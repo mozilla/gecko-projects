@@ -1278,7 +1278,7 @@ EmptyCString()
 const nsString&
 NullString()
 {
-  static const nsXPIDLString sNull;
+  static const nsString sNull(mozilla::detail::StringDataFlags::VOIDED);
 
   return sNull;
 }
@@ -1286,7 +1286,7 @@ NullString()
 const nsCString&
 NullCString()
 {
-  static const nsXPIDLCString sNull;
+  static const nsCString sNull(mozilla::detail::StringDataFlags::VOIDED);
 
   return sNull;
 }

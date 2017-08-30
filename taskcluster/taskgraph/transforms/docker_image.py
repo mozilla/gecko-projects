@@ -89,7 +89,8 @@ def fill_template(config, tasks):
                 'tier': 1,
             },
             'run-on-projects': [],
-            'worker-type': 'aws-provisioner-v1/gecko-images',
+            'worker-type': 'aws-provisioner-v1/gecko-{}-images'.format(
+                config.params['level']),
             # can't use {in-tree: ..} here, otherwise we might try to build
             # this image..
             'worker': {
@@ -101,6 +102,11 @@ def fill_template(config, tasks):
                     'name': 'level-{}-imagebuilder-v1'.format(config.params['level']),
                     'mount-point': '/home/worker/checkouts',
                 }],
+                'volumes': [
+                    # Keep in sync with Dockerfile.
+                    '/home/worker/checkouts',
+                    '/home/worker/workspace',
+                ],
                 'artifacts': [{
                     'type': 'file',
                     'path': '/home/worker/workspace/artifacts/image.tar.zst',

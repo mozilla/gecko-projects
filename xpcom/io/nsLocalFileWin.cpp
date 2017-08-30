@@ -23,7 +23,7 @@
 #include "private/pprio.h"  // To get PR_ImportFile
 #include "nsHashKeys.h"
 
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsReadableUtils.h"
 
 #include <direct.h>
@@ -39,7 +39,6 @@
 #include  <stdlib.h>
 #include  <mbstring.h>
 
-#include "nsXPIDLString.h"
 #include "prproces.h"
 #include "prlink.h"
 
@@ -1205,7 +1204,7 @@ CleanupHandlerPath(nsString& aPath)
   aPath.Append(' ');
 
   // case insensitive
-  uint32_t index = aPath.Find(".exe ", true);
+  int32_t index = aPath.Find(".exe ", true);
   if (index == kNotFound)
     index = aPath.Find(".dll ", true);
   if (index == kNotFound)

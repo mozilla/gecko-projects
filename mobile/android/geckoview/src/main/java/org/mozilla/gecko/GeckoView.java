@@ -128,7 +128,10 @@ public class GeckoView extends LayerView {
     private final GeckoViewHandler<NavigationListener> mNavigationHandler =
         new GeckoViewHandler<NavigationListener>(
             "GeckoViewNavigation", this,
-            new String[]{ "GeckoView:LocationChange" }
+            new String[]{
+                "GeckoView:LocationChange",
+                "GeckoView:OnLoadUri"
+            }
         ) {
             @Override
             public void handleMessage(final NavigationListener listener,
@@ -142,8 +145,15 @@ public class GeckoView extends LayerView {
                                          message.getBoolean("canGoBack"));
                     listener.onCanGoForward(GeckoView.this,
                                             message.getBoolean("canGoForward"));
+                } else if ("GeckoView:OnLoadUri".equals(event)) {
+                    final String uri = message.getString("uri");
+                    final NavigationListener.TargetWindow where =
+                        NavigationListener.TargetWindow.forGeckoValue(
+                            message.getInt("where"));
+                    final boolean result =
+                        listener.onLoadUri(GeckoView.this, uri, where);
+                    callback.sendSuccess(result);
                 }
-
             }
         };
 
@@ -468,7 +478,7 @@ public class GeckoView extends LayerView {
             GeckoAppShell.setApplicationContext(appContext);
         }
 
-        if (GeckoThread.initMainProcess(GeckoProfile.initFromArgs(appContext, geckoArgs),
+        if (GeckoThread.initMainProcess(/* profile */ null,
                                         geckoArgs,
                                         /* debugging */ false)) {
             GeckoThread.launch();
@@ -1379,6 +1389,61 @@ public class GeckoView extends LayerView {
         * @param canGoForward The new value for the ability.
         */
         void onCanGoForward(GeckoView view, boolean canGoForward);
+
+        enum TargetWindow {
+            DEFAULT(0),
+            CURRENT(1),
+            NEW(2);
+
+            private static final TargetWindow[] sValues = TargetWindow.values();
+            private int mValue;
+
+            private TargetWindow(int value) {
+                mValue = value;
+            }
+
+            public static TargetWindow forValue(int value) {
+                return sValues[value];
+            }
+
+            public static TargetWindow forGeckoValue(int value) {
+                // DEFAULT(0),
+                // CURRENT(1),
+                // NEW(2),
+                // NEWTAB(3),
+                // SWITCHTAB(4);
+                final TargetWindow[] sMap = {
+                    DEFAULT,
+                    CURRENT,
+                    NEW,
+                    NEW,
+                    NEW
+                };
+                return sMap[value];
+            }
+        }
+
+        enum LoadUriResult {
+            HANDLED(0),
+            LOAD_IN_FRAME(1);
+
+            private int mValue;
+
+            private LoadUriResult(int value) {
+                mValue = value;
+            }
+        }
+
+        /**
+        * A request to open an URI.
+        * @param view The GeckoView that initiated the callback.
+        * @param uri The URI to be loaded.
+        * @param where The target window.
+        *
+        * @return True if the URI loading has been handled, false if Gecko
+        *         should handle the loading.
+        */
+        boolean onLoadUri(GeckoView view, String uri, TargetWindow where);
     }
 
     /**

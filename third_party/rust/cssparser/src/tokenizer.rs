@@ -209,6 +209,7 @@ pub struct Tokenizer<'a> {
     current_line_number: u32,
     var_functions: SeenStatus,
     viewport_percentages: SeenStatus,
+    source_map_url: Option<&'a str>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -234,6 +235,7 @@ impl<'a> Tokenizer<'a> {
             current_line_number: first_line_number,
             var_functions: SeenStatus::DontCare,
             viewport_percentages: SeenStatus::DontCare,
+            source_map_url: None,
         }
     }
 
@@ -298,6 +300,11 @@ impl<'a> Tokenizer<'a> {
             line: self.current_line_number,
             column: (self.position - self.current_line_start_position) as u32,
         }
+    }
+
+    #[inline]
+    pub fn current_source_map_url(&self) -> Option<&'a str> {
+        self.source_map_url
     }
 
     #[inline]
@@ -403,6 +410,76 @@ impl<'a> Tokenizer<'a> {
     #[inline]
     fn starts_with(&self, needle: &[u8]) -> bool {
         self.input.as_bytes()[self.position..].starts_with(needle)
+    }
+
+    pub fn skip_whitespace(&mut self) {
+        while !self.is_eof() {
+            match_byte! { self.next_byte_unchecked(),
+                b' ' | b'\t' => {
+                    self.advance(1)
+                },
+                b'\n' | b'\x0C' => {
+                    self.advance(1);
+                    self.seen_newline(false);
+                },
+                b'\r' => {
+                    self.advance(1);
+                    self.seen_newline(true);
+                },
+                b'/' => {
+                    if self.starts_with(b"/*") {
+                        consume_comment(self);
+                    } else {
+                        return
+                    }
+                }
+                _ => {
+                    return
+                }
+            }
+        }
+    }
+
+    pub fn skip_cdc_and_cdo(&mut self) {
+        while !self.is_eof() {
+            match_byte! { self.next_byte_unchecked(),
+                b' ' | b'\t' => {
+                    self.advance(1)
+                },
+                b'\n' | b'\x0C' => {
+                    self.advance(1);
+                    self.seen_newline(false);
+                },
+                b'\r' => {
+                    self.advance(1);
+                    self.seen_newline(true);
+                },
+                b'/' => {
+                    if self.starts_with(b"/*") {
+                        consume_comment(self);
+                    } else {
+                        return
+                    }
+                }
+                b'<' => {
+                    if self.starts_with(b"<!--") {
+                        self.advance(4)
+                    } else {
+                        return
+                    }
+                }
+                b'-' => {
+                    if self.starts_with(b"-->") {
+                        self.advance(3)
+                    } else {
+                        return
+                    }
+                }
+                _ => {
+                    return
+                }
+            }
+        }
     }
 }
 
@@ -594,6 +671,20 @@ fn consume_whitespace<'a>(tokenizer: &mut Tokenizer<'a>, newline: bool, is_cr: b
 }
 
 
+// Check for a sourceMappingURL comment and update the tokenizer appropriately.
+fn check_for_source_map<'a>(tokenizer: &mut Tokenizer<'a>, contents: &'a str) {
+    let directive = "# sourceMappingURL=";
+    let directive_old = "@ sourceMappingURL=";
+
+    // If there is a source map directive, extract the URL.
+    if contents.starts_with(directive) || contents.starts_with(directive_old) {
+        let contents = &contents[directive.len()..];
+        tokenizer.source_map_url = contents.split(|c| {
+            c == ' ' || c == '\t' || c == '\x0C' || c == '\r' || c == '\n'
+        }).next()
+    }
+}
+
 fn consume_comment<'a>(tokenizer: &mut Tokenizer<'a>) -> &'a str {
     tokenizer.advance(2);  // consume "/*"
     let start_position = tokenizer.position();
@@ -604,7 +695,9 @@ fn consume_comment<'a>(tokenizer: &mut Tokenizer<'a>) -> &'a str {
                 tokenizer.advance(1);
                 if tokenizer.next_byte() == Some(b'/') {
                     tokenizer.advance(1);
-                    return tokenizer.slice(start_position..end_position)
+                    let contents = tokenizer.slice(start_position..end_position);
+                    check_for_source_map(tokenizer, contents);
+                    return contents
                 }
             }
             b'\n' | b'\x0C' => {
@@ -620,7 +713,9 @@ fn consume_comment<'a>(tokenizer: &mut Tokenizer<'a>) -> &'a str {
             }
         }
     }
-    tokenizer.slice_from(start_position)
+    let contents = tokenizer.slice_from(start_position);
+    check_for_source_map(tokenizer, contents);
+    contents
 }
 
 fn consume_string<'a>(tokenizer: &mut Tokenizer<'a>, single_quote: bool) -> Token<'a> {

@@ -27,6 +27,7 @@ use dom::window::Window;
 use dom_struct::dom_struct;
 use html5ever::{LocalName, Namespace, Prefix};
 use js::conversions::ToJSValConvertible;
+use js::glue::UnwrapObject;
 use js::jsapi::{Construct1, IsCallable, IsConstructor, HandleValueArray, HandleObject, MutableHandleValue};
 use js::jsapi::{Heap, JS_GetProperty, JS_SameValue, JSAutoCompartment, JSContext};
 use js::jsval::{JSVal, NullValue, ObjectValue, UndefinedValue};
@@ -194,7 +195,15 @@ impl CustomElementRegistryMethods for CustomElementRegistry {
         let name = LocalName::from(&*name);
 
         // Step 1
-        if unsafe { !IsConstructor(constructor.get()) } {
+        // We must unwrap the constructor as all wrappers are constructable if they are callable.
+        rooted!(in(cx) let unwrapped_constructor = unsafe { UnwrapObject(constructor.get(), 1) });
+
+        if unwrapped_constructor.is_null() {
+            // We do not have permission to access the unwrapped constructor.
+            return Err(Error::Security);
+        }
+
+        if unsafe { !IsConstructor(unwrapped_constructor.get()) } {
             return Err(Error::Type("Second argument of CustomElementRegistry.define is not a constructor".to_owned()));
         }
 
@@ -363,7 +372,7 @@ impl CustomElementRegistryMethods for CustomElementRegistry {
     }
 }
 
-#[derive(HeapSizeOf, JSTraceable, Clone)]
+#[derive(Clone, HeapSizeOf, JSTraceable)]
 pub struct LifecycleCallbacks {
     #[ignore_heap_size_of = "Rc"]
     connected_callback: Option<Rc<Function>>,
@@ -378,14 +387,14 @@ pub struct LifecycleCallbacks {
     attribute_changed_callback: Option<Rc<Function>>,
 }
 
-#[derive(HeapSizeOf, JSTraceable, Clone)]
+#[derive(Clone, HeapSizeOf, JSTraceable)]
 pub enum ConstructionStackEntry {
     Element(Root<Element>),
     AlreadyConstructedMarker,
 }
 
 /// https://html.spec.whatwg.org/multipage/#custom-element-definition
-#[derive(HeapSizeOf, JSTraceable, Clone)]
+#[derive(Clone, HeapSizeOf, JSTraceable)]
 pub struct CustomElementDefinition {
     pub name: LocalName,
 
@@ -611,7 +620,7 @@ pub enum CallbackReaction {
 }
 
 /// https://html.spec.whatwg.org/multipage/#processing-the-backup-element-queue
-#[derive(HeapSizeOf, JSTraceable, Eq, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Eq, HeapSizeOf, JSTraceable, PartialEq)]
 enum BackupElementQueueFlag {
     Processing,
     NotProcessing,

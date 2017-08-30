@@ -30,7 +30,12 @@ const BUF_SIZE_LIMIT: usize = 1024 * 1024;
 
 // Max table length. Calculating in worth case for one week long video, one
 // frame per table entry in 30 fps.
+#[cfg(target_pointer_width = "64")]
 const TABLE_SIZE_LIMIT: u32 = 30 * 60 * 60 * 24 * 7;
+
+// Reduce max table length if it is in 32 arch for memory problem.
+#[cfg(target_pointer_width = "32")]
+const TABLE_SIZE_LIMIT: u32 = 30 * 60 * 60 * 24;
 
 static DEBUG_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::ATOMIC_BOOL_INIT;
 
@@ -704,9 +709,8 @@ fn read_moov<T: Read>(f: &mut BMFFBox<T>, context: &mut MediaContext) -> Result<
 }
 
 fn read_pssh<T: Read>(src: &mut BMFFBox<T>) -> Result<ProtectionSystemSpecificHeaderBox> {
-    let mut box_content = Vec::with_capacity(src.head.size as usize);
-    src.read_to_end(&mut box_content)?;
-
+    let len = src.bytes_left();
+    let mut box_content = read_buf(src, len)?;
     let (system_id, kid, data) = {
         let pssh = &mut Cursor::new(box_content.as_slice());
 
@@ -716,14 +720,14 @@ fn read_pssh<T: Read>(src: &mut BMFFBox<T>) -> Result<ProtectionSystemSpecificHe
 
         let mut kid: Vec<ByteData> = Vec::new();
         if version > 0 {
-            let count = be_i32(pssh)?;
+            let count = be_u32_with_limit(pssh)?;
             for _ in 0..count {
                 let item = read_buf(pssh, 16)?;
                 kid.push(item);
             }
         }
 
-        let data_size = be_i32(pssh)? as usize;
+        let data_size = be_u32_with_limit(pssh)? as usize;
         let data = read_buf(pssh, data_size)?;
 
         (system_id, kid, data)
@@ -1332,19 +1336,18 @@ fn find_descriptor(data: &[u8], esds: &mut ES_Descriptor) -> Result<()> {
         let des = &mut Cursor::new(remains);
         let tag = des.read_u8()?;
 
-        let mut end = 0;
-        // Extension descriptor could be variable size from 0x80 to
-        // 0x80 0x80 0x80, the descriptor length is the byte after that,
-        // so it loops four times.
+        let mut end: u32 = 0;   // It's u8 without declaration type that is incorrect.
+        // MSB of extend_or_len indicates more bytes, up to 4 bytes.
         for _ in 0..4 {
             let extend_or_len = des.read_u8()?;
-            if extend_or_len < 0x80 {
-                end = extend_or_len + des.position() as u8;
+            end = (end << 7) + (extend_or_len & 0x7F) as u32;
+            if (extend_or_len & 0x80) == 0 {
+                end += des.position() as u32;
                 break;
             }
         };
 
-        if end as usize > remains.len() {
+        if (end as usize) > remains.len() || (end as u64) < des.position() {
             return Err(Error::InvalidData("Invalid descriptor."));
         }
 

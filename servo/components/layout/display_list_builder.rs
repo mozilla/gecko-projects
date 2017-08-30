@@ -12,13 +12,13 @@
 
 use app_units::{AU_PER_PX, Au};
 use block::{BlockFlow, BlockStackingContextType};
-use canvas_traits::{CanvasData, CanvasMsg, FromLayoutMsg};
+use canvas_traits::canvas::{CanvasMsg, FromLayoutMsg};
 use context::LayoutContext;
 use euclid::{Transform3D, Point2D, Vector2D, Rect, SideOffsets2D, Size2D, TypedSize2D};
 use flex::FlexFlow;
 use flow::{BaseFlow, Flow, IS_ABSOLUTELY_POSITIONED};
 use flow_ref::FlowRef;
-use fragment::{CoordinateSystem, Fragment, ImageFragmentInfo, ScannedTextFragmentInfo};
+use fragment::{CanvasFragmentSource, CoordinateSystem, Fragment, ImageFragmentInfo, ScannedTextFragmentInfo};
 use fragment::{SpecificFragmentInfo, TruncatedFragmentInfo};
 use gfx::display_list;
 use gfx::display_list::{BLUR_INFLATION_FACTOR, BaseDisplayItem, BorderDetails, BorderDisplayItem};
@@ -28,7 +28,7 @@ use gfx::display_list::{GradientDisplayItem, IframeDisplayItem, ImageBorder, Ima
 use gfx::display_list::{LineDisplayItem, NormalBorder, OpaqueNode, PushTextShadowDisplayItem};
 use gfx::display_list::{PopTextShadowDisplayItem, RadialGradientDisplayItem, ScrollRoot};
 use gfx::display_list::{ScrollRootType, SolidColorDisplayItem, StackingContext, StackingContextType};
-use gfx::display_list::{TextDisplayItem, TextOrientation, WebGLDisplayItem, WebRenderImageInfo};
+use gfx::display_list::{TextDisplayItem, TextOrientation, WebRenderImageInfo};
 use gfx_traits::{combine_id_with_fragment_type, FragmentType, StackingContextId};
 use inline::{FIRST_FRAGMENT_OF_ELEMENT, InlineFlow, LAST_FRAGMENT_OF_ELEMENT};
 use ipc_channel::ipc;
@@ -169,6 +169,9 @@ pub struct DisplayListBuildState<'a> {
     /// recursively building and processing the display list.
     pub current_stacking_context_id: StackingContextId,
 
+    /// The current stacking real context id, which doesn't include pseudo-stacking contexts.
+    pub current_real_stacking_context_id: StackingContextId,
+
     /// The current clip and scroll info, used to keep track of state when
     /// recursively building and processing the display list.
     pub current_clip_and_scroll_info: ClipAndScrollInfo,
@@ -202,6 +205,7 @@ impl<'a> DisplayListBuildState<'a> {
             scroll_root_parents: HashMap::new(),
             processing_scroll_root_element: false,
             current_stacking_context_id: StackingContextId::root(),
+            current_real_stacking_context_id: StackingContextId::root(),
             current_clip_and_scroll_info: root_clip_info,
             containing_block_clip_and_scroll_info: root_clip_info,
             iframe_sizes: Vec::new(),
@@ -228,10 +232,14 @@ impl<'a> DisplayListBuildState<'a> {
         self.scroll_root_parents.contains_key(&id)
     }
 
-    fn add_scroll_root(&mut self, scroll_root: ScrollRoot, stacking_context_id: StackingContextId) {
+    fn add_scroll_root(&mut self, scroll_root: ScrollRoot) {
+        // We want the scroll root to be defined by another other possible item that could use it,
+        // so we make sure that it is added to the beginning of the parent "real" (non-pseudo)
+        // stacking context. This ensures that item reordering will not result in an item using
+        // the scroll root before it is defined.
         self.scroll_root_parents.insert(scroll_root.id, scroll_root.parent_id);
         let info = self.stacking_context_info
-                       .entry(stacking_context_id)
+                       .entry(self.current_real_stacking_context_id)
                        .or_insert(StackingContextInfo::new());
         info.scroll_roots.push(scroll_root);
     }
@@ -547,7 +555,7 @@ pub trait FragmentDisplayListBuilding {
                                id: StackingContextId,
                                base_flow: &BaseFlow,
                                scroll_policy: ScrollPolicy,
-                               mode: StackingContextCreationMode,
+                               context_type: StackingContextType,
                                parent_clip_and_scroll_info: ClipAndScrollInfo)
                                -> StackingContext;
 
@@ -1411,7 +1419,7 @@ impl FragmentDisplayListBuilding for Fragment {
             state.add_display_item(DisplayItem::BoxShadow(box BoxShadowDisplayItem {
                 base: base,
                 box_bounds: *absolute_bounds,
-                color: style.resolve_color(box_shadow.base.color).to_gfx_color(),
+                color: box_shadow.base.color.unwrap_or(style.get_color().color).to_gfx_color(),
                 offset: Vector2D::new(box_shadow.base.horizontal, box_shadow.base.vertical),
                 blur_radius: box_shadow.base.blur.0,
                 spread_radius: box_shadow.spread,
@@ -1978,15 +1986,22 @@ impl FragmentDisplayListBuilding for Fragment {
                 let computed_width = canvas_fragment_info.dom_width.to_px();
                 let computed_height = canvas_fragment_info.dom_height.to_px();
 
-                let canvas_data = match canvas_fragment_info.ipc_renderer {
-                    Some(ref ipc_renderer) => {
-                        let ipc_renderer = ipc_renderer.lock().unwrap();
-                        let (sender, receiver) = ipc::channel().unwrap();
-                        ipc_renderer.send(CanvasMsg::FromLayout(
-                            FromLayoutMsg::SendData(sender))).unwrap();
-                        receiver.recv().unwrap()
+                let (image_key, format) = match canvas_fragment_info.source {
+                    CanvasFragmentSource::WebGL(image_key) => {
+                        (image_key, PixelFormat::BGRA8)
                     },
-                    None => return,
+                    CanvasFragmentSource::Image(ref ipc_renderer) => {
+                        match *ipc_renderer {
+                            Some(ref ipc_renderer) => {
+                                let ipc_renderer = ipc_renderer.lock().unwrap();
+                                let (sender, receiver) = ipc::channel().unwrap();
+                                ipc_renderer.send(CanvasMsg::FromLayout(
+                                    FromLayoutMsg::SendData(sender))).unwrap();
+                                (receiver.recv().unwrap().image_key, PixelFormat::BGRA8)
+                            },
+                            None => return,
+                        }
+                    }
                 };
 
                 let base = state.create_base_display_item(
@@ -1995,29 +2010,19 @@ impl FragmentDisplayListBuilding for Fragment {
                     self.node,
                     self.style.get_cursor(Cursor::Default),
                     DisplayListSection::Content);
-                let display_item = match canvas_data {
-                    CanvasData::Image(canvas_data) => {
-                        DisplayItem::Image(box ImageDisplayItem {
-                            base: base,
-                            webrender_image: WebRenderImageInfo {
-                                width: computed_width as u32,
-                                height: computed_height as u32,
-                                format: PixelFormat::BGRA8,
-                                key: Some(canvas_data.image_key),
-                            },
-                            image_data: None,
-                            stretch_size: stacking_relative_content_box.size,
-                            tile_spacing: Size2D::zero(),
-                            image_rendering: image_rendering::T::auto,
-                        })
-                    }
-                    CanvasData::WebGL(context_id) => {
-                        DisplayItem::WebGL(box WebGLDisplayItem {
-                            base: base,
-                            context_id: context_id,
-                        })
-                    }
-                };
+                let display_item = DisplayItem::Image(box ImageDisplayItem {
+                    base: base,
+                    webrender_image: WebRenderImageInfo {
+                        width: computed_width as u32,
+                        height: computed_height as u32,
+                        format: format,
+                        key: Some(image_key),
+                    },
+                    image_data: None,
+                    stretch_size: stacking_relative_content_box.size,
+                    tile_spacing: Size2D::zero(),
+                    image_rendering: image_rendering::T::auto,
+                });
 
                 state.add_display_item(display_item);
             }
@@ -2038,7 +2043,7 @@ impl FragmentDisplayListBuilding for Fragment {
                                id: StackingContextId,
                                base_flow: &BaseFlow,
                                scroll_policy: ScrollPolicy,
-                               mode: StackingContextCreationMode,
+                               context_type: StackingContextType,
                                parent_clip_and_scroll_info: ClipAndScrollInfo)
                                -> StackingContext {
         let border_box =
@@ -2061,12 +2066,6 @@ impl FragmentDisplayListBuilding for Fragment {
         if effects.opacity != 1.0 {
             filters.push(Filter::Opacity(effects.opacity.into()))
         }
-
-        let context_type = match mode {
-            StackingContextCreationMode::PseudoFloat => StackingContextType::PseudoFloat,
-            StackingContextCreationMode::PseudoPositioned => StackingContextType::PseudoPositioned,
-            _ => StackingContextType::Real,
-        };
 
         StackingContext::new(id,
                              context_type,
@@ -2136,7 +2135,7 @@ impl FragmentDisplayListBuilding for Fragment {
                 base: base.clone(),
                 blur_radius: shadow.blur.0,
                 offset: Vector2D::new(shadow.horizontal, shadow.vertical),
-                color: self.style().resolve_color(shadow.color).to_gfx_color(),
+                color: shadow.color.unwrap_or(self.style().get_color().color).to_gfx_color(),
             }));
         }
 
@@ -2293,6 +2292,7 @@ pub trait BlockFlowDisplayListBuilding {
 /// TODO(mrobinson): It would be nice to use RAII here to avoid having to call restore.
 pub struct PreservedDisplayListState {
     stacking_context_id: StackingContextId,
+    real_stacking_context_id: StackingContextId,
     clip_and_scroll_info: ClipAndScrollInfo,
     containing_block_clip_and_scroll_info: ClipAndScrollInfo,
     clips_pushed: usize,
@@ -2303,6 +2303,7 @@ impl PreservedDisplayListState {
     fn new(state: &mut DisplayListBuildState) -> PreservedDisplayListState {
         PreservedDisplayListState {
             stacking_context_id: state.current_stacking_context_id,
+            real_stacking_context_id: state.current_real_stacking_context_id,
             clip_and_scroll_info: state.current_clip_and_scroll_info,
             containing_block_clip_and_scroll_info: state.containing_block_clip_and_scroll_info,
             clips_pushed: 0,
@@ -2318,6 +2319,7 @@ impl PreservedDisplayListState {
 
     fn restore(self, state: &mut DisplayListBuildState) {
         state.current_stacking_context_id = self.stacking_context_id;
+        state.current_real_stacking_context_id = self.real_stacking_context_id;
         state.current_clip_and_scroll_info = self.clip_and_scroll_info;
         state.containing_block_clip_and_scroll_info = self.containing_block_clip_and_scroll_info;
 
@@ -2420,6 +2422,10 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
             BlockStackingContextType::StackingContext => self.fragment.stacking_context_id(),
         };
         state.current_stacking_context_id = self.base.stacking_context_id;
+
+        if block_stacking_context_type == BlockStackingContextType::StackingContext {
+            state.current_real_stacking_context_id = self.base.stacking_context_id;
+        }
 
         // We are getting the id of the scroll root that contains us here, not the id of
         // any scroll root that we create. If we create a scroll root, its id will be
@@ -2555,7 +2561,6 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
                 content_rect: Rect::new(content_box.origin, content_size),
                 root_type: ScrollRootType::ScrollFrame(sensitivity),
             },
-            self.base.stacking_context_id
         );
 
         let new_clip_and_scroll_info = ClipAndScrollInfo::simple(new_scroll_root_id);
@@ -2616,7 +2621,6 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
                 content_rect: Rect::zero(), // content_rect isn't important for clips.
                 root_type: ScrollRootType::Clip,
             },
-            self.base.stacking_context_id
         );
 
         let new_clip_and_scroll_info = ClipAndScrollInfo::new(new_scroll_root_id, new_scroll_root_id);
@@ -2630,10 +2634,10 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
                                                 state: &mut DisplayListBuildState) {
         let creation_mode = if self.base.flags.contains(IS_ABSOLUTELY_POSITIONED) ||
                                self.fragment.style.get_box().position != position::T::static_ {
-            StackingContextCreationMode::PseudoPositioned
+            StackingContextType::PseudoPositioned
         } else {
             assert!(self.base.flags.is_float());
-            StackingContextCreationMode::PseudoFloat
+            StackingContextType::PseudoFloat
         };
 
         let new_context = self.fragment.create_stacking_context(self.base.stacking_context_id,
@@ -2672,7 +2676,7 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
             self.base.stacking_context_id,
             &self.base,
             scroll_policy,
-            StackingContextCreationMode::Normal,
+            StackingContextType::Real,
             parent_clip_and_scroll_info);
 
         state.add_stacking_context(parent_stacking_context_id, stacking_context);
@@ -2731,7 +2735,7 @@ impl InlineFlowDisplayListBuilding for InlineFlow {
         self.base.clip_and_scroll_info = Some(state.current_clip_and_scroll_info);
         self.base.clip = state.clip_stack.last().cloned().unwrap_or_else(max_rect);
 
-        for mut fragment in self.fragments.fragments.iter_mut() {
+        for fragment in self.fragments.fragments.iter_mut() {
             let previous_cb_clip_scroll_info = state.containing_block_clip_and_scroll_info;
             if establishes_containing_block_for_absolute(fragment.style.get_box().position) {
                 state.containing_block_clip_and_scroll_info = state.current_clip_and_scroll_info;
@@ -2757,7 +2761,7 @@ impl InlineFlowDisplayListBuilding for InlineFlow {
                     let stacking_context = fragment.create_stacking_context(fragment.stacking_context_id,
                                                                             &self.base,
                                                                             ScrollPolicy::Scrollable,
-                                                                            StackingContextCreationMode::Normal,
+                                                                            StackingContextType::Real,
                                                                             state.current_clip_and_scroll_info);
 
                     state.add_stacking_context(current_stacking_context_id,
@@ -2918,7 +2922,7 @@ impl ComputedValuesCursorUtility for ComputedValues {
 }
 
 // A helper data structure for gradients.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 struct StopRun {
     start_offset: f32,
     end_offset: f32,
@@ -2956,7 +2960,7 @@ impl ToGfxColor for RGBA {
 }
 
 /// Describes how to paint the borders.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub enum BorderPaintingMode<'a> {
     /// Paint borders separately (`border-collapse: separate`).
     Separate,
@@ -2964,11 +2968,4 @@ pub enum BorderPaintingMode<'a> {
     Collapse(&'a CollapsedBordersForCell),
     /// Paint no borders.
     Hidden,
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum StackingContextCreationMode {
-    Normal,
-    PseudoPositioned,
-    PseudoFloat,
 }

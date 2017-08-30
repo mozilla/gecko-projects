@@ -84,6 +84,7 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
     // The leaf filename is "user" by default, but is configurable.
     nsPrintfCString shmPath("%s/dconf/", userDir);
     policy->AddPrefix(rdwrcr, shmPath.get());
+    policy->AddAncestors(shmPath.get());
 #ifdef MOZ_PULSEAUDIO
     // PulseAudio, if it can't get server info from X11, will break
     // unless it can open this directory (or create it, but in our use
@@ -99,6 +100,7 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   policy->AddPath(rdonly, "/proc/cpuinfo");
   policy->AddPath(rdonly, "/proc/meminfo");
   policy->AddDir(rdonly, "/lib");
+  policy->AddDir(rdonly, "/lib64");
   policy->AddDir(rdonly, "/etc");
   policy->AddDir(rdonly, "/usr/share");
   policy->AddDir(rdonly, "/usr/local/share");
@@ -247,20 +249,21 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
                      "security.sandbox.content.write_path_whitelist",
                      rdwr);
 
+  // Whitelisted for reading by the user/distro
+  AddDynamicPathList(policy.get(),
+                    "security.sandbox.content.read_path_whitelist",
+                    rdonly);
+
   // No read blocking at level 2 and below.
   // file:// processes also get global read permissions
   // This requires accessing user preferences so we can only do it now.
   // Our constructor is initialized before user preferences are read in.
   if (GetEffectiveContentSandboxLevel() <= 2 || aFileProcess) {
     policy->AddDir(rdonly, "/");
-    return policy;
+    // Any other read-only rules will be removed as redundant by
+    // Policy::FixRecursivePermissions, so there's no need to
+    // early-return here.
   }
-
-  // Read permissions only from here on!
-  // Whitelisted for reading by the user/distro
-  AddDynamicPathList(policy.get(),
-                    "security.sandbox.content.read_path_whitelist",
-                    rdonly);
 
   // Bug 1198550: the profiler's replacement for dl_iterate_phdr
   policy->AddPath(rdonly, nsPrintfCString("/proc/%d/maps", aPid).get());
@@ -305,8 +308,8 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
   }
 
   // Return the common policy.
+  policy->FixRecursivePermissions();
   return policy;
-
 }
 
 void

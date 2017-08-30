@@ -670,6 +670,12 @@ ConnectionData.prototype = Object.freeze({
     return count;
   },
 
+  interrupt() {
+    this._log.info("Trying to interrupt.");
+    this.ensureOpen();
+    this._dbConn.interrupt();
+  },
+
   /**
    * Helper method to bind parameters of various kinds through
    * reflection.
@@ -771,14 +777,11 @@ ConnectionData.prototype = Object.freeze({
           handledRow = true;
 
           try {
-            onRow(row);
-          } catch (e) {
-            if (e instanceof StopIteration) {
+            onRow(row, () => {
               userCancelled = true;
               pending.cancel();
-              break;
-            }
-
+            });
+          } catch (e) {
             self._log.warn("Exception when calling onRow callback", e);
           }
         }
@@ -796,22 +799,11 @@ ConnectionData.prototype = Object.freeze({
 
         switch (reason) {
           case Ci.mozIStorageStatementCallback.REASON_FINISHED:
+          case Ci.mozIStorageStatementCallback.REASON_CANCELED:
             // If there is an onRow handler, we always instead resolve to a
             // boolean indicating whether the onRow handler was called or not.
             let result = onRow ? handledRow : rows;
             deferred.resolve(result);
-            break;
-
-          case Ci.mozIStorageStatementCallback.REASON_CANCELED:
-            // It is not an error if the user explicitly requested cancel via
-            // the onRow handler.
-            if (userCancelled) {
-              let result = onRow ? handledRow : rows;
-              deferred.resolve(result);
-            } else {
-              deferred.reject(new Error("Statement was cancelled."));
-            }
-
             break;
 
           case Ci.mozIStorageStatementCallback.REASON_ERROR:
@@ -1283,14 +1275,14 @@ OpenedConnection.prototype = Object.freeze({
    * handler. Otherwise, the buffering may consume unacceptable amounts of
    * resources.
    *
-   * If a `StopIteration` is thrown during execution of an `onRow` handler,
-   * the execution of the statement is immediately cancelled. Subsequent
-   * rows will not be processed and no more `onRow` invocations will be made.
-   * The promise is resolved immediately.
+   * If the second parameter of an `onRow` handler is called during execution
+   * of the `onRow` handler, the execution of the statement is immediately
+   * cancelled. Subsequent rows will not be processed and no more `onRow`
+   * invocations will be made. The promise is resolved immediately.
    *
-   * If a non-`StopIteration` exception is thrown by the `onRow` handler, the
-   * exception is logged and processing of subsequent rows occurs as if nothing
-   * happened. The promise is still resolved (not rejected).
+   * If an exception is thrown by the `onRow` handler, the exception is logged
+   * and processing of subsequent rows occurs as if nothing happened. The
+   * promise is still resolved (not rejected).
    *
    * The return value is a promise that will be resolved when the statement
    * has completed fully.
@@ -1451,6 +1443,15 @@ OpenedConnection.prototype = Object.freeze({
    */
   discardCachedStatements() {
     return this._connectionData.discardCachedStatements();
+  },
+
+  /**
+   * Interrupts pending database operations returning at the first opportunity.
+   * Statement execution will throw an NS_ERROR_ABORT failure.
+   * Can only be used on read-only connections.
+   */
+  interrupt() {
+    this._connectionData.interrupt();
   },
 });
 

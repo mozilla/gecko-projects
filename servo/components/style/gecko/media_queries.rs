@@ -14,7 +14,7 @@ use font_metrics::get_metrics_provider_for_product;
 use gecko::values::convert_nscolor_to_rgba;
 use gecko_bindings::bindings;
 use gecko_bindings::structs;
-use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, nsCSSUnit, nsStringBuffer};
+use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, nsCSSUnit};
 use gecko_bindings::structs::{nsMediaExpression_Range, nsMediaFeature};
 use gecko_bindings::structs::{nsMediaFeature_ValueType, nsMediaFeature_RangeType, nsMediaFeature_RequirementFlags};
 use gecko_bindings::structs::{nsPresContext, RawGeckoPresContextOwned};
@@ -32,7 +32,7 @@ use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
 use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::viewport::ViewportConstraints;
-use values::{CSSFloat, specified, CustomIdent};
+use values::{CSSFloat, specified, CustomIdent, serialize_dimension};
 use values::computed::{self, ToComputedValue};
 
 /// The `Device` in Gecko wraps a pres context, has a default values computed,
@@ -156,12 +156,18 @@ impl Device {
 
     /// Returns the current viewport size in app units.
     pub fn au_viewport_size(&self) -> Size2D<Au> {
-        self.used_viewport_size.store(true, Ordering::Relaxed);
         unsafe {
             // TODO(emilio): Need to take into account scrollbars.
             let area = &self.pres_context().mVisibleArea;
             Size2D::new(Au(area.width), Au(area.height))
         }
+    }
+
+    /// Returns the current viewport size in app units, recording that it's been
+    /// used for viewport unit resolution.
+    pub fn au_viewport_size_for_viewport_unit_resolution(&self) -> Size2D<Au> {
+        self.used_viewport_size.store(true, Ordering::Relaxed);
+        self.au_viewport_size()
     }
 
     /// Returns whether we ever looked up the viewport size of the Device.
@@ -200,7 +206,7 @@ impl Device {
 
 /// A expression for gecko contains a reference to the media feature, the value
 /// the media query contained, and the range to evaluate.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct Expression {
     feature: &'static nsMediaFeature,
     value: Option<MediaExpressionValue>,
@@ -242,7 +248,7 @@ impl PartialEq for Expression {
 }
 
 /// A resolution.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Resolution {
     /// Dots per inch.
     Dpi(CSSFloat),
@@ -287,28 +293,15 @@ impl ToCss for Resolution {
         where W: fmt::Write,
     {
         match *self {
-            Resolution::Dpi(v) => write!(dest, "{}dpi", v),
-            Resolution::Dppx(v) => write!(dest, "{}dppx", v),
-            Resolution::Dpcm(v) => write!(dest, "{}dpcm", v),
+            Resolution::Dpi(v) => serialize_dimension(v, "dpi", dest),
+            Resolution::Dppx(v) => serialize_dimension(v, "dppx", dest),
+            Resolution::Dpcm(v) => serialize_dimension(v, "dpcm", dest),
         }
     }
 }
 
-unsafe fn string_from_ns_string_buffer(buffer: *const nsStringBuffer) -> String {
-    use std::slice;
-    debug_assert!(!buffer.is_null());
-    let data = buffer.offset(1) as *const u16;
-    let mut length = 0;
-    let mut iter = data;
-    while *iter != 0 {
-        length += 1;
-        iter = iter.offset(1);
-    }
-    String::from_utf16_lossy(slice::from_raw_parts(data, length))
-}
-
 /// A value found or expected in a media expression.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MediaExpressionValue {
     /// A length.
     Length(specified::Length),
@@ -334,6 +327,8 @@ pub enum MediaExpressionValue {
 
 impl MediaExpressionValue {
     fn from_css_value(for_expr: &Expression, css_value: &nsCSSValue) -> Option<Self> {
+        use gecko::conversions::string_from_chars_pointer;
+
         // NB: If there's a null value, that means that we don't support the
         // feature.
         if css_value.mUnit == nsCSSUnit::eCSSUnit_Null {
@@ -372,7 +367,9 @@ impl MediaExpressionValue {
             nsMediaFeature_ValueType::eIdent => {
                 debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Ident);
                 let string = unsafe {
-                    string_from_ns_string_buffer(*css_value.mValue.mString.as_ref())
+                    let buffer = *css_value.mValue.mString.as_ref();
+                    debug_assert!(!buffer.is_null());
+                    string_from_chars_pointer(buffer.offset(1) as *const u16)
                 };
                 Some(MediaExpressionValue::Ident(string))
             }
@@ -395,8 +392,8 @@ impl MediaExpressionValue {
     {
         match *self {
             MediaExpressionValue::Length(ref l) => l.to_css(dest),
-            MediaExpressionValue::Integer(v) => write!(dest, "{}", v),
-            MediaExpressionValue::Float(v) => write!(dest, "{}", v),
+            MediaExpressionValue::Integer(v) => v.to_css(dest),
+            MediaExpressionValue::Float(v) => v.to_css(dest),
             MediaExpressionValue::BoolInteger(v) => {
                 dest.write_str(if v { "1" } else { "0" })
             },

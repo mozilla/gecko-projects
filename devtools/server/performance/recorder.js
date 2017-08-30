@@ -10,10 +10,7 @@ loader.lazyRequireGetter(this, "Services");
 loader.lazyRequireGetter(this, "promise");
 loader.lazyRequireGetter(this, "Class",
   "sdk/core/heritage", true);
-loader.lazyRequireGetter(this, "EventTarget",
-  "sdk/event/target", true);
-loader.lazyRequireGetter(this, "events",
-  "sdk/event/core");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "Memory",
   "devtools/server/performance/memory", true);
@@ -50,20 +47,20 @@ const DRAIN_ALLOCATIONS_TIMEOUT = 2000;
  * @param Target target
  *        The target owning this connection.
  */
-exports.PerformanceRecorder = Class({
-  extends: EventTarget,
+function PerformanceRecorder(conn, tabActor) {
+  EventEmitter.decorate(this);
 
-  initialize: function (conn, tabActor) {
-    this.conn = conn;
-    this.tabActor = tabActor;
+  this.conn = conn;
+  this.tabActor = tabActor;
 
-    this._pendingConsoleRecordings = [];
-    this._recordings = [];
+  this._pendingConsoleRecordings = [];
+  this._recordings = [];
 
-    this._onTimelineData = this._onTimelineData.bind(this);
-    this._onProfilerEvent = this._onProfilerEvent.bind(this);
-  },
+  this._onTimelineData = this._onTimelineData.bind(this);
+  this._onProfilerEvent = this._onProfilerEvent.bind(this);
+}
 
+PerformanceRecorder.prototype = {
   /**
    * Initializes a connection to the profiler and other miscellaneous actors.
    * If in the process of opening, or already open, nothing happens.
@@ -156,7 +153,7 @@ exports.PerformanceRecorder = Class({
     } else if (topic === "profiler-stopped") {
       this._onProfilerUnexpectedlyStopped();
     } else if (topic === "profiler-status") {
-      events.emit(this, "profiler-status", data);
+      EventEmitter.emit(this, "profiler-status", data);
     }
   },
 
@@ -179,7 +176,7 @@ exports.PerformanceRecorder = Class({
 
     // Immediately emit this so the client can start setting things up,
     // expecting a recording very soon.
-    events.emit(this, "console-profile-start");
+    EventEmitter.emit(this, "console-profile-start");
 
     yield this.startRecording(Object.assign({}, getPerformanceRecordingPrefs(), {
       console: true,
@@ -276,7 +273,7 @@ exports.PerformanceRecorder = Class({
     let activeRecordings = this._recordings.filter(r => r.isRecording());
 
     if (activeRecordings.length) {
-      events.emit(this, "timeline-data", eventName, eventData, activeRecordings);
+      EventEmitter.emit(this, "timeline-data", eventName, eventData, activeRecordings);
     }
   },
 
@@ -376,7 +373,7 @@ exports.PerformanceRecorder = Class({
     let model = new PerformanceRecordingActor(this.conn, options, data);
     this._recordings.push(model);
 
-    events.emit(this, "recording-started", model);
+    EventEmitter.emit(this, "recording-started", model);
     return model;
   }),
 
@@ -400,7 +397,7 @@ exports.PerformanceRecorder = Class({
     // Flag the recording as no longer recording, so that `model.isRecording()`
     // is false. Do this before we fetch all the data, and then subsequently
     // the recording can be considered "completed".
-    events.emit(this, "recording-stopping", model);
+    EventEmitter.emit(this, "recording-stopping", model);
 
     // Currently there are two ways profiles stop recording. Either manually in the
     // performance tool, or via console.profileEnd. Once a recording is done,
@@ -435,7 +432,7 @@ exports.PerformanceRecorder = Class({
       duration: profilerData.currentTime - startTime,
     };
 
-    events.emit(this, "recording-stopped", model, recordingData);
+    EventEmitter.emit(this, "recording-stopped", model, recordingData);
     return model;
   }),
 
@@ -482,7 +479,7 @@ exports.PerformanceRecorder = Class({
   },
 
   toString: () => "[object PerformanceRecorder]"
-});
+};
 
 /**
  * Creates an object of configurations based off of
@@ -501,3 +498,5 @@ function getPerformanceRecordingPrefs() {
       Services.prefs.getIntPref("devtools.performance.memory.max-log-length")
   };
 }
+
+exports.PerformanceRecorder = PerformanceRecorder;

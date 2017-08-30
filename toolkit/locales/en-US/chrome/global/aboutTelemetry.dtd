@@ -21,7 +21,7 @@ Raw JSON
 ">
 
 <!ENTITY aboutTelemetry.showInFirefoxJsonViewer "
-Open in the firefox JSON viewer
+Open in the JSON viewer
 ">
 
 <!ENTITY aboutTelemetry.showSubsessionData "
@@ -82,10 +82,6 @@ Older
 
 <!ENTITY aboutTelemetry.chromeHangsSection "
   Browser Hangs
-">
-
-<!ENTITY aboutTelemetry.threadHangStatsSection "
-  Thread Hangs
 ">
 
 <!ENTITY aboutTelemetry.capturedStacksSection "

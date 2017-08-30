@@ -85,6 +85,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
+#include "mozilla/Scheduler.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/ScriptPreloader.h"
 #include "mozilla/Services.h"
@@ -762,11 +763,11 @@ ContentParent::MinTabSelect(const nsTArray<ContentParent*>& aContentParents,
 /*static*/ already_AddRefed<ContentParent>
 ContentParent::GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
                                           ProcessPriority aPriority,
-                                          ContentParent* aOpener)
+                                          ContentParent* aOpener,
+                                          bool aPreferUsed)
 {
   nsTArray<ContentParent*>& contentParents = GetOrCreatePool(aRemoteType);
   uint32_t maxContentParents = GetMaxProcessCount(aRemoteType);
-
   if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     // We never want to re-use Large-Allocation processes.
     if (contentParents.Length() >= maxContentParents) {
@@ -775,9 +776,16 @@ ContentParent::GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
                                         aOpener);
     }
   } else {
-    nsTArray<nsIContentProcessInfo*> infos(contentParents.Length());
+    uint32_t numberOfParents = contentParents.Length();
+    nsTArray<nsIContentProcessInfo*> infos(numberOfParents);
     for (auto* cp : contentParents) {
       infos.AppendElement(cp->mScriptableHelper);
+    }
+
+    if (aPreferUsed && numberOfParents) {
+      // For the preloaded browser we don't want to create a new process but reuse an
+      // existing one.
+      maxContentParents = numberOfParents;
     }
 
     nsCOMPtr<nsIContentProcessProvider> cpp =
@@ -1105,6 +1113,12 @@ ContentParent::CreateBrowser(const TabContext& aContext,
     return nullptr;
   }
 
+  nsAutoString remoteType;
+  if (!aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType,
+                              remoteType)) {
+    remoteType.AssignLiteral(DEFAULT_REMOTE_TYPE);
+  }
+
   if (aNextTabParentId) {
     if (TabParent* parent =
           sNextTabParents.GetAndRemove(aNextTabParentId).valueOr(nullptr)) {
@@ -1125,10 +1139,11 @@ ContentParent::CreateBrowser(const TabContext& aContext,
     openerTabId = TabParent::GetTabIdFrom(docShell);
   }
 
-  nsAutoString remoteType;
-  if (!aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType,
-                              remoteType)) {
-    remoteType.AssignLiteral(DEFAULT_REMOTE_TYPE);
+  bool isPreloadBrowser = false;
+  nsAutoString isPreloadBrowserStr;
+  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::isPreloadBrowser,
+                             isPreloadBrowserStr)) {
+    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("true");
   }
 
   RefPtr<nsIContentParent> constructorSender;
@@ -1146,7 +1161,8 @@ ContentParent::CreateBrowser(const TabContext& aContext,
                                       initialPriority);
       } else {
         constructorSender =
-          GetNewOrUsedBrowserProcess(remoteType, initialPriority, nullptr);
+          GetNewOrUsedBrowserProcess(remoteType, initialPriority,
+                                     nullptr, isPreloadBrowser);
       }
       if (!constructorSender) {
         return nullptr;
@@ -1374,12 +1390,15 @@ ContentParent::ShutDownProcess(ShutDownMethod aMethod)
   // other methods. We first call Shutdown() in the child. After the child is
   // ready, it calls FinishShutdown() on us. Then we close the channel.
   if (aMethod == SEND_SHUTDOWN_MESSAGE) {
-    if (mIPCOpen && !mShutdownPending && SendShutdown()) {
-      mShutdownPending = true;
-      // Start the force-kill timer if we haven't already.
-      StartForceKillTimer();
+    if (mIPCOpen && !mShutdownPending) {
+      // Stop sending input events with input priority when shutting down.
+      SetInputPriorityEventEnabled(false);
+      if (SendShutdown()) {
+        mShutdownPending = true;
+        // Start the force-kill timer if we haven't already.
+        StartForceKillTimer();
+      }
     }
-
     // If call was not successful, the channel must have been broken
     // somehow, and we will clean up the error in ActorDestroy.
     return;
@@ -1978,12 +1997,9 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   extraArgs.push_back(idStr);
   extraArgs.push_back(IsForBrowser() ? "-isForBrowser" : "-notForBrowser");
 
-  char boolBuf[1024];
-  char intBuf[1024];
-  char strBuf[1024];
-  nsFixedCString boolPrefs(boolBuf, 1024, 0);
-  nsFixedCString intPrefs(intBuf, 1024, 0);
-  nsFixedCString stringPrefs(strBuf, 1024, 0);
+  nsAutoCStringN<1024> boolPrefs;
+  nsAutoCStringN<1024> intPrefs;
+  nsAutoCStringN<1024> stringPrefs;
 
   size_t prefsLen;
   ContentPrefs::GetContentPrefs(&prefsLen);
@@ -2001,8 +2017,7 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
       nsAutoCString value;
       Preferences::GetCString(ContentPrefs::GetContentPref(i), value);
       stringPrefs.Append(nsPrintfCString("%u:%d;%s|", i, value.Length(), value.get()));
-
-    }
+      }
       break;
     case nsIPrefBranch::PREF_INVALID:
       break;
@@ -2012,12 +2027,19 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     }
   }
 
+  nsCString schedulerPrefs = Scheduler::GetPrefs();
+
   extraArgs.push_back("-intPrefs");
   extraArgs.push_back(intPrefs.get());
   extraArgs.push_back("-boolPrefs");
   extraArgs.push_back(boolPrefs.get());
   extraArgs.push_back("-stringPrefs");
   extraArgs.push_back(stringPrefs.get());
+
+  // Scheduler prefs need to be handled differently because the scheduler needs
+  // to start up in the content process before the normal preferences service.
+  extraArgs.push_back("-schedulerPrefs");
+  extraArgs.push_back(schedulerPrefs.get());
 
   if (gSafeMode) {
     extraArgs.push_back("-safeMode");
@@ -2082,6 +2104,8 @@ ContentParent::ContentParent(ContentParent* aOpener,
   , mCreatedPairedMinidumps(false)
   , mShutdownPending(false)
   , mIPCOpen(true)
+  , mIsRemoteInputEventQueueEnabled(false)
+  , mIsInputPriorityEventEnabled(false)
   , mHangMonitorActor(nullptr)
 {
   // Insert ourselves into the global linked list of ContentParent objects.
@@ -2432,6 +2456,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
   // If this isn't our first content process, just send over cached list.
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   pluginHost->SendPluginsToContent();
+  MaybeEnableRemoteInputEventQueue();
 }
 
 bool
@@ -2495,6 +2520,47 @@ void
 ContentParent::OnCompositorDeviceReset()
 {
   Unused << SendReinitRenderingForDeviceReset();
+}
+
+void
+ContentParent::MaybeEnableRemoteInputEventQueue()
+{
+  MOZ_ASSERT(!mIsRemoteInputEventQueueEnabled);
+  if (!IsInputEventQueueSupported()) {
+    return;
+  }
+  mIsRemoteInputEventQueueEnabled = true;
+  Unused << SendSetInputEventQueueEnabled();
+  SetInputPriorityEventEnabled(true);
+}
+
+void
+ContentParent::SetInputPriorityEventEnabled(bool aEnabled)
+{
+  if (!IsInputEventQueueSupported() ||
+      !mIsRemoteInputEventQueueEnabled ||
+      mIsInputPriorityEventEnabled == aEnabled) {
+    return;
+  }
+  mIsInputPriorityEventEnabled = aEnabled;
+  // Send IPC messages to flush the pending events in the input event queue and
+  // the normal event queue. See PContent.ipdl for more details.
+  Unused << SendSuspendInputEventQueue();
+  Unused << SendFlushInputEventQueue();
+  Unused << SendResumeInputEventQueue();
+}
+
+/*static*/ bool
+ContentParent::IsInputEventQueueSupported()
+{
+  static bool sSupported = false;
+  static bool sInitialized = false;
+  if (!sInitialized) {
+    MOZ_ASSERT(Preferences::IsServiceAvailable());
+    sSupported = Preferences::GetBool("input_event_queue.supported", false);
+    sInitialized = true;
+  }
+  return sSupported;
 }
 
 void
@@ -2670,6 +2736,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ContentParent)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsIDOMGeoPositionCallback)
   NS_INTERFACE_MAP_ENTRY(nsIDOMGeoPositionErrorCallback)
+  NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIObserver)
 NS_INTERFACE_MAP_END
 
@@ -2851,6 +2918,20 @@ ContentParent::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+ContentParent::GetInterface(const nsIID& aIID, void** aResult)
+{
+  NS_ENSURE_ARG_POINTER(aResult);
+
+  if (aIID.Equals(NS_GET_IID(nsIMessageSender))) {
+    nsCOMPtr<nsIMessageSender> mm = GetMessageManager();
+    mm.forget(aResult);
+    return NS_OK;
+  }
+
+  return NS_NOINTERFACE;
+}
+
 mozilla::ipc::IPCResult
 ContentParent::RecvInitBackground(Endpoint<PBackgroundParent>&& aEndpoint)
 {
@@ -2894,6 +2975,24 @@ bool
 ContentParent::DeallocPBrowserParent(PBrowserParent* frame)
 {
   return nsIContentParent::DeallocPBrowserParent(frame);
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvPBrowserConstructor(PBrowserParent* actor,
+                                       const TabId& tabId,
+                                       const TabId& sameTabGroupAs,
+                                       const IPCTabContext& context,
+                                       const uint32_t& chromeFlags,
+                                       const ContentParentId& cpId,
+                                       const bool& isForBrowser)
+{
+  return nsIContentParent::RecvPBrowserConstructor(actor,
+                                                   tabId,
+                                                   sameTabGroupAs,
+                                                   context,
+                                                   chromeFlags,
+                                                   cpId,
+                                                   isForBrowser);
 }
 
 PIPCBlobInputStreamParent*
@@ -4362,6 +4461,14 @@ ContentParent::RecvSetOfflinePermission(const Principal& aPrincipal)
 void
 ContentParent::MaybeInvokeDragSession(TabParent* aParent)
 {
+  // dnd uses IPCBlob to transfer data to the content process and the IPC
+  // message is sent as normal priority. When sending input events with input
+  // priority, the message may be preempted by the later dnd events. To make
+  // sure the input events and the blob message are processed in time order
+  // on the content process, we temporarily send the input events with normal
+  // priority when there is an active dnd session.
+  SetInputPriorityEventEnabled(false);
+
   nsCOMPtr<nsIDragService> dragService =
     do_GetService("@mozilla.org/widget/dragservice;1");
   if (dragService && dragService->MaybeAddChildProcess(this)) {
@@ -4547,8 +4654,10 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
       return IPC_OK();
     }
 
+    nsCOMPtr<nsIFrameLoaderOwner> opener = do_QueryInterface(frame);
+
     nsCOMPtr<nsIOpenURIInFrameParams> params =
-      new nsOpenURIInFrameParams(openerOriginAttributes);
+      new nsOpenURIInFrameParams(openerOriginAttributes, opener);
     params->SetReferrer(NS_ConvertUTF8toUTF16(aBaseURI));
     MOZ_ASSERT(aTriggeringPrincipal, "need a valid triggeringPrincipal");
     params->SetTriggeringPrincipal(aTriggeringPrincipal);
@@ -4720,7 +4829,7 @@ ContentParent::RecvCreateWindowInDifferentProcess(
   const bool& aCalledFromJS,
   const bool& aPositionSpecified,
   const bool& aSizeSpecified,
-  const URIParams& aURIToLoad,
+  const OptionalURIParams& aURIToLoad,
   const nsCString& aFeatures,
   const nsCString& aBaseURI,
   const float& aFullZoom,
@@ -5088,7 +5197,17 @@ ContentParent::AboutToLoadHttpFtpWyciwygDocumentForChild(nsIChannel* aChannel)
   MOZ_ASSERT(aChannel);
 
   nsresult rv;
-  if (!aChannel->IsDocument()) {
+  bool isDocument = aChannel->IsDocument();
+  if (!isDocument) {
+    // We may be looking at a nsIHttpChannel which has isMainDocumentChannel set
+    // (e.g. the internal http channel for a view-source: load.).
+    nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
+    if (httpChannel) {
+      rv = httpChannel->GetIsMainDocumentChannel(&isDocument);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
+  if (!isDocument) {
     return NS_OK;
   }
 
@@ -5108,9 +5227,7 @@ ContentParent::AboutToLoadHttpFtpWyciwygDocumentForChild(nsIChannel* aChannel)
 
   nsLoadFlags newLoadFlags;
   aChannel->GetLoadFlags(&newLoadFlags);
-  bool isDocument = false;
-  aChannel->GetIsDocument(&isDocument);
-  if (newLoadFlags & nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE && isDocument) {
+  if (newLoadFlags & nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE) {
     UpdateCookieStatus(aChannel);
   }
 
@@ -5403,5 +5520,21 @@ ContentParent::RecvDeviceReset()
     pm->SimulateDeviceReset();
   }
 
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvBHRThreadHang(const HangDetails& aDetails)
+{
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    // Copy the HangDetails recieved over the network into a nsIHangDetails, and
+    // then fire our own observer notification.
+    // XXX: We should be able to avoid this potentially expensive copy here by
+    // moving our deserialized argument.
+    nsCOMPtr<nsIHangDetails> hangDetails =
+      new nsHangDetails(HangDetails(aDetails));
+    obs->NotifyObservers(hangDetails, "bhr-thread-hang", nullptr);
+  }
   return IPC_OK();
 }

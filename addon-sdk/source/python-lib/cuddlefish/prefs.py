@@ -55,15 +55,23 @@ DEFAULT_NO_CONNECTIONS_PREFS = {
     'browser.newtab.url' : 'about:blank',
     'browser.search.update': False,
     'browser.search.suggest.enabled' : False,
+
+    # Disable all Safe Browsing lists
     'browser.safebrowsing.downloads.remote.url': 'http://localhost/safebrowsing-dummy/downloads',
     'browser.safebrowsing.malware.enabled' : False,
     'browser.safebrowsing.phishing.enabled' : False,
+    'browser.safebrowsing.blockedURIs.enabled' : False,
+    'browser.safebrowsing.passwords.enabled' : False,
     'browser.safebrowsing.provider.google.updateURL': 'http://localhost/safebrowsing-dummy/update',
     'browser.safebrowsing.provider.google.gethashURL': 'http://localhost/safebrowsing-dummy/gethash',
     'browser.safebrowsing.provider.google4.updateURL': 'http://localhost/safebrowsing4-dummy/update',
     'browser.safebrowsing.provider.google4.gethashURL': 'http://localhost/safebrowsing4-dummy/gethash',
     'browser.safebrowsing.provider.mozilla.gethashURL': 'http://localhost/safebrowsing-dummy/gethash',
     'browser.safebrowsing.provider.mozilla.updateURL': 'http://localhost/safebrowsing-dummy/update',
+    'plugins.flashBlock.enabled': False,
+    'privacy.trackingprotection.annotate_channels': False,
+    'privacy.trackingprotection.enabled': False,
+    'privacy.trackingprotection.pbmode.enabled': False,
 
     # Disable app update
     'app.update.enabled' : False,

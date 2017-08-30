@@ -143,8 +143,9 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
   }
 }
 
-WebRenderBridgeParent::WebRenderBridgeParent()
+WebRenderBridgeParent::WebRenderBridgeParent(const wr::PipelineId& aPipelineId)
   : mCompositorBridge(nullptr)
+  , mPipelineId(aPipelineId)
   , mChildLayerObserverEpoch(0)
   , mParentLayerObserverEpoch(0)
   , mWrEpoch(0)
@@ -156,9 +157,9 @@ WebRenderBridgeParent::WebRenderBridgeParent()
 }
 
 /* static */ WebRenderBridgeParent*
-WebRenderBridgeParent::CreateDestroyed()
+WebRenderBridgeParent::CreateDestroyed(const wr::PipelineId& aPipelineId)
 {
-  return new WebRenderBridgeParent();
+  return new WebRenderBridgeParent(aPipelineId);
 }
 
 WebRenderBridgeParent::~WebRenderBridgeParent()
@@ -456,7 +457,9 @@ WebRenderBridgeParent::GetRootCompositorBridgeParent() const
   // indirection to unravel.
   CompositorBridgeParent::LayerTreeState* lts =
       CompositorBridgeParent::GetIndirectShadowTree(GetLayersId());
-  MOZ_ASSERT(lts);
+  if (!lts) {
+    return nullptr;
+  }
   return lts->mParent;
 }
 
@@ -1303,17 +1306,10 @@ WebRenderBridgeParent::ClearResources()
   mApi->ClearRootDisplayList(wr::NewEpoch(wrEpoch), mPipelineId);
   // Schedule composition to clean up Pipeline
   mCompositorScheduler->ScheduleComposition();
-  // XXX webrender does not hava a way to delete a group of resources/keys,
-  // then delete keys one by one.
-  for (std::unordered_set<uint64_t>::iterator iter = mFontKeys.begin(); iter != mFontKeys.end(); iter++) {
-    mApi->DeleteFont(wr::AsFontKey(*iter));
-  }
+  // WrFontKeys and WrImageKeys are deleted during WebRenderAPI destruction.
   mFontKeys.clear();
-  for (std::unordered_set<uint64_t>::iterator iter = mActiveImageKeys.begin(); iter != mActiveImageKeys.end(); iter++) {
-    mKeysToDelete.push_back(wr::AsImageKey(*iter));
-  }
   mActiveImageKeys.clear();
-  DeleteOldImages();
+  mKeysToDelete.clear();
   for (auto iter = mExternalImageIds.Iter(); !iter.Done(); iter.Next()) {
     iter.Data()->ClearWrBridge();
   }
@@ -1425,15 +1421,6 @@ WebRenderBridgeParent::RecvInitReadLocks(ReadLockArray&& aReadLocks)
     return IPC_FAIL_NO_REASON(this);
   }
   return IPC_OK();
-}
-
-void
-WebRenderBridgeParent::SetWebRenderProfilerEnabled(bool aEnabled)
-{
-  if (mWidget) {
-    // Only set the flag to "root" WebRenderBridgeParent.
-    mApi->SetProfilerEnabled(aEnabled);
-  }
 }
 
 TextureFactoryIdentifier

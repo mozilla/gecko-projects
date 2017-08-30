@@ -28,9 +28,6 @@
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "ClientLayerManager.h"
 #include "nsQueryObject.h"
-#ifdef MOZ_FMP4
-#include "MP4Decoder.h"
-#endif
 #include "CubebUtils.h"
 
 #include "nsIScrollableFrame.h"
@@ -174,6 +171,31 @@ private:
   nsWeakPtr mWindowRef;
   nsSize mSize;
 };
+
+namespace {
+
+class NativeInputRunnable final : public PrioritizableRunnable
+{
+  explicit NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent);
+  ~NativeInputRunnable() {}
+public:
+  static already_AddRefed<nsIRunnable> Create(already_AddRefed<nsIRunnable>&& aEvent);
+};
+
+NativeInputRunnable::NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent)
+  : PrioritizableRunnable(Move(aEvent), nsIRunnablePriority::PRIORITY_INPUT)
+{
+}
+
+/* static */ already_AddRefed<nsIRunnable>
+NativeInputRunnable::Create(already_AddRefed<nsIRunnable>&& aEvent)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  nsCOMPtr<nsIRunnable> event(new NativeInputRunnable(Move(aEvent)));
+  return event.forget();
+}
+
+} // unnamed namespace
 
 LinkedList<OldWindowSize> OldWindowSize::sList;
 
@@ -1123,7 +1145,7 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
     NewRunnableMethod<int32_t,
                       int32_t,
                       uint32_t,
@@ -1137,7 +1159,7 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                     aModifiers,
                                     aCharacters,
                                     aUnmodifiedCharacters,
-                                    aObserver));
+                                    aObserver)));
   return NS_OK;
 }
 
@@ -1154,7 +1176,7 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
     NewRunnableMethod<LayoutDeviceIntPoint, int32_t, int32_t, nsIObserver*>(
       "nsIWidget::SynthesizeNativeMouseEvent",
       widget,
@@ -1162,7 +1184,7 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
       LayoutDeviceIntPoint(aScreenX, aScreenY),
       aNativeMessage,
       aModifierFlags,
-      aObserver));
+      aObserver)));
   return NS_OK;
 }
 
@@ -1177,12 +1199,13 @@ nsDOMWindowUtils::SendNativeMouseMove(int32_t aScreenX,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(NewRunnableMethod<LayoutDeviceIntPoint, nsIObserver*>(
-    "nsIWidget::SynthesizeNativeMouseMove",
-    widget,
-    &nsIWidget::SynthesizeNativeMouseMove,
-    LayoutDeviceIntPoint(aScreenX, aScreenY),
-    aObserver));
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
+    NewRunnableMethod<LayoutDeviceIntPoint, nsIObserver*>(
+      "nsIWidget::SynthesizeNativeMouseMove",
+      widget,
+      &nsIWidget::SynthesizeNativeMouseMove,
+      LayoutDeviceIntPoint(aScreenX, aScreenY),
+      aObserver)));
   return NS_OK;
 }
 
@@ -1204,25 +1227,26 @@ nsDOMWindowUtils::SendNativeMouseScrollEvent(int32_t aScreenX,
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(NewRunnableMethod<mozilla::LayoutDeviceIntPoint,
-                                            uint32_t,
-                                            double,
-                                            double,
-                                            double,
-                                            uint32_t,
-                                            uint32_t,
-                                            nsIObserver*>(
-    "nsIWidget::SynthesizeNativeMouseScrollEvent",
-    widget,
-    &nsIWidget::SynthesizeNativeMouseScrollEvent,
-    LayoutDeviceIntPoint(aScreenX, aScreenY),
-    aNativeMessage,
-    aDeltaX,
-    aDeltaY,
-    aDeltaZ,
-    aModifierFlags,
-    aAdditionalFlags,
-    aObserver));
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
+    NewRunnableMethod<mozilla::LayoutDeviceIntPoint,
+                      uint32_t,
+                      double,
+                      double,
+                      double,
+                      uint32_t,
+                      uint32_t,
+                      nsIObserver*>(
+      "nsIWidget::SynthesizeNativeMouseScrollEvent",
+      widget,
+      &nsIWidget::SynthesizeNativeMouseScrollEvent,
+      LayoutDeviceIntPoint(aScreenX, aScreenY),
+      aNativeMessage,
+      aDeltaX,
+      aDeltaY,
+      aDeltaZ,
+      aModifierFlags,
+      aAdditionalFlags,
+      aObserver)));
   return NS_OK;
 }
 
@@ -1244,7 +1268,7 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
     return NS_ERROR_INVALID_ARG;
   }
 
-  NS_DispatchToMainThread(
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
     NewRunnableMethod<uint32_t,
                       nsIWidget::TouchPointerState,
                       LayoutDeviceIntPoint,
@@ -1258,7 +1282,7 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
                                     LayoutDeviceIntPoint(aScreenX, aScreenY),
                                     aPressure,
                                     aOrientation,
-                                    aObserver));
+                                    aObserver)));
   return NS_OK;
 }
 
@@ -1273,14 +1297,14 @@ nsDOMWindowUtils::SendNativeTouchTap(int32_t aScreenX,
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
     NewRunnableMethod<LayoutDeviceIntPoint, bool, nsIObserver*>(
       "nsIWidget::SynthesizeNativeTouchTap",
       widget,
       &nsIWidget::SynthesizeNativeTouchTap,
       LayoutDeviceIntPoint(aScreenX, aScreenY),
       aLongTap,
-      aObserver));
+      aObserver)));
   return NS_OK;
 }
 
@@ -1302,11 +1326,11 @@ nsDOMWindowUtils::ClearNativeTouchSequence(nsIObserver* aObserver)
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(
+  NS_DispatchToMainThread(NativeInputRunnable::Create(
     NewRunnableMethod<nsIObserver*>("nsIWidget::ClearNativeTouchSequence",
                                     widget,
                                     &nsIWidget::ClearNativeTouchSequence,
-                                    aObserver));
+                                    aObserver)));
   return NS_OK;
 }
 
@@ -1873,8 +1897,8 @@ nsDOMWindowUtils::GetRootBounds(nsIDOMClientRect** aResult)
     nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
     if (sf) {
       bounds = sf->GetScrollRange();
-      bounds.width += sf->GetScrollPortRect().width;
-      bounds.height += sf->GetScrollPortRect().height;
+      bounds.SetWidth(bounds.Width() + sf->GetScrollPortRect().Width());
+      bounds.SetHeight(bounds.Height() + sf->GetScrollPortRect().Height());
     } else if (presShell->GetRootFrame()) {
       bounds = presShell->GetRootFrame()->GetRect();
     }
@@ -1884,8 +1908,8 @@ nsDOMWindowUtils::GetRootBounds(nsIDOMClientRect** aResult)
   RefPtr<DOMRect> rect = new DOMRect(window);
   rect->SetRect(nsPresContext::AppUnitsToFloatCSSPixels(bounds.x),
                 nsPresContext::AppUnitsToFloatCSSPixels(bounds.y),
-                nsPresContext::AppUnitsToFloatCSSPixels(bounds.width),
-                nsPresContext::AppUnitsToFloatCSSPixels(bounds.height));
+                nsPresContext::AppUnitsToFloatCSSPixels(bounds.Width()),
+                nsPresContext::AppUnitsToFloatCSSPixels(bounds.Height()));
   rect.forget(aResult);
   return NS_OK;
 }
@@ -2452,35 +2476,6 @@ nsDOMWindowUtils::GetUsingAdvancedLayers(bool* retval)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetSupportsHardwareH264Decoding(JS::MutableHandle<JS::Value> aPromise)
-{
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
-  NS_ENSURE_STATE(window);
-  nsCOMPtr<nsIGlobalObject> parentObject =
-    do_QueryInterface(window->GetCurrentInnerWindow());
-  NS_ENSURE_STATE(parentObject);
-#ifdef MOZ_FMP4
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  NS_ENSURE_STATE(widget);
-  LayerManager *mgr = widget->GetLayerManager();
-  NS_ENSURE_STATE(mgr);
-  RefPtr<Promise> promise =
-    MP4Decoder::IsVideoAccelerated(mgr->AsKnowsCompositor(), parentObject);
-  NS_ENSURE_STATE(promise);
-  aPromise.setObject(*promise->PromiseObj());
-#else
-  ErrorResult rv;
-  RefPtr<Promise> promise = Promise::Create(parentObject, rv);
-  if (rv.Failed()) {
-    return rv.StealNSResult();
-  }
-  promise->MaybeResolve(NS_LITERAL_STRING("No; Compiled without MP4 support."));
-  aPromise.setObject(*promise->PromiseObj());
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::GetCurrentAudioBackend(nsAString& aBackend)
 {
   CubebUtils::GetCurrentBackend(aBackend);
@@ -2979,7 +2974,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     return NS_ERROR_FAILURE;
   }
 
-  nsIAtom* pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
+  nsCOMPtr<nsIAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
   RefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element,
                                                          pseudo, shell);

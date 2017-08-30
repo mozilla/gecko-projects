@@ -170,7 +170,7 @@ impl fmt::Debug for Root<Element> {
     }
 }
 
-#[derive(PartialEq, HeapSizeOf)]
+#[derive(HeapSizeOf, PartialEq)]
 pub enum ElementCreator {
     ParserCreated(u64),
     ScriptCreated,
@@ -182,7 +182,7 @@ pub enum CustomElementCreationMode {
 }
 
 /// https://dom.spec.whatwg.org/#concept-element-custom-element-state
-#[derive(Clone, Copy, PartialEq, Eq, HeapSizeOf, JSTraceable)]
+#[derive(Clone, Copy, Eq, HeapSizeOf, JSTraceable, PartialEq)]
 pub enum CustomElementState {
     Undefined,
     Failed,
@@ -1674,6 +1674,15 @@ impl ElementMethods for Element {
             }
 
             // Step 4.
+            if self.get_custom_element_definition().is_some() {
+                let old_name = old_attr.local_name().clone();
+                let old_value = DOMString::from(&**old_attr.value());
+                let new_value = DOMString::from(&**attr.value());
+                let namespace = old_attr.namespace().clone();
+                let reaction = CallbackReaction::AttributeChanged(old_name, Some(old_value),
+                    Some(new_value), namespace);
+                ScriptThread::enqueue_callback_reaction(self, reaction, None);
+            }
             self.will_mutate_attr(attr);
             attr.set_owner(Some(self));
             self.attrs.borrow_mut()[position] = JS::from_ref(attr);
@@ -2972,7 +2981,7 @@ impl<'a> AttributeMutation<'a> {
 /// A holder for an element's "tag name", which will be lazily
 /// resolved and cached. Should be reset when the document
 /// owner changes.
-#[derive(JSTraceable, HeapSizeOf)]
+#[derive(HeapSizeOf, JSTraceable)]
 struct TagName {
     ptr: DOMRefCell<Option<LocalName>>,
 }

@@ -16,11 +16,22 @@ const ALTERNATIVE_COUNTRY_NAMES = {
   "US": ["US", "United States of America", "United States", "America", "U.S.", "USA", "U.S.A.", "U.S.A"],
 };
 
+const ADDRESSES_COLLECTION_NAME = "addresses";
+const CREDITCARDS_COLLECTION_NAME = "creditCards";
+const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabled";
+const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 this.FormAutofillUtils = {
   get AUTOFILL_FIELDS_THRESHOLD() { return 3; },
+  get isAutofillEnabled() { return this.isAutofillAddressesEnabled || this.isAutofillCreditCardsEnabled; },
+
+  ADDRESSES_COLLECTION_NAME,
+  CREDITCARDS_COLLECTION_NAME,
+  ENABLED_AUTOFILL_ADDRESSES_PREF,
+  ENABLED_AUTOFILL_CREDITCARDS_PREF,
 
   _fieldNameInfo: {
     "name": "name",
@@ -50,6 +61,7 @@ this.FormAutofillUtils = {
     "cc-number": "creditCard",
     "cc-exp-month": "creditCard",
     "cc-exp-year": "creditCard",
+    "cc-exp": "creditCard",
   },
   _addressDataLoaded: false,
   _collators: {},
@@ -61,6 +73,13 @@ this.FormAutofillUtils = {
 
   isCreditCardField(fieldName) {
     return this._fieldNameInfo[fieldName] == "creditCard";
+  },
+
+  isCCNumber(ccNumber) {
+    // Based on the information on wiki[1], the shortest valid length should be
+    // 12 digits(Maestro).
+    // [1] https://en.wikipedia.org/wiki/Payment_card_number
+    return ccNumber ? ccNumber.replace(/\s/g, "").match(/^\d{12,}$/) : false;
   },
 
   getCategoryFromFieldName(fieldName) {
@@ -96,6 +115,13 @@ this.FormAutofillUtils = {
       .join(this.getAddressSeparator());
   },
 
+  fmtMaskedCreditCardLabel(maskedCCNum = "") {
+    return {
+      affix: "****",
+      label: maskedCCNum.replace(/^\**/, ""),
+    };
+  },
+
   defineLazyLogGetter(scope, logPrefix) {
     XPCOMUtils.defineLazyGetter(scope, "log", () => {
       let ConsoleAPI = Cu.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
@@ -116,92 +142,17 @@ this.FormAutofillUtils = {
       return false;
     }
 
-    if (element instanceof Ci.nsIDOMHTMLInputElement) {
+    let tagName = element.tagName;
+    if (tagName == "INPUT") {
       // `element.type` can be recognized as `text`, if it's missing or invalid.
       if (!this.ALLOWED_TYPES.includes(element.type)) {
         return false;
       }
-    } else if (!(element instanceof Ci.nsIDOMHTMLSelectElement)) {
+    } else if (tagName != "SELECT") {
       return false;
     }
 
     return true;
-  },
-
-  // The tag name list is from Chromium except for "STYLE":
-  // eslint-disable-next-line max-len
-  // https://cs.chromium.org/chromium/src/components/autofill/content/renderer/form_autofill_util.cc?l=216&rcl=d33a171b7c308a64dc3372fac3da2179c63b419e
-  EXCLUDED_TAGS: ["SCRIPT", "NOSCRIPT", "OPTION", "STYLE"],
-  /**
-   * Extract all strings of an element's children to an array.
-   * "element.textContent" is a string which is merged of all children nodes,
-   * and this function provides an array of the strings contains in an element.
-   *
-   * @param  {Object} element
-   *         A DOM element to be extracted.
-   * @returns {Array}
-   *          All strings in an element.
-   */
-  extractLabelStrings(element) {
-    let strings = [];
-    let _extractLabelStrings = (el) => {
-      if (this.EXCLUDED_TAGS.includes(el.tagName)) {
-        return;
-      }
-
-      if (el.nodeType == Ci.nsIDOMNode.TEXT_NODE ||
-          el.childNodes.length == 0) {
-        let trimmedText = el.textContent.trim();
-        if (trimmedText) {
-          strings.push(trimmedText);
-        }
-        return;
-      }
-
-      for (let node of el.childNodes) {
-        if (node.nodeType != Ci.nsIDOMNode.ELEMENT_NODE &&
-            node.nodeType != Ci.nsIDOMNode.TEXT_NODE) {
-          continue;
-        }
-        _extractLabelStrings(node);
-      }
-    };
-    _extractLabelStrings(element);
-    return strings;
-  },
-
-  findLabelElements(element) {
-    let document = element.ownerDocument;
-    let labels = [];
-    // TODO: querySelectorAll is inefficient here. However, bug 1339726 is for
-    // a more efficient implementation from DOM API perspective. This function
-    // should be refined after input.labels API landed.
-    for (let label of document.querySelectorAll("label[for]")) {
-      if (element.id == label.htmlFor) {
-        labels.push(label);
-      }
-    }
-
-    if (labels.length > 0) {
-      log.debug("Label found by ID", element.id);
-      return labels;
-    }
-
-    let parent = element.parentNode;
-    if (!parent) {
-      return [];
-    }
-    do {
-      if (parent.tagName == "LABEL" &&
-          parent.control == element &&
-          !parent.hasAttribute("for")) {
-        log.debug("Label found in input's parent or ancestor.");
-        return [parent];
-      }
-      parent = parent.parentNode;
-    } while (parent);
-
-    return [];
   },
 
   loadDataFromScript(url, sandbox = {}) {
@@ -280,6 +231,55 @@ this.FormAutofillUtils = {
     return null;
   },
 
+  findSelectOption(selectEl, record, fieldName) {
+    if (this.isAddressField(fieldName)) {
+      return this.findAddressSelectOption(selectEl, record, fieldName);
+    }
+    if (this.isCreditCardField(fieldName)) {
+      return this.findCreditCardSelectOption(selectEl, record, fieldName);
+    }
+    return null;
+  },
+
+  /**
+   * Try to find the abbreviation of the given state name
+   * @param   {string[]} stateValues A list of inferable state values.
+   * @param   {string} country A country name to be identified.
+   * @returns {string} The matching state abbreviation.
+   */
+  getAbbreviatedStateName(stateValues, country = this.DEFAULT_COUNTRY_CODE) {
+    let values = Array.isArray(stateValues) ? stateValues : [stateValues];
+
+    let collators = this.getCollators(country);
+    let {sub_keys: subKeys, sub_names: subNames} = this.getCountryAddressData(country);
+
+    if (!Array.isArray(subKeys)) {
+      subKeys = subKeys.split("~");
+    }
+    if (!Array.isArray(subNames)) {
+      subNames = subNames.split("~");
+    }
+
+    let speculatedSubIndexes = [];
+    for (const val of values) {
+      let identifiedValue = this.identifyValue(subKeys, subNames, val, collators);
+      if (identifiedValue) {
+        return identifiedValue;
+      }
+
+      // Predict the possible state by partial-matching if no exact match.
+      [subKeys, subNames].forEach(sub => {
+        speculatedSubIndexes.push(sub.findIndex(token => {
+          let pattern = new RegExp("\\b" + this.escapeRegExp(token) + "\\b");
+
+          return pattern.test(val);
+        }));
+      });
+    }
+
+    return subKeys[speculatedSubIndexes.find(i => !!~i)] || null;
+  },
+
   /**
    * Find the option element from select element.
    * 1. Try to find the locale using the country from address.
@@ -291,7 +291,7 @@ this.FormAutofillUtils = {
    * @param   {string} fieldName
    * @returns {DOMElement}
    */
-  findSelectOption(selectEl, address, fieldName) {
+  findAddressSelectOption(selectEl, address, fieldName) {
     let value = address[fieldName];
     if (!value) {
       return null;
@@ -343,6 +343,66 @@ this.FormAutofillUtils = {
             if (this.identifyCountryCode(option.text, value) || this.identifyCountryCode(option.value, value)) {
               return option;
             }
+          }
+        }
+        break;
+      }
+    }
+
+    return null;
+  },
+
+  findCreditCardSelectOption(selectEl, creditCard, fieldName) {
+    let oneDigitMonth = creditCard["cc-exp-month"].toString();
+    let twoDigitsMonth = oneDigitMonth.padStart(2, "0");
+    let fourDigitsYear = creditCard["cc-exp-year"].toString();
+    let twoDigitsYear = fourDigitsYear.substr(2, 2);
+    let options = Array.from(selectEl.options);
+
+    switch (fieldName) {
+      case "cc-exp-month": {
+        for (let option of options) {
+          if ([option.text, option.label, option.value].some(s => {
+            let result = /[1-9]\d*/.exec(s);
+            return result && result[0] == oneDigitMonth;
+          })) {
+            return option;
+          }
+        }
+        break;
+      }
+      case "cc-exp-year": {
+        for (let option of options) {
+          if ([option.text, option.label, option.value].some(
+            s => s == twoDigitsYear || s == fourDigitsYear
+          )) {
+            return option;
+          }
+        }
+        break;
+      }
+      case "cc-exp": {
+        let patterns = [
+          oneDigitMonth + "/" + twoDigitsYear,    // 8/22
+          oneDigitMonth + "/" + fourDigitsYear,   // 8/2022
+          twoDigitsMonth + "/" + twoDigitsYear,   // 08/22
+          twoDigitsMonth + "/" + fourDigitsYear,  // 08/2022
+          oneDigitMonth + "-" + twoDigitsYear,    // 8-22
+          oneDigitMonth + "-" + fourDigitsYear,   // 8-2022
+          twoDigitsMonth + "-" + twoDigitsYear,   // 08-22
+          twoDigitsMonth + "-" + fourDigitsYear,  // 08-2022
+          twoDigitsYear + "-" + twoDigitsMonth,   // 22-08
+          fourDigitsYear + "-" + twoDigitsMonth,  // 2022-08
+          fourDigitsYear + "/" + oneDigitMonth,   // 2022/8
+          twoDigitsMonth + twoDigitsYear,         // 0822
+          twoDigitsYear + twoDigitsMonth,         // 2208
+        ];
+
+        for (let option of options) {
+          if ([option.text, option.label, option.value].some(
+            str => patterns.some(pattern => str.includes(pattern))
+          )) {
+            return option;
           }
         }
         break;
@@ -433,3 +493,12 @@ XPCOMUtils.defineLazyGetter(this.FormAutofillUtils, "DEFAULT_COUNTRY_CODE", () =
 
 this.log = null;
 this.FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
+
+XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
+  return Services.strings.createBundle("chrome://formautofill/locale/formautofill.properties");
+});
+
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "isAutofillAddressesEnabled", ENABLED_AUTOFILL_ADDRESSES_PREF);
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "isAutofillCreditCardsEnabled", ENABLED_AUTOFILL_CREDITCARDS_PREF);

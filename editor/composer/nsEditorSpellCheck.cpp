@@ -19,7 +19,6 @@
 #include "nsEditorSpellCheck.h"
 #include "nsError.h"                    // for NS_ERROR_NOT_INITIALIZED, etc
 #include "nsIContent.h"                 // for nsIContent
-#include "nsIContentPrefService.h"      // for nsIContentPrefService, etc
 #include "nsIContentPrefService2.h"     // for nsIContentPrefService2, etc
 #include "nsIDOMDocument.h"             // for nsIDOMDocument
 #include "nsIDOMElement.h"              // for nsIDOMElement
@@ -361,12 +360,7 @@ nsEditorSpellCheck::InitSpellChecker(nsIEditor* aEditor, bool aEnableSelectionCh
     }
     RefPtr<Selection> selection = domSelection->AsSelection();
 
-    int32_t count = 0;
-
-    rv = selection->GetRangeCount(&count);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (count > 0) {
+    if (selection->RangeCount()) {
       RefPtr<nsRange> range = selection->GetRangeAt(0);
       NS_ENSURE_STATE(range);
 

@@ -33,6 +33,7 @@
 #include <algorithm>
 #include "nsProxyRelease.h"
 #include "nsIContentPolicy.h"
+#include "mozilla/ErrorNames.h"
 
 using mozilla::media::TimeUnit;
 
@@ -73,7 +74,6 @@ MediaResource::Destroy()
 
 NS_IMPL_ADDREF(MediaResource)
 NS_IMPL_RELEASE_WITH_DESTROY(MediaResource, Destroy())
-NS_IMPL_QUERY_INTERFACE0(MediaResource)
 
 ChannelMediaResource::ChannelMediaResource(MediaResourceCallback* aCallback,
                                            nsIChannel* aChannel,
@@ -908,7 +908,7 @@ void
 ChannelMediaResource::CacheClientNotifySuspendedStatusChanged()
 {
   NS_ASSERTION(NS_IsMainThread(), "Don't call on non-main thread");
-  mCallback->NotifySuspendedStatusChanged();
+  mCallback->NotifySuspendedStatusChanged(IsSuspendedByCache());
 }
 
 nsresult
@@ -1162,8 +1162,6 @@ public:
     return std::max(aOffset, mSize);
   }
   bool    IsDataCachedToEndOfResource(int64_t aOffset) override { return true; }
-  bool    IsSuspendedByCache() override { return true; }
-  bool    IsSuspended() override { return true; }
   bool    IsTransportSeekable() override { return true; }
 
   nsresult GetCachedRanges(MediaByteRangeSet& aRanges) override;

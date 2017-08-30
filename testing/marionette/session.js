@@ -130,6 +130,14 @@ session.Proxy = class {
    */
   init() {
     switch (this.proxyType) {
+      case "autodetect":
+        Preferences.set("network.proxy.type", 4);
+        return true;
+
+      case "direct":
+        Preferences.set("network.proxy.type", 0);
+        return true;
+
       case "manual":
         Preferences.set("network.proxy.type", 1);
         if (this.httpProxy && this.httpProxyPort) {
@@ -159,16 +167,8 @@ session.Proxy = class {
             "network.proxy.autoconfig_url", this.proxyAutoconfigUrl);
         return true;
 
-      case "autodetect":
-        Preferences.set("network.proxy.type", 4);
-        return true;
-
       case "system":
         Preferences.set("network.proxy.type", 5);
-        return true;
-
-      case "noproxy":
-        Preferences.set("network.proxy.type", 0);
         return true;
 
       default:
@@ -211,33 +211,37 @@ session.Proxy = class {
     assert.object(json);
 
     assert.in("proxyType", json);
-    p.proxyType = json.proxyType;
+    p.proxyType = assert.string(json.proxyType);
 
-    if (json.proxyType == "manual") {
-      if (typeof json.httpProxy != "undefined") {
-        p.httpProxy = assert.string(json.httpProxy);
-        p.httpProxyPort = assert.positiveInteger(json.httpProxyPort);
-      }
+    switch (p.proxyType) {
+      case "manual":
+        if (typeof json.httpProxy != "undefined") {
+          p.httpProxy = assert.string(json.httpProxy);
+          p.httpProxyPort = assert.positiveInteger(json.httpProxyPort);
+        }
 
-      if (typeof json.sslProxy != "undefined") {
-        p.sslProxy = assert.string(json.sslProxy);
-        p.sslProxyPort = assert.positiveInteger(json.sslProxyPort);
-      }
+        if (typeof json.sslProxy != "undefined") {
+          p.sslProxy = assert.string(json.sslProxy);
+          p.sslProxyPort = assert.positiveInteger(json.sslProxyPort);
+        }
 
-      if (typeof json.ftpProxy != "undefined") {
-        p.ftpProxy = assert.string(json.ftpProxy);
-        p.ftpProxyPort = assert.positiveInteger(json.ftpProxyPort);
-      }
+        if (typeof json.ftpProxy != "undefined") {
+          p.ftpProxy = assert.string(json.ftpProxy);
+          p.ftpProxyPort = assert.positiveInteger(json.ftpProxyPort);
+        }
 
-      if (typeof json.socksProxy != "undefined") {
-        p.socksProxy = assert.string(json.socksProxy);
-        p.socksProxyPort = assert.positiveInteger(json.socksProxyPort);
-        p.socksProxyVersion = assert.positiveInteger(json.socksProxyVersion);
-      }
-    }
+        if (typeof json.socksProxy != "undefined") {
+          p.socksProxy = assert.string(json.socksProxy);
+          p.socksProxyPort = assert.positiveInteger(json.socksProxyPort);
+          p.socksProxyVersion = assert.positiveInteger(
+              json.socksProxyVersion);
+        }
 
-    if (typeof json.proxyAutoconfigUrl != "undefined") {
-      p.proxyAutoconfigUrl = assert.string(json.proxyAutoconfigUrl);
+        break;
+
+      case "pac":
+        p.proxyAutoconfigUrl = assert.string(json.proxyAutoconfigUrl);
+        break;
     }
 
     return p;

@@ -6,7 +6,6 @@
 
 toolkit.jar:
   skin/classic/global/10pct_transparent_grey.png
-  skin/classic/global/50pct_transparent_grey.png
   skin/classic/global/autocomplete.css
   skin/classic/global/button.css
   skin/classic/global/checkbox.css
@@ -77,7 +76,6 @@ toolkit.jar:
   skin/classic/global/icons/blacklist_64.png                         (icons/blacklist_64.png)
   skin/classic/global/icons/glyph-dropdown.png                       (icons/glyph-dropdown.png)
   skin/classic/global/icons/glyph-dropdown@2x.png                    (icons/glyph-dropdown@2x.png)
-  skin/classic/global/icons/menulist-dropmarker.png                  (icons/menulist-dropmarker.png)
   skin/classic/global/icons/notfound.png                             (icons/notfound.png)
   skin/classic/global/icons/panebutton-active.png                    (icons/panebutton-active.png)
   skin/classic/global/icons/panebutton-inactive.png                  (icons/panebutton-inactive.png)
@@ -98,9 +96,6 @@ toolkit.jar:
   skin/classic/global/icons/question-32.png                          (icons/question-32.png)
   skin/classic/global/icons/question-64.png                          (icons/question-64.png)
   skin/classic/global/icons/sslWarning.png                           (icons/sslWarning.png)
-  skin/classic/global/notification/error-icon.png                    (notification/error-icon.png)
-  skin/classic/global/notification/info-icon.png                     (notification/info-icon.png)
-  skin/classic/global/notification/warning-icon.png                  (notification/warning-icon.png)
 * skin/classic/global/in-content/common.css                          (in-content/common.css)
 * skin/classic/global/in-content/info-pages.css                      (in-content/info-pages.css)
   skin/classic/global/splitter/dimple.png                            (splitter/dimple.png)

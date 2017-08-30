@@ -53,7 +53,7 @@ class VCSHelper(object):
 
         for cmd in commands:
             try:
-                output = subprocess.check_output(cmd).strip()
+                output = subprocess.check_output(cmd, stderr=open(os.devnull, 'w')).strip()
             except (subprocess.CalledProcessError, OSError):
                 continue
 
@@ -76,19 +76,48 @@ class VCSHelper(object):
             print(e.output)
             raise
 
-    def write_task_config(self, labels):
+    def write_task_config(self, labels, templates=None):
         config = os.path.join(self.root, 'try_task_config.json')
         with open(config, 'w') as fh:
-            json.dump(sorted(labels), fh, indent=2)
+            try_task_config = {'tasks': sorted(labels)}
+            if templates:
+                try_task_config['templates'] = templates
+
+            json.dump(try_task_config, fh, indent=2, separators=(',', ':'))
         return config
 
-    def check_working_directory(self):
+    def check_working_directory(self, push=True):
+        if not push:
+            return
+
         if self.has_uncommitted_changes:
             print(UNCOMMITTED_CHANGES)
             sys.exit(1)
 
+    def push_to_try(self, msg, labels=None, templates=None, push=True):
+        self.check_working_directory(push)
+
+        config = None
+        if labels:
+            config = self.write_task_config(labels, templates)
+
+        try:
+            if not push:
+                print("Calculated try selector:")
+                if config:
+                    with open(config) as fh:
+                        print(fh.read())
+                else:
+                    print(msg)
+                return
+
+            self._push_to_try(msg, config)
+        finally:
+            if config and os.path.isfile(config):
+                os.remove(config)
+
     @abstractmethod
-    def push_to_try(self, msg, labels=None):
+    def _push_to_try(self, msg, config):
         pass
 
     @abstractproperty
@@ -102,14 +131,10 @@ class VCSHelper(object):
 
 class HgHelper(VCSHelper):
 
-    def push_to_try(self, msg, labels=None):
-        self.check_working_directory()
-
-        if labels:
-            config = self.write_task_config(labels)
-            self.run(['hg', 'add', config])
-
+    def _push_to_try(self, msg, config):
         try:
+            if config:
+                self.run(['hg', 'add', config])
             return subprocess.check_call(['hg', 'push-to-try', '-m', msg])
         except subprocess.CalledProcessError:
             try:
@@ -120,13 +145,10 @@ class HgHelper(VCSHelper):
         finally:
             self.run(['hg', 'revert', '-a'])
 
-            if labels and os.path.isfile(config):
-                os.remove(config)
-
     @property
     def files_changed(self):
         return self.run(['hg', 'log', '-r', '::. and not public()',
-                         '--template', '{join(files, "\n")}\n'])
+                         '--template', '{join(files, "\n")}\n']).splitlines()
 
     @property
     def has_uncommitted_changes(self):
@@ -136,19 +158,15 @@ class HgHelper(VCSHelper):
 
 class GitHelper(VCSHelper):
 
-    def push_to_try(self, msg, labels=None):
-        self.check_working_directory()
-
+    def _push_to_try(self, msg, config):
         try:
             subprocess.check_output(['git', 'cinnabar', '--version'], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError:
             print(GIT_CINNABAR_NOT_FOUND)
             return 1
 
-        if labels:
-            config = self.write_task_config(labels)
+        if config:
             self.run(['git', 'add', config])
-
         subprocess.check_call(['git', 'commit', '--allow-empty', '-m', msg])
         try:
             return subprocess.call(['git', 'push', 'hg::ssh://hg.mozilla.org/try',

@@ -458,14 +458,21 @@ nsSVGClipPathFrame::GetCanvasTM()
 gfxMatrix
 nsSVGClipPathFrame::GetClipPathTransform(nsIFrame* aClippedFrame)
 {
-  SVGClipPathElement *content = static_cast<SVGClipPathElement*>(mContent);
+  SVGClipPathElement *content = static_cast<SVGClipPathElement*>(GetContent());
 
   gfxMatrix tm = content->PrependLocalTransformsTo(gfxMatrix());
 
   nsSVGEnum* clipPathUnits =
     &content->mEnumAttributes[SVGClipPathElement::CLIPPATHUNITS];
 
-  return nsSVGUtils::AdjustMatrixForUnits(tm, clipPathUnits, aClippedFrame);
+  uint32_t flags =
+    nsSVGUtils::eBBoxIncludeFillGeometry |
+    (aClippedFrame->StyleBorder()->mBoxDecorationBreak == StyleBoxDecorationBreak::Clone
+      ? nsSVGUtils::eIncludeOnlyCurrentFrameForNonSVGElement
+      : 0);
+
+  return nsSVGUtils::AdjustMatrixForUnits(tm, clipPathUnits,
+                                          aClippedFrame, flags);
 }
 
 SVGBBox

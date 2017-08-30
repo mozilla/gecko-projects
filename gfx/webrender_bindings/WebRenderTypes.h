@@ -6,6 +6,7 @@
 #ifndef GFX_WEBRENDERTYPES_H
 #define GFX_WEBRENDERTYPES_H
 
+#include "FrameMetrics.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/gfx/Matrix.h"
@@ -14,6 +15,7 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
+#include "mozilla/Variant.h"
 #include "Units.h"
 #include "RoundedRect.h"
 #include "nsStyleConsts.h"
@@ -27,6 +29,7 @@ typedef wr::WrImageKey ImageKey;
 typedef wr::WrFontKey FontKey;
 typedef wr::WrEpoch Epoch;
 typedef wr::WrExternalImageId ExternalImageId;
+typedef wr::WrDebugFlags DebugFlags;
 
 typedef mozilla::Maybe<mozilla::wr::WrImageMask> MaybeImageMask;
 typedef Maybe<ExternalImageId> MaybeExternalImageId;
@@ -41,6 +44,12 @@ inline Epoch NewEpoch(uint32_t aEpoch) {
   Epoch e;
   e.mHandle = aEpoch;
   return e;
+}
+
+inline DebugFlags NewDebugFlags(uint32_t aFlags) {
+  DebugFlags flags;
+  flags.mBits = aFlags;
+  return flags;
 }
 
 inline Maybe<wr::ImageFormat>
@@ -236,8 +245,8 @@ static inline wr::LayoutRect ToLayoutRect(const gfx::RectTyped<T>& rect)
   wr::LayoutRect r;
   r.origin.x = rect.x;
   r.origin.y = rect.y;
-  r.size.width = rect.width;
-  r.size.height = rect.height;
+  r.size.width = rect.Width();
+  r.size.height = rect.Height();
   return r;
 }
 
@@ -246,8 +255,8 @@ static inline wr::LayoutRect ToLayoutRect(const gfxRect rect)
   wr::LayoutRect r;
   r.origin.x = rect.x;
   r.origin.y = rect.y;
-  r.size.width = rect.width;
-  r.size.height = rect.height;
+  r.size.width = rect.Width();
+  r.size.height = rect.Height();
   return r;
 }
 
@@ -661,6 +670,8 @@ struct WrClipId {
     return id == other.id;
   }
 };
+
+typedef Variant<layers::FrameMetrics::ViewID, WrClipId> ScrollOrClipId;
 
 } // namespace wr
 } // namespace mozilla

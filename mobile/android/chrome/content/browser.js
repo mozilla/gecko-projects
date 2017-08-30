@@ -25,9 +25,6 @@ if (AppConstants.ACCESSIBILITY) {
 XPCOMUtils.defineLazyModuleGetter(this, "Manifests",
                                   "resource://gre/modules/Manifest.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "DownloadNotifications",
-                                  "resource://gre/modules/DownloadNotifications.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 
@@ -153,16 +150,6 @@ var lazilyLoadedObserverScripts = [
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
 ];
 
-if (AppConstants.MOZ_WEBRTC) {
-  lazilyLoadedObserverScripts.push(
-    ["WebrtcUI", ["getUserMedia:ask-device-permission",
-                  "getUserMedia:request",
-                  "PeerConnection:request",
-                  "recording-device-events",
-                  "VideoCapture:Paused",
-                  "VideoCapture:Resumed"], "chrome://browser/content/WebrtcUI.js"])
-}
-
 lazilyLoadedObserverScripts.forEach(function (aScript) {
   let [name, notifications, script] = aScript;
   XPCOMUtils.defineLazyGetter(window, name, function() {
@@ -283,11 +270,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "DOMUtils",
 XPCOMUtils.defineLazyServiceGetter(window, "URIFixup",
   "@mozilla.org/docshell/urifixup;1", "nsIURIFixup");
 
-if (AppConstants.MOZ_WEBRTC) {
-  XPCOMUtils.defineLazyServiceGetter(this, "MediaManagerService",
-    "@mozilla.org/mediaManagerService;1", "nsIMediaManagerService");
-}
-
 XPCOMUtils.defineLazyModuleGetter(this, "Log",
   "resource://gre/modules/AndroidLog.jsm", "AndroidLog");
 
@@ -397,7 +379,6 @@ var BrowserApp = {
     GlobalEventDispatcher.registerListener(this, [
       "Browser:LoadManifest",
       "Browser:Quit",
-      "Browser:ZombifyTabs",
       "Fonts:Reload",
       "FormHistory:Init",
       "FullScreen:Exit",
@@ -491,7 +472,6 @@ var BrowserApp = {
 
     if (ParentalControls.parentalControlsEnabled) {
         let isBlockListEnabled = ParentalControls.isAllowed(ParentalControls.BLOCK_LIST);
-        Services.prefs.setBoolPref("browser.safebrowsing.forbiddenURIs.enabled", isBlockListEnabled);
         Services.prefs.setBoolPref("browser.safebrowsing.allowOverride", !isBlockListEnabled);
 
         let isTelemetryEnabled = ParentalControls.isAllowed(ParentalControls.TELEMETRY);
@@ -562,7 +542,6 @@ var BrowserApp = {
       InitLater(() => LightWeightThemeWebInstaller.init());
       InitLater(() => CastingApps.init(), window, "CastingApps");
       InitLater(() => Services.search.init(), Services, "search");
-      InitLater(() => DownloadNotifications.init(), window, "DownloadNotifications");
 
       // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
       InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
@@ -1416,6 +1395,45 @@ var BrowserApp = {
     return tab;
   },
 
+  /**
+   * Open or select a tab with the "about:addons" page and optionally
+   * switch to the details page related to a defined addonId.
+   *
+   * @param {string} addonId
+   */
+  openAddonManager: function openAddonManager({addonId}) {
+    if (addonId) {
+      let emWindow;
+
+      function receivePong(subject, topic, data) {
+        emWindow = subject;
+      };
+
+      Services.obs.addObserver(receivePong, "EM-pong");
+      Services.obs.notifyObservers(null, "EM-ping");
+      Services.obs.removeObserver(receivePong, "EM-pong");
+
+      if (emWindow) {
+        // "about:addons" has been already loaded in a tab.
+        emWindow.showAddonDetails(addonId);
+      } else {
+        // Wait for "about:addons" to be fully loaded.
+        function waitAboutAddons(subject, topic, data) {
+          Services.obs.removeObserver(waitAboutAddons, "EM-loaded");
+          emWindow = subject;
+
+          emWindow.showAddonDetails(addonId);
+        }
+        Services.obs.addObserver(waitAboutAddons, "EM-loaded");
+      }
+    }
+
+    BrowserApp.selectOrAddTab("about:addons", {
+      selected: true,
+      parentId: BrowserApp.selectedTab.id,
+    });
+  },
+
   // This method updates the state in BrowserApp after a tab has been selected
   // in the Java UI.
   _handleTabSelected: function _handleTabSelected(aTab) {
@@ -1678,13 +1696,6 @@ var BrowserApp = {
 
       case "Browser:Quit":
         this.quit(data);
-        break;
-
-      case "Browser:ZombifyTabs":
-        let tabs = this._tabs;
-        for (let i = 0; i < tabs.length; i++) {
-          tabs[i].zombify();
-        }
         break;
 
       case "Fonts:Reload":
@@ -2229,7 +2240,8 @@ async function installManifest(browser, data) {
       icon,
       name: manifest.name,
       start_url: manifest.start_url,
-      manifest_path: manifest.path
+      manifest_path: manifest.path,
+      manifest_url: manifest.url
     });
   } catch (err) {
     Cu.reportError("Failed to install: " + err.message);
@@ -3424,9 +3436,22 @@ nsBrowserAccess.prototype = {
     return browser;
   },
 
-  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
-    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal);
-    return browser ? browser.contentWindow : null;
+  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags,
+                                    aTriggeringPrincipal) {
+    if (!aURI) {
+      throw "Can't open an empty uri";
+    }
+    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags,
+                                   aTriggeringPrincipal);
+    return browser && browser.contentWindow;
+  },
+
+  createContentWindow: function browser_createContentWindow(
+                                aURI, aOpener, aWhere, aFlags,
+                                aTriggeringPrincipal) {
+    let browser = this._getBrowser(null, aOpener, aWhere, aFlags,
+                                   aTriggeringPrincipal);
+    return browser && browser.contentWindow;
   },
 
   openURIInFrame: function browser_openURIInFrame(aURI, aParams, aWhere, aFlags,
@@ -3437,10 +3462,7 @@ nsBrowserAccess.prototype = {
     //
     // We also ignore aName if it is set, as it is currently only used on the
     // e10s codepath.
-    let browser = this._getBrowser(aURI, null, aWhere, aFlags, null);
-    if (browser)
-      return browser.QueryInterface(Ci.nsIFrameLoaderOwner);
-    return null;
+    return this._getBrowser(aURI, null, aWhere, aFlags, null);
   },
 
   isTabContentWindow: function(aWindow) {
@@ -6605,6 +6627,7 @@ var ExternalApps = {
     this._pageActionId = PageActions.add({
       title: Strings.browser.GetStringFromName("openInApp.pageAction"),
       icon: "drawable://icon_openinapp",
+      useTint: true,
 
       clickCallback: () => {
         UITelemetry.addEvent("launch.1", "pageaction", null, "helper");
@@ -7111,7 +7134,7 @@ HTMLContextMenuItem.prototype = Object.create(ContextMenuItem.prototype, {
       }
 
       // If this is a menu item, show a new context menu with the submenu in it
-      if (elt instanceof Ci.nsIDOMHTMLMenuElement) {
+      if (elt instanceof HTMLMenuElement) {
         try {
           NativeWindow.contextmenus.menus = {};
 
@@ -7154,7 +7177,7 @@ HTMLContextMenuItem.prototype = Object.create(ContextMenuItem.prototype, {
         icon: elt.icon,
         label: elt.label,
         disabled: elt.disabled,
-        menu: elt instanceof Ci.nsIDOMHTMLMenuElement
+        menu: elt instanceof HTMLMenuElement
       };
     }
   },

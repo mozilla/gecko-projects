@@ -468,13 +468,18 @@ class AuthRequestor {
   // nsIAuthPrompt2 asyncPromptAuth
   asyncPromptAuth(channel, callback, context, level, authInfo) {
     let uri = channel.URI;
+    let proxyInfo;
+    let isProxy = !!(authInfo.flags & authInfo.AUTH_PROXY);
+    if (isProxy && channel instanceof Ci.nsIProxiedChannel) {
+      proxyInfo = channel.proxyInfo;
+    }
     let data = {
       scheme: authInfo.authenticationScheme,
       realm: authInfo.realm,
-      isProxy: !!(authInfo.flags & authInfo.AUTH_PROXY),
+      isProxy,
       challenger: {
-        host: uri.host,
-        port: uri.port,
+        host: proxyInfo ? proxyInfo.host : uri.host,
+        port: proxyInfo ? proxyInfo.port : uri.port,
       },
     };
 
@@ -532,6 +537,7 @@ class AuthRequestor {
 }
 
 HttpObserverManager = {
+  openingInitialized: false,
   modifyInitialized: false,
   examineInitialized: false,
   redirectInitialized: false,
@@ -555,13 +561,21 @@ HttpObserverManager = {
   },
 
   addOrRemove() {
-    let needModify = this.listeners.opening.size || this.listeners.modify.size || this.listeners.afterModify.size;
+    let needOpening = this.listeners.opening.size;
+    let needModify = this.listeners.modify.size || this.listeners.afterModify.size;
+    if (needOpening && !this.openingInitialized) {
+      this.openingInitialized = true;
+      Services.obs.addObserver(this, "http-on-modify-request");
+    } else if (!needOpening && this.openingInitialized) {
+      this.openingInitialized = false;
+      Services.obs.removeObserver(this, "http-on-modify-request");
+    }
     if (needModify && !this.modifyInitialized) {
       this.modifyInitialized = true;
-      Services.obs.addObserver(this, "http-on-modify-request");
+      Services.obs.addObserver(this, "http-on-before-connect");
     } else if (!needModify && this.modifyInitialized) {
       this.modifyInitialized = false;
-      Services.obs.removeObserver(this, "http-on-modify-request");
+      Services.obs.removeObserver(this, "http-on-before-connect");
     }
     this.needTracing = this.listeners.onStart.size ||
                        this.listeners.onError.size ||
@@ -632,9 +646,10 @@ HttpObserverManager = {
     let channel = subject.QueryInterface(Ci.nsIHttpChannel);
     switch (topic) {
       case "http-on-modify-request":
-        let loadContext = this.getLoadContext(channel);
-
-        this.runChannelListener(channel, loadContext, "opening");
+        this.runChannelListener(channel, this.getLoadContext(channel), "opening");
+        break;
+      case "http-on-before-connect":
+        this.runChannelListener(channel, this.getLoadContext(channel), "modify");
         break;
       case "http-on-examine-cached-response":
       case "http-on-examine-merged-response":
@@ -779,11 +794,11 @@ HttpObserverManager = {
 
     if (loadInfo) {
       let originPrincipal = loadInfo.triggeringPrincipal;
-      if (originPrincipal.URI) {
+      if (!originPrincipal.isNullPrincipal && originPrincipal.URI) {
         data.originUrl = originPrincipal.URI.spec;
       }
       let docPrincipal = loadInfo.loadingPrincipal;
-      if (docPrincipal && docPrincipal.URI) {
+      if (docPrincipal && !docPrincipal.isNullPrincipal && docPrincipal.URI) {
         data.documentUrl = docPrincipal.URI.spec;
       }
 
@@ -830,6 +845,18 @@ HttpObserverManager = {
         // The remoteAddress getter throws if the address is unavailable,
         // but ip is an optional property so just ignore the exception.
       }
+    }
+
+    if (channel instanceof Ci.nsIProxiedChannel && channel.proxyInfo) {
+      let pi = channel.proxyInfo;
+      data.proxyInfo = {
+        host: pi.host,
+        port: pi.port,
+        type: pi.type,
+        username: pi.username,
+        proxyDNS: pi.flags == Ci.nsIProxyInfo.TRANSPARENT_PROXY_RESOLVES_HOST,
+        failoverTimeout: pi.failoverTimeout,
+      };
     }
 
     return Object.assign(data, extraData);
@@ -1002,9 +1029,7 @@ HttpObserverManager = {
         }
       }
 
-      if (kind === "opening") {
-        await this.runChannelListener(channel, loadContext, "modify");
-      } else if (kind === "modify") {
+      if (kind === "modify") {
         await this.runChannelListener(channel, loadContext, "afterModify");
       }
     } catch (e) {

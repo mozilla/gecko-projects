@@ -432,7 +432,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
   nsCOMPtr<nsIScriptError> scriptError = do_QueryInterface(aMessage);
   if (scriptError) {
     nsAutoString msg, sourceName, sourceLine;
-    nsXPIDLCString category;
+    nsCString category;
     uint32_t lineNum, colNum, flags;
 
     nsresult rv = scriptError->GetErrorMessage(msg);
@@ -490,6 +490,29 @@ private:
     MOZ_CRASH("Failed to create a PBackgroundChild actor!");
   }
 };
+
+#ifdef NIGHTLY_BUILD
+/**
+ * The singleton of this class is registered with the HangMonitor as an
+ * annotator, so that the hang monitor can record whether or not there were
+ * pending input events when the thread hung.
+ */
+class PendingInputEventHangAnnotator final
+  : public HangMonitor::Annotator
+{
+public:
+  virtual void AnnotateHang(HangMonitor::HangAnnotations& aAnnotations)
+  {
+    int32_t pending = ContentChild::GetSingleton()->GetPendingInputEvents();
+    if (pending > 0) {
+      aAnnotations.AddAnnotation(NS_LITERAL_STRING("PendingInput"), pending);
+    }
+  }
+
+  static PendingInputEventHangAnnotator sSingleton;
+};
+PendingInputEventHangAnnotator PendingInputEventHangAnnotator::sSingleton;
+#endif
 
 NS_IMPL_ISUPPORTS(BackgroundChildPrimer, nsIIPCBackgroundChildCreateCallback)
 
@@ -638,6 +661,16 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
   SetProcessName(NS_LITERAL_STRING("Web Content"));
 
+#ifdef NIGHTLY_BUILD
+  // NOTE: We have to register the annotator on the main thread, as annotators
+  // only affect a single thread.
+  SystemGroup::Dispatch(TaskCategory::Other,
+                        NS_NewRunnableFunction("RegisterPendingInputEventHangAnnotator", [] {
+                          HangMonitor::RegisterAnnotator(
+                            PendingInputEventHangAnnotator::sSingleton);
+                        }));
+#endif
+
   return true;
 }
 
@@ -784,7 +817,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return rv;
     }
 
-    URIParams uriToLoad;
+    OptionalURIParams uriToLoad;
     SerializeURI(aURI, uriToLoad);
     Unused << SendCreateWindowInDifferentProcess(aTabOpener,
                                                  aChromeFlags,
@@ -2927,6 +2960,10 @@ ContentChild::RecvShutdown()
 
   mShuttingDown = true;
 
+#ifdef NIGHTLY_BUILD
+  HangMonitor::UnregisterAnnotator(PendingInputEventHangAnnotator::sSingleton);
+#endif
+
   if (mPolicy) {
     mPolicy->Deactivate();
     mPolicy = nullptr;
@@ -3452,13 +3489,6 @@ ContentChild::RecvDeactivate(PBrowserChild* aTab)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvParentActivated(PBrowserChild* aTab, const bool& aActivated)
-{
-  TabChild* tab = static_cast<TabChild*>(aTab);
-  return tab->RecvParentActivated(aActivated);
-}
-
-mozilla::ipc::IPCResult
 ContentChild::RecvProvideAnonymousTemporaryFile(const uint64_t& aID,
                                                 const FileDescOrError& aFDOrError)
 {
@@ -3565,17 +3595,76 @@ ContentChild::RecvResetCodeCoverageCounters()
 #endif
 }
 
+mozilla::ipc::IPCResult
+ContentChild::RecvSetInputEventQueueEnabled()
+{
+  nsThreadManager::get().EnableMainThreadEventPrioritization();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvFlushInputEventQueue()
+{
+  nsThreadManager::get().FlushInputEventPrioritization();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvSuspendInputEventQueue()
+{
+  nsThreadManager::get().SuspendInputEventPrioritization();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvResumeInputEventQueue()
+{
+  nsThreadManager::get().ResumeInputEventPrioritization();
+  return IPC_OK();
+}
+
 already_AddRefed<nsIEventTarget>
 ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
 {
-  if (aMsg.type() == PJavaScript::Msg_DropTemporaryStrongReferences__ID
-      || aMsg.type() == PJavaScript::Msg_DropObject__ID
-      || aMsg.type() == PContent::Msg_NotifyVisited__ID) {
-    return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
+  switch(aMsg.type()) {
+    case PJavaScript::Msg_DropTemporaryStrongReferences__ID:
+    case PJavaScript::Msg_DropObject__ID:
+    case PContent::Msg_NotifyVisited__ID:
+    case PContent::Msg_DataStoragePut__ID:
+    case PContent::Msg_DataStorageRemove__ID:
+    case PContent::Msg_DataStorageClear__ID:
+      return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
+    default:
+      return nullptr;
+  }
+}
+
+#ifdef NIGHTLY_BUILD
+void
+ContentChild::OnChannelReceivedMessage(const Message& aMsg)
+{
+  if (nsContentUtils::IsMessageInputEvent(aMsg)) {
+    mPendingInputEvents++;
+  }
+}
+
+PContentChild::Result
+ContentChild::OnMessageReceived(const Message& aMsg)
+{
+  if (nsContentUtils::IsMessageInputEvent(aMsg)) {
+    DebugOnly<uint32_t> prevEvts = mPendingInputEvents--;
+    MOZ_ASSERT(prevEvts > 0);
   }
 
-  return nullptr;
+  return PContentChild::OnMessageReceived(aMsg);
 }
+
+PContentChild::Result
+ContentChild::OnMessageReceived(const Message& aMsg, Message*& aReply)
+{
+  return PContentChild::OnMessageReceived(aMsg, aReply);
+}
+#endif
 
 } // namespace dom
 

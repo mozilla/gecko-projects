@@ -136,8 +136,6 @@ struct FontSizePrefs
 };
 
 // DOM Traversal.
-uint32_t Gecko_ChildrenCount(RawGeckoNodeBorrowed node);
-bool Gecko_NodeIsElement(RawGeckoNodeBorrowed node);
 bool Gecko_IsInDocument(RawGeckoNodeBorrowed node);
 bool Gecko_FlattenedTreeParentIsParent(RawGeckoNodeBorrowed node);
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
@@ -176,12 +174,9 @@ Gecko_LoadStyleSheet(mozilla::css::Loader* loader,
 // Selector Matching.
 uint64_t Gecko_ElementState(RawGeckoElementBorrowed element);
 uint64_t Gecko_DocumentState(const nsIDocument* aDocument);
-bool Gecko_IsTextNode(RawGeckoNodeBorrowed node);
 bool Gecko_IsRootElement(RawGeckoElementBorrowed element);
 bool Gecko_MatchesElement(mozilla::CSSPseudoClassType type, RawGeckoElementBorrowed element);
-nsIAtom* Gecko_LocalName(RawGeckoElementBorrowed element);
 nsIAtom* Gecko_Namespace(RawGeckoElementBorrowed element);
-nsIAtom* Gecko_GetElementId(RawGeckoElementBorrowed element);
 bool Gecko_MatchLang(RawGeckoElementBorrowed element,
                      nsIAtom* override_lang, bool has_override_lang,
                      const char16_t* value);
@@ -306,6 +301,12 @@ void Gecko_nsFont_InitSystem(nsFont* dst, int32_t font_id,
                              const nsStyleFont* font, RawGeckoPresContextBorrowed pres_context);
 void Gecko_nsFont_Destroy(nsFont* dst);
 
+nsTArray<unsigned int>* Gecko_AppendFeatureValueHashEntry(
+  gfxFontFeatureValueSet* value_set, nsIAtom* family, uint32_t alternate, nsIAtom* name);
+void Gecko_nsFont_SetFontFeatureValuesLookup(nsFont* font,
+                                             const RawGeckoPresContext* pres_context);
+void Gecko_nsFont_ResetFontFeatureValuesLookup(nsFont* font);
+
 // Font variant alternates
 void Gecko_ClearAlternateValues(nsFont* font, size_t length);
 void Gecko_AppendAlternateValues(nsFont* font, uint32_t alternate_name, nsIAtom* atom);
@@ -383,23 +384,20 @@ nsStyleContentData::CounterFunction* Gecko_SetCounterFunction(
     nsStyleContentData* content_data, nsStyleContentType type);
 
 // Dirtiness tracking.
-uint32_t Gecko_GetNodeFlags(RawGeckoNodeBorrowed node);
 void Gecko_SetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 void Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 void Gecko_NoteDirtyElement(RawGeckoElementBorrowed element);
 void Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed element);
 
 // Incremental restyle.
-// Also, we might want a ComputedValues to ComputedValues API for animations?
-// Not if we do them in Gecko...
-nsStyleContext* Gecko_GetStyleContext(RawGeckoElementBorrowed element,
-                                      nsIAtom* aPseudoTagOrNull);
 mozilla::CSSPseudoElementType Gecko_GetImplementedPseudo(RawGeckoElementBorrowed element);
-nsChangeHint Gecko_CalcStyleDifference(ServoStyleContextBorrowed old_style,
-                                       ServoStyleContextBorrowed new_style,
-                                       uint64_t old_style_bits,
-                                       bool* any_style_changed);
-nsChangeHint Gecko_HintsHandledForDescendants(nsChangeHint aHint);
+// We'd like to return `nsChangeHint` here, but bindgen bitfield enums don't
+// work as return values with the Linux 32-bit ABI at the moment because
+// they wrap the value in a struct.
+uint32_t Gecko_CalcStyleDifference(ServoStyleContextBorrowed old_style,
+                                   ServoStyleContextBorrowed new_style,
+                                   uint64_t old_style_bits,
+                                   bool* any_style_changed);
 
 // Get an element snapshot for a given element from the table.
 const ServoElementSnapshot*
@@ -653,6 +651,9 @@ void Gecko_AddPropertyToSet(nsCSSPropertyIDSetBorrowedMut, nsCSSPropertyID);
 // Register a namespace and get a namespace id.
 // Returns -1 on error (OOM)
 int32_t Gecko_RegisterNamespace(nsIAtom* ns);
+
+// Returns true if this process should create a rayon thread pool for styling.
+bool Gecko_ShouldCreateStyleThreadPool();
 
 // Style-struct management.
 #define STYLE_STRUCT(name, checkdata_cb)                                       \

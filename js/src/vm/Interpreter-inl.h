@@ -351,7 +351,7 @@ SetNameOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleObject e
         else
             varobj = &env->as<NativeObject>();
         MOZ_ASSERT(!varobj->getOpsSetProperty());
-        ok = NativeSetProperty(cx, varobj, id, val, receiver, Unqualified, result);
+        ok = NativeSetProperty<Unqualified>(cx, varobj, id, val, receiver, result);
     } else {
         ok = SetProperty(cx, env, id, val, receiver, result);
     }
@@ -642,8 +642,6 @@ static MOZ_ALWAYS_INLINE bool
 InitElemOperation(JSContext* cx, jsbytecode* pc, HandleObject obj, HandleValue idval, HandleValue val)
 {
     MOZ_ASSERT(!val.isMagic(JS_ELEMENTS_HOLE));
-    MOZ_ASSERT(!obj->getClass()->getGetProperty());
-    MOZ_ASSERT(!obj->getClass()->getSetProperty());
 
     RootedId id(cx);
     if (!ToPropertyKey(cx, idval, &id))

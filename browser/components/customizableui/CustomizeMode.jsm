@@ -12,7 +12,6 @@ const kPrefCustomizationDebug = "browser.uiCustomization.debug";
 const kPrefCustomizationAnimation = "browser.uiCustomization.disableAnimation";
 const kPaletteId = "customization-palette";
 const kDragDataTypePrefix = "text/toolbarwrapper-id/";
-const kPlaceholderClass = "panel-customization-placeholder";
 const kSkipSourceNodePref = "browser.uiCustomization.skipSourceNodeCheck";
 const kToolbarVisibilityBtn = "customization-toolbar-visibility-button";
 const kDrawInTitlebarPref = "browser.tabs.drawInTitlebar";
@@ -203,6 +202,21 @@ CustomizeMode.prototype = {
   },
 
   enter() {
+    if (!this.window.toolbar.visible) {
+      let w = this.window.getTopWin(true);
+      if (w) {
+        w.gCustomizeMode.enter();
+        return;
+      }
+      let obs = () => {
+        Services.obs.removeObserver(obs, "browser-delayed-startup-finished");
+        w = this.window.getTopWin(true);
+        w.gCustomizeMode.enter();
+      };
+      Services.obs.addObserver(obs, "browser-delayed-startup-finished");
+      this.window.openUILinkIn("about:newtab", "window");
+      return;
+    }
     this._wantToBeInCustomizeMode = true;
 
     if (this._customizing || this._handler.isEnteringCustomizeMode) {
@@ -1553,11 +1567,6 @@ CustomizeMode.prototype = {
 
     let draggedItem = item.firstChild;
     let placeForItem = CustomizableUI.getPlaceForItem(item);
-    let isRemovable = placeForItem == "palette" ||
-                      CustomizableUI.isWidgetRemovable(draggedItem);
-    if (item.classList.contains(kPlaceholderClass) || !isRemovable) {
-      return;
-    }
 
     let dt = aEvent.dataTransfer;
     let documentId = aEvent.target.ownerDocument.documentElement.id;
@@ -1737,10 +1746,6 @@ CustomizeMode.prototype = {
         targetNode = targetArea;
       }
     }
-    // If the target node is a placeholder, get its sibling as the real target.
-    while (targetNode.classList.contains(kPlaceholderClass) && targetNode.nextSibling) {
-      targetNode = targetNode.nextSibling;
-    }
     if (targetNode.tagName == "toolbarpaletteitem") {
       targetNode = targetNode.firstChild;
     }
@@ -1848,7 +1853,7 @@ CustomizeMode.prototype = {
         itemForPlacement = itemForPlacement.firstChild;
       }
     }
-    if (itemForPlacement && !itemForPlacement.classList.contains(kPlaceholderClass)) {
+    if (itemForPlacement) {
       let targetNodeId = (itemForPlacement.nodeName == "toolbarpaletteitem") ?
                             itemForPlacement.firstChild && itemForPlacement.firstChild.id :
                             itemForPlacement.id;
@@ -2199,8 +2204,7 @@ CustomizeMode.prototype = {
     let doc = aEvent.target.ownerDocument;
     doc.documentElement.setAttribute("customizing-movingItem", true);
     let item = this._getWrapper(aEvent.target);
-    if (item && !item.classList.contains(kPlaceholderClass) &&
-        item.getAttribute("removable") == "true") {
+    if (item) {
       item.setAttribute("mousedown", "true");
     }
   },

@@ -347,7 +347,7 @@ protected:
 
   RefPtr<ID3D11Device> GetDevice();
 
-  bool OpenSharedHandle();
+  bool EnsureTexture();
 
   RefPtr<ID3D11Device> mDevice;
   RefPtr<ID3D11Texture2D> mTexture;
@@ -408,7 +408,7 @@ private:
 protected:
   RefPtr<ID3D11Device> GetDevice();
 
-  bool OpenSharedHandle();
+  bool EnsureTexture();
 
   RefPtr<ID3D11Texture2D> mTextures[3];
   RefPtr<DataTextureSourceD3D11> mTextureSources[3];
@@ -484,6 +484,7 @@ private:
   RefPtr<ID3D11Texture2D> mSyncTexture;
   RefPtr<IDXGIKeyedMutex> mKeyedMutex;
   std::vector<ID3D11Texture2D*> mSyncedTextures;
+  Mutex mSyncLock;
 };
 
 inline uint32_t GetMaxTextureSizeForFeatureLevel(D3D_FEATURE_LEVEL aFeatureLevel)

@@ -256,6 +256,8 @@ PaymentRequest::Constructor(const GlobalObject& aGlobal,
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
   }
+
+  nsCOMPtr<nsIPrincipal> topLevelPrincipal;
   do {
     nsINode* parentNode = nsContentUtils::GetCrossDocParentNode(node);
     if (parentNode) {
@@ -269,6 +271,7 @@ PaymentRequest::Constructor(const GlobalObject& aGlobal,
         }
       }
     }
+    topLevelPrincipal = node->NodePrincipal();
     node = parentNode;
   } while (node);
 
@@ -289,8 +292,8 @@ PaymentRequest::Constructor(const GlobalObject& aGlobal,
 
   // Create PaymentRequest and set its |mId|
   RefPtr<PaymentRequest> request;
-  nsresult rv = manager->CreatePayment(window, aMethodData, aDetails,
-                                       aOptions, getter_AddRefs(request));
+  nsresult rv = manager->CreatePayment(window, topLevelPrincipal, aMethodData,
+                                       aDetails, aOptions, getter_AddRefs(request));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aRv.Throw(NS_ERROR_DOM_TYPE_ERR);
     return nullptr;
@@ -427,8 +430,7 @@ PaymentRequest::RejectShowPayment(nsresult aRejectReason)
 }
 
 void
-PaymentRequest::RespondShowPayment(bool aAccept,
-                                   const nsAString& aMethodName,
+PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
                                    const nsAString& aDetails,
                                    const nsAString& aPayerName,
                                    const nsAString& aPayerEmail,
@@ -439,7 +441,7 @@ PaymentRequest::RespondShowPayment(bool aAccept,
   MOZ_ASSERT(ReadyForUpdate());
   MOZ_ASSERT(mState == eInteractive);
 
-  if (!aAccept) {
+  if (NS_FAILED(aRv)) {
     RejectShowPayment(aRv);
     return;
   }
@@ -511,7 +513,7 @@ PaymentRequest::RespondAbortPayment(bool aSuccess)
   // - Otherwise, we are handling |Abort| method call from merchant.
   //   => Resolve/Reject |mAbortPromise| based on |aSuccess|.
   if (NS_FAILED(mUpdateError)) {
-    RespondShowPayment(false, EmptyString(), EmptyString(), EmptyString(),
+    RespondShowPayment(EmptyString(), EmptyString(), EmptyString(),
                        EmptyString(), EmptyString(), mUpdateError);
     mUpdateError = NS_OK;
     return;

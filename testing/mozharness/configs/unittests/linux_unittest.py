@@ -36,8 +36,7 @@ else:
 config = {
     "buildbot_json_path": "buildprops.json",
     "exes": {
-        "python": "/tools/buildbot/bin/python",
-        "virtualenv": ["/tools/buildbot/bin/python", "/tools/misc-python/virtualenv.py"],
+        "virtualenv": "/tools/virtualenv/bin/virtualenv",
         "tooltool.py": "/tools/tooltool.py",
     },
     "find_links": [
@@ -310,7 +309,7 @@ config = {
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": MINIDUMP_STACKWALK_PATH,
     "minidump_tooltool_manifest_path": TOOLTOOL_MANIFEST_PATH,
-    "tooltool_cache": "/home/worker/tooltool-cache",
+    "tooltool_cache": "/builds/worker/tooltool-cache",
     "download_nodejs": True,
     "nodejs_path": NODEJS_PATH,
     "nodejs_tooltool_manifest_path": NODEJS_TOOLTOOL_MANIFEST_PATH,

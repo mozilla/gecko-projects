@@ -8,7 +8,7 @@
 
 use ServoArc;
 use app_units::Au;
-use canvas_traits::CanvasMsg;
+use canvas_traits::canvas::CanvasMsg;
 use context::{LayoutContext, with_thread_local_font_context};
 use euclid::{Transform3D, Point2D, Vector2D, Radians, Rect, Size2D};
 use floats::ClearType;
@@ -30,7 +30,7 @@ use msg::constellation_msg::{BrowsingContextId, PipelineId};
 use net_traits::image::base::{Image, ImageMetadata};
 use net_traits::image_cache::{ImageOrMetadataAvailable, UsePlaceholder};
 use range::*;
-use script_layout_interface::HTMLCanvasData;
+use script_layout_interface::{HTMLCanvasData, HTMLCanvasDataSource};
 use script_layout_interface::SVGSVGData;
 use script_layout_interface::wrapper_traits::{PseudoElementType, ThreadSafeLayoutElement, ThreadSafeLayoutNode};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -53,6 +53,7 @@ use style::values::{self, Either, Auto};
 use style::values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
 use text;
 use text::TextRunScanner;
+use webrender_api;
 use wrapper::ThreadSafeLayoutNodeHelpers;
 
 // From gfxFontConstants.h in Firefox.
@@ -322,17 +323,31 @@ impl InlineAbsoluteFragmentInfo {
 }
 
 #[derive(Clone)]
+pub enum CanvasFragmentSource {
+    WebGL(webrender_api::ImageKey),
+    Image(Option<Arc<Mutex<IpcSender<CanvasMsg>>>>)
+}
+
+#[derive(Clone)]
 pub struct CanvasFragmentInfo {
-    pub ipc_renderer: Option<Arc<Mutex<IpcSender<CanvasMsg>>>>,
+    pub source: CanvasFragmentSource,
     pub dom_width: Au,
     pub dom_height: Au,
 }
 
 impl CanvasFragmentInfo {
     pub fn new(data: HTMLCanvasData) -> CanvasFragmentInfo {
+        let source = match data.source {
+            HTMLCanvasDataSource::WebGL(texture_id) => {
+                CanvasFragmentSource::WebGL(texture_id)
+            },
+            HTMLCanvasDataSource::Image(ipc_sender) => {
+                CanvasFragmentSource::Image(ipc_sender.map(|renderer| Arc::new(Mutex::new(renderer))))
+            }
+        };
+
         CanvasFragmentInfo {
-            ipc_renderer: data.ipc_renderer
-                              .map(|renderer| Arc::new(Mutex::new(renderer))),
+            source: source,
             dom_width: Au::from_px(data.width as i32),
             dom_height: Au::from_px(data.height as i32),
         }
@@ -559,7 +574,7 @@ impl ScannedTextFragmentInfo {
 
 /// Describes how to split a fragment. This is used during line breaking as part of the return
 /// value of `find_split_info_for_inline_size()`.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct SplitInfo {
     // TODO(bjz): this should only need to be a single character index, but both values are
     // currently needed for splitting in the `inline::try_append_*` functions.
@@ -618,7 +633,7 @@ impl UnscannedTextFragmentInfo {
 }
 
 /// A fragment that represents a table column.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct TableColumnFragmentInfo {
     /// the number of columns a <col> element should span
     pub span: u32,
@@ -1290,14 +1305,10 @@ impl Fragment {
     /// Computes the border and padding in both inline and block directions from the containing
     /// block inline-size and the style. After this call, the `border_padding` field will be
     /// correct.
-    ///
-    /// TODO(pcwalton): Remove `border_collapse`; we can figure it out from our style and specific
-    /// fragment info.
     pub fn compute_border_and_padding(&mut self,
-                                      containing_block_inline_size: Au,
-                                      border_collapse: border_collapse::T) {
+                                      containing_block_inline_size: Au) {
         // Compute border.
-        let border = match border_collapse {
+        let border = match self.style.get_inheritedtable().border_collapse {
             border_collapse::T::separate => self.border_width(),
             border_collapse::T::collapse => LogicalMargin::zero(self.style.writing_mode),
         };
@@ -2472,6 +2483,13 @@ impl Fragment {
                               stacking_relative_border_box.size.height - border_padding.vertical()))
     }
 
+    /// Returns true if this fragment has a filter, transform, or perspective property set.
+    pub fn has_filter_transform_or_perspective(&self) -> bool {
+           self.style().get_box().transform.0.is_some() ||
+           !self.style().get_effects().filter.0.is_empty() ||
+           self.style().get_box().perspective != Either::Second(values::None_)
+    }
+
     /// Returns true if this fragment establishes a new stacking context and false otherwise.
     pub fn establishes_stacking_context(&self) -> bool {
         // Text fragments shouldn't create stacking contexts.
@@ -2485,22 +2503,17 @@ impl Fragment {
         if self.style().get_effects().opacity != 1.0 {
             return true
         }
-        if !self.style().get_effects().filter.0.is_empty() {
-            return true
-        }
+
         if self.style().get_effects().mix_blend_mode != mix_blend_mode::T::normal {
             return true
         }
 
-        if self.style().get_box().transform.0.is_some() ||
-           self.style().get_box().transform_style == transform_style::T::preserve_3d ||
-           self.style().overrides_transform_style() {
-            return true
+        if self.has_filter_transform_or_perspective() {
+            return true;
         }
 
-        // TODO(mrobinson): Determine if this is necessary, since blocks with
-        // transformations already create stacking contexts.
-        if let Either::First(ref _length) = self.style().get_box().perspective {
+        if self.style().get_box().transform_style == transform_style::T::preserve_3d ||
+           self.style().overrides_transform_style() {
             return true
         }
 
@@ -2509,27 +2522,17 @@ impl Fragment {
             return true
         }
 
-        match (self.style().get_box().position,
-               self.style().get_position().z_index,
-               self.style().get_box().overflow_x,
-               self.style().get_box().overflow_y) {
-            (position::T::absolute,
-             Either::Second(Auto),
-             overflow_x::T::visible,
-             overflow_x::T::visible) |
-            (position::T::fixed,
-             Either::Second(Auto),
-             overflow_x::T::visible,
-             overflow_x::T::visible) |
-            (position::T::relative,
-             Either::Second(Auto),
-             overflow_x::T::visible,
-             overflow_x::T::visible) => false,
-            (position::T::absolute, _, _, _) |
-            (position::T::fixed, _, _, _) |
-            (position::T::relative, _, _, _) => true,
-            (position::T::static_, _, _, _) => false
+        // Statically positioned fragments don't establish stacking contexts if the previous
+        // conditions are not fulfilled. Furthermore, z-index doesn't apply to statically
+        // positioned fragments.
+        if self.style().get_box().position == position::T::static_ {
+            return false;
         }
+
+        // For absolutely and relatively positioned fragments we only establish a stacking
+        // context if there is a z-index set.
+        // See https://www.w3.org/TR/CSS2/visuren.html#z-index
+        self.style().get_position().z_index != Either::Second(Auto)
     }
 
     // Get the effective z-index of this fragment. Z-indices only apply to positioned element
@@ -3032,7 +3035,7 @@ pub trait FragmentBorderBoxIterator {
 
 /// The coordinate system used in `stacking_relative_border_box()`. See the documentation of that
 /// method for details.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CoordinateSystem {
     /// The border box returned is relative to the fragment's parent stacking context.
     Parent,
@@ -3077,7 +3080,7 @@ impl<'a> InlineStyleIterator<'a> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WhitespaceStrippingResult {
     RetainFragment,
     FragmentContainedOnlyBidiControlCharacters,
@@ -3099,7 +3102,7 @@ impl WhitespaceStrippingResult {
 
 /// The overflow area. We need two different notions of overflow: paint overflow and scrollable
 /// overflow.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Overflow {
     pub scroll: Rect<Au>,
     pub paint: Rect<Au>,
@@ -3146,7 +3149,7 @@ bitflags! {
 /// Specified distances from the margin edge of a block to its content in the inline direction.
 /// These are returned by `guess_inline_content_edge_offsets()` and are used in the float placement
 /// speculation logic.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SpeculatedInlineContentEdgeOffsets {
     pub start: Au,
     pub end: Au,

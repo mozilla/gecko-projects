@@ -28,7 +28,7 @@ use values::generics::transform::{StepPosition, TimingFunction as GenericTimingF
 ///
 /// If the iteration count is infinite, there's no other state, otherwise we
 /// have to keep track the current iteration and the max iteration count.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum KeyframesIterationState {
     /// Infinite iterations, so no need to track a state.
     Infinite,
@@ -39,7 +39,7 @@ pub enum KeyframesIterationState {
 /// This structure represents wether an animation is actually running.
 ///
 /// An animation can be running, or paused at a given time.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum KeyframesRunningState {
     /// This animation is paused. The inner field is the percentage of progress
     /// when it was paused, from 0 to 1.
@@ -52,7 +52,7 @@ pub enum KeyframesRunningState {
 /// duration, the current and maximum iteration count, and the state (either
 /// playing or paused).
 // TODO: unify the use of f32/f64 in this file.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct KeyframesAnimationState {
     /// The time this animation started at.
     pub started_at: f64,
@@ -244,7 +244,7 @@ impl Animation {
 
 
 /// A single animation frame of a single property.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct AnimationFrame {
     /// A description of the property animation that is occurring.
     pub property_animation: PropertyAnimation,
@@ -254,7 +254,7 @@ pub struct AnimationFrame {
 }
 
 /// Represents an animation for a given property.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct PropertyAnimation {
     property: AnimatedProperty,
     timing_function: TimingFunction,
@@ -437,20 +437,22 @@ pub fn start_transitions_if_applicable(new_animations_sender: &Sender<Animation>
                                                                      old_style,
                                                                      Arc::make_mut(new_style));
         for property_animation in property_animations {
-            // Per [1], don't trigger a new transition if the end state for that transition is
-            // the same as that of a transition that's already running on the same node.
-            //
-            // [1]: https://drafts.csswg.org/css-transitions/#starting
-            if possibly_expired_animations.iter().any(|animation| {
-                    animation.has_the_same_end_value_as(&property_animation)
-                }) {
-                continue
-            }
-
             // Set the property to the initial value.
+            //
             // NB: get_mut is guaranteed to succeed since we called make_mut()
             // above.
             property_animation.update(Arc::get_mut(new_style).unwrap(), 0.0);
+
+            // Per [1], don't trigger a new transition if the end state for that
+            // transition is the same as that of a transition that's already
+            // running on the same node.
+            //
+            // [1]: https://drafts.csswg.org/css-transitions/#starting
+            if possibly_expired_animations.iter().any(|animation| {
+                animation.has_the_same_end_value_as(&property_animation)
+            }) {
+                continue
+            }
 
             // Kick off the animation.
             let box_style = new_style.get_box();
@@ -504,7 +506,7 @@ fn compute_style_for_animation_step(context: &SharedStyleContext,
                                                /* visited_style = */ None,
                                                font_metrics_provider,
                                                CascadeFlags::empty(),
-                                               context.quirks_mode);
+                                               context.quirks_mode());
             computed
         }
     }

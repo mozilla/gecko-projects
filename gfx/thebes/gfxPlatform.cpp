@@ -598,6 +598,27 @@ void RecordingPrefChanged(const char *aPrefName, void *aClosure)
   }
 }
 
+#define WR_DEBUG_PREF "gfx.webrender.debug"
+
+void
+WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
+{
+  int32_t flags = 0;
+  // TODO: It would be nice to get the bit patterns directly from the rust code.
+  if (Preferences::GetBool(WR_DEBUG_PREF".profiler", false)) {
+    flags |= (1 << 0);
+  }
+  if (Preferences::GetBool(WR_DEBUG_PREF".texture-cache", false)) {
+    flags |= (1 << 1);
+  }
+  if (Preferences::GetBool(WR_DEBUG_PREF".render-targets", false)) {
+    flags |= (1 << 2);
+  }
+
+  gfx::gfxVars::SetWebRenderDebugFlags(flags);
+}
+
+
 #if defined(USE_SKIA)
 static uint32_t GetSkiaGlyphCacheSize()
 {
@@ -733,6 +754,14 @@ gfxPlatform::Init()
       gpu->LaunchGPUProcess();
     }
 
+    if (XRE_IsParentProcess()) {
+      if (gfxPlatform::ForceSoftwareVsync()) {
+        gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
+      } else {
+        gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
+      }
+    }
+
 #ifdef USE_SKIA
     SkGraphics::Init();
 #  ifdef MOZ_ENABLE_FREETYPE
@@ -767,7 +796,12 @@ gfxPlatform::Init()
                                                     SurfaceFormat::B8G8R8A8);
     if (!gPlatform->mScreenReferenceDrawTarget ||
         !gPlatform->mScreenReferenceDrawTarget->IsValid()) {
-      MOZ_CRASH("Could not initialize mScreenReferenceDrawTarget");
+      // If TDR is detected, create a draw target with software backend
+      // and it should be replaced later when the process gets the device
+      // reset notification.
+      if (!gPlatform->DidRenderingDeviceReset()) {
+        gfxCriticalError() << "Could not initialize mScreenReferenceDrawTarget";
+      }
     }
 
     rv = gfxFontCache::Init();
@@ -812,14 +846,6 @@ gfxPlatform::Init()
 
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
     mlg::InitializeMemoryReporters();
-
-    if (XRE_IsParentProcess()) {
-      if (gfxPlatform::ForceSoftwareVsync()) {
-        gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
-      } else {
-        gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
-      }
-    }
 
 #ifdef USE_SKIA
     uint32_t skiaCacheSize = GetSkiaGlyphCacheSize();
@@ -1039,6 +1065,8 @@ gfxPlatform::ShutdownLayersIPC()
         layers::CompositorThreadHolder::Shutdown();
         if (gfxVars::UseWebRender()) {
           wr::RenderThread::ShutDown();
+
+          Preferences::UnregisterCallback(WebRenderDebugPrefChangeCallback, WR_DEBUG_PREF);
         }
 
     } else {
@@ -1129,8 +1157,8 @@ gfxPlatform::ClearSourceSurfaceForSurface(gfxASurface *aSurface)
 }
 
 /* static */ already_AddRefed<SourceSurface>
-gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget,
-                                        gfxASurface *aSurface,
+gfxPlatform::GetSourceSurfaceForSurface(RefPtr<DrawTarget> aTarget,
+                                        gfxASurface* aSurface,
                                         bool aIsPlugin)
 {
   if (!aSurface->CairoSurface() || aSurface->CairoStatus()) {
@@ -1512,10 +1540,13 @@ gfxPlatform::CreateOffscreenCanvasDrawTarget(const IntSize& aSize, SurfaceFormat
 }
 
 already_AddRefed<DrawTarget>
-gfxPlatform::CreateOffscreenContentDrawTarget(const IntSize& aSize, SurfaceFormat aFormat)
+gfxPlatform::CreateOffscreenContentDrawTarget(const IntSize& aSize,
+                                              SurfaceFormat aFormat,
+                                              bool aFallback)
 {
-  NS_ASSERTION(mContentBackend != BackendType::NONE, "No backend.");
-  return CreateDrawTargetForBackend(mContentBackend, aSize, aFormat);
+  BackendType backend = (aFallback) ? mSoftwareBackend : mContentBackend;
+  NS_ASSERTION(backend != BackendType::NONE, "No backend.");
+  return CreateDrawTargetForBackend(backend, aSize, aFormat);
 }
 
 already_AddRefed<DrawTarget>
@@ -2193,6 +2224,15 @@ gfxPlatform::GetLog(eGfxLog aWhichLog)
     return nullptr;
 }
 
+RefPtr<mozilla::gfx::DrawTarget>
+gfxPlatform::ScreenReferenceDrawTarget()
+{
+  return (mScreenReferenceDrawTarget)
+           ? mScreenReferenceDrawTarget
+           : gPlatform->CreateOffscreenContentDrawTarget(
+               IntSize(1, 1), SurfaceFormat::B8G8R8A8, true);
+}
+
 mozilla::gfx::SurfaceFormat
 gfxPlatform::Optimal2DFormatForContent(gfxContentType aContent)
 {
@@ -2496,6 +2536,11 @@ gfxPlatform::InitWebRenderConfig()
   if (gfxConfig::IsEnabled(Feature::WEBRENDER)) {
     gfxVars::SetUseWebRender(true);
     reporter.SetSuccessful();
+
+    if (XRE_IsParentProcess()) {
+      Preferences::RegisterPrefixCallbackAndCall(WebRenderDebugPrefChangeCallback,
+                                                 WR_DEBUG_PREF);
+    }
   }
 }
 

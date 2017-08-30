@@ -240,6 +240,13 @@ nsReflowStatus::UpdateTruncated(const ReflowInput& aReflowInput,
   }
 }
 
+void
+nsIFrame::DestroyAnonymousContent(already_AddRefed<nsIContent> aContent)
+{
+  PresContext()->PresShell()->FrameConstructor()
+               ->DestroyAnonymousContent(mozilla::Move(aContent));
+}
+
 // Formerly the nsIFrameDebug interface
 
 #ifdef DEBUG
@@ -509,11 +516,10 @@ nsFrame::nsFrame(nsStyleContext* aContext, ClassID aID)
   MOZ_COUNT_CTOR(nsFrame);
 
   mStyleContext = aContext;
-  mWritingMode = WritingMode(mStyleContext);
-  mStyleContext->AddRef();
 #ifdef DEBUG
   mStyleContext->FrameAddRef();
 #endif
+  mWritingMode = WritingMode(mStyleContext);
 }
 
 nsFrame::~nsFrame()
@@ -523,11 +529,9 @@ nsFrame::~nsFrame()
   MOZ_ASSERT(GetVisibility() != Visibility::APPROXIMATELY_VISIBLE,
              "Visible nsFrame is being destroyed");
 
-  NS_IF_RELEASE(mContent);
 #ifdef DEBUG
   mStyleContext->FrameRelease();
 #endif
-  mStyleContext->Release();
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFrame)
@@ -630,10 +634,6 @@ nsFrame::Init(nsIContent*       aContent,
 
   mContent = aContent;
   mParent = aParent;
-
-  if (aContent) {
-    NS_ADDREF(aContent);
-  }
 
   if (aPrevInFlow) {
     mWritingMode = aPrevInFlow->GetWritingMode();
@@ -3497,7 +3497,7 @@ nsFrame::GetContentForEvent(WidgetEvent* aEvent,
 void
 nsFrame::FireDOMEvent(const nsAString& aDOMEventName, nsIContent *aContent)
 {
-  nsIContent* target = aContent ? aContent : mContent;
+  nsIContent* target = aContent ? aContent : GetContent();
 
   if (target) {
     RefPtr<AsyncEventDispatcher> asyncDispatcher =
@@ -6576,12 +6576,12 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                 0.0f);
 }
 
-static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = true)
+static void InvalidateRenderingObservers(nsIFrame* aDisplayRoot, nsIFrame* aFrame, bool aFrameChanged = true)
 {
+  MOZ_ASSERT(aDisplayRoot == nsLayoutUtils::GetDisplayRootFrame(aFrame));
   nsSVGEffects::InvalidateDirectRenderingObservers(aFrame);
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
   nsIFrame* parent = aFrame;
-  while (parent != displayRoot &&
+  while (parent != aDisplayRoot &&
          (parent = nsLayoutUtils::GetCrossDocParentFrame(parent)) &&
          !parent->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
     nsSVGEffects::InvalidateDirectRenderingObservers(parent);
@@ -6595,10 +6595,11 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
 }
 
 void
-SchedulePaintInternal(nsIFrame* aFrame, nsIFrame::PaintType aType = nsIFrame::PAINT_DEFAULT)
+SchedulePaintInternal(nsIFrame* aDisplayRoot, nsIFrame* aFrame,
+                      nsIFrame::PaintType aType = nsIFrame::PAINT_DEFAULT)
 {
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-  nsPresContext* pres = displayRoot->PresContext()->GetRootPresContext();
+  MOZ_ASSERT(aDisplayRoot == nsLayoutUtils::GetDisplayRootFrame(aFrame));
+  nsPresContext* pres = aDisplayRoot->PresContext()->GetRootPresContext();
 
   // No need to schedule a paint for an external document since they aren't
   // painted directly.
@@ -6619,7 +6620,7 @@ SchedulePaintInternal(nsIFrame* aFrame, nsIFrame::PaintType aType = nsIFrame::PA
   }
 
   if (aType == nsIFrame::PAINT_DEFAULT) {
-    displayRoot->AddStateBits(NS_FRAME_UPDATE_LAYER_TREE);
+    aDisplayRoot->AddStateBits(NS_FRAME_UPDATE_LAYER_TREE);
   }
 }
 
@@ -6660,7 +6661,8 @@ static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = tru
     return;
   }
   if (needsSchedulePaint) {
-    SchedulePaintInternal(aFrame);
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+    SchedulePaintInternal(displayRoot, aFrame);
   }
   if (aFrame->HasAnyStateBits(NS_FRAME_HAS_INVALID_RECT)) {
     aFrame->DeleteProperty(nsIFrame::InvalidationRect());
@@ -6860,8 +6862,9 @@ nsIFrame::IsInvalid(nsRect& aRect)
 void
 nsIFrame::SchedulePaint(PaintType aType, bool aFrameChanged)
 {
-  InvalidateRenderingObservers(this, aFrameChanged);
-  SchedulePaintInternal(this, aType);
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
+  InvalidateRenderingObservers(displayRoot, this, aFrameChanged);
+  SchedulePaintInternal(displayRoot, this, aType);
 }
 
 Layer*
@@ -6874,7 +6877,8 @@ nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
 
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(this, aDisplayItemKey);
 
-  InvalidateRenderingObservers(this);
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
+  InvalidateRenderingObservers(displayRoot, this);
 
   // If the layer is being updated asynchronously, and it's being forwarded
   // to a compositor, then we don't need to invalidate.
@@ -6920,7 +6924,7 @@ nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
     layer->SetInvalidRectToVisibleRegion();
   }
 
-  SchedulePaintInternal(this, PAINT_COMPOSITE_ONLY);
+  SchedulePaintInternal(displayRoot, this, PAINT_COMPOSITE_ONLY);
   return layer;
 }
 
@@ -9239,6 +9243,20 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
 
   ComputeAndIncludeOutlineArea(this, aOverflowAreas, aNewSize);
 
+  nsSize oldSize = mRect.Size();
+  bool sizeChanged = ((aOldSize ? *aOldSize : oldSize) != aNewSize);
+
+  // Our frame size may not have been computed and set yet, but code under
+  // functions such as ComputeEffectsRect (which we're about to call) use the
+  // values that are stored in our frame rect to compute their results.  We
+  // need the results from those functions to be based on the frame size that
+  // we *will* have, so we temporarily set our frame size here before calling
+  // those functions.
+  //
+  // XXX Someone should document here why we revert the frame size before we
+  // return rather than just leaving it set.
+  SetSize(aNewSize);
+
   // Nothing in here should affect scrollable overflow.
   aOverflowAreas.VisualOverflow() =
     ComputeEffectsRect(this, aOverflowAreas.VisualOverflow(), aNewSize);
@@ -9255,15 +9273,6 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
   }
 
   /* If we're transformed, transform the overflow rect by the current transformation. */
-  nsSize oldSize = mRect.Size();
-  bool sizeChanged = ((aOldSize ? *aOldSize : oldSize) != aNewSize);
-
-  /* Since our size might not actually have been computed yet, we need to make sure that we use the
-   * correct dimensions by overriding the stored bounding rectangle with the value the caller has
-   * ensured us we'll use.
-   */
-  SetSize(aNewSize);
-
   if (ChildrenHavePerspective(disp) && sizeChanged) {
     nsRect newBounds(nsPoint(0, 0), aNewSize);
     RecomputePerspectiveChildrenOverflow(this, effectSet);
@@ -10912,22 +10921,29 @@ nsFrame::HasCSSTransitions()
   return collection && collection->mAnimations.Length() > 0;
 }
 
-size_t
-nsIFrame::SizeOfFramePropertiesForTree(MallocSizeOf aMallocSizeOf) const
+void
+nsIFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aSizes) const
 {
-  size_t result = 0;
+  aSizes.mLayoutFramePropertiesSize +=
+    mProperties.SizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
 
-  result += mProperties.SizeOfExcludingThis(aMallocSizeOf);
+  // We don't do this for Gecko because this stuff is stored in the nsPresArena
+  // and so measured elsewhere.
+  if (mStyleContext->IsServo()) {
+    ServoStyleContext* sc = mStyleContext->AsServo();
+    if (!aSizes.mState.HaveSeenPtr(sc)) {
+      sc->AddSizeOfIncludingThis(aSizes,
+                                 &aSizes.mLayoutComputedValuesNonDom);
+    }
+  }
 
   FrameChildListIterator iter(this);
   while (!iter.IsDone()) {
     for (const nsIFrame* f : iter.CurrentList()) {
-      result += f->SizeOfFramePropertiesForTree(aMallocSizeOf);
+      f->AddSizeOfExcludingThisForTree(aSizes);
     }
     iter.Next();
   }
-
-  return result;
 }
 
 // Box layout debugging

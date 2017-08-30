@@ -18,8 +18,11 @@
  * so don't add significant include dependencies to this file.
  */
 
+class nsWindowSizes;
 struct ServoNodeData;
 namespace mozilla {
+
+class SizeOfState;
 
 /*
  * Replaced types. These get mapped to associated Servo types in bindgen.
@@ -67,9 +70,11 @@ enum class ServoTraversalFlags : uint32_t {
   // Actively seeks out and clears change hints that may have been posted into
   // the tree. Nonsensical without also passing Forgetful.
   AggressivelyForgetful = 1 << 4,
-  // Clears the dirty descendants bit in the subtree.
-  ClearDirtyDescendants = 1 << 5,
-  // Clears the animation-only dirty descendants bit in the subtree.
+  // Clears all the dirty bits (dirty descendants, animation-only dirty-descendants,
+  // needs frame, descendants need frames) on the elements traversed.
+  // in the subtree.
+  ClearDirtyBits = 1 << 5,
+  // Clears only the animation-only dirty descendants bit in the subtree.
   ClearAnimationOnlyDirtyDescendants = 1 << 6,
   // Allows the traversal to run in parallel if there are sufficient cores on
   // the machine.
@@ -229,6 +234,8 @@ public:
 #undef STYLE_STRUCT
 #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
   const nsStyleVariables* GetStyleVariables() const;
+
+  void AddSizeOfExcludingThis(nsWindowSizes& aSizes) const;
 
 private:
   mozilla::ServoCustomPropertiesMap custom_properties;

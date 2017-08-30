@@ -27,9 +27,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillHandler",
                                   "resource://formautofill/FormAutofillHandler.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormLikeFactory",
                                   "resource://gre/modules/FormLikeFactory.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "InsecurePasswordUtils",
+                                  "resource://gre/modules/InsecurePasswordUtils.jsm");
 
 const formFillController = Cc["@mozilla.org/satchel/form-fill-controller;1"]
                              .getService(Ci.nsIFormFillController);
+const {ADDRESSES_COLLECTION_NAME, CREDITCARDS_COLLECTION_NAME} = FormAutofillUtils;
 
 // Register/unregister a constructor as a factory.
 function AutocompleteFactory() {}
@@ -100,13 +103,17 @@ AutofillProfileAutoCompleteSearch.prototype = {
     let isAddressField = FormAutofillUtils.isAddressField(info.fieldName);
     let handler = FormAutofillContent.getFormHandler(focusedInput);
     let allFieldNames = handler.allFieldNames;
-    let filledRecordGUID = isAddressField ? handler.address.filledRecordGUID : handler.creditCards.filledRecordGUID;
+    let filledRecordGUID = isAddressField ? handler.address.filledRecordGUID : handler.creditCard.filledRecordGUID;
+    let searchPermitted = isAddressField ?
+                          FormAutofillUtils.isAutofillAddressesEnabled :
+                          FormAutofillUtils.isAutofillCreditCardsEnabled;
 
     // Fallback to form-history if ...
+    //   - specified autofill feature is pref off.
     //   - no profile can fill the currently-focused input.
     //   - the current form has already been populated.
     //   - (address only) less than 3 inputs are covered by all saved fields in the storage.
-    if (!savedFieldNames.has(info.fieldName) || filledRecordGUID || (isAddressField &&
+    if (!searchPermitted || !savedFieldNames.has(info.fieldName) || filledRecordGUID || (isAddressField &&
         allFieldNames.filter(field => savedFieldNames.has(field)).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD)) {
       let formHistory = Cc["@mozilla.org/autocomplete/search;1?name=form-history"]
                           .createInstance(Ci.nsIAutoCompleteSearch);
@@ -119,7 +126,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
       return;
     }
 
-    let collectionName = isAddressField ? "addresses" : "creditCards";
+    let collectionName = isAddressField ? ADDRESSES_COLLECTION_NAME : CREDITCARDS_COLLECTION_NAME;
 
     this._getRecords({collectionName, info, searchString}).then((records) => {
       if (this.forceStop) {
@@ -137,11 +144,13 @@ AutofillProfileAutoCompleteSearch.prototype = {
                                    adaptedRecords,
                                    {});
       } else {
+        let isSecure = InsecurePasswordUtils.isFormSecure(handler.form);
+
         result = new CreditCardResult(searchString,
                                       info.fieldName,
                                       allFieldNames,
                                       adaptedRecords,
-                                      {});
+                                      {isSecure});
       }
       listener.onSearchResult(this, result);
       ProfileAutocomplete.setProfileAutoCompleteResult(result);
@@ -290,7 +299,7 @@ let ProfileAutocomplete = {
 
     let formHandler = FormAutofillContent.getFormHandler(focusedInput);
 
-    formHandler.clearPreviewedFormFields();
+    formHandler.clearPreviewedFormFields(focusedInput);
   },
 
   _previewSelectedProfile(selectedIndex) {
@@ -308,7 +317,7 @@ let ProfileAutocomplete = {
     let profile = JSON.parse(this._lastAutoCompleteResult.getCommentAt(selectedIndex));
     let formHandler = FormAutofillContent.getFormHandler(focusedInput);
 
-    formHandler.previewFormFields(profile);
+    formHandler.previewFormFields(profile, focusedInput);
   },
 };
 
@@ -337,12 +346,13 @@ var FormAutofillContent = {
     Services.obs.addObserver(this, "earlyformsubmit");
 
     let autofillEnabled = Services.cpmm.initialProcessData.autofillEnabled;
-    if (autofillEnabled ||
-        // If storage hasn't be initialized yet autofillEnabled is undefined but we need to ensure
-        // autocomplete is registered before the focusin so register it in this case as long as the
-        // pref is true.
-        (autofillEnabled === undefined &&
-         Services.prefs.getBoolPref("extensions.formautofill.addresses.enabled"))) {
+    // If storage hasn't be initialized yet autofillEnabled is undefined but we need to ensure
+    // autocomplete is registered before the focusin so register it in this case as long as the
+    // pref is true.
+    let shouldEnableAutofill = autofillEnabled === undefined &&
+                               (FormAutofillUtils.isAutofillAddressesEnabled ||
+                               FormAutofillUtils.isAutofillCreditCardsEnabled);
+    if (autofillEnabled || shouldEnableAutofill) {
       ProfileAutocomplete.ensureRegistered();
     }
 
@@ -470,11 +480,6 @@ var FormAutofillContent = {
       Services.cpmm.sendAsyncMessage("FormAutofill:InitStorage");
     }
 
-    if (!FormAutofillUtils.isFieldEligibleForAutofill(element)) {
-      this.log.debug("Not an eligible field.");
-      return;
-    }
-
     let formHandler = this.getFormHandler(element);
     if (!formHandler) {
       let formLike = FormLikeFactory.createFromField(element);
@@ -494,17 +499,7 @@ var FormAutofillContent = {
     );
   },
 
-  _markAsAutofillField(field) {
-    // Since Form Autofill popup is only for input element, any non-Input
-    // element should be excluded here.
-    if (!field || !(field instanceof Ci.nsIDOMHTMLInputElement)) {
-      return;
-    }
-
-    formFillController.markAsAutofillField(field);
-  },
-
-  _previewProfile(doc) {
+  previewProfile(doc) {
     let docWin = doc.ownerGlobal;
     let selectedIndex = ProfileAutocomplete._getSelectedIndex(docWin);
     let lastAutoCompleteResult = ProfileAutocomplete.getProfileAutoCompleteResult();
@@ -533,6 +528,16 @@ var FormAutofillContent = {
 
       ProfileAutocomplete._previewSelectedProfile(selectedIndex);
     }
+  },
+
+  _markAsAutofillField(field) {
+    // Since Form Autofill popup is only for input element, any non-Input
+    // element should be excluded here.
+    if (!field || !(field instanceof Ci.nsIDOMHTMLInputElement)) {
+      return;
+    }
+
+    formFillController.markAsAutofillField(field);
   },
 
   _messageManagerFromWindow(win) {

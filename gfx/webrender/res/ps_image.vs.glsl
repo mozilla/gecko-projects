@@ -1,4 +1,3 @@
-#line 1
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -50,6 +49,7 @@ void main(void) {
     vec2 st0 = uv0 / texture_size_normalization_factor;
     vec2 st1 = uv1 / texture_size_normalization_factor;
 
+    vLayer = res.layer;
     vTextureSize = st1 - st0;
     vTextureOffset = st0;
     vTileSpacing = image.stretch_size_and_tile_spacing.zw;

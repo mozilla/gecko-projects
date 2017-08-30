@@ -36,66 +36,128 @@ public:
   size_t mOther;
 };
 
+#define ZERO_SIZE(kind, mSize)         mSize(0),
+#define ADD_TO_TAB_SIZES(kind, mSize)  aSizes->add(nsTabSizes::kind, mSize);
+#define ADD_TO_TOTAL_SIZE(kind, mSize) total += mSize;
+#define DECL_SIZE(kind, mSize)         size_t mSize;
+
+#define NS_STYLE_SIZES_FIELD(name_) mStyle##name_
+
+struct nsStyleSizes
+{
+  nsStyleSizes()
+    :
+      #define STYLE_STRUCT(name_, cb_) \
+        NS_STYLE_SIZES_FIELD(name_)(0),
+      #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
+      #include "nsStyleStructList.h"
+      #undef STYLE_STRUCT
+      #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+
+      dummy()
+  {}
+
+  void addToTabSizes(nsTabSizes* aSizes) const
+  {
+    #define STYLE_STRUCT(name_, cb_) \
+      aSizes->add(nsTabSizes::Style, NS_STYLE_SIZES_FIELD(name_));
+    #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
+    #include "nsStyleStructList.h"
+    #undef STYLE_STRUCT
+    #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+  }
+
+  size_t getTotalSize() const
+  {
+    size_t total = 0;
+
+    #define STYLE_STRUCT(name_, cb_) \
+      total += NS_STYLE_SIZES_FIELD(name_);
+    #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
+    #include "nsStyleStructList.h"
+    #undef STYLE_STRUCT
+    #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+
+    return total;
+  }
+
+  #define STYLE_STRUCT(name_, cb_) \
+    size_t NS_STYLE_SIZES_FIELD(name_);
+  #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
+  #include "nsStyleStructList.h"
+  #undef STYLE_STRUCT
+  #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+
+  // Present just to absorb the trailing comma in the constructor.
+  int dummy;
+};
+
 #define NS_ARENA_SIZES_FIELD(classname) mArena##classname
 
 struct nsArenaSizes {
 #define FOR_EACH_SIZE(macro) \
   macro(Other, mLineBoxes) \
   macro(Style, mRuleNodes) \
-  macro(Style, mStyleContexts) \
-  macro(Style, mStyleStructs)
+  macro(Style, mStyleContexts)
 
   nsArenaSizes()
     :
-      #define ZERO_SIZE(kind, mSize) mSize(0),
       FOR_EACH_SIZE(ZERO_SIZE)
-      #undef ZERO_SIZE
-      #define FRAME_ID(classname, ...) NS_ARENA_SIZES_FIELD(classname)(),
+
+      #define FRAME_ID(classname, ...) \
+        NS_ARENA_SIZES_FIELD(classname)(0),
       #define ABSTRACT_FRAME_ID(...)
       #include "nsFrameIdList.h"
       #undef FRAME_ID
       #undef ABSTRACT_FRAME_ID
-      dummy()
+
+      mGeckoStyleSizes()
   {}
 
-  void addToTabSizes(nsTabSizes *sizes) const
+  void addToTabSizes(nsTabSizes* aSizes) const
   {
-    #define ADD_TO_TAB_SIZES(kind, mSize) sizes->add(nsTabSizes::kind, mSize);
     FOR_EACH_SIZE(ADD_TO_TAB_SIZES)
-    #undef ADD_TO_TAB_SIZES
+
     #define FRAME_ID(classname, ...) \
-      sizes->add(nsTabSizes::Other, NS_ARENA_SIZES_FIELD(classname));
+      aSizes->add(nsTabSizes::Other, NS_ARENA_SIZES_FIELD(classname));
     #define ABSTRACT_FRAME_ID(...)
     #include "nsFrameIdList.h"
     #undef FRAME_ID
     #undef ABSTRACT_FRAME_ID
+
+    mGeckoStyleSizes.addToTabSizes(aSizes);
   }
 
   size_t getTotalSize() const
   {
     size_t total = 0;
-    #define ADD_TO_TOTAL_SIZE(kind, mSize) total += mSize;
+
     FOR_EACH_SIZE(ADD_TO_TOTAL_SIZE)
-    #undef ADD_TO_TOTAL_SIZE
+
     #define FRAME_ID(classname, ...) \
       total += NS_ARENA_SIZES_FIELD(classname);
     #define ABSTRACT_FRAME_ID(...)
     #include "nsFrameIdList.h"
     #undef FRAME_ID
     #undef ABSTRACT_FRAME_ID
+
+    total += mGeckoStyleSizes.getTotalSize();
+
     return total;
   }
 
-  #define DECL_SIZE(kind, mSize) size_t mSize;
   FOR_EACH_SIZE(DECL_SIZE)
-  #undef DECL_SIZE
-  #define FRAME_ID(classname, ...) size_t NS_ARENA_SIZES_FIELD(classname);
+
+  #define FRAME_ID(classname, ...) \
+    size_t NS_ARENA_SIZES_FIELD(classname);
   #define ABSTRACT_FRAME_ID(...)
   #include "nsFrameIdList.h"
   #undef FRAME_ID
   #undef ABSTRACT_FRAME_ID
-  int dummy;  // present just to absorb the trailing comma from FRAME_ID in the
-              // constructor
+
+  // This is Gecko-only because in Stylo these style structs are stored outside
+  // the nsPresArena, and so measured elsewhere.
+  nsStyleSizes mGeckoStyleSizes;
 
 #undef FOR_EACH_SIZE
 };
@@ -117,48 +179,58 @@ class nsWindowSizes
   macro(Other, mLayoutTextRunsSize) \
   macro(Other, mLayoutPresContextSize) \
   macro(Other, mLayoutFramePropertiesSize) \
+  macro(Style, mLayoutComputedValuesDom) \
+  macro(Style, mLayoutComputedValuesNonDom) \
+  macro(Style, mLayoutComputedValuesVisited) \
   macro(Other, mPropertyTablesSize) \
 
 public:
   explicit nsWindowSizes(mozilla::SizeOfState& aState)
     :
-      #define ZERO_SIZE(kind, mSize)  mSize(0),
       FOR_EACH_SIZE(ZERO_SIZE)
-      #undef ZERO_SIZE
       mDOMEventTargetsCount(0),
       mDOMEventListenersCount(0),
       mArenaSizes(),
+      mServoStyleSizes(),
       mState(aState)
   {}
 
-  void addToTabSizes(nsTabSizes *sizes) const {
-    #define ADD_TO_TAB_SIZES(kind, mSize) sizes->add(nsTabSizes::kind, mSize);
+  void addToTabSizes(nsTabSizes* aSizes) const {
     FOR_EACH_SIZE(ADD_TO_TAB_SIZES)
-    #undef ADD_TO_TAB_SIZES
-    mArenaSizes.addToTabSizes(sizes);
+    mArenaSizes.addToTabSizes(aSizes);
+    mServoStyleSizes.addToTabSizes(aSizes);
   }
 
   size_t getTotalSize() const
   {
     size_t total = 0;
-    #define ADD_TO_TOTAL_SIZE(kind, mSize) total += mSize;
+
     FOR_EACH_SIZE(ADD_TO_TOTAL_SIZE)
-    #undef ADD_TO_TOTAL_SIZE
     total += mArenaSizes.getTotalSize();
+    total += mServoStyleSizes.getTotalSize();
+
     return total;
   }
 
-  #define DECL_SIZE(kind, mSize) size_t mSize;
   FOR_EACH_SIZE(DECL_SIZE);
-  #undef DECL_SIZE
 
   uint32_t mDOMEventTargetsCount;
   uint32_t mDOMEventListenersCount;
 
   nsArenaSizes mArenaSizes;
+
+  // This is Stylo-only because in Gecko these style structs are stored in the
+  // nsPresArena, and so are measured as part of that.
+  nsStyleSizes mServoStyleSizes;
+
   mozilla::SizeOfState& mState;
 
 #undef FOR_EACH_SIZE
 };
+
+#undef ZERO_SIZE
+#undef ADD_TO_TAB_SIZES
+#undef ADD_TO_TOTAL_SIZE
+#undef DECL_SIZE
 
 #endif // nsWindowSizes_h

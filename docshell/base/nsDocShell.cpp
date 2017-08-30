@@ -842,6 +842,7 @@ nsDocShell::nsDocShell()
   , mDefaultLoadFlags(nsIRequest::LOAD_NORMAL)
   , mFrameType(FRAME_TYPE_REGULAR)
   , mPrivateBrowsingId(0)
+  , mDisplayMode(nsIDocShell::DISPLAY_MODE_BROWSER)
   , mForcedCharset(nullptr)
   , mParentCharset(nullptr)
   , mParentCharsetSource(0)
@@ -1834,6 +1835,12 @@ nsDocShell::MaybeResetInitTiming(bool aReset)
   if (aReset) {
     mTiming = nullptr;
   }
+}
+
+nsDOMNavigationTiming*
+nsDocShell::GetNavigationTiming() const
+{
+  return mTiming;
 }
 
 //
@@ -9710,6 +9717,8 @@ public:
     // Make sure to keep null things null as needed
     if (aTypeHint) {
       mTypeHint = aTypeHint;
+    } else {
+      mTypeHint.SetIsVoid(true);
     }
   }
 
@@ -9721,7 +9730,9 @@ public:
                                    mReferrer,
                                    mReferrerPolicy,
                                    mTriggeringPrincipal, mPrincipalToInherit,
-                                   mFlags, EmptyString(), mTypeHint.get(),
+                                   mFlags, EmptyString(),
+                                   mTypeHint.IsVoid() ? nullptr
+                                                      : mTypeHint.get(),
                                    NullString(), mPostData, mHeadersData,
                                    mLoadType, mSHEntry, mFirstParty,
                                    mSrcdoc, mSourceDocShell, mBaseURI,
@@ -9729,9 +9740,7 @@ public:
   }
 
 private:
-  // Use IDL strings so .get() returns null by default
-  nsXPIDLString mWindowTarget;
-  nsXPIDLCString mTypeHint;
+  nsCString mTypeHint;
   nsString mSrcdoc;
 
   RefPtr<nsDocShell> mDocShell;
@@ -9919,8 +9928,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     isTargetTopLevelDocShell = true;
   }
 
-  // If there's no targetDocShell, that means we are about to create a new window,
-  // perform a content policy check before creating the window.
+  // If there's no targetDocShell, that means we are about to create a new
+  // window (or aWindowTarget is empty). Perform a content policy check before
+  // creating the window.
   if (!targetDocShell) {
     nsCOMPtr<Element> requestingElement;
     nsISupports* requestingContext = nullptr;
@@ -10732,16 +10742,17 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   // mLSHE for the real page.
   if (mLoadType != LOAD_ERROR_PAGE) {
     SetHistoryEntry(&mLSHE, aSHEntry);
+    if (aSHEntry) {
+      // We're making history navigation or a reload. Make sure our history ID
+      // points to the same ID as SHEntry's docshell ID.
+      mHistoryID = aSHEntry->DocshellID();
+    }
   }
 
   mSavingOldViewer = savePresentation;
 
   // If we have a saved content viewer in history, restore and show it now.
   if (aSHEntry && (mLoadType & LOAD_CMD_HISTORY)) {
-    // Make sure our history ID points to the same ID as
-    // SHEntry's docshell ID.
-    mHistoryID = aSHEntry->DocshellID();
-
     // It's possible that the previous viewer of mContentViewer is the
     // viewer that will end up in aSHEntry when it gets closed.  If that's
     // the case, we need to go ahead and force it into its shentry so we
@@ -10878,6 +10889,62 @@ nsDocShell::GetInheritedPrincipal(bool aConsiderCurrentDocument)
   }
 
   return nullptr;
+}
+
+// CSPs upgrade-insecure-requests directive applies to same origin top level
+// navigations. Using the SOP would return false for the case when an https
+// page triggers and http page to load, even though that http page would be
+// upgraded to https later. Hence we have to use that custom function instead
+// of simply calling aTriggeringPrincipal->Equals(aResultPrincipal).
+static bool
+IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
+                             nsIPrincipal* aResultPrincipal)
+{
+  MOZ_ASSERT(aTriggeringPrincipal);
+  MOZ_ASSERT(aResultPrincipal);
+
+  // we only have to make sure that the following truth table holds:
+  // aTriggeringPrincipal         | aResultPrincipal             | Result
+  // ----------------------------------------------------------------
+  // http://example.com/foo.html  | http://example.com/bar.html  | true
+  // https://example.com/foo.html | https://example.com/bar.html | true
+  // https://example.com/foo.html | http://example.com/bar.html  | true
+  if (aTriggeringPrincipal->Equals(aResultPrincipal)) {
+    return true;
+  }
+
+  if (!aResultPrincipal->GetIsCodebasePrincipal()) {
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> resultURI;
+  nsresult rv = aResultPrincipal->GetURI(getter_AddRefs(resultURI));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  nsAutoCString resultScheme;
+  rv = resultURI->GetScheme(resultScheme);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (!resultScheme.EqualsLiteral("http")) {
+    return false;
+  }
+
+  nsAutoCString tmpResultSpec;
+  rv = resultURI->GetSpec(tmpResultSpec);
+  NS_ENSURE_SUCCESS(rv, false);
+  // replace http with https
+  tmpResultSpec.Replace(0, 4, "https");
+
+  nsCOMPtr<nsIURI> tmpResultURI;
+  rv = NS_NewURI(getter_AddRefs(tmpResultURI), tmpResultSpec);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  mozilla::OriginAttributes tmpOA =
+    BasePrincipal::Cast(aResultPrincipal)->OriginAttributesRef();
+
+  nsCOMPtr<nsIPrincipal> tmpResultPrincipal =
+    BasePrincipal::CreateCodebasePrincipal(tmpResultURI, tmpOA);
+
+  return aTriggeringPrincipal->Equals(tmpResultPrincipal);
 }
 
 nsresult
@@ -11174,7 +11241,7 @@ nsDocShell::DoURILoad(nsIURI* aURI,
              GetChannelResultPrincipal(channel,
                                        getter_AddRefs(resultPrincipal));
       NS_ENSURE_SUCCESS(rv, rv);
-      if (resultPrincipal->Equals(aTriggeringPrincipal)) {
+      if (IsConsideredSameOriginForUIR(aTriggeringPrincipal, resultPrincipal)) {
         static_cast<mozilla::LoadInfo*>(loadInfo.get())->SetUpgradeInsecureRequests();
       }
     }
@@ -11655,14 +11722,6 @@ nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
     bool scroll = aLoadType != LOAD_HISTORY &&
                   aLoadType != LOAD_RELOAD_NORMAL;
 
-    char* str = ToNewCString(aNewHash);
-    if (!str) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    // nsUnescape modifies the string that is passed into it.
-    nsUnescape(str);
-
     // We assume that the bytes are in UTF-8, as it says in the
     // spec:
     // http://www.w3.org/TR/html4/appendix/notes.html#h-B.2.1
@@ -11673,12 +11732,11 @@ nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
     // In that case, we should just fall through to using the
     // page's charset.
     nsresult rv = NS_ERROR_FAILURE;
-    NS_ConvertUTF8toUTF16 uStr(str);
+    NS_ConvertUTF8toUTF16 uStr(aNewHash);
     if (!uStr.IsEmpty()) {
-      rv = shell->GoToAnchor(NS_ConvertUTF8toUTF16(str), scroll,
+      rv = shell->GoToAnchor(uStr, scroll,
                              nsIPresShell::SCROLL_SMOOTH_AUTO);
     }
-    free(str);
 
     // Above will fail if the anchor name is not UTF-8.  Need to
     // convert from document charset to unicode.
@@ -11908,12 +11966,16 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
     } else if (mOSHE) {
       mOSHE->SetCacheKey(cacheKey);
     }
+
+    // Since we're force-reloading, clear all the sub frame history.
+    ClearFrameHistory(mLSHE);
+    ClearFrameHistory(mOSHE);
   }
 
-  // Clear subframe history on refresh or reload.
+  // Clear subframe history on refresh.
   // XXX: history.go(0) won't go this path as aLoadType is LOAD_HISTORY in this
   // case. One should re-validate after bug 1331865 fixed.
-  if (aLoadType == LOAD_REFRESH || (aLoadType & LOAD_CMD_RELOAD)) {
+  if (aLoadType == LOAD_REFRESH) {
     ClearFrameHistory(mLSHE);
     ClearFrameHistory(mOSHE);
   }
@@ -12368,7 +12430,7 @@ nsDocShell::SetCurrentScrollRestorationIsManual(bool aIsManual)
 }
 
 bool
-nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI)
+nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel)
 {
   // I believe none of the about: urls should go in the history. But then
   // that could just be me... If the intent is only deny about:blank then we
@@ -12388,8 +12450,18 @@ nsDocShell::ShouldAddToSessionHistory(nsIURI* aURI)
       return false;
     }
 
-    if (buf.EqualsLiteral("blank") || buf.EqualsLiteral("newtab")) {
+    if (buf.EqualsLiteral("blank")) {
       return false;
+    }
+    // We only want to add about:newtab if it's not privileged:
+    if (buf.EqualsLiteral("newtab")) {
+      NS_ENSURE_TRUE(aChannel, false);
+      nsCOMPtr<nsIPrincipal> resultPrincipal;
+      rv = nsContentUtils::GetSecurityManager()->
+             GetChannelResultPrincipal(aChannel,
+                                       getter_AddRefs(resultPrincipal));
+      NS_ENSURE_SUCCESS(rv, false);
+      return !nsContentUtils::IsSystemPrincipal(resultPrincipal);
     }
   }
 
@@ -12423,9 +12495,6 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
 
   nsresult rv = NS_OK;
   nsCOMPtr<nsISHEntry> entry;
-  bool shouldPersist;
-
-  shouldPersist = ShouldAddToSessionHistory(aURI);
 
   // Get a handle to the root docshell
   nsCOMPtr<nsIDocShellTreeItem> root;
@@ -12627,6 +12696,8 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
         do_QueryInterface(mSessionHistory);
       NS_ENSURE_TRUE(shPrivate, NS_ERROR_FAILURE);
       mSessionHistory->GetIndex(&mPreviousTransIndex);
+
+      bool shouldPersist = ShouldAddToSessionHistory(aURI, aChannel);
       rv = shPrivate->AddEntry(entry, shouldPersist);
       mSessionHistory->GetIndex(&mLoadedTransIndex);
 #ifdef DEBUG_PAGE_CACHE
@@ -15087,4 +15158,34 @@ nsIDocShell::SetHTMLEditor(HTMLEditor* aHTMLEditor)
 {
   nsDocShell* docShell = static_cast<nsDocShell*>(this);
   return docShell->SetHTMLEditorInternal(aHTMLEditor);
+}
+
+NS_IMETHODIMP
+nsDocShell::GetDisplayMode(uint32_t* aDisplayMode)
+{
+  NS_ENSURE_ARG_POINTER(aDisplayMode);
+  *aDisplayMode = mDisplayMode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetDisplayMode(uint32_t aDisplayMode)
+{
+  if (!(aDisplayMode == nsIDocShell::DISPLAY_MODE_BROWSER ||
+        aDisplayMode == nsIDocShell::DISPLAY_MODE_STANDALONE ||
+        aDisplayMode == nsIDocShell::DISPLAY_MODE_FULLSCREEN ||
+        aDisplayMode == nsIDocShell::DISPLAY_MODE_MINIMAL_UI)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (aDisplayMode != mDisplayMode) {
+    mDisplayMode = aDisplayMode;
+
+    RefPtr<nsPresContext> presContext;
+    if (NS_SUCCEEDED(GetPresContext(getter_AddRefs(presContext)))) {
+      presContext->MediaFeatureValuesChangedAllDocuments(nsRestyleHint(0));
+    }
+  }
+
+  return NS_OK;
 }

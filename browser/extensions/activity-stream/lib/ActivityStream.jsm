@@ -13,6 +13,7 @@ const {DefaultPrefs} = Cu.import("resource://activity-stream/lib/ActivityStreamP
 const {LocalizationFeed} = Cu.import("resource://activity-stream/lib/LocalizationFeed.jsm", {});
 const {ManualMigration} = Cu.import("resource://activity-stream/lib/ManualMigration.jsm", {});
 const {NewTabInit} = Cu.import("resource://activity-stream/lib/NewTabInit.jsm", {});
+const {SectionsFeed} = Cu.import("resource://activity-stream/lib/SectionsManager.jsm", {});
 const {PlacesFeed} = Cu.import("resource://activity-stream/lib/PlacesFeed.jsm", {});
 const {PrefsFeed} = Cu.import("resource://activity-stream/lib/PrefsFeed.jsm", {});
 const {Store} = Cu.import("resource://activity-stream/lib/Store.jsm", {});
@@ -50,15 +51,15 @@ const PREFS_CONFIG = new Map([
       api_key_pref: "extensions.pocket.oAuthConsumerKey",
       // Use the opposite value as what default value the feed would have used
       hidden: !PREFS_CONFIG.get("feeds.section.topstories").getValue(args),
-      learn_more_endpoint: "https://getpocket.com/firefox_learnmore?src=ff_newtab",
+      learn_more_endpoint: "https://getpocket.cdn.mozilla.net/firefox_learnmore?src=ff_newtab",
       provider_description: "pocket_feedback_body",
       provider_icon: "pocket",
       provider_name: "Pocket",
-      read_more_endpoint: "https://getpocket.com/explore/trending?src=ff_new_tab",
-      stories_endpoint: `https://getpocket.com/v3/firefox/global-recs?consumer_key=$apiKey&locale_lang=${args.locale}`,
+      read_more_endpoint: "https://getpocket.cdn.mozilla.net/explore/trending?src=ff_new_tab",
+      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       stories_referrer: "https://getpocket.com/recommendations",
       survey_link: "https://www.surveymonkey.com/r/newtabffx",
-      topics_endpoint: `https://getpocket.com/v3/firefox/trending-topics?consumer_key=$apiKey&locale_lang=${args.locale}`
+      topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`
     })
   }],
   ["migrationExpired", {
@@ -80,6 +81,18 @@ const PREFS_CONFIG = new Map([
   ["showTopSites", {
     title: "Show the Top Sites section on the New Tab page",
     value: true
+  }],
+  ["impressionStats.clicked", {
+    title: "GUIDs of clicked Top stories items",
+    value: "[]"
+  }],
+  ["impressionStats.blocked", {
+    title: "GUIDs of blocked Top stories items",
+    value: "[]"
+  }],
+  ["impressionStats.pocketed", {
+    title: "GUIDs of pocketed Top stories items",
+    value: "[]"
   }],
   ["telemetry", {
     title: "Enable system error and usage data collection",
@@ -127,6 +140,12 @@ const FEEDS_DATA = [
     name: "prefs",
     factory: () => new PrefsFeed(PREFS_CONFIG),
     title: "Preferences",
+    value: true
+  },
+  {
+    name: "sections",
+    factory: () => new SectionsFeed(),
+    title: "Manages sections",
     value: true
   },
   {

@@ -266,7 +266,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
       continue;
     }
 
-    wr::LayoutSize contentSize { pipeline->mScBounds.width, pipeline->mScBounds.height };
+    wr::LayoutSize contentSize { pipeline->mScBounds.Width(), pipeline->mScBounds.Height() };
     wr::DisplayListBuilder builder(pipelineId, contentSize);
 
     if (!keys.IsEmpty()) {
@@ -278,6 +278,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
                                   &opacity,
                                   pipeline->mScTransform.IsIdentity() ? nullptr : &pipeline->mScTransform,
                                   wr::TransformStyle::Flat,
+                                  nullptr,
                                   pipeline->mMixBlendMode,
                                   nsTArray<wr::WrFilterOp>());
 
@@ -308,7 +309,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
     wr::BuiltDisplayList dl;
     wr::LayoutSize builderContentSize;
     builder.Finalize(builderContentSize, dl);
-    mApi->SetRootDisplayList(gfx::Color(0.f, 0.f, 0.f, 0.f), epoch, LayerSize(pipeline->mScBounds.width, pipeline->mScBounds.height),
+    mApi->SetRootDisplayList(gfx::Color(0.f, 0.f, 0.f, 0.f), epoch, LayerSize(pipeline->mScBounds.Width(), pipeline->mScBounds.Height()),
                              pipelineId, builderContentSize,
                              dl.dl_desc, dl.dl.inner.data, dl.dl.inner.length);
   }

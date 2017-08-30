@@ -10,6 +10,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/SystemGroup.h"
 #include "nsCookie.h"
 #include "nsCookieService.h"
 #include "nsContentUtils.h"
@@ -55,8 +56,9 @@ NS_IMPL_ISUPPORTS(CookieServiceChild,
 CookieServiceChild::CookieServiceChild()
   : mCookieBehavior(nsICookieService::BEHAVIOR_ACCEPT)
   , mThirdPartySession(false)
-  , mIPCSync(false)
   , mLeaveSecureAlone(true)
+  , mIPCSync(false)
+  , mIPCOpen(false)
 {
   NS_ASSERTION(IsNeckoChild(), "not a child process");
 
@@ -69,9 +71,16 @@ CookieServiceChild::CookieServiceChild()
   // This corresponds to Release() in DeallocPCookieService.
   NS_ADDREF_THIS();
 
-  // Create a child PCookieService actor.
   NeckoChild::InitNeckoChild();
+
+  gNeckoChild->SetEventTargetForActor(
+    this,
+    SystemGroup::EventTargetFor(TaskCategory::Other));
+
+  // Create a child PCookieService actor.
   gNeckoChild->SendPCookieServiceConstructor(this);
+
+  mIPCOpen = true;
 
   mTLDService = do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
   NS_ASSERTION(mTLDService, "couldn't get TLDService");
@@ -95,8 +104,18 @@ CookieServiceChild::~CookieServiceChild()
 }
 
 void
+CookieServiceChild::ActorDestroy(ActorDestroyReason why)
+{
+  mIPCOpen = false;
+}
+
+void
 CookieServiceChild::TrackCookieLoad(nsIChannel *aChannel)
 {
+  if (!mIPCOpen) {
+    return;
+  }
+
   bool isForeign = false;
   nsCOMPtr<nsIURI> uri;
   aChannel->GetURI(getter_AddRefs(uri));
@@ -435,6 +454,9 @@ CookieServiceChild::GetCookieStringInternal(nsIURI *aHostURI,
   if (!mIPCSync) {
     GetCookieStringFromCookieHashTable(aHostURI, !!isForeign, attrs, result);
   } else {
+    if (!mIPCOpen) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
     GetCookieStringSyncIPC(aHostURI, !!isForeign, attrs, result);
   }
 
@@ -483,8 +505,11 @@ CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
   }
 
   // Asynchronously call the parent.
-  SendSetCookieString(uriParams, !!isForeign, cookieString,
-                      stringServerTime, attrs, aFromHttp);
+  if (mIPCOpen) {
+    SendSetCookieString(uriParams, !!isForeign, cookieString,
+                        stringServerTime, attrs, aFromHttp);
+  }
+
   if (mIPCSync) {
     return NS_OK;
   }

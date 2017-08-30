@@ -63,7 +63,7 @@ impl MediaListMethods for MediaList {
     // https://drafts.csswg.org/cssom/#dom-medialist-mediatext
     fn SetMediaText(&self, value: DOMString) {
         let mut guard = self.shared_lock().write();
-        let mut media_queries = self.media_queries.write_with(&mut guard);
+        let media_queries = self.media_queries.write_with(&mut guard);
         // Step 2
         if value.is_empty() {
             // Step 1
@@ -77,7 +77,7 @@ impl MediaListMethods for MediaList {
         let win = global.as_window();
         let url = win.get_url();
         let quirks_mode = win.Document().quirks_mode();
-        let context = ParserContext::new_for_cssom(&url, win.css_error_reporter(), Some(CssRuleType::Media),
+        let context = ParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                    PARSING_MODE_DEFAULT,
                                                    quirks_mode);
         *media_queries = parse_media_query_list(&context, &mut parser);
@@ -114,7 +114,7 @@ impl MediaListMethods for MediaList {
         let win = global.as_window();
         let url = win.get_url();
         let quirks_mode = win.Document().quirks_mode();
-        let context = ParserContext::new_for_cssom(&url, win.css_error_reporter(), Some(CssRuleType::Media),
+        let context = ParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                    PARSING_MODE_DEFAULT,
                                                    quirks_mode);
         let m = MediaQuery::parse(&context, &mut parser);
@@ -143,7 +143,7 @@ impl MediaListMethods for MediaList {
         let win = global.as_window();
         let url = win.get_url();
         let quirks_mode = win.Document().quirks_mode();
-        let context = ParserContext::new_for_cssom(&url, win.css_error_reporter(), Some(CssRuleType::Media),
+        let context = ParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                    PARSING_MODE_DEFAULT,
                                                    quirks_mode);
         let m = MediaQuery::parse(&context, &mut parser);
@@ -154,7 +154,7 @@ impl MediaListMethods for MediaList {
         // Step 3
         let m_serialized = m.unwrap().to_css_string();
         let mut guard = self.shared_lock().write();
-        let mut media_list = self.media_queries.write_with(&mut guard);
+        let media_list = self.media_queries.write_with(&mut guard);
         let new_vec = media_list.media_queries.drain(..)
                                 .filter(|q| m_serialized != q.to_css_string())
                                 .collect();

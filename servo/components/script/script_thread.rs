@@ -18,6 +18,7 @@
 //! loop.
 
 use bluetooth_traits::BluetoothRequest;
+use canvas_traits::webgl::WebGLPipeline;
 use devtools;
 use devtools_traits::{DevtoolScriptControlMsg, DevtoolsPageInfo};
 use devtools_traits::{ScriptToDevtoolsControlMsg, WorkerId};
@@ -48,6 +49,8 @@ use dom::htmlanchorelement::HTMLAnchorElement;
 use dom::htmliframeelement::{HTMLIFrameElement, NavigationType};
 use dom::mutationobserver::MutationObserver;
 use dom::node::{Node, NodeDamage, window_from_node, from_untrusted_node_address};
+use dom::performanceentry::PerformanceEntry;
+use dom::performancepainttiming::PerformancePaintTiming;
 use dom::serviceworker::TrustedServiceWorkerAddress;
 use dom::serviceworkerregistration::ServiceWorkerRegistration;
 use dom::servoparser::{ParserContext, ServoParser};
@@ -84,10 +87,10 @@ use profile_traits::time::{self, ProfilerCategory, profile};
 use script_layout_interface::message::{self, Msg, NewLayoutThreadInfo, ReflowQueryType};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
 use script_runtime::{ScriptPort, StackRootTLS, get_reports, new_rt_and_cx};
-use script_traits::{CompositorEvent, ConstellationControlMsg};
+use script_traits::{CompositorEvent, ConstellationControlMsg, PaintMetricType};
 use script_traits::{DocumentActivity, DiscardBrowsingContext, EventResult};
 use script_traits::{InitialScriptState, LayoutMsg, LoadData, MouseButton, MouseEventType, MozBrowserEvent};
-use script_traits::{NewLayoutInfo, ScriptMsg as ConstellationMsg, UpdatePipelineIdReason};
+use script_traits::{NewLayoutInfo, ScriptToConstellationChan, ScriptMsg, UpdatePipelineIdReason};
 use script_traits::{ScriptThreadFactory, TimerEvent, TimerSchedulerMsg, TimerSource};
 use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{KeyEvent, MouseButtonEvent, MouseMoveEvent, ResizeEvent};
@@ -114,6 +117,7 @@ use task_source::dom_manipulation::{DOMManipulationTask, DOMManipulationTaskSour
 use task_source::file_reading::FileReadingTaskSource;
 use task_source::history_traversal::HistoryTraversalTaskSource;
 use task_source::networking::NetworkingTaskSource;
+use task_source::performance_timeline::{PerformanceTimelineTask, PerformanceTimelineTaskSource};
 use task_source::user_interaction::{UserInteractionTask, UserInteractionTaskSource};
 use time::{get_time, precise_time_ns, Tm};
 use url::Position;
@@ -269,6 +273,8 @@ pub enum MainThreadScriptMsg {
     /// Notifies the script thread that a new worklet has been loaded, and thus the page should be
     /// reflowed.
     WorkletLoaded(PipelineId),
+    /// Tasks that originate from the performance timeline task source.
+    PerformanceTimeline(PerformanceTimelineTask),
 }
 
 impl OpaqueSender<CommonScriptMsg> for Box<ScriptChan + Send> {
@@ -454,6 +460,8 @@ pub struct ScriptThread {
 
     file_reading_task_source: FileReadingTaskSource,
 
+    performance_timeline_task_source: PerformanceTimelineTaskSource,
+
     /// A channel to hand out to threads that need to respond to a message from the script thread.
     control_chan: IpcSender<ConstellationControlMsg>,
 
@@ -462,7 +470,7 @@ pub struct ScriptThread {
     control_port: Receiver<ConstellationControlMsg>,
 
     /// For communicating load url messages to the constellation
-    constellation_chan: IpcSender<ConstellationMsg>,
+    script_sender: IpcSender<(PipelineId, ScriptMsg)>,
 
     /// A sender for new layout threads to communicate to the constellation.
     layout_to_constellation_chan: IpcSender<LayoutMsg>,
@@ -508,8 +516,11 @@ pub struct ScriptThread {
     /// The unit of related similar-origin browsing contexts' list of MutationObserver objects
     mutation_observers: DOMRefCell<Vec<JS<MutationObserver>>>,
 
+    /// A handle to the webgl thread
+    webgl_chan: WebGLPipeline,
+
     /// A handle to the webvr thread, if available
-    webvr_thread: Option<IpcSender<WebVRMsg>>,
+    webvr_chan: Option<IpcSender<WebVRMsg>>,
 
     /// The worklet thread pool
     worklet_thread_pool: DOMRefCell<Option<Rc<WorkletThreadPool>>>,
@@ -733,12 +744,12 @@ impl ScriptThread {
             let script_thread = unsafe { &*root.get().unwrap() };
             script_thread.worklet_thread_pool.borrow_mut().get_or_insert_with(|| {
                 let init = WorkletGlobalScopeInit {
-                    script_sender: script_thread.chan.0.clone(),
+                    to_script_thread_sender: script_thread.chan.0.clone(),
                     resource_threads: script_thread.resource_threads.clone(),
                     mem_profiler_chan: script_thread.mem_profiler_chan.clone(),
                     time_profiler_chan: script_thread.time_profiler_chan.clone(),
                     devtools_chan: script_thread.devtools_chan.clone(),
-                    constellation_chan: script_thread.constellation_chan.clone(),
+                    to_constellation_sender: script_thread.script_sender.clone(),
                     scheduler_chan: script_thread.scheduler_chan.clone(),
                     image_cache: script_thread.image_cache.clone(),
                 };
@@ -850,12 +861,13 @@ impl ScriptThread {
             dom_manipulation_task_source: DOMManipulationTaskSource(chan.clone()),
             user_interaction_task_source: UserInteractionTaskSource(chan.clone()),
             networking_task_source: NetworkingTaskSource(boxed_script_sender.clone()),
-            history_traversal_task_source: HistoryTraversalTaskSource(chan),
+            history_traversal_task_source: HistoryTraversalTaskSource(chan.clone()),
             file_reading_task_source: FileReadingTaskSource(boxed_script_sender),
+            performance_timeline_task_source: PerformanceTimelineTaskSource(chan),
 
             control_chan: state.control_chan,
             control_port: control_port,
-            constellation_chan: state.constellation_chan,
+            script_sender: state.script_to_constellation_chan.sender.clone(),
             time_profiler_chan: state.time_profiler_chan,
             mem_profiler_chan: state.mem_profiler_chan,
 
@@ -881,7 +893,8 @@ impl ScriptThread {
 
             layout_to_constellation_chan: state.layout_to_constellation_chan,
 
-            webvr_thread: state.webvr_thread,
+            webgl_chan: state.webgl_chan,
+            webvr_chan: state.webvr_chan,
 
             worklet_thread_pool: Default::default(),
 
@@ -1250,6 +1263,8 @@ impl ScriptThread {
                 self.handle_exit_pipeline_msg(pipeline_id, discard_browsing_context),
             ConstellationControlMsg::WebVREvents(pipeline_id, events) =>
                 self.handle_webvr_events(pipeline_id, events),
+            ConstellationControlMsg::PaintMetric(pipeline_id, metric_type, metric_value) =>
+                self.handle_paint_metric(pipeline_id, metric_type, metric_value),
             msg @ ConstellationControlMsg::AttachLayout(..) |
             msg @ ConstellationControlMsg::Viewport(..) |
             msg @ ConstellationControlMsg::SetScrollState(..) |
@@ -1280,6 +1295,8 @@ impl ScriptThread {
             MainThreadScriptMsg::WorkletLoaded(pipeline_id) =>
                 self.handle_worklet_loaded(pipeline_id),
             MainThreadScriptMsg::DOMManipulation(task) =>
+                task.handle_task(self),
+            MainThreadScriptMsg::PerformanceTimeline(task) =>
                 task.handle_task(self),
             MainThreadScriptMsg::UserInteraction(task) =>
                 task.handle_task(self),
@@ -1467,7 +1484,10 @@ impl ScriptThread {
             image_cache: self.image_cache.clone(),
             content_process_shutdown_chan: content_process_shutdown_chan,
             layout_threads: layout_threads,
-            paint_time_metrics: PaintTimeMetrics::new(self.time_profiler_chan.clone()),
+            paint_time_metrics: PaintTimeMetrics::new(new_pipeline_id,
+                                                      self.time_profiler_chan.clone(),
+                                                      self.layout_to_constellation_chan.clone(),
+                                                      self.control_chan.clone()),
         });
 
         // Pick a layout thread, any layout thread
@@ -1543,7 +1563,7 @@ impl ScriptThread {
     fn handle_visibility_change_msg(&self, id: PipelineId, visible: bool) {
         // Separate message sent since parent script thread could be different (Iframe of different
         // domain)
-        self.constellation_chan.send(ConstellationMsg::VisibilityChangeComplete(id, visible)).unwrap();
+        self.script_sender.send((id, ScriptMsg::VisibilityChangeComplete(visible))).unwrap();
 
         let window = self.documents.borrow().find_window(id);
         match window {
@@ -1643,13 +1663,13 @@ impl ScriptThread {
     /// constellation to shut down the pipeline, which will clean everything up
     /// normally. If we do exit, we will tear down the DOM nodes, possibly at a point
     /// where layout is still accessing them.
-    fn handle_exit_window_msg(&self, _: PipelineId) {
+    fn handle_exit_window_msg(&self, id: PipelineId) {
         debug!("script thread handling exit window msg");
 
         // TODO(tkuehn): currently there is only one window,
         // so this can afford to be naive and just shut down the
         // constellation. In the future it'll need to be smarter.
-        self.constellation_chan.send(ConstellationMsg::Exit).unwrap();
+        self.script_sender.send((id, ScriptMsg::Exit)).unwrap();
     }
 
     /// We have received notification that the response associated with a load has completed.
@@ -1701,7 +1721,7 @@ impl ScriptThread {
 
         let script_url = maybe_registration.get_installed().get_script_url();
         let scope_things = ServiceWorkerRegistration::create_scope_things(window.upcast(), script_url);
-        let _ = self.constellation_chan.send(ConstellationMsg::RegisterServiceWorker(scope_things, scope.clone()));
+        let _ = self.script_sender.send((pipeline_id, ScriptMsg::RegisterServiceWorker(scope_things, scope.clone())));
     }
 
     pub fn dispatch_job_queue(&self, job_handler: Box<AsyncJobHandler>) {
@@ -1712,13 +1732,17 @@ impl ScriptThread {
         &self.dom_manipulation_task_source
     }
 
+    pub fn performance_timeline_task_source(&self) -> &PerformanceTimelineTaskSource {
+        &self.performance_timeline_task_source
+    }
+
     /// Handles a request for the window title.
     fn handle_get_title_msg(&self, pipeline_id: PipelineId) {
         let document = match { self.documents.borrow().find_document(pipeline_id) } {
             Some(document) => document,
             None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
         };
-        document.send_title_to_compositor();
+        document.send_title_to_constellation();
     }
 
     /// Handles a request to exit a pipeline and shut down layout.
@@ -1758,7 +1782,7 @@ impl ScriptThread {
         debug!("shutting down layout for page {}", id);
         let _ = response_port.recv();
         chan.send(message::Msg::ExitNow).ok();
-        self.constellation_chan.send(ConstellationMsg::PipelineExited(id)).ok();
+        self.script_sender.send((id, ScriptMsg::PipelineExited)).ok();
 
         debug!("Exited pipeline {}.", id);
     }
@@ -1883,15 +1907,15 @@ impl ScriptThread {
 
     fn ask_constellation_for_browsing_context_id(&self, pipeline_id: PipelineId) -> Option<BrowsingContextId> {
         let (result_sender, result_receiver) = ipc::channel().unwrap();
-        let msg = ConstellationMsg::GetBrowsingContextId(pipeline_id, result_sender);
-        self.constellation_chan.send(msg).expect("Failed to send to constellation.");
+        let msg = ScriptMsg::GetBrowsingContextId(pipeline_id, result_sender);
+        self.script_sender.send((pipeline_id, msg)).expect("Failed to send to constellation.");
         result_receiver.recv().expect("Failed to get frame id from constellation.")
     }
 
     fn ask_constellation_for_parent_info(&self, pipeline_id: PipelineId) -> Option<(PipelineId, FrameType)> {
         let (result_sender, result_receiver) = ipc::channel().unwrap();
-        let msg = ConstellationMsg::GetParentInfo(pipeline_id, result_sender);
-        self.constellation_chan.send(msg).expect("Failed to send to constellation.");
+        let msg = ScriptMsg::GetParentInfo(pipeline_id, result_sender);
+        self.script_sender.send((pipeline_id, msg)).expect("Failed to send to constellation.");
         result_receiver.recv().expect("Failed to get frame id from constellation.")
     }
 
@@ -1976,8 +2000,8 @@ impl ScriptThread {
                       .unwrap();
 
             // update the pipeline url
-            self.constellation_chan
-                .send(ConstellationMsg::SetFinalUrl(incomplete.pipeline_id, final_url.clone()))
+            self.script_sender
+                .send((incomplete.pipeline_id, ScriptMsg::SetFinalUrl(final_url.clone())))
                 .unwrap();
         }
         debug!("ScriptThread: loading {} on pipeline {:?}", incomplete.url, incomplete.pipeline_id);
@@ -1986,6 +2010,7 @@ impl ScriptThread {
         let DOMManipulationTaskSource(ref dom_sender) = self.dom_manipulation_task_source;
         let UserInteractionTaskSource(ref user_sender) = self.user_interaction_task_source;
         let HistoryTraversalTaskSource(ref history_sender) = self.history_traversal_task_source;
+        let PerformanceTimelineTaskSource(ref performance_sender) = self.performance_timeline_task_source;
 
         let (ipc_timer_event_chan, ipc_timer_event_port) = ipc::channel().unwrap();
         ROUTER.route_ipc_receiver_to_mpsc_sender(ipc_timer_event_port,
@@ -1997,6 +2022,11 @@ impl ScriptThread {
             MutableOrigin::new(final_url.origin())
         };
 
+        let script_to_constellation_chan = ScriptToConstellationChan {
+            sender: self.script_sender.clone(),
+            pipeline_id: incomplete.pipeline_id,
+        };
+
         // Create the window and document objects.
         let window = Window::new(self.js_runtime.clone(),
                                  MainThreadScriptChan(sender.clone()),
@@ -2005,6 +2035,7 @@ impl ScriptThread {
                                  self.networking_task_source.clone(),
                                  HistoryTraversalTaskSource(history_sender.clone()),
                                  self.file_reading_task_source.clone(),
+                                 PerformanceTimelineTaskSource(performance_sender.clone()),
                                  self.image_cache_channel.clone(),
                                  self.image_cache.clone(),
                                  self.resource_threads.clone(),
@@ -2012,7 +2043,7 @@ impl ScriptThread {
                                  self.mem_profiler_chan.clone(),
                                  self.time_profiler_chan.clone(),
                                  self.devtools_chan.clone(),
-                                 self.constellation_chan.clone(),
+                                 script_to_constellation_chan,
                                  self.control_chan.clone(),
                                  self.scheduler_chan.clone(),
                                  ipc_timer_event_chan,
@@ -2023,7 +2054,8 @@ impl ScriptThread {
                                  origin,
                                  incomplete.navigation_start,
                                  incomplete.navigation_start_precise,
-                                 self.webvr_thread.clone());
+                                 self.webgl_chan.channel(),
+                                 self.webvr_chan.clone());
 
         // Initialize the browsing context for the window.
         let window_proxy = self.local_window_proxy(&window,
@@ -2082,8 +2114,8 @@ impl ScriptThread {
 
         window.init_document(&document);
 
-        self.constellation_chan
-            .send(ConstellationMsg::ActivateDocument(incomplete.pipeline_id))
+        self.script_sender
+            .send((incomplete.pipeline_id, ScriptMsg::ActivateDocument))
             .unwrap();
 
         // Notify devtools that a new script global exists.
@@ -2210,8 +2242,8 @@ impl ScriptThread {
                                                url.join(&value).map(|url| url.to_string()).ok()
                                            });
 
-                        let event = ConstellationMsg::NodeStatus(status);
-                        self.constellation_chan.send(event).unwrap();
+                        let event = ScriptMsg::NodeStatus(status);
+                        self.script_sender.send((pipeline_id, event)).unwrap();
 
                         state_already_changed = true;
                     }
@@ -2224,8 +2256,8 @@ impl ScriptThread {
                                                .inclusive_ancestors()
                                                .filter_map(Root::downcast::<HTMLAnchorElement>)
                                                .next() {
-                            let event = ConstellationMsg::NodeStatus(None);
-                            self.constellation_chan.send(event).unwrap();
+                            let event = ScriptMsg::NodeStatus(None);
+                            self.script_sender.send((pipeline_id, event)).unwrap();
                         }
                     }
                 }
@@ -2240,8 +2272,8 @@ impl ScriptThread {
                         } else {
                             EventResult::DefaultPrevented
                         };
-                        let message = ConstellationMsg::TouchEventProcessed(result);
-                        self.constellation_chan.send(message).unwrap();
+                        let message = ScriptMsg::TouchEventProcessed(result);
+                        self.script_sender.send((pipeline_id, message)).unwrap();
                     }
                     _ => {
                         // TODO: Calling preventDefault on a touchup event should prevent clicks.
@@ -2262,7 +2294,7 @@ impl ScriptThread {
                     Some(document) => document,
                     None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
                 };
-                document.dispatch_key_event(ch, key, state, modifiers, &self.constellation_chan);
+                document.dispatch_key_event(ch, key, state, modifiers);
             }
         }
     }
@@ -2310,8 +2342,8 @@ impl ScriptThread {
                 }
             }
             None => {
-                self.constellation_chan
-                    .send(ConstellationMsg::LoadUrl(parent_pipeline_id, load_data, replace))
+                self.script_sender
+                    .send((parent_pipeline_id, ScriptMsg::LoadUrl(load_data, replace)))
                     .unwrap();
             }
         }
@@ -2371,7 +2403,7 @@ impl ScriptThread {
         let context = ParserContext::new(id, load_data.url);
         self.incomplete_parser_contexts.borrow_mut().push((id, context));
 
-        self.constellation_chan.send(ConstellationMsg::InitiateNavigateRequest(req_init, id)).unwrap();
+        self.script_sender.send((id, ScriptMsg::InitiateNavigateRequest(req_init))).unwrap();
         self.incomplete_loads.borrow_mut().push(incomplete);
     }
 
@@ -2455,6 +2487,19 @@ impl ScriptThread {
         if let Some(window) = window {
             let vr = window.Navigator().Vr();
             vr.handle_webvr_events(events);
+        }
+    }
+
+    fn handle_paint_metric(&self,
+                           pipeline_id: PipelineId,
+                           metric_type: PaintMetricType,
+                           metric_value: f64) {
+        let window = self.documents.borrow().find_window(pipeline_id);
+        if let Some(window) = window {
+            let entry = PerformancePaintTiming::new(&window.upcast::<GlobalScope>(),
+                                                    metric_type, metric_value);
+            window.Performance().queue_entry(&entry.upcast::<PerformanceEntry>(),
+                                             true /* buffer performance entry */);
         }
     }
 

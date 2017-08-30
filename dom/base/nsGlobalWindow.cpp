@@ -125,6 +125,7 @@
 #include "nsIPrompt.h"
 #include "nsIPromptService.h"
 #include "nsIPromptFactory.h"
+#include "nsIAddonPolicyService.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsIWebNavigation.h"
 #include "nsIWebBrowserChrome.h"
@@ -1019,7 +1020,7 @@ NextWindowID();
 template<class T>
 nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
 : mFrameElement(nullptr), mDocShell(nullptr), mModalStateDepth(0),
-  mMutationBits(0), mIsDocumentLoaded(false),
+  mMutationBits(0), mActivePeerConnections(0), mIsDocumentLoaded(false),
   mIsHandlingResizeEvent(false), mIsInnerWindow(aOuterWindow != nullptr),
   mMayHavePaintEventListener(false), mMayHaveTouchEventListener(false),
   mMayHaveSelectionChangeEventListener(false),
@@ -2632,7 +2633,7 @@ nsGlobalWindow::SetInitialPrincipalToSubject()
     // Ensure that if someone plays with this document they will get
     // layout happening.
     nsRect r = shell->GetPresContext()->GetVisibleArea();
-    shell->Initialize(r.width, r.height);
+    shell->Initialize(r.Width(), r.Height());
   }
 }
 
@@ -2754,7 +2755,7 @@ EnablePrivilege(JSContext* cx, unsigned argc, JS::Value* vp)
 }
 
 static const JSFunctionSpec EnablePrivilegeSpec[] = {
-  JS_FS("enablePrivilege", EnablePrivilege, 1, 0),
+  JS_FN("enablePrivilege", EnablePrivilege, 1, 0),
   JS_FS_END
 };
 
@@ -4378,6 +4379,24 @@ nsPIDOMWindowInner::SyncStateFromParentWindow()
   nsGlobalWindow::Cast(this)->SyncStateFromParentWindow();
 }
 
+void
+nsPIDOMWindowInner::AddPeerConnection()
+{
+  nsGlobalWindow::Cast(this)->AddPeerConnection();
+}
+
+void
+nsPIDOMWindowInner::RemovePeerConnection()
+{
+  nsGlobalWindow::Cast(this)->RemovePeerConnection();
+}
+
+bool
+nsPIDOMWindowInner::HasActivePeerConnections()
+{
+  return nsGlobalWindow::Cast(this)->HasActivePeerConnections();
+}
+
 bool
 nsPIDOMWindowInner::IsPlayingAudio()
 {
@@ -5746,7 +5765,7 @@ nsGlobalWindow::SetInnerWidthOuter(int32_t aInnerWidth,
     presContext = presShell->GetPresContext();
 
     nsRect shellArea = presContext->GetVisibleArea();
-    height = shellArea.height;
+    height = shellArea.Height();
     SetCSSViewportWidthAndHeight(nsPresContext::CSSPixelsToAppUnits(aInnerWidth),
                                  height);
     return;
@@ -5840,7 +5859,7 @@ nsGlobalWindow::SetInnerHeightOuter(int32_t aInnerHeight,
 
     nsRect shellArea = presContext->GetVisibleArea();
     nscoord height = aInnerHeight;
-    nscoord width = shellArea.width;
+    nscoord width = shellArea.Width();
     CheckSecurityWidthAndHeight(nullptr, &height, aCallerType);
     SetCSSViewportWidthAndHeight(width,
                                  nsPresContext::CSSPixelsToAppUnits(height));
@@ -6460,8 +6479,8 @@ nsGlobalWindow::SetCSSViewportWidthAndHeight(nscoord aInnerWidth, nscoord aInner
   mDocShell->GetPresContext(getter_AddRefs(presContext));
 
   nsRect shellArea = presContext->GetVisibleArea();
-  shellArea.height = aInnerHeight;
-  shellArea.width = aInnerWidth;
+  shellArea.SetHeight(aInnerHeight);
+  shellArea.SetWidth(aInnerWidth);
 
   presContext->SetVisibleArea(shellArea);
 }
@@ -11682,7 +11701,7 @@ nsGlobalWindow::HandleIdleActiveEvent()
 }
 
 nsGlobalWindow::SlowScriptResponse
-nsGlobalWindow::ShowSlowScriptDialog()
+nsGlobalWindow::ShowSlowScriptDialog(const nsString& aAddonId)
 {
   MOZ_ASSERT(IsInnerWindow());
 
@@ -11732,9 +11751,13 @@ nsGlobalWindow::ShowSlowScriptDialog()
     nsIDocShell* docShell = GetDocShell();
     nsCOMPtr<nsITabChild> child = docShell ? docShell->GetTabChild() : nullptr;
     action = monitor->NotifySlowScript(child,
-                                       filename.get());
+                                       filename.get(),
+                                       aAddonId);
     if (action == ProcessHangMonitor::Terminate) {
       return KillSlowScript;
+    }
+    if (action == ProcessHangMonitor::TerminateGlobal) {
+      return KillScriptGlobal;
     }
 
     if (action == ProcessHangMonitor::StartDebugger) {
@@ -11772,61 +11795,58 @@ nsGlobalWindow::ShowSlowScriptDialog()
     }
   }
 
-  bool showDebugButton = !!debugCallback;
+  bool failed = false;
+  auto getString = [&] (const char* name,
+                        nsContentUtils::PropertiesFile propFile = nsContentUtils::eDOM_PROPERTIES) {
+    nsAutoString result;
+    nsresult rv = nsContentUtils::GetLocalizedString(
+      propFile, name, result);
+
+    // GetStringFromName can return NS_OK and still give nullptr string
+    failed = failed || NS_FAILED(rv) || result.IsEmpty();
+    return Move(result);
+  };
+
+  bool isAddonScript = !aAddonId.IsEmpty();
+  bool showDebugButton = debugCallback && !isAddonScript;
 
   // Get localizable strings
-  nsAutoString title, msg, stopButton, waitButton, debugButton, neverShowDlg;
 
-  rv = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                          "KillScriptTitle",
-                                          title);
+  nsAutoString title, checkboxMsg, debugButton, msg;
+  if (isAddonScript) {
+    title = getString("KillAddonScriptTitle");
+    checkboxMsg = getString("KillAddonScriptGlobalMessage");
 
-  nsresult tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "StopScriptButton",
-                                           stopButton);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
+    auto appName = getString("brandShortName", nsContentUtils::eBRAND_PROPERTIES);
 
-  tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "WaitForScriptButton",
-                                           waitButton);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
-
-  tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "DontAskAgain",
-                                           neverShowDlg);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
-
-  if (showDebugButton) {
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "DebugScriptButton",
-                                             debugButton);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    nsCOMPtr<nsIAddonPolicyService> aps = do_GetService("@mozilla.org/addons/policy-service;1");
+    nsString addonName;
+    if (!aps || NS_FAILED(aps->GetExtensionName(aAddonId, addonName))) {
+      addonName = aAddonId;
     }
 
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "KillScriptWithDebugMessage",
-                                             msg);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
-    }
-  }
-  else {
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "KillScriptMessage",
-                                             msg);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    const char16_t* params[] = {addonName.get(), appName.get()};
+    rv = nsContentUtils::FormatLocalizedString(
+        nsContentUtils::eDOM_PROPERTIES, "KillAddonScriptMessage",
+        params, msg);
+
+    failed = failed || NS_FAILED(rv);
+  } else {
+    title = getString("KillScriptTitle");
+    checkboxMsg = getString("DontAskAgain");
+
+    if (showDebugButton) {
+      debugButton = getString("DebugScriptButton");
+      msg = getString("KillScriptWithDebugMessage");
+    } else {
+      msg = getString("KillScriptMessage");
     }
   }
 
-  if (NS_FAILED(rv)) {
+  auto stopButton = getString("StopScriptButton");
+  auto waitButton = getString("WaitForScriptButton");
+
+  if (failed) {
     NS_ERROR("Failed to get localized strings.");
     return ContinueSlowScript;
   }
@@ -11874,8 +11894,6 @@ nsGlobalWindow::ShowSlowScriptDialog()
     }
   }
 
-  int32_t buttonPressed = 0; // In case the user exits dialog by clicking X.
-  bool neverShowDlgChk = false;
   uint32_t buttonFlags = nsIPrompt::BUTTON_POS_1_DEFAULT +
                          (nsIPrompt::BUTTON_TITLE_IS_STRING *
                           (nsIPrompt::BUTTON_POS_0 + nsIPrompt::BUTTON_POS_1));
@@ -11884,26 +11902,36 @@ nsGlobalWindow::ShowSlowScriptDialog()
   if (showDebugButton)
     buttonFlags += nsIPrompt::BUTTON_TITLE_IS_STRING * nsIPrompt::BUTTON_POS_2;
 
+  bool checkboxValue = false;
+  int32_t buttonPressed = 0; // In case the user exits dialog by clicking X.
   {
     // Null out the operation callback while we're re-entering JS here.
     AutoDisableJSInterruptCallback disabler(cx);
+
     // Open the dialog.
     rv = prompt->ConfirmEx(title.get(), msg.get(), buttonFlags,
                            waitButton.get(), stopButton.get(),
-                           debugButton.get(), neverShowDlg.get(),
-                           &neverShowDlgChk, &buttonPressed);
+                           debugButton.get(), checkboxMsg.get(),
+                           &checkboxValue, &buttonPressed);
   }
 
-  if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
-    return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
+  if (buttonPressed == 0) {
+    if (checkboxValue && !isAddonScript && NS_SUCCEEDED(rv))
+      return AlwaysContinueSlowScript;
+    return ContinueSlowScript;
   }
+
   if (buttonPressed == 2) {
-    if (debugCallback) {
-      rv = debugCallback->HandleSlowScriptDebug(this);
-      return NS_SUCCEEDED(rv) ? ContinueSlowScript : KillSlowScript;
-    }
+    MOZ_RELEASE_ASSERT(debugCallback);
+
+    rv = debugCallback->HandleSlowScriptDebug(this);
+    return NS_SUCCEEDED(rv) ? ContinueSlowScript : KillSlowScript;
   }
+
   JS_ClearPendingException(cx);
+
+  if (checkboxValue && isAddonScript)
+    return KillScriptGlobal;
   return KillSlowScript;
 }
 
@@ -12563,6 +12591,31 @@ nsGlobalWindow::SyncStateFromParentWindow()
   }
 }
 
+void
+nsGlobalWindow::AddPeerConnection()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  mActivePeerConnections++;
+}
+
+void
+nsGlobalWindow::RemovePeerConnection()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  MOZ_ASSERT(mActivePeerConnections);
+  mActivePeerConnections--;
+}
+
+bool
+nsGlobalWindow::HasActivePeerConnections()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  return mActivePeerConnections;
+}
+
 template<typename Method>
 void
 nsGlobalWindow::CallOnChildren(Method aMethod)
@@ -12757,10 +12810,10 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
   const bool checkForPopup = !nsContentUtils::LegacyIsCallerChromeOrNativeCode() &&
     !aDialog && !WindowExists(aName, forceNoOpener, !aCalledNoScript);
 
-  // Note: it's very important that this be an nsXPIDLCString, since we want
-  // .get() on it to return nullptr until we write stuff to it.  The window
-  // watcher expects a null URL string if there is no URL to load.
-  nsXPIDLCString url;
+  // Note: the Void handling here is very important, because the window watcher
+  // expects a null URL string (not an empty string) if there is no URL to load.
+  nsCString url;
+  url.SetIsVoid(true);
   nsresult rv = NS_OK;
 
   // It's important to do this security check before determining whether this
@@ -12775,7 +12828,7 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
     //
     // If we're not navigating, we assume that whoever *does* navigate the
     // window will do a security check of their own.
-    if (url.get() && !aDialog && aNavigate)
+    if (!url.IsVoid() && !aDialog && aNavigate)
       rv = SecurityCheckURL(url.get());
   }
 
@@ -12839,7 +12892,8 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
     if (!aCalledNoScript) {
       // We asserted at the top of this function that aNavigate is true for
       // !aCalledNoScript.
-      rv = pwwatch->OpenWindow2(AsOuter(), url.get(), name_ptr,
+      rv = pwwatch->OpenWindow2(AsOuter(), url.IsVoid() ? nullptr : url.get(),
+                                name_ptr,
                                 options_ptr, /* aCalledFromScript = */ true,
                                 aDialog, aNavigate, argv,
                                 isPopupSpamWindow,
@@ -12861,7 +12915,8 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
         nojsapi.emplace();
       }
 
-      rv = pwwatch->OpenWindow2(AsOuter(), url.get(), name_ptr,
+      rv = pwwatch->OpenWindow2(AsOuter(), url.IsVoid() ? nullptr : url.get(),
+                                name_ptr,
                                 options_ptr, /* aCalledFromScript = */ false,
                                 aDialog, aNavigate, aExtraArgument,
                                 isPopupSpamWindow,
@@ -14631,8 +14686,7 @@ nsGlobalWindow::RedefineProperty(JSContext* aCx, const char* aPropName,
   }
 
   if (!JS_WrapObject(aCx, &thisObj) ||
-      !JS_DefineProperty(aCx, thisObj, aPropName, aValue, JSPROP_ENUMERATE,
-                         JS_STUBGETTER, JS_STUBSETTER)) {
+      !JS_DefineProperty(aCx, thisObj, aPropName, aValue, JSPROP_ENUMERATE)) {
     aError.Throw(NS_ERROR_FAILURE);
   }
 }

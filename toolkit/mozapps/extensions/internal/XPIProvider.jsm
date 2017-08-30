@@ -96,8 +96,6 @@ const PREF_ALLOW_NON_MPC              = "extensions.allow-non-mpc-extensions";
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
 
-const PREF_CHECKCOMAT_THEMEOVERRIDE   = "extensions.checkCompatibility.temporaryThemeOverride_minAppVersion";
-
 const PREF_EM_HOTFIX_ID               = "extensions.hotfix.id";
 
 const OBSOLETE_PREFERENCES = [
@@ -109,8 +107,6 @@ const OBSOLETE_PREFERENCES = [
 
 const URI_EXTENSION_UPDATE_DIALOG     = "chrome://mozapps/content/extensions/update.xul";
 const URI_EXTENSION_STRINGS           = "chrome://mozapps/locale/extensions/extensions.properties";
-
-const STRING_TYPE_NAME                = "type.%ID%.name";
 
 const DIR_EXTENSIONS                  = "extensions";
 const DIR_SYSTEM_ADDONS               = "features";
@@ -843,20 +839,6 @@ function isUsableAddon(aAddon) {
     if (!app) {
       logger.warn(`Add-on ${aAddon.id} is not compatible with target application.`);
       return false;
-    }
-
-    // XXX Temporary solution to let applications opt-in to make themes safer
-    //     following significant UI changes even if checkCompatibility=false has
-    //     been set, until we get bug 962001.
-    if (aAddon.type == "theme" && app.id == Services.appinfo.ID) {
-      try {
-        let minCompatVersion = Services.prefs.getCharPref(PREF_CHECKCOMAT_THEMEOVERRIDE);
-        if (minCompatVersion &&
-            Services.vc.compare(minCompatVersion, app.maxVersion) > 0) {
-          logger.warn(`Theme ${aAddon.id} is not compatible with application version.`);
-          return false;
-        }
-      } catch (e) {}
     }
   }
 
@@ -4213,7 +4195,6 @@ this.XPIProvider = {
     if (!aFile.exists()) {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: aFile.path,
-                                    wantGlobalProperties: ["indexedDB"],
                                     addonId: aId,
                                     metadata: { addonID: aId } });
       logger.error("Attempted to load bootstrap scope from missing directory " + aFile.path);
@@ -4231,7 +4212,6 @@ this.XPIProvider = {
 
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: uri,
-                                    wantGlobalProperties: ["indexedDB"],
                                     addonId: aId,
                                     metadata: { addonID: aId, URI: uri } });
 
@@ -4366,13 +4346,17 @@ this.XPIProvider = {
       }
 
       if (aAddon.hasEmbeddedWebExtension) {
+        let reason = Object.keys(BOOTSTRAP_REASONS).find(
+          key => BOOTSTRAP_REASONS[key] == aReason
+        );
+
         if (aMethod == "startup") {
           const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor(params);
           params.webExtension = {
-            startup: () => webExtension.startup(),
+            startup: () => webExtension.startup(reason),
           };
         } else if (aMethod == "shutdown") {
-          LegacyExtensionsUtils.getEmbeddedExtensionFor(params).shutdown();
+          LegacyExtensionsUtils.getEmbeddedExtensionFor(params).shutdown(reason);
         }
       }
 
@@ -6565,8 +6549,11 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
     }
 
     try {
-      for (let promise in iterator) {
-        let entry = await promise;
+      for (;;) {
+        let {value: entry, done} = await iterator.next();
+        if (done) {
+          break;
+        }
 
         // Skip the directory currently in use
         if (this._directory && this._directory.path == entry.path) {
@@ -6579,16 +6566,16 @@ class SystemAddonInstallLocation extends MutableDirectoryInstallLocation {
         }
 
         if (entry.isDir) {
-           await OS.File.removeDir(entry.path, {
-             ignoreAbsent: true,
-             ignorePermissions: true,
-           });
-         } else {
-           await OS.File.remove(entry.path, {
-             ignoreAbsent: true,
-           });
-         }
-       }
+          await OS.File.removeDir(entry.path, {
+            ignoreAbsent: true,
+            ignorePermissions: true,
+          });
+        } else {
+          await OS.File.remove(entry.path, {
+            ignoreAbsent: true,
+          });
+        }
+      }
 
     } catch (e) {
       logger.error("Failed to clean updated system add-ons directories.", e);
@@ -6929,18 +6916,18 @@ this.XPIInternal = {
 
 var addonTypes = [
   new AddonManagerPrivate.AddonType("extension", URI_EXTENSION_STRINGS,
-                                    STRING_TYPE_NAME,
+                                    "type.extension.name",
                                     AddonManager.VIEW_TYPE_LIST, 4000,
                                     AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL),
   new AddonManagerPrivate.AddonType("theme", URI_EXTENSION_STRINGS,
-                                    STRING_TYPE_NAME,
+                                    "type.themes.name",
                                     AddonManager.VIEW_TYPE_LIST, 5000),
   new AddonManagerPrivate.AddonType("dictionary", URI_EXTENSION_STRINGS,
-                                    STRING_TYPE_NAME,
+                                    "type.dictionary.name",
                                     AddonManager.VIEW_TYPE_LIST, 7000,
                                     AddonManager.TYPE_UI_HIDE_EMPTY | AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL),
   new AddonManagerPrivate.AddonType("locale", URI_EXTENSION_STRINGS,
-                                    STRING_TYPE_NAME,
+                                    "type.locale.name",
                                     AddonManager.VIEW_TYPE_LIST, 8000,
                                     AddonManager.TYPE_UI_HIDE_EMPTY | AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL),
 ];
@@ -6953,7 +6940,7 @@ if (Services.prefs.getBoolPref("experiments.supported", false)) {
   addonTypes.push(
     new AddonManagerPrivate.AddonType("experiment",
                                       URI_EXTENSION_STRINGS,
-                                      STRING_TYPE_NAME,
+                                      "type.experiment.name",
                                       AddonManager.VIEW_TYPE_LIST, 11000,
                                       AddonManager.TYPE_UI_HIDE_EMPTY | AddonManager.TYPE_SUPPORTS_UNDO_RESTARTLESS_UNINSTALL));
 }

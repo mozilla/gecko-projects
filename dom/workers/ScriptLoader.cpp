@@ -718,7 +718,7 @@ private:
     ir->Headers()->FillResponseHeaders(loadInfo.mChannel);
 
     RefPtr<mozilla::dom::Response> response =
-      new mozilla::dom::Response(mCacheCreator->Global(), ir);
+      new mozilla::dom::Response(mCacheCreator->Global(), ir, nullptr);
 
     mozilla::dom::RequestOrUSVString request;
 
@@ -894,10 +894,19 @@ private:
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(aIndex < mLoadInfos.Length());
+    MOZ_ASSERT_IF(IsMainWorkerScript(), mWorkerScriptType != DebuggerScript);
 
     WorkerPrivate* parentWorker = mWorkerPrivate->GetParent();
 
-    nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
+    // For JavaScript debugging, the devtools server must run on the same
+    // thread as the debuggee, indicating the worker uses content principal.
+    // However, in Bug 863246, web content will no longer be able to load
+    // resource:// URIs by default, so we need system principal to load
+    // debugger scripts.
+    nsIPrincipal* principal = (mWorkerScriptType == DebuggerScript) ?
+                              nsContentUtils::GetSystemPrincipal() :
+                              mWorkerPrivate->GetPrincipal();
+
     nsCOMPtr<nsILoadGroup> loadGroup = mWorkerPrivate->GetLoadGroup();
     MOZ_DIAGNOSTIC_ASSERT(principal);
 
@@ -1961,7 +1970,7 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
            .setNoScriptRval(true);
 
     if (mScriptLoader.mWorkerScriptType == DebuggerScript) {
-      options.setVersion(JSVERSION_LATEST);
+      options.setVersion(JSVERSION_DEFAULT);
     }
 
     MOZ_ASSERT(loadInfo.mMutedErrorFlag.isSome());

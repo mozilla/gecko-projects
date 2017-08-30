@@ -103,6 +103,10 @@ var legacyMozPrefixedInterfaces =
 var interfaceNamesInGlobalScope =
   [
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    "AbortController",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "AbortSignal",
+// IMPORTANT: Do not change this list without review from a DOM peer!
     "AnalyserNode",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Animation"},
@@ -641,6 +645,8 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaRecorder",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    "MediaRecorderErrorEvent",
+// IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaSource",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaStream",
@@ -786,8 +792,6 @@ var interfaceNamesInGlobalScope =
     "RadioNodeList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Range",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "RecordErrorEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "Rect",
 // IMPORTANT: Do not change this list without review from a DOM peer!

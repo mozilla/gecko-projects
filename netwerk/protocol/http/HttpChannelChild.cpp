@@ -1923,7 +1923,7 @@ HttpChannelChild::CleanupRedirectingChannel(nsresult rv)
 NS_IMETHODIMP
 HttpChannelChild::ConnectParent(uint32_t registrarId)
 {
-  LOG(("HttpChannelChild::ConnectParent [this=%p]\n", this));
+  LOG(("HttpChannelChild::ConnectParent [this=%p, id=%" PRIu32 "]\n", this, registrarId));
   mozilla::dom::TabChild* tabChild = nullptr;
   nsCOMPtr<nsITabChild> iTabChild;
   GetCallback(iTabChild);
@@ -2563,6 +2563,7 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.allowSpdy() = mAllowSpdy;
   openArgs.allowAltSvc() = mAllowAltSvc;
   openArgs.beConservative() = mBeConservative;
+  openArgs.tlsFlags() = mTlsFlags;
   openArgs.initialRwin() = mInitialRwin;
 
   uint32_t cacheKey = 0;
@@ -2596,6 +2597,9 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.contentWindowId() = contentWindowId;
   openArgs.topLevelOuterContentWindowId() = mTopLevelOuterContentWindowId;
 
+  LOG(("HttpChannelChild::ContinueAsyncOpen this=%p gid=%" PRIu64 " topwinid=%" PRIx64,
+       this, mChannelId, mTopLevelOuterContentWindowId));
+
   if (tabChild && !tabChild->IPCOpen()) {
     return NS_ERROR_FAILURE;
   }
@@ -2611,6 +2615,8 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.dispatchFetchEventEnd()    = mDispatchFetchEventEnd;
   openArgs.handleFetchEventStart()    = mHandleFetchEventStart;
   openArgs.handleFetchEventEnd()      = mHandleFetchEventEnd;
+
+  openArgs.forceMainDocumentChannel() = mForceMainDocumentChannel;
 
   // This must happen before the constructor message is sent. Otherwise messages
   // from the parent could arrive quickly and be delivered to the wrong event
@@ -2925,6 +2931,8 @@ HttpChannelChild::ResumeAt(uint64_t startPos, const nsACString& entityID)
 NS_IMETHODIMP
 HttpChannelChild::SetPriority(int32_t aPriority)
 {
+  LOG(("HttpChannelChild::SetPriority %p p=%d", this, aPriority));
+
   int16_t newValue = clamped<int32_t>(aPriority, INT16_MIN, INT16_MAX);
   if (mPriority == newValue)
     return NS_OK;
@@ -2945,6 +2953,9 @@ HttpChannelChild::SetClassFlags(uint32_t inFlags)
   }
 
   mClassOfService = inFlags;
+
+  LOG(("HttpChannelChild %p ClassOfService=%u", this, mClassOfService));
+
   if (RemoteChannelExists()) {
     SendSetClassOfService(mClassOfService);
   }
@@ -2955,6 +2966,9 @@ NS_IMETHODIMP
 HttpChannelChild::AddClassFlags(uint32_t inFlags)
 {
   mClassOfService |= inFlags;
+
+  LOG(("HttpChannelChild %p ClassOfService=%u", this, mClassOfService));
+
   if (RemoteChannelExists()) {
     SendSetClassOfService(mClassOfService);
   }
@@ -2965,6 +2979,9 @@ NS_IMETHODIMP
 HttpChannelChild::ClearClassFlags(uint32_t inFlags)
 {
   mClassOfService &= ~inFlags;
+
+  LOG(("HttpChannelChild %p ClassOfService=%u", this, mClassOfService));
+
   if (RemoteChannelExists()) {
     SendSetClassOfService(mClassOfService);
   }

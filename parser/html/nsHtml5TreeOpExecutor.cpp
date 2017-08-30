@@ -291,6 +291,7 @@ nsHtml5TreeOpExecutor::ContinueInterruptedParsingAsync()
     // Now we set up a repetitive idle scheduler for flushing background list.
     gBackgroundFlushRunner =
       IdleTaskRunner::Create(&BackgroundFlushCallback,
+                             "nsHtml5TreeOpExecutor::BackgroundFlushCallback",
                              250, // The hard deadline: 250ms.
                              nsContentSink::sInteractiveParseTime / 1000, // Required budget.
                              true, // repeating
@@ -951,14 +952,16 @@ nsHtml5TreeOpExecutor::PreloadScript(const nsAString& aURL,
                                      const nsAString& aType,
                                      const nsAString& aCrossOrigin,
                                      const nsAString& aIntegrity,
-                                     bool aScriptFromHead)
+                                     bool aScriptFromHead,
+                                     bool aAsync,
+                                     bool aDefer)
 {
   nsCOMPtr<nsIURI> uri = ConvertIfNotPreloadedYet(aURL);
   if (!uri) {
     return;
   }
   mDocument->ScriptLoader()->PreloadURI(uri, aCharset, aType, aCrossOrigin,
-                                           aIntegrity, aScriptFromHead,
+                                           aIntegrity, aScriptFromHead, aAsync, aDefer,
                                            mSpeculationReferrerPolicy);
 }
 
@@ -966,14 +969,23 @@ void
 nsHtml5TreeOpExecutor::PreloadStyle(const nsAString& aURL,
                                     const nsAString& aCharset,
                                     const nsAString& aCrossOrigin,
+                                    const nsAString& aReferrerPolicy,
                                     const nsAString& aIntegrity)
 {
   nsCOMPtr<nsIURI> uri = ConvertIfNotPreloadedYet(aURL);
   if (!uri) {
     return;
   }
-  mDocument->PreloadStyle(uri, aCharset, aCrossOrigin,
-                          mSpeculationReferrerPolicy, aIntegrity);
+
+  mozilla::net::ReferrerPolicy referrerPolicy = mSpeculationReferrerPolicy;
+  mozilla::net::ReferrerPolicy styleReferrerPolicy =
+    mozilla::net::AttributeReferrerPolicyFromString(aReferrerPolicy);
+  if (styleReferrerPolicy != mozilla::net::RP_Unset) {
+    referrerPolicy = styleReferrerPolicy;
+  }
+
+  mDocument->PreloadStyle(uri, aCharset, aCrossOrigin, referrerPolicy,
+                          aIntegrity);
 }
 
 void
@@ -984,8 +996,9 @@ nsHtml5TreeOpExecutor::PreloadImage(const nsAString& aURL,
                                     const nsAString& aImageReferrerPolicy)
 {
   nsCOMPtr<nsIURI> baseURI = BaseURIForPreload();
+  bool isImgSet = false;
   nsCOMPtr<nsIURI> uri = mDocument->ResolvePreloadImage(baseURI, aURL, aSrcset,
-                                                        aSizes);
+                                                        aSizes, &isImgSet);
   if (uri && ShouldPreloadURI(uri)) {
     // use document wide referrer policy
     mozilla::net::ReferrerPolicy referrerPolicy = mSpeculationReferrerPolicy;
@@ -995,7 +1008,7 @@ nsHtml5TreeOpExecutor::PreloadImage(const nsAString& aURL,
       referrerPolicy = imageReferrerPolicy;
     }
 
-    mDocument->MaybePreLoadImage(uri, aCrossOrigin, referrerPolicy);
+    mDocument->MaybePreLoadImage(uri, aCrossOrigin, referrerPolicy, isImgSet);
   }
 }
 

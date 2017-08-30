@@ -486,6 +486,26 @@ private:
   IdleRunnable& operator=(const IdleRunnable&&) = delete;
 };
 
+// This class is designed to be a wrapper of a real runnable to support event
+// prioritizable.
+class PrioritizableRunnable : public Runnable, public nsIRunnablePriority
+{
+public:
+  PrioritizableRunnable(already_AddRefed<nsIRunnable>&& aRunnable,
+                        uint32_t aPriority);
+
+  NS_IMETHOD GetName(nsACString& aName) override;
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIRUNNABLE
+  NS_DECL_NSIRUNNABLEPRIORITY
+
+protected:
+  virtual ~PrioritizableRunnable() {};
+  nsCOMPtr<nsIRunnable> mRunnable;
+  uint32_t mPriority;
+};
+
 namespace detail {
 
 // An event that can be used to call a C++11 functions or function objects,
@@ -1660,6 +1680,18 @@ private:
 
 void
 NS_SetMainThread();
+
+// Used only on cooperatively scheduled "main" threads. Causes the thread to be
+// considered a main thread and also causes GetCurrentVirtualThread to return
+// aVirtualThread.
+void
+NS_SetMainThread(PRThread* aVirtualThread);
+
+// Used only on cooperatively scheduled "main" threads. Causes the thread to no
+// longer be considered a main thread. Also causes GetCurrentVirtualThread() to
+// return a unique value.
+void
+NS_UnsetMainThread();
 
 /**
  * Return the expiration time of the next timer to run on the current

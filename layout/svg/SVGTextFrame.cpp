@@ -3646,7 +3646,7 @@ SVGTextFrame::PaintSVG(gfxContext& aContext,
   TextRenderedRun run = it.Current();
 
   SVGContextPaint* outerContextPaint =
-    SVGContextPaint::GetContextPaint(mContent);
+    SVGContextPaint::GetContextPaint(GetContent());
 
   while (run.mFrame) {
     nsTextFrame* frame = run.mFrame;
@@ -3920,7 +3920,7 @@ SVGTextFrame::GetCanvasTM()
                  "should not call GetCanvasTM() when we are non-display");
 
     nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(GetParent());
-    dom::SVGTextContentElement *content = static_cast<dom::SVGTextContentElement*>(mContent);
+    dom::SVGTextContentElement *content = static_cast<dom::SVGTextContentElement*>(GetContent());
 
     gfxMatrix tm = content->PrependLocalTransformsTo(parent->GetCanvasTM());
 
@@ -5054,7 +5054,7 @@ SVGTextFrame::DoGlyphPositioning()
 
   // If the textLength="" attribute was specified, then we need ResolvePositions
   // to record that a new run starts with each glyph.
-  SVGTextContentElement* element = static_cast<SVGTextContentElement*>(mContent);
+  SVGTextContentElement* element = static_cast<SVGTextContentElement*>(GetContent());
   nsSVGLength2* textLengthAttr =
     element->GetAnimatedLength(nsGkAtoms::textLength);
   bool adjustingTextLength = textLengthAttr->IsExplicitlySet();
@@ -5208,7 +5208,7 @@ SVGTextFrame::ShouldRenderAsPath(nsTextFrame* aFrame,
 
   // Text has a stroke.
   if (style->HasStroke() &&
-      SVGContentUtils::CoordToFloat(static_cast<nsSVGElement*>(mContent),
+      SVGContentUtils::CoordToFloat(static_cast<nsSVGElement*>(GetContent()),
                                     style->mStrokeWidth) > 0) {
     return true;
   }

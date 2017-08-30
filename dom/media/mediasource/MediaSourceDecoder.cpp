@@ -6,15 +6,14 @@
 #include "MediaSourceDecoder.h"
 
 #include "mozilla/Logging.h"
-#include "mozilla/dom/HTMLMediaElement.h"
 #include "MediaDecoderStateMachine.h"
 #include "MediaShutdownManager.h"
 #include "MediaSource.h"
+#include "MediaSourceDemuxer.h"
 #include "MediaSourceResource.h"
 #include "MediaSourceUtils.h"
-#include "VideoUtils.h"
-#include "MediaSourceDemuxer.h"
 #include "SourceBufferList.h"
+#include "VideoUtils.h"
 #include <algorithm>
 
 extern mozilla::LogModule* GetMediaSourceLog();
@@ -32,12 +31,6 @@ MediaSourceDecoder::MediaSourceDecoder(MediaDecoderInit& aInit)
   , mEnded(false)
 {
   mExplicitDuration.emplace(UnspecifiedNaN<double>());
-}
-
-MediaResource*
-MediaSourceDecoder::GetResource() const
-{
-  return mResource;
 }
 
 MediaDecoderStateMachine*
@@ -61,7 +54,8 @@ MediaSourceDecoder::Load(nsIPrincipal* aPrincipal)
   MOZ_ASSERT(!GetStateMachine());
   AbstractThread::AutoEnter context(AbstractMainThread());
 
-  mResource = new MediaSourceResource(aPrincipal);
+  mPrincipal = aPrincipal;
+  mResource = MakeUnique<MediaSourceResource>();
 
   nsresult rv = MediaShutdownManager::Instance().Register(this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -296,7 +290,7 @@ MediaSourceDecoder::NextFrameBufferedStatus()
   TimeInterval interval(
     currentPosition,
     currentPosition + DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED);
-  return buffered.ContainsStrict(ClampIntervalToEnd(interval))
+  return buffered.ContainsWithStrictEnd(ClampIntervalToEnd(interval))
          ? MediaDecoderOwner::NEXT_FRAME_AVAILABLE
          : MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
 }
@@ -331,7 +325,7 @@ MediaSourceDecoder::CanPlayThroughImpl()
   TimeUnit timeAhead =
     std::min(duration, currentPosition + TimeUnit::FromSeconds(10));
   TimeInterval interval(currentPosition, timeAhead);
-  return buffered.ContainsStrict(ClampIntervalToEnd(interval));
+  return buffered.ContainsWithStrictEnd(ClampIntervalToEnd(interval));
 }
 
 TimeInterval
@@ -361,6 +355,13 @@ MediaSourceDecoder::NotifyInitDataArrived()
   if (mDemuxer) {
     mDemuxer->NotifyInitDataArrived();
   }
+}
+
+already_AddRefed<nsIPrincipal>
+MediaSourceDecoder::GetCurrentPrincipal()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return do_AddRef(mPrincipal);
 }
 
 #undef MSE_DEBUG

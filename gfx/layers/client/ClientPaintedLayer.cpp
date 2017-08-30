@@ -263,11 +263,12 @@ ClientPaintedLayer::PaintOffMainThread()
     didUpdate = true;
   }
 
-  PaintThread::Get()->FinishedLayerBatch();
+  PaintThread::Get()->EndLayer();
   mContentClient->EndPaint(nullptr);
 
   if (didUpdate) {
     UpdateContentClient(state);
+    ClientManager()->SetNeedTextureSyncOnPaintThread();
   }
   return true;
 }

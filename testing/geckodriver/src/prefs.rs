@@ -51,8 +51,7 @@ lazy_static! {
         // Disable safebrowsing components
         ("browser.safebrowsing.blockedURIs.enabled", Pref::new(false)),
         ("browser.safebrowsing.downloads.enabled", Pref::new(false)),
-        ("browser.safebrowsing.enabled", Pref::new(false)),
-        ("browser.safebrowsing.forbiddenURIs.enabled", Pref::new(false)),
+        ("browser.safebrowsing.passwords.enabled", Pref::new(false)),
         ("browser.safebrowsing.malware.enabled", Pref::new(false)),
         ("browser.safebrowsing.phishing.enabled", Pref::new(false)),
 
@@ -123,6 +122,9 @@ lazy_static! {
 
         // Disable popup-blocker
         ("dom.disable_open_during_load", Pref::new(false)),
+
+        // Enabling the support for File object creation in the content process
+        ("dom.file.createInChild", Pref::new(true)),
 
         // Disable the ProcessHangMonitor
         ("dom.ipc.reportProcessHangs", Pref::new(false)),

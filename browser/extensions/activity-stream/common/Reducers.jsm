@@ -5,6 +5,8 @@
 
 const {actionTypes: at} = Components.utils.import("resource://activity-stream/common/Actions.jsm", {});
 
+const TOP_SITES_SHOWMORE_LENGTH = 12;
+
 const INITIAL_STATE = {
   App: {
     // Have we received real data from the app yet?
@@ -12,7 +14,7 @@ const INITIAL_STATE = {
     // The locale of the browser
     locale: "",
     // Localized strings with defaults
-    strings: {},
+    strings: null,
     // The version of the system-addon
     version: null
   },
@@ -67,7 +69,6 @@ function insertPinned(links, pinned) {
   newLinks = newLinks.map(link => {
     if (link && link.isPinned) {
       delete link.isPinned;
-      delete link.pinTitle;
       delete link.pinIndex;
     }
     return link;
@@ -76,7 +77,7 @@ function insertPinned(links, pinned) {
   // Then insert them in their specified location
   pinned.forEach((val, index) => {
     if (!val) { return; }
-    let link = Object.assign({}, val, {isPinned: true, pinIndex: index, pinTitle: val.title});
+    let link = Object.assign({}, val, {isPinned: true, pinIndex: index});
     if (index > newLinks.length) {
       newLinks[index] = link;
     } else {
@@ -139,7 +140,7 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       return Object.assign({}, prevState, {rows: newRows});
     case at.PINNED_SITES_UPDATED:
       pinned = action.data;
-      newRows = insertPinned(prevState.rows, pinned);
+      newRows = insertPinned(prevState.rows, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
       return Object.assign({}, prevState, {rows: newRows});
     default:
       return prevState;
@@ -188,14 +189,27 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         }
         return section;
       });
-      // If section doesn't exist in prevState, create a new section object and
-      // append it to the sections state
+
+      // Invariant: Sections array sorted in increasing order of property `order`.
+      // If section doesn't exist in prevState, create a new section object. If
+      // the section has an order, insert it at the correct place in the array.
+      // Otherwise, prepend it and set the order to be minimal.
       if (!hasMatch) {
         const initialized = action.data.rows && action.data.rows.length > 0;
-        newState.push(Object.assign({title: "", initialized, rows: []}, action.data));
+        let order;
+        let index;
+        if (prevState.length > 0) {
+          order = action.data.order || prevState[0].order - 1;
+          index = newState.findIndex(section => section.order >= order);
+        } else {
+          order = action.data.order || 1;
+          index = 0;
+        }
+        const section = Object.assign({title: "", initialized, rows: [], order, enabled: false}, action.data);
+        newState.splice(index, 0, section);
       }
       return newState;
-    case at.SECTION_ROWS_UPDATE:
+    case at.SECTION_UPDATE:
       return prevState.map(section => {
         if (section && section.id === action.data.id) {
           return Object.assign({}, section, action.data);
@@ -254,8 +268,9 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
 }
 
 this.INITIAL_STATE = INITIAL_STATE;
+this.TOP_SITES_SHOWMORE_LENGTH = TOP_SITES_SHOWMORE_LENGTH;
 
 this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections};
 this.insertPinned = insertPinned;
 
-this.EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned"];
+this.EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_SHOWMORE_LENGTH"];

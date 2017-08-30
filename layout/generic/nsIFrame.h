@@ -89,6 +89,7 @@ class nsIContent;
 class nsContainerFrame;
 class nsPlaceholderFrame;
 class nsStyleChangeList;
+class nsWindowSizes;
 
 struct nsPeekOffsetStruct;
 struct nsPoint;
@@ -793,9 +794,8 @@ public:
   void SetStyleContext(nsStyleContext* aContext)
   {
     if (aContext != mStyleContext) {
-      nsStyleContext* oldStyleContext = mStyleContext;
+      RefPtr<nsStyleContext> oldStyleContext = mStyleContext.forget();
       mStyleContext = aContext;
-      aContext->AddRef();
 #ifdef DEBUG
       aContext->FrameAddRef();
 #endif
@@ -803,7 +803,6 @@ public:
 #ifdef DEBUG
       oldStyleContext->FrameRelease();
 #endif
-      oldStyleContext->Release();
     }
   }
 
@@ -819,11 +818,9 @@ public:
 #ifdef DEBUG
       mStyleContext->FrameRelease();
 #endif
-      mStyleContext->Release();
       mStyleContext = aContext;
-      aContext->AddRef();
 #ifdef DEBUG
-      aContext->FrameAddRef();
+      mStyleContext->FrameAddRef();
 #endif
     }
   }
@@ -899,7 +896,7 @@ public:
    * Gets the primary frame of the Content's flattened tree
    * parent, if one exists.
    */
-  inline nsIFrame* GetFlattenedTreeParentPrimaryFrame() const;
+  nsIFrame* GetFlattenedTreeParentPrimaryFrame() const;
 
   /**
    * Return the placeholder for this frame (which must be out-of-flow).
@@ -1086,9 +1083,9 @@ public:
   {
     if ((!aWritingMode.IsVertical() && !aWritingMode.IsBidiLTR()) ||
         aWritingMode.IsVerticalRL()) {
-      nscoord oldWidth = mRect.width;
+      nscoord oldWidth = mRect.Width();
       SetSize(aSize.GetPhysicalSize(aWritingMode));
-      mRect.x -= mRect.width - oldWidth;
+      mRect.x -= mRect.Width() - oldWidth;
     } else {
       SetSize(aSize.GetPhysicalSize(aWritingMode));
     }
@@ -1370,7 +1367,7 @@ public:
    * (nsFieldSetFrame overrides this).
    */
   virtual nsRect VisualBorderRectRelativeToSelf() const {
-    return nsRect(0, 0, mRect.width, mRect.height);
+    return nsRect(0, 0, mRect.Width(), mRect.Height());
   }
 
   /**
@@ -3594,8 +3591,10 @@ public:
     mProperties.DeleteAll(this);
   }
 
-  // Reports size of the FrameProperties for this frame and its descendants
-  size_t SizeOfFramePropertiesForTree(mozilla::MallocSizeOf aMallocSizeOf) const;
+  // nsIFrames themselves are in the nsPresArena, and so are not measured here.
+  // Instead, this measures heap-allocated things hanging off the nsIFrame, and
+  // likewise for its descendants.
+  void AddSizeOfExcludingThisForTree(nsWindowSizes& aWindowSizes) const;
 
   /**
    * Return true if and only if this frame obeys visibility:hidden.
@@ -4086,6 +4085,8 @@ public:
 
   RealDisplayItemArray& RealDisplayItemData() { return mDisplayItems; }
 
+  void DestroyAnonymousContent(already_AddRefed<nsIContent> aContent);
+
 protected:
 
   /**
@@ -4103,9 +4104,9 @@ protected:
   virtual bool IsLeafDynamic() const { return false; }
 
   // Members
-  nsRect           mRect;
-  nsIContent*      mContent;
-  nsStyleContext*  mStyleContext;
+  nsRect                 mRect;
+  nsCOMPtr<nsIContent>   mContent;
+  RefPtr<nsStyleContext> mStyleContext;
 private:
   nsContainerFrame* mParent;
   nsIFrame*        mNextSibling;  // doubly-linked list of frames
@@ -4358,10 +4359,10 @@ private:
     // to cast away the unsigned-ness.
     return nsRect(-(int32_t)mOverflow.mVisualDeltas.mLeft,
                   -(int32_t)mOverflow.mVisualDeltas.mTop,
-                  mRect.width + mOverflow.mVisualDeltas.mRight +
-                                mOverflow.mVisualDeltas.mLeft,
-                  mRect.height + mOverflow.mVisualDeltas.mBottom +
-                                 mOverflow.mVisualDeltas.mTop);
+                  mRect.Width() + mOverflow.mVisualDeltas.mRight +
+                                  mOverflow.mVisualDeltas.mLeft,
+                  mRect.Height() + mOverflow.mVisualDeltas.mBottom +
+                                   mOverflow.mVisualDeltas.mTop);
   }
   /**
    * Returns true if any overflow changed.

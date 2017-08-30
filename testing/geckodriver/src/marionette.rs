@@ -451,6 +451,11 @@ impl MarionetteHandler {
         // double-dashed flags are not accepted on Windows systems
         runner.args().push("-marionette".to_owned());
 
+        // https://developer.mozilla.org/docs/Environment_variables_affecting_crash_reporting
+        runner.envs().insert("MOZ_CRASHREPORTER".to_string(), "1".to_string());
+        runner.envs().insert("MOZ_CRASHREPORTER_NO_REPORT".to_string(), "1".to_string());
+        runner.envs().insert("MOZ_CRASHREPORTER_SHUTDOWN".to_string(), "1".to_string());
+
         if let Some(args) = options.args.take() {
             runner.args().extend(args);
         };
@@ -548,7 +553,16 @@ impl WebDriverHandler<GeckoExtensionRoute> for MarionetteHandler {
         match self.connection.lock() {
             Ok(ref mut connection) => {
                 match connection.as_mut() {
-                    Some(conn) => conn.send_command(resolved_capabilities, &msg),
+                    Some(conn) => {
+                        conn.send_command(resolved_capabilities, &msg)
+                            .map_err(|mut err| {
+                                // Shutdown the browser if no session can
+                                // be established due to errors.
+                                if let NewSession(_) = msg.command {
+                                    err.delete_session=true;
+                                }
+                                err})
+                    },
                     None => panic!("Connection missing")
                 }
             },
@@ -1045,7 +1059,7 @@ impl MarionetteCommand {
             GetWindowRect => (Some("getWindowRect"), None),
             MinimizeWindow => (Some("WebDriver:MinimizeWindow"), None),
             MaximizeWindow => (Some("maximizeWindow"), None),
-            FullscreenWindow => (Some("fullscreenWindow"), None),
+            FullscreenWindow => (Some("fullscreen"), None),
             SwitchToWindow(ref x) => (Some("switchToWindow"), Some(x.to_marionette())),
             SwitchToFrame(ref x) => (Some("switchToFrame"), Some(x.to_marionette())),
             SwitchToParentFrame => (Some("switchToParentFrame"), None),

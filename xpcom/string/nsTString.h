@@ -462,6 +462,15 @@ protected:
   {
   }
 
+  friend const nsTString_CharT& TNullString_CharT();
+
+  // Used by Null[C]String.
+  explicit nsTString_CharT(DataFlags aDataFlags)
+    : substring_type(char_traits::sEmptyBuffer, 0,
+                     aDataFlags | DataFlags::TERMINATED,
+                     ClassFlags::NULL_TERMINATED)
+  {}
+
   struct Segment {
     uint32_t mBegin, mLength;
     Segment(uint32_t aBegin, uint32_t aLength)
@@ -551,14 +560,15 @@ protected:
  * it contains is significantly smaller or any larger than 64 characters.
  *
  * NAMES:
- *   nsAutoString for wide characters
- *   nsAutoCString for narrow characters
+ *   nsAutoStringN / nsAutoString for wide characters
+ *   nsAutoCStringN / nsAutoCString for narrow characters
  */
-class MOZ_NON_MEMMOVABLE nsTAutoString_CharT : public nsTFixedString_CharT
+template<size_t N>
+class MOZ_NON_MEMMOVABLE nsTAutoStringN_CharT : public nsTFixedString_CharT
 {
 public:
 
-  typedef nsTAutoString_CharT self_type;
+  typedef nsTAutoStringN_CharT<N> self_type;
 
 public:
 
@@ -566,48 +576,49 @@ public:
    * constructors
    */
 
-  nsTAutoString_CharT()
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  nsTAutoStringN_CharT()
+    : fixed_string_type(mStorage, N, 0)
   {
   }
 
   explicit
-  nsTAutoString_CharT(char_type aChar)
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  nsTAutoStringN_CharT(char_type aChar)
+    : fixed_string_type(mStorage, N, 0)
   {
     Assign(aChar);
   }
 
   explicit
-  nsTAutoString_CharT(const char_type* aData, size_type aLength = size_type(-1))
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  nsTAutoStringN_CharT(const char_type* aData,
+                       size_type aLength = size_type(-1))
+    : fixed_string_type(mStorage, N, 0)
   {
     Assign(aData, aLength);
   }
 
 #if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
   explicit
-  nsTAutoString_CharT(char16ptr_t aData, size_type aLength = size_type(-1))
-    : nsTAutoString_CharT(static_cast<const char16_t*>(aData), aLength)
+  nsTAutoStringN_CharT(char16ptr_t aData, size_type aLength = size_type(-1))
+    : nsTAutoStringN_CharT(static_cast<const char16_t*>(aData), aLength)
   {
   }
 #endif
 
-  nsTAutoString_CharT(const self_type& aStr)
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  nsTAutoStringN_CharT(const self_type& aStr)
+    : fixed_string_type(mStorage, N, 0)
   {
     Assign(aStr);
   }
 
   explicit
-  nsTAutoString_CharT(const substring_type& aStr)
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  nsTAutoStringN_CharT(const substring_type& aStr)
+    : fixed_string_type(mStorage, N, 0)
   {
     Assign(aStr);
   }
 
-  MOZ_IMPLICIT nsTAutoString_CharT(const substring_tuple_type& aTuple)
-    : fixed_string_type(mStorage, kDefaultStorageSize, 0)
+  MOZ_IMPLICIT nsTAutoStringN_CharT(const substring_tuple_type& aTuple)
+    : fixed_string_type(mStorage, N, 0)
   {
     Assign(aTuple);
   }
@@ -646,16 +657,16 @@ public:
     return *this;
   }
 
-  enum
-  {
-    kDefaultStorageSize = 64
-  };
+  static const size_t kStorageSize = N;
 
 private:
 
-  char_type mStorage[kDefaultStorageSize];
+  char_type mStorage[N];
 };
 
+// We define this typedef instead of providing a default value for N so that so
+// there is a default typename that doesn't require angle brackets.
+using nsTAutoString_CharT = nsTAutoStringN_CharT<AutoStringDefaultStorageSize>;
 
 //
 // nsAutoString stores pointers into itself which are invalidated when an
@@ -687,92 +698,6 @@ public:
     return 0;
   }
 };
-
-/**
- * nsTXPIDLString extends nsTString such that:
- *
- *   (1) mData can be null
- *   (2) objects of this type can be automatically cast to |const CharT*|
- *   (3) getter_Copies method is supported to adopt data allocated with
- *       moz_xmalloc, such as "out string" parameters in XPIDL.
- *
- * NAMES:
- *   nsXPIDLString for wide characters
- *   nsXPIDLCString for narrow characters
- */
-class nsTXPIDLString_CharT : public nsTString_CharT
-{
-public:
-
-  typedef nsTXPIDLString_CharT self_type;
-
-public:
-
-  nsTXPIDLString_CharT()
-    : string_type(char_traits::sEmptyBuffer, 0,
-                  DataFlags::TERMINATED | DataFlags::VOIDED, ClassFlags(0))
-  {
-  }
-
-  // copy-constructor required to avoid default
-  nsTXPIDLString_CharT(const self_type& aStr)
-    : string_type(char_traits::sEmptyBuffer, 0,
-                  DataFlags::TERMINATED | DataFlags::VOIDED, ClassFlags(0))
-  {
-    Assign(aStr);
-  }
-
-  // return nullptr if we are voided
-#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
-  MOZ_NO_DANGLING_ON_TEMPORARIES char16ptr_t get() const
-#else
-  MOZ_NO_DANGLING_ON_TEMPORARIES const char_type* get() const
-#endif
-  {
-    return (mDataFlags & DataFlags::VOIDED) ? nullptr : mData;
-  }
-
-  // this case operator is the reason why this class cannot just be a
-  // typedef for nsTString
-  operator const char_type*() const
-  {
-    return get();
-  }
-
-  // need this to diambiguous operator[int]
-  char_type operator[](int32_t aIndex) const
-  {
-    return CharAt(index_type(aIndex));
-  }
-
-  // |operator=| does not inherit, so we must define our own
-  self_type& operator=(char_type aChar)
-  {
-    Assign(aChar);
-    return *this;
-  }
-  self_type& operator=(const char_type* aStr)
-  {
-    Assign(aStr);
-    return *this;
-  }
-  self_type& operator=(const self_type& aStr)
-  {
-    Assign(aStr);
-    return *this;
-  }
-  self_type& operator=(const substring_type& aStr)
-  {
-    Assign(aStr);
-    return *this;
-  }
-  self_type& operator=(const substring_tuple_type& aTuple)
-  {
-    Assign(aTuple);
-    return *this;
-  }
-};
-
 
 /**
  * getter_Copies support for adopting raw string out params that are

@@ -748,15 +748,28 @@ DXGITextureHostD3D11::DXGITextureHostD3D11(TextureFlags aFlags,
 }
 
 bool
-DXGITextureHostD3D11::OpenSharedHandle()
+DXGITextureHostD3D11::EnsureTexture()
 {
-  if (!GetDevice()) {
+  RefPtr<ID3D11Device> device;
+  if (mTexture) {
+    mTexture->GetDevice(getter_AddRefs(device));
+    if (device == DeviceManagerDx::Get()->GetCompositorDevice()) {
+      NS_WARNING("Incompatible texture.");
+      return true;
+    }
+    mTexture = nullptr;
+  }
+
+  device = GetDevice();
+  if (!device || device != DeviceManagerDx::Get()->GetCompositorDevice()) {
+    NS_WARNING("No device or incompatible device.");
     return false;
   }
 
-  HRESULT hr = GetDevice()->OpenSharedResource((HANDLE)mHandle,
-                                               __uuidof(ID3D11Texture2D),
-                                               (void**)(ID3D11Texture2D**)getter_AddRefs(mTexture));
+  HRESULT hr = device->OpenSharedResource(
+    (HANDLE)mHandle,
+    __uuidof(ID3D11Texture2D),
+    (void**)(ID3D11Texture2D**)getter_AddRefs(mTexture));
   if (FAILED(hr)) {
     NS_WARNING("Failed to open shared texture");
     return false;
@@ -931,7 +944,7 @@ DXGITextureHostD3D11::EnsureTextureSource()
     return true;
   }
 
-  if (!mTexture && !OpenSharedHandle()) {
+  if (!EnsureTexture()) {
     DeviceManagerDx::Get()->ForceDeviceReset(ForcedDeviceResetReason::OPENSHAREDHANDLE);
     return false;
   }
@@ -1099,13 +1112,27 @@ DXGIYCbCrTextureHostD3D11::DXGIYCbCrTextureHostD3D11(TextureFlags aFlags,
 }
 
 bool
-DXGIYCbCrTextureHostD3D11::OpenSharedHandle()
+DXGIYCbCrTextureHostD3D11::EnsureTexture()
 {
-  RefPtr<ID3D11Device> device = GetDevice();
-  if (!device) {
+  RefPtr<ID3D11Device> device;
+  if (mTextures[0]) {
+    mTextures[0]->GetDevice(getter_AddRefs(device));
+    if (device == DeviceManagerDx::Get()->GetCompositorDevice()) {
+      NS_WARNING("Incompatible texture.");
+      return true;
+    }
+    mTextures[0] = nullptr;
+    mTextures[1] = nullptr;
+    mTextures[2] = nullptr;
+  }
+
+  if (!GetDevice() ||
+      GetDevice() != DeviceManagerDx::Get()->GetCompositorDevice()) {
+    NS_WARNING("No device or incompatible device.");
     return false;
   }
 
+  device = GetDevice();
   RefPtr<ID3D11Texture2D> textures[3];
 
   HRESULT hr = device->OpenSharedResource((HANDLE)mHandles[0],
@@ -1194,7 +1221,7 @@ DXGIYCbCrTextureHostD3D11::EnsureTextureSource()
     return false;
   }
   if (!mTextureSources[0]) {
-    if (!mTextures[0] && !OpenSharedHandle()) {
+    if (!EnsureTexture()) {
       return false;
     }
 
@@ -1382,7 +1409,7 @@ DataTextureSourceD3D11::Update(DataSourceSurface* aSurface,
 
         void* data = map.mData + map.mStride * rect.y + BytesPerPixel(aSurface->GetFormat()) * rect.x;
 
-        context->UpdateSubresource(mTexture, 0, &box, data, map.mStride, map.mStride * rect.height);
+        context->UpdateSubresource(mTexture, 0, &box, data, map.mStride, map.mStride * rect.Height());
       }
     } else {
       context->UpdateSubresource(mTexture, 0, nullptr, aSurface->GetData(),
@@ -1402,8 +1429,8 @@ DataTextureSourceD3D11::Update(DataSourceSurface* aSurface,
     for (uint32_t i = 0; i < tileCount; i++) {
       IntRect tileRect = GetTileRect(i);
 
-      desc.Width = tileRect.width;
-      desc.Height = tileRect.height;
+      desc.Width = tileRect.Width();
+      desc.Height = tileRect.Height();
       desc.Usage = D3D11_USAGE_IMMUTABLE;
 
       D3D11_SUBRESOURCE_DATA initData;
@@ -1480,7 +1507,7 @@ IntRect
 DataTextureSourceD3D11::GetTileRect()
 {
   IntRect rect = GetTileRect(mCurrentTile);
-  return IntRect(rect.x, rect.y, rect.width, rect.height);
+  return IntRect(rect.x, rect.y, rect.Width(), rect.Height());
 }
 
 CompositingRenderTargetD3D11::CompositingRenderTargetD3D11(ID3D11Texture2D* aTexture,
@@ -1623,6 +1650,7 @@ SyncObjectD3D11Host::Synchronize()
 
 SyncObjectD3D11Client::SyncObjectD3D11Client(SyncHandle aSyncHandle, ID3D11Device* aDevice)
  : mSyncHandle(aSyncHandle)
+ , mSyncLock("SyncObjectD3D11")
 {
   if (!aDevice) {
     mDevice = DeviceManagerDx::Get()->GetContentDevice();
@@ -1678,9 +1706,19 @@ SyncObjectD3D11Client::IsSyncObjectValid()
   return true;
 }
 
+// We have only 1 sync object. As a thing that somehow works,
+// we copy each of the textures that need to be synced with the compositor
+// into our sync object and only use a lock for this sync object.
+// This way, we don't have to sync every texture we send to the compositor.
+// We only have to do this once per transaction.
 void
 SyncObjectD3D11Client::Synchronize()
 {
+  // Since this can be called from either the Paint or Main thread.
+  // We don't want this to race since we initialize the sync texture here
+  // too.
+  MutexAutoLock syncLock(mSyncLock);
+
   if (!mSyncedTextures.size()) {
     return;
   }

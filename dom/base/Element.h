@@ -205,7 +205,7 @@ public:
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ELEMENT_IID)
 
-  NS_DECL_SIZEOF_EXCLUDING_THIS
+  NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) override;
 
@@ -468,6 +468,15 @@ public:
 
   Directionality GetComputedDirectionality() const;
 
+  static const uint32_t kAllServoDescendantBits =
+    ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO |
+    ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO |
+    NODE_DESCENDANTS_NEED_FRAMES;
+
+  void NoteDirtyForServo();
+  void NoteAnimationOnlyDirtyForServo();
+  void NoteDescendantsNeedFramesForServo();
+
   bool HasDirtyDescendantsForServo() const
   {
     MOZ_ASSERT(IsStyledByServo());
@@ -503,7 +512,8 @@ public:
     return !!mServoData.Get();
   }
 
-  void ClearServoData();
+  void ClearServoData() { ClearServoData(GetComposedDoc()); }
+  void ClearServoData(nsIDocument* aDocument);
 
   /**
    * Gets the custom element data used by web components custom element.
@@ -702,6 +712,13 @@ public:
                               bool aNotify, nsAttrValue& aOldValue,
                               uint8_t* aModType, bool* aHasListeners,
                               bool* aOldValueSet);
+
+  /**
+   * Sets the class attribute to a value that contains no whitespace.
+   * Assumes that we are not notifying and that the attribute hasn't been
+   * set previously.
+   */
+  nsresult SetSingleClassFromParser(nsIAtom* aSingleClassName);
 
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
                            const nsAString& aValue, bool aNotify) override;
@@ -1059,11 +1076,11 @@ public:
   }
   int32_t ClientWidth()
   {
-    return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().width);
+    return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().Width());
   }
   int32_t ClientHeight()
   {
-    return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().height);
+    return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().Height());
   }
   int32_t ScrollTopMin()
   {

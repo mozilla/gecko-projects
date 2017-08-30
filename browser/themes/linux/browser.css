@@ -30,11 +30,15 @@
   --arrowpanel-dimmed-even-further: hsla(0,0%,80%,.8);
 
   --urlbar-separator-color: ThreeDShadow;
+
+  --toolbox-border-bottom-color: ThreeDShadow;
 }
 
 :root:-moz-lwtheme {
   --toolbar-bgcolor: rgba(255,255,255,.4);
   --toolbar-bgimage: none;
+
+  --toolbox-border-bottom-color: rgba(0,0,0,.3);
 }
 
 #menubar-items {
@@ -49,21 +53,6 @@
   -moz-appearance: none;
   background-color: transparent;
   border-top: none;
-}
-
-#navigator-toolbox::after {
-  content: "";
-  display: -moz-box;
-  -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  border-bottom: 1px solid ThreeDShadow;
-}
-
-#navigator-toolbox:-moz-lwtheme::after {
-  border-bottom-color: rgba(0,0,0,.3);
-}
-
-:root[customizing] #navigator-toolbox::after {
-  display: none;
 }
 
 #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
@@ -89,15 +78,6 @@
 #browser-bottombox {
   /* opaque for layers optimization */
   background-color: -moz-Dialog;
-}
-
-#bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar.png") !important;
-}
-
-toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-#personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
 }
 
 /* Bookmark menus */
@@ -255,28 +235,6 @@ menuitem.bookmark-item {
 .urlbar-input-box {
   margin: 0;
 }
-.urlbar-history-dropmarker {
-  -moz-appearance: toolbarbutton-dropdown;
-  transition: opacity 0.15s ease;
-}
-#urlbar-wrapper[switchingtabs] > #urlbar > .urlbar-textbox-container > .urlbar-history-dropmarker {
-  transition: none;
-}
-
-#navigator-toolbox:not(:hover) #nav-bar:not([customizing="true"]) #urlbar:not([focused]) > .urlbar-textbox-container > .urlbar-history-dropmarker {
-  opacity: 0;
-}
-
-#urlbar-icons {
-  -moz-box-align: center;
-}
-
-.urlbar-icon {
-  padding: 0 3px;
-  /* 16x16 icon with border-box sizing */
-  width: 22px;
-  height: 16px;
-}
 
 /* ::::: URL Bar Zoom Reset Button ::::: */
 @keyframes urlbar-zoom-reset-pulse {
@@ -415,7 +373,7 @@ html|*.addon-webext-perm-list {
 }
 
 .addon-addon-icon {
-  list-style-image: url("chrome://browser/skin/addons.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
 }
 
 .addon-toolbar-icon {
@@ -505,31 +463,16 @@ notification[value="translation"] menulist > .menulist-dropmarker {
 /* AutoComplete */
 
 %include ../shared/autocomplete.inc.css
+%include ../shared/urlbar-autocomplete.inc.css
 
 #PopupAutoComplete > richlistbox > richlistitem[originaltype~="datalist-first"] {
   border-top: 1px solid ThreeDShadow;
 }
 
-#treecolAutoCompleteImage {
-  max-width : 36px;
-}
-
-.autocomplete-richlistbox {
-  padding: 4px;
-}
-
-.autocomplete-richlistitem {
-  height: 30px;
-  min-height: 30px;
-  font: message-box;
-  border-radius: 2px;
-  border: 1px solid transparent;
-}
-
 .autocomplete-richlistitem:hover,
 treechildren.searchbar-treebody::-moz-tree-row(hover) {
-  background-color: hsla(0, 0%, 0%, 0.06);
-  border-color: hsla(0, 0%, 0%, 0.1);
+  background-color: var(--arrowpanel-dimmed);
+  border-color: var(--panel-separator-color);
 }
 
 .autocomplete-richlistitem[selected],
@@ -621,87 +564,11 @@ html|span.ac-emphasize-text-url {
   border-top: 1px solid GrayText;
 }
 
-/* Popup blocker button */
-#page-report-button {
-  list-style-image: url("chrome://browser/skin/Info.png");
-}
-
-/* Reader mode button */
-
-#reader-mode-button {
-  list-style-image: url("chrome://browser/skin/readerMode.svg");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#reader-mode-button:hover,
-#reader-mode-button[readeractive]:hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#reader-mode-button:hover:active,
-#reader-mode-button[readeractive] {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
-}
-
-/* social share panel */
-%include ../shared/social/social.inc.css
-
-.social-share-frame {
-  border-top: 1px solid #f8f8f8;
-  width: 756px;
-  height: 150px;
-}
-
-#share-container {
-  min-width: 756px;
-  background-color: white;
-  background-repeat: no-repeat;
-  background-position: center center;
-}
-#share-container[loading] {
-  background-image: url(chrome://browser/skin/tabbrowser/pendingpaint.png);
-}
-#share-container > browser {
-  transition: opacity 150ms ease-in-out;
-  opacity: 1;
-}
-#share-container[loading] > browser {
-  opacity: 0;
-}
-
-.social-share-toolbar {
-  border-bottom: 1px solid #dedede;
-  padding: 2px;
-}
-
-#social-share-provider-buttons {
-  padding: 0;
-  margin: 0;
-}
-
-.share-provider-button {
-  padding: 5px;
-  margin: 2px;
-}
-
-.share-provider-button > .toolbarbutton-text {
-  display: none;
-}
-.share-provider-button > .toolbarbutton-icon {
-  width: 16px;
-  min-height: 16px;
-  max-height: 16px;
-}
-
 /* Bookmarking panel */
 #editBookmarkPanelStarIcon {
   list-style-image: url("chrome://browser/skin/places/starred48.png");
   width: 48px;
   height: 48px;
-}
-
-#editBookmarkPanelStarIcon[unstarred] {
-  list-style-image: url("chrome://browser/skin/places/unstarred48.png");
 }
 
 #editBookmarkPanelTitle {
@@ -722,8 +589,9 @@ html|span.ac-emphasize-text-url {
 
 %include ../shared/sidebar.inc.css
 
-#sidebar {
-  background-color: Window;
+#sidebar-box {
+  background-color: -moz-Field;
+  color: -moz-FieldText;
 }
 
 #sidebar-header {
@@ -840,8 +708,6 @@ html|span.ac-emphasize-text-url {
 %include ../shared/ctrlTab.inc.css
 %include ../shared/plugin-doorhanger.inc.css
 
-%include downloads/indicator.css
-
 .gcli-panel {
   padding: 0;
 }
@@ -880,12 +746,11 @@ html|span.ac-emphasize-text-url {
      This is why we can't have nice things: */
   /* Animations don't repaint properly without an X compositor. */
   animation-name: none !important;
-  /* Opacity rounds to 0 or 1 on Linux without an X compositor so make the
-     background be transparent in that case by having all alpha values < 0.5 */
-  background-image: radial-gradient(50% 100%, rgba(0,149,220,0.3) 50%, rgba(0,149,220,0.49) 100%);
-  /* The highlight isn't anti-aliased without an X compositor so make it thicker.
-     Make it a darker color since we don't have the box-shadow in this case. */
-  border: 4px solid rgb(0,149,220);
+  /* Opacity rounds to 0 or 1 on Linux without an X compositor, making the
+     background color not visible. Anti-aliasing is not available either. Make a
+     thicker outline and cancel border-radius for that case. */
+     outline: 4px solid rgb(0,200,215);
+     border-radius: 0 !important;
 }
 
 #UITourTooltipDescription {

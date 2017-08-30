@@ -1,5 +1,8 @@
 . "$topsrcdir/browser/config/mozconfigs/macosx64/common-opt"
 
+# Enabled to get some telemetry
+mk_add_options "export JAR_COMPRESSION=brotli"
+
 ac_add_options --disable-install-strip
 ac_add_options --enable-verify-mar
 ac_add_options --enable-profiling
@@ -11,6 +14,9 @@ if test `uname -s` != Linux; then
 fi
 
 if test "${MOZ_UPDATE_CHANNEL}" = "nightly"; then
+ac_add_options --with-macbundlename-prefix=Firefox
+fi
+if test "${MOZ_UPDATE_CHANNEL}" = "nightly-try"; then
 ac_add_options --with-macbundlename-prefix=Firefox
 fi
 

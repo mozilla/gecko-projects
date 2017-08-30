@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "nsContainerFrame.h"
+#include "nsStringFwd.h"
 #include "FrameLayerBuilder.h"
 
 namespace mozilla {
@@ -21,7 +22,6 @@ class LayerManager;
 
 class nsPresContext;
 class nsDisplayItem;
-class nsAString;
 
 nsIFrame* NS_NewHTMLCanvasFrame (nsIPresShell* aPresShell, nsStyleContext* aContext);
 
@@ -52,7 +52,7 @@ public:
                                      LayerManager* aManager,
                                      nsDisplayItem* aItem,
                                      const ContainerLayerParameters& aContainerParameters);
-  void InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
+  bool InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
                                 CanvasRenderer* aRenderer);
 
   /* get the size of the canvas's image */

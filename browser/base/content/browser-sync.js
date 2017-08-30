@@ -90,8 +90,7 @@ var gSync = {
   },
 
   init() {
-    // Bail out if we're already initialized or for pop-up windows.
-    if (this._initialized || !window.toolbar.visible) {
+    if (this._initialized) {
       return;
     }
 
@@ -394,6 +393,21 @@ var gSync = {
       this.openSendToDevicePromo();
       BrowserPageActions.panelNode.hidePopup();
     });
+
+    // Now add a 'sign in to sync' item above the 'learn more' item.
+    const signInToSync = this.fxaStrings.GetStringFromName("sendTabToDevice.signintosync");
+    let signInItem = createDeviceNodeFn(null, signInToSync, null);
+    signInItem.classList.add("sync-menuitem");
+    signInItem.setAttribute("label", signInToSync);
+    // Show an icon if opened in the page action panel:
+    if (signInItem.classList.contains("subviewbutton")) {
+      signInItem.classList.add("subviewbutton-iconic", "signintosync");
+    }
+    signInItem.addEventListener("command", () => {
+      this.openPrefs("sendtab");
+      BrowserPageActions.panelNode.hidePopup();
+    });
+    fragment.insertBefore(signInItem, fragment.lastChild);
   },
 
   _appendSendTabInfoItems(fragment, createDeviceNodeFn, statusLabel, actionLabel, actionCommand) {
@@ -478,7 +492,7 @@ var gSync = {
 
     let broadcaster = document.getElementById("sync-status");
     broadcaster.setAttribute("syncstatus", "active");
-    broadcaster.setAttribute("label", this.syncStrings.GetStringFromName("syncing2.label"));
+    broadcaster.setAttribute("label", this.syncStrings.GetStringFromName("syncingtabs.label"));
     broadcaster.setAttribute("disabled", "true");
   },
 

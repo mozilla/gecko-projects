@@ -49,14 +49,6 @@
   padding-inline-start: 0;
 }
 
-/* subviewbutton entries for social sidebars have images that come from external
-/* sources, and are not guaranteed to be the size we want, so force the size on
-/* those icons. */
-toolbarbutton.social-provider-menuitem > .toolbarbutton-icon {
-  width: 16px;
-  height: 16px;
-}
-
 .subviewbutton:-moz-any([image],[targetURI],.cui-withicon, .restoreallitem, .bookmark-item)[checked="true"] > .toolbarbutton-icon {
   visibility: hidden;
 }
@@ -95,6 +87,16 @@ menu.subviewbutton > .menu-right:-moz-locale-dir(rtl) {
 
 .subviewradio > .radio-label-box {
   -moz-appearance: none;
+}
+
+/*
+ * #pageActionFeedbackAnimatableImage is wider than the panel, and due to a
+ * bug in panels on Linux, a box-shadow appears where the image would be if
+ * overflow:hidden wasn't applied. Disabling the box-shadow for this panel on
+ * Linux works around this issue. This bug is on file as 1394575.
+ */
+#pageActionFeedback > .panel-arrowcontainer > .panel-arrowcontent {
+  box-shadow: none;
 }
 
 /* START photon adjustments */

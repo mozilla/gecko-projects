@@ -251,16 +251,23 @@ bool CompartmentPrivate::TryParseLocationURI(CompartmentPrivate::LocationHint aL
         return false;
 
     // Handle Sandbox location strings.
-    // A sandbox string looks like this:
+    // A sandbox string looks like this, for anonymous sandboxes, and builds
+    // where Sandbox location tagging is enabled:
+    //
     // <sandboxName> (from: <js-stack-frame-filename>:<lineno>)
+    //
     // where <sandboxName> is user-provided via Cu.Sandbox()
     // and <js-stack-frame-filename> and <lineno> is the stack frame location
     // from where Cu.Sandbox was called.
+    //
+    // Otherwise, it is simply the caller-provided name, which is usually a URI.
+    //
     // <js-stack-frame-filename> furthermore is "free form", often using a
     // "uri -> uri -> ..." chain. The following code will and must handle this
     // common case.
+    //
     // It should be noted that other parts of the code may already rely on the
-    // "format" of these strings, such as the add-on SDK.
+    // "format" of these strings.
 
     static const nsDependentCString from("(from: ");
     static const nsDependentCString arrow(" -> ");
@@ -317,24 +324,24 @@ PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal)
     if (nsXPConnect::SecurityManager()->IsSystemPrincipal(aPrincipal))
         return true;
 
+    auto principal = BasePrincipal::Cast(aPrincipal);
+
     // ExpandedPrincipal gets a free pass.
-    nsCOMPtr<nsIExpandedPrincipal> ep = do_QueryInterface(aPrincipal);
-    if (ep)
+    if (principal->Is<ExpandedPrincipal>()) {
         return true;
+    }
+
+    // WebExtension principals get a free pass.
+    nsString addonId;
+    if (IsWebExtensionPrincipal(principal, addonId)) {
+        return true;
+    }
 
     // Check whether our URI is an "about:" URI that allows scripts.  If it is,
     // we need to allow JS to run.
     nsCOMPtr<nsIURI> principalURI;
     aPrincipal->GetURI(getter_AddRefs(principalURI));
     MOZ_ASSERT(principalURI);
-
-    // WebExtension principals gets a free pass.
-    nsString addonId;
-    aPrincipal->GetAddonId(addonId);
-    bool isWebExtension = !addonId.IsEmpty();
-    if (isWebExtension) {
-        return true;
-    }
 
     bool isAbout;
     nsresult rv = principalURI->SchemeIs("about", &isAbout);
@@ -765,7 +772,6 @@ XPCJSRuntime::CustomGCCallback(JSGCStatus status)
 /* static */ void
 XPCJSRuntime::FinalizeCallback(JSFreeOp* fop,
                                JSFinalizeStatus status,
-                               bool isZoneGC,
                                void* data)
 {
     XPCJSRuntime* self = nsXPConnect::GetRuntimeInstance();
@@ -2121,16 +2127,6 @@ MOZ_DEFINE_MALLOC_SIZE_OF(OrphanMallocSizeOf)
 
 namespace xpc {
 
-static size_t
-SizeOfTreeIncludingThis(nsINode* tree, SizeOfState& aState)
-{
-    size_t n = tree->SizeOfIncludingThis(aState);
-    for (nsIContent* child = tree->GetFirstChild(); child; child = child->GetNextNode(tree))
-        n += child->SizeOfIncludingThis(aState);
-
-    return n;
-}
-
 class OrphanReporter : public JS::ObjectPrivateVisitor
 {
   public:
@@ -2154,10 +2150,26 @@ class OrphanReporter : public JS::ObjectPrivateVisitor
             // and then record its root so we don't measure it again.
             nsCOMPtr<nsINode> orphanTree = node->SubtreeRoot();
             if (orphanTree && !mState.HaveSeenPtr(orphanTree.get())) {
-                n += SizeOfTreeIncludingThis(orphanTree, mState);
+                n += SizeOfTreeIncludingThis(orphanTree);
             }
         }
         return n;
+    }
+
+    size_t SizeOfTreeIncludingThis(nsINode* tree)
+    {
+        size_t nodeSize = 0;
+        nsWindowSizes sizes(mState);
+        tree->AddSizeOfIncludingThis(sizes, &nodeSize);
+        for (nsIContent* child = tree->GetFirstChild(); child; child = child->GetNextNode(tree))
+            child->AddSizeOfIncludingThis(sizes, &nodeSize);
+
+        // We combine the node size with nsStyleSizes here. It's not ideal, but
+        // it's hard to get the style structs measurements out to
+        // nsWindowMemoryReporter. Also, we drop mServoData in
+        // UnbindFromTree(), so in theory any non-in-tree element won't have
+        // any style data to measure.
+        return nodeSize + sizes.getTotalSize();
     }
 
   private:
@@ -2651,6 +2663,21 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
 }
 
 static void
+SetUseCounterCallback(JSObject* obj, JSUseCounter counter)
+{
+    switch (counter) {
+      case JSUseCounter::ASMJS:
+        SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_asmjs);
+        break;
+      case JSUseCounter::WASM:
+        SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_wasm);
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected JSUseCounter id");
+    }
+}
+
+static void
 CompartmentNameCallback(JSContext* cx, JSCompartment* comp,
                         char* buf, size_t bufsize)
 {
@@ -2852,6 +2879,7 @@ XPCJSRuntime::Initialize(JSContext* cx)
     JS_SetWrapObjectCallbacks(cx, &WrapObjectCallbacks);
     js::SetPreserveWrapperCallback(cx, PreserveWrapper);
     JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
+    JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
     js::SetWindowProxyClass(cx, &OuterWindowProxyClass);
     js::SetXrayJitInfo(&gXrayJitInfo);
     JS::SetProcessLargeAllocationFailureCallback(OnLargeAllocationFailureCallback);

@@ -116,6 +116,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "JSONFile",
                                   "resource://gre/modules/JSONFile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillNameUtils",
                                   "resource://formautofill/FormAutofillNameUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MasterPassword",
+                                  "resource://formautofill/MasterPassword.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PhoneNumber",
                                   "resource://formautofill/phonenumberutils/PhoneNumber.jsm");
 
@@ -529,33 +531,6 @@ class AutofillRecords {
       }
     });
     return clonedRecords;
-  }
-
-  /**
-   * Returns the filtered records based on input's information and searchString.
-   *
-   * @returns {Array.<Object>}
-   *          An array containing clones of matched record.
-   */
-  getByFilter({info, searchString}) {
-    this.log.debug("getByFilter:", info, searchString);
-
-    let lcSearchString = searchString.toLowerCase();
-    let result = this.getAll().filter(record => {
-      // Return true if string is not provided and field exists.
-      // TODO: We'll need to check if the address is for billing or shipping.
-      //       (Bug 1358941)
-      let name = record[info.fieldName];
-
-      if (!searchString) {
-        return !!name;
-      }
-
-      return name && name.toLowerCase().startsWith(lcSearchString);
-    });
-
-    this.log.debug("getByFilter:", "Returning", result.length, "result(s)");
-    return result;
   }
 
   /**
@@ -1074,7 +1049,9 @@ class AutofillRecords {
   _clone(record) {
     let result = {};
     for (let key in record) {
-      if (!key.startsWith("_")) {
+      // Do not expose hidden fields and fields with empty value (mainly used
+      // as placeholders of the computed fields).
+      if (!key.startsWith("_") && record[key] !== "") {
         result[key] = record[key];
       }
     }
@@ -1163,8 +1140,8 @@ class Addresses extends AutofillRecords {
     // TODO: We only support US in MVP so hide the field if it's not. We
     //       are going to support more countries in bug 1370193.
     if (address.country && address.country != "US") {
-      address["country-name"] = "";
       delete address.country;
+      delete address["country-name"];
     }
   }
 
@@ -1467,30 +1444,20 @@ class CreditCards extends AutofillRecords {
       hasNewComputedFields = true;
     }
 
+    let year = creditCard["cc-exp-year"];
+    let month = creditCard["cc-exp-month"];
+    if (!creditCard["cc-exp"] && month && year) {
+      creditCard["cc-exp"] = String(year) + "-" + String(month).padStart(2, "0");
+      hasNewComputedFields = true;
+    }
+
     return hasNewComputedFields;
   }
 
   _normalizeFields(creditCard) {
-    // Fields that should not be set by content.
-    delete creditCard["cc-number-encrypted"];
-
-    // Validate and encrypt credit card numbers, and calculate the masked numbers
-    if (creditCard["cc-number"]) {
-      let ccNumber = creditCard["cc-number"].replace(/\s/g, "");
-      delete creditCard["cc-number"];
-
-      if (!/^\d+$/.test(ccNumber)) {
-        throw new Error("Credit card number contains invalid characters.");
-      }
-
-      // TODO: Encrypt cc-number here (bug 1337314).
-      // e.g. creditCard["cc-number-encrypted"] = Encrypt(creditCard["cc-number"]);
-
-      if (ccNumber.length > 4) {
-        creditCard["cc-number"] = "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
-      } else {
-        creditCard["cc-number"] = ccNumber;
-      }
+    // Check if cc-number is normalized(normalizeCCNumberFields should be called first).
+    if (!creditCard["cc-number-encrypted"] || !creditCard["cc-number"].includes("*")) {
+      throw new Error("Credit card number needs to be normalized first.");
     }
 
     // Normalize name
@@ -1527,6 +1494,31 @@ class CreditCards extends AutofillRecords {
       } else {
         creditCard["cc-exp-year"] = expYear;
       }
+    }
+  }
+
+  /**
+   * Normalize credit card number related field for saving. It should always be
+   * called before adding/updating credit card records.
+   *
+   * @param  {Object} creditCard
+   *         The creditCard record with plaintext number only.
+   */
+  async normalizeCCNumberFields(creditCard) {
+    // Fields that should not be set by content.
+    delete creditCard["cc-number-encrypted"];
+
+    // Validate and encrypt credit card numbers, and calculate the masked numbers
+    if (creditCard["cc-number"]) {
+      let ccNumber = creditCard["cc-number"].replace(/\s/g, "");
+      delete creditCard["cc-number"];
+
+      if (!FormAutofillUtils.isCCNumber(ccNumber)) {
+        throw new Error("Credit card number contains invalid characters or is under 12 digits.");
+      }
+
+      creditCard["cc-number-encrypted"] = await MasterPassword.encrypt(ccNumber);
+      creditCard["cc-number"] = "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
     }
   }
 }

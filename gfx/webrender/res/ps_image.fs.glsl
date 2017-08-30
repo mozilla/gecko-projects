@@ -1,5 +1,3 @@
-#line 1
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -28,5 +26,5 @@ void main(void) {
 
     alpha = alpha * float(all(bvec2(step(position_in_tile, vStretchSize))));
 
-    oFragColor = vec4(alpha) * TEX_SAMPLE(sColor0, st);
+    oFragColor = vec4(alpha) * TEX_SAMPLE(sColor0, vec3(st, vLayer));
 }

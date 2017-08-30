@@ -405,11 +405,12 @@ HTMLAnchorElement::IntrinsicState() const
   return Link::LinkState() | nsGenericHTMLElement::IntrinsicState();
 }
 
-size_t
-HTMLAnchorElement::SizeOfExcludingThis(mozilla::SizeOfState& aState) const
+void
+HTMLAnchorElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
+                                          size_t* aNodeSize) const
 {
-  return nsGenericHTMLElement::SizeOfExcludingThis(aState) +
-         Link::SizeOfExcludingThis(aState);
+  nsGenericHTMLElement::AddSizeOfExcludingThis(aSizes, aNodeSize);
+  *aNodeSize += Link::SizeOfExcludingThis(aSizes.mState);
 }
 
 } // namespace dom

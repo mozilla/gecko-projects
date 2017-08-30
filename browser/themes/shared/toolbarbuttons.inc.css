@@ -66,16 +66,7 @@ toolbar[brighttext] {
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
   -moz-appearance: none;
-  padding: 0;
-  min-width: 26px;
-  border: 1px solid transparent;
-  border-bottom-style: none;
-  border-radius: var(--toolbarbutton-border-radius) var(--toolbarbutton-border-radius) 0 0;
-}
-
-.tabbrowser-arrowscrollbox > .scrollbutton-up,
-.tabbrowser-arrowscrollbox > .scrollbutton-down {
-  border-radius: 0;
+  padding: 0 var(--toolbarbutton-inner-padding);
 }
 
 #navigator-toolbox:not(:hover) > #TabsToolbar > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-down:not([highlight]) {
@@ -263,23 +254,39 @@ toolbar .toolbarbutton-1[checked]:not(:active):hover > .toolbarbutton-icon {
 /* ::::: bookmark buttons ::::: */
 
 toolbarbutton.bookmark-item:not(.subviewbutton) {
-  margin: 0;
-  padding: 2px 3px;
+  margin: 0 2px;
+  padding: 0 4px;
   -moz-appearance: none;
 }
 
-.bookmark-item > .toolbarbutton-icon,
-#personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
+:root[uidensity=compact] toolbarbutton.bookmark-item:not(.subviewbutton) {
+  margin: 0 1px;
+}
+
+:root[uidensity=touch] toolbarbutton.bookmark-item:not(.subviewbutton) {
+  padding: 4px;
+}
+
+toolbarbutton.bookmark-item {
+  max-width: 13em;
+}
+
+/* Not in a :not(...) clause in the rule above to avoid unduly increasing
+ * that rule's specificity. */
+#bookmarks-toolbar-placeholder {
+  max-width: unset;
+}
+
+.bookmark-item > .toolbarbutton-icon {
   width: 16px;
   height: 16px;
 }
 
 /* Force the display of the label for bookmarks */
-.bookmark-item > .toolbarbutton-text,
-#personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-text {
+.bookmark-item > .toolbarbutton-text {
   display: -moz-box !important;
 }
 
 #PlacesToolbarItems > .bookmark-item > .toolbarbutton-icon[label]:not([label=""]) {
-  margin-inline-end: 5px;
+  margin-inline-end: 4px;
 }

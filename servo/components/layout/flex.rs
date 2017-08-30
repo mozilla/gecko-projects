@@ -21,7 +21,6 @@ use model::{IntrinsicISizes, MaybeAuto, SizeConstraint};
 use std::cmp::{max, min};
 use std::ops::Range;
 use style::computed_values::{align_content, align_self, flex_direction, flex_wrap, justify_content};
-use style::computed_values::border_collapse;
 use style::logical_geometry::{Direction, LogicalSize};
 use style::properties::ComputedValues;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW};
@@ -160,8 +159,7 @@ impl FlexItem {
                                             Some(containing_length));
 
                 // These methods compute auto margins to zero length, which is exactly what we want.
-                block.fragment.compute_border_and_padding(containing_length,
-                                                          border_collapse::T::separate);
+                block.fragment.compute_border_and_padding(containing_length);
                 block.fragment.compute_inline_direction_margins(containing_length);
                 block.fragment.compute_block_direction_margins(containing_length);
 
@@ -415,7 +413,7 @@ impl FlexFlow {
 
         let items = &mut self.items[start..];
         let mut children = self.block_flow.base.children.random_access_mut();
-        for mut item in items {
+        for item in items {
             let kid = children.get(item.index);
             item.init_sizes(kid, container_size, self.main_mode);
             let outer_main_size = item.outer_main_size(kid, self.main_mode);
@@ -607,7 +605,7 @@ impl FlexFlow {
 
             let mut children = self.block_flow.base.children.random_access_mut();
             for item in items.iter_mut() {
-                let mut block = children.get(item.index).as_mut_block();
+                let block = children.get(item.index).as_mut_block();
 
                 block.base.block_container_writing_mode = container_mode;
                 block.base.block_container_inline_size = inline_size;
@@ -659,7 +657,7 @@ impl FlexFlow {
 
         let mut children = self.block_flow.base.children.random_access_mut();
         for item in &mut self.items {
-            let mut base = flow::mut_base(children.get(item.index));
+            let base = flow::mut_base(children.get(item.index));
             if !self.main_reverse {
                 base.position.start.b = cur_b;
                 cur_b = cur_b + base.position.size.block;
@@ -713,14 +711,18 @@ impl FlexFlow {
 
             line_interval = match line_align {
                 align_content::T::space_between => {
-                    if line_count == 1 {
+                    if line_count <= 1 {
                         Au(0)
                     } else {
                         free_space / (line_count - 1)
                     }
                 }
                 align_content::T::space_around => {
-                    free_space / line_count
+                    if line_count == 0 {
+                        Au(0)
+                    } else {
+                        free_space / line_count
+                    }
                 }
                 _ => Au(0),
             };
@@ -979,6 +981,14 @@ impl Flow for FlexFlow {
 
     fn compute_overflow(&self) -> Overflow {
         self.block_flow.compute_overflow()
+    }
+
+    fn contains_roots_of_absolute_flow_tree(&self) -> bool {
+        self.block_flow.contains_roots_of_absolute_flow_tree()
+    }
+
+    fn is_absolute_containing_block(&self) -> bool {
+        self.block_flow.is_absolute_containing_block()
     }
 
     fn generated_containing_block_size(&self, flow: OpaqueFlow) -> LogicalSize<Au> {

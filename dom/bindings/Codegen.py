@@ -476,8 +476,6 @@ class CGDOMJSClass(CGThing):
             static const js::ClassOps sClassOps = {
               ${addProperty}, /* addProperty */
               nullptr,               /* delProperty */
-              nullptr,               /* getProperty */
-              nullptr,               /* setProperty */
               nullptr,               /* enumerate */
               ${newEnumerate}, /* newEnumerate */
               ${resolve}, /* resolve */
@@ -767,8 +765,6 @@ class CGInterfaceObjectJSClass(CGThing):
                 static const js::ClassOps sInterfaceObjectClassOps = {
                     nullptr,               /* addProperty */
                     nullptr,               /* delProperty */
-                    nullptr,               /* getProperty */
-                    nullptr,               /* setProperty */
                     nullptr,               /* enumerate */
                     nullptr,               /* newEnumerate */
                     nullptr,               /* resolve */
@@ -7709,7 +7705,7 @@ class CGPerSignatureCall(CGThing):
             argsPre.append("global")
 
         if isConstructor and idlNode.isHTMLConstructor():
-            argsPre.append("args")
+            argsPre.extend(["args", "desiredProto"])
 
         # For JS-implemented interfaces we do not want to base the
         # needsCx decision on the types involved, just on our extended
@@ -7843,10 +7839,12 @@ class CGPerSignatureCall(CGThing):
             not getter):
             cgThings.append(CGGeneric(fill(
                 """
-                CustomElementReactionsStack* reactionsStack = GetCustomElementReactionsStack(${obj});
                 Maybe<AutoCEReaction> ceReaction;
-                if (reactionsStack) {
-                  ceReaction.emplace(reactionsStack);
+                if (CustomElementRegistry::IsCustomElementEnabled()) {
+                  CustomElementReactionsStack* reactionsStack = GetCustomElementReactionsStack(${obj});
+                  if (reactionsStack) {
+                    ceReaction.emplace(reactionsStack);
+                  }
                 }
                 """, obj=objectName)))
 
@@ -7876,7 +7874,7 @@ class CGPerSignatureCall(CGThing):
 
         if useCounterName:
             # Generate a telemetry call for when [UseCounter] is used.
-            code = "SetDocumentAndPageUseCounter(cx, obj, eUseCounter_%s);\n" % useCounterName
+            code = "SetDocumentAndPageUseCounter(obj, eUseCounter_%s);\n" % useCounterName
             cgThings.append(CGGeneric(code))
 
         self.cgRoot = CGList(cgThings)

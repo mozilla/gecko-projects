@@ -211,7 +211,7 @@ ServoStyleSheet::ParseSheet(css::Loader* aLoader,
   Inner()->mContents =
     Servo_StyleSheet_FromUTF8Bytes(
         aLoader, this, &input, mParsingMode, extraData,
-        aLineNumber, aCompatMode
+        aLineNumber, aCompatMode, aReusableSheets
     ).Consume();
 
   Inner()->mURLData = extraData.forget();
@@ -461,6 +461,13 @@ ServoStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
     s = s->mNext ? s->mNext->AsServo() : nullptr;
   }
   return n;
+}
+
+OriginFlags
+ServoStyleSheet::GetOrigin()
+{
+  return static_cast<OriginFlags>(
+    Servo_StyleSheet_GetOrigin(Inner()->mContents));
 }
 
 } // namespace mozilla

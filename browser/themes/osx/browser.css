@@ -25,47 +25,21 @@
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) + 1px);
   --toolbarbutton-border-radius: 4px;
 
-  --urlbar-dropmarker-url: url("chrome://browser/skin/urlbar-history-dropmarker.png");
-  --urlbar-dropmarker-region: rect(0, 11px, 14px, 0);
-  --urlbar-dropmarker-active-region: rect(0, 22px, 14px, 11px);
-  --urlbar-dropmarker-2x-url: url("chrome://browser/skin/urlbar-history-dropmarker@2x.png");
-  --urlbar-dropmarker-2x-region: rect(0, 22px, 28px, 0);
-  --urlbar-dropmarker-active-2x-region: rect(0, 44px, 28px, 22px);
-
   --panel-separator-color: hsla(210,4%,10%,.14);
   --arrowpanel-dimmed: hsla(210,4%,10%,.07);
   --arrowpanel-dimmed-further: hsla(210,4%,10%,.12);
   --arrowpanel-dimmed-even-further: hsla(210,4%,10%,.17);
 
   --urlbar-separator-color: hsla(0,0%,16%,.2);
+
+  --toolbox-border-bottom-color: #e1e1e2;
 }
 
 :root:-moz-lwtheme {
   --toolbar-bgcolor: rgba(255,255,255,.4);
   --toolbar-bgimage: none;
-}
 
-#navigator-toolbox::after {
-  -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  content: "";
-  display: -moz-box;
-  border-top: 1px solid hsla(0,0%,100%,.15);
-  border-bottom: 1px solid hsla(0,0%,0%,.15);
-  margin-top: -2px;
-  position: relative;
-  z-index: 2; /* navbar is at 1 */
-}
-
-@media (-moz-mac-yosemite-theme) {
-  #navigator-toolbox:-moz-window-inactive::after {
-    border-top-style: none;
-    border-bottom-color: hsla(0,0%,0%,.1);
-    margin-top: -1px;
-  }
-}
-
-:root[customizing] #navigator-toolbox::after {
-  display: none;
+  --toolbox-border-bottom-color: rgba(0,0,0,.3);
 }
 
 #navigator-toolbox toolbarbutton:-moz-lwtheme {
@@ -139,11 +113,6 @@
 #navigator-toolbox > toolbar:not(#TabsToolbar) {
   -moz-appearance: none;
   background: var(--toolbar-bgcolor);
-}
-
-#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
-  /* add extra padding to compensate the bottom border */
-  padding-bottom: 2px;
 }
 
 /* Draw the bottom border of the tabs toolbar when it's not using
@@ -285,30 +254,6 @@
   opacity: 0.7;
 }
 
-#bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar.png") !important;
-}
-
-toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-#personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
-}
-
-@media (min-resolution: 2dppx) {
-  #bookmarks-toolbar-placeholder {
-    list-style-image: url("chrome://browser/skin/places/bookmarksToolbar@2x.png") !important;
-  }
-
-  toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-  #personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-    list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel@2x.png") !important;
-  }
-
-  #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
-    width: 16px;
-  }
-}
-
 /* ----- BOOKMARK MENUS ----- */
 
 .bookmark-item > .menu-iconic-left > .menu-iconic-icon {
@@ -420,51 +365,6 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
   margin: 0;
   padding: 3px 0 2px;
 }
-.urlbar-history-dropmarker {
-  padding: 0 3px;
-  list-style-image: var(--urlbar-dropmarker-url);
-  -moz-image-region: var(--urlbar-dropmarker-region);
-  transition: opacity 0.15s ease;
-}
-#urlbar-wrapper[switchingtabs] > #urlbar > .urlbar-textbox-container > .urlbar-history-dropmarker {
-  transition: none;
-}
-
-#navigator-toolbox:not(:hover) #nav-bar:not([customizing="true"]) #urlbar:not([focused]) > .urlbar-textbox-container > .urlbar-history-dropmarker {
-  opacity: 0;
-}
-
-.urlbar-history-dropmarker[open="true"],
-.urlbar-history-dropmarker:hover:active {
-  -moz-image-region: var(--urlbar-dropmarker-active-region);
-}
-
-@media (min-resolution: 2dppx) {
-  .urlbar-history-dropmarker {
-    list-style-image: var(--urlbar-dropmarker-2x-url);
-    -moz-image-region: var(--urlbar-dropmarker-2x-region);
-  }
-
-  .urlbar-history-dropmarker[open="true"],
-  .urlbar-history-dropmarker:hover:active {
-    -moz-image-region: var(--urlbar-dropmarker-active-2x-region);
-  }
-
-  .urlbar-history-dropmarker > .dropmarker-icon {
-    width: 11px;
-  }
-}
-
-#urlbar-icons {
-  -moz-box-align: center;
-}
-
-.urlbar-icon {
-  padding: 0 3px;
-  /* 16x16 icon with border-box sizing */
-  width: 22px;
-  height: 16px;
-}
 
 /* ::::: URL Bar Zoom Reset Button ::::: */
 @keyframes urlbar-zoom-reset-pulse {
@@ -519,31 +419,16 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
 /* ----- AUTOCOMPLETE ----- */
 
 %include ../shared/autocomplete.inc.css
+%include ../shared/urlbar-autocomplete.inc.css
 
 #PopupAutoComplete > richlistbox > richlistitem[originaltype~="datalist-first"] {
   border-top: 1px solid #C7C7C7;
 }
 
-#treecolAutoCompleteImage {
-  max-width: 36px;
-}
-
-.autocomplete-richlistbox {
-  padding: 4px;
-}
-
-.autocomplete-richlistitem {
-  height: 30px;
-  min-height: 30px;
-  font: message-box;
-  border-radius: 2px;
-  border: 1px solid transparent;
-}
-
 .autocomplete-richlistitem:hover,
 treechildren.searchbar-treebody::-moz-tree-row(hover) {
-  background-color: hsla(0, 0%, 0%, 0.06);
-  border-color: hsla(0, 0%, 0%, 0.1);
+  background-color: var(--arrowpanel-dimmed);
+  border-color: var(--panel-separator-color);
 }
 
 .autocomplete-richlistitem[selected],
@@ -655,102 +540,11 @@ html|span.ac-emphasize-text-url {
   margin-bottom: -26px;
 }
 
-/* POPUP BLOCKER BUTTON */
-#page-report-button {
-  list-style-image: url("chrome://browser/skin/urlbar-popup-blocked.png");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#page-report-button:hover:active,
-#page-report-button[open="true"] {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-@media (min-resolution: 2dppx) {
-  #page-report-button {
-    list-style-image: url("chrome://browser/skin/urlbar-popup-blocked@2x.png");
-    -moz-image-region: rect(0, 32px, 32px, 0);
-  }
-
-  #page-report-button:hover:active,
-  #page-report-button[open="true"] {
-    -moz-image-region: rect(0, 64px, 32px, 32px);
-  }
-}
-
-/* Reader mode button */
-
-#reader-mode-button {
-  list-style-image: url("chrome://browser/skin/readerMode.svg");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#reader-mode-button:hover:active {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#reader-mode-button[readeractive] {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
-}
-
-/* social share panel */
-.social-share-frame {
-  border-top: 1px solid #f8f8f8;
-  min-width: 756px;
-  height: 150px;
-  /* we resize our panels dynamically, make it look nice */
-}
-
-#share-container {
-  min-width: 756px;
-  background-repeat: no-repeat;
-  background-position: center center;
-}
-#share-container[loading] {
-  background-image: url(chrome://browser/skin/tabbrowser/pendingpaint.png);
-}
-#share-container > browser {
-  transition: opacity 150ms ease-in-out;
-  opacity: 1;
-}
-#share-container[loading] > browser {
-  opacity: 0;
-}
-
-.social-share-toolbar {
-  border-bottom: 1px solid #dedede;
-  padding: 2px;
-}
-
-#social-share-provider-buttons {
-  padding: 0;
-  margin: 0;
-}
-
-.share-provider-button {
-  padding: 5px;
-  margin: 2px;
-}
-
-.share-provider-button > .toolbarbutton-text {
-  display: none;
-}
-
-.share-provider-button > .toolbarbutton-icon {
-  width: 16px;
-  min-height: 16px;
-  max-height: 16px;
-}
-
 /* BOOKMARKING PANEL */
 #editBookmarkPanelStarIcon {
   list-style-image: url("chrome://browser/skin/places/starred48.png");
   width: 48px;
   height: 48px;
-}
-
-#editBookmarkPanelStarIcon[unstarred] {
-  list-style-image: url("chrome://browser/skin/places/unstarred48.png");
 }
 
 @media (min-resolution: 2dppx) {
@@ -1378,7 +1172,7 @@ html|*.addon-webext-perm-list {
 }
 
 .addon-addon-icon {
-  list-style-image: url("chrome://browser/skin/addons.svg");
+  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
 }
 
 .addon-toolbar-icon {
@@ -1415,8 +1209,6 @@ html|*.addon-webext-perm-list {
 %include ../shared/ctrlTab.inc.css
 %include ../shared/plugin-doorhanger.inc.css
 
-%include downloads/indicator.css
-
 /* On mac, the popup notification contents are indented by default and so
   the default closebutton margins from notification.css require adjustment */
 
@@ -1437,33 +1229,6 @@ html|*.addon-webext-perm-list {
   text-shadow: none;
   background-image: linear-gradient(#B4211B, #8A1915);
   border-radius: 1px;
-}
-
-/* Share */
-%include ../shared/social/social.inc.css
-
-#social-share-panel {
-  min-height: 100px;
-  min-width: 300px;
-  transition: height .3s ease-in-out, width .3s ease-in-out;
-}
-
-#share-container,
-.social-share-frame {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: inherit;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: inherit;
-}
-
-#social-share-panel > .social-share-toolbar {
-  border-top-left-radius: inherit;
-  border-top-right-radius: inherit;
-}
-
-#social-share-provider-buttons {
-  border-top-left-radius: inherit;
-  border-top-right-radius: inherit;
 }
 
 /* Customization mode */

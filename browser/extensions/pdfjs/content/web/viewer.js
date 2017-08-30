@@ -1222,8 +1222,7 @@ let PDFViewerApplication = {
         return this.open(file, args);
       });
     }
-    let parameters = Object.create(null),
-        scale;
+    let parameters = Object.create(null);
     if (typeof file === 'string') {
       this.setTitleUsingUrl(file);
       parameters.url = file;
@@ -1236,13 +1235,10 @@ let PDFViewerApplication = {
     parameters.docBaseUrl = this.baseUrl;
     if (args) {
       for (let prop in args) {
+        if (prop === 'length') {
+          this.pdfDocumentProperties.setFileSize(args[prop]);
+        }
         parameters[prop] = args[prop];
-      }
-      if (args.scale) {
-        scale = args.scale;
-      }
-      if (args.length) {
-        this.pdfDocumentProperties.setFileSize(args.length);
       }
     }
     let loadingTask = (0, _pdfjsLib.getDocument)(parameters);
@@ -1256,7 +1252,7 @@ let PDFViewerApplication = {
     };
     loadingTask.onUnsupportedFeature = this.fallback.bind(this);
     return loadingTask.promise.then(pdfDocument => {
-      this.load(pdfDocument, scale);
+      this.load(pdfDocument);
     }, exception => {
       let message = exception && exception.message;
       let loadingErrorMessage;
@@ -1350,8 +1346,7 @@ let PDFViewerApplication = {
       }
     }
   },
-  load(pdfDocument, scale) {
-    scale = scale || _ui_utils.UNKNOWN_SCALE;
+  load(pdfDocument) {
     this.pdfDocument = pdfDocument;
     pdfDocument.getDownloadInfo().then(() => {
       this.downloadComplete = true;
@@ -1417,10 +1412,7 @@ let PDFViewerApplication = {
           sidebarView
         };
       }).then(({ hash, sidebarView }) => {
-        this.setInitialView(hash, {
-          sidebarView,
-          scale
-        });
+        this.setInitialView(hash, { sidebarView });
         initialParams.hash = hash;
         if (!this.isViewerEmbedded) {
           pdfViewer.focus();
@@ -1533,8 +1525,7 @@ let PDFViewerApplication = {
       });
     });
   },
-  setInitialView(storedHash, options = {}) {
-    let { scale = 0, sidebarView = _pdf_sidebar.SidebarView.NONE } = options;
+  setInitialView(storedHash, { sidebarView } = {}) {
     this.isInitialViewSet = true;
     this.pdfSidebar.setInitialView(sidebarView);
     if (this.initialDestination) {
@@ -1546,9 +1537,6 @@ let PDFViewerApplication = {
       this.initialBookmark = null;
     } else if (storedHash) {
       this.pdfLinkService.setHash(storedHash);
-    } else if (scale) {
-      this.pdfViewer.currentScaleValue = scale;
-      this.page = 1;
     }
     this.toolbar.setPageNumber(this.pdfViewer.currentPageNumber, this.pdfViewer.currentPageLabel);
     this.secondaryToolbar.setPageNumber(this.pdfViewer.currentPageNumber);
@@ -3980,11 +3968,10 @@ var _pdfjsLib = __webpack_require__(1);
 
 class PDFAttachmentViewer {
   constructor({ container, eventBus, downloadManager }) {
-    this.attachments = null;
     this.container = container;
     this.eventBus = eventBus;
     this.downloadManager = downloadManager;
-    this._renderedCapability = (0, _pdfjsLib.createPromiseCapability)();
+    this.reset();
     this.eventBus.on('fileattachmentannotation', this._appendAttachment.bind(this));
   }
   reset(keepRenderedCapability = false) {
@@ -3995,11 +3982,11 @@ class PDFAttachmentViewer {
     }
   }
   _dispatchEvent(attachmentsCount) {
+    this._renderedCapability.resolve();
     this.eventBus.dispatch('attachmentsloaded', {
       source: this,
       attachmentsCount
     });
-    this._renderedCapability.resolve();
   }
   _bindPdfLink(button, content, filename) {
     if (_pdfjsLib.PDFJS.disableCreateObjectURL) {
@@ -4735,11 +4722,10 @@ var _pdfjsLib = __webpack_require__(1);
 const DEFAULT_TITLE = '\u2013';
 class PDFOutlineViewer {
   constructor({ container, linkService, eventBus }) {
-    this.outline = null;
-    this.lastToggleIsShow = true;
     this.container = container;
     this.linkService = linkService;
     this.eventBus = eventBus;
+    this.reset();
   }
   reset() {
     this.outline = null;
@@ -5686,7 +5672,7 @@ class PDFSidebar {
   get isAttachmentsViewVisible() {
     return this.isOpen && this.active === SidebarView.ATTACHMENTS;
   }
-  setInitialView(view) {
+  setInitialView(view = SidebarView.NONE) {
     if (this.isInitialViewSet) {
       return;
     }
@@ -5897,13 +5883,20 @@ class PDFSidebar {
       }
     });
     this.eventBus.on('attachmentsloaded', evt => {
-      let attachmentsCount = evt.attachmentsCount;
-      this.attachmentsButton.disabled = !attachmentsCount;
-      if (attachmentsCount) {
+      if (evt.attachmentsCount) {
+        this.attachmentsButton.disabled = false;
         this._showUINotification(SidebarView.ATTACHMENTS);
-      } else if (this.active === SidebarView.ATTACHMENTS) {
-        this.switchView(SidebarView.THUMBS);
+        return;
       }
+      Promise.resolve().then(() => {
+        if (this.attachmentsView.hasChildNodes()) {
+          return;
+        }
+        this.attachmentsButton.disabled = true;
+        if (this.active === SidebarView.ATTACHMENTS) {
+          this.switchView(SidebarView.THUMBS);
+        }
+      });
     });
     this.eventBus.on('presentationmodechanged', evt => {
       if (!evt.active && !evt.switchInProgress && this.isThumbnailViewVisible) {

@@ -15,7 +15,14 @@
 #include "GMPLog.h"
 #include "mozilla/Move.h"
 
-#ifndef XP_WIN
+#ifdef XP_WIN
+#include "WinUtils.h"
+#include "nsWindowsDllInterceptor.h"
+#include <windows.h>
+#include <strsafe.h>
+#include <unordered_map>
+#include <vector>
+#else
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,9 +34,17 @@ extern const GMPPlatformAPI* sPlatform;
 
 namespace mozilla {
 
-ChromiumCDMAdapter::ChromiumCDMAdapter(nsTArray<nsCString>&& aHostFilePaths)
+#ifdef XP_WIN
+static void
+InitializeHooks();
+#endif
+
+ChromiumCDMAdapter::ChromiumCDMAdapter(nsTArray<Pair<nsCString, nsCString>>&& aHostPathPairs)
 {
-  PopulateHostFiles(Move(aHostFilePaths));
+#ifdef XP_WIN
+  InitializeHooks();
+#endif
+  PopulateHostFiles(Move(aHostPathPairs));
 }
 
 void
@@ -51,6 +66,7 @@ ChromiumCdmHost(int aHostInterfaceVersion, void* aUserData)
 #define STRINGIFY(s) _STRINGIFY(s)
 #define _STRINGIFY(s) #s
 
+#ifdef MOZILLA_OFFICIAL
 static cdm::HostFile
 TakeToCDMHostFile(HostFileData& aHostFileData)
 {
@@ -58,6 +74,7 @@ TakeToCDMHostFile(HostFileData& aHostFileData)
                        aHostFileData.mBinary.TakePlatformFile(),
                        aHostFileData.mSig.TakePlatformFile());
 }
+#endif
 
 GMPErr
 ChromiumCDMAdapter::GMPInit(const GMPPlatformAPI* aPlatformAPI)
@@ -68,6 +85,7 @@ ChromiumCDMAdapter::GMPInit(const GMPPlatformAPI* aPlatformAPI)
     return GMPGenericErr;
   }
 
+#ifdef MOZILLA_OFFICIAL
   // Note: we must call the VerifyCdmHost_0 function if it's present before
   // we call the initialize function.
   auto verify = reinterpret_cast<decltype(::VerifyCdmHost_0)*>(
@@ -80,6 +98,7 @@ ChromiumCDMAdapter::GMPInit(const GMPPlatformAPI* aPlatformAPI)
     bool result = verify(files.Elements(), files.Length());
     GMP_LOG("%s VerifyCdmHost_0 returned %d", __func__, result);
   }
+#endif
 
   auto init = reinterpret_cast<decltype(::INITIALIZE_CDM_MODULE)*>(
     PR_FindFunctionSymbol(mLib, STRINGIFY(INITIALIZE_CDM_MODULE)));
@@ -165,6 +184,99 @@ ChromiumCDMAdapter::Supports(int32_t aModuleVersion,
          aHostVersion == cdm::Host_8::kVersion;
 }
 
+#ifdef XP_WIN
+
+static WindowsDllInterceptor sKernel32Intercept;
+
+typedef DWORD(WINAPI* QueryDosDeviceWFnPtr)(_In_opt_ LPCWSTR lpDeviceName,
+                                            _Out_ LPWSTR lpTargetPath,
+                                            _In_ DWORD ucchMax);
+
+static QueryDosDeviceWFnPtr sOriginalQueryDosDeviceWFnPtr = nullptr;
+
+static std::unordered_map<std::wstring, std::wstring>* sDeviceNames = nullptr;
+
+DWORD WINAPI
+QueryDosDeviceWHook(LPCWSTR lpDeviceName, LPWSTR lpTargetPath, DWORD ucchMax)
+{
+  if (!sDeviceNames) {
+    return 0;
+  }
+  std::wstring name = std::wstring(lpDeviceName);
+  auto iter = sDeviceNames->find(name);
+  if (iter == sDeviceNames->end()) {
+    return 0;
+  }
+  const std::wstring& device = iter->second;
+  if (device.size() + 1 > ucchMax) {
+    return 0;
+  }
+  PodCopy(lpTargetPath, device.c_str(), device.size());
+  lpTargetPath[device.size()] = 0;
+  GMP_LOG("QueryDosDeviceWHook %S -> %S", lpDeviceName, lpTargetPath);
+  return name.size();
+}
+
+static std::vector<std::wstring>
+GetDosDeviceNames()
+{
+  std::vector<std::wstring> v;
+  std::vector<wchar_t> buf;
+  buf.resize(1024);
+  DWORD rv = GetLogicalDriveStringsW(buf.size(), buf.data());
+  if (rv == 0 || rv > buf.size()) {
+    return v;
+  }
+
+  // buf will be a list of null terminated strings, with the last string
+  // being 0 length.
+  const wchar_t* p = buf.data();
+  const wchar_t* end = &buf.back();
+  size_t l;
+  while (p < end && (l = wcsnlen_s(p, end - p)) > 0) {
+    // The string is of the form "C:\". We need to strip off the trailing
+    // backslash.
+    std::wstring drive = std::wstring(p, p + l);
+    if (drive.back() == '\\') {
+      drive.erase(drive.end() - 1);
+    }
+    v.push_back(move(drive));
+    p += l + 1;
+  }
+  return v;
+}
+
+static std::wstring
+GetDeviceMapping(const std::wstring& aDosDeviceName)
+{
+  wchar_t buf[MAX_PATH] = { 0 };
+  DWORD rv = QueryDosDeviceW(aDosDeviceName.c_str(), buf, MAX_PATH);
+  if (rv == 0) {
+    return std::wstring(L"");
+  }
+  return std::wstring(buf, buf + rv);
+}
+
+static void
+InitializeHooks()
+{
+  static bool initialized = false;
+  if (initialized) {
+    return;
+  }
+  initialized = true;
+  sDeviceNames = new std::unordered_map<std::wstring, std::wstring>();
+  for (const std::wstring& name : GetDosDeviceNames()) {
+    sDeviceNames->emplace(name, GetDeviceMapping(name));
+  }
+
+  sKernel32Intercept.Init("kernelbase.dll");
+  sKernel32Intercept.AddHook("QueryDosDeviceW",
+                             reinterpret_cast<intptr_t>(QueryDosDeviceWHook),
+                             (void**)(&sOriginalQueryDosDeviceWFnPtr));
+}
+#endif
+
 HostFile::HostFile(HostFile&& aOther)
   : mPath(aOther.mPath)
   , mFile(aOther.TakePlatformFile())
@@ -216,12 +328,12 @@ HostFile::TakePlatformFile()
 }
 
 void
-ChromiumCDMAdapter::PopulateHostFiles(nsTArray<nsCString>&& aHostFilePaths)
+ChromiumCDMAdapter::PopulateHostFiles(nsTArray<Pair<nsCString, nsCString>>&& aHostPathPairs)
 {
-  for (const nsCString& path : aHostFilePaths) {
+  for (const auto& pair : aHostPathPairs) {
     mHostFiles.AppendElement(
-      HostFileData(mozilla::HostFile(path),
-                   mozilla::HostFile(path + NS_LITERAL_CSTRING(".sig"))));
+      HostFileData(mozilla::HostFile(pair.first()),
+                   mozilla::HostFile(pair.second())));
   }
 }
 

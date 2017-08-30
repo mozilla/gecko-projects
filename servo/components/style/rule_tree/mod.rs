@@ -69,7 +69,7 @@ impl Drop for RuleTree {
 /// could be enough to implement the rule tree, keeping the whole rule provides
 /// more debuggability, and also the ability of show those selectors to
 /// devtools.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum StyleSource {
     /// A style rule stable pointer.
     Style(Arc<Locked<StyleRule>>),
@@ -210,7 +210,10 @@ impl RuleTree {
                     _ => {},
                 };
             }
-            if any_normal {
+            // We really want to ensure empty rule nodes appear in the rule tree for
+            // devtools, this condition ensures that if we find an empty rule node, we
+            // insert it at the normal level.
+            if any_normal || !any_important {
                 if matches!(level, Transitions) && found_important {
                     // There can be at most one transition, and it will come at
                     // the end of the iterator. Stash it and apply it after
@@ -439,7 +442,7 @@ const RULE_TREE_GC_INTERVAL: usize = 300;
 ///
 /// [1]: https://drafts.csswg.org/css-cascade/#cascade-origin
 #[repr(u8)]
-#[derive(Eq, PartialEq, Copy, Clone, Debug, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum CascadeLevel {
     /// Normal User-Agent rules.

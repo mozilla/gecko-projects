@@ -71,7 +71,6 @@ class nsIDOMHTMLInputElement;
 class nsIDOMKeyEvent;
 class nsIDOMNode;
 class nsIDragSession;
-class nsIEditor;
 class nsIEventTarget;
 class nsIFragmentContentSink;
 class nsIFrame;
@@ -127,6 +126,7 @@ namespace mozilla {
 class Dispatcher;
 class ErrorResult;
 class EventListenerManager;
+class HTMLEditor;
 
 namespace dom {
 struct CustomElementDefinition;
@@ -630,7 +630,7 @@ public:
   static nsIPrincipal* ObjectPrincipal(JSObject* aObj);
 
   static nsresult GenerateStateKey(nsIContent* aContent,
-                                   const nsIDocument* aDocument,
+                                   nsIDocument* aDocument,
                                    nsACString& aKey);
 
   /**
@@ -1672,12 +1672,6 @@ public:
    */
   static void DestroyMatchString(void* aData);
 
-  /**
-   * Unbinds the content from the tree and nulls it out if it's not null.
-   */
-  static void DestroyAnonymousContent(nsCOMPtr<nsIContent>* aContent);
-  static void DestroyAnonymousContent(nsCOMPtr<Element>* aElement);
-
   /*
    * Notify when the first XUL menu is opened and when the all XUL menus are
    * closed. At opening, aInstalling should be TRUE, otherwise, it should be
@@ -2623,7 +2617,13 @@ public:
   static int32_t GetAdjustedOffsetInTextControl(nsIFrame* aOffsetFrame,
                                                 int32_t aOffset);
 
-  static nsIEditor* GetHTMLEditor(nsPresContext* aPresContext);
+  /**
+   * Returns pointer to HTML editor instance for the aPresContext when there is.
+   * The HTML editor is shared by contenteditable elements or used in
+   * designMode.  When there are no contenteditable elements and the document
+   * is not in designMode, this returns nullptr.
+   */
+  static mozilla::HTMLEditor* GetHTMLEditor(nsPresContext* aPresContext);
 
   /**
    * Returns true if the browser.dom.window.dump.enabled pref is set.
@@ -2960,6 +2960,11 @@ public:
   static void SetupCustomElement(Element* aElement,
                                  const nsAString* aTypeExtension = nullptr);
 
+  static mozilla::dom::CustomElementDefinition*
+  GetElementDefinitionIfObservingAttr(Element* aCustomElement,
+                                      nsIAtom* aExtensionType,
+                                      nsIAtom* aAttrName);
+
   static void EnqueueLifecycleCallback(nsIDocument* aDoc,
                                        nsIDocument::ElementCallbackType aType,
                                        Element* aCustomElement,
@@ -3119,6 +3124,13 @@ public:
    * @param aResult The string result.
    */
   static bool GetSourceMapURL(nsIHttpChannel* aChannel, nsACString& aResult);
+
+  /**
+   * Returns true if the passed-in mesasge is a pending InputEvent.
+   *
+   * @param aMsg  The message to check
+   */
+  static bool IsMessageInputEvent(const IPC::Message& aMsg);
 
 private:
   static bool InitializeEventTable();

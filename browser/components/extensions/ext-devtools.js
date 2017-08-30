@@ -53,9 +53,9 @@ global.getDevToolsTargetForContext = async (context) => {
     throw new Error("Unexpected target type: only local tabs are currently supported.");
   }
 
-  const {TabTarget} = require("devtools/client/framework/target");
+  const tab = context.devToolsToolbox.target.tab;
+  context.devToolsTarget = DevToolsShim.createTargetForTab(tab);
 
-  context.devToolsTarget = new TabTarget(context.devToolsToolbox.target.tab);
   await context.devToolsTarget.makeRemote();
 
   return context.devToolsTarget;

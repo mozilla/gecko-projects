@@ -234,7 +234,13 @@ nsChannelClassifier::nsChannelClassifier(nsIChannel *aChannel)
     mTrackingProtectionEnabled(Nothing()),
     mTrackingAnnotationEnabled(Nothing())
 {
+  LOG(("nsChannelClassifier::nsChannelClassifier %p", this));
   MOZ_ASSERT(mChannel);
+}
+
+nsChannelClassifier::~nsChannelClassifier()
+{
+  LOG(("nsChannelClassifier::~nsChannelClassifier %p", this));
 }
 
 bool
@@ -744,7 +750,7 @@ nsChannelClassifier::HasBeenClassified(nsIChannel *aChannel)
         return false;
     }
 
-    nsXPIDLCString tag;
+    nsCString tag;
     cacheEntry->GetMetaDataElement("necko:classified", getter_Copies(tag));
     return tag.EqualsLiteral("1");
 }

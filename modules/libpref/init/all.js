@@ -36,14 +36,6 @@ pref("general.warnOnAboutConfig", true);
 // maximum number of dated backups to keep at any time
 pref("browser.bookmarks.max_backups",       5);
 
-// Delete HTTP cache v1 data
-pref("browser.cache.auto_delete_cache_version", 0);
-// Preference for switching the cache backend, can be changed freely at runtime
-// 0 - use the old (Darin's) cache
-// 1 - use the new cache back-end (cache v2)
-pref("browser.cache.use_new_backend",       0);
-pref("browser.cache.use_new_backend_temp",  true);
-
 pref("browser.cache.disk.enable",           true);
 // Is this the first-time smartsizing has been introduced?
 pref("browser.cache.disk.smart_size.first_run", true);
@@ -357,9 +349,6 @@ pref("media.throttle-regardless-of-download-rate", false);
 // Master HTML5 media volume scale.
 pref("media.volume_scale", "1.0");
 
-// Timeout for wakelock release
-pref("media.wakelock_timeout", 2000);
-
 // Whether we should play videos opened in a "video document", i.e. videos
 // opened as top-level documents, as opposed to inside a media element.
 pref("media.play-stand-alone", true);
@@ -672,7 +661,11 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
+#ifdef NIGHTLY_BUILD
+pref("apz.autoscroll.enabled", true);
+#else
 pref("apz.autoscroll.enabled", false);
+#endif
 
 // Whether to lock touch scrolling to one axis at a time
 // 0 = FREE (No locking at all)
@@ -742,6 +735,7 @@ pref("apz.record_checkerboarding", true);
 #else
 pref("apz.record_checkerboarding", false);
 #endif
+pref("apz.second_tap_tolerance", "0.5");
 pref("apz.test.logging_enabled", false);
 pref("apz.touch_start_tolerance", "0.1");
 pref("apz.touch_move_tolerance", "0.1");
@@ -893,7 +887,12 @@ pref("gfx.webrender.force-angle", true);
 
 pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.layers-free", false);
-pref("gfx.webrender.profiler.enabled", false);
+pref("gfx.webrender.blob-images", false);
+
+// WebRender debugging utilities.
+pref("gfx.webrender.debug.texture-cache", false);
+pref("gfx.webrender.debug.render-targets", false);
+pref("gfx.webrender.debug.profiler", false);
 
 // Whether webrender should be used as much as possible.
 pref("gfx.webrendest.enabled", false);
@@ -1411,6 +1410,7 @@ pref("privacy.trackingprotection.lower_network_priority", false);
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
+pref("dom.event.coalesce_mouse_move",       false);
 
 pref("dom.webcomponents.enabled",           false);
 pref("dom.webcomponents.customelements.enabled", false);
@@ -1424,6 +1424,7 @@ pref("javascript.options.baselinejit",      true);
 pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             true);
+pref("javascript.options.wasm_ionjit",      true);
 pref("javascript.options.wasm_baselinejit", false);
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
@@ -1442,17 +1443,42 @@ pref("javascript.options.jit.full_debug_checks", true);
 // memory, but makes things like Function.prototype.toSource()
 // fail.
 pref("javascript.options.discardSystemSource", false);
-// This preference limits the memory usage of javascript.
+
+// Many of the the following preferences tune the SpiderMonkey GC, if you
+// change the defaults here please also consider changing them in
+// js/src/jsgc.cpp.  They're documented in js/src/jsapi.h.
+
+// JSGC_MAX_MALLOC_BYTES
+// This preference limits the malloc memory that javascript objects may use.
 // If you want to change these values for your device,
 // please find Bug 417052 comment 17 and Bug 456721
 // Comment 32 and Bug 613551.
+// Override the shell's default of 0xffffffff
 pref("javascript.options.mem.high_water_mark", 128);
+
+// JSGC_MAX_BYTES
+// SpiderMonkey defaults to 2^32-1 bytes, but this is measured in MB so that
+// cannot be represented directly in order to show it in about:config.
 pref("javascript.options.mem.max", -1);
-pref("javascript.options.mem.nursery.max_kb", -1);
+
+// JSGC_MAX_NURSERY_BYTES
+#if defined(ANDROID) || defined(XP_IOS) || defined(MOZ_B2G)
+pref("javascript.options.mem.nursery.max_kb", 4096);
+#else
+pref("javascript.options.mem.nursery.max_kb", 16384);
+#endif
+
+// JSGC_MODE
 pref("javascript.options.mem.gc_per_zone", true);
 pref("javascript.options.mem.gc_incremental", true);
+
+// JSGC_SLICE_TIME_BUDGET
+// Override the shell's default of unlimited slice time.
 pref("javascript.options.mem.gc_incremental_slice_ms", 5);
+
+// JSGC_COMPACTING_ENABLED
 pref("javascript.options.mem.gc_compacting", true);
+
 pref("javascript.options.mem.log", false);
 pref("javascript.options.mem.notify", false);
 pref("javascript.options.gc_on_memory_pressure", true);
@@ -1463,17 +1489,48 @@ pref("javascript.options.compact_on_user_inactive_delay", 15000); // ms
 pref("javascript.options.compact_on_user_inactive_delay", 300000); // ms
 #endif
 
+// JSGC_HIGH_FREQUENCY_TIME_LIMIT
 pref("javascript.options.mem.gc_high_frequency_time_limit_ms", 1000);
+
+// JSGC_HIGH_FREQUENCY_LOW_LIMIT
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 100);
+
+// JSGC_HIGH_FREQUENCY_HIGH_LIMIT
 pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 500);
+
+// JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX
 pref("javascript.options.mem.gc_high_frequency_heap_growth_max", 300);
+
+// JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN
 pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 150);
+
+// JSGC_LOW_FREQUENCY_HEAP_GROWTH
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 150);
+
+// JSGC_DYNAMIC_HEAP_GROWTH
+// Override SpiderMonkey default (false).
 pref("javascript.options.mem.gc_dynamic_heap_growth", true);
+
+// JSGC_DYNAMIC_MARK_SLICE
+// Override SpiderMonkey default (false).
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
+
+// JSGC_REFRESH_FRAME_SLICES_ENABLED
 pref("javascript.options.mem.gc_refresh_frame_slices_enabled", true);
+
+// JSGC_ALLOCATION_THRESHOLD
 pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
+
+// JSGC_ALLOCATION_THRESHOLD_FACTOR
+pref("javascript.options.mem.gc_allocation_threshold_factor", 90);
+
+// JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT
+pref("javascript.options.mem.gc_allocation_threshold_factor_avoid_interrupt", 90);
+
+// JSGC_MIN_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
+
+// JSGC_MAX_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
 pref("javascript.options.showInConsole", false);
@@ -3118,6 +3175,7 @@ pref("editor.positioning.offset",            0);
 pref("dom.use_watchdog", true);
 pref("dom.max_chrome_script_run_time", 20);
 pref("dom.max_script_run_time", 10);
+pref("dom.max_ext_content_script_run_time", 5);
 
 // Stop all scripts in a compartment when the "stop script" dialog is used.
 pref("dom.global_stop_script", true);
@@ -3127,6 +3185,26 @@ pref("dom.idle_period.throttled_length", 10000);
 
 // The amount of idle time (milliseconds) reserved for a long idle period
 pref("idle_queue.long_period", 50);
+
+// Support the input event queue on the main thread of content process
+#ifdef NIGHTLY_BUILD
+pref("input_event_queue.supported", false);
+#else
+pref("input_event_queue.supported", false);
+#endif
+
+// The maximum and minimum time (milliseconds) we reserve for handling input
+// events in each frame.
+pref("input_event_queue.duration.max", 8);
+pref("input_event_queue.duration.min", 1);
+
+// The default amount of time (milliseconds) required for handling a input
+// event.
+pref("input_event_queue.default_duration_per_event", 1);
+
+// The number of processed input events we use to predict the amount of time
+// required to process the following input events.
+pref("input_event_queue.count_for_prediction", 9);
 
 // The minimum amount of time (milliseconds) required for an idle
 // period to be scheduled on the main thread. N.B. that
@@ -3249,6 +3327,13 @@ pref("dom.ipc.processCount.extension", 1);
 
 // Don't use a native event loop in the content process.
 pref("dom.ipc.useNativeEventProcessing.content", false);
+
+// Quantum DOM scheduling:
+pref("dom.ipc.scheduler", false);
+pref("dom.ipc.scheduler.useMultipleQueues", false);
+pref("dom.ipc.scheduler.preemption", false);
+pref("dom.ipc.scheduler.threadCount", 2);
+pref("dom.ipc.scheduler.chaoticScheduling", false);
 
 // Disable support for SVG
 pref("svg.disabled", false);
@@ -3601,15 +3686,9 @@ pref("font.name-list.sans-serif.he", "Arial");
 pref("font.name-list.monospace.he", "Fixed Miriam Transparent, Miriam Fixed, Rod, Courier New");
 pref("font.name-list.cursive.he", "Guttman Yad, Ktav, Arial");
 
-#ifdef EARLY_BETA_OR_EARLIER
 pref("font.name-list.serif.ja", "Yu Mincho, MS PMincho, MS Mincho, Meiryo, Yu Gothic, MS PGothic, MS Gothic");
 pref("font.name-list.sans-serif.ja", "Meiryo, Yu Gothic, MS PGothic, MS Gothic, Yu Mincho, MS PMincho, MS Mincho");
 pref("font.name-list.monospace.ja", "MS Gothic, MS Mincho, Meiryo, Yu Gothic, Yu Mincho, MS PGothic, MS PMincho");
-#else
-pref("font.name-list.serif.ja", "MS PMincho, MS Mincho, MS PGothic, MS Gothic,Meiryo");
-pref("font.name-list.sans-serif.ja", "MS PGothic, MS Gothic, MS PMincho, MS Mincho,Meiryo");
-pref("font.name-list.monospace.ja", "MS Gothic, MS Mincho, MS PGothic, MS PMincho,Meiryo");
-#endif
 
 pref("font.name-list.serif.ko", "Batang, Gulim");
 pref("font.name-list.sans-serif.ko", "Gulim");
@@ -4638,6 +4717,11 @@ pref("gl.multithreaded", true);
 pref("gl.ignore-dx-interop2-blacklist", false);
 pref("gl.use-tls-is-current", 0);
 
+#ifdef XP_MACOSX
+pref("webgl.1.allow-core-profiles", true);
+#else
+pref("webgl.1.allow-core-profiles", false);
+#endif
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
 pref("webgl.disable-angle", false);
@@ -4898,7 +4982,9 @@ pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org
 pref("extensions.webextensions.themes.enabled", false);
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
-// Whether or not the moz-extension resource loads are remoted
+// Whether or not the moz-extension resource loads are remoted. For debugging
+// purposes only. Setting this to false will break moz-extension URI loading
+// unless other process sandboxing and extension remoting prefs are changed.
 pref("extensions.webextensions.protocol.remote", true);
 
 // Report Site Issue button
@@ -4975,6 +5061,15 @@ pref("dom.battery.enabled", true);
 
 // Streams API
 pref("dom.streams.enabled", false);
+
+// Abort API
+#ifdef NIGHTLY_BUILD
+pref("dom.abortController.enabled", true);
+pref("dom.abortController.fetch.enabled", true);
+#else
+pref("dom.abortController.enabled", false);
+pref("dom.abortController.fetch.enabled", false);
+#endif
 
 // Push
 
@@ -5264,9 +5359,8 @@ pref("dom.flyweb.enabled", false);
 // Enable mapped array buffer by default.
 pref("dom.mapped_arraybuffer.enabled", true);
 
-// The tables used for Safebrowsing phishing and malware checks.
+// The tables used for Safebrowsing phishing and malware checks
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple,test-harmful-simple");
-
 #ifdef MOZILLA_OFFICIAL
 // In the official build, we are allowed to use google's private
 // phishing list "goog-phish-shavar". See Bug 1288840.
@@ -5275,37 +5369,50 @@ pref("urlclassifier.phishTable", "goog-phish-shavar,test-phish-simple");
 pref("urlclassifier.phishTable", "googpub-phish-shavar,test-phish-simple");
 #endif
 
-// Tables for application reputation.
-pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-proto");
-pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
+// Tables for application reputation
+pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
+pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar");
 
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256");
+// Tables for login reputation
+pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");
 
-// The table and update/gethash URLs for Safebrowsing phishing and malware
-// checks.
+// Tables for tracking protection
 pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 
-// The number of random entries to send with a gethash request.
+// These tables will never trigger a gethash call.
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256");
+
+// Number of random entries to send with a gethash request
 pref("urlclassifier.gethashnoise", 4);
 
-// Gethash timeout for Safebrowsing.
+// Gethash timeout for Safe Browsing
 pref("urlclassifier.gethash.timeout_ms", 5000);
-// Update server response timeout for Safebrowsing.
+// Update server response timeout for Safe Browsing
 pref("urlclassifier.update.response_timeout_ms", 30000);
-// Download update timeout for Safebrowsing.
+// Download update timeout for Safe Browsing
 pref("urlclassifier.update.timeout_ms", 90000);
 
-// Name of the about: page contributed by safebrowsing to handle display of error
-// pages on phishing/malware hits.  (bug 399233)
+// Name of the about: page to display Safe Browsing warnings (bug 399233)
 pref("urlclassifier.alternate_error_page", "blocked");
 
-// Enable phishing protection
+// Enable phishing & malware protection.
 pref("browser.safebrowsing.phishing.enabled", true);
-
-// Enable malware protection
 pref("browser.safebrowsing.malware.enabled", true);
+pref("browser.safebrowsing.debug", false);
 
+// Allow users to ignore Safe Browsing warnings.
+pref("browser.safebrowsing.allowOverride", true);
+
+#ifdef MOZILLA_OFFICIAL
+// Normally the "client ID" sent in updates is appinfo.name, but for
+// official Firefox releases from Mozilla we use a special identifier.
+pref("browser.safebrowsing.id", "navclient-auto-ffox");
+#else
+pref("browser.safebrowsing.id", "Firefox");
+#endif
+
+// Download protection
 pref("browser.safebrowsing.downloads.enabled", true);
 pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
@@ -5314,9 +5421,11 @@ pref("browser.safebrowsing.downloads.remote.block_dangerous",            true);
 pref("browser.safebrowsing.downloads.remote.block_dangerous_host",       true);
 pref("browser.safebrowsing.downloads.remote.block_potentially_unwanted", true);
 pref("browser.safebrowsing.downloads.remote.block_uncommon",             true);
-pref("browser.safebrowsing.debug", false);
 
-// The protocol version we communicate with google server.
+// Password protection
+pref("browser.safebrowsing.passwords.enabled", false);
+
+// Google Safe Browsing provider (legacy)
 pref("browser.safebrowsing.provider.google.pver", "2.2");
 pref("browser.safebrowsing.provider.google.lists", "goog-badbinurl-shavar,goog-downloadwhite-digest256,goog-phish-shavar,googpub-phish-shavar,goog-malware-shavar,goog-unwanted-shavar");
 pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
@@ -5327,9 +5436,9 @@ pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%L
 pref("browser.safebrowsing.provider.google.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");
 pref("browser.safebrowsing.provider.google.advisoryName", "Google Safe Browsing");
 
-// Prefs for v4.
+// Google Safe Browsing provider
 pref("browser.safebrowsing.provider.google4.pver", "4");
-pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto,goog-harmful-proto");
+pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto,goog-harmful-proto,goog-passwordwhite-proto");
 pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
 pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
 pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
@@ -5340,11 +5449,7 @@ pref("browser.safebrowsing.provider.google4.advisoryName", "Google Safe Browsing
 
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
 
-// The table and global pref for blocking plugin content
-pref("browser.safebrowsing.blockedURIs.enabled", true);
-pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256");
-
-// The protocol version we communicate with mozilla server.
+// Mozilla Safe Browsing provider (for tracking protection and plugin blocking)
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
 pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
@@ -5358,6 +5463,11 @@ pref("browser.safebrowsing.provider.mozilla.lists.base.description", "mozstdDesc
 pref("browser.safebrowsing.provider.mozilla.lists.content.name", "mozfullName");
 pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc2");
 
+// The table and global pref for blocking plugin content
+pref("browser.safebrowsing.blockedURIs.enabled", true);
+pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256");
+
+// Flash blocking tables
 pref("urlclassifier.flashAllowTable", "allow-flashallow-digest256");
 pref("urlclassifier.flashAllowExceptTable", "except-flashallow-digest256");
 pref("urlclassifier.flashTable", "block-flash-digest256");
@@ -5368,17 +5478,6 @@ pref("urlclassifier.flashInfobarTable", "except-flashinfobar-digest256");
 
 pref("plugins.http_https_only", true);
 pref("plugins.flashBlock.enabled", false);
-
-// Allow users to ignore Safe Browsing warnings.
-pref("browser.safebrowsing.allowOverride", true);
-
-#ifdef MOZILLA_OFFICIAL
-// Normally the "client ID" sent in updates is appinfo.name, but for
-// official Firefox releases from Mozilla we use a special identifier.
-pref("browser.safebrowsing.id", "navclient-auto-ffox");
-#else
-pref("browser.safebrowsing.id", "Firefox");
-#endif
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);
@@ -5697,7 +5796,7 @@ pref("security.mixed_content.hsts_priming_request_timeout", 2000);
 // a NullPrincipal as the security context.
 // Otherwise it will inherit the origin from parent node, this is the legacy
 // behavior of Firefox.
-pref("security.data_uri.unique_opaque_origin", false);
+pref("security.data_uri.unique_opaque_origin", true);
 
 // TODO: Bug 1380959: Block toplevel data: URI navigations
 // If true, all toplevel data: URI navigations will be blocked.

@@ -172,6 +172,7 @@ class AutoSetHandlingSegFault
 # if defined(__linux__) && defined(__mips__)
 #  define EPC_sig(p) ((p)->uc_mcontext.pc)
 #  define RFP_sig(p) ((p)->uc_mcontext.gregs[30])
+#  define RSP_sig(p) ((p)->uc_mcontext.gregs[29])
 # endif
 #elif defined(__NetBSD__)
 # define XMM_sig(p,i) (((struct fxsave64*)(p)->uc_mcontext.__fpregs)->fx_xmm[i])
@@ -416,6 +417,7 @@ struct macos_arm_context {
 #elif defined(__mips__)
 # define PC_sig(p) EPC_sig(p)
 # define FP_sig(p) RFP_sig(p)
+# define SP_sig(p) RSP_sig(p)
 #endif
 
 static uint8_t**
@@ -959,6 +961,12 @@ IsHeapAccessAddress(const Instance &instance, uint8_t* faultingAddress)
            faultingAddress < instance.memoryBase() + accessLimit;
 }
 
+MOZ_COLD static bool
+IsActiveContext(JSContext* cx)
+{
+    return cx == cx->runtime()->activeContext();
+}
+
 #if defined(XP_WIN)
 
 static bool
@@ -978,7 +986,7 @@ HandleFault(PEXCEPTION_POINTERS exception)
 
     // Don't allow recursive handling of signals, see AutoSetHandlingSegFault.
     JSContext* cx = TlsContext.get();
-    if (!cx || cx->handlingSegFault)
+    if (!cx || cx->handlingSegFault || !IsActiveContext(cx))
         return false;
     AutoSetHandlingSegFault handling(cx);
 
@@ -1013,7 +1021,7 @@ HandleFault(PEXCEPTION_POINTERS exception)
         return false;
     }
 
-    const Instance* instance = LookupFaultingInstance(activation, pc, ContextToFP(context));
+    const Instance* instance = LookupFaultingInstance(*code, pc, ContextToFP(context));
     if (!instance)
         return false;
 
@@ -1081,7 +1089,7 @@ static bool
 HandleMachException(JSContext* cx, const ExceptionRequest& request)
 {
     // Don't allow recursive handling of signals, see AutoSetHandlingSegFault.
-    if (cx->handlingSegFault)
+    if (cx->handlingSegFault || !IsActiveContext(cx))
         return false;
     AutoSetHandlingSegFault handling(cx);
 
@@ -1132,7 +1140,11 @@ HandleMachException(JSContext* cx, const ExceptionRequest& request)
     if (!activation)
         return false;
 
-    const Instance* instance = LookupFaultingInstance(activation, pc, ContextToFP(&context));
+    const Code* code = activation->compartment()->wasm.lookupCode(pc);
+    if (!code)
+        return false;
+
+    const Instance* instance = LookupFaultingInstance(*code, pc, ContextToFP(&context));
     if (!instance || !instance->code().containsFunctionPC(pc))
         return false;
 
@@ -1331,7 +1343,7 @@ HandleFault(int signum, siginfo_t* info, void* ctx)
 
     // Don't allow recursive handling of signals, see AutoSetHandlingSegFault.
     JSContext* cx = TlsContext.get();
-    if (!cx || cx->handlingSegFault)
+    if (!cx || cx->handlingSegFault || !IsActiveContext(cx))
         return false;
     AutoSetHandlingSegFault handling(cx);
 
@@ -1340,7 +1352,11 @@ HandleFault(int signum, siginfo_t* info, void* ctx)
         return false;
 
     const CodeSegment* segment;
-    const Instance* instance = LookupFaultingInstance(activation, pc, ContextToFP(context));
+    const Code* code = activation->compartment()->wasm.lookupCode(pc, &segment);
+    if (!code)
+        return false;
+
+    const Instance* instance = LookupFaultingInstance(*code, pc, ContextToFP(context));
     if (!instance || !instance->code().containsFunctionPC(pc, &segment))
         return false;
 

@@ -17,7 +17,6 @@ const EXPECTED_REFLOWS = [
     stack: [
       "select@chrome://global/content/bindings/textbox.xml",
       "focusAndSelectUrlBar@chrome://browser/content/browser.js",
-      "_delayedStartup@chrome://browser/content/browser.js",
     ],
   },
 ];
@@ -82,6 +81,16 @@ if (Services.appinfo.OS == "WINNT" || Services.appinfo.OS == "Darwin") {
   EXPECTED_REFLOWS.push(
     {
       stack: [
+        "verticalMargins@chrome://browser/content/browser-tabsintitlebar.js",
+        "_update@chrome://browser/content/browser-tabsintitlebar.js",
+        "init@chrome://browser/content/browser-tabsintitlebar.js",
+        "handleEvent@chrome://browser/content/tabbrowser.xml",
+      ],
+      times: 2, // This number should only ever go down - never up.
+    },
+
+    {
+      stack: [
         "rect@chrome://browser/content/browser-tabsintitlebar.js",
         "_update@chrome://browser/content/browser-tabsintitlebar.js",
         "init@chrome://browser/content/browser-tabsintitlebar.js",
@@ -89,16 +98,6 @@ if (Services.appinfo.OS == "WINNT" || Services.appinfo.OS == "Darwin") {
       ],
       times: 4, // This number should only ever go down - never up.
     },
-
-    {
-      stack: [
-        "verticalMargins@chrome://browser/content/browser-tabsintitlebar.js",
-        "_update@chrome://browser/content/browser-tabsintitlebar.js",
-        "init@chrome://browser/content/browser-tabsintitlebar.js",
-        "handleEvent@chrome://browser/content/tabbrowser.xml",
-      ],
-      times: 2, // This number should only ever go down - never up.
-    }
   );
 }
 

@@ -1584,6 +1584,10 @@ VARIABLES = {
         """List of manifest files defining python unit tests.
         """),
 
+    'CRAMTEST_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining cram unit tests.
+        """),
+
 
     # The following variables are used to control the target of installed files.
     'XPI_NAME': (unicode, unicode,
@@ -2084,6 +2088,14 @@ SPECIAL_VARIABLES = {
 
            RESOURCE_FILES += ['foo.res']
            RESOURCE_FILES.fonts += ['bar.res']
+        """),
+
+    'CONTENT_ACCESSIBLE_FILES': (lambda context: context['FINAL_TARGET_FILES'].contentaccessible, list,
+        """List of files which can be accessed by web content through resource:// URIs.
+
+        ``CONTENT_ACCESSIBLE_FILES`` is used to list the files to be exported
+        to ``dist/bin/contentaccessible``. Files can also be appended to a
+        field to indicate which subdirectory they should be exported to.
         """),
 
     'EXTRA_JS_MODULES': (lambda context: context['FINAL_TARGET_FILES'].modules, list,

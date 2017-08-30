@@ -93,14 +93,14 @@
 }
 
 #PanelUI-button {
-  margin-inline-start: 2px;
+  margin-inline-start: 3px;
   border-inline-start: 1px solid;
-  border-image: linear-gradient(transparent, rgba(0,0,0,.1) 20%, rgba(0,0,0,.1) 80%, transparent);
+  border-image: linear-gradient(transparent 4px, rgba(0,0,0,.1) 4px, rgba(0,0,0,.1) calc(100% - 4px), transparent calc(100% - 4px));
   border-image-slice: 1;
 }
 
 #nav-bar[brighttext] > #PanelUI-button {
-  border-image-source: linear-gradient(transparent, rgba(100%,100%,100%,.2) 20%, rgba(100%,100%,100%,.2) 80%, transparent);
+  border-image-source: linear-gradient(transparent 4px, rgba(100%,100%,100%,.2) 4px, rgba(100%,100%,100%,.2) calc(100% - 4px), transparent calc(100% - 4px));
 }
 
 #PanelUI-menu-button[badge-status] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
@@ -220,25 +220,10 @@ panelview {
   padding: 4px 4px;
 }
 
-.panel-subview-header,
 .subviewbutton.panel-subview-footer {
   box-sizing: border-box;
   min-height: 41px;
   padding: 11px 12px;
-}
-
-.panel-subview-header {
-  margin: -4px -4px 4px;
-  border-bottom: 1px solid var(--panel-separator-color);
-  color: GrayText;
-  font-variant: small-caps;
-  /* Workaround for min-height not being accounted for in vertical layout. */
-  height: 41px;
-}
-
-.cui-widget-panelview .panel-subview-header,
-photonpanelmultiview .panel-subview-header {
-  display: none;
 }
 
 .cui-widget-panelview .subviewbutton.panel-subview-footer {
@@ -308,6 +293,82 @@ panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
 #BMB_bookmarksPopup,
 .panel-mainview:not([panelid="PanelUI-popup"]) {
   max-width: @standaloneSubviewWidth@;
+}
+
+#pageActionFeedback > .panel-arrowcontainer > .panel-arrowbox {
+  /* Don't display the arrow but keep the popup at the same vertical
+     offset as other arrow panels. */
+  visibility: hidden;
+}
+
+#pageActionFeedback > .panel-arrowcontainer > .panel-arrowcontent {
+  background-color: #058b00;
+  background-image: none;
+  border-radius: 2px;
+  color: #fff;
+  font-weight: 400;
+  font-size: 1.1rem;
+  -moz-box-align: center;
+  padding: 6px 10px;
+}
+
+#pageActionFeedbackAnimatableBox {
+  position: relative;
+  overflow: hidden;
+  width: 14px;
+  height: 14px;
+}
+
+#pageActionFeedbackAnimatableBox[animate] > #pageActionFeedbackAnimatableImage {
+  position: absolute;
+  background-image: url(chrome://browser/skin/check-animation.svg);
+  background-repeat: no-repeat;
+  min-width: 266px;
+  max-width: 266px;
+  min-height: 14px;
+  max-height: 14px;
+  animation-name: page-action-feedback-animation;
+  animation-duration: 300ms;
+  animation-delay: 60ms;
+  animation-fill-mode: forwards;
+  animation-timing-function: steps(18);
+}
+
+#pageActionFeedbackAnimatableBox[animate] > #pageActionFeedbackAnimatableImage:-moz-locale-dir(rtl) {
+  animation-name: page-action-feedback-animation-rtl;
+  transform: translateX(252px);
+}
+
+@keyframes page-action-feedback-animation {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-252px);
+  }
+}
+
+@keyframes page-action-feedback-animation-rtl {
+  from {
+    transform: translateX(252px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+#pageActionFeedbackMessage {
+  margin-inline-start: 7px;
+  margin-inline-end: 0;
+  transform: scale(.8);
+  opacity: 0;
+  transition: transform 120ms cubic-bezier(.25,1.27,.35,1.18),
+              opacity 60ms linear;
+}
+
+#pageActionFeedbackAnimatableBox[animate] + #pageActionFeedbackMessage {
+  transform: scale(1);
+  opacity: 1;
 }
 
 /* Give WebExtension stand-alone panels extra width for Chrome compatibility */
@@ -536,8 +597,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 .customization-palette .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 .customization-palette .toolbarbutton-1 > .toolbarbutton-icon,
 .customization-palette .toolbarbutton-1 > .toolbarbutton-badge-stack,
-.panelUI-grid #bookmarks-toolbar-placeholder > .toolbarbutton-icon,
-.customization-palette #bookmarks-toolbar-placeholder > .toolbarbutton-icon,
 .panel-customization-placeholder-child > .toolbarbutton-icon {
   width: @panelPaletteIconSize@;
   height: @panelPaletteIconSize@;
@@ -548,7 +607,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-icon,
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-badge-stack,
-.panelUI-grid #bookmarks-toolbar-placeholder > .toolbarbutton-icon,
 .panel-customization-placeholder-child > .toolbarbutton-icon {
   /* Explanation for the below formula (A / B - C)
      A
@@ -576,14 +634,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   min-height: @panelPaletteIconSize@;
   margin: 0;
   padding: 0;
-}
-
-#personal-bookmarks[overflowedItem=true] > #bookmarks-toolbar-placeholder {
-  -moz-box-flex: 1;
-}
-
-#personal-bookmarks[cui-areatype="toolbar"][overflowedItem=true] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
-  margin-inline-end: 2px;
 }
 
 #edit-controls@inAnyPanel@ > #copy-button,
@@ -743,16 +793,22 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 
 #appMenu-fxa-label,
 #appMenu-fxa-icon {
-  -moz-image-region: rect(0, 16px, 16px, 0);
-  list-style-image: url(chrome://browser/skin/sync-horizontalbar.png);
+  -moz-context-properties: fill;
+  fill: currentColor;
+  list-style-image: url(chrome://browser/skin/sync.svg);
 }
 
 #appMenu-fxa-label {
   -moz-box-flex: 1;
 }
 
-#appMenu-fxa-icon[syncstatus="active"] {
-  list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar.png);
+@keyframes syncRotate {
+  to { transform: rotate(360deg); }
+}
+
+#appMenu-fxa-icon[syncstatus="active"] > .toolbarbutton-icon {
+  animation: syncRotate 0.8s linear infinite;
+  fill: #0a84ff;
 }
 
 #appMenu-fxa-status {
@@ -762,18 +818,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 #appMenu-fxa-avatar {
   pointer-events: none;
   list-style-image: url(chrome://browser/skin/fxa/default-avatar.svg);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #appMenu-fxa-label,
-  #appMenu-fxa-icon {
-    list-style-image: url(chrome://browser/skin/sync-horizontalbar@2x.png);
-    -moz-image-region: rect(0, 32px, 32px, 0);
-  }
-
-  #appMenu-fxa-icon[syncstatus="active"] {
-    list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar@2x.png);
-  }
 }
 
 /* Handle different UI states. */
@@ -870,11 +914,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   width: calc(@menuPanelWidth@ + 30px);
   padding-inline-start: 15px;
   border-inline-start-style: none;
-}
-
-#PanelUI-fxa-label,
-#PanelUI-fxa-icon {
-  list-style-image: url(chrome://browser/skin/sync-horizontalbar.png);
 }
 
 #PanelUI-remotetabs {
@@ -990,10 +1029,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 
 #PanelUI-remotetabs-main[devices-status="single"] > #PanelUI-remotetabs-buttons {
   display: none;
-}
-
-#PanelUI-fxa-icon[syncstatus="active"] {
-  list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar.png);
 }
 
 #PanelUI-customize {
@@ -1159,8 +1194,7 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 panelview .toolbarbutton-1,
 .subviewbutton,
 .widget-overflow-list .toolbarbutton-1,
-.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button,
-.share-provider-button {
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button {
   -moz-appearance: none;
   padding: 0 6px;
   background-color: transparent;
@@ -1171,8 +1205,7 @@ panelview .toolbarbutton-1,
 
 panelview .toolbarbutton-1,
 .subviewbutton,
-.widget-overflow-list .toolbarbutton-1,
-.share-provider-button {
+.widget-overflow-list .toolbarbutton-1 {
   border-width: 1px;
 }
 
@@ -1386,7 +1419,6 @@ panelview .toolbarbutton-1@buttonStateHover@,
 toolbarbutton.subviewbutton@buttonStateHover@,
 menu.subviewbutton@menuStateHover@,
 menuitem.subviewbutton@menuStateHover@,
-.share-provider-button@buttonStateHover@:not([checked="true"]),
 .widget-overflow-list .toolbarbutton-1@buttonStateHover@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateHover@ {
   background-color: var(--arrowpanel-dimmed);
@@ -1401,7 +1433,6 @@ panelview .toolbarbutton-1:-moz-any(@buttonStateActive@,[checked=true]),
 toolbarbutton.subviewbutton@buttonStateActive@,
 menu.subviewbutton@menuStateActive@,
 menuitem.subviewbutton@menuStateActive@,
-.share-provider-button:-moz-any(@buttonStateActive@,[checked=true]),
 .widget-overflow-list .toolbarbutton-1@buttonStateActive@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateActive@ {
   background-color: var(--arrowpanel-dimmed-further);
@@ -1914,15 +1945,6 @@ menuitem[checked="true"].subviewbutton > .menu-iconic-left {
 
   .panel-banner-item[notificationid^=update] {
     list-style-image: url(chrome://branding/content/icon32.png);
-  }
-
-  #PanelUI-fxa-label,
-  #PanelUI-fxa-icon {
-    list-style-image: url(chrome://browser/skin/sync-horizontalbar@2x.png);
-  }
-
-  #PanelUI-fxa-icon[syncstatus="active"] {
-    list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar@2x.png);
   }
 
   #PanelUI-customize {

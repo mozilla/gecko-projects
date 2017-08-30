@@ -79,15 +79,15 @@ linux64-asan/opt:
 
 # Stylo builds only run a subset of tests for the moment. So give them
 # their own test set.
-# Stylo doesn't work on 32-bit Linux yet (bug 1385025)
-# linux32-stylo/debug:
-#     build-platform: linux/debug
-#     test-sets:
-#         - stylo-tests
-# linux32-stylo/opt:
-#     build-platform: linux/opt
-#     test-sets:
-#         - stylo-tests
+linux32-stylo/debug:
+    build-platform: linux/debug
+    test-sets:
+        - stylo-tests
+linux32-stylo/opt:
+    build-platform: linux/opt
+    test-sets:
+        - awsy-stylo
+        - stylo-tests
 linux64-stylo/debug:
     build-platform: linux64/debug
     test-sets:
@@ -145,6 +145,7 @@ linux64-qr/opt:
     build-platform: linux64/opt
     test-sets:
         - qr-tests
+        - qr-talos
 linux64-qr/debug:
     build-platform: linux64/debug
     test-sets:
@@ -176,6 +177,7 @@ windows7-32/opt:
         - awsy
         - desktop-screenshot-capture
         - windows-talos
+        - windows-talos-stylo
         - windows-tests
 
 windows7-32-pgo/opt:
@@ -185,6 +187,7 @@ windows7-32-pgo/opt:
         - desktop-screenshot-capture
         - windows-tests
         - windows-talos
+        - windows-talos-stylo
 
 windows7-32-nightly/opt:
     build-platform: win32-nightly/opt
@@ -194,7 +197,7 @@ windows7-32-nightly/opt:
         - windows-tests
 
 windows7-32-devedition/opt:
-    build-platform: win32-devedition/opt
+    build-platform: win32-devedition-nightly/opt
     test-sets:
         - awsy
         - desktop-screenshot-capture
@@ -212,6 +215,7 @@ windows10-64/opt:
         - awsy
         - desktop-screenshot-capture
         - windows-talos
+        - windows-talos-stylo
         - windows-tests
 
 windows10-64-pgo/opt:
@@ -220,6 +224,7 @@ windows10-64-pgo/opt:
         - awsy
         - desktop-screenshot-capture
         - windows-talos
+        - windows-talos-stylo
         - windows-tests
 
 windows10-64-nightly/opt:
@@ -230,7 +235,7 @@ windows10-64-nightly/opt:
         - windows-tests
 
 windows10-64-devedition/opt:
-    build-platform: win64-devedition/opt
+    build-platform: win64-devedition-nightly/opt
     test-sets:
         - awsy
         - desktop-screenshot-capture
@@ -259,7 +264,7 @@ windows8-64-nightly/opt:
     test-sets:
         - windows8-tests
 windows8-64-devedition/opt:
-    build-platform: win64-devedition/opt
+    build-platform: win64-devedition-nightly/opt
     test-sets:
         - windows8-tests
 
@@ -275,6 +280,7 @@ macosx64/opt:
     build-platform: macosx64/opt
     test-sets:
         - macosx64-tests-talos
+        - macosx64-tests-talos-stylo
         - macosx64-tests
         - desktop-screenshot-capture
         - awsy
@@ -292,14 +298,14 @@ macosx64-devedition/opt:
 ##
 # Android platforms (matching /android.*/)
 
-android-4.3-arm7-api-15/debug:
-    build-platform: android-api-15/debug
+android-4.3-arm7-api-16/debug:
+    build-platform: android-api-16/debug
     test-sets:
         - android-common-tests
         - android-debug-tests
 
-android-4.3-arm7-api-15/opt:
-    build-platform: android-api-15/opt
+android-4.3-arm7-api-16/opt:
+    build-platform: android-api-16/opt
     test-sets:
         - android-common-tests
         - android-opt-tests
@@ -309,7 +315,7 @@ android-4.2-x86/opt:
     test-sets:
         - android-x86-tests
 
-android-4.3-arm7-api-15-gradle/opt:
-    build-platform: android-api-15-gradle/opt
+android-4.3-arm7-api-16-gradle/opt:
+    build-platform: android-api-16-gradle/opt
     test-sets:
         - android-gradle-tests

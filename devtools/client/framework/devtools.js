@@ -11,6 +11,7 @@ const {DevToolsShim} = Cu.import("chrome://devtools-shim/content/DevToolsShim.js
 
 // Load gDevToolsBrowser toolbox lazily as they need gDevTools to be fully initialized
 loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
+loader.lazyRequireGetter(this, "TabTarget", "devtools/client/framework/target", true);
 loader.lazyRequireGetter(this, "Toolbox", "devtools/client/framework/toolbox", true);
 loader.lazyRequireGetter(this, "ToolboxHostManager", "devtools/client/framework/toolbox-host-manager", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
@@ -21,6 +22,9 @@ loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scrat
 loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
 loader.lazyRequireGetter(this, "DebuggerClient", "devtools/shared/client/main", true);
 loader.lazyImporter(this, "BrowserToolboxProcess", "resource://devtools/client/framework/ToolboxProcess.jsm");
+
+loader.lazyRequireGetter(this, "WebExtensionInspectedWindowFront",
+      "devtools/shared/fronts/webextension-inspected-window", true);
 
 const {defaultTools: DefaultTools, defaultThemes: DefaultThemes} =
   require("devtools/client/definitions");
@@ -577,6 +581,34 @@ DevTools.prototype = {
    */
   initBrowserToolboxProcessForAddon: function (addonID) {
     BrowserToolboxProcess.init({ addonID });
+  },
+
+  /**
+   * Compatibility layer for web-extensions. Used by DevToolsShim for
+   * browser/components/extensions/ext-devtools.js
+   *
+   * web-extensions need to use dedicated instances of TabTarget and cannot reuse the
+   * cached instances managed by DevTools target factory.
+   */
+  createTargetForTab: function (tab) {
+    return new TabTarget(tab);
+  },
+
+  /**
+   * Compatibility layer for web-extensions. Used by DevToolsShim for
+   * browser/components/extensions/ext-devtools-inspectedWindow.js
+   */
+  createWebExtensionInspectedWindowFront: function (tabTarget) {
+    return new WebExtensionInspectedWindowFront(tabTarget.client, tabTarget.form);
+  },
+
+  /**
+   * Compatibility layer for web-extensions. Used by DevToolsShim for
+   * toolkit/components/extensions/ext-c-toolkit.js
+   */
+  openBrowserConsole: function () {
+    let {HUDService} = require("devtools/client/webconsole/hudservice");
+    HUDService.openBrowserConsoleOrFocus();
   },
 
   /**

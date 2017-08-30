@@ -4,6 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
 SPHINX_TREES['sslerrorreport'] = 'content/docs/sslerrorreport'
 
 MOCHITEST_MANIFESTS += [
@@ -31,7 +34,6 @@ BROWSER_CHROME_MANIFESTS += [
     'content/test/referrer/browser.ini',
     'content/test/sidebar/browser.ini',
     'content/test/siteIdentity/browser.ini',
-    'content/test/social/browser.ini',
     'content/test/static/browser.ini',
     'content/test/sync/browser.ini',
     'content/test/tabcrashed/browser.ini',

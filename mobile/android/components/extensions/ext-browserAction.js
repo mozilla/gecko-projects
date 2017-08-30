@@ -42,7 +42,11 @@ class BrowserAction {
    * called whenever the browser action is clicked on.
    */
   onClicked() {
-    this.emit("click", tabTracker.activeTab);
+    const tab = tabTracker.activeTab;
+
+    this.tabManager.addActiveTabPermission(tab);
+
+    this.emit("click", tab);
   }
 
   /**
@@ -84,7 +88,7 @@ class BrowserAction {
       }
     }
 
-    if (!tab || tab.selected) {
+    if (!tab || tab.getActive()) {
       BrowserActions.update(this.uuid, {[prop]: value});
     }
   }

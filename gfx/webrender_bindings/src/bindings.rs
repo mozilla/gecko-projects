@@ -7,9 +7,9 @@ use std::os::raw::{c_void, c_char, c_float};
 use gleam::gl;
 
 use webrender_api::*;
-use webrender::renderer::{ReadPixelsFormat, Renderer, RendererOptions};
-use webrender::renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
-use webrender::renderer::{DebugFlags, PROFILER_DBG};
+use webrender::{ReadPixelsFormat, Renderer, RendererOptions};
+use webrender::{ExternalImage, ExternalImageHandler, ExternalImageSource};
+use webrender::DebugFlags;
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dImageRenderer;
@@ -462,12 +462,22 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
                               &mut slice);
 }
 
+/// cbindgen:field-names=[mBits]
+#[repr(C)]
+pub struct WrDebugFlags {
+    bits: u32,
+}
+
 #[no_mangle]
-pub extern "C" fn wr_renderer_set_profiler_enabled(renderer: &mut Renderer,
-                                                   enabled: bool) {
-    let mut flags = renderer.get_debug_flags();
-    flags.set(PROFILER_DBG, enabled);
-    renderer.set_debug_flags(flags);
+pub extern "C" fn wr_renderer_get_debug_flags(renderer: &mut Renderer) -> WrDebugFlags {
+    WrDebugFlags { bits: renderer.get_debug_flags().bits() }
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_set_debug_flags(renderer: &mut Renderer, flags: WrDebugFlags) {
+    if let Some(dbg_flags) = DebugFlags::from_bits(flags.bits) {
+        renderer.set_debug_flags(dbg_flags);
+    }
 }
 
 #[no_mangle]
@@ -532,7 +542,7 @@ pub unsafe extern "C" fn wr_thread_pool_new() -> *mut WrThreadPool {
             register_thread_with_profiler(format!("WebRender:Worker#{}", idx));
         });
 
-    let workers = Arc::new(rayon::ThreadPool::new(worker_config).unwrap());        
+    let workers = Arc::new(rayon::ThreadPool::new(worker_config).unwrap());
 
     Box::into_raw(Box::new(WrThreadPool(workers)))
 }
@@ -550,7 +560,6 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_height: u32,
                                 gl_context: *mut c_void,
                                 thread_pool: *mut WrThreadPool,
-                                enable_profiler: bool,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
                                 out_max_texture_size: *mut u32)
@@ -580,16 +589,12 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         Arc::clone(&(*thread_pool).0)
     };
 
-    let mut debug_flags = DebugFlags::empty();
-    debug_flags.set(PROFILER_DBG, enable_profiler);
     let opts = RendererOptions {
         enable_aa: true,
         enable_subpixel_aa: true,
-        debug_flags: debug_flags,
         recorder: recorder,
         blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new(workers.clone()))),
         workers: Some(workers.clone()),
-        cache_expiry_frames: 60, // see https://github.com/servo/webrender/pull/1294#issuecomment-304318800
         enable_render_on_scroll: false,
         ..Default::default()
     };
@@ -785,7 +790,7 @@ pub unsafe extern "C" fn wr_api_set_root_display_list(dh: &mut DocumentHandle,
     let color = if color.a == 0.0 {
         None
     } else {
-        Some(color.into())
+        Some(color)
     };
     // See the documentation of set_display_list in api.rs. I don't think
     // it makes a difference in gecko at the moment(until APZ is figured out)
@@ -802,7 +807,7 @@ pub unsafe extern "C" fn wr_api_set_root_display_list(dh: &mut DocumentHandle,
                             epoch,
                             color,
                             LayoutSize::new(viewport_width, viewport_height),
-                            (pipeline_id, content_size.into(), dl),
+                            (pipeline_id, content_size, dl),
                             preserve_frame_state,
                             ResourceUpdates::new());
 }
@@ -929,7 +934,7 @@ impl WebRenderFrameBuilder {
                content_size: LayoutSize) -> WebRenderFrameBuilder {
         WebRenderFrameBuilder {
             root_pipeline_id: root_pipeline_id,
-            dl_builder: webrender_api::DisplayListBuilder::new(root_pipeline_id, content_size.into()),
+            dl_builder: webrender_api::DisplayListBuilder::new(root_pipeline_id, content_size),
             scroll_clips_defined: HashSet::new(),
         }
     }
@@ -998,12 +1003,11 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               opacity: *const f32,
                                               transform: *const LayoutTransform,
                                               transform_style: TransformStyle,
+                                              perspective: *const LayoutTransform,
                                               mix_blend_mode: MixBlendMode,
                                               filters: *const WrFilterOp,
                                               filter_count: usize) {
     assert!(unsafe { !is_in_render_thread() });
-
-    let bounds = bounds.into();
 
     let c_filters = make_slice(filters, filter_count);
     let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
@@ -1038,13 +1042,18 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
         _ => Some(PropertyBinding::Binding(PropertyBindingKey::new(animation_id))),
     };
 
+    let perspective_ref = unsafe { perspective.as_ref() };
+    let perspective = match perspective_ref {
+        Some(perspective) => Some(perspective.clone()),
+        None => None,
+    };
     state.frame_builder
          .dl_builder
          .push_stacking_context(webrender_api::ScrollPolicy::Scrollable,
                                 bounds,
                                 transform_binding,
                                 transform_style,
-                                None,
+                                perspective,
                                 mix_blend_mode,
                                 filters);
 }
@@ -1057,13 +1066,12 @@ pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
 
 #[no_mangle]
 pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
-                                    rect: LayoutRect,
+                                    clip_rect: LayoutRect,
                                     complex: *const WrComplexClipRegion,
                                     complex_count: usize,
                                     mask: *const WrImageMask)
                                     -> u64 {
     assert!(unsafe { is_in_main_thread() });
-    let clip_rect: LayoutRect = rect.into();
     let complex_slice = make_slice(complex, complex_count);
     let complex_iter = complex_slice.iter().map(|x| x.into());
     let mask : Option<ImageMask> = unsafe { mask.as_ref() }.map(|x| x.into());
@@ -1103,8 +1111,6 @@ pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
     // Avoid defining multiple scroll clips with the same clip id, as that
     // results in undefined behaviour or assertion failures.
     if !state.frame_builder.scroll_clips_defined.contains(&clip_id) {
-        let content_rect: LayoutRect = content_rect.into();
-        let clip_rect: LayoutRect = clip_rect.into();
 
         state.frame_builder.dl_builder.define_scroll_frame(
             Some(clip_id), content_rect, clip_rect, vec![], None,
@@ -1127,7 +1133,7 @@ pub extern "C" fn wr_scroll_layer_with_id(dh: &mut DocumentHandle,
                                           new_scroll_origin: LayoutPoint) {
     assert!(unsafe { is_in_compositor_thread() });
     let clip_id = ClipId::new(scroll_id, pipeline_id);
-    dh.api.scroll_node_with_id(dh.document_id, new_scroll_origin.into(), clip_id, ScrollClamping::NoClamping);
+    dh.api.scroll_node_with_id(dh.document_id, new_scroll_origin, clip_id, ScrollClamping::NoClamping);
 }
 
 #[no_mangle]
@@ -1158,7 +1164,7 @@ pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
                                     pipeline_id: WrPipelineId) {
     assert!(unsafe { is_in_main_thread() });
 
-    state.frame_builder.dl_builder.push_iframe(rect.into(), None, pipeline_id);
+    state.frame_builder.dl_builder.push_iframe(rect, None, pipeline_id);
 }
 
 #[no_mangle]
@@ -1168,9 +1174,9 @@ pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
                                   color: ColorF) {
     assert!(unsafe { !is_in_render_thread() });
 
-    state.frame_builder.dl_builder.push_rect(rect.into(),
-                                             Some(LocalClip::Rect(clip.into())),
-                                             color.into());
+    state.frame_builder.dl_builder.push_rect(rect,
+                                             Some(LocalClip::Rect(clip)),
+                                             color);
 }
 
 #[no_mangle]
@@ -1185,10 +1191,10 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
 
     state.frame_builder
          .dl_builder
-         .push_image(bounds.into(),
-                     Some(LocalClip::Rect(clip.into())),
-                     stretch_size.into(),
-                     tile_spacing.into(),
+         .push_image(bounds,
+                     Some(LocalClip::Rect(clip)),
+                     stretch_size,
+                     tile_spacing,
                      image_rendering,
                      key);
 }
@@ -1207,7 +1213,7 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
 
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds.into(),
+         .push_yuv_image(bounds,
                          Some(LocalClip::Rect(clip.into())),
                          YuvData::PlanarYCbCr(image_key_0, image_key_1, image_key_2),
                          color_space,
@@ -1227,7 +1233,7 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
 
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds.into(),
+         .push_yuv_image(bounds,
                          Some(LocalClip::Rect(clip.into())),
                          YuvData::NV12(image_key_0, image_key_1),
                          color_space,
@@ -1246,7 +1252,7 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
 
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds.into(),
+         .push_yuv_image(bounds,
                          Some(LocalClip::Rect(clip.into())),
                          YuvData::InterleavedYCbCr(image_key_0),
                          color_space,
@@ -1271,13 +1277,55 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
     let glyph_options = None; // TODO
     state.frame_builder
          .dl_builder
-         .push_text(bounds.into(),
+         .push_text(bounds,
                     Some(LocalClip::Rect(clip.into())),
                     &glyph_slice,
                     font_key,
                     colorf,
                     Au::from_f32_px(glyph_size),
                     glyph_options);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_push_text_shadow(state: &mut WrState,
+                                         bounds: LayoutRect,
+                                         clip: LayoutRect,
+                                         shadow: TextShadow) {
+    assert!(unsafe { is_in_main_thread() });
+
+    state.frame_builder.dl_builder.push_text_shadow(bounds, Some(LocalClip::Rect(clip.into())), shadow.into());
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_pop_text_shadow(state: &mut WrState) {
+    assert!(unsafe { is_in_main_thread() });
+
+    state.frame_builder.dl_builder.pop_text_shadow();
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_push_line(state: &mut WrState,
+                                  clip: LayoutRect,
+                                  baseline: f32,
+                                  start: f32,
+                                  end: f32,
+                                  orientation: LineOrientation,
+                                  width: f32,
+                                  color: ColorF,
+                                  style: LineStyle) {
+    assert!(unsafe { is_in_main_thread() });
+
+    state.frame_builder
+         .dl_builder
+         .push_line(Some(LocalClip::Rect(clip.into())),
+                    baseline,
+                    start,
+                    end,
+                    orientation,
+                    width,
+                    color,
+                    style);
+
 }
 
 #[no_mangle]
@@ -1301,9 +1349,9 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                                                });
     state.frame_builder
          .dl_builder
-         .push_border(rect.into(),
+         .push_border(rect,
                       Some(LocalClip::Rect(clip.into())),
-                      widths.into(),
+                      widths,
                       border_details);
 }
 
@@ -1459,11 +1507,11 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                                 extend_mode.into());
     state.frame_builder
          .dl_builder
-         .push_radial_gradient(rect.into(),
+         .push_radial_gradient(rect,
                                Some(LocalClip::Rect(clip.into())),
                                gradient,
-                               tile_size.into(),
-                               tile_spacing.into());
+                               tile_size,
+                               tile_spacing);
 }
 
 #[no_mangle]
@@ -1481,11 +1529,11 @@ pub extern "C" fn wr_dp_push_box_shadow(state: &mut WrState,
 
     state.frame_builder
          .dl_builder
-         .push_box_shadow(rect.into(),
+         .push_box_shadow(rect,
                           Some(LocalClip::Rect(clip.into())),
-                          box_bounds.into(),
+                          box_bounds,
                           offset,
-                          color.into(),
+                          color,
                           blur_radius,
                           spread_radius,
                           border_radius,
@@ -1542,6 +1590,8 @@ extern "C" {
                                width: u32,
                                height: u32,
                                format: ImageFormat,
+                               tile_size: *const u16,
+                               tile_offset: *const TileOffset,
                                output: MutByteSlice)
                                -> bool;
 }

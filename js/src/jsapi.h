@@ -588,7 +588,7 @@ typedef enum JSFinalizeStatus {
 } JSFinalizeStatus;
 
 typedef void
-(* JSFinalizeCallback)(JSFreeOp* fop, JSFinalizeStatus status, bool isZoneGC, void* data);
+(* JSFinalizeCallback)(JSFreeOp* fop, JSFinalizeStatus status, void* data);
 
 typedef void
 (* JSWeakPointerZonesCallback)(JSContext* cx, void* data);
@@ -883,15 +883,11 @@ static const uint8_t JSPROP_SHARED =           0x40;
 /* internal JS engine use only */
 static const uint8_t JSPROP_INTERNAL_USE_BIT = 0x80;
 
-/* use JS_PropertyStub getter/setter instead of defaulting to class gsops for
-   property holding function */
-static const unsigned JSFUN_STUB_GSOPS =      0x200;
-
 /* native that can be called as a ctor */
 static const unsigned JSFUN_CONSTRUCTOR =     0x400;
 
 /* | of all the JSFUN_* flags */
-static const unsigned JSFUN_FLAGS_MASK =      0x600;
+static const unsigned JSFUN_FLAGS_MASK =      0x400;
 
 /*
  * If set, will allow redefining a non-configurable property, but only on a
@@ -1150,7 +1146,8 @@ class JS_PUBLIC_API(ContextOptions) {
         ion_(true),
         asmJS_(true),
         wasm_(false),
-        wasmAlwaysBaseline_(false),
+        wasmBaseline_(false),
+        wasmIon_(false),
         throwOnAsmJSValidationFailure_(false),
         nativeRegExp_(true),
         unboxedArrays_(false),
@@ -1214,13 +1211,23 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
-    bool wasmAlwaysBaseline() const { return wasmAlwaysBaseline_; }
-    ContextOptions& setWasmAlwaysBaseline(bool flag) {
-        wasmAlwaysBaseline_ = flag;
+    bool wasmBaseline() const { return wasmBaseline_; }
+    ContextOptions& setWasmBaseline(bool flag) {
+        wasmBaseline_ = flag;
         return *this;
     }
-    ContextOptions& toggleWasmAlwaysBaseline() {
-        wasmAlwaysBaseline_ = !wasmAlwaysBaseline_;
+    ContextOptions& toggleWasmBaseline() {
+        wasmBaseline_ = !wasmBaseline_;
+        return *this;
+    }
+
+    bool wasmIon() const { return wasmIon_; }
+    ContextOptions& setWasmIon(bool flag) {
+        wasmIon_ = flag;
+        return *this;
+    }
+    ContextOptions& toggleWasmIon() {
+        wasmIon_ = !wasmIon_;
         return *this;
     }
 
@@ -1313,7 +1320,8 @@ class JS_PUBLIC_API(ContextOptions) {
     bool ion_ : 1;
     bool asmJS_ : 1;
     bool wasm_ : 1;
-    bool wasmAlwaysBaseline_ : 1;
+    bool wasmBaseline_ : 1;
+    bool wasmIon_ : 1;
     bool throwOnAsmJSValidationFailure_ : 1;
     bool nativeRegExp_ : 1;
     bool unboxedArrays_ : 1;
@@ -1793,13 +1801,33 @@ extern JS_PUBLIC_API(void)
 JS_UpdateWeakPointerAfterGCUnbarriered(JSObject** objp);
 
 typedef enum JSGCParamKey {
-    /** Maximum nominal heap before last ditch GC. */
+    /**
+     * Maximum nominal heap before last ditch GC.
+     *
+     * Soft limit on the number of bytes we are allowed to allocate in the GC
+     * heap. Attempts to allocate gcthings over this limit will return null and
+     * subsequently invoke the standard OOM machinery, independent of available
+     * physical memory.
+     *
+     * Pref: javascript.options.mem.max
+     * Default: 0xffffffff
+     */
     JSGC_MAX_BYTES          = 0,
 
-    /** Number of JS_malloc bytes before last ditch GC. */
+    /**
+     * Number of JS_malloc bytes before last ditch GC.
+     *
+     * Pref; javascript.options.mem.high_water_mark
+     * Default: 0xffffffff
+     */
     JSGC_MAX_MALLOC_BYTES   = 1,
 
-    /** Maximum size of the generational GC nurseries. */
+    /**
+     * Maximum size of the generational GC nurseries.
+     *
+     * Pref: javascript.options.mem.nursery.max_kb
+     * Default: JS::DefaultNurseryBytes
+     */
     JSGC_MAX_NURSERY_BYTES  = 2,
 
     /** Amount of bytes allocated by the GC. */
@@ -1808,7 +1836,14 @@ typedef enum JSGCParamKey {
     /** Number of times GC has been invoked. Includes both major and minor GC. */
     JSGC_NUMBER = 4,
 
-    /** Select GC mode. */
+    /**
+     * Select GC mode.
+     *
+     * See: JSGCMode in GCAPI.h
+     * prefs: javascript.options.mem.gc_per_zone and
+     *   javascript.options.mem.gc_incremental.
+     * Default: JSGC_MODE_INCREMENTAL
+     */
     JSGC_MODE = 6,
 
     /** Number of cached empty GC chunks. */
@@ -1817,63 +1852,159 @@ typedef enum JSGCParamKey {
     /** Total number of allocated GC chunks. */
     JSGC_TOTAL_CHUNKS = 8,
 
-    /** Max milliseconds to spend in an incremental GC slice. */
+    /**
+     * Max milliseconds to spend in an incremental GC slice.
+     *
+     * Pref: javascript.options.mem.gc_incremental_slice_ms
+     * Default: DefaultTimeBudget.
+     */
     JSGC_SLICE_TIME_BUDGET = 9,
 
-    /** Maximum size the GC mark stack can grow to. */
+    /**
+     * Maximum size the GC mark stack can grow to.
+     *
+     * Pref: none
+     * Default: MarkStack::DefaultCapacity
+     */
     JSGC_MARK_STACK_LIMIT = 10,
 
     /**
-     * GCs less than this far apart in time will be considered 'high-frequency GCs'.
+     * GCs less than this far apart in time will be considered 'high-frequency
+     * GCs'.
+     *
      * See setGCLastBytes in jsgc.cpp.
+     *
+     * Pref: javascript.options.mem.gc_high_frequency_time_limit_ms
+     * Default: HighFrequencyThresholdUsec
      */
     JSGC_HIGH_FREQUENCY_TIME_LIMIT = 11,
 
-    /** Start of dynamic heap growth. */
+    /**
+     * Start of dynamic heap growth.
+     *
+     * Pref: javascript.options.mem.gc_high_frequency_low_limit_mb
+     * Default: HighFrequencyLowLimitBytes
+     */
     JSGC_HIGH_FREQUENCY_LOW_LIMIT = 12,
 
-    /** End of dynamic heap growth. */
+    /**
+     * End of dynamic heap growth.
+     *
+     * Pref: javascript.options.mem.gc_high_frequency_high_limit_mb
+     * Default: HighFrequencyHighLimitBytes
+     */
     JSGC_HIGH_FREQUENCY_HIGH_LIMIT = 13,
 
-    /** Upper bound of heap growth. */
+    /**
+     * Upper bound of heap growth.
+     *
+     * Pref: javascript.options.mem.gc_high_frequency_heap_growth_max
+     * Default: HighFrequencyHeapGrowthMax
+     */
     JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX = 14,
 
-    /** Lower bound of heap growth. */
+    /**
+     * Lower bound of heap growth.
+     *
+     * Pref: javascript.options.mem.gc_high_frequency_heap_growth_min
+     * Default: HighFrequencyHeapGrowthMin
+     */
     JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN = 15,
 
-    /** Heap growth for low frequency GCs. */
+    /**
+     * Heap growth for low frequency GCs.
+     *
+     * Pref: javascript.options.mem.gc_low_frequency_heap_growth
+     * Default: LowFrequencyHeapGrowth
+     */
     JSGC_LOW_FREQUENCY_HEAP_GROWTH = 16,
 
     /**
      * If false, the heap growth factor is fixed at 3. If true, it is determined
      * based on whether GCs are high- or low- frequency.
+     *
+     * Pref: javascript.options.mem.gc_dynamic_heap_growth
+     * Default: DynamicHeapGrowthEnabled
      */
     JSGC_DYNAMIC_HEAP_GROWTH = 17,
 
-    /** If true, high-frequency GCs will use a longer mark slice. */
+    /**
+     * If true, high-frequency GCs will use a longer mark slice.
+     *
+     * Pref: javascript.options.mem.gc_dynamic_mark_slice
+     * Default: DynamicMarkSliceEnabled
+     */
     JSGC_DYNAMIC_MARK_SLICE = 18,
 
-    /** Lower limit after which we limit the heap growth. */
+    /**
+     * Lower limit after which we limit the heap growth.
+     *
+     * The base value used to compute zone->threshold.gcTriggerBytes(). When
+     * usage.gcBytes() surpasses threshold.gcTriggerBytes() for a zone, the
+     * zone may be scheduled for a GC, depending on the exact circumstances.
+     *
+     * Pref: javascript.options.mem.gc_allocation_threshold_mb
+     * Default GCZoneAllocThresholdBase
+     */
     JSGC_ALLOCATION_THRESHOLD = 19,
 
     /**
      * We try to keep at least this many unused chunks in the free chunk pool at
      * all times, even after a shrinking GC.
+     *
+     * Pref: javascript.options.mem.gc_min_empty_chunk_count
+     * Default: MinEmptyChunkCount
      */
     JSGC_MIN_EMPTY_CHUNK_COUNT = 21,
 
-    /** We never keep more than this many unused chunks in the free chunk pool. */
+    /**
+     * We never keep more than this many unused chunks in the free chunk
+     * pool.
+     *
+     * Pref: javascript.options.mem.gc_min_empty_chunk_count
+     * Default: MinEmptyChunkCount
+     */
     JSGC_MAX_EMPTY_CHUNK_COUNT = 22,
 
-    /** Whether compacting GC is enabled. */
+    /**
+     * Whether compacting GC is enabled.
+     *
+     * Pref: javascript.options.mem.gc_compacting
+     * Default: CompactingEnabled
+     */
     JSGC_COMPACTING_ENABLED = 23,
 
-    /** If true, painting can trigger IGC slices. */
+    /**
+     * If true, painting can trigger IGC slices.
+     *
+     * Pref: javascript.options.mem.gc_refresh_frame_slices_enabled
+     * Default: RefreshFrameSlicesEnabled
+     */
     JSGC_REFRESH_FRAME_SLICES_ENABLED = 24,
+
+    /**
+     * Factor for triggering a GC based on JSGC_ALLOCATION_THRESHOLD
+     *
+     * Default: ZoneAllocThresholdFactorDefault
+     * Pref: None
+     */
+    JSGC_ALLOCATION_THRESHOLD_FACTOR = 25,
+
+    /**
+     * Factor for triggering a GC based on JSGC_ALLOCATION_THRESHOLD.
+     * Used if another GC (in different zones) is already running.
+     *
+     * Default: ZoneAllocThresholdFactorAvoidInterruptDefault
+     * Pref: None
+     */
+    JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT = 26,
 } JSGCParamKey;
 
 extern JS_PUBLIC_API(void)
 JS_SetGCParameter(JSContext* cx, JSGCParamKey key, uint32_t value);
+
+extern JS_PUBLIC_API(void)
+JS_ResetGCParameter(JSContext* cx, JSGCParamKey key);
 
 extern JS_PUBLIC_API(uint32_t)
 JS_GetGCParameter(JSContext* cx, JSGCParamKey key);
@@ -1972,14 +2103,6 @@ extern JS_PUBLIC_API(bool)
 GetFirstArgumentAsTypeHint(JSContext* cx, CallArgs args, JSType *result);
 
 } /* namespace JS */
-
-extern JS_PUBLIC_API(bool)
-JS_PropertyStub(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
-                JS::MutableHandleValue vp);
-
-extern JS_PUBLIC_API(bool)
-JS_StrictPropertyStub(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
-                      JS::MutableHandleValue vp, JS::ObjectOpResult& result);
 
 template<typename T>
 struct JSConstScalarSpec {
@@ -2130,10 +2253,6 @@ inline int CheckIsSetterOp(JSSetterOp op);
   (static_cast<void>(sizeof(JS::detail::CheckIsSetterOp(v))), \
    reinterpret_cast<JSNative>(v))
 
-#define JS_STUBGETTER JS_PROPERTYOP_GETTER(JS_PropertyStub)
-
-#define JS_STUBSETTER JS_PROPERTYOP_SETTER(JS_StrictPropertyStub)
-
 #define JS_PS_ACCESSOR_SPEC(name, getter, setter, flags, extraFlags) \
     { name, uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | extraFlags), \
       { {  getter, setter  } } }
@@ -2196,29 +2315,25 @@ struct JSFunctionSpec {
  * Terminating sentinel initializer to put at the end of a JSFunctionSpec array
  * that's passed to JS_DefineFunctions or JS_InitClass.
  */
-#define JS_FS_END JS_FS(nullptr,nullptr,0,0)
+#define JS_FS_END JS_FN(nullptr,nullptr,0,0)
 
 /*
- * Initializer macros for a JSFunctionSpec array element. JS_FN (whose name pays
- * homage to the old JSNative/JSFastNative split) simply adds the flag
- * JSFUN_STUB_GSOPS. JS_FNINFO allows the simple adding of
- * JSJitInfos. JS_SELF_HOSTED_FN declares a self-hosted function.
- * JS_INLINABLE_FN allows specifying an InlinableNative enum value for natives
- * inlined or specialized by the JIT. Finally JS_FNSPEC has slots for all the
- * fields.
+ * Initializer macros for a JSFunctionSpec array element. JS_FNINFO allows the
+ * simple adding of JSJitInfos. JS_SELF_HOSTED_FN declares a self-hosted
+ * function. JS_INLINABLE_FN allows specifying an InlinableNative enum value for
+ * natives inlined or specialized by the JIT. Finally JS_FNSPEC has slots for
+ * all the fields.
  *
  * The _SYM variants allow defining a function with a symbol key rather than a
  * string key. For example, use JS_SYM_FN(iterator, ...) to define an
  * @@iterator method.
  */
-#define JS_FS(name,call,nargs,flags)                                          \
-    JS_FNSPEC(name, call, nullptr, nargs, flags, nullptr)
 #define JS_FN(name,call,nargs,flags)                                          \
-    JS_FNSPEC(name, call, nullptr, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
+    JS_FNSPEC(name, call, nullptr, nargs, flags, nullptr)
 #define JS_INLINABLE_FN(name,call,nargs,flags,native)                         \
-    JS_FNSPEC(name, call, &js::jit::JitInfo_##native, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
+    JS_FNSPEC(name, call, &js::jit::JitInfo_##native, nargs, flags, nullptr)
 #define JS_SYM_FN(symbol,call,nargs,flags)                                    \
-    JS_SYM_FNSPEC(symbol, call, nullptr, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
+    JS_SYM_FNSPEC(symbol, call, nullptr, nargs, flags, nullptr)
 #define JS_FNINFO(name,call,info,nargs,flags)                                 \
     JS_FNSPEC(name, call, info, nargs, flags, nullptr)
 #define JS_SELF_HOSTED_FN(name,selfHostedName,nargs,flags)                    \
@@ -2778,8 +2893,6 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
             MOZ_ASSERT(!hasAll(JSPROP_IGNORE_READONLY | JSPROP_READONLY));
             MOZ_ASSERT_IF(has(JSPROP_IGNORE_VALUE), value().isUndefined());
         }
-        MOZ_ASSERT(getter() != JS_PropertyStub);
-        MOZ_ASSERT(setter() != JS_StrictPropertyStub);
 
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_ENUMERATE));
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_PERMANENT));
@@ -2830,9 +2943,6 @@ class MutableWrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
 
     void initFields(JS::HandleObject obj, JS::HandleValue v, unsigned attrs,
                     JSGetterOp getterOp, JSSetterOp setterOp) {
-        MOZ_ASSERT(getterOp != JS_PropertyStub);
-        MOZ_ASSERT(setterOp != JS_StrictPropertyStub);
-
         object().set(obj);
         value().set(v);
         setAttributes(attrs);
@@ -2893,11 +3003,9 @@ class MutableWrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
     void setAttributes(unsigned attrs) { desc().attrs = attrs; }
 
     void setGetter(JSGetterOp op) {
-        MOZ_ASSERT(op != JS_PropertyStub);
         desc().getter = op;
     }
     void setSetter(JSSetterOp op) {
-        MOZ_ASSERT(op != JS_StrictPropertyStub);
         desc().setter = op;
     }
     void setGetterObject(JSObject* obj) {
@@ -4520,45 +4628,59 @@ extern JS_PUBLIC_API(JS::Value)
 GetModuleHostDefinedField(JSObject* module);
 
 /*
- * Perform the ModuleDeclarationInstantiation operation on on the give source
- * text module record.
+ * Perform the ModuleInstantiate operation on the given source text module
+ * record.
  *
  * This transitively resolves all module dependencies (calling the
  * HostResolveImportedModule hook) and initializes the environment record for
  * the module.
  */
 extern JS_PUBLIC_API(bool)
-ModuleDeclarationInstantiation(JSContext* cx, JS::HandleObject moduleRecord);
+ModuleInstantiate(JSContext* cx, JS::HandleObject moduleRecord);
 
 /*
- * Perform the ModuleEvaluation operation on on the give source text module
- * record.
+ * Perform the ModuleEvaluate operation on the given source text module record.
  *
  * This does nothing if this module has already been evaluated. Otherwise, it
  * transitively evaluates all dependences of this module and then evaluates this
  * module.
  *
- * ModuleDeclarationInstantiation must have completed prior to calling this.
+ * ModuleInstantiate must have completed prior to calling this.
  */
 extern JS_PUBLIC_API(bool)
-ModuleEvaluation(JSContext* cx, JS::HandleObject moduleRecord);
+ModuleEvaluate(JSContext* cx, JS::HandleObject moduleRecord);
 
 /*
  * Get a list of the module specifiers used by a source text module
  * record to request importation of modules.
  *
- * The result is a JavaScript array of string values.  To extract the individual
- * values use only JS_GetArrayLength and JS_GetElement with indices 0 to
- * length - 1.
+ * The result is a JavaScript array of object values.  To extract the individual
+ * values use only JS_GetArrayLength and JS_GetElement with indices 0 to length
+ * - 1.
+ *
+ * The element values are objects with the following properties:
+ *  - moduleSpecifier: the module specifier string
+ *  - lineNumber: the line number of the import in the source text
+ *  - columnNumber: the column number of the import in the source text
+ *
+ * These property values can be extracted with GetRequestedModuleSpecifier() and
+ * GetRequestedModuleSourcePos()
  */
 extern JS_PUBLIC_API(JSObject*)
 GetRequestedModules(JSContext* cx, JS::HandleObject moduleRecord);
 
-/*
- * Get the script associated with a module.
- */
-extern JS_PUBLIC_API(JSScript*)
-GetModuleScript(JSContext* cx, JS::HandleObject moduleRecord);
+extern JS_PUBLIC_API(JSString*)
+GetRequestedModuleSpecifier(JSContext* cx, JS::HandleValue requestedModuleObject);
+
+extern JS_PUBLIC_API(void)
+GetRequestedModuleSourcePos(JSContext* cx, JS::HandleValue requestedModuleObject,
+                            uint32_t* lineNumber, uint32_t* columnNumber);
+
+extern JS_PUBLIC_API(bool)
+IsModuleErrored(JSObject* moduleRecord);
+
+extern JS_PUBLIC_API(JS::Value)
+GetModuleError(JSObject* moduleRecord);
 
 } /* namespace JS */
 
@@ -4781,57 +4903,55 @@ extern JS_PUBLIC_API(JSObject*)
 GetWaitForAllPromise(JSContext* cx, const JS::AutoObjectVector& promises);
 
 /**
- * An AsyncTask represents a SpiderMonkey-internal operation that starts on a
- * JSContext's owner thread, possibly executes on other threads, completes, and
- * then needs to be scheduled to run again on the JSContext's owner thread. The
- * embedding provides for this final dispatch back to the JSContext's owner
- * thread by calling methods on this interface when requested.
+ * The Dispatchable interface allows the embedding to call SpiderMonkey
+ * on a JSContext thread when requested via DispatchToEventLoopCallback.
  */
-struct JS_PUBLIC_API(AsyncTask)
+class JS_PUBLIC_API(Dispatchable)
 {
-    AsyncTask() : user(nullptr) {}
-    virtual ~AsyncTask() {}
+  protected:
+    // Dispatchables are created and destroyed by SpiderMonkey.
+    Dispatchable() = default;
+    virtual ~Dispatchable()  = default;
 
-    /**
-     * After the FinishAsyncTaskCallback is called and succeeds, one of these
-     * two functions will be called on the original JSContext's owner thread.
-     */
-    virtual void finish(JSContext* cx) = 0;
-    virtual void cancel(JSContext* cx) = 0;
+  public:
+    // ShuttingDown indicates that SpiderMonkey should abort async tasks to
+    // expedite shutdown.
+    enum MaybeShuttingDown { NotShuttingDown, ShuttingDown };
 
-    /* The embedding may use this field to attach arbitrary data to a task. */
-    void* user;
+    // Called by the embedding after DispatchToEventLoopCallback succeeds.
+    virtual void run(JSContext* cx, MaybeShuttingDown maybeShuttingDown) = 0;
 };
 
 /**
- * A new AsyncTask object, created inside SpiderMonkey on the JSContext's owner
- * thread, will be passed to the StartAsyncTaskCallback before it is dispatched
- * to another thread. The embedding may use the AsyncTask::user field to attach
- * additional task state.
- *
- * If this function succeeds, SpiderMonkey will call the FinishAsyncTaskCallback
- * at some point in the future. Otherwise, FinishAsyncTaskCallback will *not*
- * be called. SpiderMonkey assumes that, if StartAsyncTaskCallback fails, it is
- * because the JSContext is being shut down.
+ * DispatchToEventLoopCallback may be called from any thread, being passed the
+ * same 'closure' passed to InitDispatchToEventLoop() and Dispatchable from the
+ * same JSRuntime. If the embedding returns 'true', the embedding must call
+ * Dispatchable::run() on an active JSContext thread for the same JSRuntime on
+ * which 'closure' was registered. If DispatchToEventLoopCallback returns
+ * 'false', SpiderMonkey will assume a shutdown of the JSRuntime is in progress.
+ * This contract implies that, by the time the final JSContext is destroyed in
+ * the JSRuntime, the embedding must have (1) run all Dispatchables for which
+ * DispatchToEventLoopCallback returned true, (2) already started returning
+ * false from calls to DispatchToEventLoopCallback.
  */
-typedef bool
-(*StartAsyncTaskCallback)(JSContext* cx, AsyncTask* task);
 
-/**
- * The FinishAsyncTaskCallback may be called from any thread and will only be
- * passed AsyncTasks that have already been started via StartAsyncTaskCallback.
- * If the embedding returns 'true', indicating success, the embedding must call
- * either task->finish() or task->cancel() on the JSContext's owner thread at
- * some point in the future.
- */
 typedef bool
-(*FinishAsyncTaskCallback)(AsyncTask* task);
+(*DispatchToEventLoopCallback)(void* closure, Dispatchable* dispatchable);
 
-/**
- * Set the above callbacks for the given context.
- */
 extern JS_PUBLIC_API(void)
-SetAsyncTaskCallbacks(JSContext* cx, StartAsyncTaskCallback start, FinishAsyncTaskCallback finish);
+InitDispatchToEventLoop(JSContext* cx, DispatchToEventLoopCallback callback, void* closure);
+
+/**
+ * When a JSRuntime is destroyed it implicitly cancels all async tasks in
+ * progress, releasing any roots held by the task. However, this is not soon
+ * enough for cycle collection, which needs to have roots dropped earlier so
+ * that the cycle collector can transitively remove roots for a future GC. For
+ * these and other cases, the set of pending async tasks can be canceled
+ * with this call earlier than JSRuntime destruction.
+ */
+
+extern JS_PUBLIC_API(void)
+ShutdownAsyncTasks(JSContext* cx);
 
 /**
  * This class can be used to store a pointer to the youngest frame of a saved
@@ -6389,8 +6509,7 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
 /**
  * The WasmModule interface allows the embedding to hold a reference to the
  * underying C++ implementation of a JS WebAssembly.Module object for purposes
- * of efficient postMessage() of WebAssembly.Module and (de)serialization off
- * the object's JSRuntime's thread for IndexedDB.
+ * of efficient postMessage() and (de)serialization from a random thread.
  *
  * For postMessage() sharing:
  *
@@ -6411,8 +6530,10 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
  * compiled code are written into separate files: a bytecode file that always
  * allows successful deserialization and a compiled-code file keyed on cpu- and
  * build-id that may become invalid if either of these change between
- * serialization and deserialization. After serialization, a reference is
- * dropped from a separate thread so the virtual destructor must be thread-safe.
+ * serialization and deserialization. Due to tiering, the serialization must
+ * asynchronously wait for compilation to complete before requesting the
+ * module's compiled code. After serialization, a reference is dropped from a
+ * separate thread so the virtual destructor must be thread-safe.
  *
  * - Deserialization starts when the structured clone algorithm encounters a
  * serialized WebAssembly.Module. On a background thread, the compiled-code file
@@ -6420,10 +6541,25 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
  * still valid (as described above). DeserializeWasmModule is then called to
  * construct a JS::WasmModule (also on the background thread), passing the
  * bytecode file descriptor and, if valid, the compiled-code file descriptor.
- * The JS::WasmObject is then transported to the JSRuntime thread (which
- * originated the request) and the wrapping WebAssembly.Module object is created
- * by calling createObject().
+ * The JS::WasmObject is then transported to a JSContext thread and the wrapping
+ * WebAssembly.Module object is created by calling createObject().
  */
+
+class WasmModuleListener
+{
+  protected:
+    virtual ~WasmModuleListener() {}
+
+  public:
+    // These method signatures are chosen to exactly match nsISupports so that a
+    // plain nsISupports-implementing class can trivially implement this
+    // interface too. We can't simply #include "nsISupports.h" so we use MFBT
+    // equivalents for all the platform-dependent types.
+    virtual MozExternalRefCountType MOZ_XPCOM_ABI AddRef() = 0;
+    virtual MozExternalRefCountType MOZ_XPCOM_ABI Release() = 0;
+
+    virtual void onCompilationComplete() = 0;
+};
 
 struct WasmModule : js::AtomicRefCounted<WasmModule>
 {
@@ -6432,6 +6568,12 @@ struct WasmModule : js::AtomicRefCounted<WasmModule>
     virtual size_t bytecodeSerializedSize() const = 0;
     virtual void bytecodeSerialize(uint8_t* bytecodeBegin, size_t bytecodeSize) const = 0;
 
+    // Compilation must complete before the serialized code is requested. If
+    // compilation is not complete, the embedding must wait until notified by
+    // implementing WasmModuleListener. SpiderMonkey will hold a RefPtr to
+    // 'listener' until onCompilationComplete() is called.
+    virtual bool compilationComplete() const = 0;
+    virtual bool notifyWhenCompilationComplete(WasmModuleListener* listener) = 0;
     virtual size_t compiledSerializedSize() const = 0;
     virtual void compiledSerialize(uint8_t* compiledBegin, size_t compiledSize) const = 0;
 

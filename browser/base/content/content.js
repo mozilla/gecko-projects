@@ -236,9 +236,6 @@ const PREF_BLOCKLIST_CLOCK_SKEW_SECONDS = "services.blocklist.clock_skew_seconds
 
 const PREF_SSL_IMPACT_ROOTS = ["security.tls.version.", "security.ssl3."];
 
-const PREF_SSL_IMPACT = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
-  return prefs.concat(Services.prefs.getChildList(root));
-}, []);
 
 /**
  * Retrieve the array of CSS selectors corresponding to the provided node. The first item
@@ -502,7 +499,10 @@ var AboutNetAndCertErrorListener = {
   },
 
   changedCertPrefs() {
-    for (let prefName of PREF_SSL_IMPACT) {
+    let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
+       return prefs.concat(Services.prefs.getChildList(root));
+    }, []);
+    for (let prefName of prefSSLImpact) {
       if (Services.prefs.prefHasUserValue(prefName)) {
         return true;
       }
@@ -825,38 +825,6 @@ var PageMetadataMessenger = {
   }
 }
 PageMetadataMessenger.init();
-
-addEventListener("ActivateSocialFeature", function(aEvent) {
-  let document = content.document;
-  let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils);
-  if (!dwu.isHandlingUserInput) {
-    Cu.reportError("attempt to activate provider without user input from " + document.nodePrincipal.origin);
-    return;
-  }
-
-  let node = aEvent.target;
-  let ownerDocument = node.ownerDocument;
-  let data = node.getAttribute("data-service");
-  if (data) {
-    try {
-      data = JSON.parse(data);
-    } catch (e) {
-      Cu.reportError("Social Service manifest parse error: " + e);
-      return;
-    }
-  } else {
-    Cu.reportError("Social Service manifest not available");
-    return;
-  }
-
-  sendAsyncMessage("Social:Activation", {
-    url: ownerDocument.location.href,
-    origin: ownerDocument.nodePrincipal.origin,
-    manifest: data,
-    triggeringPrincipal: Utils.serializePrincipal(ownerDocument.nodePrincipal),
-  });
-}, true, true);
 
 addMessageListener("ContextMenu:SaveVideoFrameAsImage", (message) => {
   let video = message.objects.target;

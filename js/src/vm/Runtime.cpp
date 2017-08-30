@@ -105,9 +105,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     profilerSampleBufferGen_(0),
     profilerSampleBufferLapCount_(1),
     telemetryCallback(nullptr),
-    startAsyncTaskCallback(nullptr),
-    finishAsyncTaskCallback(nullptr),
-    promiseTasksToDestroy(mutexid::PromiseTaskPtrVector),
     readableStreamDataRequestCallback(nullptr),
     readableStreamWriteIntoReadRequestCallback(nullptr),
     readableStreamCancelCallback(nullptr),
@@ -445,6 +442,19 @@ void
 JSRuntime::setTelemetryCallback(JSRuntime* rt, JSAccumulateTelemetryDataCallback callback)
 {
     rt->telemetryCallback = callback;
+}
+
+void
+JSRuntime::setUseCounter(JSObject* obj, JSUseCounter counter)
+{
+    if (useCounterCallback)
+        (*useCounterCallback)(obj, counter);
+}
+
+void
+JSRuntime::setUseCounterCallback(JSRuntime* rt, JSSetUseCounterCallback callback)
+{
+    rt->useCounterCallback = callback;
 }
 
 void

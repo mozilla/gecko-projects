@@ -7,9 +7,10 @@ use context::QuirksMode;
 use cssparser::{Parser, RuleListParser, ParserInput};
 use error_reporting::{ParseErrorReporter, ContextualParseError};
 use fnv::FnvHashMap;
+use invalidation::media_queries::{MediaListKey, ToMediaListKey};
 use media_queries::{MediaList, Device};
 use parking_lot::RwLock;
-use parser::ParserContext;
+use parser::{ParserContext, ParserErrorContext};
 use servo_arc::Arc;
 use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard};
 use std::mem;
@@ -35,7 +36,7 @@ pub struct UserAgentStylesheets {
 /// A set of namespaces applying to a given stylesheet.
 ///
 /// The namespace id is used in gecko
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug, Default)]
 #[allow(missing_docs)]
 pub struct Namespaces {
     pub default: Option<(Namespace, NamespaceId)>,
@@ -57,25 +58,25 @@ pub struct StylesheetContents {
     pub namespaces: RwLock<Namespaces>,
     /// The quirks mode of this stylesheet.
     pub quirks_mode: QuirksMode,
-    /// Whether this stylesheet would be dirty when the viewport size changes.
-    pub dirty_on_viewport_size_change: AtomicBool,
+    /// This stylesheet's source map URL.
+    pub source_map_url: RwLock<Option<String>>,
 }
 
 impl StylesheetContents {
     /// Parse a given CSS string, with a given url-data, origin, and
     /// quirks mode.
-    pub fn from_str(
+    pub fn from_str<R: ParseErrorReporter>(
         css: &str,
         url_data: UrlExtraData,
         origin: Origin,
         shared_lock: &SharedRwLock,
         stylesheet_loader: Option<&StylesheetLoader>,
-        error_reporter: &ParseErrorReporter,
+        error_reporter: &R,
         quirks_mode: QuirksMode,
-        line_number_offset: u64
+        line_number_offset: u32
     ) -> Self {
         let namespaces = RwLock::new(Namespaces::default());
-        let (rules, dirty_on_viewport_size_change) = Stylesheet::parse_rules(
+        let (rules, source_map_url) = Stylesheet::parse_rules(
             css,
             &url_data,
             origin,
@@ -92,8 +93,8 @@ impl StylesheetContents {
             origin: origin,
             url_data: RwLock::new(url_data),
             namespaces: namespaces,
-            dirty_on_viewport_size_change: AtomicBool::new(dirty_on_viewport_size_change),
             quirks_mode: quirks_mode,
+            source_map_url: RwLock::new(source_map_url),
         }
     }
 
@@ -128,16 +129,13 @@ impl DeepCloneWithLock for StylesheetContents {
             self.rules.read_with(guard)
                 .deep_clone_with_lock(lock, guard, params);
 
-        let dirty_on_viewport_size_change =
-            AtomicBool::new(self.dirty_on_viewport_size_change.load(Ordering::Relaxed));
-
         Self {
             rules: Arc::new(lock.wrap(rules)),
-            dirty_on_viewport_size_change,
             quirks_mode: self.quirks_mode,
             origin: self.origin,
             url_data: RwLock::new((*self.url_data.read()).clone()),
             namespaces: RwLock::new((*self.namespaces.read()).clone()),
+            source_map_url: RwLock::new((*self.source_map_url.read()).clone()),
         }
     }
 }
@@ -271,16 +269,53 @@ impl StylesheetInDocument for Stylesheet {
     }
 }
 
+/// A simple wrapper over an `Arc<Stylesheet>`, with pointer comparison, and
+/// suitable for its use in a `StylesheetSet`.
+#[derive(Clone)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub struct DocumentStyleSheet(
+    #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
+    pub Arc<Stylesheet>
+);
+
+impl PartialEq for DocumentStyleSheet {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl ToMediaListKey for DocumentStyleSheet {
+    fn to_media_list_key(&self) -> MediaListKey {
+        self.0.to_media_list_key()
+    }
+}
+
+impl StylesheetInDocument for DocumentStyleSheet {
+    fn contents(&self, guard: &SharedRwLockReadGuard) -> &StylesheetContents {
+        self.0.contents(guard)
+    }
+
+    fn media<'a>(&'a self, guard: &'a SharedRwLockReadGuard) -> Option<&'a MediaList> {
+        self.0.media(guard)
+    }
+
+    fn enabled(&self) -> bool {
+        self.0.enabled()
+    }
+}
+
 impl Stylesheet {
     /// Updates an empty stylesheet from a given string of text.
-    pub fn update_from_str(existing: &Stylesheet,
-                           css: &str,
-                           url_data: UrlExtraData,
-                           stylesheet_loader: Option<&StylesheetLoader>,
-                           error_reporter: &ParseErrorReporter,
-                           line_number_offset: u64) {
+    pub fn update_from_str<R>(existing: &Stylesheet,
+                              css: &str,
+                              url_data: UrlExtraData,
+                              stylesheet_loader: Option<&StylesheetLoader>,
+                              error_reporter: &R,
+                              line_number_offset: u32)
+        where R: ParseErrorReporter
+    {
         let namespaces = RwLock::new(Namespaces::default());
-        let (rules, dirty_on_viewport_size_change) =
+        let (rules, source_map_url) =
             Stylesheet::parse_rules(
                 css,
                 &url_data,
@@ -298,50 +333,48 @@ impl Stylesheet {
             &mut *existing.contents.namespaces.write(),
             &mut *namespaces.write()
         );
-        existing.contents.dirty_on_viewport_size_change
-            .store(dirty_on_viewport_size_change, Ordering::Release);
 
         // Acquire the lock *after* parsing, to minimize the exclusive section.
         let mut guard = existing.shared_lock.write();
         *existing.contents.rules.write_with(&mut guard) = CssRules(rules);
+        *existing.contents.source_map_url.write() = source_map_url;
     }
 
-    fn parse_rules(
+    fn parse_rules<R: ParseErrorReporter>(
         css: &str,
         url_data: &UrlExtraData,
         origin: Origin,
         namespaces: &mut Namespaces,
         shared_lock: &SharedRwLock,
         stylesheet_loader: Option<&StylesheetLoader>,
-        error_reporter: &ParseErrorReporter,
+        error_reporter: &R,
         quirks_mode: QuirksMode,
-        line_number_offset: u64
-    ) -> (Vec<CssRule>, bool) {
+        line_number_offset: u32
+    ) -> (Vec<CssRule>, Option<String>) {
         let mut rules = Vec::new();
-        let mut input = ParserInput::new(css);
+        let mut input = ParserInput::new_with_line_number_offset(css, line_number_offset);
         let mut input = Parser::new(&mut input);
 
         let context =
-            ParserContext::new_with_line_number_offset(
+            ParserContext::new(
                 origin,
                 url_data,
-                error_reporter,
-                line_number_offset,
+                None,
                 PARSING_MODE_DEFAULT,
                 quirks_mode
             );
+        let error_context = ParserErrorContext { error_reporter };
 
         let rule_parser = TopLevelRuleParser {
             stylesheet_origin: origin,
             shared_lock: shared_lock,
             loader: stylesheet_loader,
             context: context,
+            error_context: error_context,
             state: State::Start,
             had_hierarchy_error: false,
-            namespaces: Some(namespaces),
+            namespaces: namespaces,
         };
-
-        input.look_for_viewport_percentages();
 
         {
             let mut iter =
@@ -352,13 +385,15 @@ impl Stylesheet {
                     Ok(rule) => rules.push(rule),
                     Err(err) => {
                         let error = ContextualParseError::InvalidRule(err.slice, err.error);
-                        iter.parser.context().log_css_error(err.location, error);
+                        iter.parser.context.log_css_error(&iter.parser.error_context,
+                                                          err.location, error);
                     }
                 }
             }
         }
 
-        (rules, input.seen_viewport_percentages())
+        let source_map_url = input.current_source_map_url().map(String::from);
+        (rules, source_map_url)
     }
 
     /// Creates an empty stylesheet and parses it with a given base url, origin
@@ -366,16 +401,18 @@ impl Stylesheet {
     ///
     /// Effectively creates a new stylesheet and forwards the hard work to
     /// `Stylesheet::update_from_str`.
-    pub fn from_str(css: &str,
-                    url_data: UrlExtraData,
-                    origin: Origin,
-                    media: Arc<Locked<MediaList>>,
-                    shared_lock: SharedRwLock,
-                    stylesheet_loader: Option<&StylesheetLoader>,
-                    error_reporter: &ParseErrorReporter,
-                    quirks_mode: QuirksMode,
-                    line_number_offset: u64)
-                    -> Stylesheet {
+    pub fn from_str<R: ParseErrorReporter>(
+        css: &str,
+        url_data: UrlExtraData,
+        origin: Origin,
+        media: Arc<Locked<MediaList>>,
+        shared_lock: SharedRwLock,
+        stylesheet_loader: Option<&StylesheetLoader>,
+        error_reporter: &R,
+        quirks_mode: QuirksMode,
+        line_number_offset: u32)
+        -> Stylesheet
+    {
         let contents = StylesheetContents::from_str(
             css,
             url_data,
@@ -393,29 +430,6 @@ impl Stylesheet {
             media,
             disabled: AtomicBool::new(false),
         }
-    }
-
-    /// Whether this stylesheet can be dirty on viewport size change.
-    pub fn dirty_on_viewport_size_change(&self) -> bool {
-        self.contents.dirty_on_viewport_size_change.load(Ordering::SeqCst)
-    }
-
-    /// When CSSOM inserts a rule or declaration into this stylesheet, it needs to call this method
-    /// with the return value of `cssparser::Parser::seen_viewport_percentages`.
-    ///
-    /// FIXME: actually make these calls
-    ///
-    /// Note: when *removing* a rule or declaration that contains a viewport percentage,
-    /// to keep the flag accurate we’d need to iterator through the rest of the stylesheet to
-    /// check for *other* such values.
-    ///
-    /// Instead, we conservatively assume there might be some.
-    /// Restyling will some some more work than necessary, but give correct results.
-    pub fn inserted_has_viewport_percentages(&self, has_viewport_percentages: bool) {
-        self.contents.dirty_on_viewport_size_change.fetch_or(
-            has_viewport_percentages,
-            Ordering::SeqCst
-        );
     }
 
     /// Returns whether the stylesheet has been explicitly disabled through the

@@ -1285,7 +1285,7 @@ protected:
   struct MaskLayerKey;
   already_AddRefed<ImageLayer>
   CreateOrRecycleMaskImageLayerFor(const MaskLayerKey& aKey,
-                                   const std::function<void(Layer* aLayer)>& aSetUserData);
+                                   void(*aSetUserData)(Layer* aLayer));
   /**
    * Grabs all PaintedLayers and ColorLayers from the ContainerLayer and makes them
    * available for recycling.
@@ -2224,7 +2224,7 @@ ContainerState::CreateOrRecycleImageLayer(PaintedLayer *aPainted)
 
 already_AddRefed<ImageLayer>
 ContainerState::CreateOrRecycleMaskImageLayerFor(const MaskLayerKey& aKey,
-                                                 const std::function<void(Layer* aLayer)>& aSetUserData)
+                                                 void(*aSetUserData)(Layer* aLayer))
 {
   RefPtr<ImageLayer> result = mRecycledMaskImageLayers.Get(aKey);
   if (result) {
@@ -3404,20 +3404,13 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
         containingPaintedLayerData->CombinedTouchActionRegion());
     }
   } else {
-    EventRegions regions;
-    regions.mHitRegion = ScaleRegionToOutsidePixels(data->mHitRegion);
-    regions.mNoActionRegion = ScaleRegionToOutsidePixels(data->mNoActionRegion);
-    regions.mHorizontalPanRegion = ScaleRegionToOutsidePixels(data->mHorizontalPanRegion);
-    regions.mVerticalPanRegion = ScaleRegionToOutsidePixels(data->mVerticalPanRegion);
-    // Points whose hit-region status we're not sure about need to be dispatched
-    // to the content thread. If a point is in both maybeHitRegion and hitRegion
-    // then it's not a "maybe" any more, and doesn't go into the dispatch-to-
-    // content region.
-    nsIntRegion maybeHitRegion = ScaleRegionToOutsidePixels(data->mMaybeHitRegion);
-    regions.mDispatchToContentHitRegion.Sub(maybeHitRegion, regions.mHitRegion);
-    regions.mDispatchToContentHitRegion.OrWith(
-        ScaleRegionToOutsidePixels(data->mDispatchToContentHitRegion));
-    regions.mHitRegion.OrWith(maybeHitRegion);
+    EventRegions regions(
+        ScaleRegionToOutsidePixels(data->mHitRegion),
+        ScaleRegionToOutsidePixels(data->mMaybeHitRegion),
+        ScaleRegionToOutsidePixels(data->mDispatchToContentHitRegion),
+        ScaleRegionToOutsidePixels(data->mNoActionRegion),
+        ScaleRegionToOutsidePixels(data->mHorizontalPanRegion),
+        ScaleRegionToOutsidePixels(data->mVerticalPanRegion));
 
     Matrix mat = layer->GetTransform().As2D();
     mat.Invert();
@@ -3892,6 +3885,13 @@ GetASRForPerspective(const ActiveScrolledRoot* aASR, nsIFrame* aPerspectiveFrame
 }
 
 void
+SetCSSMaskLayerUserData(Layer* aMaskLayer)
+{
+  aMaskLayer->SetUserData(&gCSSMaskLayerUserData,
+                          new CSSMaskLayerUserData());
+}
+
+void
 ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
                                          nsDisplayMask* aMaskItem)
 {
@@ -3899,12 +3899,7 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
 
   RefPtr<ImageLayer> maskLayer =
     CreateOrRecycleMaskImageLayerFor(MaskLayerKey(aLayer, Nothing()),
-      [](Layer* aMaskLayer)
-      {
-        aMaskLayer->SetUserData(&gCSSMaskLayerUserData,
-                                new CSSMaskLayerUserData());
-      }
-    );
+                                     SetCSSMaskLayerUserData);
 
   CSSMaskLayerUserData* oldUserData =
     static_cast<CSSMaskLayerUserData*>(maskLayer->GetUserData(&gCSSMaskLayerUserData));
@@ -5920,60 +5915,36 @@ FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame, DisplayItemType aDisplayI
   return nullptr;
 }
 
-static gfxSize
-PredictScaleForContent(nsIFrame* aFrame, nsIFrame* aAncestorWithScale,
-                       const gfxSize& aScale)
-{
-  Matrix4x4 transform = Matrix4x4::Scaling(aScale.width, aScale.height, 1.0);
-  if (aFrame != aAncestorWithScale) {
-    // aTransform is applied first, then the scale is applied to the result
-    transform = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestorWithScale)*transform;
-  }
-  Matrix transform2d;
-  if (transform.CanDraw2D(&transform2d)) {
-     return ThebesMatrix(transform2d).ScaleFactors(true);
-  }
-  return gfxSize(1.0, 1.0);
-}
-
 gfxSize
 FrameLayerBuilder::GetPaintedLayerScaleForFrame(nsIFrame* aFrame)
 {
   MOZ_ASSERT(aFrame, "need a frame");
-  nsIFrame* last = nullptr;
-  for (nsIFrame* f = aFrame; f; f = nsLayoutUtils::GetCrossDocParentFrame(f)) {
-    last = f;
 
-    if (nsLayoutUtils::IsPopup(f)) {
-      // Don't examine ancestors of a popup. It won't make sense to check
-      // the transform from some content inside the popup to some content
-      // which is an ancestor of the popup.
-      break;
-    }
+  nsPresContext* presCtx = aFrame->PresContext()->GetRootPresContext();
 
-    const SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
-
-    for (uint32_t i = 0; i < array.Length(); i++) {
-      Layer* layer = DisplayItemData::AssertDisplayItemData(array.ElementAt(i))->mLayer;
-      ContainerLayer* container = layer ? layer->AsContainerLayer() : nullptr;
-      if (!container ||
-          !layer->Manager()->IsWidgetLayerManager()) {
-        continue;
-      }
-      for (Layer* l = container->GetFirstChild(); l; l = l->GetNextSibling()) {
-        PaintedDisplayItemLayerUserData* data =
-            static_cast<PaintedDisplayItemLayerUserData*>
-              (l->GetUserData(&gPaintedDisplayItemLayerUserData));
-        if (data) {
-          return PredictScaleForContent(aFrame, f, gfxSize(data->mXScale, data->mYScale));
-        }
-      }
-    }
+  if (!presCtx) {
+    presCtx = aFrame->PresContext();
+    MOZ_ASSERT(presCtx);
   }
 
-  float presShellResolution = last->PresContext()->PresShell()->GetResolution();
-  return PredictScaleForContent(aFrame, last,
-      gfxSize(presShellResolution, presShellResolution));
+  nsIFrame* root = presCtx->PresShell()->GetRootFrame();
+
+  MOZ_ASSERT(root);
+
+  float resolution = presCtx->PresShell()->GetResolution();
+
+  Matrix4x4 transform = Matrix4x4::Scaling(resolution, resolution, 1.0);
+  if (aFrame != root) {
+    // aTransform is applied first, then the scale is applied to the result
+    transform = nsLayoutUtils::GetTransformToAncestor(aFrame, root) * transform;
+  }
+
+  Matrix transform2d;
+  if (transform.CanDraw2D(&transform2d)) {
+    return ThebesMatrix(transform2d).ScaleFactors(true);
+  }
+
+  return gfxSize(1.0, 1.0);
 }
 
 #ifdef MOZ_DUMP_PAINTING
@@ -6447,6 +6418,13 @@ ContainerState::SetupMaskLayer(Layer *aLayer,
   SetClipCount(paintedData, aRoundedRectClipCount);
 }
 
+void
+SetMaskLayerUserData(Layer* aMaskLayer)
+{
+  aMaskLayer->SetUserData(&gMaskLayerUserData,
+                          new MaskLayerUserData());
+}
+
 already_AddRefed<Layer>
 ContainerState::CreateMaskLayer(Layer *aLayer,
                                const DisplayItemClip& aClip,
@@ -6463,13 +6441,7 @@ ContainerState::CreateMaskLayer(Layer *aLayer,
   // check if we can re-use the mask layer
   MaskLayerKey recycleKey(aLayer, aForAncestorMaskLayer);
   RefPtr<ImageLayer> maskLayer =
-    CreateOrRecycleMaskImageLayerFor(recycleKey,
-      [](Layer* aMaskLayer)
-      {
-        aMaskLayer->SetUserData(&gMaskLayerUserData,
-                                new MaskLayerUserData());
-      }
-    );
+    CreateOrRecycleMaskImageLayerFor(recycleKey, SetMaskLayerUserData);
   MaskLayerUserData* userData = GetMaskLayerUserData(maskLayer);
 
   int32_t A2D = mContainerFrame->PresContext()->AppUnitsPerDevPixel();

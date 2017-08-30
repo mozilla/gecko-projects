@@ -48,7 +48,6 @@ class nsISupports;
 class nsITransaction;
 class nsIWidget;
 class nsRange;
-class nsString;
 class nsTransactionManager;
 
 // This is int32_t instead of int16_t because nsIInlineSpellChecker.idl's
@@ -251,6 +250,11 @@ public:
   already_AddRefed<nsIDOMDocument> GetDOMDocument();
   already_AddRefed<nsIDocument> GetDocument();
   already_AddRefed<nsIPresShell> GetPresShell();
+  nsPresContext* GetPresContext()
+  {
+    RefPtr<nsIPresShell> presShell = GetPresShell();
+    return presShell ? presShell->GetPresContext() : nullptr;
+  }
   already_AddRefed<nsIWidget> GetWidget();
   nsISelectionController* GetSelectionController() const
   {
@@ -344,12 +348,27 @@ public:
   already_AddRefed<Element> CreateHTMLContent(nsIAtom* aTag);
 
   /**
+   * Creates text node which is marked as "maybe modified frequently".
+   */
+  static already_AddRefed<nsTextNode> CreateTextNode(nsIDocument& aDocument,
+                                                     const nsAString& aData);
+
+  /**
    * IME event handlers.
    */
   virtual nsresult BeginIMEComposition(WidgetCompositionEvent* aEvent);
   virtual nsresult UpdateIMEComposition(
                      WidgetCompositionEvent* aCompositionChangeEvet) = 0;
   void EndIMEComposition();
+
+  /**
+   * Commit composition if there is.
+   * Note that when there is a composition, this requests to commit composition
+   * to native IME.  Therefore, when there is composition, this can do anything.
+   * For example, the editor instance, the widget or the process itself may
+   * be destroyed.
+   */
+  nsresult CommitComposition();
 
   void SwitchTextDirectionTo(uint32_t aDirection);
 
@@ -580,6 +599,18 @@ protected:
   nsresult GetSelection(SelectionType aSelectionType,
                         nsISelection** aSelection);
 
+  /**
+   * (Begin|End)PlaceholderTransaction() are called by AutoPlaceholderBatch.
+   * This set of methods are similar to the (Begin|End)Transaction(), but do
+   * not use the transaction managers batching feature.  Instead we use a
+   * placeholder transaction to wrap up any further transaction while the
+   * batch is open.  The advantage of this is that placeholder transactions
+   * can later merge, if needed.  Merging is unavailable between transaction
+   * manager batches.
+   */
+  void BeginPlaceholderTransaction(nsIAtom* aTransactionName);
+  void EndPlaceholderTransaction();
+
 public:
   /**
    * All editor operations which alter the doc should be prefaced
@@ -632,9 +663,14 @@ public:
   /**
    * Return the offset of aChild in aParent.  Asserts fatally if parent or
    * child is null, or parent is not child's parent.
+   * FYI: aChild must not be being removed from aParent.  In such case, these
+   *      methods may return wrong index if aChild doesn't have previous
+   *      sibling or next sibling.
    */
   static int32_t GetChildOffset(nsIDOMNode* aChild,
                                 nsIDOMNode* aParent);
+  static int32_t GetChildOffset(nsINode* aChild,
+                                nsINode* aParent);
 
   /**
    * Set outOffset to the offset of aChild in the parent.
@@ -841,7 +877,10 @@ public:
   virtual bool AreNodesSameType(nsIContent* aNode1, nsIContent* aNode2);
 
   static bool IsTextNode(nsIDOMNode* aNode);
-  static bool IsTextNode(nsINode* aNode);
+  static bool IsTextNode(nsINode* aNode)
+  {
+    return aNode->NodeType() == nsIDOMNode::TEXT_NODE;
+  }
 
   static nsCOMPtr<nsIDOMNode> GetChildAt(nsIDOMNode* aParent, int32_t aOffset);
   static nsIContent* GetNodeAtRangeOffsetPoint(nsINode* aParentOrNode,
@@ -872,6 +911,11 @@ public:
     Selection* selection = sc->GetDOMSelection(ToRawSelectionType(aSelectionType));
     return selection;
   }
+
+  /**
+   * CollapseSelectionToEnd() collapses the selection to the end of the editor.
+   */
+  nsresult CollapseSelectionToEnd(Selection* aSelection);
 
   /**
    * Helpers to add a node to the selection.
@@ -928,7 +972,16 @@ public:
   /**
    * Fast non-refcounting editor root element accessor
    */
-  Element* GetRoot();
+  Element* GetRoot()
+  {
+    if (!mRootElement) {
+      // Let GetRootElement() do the work
+      nsCOMPtr<nsIDOMElement> root;
+      GetRootElement(getter_AddRefs(root));
+    }
+
+    return mRootElement;
+  }
 
   /**
    * Likewise, but gets the editor's root instead, which is different for HTML
@@ -946,6 +999,36 @@ public:
    * Accessor methods to flags.
    */
   uint32_t Flags() const { return mFlags; }
+
+  nsresult AddFlags(uint32_t aFlags)
+  {
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = (kOldFlags | aFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
+  nsresult RemoveFlags(uint32_t aFlags)
+  {
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = (kOldFlags & ~aFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
+  nsresult AddAndRemoveFlags(uint32_t aAddingFlags, uint32_t aRemovingFlags)
+  {
+    MOZ_ASSERT(!(aAddingFlags & aRemovingFlags),
+               "Same flags are specified both adding and removing");
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = ((kOldFlags | aAddingFlags) & ~aRemovingFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
 
   bool IsPlaintextEditor() const
   {
@@ -1250,6 +1333,7 @@ protected:
   bool mIsHTMLEditorClass;
 
   friend bool NSCanUnload(nsISupports* serviceMgr);
+  friend class AutoPlaceholderBatch;
   friend class AutoRules;
   friend class AutoSelectionRestorer;
   friend class AutoTransactionsConserveSelection;

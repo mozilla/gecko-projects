@@ -22,7 +22,6 @@
 #include "jsfriendapi.h"
 #include "js/Value.h"
 #include "Layers.h"
-#include "MediaDecoder.h"
 #include "nsAppRunner.h"
 // nsNPAPIPluginInstance must be included before nsIDocument.h, which is included in mozAutoDocUpdate.h.
 #include "nsNPAPIPluginInstance.h"
@@ -48,7 +47,6 @@
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLInputElement.h"
-#include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/HTMLShadowElement.h"
@@ -65,6 +63,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/HTMLEditor.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Likely.h"
@@ -108,6 +107,7 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "nsHtml5Module.h"
 #include "nsHtml5StringParser.h"
+#include "nsHTMLDocument.h"
 #include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -137,7 +137,6 @@
 #include "nsIDOMNodeList.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDragService.h"
-#include "nsIEditor.h"
 #include "nsIFormControl.h"
 #include "nsIForm.h"
 #include "nsIFragmentContentSink.h"
@@ -3006,7 +3005,7 @@ static inline bool IsAutocompleteOff(const nsIContent* aElement)
 
 /*static*/ nsresult
 nsContentUtils::GenerateStateKey(nsIContent* aContent,
-                                 const nsIDocument* aDocument,
+                                 nsIDocument* aDocument,
                                  nsACString& aKey)
 {
   aKey.Truncate();
@@ -3032,14 +3031,39 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
   bool generatedUniqueKey = false;
 
   if (htmlDocument) {
+    nsHTMLDocument* htmlDoc = static_cast<nsHTMLDocument*> (htmlDocument.get());
     // Flush our content model so it'll be up to date
     // If this becomes unnecessary and the following line is removed,
     // please also remove the corresponding flush operation from
     // nsHtml5TreeBuilderCppSupplement.h. (Look for "See bug 497861." there.)
     aContent->GetUncomposedDoc()->FlushPendingNotifications(FlushType::Content);
 
-    nsContentList *htmlForms = htmlDocument->GetForms();
-    nsContentList *htmlFormControls = htmlDocument->GetFormControls();
+    RefPtr<nsContentList> htmlForms = htmlDoc->GetExistingForms();
+    if (!htmlForms) {
+      // If the document doesn't have an existing forms content list, create a
+      // new one, but avoid creating a live list since we only need to use the
+      // list here and it doesn't need to listen to mutation events.
+
+      // Please keep this in sync with nsHTMLDocument::GetForms().
+      htmlForms = new nsContentList(aDocument, kNameSpaceID_XHTML,
+                                    nsGkAtoms::form, nsGkAtoms::form,
+                                    /* aDeep = */ true,
+                                    /* aLiveList = */ false);
+    }
+    RefPtr<nsContentList> htmlFormControls = htmlDoc->GetExistingFormControls();
+    if (!htmlFormControls) {
+      // If the document doesn't have an existing form controls content list,
+      // create a new one, but avoid creating a live list since we only need to
+      // use the list here and it doesn't need to listen to mutation events.
+      htmlFormControls = new nsContentList(aDocument,
+                                           nsHTMLDocument::MatchFormControls,
+                                           nullptr, nullptr,
+                                           /* aDeep = */ true,
+                                           /* aMatchAtom = */ nullptr,
+                                           /* aMatchNameSpaceId = */ kNameSpaceID_None,
+                                           /* aFuncMayDependOnAttr = */ true,
+                                           /* aLiveList = */ false);
+    }
 
     NS_ENSURE_TRUE(htmlForms && htmlFormControls, NS_ERROR_OUT_OF_MEMORY);
 
@@ -5200,7 +5224,8 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
                                   principal,
                                   true,
                                   nullptr,
-                                  DocumentFlavorHTML);
+                                  DocumentFlavorHTML,
+                                  StyleBackendType::None);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
@@ -5411,52 +5436,6 @@ nsContentUtils::IsInSameAnonymousTree(const nsINode* aNode,
   }
 
   return nodeAsContent->GetBindingParent() == aContent->GetBindingParent();
-}
-
-class AnonymousContentDestroyer : public Runnable {
-public:
-  explicit AnonymousContentDestroyer(nsCOMPtr<nsIContent>* aContent)
-    : mozilla::Runnable("AnonymousContentDestroyer")
-  {
-    mContent.swap(*aContent);
-    mParent = mContent->GetParent();
-    mDoc = mContent->OwnerDoc();
-  }
-  explicit AnonymousContentDestroyer(nsCOMPtr<Element>* aElement)
-    : mozilla::Runnable("AnonymousContentDestroyer")
-  {
-    mContent = aElement->forget();
-    mParent = mContent->GetParent();
-    mDoc = mContent->OwnerDoc();
-  }
-  NS_IMETHOD Run() override {
-    mContent->UnbindFromTree();
-    return NS_OK;
-  }
-private:
-  nsCOMPtr<nsIContent> mContent;
-  // Hold strong refs to the parent content and document so that they
-  // don't die unexpectedly
-  nsCOMPtr<nsIDocument> mDoc;
-  nsCOMPtr<nsIContent> mParent;
-};
-
-/* static */
-void
-nsContentUtils::DestroyAnonymousContent(nsCOMPtr<nsIContent>* aContent)
-{
-  if (*aContent) {
-    AddScriptRunner(new AnonymousContentDestroyer(aContent));
-  }
-}
-
-/* static */
-void
-nsContentUtils::DestroyAnonymousContent(nsCOMPtr<Element>* aElement)
-{
-  if (*aElement) {
-    AddScriptRunner(new AnonymousContentDestroyer(aElement));
-  }
 }
 
 /* static */
@@ -7133,12 +7112,12 @@ nsContentUtils::FindInternalContentViewer(const nsACString& aType,
 
   nsCOMPtr<nsIDocumentLoaderFactory> docFactory;
 
-  nsXPIDLCString contractID;
+  nsCString contractID;
   nsresult rv = catMan->GetCategoryEntry("Gecko-Content-Viewers",
                                          PromiseFlatCString(aType).get(),
                                          getter_Copies(contractID));
   if (NS_SUCCEEDED(rv)) {
-    docFactory = do_GetService(contractID);
+    docFactory = do_GetService(contractID.get());
     if (docFactory && aLoaderType) {
       if (contractID.EqualsLiteral(CONTENT_DLF_CONTRACTID))
         *aLoaderType = TYPE_CONTENT;
@@ -7552,7 +7531,7 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
 }
 
 
-nsIEditor*
+HTMLEditor*
 nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
 {
   nsCOMPtr<nsIDocShell> docShell(aPresContext->GetDocShell());
@@ -7561,9 +7540,7 @@ nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
       NS_FAILED(docShell->GetEditable(&isEditable)) || !isEditable)
     return nullptr;
 
-  nsCOMPtr<nsIEditor> editor;
-  docShell->GetEditor(getter_AddRefs(editor));
-  return editor;
+  return docShell->GetHTMLEditor();
 }
 
 bool
@@ -8924,12 +8901,9 @@ nsContentUtils::GetWindowRoot(nsIDocument* aDoc)
 bool
 nsContentUtils::IsPreloadType(nsContentPolicyType aType)
 {
-  if (aType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD ||
-      aType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD ||
-      aType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD) {
-    return true;
-  }
-  return false;
+  return (aType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD ||
+          aType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD ||
+          aType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD);
 }
 
 nsresult
@@ -10148,6 +10122,28 @@ nsContentUtils::SetupCustomElement(Element* aElement,
   return registry->SetupCustomElement(aElement, aTypeExtension);
 }
 
+/* static */ CustomElementDefinition*
+nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
+                                                    nsIAtom* aExtensionType,
+                                                    nsIAtom* aAttrName)
+{
+  nsString extType = nsDependentAtomString(aExtensionType);
+  NodeInfo *ni = aCustomElement->NodeInfo();
+
+  CustomElementDefinition* definition =
+    LookupCustomElementDefinition(aCustomElement->OwnerDoc(), ni->LocalName(),
+                                  ni->NamespaceID(),
+                                  extType.IsEmpty() ? nullptr : &extType);
+
+  // Custom element not defined yet or attribute is not in the observed
+  // attribute list.
+  if (!definition || !definition->IsInObservedAttributeList(aAttrName)) {
+    return nullptr;
+  }
+
+  return definition;
+}
+
 /* static */ void
 nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
                                          nsIDocument::ElementCallbackType aType,
@@ -10686,6 +10682,29 @@ nsContentUtils::GetSourceMapURL(nsIHttpChannel* aChannel, nsACString& aResult)
     rv = aChannel->GetResponseHeader(NS_LITERAL_CSTRING("X-SourceMap"), aResult);
   }
   return NS_SUCCEEDED(rv);
+}
+
+/* static */  bool
+nsContentUtils::IsMessageInputEvent(const IPC::Message& aMsg)
+{
+  if ((aMsg.type() & mozilla::dom::PBrowser::PBrowserStart)
+      == mozilla::dom::PBrowser::PBrowserStart) {
+    switch (aMsg.type()) {
+      case mozilla::dom::PBrowser::Msg_RealMouseMoveEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealMouseButtonEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealKeyEvent__ID:
+      case mozilla::dom::PBrowser::Msg_MouseWheelEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealTouchEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealTouchMoveEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealDragEvent__ID:
+      case mozilla::dom::PBrowser::Msg_UpdateDimensions__ID:
+      case mozilla::dom::PBrowser::Msg_MouseEvent__ID:
+      case mozilla::dom::PBrowser::Msg_KeyEvent__ID:
+      case mozilla::dom::PBrowser::Msg_SetDocShellIsActive__ID:
+        return true;
+    }
+  }
+  return false;
 }
 
 static const char* kUserInteractionInactive = "user-interaction-inactive";

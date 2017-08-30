@@ -42,7 +42,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "CustomizableWidgets",
                                   "resource:///modules/CustomizableWidgets.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "Bundle", function () {
-  const kUrl = "chrome://devtools/locale/key-shortcuts.properties";
+  const kUrl = "chrome://devtools-shim/locale/key-shortcuts.properties";
   return Services.strings.createBundle(kUrl);
 });
 
@@ -627,8 +627,7 @@ const JsonView = {
       // The following code emulates saveBrowser, but:
       // - Uses the given blob URL containing the custom contents to save.
       // - Obtains the file name from the URL of the document, not the blob.
-      let persistable = browser.QueryInterface(Ci.nsIFrameLoaderOwner)
-        .frameLoader.QueryInterface(Ci.nsIWebBrowserPersistable);
+      let persistable = browser.frameLoader;
       persistable.startPersistence(message.data.windowID, {
         onDocumentReady(doc) {
           let uri = chrome.makeURI(doc.documentURI, doc.characterSet);

@@ -10,10 +10,7 @@
 #include "GeneratedJNINatives.h"
 #include "GeneratedJNIWrappers.h"
 #include "HLSUtils.h"
-#include "MediaResource.h"
 #include "nsContentUtils.h"
-
-#define UNIMPLEMENTED() HLS_DEBUG("HLSResource", "UNIMPLEMENTED FUNCTION")
 
 using namespace mozilla::java;
 
@@ -41,27 +38,15 @@ private:
   HLSResource* mResource;
 };
 
-class HLSResource final : public MediaResource
+class HLSResource final
 {
 public:
   HLSResource(HLSDecoder* aDecoder, nsIChannel* aChannel, nsIURI* aURI);
   ~HLSResource();
   void Suspend();
   void Resume();
-  nsresult ReadAt(int64_t aOffset, char* aBuffer, uint32_t aCount, uint32_t* aBytes) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
-  bool ShouldCacheReads() override { UNIMPLEMENTED(); return false; }
-  int64_t Tell() override { UNIMPLEMENTED(); return -1; }
-  void Pin() override { UNIMPLEMENTED(); }
-  void Unpin() override { UNIMPLEMENTED(); }
-  int64_t GetLength() override { UNIMPLEMENTED(); return -1; }
-  int64_t GetNextCachedData(int64_t aOffset) override { UNIMPLEMENTED(); return -1; }
-  int64_t GetCachedDataEnd(int64_t aOffset) override { UNIMPLEMENTED(); return -1; }
-  bool IsDataCachedToEndOfResource(int64_t aOffset) override { UNIMPLEMENTED(); return false; }
-  bool IsSuspendedByCache() override { UNIMPLEMENTED(); return false; }
-  bool IsSuspended() override { UNIMPLEMENTED(); return false; }
-  nsresult ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCount) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
 
-  already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override
+  already_AddRefed<nsIPrincipal> GetCurrentPrincipal()
   {
     NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
 
@@ -73,46 +58,28 @@ public:
     return principal.forget();
   }
 
-  nsresult GetCachedRanges(MediaByteRangeSet& aRanges) override
-  {
-    UNIMPLEMENTED();
-    return NS_OK;
-  }
-
-  bool IsTransportSeekable() override { return true; }
-
-  bool IsLiveStream() override
-  {
-    return false;
-  }
-
-  bool IsExpectingMoreData() override
-  {
-    return false;
-  }
-
   java::GeckoHLSResourceWrapper::GlobalRef GetResourceWrapper() {
     return mHLSResourceWrapper;
   }
 
   void Detach() { mDecoder = nullptr; }
 
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    // TODO: track JAVA wrappers.
+    return 0;
+  }
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
+
 private:
   friend class HLSResourceCallbacksSupport;
 
   void onDataAvailable();
   void onError(int aErrorCode);
-
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
-  {
-    size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
-    return size;
-  }
-
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override
-  {
-    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-  }
 
   HLSDecoder* mDecoder;
   nsCOMPtr<nsIChannel> mChannel;

@@ -20,7 +20,7 @@ use properties::{AnimationRules, ComputedValues, PropertyDeclarationBlock};
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValue;
 #[cfg(feature = "gecko")] use properties::animated_properties::TransitionProperty;
 use rule_tree::CascadeLevel;
-use selector_parser::{AttrValue, ElementExt, PreExistingComputedValues};
+use selector_parser::{AttrValue, ElementExt};
 use selector_parser::{PseudoClassStringArg, PseudoElement};
 use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
 use selectors::sink::Push;
@@ -46,7 +46,7 @@ pub use style_traits::UnsafeNode;
 /// Because the script task's GC does not trace layout, node data cannot be safely stored in layout
 /// data structures. Also, layout code tends to be faster when the DOM is not being accessed, for
 /// locality reasons. Using `OpaqueNode` enforces this invariant.
-#[derive(Clone, PartialEq, Copy, Debug, Hash, Eq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
 pub struct OpaqueNode(pub usize);
 
@@ -206,7 +206,13 @@ impl<N: TNode> Debug for ShowSubtreeDataAndPrimaryValues<N> {
 
 fn fmt_with_data<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
     if let Some(el) = n.as_element() {
-        write!(f, "{:?} dd={} data={:?}", el, el.has_dirty_descendants(), el.borrow_data())
+        write!(
+            f, "{:?} dd={} aodd={} data={:?}",
+            el,
+            el.has_dirty_descendants(),
+            el.has_animation_only_dirty_descendants(),
+            el.borrow_data(),
+       )
     } else {
         write!(f, "{:?}", n)
     }
@@ -215,9 +221,10 @@ fn fmt_with_data<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
 fn fmt_with_data_and_primary_values<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
     if let Some(el) = n.as_element() {
         let dd = el.has_dirty_descendants();
+        let aodd = el.has_animation_only_dirty_descendants();
         let data = el.borrow_data();
         let values = data.as_ref().and_then(|d| d.styles.get_primary());
-        write!(f, "{:?} dd={} data={:?} values={:?}", el, dd, &data, values)
+        write!(f, "{:?} dd={} aodd={} data={:?} values={:?}", el, dd, aodd, &data, values)
     } else {
         write!(f, "{:?}", n)
     }
@@ -378,18 +385,6 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     /// Internal iterator for the classes of this element.
     fn each_class<F>(&self, callback: F) where F: FnMut(&Atom);
 
-    /// Get the pre-existing style to calculate restyle damage (change hints).
-    ///
-    /// This needs to be generic since it varies between Servo and Gecko.
-    ///
-    /// XXX(emilio): It's a bit unfortunate we need to pass the current computed
-    /// values as an argument here, but otherwise Servo would crash due to
-    /// double borrows to return it.
-    fn existing_style_for_restyle_damage<'a>(&'a self,
-                                             current_computed_values: &'a ComputedValues,
-                                             pseudo: Option<&PseudoElement>)
-                                             -> Option<&'a PreExistingComputedValues>;
-
     /// Whether a given element may generate a pseudo-element.
     ///
     /// This is useful to avoid computing, for example, pseudo styles for
@@ -512,6 +507,20 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     /// Only safe to call with exclusive access to the element.
     unsafe fn unset_animation_only_dirty_descendants(&self) {
     }
+
+    /// Clear all bits related describing the dirtiness of descendants.
+    ///
+    /// In Gecko, this corresponds to the regular dirty descendants bit, the
+    /// animation-only dirty descendants bit, and the lazy frame construction
+    /// descendants bit.
+    unsafe fn clear_descendant_bits(&self) { self.unset_dirty_descendants(); }
+
+    /// Clear all element flags related to dirtiness.
+    ///
+    /// In Gecko, this corresponds to the regular dirty descendants bit, the
+    /// animation-only dirty descendants bit, the lazy frame construction bit,
+    /// and the lazy frame construction descendants bit.
+    unsafe fn clear_dirty_bits(&self) { self.unset_dirty_descendants(); }
 
     /// Returns true if this element is a visited link.
     ///
@@ -721,28 +730,6 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
                           override_lang: Option<Option<AttrValue>>,
                           value: &PseudoClassStringArg)
                           -> bool;
-}
-
-/// Trait abstracting over different kinds of dirty-descendants bits.
-pub trait DescendantsBit<E: TElement> {
-    /// Returns true if the Element has the bit.
-    fn has(el: E) -> bool;
-    /// Sets the bit on the Element.
-    unsafe fn set(el: E);
-}
-
-/// Implementation of DescendantsBit for the regular dirty descendants bit.
-pub struct DirtyDescendants;
-impl<E: TElement> DescendantsBit<E> for DirtyDescendants {
-    fn has(el: E) -> bool { el.has_dirty_descendants() }
-    unsafe fn set(el: E) { el.set_dirty_descendants(); }
-}
-
-/// Implementation of DescendantsBit for the animation-only dirty descendants bit.
-pub struct AnimationOnlyDirtyDescendants;
-impl<E: TElement> DescendantsBit<E> for AnimationOnlyDirtyDescendants {
-    fn has(el: E) -> bool { el.has_animation_only_dirty_descendants() }
-    unsafe fn set(el: E) { el.set_animation_only_dirty_descendants(); }
 }
 
 /// TNode and TElement aren't Send because we want to be careful and explicit

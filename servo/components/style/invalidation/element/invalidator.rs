@@ -6,7 +6,7 @@
 //! element styles need to be invalidated.
 
 use Atom;
-use context::SharedStyleContext;
+use context::{SharedStyleContext, StackLimitChecker};
 use data::ElementData;
 use dom::{TElement, TNode};
 use element_state::{ElementState, IN_VISITED_OR_UNVISITED_STATE};
@@ -29,8 +29,18 @@ pub struct TreeStyleInvalidator<'a, 'b: 'a, E>
     where E: TElement,
 {
     element: E,
+    // TODO(emilio): It's tempting enough to just avoid running invalidation for
+    // elements without data.
+    //
+    // But that's be wrong for sibling invalidations when a new element has been
+    // inserted in the tree and still has no data (though I _think_ the slow
+    // selector bits save us, it'd be nice not to depend on them).
+    //
+    // Seems like we could at least avoid running invalidation for the
+    // descendants if an element has no data, though.
     data: Option<&'a mut ElementData>,
     shared_context: &'a SharedStyleContext<'b>,
+    stack_limit_checker: Option<&'a StackLimitChecker>,
 }
 
 type InvalidationVector = SmallVec<[Invalidation; 10]>;
@@ -39,7 +49,7 @@ type InvalidationVector = SmallVec<[Invalidation; 10]>;
 ///
 /// We can use this to avoid pushing invalidations of the same kind to our
 /// descendants or siblings.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum InvalidationKind {
     Descendant,
     Sibling,
@@ -121,11 +131,13 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         element: E,
         data: Option<&'a mut ElementData>,
         shared_context: &'a SharedStyleContext<'b>,
+        stack_limit_checker: Option<&'a StackLimitChecker>,
     ) -> Self {
         Self {
-            element: element,
-            data: data,
-            shared_context: shared_context,
+            element,
+            data,
+            shared_context,
+            stack_limit_checker,
         }
     }
 
@@ -154,7 +166,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             trace!(" > visitedness change, force subtree restyle");
             // We can't just return here because there may also be attribute
             // changes as well that imply additional hints.
-            let mut data = self.data.as_mut().unwrap();
+            let data = self.data.as_mut().unwrap();
             data.restyle.hint.insert(RestyleHint::restyle_subtree());
         }
 
@@ -267,7 +279,8 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             let mut sibling_invalidator = TreeStyleInvalidator::new(
                 sibling,
                 sibling_data,
-                self.shared_context
+                self.shared_context,
+                self.stack_limit_checker,
             );
 
             let mut invalidations_for_descendants = InvalidationVector::new();
@@ -329,7 +342,8 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         let mut child_invalidator = TreeStyleInvalidator::new(
             child,
             child_data,
-            self.shared_context
+            self.shared_context,
+            self.stack_limit_checker,
         );
 
         let mut invalidations_for_descendants = InvalidationVector::new();
@@ -353,7 +367,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         //
         // Since we keep the traversal flags in terms of the flattened tree,
         // we need to propagate it as appropriate.
-        if invalidated_child {
+        if invalidated_child && child.get_data().is_some() {
             let mut current = child.traversal_parent();
             while let Some(parent) = current.take() {
                 if parent == self.element {
@@ -439,9 +453,18 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         match self.data {
             None => return false,
             Some(ref data) => {
+                // FIXME(emilio): Only needs to check RESTYLE_DESCENDANTS,
+                // really.
                 if data.restyle.hint.contains_subtree() {
                     return false;
                 }
+            }
+        }
+
+        if let Some(checker) = self.stack_limit_checker {
+            if checker.limit_exceeded() {
+                self.data.as_mut().unwrap().restyle.hint.insert(RESTYLE_DESCENDANTS);
+                return true;
             }
         }
 
@@ -470,7 +493,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         any_descendant |= self.invalidate_nac(invalidations);
 
-        if any_descendant {
+        if any_descendant && self.data.as_ref().map_or(false, |d| !d.styles.is_display_none()) {
             unsafe { self.element.set_dirty_descendants() };
         }
 
@@ -571,7 +594,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
                 MatchingMode::Normal,
                 None,
                 VisitedHandlingMode::AllLinksVisitedAndUnvisited,
-                self.shared_context.quirks_mode,
+                self.shared_context.quirks_mode(),
             );
 
         let matching_result = matches_compound_selector(
@@ -595,14 +618,27 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
                 matched = true;
 
                 if matches!(next_combinator, Combinator::PseudoElement) {
+                    // This will usually be the very next component, except for
+                    // the fact that we store compound selectors the other way
+                    // around, so there could also be state pseudo-classes.
                     let pseudo_selector =
                         invalidation.selector
                             .iter_raw_parse_order_from(next_combinator_offset - 1)
+                            .skip_while(|c| matches!(**c, Component::NonTSPseudoClass(..)))
                             .next()
                             .unwrap();
+
                     let pseudo = match *pseudo_selector {
                         Component::PseudoElement(ref pseudo) => pseudo,
-                        _ => unreachable!("Someone seriously messed up selector parsing"),
+                        _ => {
+                            unreachable!(
+                                "Someone seriously messed up selector parsing: \
+                                {:?} at offset {:?}: {:?}",
+                                invalidation.selector,
+                                next_combinator_offset,
+                                pseudo_selector,
+                            )
+                        }
                     };
 
                     // FIXME(emilio): This is not ideal, and could not be
@@ -752,7 +788,7 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
         &mut self,
         map: &InvalidationMap,
     ) {
-        let quirks_mode = self.shared_context.quirks_mode;
+        let quirks_mode = self.shared_context.quirks_mode();
         let removed_id = self.removed_id;
         if let Some(ref id) = removed_id {
             if let Some(deps) = map.id_to_selector.get(id, quirks_mode) {
@@ -799,7 +835,7 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
     ) {
         map.lookup_with_additional(
             self.lookup_element,
-            self.shared_context.quirks_mode,
+            self.shared_context.quirks_mode(),
             self.removed_id,
             self.classes_removed,
             &mut |dependency| {
@@ -819,7 +855,7 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
     ) {
         map.lookup_with_additional(
             self.lookup_element,
-            self.shared_context.quirks_mode,
+            self.shared_context.quirks_mode(),
             self.removed_id,
             self.classes_removed,
             &mut |dependency| {
@@ -863,11 +899,11 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
         let mut now_context =
             MatchingContext::new_for_visited(MatchingMode::Normal, None,
                                              VisitedHandlingMode::AllLinksUnvisited,
-                                             self.shared_context.quirks_mode);
+                                             self.shared_context.quirks_mode());
         let mut then_context =
             MatchingContext::new_for_visited(MatchingMode::Normal, None,
                                              VisitedHandlingMode::AllLinksUnvisited,
-                                             self.shared_context.quirks_mode);
+                                             self.shared_context.quirks_mode());
 
         let matched_then =
             matches_selector(&dependency.selector,

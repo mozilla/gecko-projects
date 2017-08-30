@@ -152,7 +152,7 @@ impl WorkletMethods for Worklet {
 }
 
 /// A guid for worklets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, JSTraceable)]
+#[derive(Clone, Copy, Debug, Eq, Hash, JSTraceable, PartialEq)]
 pub struct WorkletId(Uuid);
 
 known_heap_size!(0, WorkletId);
@@ -609,7 +609,7 @@ impl WorkletThread {
             if old_counter == 1 {
                 debug!("Resolving promise.");
                 let msg = MainThreadScriptMsg::WorkletLoaded(pipeline_id);
-                self.global_init.script_sender.send(msg).expect("Worklet thread outlived script thread.");
+                self.global_init.to_script_thread_sender.send(msg).expect("Worklet thread outlived script thread.");
                 self.run_in_script_thread(promise.resolve_runnable(()));
             }
         }
@@ -651,12 +651,12 @@ impl WorkletThread {
     {
         let msg = CommonScriptMsg::RunnableMsg(ScriptThreadEventCategory::WorkletEvent, box runnable);
         let msg = MainThreadScriptMsg::Common(msg);
-        self.global_init.script_sender.send(msg).expect("Worklet thread outlived script thread.");
+        self.global_init.to_script_thread_sender.send(msg).expect("Worklet thread outlived script thread.");
     }
 }
 
 /// An executor of worklet tasks
-#[derive(Clone, JSTraceable, HeapSizeOf)]
+#[derive(Clone, HeapSizeOf, JSTraceable)]
 pub struct WorkletExecutor {
     worklet_id: WorkletId,
     #[ignore_heap_size_of = "channels are hard"]

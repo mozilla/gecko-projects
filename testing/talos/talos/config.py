@@ -123,6 +123,10 @@ DEFAULTS = dict(
         'browser.safebrowsing.phishing.enabled': False,
         'browser.safebrowsing.malware.enabled': False,
         'browser.safebrowsing.blockedURIs.enabled': False,
+        'browser.safebrowsing.downloads.enabled': False,
+        'browser.safebrowsing.passwords.enabled': False,
+        'plugins.flashBlock.enabled': False,
+        'privacy.trackingprotection.annotate_channels': False,
         'privacy.trackingprotection.enabled': False,
         'privacy.trackingprotection.pbmode.enabled': False,
         'browser.search.isUS': True,
@@ -439,7 +443,8 @@ def get_browser_config(config):
                 'xperf_path': None,
                 'error_filename': None,
                 'no_upload_results': False,
-                'stylo': False,
+                'enable_stylo': False,
+                'disable_stylo': False,
                 'stylothreads': 0,
                 }
     browser_config = dict(title=config['title'])

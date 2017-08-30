@@ -19,12 +19,6 @@
 
 namespace mozilla {
 
-MediaResource*
-HLSDecoder::GetResource() const
-{
-  return mResource;
-}
-
 void
 HLSDecoder::Shutdown()
 {
@@ -79,7 +73,7 @@ HLSDecoder::Load(nsIChannel* aChannel)
     return rv;
   }
 
-  mResource = new HLSResource(this, aChannel, uri);
+  mResource = MakeUnique<HLSResource>(this, aChannel, uri);
 
   rv = MediaShutdownManager::Instance().Register(this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -90,6 +84,22 @@ HLSDecoder::Load(nsIChannel* aChannel)
   NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
 
   return InitializeStateMachine();
+}
+
+void
+HLSDecoder::AddSizeOfResources(ResourceSizes* aSizes)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mResource) {
+    aSizes->mByteSize += mResource->SizeOfIncludingThis(aSizes->mMallocSizeOf);
+  }
+}
+
+already_AddRefed<nsIPrincipal>
+HLSDecoder::GetCurrentPrincipal()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mResource ? mResource->GetCurrentPrincipal() : nullptr;
 }
 
 nsresult

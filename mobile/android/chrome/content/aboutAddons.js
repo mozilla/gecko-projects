@@ -95,27 +95,48 @@ var ContextMenus = {
     Addons.uninstall(this.target.addon);
     this.target = null;
   }
+};
+
+function sendEMPong() {
+  Services.obs.notifyObservers(window, "EM-pong");
 }
 
-function init() {
+async function init() {
   window.addEventListener("popstate", onPopState);
 
   AddonManager.addInstallListener(Addons);
   AddonManager.addAddonListener(Addons);
-  Addons.init();
+
+  await Addons.init();
   showAddons();
   ContextMenus.init();
-}
 
+  Services.obs.addObserver(sendEMPong, "EM-ping");
+
+  // The addons list has been loaded and rendered, send a notification
+  // if the openOptionsPage is waiting to be able to select an addon details page.
+  Services.obs.notifyObservers(window, "EM-loaded");
+}
 
 function uninit() {
   AddonManager.removeInstallListener(Addons);
   AddonManager.removeAddonListener(Addons);
+
+  Services.obs.removeObserver(sendEMPong, "EM-ping");
 }
 
 function openLink(url) {
   let BrowserApp = gChromeWin.BrowserApp;
   BrowserApp.addTab(url, { selected: true, parentId: BrowserApp.selectedTab.id });
+}
+
+function openOptionsInTab(url) {
+  let BrowserApp = gChromeWin.BrowserApp;
+  BrowserApp.selectOrAddTab(url, {
+    startsWith: true,
+    selected: true,
+    parentId: BrowserApp.selectedTab.id
+  });
 }
 
 function onPopState(aEvent) {
@@ -138,6 +159,16 @@ function onPopState(aEvent) {
   }
 }
 
+function showAddonDetails(addonId) {
+  const listItem = Addons._getElementForAddon(addonId);
+  if (listItem) {
+    Addons.showDetails(listItem);
+    history.pushState({ id: addonId }, document.title);
+  } else {
+    throw new Error(`Addon not found: ${addonId}`);
+  }
+}
+
 function showAddons() {
   // Hide the addon options and show the addons list
   let details = document.querySelector("#addons-details");
@@ -145,6 +176,10 @@ function showAddons() {
   let list = document.querySelector("#addons-list");
   list.classList.remove("hidden");
   document.documentElement.removeAttribute("details");
+
+  // Clean the optionsBox content when switching to the add-ons list view.
+  let optionsBox = document.querySelector("#addons-details > .addon-item .options-box");
+  optionsBox.innerHTML = "";
 }
 
 function showAddonOptions() {
@@ -274,29 +309,29 @@ var Addons = {
     return element;
   },
 
-  init: function init() {
-    let self = this;
-    AddonManager.getAllAddons(function(aAddons) {
-      // Clear all content before filling the addons
-      let list = document.getElementById("addons-list");
-      list.innerHTML = "";
+  init: async function init() {
+    const aAddons = await AddonManager.getAllAddons();
 
-      aAddons.sort(function(a, b) {
-        return a.name.localeCompare(b.name);
-      });
-      for (let i = 0; i < aAddons.length; i++) {
-        // Don't create item for system add-ons.
-        if (aAddons[i].isSystem)
-          continue;
+    // Clear all content before filling the addons
+    let list = document.getElementById("addons-list");
+    list.innerHTML = "";
 
-        let item = self._createItemForAddon(aAddons[i]);
-        list.appendChild(item);
-      }
-
-      // Add a "Browse all Firefox Add-ons" item to the bottom of the list.
-      let browseItem = self._createBrowseItem();
-      list.appendChild(browseItem);
+    aAddons.sort(function(a, b) {
+      return a.name.localeCompare(b.name);
     });
+
+    for (let i = 0; i < aAddons.length; i++) {
+      // Don't create item for system add-ons.
+      if (aAddons[i].isSystem)
+        continue;
+
+      let item = this._createItemForAddon(aAddons[i]);
+      list.appendChild(item);
+    }
+
+    // Add a "Browse all Firefox Add-ons" item to the bottom of the list.
+    let browseItem = this._createBrowseItem();
+    list.appendChild(browseItem);
 
     document.getElementById("uninstall-btn").addEventListener("click", Addons.uninstallCurrent.bind(this));
     document.getElementById("cancel-btn").addEventListener("click", Addons.cancelUninstall.bind(this));
@@ -359,13 +394,27 @@ var Addons = {
 
     switch (parseInt(addon.optionsType)) {
       case AddonManager.OPTIONS_TYPE_INLINE_BROWSER:
+        // Allow the options to use all the available width space.
+        optionsBox.classList.remove("inner");
+
         // WebExtensions are loaded asynchronously and the optionsURL
         // may not be available via listitem when the add-on has just been
         // installed, but it is available on the addon if one is set.
         detailItem.setAttribute("optionsURL", addon.optionsURL);
         this.createWebExtensionOptions(optionsBox, addon.optionsURL, addon.optionsBrowserStyle);
         break;
+      case AddonManager.OPTIONS_TYPE_TAB:
+        // Keep the usual layout for any options related the legacy (or system) add-ons
+        // when the options are opened in a new tab from a single button in the addon
+        // details page.
+        optionsBox.classList.add("inner");
+
+        this.createOptionsInTabButton(optionsBox, addon);
+        break;
       case AddonManager.OPTIONS_TYPE_INLINE:
+        // Keep the usual layout for any options related the legacy (or system) add-ons.
+        optionsBox.classList.add("inner");
+
         this.createInlineOptions(optionsBox, optionsURL, aListItem);
         break;
     }
@@ -373,11 +422,64 @@ var Addons = {
     showAddonOptions();
   },
 
+  createOptionsInTabButton: function(destination, addon) {
+    let frame = destination.querySelector("iframe#addon-options");
+    let button = destination.querySelector("button#open-addon-options");
+
+    if (frame) {
+      // Remove any existent options frame (e.g. when the addon updates
+      // contains the open_in_tab options for the first time).
+
+      frame.remove();
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.setAttribute("id", "open-addon-options");
+      button.textContent = gStringBundle.GetStringFromName("addon.options");
+      destination.appendChild(button);
+    }
+
+    button.onclick = async () => {
+      const {optionsURL} = addon;
+      openOptionsInTab(optionsURL);
+    };
+  },
+
   createWebExtensionOptions: async function(destination, optionsURL, browserStyle) {
+    let originalHeight;
     let frame = document.createElement("iframe");
     frame.setAttribute("id", "addon-options");
     frame.setAttribute("mozbrowser", "true");
+    frame.setAttribute("style", "width: 100%; overflow: hidden;");
+
+    // Adjust iframe height to the iframe content (also between navigation of multiple options
+    // files).
+    frame.onload = (evt) => {
+      if (evt.target !== frame) {
+        return;
+      }
+
+      const {document} = frame.contentWindow;
+      const bodyScrollHeight = document.body && document.body.scrollHeight;
+      const documentScrollHeight = document.documentElement.scrollHeight;
+
+      // Set the iframe height to the maximum between the body and the document
+      // scrollHeight values.
+      frame.style.height = Math.max(bodyScrollHeight, documentScrollHeight) + "px";
+
+      // Restore the original iframe height between option page loads,
+      // so that we don't force the new document to have the same size
+      // of the previosuly loaded option page.
+      frame.contentWindow.addEventListener("unload", () => {
+        frame.style.height = originalHeight + "px";
+      }, {once: true});
+    };
+
     destination.appendChild(frame);
+
+    originalHeight = frame.getBoundingClientRect().height;
+
     // Loading the URL this way prevents the native back
     // button from applying to the iframe.
     frame.contentWindow.location.replace(optionsURL);

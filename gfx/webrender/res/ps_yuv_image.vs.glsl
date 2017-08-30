@@ -1,4 +1,3 @@
-#line 1
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,10 +25,14 @@ void main(void) {
     write_clip(vi.screen_pos, prim.clip_area);
 
     ImageResource y_rect = fetch_image_resource(prim.user_data0);
+    vLayers = vec3(y_rect.layer, 0.0, 0.0);
+
 #ifndef WR_FEATURE_INTERLEAVED_Y_CB_CR  // only 1 channel
     ImageResource u_rect = fetch_image_resource(prim.user_data1);
+    vLayers.y = u_rect.layer;
 #ifndef WR_FEATURE_NV12 // 2 channel
     ImageResource v_rect = fetch_image_resource(prim.user_data2);
+    vLayers.z = v_rect.layer;
 #endif
 #endif
 

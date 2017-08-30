@@ -1082,7 +1082,7 @@ var ActivityStreamProvider = {
     let items = [];
     let queryError = null;
     let conn = await PlacesUtils.promiseDBConnection();
-    await conn.executeCached(aQuery, params, aRow => {
+    await conn.executeCached(aQuery, params, (aRow, aCancel) => {
       try {
         let item = null;
         // if columns array is given construct an object
@@ -1101,7 +1101,7 @@ var ActivityStreamProvider = {
         items.push(item);
       } catch (e) {
         queryError = e;
-        throw StopIteration;
+        aCancel();
       }
     });
     if (queryError) {
@@ -1130,18 +1130,25 @@ var ActivityStreamLinks = {
   },
 
   /**
-   * Adds a bookmark
+   * Adds a bookmark and opens up the Bookmark Dialog to show feedback that
+   * the bookmarking action has been successful
    *
-   * @param {String} aUrl
-   *          The url to bookmark
+   * @param {Object} aData
+   *          aData.url The url to bookmark
+   *          aData.title The title of the page to bookmark
+   * @param {Browser} aBrowser
+   *          a <browser> element
    *
    * @returns {Promise} Returns a promise set to an object representing the bookmark
    */
-  addBookmark(aUrl) {
-    return PlacesUtils.bookmarks.insert({
-      url: aUrl,
-      parentGuid: PlacesUtils.bookmarks.unfiledGuid
-    });
+  addBookmark(aData, aBrowser) {
+      const {url, title} = aData;
+      return aBrowser.ownerGlobal.PlacesCommandHook.bookmarkPage(
+              aBrowser,
+              undefined,
+              true,
+              url,
+              title);
   },
 
   /**

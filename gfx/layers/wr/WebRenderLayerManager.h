@@ -206,7 +206,7 @@ public:
     nsIFrame::WebRenderUserDataTable* userDataTable =
       frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(aItem->GetPerFrameKey());
-    if (!data || (data->GetType() != T::Type())) {
+    if (!data || (data->GetType() != T::Type()) || !data->IsDataValid(this)) {
       data = new T(this);
       if (aOutIsRecycled) {
         *aOutIsRecycled = false;
@@ -221,6 +221,8 @@ public:
     RefPtr<T> res = static_cast<T*>(data.get());
     return res.forget();
   }
+
+  bool ShouldNotifyInvalidation() const { return mShouldNotifyInvalidation; }
 
 private:
   /**
@@ -272,6 +274,7 @@ private:
   // need this so that WebRenderLayerScrollData items that deeper in the
   // tree don't duplicate scroll metadata that their ancestors already have.
   std::vector<const ActiveScrolledRoot*> mAsrStack;
+  const ActiveScrolledRoot* mLastAsr;
 
 public:
   // Note: two DisplayItemClipChain* A and B might actually be "equal" (as per
@@ -318,6 +321,10 @@ private:
   typedef nsTHashtable<nsRefPtrHashKey<WebRenderCanvasData>> CanvasDataSet;
   // Store of WebRenderCanvasData objects for use in empty transactions
   CanvasDataSet mLastCanvasDatas;
+
+  // True if the layers-free transaction has invalidation region and then
+  // we should send notification after EndTransaction
+  bool mShouldNotifyInvalidation;
 };
 
 } // namespace layers

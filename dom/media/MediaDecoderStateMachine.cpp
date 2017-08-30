@@ -179,7 +179,6 @@ public:
   virtual State GetState() const = 0;
 
   // Event handlers for various events.
-  virtual void HandleCDMProxyReady() { }
   virtual void HandleAudioCaptured() { }
   virtual void HandleAudioDecoded(AudioData* aAudio)
   {
@@ -257,17 +256,8 @@ protected:
   using Master = MediaDecoderStateMachine;
   explicit StateObject(Master* aPtr) : mMaster(aPtr) { }
   TaskQueue* OwnerThread() const { return mMaster->mTaskQueue; }
-  MediaResource* Resource() const { return mMaster->mResource; }
   ReaderProxy* Reader() const { return mMaster->mReader; }
   const MediaInfo& Info() const { return mMaster->Info(); }
-  bool IsExpectingMoreData() const
-  {
-    // We are expecting more data if either the resource states so, or if we
-    // have a waiting promise pending (such as with non-MSE EME).
-    return Resource()->IsExpectingMoreData()
-           || mMaster->IsWaitingAudioData()
-           || mMaster->IsWaitingVideoData();
-  }
   MediaQueue<AudioData>& AudioQueue() const { return mMaster->mAudioQueue; }
   MediaQueue<VideoData>& VideoQueue() const { return mMaster->mVideoQueue; }
 
@@ -326,7 +316,6 @@ protected:
  *
  * Transition to other states when decoding metadata is done:
  *   SHUTDOWN if failing to decode metadata.
- *   WAIT_FOR_CDM if the media is encrypted and CDM is not available.
  *   DECODING_FIRSTFRAME otherwise.
  */
 class MediaDecoderStateMachine::DecodeMetadataState
@@ -386,58 +375,6 @@ private:
   }
 
   MozPromiseRequestHolder<MediaFormatReader::MetadataPromise> mMetadataRequest;
-};
-
-/**
- * Purpose: wait for the CDM to start decoding.
- *
- * Transition to other states when CDM is ready:
- *   SEEKING if any pending seek request.
- *   DECODING_FIRSTFRAME otherwise.
- */
-class MediaDecoderStateMachine::WaitForCDMState
-  : public MediaDecoderStateMachine::StateObject
-{
-public:
-  explicit WaitForCDMState(Master* aPtr) : StateObject(aPtr) { }
-
-  void Enter() { MOZ_ASSERT(!mMaster->mVideoDecodeSuspended); }
-
-  void Exit() override
-  {
-    // mPendingSeek is either moved in HandleCDMProxyReady() or should be
-    // rejected here before transition to SHUTDOWN.
-    mPendingSeek.RejectIfExists(__func__);
-  }
-
-  State GetState() const override
-  {
-    return DECODER_STATE_WAIT_FOR_CDM;
-  }
-
-  void HandleCDMProxyReady() override;
-
-  RefPtr<MediaDecoder::SeekPromise> HandleSeek(SeekTarget aTarget) override
-  {
-    SLOG("Not Enough Data to seek at this stage, queuing seek");
-    mPendingSeek.RejectIfExists(__func__);
-    mPendingSeek.mTarget.emplace(aTarget);
-    return mPendingSeek.mPromise.Ensure(__func__);
-  }
-
-  void HandleVideoSuspendTimeout() override
-  {
-    // Do nothing since no decoders are created yet.
-  }
-
-  void HandleResumeVideoDecoding(const TimeUnit&) override
-  {
-    // We never suspend video decoding in this state.
-    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
-  }
-
-private:
-  SeekJob mPendingSeek;
 };
 
 /**
@@ -2006,9 +1943,6 @@ public:
       }
       mMaster->UpdatePlaybackPosition(clockTime);
 
-      // Ensure readyState is updated before firing the 'ended' event.
-      mMaster->UpdateNextFrameStatus(MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE);
-
       mMaster->mOnPlaybackEvent.Notify(MediaEventType::PlaybackEnded);
 
       mSentPlaybackEndedEvent = true;
@@ -2257,13 +2191,7 @@ DecodeMetadataState::OnMetadataRead(MetadataHolder&& aMetadata)
     Move(aMetadata.mTags),
     MediaDecoderEventVisibility::Observable);
 
-  if (Info().IsEncrypted() && !mMaster->mCDMProxy) {
-    // Metadata parsing was successful but we're still waiting for CDM caps
-    // to become available so that we can build the correct decryptor/decoder.
-    SetState<WaitForCDMState>();
-  } else {
-    SetState<DecodingFirstFrameState>();
-  }
+  SetState<DecodingFirstFrameState>();
 }
 
 void
@@ -2272,20 +2200,8 @@ DormantState::HandlePlayStateChanged(MediaDecoder::PlayState aPlayState)
 {
   if (aPlayState == MediaDecoder::PLAY_STATE_PLAYING) {
     // Exit dormant when the user wants to play.
-    MOZ_ASSERT(!Info().IsEncrypted() || mMaster->mCDMProxy);
     MOZ_ASSERT(mMaster->mSentFirstFrameLoadedEvent);
     SetSeekingState(Move(mPendingSeek), EventVisibility::Suppressed);
-  }
-}
-
-void
-MediaDecoderStateMachine::
-WaitForCDMState::HandleCDMProxyReady()
-{
-  if (mPendingSeek.Exists()) {
-    SetSeekingState(Move(mPendingSeek), EventVisibility::Observable);
-  } else {
-    SetState<DecodingFirstFrameState>();
   }
 }
 
@@ -2462,17 +2378,15 @@ DecodingState::MaybeStartBuffering()
     return;
   }
 
-  bool shouldBuffer;
-  if (Reader()->UseBufferingHeuristics()) {
-    shouldBuffer = IsExpectingMoreData()
-                   && mMaster->HasLowDecodedData()
-                   && mMaster->HasLowBufferedData();
-  } else {
-    shouldBuffer =
-      (mMaster->OutOfDecodedAudio() && mMaster->IsWaitingAudioData())
-      || (mMaster->OutOfDecodedVideo() && mMaster->IsWaitingVideoData());
+  // Note we could have a wait promise pending when playing non-MSE EME.
+  if ((mMaster->OutOfDecodedAudio() && mMaster->IsWaitingAudioData()) ||
+      (mMaster->OutOfDecodedVideo() && mMaster->IsWaitingVideoData())) {
+    SetState<BufferingState>();
+    return;
   }
-  if (shouldBuffer) {
+
+  if (Reader()->UseBufferingHeuristics() && mMaster->HasLowDecodedData() &&
+      mMaster->HasLowBufferedData() && !mMaster->mCanPlayThrough) {
     SetState<BufferingState>();
   }
 }
@@ -2483,8 +2397,7 @@ SeekingState::SeekCompleted()
 {
   const auto newCurrentTime = CalculateNewCurrentTime();
 
-  bool isLiveStream = Resource()->IsLiveStream();
-  if (newCurrentTime == mMaster->Duration() && !isLiveStream) {
+  if (newCurrentTime == mMaster->Duration() && !mMaster->mIsLiveStream) {
     // Seeked to end of media. Explicitly finish the queues so DECODING
     // will transition to COMPLETED immediately. Note we don't do
     // this when playing a live stream, since the end of media will advance
@@ -2547,17 +2460,24 @@ BufferingState::Step()
   TimeStamp now = TimeStamp::Now();
   MOZ_ASSERT(!mBufferingStart.IsNull(), "Must know buffering start time.");
 
-  // With buffering heuristics we will remain in the buffering state if
-  // we've not decoded enough data to begin playback, or if we've not
-  // downloaded a reasonable amount of data inside our buffering time.
   if (Reader()->UseBufferingHeuristics()) {
+    if (mMaster->IsWaitingAudioData() || mMaster->IsWaitingVideoData()) {
+      // Can't exit buffering when we are still waiting for data.
+      // Note we don't schedule next loop for we will do that when the wait
+      // promise is resolved.
+      return;
+    }
+    // With buffering heuristics, we exit buffering state when we:
+    // 1. can play through or
+    // 2. time out (specified by mBufferingWait) or
+    // 3. have enough buffered data.
     TimeDuration elapsed = now - mBufferingStart;
-    bool isLiveStream = Resource()->IsLiveStream();
-    if ((isLiveStream || !mMaster->mCanPlayThrough)
-        && elapsed
-           < TimeDuration::FromSeconds(mBufferingWait * mMaster->mPlaybackRate)
-        && mMaster->HasLowBufferedData(TimeUnit::FromSeconds(mBufferingWait))
-        && IsExpectingMoreData()) {
+    TimeDuration timeout =
+      TimeDuration::FromSeconds(mBufferingWait * mMaster->mPlaybackRate);
+    bool stopBuffering =
+      mMaster->mCanPlayThrough || elapsed >= timeout ||
+      !mMaster->HasLowBufferedData(TimeUnit::FromSeconds(mBufferingWait));
+    if (!stopBuffering) {
       SLOG("Buffering: wait %ds, timeout in %.3lfs",
            mBufferingWait, mBufferingWait - elapsed.ToSeconds());
       mMaster->ScheduleStateMachineIn(TimeUnit::FromMicroseconds(USECS_PER_S));
@@ -2618,8 +2538,6 @@ ShutdownState::Enter()
   // Shutdown happens while decode timer is active, we need to disconnect and
   // dispose of the timer.
   master->CancelSuspendTimer();
-
-  master->mCDMProxyPromise.DisconnectIfExists();
 
   if (master->IsPlaying()) {
     master->StopPlayback();
@@ -2693,7 +2611,6 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mVideoDecodeSuspended(false),
   mVideoDecodeSuspendTimer(mTaskQueue),
   mOutputStreamManager(new OutputStreamManager()),
-  mResource(aDecoder->GetResource()),
   mVideoDecodeMode(VideoDecodeMode::Normal),
   mIsMSE(aDecoder->IsMSE()),
   INIT_MIRROR(mBuffered, TimeIntervals()),
@@ -2911,12 +2828,6 @@ nsresult MediaDecoderStateMachine::Init(MediaDecoder* aDecoder)
 
   mMediaSink = CreateMediaSink(mAudioCaptured);
 
-  aDecoder->RequestCDMProxy()->Then(
-    OwnerThread(), __func__, this,
-    &MediaDecoderStateMachine::OnCDMProxyReady,
-    &MediaDecoderStateMachine::OnCDMProxyNotReady)
-  ->Track(mCDMProxyPromise);
-
   nsresult rv = mReader->Init();
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3017,7 +2928,6 @@ MediaDecoderStateMachine::ToStateStr(State aState)
 {
   switch (aState) {
     case DECODER_STATE_DECODING_METADATA:   return "DECODING_METADATA";
-    case DECODER_STATE_WAIT_FOR_CDM:        return "WAIT_FOR_CDM";
     case DECODER_STATE_DORMANT:             return "DORMANT";
     case DECODER_STATE_DECODING_FIRSTFRAME: return "DECODING_FIRSTFRAME";
     case DECODER_STATE_DECODING:            return "DECODING";
@@ -3461,10 +3371,8 @@ MediaDecoderStateMachine::FinishDecodeFirstFrame()
 
   mMediaSink->Redraw(Info().mVideo);
 
-  LOG("Media duration %" PRId64 ", "
-      "transportSeekable=%d, mediaSeekable=%d",
-      Duration().ToMicroseconds(), mResource->IsTransportSeekable(),
-      mMediaSeekable);
+  LOG("Media duration %" PRId64 ", mediaSeekable=%d",
+      Duration().ToMicroseconds(), mMediaSeekable);
 
   // Get potentially updated metadata
   mReader->ReadUpdatedMetadata(mInfo.ptr());
@@ -3758,23 +3666,6 @@ void MediaDecoderStateMachine::OnMediaSinkAudioError(nsresult aResult)
   // Otherwise notify media decoder/element about this error for it makes
   // no sense to play an audio-only file without sound output.
   DecodeError(MediaResult(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR, __func__));
-}
-
-void
-MediaDecoderStateMachine::OnCDMProxyReady(RefPtr<CDMProxy> aProxy)
-{
-  MOZ_ASSERT(OnTaskQueue());
-  mCDMProxyPromise.Complete();
-  mCDMProxy = aProxy;
-  mReader->SetCDMProxy(aProxy);
-  mStateObj->HandleCDMProxyReady();
-}
-
-void
-MediaDecoderStateMachine::OnCDMProxyNotReady()
-{
-  MOZ_ASSERT(OnTaskQueue());
-  mCDMProxyPromise.Complete();
 }
 
 void

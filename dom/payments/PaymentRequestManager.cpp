@@ -12,6 +12,7 @@
 #include "mozilla/dom/PaymentRequestChild.h"
 #include "nsContentUtils.h"
 #include "nsString.h"
+#include "nsIPrincipal.h"
 
 namespace mozilla {
 namespace dom {
@@ -390,6 +391,7 @@ GetSelectedShippingOption(const PaymentDetailsInit& aDetails,
 
 nsresult
 PaymentRequestManager::CreatePayment(nsPIDOMWindowInner* aWindow,
+                                     nsIPrincipal* aTopLevelPrincipal,
                                      const Sequence<PaymentMethodData>& aMethodData,
                                      const PaymentDetailsInit& aDetails,
                                      const PaymentOptions& aOptions,
@@ -397,6 +399,7 @@ PaymentRequestManager::CreatePayment(nsPIDOMWindowInner* aWindow,
 {
   MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG_POINTER(aRequest);
+  NS_ENSURE_ARG_POINTER(aTopLevelPrincipal);
   *aRequest = nullptr;
   nsresult rv;
 
@@ -460,6 +463,7 @@ PaymentRequestManager::CreatePayment(nsPIDOMWindowInner* aWindow,
   ConvertOptions(aOptions, options);
 
   IPCPaymentCreateActionRequest action(internalId,
+                                       IPC::Principal(aTopLevelPrincipal),
                                        methodData,
                                        details,
                                        options);
@@ -590,13 +594,32 @@ PaymentRequestManager::RespondPayment(const IPCPaymentActionResponse& aResponse)
       if (NS_WARN_IF(!request)) {
         return NS_ERROR_FAILURE;
       }
-      request->RespondShowPayment(response.isAccepted(),
-                                  response.methodName(),
+      nsresult rejectedReason = NS_ERROR_DOM_ABORT_ERR;
+      switch (response.status()) {
+        case nsIPaymentActionResponse::PAYMENT_ACCEPTED: {
+          rejectedReason = NS_OK;
+          break;
+        }
+        case nsIPaymentActionResponse::PAYMENT_REJECTED: {
+          rejectedReason = NS_ERROR_DOM_ABORT_ERR;
+          break;
+        }
+        case nsIPaymentActionResponse::PAYMENT_NOTSUPPORTED: {
+          rejectedReason = NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+          break;
+        }
+        default: {
+          rejectedReason = NS_ERROR_UNEXPECTED;
+          break;
+        }
+      }
+      request->RespondShowPayment(response.methodName(),
                                   response.data(),
                                   response.payerName(),
                                   response.payerEmail(),
-                                  response.payerPhone());
-      if (!response.isAccepted()) {
+                                  response.payerPhone(),
+                                  rejectedReason);
+      if (NS_FAILED(rejectedReason)) {
         MOZ_ASSERT(mShowingRequest == request);
         mShowingRequest = nullptr;
         mRequestQueue.RemoveElement(request);

@@ -7,7 +7,6 @@
 
 include protocol PHttpChannel;
 include protocol PFTPChannel;
-include protocol PRtspChannel;
 include protocol PChildToParentStream;
 include BlobTypes;
 include URIParams;
@@ -128,6 +127,7 @@ struct HttpChannelOpenArgs
   bool                        allowSpdy;
   bool                        allowAltSvc;
   bool                        beConservative;
+  uint32_t                    tlsFlags;
   OptionalLoadInfoArgs        loadInfo;
   OptionalHttpResponseHead    synthesizedResponseHead;
   nsCString                   synthesizedSecurityInfoSerialization;
@@ -149,6 +149,7 @@ struct HttpChannelOpenArgs
   TimeStamp                   dispatchFetchEventEnd;
   TimeStamp                   handleFetchEventStart;
   TimeStamp                   handleFetchEventEnd;
+  bool                        forceMainDocumentChannel;
 };
 
 struct HttpChannelConnectArgs
@@ -210,16 +211,6 @@ struct CookieStruct
   int64_t   creationTime;
   bool      isSession;
   bool      isSecure;
-};
-
-//-----------------------------------------------------------------------------
-// RTSP IPDL structs
-//-----------------------------------------------------------------------------
-
-struct RtspChannelConnectArgs
-{
-  URIParams uri;
-  uint32_t channelId;
 };
 
 } // namespace ipc

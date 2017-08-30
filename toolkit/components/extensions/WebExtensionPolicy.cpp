@@ -89,6 +89,7 @@ WebExtensionPolicy::WebExtensionPolicy(GlobalObject& aGlobal,
                                        ErrorResult& aRv)
   : mId(NS_AtomizeMainThread(aInit.mId))
   , mHostname(aInit.mMozExtensionHostname)
+  , mName(aInit.mName)
   , mContentSecurityPolicy(aInit.mContentSecurityPolicy)
   , mLocalizeCallback(aInit.mLocalizeCallback)
   , mPermissions(new AtomSet(aInit.mPermissions))
@@ -250,7 +251,7 @@ WebExtensionPolicy::BackgroundPageHTML() const
 
   for (auto& script : mBackgroundScripts.Value()) {
     nsCString escaped;
-    escaped.Adopt(nsEscapeHTML(NS_ConvertUTF16toUTF8(script).get()));
+    nsAppendEscapedHTML(NS_ConvertUTF16toUTF8(script), escaped);
 
     result.AppendPrintf(kBackgroundPageHTMLScript, escaped.get());
   }

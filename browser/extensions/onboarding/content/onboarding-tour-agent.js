@@ -48,9 +48,6 @@ document.getElementById("onboarding-overlay")
     case "onboarding-tour-private-browsing-button":
       Mozilla.UITour.showHighlight("privateWindow");
       break;
-    case "onboarding-tour-search-button":
-      Mozilla.UITour.openSearchPanel(() => {});
-      break;
     case "onboarding-tour-singlesearch-button":
       Mozilla.UITour.showMenu("urlbar");
       break;
@@ -70,4 +67,9 @@ document.getElementById("onboarding-overlay")
   if (evt.target.classList.contains("onboarding-tour-item")) {
     Mozilla.UITour.hideHighlight();
   }
+});
+
+document.getElementById("onboarding-overlay-button").addEventListener("Agent:Destroy", () => {
+  Mozilla.UITour.hideHighlight();
+  Mozilla.UITour.hideMenu("urlbar");
 });

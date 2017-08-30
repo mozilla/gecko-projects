@@ -549,8 +549,8 @@ sandbox_addProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v)
 #define XPCONNECT_SANDBOX_CLASS_METADATA_SLOT (XPCONNECT_GLOBAL_EXTRA_SLOT_OFFSET)
 
 static const js::ClassOps SandboxClassOps = {
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, JS_NewEnumerateStandardClasses, JS_ResolveStandardClass,
+    nullptr, nullptr, nullptr,
+    JS_NewEnumerateStandardClasses, JS_ResolveStandardClass,
     JS_MayResolveStandardClass,
     sandbox_finalize,
     nullptr, nullptr, nullptr, JS_GlobalObjectTraceHook,
@@ -574,8 +574,8 @@ static const js::Class SandboxClass = {
 // Note to whomever comes here to remove addProperty hooks: billm has promised
 // to do the work for this class.
 static const js::ClassOps SandboxWriteToProtoClassOps = {
-    sandbox_addProperty, nullptr, nullptr, nullptr,
-    nullptr, JS_NewEnumerateStandardClasses, JS_ResolveStandardClass,
+    sandbox_addProperty, nullptr, nullptr,
+    JS_NewEnumerateStandardClasses, JS_ResolveStandardClass,
     JS_MayResolveStandardClass,
     sandbox_finalize,
     nullptr, nullptr, nullptr, JS_GlobalObjectTraceHook,
@@ -592,9 +592,9 @@ static const js::Class SandboxWriteToProtoClass = {
 };
 
 static const JSFunctionSpec SandboxFunctions[] = {
-    JS_FS("dump",    SandboxDump,    1,0),
-    JS_FS("debug",   SandboxDebug,   1,0),
-    JS_FS("importFunction", SandboxImport, 1,0),
+    JS_FN("dump",    SandboxDump,    1,0),
+    JS_FN("debug",   SandboxDebug,   1,0),
+    JS_FN("importFunction", SandboxImport, 1,0),
     JS_FS_END
 };
 
@@ -1706,6 +1706,12 @@ AssembleSandboxMemoryReporterName(JSContext* cx, nsCString& sandboxName)
     // Use a default name when the caller did not provide a sandboxName.
     if (sandboxName.IsEmpty())
         sandboxName = NS_LITERAL_CSTRING("[anonymous sandbox]");
+#ifndef DEBUG
+    // Adding the caller location is fairly expensive, so in non-debug builds,
+    // only add it if we don't have an explicit sandbox name.
+    else
+        return NS_OK;
+#endif
 
     // Get the xpconnect native call context.
     XPCCallContext* cc = XPCJSContext::Get()->GetCallContext();

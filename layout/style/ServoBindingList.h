@@ -20,8 +20,22 @@
 
 // Element data
 SERVO_BINDING_FUNC(Servo_Element_ClearData, void, RawGeckoElementBorrowed node)
-SERVO_BINDING_FUNC(Servo_Element_SizeOfExcludingThis, size_t, mozilla::MallocSizeOf,
-                   mozilla::SeenPtrs* seen_ptrs, RawGeckoElementBorrowed node)
+SERVO_BINDING_FUNC(Servo_Element_SizeOfExcludingThisAndCVs, size_t,
+                   mozilla::MallocSizeOf, mozilla::SeenPtrs* seen_ptrs,
+                   RawGeckoElementBorrowed node)
+SERVO_BINDING_FUNC(Servo_Element_HasPrimaryComputedValues, bool,
+                   RawGeckoElementBorrowed node)
+SERVO_BINDING_FUNC(Servo_Element_GetPrimaryComputedValues,
+                   ServoStyleContextStrong,
+                   RawGeckoElementBorrowed node)
+SERVO_BINDING_FUNC(Servo_Element_HasPseudoComputedValues, bool,
+                   RawGeckoElementBorrowed node, size_t index)
+SERVO_BINDING_FUNC(Servo_Element_GetPseudoComputedValues,
+                   ServoStyleContextStrong,
+                   RawGeckoElementBorrowed node, size_t index)
+SERVO_BINDING_FUNC(Servo_Element_IsDisplayNone,
+                   bool,
+                   RawGeckoElementBorrowed element)
 
 // Styleset and Stylesheet management
 SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetContentsStrong,
@@ -31,7 +45,8 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetContentsStr
                    mozilla::css::SheetParsingMode parsing_mode,
                    RawGeckoURLExtraData* extra_data,
                    uint32_t line_number_offset,
-                   nsCompatibility quirks_mode)
+                   nsCompatibility quirks_mode,
+                   mozilla::css::LoaderReusableStyleSheets* reusable_sheets)
 SERVO_BINDING_FUNC(Servo_StyleSheet_Empty, RawServoStyleSheetContentsStrong,
                    mozilla::css::SheetParsingMode parsing_mode)
 SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
@@ -44,12 +59,18 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_Clone, RawServoStyleSheetContentsStrong,
 SERVO_BINDING_FUNC(Servo_StyleSheet_SizeOfIncludingThis, size_t,
                    mozilla::MallocSizeOf malloc_size_of,
                    RawServoStyleSheetContentsBorrowed sheet)
-SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned, RawGeckoPresContextOwned pres_context)
-SERVO_BINDING_FUNC(Servo_StyleSet_Clear, void,
-                   RawServoStyleSetBorrowed set)
+// We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
+// work as return values with the Linux 32-bit ABI at the moment because
+// they wrap the value in a struct.
+SERVO_BINDING_FUNC(Servo_StyleSheet_GetOrigin, uint8_t,
+                   RawServoStyleSheetContentsBorrowed sheet)
+SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSet*, RawGeckoPresContextOwned pres_context)
 SERVO_BINDING_FUNC(Servo_StyleSet_RebuildCachedData, void,
                    RawServoStyleSetBorrowed set)
-SERVO_BINDING_FUNC(Servo_StyleSet_MediumFeaturesChanged, bool,
+// We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
+// work as return values with the Linux 32-bit ABI at the moment because
+// they wrap the value in a struct.
+SERVO_BINDING_FUNC(Servo_StyleSet_MediumFeaturesChanged, uint8_t,
                    RawServoStyleSetBorrowed set, bool* viewport_units_used)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_CompatModeChanged, void,
@@ -70,7 +91,9 @@ SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
 SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void, RawServoStyleSetBorrowed set,
                    RawGeckoElementBorrowedOrNull doc_elem)
 SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
-                   RawServoStyleSetBorrowed set, bool author_style_disabled)
+                   RawServoStyleSetBorrowed set,
+                   bool author_style_disabled,
+                   mozilla::OriginFlags changed_origins)
 SERVO_BINDING_FUNC(Servo_StyleSet_GetKeyframesForName, bool,
                    RawServoStyleSetBorrowed set,
                    const nsACString* property,
@@ -81,6 +104,9 @@ SERVO_BINDING_FUNC(Servo_StyleSet_GetFontFaceRules, void,
                    RawGeckoFontFaceRuleListBorrowedMut list)
 SERVO_BINDING_FUNC(Servo_StyleSet_GetCounterStyleRule, nsCSSCounterStyleRule*,
                    RawServoStyleSetBorrowed set, nsIAtom* name)
+SERVO_BINDING_FUNC(Servo_StyleSet_BuildFontFeatureValueSet, bool,
+                   RawServoStyleSetBorrowed set,
+                   gfxFontFeatureValueSet* list)
 SERVO_BINDING_FUNC(Servo_StyleSet_ResolveForDeclarations,
                    ServoStyleContextStrong,
                    RawServoStyleSetBorrowed set,
@@ -337,7 +363,8 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCssText, void,
                    nsAString* result)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
                    RawServoDeclarationBlockBorrowed declarations,
-                   nsCSSPropertyID property, nsAString* buffer)
+                   nsCSSPropertyID property, nsAString* buffer,
+                   ServoStyleContextBorrowedOrNull computed_values)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Count, uint32_t,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetNthProperty, bool,
@@ -501,8 +528,11 @@ SERVO_BINDING_FUNC(Servo_Shutdown, void)
 // Restyle and change hints.
 SERVO_BINDING_FUNC(Servo_NoteExplicitHints, void, RawGeckoElementBorrowed element,
                    nsRestyleHint restyle_hint, nsChangeHint change_hint)
+// We'd like to return `nsChangeHint` here, but bindgen bitfield enums don't
+// work as return values with the Linux 32-bit ABI at the moment because
+// they wrap the value in a struct.
 SERVO_BINDING_FUNC(Servo_TakeChangeHint,
-                   nsChangeHint,
+                   uint32_t,
                    RawGeckoElementBorrowed element,
                    bool* was_restyled)
 SERVO_BINDING_FUNC(Servo_ResolveStyle, ServoStyleContextStrong,
@@ -592,6 +622,12 @@ SERVO_BINDING_FUNC(Servo_GetCustomPropertiesCount, uint32_t,
 SERVO_BINDING_FUNC(Servo_GetCustomPropertyNameAt, bool,
                    ServoStyleContextBorrowed, uint32_t index,
                    nsAString* name)
+
+
+SERVO_BINDING_FUNC(Servo_ProcessInvalidations, void,
+                   RawServoStyleSetBorrowed set,
+                   RawGeckoElementBorrowed element,
+                   const mozilla::ServoElementSnapshotTable* snapshots)
 
 
 // AddRef / Release functions

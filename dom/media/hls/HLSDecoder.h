@@ -21,11 +21,7 @@ public:
   {
   }
 
-  MediaResource* GetResource() const override final;
-
   void Shutdown() override;
-
-  MediaDecoderStateMachine* CreateStateMachine() override;
 
   // Returns true if the HLS backend is pref'ed on.
   static bool IsEnabled();
@@ -41,10 +37,18 @@ public:
 
   void Pause() override;
 
+  void AddSizeOfResources(ResourceSizes* aSizes) override;
+  already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
+  bool IsTransportSeekable() override { return true; }
   void Suspend() override;
   void Resume() override;
 
 private:
+  void PinForSeek() override {}
+  void UnpinForSeek() override {}
+
+  MediaDecoderStateMachine* CreateStateMachine();
+
   bool CanPlayThroughImpl() override final
   {
     // TODO: We don't know how to estimate 'canplaythrough' for this decoder.
@@ -52,7 +56,9 @@ private:
     return true;
   }
 
-  RefPtr<HLSResource> mResource;
+  bool IsLiveStream() override final { return false; }
+
+  UniquePtr<HLSResource> mResource;
 };
 
 } // namespace mozilla

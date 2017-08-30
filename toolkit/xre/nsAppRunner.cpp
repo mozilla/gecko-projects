@@ -133,7 +133,7 @@
 #include "nsReadableUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMCIDInternal.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsPrintfCString.h"
 #include "nsVersionComparator.h"
 
@@ -629,7 +629,6 @@ ProcessDDE(nsINativeAppSupport* aNative, bool aWait)
   if (ar == ARG_FOUND) {
     aNative->Enable(); // enable win32 DDE responses
     if (aWait) {
-      nsIThread *thread = NS_GetCurrentThread();
       // This is just a guesstimate based on testing different values.
       // If count is 8 or less windows will display an error dialog.
       int32_t count = 20;
@@ -1797,7 +1796,7 @@ StartRemoteClient(const char* aDesktopStartupID,
   if (NS_FAILED(rv))
     return REMOTE_NOT_FOUND;
 
-  nsXPIDLCString response;
+  nsCString response;
   bool success = false;
   rv = client.SendCommandLine(program.get(), username, profile,
                               gArgc, gArgv, aDesktopStartupID,
@@ -4324,7 +4323,7 @@ XREMain::XRE_mainRun()
     rv = prefs->GetDefaultBranch(nullptr, getter_AddRefs(defaultPrefBranch));
 
     if (NS_SUCCEEDED(rv)) {
-      nsXPIDLCString sval;
+      nsCString sval;
       rv = defaultPrefBranch->GetCharPref("app.update.channel", getter_Copies(sval));
       if (NS_SUCCEEDED(rv)) {
         CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ReleaseChannel"),

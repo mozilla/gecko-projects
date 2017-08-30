@@ -13,6 +13,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "EventDispatcher",
   "resource://gre/modules/Messaging.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
 
 var dump = Cu.import("resource://gre/modules/AndroidLog.jsm", {})
            .AndroidLog.d.bind(null, "ViewNavigation");
@@ -70,11 +72,66 @@ class GeckoViewNavigation extends GeckoViewModule {
     debug("receiveMessage " + aMsg.name);
   }
 
+  // nsIBrowserDOMWindow::createContentWindow implementation.
+  createContentWindow(aUri, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
+    debug("createContentWindow: aUri=" + (aUri && aUri.spec) +
+          " aWhere=" + aWhere +
+          " aFlags=" + aFlags);
+
+    if (!aUri) {
+      throw Cr.NS_ERROR_ABORT;
+    }
+
+    let message = {
+      type: "GeckoView:OnLoadUri",
+      uri: aUri.spec,
+      where: aWhere,
+      flags: aFlags
+    };
+
+    debug("dispatch " + JSON.stringify(message));
+
+    let handled = undefined;
+    this.eventDispatcher.sendRequestForResult(message).then(response => {
+      handled = response;
+    });
+    Services.tm.spinEventLoopUntil(() => handled !== undefined);
+
+    if (!handled &&
+        (aWhere === Ci.nsIBrowserDOMWindow.OPEN_DEFAULTWINDOW ||
+         aWhere === Ci.nsIBrowserDOMWindow.OPEN_CURRENTWINDOW)) {
+      return this.browser.contentWindow;
+    }
+
+    throw Cr.NS_ERROR_ABORT;
+  }
+
   // nsIBrowserDOMWindow::openURI implementation.
-  openURI(aUri, aOpener, aWhere, aFlags) {
-    debug("openURI: aUri.spec=" + aUri.spec);
-    // nsIWebNavigation::loadURI(URI, loadFlags, referrer, postData, headers).
-    this.browser.loadURI(aUri.spec, null, null, null);
+  openURI(aUri, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
+    return this.createContentWindow(aUri, aOpener, aWhere, aFlags,
+                                    aTriggeringPrincipal);
+  }
+
+  // nsIBrowserDOMWindow::openURIInFrame implementation.
+  openURIInFrame(aUri, aParams, aWhere, aFlags, aNextTabParentId, aName) {
+    debug("openURIInFrame: aUri=" + (aUri && aUri.spec) +
+          " aParams=" + aParams +
+          " aWhere=" + aWhere +
+          " aFlags=" + aFlags +
+          " aNextTabParentId=" + aNextTabParentId +
+          " aName=" + aName);
+
+    if (aWhere === Ci.nsIBrowserDOMWindow.OPEN_DEFAULTWINDOW ||
+        aWhere === Ci.nsIBrowserDOMWindow.OPEN_CURRENTWINDOW) {
+      return this.browser;
+    }
+
+    throw Cr.NS_ERROR_ABORT;
+  }
+
+  isTabContentWindow(aWindow) {
+    debug("isTabContentWindow " + this.browser.contentWindow === aWindow);
+    return this.browser.contentWindow === aWindow;
   }
 
   // nsIBrowserDOMWindow::canClose implementation.

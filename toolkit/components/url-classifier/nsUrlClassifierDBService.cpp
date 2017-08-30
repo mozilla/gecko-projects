@@ -1564,6 +1564,9 @@ nsUrlClassifierDBService::ReadTablesFromPrefs()
   Preferences::GetCString(DOWNLOAD_ALLOW_TABLE_PREF, tables);
   AppendTables(tables, allTables);
 
+  Preferences::GetCString(PASSWORD_ALLOW_TABLE_PREF, tables);
+  AppendTables(tables, allTables);
+
   Preferences::GetCString(TRACKING_TABLE_PREF, tables);
   AppendTables(tables, allTables);
   AppendTables(tables, mTrackingProtectionTables);
@@ -1612,12 +1615,6 @@ nsUrlClassifierDBService::Init()
     GETHASH_NOISE_DEFAULT);
   ReadTablesFromPrefs();
   nsresult rv;
-
-  {
-    // Force PSM loading on main thread
-    nsCOMPtr<nsICryptoHash> dummy = do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
 
   {
     // Force nsIUrlClassifierUtils loading on main thread.
@@ -2275,13 +2272,14 @@ nsUrlClassifierDBService::Shutdown()
   //    is to avoid racing for Classifier::mUpdateThread
   //    between main thread and the worker thread. (Both threads
   //    would access Classifier::mUpdateThread.)
-  using Worker = nsUrlClassifierDBServiceWorker;
-  RefPtr<nsIRunnable> r = NewRunnableMethod(
-    "nsUrlClassifierDBServiceWorker::FlushAndDisableAsyncUpdate",
-    mWorker,
-    &Worker::FlushAndDisableAsyncUpdate);
-  SyncRunnable::DispatchToThread(gDbBackgroundThread, r);
-
+  if (mWorker->IsDBOpened()) {
+    using Worker = nsUrlClassifierDBServiceWorker;
+    RefPtr<nsIRunnable> r = NewRunnableMethod(
+      "nsUrlClassifierDBServiceWorker::FlushAndDisableAsyncUpdate",
+      mWorker,
+      &Worker::FlushAndDisableAsyncUpdate);
+    SyncRunnable::DispatchToThread(gDbBackgroundThread, r);
+  }
   // At this point the update thread has been shut down and
   // the worker thread should only have at most one event,
   // which is the callback event.

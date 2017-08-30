@@ -596,7 +596,8 @@ private:
     RefPtr<InternalHeaders> internalHeaders = aCN->GetInternalHeaders();
     ir->Headers()->Fill(*(internalHeaders.get()), ignored);
 
-    RefPtr<Response> response = new Response(aCache->GetGlobalObject(), ir);
+    RefPtr<Response> response =
+      new Response(aCache->GetGlobalObject(), ir, nullptr);
 
     RequestOrUSVString request;
     request.SetAsUSVString().Rebind(aCN->URL().Data(), aCN->URL().Length());
@@ -677,7 +678,14 @@ CompareNetwork::Initialize(nsIPrincipal* aPrincipal,
   }
 
   // Update LoadFlags for propagating to ServiceWorkerInfo.
-  mLoadFlags |= mRegistration->GetLoadFlags();
+  mLoadFlags = nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
+
+  ServiceWorkerUpdateViaCache uvc = mRegistration->GetUpdateViaCache();
+  if (uvc == ServiceWorkerUpdateViaCache::None ||
+      (uvc == ServiceWorkerUpdateViaCache::Imports && mIsMainScript)) {
+    mLoadFlags |= nsIRequest::VALIDATE_ALWAYS;
+  }
+
   if (mRegistration->IsLastUpdateCheckTimeOverOneDay()) {
     mLoadFlags |= nsIRequest::LOAD_BYPASS_CACHE;
   }

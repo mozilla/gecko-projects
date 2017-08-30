@@ -65,7 +65,6 @@ var kVersion = 10;
  * version the button is removed in as the value.  e.g. "pocket-button": 5
  */
 var ObsoleteBuiltinButtons = {
-  "pocket-button": 6
 };
 
 /**
@@ -203,13 +202,6 @@ var CustomizableUIInternal = {
 
     if (AppConstants.MOZ_DEV_EDITION) {
       navbarPlacements.splice(2, 0, "developer-button");
-    }
-
-    // Place this last, when createWidget is called for pocket, it will
-    // append to the toolbar.
-    if (Services.prefs.getBoolPref("extensions.pocket.enabled", false) &&
-        Services.prefs.getBoolPref("extensions.pocket.disablePageAction", false)) {
-      navbarPlacements.push("pocket-button");
     }
 
     this.registerArea(CustomizableUI.AREA_NAVBAR, {
@@ -375,9 +367,10 @@ var CustomizableUIInternal = {
         defaultPlacements.push("characterencoding-button");
       }
 
-      savedPanelPlacements = savedPanelPlacements.filter(id => defaultPlacements.includes(id));
+      savedPanelPlacements = savedPanelPlacements.filter(id => !defaultPlacements.includes(id));
+
       if (savedPanelPlacements.length) {
-        gSavedState.placements[this.AREA_FIXED_OVERFLOW_PANEL] = savedPanelPlacements;
+        gSavedState.placements[CustomizableUI.AREA_FIXED_OVERFLOW_PANEL] = savedPanelPlacements;
       }
     }
 
@@ -1286,6 +1279,7 @@ var CustomizableUIInternal = {
   createSpecialWidget(aId, aDocument) {
     let nodeName = "toolbar" + aId.match(/spring|spacer|separator/)[0];
     let node = aDocument.createElementNS(kNSXUL, nodeName);
+    node.className = "chromeclass-toolbar-additional";
     node.id = this.ensureSpecialWidgetId(aId);
     return node;
   },
@@ -1988,10 +1982,7 @@ var CustomizableUIInternal = {
   // Note that this does not populate gPlacements, which is done lazily so that
   // the legacy state can be migrated, which is only available once a browser
   // window is openned.
-  // The panel area is an exception here, since it has no legacy state and is
-  // built lazily - and therefore wouldn't otherwise result in restoring its
-  // state immediately when a browser window opens, which is important for
-  // other consumers of this API.
+  // The panel area is an exception here, since it has no legacy state.
   loadSavedState() {
     let state = Services.prefs.getCharPref(kPrefCustomizationState, "");
     if (!state) {
@@ -4282,6 +4273,10 @@ OverflowableToolbar.prototype = {
   },
 
   _onPanelHiding(aEvent) {
+    if (aEvent.target != this._panel) {
+      // Ignore context menus, <select> popups, etc.
+      return;
+    }
     this._chevron.open = false;
     this._panel.removeEventListener("dragover", this);
     this._panel.removeEventListener("dragend", this);

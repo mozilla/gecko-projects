@@ -32,10 +32,11 @@ import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnStopListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnTitleChangeListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.UpdateFlags;
 import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.WindowUtil;
+import org.mozilla.gecko.widget.AnimatedProgressBar;
 import org.mozilla.gecko.widget.themed.ThemedImageButton;
-import org.mozilla.gecko.widget.themed.ThemedImageView;
 import org.mozilla.gecko.widget.themed.ThemedRelativeLayout;
 
 import android.content.Context;
@@ -81,7 +82,9 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                                                 GeckoMenu.ActionItemBarPresenter {
     private static final String LOGTAG = "GeckoToolbar";
 
-    private static final int LIGHTWEIGHT_THEME_ALPHA = 77;
+    private static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_START = 204; // 255 - alpha = invert_alpha
+    private static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_END = 102;
+    public static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET = 51;
 
     public interface OnActivateListener {
         public void onActivate();
@@ -118,7 +121,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     protected boolean isSwitchingTabs;
     protected final ThemedImageButton tabsButton;
 
-    private ToolbarProgressView progressBar;
+    private AnimatedProgressBar progressBar;
     protected final TabCounter tabsCounter;
     protected final View menuButton;
     private MenuPopup menuPopup;
@@ -354,7 +357,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         urlEditLayout.onParentFocus();
     }
 
-    public void setProgressBar(ToolbarProgressView progressBar) {
+    public void setProgressBar(AnimatedProgressBar progressBar) {
         this.progressBar = progressBar;
     }
 
@@ -363,7 +366,6 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     }
 
     public void refresh() {
-        progressBar.setImageDrawable(getResources().getDrawable(R.drawable.progress));
         urlDisplayLayout.dismissSiteIdentityPopup();
         urlEditLayout.refresh();
     }
@@ -440,7 +442,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
             switch (msg) {
                 case START:
                     updateProgressVisibility(tab, Tab.LOAD_PROGRESS_INIT);
-                    // Fall through.
+                    break;
                 case ADDED:
                 case LOCATION_CHANGE:
                 case LOAD_ERROR:
@@ -448,8 +450,9 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                 case STOP:
                     flags.add(UpdateFlags.PROGRESS);
                     if (progressBar.getVisibility() == View.VISIBLE) {
-                        progressBar.animateProgress(tab.getLoadProgress());
+                        progressBar.setProgress(tab.getLoadProgress());
                     }
+                    updateProgressVisibility();
                     break;
 
                 case SELECTED:
@@ -908,7 +911,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         }
 
         final StateListDrawable stateList = new StateListDrawable();
-        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.tabs_tray_grey_pressed));
+        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.photon_browser_toolbar_bg_private));
         stateList.addState(EMPTY_STATE_SET, drawable);
 
         setBackgroundDrawable(stateList);
@@ -937,7 +940,19 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
 
         final LightweightThemeDrawable drawable = theme.getColorDrawable(view, color);
         if (drawable != null) {
-            drawable.setAlpha(LIGHTWEIGHT_THEME_ALPHA, LIGHTWEIGHT_THEME_ALPHA);
+            final int startAlpha, endAlpha;
+            final boolean horizontalGradient;
+
+            if (HardwareUtils.isTablet()) {
+                startAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET;
+                endAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET;
+                horizontalGradient = false;
+            } else {
+                startAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_START;
+                endAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_END;
+                horizontalGradient = true;
+            }
+            drawable.setAlpha(startAlpha, endAlpha, horizontalGradient);
         }
 
         return drawable;

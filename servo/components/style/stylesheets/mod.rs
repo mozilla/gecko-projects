@@ -14,6 +14,7 @@ mod loader;
 mod media_rule;
 mod memory;
 mod namespace_rule;
+pub mod origin;
 mod page_rule;
 mod rule_list;
 mod rule_parser;
@@ -25,7 +26,7 @@ pub mod viewport_rule;
 
 use cssparser::{parse_one_rule, Parser, ParserInput};
 use error_reporting::NullReporter;
-use parser::ParserContext;
+use parser::{ParserContext, ParserErrorContext};
 use servo_arc::Arc;
 use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt;
@@ -43,11 +44,13 @@ pub use self::memory::{MallocSizeOf, MallocSizeOfFn, MallocSizeOfWithGuard};
 #[cfg(feature = "gecko")]
 pub use self::memory::{MallocSizeOfWithRepeats, SizeOfState};
 pub use self::namespace_rule::NamespaceRule;
+pub use self::origin::{Origin, OriginSet, PerOrigin, PerOriginIter};
 pub use self::page_rule::PageRule;
 pub use self::rule_parser::{State, TopLevelRuleParser};
 pub use self::rule_list::{CssRules, CssRulesHelpers};
 pub use self::rules_iterator::{AllRules, EffectiveRules, NestedRuleIterationCondition, RulesIterator};
-pub use self::stylesheet::{Namespaces, Stylesheet, StylesheetContents, StylesheetInDocument, UserAgentStylesheets};
+pub use self::stylesheet::{Namespaces, Stylesheet, DocumentStyleSheet};
+pub use self::stylesheet::{StylesheetContents, StylesheetInDocument, UserAgentStylesheets};
 pub use self::style_rule::StyleRule;
 pub use self::supports_rule::SupportsRule;
 pub use self::viewport_rule::ViewportRule;
@@ -82,26 +85,10 @@ impl UrlExtraData {
 #[cfg(feature = "gecko")]
 impl Eq for UrlExtraData {}
 
-/// Each style rule has an origin, which determines where it enters the cascade.
-///
-/// http://dev.w3.org/csswg/css-cascade/#cascading-origins
-#[derive(Clone, PartialEq, Eq, Copy, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub enum Origin {
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-ua
-    UserAgent,
-
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-author
-    Author,
-
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-user
-    User,
-}
-
 /// A CSS rule.
 ///
 /// TODO(emilio): Lots of spec links should be around.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CssRule {
     // No Charset here, CSSCharsetRule has been removed from CSSOM
@@ -148,7 +135,7 @@ impl MallocSizeOfWithGuard for CssRule {
 }
 
 #[allow(missing_docs)]
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CssRuleType {
     // https://drafts.csswg.org/cssom/#the-cssrule-interface
     Style               = 1,
@@ -243,7 +230,6 @@ impl CssRule {
         let context = ParserContext::new(
             parent_stylesheet_contents.origin,
             &url_data,
-            &error_reporter,
             None,
             PARSING_MODE_DEFAULT,
             parent_stylesheet_contents.quirks_mode,
@@ -259,11 +245,12 @@ impl CssRule {
         let mut rule_parser = TopLevelRuleParser {
             stylesheet_origin: parent_stylesheet_contents.origin,
             context: context,
+            error_context: ParserErrorContext { error_reporter: &error_reporter },
             shared_lock: &shared_lock,
             loader: loader,
             state: state,
             had_hierarchy_error: false,
-            namespaces: Some(&mut *guard),
+            namespaces: &mut *guard,
         };
 
         parse_one_rule(&mut input, &mut rule_parser)

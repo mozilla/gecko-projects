@@ -352,7 +352,7 @@ impl nsStyleImage {
             // NB: stops are guaranteed to be none in the gecko side by
             // default.
 
-            let mut gecko_stop = unsafe {
+            let gecko_stop = unsafe {
                 &mut (*gecko_gradient).mStops[index]
             };
             let mut coord = nsStyleCoord::null();
@@ -918,4 +918,17 @@ impl<T> Rect<T> where T: GeckoStyleCoordConvertible {
             )
         )
     }
+}
+
+/// Convert to String from given chars pointer.
+pub unsafe fn string_from_chars_pointer(p: *const u16) -> String {
+    use std::slice;
+    let mut length = 0;
+    let mut iter = p;
+    while *iter != 0 {
+        length += 1;
+        iter = iter.offset(1);
+    }
+    let char_vec = slice::from_raw_parts(p, length as usize);
+    String::from_utf16_lossy(char_vec)
 }

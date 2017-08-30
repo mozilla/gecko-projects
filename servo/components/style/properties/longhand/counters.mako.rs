@@ -6,7 +6,7 @@
 
 <% data.new_style_struct("Counters", inherited=False, gecko_name="Content") %>
 
-<%helpers:longhand name="content" boxed="True" animation_value_type="none"
+<%helpers:longhand name="content" boxed="True" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-content/#propdef-content">
     use values::computed::ComputedValueAsSpecified;
     #[cfg(feature = "gecko")]
@@ -40,7 +40,7 @@
         #[cfg(feature = "gecko")]
         use values::specified::Attr;
 
-        #[derive(Debug, PartialEq, Eq, Clone)]
+        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum ContentItem {
             /// Literal string content.
@@ -101,7 +101,7 @@
             }
         }
 
-        #[derive(Debug, PartialEq, Eq, Clone)]
+        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum T {
             Normal,
@@ -240,7 +240,7 @@
     use style_traits::ToCss;
     use values::CustomIdent;
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct SpecifiedValue(pub Vec<(CustomIdent, specified::Integer)>);
 
     pub mod computed_value {
@@ -248,7 +248,7 @@
         use style_traits::ToCss;
         use values::CustomIdent;
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T(pub Vec<(CustomIdent, i32)>);
 

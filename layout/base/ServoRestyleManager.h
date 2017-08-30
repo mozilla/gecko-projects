@@ -163,6 +163,8 @@ private:
 #endif // DEBUG
 };
 
+enum class ServoPostTraversalFlags : uint32_t;
+
 /**
  * Restyle manager for a Servo-backed style system.
  */
@@ -185,6 +187,7 @@ public:
   void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
                                     nsRestyleHint aRestyleHint);
   void ProcessPendingRestyles();
+  void ProcessAllPendingAttributeAndStateInvalidations();
 
   /**
    * Performs a Servo animation-only traversal to compute style for all nodes
@@ -217,15 +220,6 @@ public:
   // ::first-line.  Once we get rid of the Gecko style system, we should rename
   // this method accordingly (e.g. to ReparentStyleContextForFirstLine).
   nsresult ReparentStyleContext(nsIFrame* aFrame);
-
-  /**
-   * Gets the appropriate frame given a content and a pseudo-element tag.
-   *
-   * Right now only supports a null tag, before or after. If the pseudo-element
-   * is not null, the content needs to be an element.
-   */
-  static nsIFrame* FrameForPseudoElement(const Element* aElement,
-                                         nsIAtom* aPseudoTagOrNull);
 
   /**
    * Clears the ServoElementData and HasDirtyDescendants from all elements
@@ -270,14 +264,13 @@ private:
   bool ProcessPostTraversal(Element* aElement,
                             ServoStyleContext* aParentContext,
                             ServoRestyleState& aRestyleState,
-                            ServoTraversalFlags aFlags,
-                            bool aParentWasRestyled);
+                            ServoPostTraversalFlags aFlags);
 
   struct TextPostTraversalState;
   bool ProcessPostTraversalForText(nsIContent* aTextNode,
                                    TextPostTraversalState& aState,
                                    ServoRestyleState& aRestyleState,
-                                   bool aParentWasRestyled);
+                                   ServoPostTraversalFlags aFlags);
 
   inline ServoStyleSet* StyleSet() const
   {

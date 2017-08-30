@@ -1,4 +1,3 @@
-#line 1
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -48,6 +47,6 @@ void main(void) {
     vec2 st1 = res.uv_rect.zw / texture_size;
 
     vColor = text.color;
-    vUv = mix(st0, st1, f);
+    vUv = vec3(mix(st0, st1, f), res.layer);
     vUvBorder = (res.uv_rect + vec4(0.5, 0.5, -0.5, -0.5)) / texture_size.xyxy;
 }

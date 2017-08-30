@@ -208,8 +208,6 @@ JSObject* newDelegate()
     static const js::ClassOps delegateClassOps = {
         nullptr, /* addProperty */
         nullptr, /* delProperty */
-        nullptr, /* getProperty */
-        nullptr, /* setProperty */
         nullptr, /* enumerate */
         nullptr, /* newEnumerate */
         nullptr, /* resolve */
@@ -237,7 +235,7 @@ JSObject* newDelegate()
 
     /* Create the global object. */
     JS::CompartmentOptions options;
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    options.behaviors().setVersion(JSVERSION_DEFAULT);
 
     JS::RootedObject global(cx, JS_NewGlobalObject(cx, Jsvalify(&delegateClass), nullptr,
                                                    JS::FireOnNewGlobalHook, options));

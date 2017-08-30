@@ -55,7 +55,7 @@ public:
                         RefPtr<AsyncImagePipelineManager>&& aImageMgr,
                         RefPtr<CompositorAnimationStorage>&& aAnimStorage);
 
-  static WebRenderBridgeParent* CreateDestroyed();
+  static WebRenderBridgeParent* CreateDestroyed(const wr::PipelineId& aPipelineId);
 
   wr::PipelineId PipelineId() { return mPipelineId; }
   wr::WebRenderAPI* GetWebRenderAPI() { return mApi; }
@@ -152,7 +152,6 @@ public:
   mozilla::ipc::IPCResult RecvGetAPZTestData(APZTestData* data) override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
-  void SetWebRenderProfilerEnabled(bool aEnabled);
 
   void Pause();
   bool Resume();
@@ -199,7 +198,7 @@ public:
                        CompositorAnimationStorage* aAnimStorage);
 
 private:
-  WebRenderBridgeParent();
+  explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
   virtual ~WebRenderBridgeParent();
 
   uint64_t GetLayersId() const;

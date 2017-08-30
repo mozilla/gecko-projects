@@ -26,7 +26,6 @@
 #include <process.h>
 #include <shobjidl.h>
 #include "mozilla/ipc/WindowsMessageLoop.h"
-#include "mozilla/TlsAllocationTracker.h"
 #endif
 
 #include "nsAppDirectoryServiceDefs.h"
@@ -73,6 +72,7 @@
 
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/XPCShellEnvironment.h"
+#include "mozilla/Scheduler.h"
 #include "mozilla/WindowsDllBlocklist.h"
 
 #include "GMPProcessChild.h"
@@ -365,14 +365,6 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
 #if defined(XP_WIN)
-#ifndef DEBUG
-  // XXX Bug 1320134: added for diagnosing the crashes because we're running out
-  // of TLS indices on Windows. Remove after the root cause is found.
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    mozilla::InitTlsAllocationTracker();
-  }
-#endif
-
   // From the --attach-console support in nsNativeAppSupportWin.cpp, but
   // here we are a content child process, so we always attempt to attach
   // to the parent's (ie, the browser's) console.
@@ -710,14 +702,6 @@ XRE_InitChildProcess(int aArgc,
     }
   }
 
-#if defined(XP_WIN) && !defined(DEBUG)
-  // XXX Bug 1320134: added for diagnosing the crashes because we're running out
-  // of TLS indices on Windows. Remove after the root cause is found.
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    mozilla::ShutdownTlsAllocationTracker();
-  }
-#endif
-
   return XRE_DeinitCommandLine();
 }
 
@@ -890,6 +874,8 @@ XRE_ShutdownChildProcess()
   mozilla::DebugOnly<MessageLoop*> ioLoop = XRE_GetIOMessageLoop();
   MOZ_ASSERT(!!ioLoop, "Bad shutdown order");
 
+  Scheduler::Shutdown();
+
   // Quit() sets off the following chain of events
   //  (1) UI loop starts quitting
   //  (2) UI loop returns from Run() in XRE_InitChildProcess()
@@ -897,6 +883,7 @@ XRE_ShutdownChildProcess()
   //  (4) ProcessChild joins the IO thread
   //  (5) exit()
   MessageLoop::current()->Quit();
+
 #if defined(XP_MACOSX)
   nsCOMPtr<nsIAppShell> appShell(do_GetService(kAppShellCID));
   if (appShell) {

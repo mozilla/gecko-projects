@@ -417,7 +417,10 @@ class MochitestServer(object):
         # get testing environment
         env = test_environment(xrePath=self._xrePath, log=self._log)
         env["XPCOM_DEBUG_BREAK"] = "warn"
-        env["LD_LIBRARY_PATH"] = self._xrePath
+        if "LD_LIBRARY_PATH" not in env or env["LD_LIBRARY_PATH"] is None:
+            env["LD_LIBRARY_PATH"] = self._xrePath
+        else:
+            env["LD_LIBRARY_PATH"] = ":".join([self._xrePath, env["LD_LIBRARY_PATH"]])
 
         # When running with an ASan build, our xpcshell server will also be ASan-enabled,
         # thus consuming too much resources when running together with the browser on
@@ -1401,6 +1404,8 @@ toolbar#nav-bar {
                 mozinfo.update(options.extra_mozinfo_json)
             if 'STYLO_FORCE_ENABLED' in os.environ:
                 mozinfo.update({'stylo': True})
+            if 'STYLO_FORCE_DISABLED' in os.environ:
+                mozinfo.update({'stylo': False})
 
             info = mozinfo.info
 
@@ -1809,8 +1814,8 @@ toolbar#nav-bar {
         except AttributeError:
             pass
         try:
-            if options.topsrcdir:
-                sandbox_whitelist_paths.append(options.topsrcdir)
+            if options.objPath:
+                sandbox_whitelist_paths.append(options.objPath)
         except AttributeError:
             pass
         if (platform.system() == "Linux" or
@@ -2162,11 +2167,10 @@ toolbar#nav-bar {
             # install specialpowers and mochikit addons
             addons = Addons(self.marionette)
 
-            if mozinfo.info.get('toolkit') != 'gonk':
-                addons.install(create_zip(
-                    os.path.join(here, 'extensions', 'specialpowers')
-                ))
-                addons.install(create_zip(self.mochijar))
+            addons.install(create_zip(
+                os.path.join(here, 'extensions', 'specialpowers')
+            ))
+            addons.install(create_zip(self.mochijar))
 
             self.execute_start_script()
 
@@ -2354,39 +2358,12 @@ toolbar#nav-bar {
                     break
             return result
 
-        def step3():
-            stepOptions = copy.deepcopy(options)
-            stepOptions.repeat = VERIFY_REPEAT
-            stepOptions.keep_open = False
-            stepOptions.environment.append("MOZ_CHAOSMODE=")
-            result = self.runTests(stepOptions)
-            self.message_logger.finish()
-            return result
-
-        def step4():
-            stepOptions = copy.deepcopy(options)
-            stepOptions.repeat = 0
-            stepOptions.keep_open = False
-            stepOptions.environment.append("MOZ_CHAOSMODE=")
-            for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
-                result = self.runTests(stepOptions)
-                self.message_logger.finish()
-                if result != 0:
-                    break
-            return result
-
         steps = [
             ("1. Run each test %d times in one browser." % VERIFY_REPEAT,
              step1),
             ("2. Run each test %d times in a new browser each time." %
              VERIFY_REPEAT_SINGLE_BROWSER,
              step2),
-            ("3. Run each test %d times in one browser, in chaos mode." %
-             VERIFY_REPEAT,
-             step3),
-            ("4. Run each test %d times in a new browser each time, "
-             "in chaos mode." % VERIFY_REPEAT_SINGLE_BROWSER,
-             step4),
         ]
 
         stepResults = {}

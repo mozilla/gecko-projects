@@ -177,7 +177,7 @@ ${helpers.single_keyword("text-align-last",
         use std::fmt;
         use style_traits::ToCss;
 
-        #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub enum SpecifiedValue {
             Keyword(computed_value::T),
             MatchParent,
@@ -294,7 +294,7 @@ ${helpers.predefined_type("word-spacing",
     impl ComputedValueAsSpecified for SpecifiedValue {}
     no_viewport_percentage!(SpecifiedValue);
 
-    #[derive(Clone, PartialEq, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue {
         pub underline: Option<RGBA>,
@@ -446,7 +446,7 @@ ${helpers.predefined_type(
             String(String),
         }
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct KeywordValue {
             pub fill: bool,
@@ -462,7 +462,7 @@ ${helpers.predefined_type(
         String(String),
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum KeywordValue {
         Fill(bool),
@@ -630,7 +630,7 @@ ${helpers.predefined_type(
                              "left" => Left);
 
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Debug, Clone, PartialEq, ToCss)]
+    #[derive(Clone, Debug, PartialEq, ToCss)]
     pub struct SpecifiedValue(pub HorizontalWritingModeValue, pub VerticalWritingModeValue);
 
     pub mod computed_value {
@@ -705,13 +705,17 @@ ${helpers.predefined_type(
     % endif
 </%helpers:longhand>
 
-${helpers.predefined_type("text-emphasis-color", "Color",
-                          "computed_value::T::currentcolor()",
-                          initial_specified_value="specified::Color::currentcolor()",
-                          products="gecko", animation_value_type="IntermediateColor",
-                          need_clone=True, ignored_when_colors_disabled=True,
-                          spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-color")}
-
+${helpers.predefined_type(
+    "text-emphasis-color",
+    "Color",
+    "computed_value::T::currentcolor()",
+    initial_specified_value="specified::Color::currentcolor()",
+    products="gecko",
+    animation_value_type="AnimatedColor",
+    need_clone=True,
+    ignored_when_colors_disabled=True,
+    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-color",
+)}
 
 ${helpers.predefined_type(
     "-moz-tab-size", "length::NonNegativeLengthOrNumber",
@@ -723,21 +727,28 @@ ${helpers.predefined_type(
 // CSS Compatibility
 // https://compat.spec.whatwg.org
 ${helpers.predefined_type(
-    "-webkit-text-fill-color", "Color",
+    "-webkit-text-fill-color",
+    "Color",
     "computed_value::T::currentcolor()",
-    products="gecko", animation_value_type="IntermediateColor",
-    need_clone=True, ignored_when_colors_disabled=True,
+    products="gecko",
+    animation_value_type="AnimatedColor",
+    need_clone=True,
+    ignored_when_colors_disabled=True,
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
-    spec="https://compat.spec.whatwg.org/#the-webkit-text-fill-color")}
+    spec="https://compat.spec.whatwg.org/#the-webkit-text-fill-color",
+)}
 
 ${helpers.predefined_type(
-    "-webkit-text-stroke-color", "Color",
+    "-webkit-text-stroke-color",
+    "Color",
     "computed_value::T::currentcolor()",
     initial_specified_value="specified::Color::currentcolor()",
-    products="gecko", animation_value_type="IntermediateColor",
+    products="gecko",
+    animation_value_type="AnimatedColor",
     need_clone=True, ignored_when_colors_disabled=True,
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
-    spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-color")}
+    spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-color",
+)}
 
 ${helpers.predefined_type("-webkit-text-stroke-width",
                           "BorderSideWidth",

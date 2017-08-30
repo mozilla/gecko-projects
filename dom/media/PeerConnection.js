@@ -119,11 +119,6 @@ class GlobalPCList {
     }
   }
 
-  hasActivePeerConnection(winID) {
-    this.removeNullRefs(winID);
-    return !!this._list[winID];
-  }
-
   handleGMPCrash(data) {
     let broadcastPluginCrash = function(list, winID, pluginID, pluginName) {
       if (list.hasOwnProperty(winID)) {
@@ -214,8 +209,7 @@ class GlobalPCList {
 setupPrototype(GlobalPCList, {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                          Ci.nsIMessageListener,
-                                         Ci.nsISupportsWeakReference,
-                                         Ci.IPeerConnectionManager]),
+                                         Ci.nsISupportsWeakReference]),
   classID: PC_MANAGER_CID,
   _xpcom_factory: {
     createInstance(outer, iid) {
@@ -641,6 +635,11 @@ class RTCPeerConnection {
           if (username == undefined) {
             throw new this._win.DOMException(msg + " - missing username: " + spec,
                                              "InvalidAccessError");
+          }
+          if (username.length > 512) {
+            throw new this._win.DOMException(msg +
+                                             " - username longer then 512 bytes: "
+                                             + username, "InvalidAccessError");
           }
           if (credential == undefined) {
             throw new this._win.DOMException(msg + " - missing credential: " + spec,

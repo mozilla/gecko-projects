@@ -6,14 +6,10 @@
 
 /* nsStringFwd.h --- forward declarations for string classes */
 
-#ifndef nsStringFwd_h___
-#define nsStringFwd_h___
+#ifndef nsStringFwd_h
+#define nsStringFwd_h
 
 #include "nscore.h"
-
-#ifndef MOZILLA_INTERNAL_API
-#error Internal string headers are not available from external-linkage code.
-#endif
 
 namespace mozilla {
 namespace detail {
@@ -24,28 +20,30 @@ class nsCStringRepr;
 } // namespace detail
 } // namespace mozilla
 
+static const size_t AutoStringDefaultStorageSize = 64;
+
 // Double-byte (char16_t) string types.
 class nsAString;
 class nsSubstringTuple;
 class nsString;
-class nsAutoString;
+template<size_t N> class nsAutoStringN;
+using nsAutoString = nsAutoStringN<AutoStringDefaultStorageSize>;
 class nsDependentString;
 class nsDependentSubstring;
 class nsPromiseFlatString;
 class nsStringComparator;
 class nsDefaultStringComparator;
-class nsXPIDLString;
 
 // Single-byte (char) string types.
 class nsACString;
 class nsCSubstringTuple;
 class nsCString;
-class nsAutoCString;
+template<size_t N> class nsAutoCStringN;
+using nsAutoCString = nsAutoCStringN<AutoStringDefaultStorageSize>;
 class nsDependentCString;
 class nsDependentCSubstring;
 class nsPromiseFlatCString;
 class nsCStringComparator;
 class nsDefaultCStringComparator;
-class nsXPIDLCString;
 
-#endif /* !defined(nsStringFwd_h___) */
+#endif /* !defined(nsStringFwd_h) */

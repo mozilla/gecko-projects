@@ -12,6 +12,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
+import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
@@ -19,10 +20,12 @@ import android.util.Log;
 import org.mozilla.gecko.Experiments;
 import org.mozilla.gecko.MmaConstants;
 import org.mozilla.gecko.PrefsHelper;
+import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.preferences.GeckoPreferences;
+import org.mozilla.gecko.push.PushManager;
 import org.mozilla.gecko.switchboard.SwitchBoard;
 import org.mozilla.gecko.util.ContextUtils;
 
@@ -42,14 +45,19 @@ public class MmaDelegate {
     public static final String SCREENSHOT = "E_Screenshot";
     public static final String SAVED_LOGIN_AND_PASSWORD = "E_Saved_Login_And_Password";
     public static final String LAUNCH_BUT_NOT_DEFAULT_BROWSER = "E_Launch_But_Not_Default_Browser";
+    public static final String LAUNCH_BROWSER = "E_Launch_Browser";
     public static final String NEW_TAB = "E_Opened_New_Tab";
 
 
     public static final String USER_ATT_FOCUS_INSTALLED = "Focus Installed";
     public static final String USER_ATT_KLAR_INSTALLED = "Klar Installed";
+    public static final String USER_ATT_POCKET_INSTALLED = "Pocket Installed";
     public static final String USER_ATT_DEFAULT_BROWSER = "Default Browser";
     public static final String USER_ATT_SIGNED_IN = "Signed In Sync";
 
+    public static final String PACKAGE_NAME_KLAR = "org.mozilla.klar";
+    public static final String PACKAGE_NAME_FOCUS = "org.mozilla.focus";
+    public static final String PACKAGE_NAME_POCKET = "com.ideashower.readitlater.pro";
 
     private static final String TAG = "MmaDelegate";
     private static final String KEY_PREF_BOOLEAN_MMA_ENABLED = "mma.enabled";
@@ -76,18 +84,21 @@ public class MmaDelegate {
                 if (pref.equals(KEY_PREF_BOOLEAN_MMA_ENABLED)) {
                     Log.d(TAG, "prefValue() called with: pref = [" + pref + "], value = [" + value + "]");
                     if (value) {
+                        // isGeckoPrefOn needs to be set before mmaHelper.init() cause we need it for isMmaEnabled()
+                        isGeckoPrefOn = true;
 
                         // Since user attributes are gathered in Fennec, not in MMA implementation,
                         // we gather the information here then pass to mmaHelper.init()
                         // Note that generateUserAttribute always return a non null HashMap.
                         Map<String, Object> attributes = gatherUserAttributes(activity);
-
+                        mmaHelper.setGcmSenderId(PushManager.getSenderIds());
+                        mmaHelper.setCustomIcon(R.drawable.ic_status_logo);
                         mmaHelper.init(activity, attributes);
 
                         if (!isDefaultBrowser(activity)) {
                             mmaHelper.event(MmaDelegate.LAUNCH_BUT_NOT_DEFAULT_BROWSER);
                         }
-                        isGeckoPrefOn = true;
+                        mmaHelper.event(MmaDelegate.LAUNCH_BROWSER);
                     } else {
                         isGeckoPrefOn = false;
                     }
@@ -103,8 +114,9 @@ public class MmaDelegate {
 
         final Map<String, Object> attributes = new HashMap<>();
 
-        attributes.put(USER_ATT_FOCUS_INSTALLED, ContextUtils.isPackageInstalled(context, "org.mozilla.focus"));
-        attributes.put(USER_ATT_KLAR_INSTALLED, ContextUtils.isPackageInstalled(context, "org.mozilla.klar"));
+        attributes.put(USER_ATT_FOCUS_INSTALLED, ContextUtils.isPackageInstalled(context, PACKAGE_NAME_FOCUS));
+        attributes.put(USER_ATT_KLAR_INSTALLED, ContextUtils.isPackageInstalled(context, PACKAGE_NAME_KLAR));
+        attributes.put(USER_ATT_POCKET_INSTALLED, ContextUtils.isPackageInstalled(context, PACKAGE_NAME_POCKET));
         attributes.put(USER_ATT_DEFAULT_BROWSER, isDefaultBrowser(context));
         attributes.put(USER_ATT_SIGNED_IN, FirefoxAccounts.firefoxAccountsExist(context));
 
@@ -155,4 +167,11 @@ public class MmaDelegate {
         return (TextUtils.equals(packageName, context.getPackageName()));
     }
 
+    public static boolean handleGcmMessage(@NonNull Context context, String from, @NonNull Bundle bundle) {
+        return isMmaEnabled() && mmaHelper.handleGcmMessage(context, from, bundle);
+    }
+
+    public static String getMmaSenderId() {
+        return mmaHelper.getMmaSenderId();
+    }
 }

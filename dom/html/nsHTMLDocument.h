@@ -22,7 +22,6 @@
 #include "mozilla/dom/HTMLSharedElement.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
-class nsIEditor;
 class nsIURI;
 class nsIDocShell;
 class nsICachingChannel;
@@ -76,9 +75,17 @@ public:
 
   virtual nsIContent* GetUnfocusedKeyEventTarget() override;
 
-  virtual nsContentList* GetForms() override;
+  nsContentList* GetForms();
 
-  virtual nsContentList* GetFormControls() override;
+  nsContentList* GetExistingForms() const
+  {
+    return mForms;
+  }
+
+  nsContentList* GetExistingFormControls() const
+  {
+    return mFormControls;
+  }
 
   // nsIDOMDocument interface
   using nsDocument::CreateElement;
@@ -105,7 +112,7 @@ public:
   virtual void AddedForm() override;
   virtual void RemovedForm() override;
   virtual int32_t GetNumFormsSynchronous() override;
-  virtual void TearingDownEditor(nsIEditor *aEditor) override;
+  virtual void TearingDownEditor() override;
   virtual void SetIsXHTML(bool aXHTML) override
   {
     mType = (aXHTML ? eXHTML : eHTML);
@@ -251,7 +258,6 @@ public:
   {
     // Deprecated
   }
-  mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aRv);
   // The XPCOM CaptureEvents works fine for us.
   // The XPCOM ReleaseEvents works fine for us.
   // We're picking up GetLocation from Document
@@ -261,6 +267,9 @@ public:
   }
 
   virtual nsHTMLDocument* AsHTMLDocument() override { return this; }
+
+  static bool MatchFormControls(Element* aElement, int32_t aNamespaceID,
+                                nsIAtom* aAtom, void* aData);
 
 protected:
   ~nsHTMLDocument();

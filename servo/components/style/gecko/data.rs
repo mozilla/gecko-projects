@@ -16,12 +16,11 @@ use media_queries::{Device, MediaList};
 use properties::ComputedValues;
 use servo_arc::Arc;
 use shared_lock::{Locked, StylesheetGuards, SharedRwLockReadGuard};
-use stylesheet_set::StylesheetSet;
-use stylesheets::{StylesheetContents, StylesheetInDocument};
+use stylesheets::{PerOrigin, StylesheetContents, StylesheetInDocument};
 use stylist::{ExtraStyleData, Stylist};
 
 /// Little wrapper to a Gecko style sheet.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct GeckoStyleSheet(*const ServoStyleSheet);
 
 impl ToMediaListKey for ::gecko::data::GeckoStyleSheet {
@@ -114,11 +113,8 @@ pub struct PerDocumentStyleDataImpl {
     /// Rule processor.
     pub stylist: Stylist,
 
-    /// List of stylesheets, mirrored from Gecko.
-    pub stylesheets: StylesheetSet<GeckoStyleSheet>,
-
     /// List of effective @font-face and @counter-style rules.
-    pub extra_style_data: ExtraStyleData,
+    pub extra_style_data: PerOrigin<ExtraStyleData>,
 }
 
 /// The data itself is an `AtomicRefCell`, which guarantees the proper semantics
@@ -135,7 +131,6 @@ impl PerDocumentStyleData {
 
         PerDocumentStyleData(AtomicRefCell::new(PerDocumentStyleDataImpl {
             stylist: Stylist::new(device, quirks_mode.into()),
-            stylesheets: StylesheetSet::new(),
             extra_style_data: Default::default(),
         }))
     }
@@ -153,26 +148,20 @@ impl PerDocumentStyleData {
 
 impl PerDocumentStyleDataImpl {
     /// Recreate the style data if the stylesheets have changed.
-    pub fn flush_stylesheets<E>(&mut self,
-                                guard: &SharedRwLockReadGuard,
-                                document_element: Option<E>)
-        where E: TElement,
+    pub fn flush_stylesheets<E>(
+        &mut self,
+        guard: &SharedRwLockReadGuard,
+        document_element: Option<E>,
+    ) -> bool
+    where
+        E: TElement,
     {
-        if !self.stylesheets.has_changed() {
-            return;
-        }
-
-        let author_style_disabled = self.stylesheets.author_style_disabled();
-        self.stylist.clear();
-        let iter = self.stylesheets.flush(document_element);
-        self.stylist.rebuild(
-            iter,
+        self.stylist.flush(
             &StylesheetGuards::same(guard),
             /* ua_sheets = */ None,
-            /* stylesheets_changed = */ true,
-            author_style_disabled,
             &mut self.extra_style_data,
-        );
+            document_element,
+        )
     }
 
     /// Returns whether private browsing is enabled.
@@ -185,12 +174,6 @@ impl PerDocumentStyleDataImpl {
     /// Get the default computed values for this document.
     pub fn default_computed_values(&self) -> &Arc<ComputedValues> {
         self.stylist.device().default_computed_values_arc()
-    }
-
-    /// Clear the stylist.  This will be a no-op if the stylist is
-    /// already cleared; the stylist handles that.
-    pub fn clear_stylist(&mut self) {
-        self.stylist.clear();
     }
 
     /// Returns whether visited links are enabled.

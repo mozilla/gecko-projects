@@ -86,19 +86,24 @@ function getCleanedPacket(key, packet) {
       }
 
       if (Array.isArray(res.message.arguments)) {
-        res.message.arguments.forEach((argument, i) => {
-          let existingArgument = existingPacket.message.arguments[i];
+        res.message.arguments = res.message.arguments.map((argument, i) => {
+          if (!argument || typeof argument !== "object") {
+            return argument;
+          }
 
+          let newArgument = Object.assign({}, argument);
+          let existingArgument = existingPacket.message.arguments[i];
           // Clean actor ids on each message.arguments item.
-          if (argument && argument.actor) {
-            argument.actor = existingArgument.actor;
+          if (newArgument.actor) {
+            newArgument.actor = existingArgument.actor;
           }
 
           // `window`'s properties count can vary from OS to OS, so we
           // clean the `ownPropertyLength` property from the grip.
-          if (argument && argument.class === "Window") {
-            argument.ownPropertyLength = existingArgument.ownPropertyLength;
+          if (newArgument.class === "Window") {
+            newArgument.ownPropertyLength = existingArgument.ownPropertyLength;
           }
+          return newArgument;
         });
       }
     }
@@ -289,16 +294,18 @@ function* generateConsoleApiStubs() {
   };
 
   let toolbox = yield openNewTabAndToolbox(TEST_URI, "webconsole");
-  let {ui} = toolbox.getCurrentPanel().hud;
+  const hud = toolbox.getCurrentPanel().hud;
+  let {ui} = hud;
   ok(ui.jsterm, "jsterm exists");
   ok(ui.newConsoleOutput, "newConsoleOutput exists");
 
   for (let [key, {keys, code}] of consoleApi) {
     let received = new Promise(resolve => {
       let i = 0;
-      let listener = (type, res) => {
-        stubs.packets.push(formatPacket(keys[i], res));
-        stubs.preparedMessages.push(formatStub(keys[i], res));
+      let listener = async (type, res) => {
+        const callKey = keys[i];
+        stubs.packets.push(formatPacket(callKey, res));
+        stubs.preparedMessages.push(formatStub(callKey, res));
         if (++i === keys.length) {
           toolbox.target.client.removeListener("consoleAPICall", listener);
           resolve();

@@ -31,7 +31,7 @@ fn almost_equals(a: &Json, b: &Json) -> bool {
         (_, &Json::I64(b)) => almost_equals(a, &Json::F64(b as f64)),
         (_, &Json::U64(b)) => almost_equals(a, &Json::F64(b as f64)),
 
-        (&Json::F64(a), &Json::F64(b)) => (a - b).abs() < 1e-6,
+        (&Json::F64(a), &Json::F64(b)) => (a - b).abs() <= a.abs() * 1e-6,
 
         (&Json::Boolean(a), &Json::Boolean(b)) => a == b,
         (&Json::String(ref a), &Json::String(ref b)) => a == b,
@@ -971,6 +971,29 @@ fn parser_maintains_current_line() {
 }
 
 #[test]
+fn parser_with_line_number_offset() {
+    let mut input = ParserInput::new_with_line_number_offset("ident\nident", 72);
+    let mut parser = Parser::new(&mut input);
+    assert_eq!(parser.current_source_location(), SourceLocation { line: 72, column: 0 });
+    assert_eq!(parser.next_including_whitespace_and_comments(), Ok(&Token::Ident("ident".into())));
+    assert_eq!(parser.current_source_location(), SourceLocation { line: 72, column: 5 });
+    assert_eq!(parser.next_including_whitespace_and_comments(),
+               Ok(&Token::WhiteSpace("\n".into())));
+    assert_eq!(parser.current_source_location(), SourceLocation { line: 73, column: 0 });
+    assert_eq!(parser.next_including_whitespace_and_comments(), Ok(&Token::Ident("ident".into())));
+    assert_eq!(parser.current_source_location(), SourceLocation { line: 73, column: 5 });
+}
+
+#[test]
+fn cdc_regression_test() {
+    let mut input = ParserInput::new("-->x");
+    let mut parser = Parser::new(&mut input);
+    parser.skip_cdc_and_cdo();
+    assert_eq!(parser.next(), Ok(&Token::Ident("x".into())));
+    assert_eq!(parser.next(), Err(BasicParseError::EndOfInput));
+}
+
+#[test]
 fn parse_entirely_reports_first_error() {
     #[derive(PartialEq, Debug)]
     enum E { Foo }
@@ -978,4 +1001,51 @@ fn parse_entirely_reports_first_error() {
     let mut parser = Parser::new(&mut input);
     let result: Result<(), _> = parser.parse_entirely(|_| Err(ParseError::Custom(E::Foo)));
     assert_eq!(result, Err(ParseError::Custom(E::Foo)));
+}
+
+#[test]
+fn parse_comments() {
+    let tests = vec![
+        ("/*# sourceMappingURL=here*/", Some("here")),
+        ("/*# sourceMappingURL=here  */", Some("here")),
+        ("/*@ sourceMappingURL=here*/", Some("here")),
+        ("/*@ sourceMappingURL=there*/ /*# sourceMappingURL=here*/", Some("here")),
+        ("/*# sourceMappingURL=here there  */", Some("here")),
+        ("/*# sourceMappingURL=  here  */", Some("")),
+        ("/*# sourceMappingURL=*/", Some("")),
+        ("/*# sourceMappingUR=here  */", None),
+        ("/*! sourceMappingURL=here  */", None),
+        ("/*# sourceMappingURL = here  */", None),
+        ("/*   # sourceMappingURL=here   */", None)
+    ];
+
+    for test in tests {
+        let mut input = ParserInput::new(test.0);
+        let mut parser = Parser::new(&mut input);
+        while let Ok(_) = parser.next_including_whitespace() {
+        }
+        assert_eq!(parser.current_source_map_url(), test.1);
+    }
+}
+
+#[test]
+fn roundtrip_percentage_token() {
+    fn test_roundtrip(value: &str) {
+        let mut input = ParserInput::new(value);
+        let mut parser = Parser::new(&mut input);
+        let token = parser.next().unwrap();
+        assert_eq!(token.to_css_string(), value);
+    }
+    // Test simple number serialization
+    for i in 0..101 {
+        test_roundtrip(&format!("{}%", i));
+        for j in 0..10 {
+            if j != 0 {
+                test_roundtrip(&format!("{}.{}%", i, j));
+            }
+            for k in 1..10 {
+                test_roundtrip(&format!("{}.{}{}%", i, j, k));
+            }
+        }
+    }
 }

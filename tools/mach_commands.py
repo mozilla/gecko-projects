@@ -8,7 +8,7 @@ import sys
 import os
 import stat
 import platform
-import errno
+import re
 
 from mach.decorators import (
     CommandArgument,
@@ -228,7 +228,7 @@ class FormatProvider(MachCommandBase):
         target = os.path.join(self._mach_context.state_dir, os.path.basename(root))
 
         if not os.path.exists(target):
-            tooltool_url = "https://api.pub.build.mozilla.org/tooltool/sha512/"
+            tooltool_url = "https://tooltool.mozilla-releng.net/sha512/"
             if self.prompt and raw_input("Download clang-format executables from {0} (yN)? ".format(tooltool_url)).lower() != 'y':  # noqa: E501,F821
                 print("Download aborted.")
                 return None
@@ -256,30 +256,43 @@ class FormatProvider(MachCommandBase):
             os.rename(temp, target)
         return target
 
+    # List of file extension to consider (should start with dot)
+    _format_include_extensions = ('.cpp', '.c', '.h')
+    # File contaning all paths to exclude from formatting
+    _format_ignore_file = '.clang-format-ignore'
+
+    def _get_clang_format_diff_command(self):
+        if self.repository.name == 'hg':
+            args = ["hg", "diff", "-U0", "-r" ".^"]
+            for dot_extension in self._format_include_extensions:
+                args += ['--include', 'glob:**{0}'.format(dot_extension)]
+            args += ['--exclude', 'listfile:{0}'.format(self._format_ignore_file)]
+        else:
+            args = ["git", "diff", "--no-color", "-U0", "HEAD", "--"]
+            for dot_extension in self._format_include_extensions:
+                args += ['*{0}'.format(dot_extension)]
+            # git-diff doesn't support an 'exclude-from-files' param, but
+            # allow to add individual exclude pattern since v1.9, see
+            # https://git-scm.com/docs/gitglossary#gitglossary-aiddefpathspecapathspec
+            with open(self._format_ignore_file, 'rb') as exclude_pattern_file:
+                for pattern in exclude_pattern_file.readlines():
+                    pattern = pattern.rstrip()
+                    pattern = pattern.replace('.*', '**')
+                    if not pattern or pattern.startswith('#'):
+                        continue  # empty or comment
+                    magics = ['exclude']
+                    if pattern.startswith('^'):
+                        magics += ['top']
+                        pattern = pattern[1:]
+                    args += [':({0}){1}'.format(','.join(magics), pattern)]
+        return args
+
     def run_clang_format_diff(self, clang_format_diff, show):
         # Run clang-format on the diff
         # Note that this will potentially miss a lot things
         from subprocess import Popen, PIPE
 
-        if os.path.exists(".hg"):
-            diff_process = Popen(["hg", "diff", "-U0", "-r", ".^",
-                                  "--include", "glob:**.c", "--include", "glob:**.cpp",
-                                  "--include", "glob:**.h",
-                                  "--exclude", "listfile:.clang-format-ignore"], stdout=PIPE)
-        else:
-            git_process = Popen(["git", "diff", "--no-color", "-U0", "HEAD^"], stdout=PIPE)
-            try:
-                diff_process = Popen(["filterdiff", "--include=*.h",
-                                      "--include=*.cpp", "--include=*.c",
-                                      "--exclude-from-file=.clang-format-ignore"],
-                                     stdin=git_process.stdout, stdout=PIPE)
-            except OSError as e:
-                if e.errno == errno.ENOENT:
-                    print("Can't find filterdiff. Please install patchutils.")
-                else:
-                    print("OSError {0}: {1}".format(e.code, e.reason))
-                return 1
-
+        diff_process = Popen(self._get_clang_format_diff_command(), stdout=PIPE)
         args = [sys.executable, clang_format_diff, "-p1"]
         if not show:
             args.append("-i")
@@ -287,19 +300,22 @@ class FormatProvider(MachCommandBase):
         return cf_process.communicate()[0]
 
     def generate_path_list(self, paths):
-        pathToThirdparty = os.path.join(self.topsrcdir,
-                                        "tools",
-                                        "rewriting",
-                                        "ThirdPartyPaths.txt")
-        with open(pathToThirdparty) as f:
-            # Normalize the path (no trailing /)
-            ignored_dir = tuple(d.rstrip('/') for d in f.read().splitlines())
+        pathToThirdparty = os.path.join(self.topsrcdir, self._format_ignore_file)
+        ignored_dir = []
+        for line in open(pathToThirdparty):
+            # Remove comments and empty lines
+            if line.startswith('#') or len(line.strip()) == 0:
+                continue
+            ignored_dir.append(line.rstrip())
 
-        extensions = ('.cpp', '.c', '.h')
+        # Generates the list of regexp
+        ignored_dir_re = '(%s)' % '|'.join(ignored_dir)
+        extensions = self._format_include_extensions
 
         path_list = []
         for f in paths:
-            if f.startswith(ignored_dir):
+            if re.match(ignored_dir_re, f):
+                # Early exit if we have provided an ignored directory
                 print("clang-format: Ignored third party code '{0}'".format(f))
                 continue
 
@@ -309,8 +325,8 @@ class FormatProvider(MachCommandBase):
                     subs.sort()
                     for filename in sorted(files):
                         f_in_dir = os.path.join(folder, filename)
-                        if f_in_dir.endswith(extensions):
-                            # Supported extension
+                        if f_in_dir.endswith(extensions) and not re.match(ignored_dir_re, f_in_dir):
+                            # Supported extension and accepted path
                             path_list.append(f_in_dir)
             else:
                 if f.endswith(extensions):
@@ -335,9 +351,10 @@ class FormatProvider(MachCommandBase):
         cf_process = Popen(args)
         if show:
             # show the diff
-            if os.path.exists(".hg"):
+            if self.repository.name == 'hg':
                 cf_process = Popen(["hg", "diff"] + path_list)
             else:
+                assert self.repository.name == 'git'
                 cf_process = Popen(["git", "diff"] + path_list)
         return cf_process.communicate()[0]
 

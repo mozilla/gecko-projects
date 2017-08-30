@@ -325,9 +325,9 @@ nsRange::CreateRange(nsIDOMNode* aStartContainer, uint32_t aStartOffset,
  * nsISupports
  ******************************************************/
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsRange)
-NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsRange,
-                                                   DoSetRange(nullptr, 0, nullptr, 0, nullptr))
+NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_ADDREF(nsRange)
+NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsRange,
+                                                                    DoSetRange(nullptr, 0, nullptr, 0, nullptr))
 
 // QueryInterface implementation for nsRange
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsRange)
@@ -430,11 +430,22 @@ nsRange::UnregisterCommonAncestor(nsINode* aNode)
   MOZ_ASSERT(ranges);
   NS_ASSERTION(ranges->GetEntry(this), "unknown range");
 
+  bool isNativeAnon = aNode->IsInNativeAnonymousSubtree();
+  bool removed = false;
+
   if (ranges->Count() == 1) {
     aNode->ClearCommonAncestorForRangeInSelection();
-    aNode->GetCommonAncestorRangesPtr().reset();
+    if (!isNativeAnon) {
+      // For nodes which are in native anonymous subtrees, we optimize away the
+      // cost of deallocating the hashtable here because we may need to create
+      // it again shortly afterward.  We don't do this for all nodes in order
+      // to avoid the additional memory usage unconditionally.
+      aNode->GetCommonAncestorRangesPtr().reset();
+      removed = true;
+    }
     UnmarkDescendants(aNode);
-  } else {
+  }
+  if (!removed) {
     ranges->RemoveEntry(this);
   }
 }
@@ -1205,8 +1216,9 @@ nsRange::IsValidOffset(nsINode* aNode, uint32_t aOffset)
          static_cast<size_t>(aOffset) <= aNode->Length();
 }
 
+/* static */
 nsINode*
-nsRange::IsValidBoundary(nsINode* aNode)
+nsRange::ComputeRootNode(nsINode* aNode, bool aMaySpanAnonymousSubtrees)
 {
   if (!aNode) {
     return nullptr;
@@ -1219,7 +1231,7 @@ nsRange::IsValidBoundary(nsINode* aNode)
 
     nsIContent* content = static_cast<nsIContent*>(aNode);
 
-    if (!mMaySpanAnonymousSubtrees) {
+    if (!aMaySpanAnonymousSubtrees) {
       // If the node is in a shadow tree then the ShadowRoot is the root.
       ShadowRoot* containingShadow = content->GetContainingShadow();
       if (containingShadow) {
@@ -1249,6 +1261,41 @@ nsRange::IsValidBoundary(nsINode* aNode)
 
   // We allow this because of backward compatibility.
   return root;
+}
+
+/* static */
+bool
+nsRange::IsValidPoints(nsINode* aStartContainer, uint32_t aStartOffset,
+                       nsINode* aEndContainer, uint32_t aEndOffset)
+{
+  // Use NS_WARN_IF() only for the cases where the arguments are unexpected.
+  if (NS_WARN_IF(!aStartContainer) || NS_WARN_IF(!aEndContainer) ||
+      NS_WARN_IF(!IsValidOffset(aStartContainer, aStartOffset)) ||
+      NS_WARN_IF(!IsValidOffset(aEndContainer, aEndOffset))) {
+    return false;
+  }
+
+  // Otherwise, don't use NS_WARN_IF() for preventing to make console messy.
+  // Instead, check one by one since it is easier to catch the error reason
+  // with debugger.
+
+  if (ComputeRootNode(aStartContainer) != ComputeRootNode(aEndContainer)) {
+    return false;
+  }
+
+  bool disconnected = false;
+  int32_t order =
+    nsContentUtils::ComparePoints(aStartContainer,
+                                    static_cast<int32_t>(aStartOffset),
+                                    aEndContainer,
+                                    static_cast<int32_t>(aEndOffset),
+                                    &disconnected);
+  // FYI: disconnected should be false unless |order| is 1.
+  if (order == 1 || NS_WARN_IF(disconnected)) {
+    return false;
+  }
+
+  return true;
 }
 
 void
@@ -3082,7 +3129,7 @@ static void ExtractRectFromOffset(nsIFrame* aFrame,
   aFrame->GetPointFromOffset(aOffset, &point);
 
   if (!aClampToEdge && !aR->Contains(point)) {
-    aR->width = 0;
+    aR->SetWidth(0);
     aR->x = point.x;
     return;
   }
@@ -3092,9 +3139,9 @@ static void ExtractRectFromOffset(nsIFrame* aFrame,
   }
 
   if (aKeepLeft) {
-    aR->width = point.x - aR->x;
+    aR->SetWidth(point.x - aR->x);
   } else {
-    aR->width = aR->XMost() - point.x;
+    aR->SetWidth(aR->XMost() - point.x);
     aR->x = point.x;
   }
 }
@@ -3224,7 +3271,7 @@ nsRange::CollectClientRectsAndText(nsLayoutUtils::RectCallback* aCollector,
            nsRect r = outFrame->GetRectRelativeToSelf();
            ExtractRectFromOffset(outFrame, static_cast<int32_t>(aStartOffset),
                                  &r, false, aClampToEdge);
-           r.width = 0;
+           r.SetWidth(0);
            r = nsLayoutUtils::TransformFrameRectToAncestor(outFrame, r, relativeTo);
            aCollector->AddRect(r);
         }

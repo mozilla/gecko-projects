@@ -286,8 +286,6 @@ loadListener.prototype = {
     Ci.nsIStreamListener,
     Ci.nsIChannelEventSink,
     Ci.nsIInterfaceRequestor,
-    // See FIXME comment below.
-    Ci.nsIHttpEventSink,
     Ci.nsIProgressEventSink
   ]),
 
@@ -338,9 +336,6 @@ loadListener.prototype = {
     return this.QueryInterface(aIID);
   },
 
-  // FIXME: bug 253127
-  // nsIHttpEventSink
-  onRedirect(aChannel, aNewChannel) {},
   // nsIProgressEventSink
   onProgress(aRequest, aContext, aProgress, aProgressMax) {},
   onStatus(aRequest, aContext, aStatus, aStatusArg) {}
@@ -1125,7 +1120,6 @@ EngineURL.prototype = {
       postData = Cc["@mozilla.org/network/mime-input-stream;1"].
                  createInstance(Ci.nsIMIMEInputStream);
       postData.addHeader("Content-Type", "application/x-www-form-urlencoded");
-      postData.addContentLength = true;
       postData.setData(stringStream);
     }
 
@@ -1629,6 +1623,9 @@ Engine.prototype = {
 
       aEngine._shortName = sanitizeName(aEngine.name);
       aEngine._loadPath = aEngine.getAnonymizedLoadPath(null, aEngine._uri);
+      if (aEngine._extensionID) {
+        aEngine._loadPath += ":" + aEngine._extensionID;
+      }
       aEngine.setAttr("loadPathHash", getVerificationHash(aEngine._loadPath));
     }
 
@@ -2976,12 +2973,9 @@ SearchService.prototype = {
                                                    { winPattern: "*.xml" });
       try {
         // Add dir to distDirs if it contains any files.
-        await checkForSyncCompletion(iterator.next());
-        distDirs.push(dir);
-      } catch (ex) {
-        // Catch for StopIteration exception.
-        if (ex.result == Cr.NS_ERROR_ALREADY_INITIALIZED) {
-          throw ex;
+        let {done} = await checkForSyncCompletion(iterator.next());
+        if (!done) {
+          distDirs.push(dir);
         }
       } finally {
         iterator.close();
@@ -3001,12 +2995,9 @@ SearchService.prototype = {
                                                    { winPattern: "*.xml" });
       try {
         // Add dir to otherDirs if it contains any files.
-        await checkForSyncCompletion(iterator.next());
-        otherDirs.push(dir);
-      } catch (ex) {
-        // Catch for StopIteration exception.
-        if (ex.result == Cr.NS_ERROR_ALREADY_INITIALIZED) {
-          throw ex;
+        let {done} = await checkForSyncCompletion(iterator.next());
+        if (!done) {
+          otherDirs.push(dir);
         }
       } finally {
         iterator.close();
@@ -4046,7 +4037,7 @@ SearchService.prototype = {
   },
 
   addEngine: function SRCH_SVC_addEngine(aEngineURL, aDataType, aIconURL,
-                                         aConfirm, aCallback) {
+                                         aConfirm, aCallback, aExtensionID) {
     LOG("addEngine: Adding \"" + aEngineURL + "\".");
     this._ensureInitialized();
     try {
@@ -4075,6 +4066,9 @@ SearchService.prototype = {
     }
     engine._setIcon(aIconURL, false);
     engine._confirm = aConfirm;
+    if (aExtensionID) {
+      engine._extensionID = aExtensionID;
+    }
   },
 
   removeEngine: function SRCH_SVC_removeEngine(aEngine) {

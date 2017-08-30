@@ -1098,10 +1098,10 @@ JProfSaveCircularJS(JSContext *cx, unsigned argc, JS::Value *vp)
 }
 
 static const JSFunctionSpec JProfFunctions[] = {
-    JS_FS("JProfStartProfiling",        JProfStartProfilingJS,      0, 0),
-    JS_FS("JProfStopProfiling",         JProfStopProfilingJS,       0, 0),
-    JS_FS("JProfClearCircular",         JProfClearCircularJS,       0, 0),
-    JS_FS("JProfSaveCircular",          JProfSaveCircularJS,        0, 0),
+    JS_FN("JProfStartProfiling",        JProfStartProfilingJS,      0, 0),
+    JS_FN("JProfStopProfiling",         JProfStopProfilingJS,       0, 0),
+    JS_FN("JProfClearCircular",         JProfClearCircularJS,       0, 0),
+    JS_FN("JProfSaveCircular",          JProfSaveCircularJS,        0, 0),
     JS_FS_END
 };
 
@@ -1617,6 +1617,7 @@ nsJSContext::BeginCycleCollectionCallback()
   // Create an ICC timer even if ICC is globally disabled, because we could be manually triggering
   // an incremental collection, and we want to be sure to finish it.
   sICCRunner = IdleTaskRunner::Create(ICCRunnerFired,
+                                      "BeginCycleCollectionCallback::ICCRunnerFired",
                                       kICCIntersliceDelay,
                                       kIdleICCSliceBudget,
                                       true,
@@ -1835,7 +1836,8 @@ GCTimerFired(nsITimer *aTimer, void *aClosure)
   // Now start the actual GC after initial timer has fired.
   sInterSliceGCRunner = IdleTaskRunner::Create([aClosure](TimeStamp aDeadline) {
     return InterSliceGCRunnerFired(aDeadline, aClosure);
-  }, NS_INTERSLICE_GC_DELAY,
+  }, "GCTimerFired::InterSliceGCRunnerFired",
+     NS_INTERSLICE_GC_DELAY,
      sActiveIntersliceGCBudget,
      false,
      []{ return sShuttingDown; },
@@ -2138,7 +2140,9 @@ nsJSContext::MaybePokeCC()
     nsCycleCollector_dispatchDeferredDeletion();
 
     sCCRunner =
-      IdleTaskRunner::Create(CCRunnerFired, NS_CC_SKIPPABLE_DELAY,
+      IdleTaskRunner::Create(CCRunnerFired,
+                             "MaybePokeCC::CCRunnerFired",
+                             NS_CC_SKIPPABLE_DELAY,
                              kForgetSkippableSliceDuration, true,
                              []{ return sShuttingDown; },
                              TaskCategory::GarbageCollection);
@@ -2327,7 +2331,8 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
         sInterSliceGCRunner =
           IdleTaskRunner::Create([](TimeStamp aDeadline) {
             return InterSliceGCRunnerFired(aDeadline, nullptr);
-          }, NS_INTERSLICE_GC_DELAY,
+          }, "DOMGCSliceCallback::InterSliceGCRunnerFired",
+             NS_INTERSLICE_GC_DELAY,
              sActiveIntersliceGCBudget,
              false,
              []{ return sShuttingDown; },
@@ -2416,30 +2421,56 @@ SetGCParameter(JSGCParamKey aParam, uint32_t aValue)
 }
 
 static void
-SetMemoryHighWaterMarkPrefChangedCallback(const char* aPrefName, void* aClosure)
+ResetGCParameter(JSGCParamKey aParam)
 {
-  int32_t highwatermark = Preferences::GetInt(aPrefName, 128);
-  SetGCParameter(JSGC_MAX_MALLOC_BYTES,
-                 highwatermark * 1024L * 1024L);
+  AutoJSAPI jsapi;
+  jsapi.Init();
+  JS_ResetGCParameter(jsapi.cx(), aParam);
 }
 
 static void
-SetMemoryMaxPrefChangedCallback(const char* aPrefName, void* aClosure)
+SetMemoryPrefChangedCallbackMB(const char* aPrefName, void* aClosure)
 {
-  int32_t pref = Preferences::GetInt(aPrefName, -1);
+  int32_t prefMB = Preferences::GetInt(aPrefName, -1);
   // handle overflow and negative pref values
-  CheckedInt<uint32_t> max = CheckedInt<uint32_t>(pref) * 1024 * 1024;
-  SetGCParameter(JSGC_MAX_BYTES, max.isValid() ? max.value() : -1);
+  CheckedInt<int32_t> prefB = CheckedInt<int32_t>(prefMB) * 1024 * 1024;
+  if (prefB.isValid() && prefB.value() >= 0) {
+    SetGCParameter((JSGCParamKey)(uintptr_t)aClosure, prefB.value());
+  } else {
+    ResetGCParameter((JSGCParamKey)(uintptr_t)aClosure);
+  }
 }
 
 static void
 SetMemoryNurseryMaxPrefChangedCallback(const char* aPrefName, void* aClosure)
 {
+  int32_t prefMB = Preferences::GetInt(aPrefName, -1);
+  // handle overflow and negative pref values
+  CheckedInt<int32_t> prefB = CheckedInt<int32_t>(prefMB) * 1024;
+  if (prefB.isValid() && prefB.value() >= 0) {
+    SetGCParameter((JSGCParamKey)(uintptr_t)aClosure, prefB.value());
+  } else {
+    ResetGCParameter((JSGCParamKey)(uintptr_t)aClosure);
+  }
+}
+
+static void
+SetMemoryPrefChangedCallbackInt(const char* aPrefName, void* aClosure)
+{
   int32_t pref = Preferences::GetInt(aPrefName, -1);
   // handle overflow and negative pref values
-  CheckedInt<uint32_t> max = CheckedInt<uint32_t>(pref) * 1024;
-  SetGCParameter(JSGC_MAX_NURSERY_BYTES,
-    max.isValid() ? max.value() : JS::DefaultNurseryBytes);
+  if (pref >= 0 && pref < 10000) {
+    SetGCParameter((JSGCParamKey)(uintptr_t)aClosure, pref);
+  } else {
+    ResetGCParameter((JSGCParamKey)(uintptr_t)aClosure);
+  }
+}
+
+static void
+SetMemoryPrefChangedCallbackBool(const char* aPrefName, void* aClosure)
+{
+  bool pref = Preferences::GetBool(aPrefName);
+  SetGCParameter((JSGCParamKey)(uintptr_t)aClosure, pref);
 }
 
 static void
@@ -2467,47 +2498,10 @@ SetMemoryGCSliceTimePrefChangedCallback(const char* aPrefName, void* aClosure)
   if (pref > 0 && pref < 100000) {
     sActiveIntersliceGCBudget = pref;
     SetGCParameter(JSGC_SLICE_TIME_BUDGET, pref);
+  } else {
+    ResetGCParameter(JSGC_SLICE_TIME_BUDGET);
   }
 }
-
-static void
-SetMemoryGCCompactingPrefChangedCallback(const char* aPrefName, void* aClosure)
-{
-  bool pref = Preferences::GetBool(aPrefName);
-  SetGCParameter(JSGC_COMPACTING_ENABLED, pref);
-}
-
-static void
-SetMemoryGCPrefChangedCallback(const char* aPrefName, void* aClosure)
-{
-  int32_t pref = Preferences::GetInt(aPrefName, -1);
-  // handle overflow and negative pref values
-  if (pref >= 0 && pref < 10000) {
-    SetGCParameter((JSGCParamKey)(intptr_t)aClosure, pref);
-  }
-}
-
-static void
-SetMemoryGCDynamicHeapGrowthPrefChangedCallback(const char* aPrefName, void* aClosure)
-{
-  bool pref = Preferences::GetBool(aPrefName);
-  SetGCParameter(JSGC_DYNAMIC_HEAP_GROWTH, pref);
-}
-
-static void
-SetMemoryGCDynamicMarkSlicePrefChangedCallback(const char* aPrefName, void* aClosure)
-{
-  bool pref = Preferences::GetBool(aPrefName);
-  SetGCParameter(JSGC_DYNAMIC_MARK_SLICE, pref);
-}
-
-static void
-SetMemoryGCRefreshFrameSlicesEnabledPrefChangedCallback(const char* aPrefName, void* aClosure)
-{
-  bool pref = Preferences::GetBool(aPrefName);
-  SetGCParameter(JSGC_REFRESH_FRAME_SLICES_ENABLED, pref);
-}
-
 
 static void
 SetIncrementalCCPrefChangedCallback(const char* aPrefName, void* aClosure)
@@ -2544,19 +2538,19 @@ AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
                                        aHandle);
 }
 
-class AsyncTaskRunnable final : public Runnable
+class JSDispatchableRunnable final : public Runnable
 {
-  ~AsyncTaskRunnable()
+  ~JSDispatchableRunnable()
   {
-    MOZ_ASSERT(!mTask);
+    MOZ_ASSERT(!mDispatchable);
   }
 
 public:
-  explicit AsyncTaskRunnable(JS::AsyncTask* aTask)
-    : mozilla::Runnable("AsyncTaskRunnable")
-    , mTask(aTask)
+  explicit JSDispatchableRunnable(JS::Dispatchable* aDispatchable)
+    : mozilla::Runnable("JSDispatchableRunnable")
+    , mDispatchable(aDispatchable)
   {
-    MOZ_ASSERT(mTask);
+    MOZ_ASSERT(mDispatchable);
   }
 
 protected:
@@ -2566,33 +2560,36 @@ protected:
 
     AutoJSAPI jsapi;
     jsapi.Init();
-    mTask->finish(jsapi.cx());
-    mTask = nullptr;  // mTask may delete itself
+
+    JS::Dispatchable::MaybeShuttingDown maybeShuttingDown =
+      sShuttingDown ? JS::Dispatchable::ShuttingDown : JS::Dispatchable::NotShuttingDown;
+
+    mDispatchable->run(jsapi.cx(), maybeShuttingDown);
+    mDispatchable = nullptr;  // mDispatchable may delete itself
 
     return NS_OK;
   }
 
 private:
-  JS::AsyncTask* mTask;
+  JS::Dispatchable* mDispatchable;
 };
 
 static bool
-StartAsyncTaskCallback(JSContext* aCx, JS::AsyncTask* aTask)
+DispatchToEventLoop(void* closure, JS::Dispatchable* aDispatchable)
 {
-  return true;
-}
+  MOZ_ASSERT(!closure);
 
-static bool
-FinishAsyncTaskCallback(JS::AsyncTask* aTask)
-{
-  // AsyncTasks can finish during shutdown so cannot simply
-  // NS_DispatchToMainThread.
+  // This callback may execute either on the main thread or a random JS-internal
+  // helper thread. This callback can be called during shutdown so we cannot
+  // simply NS_DispatchToMainThread. Failure during shutdown is expected and
+  // properly handled by the JS engine.
+
   nsCOMPtr<nsIEventTarget> mainTarget = GetMainThreadEventTarget();
   if (!mainTarget) {
     return false;
   }
 
-  RefPtr<AsyncTaskRunnable> r = new AsyncTaskRunnable(aTask);
+  RefPtr<JSDispatchableRunnable> r = new JSDispatchableRunnable(aDispatchable);
   MOZ_ALWAYS_SUCCEEDS(mainTarget->Dispatch(r.forget(), NS_DISPATCH_NORMAL));
   return true;
 }
@@ -2624,16 +2621,19 @@ nsJSContext::EnsureStatics()
   };
   JS::SetAsmJSCacheOps(jsapi.cx(), &asmJSCacheOps);
 
-  JS::SetAsyncTaskCallbacks(jsapi.cx(), StartAsyncTaskCallback, FinishAsyncTaskCallback);
+  JS::InitDispatchToEventLoop(jsapi.cx(), DispatchToEventLoop, nullptr);
 
   // Set these global xpconnect options...
-  Preferences::RegisterCallbackAndCall(SetMemoryHighWaterMarkPrefChangedCallback,
-                                       "javascript.options.mem.high_water_mark");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,
+                                       "javascript.options.mem.high_water_mark",
+                                       (void*)JSGC_MAX_MALLOC_BYTES);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryMaxPrefChangedCallback,
-                                       "javascript.options.mem.max");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,
+                                       "javascript.options.mem.max",
+                                       (void*)JSGC_MAX_BYTES);
   Preferences::RegisterCallbackAndCall(SetMemoryNurseryMaxPrefChangedCallback,
-                                       "javascript.options.mem.nursery.max_kb");
+                                       "javascript.options.mem.nursery.max_kb",
+                                       (void*)JSGC_MAX_NURSERY_BYTES);
 
   Preferences::RegisterCallbackAndCall(SetMemoryGCModePrefChangedCallback,
                                        "javascript.options.mem.gc_per_zone");
@@ -2644,54 +2644,64 @@ nsJSContext::EnsureStatics()
   Preferences::RegisterCallbackAndCall(SetMemoryGCSliceTimePrefChangedCallback,
                                        "javascript.options.mem.gc_incremental_slice_ms");
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCCompactingPrefChangedCallback,
-                                       "javascript.options.mem.gc_compacting");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackBool,
+                                       "javascript.options.mem.gc_compacting",
+                                       (void *)JSGC_COMPACTING_ENABLED);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_high_frequency_time_limit_ms",
                                        (void *)JSGC_HIGH_FREQUENCY_TIME_LIMIT);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCDynamicMarkSlicePrefChangedCallback,
-                                       "javascript.options.mem.gc_dynamic_mark_slice");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackBool,
+                                       "javascript.options.mem.gc_dynamic_mark_slice",
+                                       (void *)JSGC_DYNAMIC_MARK_SLICE);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCRefreshFrameSlicesEnabledPrefChangedCallback,
-                                       "javascript.options.mem.gc_refresh_frame_slices_enabled");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackBool,
+                                       "javascript.options.mem.gc_refresh_frame_slices_enabled",
+                                       (void *)JSGC_REFRESH_FRAME_SLICES_ENABLED);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCDynamicHeapGrowthPrefChangedCallback,
-                                       "javascript.options.mem.gc_dynamic_heap_growth");
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackBool,
+                                       "javascript.options.mem.gc_dynamic_heap_growth",
+                                       (void *)JSGC_DYNAMIC_HEAP_GROWTH);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_low_frequency_heap_growth",
                                        (void *)JSGC_LOW_FREQUENCY_HEAP_GROWTH);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_high_frequency_heap_growth_min",
                                        (void *)JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_high_frequency_heap_growth_max",
                                        (void *)JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_high_frequency_low_limit_mb",
                                        (void *)JSGC_HIGH_FREQUENCY_LOW_LIMIT);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_high_frequency_high_limit_mb",
                                        (void *)JSGC_HIGH_FREQUENCY_HIGH_LIMIT);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_allocation_threshold_mb",
                                        (void *)JSGC_ALLOCATION_THRESHOLD);
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
+                                       "javascript.options.mem.gc_allocation_threshold_factor",
+                                       (void *)JSGC_ALLOCATION_THRESHOLD_FACTOR);
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
+                                       "javascript.options.mem.gc_allocation_threshold_factor_avoid_interrupt",
+                                       (void *)JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT);
 
   Preferences::RegisterCallbackAndCall(SetIncrementalCCPrefChangedCallback,
                                        "dom.cycle_collector.incremental");
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_min_empty_chunk_count",
                                        (void *)JSGC_MIN_EMPTY_CHUNK_COUNT);
 
-  Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
+  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackInt,
                                        "javascript.options.mem.gc_max_empty_chunk_count",
                                        (void *)JSGC_MAX_EMPTY_CHUNK_COUNT);
 

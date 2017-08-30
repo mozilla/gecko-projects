@@ -4,11 +4,14 @@ set -x -e
 
 echo "running as" $(id)
 
-: WORKSPACE ${WORKSPACE:=/home/worker/workspace}
+: WORKSPACE ${WORKSPACE:=/builds/worker/workspace}
 
 set -v
 
-# Populate /home/worker/workspace/build/src/java_home.
+mkdir -p ${WORKSPACE}/nexus/conf
+cp /builds/worker/workspace/build/src/taskcluster/scripts/builder/build-android-dependencies/nexus.xml ${WORKSPACE}/nexus/conf/nexus.xml
+
+# Populate /builds/worker/workspace/build/src/java_home.
 . $WORKSPACE/build/src/taskcluster/scripts/builder/build-android-dependencies/repackage-jdk-centos.sh
 
 mv $WORKSPACE/java/usr/lib/jvm/java_home $WORKSPACE/build/src/java_home
@@ -16,8 +19,8 @@ mv $WORKSPACE/java/usr/lib/jvm/java_home $WORKSPACE/build/src/java_home
 export JAVA_HOME=$WORKSPACE/build/src/java_home
 export PATH=$PATH:$JAVA_HOME/bin
 
-# Populate /home/worker/.mozbuild/android-sdk-linux.
-python2.7 /home/worker/workspace/build/src/python/mozboot/mozboot/android.py --artifact-mode --no-interactive
+# Populate /builds/worker/.mozbuild/android-sdk-linux.
+python2.7 $WORKSPACE/build/src/python/mozboot/mozboot/android.py --artifact-mode --no-interactive
 
 RUN_AS_USER=worker NEXUS_WORK=$WORKSPACE/nexus /opt/sonatype/nexus/bin/nexus restart
 

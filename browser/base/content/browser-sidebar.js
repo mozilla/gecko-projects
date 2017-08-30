@@ -68,6 +68,15 @@ var SidebarUI = {
     enumerator.getNext();
     if (!enumerator.hasMoreElements()) {
       document.persist("sidebar-box", "sidebarcommand");
+
+      let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+
+      if (this._box.hasAttribute("positionend")) {
+        document.persist("sidebar-box", "positionend");
+      } else {
+        xulStore.removeValue(document.documentURI, "sidebar-box", "positionend");
+      }
+
       document.persist("sidebar-box", "width");
       document.persist("sidebar-title", "value");
     }
@@ -230,6 +239,15 @@ var SidebarUI = {
   },
 
   /**
+   * Fire a "SidebarShown" event on the sidebar to give any interested parties
+   * a chance to update the button or whatever.
+   */
+  _fireShowEvent() {
+    let event = new CustomEvent("SidebarShown", {bubbles: true});
+    this._switcherTarget.dispatchEvent(event);
+  },
+
+  /**
    * Fire a "SidebarFocused" event on the sidebar's |window| to give the sidebar
    * a chance to adjust focus as needed. An additional event is needed, because
    * we don't want to focus the sidebar when it's opened on startup or in a new
@@ -279,10 +297,12 @@ var SidebarUI = {
    * with a different commandID, then the sidebar will be opened using the
    * specified commandID. Otherwise the sidebar will be hidden.
    *
-   * @param {string} commandID ID of the xul:broadcaster element to use.
+   * @param  {string}  commandID     ID of the xul:broadcaster element to use.
+   * @param  {DOMNode} [triggerNode] Node, usually a button, that triggered the
+   *                                 visibility toggling of the sidebar.
    * @return {Promise}
    */
-  toggle(commandID = this.lastOpenedId) {
+  toggle(commandID = this.lastOpenedId, triggerNode) {
     // First priority for a default value is this.lastOpenedId which is set during show()
     // and not reset in hide(), unlike currentID. If show() hasn't been called or the command
     // doesn't exist anymore, then fallback to a default sidebar.
@@ -291,10 +311,10 @@ var SidebarUI = {
     }
 
     if (this.isOpen && commandID == this.currentID) {
-      this.hide();
+      this.hide(triggerNode);
       return Promise.resolve();
     }
-    return this.show(commandID);
+    return this.show(commandID, triggerNode);
   },
 
   /**
@@ -303,10 +323,15 @@ var SidebarUI = {
    *
    * This wraps the internal method, including a ping to telemetry.
    *
-   * @param {string} commandID ID of the xul:broadcaster element to use.
+   * @param {string}  commandID     ID of the xul:broadcaster element to use.
+   * @param {DOMNode} [triggerNode] Node, usually a button, that triggered the
+   *                                showing of the sidebar.
    */
-  show(commandID) {
+  show(commandID, triggerNode) {
     return this._show(commandID).then(() => {
+      if (triggerNode) {
+        updateToggleControlLabel(triggerNode);
+      }
       BrowserUITelemetry.countSidebarEvent(commandID, "show");
     });
   },
@@ -372,11 +397,17 @@ var SidebarUI = {
           sidebarOnLoad(event);
 
           resolve();
+
+          // Now that the currentId is updated, fire a show event.
+          this._fireShowEvent();
         }, {capture: true, once: true});
       } else {
         // Older code handled this case, so we do it too.
         this._fireFocusedEvent();
         resolve();
+
+        // Now that the currentId is updated, fire a show event.
+        this._fireShowEvent();
       }
 
       let selBrowser = gBrowser.selectedBrowser;
@@ -388,8 +419,11 @@ var SidebarUI = {
 
   /**
    * Hide the sidebar.
+   *
+   * @param {DOMNode} [triggerNode] Node, usually a button, that triggered the
+   *                                hiding of the sidebar.
    */
-  hide() {
+  hide(triggerNode) {
     if (!this.isOpen) {
       return;
     }
@@ -414,7 +448,6 @@ var SidebarUI = {
     sidebarBroadcaster.removeAttribute("checked");
     this._box.setAttribute("sidebarcommand", "");
     this._box.removeAttribute("checked");
-    this.title = "";
     this._box.hidden = this._splitter.hidden = true;
 
     let selBrowser = gBrowser.selectedBrowser;
@@ -422,6 +455,9 @@ var SidebarUI = {
     selBrowser.messageManager.sendAsyncMessage("Sidebar:VisibilityChange",
       {commandID, isOpen: false}
     );
+    if (triggerNode) {
+      updateToggleControlLabel(triggerNode);
+    }
     BrowserUITelemetry.countSidebarEvent(commandID, "hide");
   },
 };

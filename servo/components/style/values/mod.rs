@@ -19,6 +19,7 @@ use style_traits::{ToCss, ParseError, StyleParseError};
 
 pub mod animated;
 pub mod computed;
+pub mod distance;
 pub mod generics;
 pub mod specified;
 
@@ -34,6 +35,22 @@ pub const FONT_MEDIUM_PX: i32 = 16;
 define_keyword_type!(None_, "none");
 define_keyword_type!(Auto, "auto");
 define_keyword_type!(Normal, "normal");
+
+/// Serialize a normalized value into percentage.
+pub fn serialize_percentage<W>(value: CSSFloat, dest: &mut W)
+    -> fmt::Result where W: fmt::Write
+{
+    (value * 100.).to_css(dest)?;
+    dest.write_str("%")
+}
+
+/// Serialize a value with given unit into dest.
+pub fn serialize_dimension<W>(value: CSSFloat, unit: &str, dest: &mut W)
+    -> fmt::Result where W: fmt::Write
+{
+    value.to_css(dest)?;
+    dest.write_str(unit)
+}
 
 /// Convenience void type to disable some properties and values through types.
 #[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
@@ -51,7 +68,8 @@ impl Parse for Impossible {
 
 /// A struct representing one of two kinds of values.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, HasViewportPercentage, PartialEq, ToAnimatedValue, ToComputedValue, ToCss)]
+#[derive(Animate, Clone, ComputeSquaredDistance, Copy, HasViewportPercentage)]
+#[derive(PartialEq, ToAnimatedValue, ToAnimatedZero, ToComputedValue, ToCss)]
 pub enum Either<A, B> {
     /// The first value.
     First(A),
@@ -80,7 +98,7 @@ impl<A: Parse, B: Parse> Parse for Either<A, B> {
 }
 
 /// https://drafts.csswg.org/css-values-4/#custom-idents
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct CustomIdent(pub Atom);
 
@@ -109,7 +127,7 @@ impl ToCss for CustomIdent {
 }
 
 /// https://drafts.csswg.org/css-animations/#typedef-keyframes-name
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum KeyframesName {
     /// <custom-ident>

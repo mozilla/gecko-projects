@@ -279,9 +279,9 @@ ImageDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
     target->AddEventListener(NS_LITERAL_STRING("keypress"), this, false);
 
     if (GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
-      LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/ImageDocument.css"));
+      LinkStylesheet(NS_LITERAL_STRING("resource://content-accessible/ImageDocument.css"));
       if (!nsContentUtils::IsChildOfSameType(this)) {
-        LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelImageDocument.css"));
+        LinkStylesheet(NS_LITERAL_STRING("resource://content-accessible/TopLevelImageDocument.css"));
         LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelImageDocument.css"));
       }
     }
@@ -777,13 +777,13 @@ ImageDocument::UpdateTitleAndCharset()
   }
 
   if (imageRequest) {
-    nsXPIDLCString mimeType;
+    nsCString mimeType;
     imageRequest->GetMimeType(getter_Copies(mimeType));
     ToUpperCase(mimeType);
-    nsXPIDLCString::const_iterator start, end;
+    nsCString::const_iterator start, end;
     mimeType.BeginReading(start);
     mimeType.EndReading(end);
-    nsXPIDLCString::const_iterator iter = end;
+    nsCString::const_iterator iter = end;
     if (FindInReadable(NS_LITERAL_CSTRING("IMAGE/"), start, iter) &&
         iter != end) {
       // strip out "X-" if any

@@ -26,11 +26,11 @@
 
     <div id="categories">
       <div class="heading">
-        <span id="ping-type" hidden="true" class="change-ping"></span>
-        <div class="controls">
-          <span id="older-ping" hidden="true">&lt;&lt;</span>
+        <span id="ping-type" class="change-ping dropdown"></span>
+        <div id="controls" hidden="true">
+          <span id="older-ping">&lt;&lt;</span>
           <span id="ping-date" class="change-ping"></span>
-          <span id="newer-ping" hidden="true">&gt;&gt;</span>
+          <span id="newer-ping">&gt;&gt;</span>
         </div>
       </div>
       <div id="category-home" class="category has-data selected" value="home-section">
@@ -72,12 +72,6 @@
       <div class="category" value="chrome-hangs-section">
         <span class="category-name">&aboutTelemetry.chromeHangsSection;</span>
       </div>
-      <div class="category" value="thread-hang-stats-section">
-        <span class="category-name">&aboutTelemetry.threadHangStatsSection;</span>
-      </div>
-      <div class="category" value="late-writes-section">
-        <span class="category-name">&aboutTelemetry.lateWritesSection;</span>
-      </div>
       <div class="category" value="addon-details-section">
         <span class="category-name">&aboutTelemetry.addonDetailsSection;</span>
       </div>
@@ -95,7 +89,7 @@
       </div>
     </div>
 
-    <div class="main-content">
+    <div id="main" class="main-content">
 
       <div id="ping-picker" class="hidden">
         <div id="ping-source-picker">
@@ -112,7 +106,7 @@
         <div id="current-ping-picker">
           <input id="show-subsession-data" type="checkbox" checked="checked" />&aboutTelemetry.showSubsessionData;
         </div>
-        <div id="archived-ping-picker" class="hidden">
+        <div id="archived-ping-picker">
           <h4 class="title">&aboutTelemetry.choosePing;</h4>
           <div>
             <h4 class="title">&aboutTelemetry.archivePingType;</h4>
@@ -140,7 +134,7 @@
           <div id="sectionTitle" class="header-name">
               &aboutTelemetry.pageTitle;
           </div>
-          <input type="text" id="search" placeholder="" hidden="true"/>
+          <input type="text" id="search" placeholder=""/>
           <select id="processes" hidden="true"></select>
       </div>
 
@@ -196,35 +190,20 @@
       </section>
 
       <section id="slow-sql-section">
-        <div id="slow-sql-tables" class="data">
-          <p id="sql-warning" class="hidden">&aboutTelemetry.fullSqlWarning;</p>
-        </div>
+        <p id="sql-warning">&aboutTelemetry.fullSqlWarning;</p>
+        <div id="slow-sql-tables" class="data"></div>
       </section>
 
       <section id="chrome-hangs-section">
-        <div id="chrome-hangs" class="data">
-          <a id="chrome-hangs-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
-          <a id="chrome-hangs-hide-symbols" class="hidden" href="">&aboutTelemetry.hideStackSymbols;</a>
-          <br/>
-          <br/>
-          <div id="chrome-hangs-data">
-          </div>
-        </div>
-      </section>
-
-      <section id="thread-hang-stats-section">
-        <div id="thread-hang-stats" class="data"></div>
+        <a id="chrome-hangs-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
+        <a id="chrome-hangs-hide-symbols" href="">&aboutTelemetry.hideStackSymbols;</a>
+        <div id="chrome-hangs" class="data"></div>
       </section>
 
       <section id="late-writes-section">
-        <div id="late-writes" class="data">
-          <a id="late-writes-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
-          <a id="late-writes-hide-symbols" class="hidden" href="">&aboutTelemetry.hideStackSymbols;</a>
-          <br/>
-          <br/>
-          <div id="late-writes-data">
-          </div>
-        </div>
+        <a id="late-writes-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
+        <a id="late-writes-hide-symbols" href="">&aboutTelemetry.hideStackSymbols;</a>
+        <div id="late-writes" class="data"></div>
       </section>
 
       <section id="addon-details-section">
@@ -232,14 +211,9 @@
       </section>
 
       <section id="captured-stacks-section">
-        <div id="captured-stacks" class="data">
-          <a id="captured-stacks-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
-          <a id="captured-stacks-hide-symbols" class="hidden" href="">&aboutTelemetry.hideStackSymbols;</a>
-          <br/>
-          <br/>
-          <div id="captured-stacks-data">
-          </div>
-        </div>
+        <a id="captured-stacks-fetch-symbols" href="">&aboutTelemetry.fetchStackSymbols;</a>
+        <a id="captured-stacks-hide-symbols" href="">&aboutTelemetry.hideStackSymbols;</a>
+        <div id="captured-stacks" class="data"></div>
       </section>
     </div>
 

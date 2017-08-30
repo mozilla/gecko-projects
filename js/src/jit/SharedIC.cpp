@@ -664,8 +664,8 @@ HandleScript
 SharedStubInfo::outerScript(JSContext* cx)
 {
     if (!outerScript_) {
-        js::jit::JitActivationIterator iter(cx);
-        JitFrameIterator it(iter);
+        js::jit::JitActivationIterator actIter(cx);
+        JSJitFrameIter it(actIter->asJit());
         MOZ_ASSERT(it.isExitFrame());
         ++it;
         MOZ_ASSERT(it.isIonJS());
@@ -1956,8 +1956,6 @@ CheckHasNoSuchOwnProperty(JSContext* cx, JSObject* obj, jsid id)
         if (ClassMayResolveId(cx->names(), obj->getClass(), id, obj))
             return false;
         if (obj->as<NativeObject>().contains(cx, id))
-            return false;
-        if (obj->getClass()->getGetProperty())
             return false;
     } else if (obj->is<UnboxedPlainObject>()) {
         if (obj->as<UnboxedPlainObject>().containsUnboxedOrExpandoProperty(cx, id))

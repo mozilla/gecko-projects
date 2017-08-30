@@ -130,10 +130,10 @@ Debug(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static const JSFunctionSpec gGlobalFun[] = {
-    JS_FS("dump",    Dump,   1,0),
-    JS_FS("debug",   Debug,  1,0),
-    JS_FS("atob",    Atob,   1,0),
-    JS_FS("btoa",    Btoa,   1,0),
+    JS_FN("dump",    Dump,   1,0),
+    JS_FN("debug",   Debug,  1,0),
+    JS_FN("atob",    Atob,   1,0),
+    JS_FN("btoa",    Btoa,   1,0),
     JS_FS_END
 };
 
@@ -472,7 +472,7 @@ mozJSComponentLoader::CreateLoaderGlobal(JSContext* aCx,
            .setSystemZone()
            .setAddonId(aAddonID);
 
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    options.behaviors().setVersion(JSVERSION_DEFAULT);
 
     if (xpc::SharedMemoryEnabled())
         options.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
@@ -650,7 +650,7 @@ mozJSComponentLoader::ObjectForLocation(ComponentLoaderInfo& aInfo,
         // See bug 1303754.
         CompileOptions options(cx);
         options.setNoScriptRval(true)
-               .setVersion(JSVERSION_LATEST)
+               .setVersion(JSVERSION_DEFAULT)
                .setFileAndLine(nativePath.get(), 1)
                .setSourceIsLazy(cache || ScriptPreloader::GetSingleton().Active());
 

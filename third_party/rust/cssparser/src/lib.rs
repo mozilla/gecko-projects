@@ -68,6 +68,7 @@ fn parse_border_spacing(_context: &ParserContext, input: &mut Parser)
 
 #![recursion_limit="200"]  // For color::parse_color_keyword
 
+extern crate dtoa_short;
 #[macro_use] extern crate cssparser_macros;
 #[macro_use] extern crate matches;
 #[macro_use] extern crate procedural_masquerade;
@@ -77,6 +78,7 @@ fn parse_border_spacing(_context: &ParserContext, input: &mut Parser)
 #[cfg(test)] extern crate rustc_serialize;
 #[cfg(feature = "serde")] extern crate serde;
 #[cfg(feature = "heapsize")] #[macro_use] extern crate heapsize;
+extern crate smallvec;
 
 pub use cssparser_macros::*;
 

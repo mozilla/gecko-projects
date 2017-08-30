@@ -20,6 +20,7 @@
 #include "nsDisplayList.h"
 #include "JustificationUtils.h"
 #include "RubyUtils.h"
+#include "TextDrawTarget.h"
 
 // Undo the windows.h damage
 #if defined(XP_WIN) && defined(DrawText)
@@ -41,13 +42,14 @@ class SVGContextPaint;
 class nsTextFrame : public nsFrame
 {
   typedef mozilla::LayoutDeviceRect LayoutDeviceRect;
-  typedef mozilla::RawSelectionType RawSelectionType;
+  typedef mozilla::SelectionTypeMask SelectionTypeMask;
   typedef mozilla::SelectionType SelectionType;
   typedef mozilla::TextRangeStyle TextRangeStyle;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::Point Point;
   typedef mozilla::gfx::Rect Rect;
   typedef mozilla::gfx::Size Size;
+  typedef mozilla::layout::TextDrawTarget TextDrawTarget;
   typedef gfxTextRun::Range Range;
 
 public:
@@ -441,6 +443,7 @@ public:
   struct PaintTextParams
   {
     gfxContext* context;
+    TextDrawTarget* textDrawer;
     gfxPoint framePt;
     LayoutDeviceRect dirtyRect;
     mozilla::SVGContextPaint* contextPaint = nullptr;
@@ -457,7 +460,7 @@ public:
     };
     uint8_t state = PaintText;
     explicit PaintTextParams(gfxContext* aContext)
-      : context(aContext)
+      : context(aContext), textDrawer(nullptr)
     {
     }
 
@@ -480,6 +483,7 @@ public:
   struct DrawTextRunParams
   {
     gfxContext* context;
+    TextDrawTarget* textDrawer;
     PropertyProvider* provider = nullptr;
     gfxFloat* advanceWidth = nullptr;
     mozilla::SVGContextPaint* contextPaint = nullptr;
@@ -489,7 +493,7 @@ public:
     float textStrokeWidth = 0.0f;
     bool drawSoftHyphen = false;
     explicit DrawTextRunParams(gfxContext* aContext)
-      : context(aContext)
+      : context(aContext), textDrawer(nullptr)
     {}
   };
 
@@ -520,13 +524,13 @@ public:
     const nsCharClipDisplayItem::ClipEdges& aClipEdges);
   // helper: paint text with foreground and background colors determined
   // by selection(s). Also computes a mask of all selection types applying to
-  // our text, returned in aAllTypes.
+  // our text, returned in aAllSelectionTypeMask.
   // Return false if the text was not painted and we should continue with
   // the fast path.
   bool PaintTextWithSelectionColors(
     const PaintTextSelectionParams& aParams,
     const mozilla::UniquePtr<SelectionDetails>& aDetails,
-    RawSelectionType* aAllRawSelectionTypes,
+    SelectionTypeMask* aAllSelectionTypeMask,
     const nsCharClipDisplayItem::ClipEdges& aClipEdges);
   // helper: paint text decorations for text selected by aSelectionType
   void PaintTextSelectionDecorations(const PaintTextSelectionParams& aParams,
@@ -706,6 +710,7 @@ protected:
     gfxPoint framePt;
     gfxPoint textBaselinePt;
     gfxContext* context;
+    TextDrawTarget* textDrawer;
     nscolor foregroundColor = NS_RGBA(0, 0, 0, 0);
     const nsCharClipDisplayItem::ClipEdges* clipEdges = nullptr;
     PropertyProvider* provider = nullptr;
@@ -714,6 +719,7 @@ protected:
       : dirtyRect(aParams.dirtyRect)
       , framePt(aParams.framePt)
       , context(aParams.context)
+      , textDrawer(aParams.textDrawer)
     {
     }
   };

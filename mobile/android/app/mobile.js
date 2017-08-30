@@ -562,8 +562,14 @@ pref("apz.fling_friction", "0.004");
 pref("apz.fling_stopped_threshold", "0.0");
 pref("apz.max_velocity_inches_per_ms", "0.07");
 pref("apz.overscroll.enabled", true);
+pref("apz.second_tap_tolerance", "0.3");
 pref("apz.touch_move_tolerance", "0.03");
 pref("apz.touch_start_tolerance", "0.06");
+
+#ifdef NIGHTLY_BUILD
+// Temporary fix of Bug 1390145 for Fennec Nightly
+pref("apz.frame_delay.enabled", false);
+#endif
 
 pref("layers.progressive-paint", true);
 pref("layers.low-precision-buffer", true);
@@ -626,7 +632,9 @@ pref("media.mediadrm-widevinecdm.visible", true);
 pref("media.eme.enabled", true);
 #endif
 
+#ifdef NIGHTLY_BUILD
 pref("media.hls.enabled", true);
+#endif
 
 // Whether to suspend decoding of videos in background tabs.
 pref("media.suspend-bkgnd-video.enabled", true);
@@ -928,3 +936,7 @@ pref("javascript.options.native_regexp", false);
 
 // Ask for permission when enumerating WebRTC devices.
 pref("media.navigator.permission.device", true);
+
+#ifdef NIGHTLY_BUILD
+pref("media.videocontrols.lock-video-orientation", true);
+#endif

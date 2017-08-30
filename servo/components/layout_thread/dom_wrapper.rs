@@ -67,7 +67,7 @@ use style::CaseSensitivityExt;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::attr::AttrValue;
 use style::computed_values::display;
-use style::context::{QuirksMode, SharedStyleContext};
+use style::context::SharedStyleContext;
 use style::data::ElementData;
 use style::dom::{LayoutIterator, NodeInfo, OpaqueNode};
 use style::dom::{PresentationalHintsSynthesizer, TElement, TNode, UnsafeNode};
@@ -85,7 +85,7 @@ pub unsafe fn drop_style_and_layout_data(data: OpaqueStyleAndLayoutData) {
     let _ = Box::from_raw(non_opaque);
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct ServoLayoutNode<'a> {
     /// The wrapped node.
     node: LayoutJS<Node>,
@@ -329,7 +329,7 @@ impl<'ln> ServoLayoutNode<'ln> {
 }
 
 // A wrapper around documents that ensures ayout can only ever access safe properties.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct ServoLayoutDocument<'ld> {
     document: LayoutJS<Document>,
     chain: PhantomData<&'ld ()>,
@@ -357,10 +357,6 @@ impl<'ld> ServoLayoutDocument<'ld> {
         unsafe { self.document.will_paint(); }
     }
 
-    pub fn quirks_mode(&self) -> QuirksMode {
-        unsafe { self.document.quirks_mode() }
-    }
-
     pub fn style_shared_lock(&self) -> &StyleSharedRwLock {
         unsafe { self.document.style_shared_lock() }
     }
@@ -374,7 +370,7 @@ impl<'ld> ServoLayoutDocument<'ld> {
 }
 
 /// A wrapper around elements that ensures layout can only ever access safe properties.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct ServoLayoutElement<'le> {
     element: LayoutJS<Element>,
     chain: PhantomData<&'le ()>,
@@ -442,14 +438,6 @@ impl<'le> TElement for ServoLayoutElement<'le> {
                 }
             }
         }
-    }
-
-    #[inline]
-    fn existing_style_for_restyle_damage<'a>(&'a self,
-                                             current_cv: &'a ComputedValues,
-                                             _pseudo_element: Option<&PseudoElement>)
-                                             -> Option<&'a ComputedValues> {
-        Some(current_cv)
     }
 
     fn has_dirty_descendants(&self) -> bool {
@@ -818,7 +806,7 @@ impl<'le> ::selectors::Element for ServoLayoutElement<'le> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ServoThreadSafeLayoutNode<'ln> {
     /// The wrapped node.
     node: ServoLayoutNode<'ln>,
@@ -1111,7 +1099,7 @@ impl<ConcreteNode> Iterator for ThreadSafeLayoutNodeChildrenIterator<ConcreteNod
 
 /// A wrapper around elements that ensures layout can only
 /// ever access safe properties and cannot race on elements.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ServoThreadSafeLayoutElement<'le> {
     element: ServoLayoutElement<'le>,
 

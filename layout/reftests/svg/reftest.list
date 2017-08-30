@@ -56,9 +56,6 @@ skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-differenc
 
 == border-radius-01.html pass.svg
 
-== box-decoration-break-clone.html box-decoration-break-clone-ref.html
-== box-decoration-break-slice.html box-decoration-break-slice-ref.html
-
 == clip-01.svg pass.svg
 == clip-02a.svg clip-02-ref.svg
 == clip-02b.svg clip-02-ref.svg
@@ -324,7 +321,7 @@ fuzzy-if(skiaContent,1,10000) == opacity-and-transform-01.svg opacity-and-transf
 
 fuzzy-if(Android,8,200) == outer-svg-border-and-padding-01.svg outer-svg-border-and-padding-01-ref.svg
 
-fuzzy-if(skiaContent,7,175) fuzzy-if(skiaContent&&webrender,1,225) == outline.html outline-ref.html
+fuzzy-if(skiaContent,7,175) fuzzy-if(skiaContent&&webrender,7-7,154-154) == outline.html outline-ref.html
 
 == overflow-on-outer-svg-01.svg overflow-on-outer-svg-01-ref.svg
 == overflow-on-outer-svg-02a.xhtml overflow-on-outer-svg-02-ref.xhtml
@@ -419,6 +416,7 @@ fuzzy-if(skiaContent,1,340) == stroke-dasharray-03.svg pass.svg
 
 == svg-in-foreignObject-01.xhtml svg-in-foreignObject-01-ref.xhtml
 fuzzy-if(skiaContent,1,2600) == svg-in-foreignObject-02.xhtml svg-in-foreignObject-01-ref.xhtml # reuse -01-ref.xhtml
+== svg-in-inner-svg-dimensions.svg pass.svg
 == switch-01.svg pass.svg
 
 == suspend-01.svg pass.svg

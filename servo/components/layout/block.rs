@@ -51,7 +51,7 @@ use servo_geometry::max_rect;
 use std::cmp::{max, min};
 use std::fmt;
 use std::sync::Arc;
-use style::computed_values::{border_collapse, box_sizing, display, float, overflow_x};
+use style::computed_values::{box_sizing, display, float, overflow_x};
 use style::computed_values::{position, text_align};
 use style::context::SharedStyleContext;
 use style::logical_geometry::{LogicalPoint, LogicalRect, LogicalSize, WritingMode};
@@ -86,7 +86,7 @@ impl FloatedBlockInfo {
 }
 
 /// The solutions for the block-size-and-margins constraint equation.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 struct BSizeConstraintSolution {
     block_start: Au,
     block_size: Au,
@@ -448,20 +448,16 @@ pub struct AbsoluteAssignBSizesTraversal<'a>(pub &'a SharedStyleContext<'a>);
 impl<'a> PreorderFlowTraversal for AbsoluteAssignBSizesTraversal<'a> {
     #[inline]
     fn process(&self, flow: &mut Flow) {
-        {
-            // The root of the absolute flow tree is definitely not absolutely
-            // positioned. Nothing to process here.
-            let flow: &Flow = flow;
-            if flow.contains_roots_of_absolute_flow_tree() {
-                return;
-            }
-            if !flow.is_block_like() {
-                return
-            }
+        if !flow.is_block_like() {
+            return
         }
 
+        // This flow might not be an absolutely positioned flow if it is the root of the tree.
         let block = flow.as_mut_block();
-        debug_assert!(block.base.flags.contains(IS_ABSOLUTELY_POSITIONED));
+        if !block.base.flags.contains(IS_ABSOLUTELY_POSITIONED) {
+            return;
+        }
+
         if !block.base.restyle_damage.intersects(REFLOW_OUT_OF_FLOW | REFLOW) {
             return
         }
@@ -1989,12 +1985,12 @@ impl Flow for BlockFlow {
 
         // For relatively-positioned descendants, the containing block formed by a block is just
         // the content box. The containing block for absolutely-positioned descendants, on the
-        // other hand, is only established if we are positioned.
+        // other hand, is established in other circumstances (see `is_absolute_containing_block').
         let relative_offset =
             self.fragment.relative_position(&self.base
                                                  .early_absolute_position_info
                                                  .relative_containing_block_size);
-        if self.contains_positioned_fragments() {
+        if self.is_absolute_containing_block() {
             let border_box_origin = (self.fragment.border_box -
                 self.fragment.style.logical_border_width()).start;
             self.base
@@ -2013,14 +2009,15 @@ impl Flow for BlockFlow {
                                                  logical_border_width.inline_start,
                                                  logical_border_width.block_start);
                 let position = position.to_physical(self.base.writing_mode, container_size);
-                if self.contains_positioned_fragments() {
+
+                // Some blocks establish a stacking context, but not a containing block for
+                // absolutely positioned elements. An example of this might be a block that has
+                // `position: static` and `opacity` set. In these cases, absolutely-positioned
+                // children will not be positioned relative to us but will instead be positioned
+                // relative to our containing block.
+                if self.is_absolute_containing_block() {
                     position
                 } else {
-                    // We establish a stacking context but are not positioned. (This will happen
-                    // if, for example, the element has `position: static` but has `opacity` or
-                    // `transform` set.) In this case, absolutely-positioned children will not be
-                    // positioned relative to us but will instead be positioned relative to our
-                    // containing block.
                     position - self.base.stacking_relative_position
                 }
             } else {
@@ -2105,8 +2102,15 @@ impl Flow for BlockFlow {
         (self.fragment.border_box - self.fragment.style().logical_border_width()).size
     }
 
+    /// Returns true if this flow contains fragments that are roots of an absolute flow tree.
+    fn contains_roots_of_absolute_flow_tree(&self) -> bool {
+        self.contains_relatively_positioned_fragments() || self.is_root() ||
+        self.fragment.has_filter_transform_or_perspective()
+    }
+
+    /// Returns true if this is an absolute containing block.
     fn is_absolute_containing_block(&self) -> bool {
-        self.contains_positioned_fragments()
+        self.contains_positioned_fragments() || self.fragment.has_filter_transform_or_perspective()
     }
 
     fn update_late_computed_inline_position_if_necessary(&mut self, inline_position: Au) {
@@ -2192,7 +2196,7 @@ impl fmt::Debug for BlockFlow {
 }
 
 /// The inputs for the inline-sizes-and-margins constraint equation.
-#[derive(Debug, Copy, Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct ISizeConstraintInput {
     pub computed_inline_size: MaybeAuto,
     pub inline_start_margin: MaybeAuto,
@@ -2225,7 +2229,7 @@ impl ISizeConstraintInput {
 }
 
 /// The solutions for the inline-size-and-margins constraint equation.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ISizeConstraintSolution {
     pub inline_start: Au,
     pub inline_size: Au,
@@ -2264,8 +2268,7 @@ impl ISizeConstraintSolution {
 pub trait ISizeAndMarginsComputer {
     /// Instructs the fragment to compute its border and padding.
     fn compute_border_and_padding(&self, block: &mut BlockFlow, containing_block_inline_size: Au) {
-        block.fragment.compute_border_and_padding(containing_block_inline_size,
-                                                  border_collapse::T::separate);
+        block.fragment.compute_border_and_padding(containing_block_inline_size);
     }
 
     /// Compute the inputs for the ISize constraint equation.
@@ -3082,7 +3085,7 @@ impl ISizeAndMarginsComputer for InlineFlexItem {
 }
 
 /// A stacking context, a pseudo-stacking context, or a non-stacking context.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum BlockStackingContextType {
     NonstackingContext,
     PseudoStackingContext,
