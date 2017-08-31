@@ -89,7 +89,7 @@ def make_task_description(config, jobs):
 
         signing_task = None
         for dependency in dependencies.keys():
-            if 'signing' in dependency:
+            if 'repackage-signing' in dependency:
                 signing_task = dependency
         signing_task_ref = '<{}>'.format(signing_task)
 
