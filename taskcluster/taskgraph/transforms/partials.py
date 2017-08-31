@@ -37,9 +37,14 @@ def _generate_task_output_files(filenames, locale=None):
     for filename in filenames:
         data.append({
             'type': 'file',
-            'path': '/home/worker/workspace/build/artifacts/{}{}'.format(locale_output_path, filename),
+            'path': '/home/worker/artifacts/{}'.format(filename),
             'name': 'public/build/{}{}'.format(locale_output_path, filename)
         })
+    data.append({
+        'type': 'file',
+        'path': '/home/worker/artifacts/manifest.json',
+        'name': 'public/build/{}{}'.format(locale_output_path, filename)
+    })
     return data
 
 
