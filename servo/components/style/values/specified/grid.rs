@@ -9,9 +9,8 @@ use cssparser::{Parser, Token, BasicParseError};
 use parser::{Parse, ParserContext};
 use std::ascii::AsciiExt;
 use std::mem;
-use style_traits::{HasViewportPercentage, ParseError, StyleParseError};
+use style_traits::{ParseError, StyleParseError};
 use values::{CSSFloat, CustomIdent};
-use values::computed::{self, Context, ToComputedValue};
 use values::generics::grid::{GridTemplateComponent, RepeatCount, TrackBreadth, TrackKeyword, TrackRepeat};
 use values::generics::grid::{LineNameList, TrackSize, TrackList, TrackListType};
 use values::specified::LengthOrPercentage;
@@ -36,17 +35,6 @@ impl Parse for TrackBreadth<LengthOrPercentage> {
         }
 
         TrackKeyword::parse(input).map(TrackBreadth::Keyword)
-    }
-}
-
-impl HasViewportPercentage for TrackBreadth<LengthOrPercentage> {
-    #[inline]
-    fn has_viewport_percentage(&self) -> bool {
-        if let TrackBreadth::Breadth(ref lop) = *self {
-            lop.has_viewport_percentage()
-        } else {
-            false
-        }
     }
 }
 
@@ -97,7 +85,7 @@ pub fn parse_line_names<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Box<[Custo
 /// The type of `repeat` function (only used in parsing).
 ///
 /// https://drafts.csswg.org/css-grid/#typedef-track-repeat
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 enum RepeatType {
     /// [`<auto-repeat>`](https://drafts.csswg.org/css-grid/#typedef-auto-repeat)
@@ -173,13 +161,6 @@ impl TrackRepeat<LengthOrPercentage> {
                 Ok((repeat, repeat_type))
             })
         })
-    }
-}
-
-impl HasViewportPercentage for TrackRepeat<LengthOrPercentage> {
-    #[inline]
-    fn has_viewport_percentage(&self) -> bool {
-        self.track_sizes.iter().any(|ref v| v.has_viewport_percentage())
     }
 }
 
@@ -279,49 +260,6 @@ impl Parse for TrackList<LengthOrPercentage> {
     }
 }
 
-impl HasViewportPercentage for TrackList<LengthOrPercentage> {
-    #[inline]
-    fn has_viewport_percentage(&self) -> bool {
-        self.values.iter().any(|ref v| v.has_viewport_percentage())
-    }
-}
-
-
-impl ToComputedValue for TrackList<LengthOrPercentage> {
-    type ComputedValue = TrackList<computed::LengthOrPercentage>;
-
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        let mut values = Vec::with_capacity(self.values.len() + 1);
-        for value in self.values.iter().map(|val| val.to_computed_value(context)) {
-            values.push(value);
-        }
-
-        TrackList {
-            list_type: self.list_type.to_computed_value(context),
-            values: values,
-            line_names: self.line_names.clone(),
-            auto_repeat: self.auto_repeat.clone().map(|repeat| repeat.to_computed_value(context)),
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        let mut values = Vec::with_capacity(computed.values.len() + 1);
-        for value in computed.values.iter().map(ToComputedValue::from_computed_value) {
-            values.push(value);
-        }
-
-        TrackList {
-            list_type: computed.list_type,
-            values: values,
-            line_names: computed.line_names.clone(),
-            auto_repeat: computed.auto_repeat.clone().map(|ref repeat| TrackRepeat::from_computed_value(repeat)),
-        }
-    }
-}
-
-
 impl Parse for GridTemplateComponent<LengthOrPercentage> {
     // FIXME: Derive Parse (probably with None_)
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
@@ -342,39 +280,5 @@ impl GridTemplateComponent<LengthOrPercentage> {
         }
 
         LineNameList::parse(context, input).map(GridTemplateComponent::Subgrid)
-    }
-}
-
-impl HasViewportPercentage for GridTemplateComponent<LengthOrPercentage> {
-    #[inline]
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            GridTemplateComponent::TrackList(ref l) => l.has_viewport_percentage(),
-            _ => false,
-        }
-    }
-}
-
-impl ToComputedValue for GridTemplateComponent<LengthOrPercentage> {
-    type ComputedValue = GridTemplateComponent<computed::LengthOrPercentage>;
-
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        match *self {
-            GridTemplateComponent::None => GridTemplateComponent::None,
-            GridTemplateComponent::TrackList(ref l) => GridTemplateComponent::TrackList(l.to_computed_value(context)),
-            GridTemplateComponent::Subgrid(ref n) => GridTemplateComponent::Subgrid(n.to_computed_value(context)),
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        match *computed {
-            GridTemplateComponent::None => GridTemplateComponent::None,
-            GridTemplateComponent::TrackList(ref l) =>
-                GridTemplateComponent::TrackList(ToComputedValue::from_computed_value(l)),
-            GridTemplateComponent::Subgrid(ref n) =>
-                GridTemplateComponent::Subgrid(ToComputedValue::from_computed_value(n)),
-        }
     }
 }

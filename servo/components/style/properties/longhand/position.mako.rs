@@ -296,14 +296,14 @@ ${helpers.predefined_type("object-position",
     pub type SpecifiedValue = computed_value::T;
 
     pub mod computed_value {
-        #[derive(PartialEq, Clone, Eq, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum AutoFlow {
             Row,
             Column,
         }
 
-        #[derive(PartialEq, Clone, Eq, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T {
             pub autoflow: AutoFlow,
@@ -311,7 +311,6 @@ ${helpers.predefined_type("object-position",
         }
     }
 
-    no_viewport_percentage!(SpecifiedValue);
     impl ComputedValueAsSpecified for SpecifiedValue {}
 
     impl ToCss for computed_value::T {
@@ -454,7 +453,6 @@ ${helpers.predefined_type("object-position",
         pub columns: Range<u32>,
     }
 
-    no_viewport_percentage!(TemplateAreas);
     impl ComputedValueAsSpecified for TemplateAreas {}
 
     impl Parse for TemplateAreas {

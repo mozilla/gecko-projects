@@ -3,9 +3,9 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import os
-import sys
+from distutils.spawn import find_executable
 
-import py
+import mozunit
 import pytest
 
 from mozlint import cli
@@ -39,7 +39,7 @@ def test_cli_run_with_fix(run, capfd):
     assert out.endswith('{}\n')
 
 
-@pytest.mark.skipif(not py.path.local.sysfind("echo"), reason="No `echo` executable found.")
+@pytest.mark.skipif(not find_executable("echo"), reason="No `echo` executable found.")
 def test_cli_run_with_edit(run, parser, capfd):
     os.environ['EDITOR'] = 'echo'
 
@@ -58,4 +58,4 @@ def test_cli_run_with_edit(run, parser, capfd):
 
 
 if __name__ == '__main__':
-    sys.exit(pytest.main(['--verbose', __file__]))
+    mozunit.main()

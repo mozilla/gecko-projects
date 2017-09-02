@@ -62,13 +62,11 @@ def docker_worker_hazard(config, job, taskdesc):
 
     # build-haz-linux.sh needs this otherwise it assumes the checkout is in
     # the workspace.
-    env['GECKO_DIR'] = '/home/worker/checkouts/gecko'
+    env['GECKO_DIR'] = '/builds/worker/checkouts/gecko'
 
     worker['command'] = [
-        '/home/worker/bin/run-task',
-        '--chown-recursive', '/home/worker/tooltool-cache',
-        '--chown-recursive', '/home/worker/workspace',
-        '--vcs-checkout', '/home/worker/checkouts/gecko',
+        '/builds/worker/bin/run-task',
+        '--vcs-checkout', '/builds/worker/checkouts/gecko',
         '--',
         '/bin/bash', '-c', run['command']
     ]

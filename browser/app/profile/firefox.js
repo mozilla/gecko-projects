@@ -317,6 +317,9 @@ pref("browser.urlbar.maxRichResults", 10);
 // autocomplete.xml.
 pref("browser.urlbar.delay", 50);
 
+// The maximum number of historical search results to show.
+pref("browser.urlbar.maxHistoricalSearchSuggestions", 1);
+
 // The default behavior for the urlbar can be configured to use any combination
 // of the match filters with each additional filter adding more results (union).
 pref("browser.urlbar.suggest.history",              true);
@@ -457,6 +460,7 @@ pref("browser.tabs.loadInBackground", true);
 pref("browser.tabs.opentabfor.middleclick", true);
 pref("browser.tabs.loadDivertedInBackground", false);
 pref("browser.tabs.loadBookmarksInBackground", false);
+pref("browser.tabs.loadBookmarksInTabs", false);
 pref("browser.tabs.tabClipWidth", 140);
 #ifdef UNIX_BUT_NOT_MAC
 pref("browser.tabs.drawInTitlebar", false);
@@ -464,10 +468,12 @@ pref("browser.tabs.drawInTitlebar", false);
 pref("browser.tabs.drawInTitlebar", true);
 #endif
 
-// false - disable the tabbar session restore button
-// true - enable the tabbar session restore button
-// To be enabled with shield
-pref("browser.tabs.restorebutton", false);
+// 0 - Disable the tabbar session restore button.
+// 1 - Enable the tabbar session restore button.
+// 2 - Control group. The tabbar session restore button is disabled,
+// but we will record data on other session restore usage.
+// To be enabled with shield.
+pref("browser.tabs.restorebutton", 0);
 
 // When tabs opened by links in other tabs via a combination of
 // browser.link.open_newwindow being set to 3 and target="_blank" etc are
@@ -669,6 +675,10 @@ pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
 
+// Accessibility indicator preferences such as support URL, enabled flag.
+pref("accessibility.support.url", "https://support.mozilla.org/%LOCALE%/kb/accessibility-services");
+pref("accessibility.indicator.enabled", true);
+
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
 
@@ -718,9 +728,6 @@ pref("browser.preferences.instantApply", true);
 
 // Toggling Search bar on and off in about:preferences
 pref("browser.preferences.search", true);
-
-// Use the new in-content about:preferences in Nightly only for now
-pref("browser.preferences.useOldOrganization", false);
 
 // Once the Storage Management is completed.
 // (The Storage Management-related prefs are browser.storageManager.* )
@@ -1282,6 +1289,8 @@ pref("browser.newtabpage.activity-stream.enabled", true);
 pref("browser.newtabpage.activity-stream.enabled", false);
 #endif
 
+pref("browser.newtabpage.activity-stream.aboutHome.enabled", false);
+
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
 
@@ -1509,6 +1518,16 @@ pref("experiments.manifest.uri", "https://telemetry-experiment.cdn.mozilla.net/m
 // Whether experiments are supported by the current application profile.
 pref("experiments.supported", true);
 
+// Ping Centre Telemetry settings.
+#ifdef NIGHTLY_BUILD
+pref("browser.ping-centre.telemetry", true);
+#else
+pref("browser.ping-centre.telemetry", false);
+#endif
+pref("browser.ping-centre.log", false);
+pref("browser.ping-centre.staging.endpoint", "https://onyx_tiles.stage.mozaws.net/v3/links/ping-centre");
+pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.com/v3/links/ping-centre");
+
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
@@ -1548,6 +1567,12 @@ pref("browser.tabs.remote.desktopbehavior", true);
 pref("browser.tabs.remote.autostart.1", false);
 pref("browser.tabs.remote.autostart.2", true);
 #endif
+
+// For speculatively warming up tabs to improve perceived
+// performance while using the async tab switcher.
+pref("browser.tabs.remote.warmup.enabled", true);
+pref("browser.tabs.remote.warmup.maxTabs", 3);
+pref("browser.tabs.remote.warmup.unloadDelayMs", 2000);
 
 // For the about:tabcrashed page
 pref("browser.tabs.crashReporting.sendReport", true);
@@ -1700,7 +1725,14 @@ pref("browser.sessionstore.restore_tabs_lazily", true);
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
 pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple,test-harmful-simple");
+#ifdef MOZILLA_OFFICIAL
 pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
+#else
+pref("urlclassifier.phishTable", "googpub-phish-proto,test-phish-simple");
+#endif
+
+pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-proto");
+pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 
 pref("browser.suppress_first_window_animation", true);
 

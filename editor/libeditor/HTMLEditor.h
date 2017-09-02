@@ -229,6 +229,24 @@ public:
   }
   nsresult GetElementZIndex(Element* aElement, int32_t* aZindex);
 
+  nsresult SetInlineProperty(nsIAtom* aProperty,
+                             const nsAString& aAttribute,
+                             const nsAString& aValue);
+  nsresult GetInlineProperty(nsIAtom* aProperty,
+                             const nsAString& aAttribute,
+                             const nsAString& aValue,
+                             bool* aFirst,
+                             bool* aAny,
+                             bool* aAll);
+  nsresult GetInlinePropertyWithAttrValue(nsIAtom* aProperty,
+                                          const nsAString& aAttr,
+                                          const nsAString& aValue,
+                                          bool* aFirst,
+                                          bool* aAny,
+                                          bool* aAll,
+                                          nsAString& outValue);
+  nsresult RemoveInlineProperty(nsIAtom* aProperty,
+                                const nsAString& aAttribute);
 protected:
   virtual ~HTMLEditor();
 
@@ -301,8 +319,6 @@ public:
   virtual bool IsModifiableNode(nsINode* aNode) override;
 
   NS_IMETHOD SelectAll() override;
-
-  NS_IMETHOD GetRootElement(nsIDOMElement** aRootElement) override;
 
   // nsICSSLoaderObserver
   NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet,
@@ -425,7 +441,7 @@ protected:
   virtual void RemoveEventListeners() override;
 
   bool ShouldReplaceRootElement();
-  void ResetRootElementAndEventTarget();
+  void NotifyRootChanged();
   nsresult GetBodyElement(nsIDOMHTMLElement** aBody);
 
   /**
@@ -737,7 +753,6 @@ protected:
                                 const nsAString* aAttribute,
                                 nsIContent** aOutLeftNode = nullptr,
                                 nsIContent** aOutRightNode = nullptr);
-  nsresult ApplyDefaultProperties();
   nsresult RemoveStyleInside(nsIContent& aNode,
                              nsIAtom* aProperty,
                              const nsAString* aAttribute,
@@ -798,8 +813,7 @@ protected:
                                  bool* aFirst,
                                  bool* aAny,
                                  bool* aAll,
-                                 nsAString* outValue,
-                                 bool aCheckDefaults = true);
+                                 nsAString* outValue);
   bool HasStyleOrIdOrClass(Element* aElement);
   nsresult RemoveElementIfNoStyleOrIdOrClass(Element& aElement);
 
@@ -880,9 +894,6 @@ protected:
   nsTArray<nsString> mStyleSheetURLs;
   nsTArray<RefPtr<StyleSheet>> mStyleSheets;
 
-  // an array for holding default style settings
-  nsTArray<PropItem*> mDefaultStyles;
-
 protected:
   // ANONYMOUS UTILS
   void RemoveListenerAndDeleteRef(const nsAString& aEvent,
@@ -911,6 +922,8 @@ protected:
   bool IsInObservedSubtree(nsIDocument* aDocument,
                            nsIContent* aContainer,
                            nsIContent* aChild);
+
+  void UpdateRootElement();
 
   // resizing
   bool mIsObjectResizingEnabled;

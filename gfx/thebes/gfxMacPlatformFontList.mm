@@ -216,9 +216,9 @@ MacOSFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
             }
         }
 
-        // Bug 1360309: several of Apple's Chinese fonts have spurious blank
-        // glyphs for obscure Tibetan codepoints. Blacklist these so that font
-        // fallback will not use them.
+        // Bug 1360309, 1393624: several of Apple's Chinese fonts have spurious
+        // blank glyphs for obscure Tibetan and Arabic-script codepoints.
+        // Blacklist these so that font fallback will not use them.
         if (mRequiresAAT && (FamilyName().EqualsLiteral("Songti SC") ||
                              FamilyName().EqualsLiteral("Songti TC") ||
                              FamilyName().EqualsLiteral("STSong") ||
@@ -226,7 +226,15 @@ MacOSFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
                              FamilyName().EqualsLiteral("Kaiti SC") ||
                              FamilyName().EqualsLiteral("Kaiti TC") ||
                              FamilyName().EqualsLiteral("STKaiti"))) {
+            charmap->ClearRange(0x0f6b, 0x0f70);
             charmap->ClearRange(0x0f8c, 0x0f8f);
+            charmap->clear(0x0f98);
+            charmap->clear(0x0fbd);
+            charmap->ClearRange(0x0fcd, 0x0fff);
+            charmap->clear(0x0620);
+            charmap->clear(0x065f);
+            charmap->ClearRange(0x06ee, 0x06ef);
+            charmap->clear(0x06ff);
         }
     }
 
@@ -699,6 +707,12 @@ gfxSingleFaceMacFontFamily::ReadOtherFamilyNames(gfxPlatformFontList *aPlatformF
 /* gfxMacPlatformFontList */
 #pragma mark-
 
+// A bunch of fonts for "additional language support" are shipped in a
+// "Language Support" directory, and don't show up in the standard font
+// list returned by CTFontManagerCopyAvailableFontFamilyNames unless
+// we explicitly activate them.
+#define LANG_FONTS_DIR "/Library/Application Support/Apple/Fonts/Language Support"
+
 gfxMacPlatformFontList::gfxMacPlatformFontList() :
     gfxPlatformFontList(false),
     mDefaultFont(nullptr),
@@ -707,6 +721,15 @@ gfxMacPlatformFontList::gfxMacPlatformFontList() :
 #ifdef MOZ_BUNDLED_FONTS
     ActivateBundledFonts();
 #endif
+
+    nsresult rv;
+    nsCOMPtr<nsIFile> langFonts(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
+    if (NS_SUCCEEDED(rv)) {
+        rv = langFonts->InitWithNativePath(NS_LITERAL_CSTRING(LANG_FONTS_DIR));
+        if (NS_SUCCEEDED(rv)) {
+            ActivateFontsFromDir(langFonts);
+        }
+    }
 
     ::CFNotificationCenterAddObserver(::CFNotificationCenterGetLocalCenter(),
                                       this,
@@ -1493,27 +1516,16 @@ gfxMacPlatformFontList::CreateFontInfoData()
     return fi.forget();
 }
 
-#ifdef MOZ_BUNDLED_FONTS
-
 void
-gfxMacPlatformFontList::ActivateBundledFonts()
+gfxMacPlatformFontList::ActivateFontsFromDir(nsIFile* aDir)
 {
-    nsCOMPtr<nsIFile> localDir;
-    nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir));
-    if (NS_FAILED(rv)) {
-        return;
-    }
-    if (NS_FAILED(localDir->Append(NS_LITERAL_STRING("fonts")))) {
-        return;
-    }
     bool isDir;
-    if (NS_FAILED(localDir->IsDirectory(&isDir)) || !isDir) {
+    if (NS_FAILED(aDir->IsDirectory(&isDir)) || !isDir) {
         return;
     }
 
     nsCOMPtr<nsISimpleEnumerator> e;
-    rv = localDir->GetDirectoryEntries(getter_AddRefs(e));
-    if (NS_FAILED(rv)) {
+    if (NS_FAILED(aDir->GetDirectoryEntries(getter_AddRefs(e)))) {
         return;
     }
 
@@ -1544,6 +1556,23 @@ gfxMacPlatformFontList::ActivateBundledFonts()
             ::CFRelease(fontURL);
         }
     }
+}
+
+#ifdef MOZ_BUNDLED_FONTS
+
+void
+gfxMacPlatformFontList::ActivateBundledFonts()
+{
+    nsCOMPtr<nsIFile> localDir;
+    if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR,
+                                         getter_AddRefs(localDir)))) {
+        return;
+    }
+    if (NS_FAILED(localDir->Append(NS_LITERAL_STRING("fonts")))) {
+        return;
+    }
+
+    ActivateFontsFromDir(localDir);
 }
 
 #endif

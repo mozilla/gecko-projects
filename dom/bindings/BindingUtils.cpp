@@ -837,8 +837,7 @@ CreateInterfaceObject(JSContext* cx, JS::Handle<JSObject*> global,
       if (!namedConstructor ||
           !JS_DefineProperty(cx, namedConstructor, "prototype",
                              proto,
-                             JSPROP_PERMANENT | JSPROP_READONLY,
-                             JS_STUBGETTER, JS_STUBSETTER) ||
+                             JSPROP_PERMANENT | JSPROP_READONLY) ||
           (defineOnGlobal &&
            !DefineConstructor(cx, global, namedConstructors->mName,
                               namedConstructor))) {
@@ -2048,8 +2047,6 @@ NativePropertyHooks sEmptyNativePropertyHooks = {
 const js::ClassOps sBoringInterfaceObjectClassClassOps = {
     nullptr,               /* addProperty */
     nullptr,               /* delProperty */
-    nullptr,               /* getProperty */
-    nullptr,               /* setProperty */
     nullptr,               /* enumerate */
     nullptr,               /* newEnumerate */
     nullptr,               /* resolve */
@@ -3747,8 +3744,7 @@ AssertReflectorHasGivenProto(JSContext* aCx, JSObject* aReflector,
 #endif // DEBUG
 
 void
-SetDocumentAndPageUseCounter(JSContext* aCx, JSObject* aObject,
-                             UseCounter aUseCounter)
+SetDocumentAndPageUseCounter(JSObject* aObject, UseCounter aUseCounter)
 {
   nsGlobalWindow* win = xpc::WindowGlobalOrNull(js::UncheckedUnwrap(aObject));
   if (win && win->GetDocument()) {

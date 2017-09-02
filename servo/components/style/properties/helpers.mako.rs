@@ -83,8 +83,6 @@
         #[allow(unused_imports)]
         use smallvec::SmallVec;
         use std::fmt;
-        #[allow(unused_imports)]
-        use style_traits::HasViewportPercentage;
         use style_traits::{Separator, ToCss};
 
         pub mod single_value {
@@ -179,7 +177,7 @@
         }
 
         /// The specified value of ${name}.
-        #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct SpecifiedValue(pub Vec<single_value::SpecifiedValue>);
 
@@ -275,8 +273,6 @@
         #[allow(unused_imports)]
         use values::{Auto, Either, None_, Normal};
         #[allow(unused_imports)]
-        use cascade_info::CascadeInfo;
-        #[allow(unused_imports)]
         use error_reporting::ParseErrorReporter;
         #[allow(unused_imports)]
         use properties::longhands;
@@ -303,7 +299,6 @@
         pub fn cascade_property(
             declaration: &PropertyDeclaration,
             context: &mut computed::Context,
-            cascade_info: &mut Option<<&mut CascadeInfo>,
         ) {
             let value = match *declaration {
                 PropertyDeclaration::${property.camel_case}(ref value) => {
@@ -320,9 +315,6 @@
             };
 
             % if not property.derived_from:
-                if let Some(ref mut cascade_info) = *cascade_info {
-                    cascade_info.on_cascade_property(&declaration, &value);
-                }
                 match value {
                     DeclaredValue::Value(ref specified_value) => {
                         % if property.ident in SYSTEM_FONT_LONGHANDS and product == "gecko":
@@ -426,7 +418,6 @@
     %>
     <%call expr="longhand(name, keyword=Keyword(name, values, **keyword_kwargs), **kwargs)">
         use properties::longhands::system_font::SystemFont;
-        no_viewport_percentage!(SpecifiedValue);
 
         pub mod computed_value {
             use cssparser::Parser;
@@ -448,7 +439,7 @@
             ${gecko_keyword_conversion(keyword, keyword.values_for(product), type="T", cast_to="i32")}
         }
 
-        #[derive(Debug, Clone, PartialEq, Eq, Copy, ToCss)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
         pub enum SpecifiedValue {
             Keyword(computed_value::T),
             System(SystemFont),
@@ -535,7 +526,6 @@
             impl ComputedValueAsSpecified for SpecifiedValue {}
         % endif
 
-        no_viewport_percentage!(SpecifiedValue);
     </%call>
 </%def>
 
@@ -954,7 +944,7 @@
         }
 
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+        #[derive(Clone, Debug, PartialEq, ToCss)]
         pub struct SpecifiedValue(pub ${length_type});
 
         % if length_type == "MozLength":

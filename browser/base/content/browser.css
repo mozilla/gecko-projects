@@ -273,7 +273,8 @@ toolbarpaletteitem {
 %endif
 
 %if !defined(MOZ_WIDGET_GTK)
-#TabsToolbar > .private-browsing-indicator {
+#TabsToolbar > .private-browsing-indicator,
+#TabsToolbar > .accessibility-indicator {
   -moz-box-ordinal-group: 1000;
 }
 %endif
@@ -327,6 +328,7 @@ toolbarpaletteitem > toolbaritem[sdkstylewidget="true"][cui-areatype="toolbar"] 
 }
 
 .webextension-browser-action > .toolbarbutton-badge-stack > .toolbarbutton-icon {
+  height: 16px;
   width: 16px;
 }
 
@@ -411,7 +413,6 @@ toolbarbutton.webextension-menuitem > .toolbarbutton-icon {
 
 toolbarpaletteitem[removable="false"] {
   opacity: 0.5;
-  cursor: default;
 }
 
 %ifndef XP_MACOSX
@@ -503,9 +504,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 /* ::::: location bar & search bar ::::: */
 
-/* url bar min-width is defined further down, together with the maximum size
- * of the identity icon block, for different window sizes.
- */
+#urlbar-container {
+  min-width: 50ch;
+}
+
 #search-container {
   min-width: 25ch;
 }
@@ -665,8 +667,9 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
   -moz-binding: url("chrome://global/content/bindings/datetimepopup.xml#datetime-popup");
 }
 
-#urlbar[pageproxystate="invalid"] > #page-action-buttons > .urlbar-icon,
-#urlbar[pageproxystate="invalid"] > #page-action-buttons > .urlbar-icon-wrapper > .urlbar-icon,
+#urlbar[pageproxystate=invalid] > #page-action-buttons > .urlbar-page-action,
+#identity-box.chromeUI ~ #page-action-buttons > .urlbar-page-action,
+#urlbar[usertyping] > .urlbar-textbox-container > .urlbar-history-dropmarker,
 .urlbar-go-button[pageproxystate="valid"],
 .urlbar-go-button:not([parentfocused="true"]),
 #urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
@@ -684,67 +687,39 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
   -moz-user-focus: ignore;
 }
 
-
-/* We leave 49ch plus whatever space the download button will need when it
- * appears. Normally this should be 16px for the icon, plus 2 * 2px padding
- * plus the toolbarbutton-inner-padding. We're adding 4px to ensure things
- * like rounding on hidpi don't accidentally result in the button going
- * into overflow.
- */
-#urlbar-container {
-  min-width: calc(49ch + 24px + 2 * var(--toolbarbutton-inner-padding));
-}
-
-#nav-bar[hasdownloads] #urlbar-container {
-  min-width: 49ch;
-}
-
 #identity-icon-labels {
-  max-width: 17em;
+  max-width: 18em;
 }
 @media (max-width: 700px) {
   #urlbar-container {
-    min-width: calc(44ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+    min-width: 45ch;
   }
-  #nav-bar[hasdownloads] #urlbar-container {
-    min-width: 44ch;
-  }
-
   #identity-icon-labels {
-    max-width: 60px;
+    max-width: 70px;
   }
 }
 @media (max-width: 600px) {
   #urlbar-container {
-    min-width: calc(39ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+    min-width: 40ch;
   }
-  #nav-bar[hasdownloads] #urlbar-container {
-    min-width: 39ch;
+  #identity-icon-labels {
+    max-width: 60px;
+  }
+}
+@media (max-width: 500px) {
+  #urlbar-container {
+    min-width: 35ch;
   }
   #identity-icon-labels {
     max-width: 50px;
   }
 }
-@media (max-width: 500px) {
+@media (max-width: 400px) {
   #urlbar-container {
-    min-width: calc(34ch + 24px + 2 * var(--toolbarbutton-inner-padding));
-  }
-  #nav-bar[hasdownloads] #urlbar-container {
-    min-width: 34ch;
+    min-width: 28ch;
   }
   #identity-icon-labels {
     max-width: 40px;
-  }
-}
-@media (max-width: 400px) {
-  #urlbar-container {
-    min-width: calc(27ch + 24px + 2 * var(--toolbarbutton-inner-padding));
-  }
-  #nav-bar[hasdownloads] #urlbar-container {
-    min-width: 27ch;
-  }
-  #identity-icon-labels {
-    max-width: 30px;
   }
 }
 
@@ -771,6 +746,10 @@ toolbarspring {
 #nav-bar toolbarpaletteitem[id^=wrapper-customizableui-special-spring],
 #nav-bar toolbarspring {
   -moz-box-flex: 80;
+}
+
+#widget-overflow-list > toolbarspring {
+  display: none;
 }
 
 /* ::::: Unified Back-/Forward Button ::::: */
@@ -1084,7 +1063,20 @@ notification[value="translation"] {
 }
 
 /*** Visibility of downloads indicator controls ***/
-#downloads-button[indicator] > .toolbarbutton-badge-stack > image.toolbarbutton-icon {
+
+/* Bug 924050: If we've loaded the indicator, for now we hide it in the menu panel,
+   and just show the icon. This is a hack to side-step very weird layout bugs that
+   seem to be caused by the indicator stack interacting with the menu panel. */
+#downloads-button[indicator]:not([cui-areatype="menu-panel"]) > .toolbarbutton-badge-stack > image.toolbarbutton-icon,
+#downloads-button[indicator][cui-areatype="menu-panel"] > #downloads-indicator-anchor {
+  display: none;
+}
+
+toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbutton-badge-stack > image.toolbarbutton-icon {
+  display: -moz-box;
+}
+
+toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-indicator-anchor {
   display: none;
 }
 

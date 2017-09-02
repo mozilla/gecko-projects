@@ -221,6 +221,11 @@ var BrowserPageActions = {
     panelNode.setAttribute("tabspecific", "true");
     panelNode.setAttribute("photon", "true");
 
+    // For tests.
+    if (this._disableActivatedActionPanelAnimation) {
+      panelNode.setAttribute("animate", "false");
+    }
+
     let panelViewNode = null;
     let iframeNode = null;
 
@@ -338,7 +343,8 @@ var BrowserPageActions = {
 
   _makeUrlbarButtonNode(action) {
     let buttonNode = document.createElement("image");
-    buttonNode.classList.add("urlbar-icon");
+    buttonNode.classList.add("urlbar-icon", "urlbar-page-action");
+    buttonNode.setAttribute("role", "button");
     if (action.tooltip) {
       buttonNode.setAttribute("tooltiptext", action.tooltip);
     }
@@ -595,6 +601,10 @@ var BrowserPageActions = {
   onContextMenu(event) {
     let node = event.originalTarget;
     this._contextAction = this.actionForNode(node);
+    // Don't show the menu if there's no action where the user clicked!
+    if (!this._contextAction) {
+      event.preventDefault();
+    }
   },
 
   /**
@@ -670,6 +680,57 @@ var BrowserPageActions = {
   },
 };
 
+var BrowserPageActionFeedback = {
+  /**
+   * The feedback page action panel DOM node (DOM node)
+   */
+  get panelNode() {
+    delete this.panelNode;
+    return this.panelNode = document.getElementById("pageActionFeedback");
+  },
+
+  get feedbackAnimationBox() {
+    delete this.feedbackAnimationBox;
+    return this.feedbackAnimationBox = document.getElementById("pageActionFeedbackAnimatableBox");
+  },
+
+  get feedbackLabel() {
+    delete this.feedbackLabel;
+    return this.feedbackLabel = document.getElementById("pageActionFeedbackMessage");
+  },
+
+  show(action, event) {
+    this.feedbackLabel.textContent = this.panelNode.getAttribute(action + "Feedback");
+    this.panelNode.hidden = false;
+
+    let anchor = BrowserPageActions.mainButtonNode;
+    if (event.target.classList.contains("urlbar-icon")) {
+      let id = BrowserPageActions._urlbarButtonNodeIDForActionID(action);
+      let node = document.getElementById(id);
+      if (node) {
+        anchor = node;
+      }
+    }
+
+    this.panelNode.openPopup(anchor, {
+      position: "bottomcenter topright",
+      triggerEvent: event,
+    });
+
+    this.panelNode.addEventListener("popupshown", () => {
+      this.feedbackAnimationBox.setAttribute("animate", "true");
+    }, {once: true});
+    this.panelNode.addEventListener("popuphidden", () => {
+      this.feedbackAnimationBox.removeAttribute("animate");
+    }, {once: true});
+
+    // The timeout value used here allows the panel to stay open for
+    // 1 second after the text transition (duration=120ms) has finished.
+    setTimeout(() => {
+      this.panelNode.hidePopup(true);
+    }, Services.prefs.getIntPref("browser.pageActions.feedbackTimeoutMS", 1120));
+  },
+};
 
 // built-in actions below //////////////////////////////////////////////////////
 
@@ -704,6 +765,7 @@ BrowserPageActions.copyURL = {
     Cc["@mozilla.org/widget/clipboardhelper;1"]
       .getService(Ci.nsIClipboardHelper)
       .copyString(gURLBar.makeURIReadable(gBrowser.selectedBrowser.currentURI).displaySpec);
+    BrowserPageActionFeedback.show("copyURL", event);
   },
 };
 
@@ -749,6 +811,7 @@ BrowserPageActions.sendToDevice = {
     let title = browser.contentTitle;
 
     let bodyNode = panelViewNode.firstChild;
+    let panelNode = panelViewNode.closest("panel");
 
     // This is on top because it also clears the device list between state
     // changes.
@@ -762,6 +825,16 @@ BrowserPageActions.sendToDevice = {
         item.classList.add("subviewbutton-iconic");
       }
       item.setAttribute("tooltiptext", name);
+      item.addEventListener("command", event => {
+        if (panelNode) {
+          panelNode.hidePopup();
+        }
+        // There are items in the subview that don't represent devices: "Sign
+        // in", "Learn about Sync", etc.  Device items will be .sendtab-target.
+        if (event.target.classList.contains("sendtab-target")) {
+          BrowserPageActionFeedback.show("sendToDevice", event);
+        }
+      });
       return item;
     });
 

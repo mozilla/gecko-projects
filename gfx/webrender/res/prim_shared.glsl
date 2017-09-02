@@ -1,36 +1,6 @@
-#line 1
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-#define PST_TOP_LEFT     0
-#define PST_TOP          1
-#define PST_TOP_RIGHT    2
-#define PST_RIGHT        3
-#define PST_BOTTOM_RIGHT 4
-#define PST_BOTTOM       5
-#define PST_BOTTOM_LEFT  6
-#define PST_LEFT         7
-
-#define BORDER_LEFT      0
-#define BORDER_TOP       1
-#define BORDER_RIGHT     2
-#define BORDER_BOTTOM    3
-
-// Border styles as defined in webrender_api/types.rs
-#define BORDER_STYLE_NONE         0
-#define BORDER_STYLE_SOLID        1
-#define BORDER_STYLE_DOUBLE       2
-#define BORDER_STYLE_DOTTED       3
-#define BORDER_STYLE_DASHED       4
-#define BORDER_STYLE_HIDDEN       5
-#define BORDER_STYLE_GROOVE       6
-#define BORDER_STYLE_RIDGE        7
-#define BORDER_STYLE_INSET        8
-#define BORDER_STYLE_OUTSET       9
-
-#define UV_NORMALIZED    uint(0)
-#define UV_PIXEL         uint(1)
 
 #define EXTEND_MODE_CLAMP  0
 #define EXTEND_MODE_REPEAT 1
@@ -168,6 +138,15 @@ vec4[3] fetch_from_resource_cache_3(int address) {
         texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
         texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
         texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0))
+    );
+}
+
+vec4[4] fetch_from_resource_cache_4_direct(ivec2 address) {
+    return vec4[4](
+        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
+        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0)),
+        texelFetchOffset(sResourceCache, address, 0, ivec2(2, 0)),
+        texelFetchOffset(sResourceCache, address, 0, ivec2(3, 0))
     );
 }
 
@@ -330,85 +309,6 @@ struct RadialGradient {
 RadialGradient fetch_radial_gradient(int address) {
     vec4 data[3] = fetch_from_resource_cache_3(address);
     return RadialGradient(data[0], data[1], data[2]);
-}
-
-struct Border {
-    vec4 style;
-    vec4 widths;
-    vec4 colors[4];
-    vec4 radii[2];
-};
-
-vec4 get_effective_border_widths(Border border, int style) {
-    switch (style) {
-        case BORDER_STYLE_DOUBLE:
-            // Calculate the width of a border segment in a style: double
-            // border. Round to the nearest CSS pixel.
-
-            // The CSS spec doesn't define what width each of the segments
-            // in a style: double border should be. It only says that the
-            // sum of the segments should be equal to the total border
-            // width. We pick to make the segments (almost) equal thirds
-            // for now - we can adjust this if we find other browsers pick
-            // different values in some cases.
-            // SEE: https://drafts.csswg.org/css-backgrounds-3/#double
-            return floor(0.5 + border.widths / 3.0);
-        case BORDER_STYLE_GROOVE:
-        case BORDER_STYLE_RIDGE:
-            return floor(0.5 + border.widths * 0.5);
-        default:
-            return border.widths;
-    }
-}
-
-Border fetch_border(int address) {
-    vec4 data[8] = fetch_from_resource_cache_8(address);
-    return Border(data[0], data[1],
-                  vec4[4](data[2], data[3], data[4], data[5]),
-                  vec4[2](data[6], data[7]));
-}
-
-struct BorderCorners {
-    vec2 tl_outer;
-    vec2 tl_inner;
-    vec2 tr_outer;
-    vec2 tr_inner;
-    vec2 br_outer;
-    vec2 br_inner;
-    vec2 bl_outer;
-    vec2 bl_inner;
-};
-
-BorderCorners get_border_corners(Border border, RectWithSize local_rect) {
-    vec2 tl_outer = local_rect.p0;
-    vec2 tl_inner = tl_outer + vec2(max(border.radii[0].x, border.widths.x),
-                                    max(border.radii[0].y, border.widths.y));
-
-    vec2 tr_outer = vec2(local_rect.p0.x + local_rect.size.x,
-                         local_rect.p0.y);
-    vec2 tr_inner = tr_outer + vec2(-max(border.radii[0].z, border.widths.z),
-                                    max(border.radii[0].w, border.widths.y));
-
-    vec2 br_outer = vec2(local_rect.p0.x + local_rect.size.x,
-                         local_rect.p0.y + local_rect.size.y);
-    vec2 br_inner = br_outer - vec2(max(border.radii[1].x, border.widths.z),
-                                    max(border.radii[1].y, border.widths.w));
-
-    vec2 bl_outer = vec2(local_rect.p0.x,
-                         local_rect.p0.y + local_rect.size.y);
-    vec2 bl_inner = bl_outer + vec2(max(border.radii[1].z, border.widths.x),
-                                    -max(border.radii[1].w, border.widths.w));
-
-    return BorderCorners(
-        tl_outer,
-        tl_inner,
-        tr_outer,
-        tr_inner,
-        br_outer,
-        br_inner,
-        bl_outer,
-        bl_inner
-    );
 }
 
 struct Glyph {
@@ -861,6 +761,11 @@ BoxShadow fetch_boxshadow(int address) {
     return BoxShadow(data[0], data[1], data[2], data[3]);
 }
 
+BoxShadow fetch_boxshadow_direct(ivec2 address) {
+    vec4 data[4] = fetch_from_resource_cache_4_direct(address);
+    return BoxShadow(data[0], data[1], data[2], data[3]);
+}
+
 void write_clip(vec2 global_pos, ClipArea area) {
     vec2 texture_size = vec2(textureSize(sCacheA8, 0).xy);
     vec2 uv = global_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
@@ -948,68 +853,6 @@ vec4 sample_gradient(int address, float offset, float gradient_repeat) {
 
     // Finally interpolate and apply dithering
     return dither(mix(texels[0], texels[1], fract(x)));
-}
-
-//
-// Signed distance to an ellipse.
-// Taken from http://www.iquilezles.org/www/articles/ellipsedist/ellipsedist.htm
-// Note that this fails for exact circles.
-//
-float sdEllipse( vec2 p, in vec2 ab ) {
-    p = abs( p ); if( p.x > p.y ){ p=p.yx; ab=ab.yx; }
-    float l = ab.y*ab.y - ab.x*ab.x;
-
-    float m = ab.x*p.x/l;
-    float n = ab.y*p.y/l;
-    float m2 = m*m;
-    float n2 = n*n;
-
-    float c = (m2 + n2 - 1.0)/3.0;
-    float c3 = c*c*c;
-
-    float q = c3 + m2*n2*2.0;
-    float d = c3 + m2*n2;
-    float g = m + m*n2;
-
-    float co;
-
-    if( d<0.0 )
-    {
-        float p = acos(q/c3)/3.0;
-        float s = cos(p);
-        float t = sin(p)*sqrt(3.0);
-        float rx = sqrt( -c*(s + t + 2.0) + m2 );
-        float ry = sqrt( -c*(s - t + 2.0) + m2 );
-        co = ( ry + sign(l)*rx + abs(g)/(rx*ry) - m)/2.0;
-    }
-    else
-    {
-        float h = 2.0*m*n*sqrt( d );
-        float s = sign(q+h)*pow( abs(q+h), 1.0/3.0 );
-        float u = sign(q-h)*pow( abs(q-h), 1.0/3.0 );
-        float rx = -s - u - c*4.0 + 2.0*m2;
-        float ry = (s - u)*sqrt(3.0);
-        float rm = sqrt( rx*rx + ry*ry );
-        float p = ry/sqrt(rm-rx);
-        co = (p + 2.0*g/rm - m)/2.0;
-    }
-
-    float si = sqrt( 1.0 - co*co );
-
-    vec2 r = vec2( ab.x*co, ab.y*si );
-
-    return length(r - p ) * sign(p.y-r.y);
-}
-
-float distance_to_ellipse(vec2 p, vec2 radii) {
-    // sdEllipse fails on exact circles, so handle equal
-    // radii here. The branch coherency should make this
-    // a performance win for the circle case too.
-    if (radii.x == radii.y) {
-        return length(p) - radii.x;
-    } else {
-        return sdEllipse(p, radii);
-    }
 }
 
 #endif //WR_FRAGMENT_SHADER

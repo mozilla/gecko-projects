@@ -42,6 +42,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.jsm",
+  CustomizableUI: "resource:///modules/CustomizableUI.jsm",
   DownloadHistory: "resource://gre/modules/DownloadHistory.jsm",
   Downloads: "resource://gre/modules/Downloads.jsm",
   DownloadUIHelper: "resource://gre/modules/DownloadUIHelper.jsm",
@@ -950,6 +951,7 @@ const DownloadsViewPrototype = {
    */
   onDownloadBatchEnded() {
     this._loading = false;
+    this._updateViews();
   },
 
   /**
@@ -1065,13 +1067,6 @@ DownloadsIndicatorDataCtor.prototype = {
     }
   },
 
-  // Callback functions from DownloadsData
-
-  onDataLoadCompleted() {
-    DownloadsViewPrototype.onDataLoadCompleted.call(this);
-    this._updateViews();
-  },
-
   onDownloadAdded(download) {
     DownloadsViewPrototype.onDownloadAdded.call(this, download);
     this._itemCount++;
@@ -1159,6 +1154,17 @@ DownloadsIndicatorDataCtor.prototype = {
     }
 
     this._refreshProperties();
+
+    let widgetGroup = CustomizableUI.getWidget("downloads-button");
+    let inMenu = widgetGroup.areaType == CustomizableUI.TYPE_MENU_PANEL;
+    if (inMenu) {
+      if (this._attention == DownloadsCommon.ATTENTION_NONE) {
+        AppMenuNotifications.removeNotification(/^download-/);
+      } else {
+        let badgeClass = "download-" + this._attention;
+        AppMenuNotifications.showBadgeOnlyNotification(badgeClass);
+      }
+    }
 
     this._views.forEach(this._updateView, this);
   },
@@ -1295,15 +1301,6 @@ DownloadsSummaryData.prototype = {
       // another view registered with us, this will get re-populated.
       this._downloads = [];
     }
-  },
-
-  // Callback functions from DownloadsData - see the documentation in
-  // DownloadsViewPrototype for more information on what these functions
-  // are used for.
-
-  onDataLoadCompleted() {
-    DownloadsViewPrototype.onDataLoadCompleted.call(this);
-    this._updateViews();
   },
 
   onDownloadAdded(download) {

@@ -80,7 +80,7 @@ public class PayloadUploadDelegateTest {
         }
 
         @Override
-        public void lastPayloadFailed() {
+        public void lastPayloadFailed(Exception e) {
             didLastPayloadFail = true;
         }
     }
@@ -101,9 +101,7 @@ public class PayloadUploadDelegateTest {
         }
 
         @Override
-        public void onStoreCompleted(long storeEnd) {
-
-        }
+        public void onStoreCompleted() {}
 
         @Override
         public void onStoreFailed(Exception e) {
@@ -111,7 +109,7 @@ public class PayloadUploadDelegateTest {
         }
 
         @Override
-        public void onRecordStoreReconciled(String guid, Integer newVersion) {
+        public void onRecordStoreReconciled(String guid, String oldGuid, Integer newVersion) {
         }
 
         @Override

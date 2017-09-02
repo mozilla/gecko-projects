@@ -18,8 +18,7 @@ use values::generics::image::{CompatMode, ColorStop as GenericColorStop, EndingS
 use values::generics::image::{Gradient as GenericGradient, GradientItem as GenericGradientItem};
 use values::generics::image::{Image as GenericImage, GradientKind as GenericGradientKind};
 use values::generics::image::{LineDirection as GenericLineDirection, MozImageRect as GenericMozImageRect};
-use values::specified::image::{Gradient as SpecifiedGradient, LineDirection as SpecifiedLineDirection};
-use values::specified::image::{GradientKind as SpecifiedGradientKind};
+use values::specified::image::LineDirection as SpecifiedLineDirection;
 use values::specified::position::{X, Y};
 
 /// A computed image layer.
@@ -79,10 +78,13 @@ pub type ColorStop = GenericColorStop<RGBA, LengthOrPercentage>;
 pub type MozImageRect = GenericMozImageRect<NumberOrPercentage, ComputedUrl>;
 
 impl GenericLineDirection for LineDirection {
-    fn points_downwards(&self) -> bool {
+    fn points_downwards(&self, compat_mode: CompatMode) -> bool {
         match *self {
             LineDirection::Angle(angle) => angle.radians() == PI,
-            LineDirection::Vertical(Y::Bottom) => true,
+            LineDirection::Vertical(Y::Bottom)
+                if compat_mode == CompatMode::Modern => true,
+            LineDirection::Vertical(Y::Top)
+                if compat_mode != CompatMode::Modern => true,
             LineDirection::Corner(..) => false,
             #[cfg(feature = "gecko")]
             LineDirection::MozPosition(_, _) => false,
@@ -178,58 +180,6 @@ impl ToComputedValue for SpecifiedLineDirection {
                 SpecifiedLineDirection::MozPosition(ToComputedValue::from_computed_value(position),
                                                     ToComputedValue::from_computed_value(angle))
             },
-        }
-    }
-}
-
-impl ToComputedValue for SpecifiedGradient {
-    type ComputedValue = Gradient;
-
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        Self::ComputedValue {
-            kind: self.kind.to_computed_value(context),
-            items: self.items.to_computed_value(context),
-            repeating: self.repeating,
-            compat_mode: self.compat_mode
-        }
-    }
-
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        Self {
-            kind: SpecifiedGradientKind::from_computed_value(&computed.kind),
-            items: ToComputedValue::from_computed_value(&computed.items),
-            repeating: computed.repeating,
-            compat_mode: computed.compat_mode
-        }
-    }
-}
-
-impl ToComputedValue for SpecifiedGradientKind {
-    type ComputedValue = GradientKind;
-
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        match self {
-            &GenericGradientKind::Linear(ref line_direction) => {
-                GenericGradientKind::Linear(line_direction.to_computed_value(context))
-            },
-            &GenericGradientKind::Radial(ref ending_shape, ref position, ref angle) => {
-                GenericGradientKind::Radial(ending_shape.to_computed_value(context),
-                                            position.to_computed_value(context),
-                                            angle.map(|angle| angle.to_computed_value(context)))
-            }
-        }
-    }
-
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        match *computed {
-            GenericGradientKind::Linear(line_direction) => {
-                GenericGradientKind::Linear(SpecifiedLineDirection::from_computed_value(&line_direction))
-            },
-            GenericGradientKind::Radial(ending_shape, position, angle) => {
-                GenericGradientKind::Radial(ToComputedValue::from_computed_value(&ending_shape),
-                                            ToComputedValue::from_computed_value(&position),
-                                            angle.map(|angle| ToComputedValue::from_computed_value(&angle)))
-            }
         }
     }
 }

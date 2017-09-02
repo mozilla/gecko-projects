@@ -702,8 +702,12 @@ var DownloadsView = {
     let count = this._downloads.length;
     let hiddenCount = count - this.kItemCountLimit;
 
-    if (count <= 0) {
-      DownloadsButton.hide();
+    if (count > 0) {
+      DownloadsCommon.log("Setting the panel's hasdownloads attribute to true.");
+      DownloadsPanel.panel.setAttribute("hasdownloads", "true");
+    } else {
+      DownloadsCommon.log("Removing the panel's hasdownloads attribute.");
+      DownloadsPanel.panel.removeAttribute("hasdownloads");
     }
 
     // If we've got some hidden downloads, we should activate the
@@ -1571,13 +1575,6 @@ var DownloadsBlockedSubview = {
    *        An array of strings with information about the block.
    */
   toggle(element, title, details) {
-    if (this.view.showingSubView) {
-      this.hide();
-      return;
-    }
-
-    this.element = element;
-    element.setAttribute("showingsubview", "true");
     DownloadsView.subViewOpen = true;
     DownloadsViewController.updateCommands();
 
@@ -1598,32 +1595,25 @@ var DownloadsBlockedSubview = {
     // Without this, the mainView is more narrow than the panel once all
     // downloads are removed from the panel.
     document.getElementById("downloadsPanel-mainView").style.minWidth =
-      window.getComputedStyle(this.view).width;
+      window.getComputedStyle(this.subview).width;
   },
 
   handleEvent(event) {
     switch (event.type) {
       case "ViewHiding":
         this.subview.removeEventListener(event.type, this);
-        this.element.removeAttribute("showingsubview");
         DownloadsView.subViewOpen = false;
-        delete this.element;
+        // If we're going back to the main panel, use showPanel to
+        // focus the proper element.
+        if (this.view.current !== this.subview) {
+          DownloadsPanel.showPanel();
+        }
         break;
       default:
         DownloadsCommon.log("Unhandled DownloadsBlockedSubview event: " +
                             event.type);
         break;
     }
-  },
-
-  /**
-   * Slides out the blocked subview and shows the main view.
-   */
-  hide() {
-    this.view.showMainView();
-    // The point of this is to focus the proper element in the panel now that
-    // the main view is showing again.  showPanel handles that.
-    DownloadsPanel.showPanel();
   },
 
   /**

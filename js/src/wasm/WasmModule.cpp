@@ -18,6 +18,9 @@
 
 #include "wasm/WasmModule.h"
 
+#include <chrono>
+#include <thread>
+
 #include "jsnspr.h"
 
 #include "jit/JitOptions.h"
@@ -230,6 +233,111 @@ LinkData::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
     return sum;
 }
 
+class Module::Tier2GeneratorTaskImpl : public Tier2GeneratorTask
+{
+    SharedModule            module_;
+    SharedCompileArgs       compileArgs_;
+    Atomic<bool>            cancelled_;
+    bool                    finished_;
+
+  public:
+    Tier2GeneratorTaskImpl(Module& module, const CompileArgs& compileArgs)
+      : module_(&module),
+        compileArgs_(&compileArgs),
+        cancelled_(false),
+        finished_(false)
+    {}
+
+    ~Tier2GeneratorTaskImpl() override {
+        if (!finished_)
+            module_->notifyCompilationListeners();
+    }
+
+    void cancel() override {
+        cancelled_ = true;
+    }
+
+    void execute() override {
+        MOZ_ASSERT(!finished_);
+        finished_ = CompileTier2(*module_, *compileArgs_, &cancelled_);
+    }
+};
+
+void
+Module::startTier2(const CompileArgs& args)
+{
+    MOZ_ASSERT(!tiering_.lock()->active);
+
+    // If a Module initiates tier-2 compilation, we must ensure that eventually
+    // unblockOnTier2GeneratorFinished() is called. Since we must ensure
+    // Tier2GeneratorTaskImpl objects are destroyed *anyway*, we use
+    // ~Tier2GeneratorTaskImpl() to call unblockOnTier2GeneratorFinished() if it
+    // hasn't been already.
+
+    UniqueTier2GeneratorTask task(js_new<Tier2GeneratorTaskImpl>(*this, args));
+    if (!task)
+        return;
+
+    tiering_.lock()->active = true;
+
+    StartOffThreadWasmTier2Generator(Move(task));
+}
+
+void
+Module::notifyCompilationListeners()
+{
+    // Notify listeners without holding the lock to avoid deadlocks if the
+    // listener takes their own lock or reenters this Module.
+
+    Tiering::ListenerVector listeners;
+    {
+        auto tiering = tiering_.lock();
+
+        MOZ_ASSERT(tiering->active);
+        tiering->active = false;
+
+        Swap(listeners, tiering->listeners);
+    }
+
+    for (RefPtr<JS::WasmModuleListener>& listener : listeners)
+        listener->onCompilationComplete();
+}
+
+void
+Module::finishTier2(UniqueLinkDataTier linkData2, UniqueMetadataTier metadata2,
+                    UniqueConstCodeSegment code2, UniqueModuleEnvironment env2)
+{
+    // Install the data in the data structures. They will not be visible yet.
+
+    metadata().setTier2(Move(metadata2));
+    linkData().setTier2(Move(linkData2));
+    code().setTier2(Move(code2));
+    for (uint32_t i = 0; i < elemSegments_.length(); i++)
+        elemSegments_[i].setTier2(Move(env2->elemSegments[i].elemCodeRangeIndices(Tier::Ion)));
+
+    // Now that all the code and metadata is valid, make tier 2 code visible and
+    // unblock anyone waiting on it.
+
+    metadata().commitTier2();
+    notifyCompilationListeners();
+
+    // And we update the jump vector.
+
+    void** jumpTable = code().jumpTable();
+    uint8_t* base = code().segment(Tier::Ion).base();
+
+    for (auto cr : metadata(Tier::Ion).codeRanges) {
+        if (!cr.isFunction())
+            continue;
+
+        // This is a racy write that we just want to be visible, atomically,
+        // eventually.  All hardware we care about will do this right.  But
+        // we depend on the compiler not splitting the store.
+
+        jumpTable[cr.funcIndex()] = base + cr.funcTierEntry();
+    }
+}
+
 /* virtual */ size_t
 Module::bytecodeSerializedSize() const
 {
@@ -250,16 +358,45 @@ Module::bytecodeSerialize(uint8_t* bytecodeBegin, size_t bytecodeSize) const
     MOZ_RELEASE_ASSERT(bytecodeEnd == bytecodeBegin + bytecodeSize);
 }
 
+/* virtual */ bool
+Module::compilationComplete() const
+{
+    // For the purposes of serialization, if there is not an active tier-2
+    // compilation in progress, compilation is "complete" in that
+    // compiledSerialize() can be called. Now, tier-2 compilation may have
+    // failed or never started in the first place, but in such cases, a
+    // zero-byte compilation is serialized, triggering recompilation on upon
+    // deserialization. Basically, we only want serialization to wait if waiting
+    // would eventually produce tier-2 code.
+    return !tiering_.lock()->active;
+}
+
+/* virtual */ bool
+Module::notifyWhenCompilationComplete(JS::WasmModuleListener* listener)
+{
+    {
+        auto tiering = tiering_.lock();
+        if (tiering->active)
+            return tiering->listeners.append(listener);
+    }
+
+    // Notify the listener without holding the lock to avoid deadlocks if the
+    // listener takes their own lock or reenters this Module.
+    listener->onCompilationComplete();
+    return true;
+}
+
 /* virtual */ size_t
 Module::compiledSerializedSize() const
 {
+    MOZ_ASSERT(!tiering_.lock()->active);
+
     // The compiled debug code must not be saved, set compiled size to 0,
     // so Module::assumptionsMatch will return false during assumptions
     // deserialization.
     if (metadata().debugEnabled)
         return 0;
 
-    blockOnIonCompileFinished();
     if (!code_->hasTier(Tier::Serialized))
         return 0;
 
@@ -275,12 +412,13 @@ Module::compiledSerializedSize() const
 /* virtual */ void
 Module::compiledSerialize(uint8_t* compiledBegin, size_t compiledSize) const
 {
+    MOZ_ASSERT(!tiering_.lock()->active);
+
     if (metadata().debugEnabled) {
         MOZ_RELEASE_ASSERT(compiledSize == 0);
         return;
     }
 
-    blockOnIonCompileFinished();
     if (!code_->hasTier(Tier::Serialized)) {
         MOZ_RELEASE_ASSERT(compiledSize == 0);
         return;
@@ -295,56 +433,6 @@ Module::compiledSerialize(uint8_t* compiledBegin, size_t compiledSize) const
     cursor = SerializeVector(cursor, elemSegments_);
     cursor = code_->serialize(cursor, linkData_);
     MOZ_RELEASE_ASSERT(cursor == compiledBegin + compiledSize);
-}
-
-void
-Module::finishTier2Generator(UniqueLinkDataTier linkData2, UniqueMetadataTier metadata2,
-                             UniqueConstCodeSegment code2, UniqueModuleEnvironment env2)
-{
-    // Install the data in the data structures. They will not be visible yet.
-
-    metadata().setTier2(Move(metadata2));
-    linkData().setTier2(Move(linkData2));
-    code().setTier2(Move(code2));
-    for (uint32_t i = 0; i < elemSegments_.length(); i++)
-        elemSegments_[i].setTier2(Move(env2->elemSegments[i].elemCodeRangeIndices(Tier::Ion)));
-
-    // Set the flag atomically to make the tier 2 data visible everywhere at
-    // once.
-
-    metadata().commitTier2();
-
-    // And we update the jump vector.
-
-    uintptr_t* jumpTable = code().jumpTable();
-    uintptr_t base = reinterpret_cast<uintptr_t>(code().segment(Tier::Ion).base());
-
-    for (auto cr : metadata(Tier::Ion).codeRanges) {
-        if (!cr.isFunction())
-            continue;
-
-        // This is a racy write that we just want to be visible, atomically,
-        // eventually.  All hardware we care about will do this right.  But
-        // we depend on the compiler not splitting the store.
-
-        jumpTable[cr.funcIndex()] = base + cr.funcTierEntry();
-    }
-}
-
-void
-Module::blockOnIonCompileFinished() const
-{
-    LockGuard<Mutex> l(tier2Lock_);
-    while (mode_ == CompileMode::Tier1 && !metadata().hasTier2())
-        tier2Cond_.wait(l);
-}
-
-void
-Module::unblockOnTier2GeneratorFinished(CompileMode newMode) const
-{
-    LockGuard<Mutex> l(tier2Lock_);
-    mode_ = newMode;
-    tier2Cond_.notify_all();
 }
 
 /* static */ bool
@@ -420,8 +508,7 @@ Module::deserialize(const uint8_t* bytecodeBegin, size_t bytecodeSize,
     MOZ_RELEASE_ASSERT(cursor == compiledBegin + compiledSize);
     MOZ_RELEASE_ASSERT(!!maybeMetadata == code->metadata().isAsmJS());
 
-    return js_new<Module>(CompileMode::Tier2, // Serialized code is always Tier 2
-                          Move(assumptions),
+    return js_new<Module>(Move(assumptions),
                           *code,
                           nullptr,            // Serialized code is never debuggable
                           Move(linkData),
@@ -522,7 +609,7 @@ wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
         return nullptr;
 
     UniqueChars error;
-    return Compile(*bytecode, *args, &error);
+    return CompileInitialTier(*bytecode, *args, &error);
 }
 
 /* virtual */ void
@@ -558,8 +645,10 @@ Module::extractCode(JSContext* cx, Tier tier, MutableHandleValue vp) const
     if (!result)
         return false;
 
-    if (tier == Tier::Ion)
-        blockOnIonCompileFinished();
+    // This function is only used for testing purposes so we can simply
+    // busy-wait on tiered compilation to complete.
+    while (!compilationComplete())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     if (!code_->hasTier(tier)) {
         vp.setNull();
@@ -1152,6 +1241,9 @@ Module::instantiate(JSContext* cx,
 
     uint32_t mode = uint32_t(metadata().isAsmJS() ? Telemetry::ASMJS : Telemetry::WASM);
     cx->runtime()->addTelemetry(JS_TELEMETRY_AOT_USAGE, mode);
+
+    JSUseCounter useCounter = metadata().isAsmJS() ? JSUseCounter::ASMJS : JSUseCounter::WASM;
+    cx->runtime()->setUseCounter(instance, useCounter);
 
     return true;
 }

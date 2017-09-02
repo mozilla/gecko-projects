@@ -1607,9 +1607,14 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     // Unset this flag since we now really are in a document.
     UnsetFlags(NODE_FORCE_XBL_BINDINGS |
                // And clear the lazy frame construction bits.
-               NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES);
-    // And the restyle bits
-    UnsetRestyleFlagsIfGecko();
+               NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES |
+               // And the restyle bits. These shouldn't even get set if we came
+               // from a Servo-styled document, but they may be set if the
+               // element comes from a Gecko-backed document, see bug 1394586.
+               //
+               // TODO(emilio): We can remove this and assert we don't have any
+               // of them when we remove the old style system.
+               ELEMENT_ALL_RESTYLE_FLAGS);
   } else if (IsInShadowTree()) {
     // We're not in a document, but we did get inserted into a shadow tree.
     // Since we won't have any restyle data in the document's restyle trackers,
@@ -1617,9 +1622,10 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     //
     // Also clear all the other flags that are cleared above when we do get
     // inserted into a document.
-    UnsetFlags(NODE_FORCE_XBL_BINDINGS |
-               NODE_NEEDS_FRAME | NODE_DESCENDANTS_NEED_FRAMES);
-    UnsetRestyleFlagsIfGecko();
+    //
+    // See the comment about the restyle bits above, it also applies.
+    UnsetFlags(NODE_FORCE_XBL_BINDINGS | NODE_NEEDS_FRAME |
+               NODE_DESCENDANTS_NEED_FRAMES | ELEMENT_ALL_RESTYLE_FLAGS);
   } else {
     // If we're not in the doc and not in a shadow tree,
     // update our subtree pointer.
@@ -1900,7 +1906,12 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   // Computed style data isn't useful for detached nodes, and we'll need to
   // recompute it anyway if we ever insert the nodes back into a document.
   if (IsStyledByServo()) {
-    ClearServoData(document);
+    if (document) {
+      ClearServoData(document);
+    } else {
+      MOZ_ASSERT(!HasServoData());
+      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
+    }
   } else {
     MOZ_ASSERT(!HasServoData());
   }
@@ -2608,26 +2619,36 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     }
   }
 
-  nsIDocument* ownerDoc = OwnerDoc();
-  if (ownerDoc && GetCustomElementData()) {
-    nsCOMPtr<nsIAtom> oldValueAtom;
-    if (oldValue) {
-      oldValueAtom = oldValue->GetAsAtom();
-    } else {
-      // If there is no old value, get the value of the uninitialized attribute
-      // that was swapped with aParsedValue.
-      oldValueAtom = aParsedValue.GetAsAtom();
-    }
-    nsCOMPtr<nsIAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
-    LifecycleCallbackArgs args = {
-      nsDependentAtomString(aName),
-      aModType == nsIDOMMutationEvent::ADDITION ?
-        NullString() : nsDependentAtomString(oldValueAtom),
-      nsDependentAtomString(newValueAtom)
-    };
+  if (nsContentUtils::IsWebComponentsEnabled()) {
+    if (CustomElementData* data = GetCustomElementData()) {
+      if (CustomElementDefinition* definition =
+            nsContentUtils::GetElementDefinitionIfObservingAttr(this,
+                                                                data->mType,
+                                                                aName)) {
+        nsCOMPtr<nsIAtom> oldValueAtom;
+        if (oldValue) {
+          oldValueAtom = oldValue->GetAsAtom();
+        } else {
+          // If there is no old value, get the value of the uninitialized
+          // attribute that was swapped with aParsedValue.
+          oldValueAtom = aParsedValue.GetAsAtom();
+        }
+        nsCOMPtr<nsIAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
+        nsAutoString ns;
+        nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
 
-    nsContentUtils::EnqueueLifecycleCallback(
-      ownerDoc, nsIDocument::eAttributeChanged, this, &args);
+        LifecycleCallbackArgs args = {
+          nsDependentAtomString(aName),
+          aModType == nsIDOMMutationEvent::ADDITION ?
+            NullString() : nsDependentAtomString(oldValueAtom),
+          nsDependentAtomString(newValueAtom),
+          (ns.IsEmpty() ? NullString() : ns)
+        };
+
+        nsContentUtils::EnqueueLifecycleCallback(
+          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+      }
+    }
   }
 
   if (aCallAfterSetAttr) {
@@ -2902,17 +2923,27 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     }
   }
 
-  nsIDocument* ownerDoc = OwnerDoc();
-  if (ownerDoc && GetCustomElementData()) {
-    nsCOMPtr<nsIAtom> oldValueAtom = oldValue.GetAsAtom();
-    LifecycleCallbackArgs args = {
-      nsDependentAtomString(aName),
-      nsDependentAtomString(oldValueAtom),
-      NullString()
-    };
+  if (nsContentUtils::IsWebComponentsEnabled()) {
+    if (CustomElementData* data = GetCustomElementData()) {
+      if (CustomElementDefinition* definition =
+            nsContentUtils::GetElementDefinitionIfObservingAttr(this,
+                                                                data->mType,
+                                                                aName)) {
+        nsAutoString ns;
+        nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
 
-    nsContentUtils::EnqueueLifecycleCallback(
-      ownerDoc, nsIDocument::eAttributeChanged, this, &args);
+        nsCOMPtr<nsIAtom> oldValueAtom = oldValue.GetAsAtom();
+        LifecycleCallbackArgs args = {
+          nsDependentAtomString(aName),
+          nsDependentAtomString(oldValueAtom),
+          NullString(),
+          (ns.IsEmpty() ? NullString() : ns)
+        };
+
+        nsContentUtils::EnqueueLifecycleCallback(
+          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+      }
+    }
   }
 
   rv = AfterSetAttr(aNameSpaceID, aName, nullptr, &oldValue, aNotify);
@@ -4147,16 +4178,17 @@ Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32
 void
 Element::ClearServoData(nsIDocument* aDoc) {
   MOZ_ASSERT(IsStyledByServo());
+  MOZ_ASSERT(aDoc);
 #ifdef MOZ_STYLO
   Servo_Element_ClearData(this);
-  UnsetFlags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO |
-             ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
-
   // Since this element is losing its servo data, nothing under it may have
   // servo data either, so we can forget restyles rooted at this element. This
   // is necessary for correctness, since we invoke ClearServoData in various
   // places where an element's flattened tree parent changes, and such a change
   // may also make an element invalid to be used as a restyle root.
+  //
+  // Note that we need to null-check aDoc, which may be null in some situations
+  // when invoked from UnbindFromTree.
   if (aDoc && aDoc->GetServoRestyleRoot() == this) {
     aDoc->ClearServoRestyleRoot();
   }
@@ -4176,10 +4208,9 @@ Element::SetCustomElementData(CustomElementData* aData)
 MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)
 
 void
-Element::AddSizeOfExcludingThis(SizeOfState& aState, nsStyleSizes& aSizes,
-                                size_t* aNodeSize) const
+Element::AddSizeOfExcludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
 {
-  FragmentOrElement::AddSizeOfExcludingThis(aState, aSizes, aNodeSize);
+  FragmentOrElement::AddSizeOfExcludingThis(aSizes, aNodeSize);
 
   if (HasServoData()) {
     // Measure mServoData, excluding the ComputedValues. This measurement
@@ -4188,23 +4219,23 @@ Element::AddSizeOfExcludingThis(SizeOfState& aState, nsStyleSizes& aSizes,
     // output the memory measured within Servo code.
     *aNodeSize +=
       Servo_Element_SizeOfExcludingThisAndCVs(ServoElementMallocSizeOf,
-                                              &aState.mSeenPtrs, this);
+                                              &aSizes.mState.mSeenPtrs, this);
 
     // Now measure just the ComputedValues (and style structs) under
     // mServoData. This counts towards the relevant fields in |aSizes|.
     RefPtr<ServoStyleContext> sc;
     if (Servo_Element_HasPrimaryComputedValues(this)) {
       sc = Servo_Element_GetPrimaryComputedValues(this).Consume();
-      if (!aState.HaveSeenPtr(sc.get())) {
-        sc->AddSizeOfIncludingThis(aState, aSizes, &aSizes.mComputedValuesDom);
+      if (!aSizes.mState.HaveSeenPtr(sc.get())) {
+        sc->AddSizeOfIncludingThis(aSizes, &aSizes.mLayoutComputedValuesDom);
       }
 
       for (size_t i = 0; i < nsCSSPseudoElements::kEagerPseudoCount; i++) {
         if (Servo_Element_HasPseudoComputedValues(this, i)) {
           sc = Servo_Element_GetPseudoComputedValues(this, i).Consume();
-          if (!aState.HaveSeenPtr(sc.get())) {
-            sc->AddSizeOfIncludingThis(aState, aSizes,
-                                       &aSizes.mComputedValuesDom);
+          if (!aSizes.mState.HaveSeenPtr(sc.get())) {
+            sc->AddSizeOfIncludingThis(aSizes,
+                                       &aSizes.mLayoutComputedValuesDom);
           }
         }
       }
@@ -4214,14 +4245,14 @@ Element::AddSizeOfExcludingThis(SizeOfState& aState, nsStyleSizes& aSizes,
 
 #ifdef DEBUG
 static bool
-BitIsPropagated(const Element* aElement, uint32_t aBit, nsINode* aRestyleRoot)
+BitsArePropagated(const Element* aElement, uint32_t aBits, nsINode* aRestyleRoot)
 {
   const Element* curr = aElement;
   while (curr) {
     if (curr == aRestyleRoot) {
       return true;
     }
-    if (!curr->HasFlag(aBit)) {
+    if (!curr->HasAllFlags(aBits)) {
       return false;
     }
     nsINode* parentNode = curr->GetParentNode();
@@ -4233,6 +4264,21 @@ BitIsPropagated(const Element* aElement, uint32_t aBit, nsINode* aRestyleRoot)
   return true;
 }
 #endif
+
+static inline void
+AssertNoBitsPropagatedFrom(nsINode* aRoot) {
+#ifdef DEBUG
+  if (!aRoot || !aRoot->IsElement()) {
+    return;
+  }
+
+  auto* element = aRoot->GetFlattenedTreeParentElementForStyle();
+  while (element) {
+    MOZ_ASSERT(!element->HasAnyOfFlags(Element::kAllServoDescendantBits));
+    element = element->GetFlattenedTreeParentElementForStyle();
+  }
+#endif
+}
 
 // Sets |aBits| on aElement and all of its flattened-tree ancestors up to and
 // including aStopAt or the root element (whichever is encountered first).
@@ -4249,19 +4295,6 @@ PropagateBits(Element* aElement, uint32_t aBits, nsINode* aStopAt)
   }
 
   return curr;
-}
-
-// Invokes PropagateBits on the parent element if |aNode| is not the document.
-static inline Element*
-PropagateBitsFromParent(nsINode* aNode, uint32_t aBits, nsINode* aStopAt)
-{
-  MOZ_ASSERT(aNode->IsElement() || aNode == aNode->OwnerDoc());
-  if (!aNode->IsElement()) {
-    return nullptr;
-  }
-
-  Element* parent = aNode->AsElement()->GetFlattenedTreeParentElementForStyle();
-  return PropagateBits(parent, aBits, aStopAt);
 }
 
 // Notes that a given element is "dirty" with respect to the given descendants
@@ -4294,8 +4327,12 @@ PropagateBitsFromParent(nsINode* aNode, uint32_t aBits, nsINode* aStopAt)
 //   (which are the main DOM + each piece of document-level native-anoymous
 //   content), we set the restyle root to the nsINode of the document itself.
 //   This is the bail-out case where we traverse everything.
+//
+// Note that, since we track a root, we try to optimize the case where an
+// element under the current root is dirtied, that's why we don't trivially use
+// `nsContentUtils::GetCommonFlattenedTreeAncestorForStyle`.
 static void
-NoteDirtyElement(Element* aElement, uint32_t aBit)
+NoteDirtyElement(Element* aElement, uint32_t aBits)
 {
   MOZ_ASSERT(aElement->IsInComposedDoc());
   MOZ_ASSERT(aElement->IsStyledByServo());
@@ -4311,7 +4348,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBit)
 
     // Similarly, if our parent already has the bit we're propagating, we can
     // assume everything is already set up.
-    if (parent->HasFlag(aBit)) {
+    if (parent->HasAllFlags(aBits)) {
       MOZ_ASSERT(aElement->GetComposedDoc()->GetServoRestyleRoot());
       return;
     }
@@ -4329,47 +4366,84 @@ NoteDirtyElement(Element* aElement, uint32_t aBit)
     shell->EnsureStyleFlush();
   }
 
-  // If there's no existing restyle root, or if the root is already aElement,
-  // just note the root+bits and return.
   nsINode* existingRoot = doc->GetServoRestyleRoot();
   uint32_t existingBits = existingRoot ? doc->GetServoRestyleRootDirtyBits() : 0;
+
+  // The bit checks below rely on this to arrive to useful conclusions about the
+  // shape of the tree.
+  AssertNoBitsPropagatedFrom(existingRoot);
+
+  // If there's no existing restyle root, or if the root is already aElement,
+  // just note the root+bits and return.
   if (!existingRoot || existingRoot == aElement) {
-    doc->SetServoRestyleRoot(aElement, existingBits | aBit);
+    doc->SetServoRestyleRoot(aElement, existingBits | aBits);
     return;
   }
 
   // There is an existing restyle root - walk up the tree from our element,
-  // propagating bits as wel go.
-  const bool reachedDocRoot = !parent || !PropagateBits(parent, aBit, existingRoot);
+  // propagating bits as we go.
+  const bool reachedDocRoot = !parent || !PropagateBits(parent, aBits, existingRoot);
 
-  if (!reachedDocRoot) {
+  if (!reachedDocRoot || existingRoot == doc) {
       // We're a descendant of the existing root. All that's left to do is to
       // make sure the bit we propagated is also registered on the root.
-      doc->SetServoRestyleRoot(existingRoot, existingBits | aBit);
+      doc->SetServoRestyleRoot(existingRoot, existingBits | aBits);
   } else {
     // We reached the root without crossing the pre-existing restyle root. We
     // now need to find the nearest common ancestor, so climb up from the
     // existing root, extending bits along the way.
-    if (Element* commonAncestor = PropagateBitsFromParent(existingRoot, existingBits, aElement)) {
+    Element* rootParent = existingRoot->GetFlattenedTreeParentElementForStyle();
+    if (Element* commonAncestor = PropagateBits(rootParent, existingBits, aElement)) {
+      MOZ_ASSERT(commonAncestor == aElement ||
+                 commonAncestor == nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(aElement, rootParent));
+
       // We found a common ancestor. Make that the new style root, and clear the
       // bits between the new style root and the document root.
-      doc->SetServoRestyleRoot(commonAncestor, existingBits | aBit);
+      doc->SetServoRestyleRoot(commonAncestor, existingBits | aBits);
       Element* curr = commonAncestor;
       while ((curr = curr->GetFlattenedTreeParentElementForStyle())) {
-        MOZ_ASSERT(curr->HasFlag(aBit));
-        curr->UnsetFlags(aBit);
+        MOZ_ASSERT(curr->HasAllFlags(aBits));
+        curr->UnsetFlags(aBits);
       }
     } else {
       // We didn't find a common ancestor element. That means we're descended
       // from two different document style roots, so the common ancestor is the
       // document.
-      doc->SetServoRestyleRoot(doc, existingBits | aBit);
+      doc->SetServoRestyleRoot(doc, existingBits | aBits);
     }
   }
 
   MOZ_ASSERT(aElement == doc->GetServoRestyleRoot() ||
-             BitIsPropagated(parent, aBit, doc->GetServoRestyleRoot()));
-  MOZ_ASSERT(doc->GetServoRestyleRootDirtyBits() & aBit);
+             nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
+               aElement, doc->GetServoRestyleRoot()));
+  MOZ_ASSERT(aElement == doc->GetServoRestyleRoot() ||
+             BitsArePropagated(parent, aBits, doc->GetServoRestyleRoot()));
+  MOZ_ASSERT(doc->GetServoRestyleRootDirtyBits() & aBits);
+}
+
+void
+Element::NoteDirtySubtreeForServo()
+{
+  MOZ_ASSERT(IsInComposedDoc());
+  MOZ_ASSERT(HasServoData());
+
+  nsIDocument* doc = GetComposedDoc();
+  nsINode* existingRoot = doc->GetServoRestyleRoot();
+  uint32_t existingBits = existingRoot ? doc->GetServoRestyleRootDirtyBits() : 0;
+
+  if (existingRoot &&
+      existingRoot->IsElement() &&
+      existingRoot != this &&
+      nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
+        existingRoot->AsElement(), this)) {
+    PropagateBits(existingRoot->AsElement()->GetFlattenedTreeParentElementForStyle(),
+                  existingBits,
+                  this);
+
+    doc->ClearServoRestyleRoot();
+  }
+
+  NoteDirtyElement(this, existingBits | ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
 }
 
 void

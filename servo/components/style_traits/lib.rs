@@ -34,7 +34,7 @@ use selectors::parser::SelectorParseError;
 ///
 /// This unit corresponds to the smallest addressable element of the display hardware.
 #[cfg(not(feature = "servo"))]
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum DevicePixel {}
 
 /// Opaque type stored in type-unsafe work queues for parallel layout.
@@ -84,7 +84,6 @@ pub mod values;
 pub mod viewport;
 
 pub use values::{Comma, CommaWithSpace, OneOrMoreSeparated, Separator, Space, ToCss};
-pub use viewport::HasViewportPercentage;
 
 /// The error type for all CSS parsing routines.
 pub type ParseError<'i> = cssparser::ParseError<'i, SelectorParseError<'i, StyleParseError<'i>>>;
@@ -148,7 +147,7 @@ impl<'i> ValueParseError<'i> {
 }
 
 /// The result of parsing a property declaration.
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PropertyDeclarationParseError<'i> {
     /// The property declaration was for an unknown property.
     UnknownProperty(CowRcStr<'i>),

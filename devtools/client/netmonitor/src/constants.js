@@ -94,6 +94,44 @@ const EVENTS = {
   CONNECTED: "connected",
 };
 
+const UPDATE_PROPS = [
+  "method",
+  "url",
+  "remotePort",
+  "remoteAddress",
+  "status",
+  "statusText",
+  "httpVersion",
+  "securityState",
+  "securityInfo",
+  "mimeType",
+  "contentSize",
+  "transferredSize",
+  "totalTime",
+  "eventTimings",
+  "headersSize",
+  "customQueryValue",
+  "requestHeaders",
+  "requestHeadersFromUploadStream",
+  "requestCookies",
+  "requestPostData",
+  "responseHeaders",
+  "responseCookies",
+  "responseContent",
+  "responseContentDataUri",
+  "formDataSections",
+];
+
+const PANELS = {
+  COOKIES: "cookies",
+  HEADERS: "headers",
+  PARAMS: "params",
+  RESPONSE: "response",
+  SECURITY: "security",
+  STACK_TRACE: "stack-trace",
+  TIMINGS: "timings",
+};
+
 const RESPONSE_HEADERS = [
   "Cache-Control",
   "Connection",
@@ -231,11 +269,13 @@ const REQUESTS_WATERFALL = {
   // 8-bit value of the alpha component of the tick color
   BACKGROUND_TICKS_OPACITY_MIN: 32,
   BACKGROUND_TICKS_OPACITY_ADD: 32,
-  // RGBA colors for the timing markers
-  DOMCONTENTLOADED_TICKS_COLOR_RGBA: [0, 0, 255, 128],
+  // Colors for timing markers (theme colors, see variables.css)
+  DOMCONTENTLOADED_TICKS_COLOR: "highlight-blue",
+  LOAD_TICKS_COLOR: "highlight-red",
+  // Opacity for the timing markers
+  TICKS_COLOR_OPACITY: 192,
   HEADER_TICKS_MULTIPLE: 5, // ms
   HEADER_TICKS_SPACING_MIN: 60, // px
-  LOAD_TICKS_COLOR_RGBA: [255, 0, 0, 128],
   // Reserve extra space for rendering waterfall time label
   LABEL_WIDTH: 50, // px
 };
@@ -244,11 +284,13 @@ const general = {
   ACTIVITY_TYPE,
   EVENTS,
   FILTER_SEARCH_DELAY: 200,
+  UPDATE_PROPS,
   HEADERS,
   RESPONSE_HEADERS,
   FILTER_FLAGS,
   SOURCE_EDITOR_SYNTAX_HIGHLIGHT_MAX_SIZE: 51200, // 50 KB in bytes
   REQUESTS_WATERFALL,
+  PANELS,
 };
 
 // flatten constants

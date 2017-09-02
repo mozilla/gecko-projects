@@ -104,10 +104,6 @@ WebGLContextOptions::WebGLContextOptions()
         alpha = false;
 }
 
-
-/*static*/ const uint32_t WebGLContext::kMinMaxColorAttachments = 4;
-/*static*/ const uint32_t WebGLContext::kMinMaxDrawBuffers = 4;
-
 WebGLContext::WebGLContext()
     : WebGLContextUnchecked(nullptr)
     , mMaxPerfWarnings(gfxPrefs::WebGLMaxPerfWarnings())
@@ -134,7 +130,6 @@ WebGLContext::WebGLContext()
     mShouldPresent = true;
     mResetLayer = true;
     mOptionsFrozen = false;
-    mMinCapability = false;
     mDisableExtensions = false;
     mIsMesa = false;
     mEmitContextLostErrorOnce = false;
@@ -1408,6 +1403,16 @@ WebGLContext::GetCompositorBackendType() const
     return LayersBackend::LAYERS_NONE;
 }
 
+nsIDocument*
+WebGLContext::GetOwnerDoc() const
+{
+    MOZ_ASSERT(mCanvasElement);
+    if (!mCanvasElement) {
+        return nullptr;
+    }
+    return mCanvasElement->OwnerDoc();
+}
+
 void
 WebGLContext::Commit()
 {
@@ -2449,6 +2454,18 @@ WebGLContext::ValidateArrayBufferView(const char* funcName,
 
 ////////////////////////////////////////////////////////////////////////////////
 // XPCOM goop
+
+void
+WebGLContext::UpdateMaxDrawBuffers()
+{
+    mGLMaxColorAttachments = gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_COLOR_ATTACHMENTS);
+    mGLMaxDrawBuffers = gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_DRAW_BUFFERS);
+
+    // WEBGL_draw_buffers:
+    // "The value of the MAX_COLOR_ATTACHMENTS_WEBGL parameter must be greater than or
+    //  equal to that of the MAX_DRAW_BUFFERS_WEBGL parameter."
+    mGLMaxDrawBuffers = std::min(mGLMaxDrawBuffers, mGLMaxColorAttachments);
+}
 
 void
 ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& callback,

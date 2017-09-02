@@ -16,7 +16,7 @@ multiple tasks requesting the same named cache, the worker will
 have multiple caches of the same name on the worker.
 
 Caches and ``run-task``
-=======================
+-----------------------
 
 ``run-task`` is our generic task wrapper script. It does common activities
 like ensure a version control checkout is present.
@@ -39,10 +39,10 @@ Some caches are reserved for use with run-task. That property will be denoted
 below.
 
 Common Caches
-=============
+-------------
 
 Version Control Caches
-----------------------
+::::::::::::::::::::::
 
 ``level-{{level}}-checkouts-{{hash}}``
    This cache holds version control checkouts, each in a subdirectory named
@@ -54,6 +54,10 @@ Version Control Caches
 
    This cache name pattern is managed by ``run-task`` and must only be
    used with ``run-task``.
+
+``level-{{level}}-checkouts-sparse-{{hash}}``
+   This is like the above but is used when the checkout is sparse (contains
+   a subset of files).
 
 ``level-{{level}}-checkouts-{{version}}`` (deprecated)
    This cache holds version control checkouts, each in a subdirectory named
@@ -77,7 +81,7 @@ Version Control Caches
     should be replaced with ``hg robustcheckout``.
 
 Workspace Caches
-----------------
+::::::::::::::::
 
 ``level-{{level}}-*-workspace``
    These caches (of various names typically ending with ``workspace``)
@@ -85,7 +89,7 @@ Workspace Caches
    dependent on the task.
 
 Other
------
+:::::
 
 ``level-{{level}}-tooltool-cache-{{hash}}
    Tooltool invocations should use this cache. Tooltool will store files here

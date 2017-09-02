@@ -2,14 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use app_units::Au;
 use channel::{self, MsgSender, Payload, PayloadSenderHelperMethods, PayloadSender};
 use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
 use {BuiltDisplayList, BuiltDisplayListDescriptor, ClipId, ColorF, DeviceIntPoint};
-use {DeviceUintRect, DeviceUintSize, FontKey, GlyphDimensions, GlyphKey};
+use {DeviceUintRect, DeviceUintSize, FontInstanceKey, FontKey, GlyphDimensions, GlyphKey};
 use {ImageData, ImageDescriptor, ImageKey, LayoutPoint, LayoutVector2D, LayoutSize, LayoutTransform};
-use {FontInstance, NativeFontHandle, WorldPoint};
+use {FontInstance, FontInstanceOptions, FontInstancePlatformOptions, NativeFontHandle, WorldPoint};
 
 pub type TileSize = u16;
 
@@ -26,6 +27,8 @@ pub enum ResourceUpdate {
     DeleteImage(ImageKey),
     AddFont(AddFont),
     DeleteFont(FontKey),
+    AddFontInstance(AddFontInstance),
+    DeleteFontInstance(FontInstanceKey),
 }
 
 impl ResourceUpdates {
@@ -70,6 +73,27 @@ impl ResourceUpdates {
     pub fn delete_font(&mut self, key: FontKey) {
         self.updates.push(ResourceUpdate::DeleteFont(key));
     }
+
+    pub fn add_font_instance(&mut self,
+                             key: FontInstanceKey,
+                             font_key: FontKey,
+                             glyph_size: Au,
+                             options: Option<FontInstanceOptions>,
+                             platform_options: Option<FontInstancePlatformOptions>) {
+        self.updates.push(ResourceUpdate::AddFontInstance(AddFontInstance { key, font_key, glyph_size, options, platform_options }));
+    }
+
+    pub fn delete_font_instance(&mut self, key: FontInstanceKey) {
+        self.updates.push(ResourceUpdate::DeleteFontInstance(key));
+    }
+
+    pub fn merge(&mut self, mut other: ResourceUpdates) {
+        self.updates.append(&mut other.updates);
+    }
+
+    pub fn clear(&mut self) {
+        self.updates.clear()
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -95,6 +119,15 @@ pub enum AddFont {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
+pub struct AddFontInstance {
+    pub key: FontInstanceKey,
+    pub font_key: FontKey,
+    pub glyph_size: Au,
+    pub options: Option<FontInstanceOptions>,
+    pub platform_options: Option<FontInstancePlatformOptions>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 pub enum DocumentMsg {
     SetDisplayList {
         list_descriptor: BuiltDisplayListDescriptor,
@@ -110,6 +143,7 @@ pub enum DocumentMsg {
     SetPinchZoom(ZoomFactor),
     SetPan(DeviceIntPoint),
     SetRootPipeline(PipelineId),
+    RemovePipeline(PipelineId),
     SetWindowParameters {
         window_size: DeviceUintSize,
         inner_rect: DeviceUintRect,
@@ -129,6 +163,7 @@ impl fmt::Debug for DocumentMsg {
             DocumentMsg::SetPinchZoom(..) => "DocumentMsg::SetPinchZoom",
             DocumentMsg::SetPan(..) => "DocumentMsg::SetPan",
             DocumentMsg::SetRootPipeline(..) => "DocumentMsg::SetRootPipeline",
+            DocumentMsg::RemovePipeline(..) => "DocumentMsg::RemovePipeline",
             DocumentMsg::SetWindowParameters{..} => "DocumentMsg::SetWindowParameters",
             DocumentMsg::Scroll(..) => "DocumentMsg::Scroll",
             DocumentMsg::ScrollNodeWithId(..) => "DocumentMsg::ScrollNodeWithId",
@@ -137,6 +172,20 @@ impl fmt::Debug for DocumentMsg {
             DocumentMsg::GenerateFrame(..) => "DocumentMsg::GenerateFrame",
         })
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum DebugCommand {
+    // Display the frame profiler on screen.
+    EnableProfiler(bool),
+    // Display all texture cache pages on screen.
+    EnableTextureCacheDebug(bool),
+    // Display intermediate render targets on screen.
+    EnableRenderTargetDebug(bool),
+    // Fetch current documents and display lists.
+    FetchDocuments,
+    // Fetch current passes and batches.
+    FetchPasses,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -163,6 +212,8 @@ pub enum ApiMsg {
     ClearNamespace(IdNamespace),
     /// Flush from the caches anything that isn't necessary, to free some memory.
     MemoryPressure,
+    /// Change debugging options.
+    DebugCommand(DebugCommand),
     ShutDown,
 }
 
@@ -179,6 +230,7 @@ impl fmt::Debug for ApiMsg {
             ApiMsg::ExternalEvent(..) => "ApiMsg::ExternalEvent",
             ApiMsg::ClearNamespace(..) => "ApiMsg::ClearNamespace",
             ApiMsg::MemoryPressure => "ApiMsg::MemoryPressure",
+            ApiMsg::DebugCommand(..) => "ApiMsg::DebugCommand",
             ApiMsg::ShutDown => "ApiMsg::ShutDown",
         })
     }
@@ -306,6 +358,11 @@ impl RenderApi {
         FontKey::new(self.namespace_id, new_id)
     }
 
+    pub fn generate_font_instance_key(&self) -> FontInstanceKey {
+        let new_id = self.next_unique_id();
+        FontInstanceKey::new(self.namespace_id, new_id)
+    }
+
     /// Gets the dimensions for the supplied glyph keys
     ///
     /// Note: Internally, the internal texture cache doesn't store
@@ -399,7 +456,7 @@ impl RenderApi {
         self.api_sender.send(ApiMsg::UpdateDocument(document_id, msg)).unwrap()
     }
 
-        /// Sets the root pipeline.
+    /// Sets the root pipeline.
     ///
     /// # Examples
     ///
@@ -416,10 +473,17 @@ impl RenderApi {
         self.send(document_id, DocumentMsg::SetRootPipeline(pipeline_id));
     }
 
+    /// Removes data associated with a pipeline from the internal data structures.
+    /// If the specified `pipeline_id` is for the root pipeline, the root pipeline
+    /// is reset back to `None`.
+    pub fn remove_pipeline(&self, document_id: DocumentId, pipeline_id: PipelineId) {
+        self.send(document_id, DocumentMsg::RemovePipeline(pipeline_id));
+    }
+
     /// Supplies a new frame to WebRender.
     ///
     /// Non-blocking, it notifies a worker process which processes the display list.
-    /// When it's done and a RenderNotifier has been set in `webrender::renderer::Renderer`,
+    /// When it's done and a RenderNotifier has been set in `webrender::Renderer`,
     /// [new_frame_ready()][notifier] gets called.
     ///
     /// Note: Scrolling doesn't require an own Frame.

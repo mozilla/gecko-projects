@@ -278,6 +278,8 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mPendingViewportChange(false),
     mCounterStylesDirty(true),
     mPostedFlushCounterStyles(false),
+    mFontFeatureValuesDirty(true),
+    mPostedFlushFontFeatureValues(false),
     mSuppressResizeReflow(false),
     mIsVisual(false),
     mFireAfterPaintEvents(false),
@@ -674,7 +676,7 @@ nsPresContext::GetUserPreferences()
   // We don't need to force reflow: either we are initializing a new
   // prescontext or we are being called from UpdateAfterPreferencesChanged()
   // which triggers a reflow anyway.
-  SetBidi(bidiOptions, false);
+  SetBidi(bidiOptions);
 }
 
 void
@@ -1081,7 +1083,12 @@ nsPresContext::DoChangeCharSet(NotNull<const Encoding*> aCharSet)
 {
   UpdateCharSet(aCharSet);
   mDeviceContext->FlushFontCache();
-  RebuildAllStyleData(NS_STYLE_HINT_REFLOW, nsRestyleHint(0));
+  // In Stylo, if a document contains one or more <script> elements, frame
+  // construction might happen earlier than the UpdateCharSet(), so we need to
+  // restyle descendants to make their style data up-to-date.
+  RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
+                      mDocument->IsStyledByServo()
+                      ? eRestyle_ForceDescendants : nsRestyleHint(0));
 }
 
 void
@@ -1647,15 +1654,12 @@ nsPresContext::SetBidiEnabled() const
 }
 
 void
-nsPresContext::SetBidi(uint32_t aSource, bool aForceRestyle)
+nsPresContext::SetBidi(uint32_t aSource)
 {
   // Don't do all this stuff unless the options have changed.
   if (aSource == GetBidi()) {
     return;
   }
-
-  NS_ASSERTION(!(aForceRestyle && (GetBidi() == 0)),
-               "ForceReflow on new prescontext");
 
   Document()->SetBidiOptions(aSource);
   if (IBMBIDI_TEXTDIRECTION_RTL == GET_BIDI_OPTION_DIRECTION(aSource)
@@ -1673,12 +1677,6 @@ nsPresContext::SetBidi(uint32_t aSource, bool aForceRestyle)
     if (doc) {
       SetVisualMode(IsVisualCharset(doc->GetDocumentCharacterSet()));
     }
-  }
-  if (aForceRestyle && mShell) {
-    // Reconstruct the root document element's frame and its children,
-    // because we need to trigger frame reconstruction for direction change.
-    mDocument->RebuildUserFontSet();
-    mShell->ReconstructFrames();
   }
 }
 
@@ -2064,6 +2062,7 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint,
   }
   mDocument->RebuildUserFontSet();
   RebuildCounterStyles();
+  RebuildFontFeatureValues();
 
   RestyleManager()->RebuildAllStyleData(aExtraHint, aRestyleHint);
 }
@@ -3119,6 +3118,42 @@ nsPresContext::GetBidiEngine()
     mBidiEngine.reset(new nsBidi());
   }
   return *mBidiEngine;
+}
+
+void
+nsPresContext::FlushFontFeatureValues()
+{
+  if (!mShell) {
+    return; // we've been torn down
+  }
+
+  if (mFontFeatureValuesDirty) {
+    StyleSetHandle styleSet = mShell->StyleSet();
+    mFontFeatureValuesLookup = styleSet->BuildFontFeatureValueSet();
+    mFontFeatureValuesDirty = false;
+  }
+}
+
+void
+nsPresContext::RebuildFontFeatureValues()
+{
+  if (!mShell) {
+    return; // we've been torn down
+  }
+
+  mFontFeatureValuesDirty = true;
+  mShell->SetNeedStyleFlush();
+
+  if (!mPostedFlushFontFeatureValues) {
+    nsCOMPtr<nsIRunnable> ev =
+      NewRunnableMethod("nsPresContext::HandleRebuildFontFeatureValues",
+                        this, &nsPresContext::HandleRebuildFontFeatureValues);
+    nsresult rv =
+      Document()->Dispatch(TaskCategory::Other, ev.forget());
+    if (NS_SUCCEEDED(rv)) {
+      mPostedFlushFontFeatureValues = true;
+    }
+  }
 }
 
 nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,

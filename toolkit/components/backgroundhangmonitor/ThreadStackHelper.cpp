@@ -165,6 +165,20 @@ ThreadStackHelper::TryAppendFrame(HangStack::Frame aFrame)
 {
   MOZ_RELEASE_ASSERT(mStackToFill);
 
+  // We deduplicate identical frames of kind CONTENT, JIT, WASM, and SUPPRESSED.
+  switch (aFrame.GetKind()) {
+    case HangStack::Frame::Kind::CONTENT:
+    case HangStack::Frame::Kind::JIT:
+    case HangStack::Frame::Kind::WASM:
+    case HangStack::Frame::Kind::SUPPRESSED:
+      if (!mStackToFill->empty() && mStackToFill->back().GetKind() == aFrame.GetKind()) {
+        return;
+      }
+      break;
+    default:
+      break;
+  }
+
   // Record that we _want_ to use another frame entry. If this exceeds
   // mMaxStackSize, we'll allocate more room on the next hang.
   mDesiredStackSize += 1;
@@ -186,7 +200,7 @@ void
 ThreadStackHelper::CollectJitReturnAddr(void* aAddr)
 {
   MOZ_RELEASE_ASSERT(mStackToFill);
-  TryAppendFrame(HangStack::Frame("(jit frame)"));
+  TryAppendFrame(HangStack::Frame::Jit());
 }
 
 void
@@ -195,7 +209,7 @@ ThreadStackHelper::CollectWasmFrame(const char* aLabel)
   MOZ_RELEASE_ASSERT(mStackToFill);
   // We don't want to collect WASM frames, as they are probably for content, so
   // we just add a "(content wasm)" frame.
-  TryAppendFrame(HangStack::Frame("(wasm)"));
+  TryAppendFrame(HangStack::Frame::Wasm());
 }
 
 namespace {
@@ -255,12 +269,12 @@ ThreadStackHelper::CollectPseudoEntry(const js::ProfileEntry& aEntry)
   }
 
   if (!aEntry.script()) {
-    TryAppendFrame(HangStack::Frame("(profiling suppressed)"));
+    TryAppendFrame(HangStack::Frame::Suppressed());
     return;
   }
 
   if (!IsChromeJSScript(aEntry.script())) {
-    TryAppendFrame(HangStack::Frame("(content script)"));
+    TryAppendFrame(HangStack::Frame::Content());
     return;
   }
 

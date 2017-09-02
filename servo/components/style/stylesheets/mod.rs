@@ -26,7 +26,7 @@ pub mod viewport_rule;
 
 use cssparser::{parse_one_rule, Parser, ParserInput};
 use error_reporting::NullReporter;
-use parser::ParserContext;
+use parser::{ParserContext, ParserErrorContext};
 use servo_arc::Arc;
 use shared_lock::{DeepCloneParams, DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt;
@@ -88,7 +88,7 @@ impl Eq for UrlExtraData {}
 /// A CSS rule.
 ///
 /// TODO(emilio): Lots of spec links should be around.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CssRule {
     // No Charset here, CSSCharsetRule has been removed from CSSOM
@@ -135,7 +135,7 @@ impl MallocSizeOfWithGuard for CssRule {
 }
 
 #[allow(missing_docs)]
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CssRuleType {
     // https://drafts.csswg.org/cssom/#the-cssrule-interface
     Style               = 1,
@@ -230,7 +230,6 @@ impl CssRule {
         let context = ParserContext::new(
             parent_stylesheet_contents.origin,
             &url_data,
-            &error_reporter,
             None,
             PARSING_MODE_DEFAULT,
             parent_stylesheet_contents.quirks_mode,
@@ -246,6 +245,7 @@ impl CssRule {
         let mut rule_parser = TopLevelRuleParser {
             stylesheet_origin: parent_stylesheet_contents.origin,
             context: context,
+            error_context: ParserErrorContext { error_reporter: &error_reporter },
             shared_lock: &shared_lock,
             loader: loader,
             state: state,

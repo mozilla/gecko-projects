@@ -38,7 +38,7 @@ use style::stylesheets::{CssRuleType, Stylesheet};
 use style_traits::PARSING_MODE_DEFAULT;
 use stylesheet_loader::{StylesheetLoader, StylesheetContextSource, StylesheetOwner};
 
-#[derive(JSTraceable, PartialEq, Clone, Copy, HeapSizeOf)]
+#[derive(Clone, Copy, HeapSizeOf, JSTraceable, PartialEq)]
 pub struct RequestGenerationId(u32);
 
 impl RequestGenerationId {
@@ -285,9 +285,8 @@ impl HTMLLinkElement {
 
         let mut input = ParserInput::new(&mq_str);
         let mut css_parser = CssParser::new(&mut input);
-        let win = document.window();
         let doc_url = document.url();
-        let context = CssParserContext::new_for_cssom(&doc_url, win.css_error_reporter(), Some(CssRuleType::Media),
+        let context = CssParserContext::new_for_cssom(&doc_url, Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       document.quirks_mode());
         let media = parse_media_query_list(&context, &mut css_parser);

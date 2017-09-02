@@ -5,7 +5,6 @@
 use devtools;
 use devtools_traits::DevtoolScriptControlMsg;
 use dom::abstractworker::WorkerScriptMsg;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
 use dom::bindings::codegen::Bindings::ServiceWorkerGlobalScopeBinding;
 use dom::bindings::codegen::Bindings::ServiceWorkerGlobalScopeBinding::ServiceWorkerGlobalScopeMethods;
 use dom::bindings::inheritance::Castable;
@@ -50,7 +49,7 @@ pub enum MixedMessage {
     FromTimeoutThread(())
 }
 
-#[derive(JSTraceable, Clone)]
+#[derive(Clone, JSTraceable)]
 pub struct ServiceWorkerChan {
     pub sender: Sender<ServiceWorkerScriptMsg>
 }

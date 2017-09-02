@@ -13,14 +13,10 @@ SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 
 
 def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
-    """Add the workspace cache based on the build platform/type and level,
-    except on try where workspace caches are not used.
+    """Add the workspace cache.
 
-    extra, is an optional kwarg passed in that supports extending the cache
+    ``extra`` is an optional kwarg passed in that supports extending the cache
     key name to avoid undesired conflicts with other caches."""
-    if config.params['project'] == 'try':
-        return
-
     taskdesc['worker'].setdefault('caches', []).append({
         'type': 'persistent',
         'name': 'level-{}-{}-build-{}-{}-workspace'.format(
@@ -28,7 +24,10 @@ def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
             taskdesc['attributes']['build_platform'],
             taskdesc['attributes']['build_type'],
         ),
-        'mount-point': "/home/worker/workspace",
+        'mount-point': "/builds/worker/workspace",
+        # Don't enable the workspace cache when we can't guarantee its
+        # behavior, like on Try.
+        'skip-untrusted': True,
     })
     if extra:
         taskdesc['worker']['caches'][-1]['name'] += '-{}'.format(
@@ -41,7 +40,7 @@ def docker_worker_add_tc_vcs_cache(config, job, taskdesc):
         'type': 'persistent',
         'name': 'level-{}-{}-tc-vcs'.format(
             config.params['level'], config.params['project']),
-        'mount-point': "/home/worker/.tc-vcs",
+        'mount-point': "/builds/worker/.tc-vcs",
     })
 
 
@@ -55,7 +54,7 @@ def add_public_artifacts(config, job, taskdesc, path):
 
 def docker_worker_add_public_artifacts(config, job, taskdesc):
     """ Adds a public artifact directory to the task """
-    add_public_artifacts(config, job, taskdesc, path='/home/worker/artifacts/')
+    add_public_artifacts(config, job, taskdesc, path='/builds/worker/artifacts/')
 
 
 def generic_worker_add_public_artifacts(config, job, taskdesc):
@@ -74,7 +73,7 @@ def docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc):
     })
 
 
-def support_vcs_checkout(config, job, taskdesc):
+def support_vcs_checkout(config, job, taskdesc, sparse=False):
     """Update a job/task with parameters to enable a VCS checkout.
 
     This can only be used with ``run-task`` tasks, as the cache name is
@@ -85,17 +84,24 @@ def support_vcs_checkout(config, job, taskdesc):
     # native-engine does not support caches (yet), so we just do a full clone
     # every time :(
     if job['worker']['implementation'] in ('docker-worker', 'docker-engine'):
+        name = 'level-%s-checkouts' % level
+
+        # Sparse checkouts need their own cache because they can interfere
+        # with clients that aren't sparse aware.
+        if sparse:
+            name += '-sparse'
+
         taskdesc['worker'].setdefault('caches', []).append({
             'type': 'persistent',
-            'name': 'level-%s-checkouts' % level,
-            'mount-point': '/home/worker/checkouts',
+            'name': name,
+            'mount-point': '/builds/worker/checkouts',
         })
 
     taskdesc['worker'].setdefault('env', {}).update({
         'GECKO_BASE_REPOSITORY': config.params['base_repository'],
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
-        'HG_STORE_PATH': '~/checkouts/hg-store',
+        'HG_STORE_PATH': '/builds/worker/checkouts/hg-store',
     })
 
     # Give task access to hgfingerprint secret so it can pin the certificate
@@ -142,11 +148,11 @@ def docker_worker_add_tooltool(config, job, taskdesc, internal=False):
     taskdesc['worker'].setdefault('caches', []).append({
         'type': 'persistent',
         'name': 'level-%s-tooltool-cache' % level,
-        'mount-point': '/home/worker/tooltool-cache',
+        'mount-point': '/builds/worker/tooltool-cache',
     })
 
     taskdesc['worker'].setdefault('env', {}).update({
-        'TOOLTOOL_CACHE': '/home/worker/tooltool-cache',
+        'TOOLTOOL_CACHE': '/builds/worker/tooltool-cache',
     })
 
     taskdesc['worker']['relengapi-proxy'] = True

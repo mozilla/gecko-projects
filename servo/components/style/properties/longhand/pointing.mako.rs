@@ -14,7 +14,6 @@
     use values::specified::url::SpecifiedUrl;
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
         #[cfg(feature = "gecko")]
@@ -36,14 +35,14 @@
         pub type T = Keyword;
 
         #[cfg(feature = "gecko")]
-        #[derive(Clone, PartialEq, Debug)]
+        #[derive(Clone, Debug, PartialEq)]
         pub struct Image {
             pub url: SpecifiedUrl,
             pub hotspot: Option<(f32, f32)>,
         }
 
         #[cfg(feature = "gecko")]
-        #[derive(Clone, PartialEq, Debug)]
+        #[derive(Clone, Debug, PartialEq)]
         pub struct T {
             pub images: Vec<Image>,
             pub keyword: Keyword,

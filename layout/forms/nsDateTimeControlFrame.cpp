@@ -15,7 +15,6 @@
 #include "nsGkAtoms.h"
 #include "nsContentUtils.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsContentList.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsNodeInfoManager.h"
 #include "nsIDateTimeInputArea.h"
@@ -50,7 +49,7 @@ nsDateTimeControlFrame::nsDateTimeControlFrame(nsStyleContext* aContext)
 void
 nsDateTimeControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  nsContentUtils::DestroyAnonymousContent(&mInputAreaContent);
+  DestroyAnonymousContent(mInputAreaContent.forget());
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 
@@ -404,7 +403,7 @@ nsDateTimeControlFrame::AttributeChanged(int32_t aNameSpaceID,
         aAttribute == nsGkAtoms::readonly ||
         aAttribute == nsGkAtoms::tabindex) {
       MOZ_ASSERT(mContent->IsHTMLElement(nsGkAtoms::input), "bad cast");
-      auto contentAsInputElem = static_cast<dom::HTMLInputElement*>(mContent);
+      auto contentAsInputElem = static_cast<dom::HTMLInputElement*>(GetContent());
       // If script changed the <input>'s type before setting these attributes
       // then we don't need to do anything since we are going to be reframed.
       if (contentAsInputElem->ControlType() == NS_FORM_INPUT_TIME ||

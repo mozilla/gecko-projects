@@ -9,6 +9,7 @@
  */
 
 Cu.import("resource://services-common/utils.js");
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/ClientID.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LightweightThemeManager.jsm", this);
@@ -165,7 +166,7 @@ function checkPayloadInfo(data) {
   let positiveNumberCheck = arg => { return numberCheck(arg) && (arg >= 0); };
   let stringCheck = arg => { return (typeof arg == "string") && (arg != ""); };
   let revisionCheck = arg => {
-    return (Services.appinfo.isOfficial) ? stringCheck(arg) : (typeof arg == "string");
+    return (AppConstants.MOZILLA_OFFICIAL) ? stringCheck(arg) : (typeof arg == "string");
   };
   let uuidCheck = arg => {
     return UUID_REGEX.test(arg);
@@ -756,8 +757,6 @@ add_task(async function test_checkSubsessionHistograms() {
   const KEYED_ID = "TELEMETRY_TEST_KEYED_COUNT";
   const count = Telemetry.getHistogramById(COUNT_ID);
   const keyed = Telemetry.getKeyedHistogramById(KEYED_ID);
-  const registeredIds =
-    new Set(Telemetry.registeredHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, []));
 
   const stableHistograms = new Set([
     "TELEMETRY_TEST_FLAG",
@@ -781,10 +780,6 @@ add_task(async function test_checkSubsessionHistograms() {
   // check for deep equality on known stable histograms.
   let checkHistograms = (classic, subsession, message) => {
     for (let id of Object.keys(subsession)) {
-      if (!registeredIds.has(id)) {
-        continue;
-      }
-
       Assert.ok(id in classic, message + ` (${id})`);
       if (stableHistograms.has(id)) {
         Assert.deepEqual(classic[id],
@@ -799,10 +794,6 @@ add_task(async function test_checkSubsessionHistograms() {
   // Same as above, except for keyed histograms.
   let checkKeyedHistograms = (classic, subsession, message) => {
     for (let id of Object.keys(subsession)) {
-      if (!registeredIds.has(id)) {
-        continue;
-      }
-
       Assert.ok(id in classic, message);
       if (stableKeyedHistograms.has(id)) {
         Assert.deepEqual(classic[id],
@@ -1376,8 +1367,6 @@ add_task(async function test_sendShutdownPing() {
     return;
   }
 
-  const OSSHUTDOWN_SCALAR = "telemetry.os_shutting_down";
-
   let checkPendingShutdownPing = async function() {
     let pendingPings = await TelemetryStorage.loadPendingPingList();
     Assert.equal(pendingPings.length, 2,
@@ -1394,8 +1383,6 @@ add_task(async function test_sendShutdownPing() {
               "The 'saved-session' ping must be saved to disk.");
     Assert.equal("shutdown", shutdownPing.payload.info.reason,
                  "The 'shutdown' ping must be saved to disk.");
-    Assert.ok(shutdownPing.payload.processes.parent.scalars[OSSHUTDOWN_SCALAR],
-              "The OS shutdown scalar must be set to true.");
   };
 
   Preferences.set(TelemetryUtils.Preferences.ShutdownPingSender, true);
@@ -1414,8 +1401,6 @@ add_task(async function test_sendShutdownPing() {
   checkPingFormat(ping, ping.type, true, true);
   Assert.equal(ping.payload.info.reason, REASON_SHUTDOWN);
   Assert.equal(ping.clientId, gClientID);
-  Assert.ok(!(OSSHUTDOWN_SCALAR in ping.payload.processes.parent.scalars),
-            "The OS shutdown scalar must not be set.");
   // Try again, this time disable ping upload. The PingSender
   // should not be sending any ping!
   PingServer.registerPingHandler(() => Assert.ok(false, "Telemetry must not send pings if not allowed to."));
@@ -1723,29 +1708,6 @@ add_task(async function test_abortedSession() {
   await TelemetryController.testShutdown();
   Assert.ok(!(await OS.File.exists(ABORTED_FILE)),
             "No aborted session ping must be available after a shutdown.");
-
-  // Write the ping to the aborted-session file. TelemetrySession will add it to the
-  // saved pings directory when it starts.
-  await TelemetryStorage.savePingToFile(abortedSessionPing, ABORTED_FILE, false);
-  Assert.ok((await OS.File.exists(ABORTED_FILE)),
-            "The aborted session ping must exist in the aborted session ping directory.");
-
-  await TelemetryStorage.testClearPendingPings();
-  PingServer.clearRequests();
-  await TelemetryController.testReset();
-
-  Assert.ok(!(await OS.File.exists(ABORTED_FILE)),
-            "The aborted session ping must be removed from the aborted session ping directory.");
-
-  // Restarting Telemetry again to trigger sending pings in TelemetrySend.
-  await TelemetryController.testReset();
-
-  // We should have received an aborted-session ping.
-  const receivedPing = await PingServer.promiseNextPing();
-  Assert.equal(receivedPing.type, PING_TYPE_MAIN, "Should have the correct type");
-  Assert.equal(receivedPing.payload.info.reason, REASON_ABORTED_SESSION, "Ping should have the correct reason");
-
-  await TelemetryController.testShutdown();
 });
 
 add_task(async function test_abortedSession_Shutdown() {
@@ -1842,8 +1804,9 @@ add_task(async function test_schedulerComputerSleep() {
 
   const ABORTED_FILE = OS.Path.join(DATAREPORTING_PATH, ABORTED_PING_FILE_NAME);
 
-  await TelemetryStorage.testClearPendingPings();
   await TelemetryController.testReset();
+  await TelemetryController.testShutdown();
+  await TelemetryStorage.testClearPendingPings();
   PingServer.clearRequests();
 
   // Remove any aborted-session ping from the previous tests.
@@ -1929,7 +1892,8 @@ add_task(async function test_schedulerEnvironmentReschedules() {
 
   // We don't expect to receive any daily ping in this test, so assert if we do.
   PingServer.registerPingHandler((req, res) => {
-    Assert.ok(false, "No ping should be sent/received in this test.");
+    const receivedPing = decodeRequestPayload(req);
+    Assert.ok(false, `No ping should be received in this test (got ${receivedPing.id}).`);
   });
 
   // Execute one scheduler tick. It should not trigger a daily ping.
@@ -1953,7 +1917,8 @@ add_task(async function test_schedulerNothingDue() {
 
   // We don't expect to receive any ping in this test, so assert if we do.
   PingServer.registerPingHandler((req, res) => {
-    Assert.ok(false, "No ping should be sent/received in this test.");
+    const receivedPing = decodeRequestPayload(req);
+    Assert.ok(false, `No ping should be received in this test (got ${receivedPing.id}).`);
   });
 
   // Set a current date/time away from midnight, so that the daily ping doesn't get

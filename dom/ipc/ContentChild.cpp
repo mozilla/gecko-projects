@@ -662,7 +662,13 @@ ContentChild::Init(MessageLoop* aIOLoop,
   SetProcessName(NS_LITERAL_STRING("Web Content"));
 
 #ifdef NIGHTLY_BUILD
-  HangMonitor::RegisterAnnotator(PendingInputEventHangAnnotator::sSingleton);
+  // NOTE: We have to register the annotator on the main thread, as annotators
+  // only affect a single thread.
+  SystemGroup::Dispatch(TaskCategory::Other,
+                        NS_NewRunnableFunction("RegisterPendingInputEventHangAnnotator", [] {
+                          HangMonitor::RegisterAnnotator(
+                            PendingInputEventHangAnnotator::sSingleton);
+                        }));
 #endif
 
   return true;
@@ -811,7 +817,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return rv;
     }
 
-    URIParams uriToLoad;
+    OptionalURIParams uriToLoad;
     SerializeURI(aURI, uriToLoad);
     Unused << SendCreateWindowInDifferentProcess(aTabOpener,
                                                  aChromeFlags,
@@ -1023,7 +1029,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   }
 
   // If the TabChild has been torn down, we don't need to do this anymore.
-  if (NS_WARN_IF(!newChild->IPCOpen())) {
+  if (NS_WARN_IF(!newChild->IPCOpen() || newChild->IsDestroyed())) {
     return NS_ERROR_ABORT;
   }
 
@@ -3483,13 +3489,6 @@ ContentChild::RecvDeactivate(PBrowserChild* aTab)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvParentActivated(PBrowserChild* aTab, const bool& aActivated)
-{
-  TabChild* tab = static_cast<TabChild*>(aTab);
-  return tab->RecvParentActivated(aActivated);
-}
-
-mozilla::ipc::IPCResult
 ContentChild::RecvProvideAnonymousTemporaryFile(const uint64_t& aID,
                                                 const FileDescOrError& aFDOrError)
 {
@@ -3627,13 +3626,20 @@ ContentChild::RecvResumeInputEventQueue()
 already_AddRefed<nsIEventTarget>
 ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
 {
-  if (aMsg.type() == PJavaScript::Msg_DropTemporaryStrongReferences__ID
-      || aMsg.type() == PJavaScript::Msg_DropObject__ID
-      || aMsg.type() == PContent::Msg_NotifyVisited__ID) {
-    return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
+  switch(aMsg.type()) {
+    case PJavaScript::Msg_DropTemporaryStrongReferences__ID:
+    case PJavaScript::Msg_DropObject__ID:
+    case PContent::Msg_NotifyVisited__ID:
+    case PContent::Msg_DataStoragePut__ID:
+    case PContent::Msg_DataStorageRemove__ID:
+    case PContent::Msg_DataStorageClear__ID:
+    case PContent::Msg_PIPCBlobInputStreamConstructor__ID:
+    case PContent::Msg_BlobURLRegistration__ID:
+    case PContent::Msg_BlobURLUnregistration__ID:
+      return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
+    default:
+      return nullptr;
   }
-
-  return nullptr;
 }
 
 #ifdef NIGHTLY_BUILD

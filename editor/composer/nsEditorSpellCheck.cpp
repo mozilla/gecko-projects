@@ -360,20 +360,11 @@ nsEditorSpellCheck::InitSpellChecker(nsIEditor* aEditor, bool aEnableSelectionCh
     }
     RefPtr<Selection> selection = domSelection->AsSelection();
 
-    int32_t count = 0;
-
-    rv = selection->GetRangeCount(&count);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (count > 0) {
+    if (selection->RangeCount()) {
       RefPtr<nsRange> range = selection->GetRangeAt(0);
       NS_ENSURE_STATE(range);
 
-      bool collapsed = false;
-      rv = range->GetCollapsed(&collapsed);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (!collapsed) {
+      if (!range->Collapsed()) {
         // We don't want to touch the range in the selection,
         // so create a new copy of it.
 

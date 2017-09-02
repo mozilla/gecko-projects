@@ -39,22 +39,21 @@ a11y::PlatformInit()
 
   nsWinUtils::MaybeStartWindowEmulation();
   ia2AccessibleText::InitTextChangeData();
-  if (BrowserTabsRemoteAutostart()) {
-    mscom::InterceptorLog::Init();
-    UniquePtr<RegisteredProxy> regCustomProxy(
-        mscom::RegisterProxy());
-    gRegCustomProxy = regCustomProxy.release();
-    UniquePtr<RegisteredProxy> regProxy(
-        mscom::RegisterProxy(L"ia2marshal.dll"));
-    gRegProxy = regProxy.release();
-    UniquePtr<RegisteredProxy> regAccTlb(
-        mscom::RegisterTypelib(L"oleacc.dll",
-                               RegistrationFlags::eUseSystemDirectory));
-    gRegAccTlb = regAccTlb.release();
-    UniquePtr<RegisteredProxy> regMiscTlb(
-        mscom::RegisterTypelib(L"Accessible.tlb"));
-    gRegMiscTlb = regMiscTlb.release();
-  }
+
+  mscom::InterceptorLog::Init();
+  UniquePtr<RegisteredProxy> regCustomProxy(
+      mscom::RegisterProxy());
+  gRegCustomProxy = regCustomProxy.release();
+  UniquePtr<RegisteredProxy> regProxy(
+      mscom::RegisterProxy(L"ia2marshal.dll"));
+  gRegProxy = regProxy.release();
+  UniquePtr<RegisteredProxy> regAccTlb(
+      mscom::RegisterTypelib(L"oleacc.dll",
+                             RegistrationFlags::eUseSystemDirectory));
+  gRegAccTlb = regAccTlb.release();
+  UniquePtr<RegisteredProxy> regMiscTlb(
+      mscom::RegisterTypelib(L"Accessible.tlb"));
+  gRegMiscTlb = regMiscTlb.release();
 }
 
 void
@@ -198,14 +197,15 @@ a11y::IsHandlerRegistered()
     return false;
   }
 
-  nsAutoString subKey;
-  subKey.AppendLiteral("CLSID\\");
-  nsAutoString iid;
-  GUIDToString(CLSID_AccessibleHandler, iid);
-  subKey.Append(iid);
-  subKey.AppendLiteral("\\InprocHandler32");
+  nsAutoString clsid;
+  GUIDToString(CLSID_AccessibleHandler, clsid);
 
-  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT, subKey,
+  nsAutoString subKey;
+  subKey.AppendLiteral(u"SOFTWARE\\Classes\\CLSID\\");
+  subKey.Append(clsid);
+  subKey.AppendLiteral(u"\\InprocHandler32");
+
+  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_LOCAL_MACHINE, subKey,
                     nsIWindowsRegKey::ACCESS_READ);
   if (NS_FAILED(rv)) {
     return false;

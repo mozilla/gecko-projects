@@ -1481,6 +1481,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
     bool saveBytecode = false;
     bool saveIncrementalBytecode = false;
     bool assertEqBytecode = false;
+    JS::AutoObjectVector envChain(cx);
     RootedObject callerGlobal(cx, cx->global());
 
     options.setIntroductionType("js shell evaluate")
@@ -1587,6 +1588,26 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         if (!v.isUndefined())
             assertEqBytecode = ToBoolean(v);
 
+        if (!JS_GetProperty(cx, opts, "envChainObject", &v))
+            return false;
+        if (!v.isUndefined()) {
+            if (loadBytecode) {
+                JS_ReportErrorASCII(cx, "Can't use both loadBytecode and envChainObject");
+                return false;
+            }
+
+            if (v.isObject()) {
+                if (!envChain.append(&v.toObject())) {
+                    JS_ReportOutOfMemory(cx);
+                    return false;
+                }
+            } else {
+                JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+                                          "\"envChainObject\" passed to evaluate()", "not an object");
+                return false;
+            }
+        }
+
         // We cannot load or save the bytecode if we have no object where the
         // bytecode cache is stored.
         if (loadBytecode || saveBytecode || saveIncrementalBytecode) {
@@ -1644,7 +1665,11 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                     return false;
             } else {
                 mozilla::Range<const char16_t> chars = codeChars.twoByteRange();
-                (void) JS::Compile(cx, options, chars.begin().get(), chars.length(), &script);
+                if (envChain.length() == 0) {
+                    (void) JS::Compile(cx, options, chars.begin().get(), chars.length(), &script);
+                } else {
+                    (void) JS::CompileForNonSyntacticScope(cx, options, chars.begin().get(), chars.length(), &script);
+                }
             }
 
             if (!script)
@@ -1686,7 +1711,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                 return false;
         }
 
-        if (!JS_ExecuteScript(cx, script, args.rval())) {
+        if (!JS_ExecuteScript(cx, envChain, script, args.rval())) {
             if (catchTermination && !JS_IsExceptionPending(cx)) {
                 JSAutoCompartment ac1(cx, callerGlobal);
                 JSString* str = JS_NewStringCopyZ(cx, "terminated");
@@ -3128,8 +3153,8 @@ sandbox_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
 }
 
 static const JSClassOps sandbox_classOps = {
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, sandbox_enumerate, sandbox_resolve,
+    nullptr, nullptr, nullptr,
+    sandbox_enumerate, sandbox_resolve,
     nullptr, nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
@@ -6219,6 +6244,9 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "      assertEqBytecode: if true, and if both loadBytecode and saveBytecode are \n"
 "         true, then the loaded bytecode and the encoded bytecode are compared.\n"
 "         and an assertion is raised if they differ.\n"
+"      envChainObject: object to put on the scope chain, with its fields added\n"
+"         as var bindings, akin to how elements are added to the environment in\n"
+"         event handlers in Gecko.\n"
 ),
 
     JS_FN_HELP("run", Run, 1, 0,
@@ -7083,8 +7111,8 @@ global_mayResolve(const JSAtomState& names, jsid id, JSObject* maybeObj)
 }
 
 static const JSClassOps global_classOps = {
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, global_enumerate, global_resolve, global_mayResolve,
+    nullptr, nullptr, nullptr,
+    global_enumerate, global_resolve, global_mayResolve,
     nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
@@ -8415,20 +8443,19 @@ main(int argc, char** argv, char** envp)
                             "Insert the given number of NOP instructions at all possible pool locations.", 0)
         || !op.addIntOption('\0', "asm-pool-max-offset", "OFFSET",
                             "The maximum pc relative OFFSET permitted in pool reference instructions.", 1024)
-#if defined(JS_SIMULATOR_ARM)
         || !op.addBoolOption('\0', "arm-sim-icache-checks", "Enable icache flush checks in the ARM "
                              "simulator.")
         || !op.addIntOption('\0', "arm-sim-stop-at", "NUMBER", "Stop the ARM simulator after the given "
                             "NUMBER of instructions.", -1)
-#elif defined(JS_SIMULATOR_MIPS32) || defined(JS_SIMULATOR_MIPS64)
         || !op.addBoolOption('\0', "mips-sim-icache-checks", "Enable icache flush checks in the MIPS "
                              "simulator.")
         || !op.addIntOption('\0', "mips-sim-stop-at", "NUMBER", "Stop the MIPS simulator after the given "
                             "NUMBER of instructions.", -1)
-#endif
         || !op.addIntOption('\0', "nursery-size", "SIZE-MB", "Set the maximum nursery size in MB", 16)
 #ifdef JS_GC_ZEAL
         || !op.addStringOption('z', "gc-zeal", "LEVEL(;LEVEL)*[,N]", gc::ZealModeHelpText)
+#else
+        || !op.addStringOption('z', "gc-zeal", "LEVEL(;LEVEL)*[,N]", "option ignored in non-gc-zeal builds")
 #endif
         || !op.addStringOption('\0', "module-load-path", "DIR", "Set directory to load modules from")
         || !op.addBoolOption('\0', "no-async-stacks", "Disable async stacks")

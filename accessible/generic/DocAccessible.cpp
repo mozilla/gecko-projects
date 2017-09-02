@@ -163,7 +163,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(DocAccessible, Accessible)
   tmp->mARIAOwnsHash.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DocAccessible)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DocAccessible)
   NS_INTERFACE_MAP_ENTRY(nsIDocumentObserver)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -2164,10 +2164,10 @@ DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner)
     }
 
     if (MoveChild(child, aOwner, insertIdx)) {
-      nsTArray<RefPtr<Accessible> >* relocated = mARIAOwnsHash.LookupOrAdd(aOwner);
-      MOZ_ASSERT(relocated == owned);
       child->SetRelocated(true);
-      relocated->InsertElementAt(idx, child);
+      MOZ_ASSERT(owned == mARIAOwnsHash.Get(aOwner));
+      owned = mARIAOwnsHash.LookupOrAdd(aOwner);
+      owned->InsertElementAt(idx, child);
       idx++;
     }
   }

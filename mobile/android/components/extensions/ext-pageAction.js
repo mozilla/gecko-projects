@@ -22,8 +22,10 @@ var {
 // WeakMap[Extension -> PageAction]
 let pageActionMap = new WeakMap();
 
-class PageAction {
+class PageAction extends EventEmitter {
   constructor(manifest, extension) {
+    super();
+
     this.id = null;
 
     this.extension = extension;
@@ -43,6 +45,9 @@ class PageAction {
       id: `{${extension.uuid}}`,
       clickCallback: () => {
         let tab = tabTracker.activeTab;
+
+        this.tabManager.addActiveTabPermission(tab);
+
         let popup = this.tabContext.get(tab.id).popup || this.defaults.popup;
         if (popup) {
           let win = Services.wm.getMostRecentWindow("navigator:browser");
@@ -62,8 +67,6 @@ class PageAction {
                        (evt, tabId) => { this.onTabSelected(tabId); });
     this.tabContext.on("tab-closed", // eslint-disable-line mozilla/balanced-listeners
                        (evt, tabId) => { this.onTabClosed(tabId); });
-
-    EventEmitter.decorate(this);
   }
 
   /**
@@ -189,6 +192,7 @@ class PageAction {
    */
   hide() {
     this.shouldShow = false;
+
     if (this.id) {
       PageActions.remove(this.id);
       this.id = null;

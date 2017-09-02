@@ -245,7 +245,6 @@
         "description": "Clears the browser's list of downloaded files (<em>not</em> the downloaded files themselves).",
         "type": "function",
         "async": "callback",
-        "unsupported": true,
         "parameters": [
           {
             "$ref": "RemovalOptions",
@@ -285,7 +284,6 @@
         "description": "Clears the browser's stored form data (autofill).",
         "type": "function",
         "async": "callback",
-        "unsupported": true,
         "parameters": [
           {
             "$ref": "RemovalOptions",

@@ -25,6 +25,7 @@ from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import get_release_config
 from voluptuous import Any, Required, Optional, Extra
 from taskgraph import GECKO
+from ..util import docker as dockerutil
 
 from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
 
@@ -75,7 +76,7 @@ task_description_schema = Schema({
     Optional('scopes'): [basestring],
 
     # Tags
-    Optional('tags'): {basestring: object},
+    Optional('tags'): {basestring: basestring},
 
     # custom "task.extra" content
     Optional('extra'): {basestring: object},
@@ -193,6 +194,18 @@ task_description_schema = Schema({
         Required('loopback-audio', default=False): bool,
         Required('docker-in-docker', default=False): bool,  # (aka 'dind')
 
+        # Paths to Docker volumes.
+        #
+        # For in-tree Docker images, volumes can be parsed from Dockerfile.
+        # This only works for the Dockerfile itself: if a volume is defined in
+        # a base image, it will need to be declared here. Out-of-tree Docker
+        # images will also require explicit volume annotation.
+        #
+        # Caches are often mounted to the same path as Docker volumes. In this
+        # case, they take precedence over a Docker volume. But a volume still
+        # needs to be declared for the path.
+        Optional('volumes', default=[]): [basestring],
+
         # caches to set up for the task
         Optional('caches'): [{
             # only one type is supported by any of the workers right now
@@ -204,6 +217,10 @@ task_description_schema = Schema({
 
             # location in the task image where the cache will be mounted
             'mount-point': basestring,
+
+            # Whether the cache is not used in untrusted environments
+            # (like the Try repo).
+            Optional('skip-untrusted', default=False): bool,
         }],
 
         # artifacts to extract from the task image after completion
@@ -444,6 +461,7 @@ task_description_schema = Schema({
 })
 
 GROUP_NAMES = {
+    'cram': 'Cram tests',
     'mocha': 'Mocha unit tests',
     'py': 'Python unit tests',
     'tc': 'Executed by TaskCluster',
@@ -588,10 +606,12 @@ def index_builder(name):
 @payload_builder('docker-worker')
 def build_docker_worker_payload(config, task, task_def):
     worker = task['worker']
+    level = int(config.params['level'])
 
     image = worker['docker-image']
     if isinstance(image, dict):
         if 'in-tree' in image:
+            name = image['in-tree']
             docker_image_task = 'build-docker-image-' + image['in-tree']
             task.setdefault('dependencies', {})['docker-image'] = docker_image_task
 
@@ -600,6 +620,18 @@ def build_docker_worker_payload(config, task, task_def):
                 "taskId": {"task-reference": "<docker-image>"},
                 "type": "task-image",
             }
+
+            # Find VOLUME in Dockerfile.
+            volumes = dockerutil.parse_volumes(name)
+            for v in sorted(volumes):
+                if v in worker['volumes']:
+                    raise Exception('volume %s already defined; '
+                                    'if it is defined in a Dockerfile, '
+                                    'it does not need to be specified in the '
+                                    'worker definition' % v)
+
+                worker['volumes'].append(v)
+
         elif 'indexed' in image:
             image = {
                 "path": "public/image.tar.zst",
@@ -669,6 +701,8 @@ def build_docker_worker_payload(config, task, task_def):
             }
         payload['artifacts'] = artifacts
 
+    run_task = payload.get('command', [''])[0].endswith('run-task')
+
     if 'caches' in worker:
         caches = {}
 
@@ -680,14 +714,19 @@ def build_docker_worker_payload(config, task, task_def):
         # This means run-task can make changes to cache interaction at any time
         # without regards for backwards or future compatibility.
 
-        run_task = payload.get('command', [''])[0].endswith('run-task')
-
         if run_task:
             suffix = '-%s' % _run_task_suffix()
         else:
             suffix = ''
 
+        skip_untrusted = config.params['project'] == 'try' or level == 1
+
         for cache in worker['caches']:
+            # Some caches aren't enabled in environments where we can't
+            # guarantee certain behavior. Filter those out.
+            if cache.get('skip-untrusted') and skip_untrusted:
+                continue
+
             name = '%s%s' % (cache['name'], suffix)
             caches[name] = cache['mount-point']
             task_def['scopes'].append('docker-worker:cache:%s' % name)
@@ -699,17 +738,27 @@ def build_docker_worker_payload(config, task, task_def):
 
         payload['cache'] = caches
 
+    # And send down volumes information to run-task as well.
+    if run_task and worker.get('volumes'):
+        payload['env']['TASKCLUSTER_VOLUMES'] = ';'.join(
+            sorted(worker['volumes']))
+
+    if payload.get('cache') and skip_untrusted:
+        payload['env']['TASKCLUSTER_UNTRUSTED_CACHES'] = '1'
+
     if features:
         payload['features'] = features
     if capabilities:
         payload['capabilities'] = capabilities
 
     # coalesce / superseding
-    if 'coalesce-name' in task and int(config.params['level']) > 1:
+    if 'coalesce-name' in task and level > 1:
         key = COALESCE_KEY.format(
             project=config.params['project'],
             name=task['coalesce-name'])
         payload['supersederUrl'] = "https://coalesce.mozilla-releng.net/v1/list/" + key
+
+    check_caches_are_volumes(task)
 
 
 @payload_builder('generic-worker')
@@ -1120,6 +1169,30 @@ def build_task(config, tasks):
         }
 
 
+def check_caches_are_volumes(task):
+    """Ensures that all cache paths are defined as volumes.
+
+    Caches and volumes are the only filesystem locations whose content
+    isn't defined by the Docker image itself. Some caches are optional
+    depending on the job environment. We want paths that are potentially
+    caches to have as similar behavior regardless of whether a cache is
+    used. To help enforce this, we require that all paths used as caches
+    to be declared as Docker volumes. This check won't catch all offenders.
+    But it is better than nothing.
+    """
+    volumes = set(task['worker']['volumes'])
+    paths = set(c['mount-point'] for c in task['worker'].get('caches', []))
+    missing = paths - volumes
+
+    if not missing:
+        return
+
+    raise Exception('task %s (image %s) has caches that are not declared as '
+                    'Docker volumes: %s' % (task['label'],
+                                            task['worker']['docker-image'],
+                                            ', '.join(sorted(missing))))
+
+
 @transforms.add
 def check_run_task_caches(config, tasks):
     """Audit for caches requiring run-task.
@@ -1136,15 +1209,36 @@ def check_run_task_caches(config, tasks):
         (level-\d+-checkouts|level-\d+-tooltool-cache)
     ''', re.VERBOSE)
 
+    re_sparse_checkout_cache = re.compile('^level-\d+-checkouts-sparse')
+
     suffix = _run_task_suffix()
 
     for task in tasks:
         payload = task['task'].get('payload', {})
         command = payload.get('command') or ['']
-        command = command[0] if isinstance(command[0], basestring) else ''
-        run_task = command.endswith('run-task')
+
+        main_command = command[0] if isinstance(command[0], basestring) else ''
+        run_task = main_command.endswith('run-task')
+
+        require_sparse_cache = False
+        have_sparse_cache = False
+
+        if run_task:
+            for arg in command[1:]:
+                if not isinstance(arg, basestring):
+                    continue
+
+                if arg == '--':
+                    break
+
+                if arg.startswith('--sparse-profile'):
+                    require_sparse_cache = True
+                    break
 
         for cache in payload.get('cache', {}):
+            if re_sparse_checkout_cache.match(cache):
+                have_sparse_cache = True
+
             if not re_reserved_caches.match(cache):
                 continue
 
@@ -1160,6 +1254,11 @@ def check_run_task_caches(config, tasks):
                     'but the cache name is not dependent on the contents '
                     'of run-task; change the cache name to conform to the '
                     'naming requirements' % (task['label'], cache))
+
+        if require_sparse_cache and not have_sparse_cache:
+            raise Exception('%s is using a sparse checkout but not using '
+                            'a sparse checkout cache; change the checkout '
+                            'cache name so it is sparse aware' % task['label'])
 
         yield task
 

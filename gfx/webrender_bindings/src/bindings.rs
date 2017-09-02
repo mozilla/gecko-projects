@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::{mem, slice};
 use std::path::PathBuf;
@@ -7,9 +6,9 @@ use std::os::raw::{c_void, c_char, c_float};
 use gleam::gl;
 
 use webrender_api::*;
-use webrender::renderer::{ReadPixelsFormat, Renderer, RendererOptions};
-use webrender::renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
-use webrender::renderer::DebugFlags;
+use webrender::{ReadPixelsFormat, Renderer, RendererOptions};
+use webrender::{ExternalImage, ExternalImageHandler, ExternalImageSource};
+use webrender::DebugFlags;
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dImageRenderer;
@@ -38,6 +37,8 @@ type WrPipelineId = PipelineId;
 type WrImageKey = ImageKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrFontKey = FontKey;
+/// cbindgen:field-names=[mNamespace, mHandle]
+type WrFontInstanceKey = FontInstanceKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrYuvColorSpace = YuvColorSpace;
 
@@ -908,6 +909,32 @@ pub extern "C" fn wr_api_delete_font(dh: &mut DocumentHandle,
 }
 
 #[no_mangle]
+pub extern "C" fn wr_api_add_font_instance(dh: &mut DocumentHandle,
+                                           key: WrFontInstanceKey,
+                                           font_key: WrFontKey,
+                                           glyph_size: f32,
+                                           options: *const FontInstanceOptions,
+                                           platform_options: *const FontInstancePlatformOptions) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let mut resources = ResourceUpdates::new();
+    resources.add_font_instance(key,
+                                font_key,
+                                Au::from_f32_px(glyph_size),
+                                unsafe { options.as_ref().cloned() },
+                                unsafe { platform_options.as_ref().cloned() });
+    dh.api.update_resources(resources);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_delete_font_instance(dh: &mut DocumentHandle,
+                                              key: WrFontInstanceKey) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let mut resources = ResourceUpdates::new();
+    resources.delete_font_instance(key);
+    dh.api.update_resources(resources);
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn wr_api_get_namespace(dh: &mut DocumentHandle) -> WrIdNamespace {
     dh.api.get_namespace_id()
 }
@@ -926,7 +953,6 @@ pub unsafe extern "C" fn wr_api_get_namespace(dh: &mut DocumentHandle) -> WrIdNa
 pub struct WebRenderFrameBuilder {
     pub root_pipeline_id: WrPipelineId,
     pub dl_builder: webrender_api::DisplayListBuilder,
-    pub scroll_clips_defined: HashSet<ClipId>,
 }
 
 impl WebRenderFrameBuilder {
@@ -935,7 +961,6 @@ impl WebRenderFrameBuilder {
         WebRenderFrameBuilder {
             root_pipeline_id: root_pipeline_id,
             dl_builder: webrender_api::DisplayListBuilder::new(root_pipeline_id, content_size),
-            scroll_clips_defined: HashSet::new(),
         }
     }
 }
@@ -1102,21 +1127,22 @@ pub extern "C" fn wr_dp_pop_clip(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
-                                          scroll_id: u64,
-                                          content_rect: LayoutRect,
-                                          clip_rect: LayoutRect) {
+pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
+                                            scroll_id: u64,
+                                            content_rect: LayoutRect,
+                                            clip_rect: LayoutRect) {
     assert!(unsafe { is_in_main_thread() });
     let clip_id = ClipId::new(scroll_id, state.pipeline_id);
-    // Avoid defining multiple scroll clips with the same clip id, as that
-    // results in undefined behaviour or assertion failures.
-    if !state.frame_builder.scroll_clips_defined.contains(&clip_id) {
+    state.frame_builder.dl_builder.define_scroll_frame(
+        Some(clip_id), content_rect, clip_rect, vec![], None,
+        ScrollSensitivity::Script);
+}
 
-        state.frame_builder.dl_builder.define_scroll_frame(
-            Some(clip_id), content_rect, clip_rect, vec![], None,
-            ScrollSensitivity::Script);
-        state.frame_builder.scroll_clips_defined.insert(clip_id);
-    }
+#[no_mangle]
+pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
+                                          scroll_id: u64) {
+    assert!(unsafe { is_in_main_thread() });
+    let clip_id = ClipId::new(scroll_id, state.pipeline_id);
     state.frame_builder.dl_builder.push_clip_id(clip_id);
 }
 
@@ -1264,26 +1290,22 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
                                   bounds: LayoutRect,
                                   clip: LayoutRect,
                                   color: ColorF,
-                                  font_key: WrFontKey,
+                                  font_key: WrFontInstanceKey,
                                   glyphs: *const GlyphInstance,
                                   glyph_count: u32,
-                                  glyph_size: f32) {
+                                  glyph_options: *const GlyphOptions) {
     assert!(unsafe { is_in_main_thread() });
 
     let glyph_slice = make_slice(glyphs, glyph_count as usize);
 
-    let colorf = ColorF::new(color.r, color.g, color.b, color.a);
-
-    let glyph_options = None; // TODO
     state.frame_builder
          .dl_builder
          .push_text(bounds,
                     Some(LocalClip::Rect(clip.into())),
                     &glyph_slice,
                     font_key,
-                    colorf,
-                    Au::from_f32_px(glyph_size),
-                    glyph_options);
+                    color,
+                    unsafe { glyph_options.as_ref().cloned() });
 }
 
 #[no_mangle]
@@ -1590,6 +1612,8 @@ extern "C" {
                                width: u32,
                                height: u32,
                                format: ImageFormat,
+                               tile_size: *const u16,
+                               tile_offset: *const TileOffset,
                                output: MutByteSlice)
                                -> bool;
 }

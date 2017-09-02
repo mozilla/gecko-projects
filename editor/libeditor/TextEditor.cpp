@@ -52,6 +52,7 @@
 #include "nsString.h"
 #include "nsStringFwd.h"
 #include "nsSubstringTuple.h"
+#include "nsTextNode.h"
 #include "nsUnicharUtils.h"
 #include "nsXPCOM.h"
 
@@ -105,7 +106,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_ADDREF_INHERITED(TextEditor, EditorBase)
 NS_IMPL_RELEASE_INHERITED(TextEditor, EditorBase)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TextEditor)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TextEditor)
   NS_INTERFACE_MAP_ENTRY(nsIPlaintextEditor)
   NS_INTERFACE_MAP_ENTRY(nsIEditorMailSupport)
 NS_INTERFACE_MAP_END_INHERITING(EditorBase)
@@ -899,17 +900,41 @@ TextEditor::GetInputEventTargetContent()
   return target.forget();
 }
 
+nsresult
+TextEditor::DocumentIsEmpty(bool* aIsEmpty)
+{
+  NS_ENSURE_TRUE(mRules, NS_ERROR_NOT_INITIALIZED);
+
+  if (static_cast<TextEditRules*>(mRules.get())->HasBogusNode()) {
+    *aIsEmpty = true;
+    return NS_OK;
+  }
+
+  // Even if there is no bogus node, we should be detected as empty document
+  // if all the children are text nodes and these have no content.
+  Element* rootElement = GetRoot();
+  if (!rootElement) {
+    *aIsEmpty = true;
+    return NS_OK;
+  }
+
+  for (nsIContent* child = rootElement->GetFirstChild();
+       child; child = child->GetNextSibling()) {
+    if (!EditorBase::IsTextNode(child) ||
+        static_cast<nsTextNode*>(child)->TextDataLength()) {
+      *aIsEmpty = false;
+      return NS_OK;
+    }
+  }
+
+  *aIsEmpty = true;
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 TextEditor::GetDocumentIsEmpty(bool* aDocumentIsEmpty)
 {
-  NS_ENSURE_TRUE(aDocumentIsEmpty, NS_ERROR_NULL_POINTER);
-
-  NS_ENSURE_TRUE(mRules, NS_ERROR_NOT_INITIALIZED);
-
-  // Protect the edit rules object from dying
-  nsCOMPtr<nsIEditRules> rules(mRules);
-  *aDocumentIsEmpty = rules->DocumentIsEmpty();
-  return NS_OK;
+  return DocumentIsEmpty(aDocumentIsEmpty);
 }
 
 NS_IMETHODIMP
@@ -1615,15 +1640,15 @@ TextEditor::SelectEntireDocument(Selection* aSelection)
 
   // Don't select the trailing BR node if we have one
   int32_t selOffset;
-  nsCOMPtr<nsIDOMNode> selNode;
+  nsCOMPtr<nsINode> selNode;
   rv = GetEndNodeAndOffset(aSelection, getter_AddRefs(selNode), &selOffset);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMNode> childNode = GetChildAt(selNode, selOffset - 1);
+  nsINode* childNode = selNode->GetChildAt(selOffset - 1);
 
   if (childNode && TextEditUtils::IsMozBR(childNode)) {
     int32_t parentOffset;
-    nsCOMPtr<nsIDOMNode> parentNode = GetNodeLocation(childNode, &parentOffset);
+    nsINode* parentNode = GetNodeLocation(childNode, &parentOffset);
 
     return aSelection->Extend(parentNode, parentOffset);
   }

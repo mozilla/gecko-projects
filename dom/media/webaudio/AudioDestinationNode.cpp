@@ -314,7 +314,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(AudioDestinationNode, AudioNode,
                                    mAudioChannelAgent,
                                    mOfflineRenderingPromise)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioDestinationNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AudioDestinationNode)
   NS_INTERFACE_MAP_ENTRY(nsIAudioChannelAgentCallback)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
@@ -325,7 +325,7 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
                                            bool aIsOffline,
                                            uint32_t aNumberOfChannels,
                                            uint32_t aLength, float aSampleRate)
-  : AudioNode(aContext, aIsOffline ? aNumberOfChannels : 2,
+  : AudioNode(aContext, aNumberOfChannels,
               ChannelCountMode::Explicit, ChannelInterpretation::Speakers)
   , mFramesToProduce(aLength)
   , mIsOffline(aIsOffline)

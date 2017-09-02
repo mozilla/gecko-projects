@@ -99,7 +99,8 @@ public class PasswordsRepositorySession extends
 
           // Success!
           try {
-            delegate.onFetchCompleted(end);
+            setLastFetchTimestamp(end);
+            delegate.onFetchCompleted();
           } catch (Exception e) {
             Logger.error(LOG_TAG, "Delegate fetch completed callback failed.", e);
             // Don't call failure callback.
@@ -129,11 +130,10 @@ public class PasswordsRepositorySession extends
   public void fetch(final String[] guids, final RepositorySessionFetchRecordsDelegate delegate) {
     if (guids == null || guids.length < 1) {
       Logger.error(LOG_TAG, "No guids to be fetched.");
-      final long end = now();
       delegateQueue.execute(new Runnable() {
         @Override
         public void run() {
-          delegate.onFetchCompleted(end);
+          delegate.onFetchCompleted();
         }
       });
       return;
@@ -170,7 +170,8 @@ public class PasswordsRepositorySession extends
             return;
           }
 
-          delegate.onFetchCompleted(end);
+          setLastFetchTimestamp(end);
+          delegate.onFetchCompleted();
 
         } catch (Exception e) {
           Logger.error(LOG_TAG, "Exception in fetch.");
@@ -261,7 +262,7 @@ public class PasswordsRepositorySession extends
             // Note that while this counts as "reconciliation", we're probably over-counting.
             // Currently, locallyModified above is _always_ true if a record exists locally,
             // and so we'll consider any deletions of already present records as reconciliations.
-            storeDelegate.onRecordStoreReconciled(record.guid, null);
+            storeDelegate.onRecordStoreReconciled(record.guid, null, null);
             storeRecordDeletion(remoteRecord);
             return;
           }
@@ -319,11 +320,12 @@ public class PasswordsRepositorySession extends
           return;
         }
 
-        Record toStore = reconcileRecords(remoteRecord, existingRecord, lastRemoteRetrieval, lastLocalRetrieval);
-        if (toStore == null) {
-          Logger.debug(LOG_TAG, "Reconciling returned null. Not inserting a record.");
+        if (!shouldReconcileRecords(remoteRecord, existingRecord)) {
+          Logger.debug(LOG_TAG, "shouldReconcileRecords returned false. Not inserting a record.");
           return;
         }
+
+        Record toStore = reconcileRecords(remoteRecord, existingRecord, lastRemoteRetrieval, lastLocalRetrieval);
 
         // TODO: pass in timestamps?
         Logger.debug(LOG_TAG, "Replacing " + existingRecord.guid + " with record " + toStore.guid);
@@ -340,7 +342,7 @@ public class PasswordsRepositorySession extends
         // of reconcileRecords.
         Logger.debug(LOG_TAG, "Calling delegate callback with guid " + replaced.guid +
                               "(" + replaced.androidID + ")");
-        storeDelegate.onRecordStoreReconciled(record.guid, null);
+        storeDelegate.onRecordStoreReconciled(record.guid, existingRecord.guid, null);
         storeDelegate.onRecordStoreSucceeded(record.guid);
         return;
       }

@@ -5,6 +5,7 @@
 
 const {actionTypes: at} = Components.utils.import("resource://activity-stream/common/Actions.jsm", {});
 
+const TOP_SITES_DEFAULT_LENGTH = 6;
 const TOP_SITES_SHOWMORE_LENGTH = 12;
 
 const INITIAL_STATE = {
@@ -134,8 +135,11 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
         return site;
       });
       return Object.assign({}, prevState, {rows: newRows});
-    case at.PLACES_LINK_DELETED:
-    case at.PLACES_LINK_BLOCKED:
+    case at.BLOCK_URL:
+    case at.DELETE_HISTORY_URL:
+      // Optimistically update the UI by responding to the context menu action
+      // events and removing the site that was blocked/deleted with an empty slot.
+      // Once refresh() finishes, we update the UI again with a new site
       newRows = prevState.rows.filter(val => val && val.url !== action.data.url);
       return Object.assign({}, prevState, {rows: newRows});
     case at.PINNED_SITES_UPDATED:
@@ -189,14 +193,27 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         }
         return section;
       });
-      // If section doesn't exist in prevState, create a new section object and
-      // append it to the sections state
+
+      // Invariant: Sections array sorted in increasing order of property `order`.
+      // If section doesn't exist in prevState, create a new section object. If
+      // the section has an order, insert it at the correct place in the array.
+      // Otherwise, prepend it and set the order to be minimal.
       if (!hasMatch) {
         const initialized = action.data.rows && action.data.rows.length > 0;
-        newState.push(Object.assign({title: "", initialized, rows: []}, action.data));
+        let order;
+        let index;
+        if (prevState.length > 0) {
+          order = action.data.order || prevState[0].order - 1;
+          index = newState.findIndex(section => section.order >= order);
+        } else {
+          order = action.data.order || 1;
+          index = 0;
+        }
+        const section = Object.assign({title: "", initialized, rows: [], order, enabled: false}, action.data);
+        newState.splice(index, 0, section);
       }
       return newState;
-    case at.SECTION_ROWS_UPDATE:
+    case at.SECTION_UPDATE:
       return prevState.map(section => {
         if (section && section.id === action.data.id) {
           return Object.assign({}, section, action.data);
@@ -255,9 +272,10 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
 }
 
 this.INITIAL_STATE = INITIAL_STATE;
+this.TOP_SITES_DEFAULT_LENGTH = TOP_SITES_DEFAULT_LENGTH;
 this.TOP_SITES_SHOWMORE_LENGTH = TOP_SITES_SHOWMORE_LENGTH;
 
 this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections};
 this.insertPinned = insertPinned;
 
-this.EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_SHOWMORE_LENGTH"];
+this.EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_DEFAULT_LENGTH", "TOP_SITES_SHOWMORE_LENGTH"];

@@ -3182,7 +3182,18 @@ class WrappedJSHolder : public nsISupports
 private:
     virtual ~WrappedJSHolder() {}
 };
-NS_IMPL_ISUPPORTS0(WrappedJSHolder);
+
+NS_IMPL_ADDREF(WrappedJSHolder)
+NS_IMPL_RELEASE(WrappedJSHolder)
+
+// nsINamed is always supported by nsXPCWrappedJSClass.
+// We expose this interface only for the identity in telemetry analysis.
+NS_INTERFACE_TABLE_HEAD(WrappedJSHolder)
+  if (aIID.Equals(NS_GET_IID(nsINamed))) {
+    return mWrappedJS->QueryInterface(aIID, aInstancePtr);
+  }
+NS_INTERFACE_TABLE0(WrappedJSHolder)
+NS_INTERFACE_TABLE_TAIL
 
 NS_IMETHODIMP
 nsXPCComponents_Utils::GenerateXPCWrappedJS(HandleValue aObj, HandleValue aScope,
@@ -3234,11 +3245,6 @@ nsXPCComponents_Utils::GetJSEngineTelemetryValue(JSContext* cx, MutableHandleVal
     size_t i = JS_SetProtoCalled(cx);
     RootedValue v(cx, DoubleValue(i));
     if (!JS_DefineProperty(cx, obj, "setProto", v, attrs))
-        return NS_ERROR_OUT_OF_MEMORY;
-
-    i = JS_GetCustomIteratorCount(cx);
-    v.setDouble(i);
-    if (!JS_DefineProperty(cx, obj, "customIter", v, attrs))
         return NS_ERROR_OUT_OF_MEMORY;
 
     rval.setObject(*obj);

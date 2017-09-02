@@ -651,14 +651,29 @@ MappedArgumentsObject::obj_defineProperty(JSContext* cx, HandleObject obj, Handl
 
     // Step 4.
     Rooted<PropertyDescriptor> newArgDesc(cx, desc);
+
+    // Step 5.
     if (!desc.isAccessorDescriptor() && isMapped) {
-        // In this case the live mapping is supposed to keep working,
-        // we have to pass along the Getter/Setter otherwise they are overwritten.
-        newArgDesc.setGetter(MappedArgGetter);
-        newArgDesc.setSetter(MappedArgSetter);
+        // Step 5.a.
+        if (desc.hasWritable() && !desc.writable()) {
+            if (!desc.hasValue()) {
+                RootedValue v(cx, argsobj->element(JSID_TO_INT(id)));
+                newArgDesc.setValue(v);
+            }
+            newArgDesc.setGetter(nullptr);
+            newArgDesc.setSetter(nullptr);
+        } else {
+            // In this case the live mapping is supposed to keep working,
+            // we have to pass along the Getter/Setter otherwise they are
+            // overwritten.
+            newArgDesc.setGetter(MappedArgGetter);
+            newArgDesc.setSetter(MappedArgSetter);
+            newArgDesc.value().setUndefined();
+            newArgDesc.attributesRef() |= JSPROP_IGNORE_VALUE;
+        }
     }
 
-    // Steps 5-6. NativeDefineProperty will lookup [[Value]] for us.
+    // Step 6. NativeDefineProperty will lookup [[Value]] for us.
     if (!NativeDefineProperty(cx, obj.as<NativeObject>(), id, newArgDesc, result))
         return false;
     // Step 7.
@@ -894,8 +909,6 @@ ArgumentsObject::objectMovedDuringMinorGC(JSTracer* trc, JSObject* dst, JSObject
 const ClassOps MappedArgumentsObject::classOps_ = {
     nullptr,                 /* addProperty */
     ArgumentsObject::obj_delProperty,
-    nullptr,                 /* getProperty */
-    nullptr,                 /* setProperty */
     MappedArgumentsObject::obj_enumerate,
     nullptr,                 /* newEnumerate */
     MappedArgumentsObject::obj_resolve,
@@ -932,8 +945,6 @@ const Class MappedArgumentsObject::class_ = {
 const ClassOps UnmappedArgumentsObject::classOps_ = {
     nullptr,                 /* addProperty */
     ArgumentsObject::obj_delProperty,
-    nullptr,                 /* getProperty */
-    nullptr,                 /* setProperty */
     UnmappedArgumentsObject::obj_enumerate,
     nullptr,                 /* newEnumerate */
     UnmappedArgumentsObject::obj_resolve,

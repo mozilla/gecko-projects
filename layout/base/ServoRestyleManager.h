@@ -163,6 +163,8 @@ private:
 #endif // DEBUG
 };
 
+enum class ServoPostTraversalFlags : uint32_t;
+
 /**
  * Restyle manager for a Servo-backed style system.
  */
@@ -185,6 +187,7 @@ public:
   void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
                                     nsRestyleHint aRestyleHint);
   void ProcessPendingRestyles();
+  void ProcessAllPendingAttributeAndStateInvalidations();
 
   /**
    * Performs a Servo animation-only traversal to compute style for all nodes
@@ -218,6 +221,17 @@ public:
   // this method accordingly (e.g. to ReparentStyleContextForFirstLine).
   nsresult ReparentStyleContext(nsIFrame* aFrame);
 
+private:
+  /**
+   * Reparent the descendants of aFrame.  This is used by ReparentStyleContext
+   * and shouldn't be called by anyone else.  aProviderChild, if non-null, is a
+   * child that was the style parent for aFrame and hence shouldn't be
+   * reparented.
+   */
+  void ReparentFrameDescendants(nsIFrame* aFrame, nsIFrame* aProviderChild,
+                                ServoStyleSet& aStyleSet);
+
+public:
   /**
    * Clears the ServoElementData and HasDirtyDescendants from all elements
    * in the subtree rooted at aElement.
@@ -261,14 +275,13 @@ private:
   bool ProcessPostTraversal(Element* aElement,
                             ServoStyleContext* aParentContext,
                             ServoRestyleState& aRestyleState,
-                            ServoTraversalFlags aFlags,
-                            bool aParentWasRestyled);
+                            ServoPostTraversalFlags aFlags);
 
   struct TextPostTraversalState;
   bool ProcessPostTraversalForText(nsIContent* aTextNode,
                                    TextPostTraversalState& aState,
                                    ServoRestyleState& aRestyleState,
-                                   bool aParentWasRestyled);
+                                   ServoPostTraversalFlags aFlags);
 
   inline ServoStyleSet* StyleSet() const
   {

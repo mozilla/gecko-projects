@@ -109,8 +109,6 @@ CreateArrayBufferPrototype(JSContext* cx, JSProtoKey key)
 static const ClassOps ArrayBufferObjectClassOps = {
     nullptr,        /* addProperty */
     nullptr,        /* delProperty */
-    nullptr,        /* getProperty */
-    nullptr,        /* setProperty */
     nullptr,        /* enumerate */
     nullptr,        /* newEnumerate */
     nullptr,        /* resolve */
@@ -679,11 +677,11 @@ WasmArrayRawBuffer::Release(void* mem)
     WasmArrayRawBuffer* header = (WasmArrayRawBuffer*)((uint8_t*)mem - sizeof(WasmArrayRawBuffer));
     uint8_t* base = header->basePointer();
     MOZ_RELEASE_ASSERT(header->mappedSize() <= SIZE_MAX - gc::SystemPageSize());
-    size_t mappedSizeWithHeader = header->mappedSize() + gc::SystemPageSize();
 
 # ifdef XP_WIN
     VirtualFree(base, 0, MEM_RELEASE);
 # else  // XP_WIN
+    size_t mappedSizeWithHeader = header->mappedSize() + gc::SystemPageSize();
     munmap(base, mappedSizeWithHeader);
 # endif  // !XP_WIN
 
@@ -1610,7 +1608,7 @@ JS_GetArrayBufferByteLength(JSObject* obj)
 }
 
 JS_FRIEND_API(uint8_t*)
-JS_GetArrayBufferData(JSObject* obj, bool* isSharedMemory, const JS::AutoCheckCannotGC&)
+JS_GetArrayBufferData(JSObject* obj, bool* isSharedMemory, const JS::AutoRequireNoGC&)
 {
     obj = CheckedUnwrap(obj);
     if (!obj)
@@ -1826,7 +1824,7 @@ JS_IsMappedArrayBufferObject(JSObject* obj)
 }
 
 JS_FRIEND_API(void*)
-JS_GetArrayBufferViewData(JSObject* obj, bool* isSharedMemory, const JS::AutoCheckCannotGC&)
+JS_GetArrayBufferViewData(JSObject* obj, bool* isSharedMemory, const JS::AutoRequireNoGC&)
 {
     obj = CheckedUnwrap(obj);
     if (!obj)

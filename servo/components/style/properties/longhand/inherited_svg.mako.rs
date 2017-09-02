@@ -164,7 +164,7 @@ ${helpers.predefined_type("marker-end", "UrlOrNone", "Either::Second(None_)",
     ///
     /// Higher priority values, i.e. the values specified first,
     /// will be painted first (and may be covered by paintings of lower priority)
-    #[derive(PartialEq, Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue(pub u8);
 
@@ -259,7 +259,6 @@ ${helpers.predefined_type("marker-end", "UrlOrNone", "Either::Second(None_)",
         }
     }
 
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ComputedValueAsSpecified for SpecifiedValue { }
 </%helpers:longhand>
@@ -271,7 +270,6 @@ ${helpers.predefined_type("marker-end", "UrlOrNone", "Either::Second(None_)",
     use values::CustomIdent;
     use values::computed::ComputedValueAsSpecified;
 
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ComputedValueAsSpecified for SpecifiedValue { }
 

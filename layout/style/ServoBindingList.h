@@ -45,7 +45,8 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetContentsStr
                    mozilla::css::SheetParsingMode parsing_mode,
                    RawGeckoURLExtraData* extra_data,
                    uint32_t line_number_offset,
-                   nsCompatibility quirks_mode)
+                   nsCompatibility quirks_mode,
+                   mozilla::css::LoaderReusableStyleSheets* reusable_sheets)
 SERVO_BINDING_FUNC(Servo_StyleSheet_Empty, RawServoStyleSheetContentsStrong,
                    mozilla::css::SheetParsingMode parsing_mode)
 SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
@@ -103,11 +104,18 @@ SERVO_BINDING_FUNC(Servo_StyleSet_GetFontFaceRules, void,
                    RawGeckoFontFaceRuleListBorrowedMut list)
 SERVO_BINDING_FUNC(Servo_StyleSet_GetCounterStyleRule, nsCSSCounterStyleRule*,
                    RawServoStyleSetBorrowed set, nsIAtom* name)
+SERVO_BINDING_FUNC(Servo_StyleSet_BuildFontFeatureValueSet, bool,
+                   RawServoStyleSetBorrowed set,
+                   gfxFontFeatureValueSet* list)
 SERVO_BINDING_FUNC(Servo_StyleSet_ResolveForDeclarations,
                    ServoStyleContextStrong,
                    RawServoStyleSetBorrowed set,
                    ServoStyleContextBorrowedOrNull parent_style,
                    RawServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_StyleSet_AddSizeOfExcludingThis, void,
+                   mozilla::MallocSizeOf malloc_size_of,
+                   mozilla::ServoStyleSetSizes* sizes,
+                   RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleContext_AddRef, void, ServoStyleContextBorrowed ctx);
 SERVO_BINDING_FUNC(Servo_StyleContext_Release, void, ServoStyleContextBorrowed ctx);
 
@@ -618,6 +626,12 @@ SERVO_BINDING_FUNC(Servo_GetCustomPropertiesCount, uint32_t,
 SERVO_BINDING_FUNC(Servo_GetCustomPropertyNameAt, bool,
                    ServoStyleContextBorrowed, uint32_t index,
                    nsAString* name)
+
+
+SERVO_BINDING_FUNC(Servo_ProcessInvalidations, void,
+                   RawServoStyleSetBorrowed set,
+                   RawGeckoElementBorrowed element,
+                   const mozilla::ServoElementSnapshotTable* snapshots)
 
 
 // AddRef / Release functions

@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.1.20 */
+/* Generated with cbindgen:0.1.23 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
  *   1. Get the latest cbindgen using `cargo install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/rlhunt/cbindgen` and use a tagged release
- *   2. Run `cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */
 
 #include <cstdint>
@@ -55,6 +55,14 @@ enum class ExternalImageType : uint32_t {
   TextureRectHandle = 2,
   TextureExternalHandle = 3,
   ExternalBuffer = 4,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
+enum class FontRenderMode : uint32_t {
+  Mono = 0,
+  Alpha = 1,
+  Subpixel = 2,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -163,8 +171,8 @@ struct Arc_VecU8;
 
 struct DocumentHandle;
 
-struct LayerPixel;
-
+// The renderer is responsible for submitting to the GPU the work prepared by the
+// RenderBackend.
 struct Renderer;
 
 struct Vec_u8;
@@ -244,6 +252,18 @@ struct WrExternalImageId {
 
 typedef ExternalImageType WrExternalImageBufferType;
 
+struct FontInstanceKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const FontInstanceKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+typedef FontInstanceKey WrFontInstanceKey;
+
 struct FontKey {
   IdNamespace mNamespace;
   uint32_t mHandle;
@@ -255,6 +275,24 @@ struct FontKey {
 };
 
 typedef FontKey WrFontKey;
+
+struct FontInstanceOptions {
+  FontRenderMode render_mode;
+
+  bool operator==(const FontInstanceOptions& aOther) const {
+    return render_mode == aOther.render_mode;
+  }
+};
+
+struct FontInstancePlatformOptions {
+  bool use_embedded_bitmap;
+  bool force_gdi_rendering;
+
+  bool operator==(const FontInstancePlatformOptions& aOther) const {
+    return use_embedded_bitmap == aOther.use_embedded_bitmap &&
+           force_gdi_rendering == aOther.force_gdi_rendering;
+  }
+};
 
 struct Epoch {
   uint32_t mHandle;
@@ -272,8 +310,14 @@ struct Epoch {
 
 typedef Epoch WrEpoch;
 
+// This type carries no valuable semantics for WR. However, it reflects the fact that
+// clients (Servo) may generate pipelines by different semi-independent sources.
+// These pipelines still belong to the same `IdNamespace` and the same `DocumentId`.
+// Having this extra Id field enables them to generate `PipelineId` without collision.
 typedef uint32_t PipelineSourceId;
 
+// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
+// it's clonable, serializable, comparable, and hashable.
 struct PipelineId {
   PipelineSourceId mNamespace;
   uint32_t mHandle;
@@ -300,10 +344,18 @@ typedef TypedSize2D_f32__LayerPixel LayerSize;
 
 typedef LayerSize LayoutSize;
 
+// Describes the memory layout of a display list.
+// 
+// A display list consists of some number of display list items, followed by a number of display
+// items.
 struct BuiltDisplayListDescriptor {
+  // The first IPC time stamp: before any work has been done
   uint64_t builder_start_time;
+  // The second IPC time stamp: after serialization
   uint64_t builder_finish_time;
+  // The third IPC time stamp: just before sending
   uint64_t send_start_time;
+  // The offset where DisplayItems stop and the Glyph list starts
   size_t glyph_offset;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
@@ -374,8 +426,6 @@ struct TypedTransform3D_f32__LayoutPixel__LayoutPixel {
   }
 };
 
-typedef LayerPixel LayoutPixel;
-
 typedef TypedTransform3D_f32__LayoutPixel__LayoutPixel LayoutTransform;
 
 struct WrTransformProperty {
@@ -385,6 +435,10 @@ struct WrTransformProperty {
 
 typedef IdNamespace WrIdNamespace;
 
+// Represents RGBA screen colors with floating point numbers.
+// 
+// All components must be between 0.0 and 1.0.
+// An alpha value of 1.0 is opaque while 0.0 is fully transparent.
 struct ColorF {
   float r;
   float g;
@@ -409,6 +463,7 @@ struct TypedPoint2D_f32__LayerPixel {
   }
 };
 
+// A 2d Rectangle optionally tagged with a unit.
 struct TypedRect_f32__LayerPixel {
   TypedPoint2D_f32__LayerPixel origin;
   TypedSize2D_f32__LayerPixel size;
@@ -497,20 +552,7 @@ struct GradientStop {
   }
 };
 
-struct SideOffsets2D_u32 {
-  uint32_t top;
-  uint32_t right;
-  uint32_t bottom;
-  uint32_t left;
-
-  bool operator==(const SideOffsets2D_u32& aOther) const {
-    return top == aOther.top &&
-           right == aOther.right &&
-           bottom == aOther.bottom &&
-           left == aOther.left;
-  }
-};
-
+// The default side offset type with no unit.
 struct SideOffsets2D_f32 {
   float top;
   float right;
@@ -518,6 +560,21 @@ struct SideOffsets2D_f32 {
   float left;
 
   bool operator==(const SideOffsets2D_f32& aOther) const {
+    return top == aOther.top &&
+           right == aOther.right &&
+           bottom == aOther.bottom &&
+           left == aOther.left;
+  }
+};
+
+// The default side offset type with no unit.
+struct SideOffsets2D_u32 {
+  uint32_t top;
+  uint32_t right;
+  uint32_t bottom;
+  uint32_t left;
+
+  bool operator==(const SideOffsets2D_u32& aOther) const {
     return top == aOther.top &&
            right == aOther.right &&
            bottom == aOther.bottom &&
@@ -573,6 +630,14 @@ struct GlyphInstance {
   }
 };
 
+struct GlyphOptions {
+  FontRenderMode render_mode;
+
+  bool operator==(const GlyphOptions& aOther) const {
+    return render_mode == aOther.render_mode;
+  }
+};
+
 struct TextShadow {
   LayoutVector2D offset;
   ColorF color;
@@ -586,6 +651,18 @@ struct TextShadow {
 };
 
 typedef YuvColorSpace WrYuvColorSpace;
+
+struct TypedPoint2D_u16__Tiles {
+  uint16_t x;
+  uint16_t y;
+
+  bool operator==(const TypedPoint2D_u16__Tiles& aOther) const {
+    return x == aOther.x &&
+           y == aOther.y;
+  }
+};
+
+typedef TypedPoint2D_u16__Tiles TileOffset;
 
 struct MutByteSlice {
   uint8_t *buffer;
@@ -661,8 +738,20 @@ struct WrExternalImageHandler {
  * To generate this file:
  *   1. Get the latest cbindgen using `cargo install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/rlhunt/cbindgen` and use a tagged release
- *   2. Run `cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */
+
+extern void gfx_critical_note(const char *aMsg);
+
+extern bool gfx_use_wrench();
+
+extern bool is_glcontext_egl(void *aGlcontextPtr);
+
+extern bool is_in_compositor_thread();
+
+extern bool is_in_main_thread();
+
+extern bool is_in_render_thread();
 
 WR_INLINE
 const VecU8 *wr_add_ref_arc(const ArcVecU8 *aArc)
@@ -682,6 +771,15 @@ void wr_api_add_external_image(DocumentHandle *aDh,
                                WrExternalImageId aExternalImageId,
                                WrExternalImageBufferType aBufferType,
                                uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_api_add_font_instance(DocumentHandle *aDh,
+                              WrFontInstanceKey aKey,
+                              WrFontKey aFontKey,
+                              float aGlyphSize,
+                              const FontInstanceOptions *aOptions,
+                              const FontInstancePlatformOptions *aPlatformOptions)
 WR_FUNC;
 
 WR_INLINE
@@ -717,6 +815,11 @@ WR_DESTRUCTOR_SAFE_FUNC;
 WR_INLINE
 void wr_api_delete_font(DocumentHandle *aDh,
                         WrFontKey aKey)
+WR_FUNC;
+
+WR_INLINE
+void wr_api_delete_font_instance(DocumentHandle *aDh,
+                                 WrFontInstanceKey aKey)
 WR_FUNC;
 
 WR_INLINE
@@ -815,6 +918,13 @@ uint64_t wr_dp_define_clip(WrState *aState,
                            const WrComplexClipRegion *aComplex,
                            size_t aComplexCount,
                            const WrImageMask *aMask)
+WR_FUNC;
+
+WR_INLINE
+void wr_dp_define_scroll_layer(WrState *aState,
+                               uint64_t aScrollId,
+                               LayoutRect aContentRect,
+                               LayoutRect aClipRect)
 WR_FUNC;
 
 WR_INLINE
@@ -984,9 +1094,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_scroll_layer(WrState *aState,
-                             uint64_t aScrollId,
-                             LayoutRect aContentRect,
-                             LayoutRect aClipRect)
+                             uint64_t aScrollId)
 WR_FUNC;
 
 WR_INLINE
@@ -1007,10 +1115,10 @@ void wr_dp_push_text(WrState *aState,
                      LayoutRect aBounds,
                      LayoutRect aClip,
                      ColorF aColor,
-                     WrFontKey aFontKey,
+                     WrFontInstanceKey aFontKey,
                      const GlyphInstance *aGlyphs,
                      uint32_t aGlyphCount,
-                     float aGlyphSize)
+                     const GlyphOptions *aGlyphOptions)
 WR_FUNC;
 
 WR_INLINE
@@ -1020,6 +1128,7 @@ void wr_dp_push_text_shadow(WrState *aState,
                             TextShadow aShadow)
 WR_FUNC;
 
+// Push a 2 planar NV12 image.
 WR_INLINE
 void wr_dp_push_yuv_NV12_image(WrState *aState,
                                LayoutRect aBounds,
@@ -1030,6 +1139,7 @@ void wr_dp_push_yuv_NV12_image(WrState *aState,
                                ImageRendering aImageRendering)
 WR_FUNC;
 
+// Push a yuv interleaved image.
 WR_INLINE
 void wr_dp_push_yuv_interleaved_image(WrState *aState,
                                       LayoutRect aBounds,
@@ -1039,6 +1149,7 @@ void wr_dp_push_yuv_interleaved_image(WrState *aState,
                                       ImageRendering aImageRendering)
 WR_FUNC;
 
+// Push a 3 planar yuv image.
 WR_INLINE
 void wr_dp_push_yuv_planar_image(WrState *aState,
                                  LayoutRect aBounds,
@@ -1049,6 +1160,22 @@ void wr_dp_push_yuv_planar_image(WrState *aState,
                                  WrYuvColorSpace aColorSpace,
                                  ImageRendering aImageRendering)
 WR_FUNC;
+
+extern bool wr_moz2d_render_cb(ByteSlice aBlob,
+                               uint32_t aWidth,
+                               uint32_t aHeight,
+                               ImageFormat aFormat,
+                               const uint16_t *aTileSize,
+                               const TileOffset *aTileOffset,
+                               MutByteSlice aOutput);
+
+extern void wr_notifier_external_event(WrWindowId aWindowId,
+                                       size_t aRawEvent);
+
+extern void wr_notifier_new_frame_ready(WrWindowId aWindowId);
+
+extern void wr_notifier_new_scroll_frame_ready(WrWindowId aWindowId,
+                                               bool aCompositeNeeded);
 
 WR_INLINE
 void wr_rendered_epochs_delete(WrRenderedEpochs *aPipelineEpochs)
@@ -1154,5 +1281,5 @@ WR_FUNC;
  * To generate this file:
  *   1. Get the latest cbindgen using `cargo install --force cbindgen`
  *      a. Alternatively, you can clone `https://github.com/rlhunt/cbindgen` and use a tagged release
- *   2. Run `cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
+ *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */

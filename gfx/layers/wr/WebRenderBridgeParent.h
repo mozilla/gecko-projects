@@ -55,7 +55,7 @@ public:
                         RefPtr<AsyncImagePipelineManager>&& aImageMgr,
                         RefPtr<CompositorAnimationStorage>&& aAnimStorage);
 
-  static WebRenderBridgeParent* CreateDestroyed();
+  static WebRenderBridgeParent* CreateDestroyed(const wr::PipelineId& aPipelineId);
 
   wr::PipelineId PipelineId() { return mPipelineId; }
   wr::WebRenderAPI* GetWebRenderAPI() { return mApi; }
@@ -92,6 +92,12 @@ public:
                                          const ByteBuffer& aBuffer,
                                          const uint32_t& aFontIndex) override;
   mozilla::ipc::IPCResult RecvDeleteFont(const wr::FontKey& aFontKey) override;
+  mozilla::ipc::IPCResult RecvAddFontInstance(const wr::FontInstanceKey& aInstanceKey,
+                                              const wr::FontKey& aFontKey,
+                                              const float& aGlyphSize,
+                                              const MaybeFontInstanceOptions& aOptions,
+                                              const MaybeFontInstancePlatformOptions& aPlatformOptions) override;
+  mozilla::ipc::IPCResult RecvDeleteFontInstance(const wr::FontInstanceKey& aInstanceKey) override;
   mozilla::ipc::IPCResult RecvDPBegin(const gfx::IntSize& aSize) override;
   mozilla::ipc::IPCResult RecvDPEnd(const gfx::IntSize& aSize,
                                     InfallibleTArray<WebRenderParentCommand>&& aCommands,
@@ -198,7 +204,7 @@ public:
                        CompositorAnimationStorage* aAnimStorage);
 
 private:
-  WebRenderBridgeParent();
+  explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
   virtual ~WebRenderBridgeParent();
 
   uint64_t GetLayersId() const;
@@ -272,6 +278,7 @@ private:
   // WebRenderBridgeParent is destroyed abnormally and Tab move between different windows.
   std::unordered_set<uint64_t> mActiveImageKeys;
   std::unordered_set<uint64_t> mFontKeys;
+  std::unordered_set<uint64_t> mFontInstanceKeys;
   // mActiveAnimations is used to avoid leaking animations when WebRenderBridgeParent is
   // destroyed abnormally and Tab move between different windows.
   std::unordered_set<uint64_t> mActiveAnimations;

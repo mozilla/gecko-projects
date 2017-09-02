@@ -45,6 +45,7 @@
 #include "nsStringStream.h"
 #include "nsIAuthPrompt.h"
 #include "nsIAuthPrompt2.h"
+#include "nsIClassOfService.h"
 #include "nsIOutputStream.h"
 #include "nsISupportsPrimitives.h"
 #include "nsISupportsPriority.h"
@@ -380,7 +381,7 @@ XMLHttpRequestMainThread::IsCertainlyAliveForCC() const
 }
 
 // QueryInterface implementation for XMLHttpRequestMainThread
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(XMLHttpRequestMainThread)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(XMLHttpRequestMainThread)
   NS_INTERFACE_MAP_ENTRY(nsIXMLHttpRequest)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
@@ -2620,12 +2621,21 @@ XMLHttpRequestMainThread::MaybeLowerChannelPriority()
     return;
   }
 
-  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
-  if (!p) {
-    return;
+  if (nsContentUtils::IsTailingEnabled()) {
+    nsCOMPtr<nsIClassOfService> cos = do_QueryInterface(mChannel);
+    if (cos) {
+      // Adding TailAllowed to overrule the Unblocked flag, but to preserve
+      // the effect of Unblocked when tailing is off.
+      cos->AddClassFlags(nsIClassOfService::Throttleable |
+                         nsIClassOfService::Tail |
+                         nsIClassOfService::TailAllowed);
+    }
   }
 
-  p->SetPriority(nsISupportsPriority::PRIORITY_LOWEST);
+  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
+  if (p) {
+    p->SetPriority(nsISupportsPriority::PRIORITY_LOWEST);
+  }
 }
 
 nsresult
@@ -2937,6 +2947,61 @@ XMLHttpRequestMainThread::UnsuppressEventHandlingAndResume()
   if (mResumeTimeoutRunnable) {
     DispatchToMainThread(mResumeTimeoutRunnable.forget());
     mResumeTimeoutRunnable = nullptr;
+  }
+}
+
+void
+XMLHttpRequestMainThread::Send(JSContext* aCx,
+                               const Nullable<DocumentOrBlobOrArrayBufferViewOrArrayBufferOrFormDataOrURLSearchParamsOrUSVString>& aData,
+                               ErrorResult& aRv)
+{
+  if (aData.IsNull()) {
+    aRv = SendInternal(nullptr);
+    return;
+  }
+
+
+  if (aData.Value().IsDocument()) {
+    BodyExtractor<nsIDocument> body(&aData.Value().GetAsDocument());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsBlob()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsBlob());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsArrayBuffer()) {
+    BodyExtractor<const ArrayBuffer> body(&aData.Value().GetAsArrayBuffer());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsArrayBufferView()) {
+    BodyExtractor<const ArrayBufferView>
+      body(&aData.Value().GetAsArrayBufferView());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsFormData()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsFormData());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsURLSearchParams()) {
+    BodyExtractor<nsIXHRSendable> body(&aData.Value().GetAsURLSearchParams());
+    aRv = SendInternal(&body);
+    return;
+  }
+
+  if (aData.Value().IsUSVString()) {
+    BodyExtractor<const nsAString> body(&aData.Value().GetAsUSVString());
+    aRv = SendInternal(&body);
+    return;
   }
 }
 

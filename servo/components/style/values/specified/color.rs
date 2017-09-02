@@ -18,7 +18,7 @@ use super::AllowQuirks;
 use values::computed::{Color as ComputedColor, Context, ToComputedValue};
 
 /// Specified color value
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum Color {
     /// The 'currentColor' keyword
@@ -44,7 +44,6 @@ pub enum Color {
     InheritFromBodyQuirk,
 }
 
-no_viewport_percentage!(Color);
 
 #[cfg(feature = "gecko")]
 mod gecko {
@@ -305,7 +304,6 @@ impl ToComputedValue for Color {
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct RGBAColor(pub Color);
 
-no_viewport_percentage!(RGBAColor);
 
 impl Parse for RGBAColor {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {

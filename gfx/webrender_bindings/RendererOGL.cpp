@@ -26,23 +26,32 @@ wr::WrExternalImage LockExternalImage(void* aObj, wr::WrExternalImageId aId, uin
   if (texture->AsBufferTextureHost()) {
     RenderBufferTextureHost* bufferTexture = texture->AsBufferTextureHost();
     MOZ_ASSERT(bufferTexture);
-    bufferTexture->Lock();
-    RenderBufferTextureHost::RenderBufferData data =
-        bufferTexture->GetBufferDataForRender(aChannelIndex);
 
-    return RawDataToWrExternalImage(data.mData, data.mBufferSize);
+    if (bufferTexture->Lock()) {
+      RenderBufferTextureHost::RenderBufferData data =
+          bufferTexture->GetBufferDataForRender(aChannelIndex);
+
+      return RawDataToWrExternalImage(data.mData, data.mBufferSize);
+    } else {
+      return RawDataToWrExternalImage(nullptr, 0);
+    }
   } else {
     // texture handle case
     RenderTextureHostOGL* textureOGL = texture->AsTextureHostOGL();
     MOZ_ASSERT(textureOGL);
 
     textureOGL->SetGLContext(renderer->mGL);
-    textureOGL->Lock();
     gfx::IntSize size = textureOGL->GetSize(aChannelIndex);
-
-    return NativeTextureToWrExternalImage(textureOGL->GetGLHandle(aChannelIndex),
-                                          0, 0,
-                                          size.width, size.height);
+    if (textureOGL->Lock()) {
+      return NativeTextureToWrExternalImage(textureOGL->GetGLHandle(aChannelIndex),
+                                            0, 0,
+                                            size.width, size.height);
+    } else {
+      // Just use 0 for the gl handle if the lock() was failed.
+      return NativeTextureToWrExternalImage(0,
+                                            0, 0,
+                                            size.width, size.height);
+    }
   }
 }
 
@@ -138,8 +147,7 @@ RendererOGL::Render()
 
   if (!mGL->MakeCurrent()) {
     gfxCriticalNote << "Failed to make render context current, can't draw.";
-    // XXX This could cause oom in webrender since pending_texture_updates is not handled.
-    // It needs to be addressed.
+    NotifyWebRenderError(WebRenderError::MAKE_CURRENT);
     return false;
   }
 
@@ -233,6 +241,22 @@ RenderTextureHost*
 RendererOGL::GetRenderTexture(wr::WrExternalImageId aExternalImageId)
 {
   return mThread->GetRenderTexture(aExternalImageId);
+}
+
+static void
+DoNotifyWebRenderError(layers::CompositorBridgeParentBase* aBridge, WebRenderError aError)
+{
+  aBridge->NotifyWebRenderError(aError);
+}
+
+void
+RendererOGL::NotifyWebRenderError(WebRenderError aError)
+{
+  layers::CompositorThreadHolder::Loop()->PostTask(NewRunnableFunction(
+    &DoNotifyWebRenderError,
+    mBridge,
+    aError
+  ));
 }
 
 } // namespace wr

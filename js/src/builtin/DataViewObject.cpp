@@ -929,8 +929,6 @@ DataViewObject::CreatePrototype(JSContext* cx, JSProtoKey key)
 static const ClassOps DataViewObjectClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* newEnumerate */
     nullptr, /* resolve */
@@ -1013,7 +1011,7 @@ JS_GetDataViewByteOffset(JSObject* obj)
 }
 
 JS_FRIEND_API(void*)
-JS_GetDataViewData(JSObject* obj, bool* isSharedMemory, const JS::AutoCheckCannotGC&)
+JS_GetDataViewData(JSObject* obj, bool* isSharedMemory, const JS::AutoRequireNoGC&)
 {
     obj = CheckedUnwrap(obj);
     if (!obj)

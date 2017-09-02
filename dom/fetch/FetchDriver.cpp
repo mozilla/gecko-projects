@@ -43,6 +43,21 @@
 namespace mozilla {
 namespace dom {
 
+namespace {
+
+bool
+ShouldCheckSRI(const InternalRequest* const aRequest,
+               const InternalResponse* const aResponse)
+{
+  MOZ_DIAGNOSTIC_ASSERT(aRequest);
+  MOZ_DIAGNOSTIC_ASSERT(aResponse);
+
+  return !aRequest->GetIntegrity().IsEmpty() &&
+         aResponse->Type() != ResponseType::Error;
+}
+
+} // anonymous namespace
+
 NS_IMPL_ISUPPORTS(FetchDriver,
                   nsIStreamListener, nsIChannelEventSink, nsIInterfaceRequestor,
                   nsIThreadRetargetableStreamListener)
@@ -73,7 +88,7 @@ FetchDriver::~FetchDriver()
 }
 
 nsresult
-FetchDriver::Fetch(FetchSignal* aSignal, FetchDriverObserver* aObserver)
+FetchDriver::Fetch(AbortSignal* aSignal, FetchDriverObserver* aObserver)
 {
   workers::AssertIsOnMainThread();
 #ifdef DEBUG
@@ -104,7 +119,7 @@ FetchDriver::Fetch(FetchSignal* aSignal, FetchDriverObserver* aObserver)
   // the operation.
   if (aSignal) {
     if (aSignal->Aborted()) {
-      Aborted();
+      Abort();
       return NS_OK;
     }
 
@@ -378,6 +393,11 @@ FetchDriver::HttpFetch()
     }
   }
 
+  if (mIsTrackingFetch && nsContentUtils::IsTailingEnabled()) {
+    cos->AddClassFlags(nsIClassOfService::Throttleable |
+                       nsIClassOfService::Tail);
+  }
+
   if (mIsTrackingFetch && nsContentUtils::IsLowerNetworkPriority()) {
     nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(chan);
     if (p) {
@@ -423,8 +443,7 @@ FetchDriver::BeginAndGetFilteredResponse(InternalResponse* aResponse,
 
   MOZ_ASSERT(filteredResponse);
   MOZ_ASSERT(mObserver);
-  if (filteredResponse->Type() == ResponseType::Error ||
-      mRequest->GetIntegrity().IsEmpty()) {
+  if (!ShouldCheckSRI(mRequest, filteredResponse)) {
     mObserver->OnResponseAvailable(filteredResponse);
   #ifdef DEBUG
     mResponseAvailableCalled = true;
@@ -596,13 +615,11 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   // sure the Response is fully initialized before calling this.
   mResponse = BeginAndGetFilteredResponse(response, foundOpaqueRedirect);
 
-  // From "Main Fetch" step 17: SRI-part1.
-  if (mResponse->Type() != ResponseType::Error &&
-      !mRequest->GetIntegrity().IsEmpty() &&
-      mSRIMetadata.IsEmpty()) {
-    nsIConsoleReportCollector* aReporter = nullptr;
+  // From "Main Fetch" step 19: SRI-part1.
+  if (ShouldCheckSRI(mRequest, mResponse) && mSRIMetadata.IsEmpty()) {
+    nsIConsoleReportCollector* reporter = nullptr;
     if (mObserver) {
-      aReporter = mObserver->GetReporter();
+      reporter = mObserver->GetReporter();
     }
 
     nsAutoCString sourceUri;
@@ -612,9 +629,9 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
       sourceUri.Assign(mWorkerScript);
     }
     SRICheck::IntegrityMetadata(mRequest->GetIntegrity(), sourceUri,
-                                aReporter, &mSRIMetadata);
+                                reporter, &mSRIMetadata);
     mSRIDataVerifier = new SRICheckDataVerifier(mSRIMetadata, sourceUri,
-                                                aReporter);
+                                                reporter);
 
     // Do not retarget off main thread when using SRI API.
     return NS_OK;
@@ -735,9 +752,10 @@ FetchDriver::OnDataAvailable(nsIRequest* aRequest,
   MOZ_ASSERT(mResponse);
   MOZ_ASSERT(mPipeOutputStream);
 
-  // From "Main Fetch" step 17: SRI-part2.
-  if (mResponse->Type() != ResponseType::Error &&
-      !mRequest->GetIntegrity().IsEmpty()) {
+  // From "Main Fetch" step 19: SRI-part2.
+  // Note: Avoid checking the hidden opaque body.
+  if (mResponse->Type() != ResponseType::Opaque &&
+      ShouldCheckSRI(mRequest, mResponse)) {
     MOZ_ASSERT(mSRIDataVerifier);
 
     SRIVerifierAndOutputHolder holder(mSRIDataVerifier, mPipeOutputStream);
@@ -774,16 +792,15 @@ FetchDriver::OnStopRequest(nsIRequest* aRequest,
     MOZ_ASSERT(mResponse);
     MOZ_ASSERT(!mResponse->IsError());
 
-    // From "Main Fetch" step 17: SRI-part3.
-    if (mResponse->Type() != ResponseType::Error &&
-        !mRequest->GetIntegrity().IsEmpty()) {
+    // From "Main Fetch" step 19: SRI-part3.
+    if (ShouldCheckSRI(mRequest, mResponse)) {
       MOZ_ASSERT(mSRIDataVerifier);
 
       nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
 
-      nsIConsoleReportCollector* aReporter = nullptr;
+      nsIConsoleReportCollector* reporter = nullptr;
       if (mObserver) {
-        aReporter = mObserver->GetReporter();
+        reporter = mObserver->GetReporter();
       }
 
       nsAutoCString sourceUri;
@@ -793,7 +810,7 @@ FetchDriver::OnStopRequest(nsIRequest* aRequest,
         sourceUri.Assign(mWorkerScript);
       }
       nsresult rv = mSRIDataVerifier->Verify(mSRIMetadata, channel, sourceUri,
-                                             aReporter);
+                                             reporter);
       if (NS_FAILED(rv)) {
         FailWithNetworkError();
         // Cancel request.
@@ -807,9 +824,8 @@ FetchDriver::OnStopRequest(nsIRequest* aRequest,
   }
 
   if (mObserver) {
-    if (mResponse->Type() != ResponseType::Error &&
-        !mRequest->GetIntegrity().IsEmpty()) {
-      //From "Main Fetch" step 23: Process response.
+    // From "Main Fetch" step 19.1, 19.2: Process response.
+    if (ShouldCheckSRI(mRequest, mResponse)) {
       MOZ_ASSERT(mResponse);
       mObserver->OnResponseAvailable(mResponse);
       #ifdef DEBUG
@@ -967,7 +983,7 @@ FetchDriver::SetRequestHeaders(nsIHttpChannel* aChannel) const
 }
 
 void
-FetchDriver::Aborted()
+FetchDriver::Abort()
 {
   if (mObserver) {
   #ifdef DEBUG

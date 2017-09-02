@@ -10,7 +10,7 @@ const {actionCreators: ac, actionTypes: at} = Cu.import("resource://activity-str
 const {TippyTopProvider} = Cu.import("resource://activity-stream/lib/TippyTopProvider.jsm", {});
 const {insertPinned, TOP_SITES_SHOWMORE_LENGTH} = Cu.import("resource://activity-stream/common/Reducers.jsm", {});
 const {Dedupe} = Cu.import("resource://activity-stream/common/Dedupe.jsm", {});
-const {shortURL} = Cu.import("resource://activity-stream/common/ShortURL.jsm", {});
+const {shortURL} = Cu.import("resource://activity-stream/lib/ShortURL.jsm", {});
 
 XPCOMUtils.defineLazyModuleGetter(this, "NewTabUtils",
   "resource://gre/modules/NewTabUtils.jsm");
@@ -20,6 +20,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Screenshots",
 const UPDATE_TIME = 15 * 60 * 1000; // 15 minutes
 const DEFAULT_SITES_PREF = "default.sites";
 const DEFAULT_TOP_SITES = [];
+const FRECENCY_THRESHOLD = 100; // 1 visit (skip first-run/one-time pages)
 
 this.TopSitesFeed = class TopSitesFeed {
   constructor() {
@@ -62,7 +63,9 @@ this.TopSitesFeed = class TopSitesFeed {
     if (!frecent) {
       frecent = [];
     } else {
-      frecent = frecent.filter(link => link && link.type !== "affiliate");
+      // Get the best history links that pass the frecency threshold
+      frecent = frecent.filter(link => link && link.type !== "affiliate" &&
+        link.frecency > FRECENCY_THRESHOLD);
     }
 
     // Group together websites that require deduping.
@@ -118,23 +121,46 @@ this.TopSitesFeed = class TopSitesFeed {
     // Augment the pinned links with any other extra data we have for them already in the store
     const links = this.store.getState().TopSites.rows;
     const pinned = NewTabUtils.pinnedLinks.links;
-    return pinned.map(pinnedLink => (pinnedLink ? Object.assign(links.find(link => link && link.url === pinnedLink.url) || {}, pinnedLink) : pinnedLink));
+    return pinned.map(pinnedLink => {
+      if (pinnedLink) {
+        const hostname = shortURL(pinnedLink);
+        return Object.assign(links.find(link => link && link.url === pinnedLink.url) || {hostname}, pinnedLink);
+      }
+      return pinnedLink;
+    });
+  }
+  _broadcastPinnedSitesUpdated() {
+    this.store.dispatch(ac.BroadcastToContent({
+      type: at.PINNED_SITES_UPDATED,
+      data: this._getPinnedWithData()
+    }));
   }
   pin(action) {
     const {site, index} = action.data;
     NewTabUtils.pinnedLinks.pin(site, index);
-    this.store.dispatch(ac.BroadcastToContent({
-      type: at.PINNED_SITES_UPDATED,
-      data: this._getPinnedWithData()
-    }));
+    this._broadcastPinnedSitesUpdated();
   }
   unpin(action) {
     const {site} = action.data;
     NewTabUtils.pinnedLinks.unpin(site);
-    this.store.dispatch(ac.BroadcastToContent({
-      type: at.PINNED_SITES_UPDATED,
-      data: this._getPinnedWithData()
-    }));
+    this._broadcastPinnedSitesUpdated();
+  }
+  _insertPin(site, index) {
+    // Insert a pin at the given index. If that slot is already taken, we need
+    // to insert it in the next slot. Rinse and repeat if that next slot is also
+    // taken.
+    let pinned = NewTabUtils.pinnedLinks.links;
+    if (pinned.length > index && pinned[index]) {
+      this._insertPin(pinned[index], index + 1);
+    }
+    NewTabUtils.pinnedLinks.pin(site, index);
+  }
+  add(action) {
+    // Adding a top site pins it in the first slot, pushing over any link already
+    // pinned in the slot.
+    this._insertPin(action.data.site, 0);
+
+    this._broadcastPinnedSitesUpdated();
   }
   async onAction(action) {
     switch (action.type) {
@@ -151,7 +177,9 @@ this.TopSitesFeed = class TopSitesFeed {
           this.refresh(action.meta.fromTarget);
         }
         break;
-      case at.PLACES_HISTORY_CLEARED:
+      case at.PLACES_HISTORY_CLEARED: // All these actions mean we need new top sites
+      case at.PLACES_LINK_DELETED:
+      case at.PLACES_LINK_BLOCKED:
         this.refresh();
         break;
       case at.PREF_CHANGED:
@@ -167,6 +195,9 @@ this.TopSitesFeed = class TopSitesFeed {
         break;
       case at.TOP_SITES_UNPIN:
         this.unpin(action);
+        break;
+      case at.TOP_SITES_ADD:
+        this.add(action);
         break;
     }
   }

@@ -36,11 +36,11 @@ config = {
         "revision": "%(revision)s",
         "dest": MOZILLA_DIR,
     }],
-    "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-aurora",
+    "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-beta",
     "hg_l10n_tag": "default",
     'vcs_share_base': "/builds/hg-shared",
 
-    "l10n_dir": "mozilla-aurora",
+    "l10n_dir": "mozilla-beta",
     "repack_env": {
         # so ugly, bug 951238
         "LD_LIBRARY_PATH": "/lib:/tools/gcc-4.7.2-0moz1/lib:/tools/gcc-4.7.2-0moz1/lib64",

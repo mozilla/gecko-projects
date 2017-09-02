@@ -10,6 +10,7 @@
 #include "ErrorReporter.h"
 #include "GeckoProfiler.h"
 #include "gfxFontFamilyList.h"
+#include "gfxFontFeatures.h"
 #include "nsAnimationManager.h"
 #include "nsAttrValueInlines.h"
 #include "nsCSSCounterStyleRule.h"
@@ -28,6 +29,7 @@
 #include "nsIDocumentInlines.h"
 #include "nsILoadContext.h"
 #include "nsIFrame.h"
+#include "nsIMemoryReporter.h"
 #include "nsINode.h"
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
@@ -225,48 +227,32 @@ ServoComputedData::GetStyleVariables() const
             "called");
 }
 
-MOZ_DEFINE_MALLOC_SIZE_OF(ServoStyleStructsMallocSizeOf)
+MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF(ServoStyleStructsMallocEnclosingSizeOf)
 
 void
-ServoComputedData::AddSizeOfExcludingThis(SizeOfState& aState,
-                                          nsStyleSizes& aSizes) const
+ServoComputedData::AddSizeOfExcludingThis(nsWindowSizes& aSizes) const
 {
-  // XXX WARNING: GetStyleFoo() returns an nsStyleFoo pointer. This nsStyleFoo
-  // sits within a servo_arc::Arc, i.e. it is preceded by a word-sized
-  // refcount. So this pointer is an interior pointer. To get the start address
-  // of the heap block we move the pointer back by one word. For this to work,
-  // two things must be true.
-  //
-  // - The layout of servo_arc::Arc must stay the same.
-  //
-  // - The alignment of each nsStyleFoo must not be greater than the size of a
-  //   word (otherwise padding might be inserted between the refcount and the
-  //   struct in the servo_arc::Arc).
-  //
-  // In the long run a better solution here is for mozjemalloc to provide a
-  // function that converts an interior pointer to a start pointer (bug
-  // 1389305), but that's not available right now.
-  //
-  // Also, we use ServoStyleStructsMallocSizeOf rather than
-  // |aState.mMallocSizeOf| to better distinguish in DMD's output the memory
-  // measured here.
+  // Note: GetStyleFoo() returns a pointer to an nsStyleFoo that sits within a
+  // servo_arc::Arc, i.e. it is preceded by a word-sized refcount. So we need
+  // to measure it with a function that can handle an interior pointer. We use
+  // ServoStyleStructsEnclosingMallocSizeOf to clearly identify in DMD's
+  // output the memory measured here.
 #define STYLE_STRUCT(name_, cb_) \
   static_assert(alignof(nsStyle##name_) <= sizeof(size_t), \
                 "alignment will break AddSizeOfExcludingThis()"); \
-  const char* p##name_ = reinterpret_cast<const char*>(GetStyle##name_()); \
-  p##name_ -= sizeof(size_t); \
-  if (!aState.HaveSeenPtr(p##name_)) { \
-    aSizes.NS_STYLE_SIZES_FIELD(name_) += \
-      ServoStyleStructsMallocSizeOf(p##name_); \
+  const void* p##name_ = GetStyle##name_(); \
+  if (!aSizes.mState.HaveSeenPtr(p##name_)) { \
+    aSizes.mServoStyleSizes.NS_STYLE_SIZES_FIELD(name_) += \
+      ServoStyleStructsMallocEnclosingSizeOf(p##name_); \
   }
   #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
 
-  if (visited_style.mPtr && !aState.HaveSeenPtr(visited_style.mPtr)) {
+  if (visited_style.mPtr && !aSizes.mState.HaveSeenPtr(visited_style.mPtr)) {
     visited_style.mPtr->AddSizeOfIncludingThis(
-      aState, aSizes, &aSizes.mComputedValuesVisited);
+      aSizes, &aSizes.mLayoutComputedValuesVisited);
   }
 
   // Measurement of the following members may be added later if DMD finds it is
@@ -375,6 +361,13 @@ Gecko_NoteDirtyElement(RawGeckoElementBorrowed aElement)
 {
   MOZ_ASSERT(NS_IsMainThread());
   const_cast<Element*>(aElement)->NoteDirtyForServo();
+}
+
+void
+Gecko_NoteDirtySubtreeForInvalidation(RawGeckoElementBorrowed aElement)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  const_cast<Element*>(aElement)->NoteDirtySubtreeForServo();
 }
 
 void
@@ -1341,6 +1334,33 @@ Gecko_nsFont_Destroy(nsFont* aDest)
   aDest->~nsFont();
 }
 
+nsTArray<unsigned int>*
+Gecko_AppendFeatureValueHashEntry(gfxFontFeatureValueSet* aFontFeatureValues,
+                                  nsIAtom* aFamily, uint32_t aAlternate, nsIAtom* aName)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  static_assert(sizeof(unsigned int) == sizeof(uint32_t),
+                "sizeof unsigned int and uint32_t must be the same");
+  return aFontFeatureValues->AppendFeatureValueHashEntry(
+    nsDependentAtomString(aFamily),
+    nsDependentAtomString(aName),
+    aAlternate
+  );
+}
+
+void
+Gecko_nsFont_SetFontFeatureValuesLookup(nsFont* aFont,
+                                        const RawGeckoPresContext* aPresContext)
+{
+  aFont->featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
+}
+
+void
+Gecko_nsFont_ResetFontFeatureValuesLookup(nsFont* aFont)
+{
+  aFont->featureValueLookup = nullptr;
+}
+
 
 void
 Gecko_ClearAlternateValues(nsFont* aFont, size_t aLength)
@@ -1363,6 +1383,7 @@ Gecko_CopyAlternateValuesFrom(nsFont* aDest, const nsFont* aSrc)
 {
   aDest->alternateValues.Clear();
   aDest->alternateValues.AppendElements(aSrc->alternateValues);
+  aDest->featureValueLookup = aSrc->featureValueLookup;
 }
 
 void
@@ -1425,52 +1446,19 @@ Gecko_CopyCounterStyle(CounterStylePtr* aDst, const CounterStylePtr* aSrc)
   *aDst = *aSrc;
 }
 
-bool
-Gecko_CounterStyle_IsNone(const CounterStylePtr* aPtr) {
-  MOZ_ASSERT(aPtr);
-  return (*aPtr)->IsNone();
+nsIAtom*
+Gecko_CounterStyle_GetName(const CounterStylePtr* aPtr)
+{
+  if (!aPtr->IsResolved()) {
+    return aPtr->AsAtom();
+  }
+  return (*aPtr)->GetStyleName();
 }
 
-bool
-Gecko_CounterStyle_IsName(const CounterStylePtr* aPtr) {
-  return !Gecko_CounterStyle_IsNone(aPtr) && !(*aPtr)->AsAnonymous();
-}
-
-void
-Gecko_CounterStyle_GetName(const CounterStylePtr* aPtr,
-                           nsAString* aResult) {
-  MOZ_ASSERT(Gecko_CounterStyle_IsName(aPtr));
-  (*aPtr)->GetStyleName(*aResult);
-}
-
-const nsTArray<nsString>&
-Gecko_CounterStyle_GetSymbols(const CounterStylePtr* aPtr) {
-  MOZ_ASSERT((*aPtr)->AsAnonymous());
-  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
-  return anonymous->GetSymbols();
-}
-
-uint8_t
-Gecko_CounterStyle_GetSystem(const CounterStylePtr* aPtr) {
-  MOZ_ASSERT((*aPtr)->AsAnonymous());
-  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
-  return anonymous->GetSystem();
-}
-
-bool
-Gecko_CounterStyle_IsSingleString(const CounterStylePtr* aPtr) {
-  MOZ_ASSERT(aPtr);
-  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
-  return anonymous ? anonymous->IsSingleString() : false;
-}
-
-void
-Gecko_CounterStyle_GetSingleString(const CounterStylePtr* aPtr,
-                                   nsAString* aResult) {
-  MOZ_ASSERT(Gecko_CounterStyle_IsSingleString(aPtr));
-  const nsTArray<nsString>& symbols = Gecko_CounterStyle_GetSymbols(aPtr);
-  MOZ_ASSERT(symbols.Length() == 1);
-  aResult->Assign(symbols[0]);
+const AnonymousCounterStyle*
+Gecko_CounterStyle_GetAnonymous(const CounterStylePtr* aPtr)
+{
+  return aPtr->AsAnonymous();
 }
 
 already_AddRefed<css::URLValue>
@@ -2368,7 +2356,14 @@ Gecko_nsStyleFont_PrefillDefaultForGeneric(nsStyleFont* aFont,
 {
   const nsFont* defaultFont = ThreadSafeGetDefaultFontHelper(aPresContext, aFont->mLanguage,
                                                              aGenericId);
-   aFont->mFont.fontlist = defaultFont->fontlist;
+  // In case of just the language changing, the parent could have had no generic,
+  // which Gecko just does regular cascading with. Do the same.
+  // This can only happen in the case where the language changed but the family did not
+  if (aGenericId != kGenericFont_NONE) {
+    aFont->mFont.fontlist = defaultFont->fontlist;
+  } else {
+    aFont->mFont.fontlist.SetDefaultFontType(defaultFont->fontlist.GetDefaultFontType());
+  }
 }
 
 void
@@ -2737,9 +2732,7 @@ void
 Gecko_SetJemallocThreadLocalArena(bool enabled)
 {
 #if defined(MOZ_MEMORY)
-  // At this point we convert |enabled| from a plain C++ bool to a
-  // |jemalloc_bool|, so be on the safe side.
-  jemalloc_thread_local_arena(!!enabled);
+  jemalloc_thread_local_arena(enabled);
 #endif
 }
 
@@ -2797,9 +2790,14 @@ Gecko_ReportUnexpectedCSSError(ErrorReporter* reporter,
     }
   }
 
-  nsDependentCSubstring paramValue(param, paramLen);
-  nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
-  reporter->ReportUnexpectedUnescaped(message, wideParam);
+  if (param) {
+    nsDependentCSubstring paramValue(param, paramLen);
+    nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
+    reporter->ReportUnexpectedUnescaped(message, wideParam);
+  } else {
+    reporter->ReportUnexpected(message);
+  }
+
   if (suffix) {
     reporter->ReportUnexpected(suffix);
   }

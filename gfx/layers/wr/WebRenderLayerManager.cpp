@@ -41,6 +41,7 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
   , mEndTransactionWithoutLayers(false)
   , mTarget(nullptr)
   , mPaintSequenceNumber(0)
+  , mShouldNotifyInvalidation(false)
 {
   MOZ_COUNT_CTOR(WebRenderLayerManager);
 }
@@ -157,6 +158,11 @@ WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 bool
 WebRenderLayerManager::BeginTransaction()
 {
+  if (!WrBridge()->IPCOpen()) {
+    gfxCriticalNote << "IPC Channel is already torn down unexpectedly\n";
+    return false;
+  }
+
   // Increment the paint sequence number even if test logging isn't
   // enabled in this process; it may be enabled in the parent process,
   // and the parent process expects unique sequence numbers.
@@ -313,6 +319,14 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
       }
     }
 
+    // If there is any invalid item, we should notify nsPresContext after EndTransaction.
+    if (!mShouldNotifyInvalidation) {
+      nsRect invalid;
+      if (item->IsInvalid(invalid)) {
+        mShouldNotifyInvalidation = true;
+      }
+    }
+
     { // scope the ScrollingLayersHelper
       ScrollingLayersHelper clip(item, aBuilder, aSc, mClipIdCache);
 
@@ -444,12 +458,12 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
   MOZ_ASSERT(aDT);
 
   aDT->ClearRect(aImageRect.ToUnknownRect());
-  RefPtr<gfxContext> context = gfxContext::CreateOrNull(aDT, aOffset.ToUnknownPoint());
+  RefPtr<gfxContext> context = gfxContext::CreateOrNull(aDT);
   MOZ_ASSERT(context);
 
+  context->SetMatrix(gfxMatrix::Translation(-aOffset.x, -aOffset.y));
   switch (aItem->GetType()) {
   case DisplayItemType::TYPE_MASK:
-    context->SetMatrix(gfxMatrix::Translation(-aOffset.x, -aOffset.y));
     static_cast<nsDisplayMask*>(aItem)->PaintMask(aDisplayListBuilder, context);
     break;
   case DisplayItemType::TYPE_FILTER:
@@ -503,9 +517,18 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
   nsRect clippedBounds = itemBounds;
 
   const DisplayItemClip& clip = aItem->GetClip();
-  if (clip.HasClip()) {
+  // Blob images will only draw the visible area of the blob so we don't need to clip
+  // them here and can just rely on the webrender clipping.
+  if (clip.HasClip() && !gfxPrefs::WebRenderBlobImages()) {
     clippedBounds = itemBounds.Intersect(clip.GetClipRect());
   }
+
+  // nsDisplayItem::Paint() may refer the variables that come from ComputeVisibility().
+  // So we should call ComputeVisibility() before painting. e.g.: nsDisplayBoxShadowInner
+  // uses mVisibleRegion in Paint() and mVisibleRegion is computed in
+  // nsDisplayBoxShadowInner::ComputeVisibility().
+  nsRegion visibleRegion(clippedBounds);
+  aItem->ComputeVisibility(aDisplayListBuilder, &visibleRegion);
 
   const int32_t appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   LayerRect bounds = ViewAs<LayerPixel>(
@@ -685,6 +708,9 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize);
 
   if (mEndTransactionWithoutLayers) {
+    // Reset the notification flag at the begin of the EndTransaction.
+    mShouldNotifyInvalidation = false;
+
     // aDisplayList being null here means this is an empty transaction following a layers-free
     // transaction, so we reuse the previously built displaylist and scroll
     // metadata information
@@ -709,6 +735,14 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
           mLayerScrollData.back().SetEventRegionsOverride(EventRegionsOverride::ForceDispatchToContent);
         }
       }
+      RefPtr<WebRenderLayerManager> self(this);
+      auto callback = [self](FrameMetrics::ViewID aScrollId) -> bool {
+        return self->mScrollData.HasMetadataFor(aScrollId);
+      };
+      if (Maybe<ScrollMetadata> rootMetadata = nsLayoutUtils::GetRootMetadata(
+            aDisplayListBuilder, nullptr, ContainerLayerParameters(), callback)) {
+        mLayerScrollData.back().AppendScrollMetadata(mScrollData, rootMetadata.ref());
+      }
       // Append the WebRenderLayerScrollData items into WebRenderScrollData
       // in reverse order, from topmost to bottommost. This is in keeping with
       // the semantics of WebRenderScrollData.
@@ -721,6 +755,9 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
       for (auto iter = mLastCanvasDatas.Iter(); !iter.Done(); iter.Next()) {
         RefPtr<WebRenderCanvasData> canvasData = iter.Get()->GetKey();
         WebRenderCanvasRendererAsync* canvas = canvasData->GetCanvasRenderer();
+        if (canvas->IsDirty()) {
+          mShouldNotifyInvalidation = true;
+        }
         canvas->UpdateCompositableClient();
       }
     }

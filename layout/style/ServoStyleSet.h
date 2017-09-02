@@ -97,7 +97,21 @@ public:
     return sInServoTraversal;
   }
 
-  ServoStyleSet();
+  // The kind of styleset we have.
+  //
+  // We use ServoStyleSet also from XBL bindings, and some stuff needs to be
+  // different between them.
+  enum class Kind : uint8_t {
+    // A "master" StyleSet.
+    //
+    // This one is owned by a pres shell for a given document.
+    Master,
+
+    // A StyleSet for XBL, which is owned by a given XBL binding.
+    ForXBL,
+  };
+
+  explicit ServoStyleSet(Kind aKind);
   ~ServoStyleSet();
 
   void Init(nsPresContext* aPresContext, nsBindingManager* aBindingManager);
@@ -121,7 +135,7 @@ public:
 
   void InvalidateStyleForCSSRuleChanges();
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  void AddSizeOfIncludingThis(nsWindowSizes& aSizes) const;
   const RawServoStyleSet* RawSet() const {
     return mRawSet.get();
   }
@@ -289,16 +303,6 @@ public:
   void StyleNewlyBoundElement(dom::Element* aElement);
 
   /**
-   * Like StyleNewSubtree, but in response to a request to reconstruct frames
-   * for the given subtree, and so works on elements that already have
-   * styles.  This will leave the subtree in a state just like after an initial
-   * styling, i.e. with new styles, no change hints, and with the dirty
-   * descendants bits cleared.  No comparison of old and new styles is done,
-   * so no change hints will be processed.
-   */
-  void StyleSubtreeForReconstruct(dom::Element* aRoot);
-
-  /**
    * Helper for correctly calling UpdateStylist without paying the cost of an
    * extra function call in the common no-rebuild-needed case.
    */
@@ -372,6 +376,9 @@ public:
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
   nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
+
+  // Get all the currently-active font feature values set.
+  already_AddRefed<gfxFontFeatureValueSet> BuildFontFeatureValueSet();
 
   already_AddRefed<ServoStyleContext>
   GetBaseContextForElement(dom::Element* aElement,
@@ -472,6 +479,9 @@ private:
    */
   const SnapshotTable& Snapshots();
 
+  bool IsMaster() const { return mKind == Kind::Master; }
+  bool IsForXBL() const { return mKind == Kind::ForXBL; }
+
   /**
    * Resolve all ServoDeclarationBlocks attached to mapped
    * presentation attributes cached on the document.
@@ -552,6 +562,7 @@ private:
   void RemoveSheetOfType(SheetType aType,
                          ServoStyleSheet* aSheet);
 
+  const Kind mKind;
   nsPresContext* mPresContext;
   UniquePtr<RawServoStyleSet> mRawSet;
   EnumeratedArray<SheetType, SheetType::Count,

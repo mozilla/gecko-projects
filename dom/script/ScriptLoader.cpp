@@ -137,10 +137,13 @@ ScriptLoader::ScriptLoader(nsIDocument *aDocument)
     mGiveUpEncoding(false),
     mReporter(new ConsoleReportCollector())
 {
+  LOG(("ScriptLoader::ScriptLoader %p", this));
 }
 
 ScriptLoader::~ScriptLoader()
 {
+  LOG(("ScriptLoader::~ScriptLoader %p", this));
+
   mObservers.Clear();
 
   if (mParserBlockingRequest) {
@@ -542,38 +545,32 @@ ScriptLoader::CreateModuleScript(ModuleLoadRequest* aRequest)
   return rv;
 }
 
-static bool
-CreateTypeError(JSContext* aCx, ModuleScript* aScript, const nsString& aMessage,
-                JS::MutableHandle<JS::Value> aError)
-{
-  JS::Rooted<JSObject*> module(aCx, aScript->ModuleRecord());
-  JS::Rooted<JSScript*> script(aCx, JS::GetModuleScript(aCx, module));
-  JS::Rooted<JSString*> filename(aCx);
-  filename = JS_NewStringCopyZ(aCx, JS_GetScriptFilename(script));
-  if (!filename) {
-    return false;
-  }
-
-  JS::Rooted<JSString*> message(aCx, JS_NewUCStringCopyZ(aCx, aMessage.get()));
-  if (!message) {
-    return false;
-  }
-
-  return JS::CreateError(aCx, JSEXN_TYPEERR, nullptr, filename, 0, 0, nullptr,
-                         message, aError);
-}
-
 static nsresult
 HandleResolveFailure(JSContext* aCx, ModuleScript* aScript,
-                     const nsAString& aSpecifier)
+                     const nsAString& aSpecifier,
+                     uint32_t aLineNumber, uint32_t aColumnNumber)
 {
-  // TODO: How can we get the line number of the failed import?
+  nsAutoCString url;
+  aScript->BaseURL()->GetAsciiSpec(url);
+
+  JS::Rooted<JSString*> filename(aCx);
+  filename = JS_NewStringCopyZ(aCx, url.get());
+  if (!filename) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   nsAutoString message(NS_LITERAL_STRING("Error resolving module specifier: "));
   message.Append(aSpecifier);
 
+  JS::Rooted<JSString*> string(aCx, JS_NewUCStringCopyZ(aCx, message.get()));
+  if (!string) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   JS::Rooted<JS::Value> error(aCx);
-  if (!CreateTypeError(aCx, aScript, message, &error)) {
+  if (!JS::CreateError(aCx, JSEXN_TYPEERR, nullptr, filename, aLineNumber,
+                       aColumnNumber, nullptr, string, &error))
+  {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -654,21 +651,26 @@ ResolveRequestedModules(ModuleLoadRequest* aRequest, nsCOMArray<nsIURI>& aUrls)
 
   JSContext* cx = jsapi.cx();
   JS::Rooted<JSObject*> moduleRecord(cx, ms->ModuleRecord());
-  JS::Rooted<JSObject*> specifiers(cx, JS::GetRequestedModules(cx, moduleRecord));
+  JS::Rooted<JSObject*> requestedModules(cx);
+  requestedModules = JS::GetRequestedModules(cx, moduleRecord);
+  MOZ_ASSERT(requestedModules);
 
   uint32_t length;
-  if (!JS_GetArrayLength(cx, specifiers, &length)) {
+  if (!JS_GetArrayLength(cx, requestedModules, &length)) {
     return NS_ERROR_FAILURE;
   }
 
-  JS::Rooted<JS::Value> val(cx);
+  JS::Rooted<JS::Value> element(cx);
   for (uint32_t i = 0; i < length; i++) {
-    if (!JS_GetElement(cx, specifiers, i, &val)) {
+    if (!JS_GetElement(cx, requestedModules, i, &element)) {
       return NS_ERROR_FAILURE;
     }
 
+    JS::Rooted<JSString*> str(cx, JS::GetRequestedModuleSpecifier(cx, element));
+    MOZ_ASSERT(str);
+
     nsAutoJSString specifier;
-    if (!specifier.init(cx, val)) {
+    if (!specifier.init(cx, str)) {
       return NS_ERROR_FAILURE;
     }
 
@@ -676,7 +678,11 @@ ResolveRequestedModules(ModuleLoadRequest* aRequest, nsCOMArray<nsIURI>& aUrls)
     ModuleScript* ms = aRequest->mModuleScript;
     nsCOMPtr<nsIURI> uri = ResolveModuleSpecifier(ms, specifier);
     if (!uri) {
-      nsresult rv = HandleResolveFailure(cx, ms, specifier);
+      uint32_t lineNumber = 0;
+      uint32_t columnNumber = 0;
+      JS::GetRequestedModuleSourcePos(cx, element, &lineNumber, &columnNumber);
+
+      nsresult rv = HandleResolveFailure(cx, ms, specifier, lineNumber, columnNumber);
       NS_ENSURE_SUCCESS(rv, rv);
       return NS_ERROR_FAILURE;
     }
@@ -1052,15 +1058,37 @@ ScriptLoader::StartLoad(ScriptLoadRequest* aRequest)
   bool async = script ? script->GetScriptAsync() : aRequest->mPreloadAsAsync;
   bool defer = script ? script->GetScriptDeferred() : aRequest->mPreloadAsDefer;
 
+  LOG(("ScriptLoadRequest (%p): async=%d defer=%d tracking=%d",
+       aRequest, async, defer, aRequest->IsTracking()));
+
   nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(channel));
   if (cos) {
     if (aRequest->mScriptFromHead && !async && !defer) {
       // synchronous head scripts block loading of most other non js/css
-      // content such as images
+      // content such as images, Leader implicitely disallows tailing
       cos->AddClassFlags(nsIClassOfService::Leader);
-    } else if (!defer) {
-      // other scripts are neither blocked nor prioritized unless marked deferred
+    } else if (defer && (!async || !nsContentUtils::IsTailingEnabled())) {
+      // Bug 1395525 and the !nsContentUtils::IsTailingEnabled() bit:
+      // We want to make sure that turing tailing off by the pref makes
+      // the browser behave exactly the same way as before landing
+      // the tailing patch, which has added the "&& !async" part.
+
+      // head/body deferred scripts are blocked by leaders but are not
+      // allowed tailing because they block DOMContentLoaded
+      cos->AddClassFlags(nsIClassOfService::TailForbidden);
+    } else {
+      // other scripts (=body sync or head/body async) are neither blocked
+      // nor prioritized
       cos->AddClassFlags(nsIClassOfService::Unblocked);
+
+      if (async) {
+        // async scripts are allowed tailing, since those and only those
+        // don't block DOMContentLoaded; this flag doesn't enforce tailing,
+        // just overweights the Unblocked flag when the channel is found
+        // to be a thrird-party tracker and thus set the Tail flag to engage
+        // tailing.
+        cos->AddClassFlags(nsIClassOfService::TailAllowed);
+      }
     }
   }
 
@@ -1203,8 +1231,11 @@ ScriptLoader::CreateLoadRequest(ScriptKind aKind,
                                 const SRIMetadata& aIntegrity)
 {
   if (aKind == ScriptKind::Classic) {
-    return new ScriptLoadRequest(aKind, aElement, aVersion, aCORSMode,
+    ScriptLoadRequest* slr = new ScriptLoadRequest(aKind, aElement, aVersion, aCORSMode,
                                  aIntegrity);
+
+    LOG(("ScriptLoader %p creates ScriptLoadRequest %p", this, slr));
+    return slr;
   }
 
   MOZ_ASSERT(aKind == ScriptKind::Module);
@@ -1881,6 +1912,12 @@ ScriptLoader::ProcessRequest(ScriptLoadRequest* aRequest)
   // Free any source data, but keep the bytecode content as we might have to
   // save it later.
   aRequest->mScriptText.clearAndFree();
+  if (aRequest->IsBytecode()) {
+    // We received bytecode as input, thus we were decoding, and we will not be
+    // encoding the bytecode once more. We can safely clear the content of this
+    // buffer.
+    aRequest->mScriptBytecode.clearAndFree();
+  }
 
   return rv;
 }

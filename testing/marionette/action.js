@@ -11,7 +11,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 Cu.import("chrome://marionette/content/assert.js");
 Cu.import("chrome://marionette/content/element.js");
 const {
-  error,
+  pprint,
   InvalidArgumentError,
   MoveTargetOutOfBoundsError,
   UnsupportedOperationError,
@@ -20,8 +20,6 @@ Cu.import("chrome://marionette/content/event.js");
 Cu.import("chrome://marionette/content/interaction.js");
 
 this.EXPORTED_SYMBOLS = ["action"];
-
-const {pprint} = error;
 
 // TODO? With ES 2016 and Symbol you can make a safer approximation
 // to an enum e.g. https://gist.github.com/xmlking/e86e4f15ec32b12c4689
@@ -457,7 +455,7 @@ class InputState {
    * @throws {InvalidArgumentError}
    *     If {@link actionSequence.type} is not valid.
    */
-  static fromJson(obj) {
+  static fromJSON(obj) {
     let type = obj.type;
     assert.in(type, ACTIONS, pprint`Unknown action type: ${type}`);
     let name = type == "none" ? "Null" : capitalize(type);
@@ -674,7 +672,7 @@ action.Action = class {
    * @throws {UnsupportedOperationError}
    *     If <code>actionItem.type</code> is {@link action.PointerCancel}.
    */
-  static fromJson(actionSequence, actionItem) {
+  static fromJSON(actionSequence, actionItem) {
     let type = actionSequence.type;
     let id = actionSequence.id;
     let subtypes = ACTIONS[type];
@@ -690,7 +688,7 @@ action.Action = class {
     let item = new action.Action(id, type, subtype);
     if (type === "pointer") {
       action.processPointerAction(id,
-          action.PointerParameters.fromJson(actionSequence.parameters), item);
+          action.PointerParameters.fromJSON(actionSequence.parameters), item);
     }
 
     switch (item.subtype) {
@@ -763,21 +761,21 @@ action.Chain = class extends Array {
    *     Array of objects that each represent an action sequence.
    *
    * @return {action.Chain}
-   *     Transpose of |actions| such that actions to be performed in a
-   *     single tick are grouped together.
+   *     Transpose of <var>actions</var> such that actions to be performed
+   *     in a single tick are grouped together.
    *
    * @throws {InvalidArgumentError}
-   *     If |actions| is not an Array.
+   *     If <var>actions</var> is not an Array.
    */
-  static fromJson(actions) {
+  static fromJSON(actions) {
     assert.array(actions,
         pprint`Expected 'actions' to be an array, got ${actions}`);
 
     let actionsByTick = new action.Chain();
-    //  TODO check that each actionSequence in actions refers to a
-    // different input ID
     for (let actionSequence of actions) {
-      let inputSourceActions = action.Sequence.fromJson(actionSequence);
+      // TODO(maja_zf): Check that each actionSequence in actions refers
+      // to a different input ID.
+      let inputSourceActions = action.Sequence.fromJSON(actionSequence);
       for (let i = 0; i < inputSourceActions.length; i++) {
         // new tick
         if (actionsByTick.length < (i + 1)) {
@@ -807,13 +805,14 @@ action.Sequence = class extends Array {
    *     Sequence of actions that can be dispatched.
    *
    * @throws {InvalidArgumentError}
-   *     If |actionSequence.id| is not a string or it's aleady mapped
-   *     to an |action.InputState} incompatible with |actionSequence.type|.
-   *     If |actionSequence.actions| is not an Array.
+   *     If <code>actionSequence.id</code> is not a
+   *     string or it's aleady mapped to an |action.InputState}
+   *     incompatible with <code>actionSequence.type</code>, or if
+   *     <code>actionSequence.actions</code> is not an <code>Array</code>.
    */
-  static fromJson(actionSequence) {
+  static fromJSON(actionSequence) {
     // used here to validate 'type' in addition to InputState type below
-    let inputSourceState = InputState.fromJson(actionSequence);
+    let inputSourceState = InputState.fromJSON(actionSequence);
     let id = actionSequence.id;
     assert.defined(id, "Expected 'id' to be defined");
     assert.string(id, pprint`Expected 'id' to be a string, got ${id}`);
@@ -830,10 +829,12 @@ action.Sequence = class extends Array {
           `Expected ${id} to be mapped to ${inputSourceState}, ` +
           `got ${action.inputStateMap.get(id)}`);
     }
+
     let actions = new action.Sequence();
     for (let actionItem of actionItems) {
-      actions.push(action.Action.fromJson(actionSequence, actionItem));
+      actions.push(action.Action.fromJSON(actionSequence, actionItem));
     }
+
     return actions;
   }
 };
@@ -861,7 +862,7 @@ action.PointerParameters = class {
    * @return {action.PointerParameters}
    *     Validated pointer paramters.
    */
-  static fromJson(parametersData) {
+  static fromJSON(parametersData) {
     if (typeof parametersData == "undefined") {
       return new action.PointerParameters();
     }
@@ -870,8 +871,9 @@ action.PointerParameters = class {
 };
 
 /**
- * Adds |pointerType| attribute to Action |act|. Helper function
- * for |action.Action.fromJson|.
+ * Adds <var>pointerType</var> attribute to Action <var>act</var>.
+ *
+ * Helper function for {@link action.Action.fromJSON}.
  *
  * @param {string} id
  *     Input source ID.
@@ -881,8 +883,9 @@ action.PointerParameters = class {
  *     Action to be updated.
  *
  * @throws {InvalidArgumentError}
- *     If |id| is already mapped to an |action.InputState| that is
- *     not compatible with |act.type| or |pointerParams.pointerType|.
+ *     If <var>id</var> is already mapped to an
+ *     {@link action.InputState} that is not compatible with
+ *     <code>act.type</code> or <code>pointerParams.pointerType</code>.
  */
 action.processPointerAction = function(id, pointerParams, act) {
   if (action.inputStateMap.has(id) &&
@@ -1318,7 +1321,7 @@ function dispatchPointerMove(a, inputState, tickDuration, seenEls, window) {
     const [startX, startY] = [inputState.x, inputState.y];
 
     let target = action.computePointerDestination(a, inputState,
-        getElementCenter(a.origin, seenEls, window));
+        getElementCenter(a.origin, seenEls));
     const [targetX, targetY] = [target.x, target.y];
 
     if (!inViewPort(targetX, targetY, window)) {
@@ -1427,11 +1430,11 @@ function inViewPort(x, y, win) {
   return !(x < 0 || y < 0 || x > win.innerWidth || y > win.innerHeight);
 }
 
-function getElementCenter(elementReference, seenEls, window) {
+function getElementCenter(elementReference, seenEls) {
   if (element.isWebElementReference(elementReference)) {
     let uuid = elementReference[element.Key] ||
         elementReference[element.LegacyKey];
-    let el = seenEls.get(uuid, {frame: window});
+    let el = seenEls.get(uuid);
     return element.coordinates(el);
   }
   return {};

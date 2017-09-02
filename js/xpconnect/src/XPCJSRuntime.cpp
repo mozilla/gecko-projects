@@ -92,7 +92,6 @@ const char* const XPCJSRuntime::mStrings[] = {
     "createInstance",       // IDX_CREATE_INSTANCE
     "item",                 // IDX_ITEM
     "__proto__",            // IDX_PROTO
-    "__iterator__",         // IDX_ITERATOR
     "__exposedProps__",     // IDX_EXPOSEDPROPS
     "eval",                 // IDX_EVAL
     "controllers",          // IDX_CONTROLLERS
@@ -772,7 +771,6 @@ XPCJSRuntime::CustomGCCallback(JSGCStatus status)
 /* static */ void
 XPCJSRuntime::FinalizeCallback(JSFreeOp* fop,
                                JSFinalizeStatus status,
-                               bool isZoneGC,
                                void* data)
 {
     XPCJSRuntime* self = nsXPConnect::GetRuntimeInstance();
@@ -2160,10 +2158,10 @@ class OrphanReporter : public JS::ObjectPrivateVisitor
     size_t SizeOfTreeIncludingThis(nsINode* tree)
     {
         size_t nodeSize = 0;
-        nsStyleSizes sizes;
-        tree->AddSizeOfIncludingThis(mState, sizes, &nodeSize);
+        nsWindowSizes sizes(mState);
+        tree->AddSizeOfIncludingThis(sizes, &nodeSize);
         for (nsIContent* child = tree->GetFirstChild(); child; child = child->GetNextNode(tree))
-            child->AddSizeOfIncludingThis(mState, sizes, &nodeSize);
+            child->AddSizeOfIncludingThis(sizes, &nodeSize);
 
         // We combine the node size with nsStyleSizes here. It's not ideal, but
         // it's hard to get the style structs measurements out to
@@ -2664,6 +2662,21 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
 }
 
 static void
+SetUseCounterCallback(JSObject* obj, JSUseCounter counter)
+{
+    switch (counter) {
+      case JSUseCounter::ASMJS:
+        SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_asmjs);
+        break;
+      case JSUseCounter::WASM:
+        SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_wasm);
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected JSUseCounter id");
+    }
+}
+
+static void
 CompartmentNameCallback(JSContext* cx, JSCompartment* comp,
                         char* buf, size_t bufsize)
 {
@@ -2865,6 +2878,7 @@ XPCJSRuntime::Initialize(JSContext* cx)
     JS_SetWrapObjectCallbacks(cx, &WrapObjectCallbacks);
     js::SetPreserveWrapperCallback(cx, PreserveWrapper);
     JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
+    JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
     js::SetWindowProxyClass(cx, &OuterWindowProxyClass);
     js::SetXrayJitInfo(&gXrayJitInfo);
     JS::SetProcessLargeAllocationFailureCallback(OnLargeAllocationFailureCallback);

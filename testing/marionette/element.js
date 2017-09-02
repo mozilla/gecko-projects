@@ -12,10 +12,10 @@ Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("chrome://marionette/content/assert.js");
 Cu.import("chrome://marionette/content/atom.js");
 const {
-  error,
   InvalidSelectorError,
   JavaScriptError,
   NoSuchElementError,
+  pprint,
   StaleElementReferenceError,
 } = Cu.import("chrome://marionette/content/error.js", {});
 Cu.import("chrome://marionette/content/wait.js");
@@ -155,8 +155,6 @@ element.Store = class {
    *
    * @param {string} uuid
    *     Web element reference, or UUID.
-   * @param {Object.<string, (WindowProxy|Element)} container
-   *     Window and an optional shadow root that contains the element.
    *
    * @returns {Element}
    *     Element associated with reference.
@@ -167,11 +165,10 @@ element.Store = class {
    *     If element has gone stale, indicating it is no longer attached to
    *     the DOM provided in the container.
    */
-  get(uuid, container) {
+  get(uuid) {
     let el = this.els[uuid];
     if (!el) {
-      throw new NoSuchElementError(`Element reference not seen before: ` +
-                                   `${uuid}`);
+      throw new NoSuchElementError("Element reference not seen before: " + uuid);
     }
 
     try {
@@ -181,9 +178,9 @@ element.Store = class {
       delete this.els[uuid];
     }
 
-    if (element.isStale(el, container.frame, container.shadowRoot)) {
+    if (element.isStale(el)) {
       throw new StaleElementReferenceError(
-          error.pprint`The element reference of ${el} stale; ` +
+          pprint`The element reference of ${el} stale; ` +
               "either the element is no longer attached to the DOM " +
               "or the document has been refreshed");
     }
@@ -626,82 +623,23 @@ element.generateUUID = function() {
 /**
  * Determines if <var>el</var> is stale.
  *
- * A stale element is an element no longer attached to the DOM, which
- * is provided through <var>window</var>.
+ * A stale element is an element no longer attached to the DOM or which
+ * node document is not the active document.
  *
  * @param {Element} el
  *     DOM element to check for staleness.
- * @param {WindowProxy} window
- *     Window global to check if <var>el</var> is still part of.
- * @param {Element=} shadowRoot
- *     Current shadow root element.
  *
  * @return {boolean}
  *     True if <var>el</var> is stale, false otherwise.
  */
-element.isStale = function(el, window, shadowRoot = undefined) {
-  if (typeof window == "undefined") {
-    throw new TypeError("Window global must be provided for staleness check");
+element.isStale = function(el) {
+  let doc = el.ownerDocument;
+  let win = doc.defaultView;
+
+  if (!win || el.ownerDocument !== win.document) {
+    return true;
   }
-
-  // use XPCNativeWrapper to compare elements (see bug 834266)
-  let wrappedElement, wrappedWindow, wrappedShadowRoot;
-
-  wrappedElement = new XPCNativeWrapper(el);
-  wrappedWindow = new XPCNativeWrapper(window);
-  if (shadowRoot) {
-    wrappedShadowRoot = new XPCNativeWrapper(shadowRoot);
-  }
-
-  const container = {
-    frame: wrappedWindow,
-    shadowRoot: wrappedShadowRoot,
-  };
-
-  let sameDoc = wrappedElement.ownerDocument === wrappedWindow.document;
-  let disconn = element.isDisconnected(wrappedElement, container);
-
-  return !el || !sameDoc || disconn;
-};
-
-/**
- * Check if the element is detached from the current frame as well as
- * the optional shadow root (when inside a Shadow DOM context).
- *
- * @param {Element} el
- *     Element to be checked.
- * @param {Container} container
- *     Container with |frame|, which is the window object that contains
- *     the element, and an optional |shadowRoot|.
- *
- * @return {boolean}
- *     Flag indicating that the element is disconnected.
- */
-element.isDisconnected = function(el, container = {}) {
-  const {frame, shadowRoot} = container;
-  assert.defined(frame);
-
-  // shadow DOM
-  if (frame.ShadowRoot && shadowRoot) {
-    if (el.compareDocumentPosition(shadowRoot) &
-        DOCUMENT_POSITION_DISCONNECTED) {
-      return true;
-    }
-
-    // looking for next possible ShadowRoot ancestor
-    let parent = shadowRoot.host;
-    while (parent && !(parent instanceof frame.ShadowRoot)) {
-      parent = parent.parentNode;
-    }
-    return element.isDisconnected(
-        shadowRoot.host,
-        {frame, shadowRoot: parent});
-  }
-
-  // outside shadow DOM
-  let docEl = frame.document.documentElement;
-  return el.compareDocumentPosition(docEl) &
-      DOCUMENT_POSITION_DISCONNECTED;
+  return !el.isConnected;
 };
 
 /**
@@ -965,7 +903,7 @@ element.getPointerInteractablePaintTree = function(el) {
   }
 
   // pointer-interactable elements tree, step 1
-  if (element.isDisconnected(el, container)) {
+  if (!el.isConnected) {
     return [];
   }
 

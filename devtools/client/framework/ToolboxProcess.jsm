@@ -21,6 +21,9 @@ XPCOMUtils.defineLazyGetter(this, "Telemetry", function () {
 XPCOMUtils.defineLazyGetter(this, "EventEmitter", function () {
   return require("devtools/shared/old-event-emitter");
 });
+XPCOMUtils.defineLazyGetter(this, "system", function () {
+  return require("devtools/shared/system");
+});
 const promise = require("promise");
 const Services = require("Services");
 
@@ -145,17 +148,20 @@ BrowserToolboxProcess.prototype = {
     this.debuggerServer.allowChromeProcess = true;
     dumpn("initialized and added the browser actors for the DebuggerServer.");
 
-    let chromeDebuggingPort =
-      Services.prefs.getIntPref("devtools.debugger.chrome-debugging-port");
     let chromeDebuggingWebSocket =
       Services.prefs.getBoolPref("devtools.debugger.chrome-debugging-websocket");
     let listener = this.debuggerServer.createListener();
-    listener.portOrPath = chromeDebuggingPort;
+    listener.portOrPath = -1;
     listener.webSocket = chromeDebuggingWebSocket;
     listener.open();
+    this.port = listener.port;
+
+    if (!this.port) {
+      throw new Error("No debugger server port");
+    }
 
     dumpn("Finished initializing the chrome toolbox server.");
-    dumpn("Started listening on port: " + chromeDebuggingPort);
+    dump(`Debugger Server for Browser Toolbox listening on port: ${this.port}\n`);
   },
 
   /**
@@ -242,10 +248,9 @@ BrowserToolboxProcess.prototype = {
 
     let command = Services.dirsvc.get("XREExeF", Ci.nsIFile).path;
 
-    let xulURI = DBG_XUL;
-
+    let xulURI = `${DBG_XUL}?port=${this.port}`;
     if (this._options.addonID) {
-      xulURI += "?addonID=" + this._options.addonID;
+      xulURI += `&addonID=${this._options.addonID}`;
     }
 
     dumpn("Running chrome debugging process.");
@@ -263,7 +268,7 @@ BrowserToolboxProcess.prototype = {
     // well.
     //
     // As an approximation of "isLocalBuild", check for an unofficial build.
-    if (!Services.appinfo.isOfficial) {
+    if (!system.constants.MOZILLA_OFFICIAL) {
       args.push("-purgecaches");
     }
 

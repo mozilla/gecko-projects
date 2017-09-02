@@ -525,7 +525,7 @@ private:
   DECL_OVERRIDE_PREF(Live, "layers.advanced.background-color",        LayersAllowBackgroundColorLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.background-image",        LayersAllowBackgroundImage, gfxPrefs::OverrideBase_WebRendest());
   DECL_GFX_PREF(Live, "layers.advanced.basic-layer.enabled",          LayersAdvancedBasicLayerEnabled, bool, false);
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.border-layers",           LayersAllowBorderLayers, gfxPrefs::OverrideBase_WebRendest());
+  DECL_OVERRIDE_PREF(Live, "layers.advanced.border-layers",           LayersAllowBorderLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.boxshadow-inset-layers",  LayersAllowInsetBoxShadow, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.boxshadow-outer-layers",  LayersAllowOuterBoxShadow, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.bullet-layers",           LayersAllowBulletLayers, gfxPrefs::OverrideBase_WebRender());
@@ -538,7 +538,7 @@ private:
   DECL_OVERRIDE_PREF(Live, "layers.advanced.image-layers",            LayersAllowImageLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.outline-layers",          LayersAllowOutlineLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.solid-color",             LayersAllowSolidColorLayers, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.table",                   LayersAllowTable, gfxPrefs::OverrideBase_WebRendest());
+  DECL_OVERRIDE_PREF(Live, "layers.advanced.table",                   LayersAllowTable, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.text-layers",             LayersAllowTextLayers, gfxPrefs::OverrideBase_WebRendest());
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
@@ -667,6 +667,8 @@ private:
   DECL_GFX_PREF(Once, "media.windows-media-foundation.use-sync-texture", PDMWMFUseSyncTexture, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.low-latency.enabled", PDMWMFLowLatencyEnabled, bool, false);
   DECL_GFX_PREF(Live, "media.wmf.skip-blacklist", PDMWMFSkipBlacklist, bool, false);
+  DECL_GFX_PREF(Live, "media.wmf.deblacklisting-for-telemetry-in-gpu-process", PDMWMFDeblacklistingForTelemetryInGPUProcess, bool, false);
+  DECL_GFX_PREF(Live, "media.wmf.amd.vp9.enabled", PDMWMFAMDVP9DecoderEnabled, bool, true);
 #endif
 
   // These affect how line scrolls from wheel events will be accelerated.

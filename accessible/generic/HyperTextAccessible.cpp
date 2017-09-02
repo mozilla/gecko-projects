@@ -1142,37 +1142,19 @@ HyperTextAccessible::LandmarkRole() const
     return nsGkAtoms::navigation;
   }
 
-  if (mContent->IsAnyOfHTMLElements(nsGkAtoms::header,
-                                    nsGkAtoms::footer)) {
-    // Only map header and footer if they are not descendants of an article
-    // or section tag.
-    nsIContent* parent = mContent->GetParent();
-    while (parent) {
-      if (parent->IsAnyOfHTMLElements(nsGkAtoms::article, nsGkAtoms::section)) {
-        break;
-      }
-      parent = parent->GetParent();
-    }
-
-    // No article or section elements found.
-    if (!parent) {
-      if (mContent->IsHTMLElement(nsGkAtoms::header)) {
-        return nsGkAtoms::banner;
-      }
-
-      if (mContent->IsHTMLElement(nsGkAtoms::footer)) {
-        return nsGkAtoms::contentinfo;
-      }
-    }
-    return nullptr;
-  }
-
   if (mContent->IsHTMLElement(nsGkAtoms::aside)) {
     return nsGkAtoms::complementary;
   }
 
   if (mContent->IsHTMLElement(nsGkAtoms::main)) {
     return nsGkAtoms::main;
+  }
+
+  // Only return xml-roles "region" if the section has an accessible name.
+  if (mContent->IsHTMLElement(nsGkAtoms::section)) {
+    nsAutoString name;
+    const_cast<HyperTextAccessible*>(this)->Name(name);
+    return name.IsEmpty() ? nullptr : nsGkAtoms::region;
   }
 
   return nullptr;

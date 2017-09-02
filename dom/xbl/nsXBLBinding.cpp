@@ -12,7 +12,7 @@
 #include "nsIURI.h"
 #include "nsIURL.h"
 #include "nsIChannel.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsReadableUtils.h"
 #include "plstr.h"
 #include "nsIContent.h"
@@ -86,7 +86,7 @@ XBLEnumerate(JSContext *cx, JS::Handle<JSObject*> obj)
 }
 
 static const JSClassOps gPrototypeJSClassOps = {
-    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr,
     XBLEnumerate, nullptr, nullptr,
     nullptr, XBLFinalize,
     nullptr, nullptr, nullptr, nullptr
@@ -905,8 +905,7 @@ GetOrCreateClassObjectMap(JSContext *cx, JS::Handle<JSObject*> scope, const char
   // It's not there. Create and define it.
   JS::Rooted<JSObject*> map(cx, JS::NewWeakMapObject(cx));
   if (!map || !JS_DefineProperty(cx, scope, mapName, map,
-                                 JSPROP_PERMANENT | JSPROP_READONLY,
-                                 JS_STUBGETTER, JS_STUBSETTER))
+                                 JSPROP_PERMANENT | JSPROP_READONLY))
   {
     return nullptr;
   }
@@ -1067,8 +1066,7 @@ nsXBLBinding::DoInitJSClass(JSContext *cx,
     JSAutoCompartment ac3(cx, holder);
     if (!JS_WrapObject(cx, &proto) ||
         !JS_DefineUCProperty(cx, holder, aClassName.get(), -1, proto,
-                             JSPROP_READONLY | JSPROP_PERMANENT,
-                             JS_STUBGETTER, JS_STUBSETTER))
+                             JSPROP_READONLY | JSPROP_PERMANENT))
     {
       return NS_ERROR_OUT_OF_MEMORY;
     }

@@ -560,6 +560,9 @@ StreamAndPromiseForOperation::StreamAndPromiseForOperation(MediaStream* aStream,
 
 AudioCallbackDriver::AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl)
   : GraphDriver(aGraphImpl)
+  , mOuputChannels(mGraphImpl->AudioChannelCount())
+  , mScratchBuffer(std::max<uint32_t>(1, mOuputChannels))
+  , mBuffer(std::max<uint32_t>(1, mOuputChannels))
   , mSampleRate(0)
   , mInputChannels(1)
   , mIterationDurationMS(MEDIA_GRAPH_TARGET_PERIOD_MS)
@@ -571,11 +574,21 @@ AudioCallbackDriver::AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl)
   , mFromFallback(false)
 {
   LOG(LogLevel::Debug, ("AudioCallbackDriver ctor for graph %p", aGraphImpl));
+#if defined(XP_WIN)
+  if (XRE_IsContentProcess()) {
+    audio::AudioNotificationReceiver::Register(this);
+  }
+#endif
 }
 
 AudioCallbackDriver::~AudioCallbackDriver()
 {
   MOZ_ASSERT(mPromisesForOperation.IsEmpty());
+#if defined(XP_WIN)
+  if (XRE_IsContentProcess()) {
+    audio::AudioNotificationReceiver::Unregister(this);
+  }
+#endif
 }
 
 bool IsMacbookOrMacbookAir()
@@ -626,15 +639,14 @@ AudioCallbackDriver::Init()
 
   mSampleRate = output.rate = CubebUtils::PreferredSampleRate();
 
-  output.channels = mGraphImpl->AudioChannelCount();
   if (AUDIO_OUTPUT_FORMAT == AUDIO_FORMAT_S16) {
     output.format = CUBEB_SAMPLE_S16NE;
   } else {
     output.format = CUBEB_SAMPLE_FLOAT32NE;
   }
 
-  // Graphs are always stereo for now.
-  output.layout = CUBEB_LAYOUT_STEREO;
+  output.channels = mOuputChannels;
+  output.layout = CUBEB_LAYOUT_UNDEFINED;
 
   Maybe<uint32_t> latencyPref = CubebUtils::GetCubebMSGLatencyInFrames();
   if (latencyPref) {
@@ -855,6 +867,16 @@ AudioCallbackDriver::WakeUp()
   mGraphImpl->GetMonitor().Notify();
 }
 
+#if defined(XP_WIN)
+void
+AudioCallbackDriver::ResetDefaultDevice()
+{
+  if (cubeb_stream_reset_default_device(mAudioStream) != CUBEB_OK) {
+    NS_WARNING("Could not reset cubeb stream to default output device.");
+  }
+}
+#endif
+
 /* static */ long
 AudioCallbackDriver::DataCallback_s(cubeb_stream* aStream,
                                     void* aUser,
@@ -923,7 +945,7 @@ AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
     // driver is the first one for this graph), and the graph would exit. Simply
     // return here until we have messages.
     if (!mGraphImpl->MessagesQueued()) {
-      PodZero(aOutputBuffer, aFrames * mGraphImpl->AudioChannelCount());
+      PodZero(aOutputBuffer, aFrames * mOuputChannels);
       return aFrames;
     }
     mGraphImpl->SwapMessageQueues();
@@ -1010,7 +1032,7 @@ AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
   // removed/added to this list and TSAN issues, but input and output will
   // use separate callback methods.
   mGraphImpl->NotifyOutputData(aOutputBuffer, static_cast<size_t>(aFrames),
-                               mSampleRate, ChannelCount);
+                               mSampleRate, mOuputChannels);
 
   bool switching = false;
   {

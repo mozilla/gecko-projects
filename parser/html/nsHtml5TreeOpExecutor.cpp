@@ -291,6 +291,7 @@ nsHtml5TreeOpExecutor::ContinueInterruptedParsingAsync()
     // Now we set up a repetitive idle scheduler for flushing background list.
     gBackgroundFlushRunner =
       IdleTaskRunner::Create(&BackgroundFlushCallback,
+                             "nsHtml5TreeOpExecutor::BackgroundFlushCallback",
                              250, // The hard deadline: 250ms.
                              nsContentSink::sInteractiveParseTime / 1000, // Required budget.
                              true, // repeating
@@ -995,8 +996,9 @@ nsHtml5TreeOpExecutor::PreloadImage(const nsAString& aURL,
                                     const nsAString& aImageReferrerPolicy)
 {
   nsCOMPtr<nsIURI> baseURI = BaseURIForPreload();
+  bool isImgSet = false;
   nsCOMPtr<nsIURI> uri = mDocument->ResolvePreloadImage(baseURI, aURL, aSrcset,
-                                                        aSizes);
+                                                        aSizes, &isImgSet);
   if (uri && ShouldPreloadURI(uri)) {
     // use document wide referrer policy
     mozilla::net::ReferrerPolicy referrerPolicy = mSpeculationReferrerPolicy;
@@ -1006,7 +1008,7 @@ nsHtml5TreeOpExecutor::PreloadImage(const nsAString& aURL,
       referrerPolicy = imageReferrerPolicy;
     }
 
-    mDocument->MaybePreLoadImage(uri, aCrossOrigin, referrerPolicy);
+    mDocument->MaybePreLoadImage(uri, aCrossOrigin, referrerPolicy, isImgSet);
   }
 }
 

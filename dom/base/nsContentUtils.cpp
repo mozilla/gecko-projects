@@ -44,6 +44,7 @@
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -107,6 +108,7 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "nsHtml5Module.h"
 #include "nsHtml5StringParser.h"
+#include "nsHTMLDocument.h"
 #include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -294,6 +296,7 @@ bool nsContentUtils::sIsUserTimingLoggingEnabled = false;
 bool nsContentUtils::sIsFormAutofillAutocompleteEnabled = false;
 bool nsContentUtils::sIsWebComponentsEnabled = false;
 bool nsContentUtils::sIsCustomElementsEnabled = false;
+bool nsContentUtils::sDevToolsEnabled = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
 bool nsContentUtils::sUseActivityCursor = false;
 bool nsContentUtils::sAnimationsAPICoreEnabled = false;
@@ -302,6 +305,7 @@ bool nsContentUtils::sGetBoxQuadsEnabled = false;
 bool nsContentUtils::sSkipCursorMoveForSameValueSet = false;
 bool nsContentUtils::sRequestIdleCallbackEnabled = false;
 bool nsContentUtils::sLowerNetworkPriority = false;
+bool nsContentUtils::sTailingEnabled = false;
 bool nsContentUtils::sShowInputPlaceholderOnFocus = true;
 bool nsContentUtils::sAutoFocusEnabled = true;
 #ifndef RELEASE_OR_BETA
@@ -703,6 +707,9 @@ nsContentUtils::Init()
   Preferences::AddBoolVarCache(&sIsCustomElementsEnabled,
                                "dom.webcomponents.customelements.enabled", false);
 
+  Preferences::AddBoolVarCache(&sDevToolsEnabled,
+                               "devtools.enabled");
+
   Preferences::AddIntVarCache(&sPrivacyMaxInnerWidth,
                               "privacy.window.maxInnerWidth",
                               1000);
@@ -762,6 +769,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sLowerNetworkPriority,
                                "privacy.trackingprotection.lower_network_priority", false);
+
+  Preferences::AddBoolVarCache(&sTailingEnabled,
+                               "network.http.tailing.enabled", true);
 
   Preferences::AddBoolVarCache(&sShowInputPlaceholderOnFocus,
                                "dom.placeholder.show_on_focus", true);
@@ -2640,6 +2650,26 @@ nsContentUtils::ContentIsFlattenedTreeDescendantOf(
 }
 
 // static
+bool
+nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
+  const nsINode* aPossibleDescendant,
+  const nsINode* aPossibleAncestor)
+{
+  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
+  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+
+  do {
+    if (aPossibleDescendant == aPossibleAncestor) {
+      return true;
+    }
+    aPossibleDescendant =
+      aPossibleDescendant->GetFlattenedTreeParentNodeForStyle();
+  } while (aPossibleDescendant);
+
+  return false;
+}
+
+// static
 nsresult
 nsContentUtils::GetAncestors(nsINode* aNode,
                              nsTArray<nsINode*>& aArray)
@@ -2764,6 +2794,16 @@ nsContentUtils::GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
 {
   return GetCommonAncestorInternal(aContent1, aContent2, [](nsIContent* aContent) {
     return aContent->GetFlattenedTreeParent();
+  });
+}
+
+/* static */
+Element*
+nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(Element* aElement1,
+                                                       Element* aElement2)
+{
+  return GetCommonAncestorInternal(aElement1, aElement2, [](Element* aElement) {
+    return aElement->GetFlattenedTreeParentElementForStyle();
   });
 }
 
@@ -3004,7 +3044,7 @@ static inline bool IsAutocompleteOff(const nsIContent* aElement)
 
 /*static*/ nsresult
 nsContentUtils::GenerateStateKey(nsIContent* aContent,
-                                 const nsIDocument* aDocument,
+                                 nsIDocument* aDocument,
                                  nsACString& aKey)
 {
   aKey.Truncate();
@@ -3030,16 +3070,34 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
   bool generatedUniqueKey = false;
 
   if (htmlDocument) {
+    nsHTMLDocument* htmlDoc = static_cast<nsHTMLDocument*> (htmlDocument.get());
     // Flush our content model so it'll be up to date
     // If this becomes unnecessary and the following line is removed,
     // please also remove the corresponding flush operation from
     // nsHtml5TreeBuilderCppSupplement.h. (Look for "See bug 497861." there.)
     aContent->GetUncomposedDoc()->FlushPendingNotifications(FlushType::Content);
 
-    nsContentList *htmlForms = htmlDocument->GetForms();
-    nsContentList *htmlFormControls = htmlDocument->GetFormControls();
+    RefPtr<nsContentList> htmlForms = htmlDoc->GetExistingForms();
+    if (!htmlForms) {
+      // If the document doesn't have an existing forms content list, create a
+      // new one, but avoid creating a live list since we only need to use the
+      // list here and it doesn't need to listen to mutation events.
 
-    NS_ENSURE_TRUE(htmlForms && htmlFormControls, NS_ERROR_OUT_OF_MEMORY);
+      // Please keep this in sync with nsHTMLDocument::GetForms().
+      htmlForms = new nsContentList(aDocument, kNameSpaceID_XHTML,
+                                    nsGkAtoms::form, nsGkAtoms::form,
+                                    /* aDeep = */ true,
+                                    /* aLiveList = */ false);
+    }
+    RefPtr<nsContentList> htmlFormControls =
+      new nsContentList(aDocument,
+                        nsHTMLDocument::MatchFormControls,
+                        nullptr, nullptr,
+                        /* aDeep = */ true,
+                        /* aMatchAtom = */ nullptr,
+                        /* aMatchNameSpaceId = */ kNameSpaceID_None,
+                        /* aFuncMayDependOnAttr = */ true,
+                        /* aLiveList = */ false);
 
     // If we have a form control and can calculate form information, use that
     // as the key - it is more reliable than just recording position in the
@@ -3056,7 +3114,7 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
     // XXXbz We don't?  Why not?  I don't follow.
     //
     nsCOMPtr<nsIFormControl> control(do_QueryInterface(aContent));
-    if (control && htmlFormControls && htmlForms) {
+    if (control) {
 
       // Append the control type
       KeyAppendInt(control->ControlType(), aKey);
@@ -5410,52 +5468,6 @@ nsContentUtils::IsInSameAnonymousTree(const nsINode* aNode,
   }
 
   return nodeAsContent->GetBindingParent() == aContent->GetBindingParent();
-}
-
-class AnonymousContentDestroyer : public Runnable {
-public:
-  explicit AnonymousContentDestroyer(nsCOMPtr<nsIContent>* aContent)
-    : mozilla::Runnable("AnonymousContentDestroyer")
-  {
-    mContent.swap(*aContent);
-    mParent = mContent->GetParent();
-    mDoc = mContent->OwnerDoc();
-  }
-  explicit AnonymousContentDestroyer(nsCOMPtr<Element>* aElement)
-    : mozilla::Runnable("AnonymousContentDestroyer")
-  {
-    mContent = aElement->forget();
-    mParent = mContent->GetParent();
-    mDoc = mContent->OwnerDoc();
-  }
-  NS_IMETHOD Run() override {
-    mContent->UnbindFromTree();
-    return NS_OK;
-  }
-private:
-  nsCOMPtr<nsIContent> mContent;
-  // Hold strong refs to the parent content and document so that they
-  // don't die unexpectedly
-  nsCOMPtr<nsIDocument> mDoc;
-  nsCOMPtr<nsIContent> mParent;
-};
-
-/* static */
-void
-nsContentUtils::DestroyAnonymousContent(nsCOMPtr<nsIContent>* aContent)
-{
-  if (*aContent) {
-    AddScriptRunner(new AnonymousContentDestroyer(aContent));
-  }
-}
-
-/* static */
-void
-nsContentUtils::DestroyAnonymousContent(nsCOMPtr<Element>* aElement)
-{
-  if (*aElement) {
-    AddScriptRunner(new AnonymousContentDestroyer(aElement));
-  }
 }
 
 /* static */
@@ -8921,12 +8933,9 @@ nsContentUtils::GetWindowRoot(nsIDocument* aDoc)
 bool
 nsContentUtils::IsPreloadType(nsContentPolicyType aType)
 {
-  if (aType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD ||
-      aType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD ||
-      aType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD) {
-    return true;
-  }
-  return false;
+  return (aType == nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD ||
+          aType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD ||
+          aType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD);
 }
 
 nsresult
@@ -10145,6 +10154,28 @@ nsContentUtils::SetupCustomElement(Element* aElement,
   return registry->SetupCustomElement(aElement, aTypeExtension);
 }
 
+/* static */ CustomElementDefinition*
+nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
+                                                    nsIAtom* aExtensionType,
+                                                    nsIAtom* aAttrName)
+{
+  nsString extType = nsDependentAtomString(aExtensionType);
+  NodeInfo *ni = aCustomElement->NodeInfo();
+
+  CustomElementDefinition* definition =
+    LookupCustomElementDefinition(aCustomElement->OwnerDoc(), ni->LocalName(),
+                                  ni->NamespaceID(),
+                                  extType.IsEmpty() ? nullptr : &extType);
+
+  // Custom element not defined yet or attribute is not in the observed
+  // attribute list.
+  if (!definition || !definition->IsInObservedAttributeList(aAttrName)) {
+    return nullptr;
+  }
+
+  return definition;
+}
+
 /* static */ void
 nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
                                          nsIDocument::ElementCallbackType aType,
@@ -10851,3 +10882,17 @@ nsContentUtils::ExtractErrorValues(JSContext* aCx,
   }
 }
 
+/* static */ bool
+nsContentUtils::DevToolsEnabled(JSContext* aCx)
+{
+  if (NS_IsMainThread()) {
+    return sDevToolsEnabled;
+  }
+
+  workers::WorkerPrivate* workerPrivate = workers::GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->DevToolsEnabled();
+}

@@ -4,7 +4,6 @@
 
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
 use dom::bindings::codegen::Bindings::WebSocketBinding;
 use dom::bindings::codegen::Bindings::WebSocketBinding::{BinaryType, WebSocketMethods};
 use dom::bindings::codegen::UnionTypes::StringOrStringSequence;
@@ -42,7 +41,7 @@ use std::thread;
 use task_source::TaskSource;
 use task_source::networking::NetworkingTaskSource;
 
-#[derive(JSTraceable, PartialEq, Copy, Clone, Debug, HeapSizeOf)]
+#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
 enum WebSocketRequestState {
     Connecting = 0,
     Open = 1,

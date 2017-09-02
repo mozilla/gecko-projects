@@ -7598,22 +7598,6 @@ nsCSSFrameConstructor::StyleNewChildRange(nsIContent* aStartChild,
 }
 
 void
-nsCSSFrameConstructor::StyleChildRangeForReconstruct(nsIContent* aStartChild,
-                                                     nsIContent* aEndChild)
-{
-  ServoStyleSet* styleSet = mPresShell->StyleSet()->AsServo();
-
-  // We take a parallelism hit here, since we don't have a great API to pass
-  // a range of elements to style to Servo.
-  for (nsIContent* child = aStartChild; child != aEndChild;
-       child = child->GetNextSibling()) {
-    if (child->IsElement()) {
-      styleSet->StyleSubtreeForReconstruct(child->AsElement());
-    }
-  }
-}
-
-void
 nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
                                        nsIContent* aFirstNewContent,
                                        bool aAllowLazyConstruction,
@@ -7684,8 +7668,9 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
         !aContainer->IsActiveChildrenElement()) {
       // We're punting on frame construction because there's no container frame.
       // The Servo-backed style system handles this case like the lazy frame
-      // construction case.
-      if (isNewlyAddedContentForServo) {
+      // construction case, except when we're already constructing frames, in
+      // which case we shouldn't need to do anything else.
+      if (isNewlyAddedContentForServo && aAllowLazyConstruction) {
         LazilyStyleNewChildRange(aFirstNewContent, nullptr);
       }
       return;
@@ -7701,12 +7686,8 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
   }
 
   // We couldn't construct lazily. Make Servo eagerly traverse the new content.
-  if (aContainer->IsStyledByServo()) {
-    if (aForReconstruction) {
-      StyleChildRangeForReconstruct(aFirstNewContent, nullptr);
-    } else {
-      StyleNewChildRange(aFirstNewContent, nullptr);
-    }
+  if (isNewlyAddedContentForServo) {
+    StyleNewChildRange(aFirstNewContent, nullptr);
   }
 
   if (isNewShadowTreeContent) {
@@ -7940,7 +7921,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
 
   // Recover first-letter frames
   if (haveFirstLetterStyle) {
-    RecoverLetterFrames(containingBlock, haveFirstLineStyle);
+    RecoverLetterFrames(containingBlock);
   }
 
 #ifdef DEBUG
@@ -8168,8 +8149,9 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     if (!parentFrame && !aContainer->IsActiveChildrenElement()) {
       // We're punting on frame construction because there's no container frame.
       // The Servo-backed style system handles this case like the lazy frame
-      // construction case.
-      if (isNewlyAddedContentForServo) {
+      // construction case, except when we're already constructing frames, in
+      // which case we shouldn't need to do anything else.
+      if (isNewlyAddedContentForServo && aAllowLazyConstruction) {
         LazilyStyleNewChildRange(aStartChild, aEndChild);
       }
       return;
@@ -8189,12 +8171,8 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   }
 
   // We couldn't construct lazily. Make Servo eagerly traverse the new content.
-  if (aContainer->IsStyledByServo()) {
-    if (aForReconstruction) {
-      StyleChildRangeForReconstruct(aStartChild, aEndChild);
-    } else {
-      StyleNewChildRange(aStartChild, aEndChild);
-    }
+  if (isNewlyAddedContentForServo) {
+    StyleNewChildRange(aStartChild, aEndChild);
   }
 
   if (isNewShadowTreeContent) {
@@ -8376,8 +8354,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
       // Need check whether a range insert is still safe.
       if (!isSingleInsert && !isRangeInsertSafe) {
         // Need to recover the letter frames first.
-        RecoverLetterFrames(state.mFloatedItems.containingBlock,
-                            haveFirstLineStyle);
+        RecoverLetterFrames(state.mFloatedItems.containingBlock);
 
         // must fall back to a single ContertInserted for each child in the range
         LAYOUT_PHASE_TEMP_EXIT();
@@ -8620,8 +8597,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   if (haveFirstLetterStyle) {
     // Recover the letter frames for the containing block when
     // it has first-letter style.
-    RecoverLetterFrames(state.mFloatedItems.containingBlock,
-                        haveFirstLineStyle);
+    RecoverLetterFrames(state.mFloatedItems.containingBlock);
   }
 
 #ifdef DEBUG
@@ -8640,20 +8616,16 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
 #endif
 }
 
-void
+bool
 nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
                                       nsIContent* aChild,
                                       nsIContent* aOldNextSibling,
-                                      RemoveFlags aFlags,
-                                      bool*       aDidReconstruct)
+                                      RemoveFlags aFlags)
 {
   MOZ_ASSERT(aChild);
-  MOZ_ASSERT(aDidReconstruct);
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
   NS_PRECONDITION(mUpdateCount != 0,
                   "Should be in an update while destroying frames");
-
-  *aDidReconstruct = false;
 
   // Only recreate sync if we're already in frame construction, that is,
   // recreate async for XBL DOM changes, and normal content removals.
@@ -8707,27 +8679,28 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
 
     nsIFrame* ancestorFrame = ancestor->GetPrimaryFrame();
     if (ancestorFrame->GetProperty(nsIFrame::GenConProperty())) {
-      *aDidReconstruct = true;
       // XXXmats Can we recreate frames only for the ::after/::before content?
       // XXX Perhaps even only those that belong to the aChild sub-tree?
       LAYOUT_PHASE_TEMP_EXIT();
       RecreateFramesForContent(ancestor, insertionKind, aFlags);
       LAYOUT_PHASE_TEMP_REENTER();
-      return;
+      return true;
     }
 
     FlattenedChildIterator iter(aChild);
+    bool didReconstruct = false;
     for (nsIContent* c = iter.GetNextChild(); c; c = iter.GetNextChild()) {
       if (c->GetPrimaryFrame() || GetDisplayContentsStyleFor(c)) {
         LAYOUT_PHASE_TEMP_EXIT();
-        ContentRemoved(aChild, c, nullptr, aFlags, aDidReconstruct);
+        didReconstruct |= ContentRemoved(aChild, c, nullptr, aFlags);
         LAYOUT_PHASE_TEMP_REENTER();
-        if (aFlags != REMOVE_DESTROY_FRAMES && *aDidReconstruct) {
-          return;
+        if (aFlags != REMOVE_DESTROY_FRAMES && didReconstruct) {
+          return true;
         }
       }
     }
     UnregisterDisplayContentsStyleFor(aChild, aContainer);
+    return didReconstruct;
   }
 
 #ifdef MOZ_XUL
@@ -8736,7 +8709,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     if (aFlags == REMOVE_DESTROY_FRAMES) {
       CaptureStateForFramesOf(aChild, mTempFrameTreeState);
     }
-    return;
+    return false;
   }
 #endif // MOZ_XUL
 
@@ -8771,11 +8744,10 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     //
     // XXXsmaug This is super unefficient!
     nsIContent* bindingParent = aContainer->GetBindingParent();
-    *aDidReconstruct = true;
     LAYOUT_PHASE_TEMP_EXIT();
     RecreateFramesForContent(bindingParent, insertionKind, aFlags);
     LAYOUT_PHASE_TEMP_REENTER();
-    return;
+    return true;
   }
 
   if (aFlags == REMOVE_DESTROY_FRAMES) {
@@ -8789,9 +8761,8 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     LAYOUT_PHASE_TEMP_EXIT();
     if (MaybeRecreateContainerForFrameRemoval(
           childFrame, insertionKind, aFlags)) {
-      *aDidReconstruct = true;
       LAYOUT_PHASE_TEMP_REENTER();
-      return;
+      return true;
     }
     LAYOUT_PHASE_TEMP_REENTER();
 
@@ -8802,12 +8773,11 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     if (parentType == LayoutFrameType::FrameSet &&
         IsSpecialFramesetChild(aChild)) {
       // Just reframe the parent, since framesets are weird like that.
-      *aDidReconstruct = true;
       LAYOUT_PHASE_TEMP_EXIT();
       RecreateFramesForContent(parentFrame->GetContent(), insertionKind,
                                aFlags);
       LAYOUT_PHASE_TEMP_REENTER();
-      return;
+      return true;
     }
 
     // If we're a child of MathML, then we should reframe the MathML content.
@@ -8817,11 +8787,10 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
                                          ? parentFrame->GetParent()
                                          : parentFrame;
     if (possibleMathMLAncestor->IsFrameOfType(nsIFrame::eMathML)) {
-      *aDidReconstruct = true;
       LAYOUT_PHASE_TEMP_EXIT();
       RecreateFramesForContent(parentFrame->GetContent(), insertionKind, aFlags);
       LAYOUT_PHASE_TEMP_REENTER();
-      return;
+      return true;
     }
 
     // Undo XUL wrapping if it's no longer needed.
@@ -8833,12 +8802,11 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
         // check if this frame is the only one needing wrapping
         aChild == AnyKidsNeedBlockParent(parentFrame->PrincipalChildList().FirstChild()) &&
         !AnyKidsNeedBlockParent(childFrame->GetNextSibling())) {
-      *aDidReconstruct = true;
       LAYOUT_PHASE_TEMP_EXIT();
       RecreateFramesForContent(grandparentFrame->GetContent(), insertionKind,
                                aFlags);
       LAYOUT_PHASE_TEMP_REENTER();
-      return;
+      return true;
     }
 
 #ifdef ACCESSIBILITY
@@ -8881,7 +8849,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
         // XXXbz the GetContent() != aChild check is needed due to bug 135040.
         // Remove it once that's fixed.
         UnregisterDisplayNoneStyleFor(aChild, aContainer);
-        return;
+        return false;
       }
       parentFrame = childFrame->GetParent();
       parentType = parentFrame->Type();
@@ -8922,9 +8890,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     }
 
     if (haveFLS && mRootElementFrame) {
-      RecoverLetterFrames(containingBlock,
-                          ShouldHaveFirstLineStyle(containingBlock->GetContent(),
-                                                   containingBlock->StyleContext()));
+      RecoverLetterFrames(containingBlock);
     }
 
     // If we're just reconstructing frames for the element, then the
@@ -8974,6 +8940,8 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     }
 #endif
   }
+
+  return false;
 }
 
 /**
@@ -9099,9 +9067,7 @@ nsCSSFrameConstructor::CharacterDataChanged(nsIContent* aContent,
     frame->CharacterDataChanged(aInfo);
 
     if (haveFirstLetterStyle) {
-      RecoverLetterFrames(block,
-                          ShouldHaveFirstLineStyle(block->GetContent(),
-                                                   block->StyleContext()));
+      RecoverLetterFrames(block);
     }
   }
 }
@@ -10096,10 +10062,11 @@ nsCSSFrameConstructor::RecreateFramesForContent(nsIContent* aContent,
     nsCOMPtr<nsIContent> container = aContent->GetParent();
 
     // Remove the frames associated with the content object.
-    bool didReconstruct;
     nsIContent* nextSibling = aContent->IsRootOfAnonymousSubtree() ?
       nullptr : aContent->GetNextSibling();
-    ContentRemoved(container, aContent, nextSibling, aFlags, &didReconstruct);
+    bool didReconstruct =
+      ContentRemoved(container, aContent, nextSibling, aFlags);
+
     if (!didReconstruct) {
       if (aInsertionKind == InsertionKind::Async) {
         // XXXmats doesn't frame state need to be restored in this case too?
@@ -10120,19 +10087,17 @@ nsCSSFrameConstructor::RecreateFramesForContent(nsIContent* aContent,
   }
 }
 
-void
-nsCSSFrameConstructor::DestroyFramesFor(nsIContent* aContent,
-                                        bool* aDidReconstruct)
+bool
+nsCSSFrameConstructor::DestroyFramesFor(Element* aElement)
 {
-  MOZ_ASSERT(aContent && aContent->GetParentNode());
+  MOZ_ASSERT(aElement && aElement->GetParentNode());
 
   nsIContent* nextSibling =
-    aContent->IsRootOfAnonymousSubtree() ? nullptr : aContent->GetNextSibling();
-  ContentRemoved(aContent->GetParent(),
-                 aContent,
-                 nextSibling,
-                 REMOVE_DESTROY_FRAMES,
-                 aDidReconstruct);
+    aElement->IsRootOfAnonymousSubtree() ? nullptr : aElement->GetNextSibling();
+  return ContentRemoved(aElement->GetParent(),
+                        aElement,
+                        nextSibling,
+                        REMOVE_DESTROY_FRAMES);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -10252,7 +10217,8 @@ nsCSSFrameConstructor::sPseudoParentData[eParentTypeCount] = {
     FCDATA_DECL(FCDATA_IS_TABLE_PART | FCDATA_SKIP_FRAMESET |
                 FCDATA_DISALLOW_OUT_OF_FLOW | FCDATA_USE_CHILD_ITEMS |
                 FCDATA_SKIP_ABSPOS_PUSH |
-                FCDATA_IS_WRAPPER_ANON_BOX |
+                // Not FCDATA_IS_WRAPPER_ANON_BOX, because we don't need to
+                // restyle these: they have non-inheriting style contexts.
                 FCDATA_DESIRED_PARENT_TYPE_TO_BITS(eTypeTable),
                 NS_NewTableColGroupFrame),
     &nsCSSAnonBoxes::tableColGroup
@@ -10891,9 +10857,16 @@ nsCSSFrameConstructor::WrapItemsInPseudoParent(nsIContent* aParentContent,
     pseudoType = nsCSSAnonBoxes::inlineTable;
   }
 
-  already_AddRefed<nsStyleContext> wrapperStyle =
-    mPresShell->StyleSet()->ResolveInheritingAnonymousBoxStyle(pseudoType,
-                                                               aParentStyle);
+  already_AddRefed<nsStyleContext> wrapperStyle;
+  if (pseudoData.mFCData.mBits & FCDATA_IS_WRAPPER_ANON_BOX) {
+    wrapperStyle =
+      mPresShell->StyleSet()->ResolveInheritingAnonymousBoxStyle(pseudoType,
+                                                                 aParentStyle);
+  } else {
+    wrapperStyle =
+      mPresShell->StyleSet()->ResolveNonInheritingAnonymousBoxStyle(pseudoType);
+  }
+
   FrameConstructionItem* newItem =
     new FrameConstructionItem(&pseudoData.mFCData,
                               // Use the content of our parent frame
@@ -12273,8 +12246,7 @@ nsCSSFrameConstructor::RemoveLetterFrames(nsIPresShell* aPresShell,
 
 // Fixup the letter frame situation for the given block
 void
-nsCSSFrameConstructor::RecoverLetterFrames(nsContainerFrame* aBlockFrame,
-                                           bool aMayHaveFirstLine)
+nsCSSFrameConstructor::RecoverLetterFrames(nsContainerFrame* aBlockFrame)
 {
   aBlockFrame =
     static_cast<nsContainerFrame*>(aBlockFrame->FirstContinuation());
@@ -12300,14 +12272,17 @@ nsCSSFrameConstructor::RecoverLetterFrames(nsContainerFrame* aBlockFrame,
   } while (continuation);
 
   if (parentFrame) {
-    // Take the old textFrame out of the parents child list
+    // Take the old textFrame out of the parent's child list
     RemoveFrame(kPrincipalList, textFrame);
 
+    // When we got the first-letter style from servo, it gave us the style not
+    // affected by the first-line bits.  So we may need to reparent the new
+    // frames' styles to deal with that.  Note that we already used parentFrame
+    // to inherit from, so the only case in which we need to fix something up is
+    // if parentFrame is itself a ::first-line frame, because in that case we
+    // have to do inheritance partially from it and partially from the block.
     auto* restyleManager = RestyleManager();
-    if (aMayHaveFirstLine && restyleManager->IsServo()) {
-      // When we got the first-letter style from servo, it gave us the style not
-      // affected by the first-line bits.  So we need to reparent the new
-      // frames' styles to deal with that.
+    if (parentFrame->IsLineFrame() && restyleManager->IsServo()) {
       for (nsIFrame* f : letterFrames) {
         restyleManager->ReparentStyleContext(f);
       }

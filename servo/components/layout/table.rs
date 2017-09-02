@@ -545,8 +545,7 @@ pub struct InternalTable {
 
 impl ISizeAndMarginsComputer for InternalTable {
     fn compute_border_and_padding(&self, block: &mut BlockFlow, containing_block_inline_size: Au) {
-        block.fragment.compute_border_and_padding(containing_block_inline_size,
-                                                  self.border_collapse)
+        block.fragment.compute_border_and_padding(containing_block_inline_size)
     }
 
     /// Compute the used value of inline-size, taking care of min-inline-size and max-inline-size.
@@ -588,7 +587,7 @@ impl ISizeAndMarginsComputer for InternalTable {
 /// maximum of 100 pixels and 20% of the table), the preceding constraint means that we must
 /// potentially store both a specified width *and* a specified percentage, so that the inline-size
 /// assignment phase of layout will know which one to pick.
-#[derive(Clone, Serialize, Debug, Copy)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct ColumnIntrinsicInlineSize {
     /// The preferred intrinsic inline size.
     pub preferred: Au,
@@ -625,7 +624,7 @@ impl ColumnIntrinsicInlineSize {
 ///
 /// TODO(pcwalton): There will probably be some `border-collapse`-related info in here too
 /// eventually.
-#[derive(Serialize, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct ColumnComputedInlineSize {
     /// The computed size of this inline column.
     pub size: Au,

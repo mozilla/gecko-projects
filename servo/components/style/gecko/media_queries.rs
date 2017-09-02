@@ -156,12 +156,18 @@ impl Device {
 
     /// Returns the current viewport size in app units.
     pub fn au_viewport_size(&self) -> Size2D<Au> {
-        self.used_viewport_size.store(true, Ordering::Relaxed);
         unsafe {
             // TODO(emilio): Need to take into account scrollbars.
             let area = &self.pres_context().mVisibleArea;
             Size2D::new(Au(area.width), Au(area.height))
         }
+    }
+
+    /// Returns the current viewport size in app units, recording that it's been
+    /// used for viewport unit resolution.
+    pub fn au_viewport_size_for_viewport_unit_resolution(&self) -> Size2D<Au> {
+        self.used_viewport_size.store(true, Ordering::Relaxed);
+        self.au_viewport_size()
     }
 
     /// Returns whether we ever looked up the viewport size of the Device.
@@ -200,7 +206,7 @@ impl Device {
 
 /// A expression for gecko contains a reference to the media feature, the value
 /// the media query contained, and the range to evaluate.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct Expression {
     feature: &'static nsMediaFeature,
     value: Option<MediaExpressionValue>,
@@ -242,7 +248,7 @@ impl PartialEq for Expression {
 }
 
 /// A resolution.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Resolution {
     /// Dots per inch.
     Dpi(CSSFloat),
@@ -295,7 +301,7 @@ impl ToCss for Resolution {
 }
 
 /// A value found or expected in a media expression.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MediaExpressionValue {
     /// A length.
     Length(specified::Length),

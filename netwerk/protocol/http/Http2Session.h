@@ -179,8 +179,10 @@ public:
     kUrgentStartGroupID = 0xD
     // Hey, you! YES YOU! If you add/remove any groups here, you almost
     // certainly need to change the lookup of the stream/ID hash in
-    // Http2Session::OnTransportStatus. Yeah, that's right. YOU!
+    // Http2Session::OnTransportStatus and |kPriorityGroupCount| below.
+    // Yeah, that's right. YOU!
   };
+  const static uint8_t kPriorityGroupCount = 6;
 
   static nsresult RecvHeaders(Http2Session *);
   static nsresult RecvPriority(Http2Session *);
@@ -256,6 +258,8 @@ public:
   // For use by an HTTP2Stream
   void Received421(nsHttpConnectionInfo *ci);
 
+  void SendPriorityFrame(uint32_t streamID, uint32_t dependsOn, uint8_t weight);
+
 private:
 
   // These internal states do not correspond to the states of the HTTP/2 specification
@@ -305,6 +309,7 @@ private:
 
   MOZ_MUST_USE nsresult SetInputFrameDataStream(uint32_t);
   void        CreatePriorityNode(uint32_t, uint32_t, uint8_t, const char *);
+  char        *CreatePriorityFrame(uint32_t, uint32_t, uint8_t);
   bool        VerifyStream(Http2Stream *, uint32_t);
   void        SetNeedsCleanup();
 
@@ -530,6 +535,8 @@ private:
   nsDataHashtable<nsCStringHashKey, bool> mOriginFrame;
 
   nsDataHashtable<nsCStringHashKey, bool> mJoinConnectionCache;
+
+  uint64_t mCurrentForegroundTabOuterContentWindowId;
 
   class CachePushCheckCallback final : public nsICacheEntryOpenCallback
   {

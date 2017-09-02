@@ -121,7 +121,7 @@ public:
   void NetworkError();
 
   // Return the principal of the current URI being played or downloaded.
-  virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal();
+  virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal() = 0;
 
   // Return the time position in the video stream being
   // played measured in seconds.
@@ -199,7 +199,7 @@ public:
   bool IsMediaSeekable();
   // Returns true if seeking is supported on a transport level (e.g. the server
   // supports range requests, we are playing a file, etc.).
-  bool IsTransportSeekable();
+  virtual bool IsTransportSeekable() = 0;
 
   // Return the time ranges that can be seeked into.
   virtual media::TimeIntervals GetSeekable();
@@ -275,7 +275,7 @@ private:
     MozPromiseHolder<SizeOfPromise> mCallback;
   };
 
-  virtual void AddSizeOfResources(ResourceSizes* aSizes);
+  virtual void AddSizeOfResources(ResourceSizes* aSizes) = 0;
 
   VideoFrameContainer* GetVideoFrameContainer()
   {
@@ -357,14 +357,6 @@ private:
   {
     return mAbstractMainThread;
   }
-
-  typedef MozPromise<RefPtr<CDMProxy>, bool /* aIgnored */,
-                     /* IsExclusive = */ true>
-    CDMProxyPromise;
-
-  // Resolved when a CDMProxy is available and the capabilities are known or
-  // rejected when this decoder is about to shut down.
-  RefPtr<CDMProxyPromise> RequestCDMProxy() const;
 
   void SetCDMProxy(CDMProxy* aProxy);
 
@@ -481,14 +473,11 @@ protected:
     media::TimeUnit::FromMicroseconds(250000);
 
 private:
-  // Get the current MediaResource being used.
-  // Note: The MediaResource is refcounted, but it outlives the MediaDecoder,
-  // so it's OK to use the reference returned by this function without
-  // refcounting, *unless* you need to store and use the reference after the
-  // MediaDecoder has been destroyed. You might need to do this if you're
-  // wrapping the MediaResource in some kind of byte stream interface to be
-  // passed to a platform decoder.
-  virtual MediaResource* GetResource() const = 0;
+  // Ensures our media resource has been pinned.
+  virtual void PinForSeek() = 0;
+
+  // Ensures our media resource has been unpinned.
+  virtual void UnpinForSeek() = 0;
 
   nsCString GetDebugInfo();
 
@@ -521,9 +510,6 @@ private:
   // Explicitly prievate to force access via accessors.
   RefPtr<MediaDecoderStateMachine> mDecoderStateMachine;
 
-  MozPromiseHolder<CDMProxyPromise> mCDMProxyPromiseHolder;
-  RefPtr<CDMProxyPromise> mCDMProxyPromise;
-
 protected:
   void NotifyDataArrivedInternal();
   void DiscardOngoingSeekIfExists();
@@ -533,23 +519,11 @@ protected:
   // Called on the main thread only.
   virtual void DownloadProgressed();
 
-  // Called by MediaResource when the "cache suspended" status changes.
-  // If MediaResource::IsSuspendedByCache returns true, then the decoder
-  // should stop buffering or otherwise waiting for download progress and
-  // start consuming data, if possible, because the cache is full.
-  void NotifySuspendedStatusChanged();
-
   // Called by MediaResource when the principal of the resource has
   // changed. Called on main thread only.
   void NotifyPrincipalChanged();
 
   MozPromiseRequestHolder<SeekPromise> mSeekRequest;
-
-  // Ensures our media stream has been pinned.
-  void PinForSeek();
-
-  // Ensures our media stream has been unpinned.
-  void UnpinForSeek();
 
   const char* PlayStateStr();
 
@@ -567,10 +541,6 @@ protected:
   const RefPtr<FrameStatistics> mFrameStats;
 
   RefPtr<VideoFrameContainer> mVideoFrameContainer;
-
-  // True when our media stream has been pinned. We pin the stream
-  // while seeking.
-  bool mPinnedForSeek;
 
   // True if the decoder has been directed to minimize its preroll before
   // playback starts. After the first time playback starts, we don't attempt

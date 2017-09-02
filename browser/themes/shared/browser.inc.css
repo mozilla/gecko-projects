@@ -55,40 +55,57 @@
   padding-bottom: 0;
 }
 
-/* Go button */
-.urlbar-go-button {
-  padding: 0 3px;
-  list-style-image: url("chrome://browser/skin/reload-stop-go.png");
+/* Library animation */
+
+#navigator-toolbox[animate] {
+  position: relative;
 }
 
-.urlbar-go-button {
-  -moz-image-region: rect(0, 42px, 14px, 28px);
+#library-animatable-box {
+  display: none;
 }
 
-.urlbar-go-button:hover {
-  -moz-image-region: rect(14px, 42px, 28px, 28px);
+#library-animatable-box[animate] {
+  display: -moz-box;
 }
 
-.urlbar-go-button:hover:active {
-  -moz-image-region: rect(28px, 42px, 42px, 28px);
+/* Private browsing and accessibility indicators */
+
+.accessibility-indicator,
+.private-browsing-indicator {
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+  background-position: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  margin-right: 8px;
 }
 
-.urlbar-go-button:-moz-locale-dir(rtl) {
-  transform: scaleX(-1);
+.accessibility-indicator {
+  background-image: url("chrome://browser/skin/accessibility.svg");
+  -moz-user-focus: normal;
+  /* Clear default button styling */
+  -moz-appearance: none;
+  margin-top: unset;
+  margin-bottom: unset;
+  min-width: unset;
+  color: unset;
+  text-shadow: unset;
 }
 
-@media (min-resolution: 1.1dppx) {
-  .urlbar-go-button {
-    list-style-image: url("chrome://browser/skin/reload-stop-go@2x.png");
-    -moz-image-region: rect(0, 84px, 28px, 56px);
-    width: 20px;
-  }
-
-  .urlbar-go-button:hover {
-    -moz-image-region: rect(28px, 84px, 56px, 56px);
-  }
-
-  .urlbar-go-button:hover:active {
-    -moz-image-region: rect(56px, 84px, 84px, 56px);
-  }
+.accessibility-indicator:-moz-any(:hover, :active, :focus, :-moz-focusring) {
+  background-image: url("chrome://browser/skin/accessibility-active.svg");
+  outline: 0;
 }
+
+.private-browsing-indicator {
+  background-image: url("chrome://browser/skin/private-browsing.svg");
+}
+
+:root:not([accessibilitymode]) .accessibility-indicator,
+:root:not([privatebrowsingmode=temporary]) .private-browsing-indicator {
+  display: none;
+}
+
+/* End private browsing and accessibility indicators */

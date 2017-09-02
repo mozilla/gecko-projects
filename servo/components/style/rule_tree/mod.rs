@@ -17,7 +17,7 @@ use std::io::{self, Write};
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-use stylesheets::StyleRule;
+use stylesheets::{MallocSizeOf, MallocSizeOfFn, StyleRule};
 use thread_state;
 
 /// The rule tree, the structure servo uses to preserve the results of selector
@@ -62,6 +62,12 @@ impl Drop for RuleTree {
     }
 }
 
+impl MallocSizeOf for RuleTree {
+    fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn) -> usize {
+        self.root.get().malloc_size_of_including_self(malloc_size_of)
+    }
+}
+
 /// A style source for the rule node. It can either be a CSS style rule or a
 /// declaration block.
 ///
@@ -69,7 +75,7 @@ impl Drop for RuleTree {
 /// could be enough to implement the rule tree, keeping the whole rule provides
 /// more debuggability, and also the ability of show those selectors to
 /// devtools.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum StyleSource {
     /// A style rule stable pointer.
     Style(Arc<Locked<StyleRule>>),
@@ -193,10 +199,11 @@ impl RuleTree {
         for (source, level) in iter {
             debug_assert!(last_level <= level, "Not really ordered");
             debug_assert!(!level.is_important(), "Important levels handled internally");
-            let (any_normal, any_important) = {
+            let any_important = {
                 let pdb = source.read(level.guard(guards));
-                (pdb.any_normal(), pdb.any_important())
+                pdb.any_important()
             };
+
             if any_important {
                 found_important = true;
                 match level {
@@ -210,19 +217,25 @@ impl RuleTree {
                     _ => {},
                 };
             }
-            // We really want to ensure empty rule nodes appear in the rule tree for
-            // devtools, this condition ensures that if we find an empty rule node, we
-            // insert it at the normal level.
-            if any_normal || !any_important {
-                if matches!(level, Transitions) && found_important {
-                    // There can be at most one transition, and it will come at
-                    // the end of the iterator. Stash it and apply it after
-                    // !important rules.
-                    debug_assert!(transition.is_none());
-                    transition = Some(source);
-                } else {
-                    current = current.ensure_child(self.root.downgrade(), source, level);
-                }
+
+            // We don't optimize out empty rules, even though we could.
+            //
+            // Inspector relies on every rule being inserted in the normal level
+            // at least once, in order to return the rules with the correct
+            // specificity order.
+            //
+            // TODO(emilio): If we want to apply these optimizations without
+            // breaking inspector's expectations, we'd need to run
+            // selector-matching again at the inspector's request. That may or
+            // may not be a better trade-off.
+            if matches!(level, Transitions) && found_important {
+                // There can be at most one transition, and it will come at
+                // the end of the iterator. Stash it and apply it after
+                // !important rules.
+                debug_assert!(transition.is_none());
+                transition = Some(source);
+            } else {
+                current = current.ensure_child(self.root.downgrade(), source, level);
             }
             last_level = level;
         }
@@ -442,7 +455,7 @@ const RULE_TREE_GC_INTERVAL: usize = 300;
 ///
 /// [1]: https://drafts.csswg.org/css-cascade/#cascade-origin
 #[repr(u8)]
-#[derive(Eq, PartialEq, Copy, Clone, Debug, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum CascadeLevel {
     /// Normal User-Agent rules.
@@ -780,6 +793,14 @@ impl RuleNode {
                 Some(WeakRuleNode::from_ptr(first_child))
             }
         }
+    }
+
+    fn malloc_size_of_including_self(&self, malloc_size_of: MallocSizeOfFn) -> usize {
+        let mut n = unsafe { malloc_size_of(self as *const _ as *const _) };
+        for child in self.iter_children() {
+            n += unsafe { (*child.ptr()).malloc_size_of_including_self(malloc_size_of) };
+        }
+        n
     }
 }
 

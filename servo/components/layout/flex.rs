@@ -7,7 +7,7 @@
 #![deny(unsafe_code)]
 
 use app_units::{Au, MAX_AU};
-use block::{BlockFlow, MarginsMayCollapseFlag};
+use block::{AbsoluteAssignBSizesTraversal, BlockFlow, MarginsMayCollapseFlag};
 use context::LayoutContext;
 use display_list_builder::{DisplayListBuildState, FlexFlowDisplayListBuilding};
 use euclid::Point2D;
@@ -17,17 +17,18 @@ use flow::{Flow, FlowClass, ImmutableFlowUtils, OpaqueFlow};
 use flow::{INLINE_POSITION_IS_STATIC, IS_ABSOLUTELY_POSITIONED};
 use fragment::{Fragment, FragmentBorderBoxIterator, Overflow};
 use layout_debug;
+use model::{AdjoiningMargins, CollapsibleMargins};
 use model::{IntrinsicISizes, MaybeAuto, SizeConstraint};
 use std::cmp::{max, min};
 use std::ops::Range;
 use style::computed_values::{align_content, align_self, flex_direction, flex_wrap, justify_content};
-use style::computed_values::border_collapse;
 use style::logical_geometry::{Direction, LogicalSize};
 use style::properties::ComputedValues;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW};
 use style::values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto, LengthOrPercentageOrNone};
 use style::values::computed::flex::FlexBasis;
 use style::values::generics::flex::FlexBasis as GenericFlexBasis;
+use traversal::PreorderFlowTraversal;
 
 /// The size of an axis. May be a specified size, a min/max
 /// constraint, or an unlimited size
@@ -160,8 +161,7 @@ impl FlexItem {
                                             Some(containing_length));
 
                 // These methods compute auto margins to zero length, which is exactly what we want.
-                block.fragment.compute_border_and_padding(containing_length,
-                                                          border_collapse::T::separate);
+                block.fragment.compute_border_and_padding(containing_length);
                 block.fragment.compute_inline_direction_margins(containing_length);
                 block.fragment.compute_block_direction_margins(containing_length);
 
@@ -713,14 +713,18 @@ impl FlexFlow {
 
             line_interval = match line_align {
                 align_content::T::space_between => {
-                    if line_count == 1 {
+                    if line_count <= 1 {
                         Au(0)
                     } else {
                         free_space / (line_count - 1)
                     }
                 }
                 align_content::T::space_around => {
-                    free_space / line_count
+                    if line_count == 0 {
+                        Au(0)
+                    } else {
+                        free_space / line_count
+                    }
                 }
                 _ => Au(0),
             };
@@ -802,7 +806,6 @@ impl FlexFlow {
         let total_block_size = total_cross_size + self.block_flow.fragment.border_padding.block_start_end();
         self.block_flow.fragment.border_box.size.block = total_block_size;
         self.block_flow.base.position.size.block = total_block_size;
-
     }
 }
 
@@ -939,13 +942,29 @@ impl Flow for FlexFlow {
     }
 
     fn assign_block_size(&mut self, layout_context: &LayoutContext) {
-        self.block_flow
-            .assign_block_size_block_base(layout_context,
-                                          None,
-                                          MarginsMayCollapseFlag::MarginsMayNotCollapse);
         match self.main_mode {
-            Direction::Inline => self.inline_mode_assign_block_size(layout_context),
-            Direction::Block => self.block_mode_assign_block_size(),
+            Direction::Inline => {
+                self.inline_mode_assign_block_size(layout_context);
+                let block_start = AdjoiningMargins::from_margin(self.block_flow.fragment.margin.block_start);
+                let block_end = AdjoiningMargins::from_margin(self.block_flow.fragment.margin.block_end);
+                self.block_flow.base.collapsible_margins = CollapsibleMargins::Collapse(block_start, block_end);
+
+                // TODO(stshine): assign proper static position for absolute descendants.
+                if (&*self as &Flow).contains_roots_of_absolute_flow_tree() {
+                    // Assign block-sizes for all flows in this absolute flow tree.
+                    // This is preorder because the block-size of an absolute flow may depend on
+                    // the block-size of its containing block, which may also be an absolute flow.
+                    let assign_abs_b_sizes = AbsoluteAssignBSizesTraversal(layout_context.shared_context());
+                    assign_abs_b_sizes.traverse_absolute_flows(&mut *self);
+                }
+            }
+            Direction::Block =>{
+                self.block_flow
+                    .assign_block_size_block_base(layout_context,
+                                                  None,
+                                                  MarginsMayCollapseFlag::MarginsMayNotCollapse);
+                self.block_mode_assign_block_size();
+            }
         }
     }
 

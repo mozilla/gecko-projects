@@ -89,6 +89,20 @@ GetMaxBudget(bool aIsBackground)
   return maxBudget > 0 ? TimeDuration::FromMilliseconds(maxBudget)
                        : TimeDuration::Forever();
 }
+
+TimeDuration
+GetMinBudget(bool aIsBackground)
+{
+  // The minimum budget is computed by looking up the maximum allowed
+  // delay and computing how long time it would take to regenerate
+  // that budget using the regeneration factor. This number is
+  // expected to be negative.
+  return TimeDuration::FromMilliseconds(
+    - gBudgetThrottlingMaxDelay /
+    std::max(aIsBackground ? gBackgroundBudgetRegenerationFactor
+                           : gForegroundBudgetRegenerationFactor,
+             1));
+}
 } // namespace
 
 //
@@ -205,9 +219,7 @@ TimeoutManager::MinSchedulingDelay() const
       mExecutionBudget < TimeDuration()) {
     // Only throttle if execution budget is less than 0
     double factor = 1.0 / GetRegenerationFactor(mWindow.IsBackgroundInternal());
-    return TimeDuration::Min(
-      TimeDuration::FromMilliseconds(gBudgetThrottlingMaxDelay),
-      TimeDuration::Max(unthrottled, -mExecutionBudget.MultDouble(factor)));
+    return TimeDuration::Max(unthrottled, -mExecutionBudget.MultDouble(factor));
   }
   //
   return unthrottled;
@@ -333,10 +345,22 @@ TimeoutManager::UpdateBudget(const TimeStamp& aNow, const TimeDuration& aDuratio
   if (BudgetThrottlingEnabled(isBackground)) {
     double factor = GetRegenerationFactor(isBackground);
     TimeDuration regenerated = (aNow - mLastBudgetUpdate).MultDouble(factor);
-    // Clamp the budget to the maximum allowed budget.
-    mExecutionBudget = TimeDuration::Min(
-      GetMaxBudget(isBackground), mExecutionBudget - aDuration + regenerated);
+    // Clamp the budget to the range of minimum and maximum allowed budget.
+    mExecutionBudget = TimeDuration::Max(
+      GetMinBudget(isBackground),
+      TimeDuration::Min(GetMaxBudget(isBackground),
+                        mExecutionBudget - aDuration + regenerated));
+  } else {
+    // If budget throttling isn't enabled, reset the execution budget
+    // to the max budget specified in preferences. Always doing this
+    // will catch the case of BudgetThrottlingEnabled going from
+    // returning true to returning false. This prevent us from looping
+    // in RunTimeout, due to totalTimeLimit being set to zero and no
+    // timeouts being executed, even though budget throttling isn't
+    // active at the moment.
+    mExecutionBudget = GetMaxBudget(isBackground);
   }
+
   mLastBudgetUpdate = aNow;
 }
 
@@ -1244,12 +1268,7 @@ TimeoutManager::BudgetThrottlingEnabled(bool aIsBackground) const
     return false;
   }
 
-  bool active;
-  // Check if we have web sockets
-  RefPtr<WebSocketEventService> eventService = WebSocketEventService::Get();
-  if (eventService &&
-      NS_SUCCEEDED(eventService->HasListenerFor(mWindow.WindowID(), &active)) &&
-      active) {
+  if (mWindow.AsInner()->HasOpenWebSockets()) {
     return false;
   }
 

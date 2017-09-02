@@ -36,6 +36,7 @@ static DEFAULT_SCROLLBAR_COLOR: ColorF = ColorF { r: 0.3, g: 0.3, b: 0.3, a: 0.6
 /// This structure keeps track of what ids are the "root" for one particular level of
 /// nesting as well as keeping and index, which can make ClipIds used internally unique
 /// in the full ClipScrollTree.
+#[derive(Debug)]
 struct NestedDisplayListInfo {
     /// The index of this nested display list, which is used to generate
     /// new ClipIds for clips that are defined inside it.
@@ -82,11 +83,19 @@ impl NestedDisplayListInfo {
             self.convert_id_to_nested(id)
         }
     }
+
+    fn convert_new_id_to_nested(&self, id: &ClipId) -> ClipId {
+        if id.pipeline_id() != self.clip_node_id.pipeline_id() {
+            return *id;
+        }
+        self.convert_id_to_nested(id)
+    }
 }
 
 struct FlattenContext<'a> {
     scene: &'a Scene,
     builder: &'a mut FrameBuilder,
+    resource_cache: &'a ResourceCache,
     tiled_image_map: TiledImageMap,
     replacements: Vec<(ClipId, ClipId)>,
     nested_display_list_info: Vec<NestedDisplayListInfo>,
@@ -96,11 +105,12 @@ struct FlattenContext<'a> {
 impl<'a> FlattenContext<'a> {
     fn new(scene: &'a Scene,
            builder: &'a mut FrameBuilder,
-           resource_cache: &ResourceCache)
+           resource_cache: &'a ResourceCache)
            -> FlattenContext<'a> {
         FlattenContext {
             scene,
             builder,
+            resource_cache,
             tiled_image_map: resource_cache.get_tiled_image_map(),
             replacements: Vec::new(),
             nested_display_list_info: Vec::new(),
@@ -123,7 +133,7 @@ impl<'a> FlattenContext<'a> {
 
     fn convert_new_id_to_nested(&self, id: &ClipId) -> ClipId {
         if let Some(nested_info) = self.nested_display_list_info.last() {
-            nested_info.convert_id_to_nested(id)
+            nested_info.convert_new_id_to_nested(id)
         } else {
             *id
         }
@@ -557,12 +567,12 @@ impl Frame {
                                               info.image_rendering);
             }
             SpecificDisplayItem::Text(ref text_info) => {
+                let instance = context.resource_cache.get_font_instance(text_info.font_key).unwrap();
                 context.builder.add_text(clip_and_scroll,
                                          reference_frame_relative_offset,
                                          item_rect_with_offset,
                                          &clip_with_offset,
-                                         text_info.font_key,
-                                         text_info.size,
+                                         instance,
                                          &text_info.color,
                                          item.glyphs(),
                                          item.display_list().get(item.glyphs()).count(),
@@ -994,22 +1004,15 @@ impl Frame {
         // This can happen with very tall and thin images used as a repeating background.
         // Apparently web authors do that...
 
-        let mut repeat_x = false;
-        let mut repeat_y = false;
+        let needs_repeat_x = info.stretch_size.width < item_rect.size.width;
+        let needs_repeat_y = info.stretch_size.height < item_rect.size.height;
 
-        if info.stretch_size.width < item_rect.size.width {
-            // If this assert blows up it means we haven't properly decomposed the image in decompose_image_row.
-            debug_assert!(image_size.width <= tile_size);
-            // we don't actually tile in this dimension so repeating can be done in the shader.
-            repeat_x = true;
-        }
+        let tiled_in_x = image_size.width > tile_size;
+        let tiled_in_y = image_size.height > tile_size;
 
-        if info.stretch_size.height < item_rect.size.height {
-            // If this assert blows up it means we haven't properly decomposed the image in decompose_image.
-            debug_assert!(image_size.height <= tile_size);
-            // we don't actually tile in this dimension so repeating can be done in the shader.
-            repeat_y = true;
-        }
+        // If we don't actually tile in this dimension, repeating can be done in the shader.
+        let shader_repeat_x = needs_repeat_x && !tiled_in_x;
+        let shader_repeat_y = needs_repeat_y && !tiled_in_y;
 
         let tile_size_f32 = tile_size as f32;
 
@@ -1043,7 +1046,7 @@ impl Frame {
                                         TileOffset::new(tx, ty),
                                         stretched_tile_size,
                                         1.0, 1.0,
-                                        repeat_x, repeat_y);
+                                        shader_repeat_x, shader_repeat_y);
             }
             if leftover.width != 0 {
                 // Tiles on the right edge that are smaller than the tile size.
@@ -1056,7 +1059,7 @@ impl Frame {
                                         stretched_tile_size,
                                         (leftover.width as f32) / tile_size_f32,
                                         1.0,
-                                        repeat_x, repeat_y);
+                                        shader_repeat_x, shader_repeat_y);
             }
         }
 
@@ -1072,8 +1075,8 @@ impl Frame {
                                         stretched_tile_size,
                                         1.0,
                                         (leftover.height as f32) / tile_size_f32,
-                                        repeat_x,
-                                        repeat_y);
+                                        shader_repeat_x,
+                                        shader_repeat_y);
             }
 
             if leftover.width != 0 {
@@ -1087,8 +1090,8 @@ impl Frame {
                                         stretched_tile_size,
                                         (leftover.width as f32) / tile_size_f32,
                                         (leftover.height as f32) / tile_size_f32,
-                                        repeat_x,
-                                        repeat_y);
+                                        shader_repeat_x,
+                                        shader_repeat_y);
             }
         }
     }
@@ -1103,16 +1106,16 @@ impl Frame {
                           stretched_tile_size: LayerSize,
                           tile_ratio_width: f32,
                           tile_ratio_height: f32,
-                          repeat_x: bool,
-                          repeat_y: bool) {
+                          shader_repeat_x: bool,
+                          shader_repeat_y: bool) {
         // If the the image is tiled along a given axis, we can't have the shader compute
         // the image repetition pattern. In this case we base the primitive's rectangle size
         // on the stretched tile size which effectively cancels the repetion (and repetition
         // has to be emulated by generating more primitives).
-        // If the image is not tiling along this axis, we can perform the repetition in the
+        // If the image is not tiled along this axis, we can perform the repetition in the
         // shader. in this case we use the item's size in the primitive (on that particular
         // axis).
-        // See the repeat_x/y code below.
+        // See the shader_repeat_x/y code below.
 
         let stretched_size = LayerSize::new(
             stretched_tile_size.width * tile_ratio_width,
@@ -1127,12 +1130,12 @@ impl Frame {
             stretched_size,
         );
 
-        if repeat_x {
+        if shader_repeat_x {
             assert_eq!(tile_offset.x, 0);
             prim_rect.size.width = item_rect.size.width;
         }
 
-        if repeat_y {
+        if shader_repeat_y {
             assert_eq!(tile_offset.y, 0);
             prim_rect.size.height = item_rect.size.height;
         }

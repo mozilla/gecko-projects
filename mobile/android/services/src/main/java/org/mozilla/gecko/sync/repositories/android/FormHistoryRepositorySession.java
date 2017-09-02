@@ -213,7 +213,8 @@ public class FormHistoryRepositorySession extends
           }
         }
 
-        delegate.onFetchCompleted(end);
+        setLastFetchTimestamp(end);
+        delegate.onFetchCompleted();
       }
     };
 
@@ -436,7 +437,8 @@ public class FormHistoryRepositorySession extends
           synchronized (recordsBufferMonitor) {
             flushInsertQueue();
           }
-          storeDelegate.deferredStoreDelegate(storeWorkQueue).onStoreCompleted(now());
+          setLastStoreTimestamp(now());
+          storeDelegate.deferredStoreDelegate(storeWorkQueue).onStoreCompleted();
         } catch (Exception e) {
           // XXX TODO
           storeDelegate.deferredStoreDelegate(storeWorkQueue).onRecordStoreFailed(e, null);
@@ -565,7 +567,7 @@ public class FormHistoryRepositorySession extends
               // Note that while this counts as "reconciliation", we're probably over-counting.
               // Currently, locallyModified above is _always_ true if a record exists locally,
               // and so we'll consider any deletions of already present records as reconciliations.
-              storeDelegate.onRecordStoreReconciled(record.guid, null);
+              storeDelegate.onRecordStoreReconciled(record.guid, null, null);
               storeDelegate.onRecordStoreSucceeded(record.guid);
               return;
             }
@@ -617,7 +619,7 @@ public class FormHistoryRepositorySession extends
             Logger.trace(LOG_TAG, "Remote is newer, and not deleted. Storing.");
             replaceExistingRecordWithRegularRecord(record, existingRecord);
             trackRecord(record);
-            storeDelegate.onRecordStoreReconciled(record.guid, null);
+            storeDelegate.onRecordStoreReconciled(record.guid, existingRecord.guid, null);
             storeDelegate.onRecordStoreSucceeded(record.guid);
             return;
           }

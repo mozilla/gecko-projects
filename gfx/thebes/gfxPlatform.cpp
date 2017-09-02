@@ -796,7 +796,12 @@ gfxPlatform::Init()
                                                     SurfaceFormat::B8G8R8A8);
     if (!gPlatform->mScreenReferenceDrawTarget ||
         !gPlatform->mScreenReferenceDrawTarget->IsValid()) {
-      MOZ_CRASH("Could not initialize mScreenReferenceDrawTarget");
+      // If TDR is detected, create a draw target with software backend
+      // and it should be replaced later when the process gets the device
+      // reset notification.
+      if (!gPlatform->DidRenderingDeviceReset()) {
+        gfxCriticalError() << "Could not initialize mScreenReferenceDrawTarget";
+      }
     }
 
     rv = gfxFontCache::Init();
@@ -1152,8 +1157,8 @@ gfxPlatform::ClearSourceSurfaceForSurface(gfxASurface *aSurface)
 }
 
 /* static */ already_AddRefed<SourceSurface>
-gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget,
-                                        gfxASurface *aSurface,
+gfxPlatform::GetSourceSurfaceForSurface(RefPtr<DrawTarget> aTarget,
+                                        gfxASurface* aSurface,
                                         bool aIsPlugin)
 {
   if (!aSurface->CairoSurface() || aSurface->CairoStatus()) {
@@ -1535,10 +1540,13 @@ gfxPlatform::CreateOffscreenCanvasDrawTarget(const IntSize& aSize, SurfaceFormat
 }
 
 already_AddRefed<DrawTarget>
-gfxPlatform::CreateOffscreenContentDrawTarget(const IntSize& aSize, SurfaceFormat aFormat)
+gfxPlatform::CreateOffscreenContentDrawTarget(const IntSize& aSize,
+                                              SurfaceFormat aFormat,
+                                              bool aFallback)
 {
-  NS_ASSERTION(mContentBackend != BackendType::NONE, "No backend.");
-  return CreateDrawTargetForBackend(mContentBackend, aSize, aFormat);
+  BackendType backend = (aFallback) ? mSoftwareBackend : mContentBackend;
+  NS_ASSERTION(backend != BackendType::NONE, "No backend.");
+  return CreateDrawTargetForBackend(backend, aSize, aFormat);
 }
 
 already_AddRefed<DrawTarget>
@@ -2216,6 +2224,15 @@ gfxPlatform::GetLog(eGfxLog aWhichLog)
     return nullptr;
 }
 
+RefPtr<mozilla::gfx::DrawTarget>
+gfxPlatform::ScreenReferenceDrawTarget()
+{
+  return (mScreenReferenceDrawTarget)
+           ? mScreenReferenceDrawTarget
+           : gPlatform->CreateOffscreenContentDrawTarget(
+               IntSize(1, 1), SurfaceFormat::B8G8R8A8, true);
+}
+
 mozilla::gfx::SurfaceFormat
 gfxPlatform::Optimal2DFormatForContent(gfxContentType aContent)
 {
@@ -2720,6 +2737,10 @@ gfxPlatform::GetApzSupportInfo(mozilla::widget::InfoObject& aObj)
   if (SupportsApzKeyboardInput() && !gfxPrefs::AccessibilityBrowseWithCaret()) {
     aObj.DefineProperty("ApzKeyboardInput", 1);
   }
+
+  if (SupportsApzAutoscrolling()) {
+    aObj.DefineProperty("ApzAutoscrollInput", 1);
+  }
 }
 
 void
@@ -2893,6 +2914,12 @@ bool
 gfxPlatform::SupportsApzKeyboardInput() const
 {
   return gfxPrefs::APZKeyboardEnabled();
+}
+
+bool
+gfxPlatform::SupportsApzAutoscrolling() const
+{
+  return gfxPrefs::APZAutoscrollEnabled();
 }
 
 void

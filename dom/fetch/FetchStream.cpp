@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "FetchStream.h"
+#include "mozilla/dom/DOMError.h"
 #include "nsITransport.h"
 #include "nsIStreamTransportService.h"
 #include "nsProxyRelease.h"
@@ -159,8 +160,6 @@ FetchStream::Create(JSContext* aCx, FetchStreamHolder* aStreamHolder,
     return;
   }
 
-  stream->mReadableStream = body;
-
   // This will be released in FetchStream::FinalizeCallback().  We are
   // guaranteed the jsapi will call FinalizeCallback when ReadableStream
   // js object is finalized.
@@ -183,7 +182,13 @@ FetchStream::RequestDataCallback(JSContext* aCx,
   RefPtr<FetchStream> stream = static_cast<FetchStream*>(aUnderlyingSource);
 
   MOZ_DIAGNOSTIC_ASSERT(stream->mState == eWaiting ||
-                        stream->mState == eChecking);
+                        stream->mState == eChecking ||
+                        stream->mState == eReading);
+
+  if (stream->mState == eReading) {
+    // We are already reading data.
+    return;
+  }
 
   if (stream->mState == eChecking) {
     // If we are looking for more data, there is nothing else we should do:
@@ -339,6 +344,18 @@ FetchStream::ErroredCallback(JSContext* aCx, JS::HandleObject aStream,
 {
   MOZ_DIAGNOSTIC_ASSERT(aUnderlyingSource);
   MOZ_DIAGNOSTIC_ASSERT(aFlags == FETCH_STREAM_FLAG);
+
+  // This is safe because we created an extra reference in FetchStream::Create()
+  // that won't be released until FetchStream::FinalizeCallback() is called.
+  // We are guaranteed that won't happen until the js ReadableStream object
+  // is finalized.
+  FetchStream* stream = static_cast<FetchStream*>(aUnderlyingSource);
+
+  if (stream->mInputStream) {
+    stream->mInputStream->CloseWithStatus(NS_BASE_STREAM_CLOSED);
+  }
+
+  stream->ReleaseObjects();
 }
 
 void
@@ -364,7 +381,6 @@ FetchStream::FetchStream(nsIGlobalObject* aGlobal,
   , mStreamHolder(aStreamHolder)
   , mOwningEventTarget(aGlobal->EventTargetFor(TaskCategory::Other))
   , mOriginalInputStream(aInputStream)
-  , mReadableStream(nullptr)
 {
   MOZ_DIAGNOSTIC_ASSERT(aInputStream);
   MOZ_DIAGNOSTIC_ASSERT(aStreamHolder);
@@ -423,7 +439,7 @@ FetchStream::OnInputStreamReady(nsIAsyncInputStream* aStream)
   }
 
   JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> stream(cx, mReadableStream);
+  JS::Rooted<JSObject*> stream(cx, mStreamHolder->ReadableStreamBody());
 
   uint64_t size = 0;
   nsresult rv = mInputStream->Available(&size);
@@ -489,7 +505,7 @@ FetchStream::Close()
   }
 
   JSContext* cx = jsapi.cx();
-  JS::Rooted<JSObject*> stream(cx, mReadableStream);
+  JS::Rooted<JSObject*> stream(cx, mStreamHolder->ReadableStreamBody());
   CloseAndReleaseObjects(cx, stream);
 }
 

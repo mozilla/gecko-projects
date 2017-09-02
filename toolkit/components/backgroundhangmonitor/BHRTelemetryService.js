@@ -13,6 +13,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "TelemetryController",
                                   "resource://gre/modules/TelemetryController.jsm");
 
 function BHRTelemetryService() {
+  // Allow tests to get access to this object to verify it works correctly.
+  this.wrappedJSObject = this;
+
   Services.obs.addObserver(this, "profile-before-change");
   Services.obs.addObserver(this, "bhr-thread-hang");
 
@@ -26,6 +29,7 @@ BHRTelemetryService.prototype = Object.freeze({
   TRANSMIT_HANG_COUNT: 50,
 
   resetPayload() {
+    this.startTime = +new Date();
     this.payload = {
       modules: [],
       hangs: [],
@@ -33,7 +37,7 @@ BHRTelemetryService.prototype = Object.freeze({
   },
 
   recordHang({duration, thread, runnableName, process, stack,
-              modules, annotations}) {
+              remoteType, modules, annotations}) {
     if (!Services.telemetry.canRecordExtended) {
       return;
     }
@@ -65,6 +69,7 @@ BHRTelemetryService.prototype = Object.freeze({
       thread,
       runnableName,
       process,
+      remoteType,
       annotations,
       stack,
     });
@@ -87,6 +92,7 @@ BHRTelemetryService.prototype = Object.freeze({
     // testing.
     if (Services.prefs.getBoolPref("toolkit.telemetry.bhrPing.enabled", false) &&
         this.payload.hangs.length > 0) {
+      this.payload.timeSinceLastPing = new Date() - this.startTime;
       TelemetryController.submitExternalPing("bhr", this.payload, {
         addEnvironment: true,
       });

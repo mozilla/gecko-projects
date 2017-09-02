@@ -14,6 +14,7 @@ use gecko_bindings::structs::mozilla::css::ErrorReporter;
 use gecko_bindings::structs::mozilla::css::ImageValue;
 use gecko_bindings::structs::mozilla::css::URLValue;
 use gecko_bindings::structs::mozilla::css::URLValueData;
+use gecko_bindings::structs::mozilla::AnonymousCounterStyle;
 use gecko_bindings::structs::mozilla::MallocSizeOf;
 use gecko_bindings::structs::mozilla::OriginFlags;
 use gecko_bindings::structs::mozilla::Side;
@@ -61,11 +62,13 @@ use gecko_bindings::structs::SeenPtrs;
 use gecko_bindings::structs::ServoBundledURI;
 use gecko_bindings::structs::ServoElementSnapshot;
 use gecko_bindings::structs::ServoElementSnapshotTable;
+use gecko_bindings::structs::ServoStyleSetSizes;
 use gecko_bindings::structs::SheetParsingMode;
 use gecko_bindings::structs::StyleBasicShape;
 use gecko_bindings::structs::StyleBasicShapeType;
 use gecko_bindings::structs::StyleShapeSource;
 use gecko_bindings::structs::StyleTransition;
+use gecko_bindings::structs::gfxFontFeatureValueSet;
 use gecko_bindings::structs::nsBorderColors;
 use gecko_bindings::structs::nsCSSCounterStyleRule;
 use gecko_bindings::structs::nsCSSFontFaceRule;
@@ -911,6 +914,22 @@ extern "C" {
     pub fn Gecko_nsFont_Destroy(dst: *mut nsFont);
 }
 extern "C" {
+    pub fn Gecko_AppendFeatureValueHashEntry(value_set:
+                                                 *mut gfxFontFeatureValueSet,
+                                             family: *mut nsIAtom,
+                                             alternate: u32,
+                                             name: *mut nsIAtom)
+     -> *mut nsTArray<::std::os::raw::c_uint>;
+}
+extern "C" {
+    pub fn Gecko_nsFont_SetFontFeatureValuesLookup(font: *mut nsFont,
+                                                   pres_context:
+                                                       *const RawGeckoPresContext);
+}
+extern "C" {
+    pub fn Gecko_nsFont_ResetFontFeatureValuesLookup(font: *mut nsFont);
+}
+extern "C" {
     pub fn Gecko_ClearAlternateValues(font: *mut nsFont, length: usize);
 }
 extern "C" {
@@ -954,29 +973,12 @@ extern "C" {
                                   src: *const CounterStylePtr);
 }
 extern "C" {
-    pub fn Gecko_CounterStyle_IsNone(ptr: *const CounterStylePtr) -> bool;
+    pub fn Gecko_CounterStyle_GetName(ptr: *const CounterStylePtr)
+     -> *mut nsIAtom;
 }
 extern "C" {
-    pub fn Gecko_CounterStyle_IsName(ptr: *const CounterStylePtr) -> bool;
-}
-extern "C" {
-    pub fn Gecko_CounterStyle_GetName(ptr: *const CounterStylePtr,
-                                      result: *mut nsAString);
-}
-extern "C" {
-    pub fn Gecko_CounterStyle_GetSymbols(ptr: *const CounterStylePtr)
-     -> *const nsTArray<nsStringRepr>;
-}
-extern "C" {
-    pub fn Gecko_CounterStyle_GetSystem(ptr: *const CounterStylePtr) -> u8;
-}
-extern "C" {
-    pub fn Gecko_CounterStyle_IsSingleString(ptr: *const CounterStylePtr)
-     -> bool;
-}
-extern "C" {
-    pub fn Gecko_CounterStyle_GetSingleString(ptr: *const CounterStylePtr,
-                                              result: *mut nsAString);
+    pub fn Gecko_CounterStyle_GetAnonymous(ptr: *const CounterStylePtr)
+     -> *const AnonymousCounterStyle;
 }
 extern "C" {
     pub fn Gecko_SetNullImageValue(image: *mut nsStyleImage);
@@ -1065,6 +1067,10 @@ extern "C" {
 }
 extern "C" {
     pub fn Gecko_NoteDirtyElement(element: RawGeckoElementBorrowed);
+}
+extern "C" {
+    pub fn Gecko_NoteDirtySubtreeForInvalidation(element:
+                                                     RawGeckoElementBorrowed);
 }
 extern "C" {
     pub fn Gecko_NoteAnimationOnlyDirtyElement(element:
@@ -1929,7 +1935,9 @@ extern "C" {
                                           extra_data:
                                               *mut RawGeckoURLExtraData,
                                           line_number_offset: u32,
-                                          quirks_mode: nsCompatibility)
+                                          quirks_mode: nsCompatibility,
+                                          reusable_sheets:
+                                              *mut LoaderReusableStyleSheets)
      -> RawServoStyleSheetContentsStrong;
 }
 extern "C" {
@@ -2033,6 +2041,13 @@ extern "C" {
      -> *mut nsCSSCounterStyleRule;
 }
 extern "C" {
+    pub fn Servo_StyleSet_BuildFontFeatureValueSet(set:
+                                                       RawServoStyleSetBorrowed,
+                                                   list:
+                                                       *mut gfxFontFeatureValueSet)
+     -> bool;
+}
+extern "C" {
     pub fn Servo_StyleSet_ResolveForDeclarations(set:
                                                      RawServoStyleSetBorrowed,
                                                  parent_style:
@@ -2040,6 +2055,11 @@ extern "C" {
                                                  declarations:
                                                      RawServoDeclarationBlockBorrowed)
      -> ServoStyleContextStrong;
+}
+extern "C" {
+    pub fn Servo_StyleSet_AddSizeOfExcludingThis(malloc_size_of: MallocSizeOf,
+                                                 sizes: *mut ServoStyleSetSizes,
+                                                 set: RawServoStyleSetBorrowed);
 }
 extern "C" {
     pub fn Servo_StyleContext_AddRef(ctx: ServoStyleContextBorrowed);

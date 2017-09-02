@@ -40,7 +40,6 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/LazyIdleThread.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
@@ -3072,7 +3071,8 @@ QuotaObject::MaybeUpdateSize(int64_t aSize, bool aTruncate)
       MOZ_ASSERT(!lock->GetGroup().IsEmpty());
       MOZ_ASSERT(lock->GetOriginScope().IsOrigin());
       MOZ_ASSERT(!lock->GetOriginScope().GetOrigin().IsEmpty());
-      MOZ_ASSERT(lock->GetOriginScope().GetOrigin() != mOriginInfo->mOrigin,
+      MOZ_ASSERT(!(lock->GetOriginScope().GetOrigin() == mOriginInfo->mOrigin &&
+                   lock->GetPersistenceType().Value() == groupInfo->mPersistenceType),
                  "Deleted itself!");
 
       quotaManager->LockedRemoveQuotaForOrigin(
@@ -3592,11 +3592,10 @@ QuotaManager::Init(const nsAString& aBasePath)
     return rv;
   }
 
-  // Make a lazy thread for any IO we need (like clearing or enumerating the
-  // contents of storage directories).
-  mIOThread = new LazyIdleThread(DEFAULT_THREAD_TIMEOUT_MS,
-                                 NS_LITERAL_CSTRING("Storage I/O"),
-                                 LazyIdleThread::ManualShutdown);
+  rv = NS_NewNamedThread("QuotaManager IO", getter_AddRefs(mIOThread));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   // Make a timer here to avoid potential failures later. We don't actually
   // initialize the timer until shutdown.

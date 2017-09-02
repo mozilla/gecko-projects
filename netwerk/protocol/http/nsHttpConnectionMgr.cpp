@@ -3414,6 +3414,47 @@ nsHttpConnectionMgr::ResumeReadOf(nsTArray<RefPtr<nsHttpTransaction>>* transacti
 }
 
 void
+nsHttpConnectionMgr::NotifyConnectionOfWindowIdChange(uint64_t previousWindowId)
+{
+    MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+
+    nsTArray<RefPtr<nsHttpTransaction>> *transactions = nullptr;
+    nsTArray<RefPtr<nsAHttpConnection>> connections;
+
+    auto addConnectionHelper =
+        [&connections](nsTArray<RefPtr<nsHttpTransaction>> *trans) {
+            if (!trans) {
+                return;
+            }
+
+            for (auto t : *trans) {
+                RefPtr<nsAHttpConnection> conn = t->Connection();
+                if (conn && !connections.Contains(conn)) {
+                    connections.AppendElement(conn);
+                }
+            }
+        };
+
+    // Get unthrottled transactions with the previous and current window id.
+    transactions = mActiveTransactions[false].Get(previousWindowId);
+    addConnectionHelper(transactions);
+    transactions =
+        mActiveTransactions[false].Get(mCurrentTopLevelOuterContentWindowId);
+    addConnectionHelper(transactions);
+
+    // Get throttled transactions with the previous and current window id.
+    transactions = mActiveTransactions[true].Get(previousWindowId);
+    addConnectionHelper(transactions);
+    transactions =
+        mActiveTransactions[true].Get(mCurrentTopLevelOuterContentWindowId);
+    addConnectionHelper(transactions);
+
+    for (auto conn : connections) {
+        conn->TopLevelOuterContentWindowIdChanged(mCurrentTopLevelOuterContentWindowId);
+    }
+}
+
+void
 nsHttpConnectionMgr::OnMsgUpdateCurrentTopLevelOuterContentWindowId(
     int32_t aLoading, ARefBase *param)
 {
@@ -3429,7 +3470,10 @@ nsHttpConnectionMgr::OnMsgUpdateCurrentTopLevelOuterContentWindowId(
     bool activeTabWasLoading = mActiveTabTransactionsExist;
     bool activeTabIdChanged = mCurrentTopLevelOuterContentWindowId != winId;
 
+    uint64_t previousWindowId = mCurrentTopLevelOuterContentWindowId;
     mCurrentTopLevelOuterContentWindowId = winId;
+
+    NotifyConnectionOfWindowIdChange(previousWindowId);
 
     LOG(("nsHttpConnectionMgr::OnMsgUpdateCurrentTopLevelOuterContentWindowId"
          " id=%" PRIx64 "\n",
@@ -3588,12 +3632,6 @@ nsHttpConnectionMgr::GetOrCreateConnectionEntry(nsHttpConnectionInfo *specificCI
     if (!specificEnt) {
         RefPtr<nsHttpConnectionInfo> clone(specificCI->Clone());
         specificEnt = new nsConnectionEntry(clone);
-#if defined(_WIN64) && defined(WIN95)
-        specificEnt->mUseFastOpen = gHttpHandler->UseFastOpen() &&
-                                    gSocketTransportService->HasFileDesc2PlatformOverlappedIOHandleFunc();
-#else
-        specificEnt->mUseFastOpen = gHttpHandler->UseFastOpen();
-#endif
         mCT.Put(clone->HashKey(), specificEnt);
     }
     return specificEnt;
@@ -3727,7 +3765,6 @@ nsHalfOpenSocket::nsHalfOpenSocket(nsConnectionEntry *ent,
     , mFreeToUse(true)
     , mPrimaryStreamStatus(NS_OK)
     , mFastOpenInProgress(false)
-    , mFastOpenStatus(TFO_NOT_TRIED)
     , mEnt(ent)
 {
     MOZ_ASSERT(ent && trans, "constructor with null arguments");
@@ -3744,6 +3781,11 @@ nsHalfOpenSocket::nsHalfOpenSocket(nsConnectionEntry *ent,
         }
     }
 
+    if (mEnt->mConnInfo->FirstHopSSL()) {
+      mFastOpenStatus = TFO_NOT_TRIED;
+    } else {
+      mFastOpenStatus = TFO_HTTP;
+    }
     MOZ_ASSERT(mEnt);
 }
 
@@ -4898,6 +4940,12 @@ ConnectionHandle::HttpConnection()
     return rv.forget();
 }
 
+void
+ConnectionHandle::TopLevelOuterContentWindowIdChanged(uint64_t windowId)
+{
+  // Do nothing.
+}
+
 // nsConnectionEntry
 
 nsHttpConnectionMgr::
@@ -4910,7 +4958,18 @@ nsConnectionEntry::nsConnectionEntry(nsHttpConnectionInfo *ci)
     , mDoNotDestroy(false)
 {
     MOZ_COUNT_CTOR(nsConnectionEntry);
-    mUseFastOpen = gHttpHandler->UseFastOpen();
+
+    if (mConnInfo->FirstHopSSL()) {
+#if defined(_WIN64) && defined(WIN95)
+        mUseFastOpen = gHttpHandler->UseFastOpen() &&
+                       gSocketTransportService->HasFileDesc2PlatformOverlappedIOHandleFunc();
+#else
+        mUseFastOpen = gHttpHandler->UseFastOpen();
+#endif
+    } else {
+        // Only allow the TCP fast open on a secure connection.
+        mUseFastOpen = false;
+    }
 
     LOG(("nsConnectionEntry::nsConnectionEntry this=%p key=%s",
          this, ci->HashKey().get()));

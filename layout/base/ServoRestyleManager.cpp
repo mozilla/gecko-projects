@@ -60,7 +60,8 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
     if (parent->IsLineFrame()) {
       parent = parent->GetParent();
     }
-    return parent->IsViewportFrame() ? nullptr : parent;
+    return parent->IsViewportFrame() ?
+      nullptr : FirstContinuationOrPartOfIBSplit(parent);
   }
 
   if (aFrame.IsBulletFrame()) {
@@ -203,16 +204,19 @@ ServoRestyleState::ProcessMaybeNestedWrapperRestyle(nsIFrame* aParent,
   if (parent->IsLineFrame()) {
     parent = parent->GetParent();
   }
-  MOZ_ASSERT(parent->FirstContinuation() == aParent ||
+  MOZ_ASSERT(FirstContinuationOrPartOfIBSplit(parent) == aParent ||
              (parent->StyleContext()->IsInheritingAnonBox() &&
               parent->GetContent() == aParent->GetContent()));
 
-  // Now "this" is a ServoRestyleState for aParent, so if parent != aParent we
-  // need a new ServoRestyleState for the kid.
+  // Now "this" is a ServoRestyleState for aParent, so if parent is not a prev
+  // continuation (possibly across ib splits) of aParent we need a new
+  // ServoRestyleState for the kid.
   Maybe<ServoRestyleState> parentRestyleState;
-  if (parent != aParent) {
+  nsIFrame* parentForRestyle = aParent;
+  if (nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent) != aParent) {
     parentRestyleState.emplace(*parent, *this, nsChangeHint_Empty,
                                Type::InFlow);
+    parentForRestyle = parent;
   }
   ServoRestyleState& curRestyleState =
     parentRestyleState ? *parentRestyleState : *this;
@@ -220,7 +224,7 @@ ServoRestyleState::ProcessMaybeNestedWrapperRestyle(nsIFrame* aParent,
   // This frame may already have been restyled.  Even if it has, we can't just
   // return, because the next frame may be a kid of it that does need restyling.
   if (cur->IsWrapperAnonBoxNeedingRestyle()) {
-    parent->UpdateStyleOfChildAnonBox(cur, curRestyleState);
+    parentForRestyle->UpdateStyleOfChildAnonBox(cur, curRestyleState);
     cur->SetIsWrapperAnonBoxNeedingRestyle(false);
   }
 
@@ -437,10 +441,12 @@ ServoRestyleManager::ClearRestyleStateFromSubtree(Element* aElement)
 struct ServoRestyleManager::TextPostTraversalState
 {
 public:
-  TextPostTraversalState(ServoStyleContext& aParentContext,
+  TextPostTraversalState(Element& aParentElement,
+                         ServoStyleContext* aParentContext,
                          bool aDisplayContentsParentStyleChanged,
                          ServoRestyleState& aParentRestyleState)
-    : mParentContext(aParentContext)
+    : mParentElement(aParentElement)
+    , mParentContext(aParentContext)
     , mParentRestyleState(aParentRestyleState)
     , mStyle(nullptr)
     , mShouldPostHints(aDisplayContentsParentStyleChanged)
@@ -454,7 +460,7 @@ public:
   {
     if (!mStyle) {
       mStyle = mParentRestyleState.StyleSet().ResolveStyleForText(
-        aTextNode, &mParentContext);
+        aTextNode, &ParentStyle());
     }
     MOZ_ASSERT(mStyle);
     return *mStyle;
@@ -497,7 +503,18 @@ public:
   }
 
 private:
-  ServoStyleContext& mParentContext;
+  ServoStyleContext& ParentStyle() {
+    if (!mParentContext) {
+      mLazilyResolvedParentContext =
+        mParentRestyleState.StyleSet().ResolveServoStyle(&mParentElement);
+      mParentContext = mLazilyResolvedParentContext;
+    }
+    return *mParentContext;
+  }
+
+  Element& mParentElement;
+  ServoStyleContext* mParentContext;
+  RefPtr<ServoStyleContext> mLazilyResolvedParentContext;
   ServoRestyleState& mParentRestyleState;
   RefPtr<nsStyleContext> mStyle;
   bool mShouldPostHints;
@@ -632,13 +649,89 @@ UpdateFramePseudoElementStyles(nsIFrame* aFrame,
     aFrame, aRestyleState.StyleSet(), aRestyleState.ChangeList());
 }
 
+enum class ServoPostTraversalFlags : uint32_t
+{
+  Empty = 0,
+  // Whether parent was restyled.
+  ParentWasRestyled = 1 << 0,
+  // Skip sending accessibility notifications for all descendants.
+  SkipA11yNotifications = 1 << 1,
+  // Always send accessibility notifications if the element is shown.
+  // The SkipA11yNotifications flag above overrides this flag.
+  SendA11yNotificationsIfShown = 1 << 2,
+};
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(ServoPostTraversalFlags)
+
+// Send proper accessibility notifications and return post traversal
+// flags for kids.
+static ServoPostTraversalFlags
+SendA11yNotifications(nsPresContext* aPresContext,
+                      Element* aElement,
+                      nsStyleContext* aOldStyleContext,
+                      nsStyleContext* aNewStyleContext,
+                      ServoPostTraversalFlags aFlags)
+{
+  using Flags = ServoPostTraversalFlags;
+  MOZ_ASSERT(!(aFlags & Flags::SkipA11yNotifications) ||
+             !(aFlags & Flags::SendA11yNotificationsIfShown),
+             "The two a11y flags should never be set together");
+
+#ifdef ACCESSIBILITY
+  nsAccessibilityService* accService = GetAccService();
+  if (!accService) {
+    // If we don't have accessibility service, accessibility is not
+    // enabled. Just skip everything.
+    return Flags::Empty;
+  }
+  if (aFlags & Flags::SkipA11yNotifications) {
+    // Propogate the skipping flag to descendants.
+    return Flags::SkipA11yNotifications;
+  }
+
+  bool needsNotify = false;
+  bool isVisible = aNewStyleContext->StyleVisibility()->IsVisible();
+  if (aFlags & Flags::SendA11yNotificationsIfShown) {
+    if (!isVisible) {
+      // Propagate the sending-if-shown flag to descendants.
+      return Flags::SendA11yNotificationsIfShown;
+    }
+    // We have asked accessibility service to remove the whole subtree
+    // of element which becomes invisible from the accessible tree, but
+    // this element is visible, so we need to add it back.
+    needsNotify = true;
+  } else {
+    // If we shouldn't skip in any case, we need to check whether our
+    // own visibility has changed.
+    bool wasVisible = aOldStyleContext->StyleVisibility()->IsVisible();
+    needsNotify = wasVisible != isVisible;
+  }
+
+  if (needsNotify) {
+    nsIPresShell* presShell = aPresContext->PresShell();
+    if (isVisible) {
+      accService->ContentRangeInserted(presShell, aElement->GetParent(),
+                                       aElement, aElement->GetNextSibling());
+      // We are adding the subtree. Accessibility service would handle
+      // descendants, so we should just skip them from notifying.
+      return Flags::SkipA11yNotifications;
+    }
+    // Remove the subtree of this invisible element, and ask any shown
+    // descendant to add themselves back.
+    accService->ContentRemoved(presShell, aElement);
+    return Flags::SendA11yNotificationsIfShown;
+  }
+#endif
+
+  return Flags::Empty;
+}
+
 bool
 ServoRestyleManager::ProcessPostTraversal(
   Element* aElement,
   ServoStyleContext* aParentContext,
   ServoRestyleState& aRestyleState,
-  ServoTraversalFlags aFlags,
-  bool aParentWasRestyled)
+  ServoPostTraversalFlags aFlags)
 {
   nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(aElement);
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
@@ -682,7 +775,8 @@ ServoRestyleManager::ProcessPostTraversal(
 
     // If the parent wasn't restyled, the styles of our anon box parents won't
     // change either.
-    if (aParentWasRestyled && maybeAnonBoxChild->ParentIsWrapperAnonBox()) {
+    if ((aFlags & ServoPostTraversalFlags::ParentWasRestyled) &&
+        maybeAnonBoxChild->ParentIsWrapperAnonBox()) {
       aRestyleState.AddPendingWrapperRestyle(
         ServoRestyleState::TableAwareParentFor(maybeAnonBoxChild));
     }
@@ -741,11 +835,13 @@ ServoRestyleManager::ProcessPostTraversal(
     thisFrameRestyleState ? *thisFrameRestyleState : aRestyleState;
 
   RefPtr<ServoStyleContext> upToDateContext =
-    (wasRestyled || !oldStyleContext)
+    wasRestyled
       ? aRestyleState.StyleSet().ResolveServoStyle(aElement)
       : oldStyleContext;
 
-  MOZ_ASSERT(upToDateContext);
+  ServoPostTraversalFlags childrenFlags =
+    wasRestyled ? ServoPostTraversalFlags::ParentWasRestyled
+                : ServoPostTraversalFlags::Empty;
 
   if (wasRestyled && oldStyleContext) {
     MOZ_ASSERT(styleFrame || displayContentsStyle);
@@ -800,6 +896,10 @@ ServoRestyleManager::ProcessPostTraversal(
     // |styleFrame| to ensure the animated transform has been removed first.
     AddLayerChangesForAnimation(
       styleFrame, aElement, aRestyleState.ChangeList());
+
+    childrenFlags |= SendA11yNotifications(mPresContext, aElement,
+                                           oldStyleContext,
+                                           upToDateContext, aFlags);
   }
 
   const bool traverseElementChildren =
@@ -809,7 +909,8 @@ ServoRestyleManager::ProcessPostTraversal(
   bool recreatedAnyContext = wasRestyled;
   if (traverseElementChildren || traverseTextChildren) {
     StyleChildrenIterator it(aElement);
-    TextPostTraversalState textState(*upToDateContext,
+    TextPostTraversalState textState(*aElement,
+                                     upToDateContext,
                                      displayContentsStyle && wasRestyled,
                                      childrenRestyleState);
     for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
@@ -817,12 +918,11 @@ ServoRestyleManager::ProcessPostTraversal(
         recreatedAnyContext |= ProcessPostTraversal(n->AsElement(),
                                                     upToDateContext,
                                                     childrenRestyleState,
-                                                    aFlags,
-                                                    wasRestyled);
+                                                    childrenFlags);
       } else if (traverseTextChildren && n->IsNodeOfType(nsINode::eTEXT)) {
         recreatedAnyContext |= ProcessPostTraversalForText(n, textState,
                                                            childrenRestyleState,
-                                                           wasRestyled);
+                                                           childrenFlags);
       }
     }
   }
@@ -869,7 +969,7 @@ ServoRestyleManager::ProcessPostTraversalForText(
     nsIContent* aTextNode,
     TextPostTraversalState& aPostTraversalState,
     ServoRestyleState& aRestyleState,
-    bool aParentWasRestyled)
+    ServoPostTraversalFlags aFlags)
 {
   // Handle lazy frame construction.
   if (aTextNode->HasFlag(NODE_NEEDS_FRAME)) {
@@ -886,7 +986,8 @@ ServoRestyleManager::ProcessPostTraversalForText(
 
   // If the parent wasn't restyled, the styles of our anon box parents won't
   // change either.
-  if (aParentWasRestyled && primaryFrame->ParentIsWrapperAnonBox()) {
+  if ((aFlags & ServoPostTraversalFlags::ParentWasRestyled) &&
+      primaryFrame->ParentIsWrapperAnonBox()) {
     aRestyleState.AddPendingWrapperRestyle(
       ServoRestyleState::TableAwareParentFor(primaryFrame));
   }
@@ -1000,16 +1101,7 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
     aFlags |= ServoTraversalFlags::ForCSSRuleChanges;
   }
 
-  while (doc->GetServoRestyleRoot()) {
-    // Do the servo traversal.
-    bool needsPostTraversal = styleSet->StyleDocument(aFlags);
-
-    // If we don't need a post-traversal, we're done.
-    if (!needsPostTraversal) {
-      doc->ClearServoRestyleRoot();
-      break;
-    }
-
+  while (styleSet->StyleDocument(aFlags)) {
     ClearSnapshots();
 
     nsStyleChangeList currentChanges(StyleBackendType::Servo);
@@ -1023,9 +1115,8 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
       while (Element* root = iter.GetNextStyleRoot()) {
         nsTArray<nsIFrame*> wrappersToRestyle;
         ServoRestyleState state(*styleSet, currentChanges, wrappersToRestyle);
-        anyStyleChanged |=
-          ProcessPostTraversal(root, nullptr, state, aFlags,
-                               /* aParentWasRestyled = */ false);
+        ServoPostTraversalFlags flags = ServoPostTraversalFlags::Empty;
+        anyStyleChanged |= ProcessPostTraversal(root, nullptr, state, flags);
       }
     }
 
@@ -1074,6 +1165,8 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
     }
   }
 
+  doc->ClearServoRestyleRoot();
+
   FlushOverflowChangedTracker();
 
   ClearSnapshots();
@@ -1099,6 +1192,17 @@ ServoRestyleManager::ProcessPendingRestyles()
 }
 
 void
+ServoRestyleManager::ProcessAllPendingAttributeAndStateInvalidations()
+{
+  AutoTimelineMarker marker(mPresContext->GetDocShell(),
+                            "ProcessAllPendingAttributeAndStateInvalidations");
+  for (auto iter = mSnapshots.Iter(); !iter.Done(); iter.Next()) {
+    Servo_ProcessInvalidations(StyleSet()->RawSet(), iter.Key(), &mSnapshots);
+  }
+  ClearSnapshots();
+}
+
+void
 ServoRestyleManager::UpdateOnlyAnimationStyles()
 {
   // Bug 1365855: We also need to implement this for SMIL.
@@ -1121,34 +1225,12 @@ ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
   }
 
   Element* aElement = aContent->AsElement();
-  nsChangeHint changeHint;
-  nsRestyleHint restyleHint;
-
   if (!aElement->HasServoData()) {
     return;
   }
 
-  // NOTE: restyleHint here is effectively always 0, since that's what
-  // ServoStyleSet::HasStateDependentStyle returns. Servo computes on
-  // ProcessPendingRestyles using the ElementSnapshot, but in theory could
-  // compute it sequentially easily.
-  //
-  // Determine what's the best way to do it, and how much work do we save
-  // processing the restyle hint early (i.e., computing the style hint here
-  // sequentially, potentially saving the snapshot), vs lazily (snapshot
-  // approach).
-  //
-  // If we take the sequential approach we need to specialize Servo's restyle
-  // hints system a bit more, and mesure whether we save something storing the
-  // restyle hint in the table and deferring the dirtiness setting until
-  // ProcessPendingRestyles (that's a requirement if we store snapshots though),
-  // vs processing the restyle hint in-place, dirtying the nodes on
-  // PostRestyleEvent.
-  //
-  // If we definitely take the snapshot approach, we should take rid of
-  // HasStateDependentStyle, etc (though right now they're no-ops).
-  ContentStateChangedInternal(aElement, aChangedBits, &changeHint,
-                              &restyleHint);
+  nsChangeHint changeHint;
+  ContentStateChangedInternal(aElement, aChangedBits, &changeHint);
 
   // Don't bother taking a snapshot if no rules depend on these state bits.
   //
@@ -1164,8 +1246,8 @@ ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
   EventStates previousState = aElement->StyleState() ^ aChangedBits;
   snapshot.AddState(previousState);
 
-  if (restyleHint || changeHint) {
-    Servo_NoteExplicitHints(aElement, restyleHint, changeHint);
+  if (changeHint) {
+    Servo_NoteExplicitHints(aElement, nsRestyleHint(0), changeHint);
   }
 
   // Assuming we need to invalidate cached style in getComputedStyle for
@@ -1406,20 +1488,6 @@ ServoRestyleManager::DoReparentStyleContext(nsIFrame* aFrame,
   nsIFrame* providerFrame;
   nsStyleContext* newParentContext =
     aFrame->GetParentStyleContext(&providerFrame);
-  if (!newParentContext) {
-    // No need to do anything here.
-#ifdef DEBUG
-    // Make sure we have no children, so we really know there is nothing to do.
-    nsIFrame::ChildListIterator lists(aFrame);
-    for (; !lists.IsDone(); lists.Next()) {
-      MOZ_ASSERT(lists.CurrentList().IsEmpty(),
-                 "Failing to reparent style context for child of "
-                 "non-inheriting anon box");
-    }
-#endif // DEBUG
-    return;
-  }
-
   // If our provider is our child, we want to reparent it first, because we
   // inherit style from it.
   bool isChild = providerFrame && providerFrame->GetParent() == aFrame;
@@ -1432,6 +1500,17 @@ ServoRestyleManager::DoReparentStyleContext(nsIFrame* aFrame,
     providerChild = providerFrame;
     MOZ_ASSERT(!providerFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW),
                "Out of flow provider?");
+  }
+
+  if (!newParentContext) {
+    // No need to do anything here for this frame, but we should still reparent
+    // its descendants, because those may have styles that inherit from the
+    // parent of this frame (e.g. non-anonymous columns in an anonymous
+    // colgroup).
+    MOZ_ASSERT(aFrame->StyleContext()->IsNonInheritingAnonBox(),
+               "Why did this frame not end up with a parent context?");
+    ReparentFrameDescendants(aFrame, providerChild, aStyleSet);
+    return;
   }
 
   bool isElement = aFrame->GetContent()->IsElement();
@@ -1472,9 +1551,15 @@ ServoRestyleManager::DoReparentStyleContext(nsIFrame* aFrame,
 
   if (!providerFrame) {
     // No providerFrame means we inherited from a display:contents thing.  Our
-    // layout parent style is the style of our nearest ancestor frame.
-    providerFrame = nsFrame::CorrectStyleParentFrame(aFrame->GetParent(),
-                                                     oldContext->GetPseudo());
+    // layout parent style is the style of our nearest ancestor frame.  But we have
+    // to be careful to do that with our placeholder, not with us, if we're out of
+    // flow.
+    if (aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+      aFrame->GetPlaceholderFrame()->GetLayoutParentStyleForOutOfFlow(&providerFrame);
+    } else {
+      providerFrame = nsFrame::CorrectStyleParentFrame(aFrame->GetParent(),
+                                                       oldContext->GetPseudo());
+    }
   }
   ServoStyleContext* layoutParent = providerFrame->StyleContext()->AsServo();
 
@@ -1517,19 +1602,27 @@ ServoRestyleManager::DoReparentStyleContext(nsIFrame* aFrame,
   // reparenting the table wrapper frame.  So no need to
   // UpdateStyleOfOwnedAnonBoxes() here.
 
+  ReparentFrameDescendants(aFrame, providerChild, aStyleSet);
+
+  // We do not need to do the equivalent of UpdateFramePseudoElementStyles,
+  // because those are hadled by our descendant walk.
+}
+
+void
+ServoRestyleManager::ReparentFrameDescendants(nsIFrame* aFrame,
+                                              nsIFrame* aProviderChild,
+                                              ServoStyleSet& aStyleSet)
+{
   nsIFrame::ChildListIterator lists(aFrame);
   for (; !lists.IsDone(); lists.Next()) {
     for (nsIFrame* child : lists.CurrentList()) {
       // only do frames that are in flow
       if (!(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
-          child != providerChild) {
+          child != aProviderChild) {
         DoReparentStyleContext(child, aStyleSet);
       }
     }
   }
-
-  // We do not need to do the equivalent of UpdateFramePseudoElementStyles,
-  // because those are hadled by our descendant walk.
 }
 
 } // namespace mozilla

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use api::DebugCommand;
 use device::TextureFilter;
 use fxhash::FxHasher;
 use profiler::BackendProfileCounters;
@@ -50,32 +51,6 @@ pub enum SourceTexture {
 pub const ORTHO_NEAR_PLANE: f32 = -1000000.0;
 pub const ORTHO_FAR_PLANE: f32 = 1000000.0;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum TextureSampler {
-    Color0,
-    Color1,
-    Color2,
-    CacheA8,
-    CacheRGBA8,
-    ResourceCache,
-    Layers,
-    RenderTasks,
-    Dither,
-}
-
-impl TextureSampler {
-    pub fn color(n: usize) -> TextureSampler {
-        match n {
-            0 => TextureSampler::Color0,
-            1 => TextureSampler::Color1,
-            2 => TextureSampler::Color2,
-            _ => {
-                panic!("There are only 3 color samplers.");
-            }
-        }
-    }
-}
-
 /// Optional textures that can be used as a source in the shaders.
 /// Textures that are not used by the batch are equal to TextureId::invalid().
 #[derive(Copy, Clone, Debug)]
@@ -94,15 +69,12 @@ impl BatchTextures {
         BatchTextures {
             colors: [
                 SourceTexture::CacheRGBA8,
-                SourceTexture::Invalid,
+                SourceTexture::CacheA8,
                 SourceTexture::Invalid,
             ]
         }
     }
 }
-
-// In some places we need to temporarily bind a texture to any slot.
-pub const DEFAULT_TEXTURE: TextureSampler = TextureSampler::Color0;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum RenderTargetMode {
@@ -184,7 +156,13 @@ impl RendererFrame {
     }
 }
 
+pub enum DebugOutput {
+    FetchDocuments(String),
+}
+
 pub enum ResultMsg {
+    DebugCommand(DebugCommand),
+    DebugOutput(DebugOutput),
     RefreshShader(PathBuf),
     NewFrame(DocumentId, RendererFrame, TextureUpdateList, BackendProfileCounters),
     UpdateResources { updates: TextureUpdateList, cancel_rendering: bool },

@@ -823,11 +823,14 @@ public:
     ResolvePreloadImage(nsIURI *aBaseURI,
                         const nsAString& aSrcAttr,
                         const nsAString& aSrcsetAttr,
-                        const nsAString& aSizesAttr) override;
+                        const nsAString& aSizesAttr,
+                        bool *aIsImgSet) override;
 
   virtual void MaybePreLoadImage(nsIURI* uri,
                                  const nsAString &aCrossOriginAttr,
-                                 ReferrerPolicy aReferrerPolicy) override;
+                                 ReferrerPolicy aReferrerPolicy,
+                                 bool aIsImgSet) override;
+
   virtual void ForgetImagePreload(nsIURI* aURI) override;
 
   virtual void MaybePreconnect(nsIURI* uri,
@@ -1427,6 +1430,12 @@ private:
 public:
   bool mWillReparent;
 #endif
+
+private:
+  void RecordNavigationTiming(ReadyState aReadyState);
+  bool mDOMLoadingSet : 1;
+  bool mDOMInteractiveSet : 1;
+  bool mDOMCompleteSet : 1;
 };
 
 class nsDocumentOnStack

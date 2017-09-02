@@ -123,6 +123,14 @@ public:
 
   void DeleteFont(wr::FontKey aKey);
 
+  void AddFontInstance(wr::FontInstanceKey aKey,
+                       wr::FontKey aFontKey,
+                       float aGlyphSize,
+                       const wr::FontInstanceOptions* aOptions,
+                       const wr::FontInstancePlatformOptions* aPlatformOptions);
+
+  void DeleteFontInstance(wr::FontInstanceKey aKey);
+
   void SetFrameStartTime(const TimeStamp& aTime);
 
   void RunOnRenderThread(UniquePtr<RendererEvent> aEvent);
@@ -195,9 +203,11 @@ public:
 
   void PushBuiltDisplayList(wr::BuiltDisplayList &dl);
 
-  void PushScrollLayer(const layers::FrameMetrics::ViewID& aScrollId,
-                       const wr::LayoutRect& aContentRect, // TODO: We should work with strongly typed rects
-                       const wr::LayoutRect& aClipRect);
+  bool IsScrollLayerDefined(layers::FrameMetrics::ViewID aScrollId) const;
+  void DefineScrollLayer(const layers::FrameMetrics::ViewID& aScrollId,
+                         const wr::LayoutRect& aContentRect, // TODO: We should work with strongly typed rects
+                         const wr::LayoutRect& aClipRect);
+  void PushScrollLayer(const layers::FrameMetrics::ViewID& aScrollId);
   void PopScrollLayer();
 
   void PushClipAndScrollInfo(const layers::FrameMetrics::ViewID& aScrollId,
@@ -300,9 +310,9 @@ public:
   void PushText(const wr::LayoutRect& aBounds,
                 const wr::LayoutRect& aClip,
                 const gfx::Color& aColor,
-                wr::FontKey aFontKey,
+                wr::FontInstanceKey aFontKey,
                 Range<const wr::GlyphInstance> aGlyphBuffer,
-                float aGlyphSize);
+                const wr::GlyphOptions* aGlyphOptions = nullptr);
 
   void PushLine(const wr::LayoutRect& aClip,
                 const wr::Line& aLine);
@@ -330,7 +340,7 @@ public:
   // is empty.
   Maybe<wr::WrClipId> TopmostClipId();
   // Same as TopmostClipId() but for scroll layers.
-  Maybe<layers::FrameMetrics::ViewID> TopmostScrollId();
+  layers::FrameMetrics::ViewID TopmostScrollId();
   // Returns the scroll id that was pushed just before the given scroll id. This
   // function returns Nothing() if the given scrollid has not been encountered,
   // or if it is the rootmost scroll id (and therefore has no ancestor).
@@ -348,8 +358,10 @@ protected:
   std::vector<wr::WrClipId> mClipIdStack;
   std::vector<layers::FrameMetrics::ViewID> mScrollIdStack;
 
-  // Track the parent scroll id of each scroll id that we encountered.
-  std::unordered_map<layers::FrameMetrics::ViewID, layers::FrameMetrics::ViewID> mScrollParents;
+  // Track the parent scroll id of each scroll id that we encountered. A
+  // Nothing() value indicates a root scroll id. We also use this structure to
+  // ensure that we don't define a particular scroll layer multiple times.
+  std::unordered_map<layers::FrameMetrics::ViewID, Maybe<layers::FrameMetrics::ViewID>> mScrollParents;
 
   friend class WebRenderAPI;
 };

@@ -114,7 +114,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_ADDREF_INHERITED(AudioContext, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(AudioContext, DOMEventTargetHelper)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioContext)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AudioContext)
   NS_INTERFACE_MAP_ENTRY(nsIMemoryReporter)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
@@ -205,8 +205,10 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
+  uint32_t maxChannelCount = std::min<uint32_t>(WebAudioUtils::MaxChannelCount,
+      CubebUtils::MaxNumberOfChannels());
   RefPtr<AudioContext> object =
-    new AudioContext(window, false);
+    new AudioContext(window, false,maxChannelCount);
   aRv = object->Init();
   if (NS_WARN_IF(aRv.Failed())) {
      return nullptr;
@@ -622,7 +624,8 @@ AudioContext::UpdatePannerSource()
 uint32_t
 AudioContext::MaxChannelCount() const
 {
-  return mIsOffline ? mNumberOfChannels : CubebUtils::MaxNumberOfChannels();
+  return std::min<uint32_t>(WebAudioUtils::MaxChannelCount,
+      mIsOffline ? mNumberOfChannels : CubebUtils::MaxNumberOfChannels());
 }
 
 uint32_t

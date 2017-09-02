@@ -23,7 +23,6 @@ use cssparser::ParserInput;
 #[cfg(feature = "servo")] use euclid::SideOffsets2D;
 use computed_values;
 use context::QuirksMode;
-use error_reporting::NullReporter;
 use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")] use gecko_bindings::bindings;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::{self, nsCSSPropertyID};
@@ -37,14 +36,13 @@ use selector_parser::PseudoElement;
 use selectors::parser::SelectorParseError;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
-use style_traits::{PARSING_MODE_DEFAULT, HasViewportPercentage, ToCss, ParseError};
+use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError};
 use style_traits::{PropertyDeclarationParseError, StyleParseError, ValueParseError};
 use stylesheets::{CssRuleType, MallocSizeOf, MallocSizeOfFn, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
 use values::computed;
 use values::computed::NonNegativeAu;
-use cascade_info::CascadeInfo;
 use rule_tree::{CascadeLevel, StrongRuleNode};
 use self::computed_value_flags::ComputedValueFlags;
 use style_adjuster::StyleAdjuster;
@@ -231,7 +229,7 @@ pub mod animated_properties {
 }
 
 /// A longhand or shorthand porperty
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct NonCustomPropertyId(usize);
 
 impl From<LonghandId> for NonCustomPropertyId {
@@ -396,7 +394,7 @@ impl PropertyDeclarationIdSet {
 
 /// An enum to represent a CSS Wide keyword.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
 pub enum CSSWideKeyword {
     /// The `initial` keyword.
     Initial,
@@ -459,7 +457,7 @@ bitflags! {
 }
 
 /// An identifier for a given longhand property.
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum LonghandId {
     % for i, property in enumerate(data.longhands):
@@ -771,7 +769,7 @@ impl ShorthandId {
 
 /// Servo's representation of a declared value for a given `T`, which is the
 /// declared value for that property.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeclaredValue<'a, T: 'a> {
     /// A known specified value from the stylesheet.
     Value(&'a T),
@@ -785,7 +783,7 @@ pub enum DeclaredValue<'a, T: 'a> {
 /// that PropertyDeclaration can avoid embedding a DeclaredValue (and its
 /// extra discriminant word) and synthesize dependent DeclaredValues for
 /// PropertyDeclaration instances as needed.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeclaredValueOwned<T> {
     /// A known specified value from the stylesheet.
     Value(T),
@@ -807,7 +805,7 @@ impl<T> DeclaredValueOwned<T> {
 }
 
 /// An unparsed property value that contains `var()` functions.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct UnparsedValue {
     /// The css serialization for this value.
     css: String,
@@ -828,10 +826,8 @@ impl UnparsedValue {
         .ok()
         .and_then(|css| {
             // As of this writing, only the base URL is used for property values:
-            let reporter = NullReporter;
             let context = ParserContext::new(Origin::Author,
                                              &self.url_data,
-                                             &reporter,
                                              None,
                                              PARSING_MODE_DEFAULT,
                                              quirks_mode);
@@ -877,19 +873,6 @@ impl UnparsedValue {
     }
 }
 
-impl<'a, T: HasViewportPercentage> HasViewportPercentage for DeclaredValue<'a, T> {
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            DeclaredValue::Value(ref v) => v.has_viewport_percentage(),
-            DeclaredValue::WithVariables(_) => {
-                panic!("DeclaredValue::has_viewport_percentage without \
-                        resolving variables!")
-            },
-            DeclaredValue::CSSWideKeyword(_) => false,
-        }
-    }
-}
-
 impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
         where W: fmt::Write,
@@ -910,7 +893,7 @@ impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
 
 /// An identifier for a given property declaration, which can be either a
 /// longhand or a custom property.
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum PropertyDeclarationId<'a> {
     /// A longhand.
@@ -975,7 +958,7 @@ impl<'a> PropertyDeclarationId<'a> {
 
 /// Servo's representation of a CSS property, that is, either a longhand, a
 /// shorthand, or a custom property.
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum PropertyId {
     /// A longhand property.
     Longhand(LonghandId),
@@ -1014,10 +997,6 @@ impl PropertyId {
     /// will be used. It is `Origin::Author` for stylesheet_origin and
     /// `CssRuleType::Style` for rule_type.
     pub fn parse(property_name: &str, context: Option< &PropertyParserContext>) -> Result<Self, ()> {
-        if let Ok(name) = ::custom_properties::parse_name(property_name) {
-            return Ok(PropertyId::Custom(::custom_properties::Name::from(name)))
-        }
-
         // FIXME(https://github.com/rust-lang/rust/issues/33156): remove this enum and use PropertyId
         // when stable Rust allows destructors in statics.
         // ShorthandAlias is not used in servo build. That's why we need to allow dead_code.
@@ -1074,9 +1053,10 @@ impl PropertyId {
             Some(&StaticId::ShorthandAlias(id, alias)) => {
                 (PropertyId::Shorthand(id), Some(alias))
             },
-            None => return Err(()),
+            None => return ::custom_properties::parse_name(property_name)
+                .map(|name| PropertyId::Custom(::custom_properties::Name::from(name))),
         };
-        id.check_allowed_in(alias, context).map_err(|_| ())?;
+        id.check_allowed_in(alias, context)?;
         Ok(id)
     }
 
@@ -1159,8 +1139,11 @@ impl PropertyId {
         }
     }
 
-    fn check_allowed_in(&self, alias: Option<AliasId>, context: &PropertyParserContext)
-                        -> Result<(), PropertyDeclarationParseError<'static>> {
+    fn check_allowed_in(
+        &self,
+        alias: Option<AliasId>,
+        context: &PropertyParserContext,
+    ) -> Result<(), ()> {
         let id: NonCustomPropertyId;
         if let Some(alias_id) = alias {
             id = alias_id.into();
@@ -1180,10 +1163,10 @@ impl PropertyId {
         ${id_set("DISALLOWED_IN_PAGE_RULE", lambda p: not p.allowed_in_page_rule)}
         match context.rule_type {
             CssRuleType::Keyframe if DISALLOWED_IN_KEYFRAME_BLOCK.contains(id) => {
-                return Err(PropertyDeclarationParseError::AnimationPropertyInKeyframeBlock)
+                return Err(());
             }
             CssRuleType::Page if DISALLOWED_IN_PAGE_RULE.contains(id) => {
-                return Err(PropertyDeclarationParseError::NotAllowedInPageRule)
+                return Err(())
             }
             _ => {}
         }
@@ -1248,15 +1231,15 @@ impl PropertyId {
             if context.stylesheet_origin != Origin::UserAgent {
                 if EXPERIMENTAL.contains(id) {
                     if !passes_pref_check() {
-                        return Err(PropertyDeclarationParseError::ExperimentalProperty);
+                        return Err(())
                     }
                 } else {
-                    return Err(PropertyDeclarationParseError::UnknownProperty(self.name().into()));
+                    return Err(())
                 }
             }
         } else {
             if EXPERIMENTAL.contains(id) && !passes_pref_check() {
-                return Err(PropertyDeclarationParseError::ExperimentalProperty);
+                return Err(());
             }
         }
 
@@ -1284,7 +1267,7 @@ impl PropertyParserContext {
 }
 
 /// Servo's representation for a property declaration.
-#[derive(PartialEq, Clone)]
+#[derive(Clone, PartialEq)]
 pub enum PropertyDeclaration {
     % for property in data.longhands:
         /// ${property.name}
@@ -1301,26 +1284,6 @@ pub enum PropertyDeclaration {
     /// A custom property declaration, with the property name and the declared
     /// value.
     Custom(::custom_properties::Name, DeclaredValueOwned<Box<::custom_properties::SpecifiedValue>>),
-}
-
-impl HasViewportPercentage for PropertyDeclaration {
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            % for property in data.longhands:
-                PropertyDeclaration::${property.camel_case}(ref val) => {
-                    val.has_viewport_percentage()
-                },
-            % endfor
-            PropertyDeclaration::WithVariables(..) => {
-                panic!("DeclaredValue::has_viewport_percentage without \
-                        resolving variables!")
-            },
-            PropertyDeclaration::CSSWideKeyword(..) => false,
-            PropertyDeclaration::Custom(_, ref val) => {
-                val.borrow().has_viewport_percentage()
-            }
-        }
-    }
 }
 
 impl fmt::Debug for PropertyDeclaration {
@@ -1550,8 +1513,12 @@ impl PropertyDeclaration {
                               id: PropertyId, context: &ParserContext, input: &mut Parser<'i, 't>)
                               -> Result<(), PropertyDeclarationParseError<'i>> {
         assert!(declarations.is_empty());
+        let start = input.state();
         match id {
             PropertyId::Custom(name) => {
+                // FIXME: fully implement https://github.com/w3c/csswg-drafts/issues/774
+                // before adding skip_whitespace here.
+                // This probably affects some test results.
                 let value = match input.try(|i| CSSWideKeyword::parse(i)) {
                     Ok(keyword) => DeclaredValueOwned::CSSWideKeyword(keyword),
                     Err(()) => match ::custom_properties::SpecifiedValue::parse(context, input) {
@@ -1564,11 +1531,11 @@ impl PropertyDeclaration {
                 Ok(())
             }
             PropertyId::Longhand(id) => {
+                input.skip_whitespace();  // Unnecessary for correctness, but may help try() rewind less.
                 input.try(|i| CSSWideKeyword::parse(i)).map(|keyword| {
                     PropertyDeclaration::CSSWideKeyword(id, keyword)
                 }).or_else(|()| {
                     input.look_for_var_functions();
-                    let start = input.state();
                     input.parse_entirely(|input| id.parse_value(context, input))
                     .or_else(|err| {
                         while let Ok(_) = input.next() {}  // Look for var() after the error.
@@ -1595,6 +1562,7 @@ impl PropertyDeclaration {
                 })
             }
             PropertyId::Shorthand(id) => {
+                input.skip_whitespace();  // Unnecessary for correctness, but may help try() rewind less.
                 if let Ok(keyword) = input.try(|i| CSSWideKeyword::parse(i)) {
                     if id == ShorthandId::All {
                         declarations.all_shorthand = AllShorthand::CSSWideKeyword(keyword)
@@ -1606,7 +1574,6 @@ impl PropertyDeclaration {
                     Ok(())
                 } else {
                     input.look_for_var_functions();
-                    let start = input.state();
                     // Not using parse_entirely here: each ${shorthand.ident}::parse_into function
                     // needs to do so *before* pushing to `declarations`.
                     id.parse_into(declarations, context, input).or_else(|err| {
@@ -1724,7 +1691,7 @@ pub mod style_structs {
         % if style_struct.name == "Font":
         #[derive(Clone, Debug)]
         % else:
-        #[derive(PartialEq, Clone, Debug)]
+        #[derive(Clone, Debug, PartialEq)]
         % endif
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         /// The ${style_struct.name} style struct.
@@ -2694,6 +2661,14 @@ impl<'a> StyleBuilder<'a> {
             self.inherited_style_ignoring_first_line.get_${property.style_struct.name_lower}();
         % endif
 
+        % if property.ident == "content":
+        self.flags.insert(::properties::computed_value_flags::INHERITS_CONTENT);
+        % endif
+
+        % if property.ident == "display":
+        self.flags.insert(::properties::computed_value_flags::INHERITS_DISPLAY);
+        % endif
+
         self.${property.style_struct.ident}.mutate()
             .copy_${property.ident}_from(
                 inherited_struct,
@@ -2725,12 +2700,13 @@ impl<'a> StyleBuilder<'a> {
         &mut self,
         value: longhands::${property.ident}::computed_value::T
     ) {
+        <% props_need_device = ["content", "list_style_type", "font_variant_alternates"] %>
         self.${property.style_struct.ident}.mutate()
             .set_${property.ident}(
                 value,
                 % if property.logical:
                 self.writing_mode,
-                % elif product == "gecko" and property.ident in ["content", "list_style_type"]:
+                % elif product == "gecko" and property.ident in props_need_device:
                 self.device,
                 % endif
             );
@@ -2943,9 +2919,10 @@ mod lazy_static_module {
 
 /// A per-longhand function that performs the CSS cascade for that longhand.
 pub type CascadePropertyFn =
-    extern "Rust" fn(declaration: &PropertyDeclaration,
-                     context: &mut computed::Context,
-                     cascade_info: &mut Option<<&mut CascadeInfo>);
+    extern "Rust" fn(
+        declaration: &PropertyDeclaration,
+        context: &mut computed::Context,
+    );
 
 /// A per-longhand array of functions to perform the CSS cascade on each of
 /// them, effectively doing virtual dispatch.
@@ -3020,7 +2997,6 @@ pub fn cascade(
     parent_style_ignoring_first_line: Option<<&ComputedValues>,
     layout_parent_style: Option<<&ComputedValues>,
     visited_style: Option<Arc<ComputedValues>>,
-    cascade_info: Option<<&mut CascadeInfo>,
     font_metrics_provider: &FontMetricsProvider,
     flags: CascadeFlags,
     quirks_mode: QuirksMode
@@ -3079,7 +3055,6 @@ pub fn cascade(
         parent_style_ignoring_first_line,
         layout_parent_style,
         visited_style,
-        cascade_info,
         font_metrics_provider,
         flags,
         quirks_mode,
@@ -3098,7 +3073,6 @@ pub fn apply_declarations<'a, F, I>(
     parent_style_ignoring_first_line: Option<<&ComputedValues>,
     layout_parent_style: Option<<&ComputedValues>,
     visited_style: Option<Arc<ComputedValues>>,
-    mut cascade_info: Option<<&mut CascadeInfo>,
     font_metrics_provider: &FontMetricsProvider,
     flags: CascadeFlags,
     quirks_mode: QuirksMode,
@@ -3270,9 +3244,7 @@ where
             % endif
 
             let discriminant = longhand_id as usize;
-            (CASCADE_PROPERTY[discriminant])(&*declaration,
-                                             &mut context,
-                                             &mut cascade_info);
+            (CASCADE_PROPERTY[discriminant])(&*declaration, &mut context);
         }
         % if category_to_cascade_now == "early":
             let writing_mode = get_writing_mode(context.builder.get_inheritedbox());
@@ -3325,20 +3297,15 @@ where
                         }
                     }
 
-                    // In case of just the language changing, the parent could have had no generic,
-                    // which Gecko just does regular cascading with. Do the same.
-                    // This can only happen in the case where the language changed but the family did not
-                    if generic != structs::kGenericFont_NONE {
-                        let pres_context = context.builder.device.pres_context();
-                        let gecko_font = context.builder.mutate_font().gecko_mut();
-                        gecko_font.mGenericID = generic;
-                        unsafe {
-                            bindings::Gecko_nsStyleFont_PrefillDefaultForGeneric(
-                                gecko_font,
-                                pres_context,
-                                generic,
-                            );
-                        }
+                    let pres_context = context.builder.device.pres_context();
+                    let gecko_font = context.builder.mutate_font().gecko_mut();
+                    gecko_font.mGenericID = generic;
+                    unsafe {
+                        bindings::Gecko_nsStyleFont_PrefillDefaultForGeneric(
+                            gecko_font,
+                            pres_context,
+                            generic,
+                        );
                     }
                 }
             % endif
@@ -3358,14 +3325,14 @@ where
                 if let Some(ref declaration) = font_family {
 
                     let discriminant = LonghandId::FontFamily as usize;
-                    (CASCADE_PROPERTY[discriminant])(declaration,
-                                                     &mut context,
-                                                     &mut cascade_info);
+                    (CASCADE_PROPERTY[discriminant])(declaration, &mut context);
                     % if product == "gecko":
                         let device = context.builder.device;
                         if let PropertyDeclaration::FontFamily(ref val) = **declaration {
                             if val.get_system().is_some() {
-                                context.builder.mutate_font().fixup_system();
+                                let default = context.cached_system_font
+                                                     .as_ref().unwrap().default_font_type;
+                                context.builder.mutate_font().fixup_system(default);
                             } else {
                                 context.builder.mutate_font().fixup_none_generic(device);
                             }
@@ -3376,9 +3343,7 @@ where
 
             if let Some(ref declaration) = font_size {
                 let discriminant = LonghandId::FontSize as usize;
-                (CASCADE_PROPERTY[discriminant])(declaration,
-                                                 &mut context,
-                                                 &mut cascade_info);
+                (CASCADE_PROPERTY[discriminant])(declaration, &mut context);
             % if product == "gecko":
             // Font size must be explicitly inherited to handle lang changes and
             // scriptlevel changes.
@@ -3390,9 +3355,7 @@ where
                 let size = PropertyDeclaration::CSSWideKeyword(
                     LonghandId::FontSize, CSSWideKeyword::Inherit);
 
-                (CASCADE_PROPERTY[discriminant])(&size,
-                                                 &mut context,
-                                                 &mut cascade_info);
+                (CASCADE_PROPERTY[discriminant])(&size, &mut context);
             % endif
             }
         % endif
@@ -3495,7 +3458,7 @@ pub fn modify_border_style_for_inline_sides(style: &mut Arc<ComputedValues>,
 }
 
 /// An identifier for a given alias property.
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum AliasId {
     % for i, property in enumerate(data.all_aliases()):

@@ -318,17 +318,6 @@ impl<'ln> TNode for GeckoNode<'ln> {
     fn is_in_doc(&self) -> bool {
         unsafe { bindings::Gecko_IsInDocument(self.0) }
     }
-
-    fn needs_dirty_on_viewport_size_changed(&self) -> bool {
-        // Gecko's node doesn't have the DIRTY_ON_VIEWPORT_SIZE_CHANGE flag,
-        // so we force them to be dirtied on viewport size change, regardless if
-        // they use viewport percentage size or not.
-        // TODO(shinglyu): implement this in Gecko: https://github.com/servo/servo/pull/11890
-        true
-    }
-
-    // TODO(shinglyu): implement this in Gecko: https://github.com/servo/servo/pull/11890
-    unsafe fn set_dirty_on_viewport_size_changed(&self) {}
 }
 
 /// A wrapper on top of two kind of iterators, depending on the parent being
@@ -467,10 +456,13 @@ impl<'le> fmt::Debug for GeckoElement<'le> {
 
 impl<'le> GeckoElement<'le> {
     /// Parse the style attribute of an element.
-    pub fn parse_style_attribute(value: &str,
-                                 url_data: &UrlExtraData,
-                                 quirks_mode: QuirksMode,
-                                 reporter: &ParseErrorReporter) -> PropertyDeclarationBlock {
+    pub fn parse_style_attribute<R>(value: &str,
+                                    url_data: &UrlExtraData,
+                                    quirks_mode: QuirksMode,
+                                    reporter: &R)
+                                    -> PropertyDeclarationBlock
+        where R: ParseErrorReporter
+    {
         parse_style_attribute(value, url_data, reporter, quirks_mode)
     }
 
@@ -1091,7 +1083,7 @@ impl<'le> TElement for GeckoElement<'le> {
         self.unset_flags(ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO as u32)
     }
 
-    unsafe fn clear_descendants_bits(&self) {
+    unsafe fn clear_descendant_bits(&self) {
         self.unset_flags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO as u32 |
                          ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO as u32 |
                          NODE_DESCENDANTS_NEED_FRAMES as u32)
@@ -1156,7 +1148,9 @@ impl<'le> TElement for GeckoElement<'le> {
         let ptr = self.0.mServoData.get();
         unsafe {
             self.unset_flags(ELEMENT_HAS_SNAPSHOT as u32 |
-                             ELEMENT_HANDLED_SNAPSHOT as u32);
+                             ELEMENT_HANDLED_SNAPSHOT as u32 |
+                             structs::Element_kAllServoDescendantBits |
+                             NODE_NEEDS_FRAME as u32);
         }
         if !ptr.is_null() {
             debug!("Dropping ElementData for {:?}", self);
@@ -1177,7 +1171,9 @@ impl<'le> TElement for GeckoElement<'le> {
         // level native anonymous content subtree roots, since they're not
         // really roots from the style fixup perspective.  Checking that we
         // are NAC handles both cases.
-        self.is_native_anonymous()
+        self.is_native_anonymous() &&
+        (self.is_root_of_native_anonymous_subtree() ||
+         self.implemented_pseudo_element().is_some())
     }
 
     unsafe fn set_selector_flags(&self, flags: ElementSelectorFlags) {

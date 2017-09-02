@@ -114,7 +114,7 @@ ChannelMediaDecoder::ResourceCallback::NotifyDataEnded(nsresult aStatus)
       // NotifySuspendedStatusChanged will tell the element that download
       // has been suspended "by the cache", which is true since we never
       // download anything. The element can then transition to HAVE_ENOUGH_DATA.
-      self->mDecoder->NotifySuspendedStatusChanged();
+      owner->NotifySuspendedByCache(true);
     }
   });
   mAbstractMainThread->Dispatch(r.forget());
@@ -130,11 +130,14 @@ ChannelMediaDecoder::ResourceCallback::NotifyPrincipalChanged()
 }
 
 void
-ChannelMediaDecoder::ResourceCallback::NotifySuspendedStatusChanged()
+ChannelMediaDecoder::ResourceCallback::NotifySuspendedStatusChanged(
+  bool aSuspendedByCache)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (mDecoder) {
-    mDecoder->NotifySuspendedStatusChanged();
+  MediaDecoderOwner* owner = GetMediaOwner();
+  if (owner) {
+    AbstractThread::AutoEnter context(owner->AbstractMainThread());
+    owner->NotifySuspendedByCache(aSuspendedByCache);
   }
 }
 
@@ -187,12 +190,6 @@ ChannelMediaDecoder::Clone(MediaDecoderInit& aInit)
     return nullptr;
   }
   return decoder.forget();
-}
-
-MediaResource*
-ChannelMediaDecoder::GetResource() const
-{
-  return mResource;
 }
 
 MediaDecoderStateMachine* ChannelMediaDecoder::CreateStateMachine()
@@ -485,6 +482,29 @@ ChannelMediaDecoder::ShouldThrottleDownload()
 }
 
 void
+ChannelMediaDecoder::AddSizeOfResources(ResourceSizes* aSizes)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mResource) {
+    aSizes->mByteSize += mResource->SizeOfIncludingThis(aSizes->mMallocSizeOf);
+  }
+}
+
+already_AddRefed<nsIPrincipal>
+ChannelMediaDecoder::GetCurrentPrincipal()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mResource ? mResource->GetCurrentPrincipal() : nullptr;
+}
+
+bool
+ChannelMediaDecoder::IsTransportSeekable()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mResource->IsTransportSeekable();
+}
+
+void
 ChannelMediaDecoder::SetLoadInBackground(bool aLoadInBackground)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -509,6 +529,29 @@ ChannelMediaDecoder::Resume()
   if (mResource) {
     mResource->Resume();
   }
+}
+
+void
+ChannelMediaDecoder::PinForSeek()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!mResource || mPinnedForSeek) {
+    return;
+  }
+  mPinnedForSeek = true;
+  mResource->Pin();
+}
+
+void
+ChannelMediaDecoder::UnpinForSeek()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
+  if (!mResource || !mPinnedForSeek) {
+    return;
+  }
+  mPinnedForSeek = false;
+  mResource->Unpin();
 }
 
 void

@@ -126,8 +126,6 @@ var whitelist = [
   {file: "resource://gre/modules/Localization.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
-  // Bug 1339420
-  {file: "chrome://branding/content/icon128.png"},
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
    platforms: ["linux", "macosx"]},
@@ -173,7 +171,6 @@ var whitelist = [
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
   // Bug 1351637
   {file: "resource://gre/modules/sdk/bootstrap.js"},
-
 ];
 
 whitelist = new Set(whitelist.filter(item =>
@@ -475,7 +472,8 @@ function findChromeUrlsFromArray(array, prefix) {
 
     // Only keep strings that look like real chrome or resource urls.
     if (/chrome:\/\/[a-zA-Z09 -]+\/(content|skin|locale)\//.test(string) ||
-        /resource:\/\/gre.*\.[a-z]+/.test(string))
+        /resource:\/\/gre.*\.[a-z]+/.test(string) ||
+        string.startsWith("resource://content-accessible/"))
       gReferencesFromCode.add(string);
   }
 }
@@ -537,6 +535,8 @@ add_task(async function checkAllTheFiles() {
   let devtoolsPrefixes = ["chrome://webide/",
                           "chrome://devtools",
                           "resource://devtools/",
+                          "resource://devtools-client-jsonview/",
+                          "resource://devtools-client-shared/",
                           "resource://app/modules/devtools",
                           "resource://gre/modules/devtools"];
   let chromeFiles = [];

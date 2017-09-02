@@ -240,6 +240,13 @@ nsReflowStatus::UpdateTruncated(const ReflowInput& aReflowInput,
   }
 }
 
+void
+nsIFrame::DestroyAnonymousContent(already_AddRefed<nsIContent> aContent)
+{
+  PresContext()->PresShell()->FrameConstructor()
+               ->DestroyAnonymousContent(mozilla::Move(aContent));
+}
+
 // Formerly the nsIFrameDebug interface
 
 #ifdef DEBUG
@@ -490,11 +497,10 @@ nsFrame::nsFrame(nsStyleContext* aContext, ClassID aID)
   MOZ_COUNT_CTOR(nsFrame);
 
   mStyleContext = aContext;
-  mWritingMode = WritingMode(mStyleContext);
-  mStyleContext->AddRef();
 #ifdef DEBUG
   mStyleContext->FrameAddRef();
 #endif
+  mWritingMode = WritingMode(mStyleContext);
 }
 
 nsFrame::~nsFrame()
@@ -504,11 +510,9 @@ nsFrame::~nsFrame()
   MOZ_ASSERT(GetVisibility() != Visibility::APPROXIMATELY_VISIBLE,
              "Visible nsFrame is being destroyed");
 
-  NS_IF_RELEASE(mContent);
 #ifdef DEBUG
   mStyleContext->FrameRelease();
 #endif
-  mStyleContext->Release();
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFrame)
@@ -611,10 +615,6 @@ nsFrame::Init(nsIContent*       aContent,
 
   mContent = aContent;
   mParent = aParent;
-
-  if (aContent) {
-    NS_ADDREF(aContent);
-  }
 
   if (aPrevInFlow) {
     mWritingMode = aPrevInFlow->GetWritingMode();
@@ -3323,7 +3323,7 @@ nsFrame::GetContentForEvent(WidgetEvent* aEvent,
 void
 nsFrame::FireDOMEvent(const nsAString& aDOMEventName, nsIContent *aContent)
 {
-  nsIContent* target = aContent ? aContent : mContent;
+  nsIContent* target = aContent ? aContent : GetContent();
 
   if (target) {
     RefPtr<AsyncEventDispatcher> asyncDispatcher =
@@ -10214,15 +10214,17 @@ void
 nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
                                     ServoRestyleState& aRestyleState)
 {
-  MOZ_ASSERT(aChildFrame->GetParent() == this ||
-             (aChildFrame->IsTableFrame() &&
-              aChildFrame->GetParent()->GetParent() == this) ||
-             (aChildFrame->GetParent()->IsLineFrame() &&
-              aChildFrame->GetParent()->GetParent() == this) ||
-             (aChildFrame->IsTableFrame() &&
-              aChildFrame->GetParent()->GetParent()->IsLineFrame() &&
-              aChildFrame->GetParent()->GetParent()->GetParent() == this),
+#ifdef DEBUG
+  nsIFrame* parent = aChildFrame->GetParent();;
+  if (aChildFrame->IsTableFrame()) {
+    parent = parent->GetParent();
+  }
+  if (parent->IsLineFrame()) {
+    parent = parent->GetParent();
+  }
+  MOZ_ASSERT(nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent) == this,
              "This should only be used for children!");
+#endif // DEBUG
   MOZ_ASSERT(!GetContent() || !aChildFrame->GetContent() ||
              aChildFrame->GetContent() == GetContent(),
              "What content node is it a frame for?");
@@ -10721,8 +10723,8 @@ nsIFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aSizes) const
   if (mStyleContext->IsServo()) {
     ServoStyleContext* sc = mStyleContext->AsServo();
     if (!aSizes.mState.HaveSeenPtr(sc)) {
-      sc->AddSizeOfIncludingThis(aSizes.mState, aSizes.mStyleSizes,
-                                 &aSizes.mStyleSizes.mComputedValuesNonDom);
+      sc->AddSizeOfIncludingThis(aSizes,
+                                 &aSizes.mLayoutComputedValuesNonDom);
     }
   }
 

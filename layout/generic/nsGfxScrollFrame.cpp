@@ -18,7 +18,6 @@
 #include "nsContainerFrame.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
-#include "nsContentList.h"
 #include "nsIDocumentInlines.h"
 #include "nsFontMetrics.h"
 #include "nsBoxLayoutState.h"
@@ -2006,6 +2005,7 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter,
   , mScrollCornerBox(nullptr)
   , mResizerBox(nullptr)
   , mOuter(aOuter)
+  , mReferenceFrameDuringPainting(nullptr)
   , mAsyncScroll(nullptr)
   , mAsyncSmoothMSDScroll(nullptr)
   , mLastScrollOrigin(nsGkAtoms::other)
@@ -3269,6 +3269,7 @@ void
 ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                     const nsDisplayListSet& aLists)
 {
+  SetAndNullOnExit<const nsIFrame> tmpBuilder(mReferenceFrameDuringPainting, aBuilder->GetCurrentReferenceFrame());
   if (aBuilder->IsForFrameVisibility()) {
     NotifyApproximateFrameVisibilityUpdate(false);
   }
@@ -4605,10 +4606,10 @@ ScrollFrameHelper::Destroy()
   }
 
   // Unbind any content created in CreateAnonymousContent from the tree
-  nsContentUtils::DestroyAnonymousContent(&mHScrollbarContent);
-  nsContentUtils::DestroyAnonymousContent(&mVScrollbarContent);
-  nsContentUtils::DestroyAnonymousContent(&mScrollCornerContent);
-  nsContentUtils::DestroyAnonymousContent(&mResizerContent);
+  mOuter->DestroyAnonymousContent(mHScrollbarContent.forget());
+  mOuter->DestroyAnonymousContent(mVScrollbarContent.forget());
+  mOuter->DestroyAnonymousContent(mScrollCornerContent.forget());
+  mOuter->DestroyAnonymousContent(mResizerContent.forget());
 
   if (mPostedReflowCallback) {
     mOuter->PresContext()->PresShell()->CancelReflowCallback(this);
@@ -5866,7 +5867,8 @@ ScrollFrameHelper::GetScrolledRect() const
   // relative to the reference frame, since that's the space where painting does
   // snapping.
   nsSize scrollPortSize = GetScrollPositionClampingScrollPortSize();
-  nsIFrame* referenceFrame = nsLayoutUtils::GetReferenceFrame(mOuter);
+  const nsIFrame* referenceFrame =
+    mReferenceFrameDuringPainting ? mReferenceFrameDuringPainting : nsLayoutUtils::GetReferenceFrame(mOuter);
   nsPoint toReferenceFrame = mOuter->GetOffsetToCrossDoc(referenceFrame);
   nsRect scrollPort(mScrollPort.TopLeft() + toReferenceFrame, scrollPortSize);
   nsRect scrolledRect = result + scrollPort.TopLeft();

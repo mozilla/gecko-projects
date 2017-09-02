@@ -2117,9 +2117,11 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
       }
     }
 
+    WebRenderLayerManager* wrManager = static_cast<WebRenderLayerManager*>(layerManager.get());
+
     MaybeSetupTransactionIdAllocator(layerManager, presContext);
     bool temp = aBuilder->SetIsCompositingCheap(layerManager->IsCompositingCheap());
-    static_cast<WebRenderLayerManager*>(layerManager.get())->EndTransactionWithoutLayer(this, aBuilder);
+    wrManager->EndTransactionWithoutLayer(this, aBuilder);
 
     // For layers-free mode, we check the invalidation state bits in the EndTransaction.
     // So we clear the invalidation state bits after EndTransaction.
@@ -2136,8 +2138,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
       TriggerPendingAnimations(document, layerManager->GetAnimationReadyTime());
     }
 
-    // TODO: make sure this gets fired at the right times
-    if (view && presContext->IsChrome()) {
+    if (wrManager->ShouldNotifyInvalidation()) {
       presContext->NotifyInvalidation(layerManager->GetLastTransactionId(), nsIntRect());
     }
 
@@ -2231,51 +2232,12 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
       root->SetEventRegionsOverride(EventRegionsOverride::NoOverride);
     }
 
-    // If we're using containerless scrolling, there is still one case where we
-    // want the root container layer to have metrics. If the parent process is
-    // using XUL windows, there is no root scrollframe, and without explicitly
-    // creating metrics there will be no guaranteed top-level APZC.
-    bool addMetrics = gfxPrefs::LayoutUseContainersForRootFrames() ||
-        (XRE_IsParentProcess() && !presShell->GetRootScrollFrame());
-
-    // Add metrics if there are none in the layer tree with the id (create an id
-    // if there isn't one already) of the root scroll frame/root content.
-    bool ensureMetricsForRootId =
-      nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
-      !gfxPrefs::LayoutUseContainersForRootFrames() &&
-      aBuilder->IsPaintingToWindow() &&
-      !presContext->GetParentPresContext();
-
-    nsIContent* content = nullptr;
-    nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
-    if (rootScrollFrame) {
-      content = rootScrollFrame->GetContent();
-    } else {
-      // If there is no root scroll frame, pick the document element instead.
-      // The only case we don't want to do this is in non-APZ fennec, where
-      // we want the root xul document to get a null scroll id so that the root
-      // content document gets the first non-null scroll id.
-      content = document->GetDocumentElement();
-    }
-
-    if (ensureMetricsForRootId && content) {
-      ViewID scrollId = nsLayoutUtils::FindOrCreateIDFor(content);
-      if (nsLayoutUtils::ContainsMetricsWithId(root, scrollId)) {
-        ensureMetricsForRootId = false;
-      }
-    }
-
-    if (addMetrics || ensureMetricsForRootId) {
-      bool isRootContent = presContext->IsRootContentDocument();
-
-      nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
-
-      root->SetScrollMetadata(
-        nsLayoutUtils::ComputeScrollMetadata(frame,
-                           rootScrollFrame, content,
-                           aBuilder->FindReferenceFrameFor(frame),
-                           root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
-                           isRootContent, containerParameters));
+    auto callback = [root](FrameMetrics::ViewID aScrollId) -> bool {
+      return nsLayoutUtils::ContainsMetricsWithId(root, aScrollId);
+    };
+    if (Maybe<ScrollMetadata> rootMetadata = nsLayoutUtils::GetRootMetadata(
+          aBuilder, root, containerParameters, callback)) {
+      root->SetScrollMetadata(rootMetadata.value());
     }
 
     // NS_WARNING is debug-only, so don't even bother checking the conditions in
@@ -2508,7 +2470,7 @@ void nsDisplayList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
       (itemType == DisplayItemType::TYPE_TRANSFORM &&
        static_cast<nsDisplayTransform*>(item)->IsParticipating3DContext()) ||
       (itemType == DisplayItemType::TYPE_PERSPECTIVE &&
-       item->Frame()->Extend3DContext());
+       static_cast<nsDisplayPerspective*>(item)->TransformFrame()->Extend3DContext());
     if (same3DContext &&
         (itemType != DisplayItemType::TYPE_TRANSFORM ||
          !static_cast<nsDisplayTransform*>(item)->IsLeafOf3DContext())) {
@@ -3595,8 +3557,11 @@ nsDisplayBackgroundImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilde
                                                   WebRenderLayerManager* aManager,
                                                   nsDisplayListBuilder* aDisplayListBuilder)
 {
-  if (!CanBuildWebRenderDisplayItems(aManager)) {
-    return false;
+  if (aManager->IsLayersFreeTransaction()) {
+    ContainerLayerParameters parameter;
+    if (GetLayerState(aDisplayListBuilder, aManager, parameter) != LAYER_ACTIVE) {
+      return false;
+    }
   }
 
   if (aDisplayListBuilder) {
@@ -7529,11 +7494,11 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const FrameTransformProp
   if ((aFlags & INCLUDE_PRESERVE3D_ANCESTORS) &&
       frame && frame->Combines3DTransformWithAncestors()) {
     // Include the transform set on our parent
-    NS_ASSERTION(frame->GetParent() &&
-                 frame->GetParent()->IsTransformed() &&
-                 frame->GetParent()->Extend3DContext(),
+    nsIFrame* parentFrame = frame->GetFlattenedTreeParentPrimaryFrame();
+    NS_ASSERTION(parentFrame && parentFrame->IsTransformed() &&
+                 parentFrame->Extend3DContext(),
                  "Preserve3D mismatch!");
-    FrameTransformProperties props(frame->GetParent(),
+    FrameTransformProperties props(parentFrame,
                                    aAppUnitsPerPixel,
                                    nullptr);
 
@@ -7778,7 +7743,7 @@ nsDisplayTransform::GetAccumulatedPreserved3DTransform(nsDisplayListBuilder* aBu
     const nsIFrame* establisher; // Establisher of the 3D rendering context.
     for (establisher = mFrame;
          establisher && establisher->Combines3DTransformWithAncestors();
-         establisher = nsLayoutUtils::GetCrossDocParentFrame(establisher)) {
+         establisher = establisher->GetFlattenedTreeParentPrimaryFrame()) {
     }
     const nsIFrame* establisherReference =
       aBuilder->FindReferenceFrameFor(nsLayoutUtils::GetCrossDocParentFrame(establisher));

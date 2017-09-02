@@ -16,6 +16,7 @@ use style::context::{CascadeInputs, QuirksMode, SharedStyleContext, StyleContext
 use style::context::ThreadLocalStyleContext;
 use style::data::ElementStyles;
 use style::dom::{ShowSubtreeData, TElement, TNode};
+use style::driver;
 use style::element_state::ElementState;
 use style::error_reporting::{NullReporter, ParseErrorReporter};
 use style::font_metrics::{FontMetricsProvider, get_metrics_provider_for_product};
@@ -69,13 +70,14 @@ use style::gecko_bindings::bindings::nsTArrayBorrowed_uintptr_t;
 use style::gecko_bindings::bindings::nsTimingFunctionBorrowed;
 use style::gecko_bindings::bindings::nsTimingFunctionBorrowedMut;
 use style::gecko_bindings::structs;
-use style::gecko_bindings::structs::{CSSPseudoElementType, CompositeOperation, Loader};
+use style::gecko_bindings::structs::{CSSPseudoElementType, CompositeOperation};
+use style::gecko_bindings::structs::{Loader, LoaderReusableStyleSheets};
 use style::gecko_bindings::structs::{RawServoStyleRule, ServoStyleContextStrong};
 use style::gecko_bindings::structs::{ServoStyleSheet, SheetParsingMode, nsIAtom, nsCSSPropertyID};
 use style::gecko_bindings::structs::{nsCSSFontFaceRule, nsCSSCounterStyleRule};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint, PropertyValuePair};
 use style::gecko_bindings::structs::IterationCompositeOperation;
-use style::gecko_bindings::structs::MallocSizeOf;
+use style::gecko_bindings::structs::MallocSizeOf as GeckoMallocSizeOf;
 use style::gecko_bindings::structs::OriginFlags;
 use style::gecko_bindings::structs::OriginFlags_Author;
 use style::gecko_bindings::structs::OriginFlags_User;
@@ -84,9 +86,11 @@ use style::gecko_bindings::structs::RawGeckoGfxMatrix4x4;
 use style::gecko_bindings::structs::RawGeckoPresContextOwned;
 use style::gecko_bindings::structs::SeenPtrs;
 use style::gecko_bindings::structs::ServoElementSnapshotTable;
+use style::gecko_bindings::structs::ServoStyleSetSizes;
 use style::gecko_bindings::structs::ServoTraversalFlags;
 use style::gecko_bindings::structs::StyleRuleInclusion;
 use style::gecko_bindings::structs::URLExtraData;
+use style::gecko_bindings::structs::gfxFontFeatureValueSet;
 use style::gecko_bindings::structs::nsCSSValueSharedList;
 use style::gecko_bindings::structs::nsCompatibility;
 use style::gecko_bindings::structs::nsIDocument;
@@ -99,7 +103,6 @@ use style::gecko_bindings::sugar::refptr::RefPtr;
 use style::gecko_properties::style_structs;
 use style::invalidation::element::restyle_hints;
 use style::media_queries::{MediaList, parse_media_query_list};
-use style::parallel;
 use style::parser::{ParserContext, self};
 use style::properties::{CascadeFlags, ComputedValues, Importance};
 use style::properties::{IS_FIELDSET_CONTENT, IS_LINK, IS_VISITED_LINK, LonghandIdSet};
@@ -111,7 +114,6 @@ use style::properties::animated_properties::compare_property_priority;
 use style::properties::parse_one_declaration_into;
 use style::rule_tree::StyleSource;
 use style::selector_parser::PseudoElementCascadeType;
-use style::sequential;
 use style::shared_lock::{SharedRwLockReadGuard, StylesheetGuards, ToCssWithGuard, Locked};
 use style::string_cache::Atom;
 use style::style_adjuster::StyleAdjuster;
@@ -125,7 +127,7 @@ use style::stylesheets::supports_rule::parse_condition_or_declaration;
 use style::stylist::RuleInclusion;
 use style::thread_state;
 use style::timer::Timer;
-use style::traversal::{DomTraversal, TraversalDriver};
+use style::traversal::DomTraversal;
 use style::traversal::resolve_style;
 use style::traversal_flags::{TraversalFlags, self};
 use style::values::{CustomIdent, KeyframesName};
@@ -196,7 +198,6 @@ fn create_shared_context<'a>(global_style_data: &GlobalStyleData,
         options: global_style_data.options.clone(),
         guards: StylesheetGuards::same(guard),
         timer: Timer::new(),
-        quirks_mode: per_doc_data.stylist.quirks_mode(),
         traversal_flags: traversal_flags,
         snapshot_map: snapshot_map,
     }
@@ -234,24 +235,17 @@ fn traverse_subtree(element: GeckoElement,
         return;
     }
 
-    debug!("Traversing subtree:");
-    debug!("{:?}", ShowSubtreeData(element.as_node()));
+    debug!("Traversing subtree from {:?}", element);
 
-    let style_thread_pool = &*STYLE_THREAD_POOL;
-    let traversal_driver = if !traversal_flags.contains(traversal_flags::ParallelTraversal) ||
-                              style_thread_pool.style_thread_pool.is_none() {
-        TraversalDriver::Sequential
+    let thread_pool_holder = &*STYLE_THREAD_POOL;
+    let thread_pool = if traversal_flags.contains(traversal_flags::ParallelTraversal) {
+        thread_pool_holder.style_thread_pool.as_ref()
     } else {
-        TraversalDriver::Parallel
+        None
     };
 
-    let traversal = RecalcStyleOnly::new(shared_style_context, traversal_driver);
-    if traversal_driver.is_parallel() {
-        parallel::traverse_dom(&traversal, element, token,
-                               style_thread_pool.style_thread_pool.as_ref().unwrap());
-    } else {
-        sequential::traverse_dom(&traversal, element, token);
-    }
+    let traversal = RecalcStyleOnly::new(shared_style_context);
+    driver::traverse_dom(&traversal, element, token, thread_pool);
 }
 
 /// Traverses the subtree rooted at `root` for restyling.
@@ -259,17 +253,19 @@ fn traverse_subtree(element: GeckoElement,
 /// Returns whether a Gecko post-traversal (to perform lazy frame construction,
 /// or consume any RestyleData, or drop any ElementData) is required.
 #[no_mangle]
-pub extern "C" fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
-                                        raw_data: RawServoStyleSetBorrowed,
-                                        snapshots: *const ServoElementSnapshotTable,
-                                        raw_flags: ServoTraversalFlags)
-                                        -> bool {
+pub extern "C" fn Servo_TraverseSubtree(
+    root: RawGeckoElementBorrowed,
+    raw_data: RawServoStyleSetBorrowed,
+    snapshots: *const ServoElementSnapshotTable,
+    raw_flags: ServoTraversalFlags
+) -> bool {
     let traversal_flags = TraversalFlags::from_bits_truncate(raw_flags);
     debug_assert!(!snapshots.is_null());
 
     let element = GeckoElement(root);
 
     debug!("Servo_TraverseSubtree (flags={:?})", traversal_flags);
+    debug!("{:?}", ShowSubtreeData(element.as_node()));
     // It makes no sense to do an animation restyle when we're styling
     // newly-inserted content.
     if !traversal_flags.contains(traversal_flags::UnstyledOnly) {
@@ -384,7 +380,9 @@ pub extern "C" fn Servo_AnimationValues_ComputeDistance(from: RawServoAnimationV
                                                         -> f64 {
     let from_value = AnimationValue::as_arc(&from);
     let to_value = AnimationValue::as_arc(&to);
-    from_value.compute_squared_distance(to_value).map(|d| d.sqrt()).unwrap_or(0.0)
+    // If compute_squared_distance() failed, this function will return negative value
+    // in order to check whether we support the specified paced animation values.
+    from_value.compute_squared_distance(to_value).map(|d| d.sqrt()).unwrap_or(-1.0)
 }
 
 #[no_mangle]
@@ -668,7 +666,7 @@ pub extern "C" fn Servo_StyleSet_GetBaseComputedValuesForElement(raw_data: RawSe
                                                                  pseudo_type: CSSPseudoElementType)
                                                                  -> ServoStyleContextStrong
 {
-    use style::style_resolver::StyleResolverForElement;
+    use style::style_resolver::{PseudoElementResolution, StyleResolverForElement};
 
     debug_assert!(!snapshots.is_null());
     let computed_values = unsafe { ArcBorrow::from_ref(computed_values) };
@@ -724,7 +722,8 @@ pub extern "C" fn Servo_StyleSet_GetBaseComputedValuesForElement(raw_data: RawSe
             visited_rules: None,
         };
 
-    StyleResolverForElement::new(element, &mut context, RuleInclusion::All)
+    // Actually `PseudoElementResolution` doesn't matter.
+    StyleResolverForElement::new(element, &mut context, RuleInclusion::All, PseudoElementResolution::IfApplicable)
         .cascade_style_and_visited_with_default_parents(inputs)
         .into()
 }
@@ -773,7 +772,7 @@ pub extern "C" fn Servo_Element_ClearData(element: RawGeckoElementBorrowed) {
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_SizeOfExcludingThisAndCVs(malloc_size_of: MallocSizeOf,
+pub extern "C" fn Servo_Element_SizeOfExcludingThisAndCVs(malloc_size_of: GeckoMallocSizeOf,
                                                           seen_ptrs: *mut SeenPtrs,
                                                           element: RawGeckoElementBorrowed) -> usize {
     let malloc_size_of = malloc_size_of.unwrap();
@@ -867,7 +866,8 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(
     mode: SheetParsingMode,
     extra_data: *mut URLExtraData,
     line_number_offset: u32,
-    quirks_mode: nsCompatibility
+    quirks_mode: nsCompatibility,
+    reusable_sheets: *mut LoaderReusableStyleSheets
 ) -> RawServoStyleSheetContentsStrong {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
@@ -884,7 +884,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(
     let loader = if loader.is_null() {
         None
     } else {
-        Some(StylesheetLoader::new(loader, stylesheet, ptr::null_mut()))
+        Some(StylesheetLoader::new(loader, stylesheet, reusable_sheets))
     };
 
     // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
@@ -897,7 +897,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(
     Arc::new(StylesheetContents::from_str(
         input, url_data.clone(), origin,
         &global_style_data.shared_lock, loader, &reporter,
-        quirks_mode.into(), line_number_offset as u64)
+        quirks_mode.into(), line_number_offset)
     ).into_strong()
 }
 
@@ -1004,7 +1004,9 @@ pub extern "C" fn Servo_StyleSet_FlushStyleSheets(
     if have_invalidations && doc_element.is_some() {
         // The invalidation machinery propagates the bits up, but we still
         // need to tell the gecko restyle root machinery about it.
-        unsafe { bindings::Gecko_NoteDirtyElement(doc_element.unwrap().0); }
+        unsafe {
+            bindings::Gecko_NoteDirtySubtreeForInvalidation(doc_element.unwrap().0);
+        }
     }
 }
 
@@ -1056,7 +1058,7 @@ pub extern "C" fn Servo_StyleSheet_Clone(
 
 #[no_mangle]
 pub extern "C" fn Servo_StyleSheet_SizeOfIncludingThis(
-    malloc_size_of: MallocSizeOf,
+    malloc_size_of: GeckoMallocSizeOf,
     sheet: RawServoStyleSheetContentsBorrowed
 ) -> usize {
     let global_style_data = &*GLOBAL_STYLE_DATA;
@@ -1919,9 +1921,6 @@ pub extern "C" fn Servo_ComputedValues_GetStyleRuleList(values: ServoStyleContex
         None => return,
     };
 
-    let global_style_data = &*GLOBAL_STYLE_DATA;
-    let guard = global_style_data.shared_lock.read();
-
     // TODO(emilio): Will benefit from SmallVec.
     let mut result = vec![];
     for node in rule_node.self_and_ancestors() {
@@ -1930,13 +1929,12 @@ pub extern "C" fn Servo_ComputedValues_GetStyleRuleList(values: ServoStyleContex
             _ => continue,
         };
 
+        // For the rules with any important declaration, we insert them into
+        // rule tree twice, one for normal level and another for important
+        // level. So, we skip the important one to keep the specificity order of
+        // rules.
         if node.importance().important() {
-            let block = style_rule.read_with(&guard).block.read_with(&guard);
-            if block.any_normal() {
-                // We'll append it when we find the normal rules in our
-                // parent chain.
-                continue;
-            }
+            continue;
         }
 
         result.push(style_rule);
@@ -1986,13 +1984,16 @@ pub extern "C" fn Servo_StyleSet_CompatModeChanged(raw_data: RawServoStyleSetBor
     data.stylist.set_quirks_mode(quirks_mode.into());
 }
 
-fn parse_property_into(declarations: &mut SourcePropertyDeclaration,
-                       property_id: PropertyId,
-                       value: *const nsACString,
-                       data: *mut URLExtraData,
-                       parsing_mode: structs::ParsingMode,
-                       quirks_mode: QuirksMode,
-                       reporter: &ParseErrorReporter) -> Result<(), ()> {
+fn parse_property_into<R>(declarations: &mut SourcePropertyDeclaration,
+                          property_id: PropertyId,
+                          value: *const nsACString,
+                          data: *mut URLExtraData,
+                          parsing_mode: structs::ParsingMode,
+                          quirks_mode: QuirksMode,
+                          reporter: &R)
+                          -> Result<(), ()>
+    where R: ParseErrorReporter
+{
     use style_traits::ParsingMode;
     let value = unsafe { value.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { RefPtr::from_ptr_ref(&data) };
@@ -2039,10 +2040,8 @@ pub extern "C" fn Servo_ParseEasing(easing: *const nsAString,
     use style::properties::longhands::transition_timing_function;
 
     let url_data = unsafe { RefPtr::from_ptr_ref(&data) };
-    let reporter = NullReporter;
     let context = ParserContext::new(Origin::Author,
                                      url_data,
-                                     &reporter,
                                      Some(CssRuleType::Style),
                                      PARSING_MODE_DEFAULT,
                                      QuirksMode::NoQuirks);
@@ -2370,8 +2369,7 @@ pub extern "C" fn Servo_MediaList_SetText(list: RawServoMediaListBorrowed, text:
     let mut input = ParserInput::new(&text);
     let mut parser = Parser::new(&mut input);
     let url_data = unsafe { dummy_url_data() };
-    let reporter = NullReporter;
-    let context = ParserContext::new_for_cssom(url_data, &reporter, Some(CssRuleType::Media),
+    let context = ParserContext::new_for_cssom(url_data, Some(CssRuleType::Media),
                                                PARSING_MODE_DEFAULT,
                                                QuirksMode::NoQuirks);
      write_locked_arc(list, |list: &mut MediaList| {
@@ -2402,8 +2400,7 @@ pub extern "C" fn Servo_MediaList_AppendMedium(list: RawServoMediaListBorrowed,
                                                new_medium: *const nsACString) {
     let new_medium = unsafe { new_medium.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { dummy_url_data() };
-    let reporter = NullReporter;
-    let context = ParserContext::new_for_cssom(url_data, &reporter, Some(CssRuleType::Media),
+    let context = ParserContext::new_for_cssom(url_data, Some(CssRuleType::Media),
                                                PARSING_MODE_DEFAULT,
                                                QuirksMode::NoQuirks);
     write_locked_arc(list, |list: &mut MediaList| {
@@ -2416,8 +2413,7 @@ pub extern "C" fn Servo_MediaList_DeleteMedium(list: RawServoMediaListBorrowed,
                                                old_medium: *const nsACString) -> bool {
     let old_medium = unsafe { old_medium.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { dummy_url_data() };
-    let reporter = NullReporter;
-    let context = ParserContext::new_for_cssom(url_data, &reporter, Some(CssRuleType::Media),
+    let context = ParserContext::new_for_cssom(url_data, Some(CssRuleType::Media),
                                                PARSING_MODE_DEFAULT,
                                                QuirksMode::NoQuirks);
     write_locked_arc(list, |list: &mut MediaList| list.delete_medium(&context, old_medium))
@@ -2783,8 +2779,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetBackgroundImage(declarations:
 
     let url_data = unsafe { RefPtr::from_ptr_ref(&raw_extra_data) };
     let string = unsafe { (*value).to_string() };
-    let error_reporter = NullReporter;
-    let context = ParserContext::new(Origin::Author, url_data, &error_reporter,
+    let context = ParserContext::new(Origin::Author, url_data,
                                      Some(CssRuleType::Style), PARSING_MODE_DEFAULT,
                                      QuirksMode::NoQuirks);
     if let Ok(mut url) = SpecifiedUrl::parse_from_string(string.into(), &context) {
@@ -2837,13 +2832,11 @@ pub extern "C" fn Servo_CSSSupports(cond: *const nsACString) -> bool {
     let cond = input.parse_entirely(|i| parse_condition_or_declaration(i));
     if let Ok(cond) = cond {
         let url_data = unsafe { dummy_url_data() };
-        let reporter = NullReporter;
         // NOTE(emilio): The supports API is not associated to any stylesheet,
         // so the fact that there are no namespace map here is fine.
         let context =
             ParserContext::new_for_cssom(
                 url_data,
-                &reporter,
                 Some(CssRuleType::Style),
                 PARSING_MODE_DEFAULT,
                 QuirksMode::NoQuirks,
@@ -2935,8 +2928,9 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
     let doc_data = PerDocumentStyleData::from_ffi(raw_data);
     let data = doc_data.borrow();
     let rule_inclusion = RuleInclusion::from(rule_inclusion);
-    let finish = |styles: &ElementStyles| -> Arc<ComputedValues> {
-        match PseudoElement::from_pseudo_type(pseudo_type) {
+    let pseudo = PseudoElement::from_pseudo_type(pseudo_type);
+    let finish = |styles: &ElementStyles, is_probe: bool| -> Option<Arc<ComputedValues>> {
+        match pseudo {
             Some(ref pseudo) => {
                 get_pseudo_style(
                     &guard,
@@ -2946,22 +2940,27 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
                     styles,
                     /* inherited_styles = */ None,
                     &*data,
-                    /* is_probe = */ false,
-                ).expect("We're not probing, so we should always get a style \
-                         back")
+                    is_probe,
+                )
             }
-            None => styles.primary().clone(),
+            None => Some(styles.primary().clone()),
         }
     };
+
+    let is_before_or_after = pseudo.as_ref().map_or(false, |p| p.is_before_or_after());
 
     // In the common case we already have the style. Check that before setting
     // up all the computation machinery. (Don't use it when we're getting
     // default styles or in a bfcached document (as indicated by
     // ignore_existing_styles), though.)
+    //
+    // Also, only probe in the ::before or ::after case, since their styles may
+    // not be in the `ElementData`, given they may exist but not be applicable
+    // to generate an actual pseudo-element (like, having a `content: none`).
     if rule_inclusion == RuleInclusion::All && !ignore_existing_styles {
         let styles = element.mutate_data().and_then(|d| {
             if d.has_styles() {
-                Some(finish(&d.styles))
+                finish(&d.styles, is_before_or_after)
             } else {
                 None
             }
@@ -2983,8 +2982,17 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
         thread_local: &mut tlc,
     };
 
-    let styles = resolve_style(&mut context, element, rule_inclusion, ignore_existing_styles);
-    finish(&styles).into()
+    let styles = resolve_style(
+        &mut context,
+        element,
+        rule_inclusion,
+        ignore_existing_styles,
+        pseudo.as_ref()
+    );
+
+    finish(&styles, /* is_probe = */ false)
+        .expect("We're not probing, so we should always get a style back")
+        .into()
 }
 
 #[no_mangle]
@@ -3297,6 +3305,9 @@ pub extern "C" fn Servo_AssertTreeIsClean(root: RawGeckoElementBorrowed) {
     }
 
     let root = GeckoElement(root);
+    debug!("Servo_AssertTreeIsClean: ");
+    debug!("{:?}", ShowSubtreeData(root.as_node()));
+
     fn assert_subtree_is_clean<'le>(el: GeckoElement<'le>) {
         debug_assert!(!el.has_dirty_descendants() && !el.has_animation_only_dirty_descendants(),
                       "{:?} has still dirty bit {:?} or animation-only dirty bit {:?}",
@@ -3523,6 +3534,30 @@ pub extern "C" fn Servo_StyleSet_GetCounterStyleRule(raw_data: RawServoStyleSetB
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_StyleSet_BuildFontFeatureValueSet(
+  raw_data: RawServoStyleSetBorrowed,
+  set: *mut gfxFontFeatureValueSet
+) -> bool {
+    let data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+
+    let font_feature_values_iter = data.extra_style_data
+        .iter_origins_rev()
+        .flat_map(|(d, _)| d.font_feature_values.iter());
+
+    let mut any_rule = false;
+    for src in font_feature_values_iter {
+        any_rule = true;
+        let rule = src.read_with(&guard);
+        rule.set_at_rules(set);
+    }
+
+    any_rule
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_StyleSet_ResolveForDeclarations(
     raw_data: RawServoStyleSetBorrowed,
     parent_style_context: ServoStyleContextBorrowedOrNull,
@@ -3545,6 +3580,18 @@ pub extern "C" fn Servo_StyleSet_ResolveForDeclarations(
         parent_style,
         declarations.clone_arc(),
     ).into()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleSet_AddSizeOfExcludingThis(
+    malloc_size_of: GeckoMallocSizeOf,
+    sizes: *mut ServoStyleSetSizes,
+    raw_data: RawServoStyleSetBorrowed
+) {
+    let data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
+    let malloc_size_of = malloc_size_of.unwrap();
+    let sizes = unsafe { sizes.as_mut() }.unwrap();
+    data.malloc_add_size_of_children(malloc_size_of, sizes);
 }
 
 #[no_mangle]
@@ -3645,4 +3692,32 @@ pub extern "C" fn Servo_GetCustomPropertyNameAt(computed_values: ServoStyleConte
     name.assign(&*property_name.as_slice());
 
     true
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_ProcessInvalidations(set: RawServoStyleSetBorrowed,
+                                             element: RawGeckoElementBorrowed,
+                                             snapshots: *const ServoElementSnapshotTable) {
+    debug_assert!(!snapshots.is_null());
+
+    let element = GeckoElement(element);
+    debug_assert!(element.has_snapshot());
+    debug_assert!(!element.handled_snapshot());
+
+    let mut data = element.mutate_data();
+    debug_assert!(data.is_some());
+
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    let per_doc_data = PerDocumentStyleData::from_ffi(set).borrow();
+    let shared_style_context = create_shared_context(&global_style_data,
+                                                     &guard,
+                                                     &per_doc_data,
+                                                     TraversalFlags::empty(),
+                                                     unsafe { &*snapshots });
+    let mut data = data.as_mut().map(|d| &mut **d);
+
+    if let Some(ref mut data) = data {
+        data.invalidate_style_if_needed(element, &shared_style_context, None);
+    }
 }

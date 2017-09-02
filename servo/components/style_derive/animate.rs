@@ -2,70 +2,77 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use quote;
-use std::borrow::Cow;
-use syn;
-use synstructure;
+use cg;
+use quote::Tokens;
+use syn::{DeriveInput, Path};
 
-pub fn derive(input: syn::DeriveInput) -> quote::Tokens {
+pub fn derive(input: DeriveInput) -> Tokens {
     let name = &input.ident;
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    let mut where_clause = where_clause.clone();
-    for param in &input.generics.ty_params {
-        where_clause.predicates.push(where_predicate(syn::Ty::Path(None, param.ident.clone().into())))
-    }
+    let trait_path = &["values", "animated", "Animate"];
+    let (impl_generics, ty_generics, mut where_clause) =
+        cg::trait_parts(&input, trait_path);
 
-    let variants = variants(&input);
+    let input_attrs = cg::parse_input_attrs::<AnimateInputAttrs>(&input);
+    let variants = cg::variants(&input);
     let mut match_body = quote!();
-    match_body.append_all(variants.iter().map(|variant| {
-        let name = match input.body {
-            syn::Body::Struct(_) => Cow::Borrowed(&input.ident),
-            syn::Body::Enum(_) => {
-                Cow::Owned(syn::Ident::from(format!("{}::{}", input.ident, variant.ident)))
-            },
-        };
-        let (this_pattern, this_info) = synstructure::match_pattern(
-            &name,
-            &variant.data,
-            &synstructure::BindOpts::with_prefix(
-                synstructure::BindStyle::Ref,
-                "this".to_owned(),
-            ),
-        );
-        let (other_pattern, other_info) = synstructure::match_pattern(
-            &name,
-            &variant.data,
-            &synstructure::BindOpts::with_prefix(
-                synstructure::BindStyle::Ref,
-                "other".to_owned(),
-            ),
-        );
-        let (result_value, result_info) = synstructure::match_pattern(
-            &name,
-            &variant.data,
-            &synstructure::BindOpts::with_prefix(
-                synstructure::BindStyle::Move,
-                "result".to_owned(),
-            ),
-        );
+    let mut append_error_clause = variants.len() > 1;
+    match_body.append_all(variants.iter().flat_map(|variant| {
+        let variant_attrs = cg::parse_variant_attrs::<AnimationVariantAttrs>(variant);
+        if variant_attrs.error {
+            append_error_clause = true;
+            return None;
+        }
+        let name = cg::variant_ctor(&input, variant);
+        let (this_pattern, this_info) = cg::ref_pattern(&name, variant, "this");
+        let (other_pattern, other_info) = cg::ref_pattern(&name, variant, "other");
+        let (result_value, result_info) = cg::value(&name, variant, "result");
         let mut computations = quote!();
         let iter = result_info.iter().zip(this_info.iter().zip(&other_info));
         computations.append_all(iter.map(|(result, (this, other))| {
-            where_clause.predicates.push(where_predicate(this.field.ty.clone()));
-            quote! {
-                let #result = ::values::animated::Animate::animate(#this, #other, procedure)?;
+            let field_attrs = cg::parse_field_attrs::<AnimationFieldAttrs>(&result.field);
+            if field_attrs.constant {
+                if cg::is_parameterized(&result.field.ty, where_clause.params, None) {
+                    where_clause.inner.predicates.push(cg::where_predicate(
+                        result.field.ty.clone(),
+                        &["std", "cmp", "PartialEq"],
+                        None,
+                    ));
+                    where_clause.inner.predicates.push(cg::where_predicate(
+                        result.field.ty.clone(),
+                        &["std", "clone", "Clone"],
+                        None,
+                    ));
+                }
+                quote! {
+                    if #this != #other {
+                        return Err(());
+                    }
+                    let #result = ::std::clone::Clone::clone(#this);
+                }
+            } else {
+                where_clause.add_trait_bound(&result.field.ty);
+                quote! {
+                    let #result =
+                        ::values::animated::Animate::animate(#this, #other, procedure)?;
+                }
             }
         }));
-        quote! {
+        Some(quote! {
             (&#this_pattern, &#other_pattern) => {
                 #computations
                 Ok(#result_value)
             }
-        }
+        })
     }));
 
-    if variants.len() > 1 {
-        match_body = quote! { #match_body, _ => Err(()), };
+    if append_error_clause {
+        if let Some(fallback) = input_attrs.fallback {
+            match_body.append(quote! {
+                (this, other) => #fallback(this, other, procedure)
+            });
+        } else {
+            match_body.append(quote! { _ => Err(()) });
+        }
     }
 
     quote! {
@@ -85,39 +92,20 @@ pub fn derive(input: syn::DeriveInput) -> quote::Tokens {
     }
 }
 
-fn variants(input: &syn::DeriveInput) -> Cow<[syn::Variant]> {
-    match input.body {
-        syn::Body::Enum(ref variants) => (&**variants).into(),
-        syn::Body::Struct(ref data) => {
-            vec![syn::Variant {
-                ident: input.ident.clone(),
-                attrs: input.attrs.clone(),
-                data: data.clone(),
-                discriminant: None,
-            }].into()
-        },
-    }
+#[darling(attributes(animate), default)]
+#[derive(Default, FromDeriveInput)]
+struct AnimateInputAttrs {
+    fallback: Option<Path>,
 }
 
-fn where_predicate(ty: syn::Ty) -> syn::WherePredicate {
-    syn::WherePredicate::BoundPredicate(
-        syn::WhereBoundPredicate {
-            bound_lifetimes: vec![],
-            bounded_ty: ty,
-            bounds: vec![syn::TyParamBound::Trait(
-                syn::PolyTraitRef {
-                    bound_lifetimes: vec![],
-                    trait_ref: syn::Path {
-                        global: true,
-                        segments: vec![
-                            "values".into(),
-                            "animated".into(),
-                            "Animate".into(),
-                        ],
-                    },
-                },
-                syn::TraitBoundModifier::None,
-            )],
-        },
-    )
+#[darling(attributes(animation), default)]
+#[derive(Default, FromVariant)]
+pub struct AnimationVariantAttrs {
+    pub error: bool,
+}
+
+#[darling(attributes(animation), default)]
+#[derive(Default, FromField)]
+pub struct AnimationFieldAttrs {
+    pub constant: bool,
 }

@@ -62,6 +62,52 @@
   padding: 0 12px;
 }
 
+:root[sessionrestored] .tab-loading-burst {
+  position: relative;
+  overflow: hidden;
+}
+
+:root[sessionrestored] .tab-loading-burst::before {
+  position: absolute;
+  content: "";
+  /* We set the width to be a percentage of the tab's width so that we can use
+     the `scale` transform to scale it up to the full size of the tab when the
+     burst occurs. We also need to set the margin-inline-start so that the
+     center of the burst matches the center of the favicon. */
+  width: 5%;
+  height: 100%;
+  /* Center the burst over the .tab-loading-burst; it's 9px from the edge thanks
+     to .tab-content, plus 8px more since .tab-loading-burst is 16px wide. */
+  margin-inline-start: calc(17px - 2.5%);
+}
+
+:root[sessionrestored] .tab-loading-burst[pinned]::before {
+  /* This is like the margin-inline-start rule above, except that icons for
+     pinned tabs are 12px from the edge. */
+  margin-inline-start: calc(20px - 2.5%);
+}
+
+:root[sessionrestored] .tab-loading-burst[bursting]::before {
+  background-image: url("chrome://browser/skin/tabbrowser/loading-burst.svg");
+  background-position: center center;
+  background-size: 100% auto;
+  background-repeat: no-repeat;
+  animation: tab-burst-animation 375ms cubic-bezier(0,0,.58,1);
+  -moz-context-properties: fill;
+  fill: var(--tab-loading-fill);
+}
+
+@keyframes tab-burst-animation {
+  0% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(40);
+  }
+}
+
 .tab-throbber,
 .tab-icon-image,
 .tab-sharing-icon-overlay,
@@ -98,8 +144,16 @@
   opacity: 0.7;
 }
 
+:root[sessionrestored] .tab-throbber[busy]:-moz-locale-dir(rtl)::before {
+  animation-name: tab-throbber-animation-rtl;
+}
+
 @keyframes tab-throbber-animation {
   100% { transform: translateX(-100%); }
+}
+
+@keyframes tab-throbber-animation-rtl {
+  100% { transform: translateX(100%); }
 }
 
 :root[sessionrestored] .tab-throbber[progress]::before {
@@ -116,7 +170,7 @@
 .tab-throbber:not([pinned]),
 .tab-sharing-icon-overlay:not([pinned]),
 .tab-icon-image:not([pinned]) {
-  margin-inline-end: -16px;
+  margin-inline-end: 6px;
 }
 
 .tab-icon-image {
@@ -131,14 +185,6 @@
 .tab-icon-image[sharing]:not([selected]),
 .tab-sharing-icon-overlay {
   animation: 3s linear tab-sharing-icon-pulse infinite;
-}
-
-.tab-label-container {
-  padding-inline-start: 22px;
-}
-
-.tab-icon-image:not([src]):not([busy]):not([pinned]) ~ .tab-label-container {
-  padding-inline-start: 0;
 }
 
 /* This should remain identical to identity-box-sharing-icon-pulse in identity-block.inc.css */
@@ -296,9 +342,14 @@
 /* Tab Overflow */
 .tabbrowser-arrowscrollbox > .arrowscrollbox-overflow-start-indicator:not([collapsed]),
 .tabbrowser-arrowscrollbox > .arrowscrollbox-overflow-end-indicator:not([collapsed]) {
+  width: 18px;
   background-image: url(chrome://browser/skin/tabbrowser/tab-overflow-indicator.png);
-  background-size: 100% 100%;
-  width: 19px;
+  background-size: 17px 100%;
+  border-left: 1px solid;
+  border-image: linear-gradient(rgba(255,255,255,.2),
+                                rgba(255,255,255,.2) calc(100% - 1px - var(--tab-toolbar-navbar-overlap)),
+                                transparent calc(100% - 1px - var(--tab-toolbar-navbar-overlap)));
+  border-image-slice: 1;
   pointer-events: none;
   position: relative;
   z-index: 3; /* the selected tab's z-index + 1 */
@@ -310,13 +361,13 @@
 }
 
 .tabbrowser-arrowscrollbox > .arrowscrollbox-overflow-start-indicator:not([collapsed]) {
-  margin-inline-start: -2px;
+  margin-inline-start: -1px;
   margin-inline-end: -17px;
 }
 
 .tabbrowser-arrowscrollbox > .arrowscrollbox-overflow-end-indicator:not([collapsed]) {
   margin-inline-start: -17px;
-  margin-inline-end: -2px;
+  margin-inline-end: -1px;
 }
 
 .tabbrowser-arrowscrollbox > .arrowscrollbox-overflow-start-indicator[collapsed],

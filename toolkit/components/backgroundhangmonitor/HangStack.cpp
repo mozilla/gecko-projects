@@ -227,6 +227,13 @@ ParamTraits<mozilla::HangStack>::Write(Message* aMsg, const mozilla::HangStack& 
         WriteParam(aMsg, frame.AsPC());
         break;
       }
+      case Frame::Kind::CONTENT:
+      case Frame::Kind::WASM:
+      case Frame::Kind::JIT:
+      case Frame::Kind::SUPPRESSED: {
+        // NOTE: no associated data.
+        break;
+      }
       default: {
         MOZ_RELEASE_ASSERT(false, "Invalid kind for HangStack Frame");
         break;
@@ -250,7 +257,10 @@ ParamTraits<mozilla::HangStack>::Read(const Message* aMsg,
     return false;
   }
 
-  aResult->reserve(length);
+  if (!aResult->reserve(length)) {
+    return false;
+  }
+
   for (size_t i = 0; i < length; ++i) {
     Frame::Kind kind;
     if (!ReadParam(aMsg, aIter, &kind)) {
@@ -282,6 +292,18 @@ ParamTraits<mozilla::HangStack>::Read(const Message* aMsg,
         aResult->infallibleAppend(Frame(pc));
         break;
       }
+      case Frame::Kind::CONTENT:
+        aResult->infallibleAppend(Frame::Content());
+        break;
+      case Frame::Kind::WASM:
+        aResult->infallibleAppend(Frame::Wasm());
+        break;
+      case Frame::Kind::JIT:
+        aResult->infallibleAppend(Frame::Jit());
+        break;
+      case Frame::Kind::SUPPRESSED:
+        aResult->infallibleAppend(Frame::Suppressed());
+        break;
       default:
         // We can't deserialize other kinds!
         return false;

@@ -18,7 +18,6 @@
     use std::fmt;
     use style_traits::ToCss;
 
-    no_viewport_percentage!(SpecifiedValue);
 
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     #[derive(Clone, Debug, Eq, PartialEq, ToCss)]
@@ -38,7 +37,7 @@
     pub mod computed_value {
         pub use super::Side;
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T {
             // When the specified value only has one side, that's the "second"
@@ -150,7 +149,6 @@ ${helpers.single_keyword("unicode-bidi",
     use values::computed::ComputedValueAsSpecified;
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     bitflags! {
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]

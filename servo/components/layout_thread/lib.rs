@@ -127,6 +127,7 @@ use style::context::{StyleSystemOptions, ThreadLocalStyleContextCreationInfo};
 use style::context::RegisteredSpeculativePainter;
 use style::context::RegisteredSpeculativePainters;
 use style::dom::{ShowSubtree, ShowSubtreeDataAndPrimaryValues, TElement, TNode};
+use style::driver;
 use style::error_reporting::{NullReporter, RustLogReporter};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::logical_geometry::LogicalPoint;
@@ -139,7 +140,7 @@ use style::stylesheets::{Origin, OriginSet, Stylesheet, DocumentStyleSheet, Styl
 use style::stylist::Stylist;
 use style::thread_state;
 use style::timer::Timer;
-use style::traversal::{DomTraversal, TraversalDriver};
+use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 use style_traits::CSSPixel;
 use style_traits::DevicePixel;
@@ -259,9 +260,6 @@ pub struct LayoutThread {
     // Number of layout threads. This is copied from `servo_config::opts`, but we'd
     // rather limit the dependency on that module here.
     layout_threads: usize,
-
-    /// Which quirks mode are we rendering the document in?
-    quirks_mode: Option<QuirksMode>,
 
     /// Paint time metrics.
     paint_time_metrics: PaintTimeMetrics,
@@ -543,7 +541,6 @@ impl LayoutThread {
                     Timer::new()
                 },
             layout_threads: layout_threads,
-            quirks_mode: None,
             paint_time_metrics: paint_time_metrics,
         }
     }
@@ -582,7 +579,6 @@ impl LayoutThread {
                 registered_speculative_painters: &self.registered_painters,
                 local_context_creation_data: Mutex::new(thread_local_style_context_creation_data),
                 timer: self.timer.clone(),
-                quirks_mode: self.quirks_mode.unwrap(),
                 traversal_flags: TraversalFlags::empty(),
                 snapshot_map: snapshot_map,
             },
@@ -1068,7 +1064,6 @@ impl LayoutThread {
                              possibly_locked_rw_data: &mut RwData<'a, 'b>) {
         let document = unsafe { ServoLayoutNode::new(&data.document) };
         let document = document.as_document().unwrap();
-        self.quirks_mode = Some(document.quirks_mode());
 
         // FIXME(pcwalton): Combine `ReflowGoal` and `ReflowQueryType`. Then remove this assert.
         debug_assert!((data.reflow_info.goal == ReflowGoal::ForDisplay &&
@@ -1148,6 +1143,7 @@ impl LayoutThread {
         let document_shared_lock = document.style_shared_lock();
         self.document_shared_lock = Some(document_shared_lock.clone());
         let author_guard = document_shared_lock.read();
+        let had_used_viewport_units = self.stylist.device().used_viewport_units();
         let device = Device::new(MediaType::screen(), initial_viewport, device_pixel_ratio);
         let sheet_origins_affected_by_device_change =
             self.stylist.set_device(device, &author_guard);
@@ -1170,28 +1166,9 @@ impl LayoutThread {
                        .send(ConstellationMsg::ViewportConstrained(self.id, constraints.clone()))
                        .unwrap();
             }
-            if self.stylist.iter_stylesheets().any(|sheet| sheet.0.dirty_on_viewport_size_change()) {
-                let mut iter = element.as_node().traverse_preorder();
-
-                let mut next = iter.next();
-                while let Some(node) = next {
-                    if node.needs_dirty_on_viewport_size_changed() {
-                        let el = node.as_element().unwrap();
-                        if let Some(mut d) = element.mutate_data() {
-                            if d.has_styles() {
-                                // FIXME(emilio): This only needs to recascade,
-                                // afaict.
-                                d.restyle.hint.insert(RestyleHint::restyle_subtree());
-                            }
-                        }
-                        if let Some(p) = el.parent_element() {
-                            unsafe { p.note_dirty_descendant() };
-                        }
-
-                        next = iter.next_skipping_children();
-                    } else {
-                        next = iter.next();
-                    }
+            if had_used_viewport_units {
+                if let Some(mut data) = element.mutate_data() {
+                    data.restyle.hint.insert(RestyleHint::recascade_subtree());
                 }
             }
         }
@@ -1282,14 +1259,14 @@ impl LayoutThread {
         let mut layout_context =
             self.build_layout_context(guards.clone(), true, &map);
 
-        // NB: Type inference falls apart here for some reason, so we need to be very verbose. :-(
-        let traversal_driver = if self.parallel_flag && self.parallel_traversal.is_some() {
-            TraversalDriver::Parallel
+        let thread_pool = if self.parallel_flag {
+            self.parallel_traversal.as_ref()
         } else {
-            TraversalDriver::Sequential
+            None
         };
 
-        let traversal = RecalcStyleAndConstructFlows::new(layout_context, traversal_driver);
+        // NB: Type inference falls apart here for some reason, so we need to be very verbose. :-(
+        let traversal = RecalcStyleAndConstructFlows::new(layout_context);
         let token = {
             let context = <RecalcStyleAndConstructFlows as
                            DomTraversal<ServoLayoutElement>>::shared_context(&traversal);
@@ -1306,16 +1283,8 @@ impl LayoutThread {
                     self.time_profiler_chan.clone(),
                     || {
                 // Perform CSS selector matching and flow construction.
-                if traversal_driver.is_parallel() {
-                    let pool = self.parallel_traversal.as_ref().unwrap();
-                    // Parallel mode
-                    parallel::traverse_dom::<ServoLayoutElement, RecalcStyleAndConstructFlows>(
-                        &traversal, element, token, pool);
-                } else {
-                    // Sequential mode
-                    sequential::traverse_dom::<ServoLayoutElement, RecalcStyleAndConstructFlows>(
-                        &traversal, element, token);
-                }
+                driver::traverse_dom::<ServoLayoutElement, RecalcStyleAndConstructFlows>(
+                    &traversal, element, token, thread_pool);
             });
             // TODO(pcwalton): Measure energy usage of text shaping, perhaps?
             let text_shaping_time =

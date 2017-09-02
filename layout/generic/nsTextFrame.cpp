@@ -4861,7 +4861,12 @@ nsTextFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
   }
 
   int32_t endOfChangedText = aInfo->mChangeStart + aInfo->mReplaceLength;
-  nsTextFrame* lastDirtiedFrame = nullptr;
+
+  // Parent of the last frame that we passed to FrameNeedsReflow (or noticed
+  // had already received an earlier FrameNeedsReflow call).
+  // (For subsequent frames with this same parent, we can just set their
+  // dirty bit without bothering to call FrameNeedsReflow again.)
+  nsIFrame* lastDirtiedFrameParent = nullptr;
 
   nsIPresShell* shell = PresContext()->GetPresShell();
   do {
@@ -4869,17 +4874,39 @@ nsTextFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
     // if this was a pure insertion).
     textFrame->mState &= ~TEXT_WHITESPACE_FLAGS;
     textFrame->ClearTextRuns();
-    if (!lastDirtiedFrame ||
-        lastDirtiedFrame->GetParent() != textFrame->GetParent()) {
-      // Ask the parent frame to reflow me.
-      shell->FrameNeedsReflow(textFrame, nsIPresShell::eStyleChange,
-                              NS_FRAME_IS_DIRTY);
-      lastDirtiedFrame = textFrame;
+
+    nsIFrame* parentOfTextFrame = textFrame->GetParent();
+    bool areAncestorsAwareOfReflowRequest = false;
+    if (lastDirtiedFrameParent == parentOfTextFrame) {
+      // An earlier iteration of this loop already called
+      // FrameNeedsReflow for a sibling of |textFrame|.
+      areAncestorsAwareOfReflowRequest = true;
     } else {
-      // if the parent is a block, we're cheating here because we should
-      // be marking our line dirty, but we're not. nsTextFrame::SetLength
-      // will do that when it gets called during reflow.
-      textFrame->AddStateBits(NS_FRAME_IS_DIRTY);
+      lastDirtiedFrameParent = parentOfTextFrame;
+    }
+
+    if (textFrame->mReflowRequestedForCharDataChange) {
+      // We already requested a reflow for this frame; nothing to do.
+      MOZ_ASSERT(textFrame->HasAnyStateBits(NS_FRAME_IS_DIRTY),
+                 "mReflowRequestedForCharDataChange should only be set "
+                 "on dirty frames");
+    } else {
+      // Make sure textFrame is queued up for a reflow.  Also set a flag so we
+      // don't waste time doing this again in repeated calls to this method.
+      textFrame->mReflowRequestedForCharDataChange = true;
+      if (!areAncestorsAwareOfReflowRequest) {
+        // Ask the parent frame to reflow me.
+        shell->FrameNeedsReflow(textFrame, nsIPresShell::eStyleChange,
+                                NS_FRAME_IS_DIRTY);
+      } else {
+        // We already called FrameNeedsReflow on behalf of an earlier sibling,
+        // so we can just mark this frame as dirty and don't need to bother
+        // telling its ancestors.
+        // Note: if the parent is a block, we're cheating here because we should
+        // be marking our line dirty, but we're not. nsTextFrame::SetLength will
+        // do that when it gets called during reflow.
+        textFrame->AddStateBits(NS_FRAME_IS_DIRTY);
+      }
     }
     textFrame->InvalidateFrame();
 
@@ -5268,8 +5295,14 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
   }
 
   for (const mozilla::layout::TextRunFragment& text: mTextDrawer->GetText()) {
+    // mOpacity is set after we do our analysis, so we need to apply it here.
+    // mOpacity is only non-trivial when we have "pure" text, so we don't
+    // ever need to apply it to shadows or decorations.
+    auto color = text.color;
+    color.a *= mOpacity;
+
     aManager->WrBridge()->PushGlyphs(aBuilder, text.glyphs, text.font,
-                                     text.color, aSc, boundsRect, clipRect);
+                                     color, aSc, boundsRect, clipRect);
   }
 
   for (const wr::Line& decoration: mTextDrawer->GetAfterDecorations()) {
@@ -5315,7 +5348,11 @@ nsDisplayText::BuildLayer(nsDisplayListBuilder* aBuilder,
 
     GlyphArray* glyphs = allGlyphs.AppendElement();
     glyphs->glyphs() = text.glyphs;
-    glyphs->color() = text.color;
+
+    // Apply folded alpha (only applies to glyphs)
+    auto color = text.color;
+    color.a *= mOpacity;
+    glyphs->color() = color;
   }
 
   MOZ_ASSERT(font);
@@ -6022,15 +6059,14 @@ nsTextFrame::ComputeDescentLimitForSelectionUnderline(
   return aFontMetrics.maxDescent + (lineHeight - aFontMetrics.maxHeight) / 2;
 }
 
-
 // Make sure this stays in sync with DrawSelectionDecorations below
-static const RawSelectionType kRawSelectionTypesWithDecorations =
-  nsISelectionController::SELECTION_SPELLCHECK |
-  nsISelectionController::SELECTION_URLSTRIKEOUT |
-  nsISelectionController::SELECTION_IME_RAWINPUT |
-  nsISelectionController::SELECTION_IME_SELECTEDRAWTEXT |
-  nsISelectionController::SELECTION_IME_CONVERTEDTEXT |
-  nsISelectionController::SELECTION_IME_SELECTEDCONVERTEDTEXT;
+static const SelectionTypeMask kSelectionTypesWithDecorations =
+  ToSelectionTypeMask(SelectionType::eSpellCheck) |
+  ToSelectionTypeMask(SelectionType::eURLStrikeout) |
+  ToSelectionTypeMask(SelectionType::eIMERawClause) |
+  ToSelectionTypeMask(SelectionType::eIMESelectedRawClause) |
+  ToSelectionTypeMask(SelectionType::eIMEConvertedClause) |
+  ToSelectionTypeMask(SelectionType::eIMESelectedClause);
 
 /* static */
 gfxFloat
@@ -6109,7 +6145,7 @@ nsTextFrame::PaintDecorationLine(const PaintDecorationLineParams& aParams)
 }
 
 /**
- * This, plus kRawSelectionTypesWithDecorations, encapsulates all knowledge
+ * This, plus kSelectionTypesWithDecorations, encapsulates all knowledge
  * about drawing text decoration for selections.
  */
 void
@@ -6557,7 +6593,7 @@ bool
 nsTextFrame::PaintTextWithSelectionColors(
     const PaintTextSelectionParams& aParams,
     const UniquePtr<SelectionDetails>& aDetails,
-    RawSelectionType* aAllRawSelectionTypes,
+    SelectionTypeMask* aAllSelectionTypeMask,
     const nsCharClipDisplayItem::ClipEdges& aClipEdges)
 {
   const gfxTextRun::Range& contentRange = aParams.contentRange;
@@ -6573,7 +6609,7 @@ nsTextFrame::PaintTextWithSelectionColors(
     return false;
   }
 
-  RawSelectionType allRawSelectionTypes = 0;
+  SelectionTypeMask allSelectionTypeMask = 0;
   for (uint32_t i = 0; i < contentRange.Length(); ++i) {
     prevailingSelections[i] = nullptr;
   }
@@ -6585,7 +6621,7 @@ nsTextFrame::PaintTextWithSelectionColors(
                            sdptr->mEnd - int32_t(contentRange.start));
     SelectionType selectionType = sdptr->mSelectionType;
     if (start < end) {
-      allRawSelectionTypes |= ToRawSelectionType(selectionType);
+      allSelectionTypeMask |= ToSelectionTypeMask(selectionType);
       // Ignore selections that don't set colors
       nscolor foreground, background;
       if (GetSelectionTextColors(selectionType, *aParams.textPaintStyle,
@@ -6604,9 +6640,9 @@ nsTextFrame::PaintTextWithSelectionColors(
       }
     }
   }
-  *aAllRawSelectionTypes = allRawSelectionTypes;
+  *aAllSelectionTypeMask = allSelectionTypeMask;
 
-  if (!allRawSelectionTypes) {
+  if (!allSelectionTypeMask) {
     // Nothing is selected in the given text range. XXX can this still occur?
     return false;
   }
@@ -6835,8 +6871,8 @@ nsTextFrame::PaintTextWithSelection(
     return false;
   }
 
-  RawSelectionType allRawSelectionTypes;
-  if (!PaintTextWithSelectionColors(aParams, details, &allRawSelectionTypes,
+  SelectionTypeMask allSelectionTypeMask;
+  if (!PaintTextWithSelectionColors(aParams, details, &allSelectionTypeMask,
                                     aClipEdges)) {
     return false;
   }
@@ -6844,10 +6880,13 @@ nsTextFrame::PaintTextWithSelection(
   // and paint decorations for any that actually occur in this frame. Paint
   // higher-numbered selection rawSelectionTypes below lower-numered ones on the
   // general principal that lower-numbered selections are higher priority.
-  allRawSelectionTypes &= kRawSelectionTypesWithDecorations;
-  for (size_t i = kSelectionTypeCount - 1; i >= 1; --i) {
-    SelectionType selectionType = ToSelectionType(1 << (i - 1));
-    if (selectionType & allRawSelectionTypes) {
+  allSelectionTypeMask &= kSelectionTypesWithDecorations;
+  MOZ_ASSERT(kPresentSelectionTypes[0] == SelectionType::eNormal,
+             "The following for loop assumes that the first item of "
+             "kPresentSelectionTypes is SelectionType::eNormal");
+  for (size_t i = ArrayLength(kPresentSelectionTypes) - 1; i >= 1; --i) {
+    SelectionType selectionType = kPresentSelectionTypes[i];
+    if (ToSelectionTypeMask(selectionType) & allSelectionTypeMask) {
       // There is some selection of this selectionType. Try to paint its
       // decorations (there might not be any for this type but that's OK,
       // PaintTextSelectionDecorations will exit early).
@@ -7738,7 +7777,9 @@ nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
   UniquePtr<SelectionDetails> details = GetSelectionDetails();
   for (SelectionDetails* sd = details.get(); sd; sd = sd->mNext.get()) {
     if (sd->mStart == sd->mEnd ||
-        !(sd->mSelectionType & kRawSelectionTypesWithDecorations) ||
+        sd->mSelectionType == SelectionType::eInvalid ||
+        !(ToSelectionTypeMask(sd->mSelectionType) &
+            kSelectionTypesWithDecorations) ||
         // URL strikeout does not use underline.
         sd->mSelectionType == SelectionType::eURLStrikeout) {
       continue;
@@ -7816,7 +7857,7 @@ nsTextFrame::SetSelectedRange(uint32_t aStart, uint32_t aEnd, bool aSelected,
     // We may need to reflow to recompute the overflow area for
     // spellchecking or IME underline if their underline is thicker than
     // the normal decoration line.
-    if (aSelectionType & kRawSelectionTypesWithDecorations) {
+    if (ToSelectionTypeMask(aSelectionType) & kSelectionTypesWithDecorations) {
       bool didHaveOverflowingSelection =
         (f->GetStateBits() & TEXT_SELECTION_UNDERLINE_OVERFLOWED) != 0;
       nsRect r(nsPoint(0, 0), GetSize());
@@ -9373,8 +9414,10 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
 
   // Clear out the reflow state flags in mState. We also clear the whitespace
   // flags because this can change whether the frame maps whitespace-only text
-  // or not.
+  // or not. We also clear the flag that tracks whether we had a pending
+  // reflow request from CharacterDataChanged (since we're reflowing now).
   RemoveStateBits(TEXT_REFLOW_FLAGS | TEXT_WHITESPACE_FLAGS);
+  mReflowRequestedForCharDataChange = false;
 
   // Temporarily map all possible content while we construct our new textrun.
   // so that when doing reflow our styles prevail over any part of the

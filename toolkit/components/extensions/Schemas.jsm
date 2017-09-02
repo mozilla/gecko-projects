@@ -128,7 +128,7 @@ async function readJSONAndBlobbify(url) {
  *        value.
  */
 function exportLazyGetter(object, prop, getter) {
-  object = Cu.waiveXrays(object);
+  object = ChromeUtils.waiveXrays(object);
 
   let redefine = value => {
     if (value === undefined) {
@@ -182,7 +182,7 @@ function exportLazyGetter(object, prop, getter) {
  *        undefined, which will cause the property to be deleted.
  */
 function exportLazyProperty(object, prop, getter) {
-  object = Cu.waiveXrays(object);
+  object = ChromeUtils.waiveXrays(object);
 
   let redefine = obj => {
     let desc = getter.call(obj);
@@ -244,21 +244,26 @@ function parsePattern(pattern) {
 }
 
 function getValueBaseType(value) {
-  let t = typeof(value);
-  if (t == "object") {
-    if (value === null) {
-      return "null";
-    } else if (Array.isArray(value)) {
-      return "array";
-    } else if (Object.prototype.toString.call(value) == "[object ArrayBuffer]") {
-      return "binary";
-    }
-  } else if (t == "number") {
-    if (value % 1 == 0) {
-      return "integer";
-    }
+  let type = typeof value;
+  switch (type) {
+    case "object":
+      if (value === null) {
+        return "null";
+      }
+      switch (ChromeUtils.getClassName(value, true)) {
+        case "Array":
+          return "array";
+        case "ArrayBuffer":
+          return "binary";
+      }
+      break;
+
+    case "number":
+      if (value % 1 === 0) {
+        return "integer";
+      }
   }
-  return t;
+  return type;
 }
 
 // Methods of Context that are used by Schemas.normalize. These methods can be
@@ -277,6 +282,15 @@ const CONTEXT_FOR_INJECTION = [
   "isPermissionRevokable",
   "shouldInject",
 ];
+
+// If the message is a function, call it and return the result.
+// Otherwise, assume it's a string.
+function forceString(msg) {
+  if (typeof msg === "function") {
+    return msg();
+  }
+  return msg;
+}
 
 /**
  * A context for schema validation and error reporting. This class is only used
@@ -387,10 +401,12 @@ class Context {
    * If the context has a `currentTarget` value, this is prepended to
    * the message to indicate the location of the error.
    *
-   * @param {string} errorMessage
+   * @param {string|function} errorMessage
    *        The error message which will be displayed when this is the
-   *        only possible matching schema.
-   * @param {string} choicesMessage
+   *        only possible matching schema. If a function is passed, it
+   *        will be evaluated when the error string is first needed, and
+   *        must return a string.
+   * @param {string|function} choicesMessage
    *        The message describing the valid what constitutes a valid
    *        value for this schema, which will be displayed when multiple
    *        schema choices are available and none match.
@@ -411,7 +427,8 @@ class Context {
     }
 
     if (this.currentTarget) {
-      return {error: `Error processing ${this.currentTarget}: ${errorMessage}`};
+      let {currentTarget} = this;
+      return {error: () => `Error processing ${currentTarget}: ${forceString(errorMessage)}`};
     }
     return {error: errorMessage};
   }
@@ -428,7 +445,7 @@ class Context {
    * @returns {Error}
    */
   makeError(message) {
-    let {error} = this.error(message);
+    let error = forceString(this.error(message).error);
     if (this.cloneScope) {
       return new this.cloneScope.Error(error);
     }
@@ -479,19 +496,23 @@ class Context {
     try {
       let result = callback();
 
-      return {result, choices: Array.from(choices)};
+      return {result, choices};
     } finally {
       this.currentChoices = currentChoices;
       this.choicePathIndex = choicePathIndex;
 
-      choices = Array.from(choices);
-      if (choices.length == 1) {
-        currentChoices.add(choices[0]);
-      } else if (choices.length) {
-        let n = choices.length - 1;
-        choices[n] = `or ${choices[n]}`;
+      if (choices.size == 1) {
+        for (let choice of choices) {
+          currentChoices.add(choice);
+        }
+      } else if (choices.size) {
+        this.error(null, () => {
+          let array = Array.from(choices, forceString);
+          let n = array.length - 1;
+          array[n] = `or ${array[n]}`;
 
-        this.error(null, `must either [${choices.join(", ")}]`);
+          return `must either [${array.join(", ")}]`;
+        });
       }
     }
   }
@@ -603,7 +624,7 @@ class InjectionEntry {
       }
 
       try {
-        let unwrapped = Cu.waiveXrays(this.parentObj);
+        let unwrapped = ChromeUtils.waiveXrays(this.parentObj);
         delete unwrapped[this.name];
       } catch (e) {
         Cu.reportError(e);
@@ -912,6 +933,19 @@ const FORMATS = {
     throw new SyntaxError(`String ${JSON.stringify(string)} must be a relative URL`);
   },
 
+  imageDataOrStrictRelativeUrl(string, context) {
+    // Do not accept a string which resolves as an absolute URL, or any
+    // protocol-relative URL, except PNG or JPG data URLs
+    if (!string.startsWith("data:image/png;base64,") && !string.startsWith("data:image/jpeg;base64,")) {
+      try {
+        return FORMATS.strictRelativeUrl(string, context);
+      } catch (e) {
+        throw new SyntaxError(`String ${JSON.stringify(string)} must be a relative or PNG or JPG data:image URL`);
+      }
+    }
+    return string;
+  },
+
   contentSecurityPolicy(string, context) {
     let error = contentPolicyService.validateAddonCSP(string);
     if (error != null) {
@@ -1166,13 +1200,13 @@ class Type extends Entry {
     }
 
     let choice;
-    if (/^[aeiou]/.test(type)) {
+    if ("aeiou".includes(type[0])) {
       choice = `be an ${type} value`;
     } else {
       choice = `be a ${type} value`;
     }
 
-    return context.error(`Expected ${type} instead of ${JSON.stringify(value)}`,
+    return context.error(() => `Expected ${type} instead of ${JSON.stringify(value)}`,
                          choice);
   }
 }
@@ -1231,18 +1265,19 @@ class ChoiceType extends Type {
     if (result) {
       return result;
     }
-    if (choices.length <= 1) {
+    if (choices.size <= 1) {
       return error;
     }
 
+    choices = Array.from(choices, forceString);
     let n = choices.length - 1;
     choices[n] = `or ${choices[n]}`;
 
     let message;
     if (typeof value === "object") {
-      message = `Value must either: ${choices.join(", ")}`;
+      message = () => `Value must either: ${choices.join(", ")}`;
     } else {
-      message = `Value ${JSON.stringify(value)} must either: ${choices.join(", ")}`;
+      message = () => `Value ${JSON.stringify(value)} must either: ${choices.join(", ")}`;
     }
 
     return context.error(message, null);
@@ -1368,21 +1403,21 @@ class StringType extends Type {
 
       let choices = this.enumeration.map(JSON.stringify).join(", ");
 
-      return context.error(`Invalid enumeration value ${JSON.stringify(value)}`,
+      return context.error(() => `Invalid enumeration value ${JSON.stringify(value)}`,
                            `be one of [${choices}]`);
     }
 
     if (value.length < this.minLength) {
-      return context.error(`String ${JSON.stringify(value)} is too short (must be ${this.minLength})`,
+      return context.error(() => `String ${JSON.stringify(value)} is too short (must be ${this.minLength})`,
                            `be longer than ${this.minLength}`);
     }
     if (value.length > this.maxLength) {
-      return context.error(`String ${JSON.stringify(value)} is too long (must be ${this.maxLength})`,
+      return context.error(() => `String ${JSON.stringify(value)} is too long (must be ${this.maxLength})`,
                            `be shorter than ${this.maxLength}`);
     }
 
     if (this.pattern && !this.pattern.test(value)) {
-      return context.error(`String ${JSON.stringify(value)} must match ${this.pattern}`,
+      return context.error(() => `String ${JSON.stringify(value)} must match ${this.pattern}`,
                            `match the pattern ${this.pattern.toSource()}`);
     }
 
@@ -1528,28 +1563,13 @@ class ObjectType extends Type {
     // Proxy). Then we copy the properties out of it into a normal
     // object using a waiver wrapper.
 
-    let klass = Cu.getClassName(value, true);
+    let klass = ChromeUtils.getClassName(value, true);
     if (klass != "Object") {
       throw context.error(`Expected a plain JavaScript object, got a ${klass}`,
                           `be a plain JavaScript object`);
     }
 
-    let properties = Object.create(null);
-
-    let waived = Cu.waiveXrays(value);
-    for (let prop of Object.getOwnPropertyNames(waived)) {
-      let desc = Object.getOwnPropertyDescriptor(waived, prop);
-      if (desc.get || desc.set) {
-        throw context.error("Objects cannot have getters or setters on properties",
-                            "contain no getter or setter properties");
-      }
-      // Chrome ignores non-enumerable properties.
-      if (desc.enumerable) {
-        properties[prop] = Cu.unwaiveXrays(desc.value);
-      }
-    }
-
-    return properties;
+    return ChromeUtils.shallowClone(value);
   }
 
   checkProperty(context, prop, propType, result, properties, remainingProps) {
@@ -1583,7 +1603,7 @@ class ObjectType extends Type {
 
     if (error) {
       if (onError == "warn") {
-        context.logError(error.error);
+        context.logError(forceString(error.error));
       } else if (onError != "ignore") {
         throw error;
       }
@@ -1808,7 +1828,7 @@ class ArrayType extends Type {
       element = context.withPath(String(i), () => this.itemType.normalize(element, context));
       if (element.error) {
         if (this.onError == "warn") {
-          context.logError(element.error);
+          context.logError(forceString(element.error));
         } else if (this.onError != "ignore") {
           return element;
         }
@@ -1962,7 +1982,7 @@ class TypeProperty extends Entry {
       let setStub = (value) => {
         let normalized = this.type.normalize(value, context);
         if (normalized.error) {
-          this.throwError(context, normalized.error);
+          this.throwError(context, forceString(normalized.error));
         }
 
         apiImpl.setProperty(normalized.value);
@@ -2036,7 +2056,7 @@ class SubModuleProperty extends Entry {
     return {
       descriptor: {value: obj},
       revoke() {
-        let unwrapped = Cu.waiveXrays(obj);
+        let unwrapped = ChromeUtils.waiveXrays(obj);
         for (let fun of functions) {
           try {
             delete unwrapped[fun.name];
@@ -2130,7 +2150,7 @@ class CallEntry extends Entry {
       let parameter = this.parameters[parameterIndex];
       let r = parameter.type.normalize(arg, context);
       if (r.error) {
-        this.throwError(context, `Type error for parameter ${parameter.name} (${r.error})`);
+        this.throwError(context, `Type error for parameter ${parameter.name} (${forceString(r.error)})`);
       }
       return r.value;
     });
@@ -2178,14 +2198,16 @@ FunctionEntry = class FunctionEntry extends CallEntry {
     if (optional && value == null) {
       return;
     }
-    if (type.reference === "ExtensionPanel" || type.reference === "Port") {
+    if (type.reference === "ExtensionPanel" ||
+        type.reference === "ExtensionSidebarPane" ||
+        type.reference === "Port") {
       // TODO: We currently treat objects with functions as SubModuleType,
       // which is just wrong, and a bigger yak.  Skipping for now.
       return;
     }
     const {error} = type.normalize(value, context);
     if (error) {
-      this.throwError(context, `Type error for ${name} value (${error})`);
+      this.throwError(context, `Type error for ${name} value (${forceString(error)})`);
     }
   }
 
@@ -2328,7 +2350,7 @@ Event = class Event extends CallEntry { // eslint-disable-line no-native-reassig
         apiImpl.revoke();
         apiImpl = null;
 
-        let unwrapped = Cu.waiveXrays(obj);
+        let unwrapped = ChromeUtils.waiveXrays(obj);
         delete unwrapped.addListener;
         delete unwrapped.removeListener;
         delete unwrapped.hasListener;
@@ -2881,6 +2903,10 @@ this.Schemas = {
     let ns = this.getNamespace(namespaceName);
     let type = ns.get(prop);
 
-    return type.normalize(obj, new Context(context));
+    let result = type.normalize(obj, new Context(context));
+    if (result.error) {
+      return {error: forceString(result.error)};
+    }
+    return result;
   },
 };

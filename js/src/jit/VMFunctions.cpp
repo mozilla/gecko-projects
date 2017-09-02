@@ -505,15 +505,20 @@ SetProperty(JSContext* cx, HandleObject obj, HandlePropertyName name, HandleValu
     RootedValue receiver(cx, ObjectValue(*obj));
     ObjectOpResult result;
     if (MOZ_LIKELY(!obj->getOpsSetProperty())) {
-        if (!NativeSetProperty(
-                cx, obj.as<NativeObject>(), id, value, receiver,
-                (op == JSOP_SETNAME || op == JSOP_STRICTSETNAME ||
-                 op == JSOP_SETGNAME || op == JSOP_STRICTSETGNAME)
-                ? Unqualified
-                : Qualified,
-                result))
+        if (op == JSOP_SETNAME || op == JSOP_STRICTSETNAME ||
+            op == JSOP_SETGNAME || op == JSOP_STRICTSETGNAME)
         {
-            return false;
+            if (!NativeSetProperty<Unqualified>(cx, obj.as<NativeObject>(), id, value, receiver,
+                                                result))
+            {
+                return false;
+            }
+        } else {
+            if (!NativeSetProperty<Qualified>(cx, obj.as<NativeObject>(), id, value, receiver,
+                                              result))
+            {
+                return false;
+            }
         }
     } else {
         if (!SetProperty(cx, obj, id, value, receiver, result))
@@ -1591,11 +1596,8 @@ GetNativeDataProperty(JSContext* cx, NativeObject* obj, jsid id, Value* vp)
 
         // Property not found. Watch out for Class hooks.
         if (MOZ_UNLIKELY(!obj->is<PlainObject>())) {
-            if (ClassMayResolveId(cx->names(), obj->getClass(), id, obj) ||
-                obj->getClass()->getGetProperty())
-            {
+            if (ClassMayResolveId(cx->names(), obj->getClass(), id, obj))
                 return false;
-            }
         }
 
         JSObject* proto = obj->staticPrototype();
@@ -1747,11 +1749,8 @@ ObjectHasGetterSetter(JSContext* cx, JSObject* objArg, Shape* propShape)
 
         // Property not found. Watch out for Class hooks.
         if (!nobj->is<PlainObject>()) {
-            if (ClassMayResolveId(cx->names(), nobj->getClass(), id, nobj) ||
-                nobj->getClass()->getGetProperty())
-            {
+            if (ClassMayResolveId(cx->names(), nobj->getClass(), id, nobj))
                 return false;
-            }
         }
 
         JSObject* proto = nobj->staticPrototype();

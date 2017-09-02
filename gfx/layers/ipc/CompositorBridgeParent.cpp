@@ -35,6 +35,7 @@
 #include "VRManager.h"                  // for VRManager
 #include "mozilla/ipc/Transport.h"      // for Transport
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/gfx/GPUParent.h"
 #include "mozilla/layers/AnimationHelper.h" // for CompositorAnimationStorage
 #include "mozilla/layers/APZCTreeManager.h"  // for APZCTreeManager
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
@@ -1697,7 +1698,7 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   RefPtr<widget::CompositorWidget> widget = mWidget;
   RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(this, Move(widget), aSize);
   if (!api) {
-    mWrBridge = WebRenderBridgeParent::CreateDestroyed();
+    mWrBridge = WebRenderBridgeParent::CreateDestroyed(aPipelineId);
     mWrBridge.get()->AddRef(); // IPDL reference
     *aIdNamespace = mWrBridge->GetIdNamespace();
     *aTextureFactoryIdentifier = TextureFactoryIdentifier(LayersBackend::LAYERS_NONE);
@@ -2117,6 +2118,13 @@ bool
 CompositorBridgeParent::IsSameProcess() const
 {
   return OtherPid() == base::GetCurrentProcId();
+}
+
+void
+CompositorBridgeParent::NotifyWebRenderError(wr::WebRenderError aError)
+{
+  MOZ_ASSERT(CompositorLoop() == MessageLoop::current());
+  Unused << SendNotifyWebRenderError(aError);
 }
 
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)

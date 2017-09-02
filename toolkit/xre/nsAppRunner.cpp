@@ -133,7 +133,7 @@
 #include "nsReadableUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMCIDInternal.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsPrintfCString.h"
 #include "nsVersionComparator.h"
 
@@ -629,7 +629,6 @@ ProcessDDE(nsINativeAppSupport* aNative, bool aWait)
   if (ar == ARG_FOUND) {
     aNative->Enable(); // enable win32 DDE responses
     if (aWait) {
-      nsIThread *thread = NS_GetCurrentThread();
       // This is just a guesstimate based on testing different values.
       // If count is 8 or less windows will display an error dialog.
       int32_t count = 20;
@@ -1103,17 +1102,6 @@ NS_IMETHODIMP
 nsXULAppInfo::GetDistributionID(nsACString& aResult)
 {
   aResult.AssignLiteral(MOZ_DISTRIBUTION_ID);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXULAppInfo::GetIsOfficial(bool* aResult)
-{
-#ifdef MOZILLA_OFFICIAL
-  *aResult = true;
-#else
-  *aResult = false;
-#endif
   return NS_OK;
 }
 
@@ -4456,6 +4444,7 @@ XREMain::XRE_mainRun()
       rv = GetCurrentProfile(mProfileSvc, mProfD, getter_AddRefs(newProfile));
       if (NS_SUCCEEDED(rv)) {
         newProfile->SetName(gResetOldProfileName);
+        mProfileName.Assign(gResetOldProfileName);
         // Set the new profile as the default after we're done cleaning up the old profile,
         // iff that profile was already the default
         if (profileWasSelected) {

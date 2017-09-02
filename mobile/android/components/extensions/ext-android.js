@@ -1,8 +1,5 @@
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(global, "EventEmitter",
-                                  "resource://gre/modules/EventEmitter.jsm");
-
 // This function is pretty tightly tied to Extension.jsm.
 // Its job is to fill in the |tab| property of the sender.
 const getSender = (extension, target, sender) => {
@@ -48,6 +45,25 @@ extensions.on("page-shutdown", (type, context) => {
 });
 /* eslint-enable mozilla/balanced-listeners */
 
+global.openOptionsPage = (extension) => {
+  let window = windowTracker.topWindow;
+  if (!window) {
+    return Promise.reject({message: "No browser window available"});
+  }
+
+  let {BrowserApp} = window;
+
+  if (extension.manifest.options_ui.open_in_tab) {
+    BrowserApp.selectOrAddTab(extension.manifest.options_ui.page, {
+      selected: true,
+      parentId: BrowserApp.selectedTab.id,
+    });
+  } else {
+    BrowserApp.openAddonManager({addonId: extension.id});
+  }
+
+  return Promise.resolve();
+};
 
 extensions.registerModules({
   browserAction: {

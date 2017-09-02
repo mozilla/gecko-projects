@@ -1837,6 +1837,12 @@ nsDocShell::MaybeResetInitTiming(bool aReset)
   }
 }
 
+nsDOMNavigationTiming*
+nsDocShell::GetNavigationTiming() const
+{
+  return mTiming;
+}
+
 //
 // Bug 13871: Prevent frameset spoofing
 //
@@ -9711,6 +9717,8 @@ public:
     // Make sure to keep null things null as needed
     if (aTypeHint) {
       mTypeHint = aTypeHint;
+    } else {
+      mTypeHint.SetIsVoid(true);
     }
   }
 
@@ -9722,7 +9730,9 @@ public:
                                    mReferrer,
                                    mReferrerPolicy,
                                    mTriggeringPrincipal, mPrincipalToInherit,
-                                   mFlags, EmptyString(), mTypeHint.get(),
+                                   mFlags, EmptyString(),
+                                   mTypeHint.IsVoid() ? nullptr
+                                                      : mTypeHint.get(),
                                    NullString(), mPostData, mHeadersData,
                                    mLoadType, mSHEntry, mFirstParty,
                                    mSrcdoc, mSourceDocShell, mBaseURI,
@@ -9730,8 +9740,7 @@ public:
   }
 
 private:
-  // Use IDL strings so .get() returns null by default
-  nsXPIDLCString mTypeHint;
+  nsCString mTypeHint;
   nsString mSrcdoc;
 
   RefPtr<nsDocShell> mDocShell;
@@ -9919,8 +9928,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     isTargetTopLevelDocShell = true;
   }
 
-  // If there's no targetDocShell, that means we are about to create a new window,
-  // perform a content policy check before creating the window.
+  // If there's no targetDocShell, that means we are about to create a new
+  // window (or aWindowTarget is empty). Perform a content policy check before
+  // creating the window.
   if (!targetDocShell) {
     nsCOMPtr<Element> requestingElement;
     nsISupports* requestingContext = nullptr;
@@ -10732,16 +10742,17 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   // mLSHE for the real page.
   if (mLoadType != LOAD_ERROR_PAGE) {
     SetHistoryEntry(&mLSHE, aSHEntry);
+    if (aSHEntry) {
+      // We're making history navigation or a reload. Make sure our history ID
+      // points to the same ID as SHEntry's docshell ID.
+      mHistoryID = aSHEntry->DocshellID();
+    }
   }
 
   mSavingOldViewer = savePresentation;
 
   // If we have a saved content viewer in history, restore and show it now.
   if (aSHEntry && (mLoadType & LOAD_CMD_HISTORY)) {
-    // Make sure our history ID points to the same ID as
-    // SHEntry's docshell ID.
-    mHistoryID = aSHEntry->DocshellID();
-
     // It's possible that the previous viewer of mContentViewer is the
     // viewer that will end up in aSHEntry when it gets closed.  If that's
     // the case, we need to go ahead and force it into its shentry so we
@@ -11711,14 +11722,6 @@ nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
     bool scroll = aLoadType != LOAD_HISTORY &&
                   aLoadType != LOAD_RELOAD_NORMAL;
 
-    char* str = ToNewCString(aNewHash);
-    if (!str) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    // nsUnescape modifies the string that is passed into it.
-    nsUnescape(str);
-
     // We assume that the bytes are in UTF-8, as it says in the
     // spec:
     // http://www.w3.org/TR/html4/appendix/notes.html#h-B.2.1
@@ -11729,12 +11732,11 @@ nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
     // In that case, we should just fall through to using the
     // page's charset.
     nsresult rv = NS_ERROR_FAILURE;
-    NS_ConvertUTF8toUTF16 uStr(str);
+    NS_ConvertUTF8toUTF16 uStr(aNewHash);
     if (!uStr.IsEmpty()) {
-      rv = shell->GoToAnchor(NS_ConvertUTF8toUTF16(str), scroll,
+      rv = shell->GoToAnchor(uStr, scroll,
                              nsIPresShell::SCROLL_SMOOTH_AUTO);
     }
-    free(str);
 
     // Above will fail if the anchor name is not UTF-8.  Need to
     // convert from document charset to unicode.
@@ -11964,12 +11966,16 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
     } else if (mOSHE) {
       mOSHE->SetCacheKey(cacheKey);
     }
+
+    // Since we're force-reloading, clear all the sub frame history.
+    ClearFrameHistory(mLSHE);
+    ClearFrameHistory(mOSHE);
   }
 
-  // Clear subframe history on refresh or reload.
+  // Clear subframe history on refresh.
   // XXX: history.go(0) won't go this path as aLoadType is LOAD_HISTORY in this
   // case. One should re-validate after bug 1331865 fixed.
-  if (aLoadType == LOAD_REFRESH || (aLoadType & LOAD_CMD_RELOAD)) {
+  if (aLoadType == LOAD_REFRESH) {
     ClearFrameHistory(mLSHE);
     ClearFrameHistory(mOSHE);
   }

@@ -373,8 +373,6 @@ public:
 
   mozilla::ipc::IPCResult RecvDeactivate();
 
-  mozilla::ipc::IPCResult RecvParentActivated(const bool& aActivated);
-
   virtual mozilla::ipc::IPCResult RecvMouseEvent(const nsString& aType,
                                                  const float& aX,
                                                  const float& aY,
@@ -482,7 +480,6 @@ public:
                                                    InfallibleTArray<CpowEntry>&& aCpows,
                                                    const IPC::Principal& aPrincipal,
                                                    const ClonedMessageData& aData) override;
-
   virtual mozilla::ipc::IPCResult
   RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext) override;
 
@@ -752,7 +749,23 @@ public:
     return mWidgetNativeData;
   }
 
+
   void MaybeDispatchCoalescedMouseMoveEvents();
+
+  static bool HasActiveTabs()
+  {
+    return sActiveTabs && !sActiveTabs->IsEmpty();
+  }
+
+  // Returns whichever TabChild is currently in the foreground. If there are
+  // multiple TabChilds in the foreground (due to multiple windows being open),
+  // this returns null. This should only be called if HasActiveTabs() returns
+  // true.
+  static const nsTArray<TabChild*>& GetActiveTabs()
+  {
+    MOZ_ASSERT(HasActiveTabs());
+    return *sActiveTabs;
+  }
 
 protected:
   virtual ~TabChild();
@@ -773,6 +786,8 @@ protected:
   virtual mozilla::ipc::IPCResult RecvRequestNotifyAfterRemotePaint() override;
 
   virtual mozilla::ipc::IPCResult RecvSuppressDisplayport(const bool& aEnabled) override;
+
+  virtual mozilla::ipc::IPCResult RecvParentActivated(const bool& aActivated) override;
 
   virtual mozilla::ipc::IPCResult RecvSetKeyboardIndicators(const UIStateChangeType& aShowAccelerators,
                                                             const UIStateChangeType& aShowFocusRings) override;
@@ -946,6 +961,12 @@ private:
   uint32_t mPendingDocShellBlockers;
 
   WindowsHandle mWidgetNativeData;
+
+  // This state is used to keep track of the current active tabs (the ones in
+  // the foreground). There may be more than one if there are multiple browser
+  // windows open. There may be none if this process does not host any
+  // foreground tabs.
+  static nsTArray<TabChild*>* sActiveTabs;
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

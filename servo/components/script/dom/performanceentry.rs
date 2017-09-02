@@ -21,10 +21,10 @@ pub struct PerformanceEntry {
 }
 
 impl PerformanceEntry {
-    fn new_inherited(name: DOMString,
-                     entry_type: DOMString,
-                     start_time: f64,
-                     duration: f64) -> PerformanceEntry {
+    pub fn new_inherited(name: DOMString,
+                         entry_type: DOMString,
+                         start_time: f64,
+                         duration: f64) -> PerformanceEntry {
         PerformanceEntry {
             reflector_: Reflector::new(),
             name,
@@ -50,6 +50,10 @@ impl PerformanceEntry {
 
     pub fn name(&self) -> &DOMString {
         &self.name
+    }
+
+    pub fn start_time(&self) -> f64 {
+        self.start_time
     }
 }
 

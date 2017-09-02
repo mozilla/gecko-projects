@@ -151,7 +151,7 @@ function getMainWindow() {
  */
 function getMainWindowWithPreferencesPane() {
   let mainWindow = getMainWindow();
-  if (mainWindow && "openAdvancedPreferences" in mainWindow) {
+  if (mainWindow && "openPreferences" in mainWindow) {
     return mainWindow;
   }
   return null;
@@ -241,13 +241,7 @@ var Settings = {
         } else {
           // Show the data choices preferences on desktop.
           let mainWindow = getMainWindowWithPreferencesPane();
-          // The advanced subpanes are only supported in the old organization,
-          // which will be removed by bug 1349689.
-          if (Preferences.get("browser.preferences.useOldOrganization")) {
-            mainWindow.openAdvancedPreferences("dataChoicesTab", {origin: "aboutTelemetry"});
-          } else {
-            mainWindow.openPreferences("privacy-reports", {origin: "aboutTelemetry"});
-          }
+          mainWindow.openPreferences("privacy-reports", { origin: "aboutTelemetry" });
         }
       });
     }
@@ -321,19 +315,29 @@ var PingPicker = {
     document.getElementById("older-ping")
             .addEventListener("click", () => this._movePingIndex(1));
 
+    let pingPickerNeedHide = false;
+    let pingPicker = document.getElementById("ping-picker");
+    pingPicker.addEventListener("mouseenter", () => pingPickerNeedHide = false);
+    pingPicker.addEventListener("mouseleave", () => pingPickerNeedHide = true);
     document.addEventListener("click", (ev) => {
-      if (ev.target.querySelector("#ping-picker")) {
-        document.getElementById("ping-picker").classList.add("hidden");
+      if (pingPickerNeedHide) {
+        pingPicker.classList.add("hidden");
       }
     });
     document.getElementById("choose-payload")
             .addEventListener("change", () => displayPingData(gPingData));
     document.getElementById("processes")
             .addEventListener("change", () => displayPingData(gPingData));
-    Array.from(document.querySelectorAll(".change-ping")).forEach(el =>
-      el.addEventListener("click", () =>
-        document.getElementById("ping-picker").classList.remove("hidden"))
-    );
+    Array.from(document.querySelectorAll(".change-ping")).forEach(el => {
+      el.addEventListener("click", (event) => {
+        if (!pingPicker.classList.contains("hidden")) {
+          pingPicker.classList.add("hidden");
+        } else {
+          pingPicker.classList.remove("hidden")
+          event.stopPropagation();
+        }
+      });
+    });
   },
 
   onPingSourceChanged() {
@@ -688,7 +692,6 @@ var EnvironmentData = {
 
   appendAddonSubsectionTitle(section, table) {
     let caption = document.createElement("caption");
-    caption.setAttribute("class", "addon-caption");
     caption.appendChild(document.createTextNode(section));
     table.appendChild(caption);
   },
@@ -838,7 +841,6 @@ var SlowSQL = {
       this.renderTable(table, mainThread);
 
       slowSqlDiv.appendChild(table);
-      slowSqlDiv.appendChild(document.createElement("hr"));
     }
 
     // Other threads
@@ -848,7 +850,6 @@ var SlowSQL = {
       this.renderTable(table, otherThreads);
 
       slowSqlDiv.appendChild(table);
-      slowSqlDiv.appendChild(document.createElement("hr"));
     }
   },
 
@@ -1166,7 +1167,7 @@ var Histogram = {
     outerDiv.id = aName;
 
     let divTitle = document.createElement("div");
-    divTitle.className = "histogram-title";
+    divTitle.classList.add("histogram-title");
     divTitle.appendChild(document.createTextNode(aName));
     outerDiv.appendChild(divTitle);
 
@@ -1175,6 +1176,7 @@ var Histogram = {
                 this.hgramSumCaption + " = " + hgram.sum;
 
     let divStats = document.createElement("div");
+    divStats.classList.add("histogram-stats");
     divStats.appendChild(document.createTextNode(stats));
     outerDiv.appendChild(divStats);
 
@@ -1305,6 +1307,10 @@ var Histogram = {
 
 var Search = {
 
+  blacklist: [
+    "raw-payload-section"
+  ],
+
   // Pass if: all non-empty array items match (case-sensitive)
   isPassText(subject, filter) {
     for (let item of filter) {
@@ -1358,28 +1364,34 @@ var Search = {
 
   filterKeyedElements(keyedElements, filterText) {
     let [isPassFunc, filter] = this.chooseFilter(filterText);
+    let allElementsHidden = true;
 
     let needLowerCase = (isPassFunc === this.isPassText);
     keyedElements.forEach((keyedElement) => {
       let subject = needLowerCase ? keyedElement.key.id.toLowerCase() : keyedElement.key.id;
       if (!isPassFunc(subject, filter)) { // If the keyedHistogram's name is not matched
-        let allElementHidden = true;
+        let allKeyedElementsHidden = true;
         for (let element of keyedElement.datas) {
           let subject = needLowerCase ? element.id.toLowerCase() : element.id;
           let match = isPassFunc(subject, filter);
           element.hidden = !match;
           if (match) {
-            allElementHidden = false;
+            allKeyedElementsHidden = false;
           }
         }
-        keyedElement.key.hidden = allElementHidden;
+        if (allElementsHidden && !allKeyedElementsHidden) {
+          allElementsHidden = false;
+        }
+        keyedElement.key.hidden = allKeyedElementsHidden;
       } else { // If the keyedHistogram's name is matched
+        allElementsHidden = false;
         keyedElement.key.hidden = false;
         for (let element of keyedElement.datas) {
           element.hidden = false;
         }
       }
     });
+    return allElementsHidden;
   },
 
   searchHandler(e) {
@@ -1389,16 +1401,18 @@ var Search = {
     this.idleTimeout = setTimeout(() => Search.search(e.target.value), FILTER_IDLE_TIMEOUT);
   },
 
-  search(text, section = null) {
+  search(text, sectionParam = null) {
+    let section = sectionParam;
     if (!section) {
       let sectionId = document.querySelector(".category.selected").getAttribute("value");
       section = document.getElementById(sectionId);
     }
+    let noSearchResults = true;
     if (section.id === "home-section") {
-      this.homeSearch(text);
+      return this.homeSearch(text);
     } else if (section.id === "histograms-section") {
       let histograms = section.getElementsByClassName("histogram");
-      this.filterElements(histograms, text);
+      noSearchResults = this.filterElements(histograms, text);
     } else if (section.id === "keyed-histograms-section") {
       let keyedElements = [];
       let keyedHistograms = section.getElementsByClassName("keyed-histogram");
@@ -1406,7 +1420,7 @@ var Search = {
         let datas = key.getElementsByClassName("histogram");
         keyedElements.push({key, datas});
       }
-      this.filterKeyedElements(keyedElements, text);
+      noSearchResults = this.filterKeyedElements(keyedElements, text);
     } else if (section.id === "keyed-scalars-section") {
       let keyedElements = [];
       let keyedScalars = section.getElementsByClassName("keyed-scalar");
@@ -1414,20 +1428,48 @@ var Search = {
         let datas = key.querySelector("table").rows;
         keyedElements.push({key, datas});
       }
-      this.filterKeyedElements(keyedElements, text);
+      noSearchResults = this.filterKeyedElements(keyedElements, text);
+    } else if (section.querySelector(".sub-section")) {
+      let keyedSubSections = [];
+      let subsections = section.querySelectorAll(".sub-section");
+      for (let section of subsections) {
+        let datas = section.querySelector("table").rows
+        keyedSubSections.push({section, datas});
+      }
+      noSearchResults = this.filterKeyedElements(keyedSubSections, text);
     } else {
       let tables = section.querySelectorAll("table");
       for (let table of tables) {
-        let allElementsHidden = this.filterElements(table.rows, text);
+        noSearchResults = this.filterElements(table.rows, text);
         if (table.caption) {
-          table.caption.hidden = allElementsHidden;
+          table.caption.hidden = noSearchResults;
         }
       }
+    }
+
+    if (!sectionParam) { // If we are not searching in all section.
+      this.updateNoResults(text, noSearchResults);
+    }
+    return noSearchResults;
+  },
+
+  updateNoResults(text, noSearchResults) {
+    document.getElementById("no-search-results").classList.toggle("hidden", !noSearchResults);
+    if (noSearchResults) {
+      let section = document.querySelector(".category.selected > span");
+      let selectedTitle = section.textContent.trim();
+      if (section.parentElement.id === "category-home") {
+        selectedTitle = bundle.GetStringFromName("allSections");
+      }
+      let format = [selectedTitle, text];
+      let searchStatus = bundle.formatStringFromName("noSearchResults", format, 2);
+      document.getElementById("no-search-results-text").textContent = searchStatus;
     }
   },
 
   resetHome() {
     document.getElementById("main").classList.remove("search");
+    document.getElementById("no-search-results").classList.add("hidden");
     adjustHeaderState();
     Array.from(document.querySelectorAll("section")).forEach((section) => {
       section.classList.toggle("active", section.id == "home-section");
@@ -1442,14 +1484,19 @@ var Search = {
     document.getElementById("main").classList.add("search");
     let title = bundle.formatStringFromName("resultsForSearch", [text], 1);
     adjustHeaderState(title);
+    let noSearchResults = true;
     Array.from(document.querySelectorAll("section")).forEach((section) => {
       if (section.id == "home-section" || section.id == "raw-payload-section") {
         section.classList.remove("active");
         return;
       }
       section.classList.add("active");
-      this.search(text, section);
+      let sectionHidden = this.search(text, section);
+      if (noSearchResults && !sectionHidden) {
+        noSearchResults = false;
+      }
     });
+    this.updateNoResults(text, noSearchResults);
   }
 }
 
@@ -1621,7 +1668,7 @@ var KeyedHistogram = {
     outerDiv.id = id;
 
     let divTitle = document.createElement("div");
-    divTitle.className = "keyed-histogram-title";
+    divTitle.classList.add("keyed-title");
     divTitle.appendChild(document.createTextNode(id));
     outerDiv.appendChild(divTitle);
 
@@ -1740,7 +1787,8 @@ var KeyedScalars = {
       let container = document.createElement("div");
       container.classList.add("keyed-scalar");
       container.id = scalar;
-      let scalarNameSection = document.createElement("h2");
+      let scalarNameSection = document.createElement("p");
+      scalarNameSection.classList.add("keyed-title");
       scalarNameSection.appendChild(document.createTextNode(scalar));
       container.appendChild(scalarNameSection);
       // Populate the section with the key-value pairs from the scalar.
@@ -1818,6 +1866,16 @@ function setupPageHeader() {
 
   let subtitleElement = document.getElementById("page-subtitle");
   subtitleElement.appendChild(document.createTextNode(subtitleText));
+
+  let links = [
+    "https://docs.telemetry.mozilla.org/",
+    "https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/index.html",
+    "https://telemetry.mozilla.org/",
+  ];
+  let htmlLink = document.querySelectorAll("#home-section > ul > li > a");
+  htmlLink.forEach((a, index) => {
+    a.href = links[index];
+  });
 }
 
 function displayProcessesSelector(selectedSection) {
@@ -1832,17 +1890,20 @@ function displayProcessesSelector(selectedSection) {
   processes.hidden = !whitelist.includes(selectedSection);
 }
 
-function adjustSearchState() {
+function refreshSearch() {
   let selectedSection = document.querySelector(".category.selected").getAttribute("value");
-  let blacklist = [
-    "raw-payload-section"
-  ];
   let search = document.getElementById("search");
-  search.hidden = blacklist.includes(selectedSection);
-  // Filter element on section change.
-  if (!blacklist.includes(selectedSection)) {
+  if (!Search.blacklist.includes(selectedSection)) {
     Search.search(search.value);
   }
+}
+
+function adjustSearchState() {
+  let selectedSection = document.querySelector(".category.selected").getAttribute("value");
+  let search = document.getElementById("search");
+  search.hidden = Search.blacklist.includes(selectedSection);
+  document.getElementById("no-search-results").classList.add("hidden");
+  Search.search(""); // reinitialize search state.
 }
 
 function adjustSection() {
@@ -1856,6 +1917,9 @@ function adjustHeaderState(title = null) {
   let selected = document.querySelector(".category.selected .category-name");
   let selectedTitle = selected.textContent.trim();
   document.getElementById("sectionTitle").textContent = title ? title : selectedTitle;
+  if (selected.parentElement.id === "category-home") {
+    selectedTitle = bundle.GetStringFromName("allSections");
+  }
   let search = document.getElementById("search");
   let placeholder = bundle.formatStringFromName("filterPlaceholder", [ selectedTitle ], 1);
   search.setAttribute("placeholder", placeholder);
@@ -1897,8 +1961,6 @@ function show(selected) {
     }
   }
 
-  adjustHeaderState();
-
   let current_button = document.querySelector(".category.selected");
   if (current_button == selected)
     return;
@@ -1913,6 +1975,7 @@ function show(selected) {
   // Hack because subsection text appear selected. See Bug 1375114.
   document.getSelection().empty();
 
+  adjustHeaderState();
   displayProcessesSelector(selectedValue);
   adjustSearchState();
   changeUrlPath(selectedValue);
@@ -2049,7 +2112,12 @@ function urlStateRestore() {
 }
 
 function openJsonInFirefoxJsonViewer(json) {
-  window.open("data:application/json;base64," + btoa(json));
+  json = unescape(encodeURIComponent(json));
+  try {
+    window.open("data:application/json;base64," + btoa(json));
+  } catch (e) {
+    show(document.querySelector(".category[value=raw-payload-section]"));
+  }
 }
 
 function onLoad() {
@@ -2068,8 +2136,8 @@ function onLoad() {
 
   // Update ping data when async Telemetry init is finished.
   Telemetry.asyncFetchTelemetryData(async () => {
-    await PingPicker.update();
     urlStateRestore();
+    await PingPicker.update();
   });
 }
 
@@ -2323,8 +2391,8 @@ function displayPingData(ping, updatePayloadList = false) {
   try {
     PingPicker.render();
     displayRichPingData(ping, updatePayloadList);
-    adjustSearchState();
     adjustSection();
+    refreshSearch();
   } catch (err) {
     console.log(err);
     PingPicker._showRawPingData();

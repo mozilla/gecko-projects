@@ -238,7 +238,7 @@ var onboardingTourset = {
           <img src="resource://onboarding/img/figure_library.svg" role="presentation"/>
         </section>
         <aside class="onboarding-tour-button-container">
-          <button id="onboarding-tour-library-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-library.button"></button>
+          <button id="onboarding-tour-library-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-library.button2"></button>
         </aside>
       `;
       return div;
@@ -291,6 +291,36 @@ var onboardingTourset = {
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_performance.svg" role="presentation"/>
         </section>
+      `;
+      return div;
+    },
+  },
+  "screenshots": {
+    id: "onboarding-tour-screenshots",
+    tourNameId: "onboarding.tour-screenshots",
+    getNotificationStrings(bundle) {
+      return {
+        title: bundle.GetStringFromName("onboarding.notification.onboarding-tour-screenshots.title"),
+        message: bundle.formatStringFromName("onboarding.notification.onboarding-tour-screenshots.message", [BRAND_SHORT_NAME], 1),
+        button: bundle.GetStringFromName("onboarding.button.learnMore"),
+      };
+    },
+    getPage(win, bundle) {
+      let div = win.document.createElement("div");
+      // Screenshot tour opens the screenshot page directly, see below a#onboarding-tour-screenshots-button.
+      // The screenshots page should be responsible for highlighting the Screenshots button
+      div.innerHTML = `
+        <section class="onboarding-tour-description">
+          <h1 data-l10n-id="onboarding.tour-screenshots.title"></h1>
+          <p data-l10n-id="onboarding.tour-screenshots.description"></p>
+        </section>
+        <section class="onboarding-tour-content">
+          <img src="resource://onboarding/img/figure_screenshots.svg" role="presentation"/>
+        </section>
+        <aside class="onboarding-tour-button-container">
+          <a id="onboarding-tour-screenshots-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-screenshots.button"
+             href="https://screenshots.firefox.com/#tour" target="_blank"></a>
+        </aside>
       `;
       return div;
     },
@@ -442,7 +472,7 @@ class Onboarding {
    * Find a tour that should be selected. It is either a first tour that was not
    * yet complete or the first one in the tab list.
    */
-  get selectedTour() {
+  get _firstUncompleteTour() {
     return this._tours.find(tour => !this.isTourCompleted(tour.id)) ||
            this._tours[0];
   }
@@ -457,13 +487,15 @@ class Onboarding {
 
     switch (id) {
       case "onboarding-overlay-button":
+        this.showOverlay();
+        this.gotoPage(this._firstUncompleteTour.id);
+        break;
       case "onboarding-overlay-close-btn":
       // If the clicking target is directly on the outer-most overlay,
       // that means clicking outside the tour content area.
       // Let's toggle the overlay.
       case "onboarding-overlay":
-        this.toggleOverlay();
-        this.gotoPage(this.selectedTour.id);
+        this.hideOverlay();
         break;
       case "onboarding-notification-close-btn":
         this.hideNotification();
@@ -471,7 +503,7 @@ class Onboarding {
         break;
       case "onboarding-notification-action-btn":
         let tourId = this._notificationBar.dataset.targetTourId;
-        this.toggleOverlay();
+        this.showOverlay();
         this.gotoPage(tourId);
         this._removeTourFromNotificationQueue(tourId);
         break;
@@ -523,7 +555,6 @@ class Onboarding {
         this.handleClick(target);
         event.preventDefault();
       }
-
       return;
     }
 
@@ -564,7 +595,7 @@ class Onboarding {
         event.preventDefault();
         break;
       case "Escape":
-        this.toggleOverlay();
+        this.hideOverlay();
         break;
       case "Tab":
         let next = this.wrapMoveFocus(target, shiftKey);
@@ -603,31 +634,34 @@ class Onboarding {
     }
     this.uiInitialized = false;
 
+    this._overlayIcon.dispatchEvent(new this._window.CustomEvent("Agent:Destroy"));
+
     this._clearPrefObserver();
     this._overlayIcon.remove();
     this._overlay.remove();
     if (this._notificationBar) {
       this._notificationBar.remove();
     }
-
     this._tourItems = this._tourPages =
     this._overlayIcon = this._overlay = this._notificationBar = null;
   }
 
-  toggleOverlay() {
+  showOverlay() {
     if (this._tourItems.length == 0) {
       // Lazy loading until first toggle.
       this._loadTours(this._tours);
     }
 
     this.hideNotification();
-    this._overlay.classList.toggle("onboarding-opened");
-    this.toggleModal(this._overlay.classList.contains("onboarding-opened"));
+    this.toggleModal(this._overlay.classList.toggle("onboarding-opened"));
+  }
 
+  hideOverlay() {
     let hiddenCheckbox = this._window.document.getElementById("onboarding-tour-hidden-checkbox");
     if (hiddenCheckbox.checked) {
       this.hide();
     }
+    this.toggleModal(this._overlay.classList.toggle("onboarding-opened"));
   }
 
   /**
@@ -641,10 +675,10 @@ class Onboarding {
       [...doc.body.children].forEach(
         child => child.id !== "onboarding-overlay" &&
                  child.setAttribute("aria-hidden", true));
-      // When dialog is opened with the keyboard, focus on the selected or
-      // first tour item.
+      // When dialog is opened with the keyboard, focus on the 1st uncomplete tour
+      // because it will be the selected tour
       if (this._overlayIcon.dataset.keyboardFocus) {
-        doc.getElementById(this.selectedTour.id).focus();
+        doc.getElementById(this._firstUncompleteTour.id).focus();
       } else {
         // When dialog is opened with mouse, focus on the dialog itself to avoid
         // visible keyboard focus styling.
@@ -912,11 +946,10 @@ class Onboarding {
     let footer = this._window.document.createElement("footer");
     footer.id = "onboarding-notification-bar";
     footer.setAttribute("aria-live", "polite");
-    footer.setAttribute("aria-labelledby", "onboarding-notification-icon")
+    footer.setAttribute("aria-labelledby", "onboarding-notification-tour-title")
     // We use `innerHTML` for more friendly reading.
     // The security should be fine because this is not from an external input.
     footer.innerHTML = `
-      <div id="onboarding-notification-icon" role="presentation"></div>
       <section id="onboarding-notification-message-section" role="presentation">
         <div id="onboarding-notification-tour-icon" role="presentation"></div>
         <div id="onboarding-notification-body" role="presentation">
@@ -927,14 +960,6 @@ class Onboarding {
       </section>
       <button id="onboarding-notification-close-btn" class="onboarding-close-btn"></button>
     `;
-    let toolTip = this._bundle.formatStringFromName(
-      this._tourType === "new" ? "onboarding.notification-icon-tool-tip" :
-                                 "onboarding.notification-icon-tooltip-updated",
-      [BRAND_SHORT_NAME], 1);
-
-    let icon = footer.querySelector("#onboarding-notification-icon");
-    icon.setAttribute("aria-label", toolTip);
-    icon.setAttribute("role", "presentation");
 
     let closeBtn = footer.querySelector("#onboarding-notification-close-btn");
     closeBtn.setAttribute("title",
@@ -999,7 +1024,7 @@ class Onboarding {
     let img = this._window.document.createElement("img");
     img.id = "onboarding-overlay-button-icon";
     img.setAttribute("role", "presentation");
-    img.src = "resource://onboarding/img/overlay-icon.svg";
+    img.src = "chrome://branding/content/icon64.png";
     button.appendChild(img);
     return button;
   }
@@ -1086,27 +1111,26 @@ class Onboarding {
 }
 
 // Load onboarding module only when we enable it.
-if (Services.prefs.getBoolPref("browser.onboarding.enabled", false) &&
-    !Services.prefs.getBoolPref("browser.onboarding.hidden", false)) {
-
+if (Services.prefs.getBoolPref("browser.onboarding.enabled", false)) {
   addEventListener("load", function onLoad(evt) {
     if (!content || evt.target != content.document) {
       return;
     }
-    removeEventListener("load", onLoad);
 
-    let window = evt.target.defaultView;
-    let location = window.location.href;
-    if (location == ABOUT_NEWTAB_URL || location == ABOUT_HOME_URL) {
-      // We just want to run tests as quick as possible
-      // so in the automation test, we don't do `requestIdleCallback`.
-      if (Cu.isInAutomation) {
-        new Onboarding(window);
-        return;
+    if (!Services.prefs.getBoolPref("browser.onboarding.hidden", false)) {
+      let window = evt.target.defaultView;
+      let location = window.location.href;
+      if (location == ABOUT_NEWTAB_URL || location == ABOUT_HOME_URL) {
+        // We just want to run tests as quick as possible
+        // so in the automation test, we don't do `requestIdleCallback`.
+        if (Cu.isInAutomation) {
+          new Onboarding(window);
+          return;
+        }
+        window.requestIdleCallback(() => {
+          new Onboarding(window);
+        });
       }
-      window.requestIdleCallback(() => {
-        new Onboarding(window);
-      });
     }
   }, true);
 }

@@ -21,6 +21,7 @@
 #include "nsIUUIDGenerator.h"
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
+#include "nsStringFwd.h"
 #include "nsDataHashtable.h"             // for member
 #include "nsURIHashKey.h"                // for member
 #include "mozilla/net/ReferrerPolicy.h"  // for member
@@ -54,7 +55,6 @@ class ElementCreationOptionsOrString;
 
 class gfxUserFontSet;
 class imgIRequest;
-class nsAString;
 class nsBindingManager;
 class nsIDocShell;
 class nsDocShell;
@@ -2073,6 +2073,34 @@ public:
     return mMarkedCCGeneration;
   }
 
+  /**
+   * Returns whether this document is cookie averse. See
+   * https://html.spec.whatwg.org/multipage/dom.html#cookie-averse-document-object
+   */
+  bool IsCookieAverse() const
+  {
+    // If we are a document that "has no browsing context."
+    if (!GetInnerWindow()) {
+      return true;
+    }
+
+    // If we are a document "whose URL's scheme is not a network scheme."
+    // NB: Explicitly allow file: URIs to store cookies.
+    nsCOMPtr<nsIURI> codebaseURI;
+    NodePrincipal()->GetURI(getter_AddRefs(codebaseURI));
+
+    if (!codebaseURI) {
+      return true;
+    }
+
+    nsAutoCString scheme;
+    codebaseURI->GetScheme(scheme);
+    return !scheme.EqualsLiteral("http") &&
+           !scheme.EqualsLiteral("https") &&
+           !scheme.EqualsLiteral("ftp") &&
+           !scheme.EqualsLiteral("file");
+  }
+
   bool IsLoadedAsData()
   {
     return mLoadedAsData;
@@ -2403,21 +2431,27 @@ public:
    * nesting and possible sources, which are used to inform URL selection
    * responsive <picture> or <img srcset> images.  Unset attributes are expected
    * to be marked void.
+   * If this image is for <picture> or <img srcset>, aIsImgSet will be set to
+   * true, false otherwise.
    */
   virtual already_AddRefed<nsIURI>
     ResolvePreloadImage(nsIURI *aBaseURI,
                         const nsAString& aSrcAttr,
                         const nsAString& aSrcsetAttr,
-                        const nsAString& aSizesAttr) = 0;
+                        const nsAString& aSizesAttr,
+                        bool *aIsImgSet) = 0;
   /**
    * Called by nsParser to preload images. Can be removed and code moved
    * to nsPreloadURIs::PreloadURIs() in file nsParser.cpp whenever the
    * parser-module is linked with gklayout-module.  aCrossOriginAttr should
    * be a void string if the attr is not present.
+   * aIsImgSet is the value got from calling ResolvePreloadImage, it is true
+   * when this image is for loading <picture> or <img srcset> images.
    */
   virtual void MaybePreLoadImage(nsIURI* uri,
                                  const nsAString& aCrossOriginAttr,
-                                 ReferrerPolicyEnum aReferrerPolicy) = 0;
+                                 ReferrerPolicyEnum aReferrerPolicy,
+                                 bool aIsImgSet) = 0;
 
   /**
    * Called by images to forget an image preload when they start doing

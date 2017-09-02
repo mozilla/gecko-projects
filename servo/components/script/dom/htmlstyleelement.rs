@@ -86,7 +86,6 @@ impl HTMLStyleElement {
         let data = node.GetTextContent().expect("Element.textContent must be a string");
         let url = win.get_url();
         let context = CssParserContext::new_for_cssom(&url,
-                                                      win.css_error_reporter(),
                                                       Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       doc.quirks_mode());
@@ -99,7 +98,7 @@ impl HTMLStyleElement {
                                          shared_lock, Some(&loader),
                                          win.css_error_reporter(),
                                          doc.quirks_mode(),
-                                         self.line_number);
+                                         self.line_number as u32);
 
         let sheet = Arc::new(sheet);
 

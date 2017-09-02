@@ -2314,8 +2314,7 @@ Parser<FullParseHandler, char16_t>::moduleBody(ModuleSharedContext* modulesc)
             if (!AtomToPrintableString(context, name, &str))
                 return null();
 
-            JS_ReportErrorNumberLatin1(context, GetErrorMessage, nullptr,
-                                       JSMSG_MISSING_EXPORT, str.ptr());
+            errorAt(TokenStream::NoOffset, JSMSG_MISSING_EXPORT, str.ptr());
             return null();
         }
 
@@ -6305,7 +6304,10 @@ Parser<ParseHandler, CharT>::forStatement(YieldHandling yieldHandling)
         }
     }
 
-    MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_AFTER_FOR);
+    MUST_MATCH_TOKEN_MOD_WITH_REPORT(TOK_LP, TokenStream::None,
+                                     error((token == TOK_AWAIT && !pc->isAsync())
+                                           ? JSMSG_FOR_AWAIT_OUTSIDE_ASYNC
+                                           : JSMSG_PAREN_AFTER_FOR));
 
     // PNK_FORHEAD, PNK_FORIN, or PNK_FOROF depending on the loop type.
     ParseNodeKind headKind;

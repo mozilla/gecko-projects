@@ -417,7 +417,10 @@ class MochitestServer(object):
         # get testing environment
         env = test_environment(xrePath=self._xrePath, log=self._log)
         env["XPCOM_DEBUG_BREAK"] = "warn"
-        env["LD_LIBRARY_PATH"] = self._xrePath
+        if "LD_LIBRARY_PATH" not in env or env["LD_LIBRARY_PATH"] is None:
+            env["LD_LIBRARY_PATH"] = self._xrePath
+        else:
+            env["LD_LIBRARY_PATH"] = ":".join([self._xrePath, env["LD_LIBRARY_PATH"]])
 
         # When running with an ASan build, our xpcshell server will also be ASan-enabled,
         # thus consuming too much resources when running together with the browser on
@@ -1401,6 +1404,8 @@ toolbar#nav-bar {
                 mozinfo.update(options.extra_mozinfo_json)
             if 'STYLO_FORCE_ENABLED' in os.environ:
                 mozinfo.update({'stylo': True})
+            if 'STYLO_FORCE_DISABLED' in os.environ:
+                mozinfo.update({'stylo': False})
 
             info = mozinfo.info
 
@@ -1657,9 +1662,9 @@ toolbar#nav-bar {
 
         return browserEnv
 
-    def killNamedOrphans(self, pname):
-        """ Kill orphan processes matching the given command name """
-        self.log.info("Checking for orphan %s processes..." % pname)
+    def killNamedProc(self, pname):
+        """ Kill processes matching the given command name """
+        self.log.info("Checking for %s processes..." % pname)
 
         def _psInfo(line):
             if pname in line:
@@ -1674,8 +1679,8 @@ toolbar#nav-bar {
             parts = line.split()
             if len(parts) == 3 and parts[0].isdigit():
                 pid = int(parts[0])
-                if parts[2] == pname and parts[1] == '1':
-                    self.log.info("killing %s orphan with pid %d" % (pname, pid))
+                if parts[2] == pname:
+                    self.log.info("killing %s with pid %d" % (pname, pid))
                     killPid(pid, self.log)
         process = mozprocess.ProcessHandler(['ps', '-o', 'pid,ppid,comm'],
                                             processOutputLine=_psKill)
@@ -2414,10 +2419,10 @@ toolbar#nav-bar {
         # Despite our efforts to clean up servers started by this script, in practice
         # we still see infrequent cases where a process is orphaned and interferes
         # with future tests, typically because the old server is keeping the port in use.
-        # Try to avoid those failures by checking for and killing orphan servers before
+        # Try to avoid those failures by checking for and killing servers before
         # trying to start new ones.
-        self.killNamedOrphans('ssltunnel')
-        self.killNamedOrphans('xpcshell')
+        self.killNamedProc('ssltunnel')
+        self.killNamedProc('xpcshell')
 
         if options.cleanupCrashes:
             mozcrash.cleanup_pending_crash_reports()

@@ -61,6 +61,7 @@ following parameters::
   "userAttributes" -> "{                // A set of key-value pairs used to describe the user.
     "Focus Installed" -> true           // If Focus for Android is installed.
     "Klar Installed" -> true            // If Klar for Android is installed.
+    "Pocket Installed" -> true          // If Pocket for Android is installed.
     "Signed In Sync" -> true            // If the user has signed in to Mozilla account.
     "Default Browser" -> true           // If the user has set Fennec as default browser.
   }
@@ -142,7 +143,14 @@ List of current Events related data that is sent:
 {
   "event" : "E_Opened_New_Tab"
 }
-
+* App start but Fennec is not set as default browser
+{
+  "event" : "E_Launch_But_Not_Default_Browser"
+}
+* General app start event
+{
+  "event" : "E_Launch_Browser"
+}
 Deep Links:
 Deep links are actions that can point Fennec to open certain pages or load features such as `show bookmark list` or
 `open a SUMO page`. When users see a prompt Leanplum message, they can click the button(s) on it. These buttons can

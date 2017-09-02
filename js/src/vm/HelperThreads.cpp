@@ -101,16 +101,19 @@ js::StartOffThreadWasmCompile(wasm::CompileTask* task, wasm::CompileMode mode)
     return true;
 }
 
-bool
-js::StartOffThreadWasmTier2Generator(wasm::Tier2GeneratorTask* task)
+void
+js::StartOffThreadWasmTier2Generator(wasm::UniqueTier2GeneratorTask task)
 {
+    MOZ_ASSERT(CanUseExtraThreads());
+
     AutoLockHelperThreadState lock;
 
-    if (!HelperThreadState().wasmTier2GeneratorWorklist(lock).append(task))
-        return false;
+    if (!HelperThreadState().wasmTier2GeneratorWorklist(lock).append(task.get()))
+        return;
+
+    Unused << task.release();
 
     HelperThreadState().notifyOne(GlobalHelperThreadState::PRODUCER, lock);
-    return true;
 }
 
 static void
@@ -127,8 +130,7 @@ CancelOffThreadWasmTier2GeneratorLocked(AutoLockHelperThreadState& lock)
         for (size_t i = 0; i < worklist.length(); i++) {
             wasm::Tier2GeneratorTask* task = worklist[i];
             HelperThreadState().remove(worklist, &i);
-            CancelTier2GeneratorTask(task);
-            DeleteTier2GeneratorTask(task);
+            js_delete(task);
         }
     }
 
@@ -142,7 +144,7 @@ CancelOffThreadWasmTier2GeneratorLocked(AutoLockHelperThreadState& lock)
     for (auto& helper : *HelperThreadState().threads) {
         if (helper.wasmTier2GeneratorTask()) {
             // Set a flag that causes compilation to shortcut itself.
-            CancelTier2GeneratorTask(helper.wasmTier2GeneratorTask());
+            helper.wasmTier2GeneratorTask()->cancel();
 
             // Wait for the generator task to finish.  This avoids a shutdown race where
             // the shutdown code is trying to shut down helper threads and the ongoing
@@ -378,7 +380,7 @@ js::HasOffThreadIonCompile(JSCompartment* comp)
 static const JSClassOps parseTaskGlobalClassOps = {
     nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr,
     JS_GlobalObjectTraceHook
 };
 
@@ -684,9 +686,6 @@ EnsureParserCreatedClasses(JSContext* cx, ParseTaskKind kind)
 
     if (!EnsureConstructor(cx, global, JSProto_RegExp))
         return false; // needed by regular expression literals
-
-    if (!EnsureConstructor(cx, global, JSProto_Iterator))
-        return false; // needed by ???
 
     if (!GlobalObject::initStarGenerators(cx, global))
         return false; // needed by function*() {} and generator comprehensions
@@ -1231,7 +1230,8 @@ bool
 GlobalHelperThreadState::canStartWasmTier2Generator(const AutoLockHelperThreadState& lock)
 {
     return !wasmTier2GeneratorWorklist(lock).empty() &&
-           checkTaskThreadLimit<wasm::Tier2GeneratorTask*>(maxWasmTier2GeneratorThreads());
+           checkTaskThreadLimit<wasm::Tier2GeneratorTask*>(maxWasmTier2GeneratorThreads(),
+                                                           /*isMaster=*/true);
 }
 
 bool
@@ -1753,10 +1753,6 @@ GlobalHelperThreadState::mergeParseTaskCompartment(JSContext* cx, ParseTask* par
                                                    Handle<GlobalObject*> global,
                                                    JSCompartment* dest)
 {
-    // Finish any ongoing incremental GC that may affect the destination zone.
-    if (JS::IsIncrementalGCInProgress(cx) && dest->zone()->wasGCStarted())
-        JS::FinishIncrementalGC(cx, JS::gcreason::API);
-
     // After we call LeaveParseTaskZone() it's not safe to GC until we have
     // finished merging the contents of the parse task's compartment into the
     // destination compartment.
@@ -1794,8 +1790,7 @@ GlobalHelperThreadState::mergeParseTaskCompartment(JSContext* cx, ParseTask* par
             JSProtoKey key = JS::IdentifyStandardPrototype(protoObj);
             if (key != JSProto_Null) {
                 MOZ_ASSERT(key == JSProto_Object || key == JSProto_Array ||
-                           key == JSProto_Function || key == JSProto_RegExp ||
-                           key == JSProto_Iterator);
+                           key == JSProto_Function || key == JSProto_RegExp);
                 newProto = GetBuiltinPrototypePure(global, key);
             } else if (protoObj == parseTaskStarGenFunctionProto) {
                 newProto = global->getStarGeneratorFunctionPrototype();
@@ -1882,18 +1877,12 @@ HelperThread::handleWasmTier2GeneratorWorkload(AutoLockHelperThreadState& locked
     MOZ_ASSERT(idle());
 
     currentTask.emplace(HelperThreadState().wasmTier2GeneratorWorklist(locked).popCopy());
-    bool success = false;
 
     wasm::Tier2GeneratorTask* task = wasmTier2GeneratorTask();
     {
         AutoUnlockHelperThreadState unlock(locked);
-        success = wasm::GenerateTier2(task);
+        task->execute();
     }
-
-    // We silently ignore failures.  Such failures must be resource exhaustion
-    // or cancellation, because all error checking was performed by the initial
-    // compilation.
-    mozilla::Unused << success;
 
     // During shutdown the main thread will wait for any ongoing (cancelled)
     // tier-2 generation to shut down normally.  To do so, it waits on the
@@ -1901,7 +1890,7 @@ HelperThread::handleWasmTier2GeneratorWorkload(AutoLockHelperThreadState& locked
     HelperThreadState().incWasmTier2GeneratorsFinished(locked);
     HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, locked);
 
-    wasm::DeleteTier2GeneratorTask(task);
+    js_delete(task);
     currentTask.reset();
 }
 

@@ -5,7 +5,6 @@
 use base64;
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::BlobBinding::BlobMethods;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
 use dom::bindings::codegen::Bindings::FileReaderBinding::{self, FileReaderConstants, FileReaderMethods};
 use dom::bindings::codegen::UnionTypes::StringOrObject;
 use dom::bindings::error::{Error, ErrorResult, Fallible};
@@ -39,7 +38,7 @@ use std::thread;
 use task_source::TaskSource;
 use task_source::file_reading::{FileReadingTaskSource, FileReadingRunnable, FileReadingTask};
 
-#[derive(PartialEq, Clone, Copy, JSTraceable, HeapSizeOf)]
+#[derive(Clone, Copy, HeapSizeOf, JSTraceable, PartialEq)]
 pub enum FileReaderFunction {
     ReadAsText,
     ReadAsDataUrl,
@@ -66,11 +65,11 @@ impl ReadMetaData {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, JSTraceable, HeapSizeOf)]
+#[derive(Clone, Copy, HeapSizeOf, JSTraceable, PartialEq)]
 pub struct GenerationId(u32);
 
 #[repr(u16)]
-#[derive(Copy, Clone, Debug, PartialEq, JSTraceable, HeapSizeOf)]
+#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
 pub enum FileReaderReadyState {
     Empty = FileReaderConstants::EMPTY,
     Loading = FileReaderConstants::LOADING,

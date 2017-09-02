@@ -577,8 +577,6 @@ child:
 
     async Deactivate(PBrowser aTab);
 
-    async ParentActivated(PBrowser aTab, bool aActivated);
-
     async PParentToChildStream();
 
     async ProvideAnonymousTemporaryFile(uint64_t aID, FileDescOrError aFD);
@@ -1033,7 +1031,7 @@ parent:
       bool aCalledFromJS,
       bool aPositionSpecified,
       bool aSizeSpecified,
-      URIParams aURIToLoad,
+      OptionalURIParams aURIToLoad,
       nsCString aFeatures,
       nsCString aBaseURI,
       float aFullZoom,

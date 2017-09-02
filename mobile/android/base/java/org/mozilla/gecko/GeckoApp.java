@@ -752,12 +752,6 @@ public abstract class GeckoApp extends GeckoActivity
             // Context: Sharing via chrome list (no explicit session is active)
             Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST, "text");
 
-        } else if ("Snackbar:Show".equals(event)) {
-            SnackbarBuilder.builder(this)
-                    .fromEvent(message)
-                    .callback(callback)
-                    .buildAndShow();
-
         } else if ("SystemUI:Visibility".equals(event)) {
             if (message.getBoolean("visible", true)) {
                 mMainLayout.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
@@ -1030,6 +1024,11 @@ public abstract class GeckoApp extends GeckoActivity
 
     @Override // GeckoView.ContentListener
     public void onFullScreen(final GeckoView view, final boolean fullScreen) {
+        if (fullScreen) {
+            SnackbarBuilder.builder(this)
+                    .message(R.string.fullscreen_warning)
+                    .duration(Snackbar.LENGTH_LONG).buildAndShow();
+        }
         ThreadUtils.assertOnUiThread();
         ActivityUtils.setFullScreen(this, fullScreen);
     }
@@ -1398,8 +1397,6 @@ public abstract class GeckoApp extends GeckoActivity
                 BrowserLocaleManager.storeAndNotifyOSLocale(getSharedPreferencesForProfile(), osLocale);
             }
         });
-
-        IntentHelper.init(this);
     }
 
     @Override
@@ -2041,8 +2038,6 @@ public abstract class GeckoApp extends GeckoActivity
         // Undo whatever we did in onPause.
         super.onResume();
 
-        EventDispatcher.getInstance().registerUiThreadListener(this, "Snackbar:Show");
-
         if (mIsAbortingAppLaunch) {
             return;
         }
@@ -2114,8 +2109,6 @@ public abstract class GeckoApp extends GeckoActivity
     @Override
     public void onPause()
     {
-        EventDispatcher.getInstance().unregisterUiThreadListener(this, "Snackbar:Show");
-
         if (mIsAbortingAppLaunch) {
             super.onPause();
             return;

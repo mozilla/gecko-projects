@@ -449,10 +449,12 @@ private:
  * to an nsIChannel, which holds a reference to this listener.
  * We break the reference cycle in OnStartRequest by clearing mElement.
  */
-class HTMLMediaElement::MediaLoadListener final : public nsIStreamListener,
-                                                  public nsIChannelEventSink,
-                                                  public nsIInterfaceRequestor,
-                                                  public nsIObserver
+class HTMLMediaElement::MediaLoadListener final
+  : public nsIStreamListener
+  , public nsIChannelEventSink
+  , public nsIInterfaceRequestor
+  , public nsIObserver
+  , public nsIThreadRetargetableStreamListener
 {
   ~MediaLoadListener() {}
 
@@ -462,6 +464,7 @@ class HTMLMediaElement::MediaLoadListener final : public nsIStreamListener,
   NS_DECL_NSICHANNELEVENTSINK
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIINTERFACEREQUESTOR
+  NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
 public:
   explicit MediaLoadListener(HTMLMediaElement* aElement)
@@ -477,9 +480,13 @@ private:
   const uint32_t mLoadID;
 };
 
-NS_IMPL_ISUPPORTS(HTMLMediaElement::MediaLoadListener, nsIRequestObserver,
-                  nsIStreamListener, nsIChannelEventSink,
-                  nsIInterfaceRequestor, nsIObserver)
+NS_IMPL_ISUPPORTS(HTMLMediaElement::MediaLoadListener,
+                  nsIRequestObserver,
+                  nsIStreamListener,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor,
+                  nsIObserver,
+                  nsIThreadRetargetableStreamListener)
 
 NS_IMETHODIMP
 HTMLMediaElement::MediaLoadListener::Observe(nsISupports* aSubject,
@@ -619,6 +626,18 @@ HTMLMediaElement::MediaLoadListener::AsyncOnChannelRedirect(nsIChannel* aOldChan
   }
   cb->OnRedirectVerifyCallback(NS_OK);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+HTMLMediaElement::MediaLoadListener::CheckListenerChain()
+{
+  MOZ_ASSERT(mNextListener);
+  nsCOMPtr<nsIThreadRetargetableStreamListener> retargetable =
+    do_QueryInterface(mNextListener);
+  if (retargetable) {
+    return retargetable->CheckListenerChain();
+  }
+  return NS_ERROR_NO_INTERFACE;
 }
 
 NS_IMETHODIMP
@@ -1474,7 +1493,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLMediaElement, nsGenericHTMLE
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSeekDOMPromise)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLMediaElement)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLMediaElement)
   NS_INTERFACE_MAP_ENTRY(nsIDOMHTMLMediaElement)
 NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
@@ -2657,7 +2676,7 @@ HTMLMediaElement::SetCurrentTime(double aCurrentTime, ErrorResult& aRv)
  * on success, and NS_ERROR_FAILURE on failure.
  */
 static nsresult
-IsInRanges(dom::TimeRanges& aRanges,
+IsInRanges(TimeRanges& aRanges,
            double aValue,
            bool& aIsInRanges,
            int32_t& aIntervalIndex)
@@ -2740,13 +2759,13 @@ HTMLMediaElement::Seek(double aTime,
   }
 
   // Clamp the seek target to inside the seekable ranges.
-  RefPtr<dom::TimeRanges> seekable = new dom::TimeRanges(ToSupports(OwnerDoc()));
   media::TimeIntervals seekableIntervals = mDecoder->GetSeekable();
   if (seekableIntervals.IsInvalid()) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR); // This will reject the promise.
     return promise.forget();
   }
-  seekableIntervals.ToTimeRanges(seekable);
+  RefPtr<TimeRanges> seekable =
+    new TimeRanges(ToSupports(OwnerDoc()), seekableIntervals);
   uint32_t length = 0;
   seekable->GetLength(&length);
   if (!length) {
@@ -2865,10 +2884,9 @@ NS_IMETHODIMP HTMLMediaElement::GetDuration(double* aDuration)
 already_AddRefed<TimeRanges>
 HTMLMediaElement::Seekable() const
 {
-  RefPtr<TimeRanges> ranges = new TimeRanges(ToSupports(OwnerDoc()));
-  if (mDecoder) {
-    mDecoder->GetSeekable().ToTimeRanges(ranges);
-  }
+  media::TimeIntervals seekable =
+    mDecoder ? mDecoder->GetSeekable() : media::TimeIntervals();
+  RefPtr<TimeRanges> ranges = new TimeRanges(ToSupports(OwnerDoc()), seekable);
   return ranges.forget();
 }
 
@@ -3169,7 +3187,7 @@ NS_IMPL_ADDREF_INHERITED(HTMLMediaElement::StreamCaptureTrackSource,
                          MediaStreamTrackSource)
 NS_IMPL_RELEASE_INHERITED(HTMLMediaElement::StreamCaptureTrackSource,
                           MediaStreamTrackSource)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::StreamCaptureTrackSource)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLMediaElement::StreamCaptureTrackSource)
 NS_INTERFACE_MAP_END_INHERITING(MediaStreamTrackSource)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::StreamCaptureTrackSource,
                                    MediaStreamTrackSource,
@@ -3248,7 +3266,7 @@ NS_IMPL_ADDREF_INHERITED(HTMLMediaElement::DecoderCaptureTrackSource,
                          MediaStreamTrackSource)
 NS_IMPL_RELEASE_INHERITED(HTMLMediaElement::DecoderCaptureTrackSource,
                           MediaStreamTrackSource)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::DecoderCaptureTrackSource)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLMediaElement::DecoderCaptureTrackSource)
 NS_INTERFACE_MAP_END_INHERITING(MediaStreamTrackSource)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::DecoderCaptureTrackSource,
                                    MediaStreamTrackSource,
@@ -3292,7 +3310,7 @@ NS_IMPL_ADDREF_INHERITED(HTMLMediaElement::CaptureStreamTrackSourceGetter,
                          MediaStreamTrackSourceGetter)
 NS_IMPL_RELEASE_INHERITED(HTMLMediaElement::CaptureStreamTrackSourceGetter,
                           MediaStreamTrackSourceGetter)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::CaptureStreamTrackSourceGetter)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLMediaElement::CaptureStreamTrackSourceGetter)
 NS_INTERFACE_MAP_END_INHERITING(MediaStreamTrackSourceGetter)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLMediaElement::CaptureStreamTrackSourceGetter,
                                    MediaStreamTrackSourceGetter,
@@ -4166,61 +4184,22 @@ HTMLMediaElement::WakeLockBoolWrapper::operator=(bool val)
   return *this;
 }
 
-HTMLMediaElement::WakeLockBoolWrapper::~WakeLockBoolWrapper()
-{
-  if (mTimer) {
-    mTimer->Cancel();
-  }
-}
-
-void
-HTMLMediaElement::WakeLockBoolWrapper::SetCanPlay(bool aCanPlay)
-{
-  mCanPlay = aCanPlay;
-  UpdateWakeLock();
-}
-
 void
 HTMLMediaElement::WakeLockBoolWrapper::UpdateWakeLock()
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mOuter);
 
-  if (!mOuter) {
-    return;
-  }
-
-  bool playing = (!mValue && mCanPlay);
-
-  if (playing) {
-    if (mTimer) {
-      mTimer->Cancel();
-      mTimer = nullptr;
-    }
+  bool playing = !mValue;
+  bool isAudible = mOuter->Volume() > 0.0 &&
+                   !mOuter->mMuted &&
+                   mOuter->mIsAudioTrackAudible;
+  // when playing audible media.
+  if (playing && isAudible) {
     mOuter->WakeLockCreate();
-  } else if (!mTimer) {
-    // Don't release the wake lock immediately; instead, release it after a
-    // grace period.
-    int timeout = Preferences::GetInt("media.wakelock_timeout", 2000);
-    mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    if (mTimer) {
-      mTimer->SetTarget(mOuter->MainThreadEventTarget());
-      mTimer->InitWithNamedFuncCallback(
-        TimerCallback,
-        this,
-        timeout,
-        nsITimer::TYPE_ONE_SHOT,
-        "dom::HTMLMediaElement::WakeLockBoolWrapper::UpdateWakeLock");
-    }
+  } else {
+    mOuter->WakeLockRelease();
   }
-}
-
-void
-HTMLMediaElement::WakeLockBoolWrapper::TimerCallback(nsITimer* aTimer,
-                                                     void* aClosure)
-{
-  WakeLockBoolWrapper* wakeLock = static_cast<WakeLockBoolWrapper*>(aClosure);
-  wakeLock->mOuter->WakeLockRelease();
-  wakeLock->mTimer = nullptr;
 }
 
 void
@@ -4232,7 +4211,7 @@ HTMLMediaElement::WakeLockCreate()
     NS_ENSURE_TRUE_VOID(pmService);
 
     ErrorResult rv;
-    mWakeLock = pmService->NewWakeLock(NS_LITERAL_STRING("cpu"),
+    mWakeLock = pmService->NewWakeLock(NS_LITERAL_STRING("audio-playing"),
                                        OwnerDoc()->GetInnerWindow(),
                                        rv);
   }
@@ -5315,15 +5294,16 @@ void HTMLMediaElement::ProcessMediaFragmentURI()
   }
 }
 
-void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
-                                      nsAutoPtr<const MetadataTags> aTags)
+void
+HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
+                                 UniquePtr<const MetadataTags> aTags)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   SetMediaInfo(*aInfo);
 
   mIsEncrypted = aInfo->IsEncrypted() || mPendingEncryptedInitData.IsEncrypted();
-  mTags = aTags.forget();
+  mTags = Move(aTags);
   mLoadedDataFired = false;
   ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_METADATA);
 
@@ -5538,9 +5518,10 @@ void HTMLMediaElement::SeekCompleted()
   }
 }
 
-void HTMLMediaElement::NotifySuspendedByCache(bool aIsSuspended)
+void
+HTMLMediaElement::NotifySuspendedByCache(bool aSuspendedByCache)
 {
-  mDownloadSuspendedByCache = aIsSuspended;
+  mDownloadSuspendedByCache = aSuspendedByCache;
 }
 
 void HTMLMediaElement::DownloadSuspended()
@@ -5735,7 +5716,7 @@ HTMLMediaElement::UpdateReadyStateInternal()
     if (hasVideoTracks) {
       mediaInfo.EnableVideo();
     }
-    MetadataLoaded(&mediaInfo, nsAutoPtr<const MetadataTags>(nullptr));
+    MetadataLoaded(&mediaInfo, nullptr);
   }
 
   if (mMediaSource) {
@@ -6548,13 +6529,9 @@ HTMLMediaElement::CopyInnerTo(Element* aDest, bool aPreallocateChildren)
 already_AddRefed<TimeRanges>
 HTMLMediaElement::Buffered() const
 {
-  RefPtr<TimeRanges> ranges = new TimeRanges(ToSupports(OwnerDoc()));
-  if (mDecoder) {
-    media::TimeIntervals buffered = mDecoder->GetBuffered();
-    if (!buffered.IsInvalid()) {
-      buffered.ToTimeRanges(ranges);
-    }
-  }
+  media::TimeIntervals buffered =
+    mDecoder ? mDecoder->GetBuffered() : media::TimeIntervals();
+  RefPtr<TimeRanges> ranges = new TimeRanges(ToSupports(OwnerDoc()), buffered);
   return ranges.forget();
 }
 
@@ -6668,14 +6645,16 @@ NS_IMETHODIMP HTMLMediaElement::GetMozFragmentEnd(double* aTime)
 
 static double ClampPlaybackRate(double aPlaybackRate)
 {
+  MOZ_ASSERT(aPlaybackRate >= 0.0);
+
   if (aPlaybackRate == 0.0) {
     return aPlaybackRate;
   }
-  if (Abs(aPlaybackRate) < MIN_PLAYBACKRATE) {
-    return aPlaybackRate < 0 ? -MIN_PLAYBACKRATE : MIN_PLAYBACKRATE;
+  if (aPlaybackRate < MIN_PLAYBACKRATE) {
+    return MIN_PLAYBACKRATE;
   }
-  if (Abs(aPlaybackRate) > MAX_PLAYBACKRATE) {
-    return aPlaybackRate < 0 ? -MAX_PLAYBACKRATE : MAX_PLAYBACKRATE;
+  if (aPlaybackRate > MAX_PLAYBACKRATE) {
+    return MAX_PLAYBACKRATE;
   }
   return aPlaybackRate;
 }
@@ -6717,14 +6696,18 @@ HTMLMediaElement::SetPlaybackRate(double aPlaybackRate, ErrorResult& aRv)
   // Changing the playback rate of a media that has more than two channels is
   // not supported.
   if (aPlaybackRate < 0) {
-    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
   }
 
-  mPlaybackRate = ClampPlaybackRate(aPlaybackRate);
+  if (mPlaybackRate == aPlaybackRate) {
+    return;
+  }
+
+  mPlaybackRate = aPlaybackRate;
 
   if (mPlaybackRate != 0.0 &&
-      (mPlaybackRate < 0 || mPlaybackRate > THRESHOLD_HIGH_PLAYBACKRATE_AUDIO ||
+      (mPlaybackRate > THRESHOLD_HIGH_PLAYBACKRATE_AUDIO ||
        mPlaybackRate < THRESHOLD_LOW_PLAYBACKRATE_AUDIO)) {
     SetMutedInternal(mMuted | MUTED_BY_INVALID_PLAYBACK_RATE);
   } else {
@@ -6732,7 +6715,7 @@ HTMLMediaElement::SetPlaybackRate(double aPlaybackRate, ErrorResult& aRv)
   }
 
   if (mDecoder) {
-    mDecoder->SetPlaybackRate(mPlaybackRate);
+    mDecoder->SetPlaybackRate(ClampPlaybackRate(mPlaybackRate));
   }
   DispatchAsyncEvent(NS_LITERAL_STRING("ratechange"));
 }
@@ -7207,6 +7190,8 @@ HTMLMediaElement::NotifyAudioPlaybackChanged(AudibleChangedReasons aReason)
   if (mAudioChannelWrapper) {
     mAudioChannelWrapper->NotifyAudioPlaybackChanged(aReason);
   }
+  // only request wake lock for audible media.
+  mPaused.UpdateWakeLock();
 }
 
 bool
@@ -7640,7 +7625,7 @@ HTMLMediaElement::ReportCanPlayTelemetry()
       [thread, abstractThread]() {
 #if XP_WIN
         // Windows Media Foundation requires MSCOM to be inited.
-        HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+        DebugOnly<HRESULT> hr = CoInitializeEx(0, COINIT_MULTITHREADED);
         MOZ_ASSERT(hr == S_OK);
 #endif
         bool aac = MP4Decoder::IsSupportedType(

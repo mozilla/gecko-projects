@@ -70,7 +70,6 @@ ${helpers.single_keyword("word-break",
                                   animation_value_type="discrete"
                                   flags="APPLIES_TO_PLACEHOLDER",
                                   spec="https://drafts.csswg.org/css-text/#propdef-text-justify">
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ToComputedValue for SpecifiedValue {
         type ComputedValue = computed_value::T;
@@ -114,7 +113,6 @@ ${helpers.single_keyword("text-align-last",
 <%helpers:longhand name="text-align" animation_value_type="discrete"
                    flags="APPLIES_TO_PLACEHOLDER"
                    spec="https://drafts.csswg.org/css-text/#propdef-text-align">
-    no_viewport_percentage!(SpecifiedValue);
     pub mod computed_value {
         use style_traits::ToCss;
         macro_rules! define_text_align {
@@ -177,7 +175,7 @@ ${helpers.single_keyword("text-align-last",
         use std::fmt;
         use style_traits::ToCss;
 
-        #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub enum SpecifiedValue {
             Keyword(computed_value::T),
             MatchParent,
@@ -292,9 +290,8 @@ ${helpers.predefined_type("word-spacing",
     use values::computed::ComputedValueAsSpecified;
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
-    #[derive(Clone, PartialEq, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue {
         pub underline: Option<RGBA>,
@@ -379,7 +376,6 @@ ${helpers.predefined_type("word-spacing",
                                   spec="https://drafts.csswg.org/css-text/#propdef-white-space">
     use values::computed::ComputedValueAsSpecified;
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     % if product != "gecko":
     impl SpecifiedValue {
@@ -435,7 +431,6 @@ ${helpers.predefined_type(
     use style_traits::ToCss;
     use unicode_segmentation::UnicodeSegmentation;
 
-    no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -446,7 +441,7 @@ ${helpers.predefined_type(
             String(String),
         }
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct KeywordValue {
             pub fill: bool,
@@ -462,7 +457,7 @@ ${helpers.predefined_type(
         String(String),
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum KeywordValue {
         Fill(bool),
@@ -630,7 +625,7 @@ ${helpers.predefined_type(
                              "left" => Left);
 
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Debug, Clone, PartialEq, ToCss)]
+    #[derive(Clone, Debug, PartialEq, ToCss)]
     pub struct SpecifiedValue(pub HorizontalWritingModeValue, pub VerticalWritingModeValue);
 
     pub mod computed_value {
@@ -638,7 +633,6 @@ ${helpers.predefined_type(
     }
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     pub fn get_initial_value() -> computed_value::T {
         SpecifiedValue(HorizontalWritingModeValue::Over, VerticalWritingModeValue::Right)

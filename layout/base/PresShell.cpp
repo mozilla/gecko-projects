@@ -560,6 +560,8 @@ mozilla::LazyLogModule PresShell::gLog("PresShell");
 mozilla::TimeStamp PresShell::sLastInputCreated;
 mozilla::TimeStamp PresShell::sLastInputProcessed;
 
+bool PresShell::sProcessInteractable = false;
+
 #ifdef DEBUG
 static void
 VerifyStyleTree(nsPresContext* aPresContext, nsFrameManager* aFrameManager)
@@ -1017,6 +1019,9 @@ PresShell::Init(nsIDocument* aDocument,
 #endif
       os->AddObserver(this, "memory-pressure", false);
       os->AddObserver(this, NS_WIDGET_WAKE_OBSERVER_TOPIC, false);
+      if (XRE_IsParentProcess() && !sProcessInteractable) {
+        os->AddObserver(this, "sessionstore-one-or-no-tab-restored", false);
+      }
     }
   }
 
@@ -1245,6 +1250,9 @@ PresShell::Destroy()
 #endif
       os->RemoveObserver(this, "memory-pressure");
       os->RemoveObserver(this, NS_WIDGET_WAKE_OBSERVER_TOPIC);
+      if (XRE_IsParentProcess()) {
+        os->RemoveObserver(this, "sessionstore-one-or-no-tab-restored");
+      }
     }
   }
 
@@ -2927,9 +2935,8 @@ PresShell::DestroyFramesFor(Element* aElement)
   ++mChangeNestCount;
 
   nsCSSFrameConstructor* fc = FrameConstructor();
-  bool didReconstruct;
   fc->BeginUpdate();
-  fc->DestroyFramesFor(aElement, &didReconstruct);
+  bool didReconstruct = fc->DestroyFramesFor(aElement);
   fc->EndUpdate();
 
   // XXXmats doesn't frame state need to be restored in this case?
@@ -2937,6 +2944,14 @@ PresShell::DestroyFramesFor(Element* aElement)
     PostRecreateFramesFor(aElement);
   }
 
+  // NOTE(emilio): This is needed to force also a full subtree restyle for the
+  // content (in Stylo, where the existence of frames != the existence of
+  // styles).
+  //
+  // It's a bit out of place in a function called DestroyFramesFor,
+  // however the two only callers of this code really need this (given they
+  // shuffle the flattened tree around), and this avoids exposing additional
+  // APIs on the pres shell.
   mPresContext->RestyleManager()->PostRestyleEvent(
     aElement, eRestyle_Subtree, nsChangeHint(0));
 
@@ -3006,7 +3021,8 @@ PresShell::CreateReferenceRenderingContext()
   nsDeviceContext* devCtx = mPresContext->DeviceContext();
   RefPtr<gfxContext> rc;
   if (mPresContext->IsScreen()) {
-    rc = gfxContext::CreateOrNull(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
+    rc = gfxContext::CreateOrNull(
+      gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
   } else {
     // We assume the devCtx has positive width and height for this call.
     // However, width and height, may be outside of the reasonable range
@@ -4158,6 +4174,8 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
 
       mPresContext->FlushCounterStyles();
 
+      mPresContext->FlushFontFeatureValues();
+
       // Flush any requested SMIL samples.
       if (mDocument->HasAnimationController()) {
         mDocument->GetAnimationController()->FlushResampleRequests();
@@ -4490,11 +4508,8 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
     }
   }
 
-  bool didReconstruct;
   mFrameConstructor->ContentRemoved(aMaybeContainer, aChild, oldNextSibling,
-                                    nsCSSFrameConstructor::REMOVE_CONTENT,
-                                    &didReconstruct);
-
+                                    nsCSSFrameConstructor::REMOVE_CONTENT);
 
   if (aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
     MOZ_ASSERT(container == aDocument);
@@ -4527,7 +4542,10 @@ PresShell::ReconstructFrames()
 
   // Have to make sure that the content notifications are flushed before we
   // start messing with the frame model; otherwise we can get content doubling.
-  mDocument->FlushPendingNotifications(FlushType::ContentAndNotify);
+  //
+  // Also make sure that styles are flushed before calling into the frame
+  // constructor, since that's what it expects.
+  mDocument->FlushPendingNotifications(FlushType::Style);
 
   if (mIsDestroying) {
     return;
@@ -4552,6 +4570,7 @@ nsIPresShell::RestyleForCSSRuleChanges()
 
   if (mPresContext) {
     mPresContext->RebuildCounterStyles();
+    mPresContext->RebuildFontFeatureValues();
   }
 
   if (!mDidInitialize) {
@@ -8270,6 +8289,32 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
         double lastMillis = (sLastInputProcessed - sLastInputCreated).ToMilliseconds();
         Telemetry::Accumulate(Telemetry::INPUT_EVENT_RESPONSE_COALESCED_MS,
                               lastMillis);
+
+        if (MOZ_UNLIKELY(!sProcessInteractable)) {
+          // For content process, we use the ready state of
+          // top-level-content-document to know if the process has finished the
+          // start-up.
+          // For parent process, see the topic
+          // 'sessionstore-one-or-no-tab-restored' in PresShell::Observe.
+          if (XRE_IsContentProcess() &&
+              mDocument && mDocument->IsTopLevelContentDocument()) {
+            switch (mDocument->GetReadyStateEnum()) {
+              case nsIDocument::READYSTATE_INTERACTIVE:
+              case nsIDocument::READYSTATE_COMPLETE:
+                sProcessInteractable = true;
+                break;
+              default:
+                break;
+            }
+          }
+        }
+        if (MOZ_LIKELY(sProcessInteractable)) {
+          Telemetry::Accumulate(Telemetry::INPUT_EVENT_RESPONSE_POST_STARTUP_MS,
+                                lastMillis);
+        } else {
+          Telemetry::Accumulate(Telemetry::INPUT_EVENT_RESPONSE_STARTUP_MS,
+                                lastMillis);
+        }
       }
       sLastInputCreated = aEvent->mTimeStamp;
     } else if (aEvent->mTimeStamp < sLastInputCreated) {
@@ -9155,6 +9200,8 @@ PresShell::WillDoReflow()
 
   mPresContext->FlushCounterStyles();
 
+  mPresContext->FlushFontFeatureValues();
+
   mFrameConstructor->BeginUpdate();
 
   mLastReflowStart = GetPerformanceNow();
@@ -9703,6 +9750,19 @@ PresShell::Observe(nsISupports* aSubject,
 
   if (!nsCRT::strcmp(aTopic, NS_WIDGET_WAKE_OBSERVER_TOPIC)) {
     mLastOSWake = TimeStamp::Now();
+    return NS_OK;
+  }
+
+  // For parent process, user may expect the UI is interactable after a
+  // tab (previously opened page or home page) has restored.
+  if (!nsCRT::strcmp(aTopic, "sessionstore-one-or-no-tab-restored")) {
+    MOZ_ASSERT(XRE_IsParentProcess());
+    sProcessInteractable = true;
+
+    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+    if (os) {
+      os->RemoveObserver(this, "sessionstore-one-or-no-tab-restored");
+    }
     return NS_OK;
   }
 
@@ -11006,9 +11066,9 @@ PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const
     mFramesToDirty.ShallowSizeOfExcludingThis(mallocSizeOf);
 
   if (nsStyleSet* styleSet = StyleSet()->GetAsGecko()) {
-    aSizes.mLayoutStyleSetsSize += styleSet->SizeOfIncludingThis(mallocSizeOf);
+    styleSet->AddSizeOfIncludingThis(aSizes);
   } else if (ServoStyleSet* styleSet = StyleSet()->GetAsServo()) {
-    aSizes.mLayoutStyleSetsSize += styleSet->SizeOfIncludingThis(mallocSizeOf);
+    styleSet->AddSizeOfIncludingThis(aSizes);
   } else {
     MOZ_CRASH();
   }

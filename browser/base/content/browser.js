@@ -548,11 +548,7 @@ const gStoragePressureObserver = {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
           let win = gBrowser.ownerGlobal;
-          if (Services.prefs.getBoolPref("browser.preferences.useOldOrganization")) {
-            win.openAdvancedPreferences("networkTab", {origin: "storagePressure"});
-          } else {
-            win.openPreferences("panePrivacy", {origin: "storagePressure"});
-          }
+          win.openPreferences("panePrivacy", { origin: "storagePressure" });
         }
       });
     }
@@ -1364,6 +1360,7 @@ var gBrowserInit = {
     CombinedStopReload.init();
     gPrivateBrowsingUI.init();
     BrowserPageActions.init();
+    gAccessibilityServiceIndicator.init();
 
     if (window.matchMedia("(-moz-os-version: windows-win8)").matches &&
         window.matchMedia("(-moz-windows-default-theme)").matches) {
@@ -1379,11 +1376,27 @@ var gBrowserInit = {
 
     gRemoteControl.updateVisualCue(Marionette.running);
 
-    let uriToLoad = this._getUriToLoad();
-    gIdentityHandler.initIdentityBlock(uriToLoad);
+    // If we are given a tab to swap in, take care of it before first paint to
+    // avoid an about:blank flash.
+    let tabToOpen = window.arguments && window.arguments[0];
+    if (tabToOpen instanceof XULElement) {
+      // Clear the reference to the tab from the arguments array.
+      window.arguments[0] = null;
+
+      // Stop the about:blank load
+      gBrowser.stop();
+      // make sure it has a docshell
+      gBrowser.docShell;
+
+      try {
+        gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, tabToOpen);
+      } catch (e) {
+        Cu.reportError(e);
+      }
+    }
 
     // Wait until chrome is painted before executing code not critical to making the window visible
-    this._boundDelayedStartup = this._delayedStartup.bind(this, uriToLoad);
+    this._boundDelayedStartup = this._delayedStartup.bind(this);
     window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
 
     this._loadHandled = true;
@@ -1394,7 +1407,7 @@ var gBrowserInit = {
     this._boundDelayedStartup = null;
   },
 
-  _delayedStartup(uriToLoad) {
+  _delayedStartup() {
     let tmp = {};
     Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", tmp);
     let TelemetryTimestamps = tmp.TelemetryTimestamps;
@@ -1408,8 +1421,7 @@ var gBrowserInit = {
 
     // This pageshow listener needs to be registered before we may call
     // swapBrowsersAndCloseOther() to receive pageshow events fired by that.
-    let mm = window.messageManager;
-    mm.addMessageListener("PageVisibility:Show", function(message) {
+    window.messageManager.addMessageListener("PageVisibility:Show", function(message) {
       if (message.target == gBrowser.selectedBrowser) {
         setTimeout(pageShowEventHandlers, 0, message.data.persisted);
       }
@@ -1440,89 +1452,7 @@ var gBrowserInit = {
     // e.g., start/home page, command line / startup uris to load, sessionstore
     gAboutNewTabService.QueryInterface(Ci.nsISupports);
 
-    if (uriToLoad && uriToLoad != "about:blank") {
-      if (uriToLoad instanceof Ci.nsIArray) {
-        let count = uriToLoad.length;
-        let specs = [];
-        for (let i = 0; i < count; i++) {
-          let urisstring = uriToLoad.queryElementAt(i, Ci.nsISupportsString);
-          specs.push(urisstring.data);
-        }
-
-        // This function throws for certain malformed URIs, so use exception handling
-        // so that we don't disrupt startup
-        try {
-          gBrowser.loadTabs(specs, {
-            inBackground: false,
-            replace: true,
-            triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-          });
-        } catch (e) {}
-      } else if (uriToLoad instanceof XULElement) {
-        // swap the given tab with the default about:blank tab and then close
-        // the original tab in the other window.
-        let tabToOpen = uriToLoad;
-
-        // If this tab was passed as a window argument, clear the
-        // reference to it from the arguments array.
-        if (window.arguments[0] == tabToOpen) {
-          window.arguments[0] = null;
-        }
-
-        // Stop the about:blank load
-        gBrowser.stop();
-        // make sure it has a docshell
-        gBrowser.docShell;
-
-        // We must set usercontextid before updateBrowserRemoteness()
-        // so that the newly created remote tab child has correct usercontextid
-        if (tabToOpen.hasAttribute("usercontextid")) {
-          let usercontextid = tabToOpen.getAttribute("usercontextid");
-          gBrowser.selectedBrowser.setAttribute("usercontextid", usercontextid);
-        }
-
-        try {
-          // Make sure selectedBrowser has the same remote settings as the one
-          // we are swapping in.
-          gBrowser.updateBrowserRemoteness(gBrowser.selectedBrowser,
-                                           tabToOpen.linkedBrowser.isRemoteBrowser,
-                                           { remoteType: tabToOpen.linkedBrowser.remoteType });
-          gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, tabToOpen);
-        } catch (e) {
-          Cu.reportError(e);
-        }
-      } else if (window.arguments.length >= 3) {
-        // window.arguments[2]: referrer (nsIURI | string)
-        //                 [3]: postData (nsIInputStream)
-        //                 [4]: allowThirdPartyFixup (bool)
-        //                 [5]: referrerPolicy (int)
-        //                 [6]: userContextId (int)
-        //                 [7]: originPrincipal (nsIPrincipal)
-        //                 [8]: triggeringPrincipal (nsIPrincipal)
-        let referrerURI = window.arguments[2];
-        if (typeof(referrerURI) == "string") {
-          try {
-            referrerURI = makeURI(referrerURI);
-          } catch (e) {
-            referrerURI = null;
-          }
-        }
-        let referrerPolicy = (window.arguments[5] != undefined ?
-            window.arguments[5] : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
-        let userContextId = (window.arguments[6] != undefined ?
-            window.arguments[6] : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID);
-        loadURI(uriToLoad, referrerURI, window.arguments[3] || null,
-                window.arguments[4] || false, referrerPolicy, userContextId,
-                // pass the origin principal (if any) and force its use to create
-                // an initial about:blank viewer if present:
-                window.arguments[7], !!window.arguments[7], window.arguments[8]);
-        window.focus();
-      } else {
-        // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
-        // Such callers expect that window.arguments[0] is handled as a single URI.
-        loadOneOrMoreURIs(uriToLoad, Services.scriptSecurityManager.getSystemPrincipal());
-      }
-    }
+    this._handleURIToLoad();
 
     Services.obs.addObserver(gIdentityHandler, "perm-changed");
     Services.obs.addObserver(gRemoteControl, "remote-active");
@@ -1550,27 +1480,6 @@ var gBrowserInit = {
     PanelUI.init();
 
     UpdateUrlbarSearchSplitterState();
-
-    if (!(isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") ||
-        !focusAndSelectUrlBar()) {
-      if (gBrowser.selectedBrowser.isRemoteBrowser) {
-        // If the initial browser is remote, in order to optimize for first paint,
-        // we'll defer switching focus to that browser until it has painted.
-        let focusedElement = document.commandDispatcher.focusedElement;
-        mm.addMessageListener("Browser:FirstPaint", function onFirstPaint() {
-          mm.removeMessageListener("Browser:FirstPaint", onFirstPaint);
-          // If focus didn't move while we were waiting for first paint, we're okay
-          // to move to the browser.
-          if (document.commandDispatcher.focusedElement == focusedElement) {
-            gBrowser.selectedBrowser.focus();
-          }
-        });
-      } else {
-        // If the initial browser is not remote, we can focus the browser
-        // immediately with no paint performance impact.
-        gBrowser.selectedBrowser.focus();
-      }
-    }
 
     // Enable/Disable auto-hide tabbar
     gBrowser.tabContainer.updateVisibility();
@@ -1693,6 +1602,101 @@ var gBrowserInit = {
     TelemetryTimestamps.add("delayedStartupFinished");
   },
 
+  _handleURIToLoad() {
+    let initiallyFocusedElement = document.commandDispatcher.focusedElement;
+
+    let firstBrowserPaintDeferred = {};
+    firstBrowserPaintDeferred.promise = new Promise(resolve => {
+      firstBrowserPaintDeferred.resolve = resolve;
+    });
+
+    let mm = window.messageManager;
+    mm.addMessageListener("Browser:FirstPaint", function onFirstPaint() {
+      mm.removeMessageListener("Browser:FirstPaint", onFirstPaint);
+      firstBrowserPaintDeferred.resolve();
+    });
+
+    this._uriToLoadPromise.then(uriToLoad => {
+      if (!uriToLoad || uriToLoad == "about:blank") {
+        return;
+      }
+
+      // We don't check if uriToLoad is a XULElement because this case has
+      // already been handled before first paint, and the argument cleared.
+      if (uriToLoad instanceof Ci.nsIArray) {
+        let count = uriToLoad.length;
+        let specs = [];
+        for (let i = 0; i < count; i++) {
+          let urisstring = uriToLoad.queryElementAt(i, Ci.nsISupportsString);
+          specs.push(urisstring.data);
+        }
+
+        // This function throws for certain malformed URIs, so use exception handling
+        // so that we don't disrupt startup
+        try {
+          gBrowser.loadTabs(specs, {
+            inBackground: false,
+            replace: true,
+            triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+          });
+        } catch (e) {}
+      } else if (window.arguments.length >= 3) {
+        // window.arguments[2]: referrer (nsIURI | string)
+        //                 [3]: postData (nsIInputStream)
+        //                 [4]: allowThirdPartyFixup (bool)
+        //                 [5]: referrerPolicy (int)
+        //                 [6]: userContextId (int)
+        //                 [7]: originPrincipal (nsIPrincipal)
+        //                 [8]: triggeringPrincipal (nsIPrincipal)
+        let referrerURI = window.arguments[2];
+        if (typeof(referrerURI) == "string") {
+          try {
+            referrerURI = makeURI(referrerURI);
+          } catch (e) {
+            referrerURI = null;
+          }
+        }
+        let referrerPolicy = (window.arguments[5] != undefined ?
+            window.arguments[5] : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
+        let userContextId = (window.arguments[6] != undefined ?
+            window.arguments[6] : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID);
+        loadURI(uriToLoad, referrerURI, window.arguments[3] || null,
+                window.arguments[4] || false, referrerPolicy, userContextId,
+                // pass the origin principal (if any) and force its use to create
+                // an initial about:blank viewer if present:
+                window.arguments[7], !!window.arguments[7], window.arguments[8]);
+        window.focus();
+      } else {
+        // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
+        // Such callers expect that window.arguments[0] is handled as a single URI.
+        loadOneOrMoreURIs(uriToLoad, Services.scriptSecurityManager.getSystemPrincipal());
+      }
+    });
+
+    this._uriToLoadPromise.then(uriToLoad => {
+      if ((isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") &&
+          focusAndSelectUrlBar()) {
+        return;
+      }
+
+      if (gBrowser.selectedBrowser.isRemoteBrowser) {
+        // If the initial browser is remote, in order to optimize for first paint,
+        // we'll defer switching focus to that browser until it has painted.
+        firstBrowserPaintDeferred.promise.then(() => {
+          // If focus didn't move while we were waiting for first paint, we're okay
+          // to move to the browser.
+          if (document.commandDispatcher.focusedElement == initiallyFocusedElement) {
+            gBrowser.selectedBrowser.focus();
+          }
+        });
+      } else {
+        // If the initial browser is not remote, we can focus the browser
+        // immediately with no paint performance impact.
+        gBrowser.selectedBrowser.focus();
+      }
+    });
+  },
+
   /**
    * Use this function as an entry point to schedule tasks that
    * need to run once per window after startup, and can be scheduled
@@ -1755,28 +1759,38 @@ var gBrowserInit = {
   },
 
   // Returns the URI(s) to load at startup.
-  _getUriToLoad() {
-    // window.arguments[0]: URI to load (string), or an nsIArray of
-    //                      nsISupportsStrings to load, or a xul:tab of
-    //                      a tabbrowser, which will be replaced by this
-    //                      window (for this case, all other arguments are
-    //                      ignored).
-    if (!window.arguments || !window.arguments[0])
-      return null;
+  get _uriToLoadPromise() {
+    delete this._uriToLoadPromise;
+    return this._uriToLoadPromise = new Promise(resolve => {
+      // window.arguments[0]: URI to load (string), or an nsIArray of
+      //                      nsISupportsStrings to load, or a xul:tab of
+      //                      a tabbrowser, which will be replaced by this
+      //                      window (for this case, all other arguments are
+      //                      ignored).
+      if (!window.arguments || !window.arguments[0]) {
+        resolve(null);
+        return;
+      }
 
-    let uri = window.arguments[0];
-    let sessionStartup = Cc["@mozilla.org/browser/sessionstartup;1"]
-                           .getService(Ci.nsISessionStartup);
-    let defaultArgs = Cc["@mozilla.org/browser/clh;1"]
-                        .getService(Ci.nsIBrowserHandler)
-                        .defaultArgs;
+      let uri = window.arguments[0];
+      let defaultArgs = Cc["@mozilla.org/browser/clh;1"]
+                          .getService(Ci.nsIBrowserHandler)
+                          .defaultArgs;
 
-    // If the given URI matches defaultArgs (the default homepage) we want
-    // to block its load if we're going to restore a session anyway.
-    if (uri == defaultArgs && sessionStartup.willOverrideHomepage)
-      return null;
+      // If the given URI is different from the homepage, we want to load it.
+      if (uri != defaultArgs) {
+        resolve(uri);
+        return;
+      }
 
-    return uri;
+      // The URI appears to be the the homepage. We want to load it only if
+      // session restore isn't about to override the homepage.
+      let sessionStartup = Cc["@mozilla.org/browser/sessionstartup;1"]
+                             .getService(Ci.nsISessionStartup);
+      sessionStartup.willOverrideHomepagePromise.then(willOverrideHomepage => {
+        resolve(willOverrideHomepage ? null : uri);
+      });
+    });
   },
 
   onUnload() {
@@ -1834,6 +1848,8 @@ var gBrowserInit = {
     CaptivePortalWatcher.uninit();
 
     SidebarUI.uninit();
+
+    gAccessibilityServiceIndicator.uninit();
 
     // Now either cancel delayedStartup, or clean up the services initialized from
     // it.
@@ -2742,6 +2758,7 @@ function URLBarSetURI(aURI) {
   let isDifferentValidValue = valid && value != gURLBar.value;
   gURLBar.value = value;
   gURLBar.valueIsTyped = !valid;
+  gURLBar.removeAttribute("usertyping");
   if (isDifferentValidValue) {
     gURLBar.selectionStart = gURLBar.selectionEnd = 0;
   }
@@ -5361,17 +5378,13 @@ nsBrowserAccess.prototype = {
                           : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID
 
     let referrer = aParams.referrer ? makeURI(aParams.referrer) : null;
-    let browser = this._openURIInNewTab(aURI, referrer,
-                                        aParams.referrerPolicy,
-                                        aParams.isPrivate,
-                                        isExternal, false,
-                                        userContextId, null, aParams.openerBrowser,
-                                        aParams.triggeringPrincipal,
-                                        aNextTabParentId, aName);
-    if (browser)
-      return browser.QueryInterface(Ci.nsIFrameLoaderOwner);
-
-    return null;
+    return this._openURIInNewTab(aURI, referrer,
+                                 aParams.referrerPolicy,
+                                 aParams.isPrivate,
+                                 isExternal, false,
+                                 userContextId, null, aParams.openerBrowser,
+                                 aParams.triggeringPrincipal,
+                                 aNextTabParentId, aName);
   },
 
   isTabContentWindow(aWindow) {
@@ -6506,13 +6519,7 @@ var OfflineApps = {
   },
 
   manage() {
-    // The advanced subpanes are only supported in the old organization, which will
-    // be removed by bug 1349689.
-    if (Services.prefs.getBoolPref("browser.preferences.useOldOrganization")) {
-      openAdvancedPreferences("networkTab", {origin: "offlineApps"});
-    } else {
-      openPreferences("panePrivacy", {origin: "offlineApps"});
-    }
+    openPreferences("panePrivacy", { origin: "offlineApps" });
   },
 
   receiveMessage(msg) {
@@ -7053,7 +7060,7 @@ var gIdentityHandler = {
    * RegExp used to decide if an about url should be shown as being part of
    * the browser UI.
    */
-  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|searchreset|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
+  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|license|newaddon|permissions|preferences|rights|searchreset|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
 
   get _isBroken() {
     return this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
@@ -7683,14 +7690,6 @@ var gIdentityHandler = {
   },
 
   setURI(uri) {
-    // Ignore about:blank loads until the window's initial URL has loaded,
-    // to avoid hiding the UI that initIdentityBlock could have prepared.
-    if (this._ignoreAboutBlankUntilFirstLoad) {
-      if (uri.spec == "about:blank")
-        return;
-      this._ignoreAboutBlankUntilFirstLoad = false;
-    }
-
     this._uri = uri;
 
     try {
@@ -7721,25 +7720,6 @@ var gIdentityHandler = {
       this._isURILoadedFromFile = resolvedURI.schemeIs("file");
     } catch (ex) {
       // NetUtil's methods will throw for malformed URIs and the like
-    }
-  },
-
-  /**
-   * Used to initialize the identity block before first paint to avoid
-   * flickering when opening a new window showing a secure internal page
-   * (eg. about:home)
-   */
-  initIdentityBlock(initialURI) {
-    if ((typeof initialURI != "string") || !initialURI.startsWith("about:"))
-      return;
-
-    let uri = Services.io.newURI(initialURI);
-    if (this._secureInternalUIWhitelist.test(uri.pathQueryRef)) {
-      this._isSecureInternalUI = true;
-      this._ignoreAboutBlankUntilFirstLoad = true;
-      this.refreshIdentityBlock();
-      // The identity label won't be visible without setting this.
-      gURLBar.setAttribute("pageproxystate", "valid");
     }
   },
 
@@ -8047,6 +8027,63 @@ function getBrowser() {
   return gBrowser;
 }
 
+const gAccessibilityServiceIndicator = {
+  init() {
+    // Pref to enable accessibility service indicator.
+    gPrefService.addObserver("accessibility.indicator.enabled", this);
+    // Accessibility service init/shutdown event.
+    Services.obs.addObserver(this, "a11y-init-or-shutdown");
+    this.update(Services.appinfo.accessibilityEnabled);
+  },
+
+  update(accessibilityEnabled = false) {
+    if (this.enabled && accessibilityEnabled) {
+      this._active = true;
+      document.documentElement.setAttribute("accessibilitymode", "true");
+      [...document.querySelectorAll(".accessibility-indicator")].forEach(
+        indicator => ["click", "keypress"].forEach(type =>
+          indicator.addEventListener(type, this)));
+      TabsInTitlebar.updateAppearance(true);
+    } else if (this._active) {
+      this._active = false;
+      document.documentElement.removeAttribute("accessibilitymode");
+      [...document.querySelectorAll(".accessibility-indicator")].forEach(
+        indicator => ["click", "keypress"].forEach(type =>
+          indicator.removeEventListener(type, this)));
+      TabsInTitlebar.updateAppearance(true);
+    }
+  },
+
+  observe(subject, topic, data) {
+    if (topic == "nsPref:changed" && data === "accessibility.indicator.enabled") {
+      this.update(Services.appinfo.accessibilityEnabled);
+    } else if (topic === "a11y-init-or-shutdown") {
+      // When "a11y-init-or-shutdown" event is fired, "1" indicates that
+      // accessibility service is started and "0" that it is shut down.
+      this.update(data === "1");
+    }
+  },
+
+  get enabled() {
+    return gPrefService.getBoolPref("accessibility.indicator.enabled");
+  },
+
+  handleEvent({ key, type }) {
+    if ((type === "keypress" && [" ", "Enter"].includes(key)) ||
+         type === "click") {
+      let a11yServicesSupportURL =
+        Services.urlFormatter.formatURLPref("accessibility.support.url");
+      gBrowser.selectedTab = gBrowser.addTab(a11yServicesSupportURL);
+    }
+  },
+
+  uninit() {
+    gPrefService.removeObserver("accessibility.indicator.enabled", this);
+    Services.obs.removeObserver(this, "a11y-init-or-shutdown");
+    this.update();
+  }
+};
+
 var gPrivateBrowsingUI = {
   init: function PBUI_init() {
     // Do nothing for normal windows
@@ -8251,15 +8288,22 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams = {}) {
 
 var RestoreLastSessionObserver = {
   init() {
+    let browser_tabs_restorebutton_pref = Services.prefs.getIntPref("browser.tabs.restorebutton");
+    Services.telemetry.scalarSet("browser.session.restore.browser_tabs_restorebutton", browser_tabs_restorebutton_pref);
+    Services.telemetry.scalarSet("browser.session.restore.browser_startup_page", Services.prefs.getIntPref("browser.startup.page"));
     if (SessionStore.canRestoreLastSession &&
         !PrivateBrowsingUtils.isWindowPrivate(window)) {
-      if (Services.prefs.getBoolPref("browser.tabs.restorebutton")) {
+      if (browser_tabs_restorebutton_pref == 1) {
         let {restoreTabsButton, restoreTabsButtonWrapperWidth} = gBrowser.tabContainer;
         let restoreTabsButtonWrapper = restoreTabsButton.parentNode;
         restoreTabsButtonWrapper.setAttribute("session-exists", "true");
         gBrowser.tabContainer.updateSessionRestoreVisibility();
         restoreTabsButton.style.maxWidth = `${restoreTabsButtonWrapperWidth}px`;
         gBrowser.tabContainer.addEventListener("TabOpen", this);
+        Services.telemetry.scalarSet("browser.session.restore.tabbar_restore_available", true);
+        restoreTabsButton.addEventListener("click", () => {
+          Services.telemetry.scalarSet("browser.session.restore.tabbar_restore_clicked", true);
+        });
       }
       Services.obs.addObserver(this, "sessionstore-last-session-cleared", true);
       goSetCommandEnabled("Browser:RestoreLastSession", true);

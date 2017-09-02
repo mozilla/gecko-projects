@@ -20,7 +20,6 @@
 #include "jshashutil.h"
 #include "jsiter.h"
 #include "jsstr.h"
-#include "jsweakmap.h"
 #include "jswrapper.h"
 #include "selfhosted.out.h"
 
@@ -35,7 +34,7 @@
 #include "builtin/SIMD.h"
 #include "builtin/Stream.h"
 #include "builtin/TypedObject.h"
-#include "builtin/WeakSetObject.h"
+#include "builtin/WeakMapObject.h"
 #include "gc/Marking.h"
 #include "gc/Policy.h"
 #include "jit/AtomicOperations.h"
@@ -355,6 +354,50 @@ intrinsic_ThrowInternalError(JSContext* cx, unsigned argc, Value* vp)
     return false;
 }
 
+static bool
+intrinsic_GetErrorMessage(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 1);
+    MOZ_ASSERT(args[0].isInt32());
+
+    const JSErrorFormatString* errorString = GetErrorMessage(nullptr, args[0].toInt32());
+    MOZ_ASSERT(errorString);
+
+    MOZ_ASSERT(errorString->argCount == 0);
+    RootedString message(cx, JS_NewStringCopyZ(cx, errorString->format));
+    if (!message)
+        return false;
+
+    args.rval().setString(message);
+    return true;
+}
+
+static bool
+intrinsic_CreateModuleSyntaxError(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 4);
+    MOZ_ASSERT(args[0].isObject());
+    MOZ_ASSERT(args[1].isInt32());
+    MOZ_ASSERT(args[2].isInt32());
+    MOZ_ASSERT(args[3].isString());
+
+    RootedModuleObject module(cx, &args[0].toObject().as<ModuleObject>());
+    RootedString filename(cx, JS_NewStringCopyZ(cx, module->script()->filename()));
+    RootedString message(cx, args[3].toString());
+
+    RootedValue error(cx);
+    if (!JS::CreateError(cx, JSEXN_SYNTAXERR, nullptr, filename, args[1].toInt32(),
+                         args[2].toInt32(), nullptr, message, &error))
+    {
+        return false;
+    }
+
+    args.rval().set(error);
+    return true;
+}
+
 /**
  * Handles an assertion failure in self-hosted code just like an assertion
  * failure in C++ code. Information about the failure can be provided in args[0].
@@ -530,6 +573,81 @@ intrinsic_DefineDataProperty(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().setUndefined();
+    return true;
+}
+
+static bool
+intrinsic_DefineProperty(JSContext* cx, unsigned argc, Value* vp)
+{
+    // _DefineProperty(object, propertyKey, attributes, valueOrGetter, setter, strict)
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 6);
+    MOZ_ASSERT(args[0].isObject());
+    MOZ_ASSERT(args[1].isString() || args[1].isNumber() || args[1].isSymbol());
+    MOZ_ASSERT(args[2].isInt32());
+    MOZ_ASSERT(args[5].isBoolean());
+
+    RootedObject obj(cx, &args[0].toObject());
+    RootedId id(cx);
+    if (!ValueToId<CanGC>(cx, args[1], &id))
+        return false;
+
+    Rooted<PropertyDescriptor> desc(cx);
+
+    unsigned attributes = args[2].toInt32();
+    unsigned attrs = 0;
+    if (attributes & ATTR_ENUMERABLE)
+        attrs |= JSPROP_ENUMERATE;
+    else if (!(attributes & ATTR_NONENUMERABLE))
+        attrs |= JSPROP_IGNORE_ENUMERATE;
+
+    if (attributes & ATTR_NONCONFIGURABLE)
+        attrs |= JSPROP_PERMANENT;
+    else if (!(attributes & ATTR_CONFIGURABLE))
+        attrs |= JSPROP_IGNORE_PERMANENT;
+
+    if (attributes & ATTR_NONWRITABLE)
+        attrs |= JSPROP_READONLY;
+    else if (!(attributes & ATTR_WRITABLE))
+        attrs |= JSPROP_IGNORE_READONLY;
+
+    // When args[4] is |null|, the data descriptor has a value component.
+    if ((attributes & DATA_DESCRIPTOR_KIND) && args[4].isNull())
+        desc.value().set(args[3]);
+    else
+        attrs |= JSPROP_IGNORE_VALUE;
+
+    if (attributes & ACCESSOR_DESCRIPTOR_KIND) {
+        Value getter = args[3];
+        MOZ_ASSERT(getter.isObject() || getter.isNullOrUndefined());
+        if (getter.isObject())
+            desc.setGetterObject(&getter.toObject());
+        if (!getter.isNull())
+            attrs |= JSPROP_GETTER | JSPROP_SHARED;
+
+        Value setter = args[4];
+        MOZ_ASSERT(setter.isObject() || setter.isNullOrUndefined());
+        if (setter.isObject())
+            desc.setSetterObject(&setter.toObject());
+        if (!setter.isNull())
+            attrs |= JSPROP_SETTER | JSPROP_SHARED;
+
+        // By convention, these bits are not used on accessor descriptors.
+        attrs &= ~(JSPROP_IGNORE_READONLY | JSPROP_IGNORE_VALUE);
+    }
+
+    desc.setAttributes(attrs);
+    desc.assertValid();
+
+    ObjectOpResult result;
+    if (!DefineProperty(cx, obj, id, desc, result))
+        return false;
+
+    bool strict = args[5].toBoolean();
+    if (strict && !result.checkStrict(cx, obj, id))
+        return false;
+
+    args.rval().setBoolean(bool(result));
     return true;
 }
 
@@ -2169,9 +2287,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_INLINABLE_FN("std_Object_create",         obj_create,                   2, 0, ObjectCreate),
     JS_FN("std_Object_propertyIsEnumerable",     obj_propertyIsEnumerable,     1,0),
-    JS_FN("std_Object_defineProperty",           obj_defineProperty,           3,0),
     JS_FN("std_Object_getOwnPropertyNames",      obj_getOwnPropertyNames,      1,0),
-    JS_FN("std_Object_getOwnPropertyDescriptor", obj_getOwnPropertyDescriptor, 2,0),
     JS_FN("std_Object_toString",                 obj_toString,                 0,0),
 
     JS_INLINABLE_FN("std_Reflect_getPrototypeOf", Reflect_getPrototypeOf,      1,0,
@@ -2207,10 +2323,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("std_TypedArray_buffer",               js::TypedArray_bufferGetter,  1,0),
 
-    JS_FN("std_WeakMap_has",                     WeakMap_has,                  1,0),
-    JS_FN("std_WeakMap_get",                     WeakMap_get,                  2,0),
+    JS_FN("std_WeakMap_get",                     WeakMap_get,                  1,0),
     JS_FN("std_WeakMap_set",                     WeakMap_set,                  2,0),
-    JS_FN("std_WeakMap_delete",                  WeakMap_delete,               1,0),
 
     JS_FN("std_SIMD_Int8x16_extractLane",        simd_int8x16_extractLane,     2,0),
     JS_FN("std_SIMD_Int16x8_extractLane",        simd_int16x8_extractLane,     2,0),
@@ -2245,6 +2359,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ThrowTypeError",          intrinsic_ThrowTypeError,          4,0),
     JS_FN("ThrowSyntaxError",        intrinsic_ThrowSyntaxError,        4,0),
     JS_FN("ThrowInternalError",      intrinsic_ThrowInternalError,      4,0),
+    JS_FN("GetErrorMessage",         intrinsic_GetErrorMessage,         1,0),
+    JS_FN("CreateModuleSyntaxError", intrinsic_CreateModuleSyntaxError, 4,0),
     JS_FN("AssertionFailed",         intrinsic_AssertionFailed,         1,0),
     JS_FN("DumpMessage",             intrinsic_DumpMessage,             1,0),
     JS_FN("OwnPropertyKeys",         intrinsic_OwnPropertyKeys,         1,0),
@@ -2257,6 +2373,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("RuntimeDefaultLocale",    intrinsic_RuntimeDefaultLocale,    0,0),
     JS_FN("AddContentTelemetry",     intrinsic_AddContentTelemetry,     2,0),
     JS_FN("_DefineDataProperty",     intrinsic_DefineDataProperty,      4,0),
+    JS_FN("_DefineProperty",         intrinsic_DefineProperty,          6,0),
 
     JS_INLINABLE_FN("_IsConstructing", intrinsic_IsConstructing,        0,0,
                     IntrinsicIsConstructing),
@@ -2413,10 +2530,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     IntrinsicIsSetObject),
     JS_FN("CallSetMethodIfWrapped", CallNonGenericSelfhostedMethod<Is<SetObject>>, 2, 0),
 
-    JS_FN("IsWeakSet", intrinsic_IsInstanceOfBuiltin<WeakSetObject>, 1,0),
-    JS_FN("CallWeakSetMethodIfWrapped",
-          CallNonGenericSelfhostedMethod<Is<WeakSetObject>>, 2, 0),
-
     JS_FN("IsReadableStreamBYOBRequest",
           intrinsic_IsInstanceOfBuiltin<ReadableStreamBYOBRequest>, 1, 0),
 
@@ -2507,6 +2620,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("GetNumberFormatConstructor",
           intrinsic_GetBuiltinIntlConstructor<GlobalObject::getOrCreateNumberFormatConstructor>,
           0,0),
+
+    JS_FN("GetOwnPropertyDescriptorToArray", GetOwnPropertyDescriptorToArray, 2,0),
 
     JS_INLINABLE_FN("IsRegExpObject",
                     intrinsic_IsInstanceOfBuiltin<RegExpObject>, 1,0,
@@ -2617,7 +2732,7 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
     static const ClassOps shgClassOps = {
         nullptr, nullptr, nullptr, nullptr,
         nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr,
         JS_GlobalObjectTraceHook
     };
 

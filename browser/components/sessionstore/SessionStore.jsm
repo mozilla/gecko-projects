@@ -971,6 +971,8 @@ var SessionStoreInternal = {
         SessionStoreInternal.restoreNextTab();
 
         this._sendTabRestoredNotification(tab, data.isRemotenessUpdate);
+
+        Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
         break;
       case "SessionStore:crashedTabRevived":
         // The browser was revived by navigating to a different page
@@ -1149,6 +1151,7 @@ var SessionStoreInternal = {
 
           // Nothing to restore now, notify observers things are complete.
           Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+          Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
           this._deferredAllWindowsRestored.resolve();
         } else {
           TelemetryTimestamps.add("sessionRestoreRestoring");
@@ -1168,6 +1171,7 @@ var SessionStoreInternal = {
       } else {
         // Nothing to restore, notify observers things are complete.
         Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+        Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
         this._deferredAllWindowsRestored.resolve();
       }
     // this window was opened by _openWindowWithState
@@ -3414,6 +3418,10 @@ var SessionStoreInternal = {
     tabstrip.smoothScroll = smoothScroll;
 
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_RESTORE_WINDOW_MS");
+    if (Services.prefs.getIntPref("browser.tabs.restorebutton") != 0 ) {
+      Services.telemetry.scalarAdd("browser.session.restore.number_of_tabs", winData.tabs.length);
+      Services.telemetry.scalarAdd("browser.session.restore.number_of_win", 1);
+    }
 
     this._setWindowStateReady(aWindow);
 
@@ -4756,7 +4764,7 @@ var SessionStoreInternal = {
     if (options.tabData.storage) {
       for (let origin of Object.getOwnPropertyNames(options.tabData.storage)) {
         try {
-          let {frameLoader} = browser.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
+          let {frameLoader} = browser;
           if (frameLoader.tabParent) {
             let attrs = browser.contentPrincipal.originAttributes;
             let dataPrincipal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(origin);

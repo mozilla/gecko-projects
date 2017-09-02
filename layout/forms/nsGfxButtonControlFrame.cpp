@@ -10,9 +10,6 @@
 #include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsContentUtils.h"
-// MouseEvent suppression in PP
-#include "nsContentList.h"
-
 #include "nsIDOMHTMLInputElement.h"
 #include "nsTextNode.h"
 
@@ -33,7 +30,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsGfxButtonControlFrame)
 
 void nsGfxButtonControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  nsContentUtils::DestroyAnonymousContent(&mTextContent);
+  DestroyAnonymousContent(mTextContent.forget());
   nsHTMLButtonControlFrame::DestroyFrom(aDestructRoot);
 }
 

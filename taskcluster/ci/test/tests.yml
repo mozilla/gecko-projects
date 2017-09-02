@@ -5,6 +5,9 @@
 
 # Note that these are in lexical order, as enforced by the task loader.
 
+# Adding a new test type or running tests on a new platform? Be sure to review
+# https://wiki.mozilla.org/Sheriffing/Job_Visibility_Policy
+
 awsy:
     description: "Are we slim yet"
     suite: awsy
@@ -12,6 +15,10 @@ awsy:
     max-run-time: 7200
     instance-size: xlarge
     allow-software-gl-layers: false
+    run-on-projects:
+        by-test-platform:
+            .*-devedition/.*: [] # don't run on devedition
+            default: built-projects
     mozharness:
         script: awsy_script.py
         config:
@@ -33,6 +40,7 @@ awsy-stylo:
     run-on-projects:
         by-test-platform:
             .*-stylo.*: ['autoland', 'mozilla-central', 'try']
+            .*-devedition/.*: [] # don't run on devedition
             default: built-projects
     mozharness:
         script: awsy_script.py
@@ -57,6 +65,7 @@ awsy-stylo-sequential:
     run-on-projects:
         by-test-platform:
             .*-stylo.*: ['autoland', 'mozilla-central', 'try']
+            .*-devedition/.*: [] # don't run on devedition
             default: built-projects
     mozharness:
         script: awsy_script.py
@@ -103,6 +112,10 @@ cppunit:
                             - remove_executables.py
                 extra-options:
                     - --cppunittest-suite=cppunittest
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 crashtest:
     description: "Crashtest run"
@@ -152,6 +165,7 @@ crashtest:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            windows10-64-asan.*: 3
             default: default
 
 firefox-ui-functional-local:
@@ -174,13 +188,16 @@ firefox-ui-functional-local:
         extra-options:
             - "--tag"
             - "local"
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 firefox-ui-functional-remote:
     description: "Firefox-ui-tests functional run"
     suite: "firefox-ui/functional remote"
     treeherder-symbol: tc-Fxfn-r(en-US)
     max-run-time: 5400
-    tier: 2
     mozharness:
         script: firefox_ui_tests/functional.py
         config:
@@ -196,6 +213,10 @@ firefox-ui-functional-remote:
         extra-options:
             - "--tag"
             - "remote"
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: 2
 
 geckoview:
     description: "Geckoview run"
@@ -223,7 +244,7 @@ gtest:
             linux64-qr/.*: ['mozilla-central', 'try']
             windows.*-pgo/.*: [] # permafails on pgo
             windows.*-nightly/.*: [] # permafails on nightly too
-            windows.*-devedition/.*: [] # permafails here too
+            .*-devedition/.*: [] # don't run on devedition
             default: built-projects
     mozharness:
         script: desktop_unittest.py
@@ -243,6 +264,7 @@ gtest:
         by-test-platform:
             windows7-32-pgo.*: 3
             windows10-64-pgo.*: 3
+            windows10-64-asan.*: 3
             default: default
 
 jittest:
@@ -282,6 +304,10 @@ jittest:
         files-changed:
             - js/src/**
             - js/public/**
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 jsreftest:
     description: "JS Reftest run"
@@ -340,6 +366,7 @@ jsreftest:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            windows10-64-asan.*: 3
             default: default
 
 marionette:
@@ -357,6 +384,7 @@ marionette:
     tier:
         by-test-platform:
             android.*: 2
+            windows10-64-asan.*: 3
             default: default
     chunks:
         by-test-platform:
@@ -391,7 +419,6 @@ marionette-headless:
     treeherder-symbol: tc(MnH)
     max-run-time: 5400
     instance-size: default
-    tier: default
     chunks: 1
     mozharness:
         script: marionette.py
@@ -408,6 +435,10 @@ marionette-headless:
                     - remove_executables.py
         extra-options:
             - --headless
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 mochitest:
     description: "Mochitest plain run"
@@ -451,6 +482,7 @@ mochitest:
     tier:
         by-test-platform:
             macosx64-stylo/.*: 2
+            windows10-64-asan.*: 3
             default: default
     mozharness:
         by-test-platform:
@@ -493,8 +525,6 @@ mochitest-a11y:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
             linux.*-stylo.*: ['autoland', 'mozilla-central', 'try']
-            linux32-stylo/debug: ['try']
-            linux64-stylo/debug: ['try']
             macosx64-stylo/.*: ['mozilla-central', 'try']
             windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
@@ -517,8 +547,7 @@ mochitest-a11y:
     tier:
         by-test-platform:
             .*-stylo.*: 2
-            linux32-stylo/debug: 3
-            linux64-stylo/debug: 3
+            windows10-64-asan.*: 3
             default: default
 
 mochitest-browser-chrome:
@@ -532,6 +561,7 @@ mochitest-browser-chrome:
     chunks:
         by-test-platform:
             linux64/debug: 16
+            linux64-stylo/debug: 16
             linux64-asan/opt: 16
             linux64-jsdcov/opt: 35
             linux32/debug: 16
@@ -547,6 +577,7 @@ mochitest-browser-chrome:
             linux64-jsdcov/opt: 7200
             linux64-ccov/opt: 7200
             linux64/debug: 5400
+            linux64-stylo/debug: 5400
             linux32/debug: 5400
             linux32-stylo/debug: 5400
             default: 3600
@@ -557,7 +588,6 @@ mochitest-browser-chrome:
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
             linux.*-stylo.*: ['autoland', 'mozilla-central', 'try']
-            linux64-stylo/debug: ['try']
             macosx64-stylo/.*: ['mozilla-central', 'try']
             windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
@@ -594,7 +624,7 @@ mochitest-browser-chrome:
     tier:
         by-test-platform:
             .*-stylo.*: 2
-            linux64-stylo/debug: 3
+            windows10-64-asan.*: 3
             default: default
 
 mochitest-browser-screenshots:
@@ -649,8 +679,6 @@ mochitest-chrome:
     run-on-projects:
         by-test-platform:
             windows7-32.*: ['try', 'date']
-            linux32-stylo/debug: ['try']
-            linux64-stylo/debug: ['try']
             linux.*-stylo.*: ['autoland', 'mozilla-central', 'try']
             macosx64-stylo/.*: ['mozilla-central', 'try']
             default: built-projects
@@ -694,8 +722,6 @@ mochitest-chrome:
         by-test-platform:
             windows7-32.*: 2
             macosx64-stylo/.*: 2
-            linux32-stylo/debug: 3
-            linux64-stylo/debug: 3
             default: default
 
 mochitest-clipboard:
@@ -707,8 +733,6 @@ mochitest-clipboard:
     instance-size: xlarge
     run-on-projects:
         by-test-platform:
-            linux32-stylo/debug: ['try']
-            linux64-stylo/debug: ['try']
             linux.*-stylo.*: ['autoland', 'mozilla-central', 'try']
             macosx64-stylo/.*: ['mozilla-central', 'try']
             default: built-projects
@@ -752,8 +776,6 @@ mochitest-clipboard:
     tier:
         by-test-platform:
             macosx64-stylo/.*: 2
-            linux32-stylo/debug: 3
-            linux64-stylo/debug: 3
             default: default
 
 mochitest-devtools-chrome:
@@ -808,6 +830,10 @@ mochitest-devtools-chrome:
             default: default
     # Bug 1296086: high number of intermittents observed with software GL and large instances
     allow-software-gl-layers: false
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 mochitest-gpu:
     description: "Mochitest GPU run"
@@ -864,6 +890,7 @@ mochitest-gpu:
         by-test-platform:
             linux64-qr/.*: 1
             macosx64-stylo/.*: 2
+            windows10-64-asan.*: 3
             default: default
 
 mochitest-jetpack:
@@ -889,6 +916,10 @@ mochitest-jetpack:
                     - remove_executables.py
         extra-options:
             - --mochitest-suite=jetpack-package
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 mochitest-media:
     description: "Mochitest media run"
@@ -954,6 +985,7 @@ mochitest-media:
         by-test-platform:
             linux64-qr/.*: 1
             macosx64-stylo/.*: 2
+            windows10-64-asan.*: 3
             default: default
 
 mochitest-valgrind:
@@ -1055,6 +1087,7 @@ mochitest-webgl:
         by-test-platform:
             linux64-qr/.*: 1
             macosx64-stylo/.*: 2
+            windows10-64-asan.*: 3
             default: default
 
 reftest:
@@ -1084,8 +1117,8 @@ reftest:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 48
             android.*: 16
-            macosx64/opt: 1
-            macosx64/debug: 2
+            macosx64.*/opt: 1
+            macosx64.*/debug: 2
             windows8-64.*/opt: 1
             windows8-64.*/debug: 2
             default: 8
@@ -1129,6 +1162,7 @@ reftest:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            windows10-64-asan.*: 3
             default: default
 
 reftest-gpu:
@@ -1210,16 +1244,21 @@ reftest-no-accel:
                     - remove_executables.py
         extra-options:
             - --reftest-suite=reftest-no-accel
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default
 
 reftest-stylo:
     description: "Reftest run for Stylo"
     suite: reftest/reftest-stylo
     treeherder-symbol: tc-R(Rs)
     virtualization: virtual-with-gpu
-    chunks: 16
+    chunks: 8
     run-on-projects:
         by-test-platform:
             windows10.*: []
+            macosx.*: []
             default: ['autoland', 'mozilla-central', 'try']
     mozharness:
         script: desktop_unittest.py
@@ -1293,6 +1332,7 @@ talos-chrome-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1348,6 +1388,7 @@ talos-dromaeojs-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1403,6 +1444,7 @@ talos-g1-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 7200
     mozharness:
@@ -1459,6 +1501,7 @@ talos-g2-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     mozharness:
         script: talos_script.py
@@ -1541,6 +1584,7 @@ talos-g4-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1597,6 +1641,7 @@ talos-g5-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1653,6 +1698,7 @@ talos-other-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1730,6 +1776,7 @@ talos-perf-reftest-singletons-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1755,6 +1802,7 @@ talos-perf-reftest-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1806,6 +1854,7 @@ talos-svgr-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1861,6 +1910,7 @@ talos-tp5o-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
+            macosx.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1887,7 +1937,7 @@ talos-tp6:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
-            macosx.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+            macosx.*: ['mozilla-beta', 'mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1915,7 +1965,7 @@ talos-tp6-stylo:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-            macosx64-stylo/.*: []
+            macosx.*: ['mozilla-beta', 'mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1941,7 +1991,7 @@ talos-tp6-stylo-threads:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-            macosx64-stylo/.*: []
+            macosx.*: ['mozilla-beta', 'mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -2269,6 +2319,7 @@ xpcshell:
             default: built-projects
     chunks:
         by-test-platform:
+            linux32/debug: 12
             linux64/debug: 10
             android-4.2-x86/opt: 6
             macosx.*: 1
@@ -2317,3 +2368,7 @@ xpcshell:
                         windows10-64-asan/opt: false    # No XPCShell on ASAN yet
                         windows.*: true
                         default: false
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: default

@@ -10,9 +10,6 @@ use cssparser::{Parser, ParserInput};
 use devtools_traits::{ScriptToDevtoolsControlMsg, TimelineMarker, TimelineMarkerType};
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, DocumentReadyState};
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::OnBeforeUnloadEventHandlerNonNull;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::OnErrorEventHandlerNonNull;
 use dom::bindings::codegen::Bindings::FunctionBinding::Function;
 use dom::bindings::codegen::Bindings::PermissionStatusBinding::PermissionState;
 use dom::bindings::codegen::Bindings::RequestBinding::RequestInit;
@@ -105,7 +102,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::mpsc::TryRecvError::{Disconnected, Empty};
 use style::context::ReflowGoal;
-use style::error_reporting::ParseErrorReporter;
 use style::media_queries;
 use style::parser::ParserContext as CssParserContext;
 use style::properties::PropertyId;
@@ -130,7 +126,7 @@ use webrender_api::ClipId;
 use webvr_traits::WebVRMsg;
 
 /// Current state of the window object
-#[derive(JSTraceable, Copy, Clone, Debug, PartialEq, HeapSizeOf)]
+#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
 enum WindowState {
     Alive,
     Zombie,     // Pipeline is closed, but the window hasn't been GCed yet.
@@ -377,7 +373,7 @@ impl Window {
          &self.bluetooth_extra_permission_data
     }
 
-    pub fn css_error_reporter(&self) -> &ParseErrorReporter {
+    pub fn css_error_reporter(&self) -> &CSSErrorReporter {
         &self.error_reporter
     }
 
@@ -1012,7 +1008,7 @@ impl WindowMethods for Window {
         let mut parser = Parser::new(&mut input);
         let url = self.get_url();
         let quirks_mode = self.Document().quirks_mode();
-        let context = CssParserContext::new_for_cssom(&url, self.css_error_reporter(), Some(CssRuleType::Media),
+        let context = CssParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       quirks_mode);
         let media_query_list = media_queries::parse_media_query_list(&context, &mut parser);

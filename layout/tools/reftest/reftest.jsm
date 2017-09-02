@@ -3,6 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+"use strict";
 
 this.EXPORTED_SYMBOLS = ["OnRefTestLoad", "OnRefTestUnload"];
 
@@ -336,8 +337,7 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
       logger.warning("Could not get test plugin tags.");
     }
 
-    gBrowserMessageManager = gBrowser.QueryInterface(CI.nsIFrameLoaderOwner)
-                                     .frameLoader.messageManager;
+    gBrowserMessageManager = gBrowser.frameLoader.messageManager;
     // The content script waits for the initial onload, then notifies
     // us.
     RegisterMessageListenersAndLoadContentScript();
@@ -552,10 +552,11 @@ function StartTests()
             // gURLs array which prevents skipped tests from showing up in the log
             start = gThisChunk == 1 ? 0 : gURLs.indexOf(tURLs[start]);
             end = gThisChunk == gTotalChunks ? gURLs.length : gURLs.indexOf(tURLs[end + 1]) - 1;
-            gURLs = gURLs.slice(start, end);
 
             logger.info("Running chunk " + gThisChunk + " out of " + gTotalChunks + " chunks.  " +
                 "tests " + (start+1) + "-" + end + "/" + gURLs.length);
+
+            gURLs = gURLs.slice(start, end);
         }
 
         if (gShuffle) {
@@ -726,9 +727,17 @@ function BuildConditionSandbox(aURL) {
 #endif
 
 #ifdef MOZ_STYLO
-    sandbox.stylo =
-       (!!env.get("STYLO_FORCE_ENABLED") || prefs.getBoolPref("layout.css.servo.enabled", false)) &&
-        !gCompareStyloToGecko;
+    let styloEnabled = false;
+    // Perhaps a bit redundant in places, but this is easier to compare with the
+    // the real check in `nsLayoutUtils.cpp` to ensure they test the same way.
+    if (env.get("STYLO_FORCE_ENABLED")) {
+        styloEnabled = true;
+    } else if (env.get("STYLO_FORCE_DISABLED")) {
+        styloEnabled = false;
+    } else {
+        styloEnabled = prefs.getBoolPref("layout.css.servo.enabled", false);
+    }
+    sandbox.stylo = styloEnabled && !gCompareStyloToGecko;
     sandbox.styloVsGecko = gCompareStyloToGecko;
 #else
     sandbox.stylo = false;
@@ -845,9 +854,9 @@ function AddTestItem(aTest, aFilter)
     if (!aFilter)
         aFilter = [null, [], false];
 
-    globalFilter = aFilter[0];
-    manifestFilter = aFilter[1];
-    invertManifest = aFilter[2];
+    var globalFilter = aFilter[0];
+    var manifestFilter = aFilter[1];
+    var invertManifest = aFilter[2];
     if ((globalFilter && !globalFilter.test(aTest.url1.spec)) ||
         (manifestFilter &&
          !(invertManifest ^ manifestFilter.test(aTest.url1.spec))))
@@ -1488,7 +1497,7 @@ function StartCurrentURI(aState)
 
 function DoneTests()
 {
-    logger.suiteEnd(extra={'results': gTestResults});
+    logger.suiteEnd({'results': gTestResults});
     logger.info("Slowest test took " + gSlowestTestTime + "ms (" + gSlowestTestURL + ")");
     logger.info("Total canvas count = " + gRecycledCanvases.length);
     if (gFailedUseWidgetLayers) {

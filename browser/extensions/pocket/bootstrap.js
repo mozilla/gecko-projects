@@ -109,7 +109,7 @@ var PocketPageAction = {
 
           let wrapper = doc.createElement("hbox");
           wrapper.id = "pocket-button-box";
-          wrapper.classList.add("urlbar-icon-wrapper");
+          wrapper.classList.add("urlbar-icon-wrapper", "urlbar-page-action");
           wrapper.setAttribute("context", "pageActionPanelContextMenu");
           wrapper.addEventListener("contextmenu", event => {
             window.BrowserPageActions.onContextMenu(event);
@@ -118,9 +118,15 @@ var PocketPageAction = {
           animatableBox.id = "pocket-animatable-box";
           let animatableImage = doc.createElement("image");
           animatableImage.id = "pocket-animatable-image";
+          animatableImage.setAttribute("role", "button");
+          let tooltip =
+            gPocketBundle.GetStringFromName("pocket-button.tooltiptext");
+          animatableImage.setAttribute("tooltiptext", tooltip);
           let pocketButton = doc.createElement("image");
           pocketButton.id = "pocket-button";
           pocketButton.classList.add("urlbar-icon");
+          pocketButton.setAttribute("role", "button");
+          pocketButton.setAttribute("tooltiptext", tooltip);
 
           wrapper.appendChild(pocketButton);
           wrapper.appendChild(animatableBox);
@@ -192,7 +198,7 @@ var PocketPageAction = {
   },
 
   startLibraryAnimation(doc) {
-    var libraryButton = doc.getElementById("library-button");
+    let libraryButton = doc.getElementById("library-button");
     if (!Services.prefs.getBoolPref("toolkit.cosmeticAnimations.enabled") ||
         !libraryButton ||
         libraryButton.getAttribute("cui-areatype") == "menu-panel" ||
@@ -200,20 +206,42 @@ var PocketPageAction = {
         !libraryButton.closest("#nav-bar")) {
       return;
     }
-    libraryButton.removeAttribute("fade");
+
+    let animatableBox = doc.getElementById("library-animatable-box");
+    let navBar = doc.getElementById("nav-bar");
+    let libraryIcon = doc.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
+    let dwu = doc.defaultView.getInterface(Ci.nsIDOMWindowUtils);
+    let iconBounds = dwu.getBoundsWithoutFlushing(libraryIcon);
+    let libraryBounds = dwu.getBoundsWithoutFlushing(libraryButton);
+
+    animatableBox.style.setProperty("--library-button-y", libraryBounds.y + "px");
+    animatableBox.style.setProperty("--library-button-height", libraryBounds.height + "px");
+    animatableBox.style.setProperty("--library-icon-x", iconBounds.x + "px");
+    if (navBar.hasAttribute("brighttext")) {
+      animatableBox.setAttribute("brighttext", "true");
+    } else {
+      animatableBox.removeAttribute("brighttext");
+    }
+    animatableBox.removeAttribute("fade");
+    doc.defaultView.gNavToolbox.setAttribute("animate", "pocket");
     libraryButton.setAttribute("animate", "pocket");
-    libraryButton.addEventListener("animationend", PocketPageAction.onLibraryButtonAnimationEnd);
+    animatableBox.setAttribute("animate", "pocket");
+    animatableBox.addEventListener("animationend", PocketPageAction.onLibraryButtonAnimationEnd);
   },
 
   onLibraryButtonAnimationEnd(event) {
     let doc = event.target.ownerDocument;
     let libraryButton = doc.getElementById("library-button");
+    let animatableBox = doc.getElementById("library-animatable-box");
     if (event.animationName.startsWith("library-pocket-animation")) {
-      libraryButton.setAttribute("fade", "true");
+      animatableBox.setAttribute("fade", "true");
     } else if (event.animationName == "library-pocket-fade") {
-      libraryButton.removeEventListener("animationend", PocketPageAction.onLibraryButtonAnimationEnd);
+      animatableBox.removeEventListener("animationend", PocketPageAction.onLibraryButtonAnimationEnd);
+      // Put the 'fill' back in the normal icon.
       libraryButton.removeAttribute("animate");
-      libraryButton.removeAttribute("fade");
+      animatableBox.removeAttribute("animate");
+      animatableBox.removeAttribute("fade");
+      event.target.ownerGlobal.gNavToolbox.removeAttribute("animate");
     }
   },
 };
@@ -440,7 +468,7 @@ var PocketOverlay = {
         "id": "menu_pocket",
         "label": gPocketBundle.GetStringFromName("pocketMenuitem.label"),
         "class": "menuitem-iconic", // OSX only
-        "oncommand": "openUILink(Pocket.listURL, event);",
+        "oncommand": "Pocket.openList(event)",
         "hidden": hidden
       });
       let sep = createElementWithAttrs(document, "menuseparator", {
@@ -461,7 +489,7 @@ var PocketOverlay = {
         "id": "BMB_pocket",
         "label": gPocketBundle.GetStringFromName("pocketMenuitem.label"),
         "class": "menuitem-iconic bookmark-item subviewbutton",
-        "oncommand": "openUILink(Pocket.listURL, event);",
+        "oncommand": "Pocket.openList(event)",
         "hidden": hidden
       });
       let sep = createElementWithAttrs(document, "menuseparator", {
@@ -479,7 +507,7 @@ var PocketOverlay = {
         "id": "panelMenu_pocket",
         "label": gPocketBundle.GetStringFromName("pocketMenuitem.label"),
         "class": "subviewbutton cui-withicon",
-        "oncommand": "openUILink(Pocket.listURL, event);",
+        "oncommand": "Pocket.openList(event)",
         "hidden": hidden
       });
       let sep = createElementWithAttrs(document, "toolbarseparator", {
@@ -500,7 +528,7 @@ var PocketOverlay = {
         "id": "appMenu-library-pocket-button",
         "label": gPocketBundle.GetStringFromName("pocketMenuitem.label"),
         "class": "subviewbutton subviewbutton-iconic",
-        "oncommand": "openUILink(Pocket.listURL, event);",
+        "oncommand": "Pocket.openList(event)",
         "hidden": hidden
       });
       sib.parentNode.insertBefore(menu, sib);

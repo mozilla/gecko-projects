@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLMediaElement.h"
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
@@ -128,16 +129,26 @@ public:
 
   bool MozHasAudio() const;
 
-  bool MozUseScreenWakeLock() const;
-
-  void SetMozUseScreenWakeLock(bool aValue);
-
-  void NotifyOwnerDocumentActivityChanged() override;
-
   // Gives access to the decoder's frame statistics, if present.
   FrameStatistics* GetFrameStatistics();
 
   already_AddRefed<VideoPlaybackQuality> GetVideoPlaybackQuality();
+
+
+  bool MozOrientationLockEnabled() const
+  {
+    return MediaPrefs::VideoOrientationLockEnabled();
+  }
+
+  bool MozIsOrientationLocked() const
+  {
+    return mIsOrientationLocked;
+  }
+
+  void SetMozIsOrientationLocked(bool aLock)
+  {
+    mIsOrientationLocked = aLock;
+  }
 
 protected:
   virtual ~HTMLVideoElement();
@@ -148,8 +159,9 @@ protected:
   virtual void WakeLockRelease() override;
   void UpdateScreenWakeLock();
 
-  bool mUseScreenWakeLock;
   RefPtr<WakeLock> mScreenWakeLock;
+
+  bool mIsOrientationLocked;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

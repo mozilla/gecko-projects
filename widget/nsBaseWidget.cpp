@@ -70,6 +70,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/Services.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/webrender/WebRenderTypes.h"
 #include "nsRefPtrHashtable.h"
 #include "TouchEvents.h"
 #include "WritingModes.h"
@@ -1293,7 +1294,7 @@ nsBaseWidget::CreateCompositorSession(int aWidth,
       if (textureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_WR) {
         retry = true;
         DestroyCompositor();
-        gfx::GPUProcessManager::Get()->DisableWebRender();
+        gfx::GPUProcessManager::Get()->DisableWebRender(wr::WebRenderError::INITIALIZE);
       }
     }
 
@@ -2285,7 +2286,7 @@ nsIWidget::CaptureRegisteredPlugins(uintptr_t aOwnerWidget)
   // a specific top level window. We use the parent widget during iteration
   // to skip the plugin widgets owned by other top level windows.
   for (auto iter = sPluginWidgetList->Iter(); !iter.Done(); iter.Next()) {
-    const void* windowId = iter.Key();
+    DebugOnly<const void*> windowId = iter.Key();
     nsIWidget* widget = iter.UserData();
 
     MOZ_ASSERT(windowId);

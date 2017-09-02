@@ -192,13 +192,13 @@ nsIContent::GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const
       // we are trying to eagerly restyle document level NAC in
       // nsCSSFrameConstructor::GetAnonymousContent before the root
       // element's frame has been constructed.
-      return nullptr;
+      return OwnerDoc();
     }
     nsIAnonymousContentCreator* creator = do_QueryFrame(parentFrame);
     if (!creator) {
       // If the root element does have a frame, but does not implement
       // nsIAnonymousContentCreator, then this must be document level NAC.
-      return nullptr;
+      return OwnerDoc();
     }
     AutoTArray<nsIContent*, 8> elements;
     creator->AppendAnonymousContentTo(elements, 0);
@@ -206,7 +206,7 @@ nsIContent::GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const
       // If the root element does have a frame, and also does implement
       // nsIAnonymousContentCreator, but didn't create this node, then
       // it must be document level NAC.
-      return nullptr;
+      return OwnerDoc();
     }
   }
 
@@ -693,18 +693,19 @@ NS_IMPL_ISUPPORTS(nsNodeWeakReference,
 
 nsNodeWeakReference::~nsNodeWeakReference()
 {
-  if (mNode) {
-    NS_ASSERTION(mNode->Slots()->mWeakReference == this,
+  nsINode* node = static_cast<nsINode*>(mObject);
+
+  if (node) {
+    NS_ASSERTION(node->Slots()->mWeakReference == this,
                  "Weak reference has wrong value");
-    mNode->Slots()->mWeakReference = nullptr;
+    node->Slots()->mWeakReference = nullptr;
   }
 }
 
 NS_IMETHODIMP
-nsNodeWeakReference::QueryReferent(const nsIID& aIID, void** aInstancePtr)
+nsNodeWeakReference::QueryReferentFromScript(const nsIID& aIID, void** aInstancePtr)
 {
-  return mNode ? mNode->QueryInterface(aIID, aInstancePtr) :
-                 NS_ERROR_NULL_POINTER;
+  return QueryReferent(aIID, aInstancePtr);
 }
 
 size_t
@@ -2576,16 +2577,16 @@ FragmentOrElement::FireNodeRemovedForChildren()
 }
 
 void
-FragmentOrElement::AddSizeOfExcludingThis(SizeOfState& aState,
-                                          nsStyleSizes& aSizes,
+FragmentOrElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
                                           size_t* aNodeSize) const
 {
-  nsIContent::AddSizeOfExcludingThis(aState, aSizes, aNodeSize);
-  *aNodeSize += mAttrsAndChildren.SizeOfExcludingThis(aState.mMallocSizeOf);
+  nsIContent::AddSizeOfExcludingThis(aSizes, aNodeSize);
+  *aNodeSize +=
+    mAttrsAndChildren.SizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
 
   nsDOMSlots* slots = GetExistingDOMSlots();
   if (slots) {
-    *aNodeSize += slots->SizeOfIncludingThis(aState.mMallocSizeOf);
+    *aNodeSize += slots->SizeOfIncludingThis(aSizes.mState.mMallocSizeOf);
   }
 }
 

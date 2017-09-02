@@ -469,17 +469,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   border-top: 1px solid ThreeDShadow;
 }
 
-.autocomplete-richlistitem:hover,
-treechildren.searchbar-treebody::-moz-tree-row(hover) {
-  background-color: hsla(0, 0%, 0%, 0.06);
-  border-color: hsla(0, 0%, 0%, 0.1);
-}
-
-.autocomplete-richlistitem[selected],
-treechildren.searchbar-treebody::-moz-tree-row(selected) {
-  background-color: Highlight;
-}
-
 .ac-title {
   font-size: 1.05em;
 }
@@ -569,10 +558,6 @@ html|span.ac-emphasize-text-url {
   list-style-image: url("chrome://browser/skin/places/starred48.png");
   width: 48px;
   height: 48px;
-}
-
-#editBookmarkPanelStarIcon[unstarred] {
-  list-style-image: url("chrome://browser/skin/places/unstarred48.png");
 }
 
 #editBookmarkPanelTitle {
@@ -736,12 +721,6 @@ html|span.ac-emphasize-text-url {
 %include ../shared/customizableui/customizeMode.inc.css
 
 /* End customization mode */
-
-
-#main-window[privatebrowsingmode=temporary] #private-browsing-indicator {
-  background: url("chrome://browser/skin/privatebrowsing-mask.png") center no-repeat;
-  width: 40px;
-}
 
 %include ../shared/UITour.inc.css
 

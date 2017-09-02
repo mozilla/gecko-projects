@@ -99,6 +99,7 @@
 #include "nsIWebNavigation.h"
 #include "nsIScriptError.h"
 #include "nsISimpleEnumerator.h"
+#include "nsIRequestContext.h"
 #include "nsStyleSheetService.h"
 
 #include "nsNetUtil.h"     // for NS_NewURI
@@ -1561,6 +1562,9 @@ nsDocument::nsDocument(const char* aContentType)
 #ifdef DEBUG
   , mWillReparent(false)
 #endif
+  , mDOMLoadingSet(false)
+  , mDOMInteractiveSet(false)
+  , mDOMCompleteSet(false)
 {
   SetContentTypeInternal(nsDependentCString(aContentType));
 
@@ -2327,6 +2331,18 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
 
     // XXXbz what does "just fine" mean exactly?  And given that there
     // is no nsDocShell::SetDocument, what is this talking about?
+
+    // Inform the associated request context about this load start so
+    // any of its internal load progress flags gets reset.
+    nsCOMPtr<nsIRequestContextService> rcsvc =
+      do_GetService("@mozilla.org/network/request-context-service;1");
+    if (rcsvc) {
+      nsCOMPtr<nsIRequestContext> rc;
+      rcsvc->GetRequestContextFromLoadGroup(aLoadGroup, getter_AddRefs(rc));
+      if (rc) {
+        rc->BeginLoad();
+      }
+    }
   }
 
   mLastModified.Truncate();
@@ -4399,6 +4415,7 @@ void
 nsDocument::AddOnDemandBuiltInUASheet(StyleSheet* aSheet)
 {
   MOZ_ASSERT(!mOnDemandBuiltInUASheets.Contains(aSheet));
+  MOZ_DIAGNOSTIC_ASSERT(aSheet->IsServo() == IsStyledByServo());
 
   // Prepend here so that we store the sheets in mOnDemandBuiltInUASheets in
   // the same order that they should end up in the style set.
@@ -4440,6 +4457,7 @@ nsDocument::GetIndexOfStyleSheet(const StyleSheet* aSheet) const
 void
 nsDocument::AddStyleSheetToStyleSets(StyleSheet* aSheet)
 {
+  MOZ_DIAGNOSTIC_ASSERT(aSheet->IsServo() == IsStyledByServo());
   nsCOMPtr<nsIPresShell> shell = GetShell();
   if (shell) {
     shell->StyleSet()->AddDocStyleSheet(aSheet, this);
@@ -4494,6 +4512,7 @@ void
 nsDocument::AddStyleSheet(StyleSheet* aSheet)
 {
   NS_PRECONDITION(aSheet, "null arg");
+  MOZ_DIAGNOSTIC_ASSERT(aSheet->IsServo() == IsStyledByServo());
   mStyleSheets.AppendElement(aSheet);
   aSheet->SetAssociatedDocument(this, StyleSheet::OwnedByDocument);
 
@@ -4559,6 +4578,7 @@ nsDocument::UpdateStyleSheets(nsTArray<RefPtr<StyleSheet>>& aOldSheets,
     // Now put the new one in its place.  If it's null, just ignore it.
     StyleSheet* newSheet = aNewSheets[i];
     if (newSheet) {
+      MOZ_DIAGNOSTIC_ASSERT(newSheet->IsServo() == IsStyledByServo());
       mStyleSheets.InsertElementAt(oldIndex, newSheet);
       newSheet->SetAssociatedDocument(this, StyleSheet::OwnedByDocument);
       if (newSheet->IsApplicable()) {
@@ -4577,6 +4597,7 @@ nsDocument::InsertStyleSheetAt(StyleSheet* aSheet, int32_t aIndex)
 {
   NS_PRECONDITION(aSheet, "null ptr");
 
+  MOZ_DIAGNOSTIC_ASSERT(aSheet->IsServo() == IsStyledByServo());
   mStyleSheets.InsertElementAt(aIndex, aSheet);
 
   aSheet->SetAssociatedDocument(this, StyleSheet::OwnedByDocument);
@@ -4596,6 +4617,7 @@ nsDocument::SetStyleSheetApplicableState(StyleSheet* aSheet,
   NS_PRECONDITION(aSheet, "null arg");
 
   // If we're actually in the document style sheet list
+  MOZ_DIAGNOSTIC_ASSERT(aSheet->IsServo() == IsStyledByServo());
   if (mStyleSheets.IndexOf(aSheet) != mStyleSheets.NoIndex) {
     if (aApplicable) {
       AddStyleSheetToStyleSets(aSheet);
@@ -7157,8 +7179,12 @@ nsDocument::GetTitleElement()
 
   // We check the HTML namespace even for non-HTML documents, except SVG.  This
   // matches the spec and the behavior of all tested browsers.
-  RefPtr<nsContentList> list =
-    NS_GetContentList(this, kNameSpaceID_XHTML, NS_LITERAL_STRING("title"));
+  // We avoid creating a live nsContentList since we don't need to watch for DOM
+  // tree mutations.
+  RefPtr<nsContentList> list = new nsContentList(this, kNameSpaceID_XHTML,
+                                                 nsGkAtoms::title, nsGkAtoms::title,
+                                                 /* aDeep = */ true,
+                                                 /* aLiveList = */ false);
 
   nsIContent* first = list->Item(0, false);
 
@@ -9600,6 +9626,7 @@ nsDocument::CloneDocHelper(nsDocument* clone, bool aPreallocateChildren) const
   clone->mContentLanguage = mContentLanguage;
   clone->SetContentTypeInternal(GetContentTypeInternal());
   clone->mSecurityInfo = mSecurityInfo;
+  clone->mStyleBackendType = mStyleBackendType;
 
   // State from nsDocument
   clone->mType = mType;
@@ -9643,6 +9670,8 @@ nsDocument::SetReadyStateInternal(ReadyState rs)
   if (READYSTATE_LOADING == rs) {
     mLoadingTimeStamp = mozilla::TimeStamp::Now();
   }
+
+  RecordNavigationTiming(rs);
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, NS_LITERAL_STRING("readystatechange"),
@@ -9765,19 +9794,23 @@ already_AddRefed<nsIURI>
 nsDocument::ResolvePreloadImage(nsIURI *aBaseURI,
                                 const nsAString& aSrcAttr,
                                 const nsAString& aSrcsetAttr,
-                                const nsAString& aSizesAttr)
+                                const nsAString& aSizesAttr,
+                                bool *aIsImgSet)
 {
   nsString sourceURL;
+  bool isImgSet;
   if (mPreloadPictureDepth == 1 && !mPreloadPictureFoundSource.IsVoid()) {
     // We're in a <picture> element and found a URI from a source previous to
     // this image, use it.
     sourceURL = mPreloadPictureFoundSource;
+    isImgSet = true;
   } else {
     // Otherwise try to use this <img> as a source
     HTMLImageElement::SelectSourceForTagWithAttrs(this, false, aSrcAttr,
                                                   aSrcsetAttr, aSizesAttr,
                                                   NullString(), NullString(),
                                                   sourceURL);
+    isImgSet = !aSrcsetAttr.IsEmpty();
   }
 
   // Empty sources are not loaded by <img> (i.e. not resolved to the baseURI)
@@ -9795,6 +9828,8 @@ nsDocument::ResolvePreloadImage(nsIURI *aBaseURI,
     return nullptr;
   }
 
+  *aIsImgSet = isImgSet;
+
   // We don't clear mPreloadPictureFoundSource because subsequent <img> tags in
   // this this <picture> share the same <sources> (though this is not valid per
   // spec)
@@ -9803,16 +9838,12 @@ nsDocument::ResolvePreloadImage(nsIURI *aBaseURI,
 
 void
 nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
-                              ReferrerPolicy aReferrerPolicy)
+                              ReferrerPolicy aReferrerPolicy, bool aIsImgSet)
 {
   // Early exit if the img is already present in the img-cache
   // which indicates that the "real" load has already started and
   // that we shouldn't preload it.
-  int16_t blockingStatus;
-  if (nsContentUtils::IsImageInCache(uri, static_cast<nsIDocument *>(this)) ||
-      !nsContentUtils::CanLoadImage(uri, static_cast<nsIDocument *>(this),
-                                    this, NodePrincipal(), &blockingStatus,
-                                    nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD)) {
+  if (nsContentUtils::IsImageInCache(uri, static_cast<nsIDocument *>(this))) {
     return;
   }
 
@@ -9831,6 +9862,10 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
     MOZ_CRASH("Unknown CORS mode!");
   }
 
+  nsContentPolicyType policyType =
+    aIsImgSet ? nsIContentPolicy::TYPE_IMAGESET :
+                nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD;
+
   // Image not in cache - trigger preload
   RefPtr<imgRequestProxy> request;
   nsresult rv =
@@ -9844,7 +9879,7 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
                               loadFlags,
                               NS_LITERAL_STRING("img"),
                               getter_AddRefs(request),
-                              nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD);
+                              policyType);
 
   // Pin image-reference to avoid evicting it from the img-cache before
   // the "real" load occurs. Unpinned in DispatchContentLoadedEvents and
@@ -10135,23 +10170,12 @@ nsDocument::ScrollToRef()
     return;
   }
 
-  char* tmpstr = ToNewCString(mScrollToRef);
-  if (!tmpstr) {
-    return;
-  }
-
-  nsUnescape(tmpstr);
-  nsAutoCString unescapedRef;
-  unescapedRef.Assign(tmpstr);
-  free(tmpstr);
-
-  nsresult rv = NS_ERROR_FAILURE;
-  // We assume that the bytes are in UTF-8, as it says in the spec:
-  // http://www.w3.org/TR/html4/appendix/notes.html#h-B.2.1
-  NS_ConvertUTF8toUTF16 ref(unescapedRef);
-
   nsCOMPtr<nsIPresShell> shell = GetShell();
   if (shell) {
+    nsresult rv = NS_ERROR_FAILURE;
+    // We assume that the bytes are in UTF-8, as it says in the spec:
+    // http://www.w3.org/TR/html4/appendix/notes.html#h-B.2.1
+    NS_ConvertUTF8toUTF16 ref(mScrollToRef);
     // Check an empty string which might be caused by the UTF-8 conversion
     if (!ref.IsEmpty()) {
       // Note that GoToAnchor will handle flushing layout as needed.
@@ -10162,9 +10186,16 @@ nsDocument::ScrollToRef()
 
     // If UTF-8 URI failed then try to assume the string as a
     // document's charset.
-
     if (NS_FAILED(rv)) {
       auto encoding = GetDocumentCharacterSet();
+      char* tmpstr = ToNewCString(mScrollToRef);
+      if (!tmpstr) {
+        return;
+      }
+      nsUnescape(tmpstr);
+      nsAutoCString unescapedRef;
+      unescapedRef.Assign(tmpstr);
+      free(tmpstr);
 
       rv = encoding->DecodeWithoutBOMHandling(unescapedRef, ref);
 
@@ -10316,6 +10347,7 @@ nsIDocument::CreateStaticClone(nsIDocShell* aCloneContainer)
 
       clonedDoc->mOriginalDocument->mStaticCloneCount++;
 
+      MOZ_ASSERT(GetStyleBackendType() == clonedDoc->GetStyleBackendType());
       int32_t sheetsCount = GetNumberOfStyleSheets();
       for (int32_t i = 0; i < sheetsCount; ++i) {
         RefPtr<StyleSheet> sheet = GetStyleSheetAt(i);
@@ -12563,8 +12595,7 @@ nsDocument::GetVisibilityState(nsAString& aState)
 /* virtual */ void
 nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aSizes) const
 {
-  nsINode::AddSizeOfExcludingThis(aSizes.mState, aSizes.mStyleSizes,
-                                  &aSizes.mDOMOtherSize);
+  nsINode::AddSizeOfExcludingThis(aSizes, &aSizes.mDOMOtherSize);
 
   if (mPresShell) {
     mPresShell->AddSizeOfIncludingThis(aSizes);
@@ -12611,8 +12642,7 @@ SizeOfOwnedSheetArrayExcludingThis(const nsTArray<RefPtr<StyleSheet>>& aSheets,
 }
 
 void
-nsDocument::AddSizeOfExcludingThis(SizeOfState& aState,
-                                   nsStyleSizes& aSizes,
+nsDocument::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
                                    size_t* aNodeSize) const
 {
   // This AddSizeOfExcludingThis() overrides the one from nsINode.  But
@@ -12626,8 +12656,7 @@ static void
 AddSizeOfNodeTree(nsIContent* aNode, nsWindowSizes& aWindowSizes)
 {
   size_t nodeSize = 0;
-  aNode->AddSizeOfIncludingThis(aWindowSizes.mState, aWindowSizes.mStyleSizes,
-                                &nodeSize);
+  aNode->AddSizeOfIncludingThis(aWindowSizes, &nodeSize);
 
   // This is where we transfer the nodeSize obtained from
   // nsINode::AddSizeOfIncludingThis() to a value in nsWindowSizes.
@@ -13818,4 +13847,54 @@ nsIDocument::GetSelection(ErrorResult& aRv)
   }
 
   return nsGlobalWindow::Cast(window)->GetSelection(aRv);
+}
+
+void
+nsDocument::RecordNavigationTiming(ReadyState aReadyState)
+{
+  if (!XRE_IsContentProcess()) {
+    return;
+  }
+  if (!IsTopLevelContentDocument()) {
+    return;
+  }
+  // If we dont have the timing yet (mostly because the doc is still loading),
+  // get it from docshell.
+  RefPtr<nsDOMNavigationTiming> timing = mTiming;
+  if (!timing) {
+    if (!mDocumentContainer) {
+      return;
+    }
+    timing = mDocumentContainer->GetNavigationTiming();
+    if (!timing) {
+      return;
+    }
+  }
+  TimeStamp startTime = timing->GetNavigationStartTimeStamp();
+  switch (aReadyState) {
+    case READYSTATE_LOADING:
+      if (!mDOMLoadingSet) {
+        Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_DOM_LOADING_MS,
+                                       startTime);
+        mDOMLoadingSet = true;
+      }
+      break;
+    case READYSTATE_INTERACTIVE:
+      if (!mDOMInteractiveSet) {
+        Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_DOM_INTERACTIVE_MS,
+                                       startTime);
+        mDOMInteractiveSet = true;
+      }
+      break;
+    case READYSTATE_COMPLETE:
+      if (!mDOMCompleteSet) {
+        Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_DOM_COMPLETE_MS,
+                                       startTime);
+        mDOMCompleteSet = true;
+      }
+      break;
+    default:
+      NS_WARNING("Unexpected ReadyState value");
+      break;
+  }
 }

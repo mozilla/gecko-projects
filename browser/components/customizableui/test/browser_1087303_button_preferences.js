@@ -12,6 +12,8 @@ add_task(async function() {
   CustomizableUI.addWidgetToArea("preferences-button", CustomizableUI.AREA_FIXED_OVERFLOW_PANEL);
   registerCleanupFunction(() => CustomizableUI.reset());
 
+  await waitForOverflowButtonShown();
+
   await document.getElementById("nav-bar").overflowable.show();
   info("Menu panel was opened");
 
@@ -42,12 +44,13 @@ function waitForPageLoad(aTab) {
       reject("Page didn't load within " + 20000 + "ms");
     }, 20000);
 
-    function onTabLoad(event) {
+    async function onTabLoad(event) {
       clearTimeout(timeoutId);
       aTab.linkedBrowser.removeEventListener("load", onTabLoad, true);
       info("Tab event received: load");
       resolve();
-   }
+    }
+
     aTab.linkedBrowser.addEventListener("load", onTabLoad, true, true);
   });
 }

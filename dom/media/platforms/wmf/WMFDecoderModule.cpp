@@ -15,6 +15,7 @@
 #include "WMFAudioMFTManager.h"
 #include "WMFMediaDataDecoder.h"
 #include "WMFVideoMFTManager.h"
+#include "gfxPrefs.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Services.h"
@@ -32,6 +33,7 @@
 #include "mozilla/mscom/EnsureMTA.h"
 
 extern const GUID CLSID_WebmMfVpxDec;
+extern const GUID CLSID_AMDWebmMfVp9Dec;
 
 namespace mozilla {
 
@@ -261,9 +263,11 @@ WMFDecoderModule::Supports(const TrackInfo& aTrackInfo,
     return true;
   }
   if (MediaPrefs::PDMWMFVP9DecoderEnabled()) {
-    if ((VPXDecoder::IsVP8(aTrackInfo.mMimeType)
-         || VPXDecoder::IsVP9(aTrackInfo.mMimeType))
-        && CanCreateWMFDecoder<CLSID_WebmMfVpxDec>()) {
+    if ((VPXDecoder::IsVP8(aTrackInfo.mMimeType) ||
+         VPXDecoder::IsVP9(aTrackInfo.mMimeType)) &&
+        ((gfxPrefs::PDMWMFAMDVP9DecoderEnabled() &&
+          CanCreateWMFDecoder<CLSID_AMDWebmMfVp9Dec>()) ||
+         CanCreateWMFDecoder<CLSID_WebmMfVpxDec>())) {
       return true;
     }
   }

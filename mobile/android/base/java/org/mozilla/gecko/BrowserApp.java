@@ -11,6 +11,7 @@ import android.app.DownloadManager;
 import android.content.ContentProviderClient;
 import android.os.Environment;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
 
 import org.mozilla.gecko.activitystream.ActivityStream;
@@ -91,7 +92,6 @@ import org.mozilla.gecko.telemetry.measurements.SearchCountMeasurements;
 import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
-import org.mozilla.gecko.toolbar.ToolbarProgressView;
 import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
 import org.mozilla.gecko.updater.PostUpdateHandler;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
@@ -111,6 +111,7 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.WindowUtil;
 import org.mozilla.gecko.widget.ActionModePresenter;
 import org.mozilla.gecko.widget.AnchoredPopup;
+import org.mozilla.gecko.widget.AnimatedProgressBar;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 
 import android.app.Activity;
@@ -241,7 +242,7 @@ public class BrowserApp extends GeckoApp
     private View doorhangerOverlay;
     // We can't name the TabStrip class because it's not included on API 9.
     private TabStripInterface mTabStrip;
-    private ToolbarProgressView mProgressView;
+    private AnimatedProgressBar mProgressView;
     private FirstrunAnimationContainer mFirstrunAnimationContainer;
     private HomeScreen mHomeScreen;
     private TabsPanel mTabsPanel;
@@ -672,7 +673,7 @@ public class BrowserApp extends GeckoApp
             }
         });
 
-        mProgressView = (ToolbarProgressView) findViewById(R.id.page_progress);
+        mProgressView = (AnimatedProgressBar) findViewById(R.id.page_progress);
         mProgressView.setDynamicToolbar(mDynamicToolbar);
         mBrowserToolbar.setProgressBar(mProgressView);
 
@@ -1607,7 +1608,6 @@ public class BrowserApp extends GeckoApp
         if (mTextSelection != null)
             mTextSelection.destroy();
         NotificationHelper.destroy();
-        IntentHelper.destroy();
         GeckoNetworkManager.destroy();
 
         super.onDestroy();
@@ -2067,12 +2067,13 @@ public class BrowserApp extends GeckoApp
                 final String name = message.getString("name");
                 final String startUrl = message.getString("start_url");
                 final String manifestPath = message.getString("manifest_path");
+                final String manifestUrl = message.getString("manifest_url");
                 final LoadFaviconResult loadIconResult = FaviconDecoder
                     .decodeDataURI(this, message.getString("icon"));
                 if (loadIconResult != null) {
                     final Bitmap icon = loadIconResult
                         .getBestBitmap(GeckoAppShell.getPreferredIconSize());
-                    GeckoApplication.createAppShortcut(name, startUrl, manifestPath, icon);
+                    GeckoApplication.createAppShortcut(name, startUrl, manifestPath, manifestUrl, icon);
                 } else {
                     Log.e(LOGTAG, "Failed to load icon!");
                 }
@@ -2452,18 +2453,19 @@ public class BrowserApp extends GeckoApp
     }
 
     public void openUrlAndStopEditing(String url) {
-        openUrlAndStopEditing(url, null, false);
+        openUrlAndStopEditing(url, null, null, false);
     }
 
-    private void openUrlAndStopEditing(String url, boolean newTab) {
-        openUrlAndStopEditing(url, null, newTab);
+    private void openUrlAndStopEditingWithReferrer(final String url, final String referrerUri) {
+        openUrlAndStopEditing(url, null, referrerUri, false);
     }
 
     private void openUrlAndStopEditing(String url, String searchEngine) {
-        openUrlAndStopEditing(url, searchEngine, false);
+        openUrlAndStopEditing(url, searchEngine, null, false);
     }
 
-    private void openUrlAndStopEditing(String url, String searchEngine, boolean newTab) {
+    private void openUrlAndStopEditing(String url, String searchEngine, @Nullable final String referrerUri,
+            boolean newTab) {
         int flags = Tabs.LOADURL_NONE;
         if (newTab) {
             flags |= Tabs.LOADURL_NEW_TAB;
@@ -2472,7 +2474,7 @@ public class BrowserApp extends GeckoApp
             }
         }
 
-        Tabs.getInstance().loadUrl(url, searchEngine, -1, flags);
+        Tabs.getInstance().loadUrl(url, searchEngine, referrerUri, Tabs.INVALID_TAB_ID, null, flags);
 
         mBrowserToolbar.cancelEdit();
     }
@@ -4133,6 +4135,12 @@ public class BrowserApp extends GeckoApp
     // HomePager.OnUrlOpenListener
     @Override
     public void onUrlOpen(String url, EnumSet<OnUrlOpenListener.Flags> flags) {
+        onUrlOpenWithReferrer(url, null, flags);
+    }
+
+    @Override
+    public void onUrlOpenWithReferrer(final String url, @Nullable final String referrerUri,
+            final EnumSet<OnUrlOpenListener.Flags> flags) {
         if (flags.contains(OnUrlOpenListener.Flags.OPEN_WITH_INTENT)) {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setData(Uri.parse(url));
@@ -4150,7 +4158,7 @@ public class BrowserApp extends GeckoApp
             }
 
             if (!maybeSwitchToTab(pageURL, flags)) {
-                openUrlAndStopEditing(pageURL);
+                openUrlAndStopEditingWithReferrer(pageURL, referrerUri);
                 clearSelectedTabApplicationId();
             }
         }
@@ -4159,6 +4167,12 @@ public class BrowserApp extends GeckoApp
     // HomePager.OnUrlOpenInBackgroundListener
     @Override
     public void onUrlOpenInBackground(final String url, EnumSet<OnUrlOpenInBackgroundListener.Flags> flags) {
+        onUrlOpenInBackgroundWithReferrer(url, null, flags);
+    }
+
+    @Override
+    public void onUrlOpenInBackgroundWithReferrer(final String url, @Nullable final String referrerUri,
+            final EnumSet<OnUrlOpenInBackgroundListener.Flags> flags) {
         if (url == null) {
             throw new IllegalArgumentException("url must not be null");
         }
@@ -4177,7 +4191,7 @@ public class BrowserApp extends GeckoApp
             loadFlags |= Tabs.LOADURL_PRIVATE;
         }
 
-        final Tab newTab = Tabs.getInstance().loadUrl(pageURL, loadFlags);
+        final Tab newTab = Tabs.getInstance().loadUrl(pageURL, null, referrerUri, Tabs.INVALID_TAB_ID, null, loadFlags);
 
         // We switch to the desired tab by unique ID, which closes any window
         // for a race between opening the tab and closing it, and switching to

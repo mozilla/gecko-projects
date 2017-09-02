@@ -47,7 +47,6 @@ var ecmaGlobals =
     "Int8Array",
     "InternalError",
     "Intl",
-    "Iterator",
     "JSON",
     "Map",
     "Math",
@@ -102,6 +101,10 @@ var legacyMozPrefixedInterfaces =
 // IMPORTANT: Do not change the list below without review from a DOM peer!
 var interfaceNamesInGlobalScope =
   [
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "AbortController", nightly: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "AbortSignal", nightly: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "AnalyserNode",
 // IMPORTANT: Do not change this list without review from a DOM peer!

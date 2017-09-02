@@ -40,7 +40,7 @@ impl StyleDifference {
 }
 
 /// Represents whether or not the style of an element has changed.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub enum StyleChange {
     /// The style hasn't changed.
     Unchanged,
@@ -50,7 +50,7 @@ pub enum StyleChange {
 
 /// Whether or not newly computed values for an element need to be cascade
 /// to children.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ChildCascadeRequirement {
     /// Old and new computed values were the same, or we otherwise know that
     /// we won't bother recomputing style for children, so we can skip cascading
@@ -96,7 +96,7 @@ impl RulesChanged {
 }
 
 /// Determines which styles are being cascaded currently.
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CascadeVisitedMode {
     /// Cascade the regular, unvisited styles.
     Unvisited,
@@ -123,7 +123,7 @@ trait PrivateMatchMethods: TElement {
         primary_style: &Arc<ComputedValues>
     ) -> Option<Arc<ComputedValues>> {
         use context::CascadeInputs;
-        use style_resolver::StyleResolverForElement;
+        use style_resolver::{PseudoElementResolution, StyleResolverForElement};
         use stylist::RuleInclusion;
 
         let rule_node = primary_style.rules();
@@ -143,8 +143,9 @@ trait PrivateMatchMethods: TElement {
                 visited_rules: primary_style.get_visited_style().and_then(|s| s.rules.clone()),
             };
 
+        // Actually `PseudoElementResolution` doesn't really matter.
         let style =
-            StyleResolverForElement::new(*self, context, RuleInclusion::All)
+            StyleResolverForElement::new(*self, context, RuleInclusion::All, PseudoElementResolution::IfApplicable)
                 .cascade_style_and_visited_with_default_parents(inputs);
 
         Some(style)
@@ -170,12 +171,12 @@ trait PrivateMatchMethods: TElement {
 
             // If the traverse is triggered by CSS rule changes, we need to
             // try to update all CSS animations on the element if the element
-            // has CSS animation style regardless of whether the animation is
-            // running or not.
+            // has or will have CSS animation style regardless of whether the
+            // animation is running or not.
             // TODO: We should check which @keyframes changed/added/deleted
             // and update only animations corresponding to those @keyframes.
             (context.shared.traversal_flags.contains(traversal_flags::ForCSSRuleChanges) &&
-             has_new_animation_style) ||
+             (has_new_animation_style || has_animations)) ||
             !old_box_style.animations_equals(new_box_style) ||
              (old_display_style == display::T::none &&
               new_display_style != display::T::none &&

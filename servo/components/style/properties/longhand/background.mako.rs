@@ -64,12 +64,11 @@ ${helpers.predefined_type("background-image", "ImageLayer",
     pub mod computed_value {
         pub use super::RepeatKeyword;
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T(pub RepeatKeyword, pub RepeatKeyword);
     }
 
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ToCss for computed_value::T {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {

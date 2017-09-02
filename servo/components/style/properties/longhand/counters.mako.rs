@@ -23,7 +23,6 @@
     pub use self::computed_value::ContentItem;
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
         use cssparser;
@@ -40,7 +39,7 @@
         #[cfg(feature = "gecko")]
         use values::specified::Attr;
 
-        #[derive(Debug, PartialEq, Eq, Clone)]
+        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum ContentItem {
             /// Literal string content.
@@ -101,7 +100,7 @@
             }
         }
 
-        #[derive(Debug, PartialEq, Eq, Clone)]
+        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum T {
             Normal,
@@ -240,7 +239,7 @@
     use style_traits::ToCss;
     use values::CustomIdent;
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct SpecifiedValue(pub Vec<(CustomIdent, specified::Integer)>);
 
     pub mod computed_value {
@@ -248,7 +247,7 @@
         use style_traits::ToCss;
         use values::CustomIdent;
 
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T(pub Vec<(CustomIdent, i32)>);
 
@@ -296,7 +295,6 @@
         computed_value::T(Vec::new())
     }
 
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ToCss for SpecifiedValue {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result

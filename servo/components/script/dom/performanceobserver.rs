@@ -27,7 +27,7 @@ const VALID_ENTRY_TYPES: &'static [&'static str] = &[
     // "measure", XXX User Timing API
     // "resource", XXX Resource Timing API
     // "server", XXX Server Timing API
-    // "paint", XXX Paint Timing API
+    "paint", // Paint Timing API
 ];
 
 #[dom_struct]
@@ -89,23 +89,30 @@ impl PerformanceObserver {
     pub fn entries(&self) -> DOMPerformanceEntryList {
         self.entries.borrow().clone()
     }
+
+    pub fn set_entries(&self, entries: DOMPerformanceEntryList) {
+        *self.entries.borrow_mut() = entries;
+    }
 }
 
 impl PerformanceObserverMethods for PerformanceObserver {
     // https://w3c.github.io/performance-timeline/#dom-performanceobserver-observe()
     fn Observe(&self, options: &PerformanceObserverInit) -> Fallible<()> {
+        // step 1
         // Make sure the client is asking to observe events from allowed entry types.
         let entry_types = options.entryTypes.iter()
                                             .filter(|e| VALID_ENTRY_TYPES.contains(&e.as_ref()))
                                             .map(|e| e.clone())
                                             .collect::<Vec<DOMString>>();
+        // step 2
         // There must be at least one valid entry type.
         if entry_types.is_empty() {
             return Err((Error::Type("entryTypes cannot be empty".to_string())));
         }
 
         let performance = self.global().as_window().Performance();
-        performance.add_observer(self, entry_types);
+        // step 3-4-5
+        performance.add_observer(self, entry_types, options.buffered);
         Ok(())
     }
 

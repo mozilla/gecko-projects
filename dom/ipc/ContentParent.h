@@ -11,7 +11,6 @@
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
 #include "mozilla/gfx/GPUProcessListener.h"
-#include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
@@ -76,6 +75,7 @@ class PrintingParent;
 }
 
 namespace ipc {
+class CrashReporterHost;
 class OptionalURIParams;
 class PFileDescriptorSetParent;
 class URIParams;
@@ -541,7 +541,7 @@ public:
     const bool& aCalledFromJS,
     const bool& aPositionSpecified,
     const bool& aSizeSpecified,
-    const URIParams& aURIToLoad,
+    const OptionalURIParams& aURIToLoad,
     const nsCString& aFeatures,
     const nsCString& aBaseURI,
     const float& aFullZoom,
@@ -605,12 +605,6 @@ public:
   virtual bool SendDeactivate(PBrowserParent* aTab) override
   {
     return PContentParent::SendDeactivate(aTab);
-  }
-
-  virtual bool SendParentActivated(PBrowserParent* aTab,
-                                   const bool& aActivated) override
-  {
-    return PContentParent::SendParentActivated(aTab, aActivated);
   }
 
   virtual bool

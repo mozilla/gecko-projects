@@ -51,7 +51,7 @@ use servo_geometry::max_rect;
 use std::cmp::{max, min};
 use std::fmt;
 use std::sync::Arc;
-use style::computed_values::{border_collapse, box_sizing, display, float, overflow_x};
+use style::computed_values::{box_sizing, display, float, overflow_x};
 use style::computed_values::{position, text_align};
 use style::context::SharedStyleContext;
 use style::logical_geometry::{LogicalPoint, LogicalRect, LogicalSize, WritingMode};
@@ -86,7 +86,7 @@ impl FloatedBlockInfo {
 }
 
 /// The solutions for the block-size-and-margins constraint equation.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 struct BSizeConstraintSolution {
     block_start: Au,
     block_size: Au,
@@ -1429,6 +1429,9 @@ impl BlockFlow {
     /// Determines the type of formatting context this is. See the definition of
     /// `FormattingContextType`.
     pub fn formatting_context_type(&self) -> FormattingContextType {
+        if self.is_inline_flex_item() || self.is_block_flex_item() {
+            return FormattingContextType::Other
+        }
         let style = self.fragment.style();
         if style.get_box().float != float::T::none {
             return FormattingContextType::Other
@@ -2196,7 +2199,7 @@ impl fmt::Debug for BlockFlow {
 }
 
 /// The inputs for the inline-sizes-and-margins constraint equation.
-#[derive(Debug, Copy, Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct ISizeConstraintInput {
     pub computed_inline_size: MaybeAuto,
     pub inline_start_margin: MaybeAuto,
@@ -2229,7 +2232,7 @@ impl ISizeConstraintInput {
 }
 
 /// The solutions for the inline-size-and-margins constraint equation.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ISizeConstraintSolution {
     pub inline_start: Au,
     pub inline_size: Au,
@@ -2268,8 +2271,7 @@ impl ISizeConstraintSolution {
 pub trait ISizeAndMarginsComputer {
     /// Instructs the fragment to compute its border and padding.
     fn compute_border_and_padding(&self, block: &mut BlockFlow, containing_block_inline_size: Au) {
-        block.fragment.compute_border_and_padding(containing_block_inline_size,
-                                                  border_collapse::T::separate);
+        block.fragment.compute_border_and_padding(containing_block_inline_size);
     }
 
     /// Compute the inputs for the ISize constraint equation.
@@ -3086,7 +3088,7 @@ impl ISizeAndMarginsComputer for InlineFlexItem {
 }
 
 /// A stacking context, a pseudo-stacking context, or a non-stacking context.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum BlockStackingContextType {
     NonstackingContext,
     PseudoStackingContext,

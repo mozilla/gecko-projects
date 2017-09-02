@@ -65,7 +65,9 @@
 # so that they can be shared by macBrowserOverlay.xul.
 #include global-scripts.inc
 
-<script type="application/javascript" src="chrome://global/content/contentAreaUtils.js"/>
+<script type="application/javascript">
+  Services.scriptloader.loadSubScript("chrome://global/content/contentAreaUtils.js", this);
+</script>
 
 # All sets except for popupsets (commands, keys, stringbundles and broadcasters) *must* go into the
 # browser-sets.inc file for sharing with hiddenWindow.xul.
@@ -155,13 +157,15 @@
            level="parent"
            overflowpadding="30" />
 
+   <!-- for date/time picker. consumeoutsideclicks is set to never, so that
+        clicks on the anchored input box are never consumed. -->
     <panel id="DateTimePickerPanel"
            type="arrow"
            hidden="true"
            orient="vertical"
            noautofocus="true"
-           noautohide="true"
-           consumeoutsideclicks="false"
+           norolluponanchor="true"
+           consumeoutsideclicks="never"
            level="parent"
            tabspecific="true">
     </panel>
@@ -393,14 +397,14 @@
       <menuitem id="placesContext_hideRecentlyBookmarked"
                 label="&hideRecentlyBookmarked.label;"
                 accesskey="&hideRecentlyBookmarked.accesskey;"
-                oncommand="BookmarkingUI.hideRecentlyBookmarked();"
+                oncommand="RecentBookmarksMenuUI.visible = false;"
                 closemenu="single"
                 ignoreitem="true"
                 hidden="true"/>
       <menuitem id="placesContext_showRecentlyBookmarked"
                 label="&showRecentlyBookmarked.label;"
                 accesskey="&showRecentlyBookmarked.accesskey;"
-                oncommand="BookmarkingUI.showRecentlyBookmarked();"
+                oncommand="RecentBookmarksMenuUI.visible = true;"
                 closemenu="single"
                 ignoreitem="true"
                 hidden="true"/>
@@ -429,8 +433,6 @@
            position="bottomcenter topright"
            tabspecific="true"
            noautofocus="true"
-           context="pageActionPanelContextMenu"
-           oncontextmenu="BrowserPageActions.onContextMenu(event);"
            copyURL-title="&copyURLCmd.label;"
            emailLink-title="&emailPageCmd.label;"
            sendToDevice-title="&sendToDevice.label3;"
@@ -439,10 +441,27 @@
                             mainViewId="pageActionPanelMainView"
                             viewCacheId="appMenu-viewCache">
         <panelview id="pageActionPanelMainView"
+                   context="pageActionPanelContextMenu"
+                   oncontextmenu="BrowserPageActions.onContextMenu(event);"
                    class="PanelUI-subView">
           <vbox class="panel-subview-body"/>
         </panelview>
       </photonpanelmultiview>
+    </panel>
+    <panel id="pageActionFeedback"
+           role="alert"
+           type="arrow"
+           hidden="true"
+           flip="slide"
+           position="bottomcenter topright"
+           tabspecific="true"
+           noautofocus="true"
+           copyURLFeedback="&copyURLFeedback.label;"
+           sendToDeviceFeedback="&sendToDeviceFeedback.label;">
+      <hbox id="pageActionFeedbackAnimatableBox">
+        <image id="pageActionFeedbackAnimatableImage"/>
+      </hbox>
+      <label id="pageActionFeedbackMessage"/>
     </panel>
 
     <menupopup id="pageActionPanelContextMenu"
@@ -568,9 +587,8 @@
     <spacer id="titlebar-spacer" flex="1"/>
     <hbox id="titlebar-buttonbox-container">
 #ifdef XP_WIN
-      <hbox id="private-browsing-indicator-titlebar">
-        <hbox class="private-browsing-indicator"/>
-      </hbox>
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;" aria-live="polite"/>
+      <hbox class="private-browsing-indicator"/>
 #endif
       <hbox id="titlebar-buttonbox">
         <toolbarbutton class="titlebar-button" id="titlebar-min" oncommand="window.minimize();"/>
@@ -582,6 +600,7 @@
     <!-- OS X does not natively support RTL for its titlebar items, so we prevent this secondary
          buttonbox from reversing order in RTL by forcing an LTR direction. -->
     <hbox id="titlebar-secondary-buttonbox" dir="ltr">
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;" aria-live="polite"/>
       <hbox class="private-browsing-indicator"/>
       <hbox id="titlebar-fullscreen-button"/>
     </hbox>
@@ -628,8 +647,12 @@
              collapsed="true">
 
 #if defined(MOZ_WIDGET_GTK)
-      <hbox id="private-browsing-indicator"
+      <hbox class="private-browsing-indicator"
             skipintoolbarset="true"/>
+      <button class="accessibility-indicator"
+              tooltiptext="&accessibilityIndicator.tooltip;"
+              aria-live="polite"
+              skipintoolbarset="true"/>
 #endif
 
       <tabs id="tabbrowser-tabs"
@@ -677,6 +700,8 @@
       </toolbarbutton>
 
 #if !defined(MOZ_WIDGET_GTK)
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;"
+              aria-live="polite" skipintoolbarset="true"/>
       <hbox class="private-browsing-indicator" skipintoolbarset="true"/>
 #endif
 #ifdef CAN_DRAW_IN_TITLEBAR
@@ -856,41 +881,48 @@
                 <label id="extension" class="urlbar-display urlbar-display-extension" value="&urlbar.extension.label;"/>
               </box>
               <hbox id="page-action-buttons">
+                <hbox id="userContext-icons" hidden="true">
+                  <label id="userContext-label"/>
+                  <image id="userContext-indicator"/>
+                </hbox>
                 <image id="page-report-button"
-                       class="urlbar-icon"
+                       class="urlbar-icon urlbar-page-action"
+                       role="button"
                        hidden="true"
                        tooltiptext="&pageReportIcon.tooltip;"
                        onmousedown="gPopupBlockerObserver.onReportButtonMousedown(event);"/>
                 <image id="reader-mode-button"
-                       class="urlbar-icon"
+                       class="urlbar-icon urlbar-page-action"
+                       role="button"
                        hidden="true"
                        onclick="ReaderParent.buttonClick(event);"/>
                 <toolbarbutton id="urlbar-zoom-button"
                        onclick="FullZoom.reset();"
                        tooltip="dynamic-shortcut-tooltip"
                        hidden="true"/>
+                <box id="pageActionSeparator" class="urlbar-page-action"/>
                 <image id="pageActionButton"
-                       class="urlbar-icon"
+                       class="urlbar-icon urlbar-page-action"
+                       role="button"
                        tooltiptext="&pageActionButton.tooltip;"
                        onclick="BrowserPageActions.mainButtonClicked(event);"/>
                 <hbox id="star-button-box"
                       hidden="true"
-                      class="urlbar-icon-wrapper"
+                      class="urlbar-icon-wrapper urlbar-page-action"
+                      role="button"
                       context="pageActionPanelContextMenu"
                       oncontextmenu="BrowserPageActions.onContextMenu(event);"
                       onclick="BrowserPageActions.bookmark.onUrlbarNodeClicked(event);">
-                  <image id="star-button" class="urlbar-icon">
-                    <observes element="bookmarkThisPageBroadcaster" attribute="starred"/>
-                    <observes element="bookmarkThisPageBroadcaster" attribute="tooltiptext"/>
-                  </image>
+                  <image id="star-button"
+                         class="urlbar-icon"
+                         role="button"
+                         observes="bookmarkThisPageBroadcaster"/>
                   <hbox id="star-button-animatable-box">
-                    <image id="star-button-animatable-image"/>
+                    <image id="star-button-animatable-image"
+                           role="button"
+                           observes="bookmarkThisPageBroadcaster"/>
                   </hbox>
                 </hbox>
-              </hbox>
-              <hbox id="userContext-icons" hidden="true">
-                <label id="userContext-label"/>
-                <image id="userContext-indicator"/>
               </hbox>
             </textbox>
         </toolbaritem>
@@ -903,18 +935,17 @@
         </toolbaritem>
 
         <!-- This is a placeholder for the Downloads Indicator.  It is visible
-             before the Downloads Indicator overlay is loaded. -->
+             during the customization of the toolbar, in the palette, and before
+             the Downloads Indicator overlay is loaded. -->
         <toolbarbutton id="downloads-button"
-                       hidden="true"
                        class="toolbarbutton-1 chromeclass-toolbar-additional badged-button"
-                       skipintoolbarset="true"
-                       overflows="false"
                        key="key_openDownloads"
                        oncommand="DownloadsIndicatorView.onCommand(event);"
                        ondrop="DownloadsIndicatorView.onDrop(event);"
                        ondragover="DownloadsIndicatorView.onDragOver(event);"
                        ondragenter="DownloadsIndicatorView.onDragOver(event);"
                        label="&downloads.label;"
+                       removable="true"
                        cui-areatype="toolbar"
                        tooltip="dynamic-shortcut-tooltip"/>
 
@@ -924,11 +955,7 @@
                        closemenu="none"
                        cui-areatype="toolbar"
                        tooltiptext="&libraryButton.tooltip;"
-                       label="&places.library.title;">
-          <box class="toolbarbutton-animatable-box">
-            <image class="toolbarbutton-animatable-image"/>
-          </box>
-        </toolbarbutton>
+                       label="&places.library.title;"/>
 
       </hbox>
 
@@ -1058,7 +1085,7 @@
                      class="toolbarbutton-1 chromeclass-toolbar-additional"
                      removable="true"
                      type="menu"
-                     label="&bookmarksMenuButton.label;"
+                     label="&bookmarksMenuButton2.label;"
                      tooltip="dynamic-shortcut-tooltip"
                      anchor="dropmarker"
                      ondragenter="PlacesMenuDNDHandler.onDragEnter(event);"
@@ -1152,6 +1179,9 @@
         </menupopup>
       </toolbarbutton>
     </toolbarpalette>
+    <box id="library-animatable-box" class="toolbarbutton-animatable-box">
+      <image class="toolbarbutton-animatable-image"/>
+    </box>
   </toolbox>
 
   <hbox id="fullscr-toggler" hidden="true"/>

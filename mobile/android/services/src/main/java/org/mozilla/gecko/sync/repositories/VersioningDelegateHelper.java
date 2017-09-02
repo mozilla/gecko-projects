@@ -147,8 +147,8 @@ public class VersioningDelegateHelper {
         }
 
         @Override
-        public void onFetchCompleted(long fetchEnd) {
-            this.inner.onFetchCompleted(fetchEnd);
+        public void onFetchCompleted() {
+            this.inner.onFetchCompleted();
         }
 
         @Override
@@ -175,12 +175,20 @@ public class VersioningDelegateHelper {
         }
 
         @Override
-        public void onRecordStoreReconciled(String guid, Integer newVersion) {
+        public void onRecordStoreReconciled(String guid, String oldGuid, Integer newVersion) {
             if (newVersion == null) {
                 throw new IllegalArgumentException("Received null localVersion after reconciling a versioned record.");
             }
+            // As incoming records are processed, we might be chain-duping them. In which case,
+            // we'd record a reconciled record and its guid in this map, and then another will come in
+            // and will dupe to the just-reconciled record. We'll do the replacement, and record the
+            // winning guid in this map. At that point, our map has two guids, one of which doesn't
+            // exist in the database anymore.
+            // That is why we remove old GUIDs from the map whenever we perform a replacement.
+            // See Bug 1392716.
+            localVersionsOfGuids.remove(oldGuid);
             localVersionsOfGuids.put(guid, newVersion);
-            inner.onRecordStoreReconciled(guid, null);
+            inner.onRecordStoreReconciled(guid, oldGuid, newVersion);
         }
 
         @Override
@@ -189,8 +197,8 @@ public class VersioningDelegateHelper {
         }
 
         @Override
-        public void onStoreCompleted(long storeEnd) {
-            inner.onStoreCompleted(storeEnd);
+        public void onStoreCompleted() {
+            inner.onStoreCompleted();
         }
 
         @Override

@@ -14,7 +14,7 @@ use parser::{Parse, ParserContext};
 use std::{cmp, fmt, mem};
 use std::ascii::AsciiExt;
 use std::ops::Mul;
-use style_traits::{HasViewportPercentage, ToCss, ParseError, StyleParseError};
+use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::values::specified::AllowedLengthType;
 use stylesheets::CssRuleType;
 use super::{AllowQuirks, Number, ToComputedValue, Percentage};
@@ -52,7 +52,7 @@ pub fn au_to_int_px(au: f32) -> i32 {
     (au / AU_PER_PX).round() as i32
 }
 
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 /// A font relative length.
 pub enum FontRelativeLength {
@@ -167,7 +167,7 @@ impl FontRelativeLength {
     }
 }
 
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 /// A viewport-relative length.
 ///
@@ -181,12 +181,6 @@ pub enum ViewportPercentageLength {
     Vmin(CSSFloat),
     /// https://drafts.csswg.org/css-values/#vmax
     Vmax(CSSFloat)
-}
-
-impl HasViewportPercentage for ViewportPercentageLength {
-    fn has_viewport_percentage(&self) -> bool {
-        true
-    }
 }
 
 impl ToCss for ViewportPercentageLength {
@@ -224,7 +218,7 @@ impl ViewportPercentageLength {
 }
 
 /// HTML5 "character width", as defined in HTML5 § 14.5.4.
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct CharacterWidth(pub i32);
 
@@ -256,7 +250,7 @@ fn to_au_round(length: CSSFloat, au_per_unit: CSSFloat) -> Au {
 }
 
 /// Represents an absolute length with its unit
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum AbsoluteLength {
     /// An absolute length in pixels (px)
@@ -347,7 +341,7 @@ impl Mul<CSSFloat> for AbsoluteLength {
 }
 
 /// Represents a physical length (mozmm) based on DPI
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg(feature = "gecko")]
 pub struct PhysicalLength(pub CSSFloat);
 
@@ -393,7 +387,7 @@ impl Mul<CSSFloat> for PhysicalLength {
 /// A `<length>` without taking `calc` expressions into account
 ///
 /// https://drafts.csswg.org/css-values/#lengths
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum NoCalcLength {
     /// An absolute length
@@ -420,15 +414,6 @@ pub enum NoCalcLength {
     /// A physical length (mozmm) based on DPI
     #[cfg(feature = "gecko")]
     Physical(PhysicalLength),
-}
-
-impl HasViewportPercentage for NoCalcLength {
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            NoCalcLength::ViewportPercentage(_) => true,
-            _ => false,
-        }
-    }
 }
 
 impl ToCss for NoCalcLength {
@@ -545,7 +530,7 @@ impl NoCalcLength {
 ///
 /// https://drafts.csswg.org/css-values/#lengths
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum Length {
     /// The internal length type that cannot parse `calc`
     NoCalc(NoCalcLength),
@@ -759,7 +744,7 @@ pub type NonNegativeLengthOrNumber = Either<NonNegativeLength, NonNegativeNumber
 /// A length or a percentage value.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum LengthOrPercentage {
     Length(NoCalcLength),
     Percentage(computed::Percentage),
@@ -929,7 +914,7 @@ impl LengthOrPercentage {
 /// Either a `<length>`, a `<percentage>`, or the `auto` keyword.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum LengthOrPercentageOrAuto {
     Length(NoCalcLength),
     Percentage(computed::Percentage),
@@ -1045,7 +1030,7 @@ impl LengthOrPercentageOrAuto {
 
 /// Either a `<length>`, a `<percentage>`, or the `none` keyword.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 #[allow(missing_docs)]
 pub enum LengthOrPercentageOrNone {
     Length(NoCalcLength),
@@ -1193,7 +1178,7 @@ impl LengthOrNumber {
 /// `auto`, and cannot be `none`.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum MozLength {
     LengthOrPercentageOrAuto(LengthOrPercentageOrAuto),
     ExtremumLength(ExtremumLength),
@@ -1219,7 +1204,7 @@ impl MozLength {
 /// A value suitable for a `max-width` or `max-height` property.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum MaxLength {
     LengthOrPercentageOrNone(LengthOrPercentageOrNone),
     ExtremumLength(ExtremumLength),

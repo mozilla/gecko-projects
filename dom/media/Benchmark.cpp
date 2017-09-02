@@ -16,6 +16,7 @@
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SharedThreadPool.h"
+#include "mozilla/SystemGroup.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/ContentChild.h"
@@ -53,7 +54,7 @@ VP9Benchmark::IsVP9DecodeFast()
     sHasRunTest = true;
 
     RefPtr<WebMDemuxer> demuxer = new WebMDemuxer(
-      new BufferMediaResource(sWebMSample, sizeof(sWebMSample), nullptr));
+      new BufferMediaResource(sWebMSample, sizeof(sWebMSample)));
     RefPtr<Benchmark> estimiser =
       new Benchmark(demuxer,
                     {

@@ -11,11 +11,11 @@ use app_units::Au;
 use context::QuirksMode;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser, parse_important};
 use cssparser::{CowRcStr, ToCss as ParserToCss};
-use error_reporting::ContextualParseError;
+use error_reporting::{ContextualParseError, ParseErrorReporter};
 use euclid::TypedSize2D;
 use font_metrics::get_metrics_provider_for_product;
 use media_queries::Device;
-use parser::{Parse, ParserContext};
+use parser::{ParserContext, ParserErrorContext};
 use properties::StyleBuilder;
 use selectors::parser::SelectorParseError;
 use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
@@ -346,8 +346,14 @@ fn is_whitespace_separator_or_equals(c: &char) -> bool {
     WHITESPACE.contains(c) || SEPARATOR.contains(c) || *c == '='
 }
 
-impl Parse for ViewportRule {
-    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+impl ViewportRule {
+    /// Parse a single @viewport rule.
+    pub fn parse<'i, 't, R>(context: &ParserContext,
+                            error_context: &ParserErrorContext<R>,
+                            input: &mut Parser<'i, 't>)
+                            -> Result<Self, ParseError<'i>>
+        where R: ParseErrorReporter
+    {
         let parser = ViewportRuleParser { context: context };
 
         let mut cascade = Cascade::new();
@@ -361,7 +367,7 @@ impl Parse for ViewportRule {
                 }
                 Err(err) => {
                     let error = ContextualParseError::UnsupportedViewportDescriptorDeclaration(err.slice, err.error);
-                    context.log_css_error(err.location, error);
+                    context.log_css_error(error_context, err.location, error);
                 }
             }
         }
@@ -694,10 +700,6 @@ impl MaybeNew for ViewportConstraints {
         //
         // Note: DEVICE-ADAPT § 5. states that relative length values are
         // resolved against initial values
-        //
-        // Note, we set used_viewport_size flag for Gecko in au_viewport_size.
-        // If we ever start supporting ViewportRule in Gecko, we probably want
-        // to avoid doing so at this place.
         let initial_viewport = device.au_viewport_size();
 
         let provider = get_metrics_provider_for_product();

@@ -168,7 +168,7 @@ ServoStyleSheet::LastRelease()
 }
 
 // QueryInterface implementation for ServoStyleSheet
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServoStyleSheet)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ServoStyleSheet)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMCSSStyleSheet)
   if (aIID.Equals(NS_GET_IID(ServoStyleSheet)))
     foundInterface = reinterpret_cast<nsISupports*>(this);
@@ -211,7 +211,7 @@ ServoStyleSheet::ParseSheet(css::Loader* aLoader,
   Inner()->mContents =
     Servo_StyleSheet_FromUTF8Bytes(
         aLoader, this, &input, mParsingMode, extraData,
-        aLineNumber, aCompatMode
+        aLineNumber, aCompatMode, aReusableSheets
     ).Consume();
 
   Inner()->mURLData = extraData.forget();

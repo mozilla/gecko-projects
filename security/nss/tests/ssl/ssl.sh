@@ -554,6 +554,8 @@ ssl_stress()
 
       echo "${testname}" | grep "client auth" > /dev/null
       CAUTH=$?
+      echo "${testname}" | grep "no login" > /dev/null
+      NOLOGIN=$?
 
       if [ "$ectype" = "SNI" -a "$NORM_EXT" = "Extended Test" ] ; then
           echo "$SCRIPTNAME: skipping  $testname for $NORM_EXT"
@@ -561,6 +563,9 @@ ssl_stress()
           echo "$SCRIPTNAME: skipping  $testname (ECC only)"
       elif [ "${CLIENT_MODE}" = "fips" -a "${CAUTH}" -ne 0 ] ; then
           echo "$SCRIPTNAME: skipping  $testname (non-FIPS only)"
+      elif [ "${NOLOGIN}" -eq 0 ] && \
+           [ "${CLIENT_MODE}" = "fips" -o "$NORM_EXT" = "Extended Test" ] ; then
+          echo "$SCRIPTNAME: skipping  $testname for $NORM_EXT"
       elif [ "`echo $ectype | cut -b 1`" != "#" ]; then
           cparam=`echo $cparam | sed -e 's;_; ;g' -e "s/TestUser/$USER_NICKNAME/g" `
           if [ "$ectype" = "SNI" ]; then
@@ -575,10 +580,16 @@ ssl_stress()
               ps -ef | grep selfserv
           fi
 
-          echo "strsclnt -q -p ${PORT} -d ${P_R_CLIENTDIR} ${CLIENT_OPTIONS} -w nss $cparam \\"
+          if [ "${NOLOGIN}" -eq 0 ] ; then
+              dbdir=${P_R_NOLOGINDIR}
+          else
+              dbdir=${P_R_CLIENTDIR}
+          fi
+
+          echo "strsclnt -q -p ${PORT} -d ${dbdir} ${CLIENT_OPTIONS} -w nss $cparam \\"
           echo "         -V ssl3:tls1.2 $verbose ${HOSTADDR}"
           echo "strsclnt started at `date`"
-          ${PROFTOOL} ${BINDIR}/strsclnt -q -p ${PORT} -d ${P_R_CLIENTDIR} ${CLIENT_OPTIONS} -w nss $cparam \
+          ${PROFTOOL} ${BINDIR}/strsclnt -q -p ${PORT} -d ${dbdir} ${CLIENT_OPTIONS} -w nss $cparam \
                    -V ssl3:tls1.2 $verbose ${HOSTADDR}
           ret=$?
           echo "strsclnt completed at `date`"
@@ -1172,8 +1183,8 @@ ssl_run_tests()
                 ssl_set_fips server on
                 ;;
             *)
-                echo "${SCRIPTNAME}: Error: Unknown server mode ${SERVER_MODE}"
-                continue
+                html_failed "${SCRIPTNAME}: Error: Unknown server mode ${SERVER_MODE}"
+                return 1
                 ;;
             esac
 
@@ -1186,8 +1197,8 @@ ssl_run_tests()
                 ssl_set_fips client on
                 ;;
             *)
-                echo "${SCRIPTNAME}: Error: Unknown client mode ${CLIENT_MODE}"
-                continue
+                html_failed "${SCRIPTNAME}: Error: Unknown client mode ${CLIENT_MODE}"
+                return 1
                 ;;
             esac
 

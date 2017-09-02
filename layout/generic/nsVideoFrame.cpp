@@ -25,7 +25,6 @@
 #include "nsContentUtils.h"
 #include "ImageContainer.h"
 #include "ImageLayers.h"
-#include "nsContentList.h"
 #include "nsStyleUtil.h"
 #include <algorithm>
 
@@ -177,9 +176,9 @@ nsVideoFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
 void
 nsVideoFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
-  nsContentUtils::DestroyAnonymousContent(&mCaptionDiv);
-  nsContentUtils::DestroyAnonymousContent(&mVideoControls);
-  nsContentUtils::DestroyAnonymousContent(&mPosterImage);
+  DestroyAnonymousContent(mCaptionDiv.forget());
+  DestroyAnonymousContent(mVideoControls.forget());
+  DestroyAnonymousContent(mPosterImage.forget());
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 

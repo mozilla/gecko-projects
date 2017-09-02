@@ -2169,9 +2169,10 @@ fn static_assert() {
         }
     }
 
-    pub fn fixup_system(&mut self) {
+    pub fn fixup_system(&mut self, default_font_type: structs::FontFamilyType) {
         self.gecko.mFont.systemFont = true;
         self.gecko.mGenericID = structs::kGenericFont_NONE;
+        self.gecko.mFont.fontlist.mDefaultFontType = default_font_type;
     }
 
     pub fn set_font_family(&mut self, v: longhands::font_family::computed_value::T) {
@@ -2223,7 +2224,16 @@ fn static_assert() {
         use gecko_bindings::structs::FontFamilyType;
         use gecko_string_cache::Atom;
 
-        ::properties::longhands::font_family::computed_value::T(
+        if self.gecko.mFont.fontlist.mFontlist.is_empty() {
+            let default = match self.gecko.mFont.fontlist.mDefaultFontType {
+                FontFamilyType::eFamily_serif => FontFamily::Generic(atom!("serif")),
+                FontFamilyType::eFamily_sans_serif => FontFamily::Generic(atom!("sans-serif")),
+                _ => panic!("Default generic must be serif or sans-serif"),
+            };
+            return longhands::font_family::computed_value::T(vec![default]);
+        }
+
+        longhands::font_family::computed_value::T(
             self.gecko.mFont.fontlist.mFontlist.iter().map(|gecko_font_family_name| {
                 match gecko_font_family_name.mType {
                     FontFamilyType::eFamily_serif => FontFamily::Generic(atom!("serif")),
@@ -2513,8 +2523,12 @@ fn static_assert() {
 
     <% impl_simple_type_with_conversion("font_language_override", "mFont.languageOverride") %>
 
-    pub fn set_font_variant_alternates(&mut self, v: longhands::font_variant_alternates::computed_value::T) {
+    pub fn set_font_variant_alternates(&mut self,
+                                       v: longhands::font_variant_alternates::computed_value::T,
+                                       device: &Device) {
         use gecko_bindings::bindings::{Gecko_ClearAlternateValues, Gecko_AppendAlternateValues};
+        use gecko_bindings::bindings::Gecko_nsFont_ResetFontFeatureValuesLookup;
+        use gecko_bindings::bindings::Gecko_nsFont_SetFontFeatureValuesLookup;
         % for value in "normal swash stylistic ornaments annotation styleset character_variant historical".split():
             use gecko_bindings::structs::NS_FONT_VARIANT_ALTERNATES_${value.upper()};
         % endfor
@@ -2526,6 +2540,8 @@ fn static_assert() {
 
         if v.0.is_empty() {
             self.gecko.mFont.variantAlternates = NS_FONT_VARIANT_ALTERNATES_NORMAL as u16;
+            unsafe { Gecko_nsFont_ResetFontFeatureValuesLookup(&mut self.gecko.mFont); }
+            return;
         }
 
         for val in v.0.iter() {
@@ -2556,6 +2572,10 @@ fn static_assert() {
                     self.gecko.mFont.variantAlternates |= NS_FONT_VARIANT_ALTERNATES_HISTORICAL as u16;
                 }
             }
+        }
+
+        unsafe {
+            Gecko_nsFont_SetFontFeatureValuesLookup(&mut self.gecko.mFont, device.pres_context());
         }
     }
 
@@ -2884,33 +2904,41 @@ fn static_assert() {
     }
 
     pub fn set_vertical_align(&mut self, v: longhands::vertical_align::computed_value::T) {
-        <% keyword = data.longhands_by_name["vertical-align"].keyword %>
-        use properties::longhands::vertical_align::computed_value::T;
-        // FIXME: Align binary representations and ditch |match| for cast + static_asserts
-        match v {
-            % for value in keyword.values_for('gecko'):
-                T::${to_rust_ident(value)} =>
-                    self.gecko.mVerticalAlign.set_value(
-                            CoordDataValue::Enumerated(structs::${keyword.gecko_constant(value)})),
-            % endfor
-            T::LengthOrPercentage(v) => self.gecko.mVerticalAlign.set(v),
-        }
+        use values::generics::box_::VerticalAlign;
+        let value = match v {
+            VerticalAlign::Baseline => structs::NS_STYLE_VERTICAL_ALIGN_BASELINE,
+            VerticalAlign::Sub => structs::NS_STYLE_VERTICAL_ALIGN_SUB,
+            VerticalAlign::Super => structs::NS_STYLE_VERTICAL_ALIGN_SUPER,
+            VerticalAlign::Top => structs::NS_STYLE_VERTICAL_ALIGN_TOP,
+            VerticalAlign::TextTop => structs::NS_STYLE_VERTICAL_ALIGN_TEXT_TOP,
+            VerticalAlign::Middle => structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE,
+            VerticalAlign::Bottom => structs::NS_STYLE_VERTICAL_ALIGN_BOTTOM,
+            VerticalAlign::TextBottom => structs::NS_STYLE_VERTICAL_ALIGN_TEXT_BOTTOM,
+            VerticalAlign::MozMiddleWithBaseline => {
+                structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE
+            },
+            VerticalAlign::Length(length) => {
+                self.gecko.mVerticalAlign.set(length);
+                return;
+            },
+        };
+        self.gecko.mVerticalAlign.set_value(CoordDataValue::Enumerated(value));
     }
 
     pub fn clone_vertical_align(&self) -> longhands::vertical_align::computed_value::T {
-        use properties::longhands::vertical_align::computed_value::T;
         use values::computed::LengthOrPercentage;
+        use values::generics::box_::VerticalAlign;
 
-        match self.gecko.mVerticalAlign.as_value() {
-            % for value in keyword.values_for('gecko'):
-                CoordDataValue::Enumerated(structs::${keyword.gecko_constant(value)}) => T::${to_rust_ident(value)},
-            % endfor
-                CoordDataValue::Enumerated(_) => panic!("Unexpected enum variant for vertical-align"),
-                _ => {
-                    let v = LengthOrPercentage::from_gecko_style_coord(&self.gecko.mVerticalAlign)
-                        .expect("Expected length or percentage for vertical-align");
-                    T::LengthOrPercentage(v)
-                }
+        let gecko = &self.gecko.mVerticalAlign;
+        match gecko.as_value() {
+            CoordDataValue::Enumerated(value) => VerticalAlign::from_gecko_keyword(value),
+            _ => {
+                VerticalAlign::Length(
+                    LengthOrPercentage::from_gecko_style_coord(gecko).expect(
+                        "expected <length-percentage> for vertical-align",
+                    ),
+                )
+            },
         }
     }
 
@@ -4139,19 +4167,14 @@ fn static_assert() {
     }
 
     pub fn clone_list_style_type(&self) -> longhands::list_style_type::computed_value::T {
-        use gecko_bindings::bindings::Gecko_CounterStyle_IsSingleString;
-        use gecko_bindings::bindings::Gecko_CounterStyle_GetSingleString;
         use self::longhands::list_style_type::computed_value::T;
+        use values::Either;
         use values::generics::CounterStyleOrNone;
 
-        if unsafe { Gecko_CounterStyle_IsSingleString(&self.gecko.mCounterStyle) } {
-            ns_auto_string!(single_string);
-            unsafe {
-                Gecko_CounterStyle_GetSingleString(&self.gecko.mCounterStyle, &mut *single_string)
-            };
-            T::String(single_string.to_string())
-        } else {
-            T::CounterStyle(CounterStyleOrNone::from_gecko_value(&self.gecko.mCounterStyle))
+        let result = CounterStyleOrNone::from_gecko_value(&self.gecko.mCounterStyle);
+        match result {
+            Either::First(counter_style) => T::CounterStyle(counter_style),
+            Either::Second(string) => T::String(string),
         }
     }
 
@@ -5597,6 +5620,7 @@ clip-path
         use gecko::conversions::string_from_chars_pointer;
         use gecko_bindings::structs::nsStyleContentType::*;
         use properties::longhands::content::computed_value::{T, ContentItem};
+        use values::Either;
         use values::generics::CounterStyleOrNone;
         use values::specified::url::SpecifiedUrl;
         use values::specified::Attr;
@@ -5644,6 +5668,11 @@ clip-path
                         let ident = gecko_function.mIdent.to_string();
                         let style =
                             CounterStyleOrNone::from_gecko_value(&gecko_function.mCounterStyle);
+                        let style = match style {
+                            Either::First(counter_style) => counter_style,
+                            Either::Second(_) =>
+                                unreachable!("counter function shouldn't have single string type"),
+                        };
                         if gecko_content.mType == eStyleContentType_Counter {
                             ContentItem::Counter(ident, style)
                         } else {

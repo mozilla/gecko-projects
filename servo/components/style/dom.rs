@@ -46,7 +46,7 @@ pub use style_traits::UnsafeNode;
 /// Because the script task's GC does not trace layout, node data cannot be safely stored in layout
 /// data structures. Also, layout code tends to be faster when the DOM is not being accessed, for
 /// locality reasons. Using `OpaqueNode` enforces this invariant.
-#[derive(Clone, PartialEq, Copy, Debug, Hash, Eq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
 pub struct OpaqueNode(pub usize);
 
@@ -138,12 +138,6 @@ pub trait TNode : Sized + Copy + Clone + Debug + NodeInfo {
     /// Get this node as an element, if it's one.
     fn as_element(&self) -> Option<Self::ConcreteElement>;
 
-    /// Whether this node needs to be laid out on viewport size change.
-    fn needs_dirty_on_viewport_size_changed(&self) -> bool;
-
-    /// Mark this node as needing layout on viewport size change.
-    unsafe fn set_dirty_on_viewport_size_changed(&self);
-
     /// Whether this node can be fragmented. This is used for multicol, and only
     /// for Servo.
     fn can_be_fragmented(&self) -> bool;
@@ -206,7 +200,13 @@ impl<N: TNode> Debug for ShowSubtreeDataAndPrimaryValues<N> {
 
 fn fmt_with_data<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
     if let Some(el) = n.as_element() {
-        write!(f, "{:?} dd={} data={:?}", el, el.has_dirty_descendants(), el.borrow_data())
+        write!(
+            f, "{:?} dd={} aodd={} data={:?}",
+            el,
+            el.has_dirty_descendants(),
+            el.has_animation_only_dirty_descendants(),
+            el.borrow_data(),
+       )
     } else {
         write!(f, "{:?}", n)
     }
@@ -215,9 +215,10 @@ fn fmt_with_data<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
 fn fmt_with_data_and_primary_values<N: TNode>(f: &mut fmt::Formatter, n: N) -> fmt::Result {
     if let Some(el) = n.as_element() {
         let dd = el.has_dirty_descendants();
+        let aodd = el.has_animation_only_dirty_descendants();
         let data = el.borrow_data();
         let values = data.as_ref().and_then(|d| d.styles.get_primary());
-        write!(f, "{:?} dd={} data={:?} values={:?}", el, dd, &data, values)
+        write!(f, "{:?} dd={} aodd={} data={:?} values={:?}", el, dd, aodd, &data, values)
     } else {
         write!(f, "{:?}", n)
     }
@@ -506,7 +507,7 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     /// In Gecko, this corresponds to the regular dirty descendants bit, the
     /// animation-only dirty descendants bit, and the lazy frame construction
     /// descendants bit.
-    unsafe fn clear_descendants_bits(&self) { self.unset_dirty_descendants(); }
+    unsafe fn clear_descendant_bits(&self) { self.unset_dirty_descendants(); }
 
     /// Clear all element flags related to dirtiness.
     ///

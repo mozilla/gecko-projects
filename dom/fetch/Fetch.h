@@ -17,6 +17,7 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/AbortSignal.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/FetchStreamReader.h"
 #include "mozilla/dom/RequestBinding.h"
@@ -102,6 +103,9 @@ public:
 
   virtual void
   NullifyStream() = 0;
+
+  virtual JSObject*
+  ReadableStreamBody() = 0;
 };
 
 /*
@@ -139,6 +143,7 @@ public:
  */
 template <class Derived>
 class FetchBody : public FetchStreamHolder
+                , public AbortFollower
 {
 public:
   friend class FetchBodyConsumer<Derived>;
@@ -230,6 +235,20 @@ public:
     mFetchStreamReader = nullptr;
   }
 
+  JSObject*
+  ReadableStreamBody() override
+  {
+    MOZ_ASSERT(mReadableStreamBody);
+    return mReadableStreamBody;
+  }
+
+  virtual AbortSignal*
+  GetSignal() const = 0;
+
+  // AbortFollower
+  void
+  Abort() override;
+
 protected:
   nsCOMPtr<nsIGlobalObject> mOwner;
 
@@ -252,7 +271,7 @@ protected:
   SetMimeType();
 
   void
-  SetReadableStreamBody(JSObject* aBody);
+  SetReadableStreamBody(JSContext* aCx, JSObject* aBody);
 
 private:
   Derived*

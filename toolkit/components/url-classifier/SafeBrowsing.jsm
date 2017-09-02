@@ -134,6 +134,7 @@ this.SafeBrowsing = {
   initialized:          false,
   phishingEnabled:      false,
   malwareEnabled:       false,
+  downloadsEnabled:     false,
   passwordsEnabled:     false,
   trackingEnabled:      false,
   blockedEnabled:       false,
@@ -213,6 +214,7 @@ this.SafeBrowsing = {
 
     this.phishingEnabled = Services.prefs.getBoolPref("browser.safebrowsing.phishing.enabled");
     this.malwareEnabled = Services.prefs.getBoolPref("browser.safebrowsing.malware.enabled");
+    this.downloadsEnabled = Services.prefs.getBoolPref("browser.safebrowsing.downloads.enabled");
     this.passwordsEnabled = Services.prefs.getBoolPref("browser.safebrowsing.passwords.enabled");
     this.trackingEnabled = Services.prefs.getBoolPref("privacy.trackingprotection.enabled") || Services.prefs.getBoolPref("privacy.trackingprotection.pbmode.enabled");
     this.blockedEnabled = Services.prefs.getBoolPref("browser.safebrowsing.blockedURIs.enabled");
@@ -303,6 +305,7 @@ this.SafeBrowsing = {
       let googleKey = Services.urlFormatter.formatURL("%GOOGLE_API_KEY%").trim();
       if ((provider == "google" || provider == "google4") &&
           (!googleKey || googleKey == "no-google-api-key")) {
+        log("Missing Google API key, clearing updateURL and gethashURL.");
         updateURL = "";
         gethashURL = "";
       }
@@ -327,11 +330,14 @@ this.SafeBrowsing = {
   },
 
   controlUpdateChecking() {
-    log("phishingEnabled:", this.phishingEnabled, "malwareEnabled:",
-        this.malwareEnabled, "passwordsEnabled:", this.passwordsEnabled,
+    log("phishingEnabled:", this.phishingEnabled,
+        "malwareEnabled:", this.malwareEnabled,
+        "downloadsEnabled:", this.downloadsEnabled,
+        "passwordsEnabled:", this.passwordsEnabled,
         "trackingEnabled:", this.trackingEnabled,
-        "blockedEnabled:", this.blockedEnabled, "trackingAnnotations",
-        this.trackingAnnotations, "flashBlockEnabled", this.flashBlockEnabled,
+        "blockedEnabled:", this.blockedEnabled,
+        "trackingAnnotations", this.trackingAnnotations,
+        "flashBlockEnabled", this.flashBlockEnabled,
         "flashInfobarListEnabled:", this.flashInfobarListEnabled);
 
     let listManager = Cc["@mozilla.org/url-classifier/listmanager;1"].
@@ -352,14 +358,14 @@ this.SafeBrowsing = {
       }
     }
     for (let i = 0; i < this.downloadBlockLists.length; ++i) {
-      if (this.malwareEnabled) {
+      if (this.downloadsEnabled) {
         listManager.enableUpdate(this.downloadBlockLists[i]);
       } else {
         listManager.disableUpdate(this.downloadBlockLists[i]);
       }
     }
     for (let i = 0; i < this.downloadAllowLists.length; ++i) {
-      if (this.malwareEnabled) {
+      if (this.downloadsEnabled) {
         listManager.enableUpdate(this.downloadAllowLists[i]);
       } else {
         listManager.disableUpdate(this.downloadAllowLists[i]);
