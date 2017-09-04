@@ -71,6 +71,9 @@ def make_task_description(config, jobs):
         platform = get_friendly_platform_name(dep_th_platform)
         upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], platform, locale)
 
+        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
+        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
+
         task = {
             'label': label,
             'description': "{} Partials".format(
@@ -83,6 +86,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
+            'extra': job.get('extra', {}),
         }
 
         yield task
