@@ -388,20 +388,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   int32_t parentAPD = PresContext()->AppUnitsPerDevPixel();
   int32_t subdocAPD = presContext->AppUnitsPerDevPixel();
 
-  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
-  if (sf) {
-    // We are forcing a rebuild of nsDisplayCanvasBackgroundColor to make sure
-    // that the canvas background color will be set correctly, and that only one
-    // unscrollable item will be created.
-    // This is done to avoid, for example, a case where only scrollbar frames
-    // are invalidated - we would skip creating nsDisplayCanvasBackgroundColor
-    // and possibly end up with an extra nsDisplaySolidColor item.
-    nsCanvasFrame* canvasFrame = do_QueryFrame(sf->GetScrolledFrame());
-    if (canvasFrame) {
-      aBuilder->MarkFrameForDisplayIfVisible(canvasFrame);
-    }
-  }
-
   nsRect visible;
   nsRect dirty;
   bool haveDisplayPort = false;
@@ -449,6 +435,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     clipState.ClipContainingBlockDescendantsToContentBox(aBuilder, this);
   }
 
+  nsIScrollableFrame *sf = presShell->GetRootScrollFrameAsScrollable();
   bool constructResolutionItem = subdocRootFrame &&
     (presShell->GetResolution() != 1.0);
   bool constructZoomItem = subdocRootFrame && parentAPD != subdocAPD;
@@ -533,19 +520,17 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         bounds = bounds.ScaleToOtherAppUnitsRoundOut(parentAPD, subdocAPD);
       }
 
-      uint32_t flags = nsIPresShell::APPEND_REUSABLE_ITEMS |
-        nsIPresShell::FORCE_DRAW | nsIPresShell::ADD_FOR_SUBDOC;
-
       // If we are in print preview/page layout we want to paint the grey
       // background behind the page, not the canvas color. The canvas color gets
       // painted on the page itself.
       if (nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
         presShell->AddPrintPreviewBackgroundItem(
-          *aBuilder, childItems, frame, bounds, flags);
+          *aBuilder, childItems, frame, bounds);
       } else {
         // Add the canvas background color to the bottom of the list. This
         // happens after we've built the list so that AddCanvasBackgroundColorItem
         // can monkey with the contents if necessary.
+        uint32_t flags = nsIPresShell::FORCE_DRAW | nsIPresShell::ADD_FOR_SUBDOC;
         presShell->AddCanvasBackgroundColorItem(
           *aBuilder, childItems, frame, bounds, NS_RGBA(0,0,0,0), flags);
       }
@@ -620,9 +605,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // Add the canvas background color to the bottom of the list. This
     // happens after we've built the list so that AddCanvasBackgroundColorItem
     // can monkey with the contents if necessary.
-    uint32_t flags = nsIPresShell::APPEND_REUSABLE_ITEMS |
-      nsIPresShell::FORCE_DRAW | nsIPresShell::APPEND_UNSCROLLED_ONLY;
-
+    uint32_t flags = nsIPresShell::FORCE_DRAW | nsIPresShell::ADD_FOR_SUBDOC;
     presShell->AddCanvasBackgroundColorItem(
       *aBuilder, childItems, this, bounds, NS_RGBA(0,0,0,0), flags);
    }

@@ -1227,6 +1227,20 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
 #ifdef DEBUG
   state->mAutoLayoutPhase.emplace(aReferenceFrame->PresContext(), eLayoutPhase_DisplayListBuilding);
 #endif
+  
+  nsIScrollableFrame* sf = state->mPresShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    // We are forcing a rebuild of nsDisplayCanvasBackgroundColor to make sure
+    // that the canvas background color will be set correctly, and that only one
+    // unscrollable item will be created.
+    // This is done to avoid, for example, a case where only scrollbar frames
+    // are invalidated - we would skip creating nsDisplayCanvasBackgroundColor
+    // and possibly end up with an extra nsDisplaySolidColor item.
+    nsCanvasFrame* canvasFrame = do_QueryFrame(sf->GetScrolledFrame());
+    if (canvasFrame) {
+      MarkFrameForDisplayIfVisible(canvasFrame);
+    }
+  }
 
   state->mCaretFrame = nullptr;
   state->mFirstFrameMarkedForDisplay = mFramesMarkedForDisplay.Length();

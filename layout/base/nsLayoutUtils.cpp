@@ -4425,6 +4425,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             builder.SetDirtyRect(modifiedDirty);
             builder.SetPartialUpdate(true);
             aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
+            AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
             builder.SetPartialUpdate(false);
             //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
             //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
@@ -4486,18 +4487,13 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         builder.SetDirtyRect(dirtyRect);
         builder.ClearWindowDraggingRegion();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
+        AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
       }
 
       // printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
     builder.SetIsBuilding(false);
-
-    // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
-    // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,
-    // we need to handle this separately, possibly by tracking which ones exist and doing
-    // them here.
-    AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
     // if (XRE_IsContentProcess()) {
     //   printf_stderr("Painting --- Full list:\n");

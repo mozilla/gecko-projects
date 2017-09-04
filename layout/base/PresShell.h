@@ -344,8 +344,7 @@ public:
   virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                              nsDisplayList& aList,
                                              nsIFrame* aFrame,
-                                             const nsRect& aBounds,
-                                             uint32_t aFlags) override;
+                                             const nsRect& aBounds) override;
 
   virtual nscolor ComputeBackstopColor(nsView* aDisplayRoot) override;
 

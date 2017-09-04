@@ -5217,12 +5217,10 @@ void
 PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                          nsDisplayList&        aList,
                                          nsIFrame*             aFrame,
-                                         const nsRect&         aBounds,
-                                         uint32_t              aFlags)
+                                         const nsRect&         aBounds)
 {
   aList.AppendNewToBottom(new (&aBuilder)
-    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115),
-                        aFlags & APPEND_REUSABLE_ITEMS));
+    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115)));
 }
 
 static bool
@@ -5306,8 +5304,7 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
     aList.AppendNewToBottom(
-      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor,
-                                          aFlags & APPEND_REUSABLE_ITEMS));
+      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
   }
 }
 
