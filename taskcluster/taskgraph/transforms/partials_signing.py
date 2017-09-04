@@ -32,7 +32,6 @@ def generate_upstream_artifacts(release_history, platform, locale=None):
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in artifacts],
         "formats": ["mar_sha384"],
-        "locale": locale or 'en-US',
     }]
 
     return upstream_artifacts
