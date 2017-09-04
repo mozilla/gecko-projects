@@ -4425,7 +4425,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             builder.SetDirtyRect(modifiedDirty);
             builder.SetPartialUpdate(true);
             aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
-            AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
+            AddExtraBackgroundItems(builder, modifiedDL, aFrame, canvasArea, visibleRegion, aBackstop);
             builder.SetPartialUpdate(false);
             //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
             //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
