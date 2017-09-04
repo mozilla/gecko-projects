@@ -1227,7 +1227,10 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
 #ifdef DEBUG
   state->mAutoLayoutPhase.emplace(aReferenceFrame->PresContext(), eLayoutPhase_DisplayListBuilding);
 #endif
-  
+
+  state->mCaretFrame = nullptr;
+  state->mFirstFrameMarkedForDisplay = mFramesMarkedForDisplay.Length();
+
   nsIScrollableFrame* sf = state->mPresShell->GetRootScrollFrameAsScrollable();
   if (sf) {
     // We are forcing a rebuild of nsDisplayCanvasBackgroundColor to make sure
@@ -1241,9 +1244,6 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
       MarkFrameForDisplayIfVisible(canvasFrame);
     }
   }
-
-  state->mCaretFrame = nullptr;
-  state->mFirstFrameMarkedForDisplay = mFramesMarkedForDisplay.Length();
 
   state->mPresShell->UpdateCanvasBackground();
 
