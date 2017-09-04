@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 transforms = TransformSequence()
 
 
-def generate_upstream_artifacts(release_history, platform, locale=None):
+def generate_upstream_artifacts(release_history, platform, locale='en-US'):
     artifact_prefix = 'public/build'
-    if locale:
+    if locale != 'en-US':
         artifact_prefix = 'public/build/{}'.format(locale)
 
     artifacts = get_partials_artifacts(release_history, platform, locale)
