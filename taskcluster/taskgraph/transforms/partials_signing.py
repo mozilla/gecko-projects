@@ -9,6 +9,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.scriptworker import get_signing_cert_scope_per_platform
 from taskgraph.util.partials import get_friendly_platform_name, get_partials_artifacts
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
@@ -71,6 +72,12 @@ def make_task_description(config, jobs):
         platform = get_friendly_platform_name(dep_th_platform)
         upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], platform, locale)
 
+        build_platform = dep_job.attributes.get('build_platform')
+        is_nightly = dep_job.attributes.get('nightly')
+        signing_cert_scope = get_signing_cert_scope_per_platform(
+            build_platform, is_nightly, config
+        )
+        scopes = [signing_cert_scope, 'project:releng:signing:format:mar_sha384']
         task = {
             'label': label,
             'description': "{} Partials".format(
@@ -81,6 +88,7 @@ def make_task_description(config, jobs):
                            'max-run-time': 3600},
             'dependencies': dependencies,
             'attributes': attributes,
+            'scopes': scopes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
         }
