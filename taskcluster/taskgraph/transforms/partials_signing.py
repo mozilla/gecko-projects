@@ -31,7 +31,8 @@ def generate_upstream_artifacts(release_history, platform, locale=None):
         "taskType": 'partials',
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in artifacts],
-        "formats": ["mar_sha384"]
+        "formats": ["mar_sha384"],
+        "locale": locale or 'en-US',
     }]
 
     return upstream_artifacts
@@ -71,14 +72,11 @@ def make_task_description(config, jobs):
         platform = get_friendly_platform_name(dep_th_platform)
         upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], platform, locale)
 
-        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
-        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
-
         task = {
             'label': label,
             'description': "{} Partials".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
+            'worker-type': 'scriptworker-prov-v1/signing-linux-v1',
             'worker': {'implementation': 'scriptworker-signing',
                            'upstream-artifacts': upstream_artifacts,
                            'max-run-time': 3600},
@@ -86,7 +84,6 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
-            'extra': job.get('extra', {}),
         }
 
         yield task
