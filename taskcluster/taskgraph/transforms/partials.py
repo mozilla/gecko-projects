@@ -113,6 +113,9 @@ def make_task_description(config, jobs):
             })
             update_number += 1
 
+        cot = extra.setdefault('chainOfTrust', {})
+        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
+
         worker = {
             'artifacts': _generate_task_output_files(builds.keys(), build_locale),
         }
