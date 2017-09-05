@@ -64,11 +64,10 @@ public:
   friend class FrameLayerBuilder;
 
   uint32_t GetDisplayItemKey() { return mDisplayItemKey; }
+  layers::Layer* GetLayer() const { return mLayer; }
   nsDisplayItemGeometry* GetGeometry() const { return mGeometry.get(); }
   void Invalidate() { mIsInvalid = true; }
   void ClearAnimationCompositorState();
-
-  layers::Layer* GetLayer() const { return mLayer; }
 
   static DisplayItemData* AssertDisplayItemData(DisplayItemData* aData);
 
@@ -347,7 +346,7 @@ public:
    * Call this to notify that we have just started a transaction on the
    * retained layer manager aManager.
    */
-  void DidBeginRetainedLayerTransaction(LayerManager* aManager, LayerManagerData* aParent = nullptr);
+  void DidBeginRetainedLayerTransaction(LayerManager* aManager);
 
   /**
    * Call this just before we end a transaction.
@@ -519,7 +518,7 @@ public:
     Layer* layer = nullptr;
     for (DisplayItemData* data : array) {
       DisplayItemData::AssertDisplayItemData(data);
-      if (!data->mLayer || data->mLayer->GetType() != T::Type()) {
+      if (data->mLayer->GetType() != T::Type()) {
         continue;
       }
       if (layer && layer != data->mLayer) {
@@ -549,7 +548,6 @@ public:
    * paint. Returns false otherwise.
    */
   static bool HasRetainedDataFor(nsIFrame* aFrame, uint32_t aDisplayItemKey);
-  static bool HasRetainedDataFor(nsIFrame* aFrame);
 
   typedef void (*DisplayItemDataCallback)(nsIFrame *aFrame, DisplayItemData* aItem);
 

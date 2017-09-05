@@ -137,8 +137,7 @@ FrameLayerBuilder::~FrameLayerBuilder()
 }
 
 DisplayItemData::DisplayItemData(LayerManagerData* aParent, uint32_t aKey,
-                                 Layer* aLayer,
-                                 nsIFrame* aFrame)
+                                 Layer* aLayer, nsIFrame* aFrame)
 
   : mRefCnt(0)
   , mParent(aParent)
@@ -156,6 +155,7 @@ DisplayItemData::DisplayItemData(LayerManagerData* aParent, uint32_t aKey,
   MOZ_RELEASE_ASSERT(!sAliveDisplayItemDatas->Contains(this));
   sAliveDisplayItemDatas->PutEntry(this);
 
+  MOZ_RELEASE_ASSERT(mLayer);
   if (aFrame) {
     AddFrame(aFrame);
   }
@@ -165,6 +165,7 @@ DisplayItemData::DisplayItemData(LayerManagerData* aParent, uint32_t aKey,
 void
 DisplayItemData::AddFrame(nsIFrame* aFrame)
 {
+  MOZ_RELEASE_ASSERT(mLayer);
   mFrameList.AppendElement(aFrame);
 
   SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
@@ -174,6 +175,7 @@ DisplayItemData::AddFrame(nsIFrame* aFrame)
 void
 DisplayItemData::RemoveFrame(nsIFrame* aFrame)
 {
+  MOZ_RELEASE_ASSERT(mLayer);
   bool result = mFrameList.RemoveElement(aFrame);
   MOZ_RELEASE_ASSERT(result, "Can't remove a frame that wasn't added!");
 
@@ -184,6 +186,7 @@ DisplayItemData::RemoveFrame(nsIFrame* aFrame)
 void
 DisplayItemData::EndUpdate()
 {
+  MOZ_RELEASE_ASSERT(mLayer);
   MOZ_ASSERT(!mItem);
   mIsInvalid = false;
   mUsed = false;
@@ -192,6 +195,7 @@ DisplayItemData::EndUpdate()
 void
 DisplayItemData::EndUpdate(nsAutoPtr<nsDisplayItemGeometry> aGeometry)
 {
+  MOZ_RELEASE_ASSERT(mLayer);
   MOZ_ASSERT(mItem);
   MOZ_ASSERT(mGeometry || aGeometry);
 
@@ -210,6 +214,8 @@ DisplayItemData::BeginUpdate(Layer* aLayer, LayerState aState,
                              uint32_t aContainerLayerGeneration,
                              nsDisplayItem* aItem /* = nullptr */)
 {
+  MOZ_RELEASE_ASSERT(mLayer);
+  MOZ_RELEASE_ASSERT(aLayer);
   mLayer = aLayer;
   mOptLayer = nullptr;
   mInactiveManager = nullptr;
@@ -217,7 +223,7 @@ DisplayItemData::BeginUpdate(Layer* aLayer, LayerState aState,
   mContainerLayerGeneration = aContainerLayerGeneration;
   mUsed = true;
 
-  if (aLayer && aLayer->AsPaintedLayer()) {
+  if (aLayer->AsPaintedLayer()) {
     mItem = aItem;
   }
 
@@ -255,6 +261,7 @@ static const nsIFrame* sDestroyedFrame = nullptr;
 DisplayItemData::~DisplayItemData()
 {
   MOZ_COUNT_DTOR(DisplayItemData);
+  MOZ_RELEASE_ASSERT(mLayer);
   for (uint32_t i = 0; i < mFrameList.Length(); i++) {
     nsIFrame* frame = mFrameList[i];
     if (frame == sDestroyedFrame) {
@@ -303,6 +310,7 @@ DisplayItemData::AssertDisplayItemData(DisplayItemData* aData)
 {
   MOZ_RELEASE_ASSERT(aData);
   MOZ_RELEASE_ASSERT(sAliveDisplayItemDatas && sAliveDisplayItemDatas->Contains(aData));
+  MOZ_RELEASE_ASSERT(aData->mLayer);
   return aData;
 }
 
@@ -311,9 +319,11 @@ DisplayItemData::AssertDisplayItemData(DisplayItemData* aData)
  */
 class LayerManagerData : public LayerUserData {
 public:
-  explicit LayerManagerData(LayerManager *aManager, LayerManagerData* aParent)
+  explicit LayerManagerData(LayerManager *aManager)
     : mLayerManager(aManager)
-    , mParent(aParent)
+#ifdef DEBUG_DISPLAY_ITEM_DATA
+    , mParent(nullptr)
+#endif
     , mInvalidateAllLayers(false)
   {
     MOZ_COUNT_CTOR(LayerManagerData);
@@ -383,7 +393,9 @@ public:
    * Tracks which frames have layers associated with them.
    */
   LayerManager *mLayerManager;
+#ifdef DEBUG_DISPLAY_ITEM_DATA
   LayerManagerData *mParent;
+#endif
   nsTHashtable<nsRefPtrHashKey<DisplayItemData> > mDisplayItems;
   bool mInvalidateAllLayers;
 };
@@ -1829,7 +1841,7 @@ FrameLayerBuilder::GetDisplayItemData(nsIFrame* aFrame, uint32_t aKey)
   for (uint32_t i = 0; i < array.Length(); i++) {
     DisplayItemData* item = DisplayItemData::AssertDisplayItemData(array.ElementAt(i));
     if (item->mDisplayItemKey == aKey &&
-        item->mParent->mLayerManager == mRetainingManager) {
+        item->mLayer->Manager() == mRetainingManager) {
       return item;
     }
   }
@@ -1954,7 +1966,7 @@ FrameLayerBuilder::RemoveFrameFromLayerManager(const nsIFrame* aFrame,
 #endif
 
   for (DisplayItemData* data : aArray) {
-    PaintedLayer* t = data->mLayer ? data->mLayer->AsPaintedLayer() : nullptr;
+    PaintedLayer* t = data->mLayer->AsPaintedLayer();
     if (t) {
       PaintedDisplayItemLayerUserData* paintedData =
           static_cast<PaintedDisplayItemLayerUserData*>(t->GetUserData(&gPaintedDisplayItemLayerUserData));
@@ -1975,16 +1987,15 @@ FrameLayerBuilder::RemoveFrameFromLayerManager(const nsIFrame* aFrame,
 }
 
 void
-FrameLayerBuilder::DidBeginRetainedLayerTransaction(LayerManager* aManager, LayerManagerData* aParent)
+FrameLayerBuilder::DidBeginRetainedLayerTransaction(LayerManager* aManager)
 {
   mRetainingManager = aManager;
   LayerManagerData* data = static_cast<LayerManagerData*>
     (aManager->GetUserData(&gLayerManagerUserData));
   if (data) {
-    MOZ_ASSERT(data->mParent == aParent);
     mInvalidateAllLayers = data->mInvalidateAllLayers;
   } else {
-    data = new LayerManagerData(aManager, aParent);
+    data = new LayerManagerData(aManager);
     aManager->SetUserData(&gLayerManagerUserData, data);
   }
 }
@@ -2025,7 +2036,7 @@ FrameLayerBuilder::WillEndTransaction()
     DisplayItemData* data = iter.Get()->GetKey();
     if (!data->mUsed) {
       // This item was visible, but isn't anymore.
-      PaintedLayer* t = data->mLayer ? data->mLayer->AsPaintedLayer() : nullptr;
+      PaintedLayer* t = data->mLayer->AsPaintedLayer();
       if (t && data->mGeometry) {
 #ifdef MOZ_DUMP_PAINTING
         if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
@@ -2057,7 +2068,7 @@ FrameLayerBuilder::GetDisplayItemDataForManager(nsDisplayItem* aItem,
   for (uint32_t i = 0; i < array.Length(); i++) {
     DisplayItemData* item = DisplayItemData::AssertDisplayItemData(array.ElementAt(i));
     if (item->mDisplayItemKey == aItem->GetPerFrameKey() &&
-        item->mParent->mLayerManager == aManager) {
+        item->mLayer->Manager() == aManager) {
       return item;
     }
   }
@@ -2073,16 +2084,6 @@ FrameLayerBuilder::HasRetainedDataFor(nsIFrame* aFrame, uint32_t aDisplayItemKey
     if (DisplayItemData::AssertDisplayItemData(array.ElementAt(i))->mDisplayItemKey == aDisplayItemKey) {
       return true;
     }
-  }
-  return false;
-}
-
-bool
-FrameLayerBuilder::HasRetainedDataFor(nsIFrame* aFrame)
-{
-  const SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
-  if (array.Length() > 0) {
-    return true;
   }
   return false;
 }
@@ -2110,7 +2111,7 @@ FrameLayerBuilder::GetOldLayerForFrame(nsIFrame* aFrame, uint32_t aDisplayItemKe
 
   DisplayItemData *data = GetDisplayItemData(aFrame, aDisplayItemKey);
 
-  if (data && data->mParent->mLayerManager == mRetainingManager) {
+  if (data && data->mLayer->Manager() == mRetainingManager) {
     return data;
   }
   return nullptr;
@@ -4050,7 +4051,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     // If the item is a event regions item, but is empty (has no regions in it)
     // then we should just throw it out
     if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
-      mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
       nsDisplayLayerEventRegions* eventRegions =
         static_cast<nsDisplayLayerEventRegions*>(item);
 
@@ -4083,7 +4083,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
     if (item->ShouldFlattenAway(mBuilder)) {
       MOZ_ASSERT(childItems);
-      mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
       ProcessDisplayItems(childItems, aLastAnimatedGeometryRoot, aLastASR,
                           aLastAGRTopLeft, aTopLeft, aMaxLayers, aLayerCount);
       continue;
@@ -4101,7 +4100,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     if (mParameters.mForEventsAndPluginsOnly && !item->GetChildren() &&
         (itemType != DisplayItemType::TYPE_LAYER_EVENT_REGIONS &&
          itemType != DisplayItemType::TYPE_PLUGIN)) {
-      mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
       continue;
     }
 
@@ -4348,7 +4346,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       params.mLayerContentsVisibleRect = &layerContentsVisibleRect;
       RefPtr<Layer> ownLayer = item->BuildLayer(mBuilder, mManager, params);
       if (!ownLayer) {
-        mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
         continue;
       }
 
@@ -4602,7 +4599,7 @@ void
 FrameLayerBuilder::ComputeGeometryChangeForItem(DisplayItemData* aData)
 {
   nsDisplayItem *item = aData->mItem;
-  PaintedLayer* paintedLayer = aData->mLayer ? aData->mLayer->AsPaintedLayer() : nullptr;
+  PaintedLayer* paintedLayer = aData->mLayer->AsPaintedLayer();
   // If aData->mOptLayer is presence, means this item has been optimized to the separate
   // layer. Thus, skip geometry change calculation.
   if (aData->mOptLayer || !item || !paintedLayer) {
@@ -4770,8 +4767,7 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
 
       tempManager->BeginTransaction();
       if (mRetainingManager) {
-        layerBuilder->DidBeginRetainedLayerTransaction(tempManager,
-          static_cast<LayerManagerData*>(mRetainingManager->GetUserData(&gLayerManagerUserData)));
+        layerBuilder->DidBeginRetainedLayerTransaction(tempManager);
       }
 
       UniquePtr<LayerProperties> props(LayerProperties::CloneFrom(tempManager->GetRoot()));
@@ -4800,7 +4796,16 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
 
       // If BuildLayer didn't call BuildContainerLayerFor, then our new layer won't have been
       // stored in layerBuilder. Manually add it now.
-      layerBuilder->StoreDataForFrame(aItem, tmpLayer, LAYER_ACTIVE);
+      if (mRetainingManager) {
+#ifdef DEBUG_DISPLAY_ITEM_DATA
+        LayerManagerData* parentLmd = static_cast<LayerManagerData*>
+          (layer->Manager()->GetUserData(&gLayerManagerUserData));
+        LayerManagerData* lmd = static_cast<LayerManagerData*>
+          (tempManager->GetUserData(&gLayerManagerUserData));
+        lmd->mParent = parentLmd;
+#endif
+        layerBuilder->StoreDataForFrame(aItem, tmpLayer, LAYER_ACTIVE);
+      }
 
       tempManager->SetRoot(tmpLayer);
       layerBuilder->WillEndTransaction();
@@ -4855,10 +4860,6 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
 DisplayItemData*
 FrameLayerBuilder::StoreDataForFrame(nsDisplayItem* aItem, Layer* aLayer, LayerState aState)
 {
-  if (!mRetainingManager) {
-    return nullptr;
-  }
-
   DisplayItemData* oldData = GetDisplayItemDataForManager(aItem, mRetainingManager);
   if (oldData) {
     if (!oldData->mUsed) {
@@ -4885,10 +4886,6 @@ FrameLayerBuilder::StoreDataForFrame(nsIFrame* aFrame,
                                      Layer* aLayer,
                                      LayerState aState)
 {
-  if (!mRetainingManager) {
-    return;
-  }
-
   DisplayItemData* oldData = GetDisplayItemData(aFrame, aDisplayItemKey);
   if (oldData && oldData->mFrameList.Length() == 1) {
     oldData->BeginUpdate(aLayer, aState, mContainerLayerGeneration);
@@ -5718,10 +5715,12 @@ FrameLayerBuilder::BuildContainerLayerFor(nsDisplayListBuilder* aBuilder,
   uint32_t oldGeneration = mContainerLayerGeneration;
   mContainerLayerGeneration = ++mMaxContainerLayerGeneration;
 
-  if (aContainerItem) {
-    StoreDataForFrame(aContainerItem, containerLayer, LAYER_ACTIVE);
-  } else {
-    StoreDataForFrame(aContainerFrame, containerDisplayItemKey, containerLayer, LAYER_ACTIVE);
+  if (mRetainingManager) {
+    if (aContainerItem) {
+      StoreDataForFrame(aContainerItem, containerLayer, LAYER_ACTIVE);
+    } else {
+      StoreDataForFrame(aContainerFrame, containerDisplayItemKey, containerLayer, LAYER_ACTIVE);
+    }
   }
 
   LayerManagerData* data = static_cast<LayerManagerData*>
@@ -6239,7 +6238,6 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     // items too, so there's no need to do this for the items in inactive
     // PaintedLayers. If aDirtyRegion has not changed since the previous call
     // then we can skip this.
-
     int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
     RecomputeVisibilityForItems(entry->mItems, builder, aDirtyRegion,
                                 offset, appUnitsPerDevPixel,

@@ -4116,7 +4116,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
         // If we found an intermediate stacking context with an existing display item
         // then we can store the dirty rect there and stop.
         if (currentFrame != aDisplayRootFrame &&
-            FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+            currentFrame->RealDisplayItemData().Length() != 0) {
           aBuilder.MarkFrameForDisplayIfVisible(currentFrame);
 
           // Store the stacking context relative dirty area such
