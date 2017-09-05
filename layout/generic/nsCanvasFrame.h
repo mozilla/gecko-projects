@@ -176,12 +176,6 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) override;
 
-  virtual void RestoreState() override
-  {
-    nsDisplayItem::RestoreState();
-    mColor = NS_RGBA(0, 0, 0, 0);
-  }
-
   void SetExtraBackgroundColor(nscolor aColor)
   {
     mColor = aColor;
