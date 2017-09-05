@@ -509,6 +509,7 @@ GROUP_NAMES = {
     'p': 'Partial generation',
     'ps': 'Partials signing',
     'pBM': 'Beetmover for partials',
+    'pUp': 'Partials Balrog upload',
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
