@@ -171,7 +171,6 @@ protected:
   bool mPostedReflowCallback;
   bool mDidCreateDoc;
   bool mCallingShow;
-  Maybe<bool> mPreviouslyNeededLayer;
   WeakFrame mPreviousCaret;
 };
 
