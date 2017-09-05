@@ -669,8 +669,7 @@ TextOverflow::ExamineLineFrames(nsLineBox*      aLine,
 }
 
 void
-TextOverflow::ProcessLine(nsDisplayListBuilder* aBuilder,
-                          const nsDisplayListSet& aLists,
+TextOverflow::ProcessLine(const nsDisplayListSet& aLists,
                           nsLineBox*              aLine)
 {
   NS_ASSERTION(mIStart.mStyle->mType != NS_STYLE_TEXT_OVERFLOW_CLIP ||
@@ -718,14 +717,13 @@ TextOverflow::ProcessLine(nsDisplayListBuilder* aBuilder,
   // Clip and remove display items as needed at the final marker edges.
   nsDisplayList* lists[] = { aLists.Content(), aLists.PositionedDescendants() };
   for (uint32_t i = 0; i < ArrayLength(lists); ++i) {
-    PruneDisplayListContents(aBuilder, lists[i], framesToHide, insideMarkersArea);
+    PruneDisplayListContents(lists[i], framesToHide, insideMarkersArea);
   }
   CreateMarkers(aLine, needIStart, needIEnd, insideMarkersArea, contentArea);
 }
 
 void
-TextOverflow::PruneDisplayListContents(nsDisplayListBuilder* aBuilder,
-                                       nsDisplayList* aList,
+TextOverflow::PruneDisplayListContents(nsDisplayList* aList,
                                        const FrameHashtable& aFramesToHide,
                                        const LogicalRect& aInsideMarkersArea)
 {
@@ -741,7 +739,7 @@ TextOverflow::PruneDisplayListContents(nsDisplayListBuilder* aBuilder,
     nsDisplayList* wrapper = item->GetSameCoordinateSystemChildren();
     if (wrapper) {
       if (!itemFrame || GetSelfOrNearestBlock(itemFrame) == mBlock) {
-        PruneDisplayListContents(aBuilder, wrapper, aFramesToHide, aInsideMarkersArea);
+        PruneDisplayListContents(wrapper, aFramesToHide, aInsideMarkersArea);
       }
     }
 

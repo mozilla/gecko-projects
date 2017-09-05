@@ -6709,7 +6709,7 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   }
 
   if (lineMayHaveTextOverflow) {
-    aTextOverflow->ProcessLine(aBuilder, collection, aLine.get());
+    aTextOverflow->ProcessLine(collection, aLine.get());
   }
 
   collection.MoveTo(aLists);
