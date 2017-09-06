@@ -1996,6 +1996,14 @@ public:
     return mFrame;
   }
   
+  /**
+   * @return the frame for invalidation.
+   */
+  virtual nsIFrame* FrameForInvalidation() const
+  {
+    return mFrame;
+  }
+
   bool HasDeletedFrame() const { return !mFrame; }
 
   virtual nsIFrame* StyleFrame() const { return mFrame; }
@@ -3807,6 +3815,8 @@ public:
 
   virtual bool IsInvalid(nsRect& aRect) const override;
 
+  virtual nsIFrame* FrameForInvalidation() const override { return mStyleFrame; }
+
   NS_DISPLAY_DECL_NAME("TableBackgroundImage", TYPE_TABLE_BACKGROUND_IMAGE)
 protected:
   virtual nsIFrame* StyleFrame() const override { return mStyleFrame; }
@@ -4002,8 +4012,11 @@ public:
                                 nscolor aColor,
                                 nsIFrame* aAncestorFrame)
     : nsDisplayBackgroundColor(aBuilder, aFrame, aBackgroundRect, aBackgroundStyle, aColor)
+    , mAncestorFrame(aAncestorFrame)
     , mTableType(GetTableTypeFromFrame(aAncestorFrame))
   { }
+
+  virtual nsIFrame* FrameForInvalidation() const override { return mAncestorFrame; }
 
   virtual uint32_t GetPerFrameKey() const override {
     return (static_cast<uint8_t>(mTableType) << TYPE_BITS) |
@@ -4012,6 +4025,7 @@ public:
 
   NS_DISPLAY_DECL_NAME("TableBackgroundColor", TYPE_TABLE_BACKGROUND_COLOR)
 protected:
+  nsIFrame* mAncestorFrame;
   TableType mTableType;
 };
 
@@ -5212,6 +5226,8 @@ public:
                                                                uint32_t aIndex,
                                                                nsIFrame* aAncestorFrame);
 
+  virtual nsIFrame* FrameForInvalidation() const override { return mAncestorFrame; }
+
   virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << (TYPE_BITS + static_cast<uint8_t>(TableTypeBits::COUNT))) |
            (static_cast<uint8_t>(mTableType) << TYPE_BITS) |
@@ -5223,6 +5239,7 @@ protected:
   nsDisplayTableFixedPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                               nsDisplayList* aList, uint32_t aIndex, nsIFrame* aAncestorFrame);
 
+  nsIFrame* mAncestorFrame;
   TableType mTableType;
 };
 

@@ -3839,7 +3839,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         i->Destroy(aBuilder);
       } else {
         while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-          if (!IsAnyAncestorModified(old->Frame())) {
+          if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
             ReuseItem(old);
           } else {
             // TODO: Is it going to be safe to call the dtor on a display item that belongs
@@ -3854,7 +3854,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         // here. Is there any other cached state that we need to update?
         MOZ_ASSERT(old && IsSameItem(i, old));
 
-        if (!IsAnyAncestorModified(old->Frame())) {
+        if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
           if (old->GetChildren()) {
             MOZ_ASSERT(i->GetChildren());
             MergeDisplayLists(aBuilder, i->GetChildren(),
@@ -3881,7 +3881,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
   // Reuse the remaining items from the old display list.
   while ((old = aOldList->RemoveBottom())) {
-    if (!IsAnyAncestorModified(old->Frame())) {
+    if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
       ReuseItem(old);
 
       if (old->GetChildren()) {

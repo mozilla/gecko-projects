@@ -7093,6 +7093,7 @@ nsDisplayTableFixedPosition::nsDisplayTableFixedPosition(nsDisplayListBuilder* a
                                                          uint32_t aIndex,
                                                          nsIFrame* aAncestorFrame)
   : nsDisplayFixedPosition(aBuilder, aFrame, aList, aIndex)
+  , mAncestorFrame(aAncestorFrame)
   , mTableType(GetTableTypeFromFrame(aAncestorFrame))
 {
 }
