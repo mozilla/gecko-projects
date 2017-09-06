@@ -19,11 +19,10 @@ transforms = TransformSequence()
 
 
 def generate_upstream_artifacts(release_history, platform, locale=None):
-    artifact_prefix = 'public/build'
-    if locale:
-        artifact_prefix = 'public/build/{}'.format(locale)
+    if locale == 'en-US':
+        artifact_prefix = 'public/build'
     else:
-        locale = 'en-US'
+        artifact_prefix = 'public/build/{}'.format(locale)
 
     artifacts = get_partials_artifacts(release_history, platform, locale)
 
@@ -42,6 +41,12 @@ def generate_upstream_artifacts(release_history, platform, locale=None):
 def make_partials_artifacts(config, jobs):
     for job in jobs:
         locale = job["attributes"].get("locale")
+        if locale:
+            job['treeherder']['symbol'] = 'pBM({})'.format(locale)
+        else:
+            locale = 'en-US'
+            job['treeherder']['symbol'] = 'pBM(N)'
+
         platform = job["attributes"]["build_platform"]
 
         platform = get_friendly_platform_name(platform)
@@ -50,9 +55,6 @@ def make_partials_artifacts(config, jobs):
         )
 
         job['worker']['upstream-artifacts'].extend(upstream_artifacts)
-
-        locale = job['attributes'].get('locale', 'N')
-        job['treeherder']['symbol'] = 'pBM({})'.format(locale)
 
         extra = list()
 
