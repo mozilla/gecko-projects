@@ -123,11 +123,11 @@ add_task(async function sendToDevice_nonSendable() {
     // not sendable.)  So first check that that's the case, and then unhide the
     // main button so that this test can continue.
     Assert.equal(
-      window.getComputedStyle(BrowserPageActions.mainButtonNode).visibility,
-      "collapse",
+      window.getComputedStyle(BrowserPageActions.mainButtonNode).display,
+      "none",
       "Main button should be hidden on about:home"
     );
-    BrowserPageActions.mainButtonNode.style.visibility = "visible";
+    BrowserPageActions.mainButtonNode.style.display = "-moz-box";
     await promiseSyncReady();
     // Open the panel.  Send to Device should be disabled.
     await promisePageActionPanelOpen();
@@ -137,8 +137,8 @@ add_task(async function sendToDevice_nonSendable() {
     let hiddenPromise = promisePageActionPanelHidden();
     BrowserPageActions.panelNode.hidePopup();
     await hiddenPromise;
-    // Remove the `visibility` style set above.
-    BrowserPageActions.mainButtonNode.style.removeProperty("visibility");
+    // Remove the `display` style set above.
+    BrowserPageActions.mainButtonNode.style.removeProperty("display");
   });
 });
 
@@ -551,6 +551,10 @@ add_task(async function sendToDevice_inUrlbar() {
     // after a moment.
     info("Waiting for the Sent! notification panel to open");
     await promisePanelShown(BrowserPageActionFeedback.panelNode.id);
+    Assert.equal(
+      BrowserPageActionFeedback.panelNode.anchorNode.id,
+      urlbarButton.id
+    );
     info("Waiting for the Sent! notification panel to close");
     await promisePanelHidden(BrowserPageActionFeedback.panelNode.id);
 

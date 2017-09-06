@@ -114,7 +114,8 @@ struct CounterStyleRuleParser<'a, 'b: 'a> {
 
 /// Default methods reject all at rules.
 impl<'a, 'b, 'i> AtRuleParser<'i> for CounterStyleRuleParser<'a, 'b> {
-    type Prelude = ();
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = ();
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }
@@ -326,7 +327,8 @@ impl ToCss for System {
             System::Additive => dest.write_str("additive"),
             System::Fixed { first_symbol_value } => {
                 if let Some(value) = first_symbol_value {
-                    write!(dest, "fixed {}", value)
+                    dest.write_str("fixed ")?;
+                    value.to_css(dest)
                 } else {
                     dest.write_str("fixed")
                 }
@@ -454,7 +456,7 @@ where W: fmt::Write {
 
 fn bound_to_css<W>(range: Option<i32>, dest: &mut W) -> fmt::Result where W: fmt::Write {
     if let Some(finite) = range {
-        write!(dest, "{}", finite)
+        finite.to_css(dest)
     } else {
         dest.write_str("infinite")
     }

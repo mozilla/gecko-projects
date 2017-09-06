@@ -112,8 +112,10 @@ VideoDecoderParent::RecvInit()
           self->mDecoder->IsHardwareAccelerated(hardwareReason);
         uint32_t conversion =
           static_cast<uint32_t>(self->mDecoder->NeedsConversion());
-        Unused << self->SendInitComplete(
-          hardwareAccelerated, hardwareReason, conversion);
+        Unused << self->SendInitComplete(self->mDecoder->GetDescriptionName(),
+                                         hardwareAccelerated,
+                                         hardwareReason,
+                                         conversion);
       }
     },
     [self] (MediaResult aReason) {
@@ -199,7 +201,7 @@ VideoDecoderParent::ProcessDecodedData(
       video->mDisplay,
       texture ? texture->GetSize() : IntSize(),
       texture ? mParent->StoreImage(video->mImage, texture)
-              : SurfaceDescriptorGPUVideo(0),
+              : SurfaceDescriptorGPUVideo(0, null_t()),
       video->mFrameID);
     Unused << SendOutput(output);
   }

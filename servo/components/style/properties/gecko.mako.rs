@@ -5,7 +5,7 @@
 // `data` comes from components/style/properties.mako.rs; see build.rs for more details.
 
 <%!
-    from data import to_rust_ident, to_camel_case
+    from data import to_rust_ident, to_camel_case, to_camel_case_lower
     from data import Keyword
 %>
 <%namespace name="helpers" file="/helpers.mako.rs" />
@@ -60,7 +60,7 @@ use selector_parser::PseudoElement;
 use servo_arc::{Arc, RawOffsetArc};
 use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
-use values::{self, Auto, CustomIdent, Either, KeyframesName};
+use values::{self, Auto, CustomIdent, Either, KeyframesName, None_};
 use values::computed::{NonNegativeAu, ToComputedValue, Percentage};
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
 use computed_values::border_style;
@@ -743,10 +743,16 @@ def set_gecko_property(ffi_name, expr):
             }
         }
 
-        if let Some(fallback) = fallback {
-            paint.mFallbackType = nsStyleSVGFallbackType::eStyleSVGFallbackType_Color;
-            paint.mFallbackColor = convert_rgba_to_nscolor(&fallback);
-        }
+        paint.mFallbackType = match fallback {
+            Some(Either::First(color)) => {
+                paint.mFallbackColor = convert_rgba_to_nscolor(&color);
+                nsStyleSVGFallbackType::eStyleSVGFallbackType_Color
+            },
+            Some(Either::Second(_)) => {
+                nsStyleSVGFallbackType::eStyleSVGFallbackType_None
+            },
+            None => nsStyleSVGFallbackType::eStyleSVGFallbackType_NotSet
+        };
     }
 
     #[allow(non_snake_case)]
@@ -771,11 +777,17 @@ def set_gecko_property(ffi_name, expr):
         use self::structs::nsStyleSVGPaintType;
         use self::structs::nsStyleSVGFallbackType;
         let ref paint = ${get_gecko_property(gecko_ffi_name)};
-        let fallback = if let nsStyleSVGFallbackType::eStyleSVGFallbackType_Color = paint.mFallbackType {
-            Some(convert_nscolor_to_rgba(paint.mFallbackColor))
-        } else {
-            None
+
+        let fallback = match paint.mFallbackType {
+            nsStyleSVGFallbackType::eStyleSVGFallbackType_Color => {
+                Some(Either::First(convert_nscolor_to_rgba(paint.mFallbackColor)))
+            },
+            nsStyleSVGFallbackType::eStyleSVGFallbackType_None => {
+                Some(Either::Second(None_))
+            },
+            nsStyleSVGFallbackType::eStyleSVGFallbackType_NotSet => None,
         };
+
         let kind = match paint.mType {
             nsStyleSVGPaintType::eStyleSVGPaintType_None => SVGPaintKind::None,
             nsStyleSVGPaintType::eStyleSVGPaintType_ContextFill => SVGPaintKind::ContextFill,
@@ -1067,6 +1079,67 @@ impl Clone for ${style_struct.gecko_struct_name} {
     #[allow(non_snake_case)]
     pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         From::from(self.gecko.${gecko_ffi_name})
+    }
+</%def>
+
+<%def name="impl_font_settings(ident, tag_type)">
+    <%
+    gecko_ffi_name = to_camel_case_lower(ident)
+    %>
+
+    pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
+        use values::generics::FontSettings;
+
+        let current_settings = &mut self.gecko.mFont.${gecko_ffi_name};
+        current_settings.clear_pod();
+
+        match v {
+            FontSettings::Normal => (), // do nothing, length is already 0
+
+            FontSettings::Tag(other_settings) => {
+                unsafe { current_settings.set_len_pod(other_settings.len() as u32) };
+
+                for (current, other) in current_settings.iter_mut().zip(other_settings) {
+                    current.mTag = other.tag;
+                    current.mValue = other.value.0;
+                }
+            }
+        };
+    }
+
+    pub fn copy_${ident}_from(&mut self, other: &Self) {
+        let current_settings = &mut self.gecko.mFont.${gecko_ffi_name};
+        let other_settings = &other.gecko.mFont.${gecko_ffi_name};
+        let settings_length = other_settings.len() as u32;
+
+        current_settings.clear_pod();
+        unsafe { current_settings.set_len_pod(settings_length) };
+
+        for (current, other) in current_settings.iter_mut().zip(other_settings.iter()) {
+            current.mTag = other.mTag;
+            current.mValue = other.mValue;
+        }
+    }
+
+    pub fn reset_${ident}(&mut self, other: &Self) {
+        self.copy_${ident}_from(other)
+    }
+
+    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+        use values::generics::{FontSettings, FontSettingTag, ${tag_type}} ;
+
+        if self.gecko.mFont.${gecko_ffi_name}.len() == 0 {
+            FontSettings::Normal
+        } else {
+            FontSettings::Tag(
+                self.gecko.mFont.${gecko_ffi_name}.iter().map(|gecko_font_setting| {
+                    FontSettingTag {
+                        tag: gecko_font_setting.mTag,
+                        value: ${tag_type}(gecko_font_setting.mValue),
+                    }
+                }).collect()
+            )
+        }
     }
 </%def>
 
@@ -2069,98 +2142,8 @@ fn static_assert() {
     skip_longhands="${skip_font_longhands}"
     skip_additionals="*">
 
-    pub fn set_font_feature_settings(&mut self, v: longhands::font_feature_settings::computed_value::T) {
-        use values::generics::FontSettings;
-
-        let current_settings = &mut self.gecko.mFont.fontFeatureSettings;
-        current_settings.clear_pod();
-
-        match v {
-            FontSettings::Normal => (), // do nothing, length is already 0
-
-            FontSettings::Tag(feature_settings) => {
-                unsafe { current_settings.set_len_pod(feature_settings.len() as u32) };
-
-                for (current, feature) in current_settings.iter_mut().zip(feature_settings) {
-                    current.mTag = feature.tag;
-                    current.mValue = feature.value.0;
-                }
-            }
-        };
-    }
-
-    pub fn copy_font_feature_settings_from(&mut self, other: &Self) {
-        let current_settings = &mut self.gecko.mFont.fontFeatureSettings;
-        let feature_settings = &other.gecko.mFont.fontFeatureSettings;
-        let settings_length = feature_settings.len() as u32;
-
-        current_settings.clear_pod();
-        unsafe { current_settings.set_len_pod(settings_length) };
-
-        for (current, feature) in current_settings.iter_mut().zip(feature_settings.iter()) {
-            current.mTag = feature.mTag;
-            current.mValue = feature.mValue;
-        }
-    }
-
-    pub fn reset_font_feature_settings(&mut self, other: &Self) {
-        self.copy_font_feature_settings_from(other)
-    }
-
-    pub fn clone_font_feature_settings(&self) -> longhands::font_feature_settings::computed_value::T {
-        use values::generics::{FontSettings, FontSettingTag, FontSettingTagInt} ;
-
-        if self.gecko.mFont.fontFeatureSettings.len() == 0 {
-            FontSettings::Normal
-        } else {
-            FontSettings::Tag(
-                self.gecko.mFont.fontFeatureSettings.iter().map(|gecko_font_feature_setting| {
-                    FontSettingTag {
-                        tag: gecko_font_feature_setting.mTag,
-                        value: FontSettingTagInt(gecko_font_feature_setting.mValue),
-                    }
-                }).collect()
-            )
-        }
-    }
-
-    pub fn set_font_variation_settings(&mut self, v: longhands::font_variation_settings::computed_value::T) {
-        use values::generics::FontSettings;
-
-        let current_settings = &mut self.gecko.mFont.fontVariationSettings;
-        current_settings.clear_pod();
-
-        match v {
-            FontSettings::Normal => (), // do nothing, length is already 0
-
-            FontSettings::Tag(feature_settings) => {
-                unsafe { current_settings.set_len_pod(feature_settings.len() as u32) };
-
-                for (current, feature) in current_settings.iter_mut().zip(feature_settings) {
-                    current.mTag = feature.tag;
-                    current.mValue = feature.value.0;
-                }
-            }
-        };
-    }
-
-    pub fn copy_font_variation_settings_from(&mut self, other: &Self ) {
-        let current_settings = &mut self.gecko.mFont.fontVariationSettings;
-        let feature_settings = &other.gecko.mFont.fontVariationSettings;
-        let settings_length = feature_settings.len() as u32;
-
-        current_settings.clear_pod();
-        unsafe { current_settings.set_len_pod(settings_length) };
-
-        for (current, feature) in current_settings.iter_mut().zip(feature_settings.iter()) {
-            current.mTag = feature.mTag;
-            current.mValue = feature.mValue;
-        }
-    }
-
-    pub fn reset_font_variation_settings(&mut self, other: &Self) {
-        self.copy_font_variation_settings_from(other)
-    }
+    <% impl_font_settings("font_feature_settings", "FontSettingTagInt") %>
+    <% impl_font_settings("font_variation_settings", "FontSettingTagFloat") %>
 
     pub fn fixup_none_generic(&mut self, device: &Device) {
         self.gecko.mFont.systemFont = false;

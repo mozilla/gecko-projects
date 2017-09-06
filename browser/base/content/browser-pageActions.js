@@ -47,10 +47,31 @@ var BrowserPageActions = {
    * Inits.  Call to init.
    */
   init() {
+    this.placeAllActions();
+  },
+
+  /**
+   * Places all registered actions.
+   */
+  placeAllActions() {
+    // Place actions in the panel.  Notify of onBeforePlacedInWindow too.
     for (let action of PageActions.actions) {
-      this.placeAction(action,
-                       PageActions.insertBeforeActionIDInPanel(action),
-                       PageActions.insertBeforeActionIDInUrlbar(action));
+      action.onBeforePlacedInWindow(window);
+      this.placeActionInPanel(action);
+    }
+
+    // Place actions in the urlbar.  Do this in reverse order.  The reason is
+    // subtle.  If there were no urlbar nodes already in markup (like the
+    // bookmark star button), then doing this in forward order would be fine.
+    // Forward order means that the insert-before relationship is always broken:
+    // there's never a next-sibling node before which to insert a new node, so
+    // node.insertBefore() is always passed null, and nodes are always appended.
+    // That will break the position of nodes that should be inserted before
+    // nodes that are in markup, which in turn can break other nodes.
+    let actionsInUrlbar = PageActions.actionsInUrlbar;
+    for (let i = actionsInUrlbar.length - 1; i >= 0; i--) {
+      let action = actionsInUrlbar[i];
+      this.placeActionInUrlbar(action);
     }
   },
 
@@ -59,17 +80,11 @@ var BrowserPageActions = {
    *
    * @param  action (PageActions.Action, required)
    *         The action to place.
-   * @param  panelInsertBeforeID (string, required)
-   *         The ID of the action in the panel before which the given action
-   *         action should be inserted.
-   * @param  urlbarInsertBeforeID (string, required)
-   *         If the action is shown in the urlbar, then this is ID of the action
-   *         in the urlbar before which the given action should be inserted.
    */
-  placeAction(action, panelInsertBeforeID, urlbarInsertBeforeID) {
+  placeAction(action) {
     action.onBeforePlacedInWindow(window);
-    this.placeActionInPanel(action, panelInsertBeforeID);
-    this.placeActionInUrlbar(action, urlbarInsertBeforeID);
+    this.placeActionInPanel(action);
+    this.placeActionInUrlbar(action);
   },
 
   /**
@@ -77,11 +92,9 @@ var BrowserPageActions = {
    *
    * @param  action (PageActions.Action, required)
    *         The action to place.
-   * @param  insertBeforeID (string, required)
-   *         The ID of the action in the panel before which the given action
-   *         action should be inserted.  Pass null to append.
    */
-  placeActionInPanel(action, insertBeforeID) {
+  placeActionInPanel(action) {
+    let insertBeforeID = PageActions.nextActionID(action, PageActions.actions);
     let id = this._panelButtonNodeIDForActionID(action.id);
     let node = document.getElementById(id);
     if (!node) {
@@ -182,33 +195,9 @@ var BrowserPageActions = {
       return null;
     }
 
-    // Before creating the panel, find the best anchor node for it because we'll
-    // bail if there isn't one.  Try each of the following nodes in order, using
-    // the first that's visible.
-    let anchorNode = null;
-    let potentialAnchorNodeIDs = [
-      action.anchorIDOverride || null,
-      this._urlbarButtonNodeIDForActionID(action.id),
-      this.mainButtonNode.id,
-      "identity-icon",
-    ];
-    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
-    for (let id of potentialAnchorNodeIDs) {
-      if (id) {
-        let node = document.getElementById(id);
-        if (node && !node.hidden) {
-          let bounds = dwu.getBoundsWithoutFlushing(node);
-          if (bounds.height > 0 && bounds.width > 0) {
-            anchorNode = node;
-            break;
-          }
-        }
-      }
-    }
-    if (!anchorNode) {
-      throw new Error(`PageActions: No anchor node for '${action.id}'`);
-    }
+    // Before creating the panel, get the anchor node for it because it'll throw
+    // if there isn't one (which shouldn't happen, but still).
+    let anchorNode = this.panelAnchorNodeForAction(action);
 
     panelNode = document.createElement("panel");
     panelNode.id = this._activatedActionPanelID;
@@ -272,6 +261,30 @@ var BrowserPageActions = {
     return panelNode;
   },
 
+  panelAnchorNodeForAction(action) {
+    // Try each of the following nodes in order, using the first that's visible.
+    let potentialAnchorNodeIDs = [
+      action.anchorIDOverride || null,
+      this._urlbarButtonNodeIDForActionID(action.id),
+      this.mainButtonNode.id,
+      "identity-icon",
+    ];
+    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIDOMWindowUtils);
+    for (let id of potentialAnchorNodeIDs) {
+      if (id) {
+        let node = document.getElementById(id);
+        if (node && !node.hidden) {
+          let bounds = dwu.getBoundsWithoutFlushing(node);
+          if (bounds.height > 0 && bounds.width > 0) {
+            return node;
+          }
+        }
+      }
+    }
+    throw new Error(`PageActions: No anchor node for '${action.id}'`);
+  },
+
   get activatedActionPanelNode() {
     return document.getElementById(this._activatedActionPanelID);
   },
@@ -285,11 +298,10 @@ var BrowserPageActions = {
    *
    * @param  action (PageActions.Action, required)
    *         The action to place.
-   * @param  insertBeforeID (string, required)
-   *         If the action is shown in the urlbar, then this is ID of the action
-   *         in the urlbar before which the given action should be inserted.
    */
-  placeActionInUrlbar(action, insertBeforeID) {
+  placeActionInUrlbar(action) {
+    let insertBeforeID =
+      PageActions.nextActionID(action, PageActions.actionsInUrlbar);
     let id = this._urlbarButtonNodeIDForActionID(action.id);
     let node = document.getElementById(id);
 
@@ -700,18 +712,10 @@ var BrowserPageActionFeedback = {
   },
 
   show(action, event) {
-    this.feedbackLabel.textContent = this.panelNode.getAttribute(action + "Feedback");
+    this.feedbackLabel.textContent = this.panelNode.getAttribute(action.id + "Feedback");
     this.panelNode.hidden = false;
 
-    let anchor = BrowserPageActions.mainButtonNode;
-    if (event.target.classList.contains("urlbar-icon")) {
-      let id = BrowserPageActions._urlbarButtonNodeIDForActionID(action);
-      let node = document.getElementById(id);
-      if (node) {
-        anchor = node;
-      }
-    }
-
+    let anchor = BrowserPageActions.panelAnchorNodeForAction(action);
     this.panelNode.openPopup(anchor, {
       position: "bottomcenter topright",
       triggerEvent: event,
@@ -765,7 +769,8 @@ BrowserPageActions.copyURL = {
     Cc["@mozilla.org/widget/clipboardhelper;1"]
       .getService(Ci.nsIClipboardHelper)
       .copyString(gURLBar.makeURIReadable(gBrowser.selectedBrowser.currentURI).displaySpec);
-    BrowserPageActionFeedback.show("copyURL", event);
+    let action = PageActions.actionForID("copyURL");
+    BrowserPageActionFeedback.show(action, event);
   },
 };
 
@@ -832,7 +837,8 @@ BrowserPageActions.sendToDevice = {
         // There are items in the subview that don't represent devices: "Sign
         // in", "Learn about Sync", etc.  Device items will be .sendtab-target.
         if (event.target.classList.contains("sendtab-target")) {
-          BrowserPageActionFeedback.show("sendToDevice", event);
+          let action = PageActions.actionForID("sendToDevice");
+          BrowserPageActionFeedback.show(action, event);
         }
       });
       return item;

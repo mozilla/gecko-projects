@@ -617,6 +617,50 @@
               return location == "about:blank";
             },
 
+            _syncThrobberAnimations() {
+              const originalTab = this.mTab;
+              BrowserUtils.promiseLayoutFlushed(this.mTab.ownerDocument, "style", () => {
+                if (!originalTab.parentNode) {
+                  return;
+                }
+
+                const animations =
+                  Array.from(originalTab.parentNode.getElementsByTagName("tab"))
+                  .map(tab => {
+                    const throbber =
+                      document.getAnonymousElementByAttribute(tab, "anonid", "tab-throbber");
+                    return throbber ? throbber.getAnimations({ subtree: true }) : [];
+                  })
+                  .reduce((a, b) => a.concat(b))
+                  .filter(anim =>
+                    anim instanceof CSSAnimation &&
+                    (anim.animationName === "tab-throbber-animation" ||
+                     anim.animationName === "tab-throbber-animation-rtl") &&
+                    (anim.playState === "running" || anim.playState === "pending"));
+
+                // Synchronize with the oldest running animation, if any.
+                const firstStartTime = Math.min(
+                  ...animations.map(anim => anim.startTime === null ? Infinity : anim.startTime)
+                );
+                if (firstStartTime === Infinity) {
+                  return;
+                }
+                requestAnimationFrame(() => {
+                  for (let animation of animations) {
+                    // If |animation| has been cancelled since this rAF callback
+                    // was scheduled we don't want to set its startTime since
+                    // that would restart it. We check for a cancelled animation
+                    // by looking for a null currentTime rather than checking
+                    // the playState, since reading the playState of
+                    // a CSSAnimation object will flush style.
+                    if (animation.currentTime !== null) {
+                      animation.startTime = firstStartTime;
+                    }
+                  }
+                });
+              });
+            },
+
             onProgressChange(aWebProgress, aRequest,
                              aCurSelfProgress, aMaxSelfProgress,
                              aCurTotalProgress, aMaxTotalProgress) {
@@ -714,6 +758,7 @@
                 if (this._shouldShowProgress(aRequest)) {
                   if (!(aStateFlags & nsIWebProgressListener.STATE_RESTORING)) {
                     this.mTab.setAttribute("busy", "true");
+                    this._syncThrobberAnimations();
                   }
 
                   if (this.mTab.selected) {
@@ -2226,7 +2271,8 @@
         "audioPlaybackStopped", "pauseMedia", "stopMedia",
         "resumeMedia", "mute", "unmute", "blockedPopups", "lastURI",
         "purgeSessionHistory", "stopScroll", "startScroll",
-        "userTypedValue", "userTypedClear", "mediaBlocked"
+        "userTypedValue", "userTypedClear", "mediaBlocked",
+        "didStartLoadSinceLastUserTyping"
       ]</field>
 
       <method name="_createLazyBrowser">
@@ -2253,6 +2299,9 @@
                     let url = SessionStore.getLazyTabValue(aTab, "url");
                     return Services.io.newURI(url);
                   };
+                  break;
+                case "didStartLoadSinceLastUserTyping":
+                  getter = () => () => false;
                   break;
                 case "fullZoom":
                 case "textZoom":
@@ -2327,6 +2376,7 @@
 
       <method name="_insertBrowser">
         <parameter name="aTab"/>
+        <parameter name="aInsertedOnTabCreation"/>
         <body>
           <![CDATA[
             "use strict";
@@ -2388,8 +2438,59 @@
               this._outerWindowIDBrowserMap.set(browser.outerWindowID, browser);
             }
 
-            var evt = new CustomEvent("TabBrowserInserted", { bubbles: true, detail: {} });
+            var evt = new CustomEvent("TabBrowserInserted",
+              { bubbles: true, detail: { insertedOnTabCreation: aInsertedOnTabCreation } });
             aTab.dispatchEvent(evt);
+          ]]>
+        </body>
+      </method>
+
+      <method name="discardBrowser">
+        <parameter name="aBrowser"/>
+        <body>
+          <![CDATA[
+            "use strict";
+
+            let tab = this.getTabForBrowser(aBrowser);
+
+            if (!tab ||
+                tab.selected ||
+                tab.closing ||
+                this._windowIsClosing ||
+                !aBrowser.isConnected ||
+                !aBrowser.isRemoteBrowser ||
+                aBrowser.frameLoader.tabParent.hasBeforeUnload) {
+              return;
+            }
+
+            // Set browser parameters for when browser is restored.  Also remove
+            // listeners and set up lazy restore data in SessionStore. This must
+            // be done before aBrowser is destroyed and removed from the document.
+            tab._browserParams = { uriIsAboutBlank: aBrowser.currentURI.spec == "about:blank",
+                                   remoteType: aBrowser.remoteType,
+                                   usingPreloadedContent: false };
+
+            SessionStore.resetBrowserToLazyState(tab);
+
+            this._outerWindowIDBrowserMap.delete(aBrowser.outerWindowID);
+
+            // Remove the tab's filter and progress listener.
+            let filter = this._tabFilters.get(tab);
+            let listener = this._tabListeners.get(tab);
+            aBrowser.webProgress.removeProgressListener(filter);
+            filter.removeProgressListener(listener);
+            listener.destroy();
+
+            this._tabListeners.delete(tab);
+            this._tabFilters.delete(tab);
+
+            aBrowser.destroy();
+
+            let notificationbox = this.getNotificationBox(aBrowser);
+            this.mPanelContainer.removeChild(notificationbox);
+            tab.removeAttribute("linkedpanel");
+
+            this._createLazyBrowser(tab);
           ]]>
         </body>
       </method>
@@ -2639,7 +2740,7 @@
                 b.registeredOpenURI = lazyBrowserURI;
               }
             } else {
-              this._insertBrowser(t);
+              this._insertBrowser(t, true);
             }
 
             // Dispatch a new tab notification.  We do this once we're
@@ -7516,6 +7617,7 @@
         <xul:hbox xbl:inherits="pinned,selected=visuallyselected,titlechanged,attention"
                   class="tab-content" align="center">
           <xul:hbox xbl:inherits="fadein,pinned,busy,progress,selected=visuallyselected"
+                    anonid="tab-throbber"
                     class="tab-throbber"
                     layer="true"/>
           <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"

@@ -17,8 +17,8 @@ import android.view.View;
  * ItemDecoration implementation that draws horizontal divider line between highlight items.
  */
 /* package */ class HighlightsDividerItemDecoration extends RecyclerView.ItemDecoration {
-    // We do not want to draw a divider for the Top Sites panel and the Welcome panel.
-    private static final int START_DRAWING_AT_POSITION = 2;
+    // We do not want to draw a divider for the Top Sites panel.
+    private static final int START_DRAWING_AT_POSITION = 1;
 
     private static final int[] ATTRS = new int[]{
             android.R.attr.listDivider
@@ -39,6 +39,9 @@ import android.view.View;
         final int childCount = parent.getChildCount();
         for (int i = START_DRAWING_AT_POSITION; i < childCount; i++) {
             final View child = parent.getChildAt(i);
+            if (child.getVisibility() == View.GONE) {
+                continue;
+            }
             final RecyclerView.LayoutParams params = (RecyclerView.LayoutParams) child
                     .getLayoutParams();
             final int top = child.getBottom() + params.bottomMargin;

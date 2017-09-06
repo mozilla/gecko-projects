@@ -74,8 +74,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                                        .getService(Components.interfaces.nsIPrefService)
                                        .getDefaultBranch("browser.urlbar.");
 
-        Services.prefs.addObserver("browser.search.openintab", this);
-        this.browserSearchOpenInTab = Services.prefs.getBoolPref("browser.search.openintab");
         Services.prefs.addObserver("browser.search.suggest.enabled", this);
         this.browserSearchSuggestEnabled = Services.prefs.getBoolPref("browser.search.suggest.enabled");
 
@@ -139,7 +137,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <destructor><![CDATA[
         this._prefs.removeObserver("", this);
         this._prefs = null;
-        Services.prefs.removeObserver("browser.search.openintab", this);
         Services.prefs.removeObserver("browser.search.suggest.enabled", this);
         this.inputField.controllers.removeController(this._copyCutController);
         this.inputField.removeEventListener("paste", this);
@@ -186,6 +183,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       -->
       <property name="maxRows"
                 onget="return this.popup.maxResults;"/>
+
+      <!--
+        Set by focusAndSelectUrlBar to indicate whether the next focus event was
+        initiated by an explicit user action. See the "focus" handler below.
+      -->
+      <field name="userInitiatedFocus">false</field>
 
       <!--
         onBeforeValueGet is called by the base-binding's .value getter.
@@ -560,8 +563,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           if (!where) {
             if (isMouseEvent) {
               where = whereToOpenLink(event, false, false);
-            } else if (this.browserSearchOpenInTab) {
-              where = "tab";
             } else {
               // If the current tab is empty, ignore Alt+Enter (reuse this tab)
               let altEnter = !isMouseEvent &&
@@ -1098,9 +1099,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               case "speculativeConnect.enabled":
                 this.speculativeConnectEnabled = this._prefs.getBoolPref(aData);
                 break;
-              case "browser.search.openintab":
-                this.browserSearchOpenInTab = Services.prefs.getBoolPref(aData);
-                break;
               case "browser.search.suggest.enabled":
                 this.browserSearchSuggestEnabled = Services.prefs.getBoolPref(aData);
                 break;
@@ -1453,6 +1451,27 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
+      <method name="maybeShowSearchSuggestionsNotificationOnFocus">
+        <parameter name="mouseFocused"/>
+        <body><![CDATA[
+          let whichNotification = this.whichSearchSuggestionsNotification;
+          if (this._showSearchSuggestionNotificationOnMouseFocus &&
+              mouseFocused) {
+            // Force showing the opt-out notification.
+            this._whichSearchSuggestionsNotification = whichNotification = "opt-out";
+          }
+          if (whichNotification == "opt-out") {
+            try {
+              this.popup.openAutocompletePopup(this, this);
+            } finally {
+              if (mouseFocused) {
+                delete this._whichSearchSuggestionsNotification;
+                this._showSearchSuggestionNotificationOnMouseFocus = false;
+              }
+            }
+          }
+        ]]></body>
+      </method>
     </implementation>
 
     <handlers>
@@ -1477,6 +1496,14 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         }
       ]]></handler>
 
+      <handler event="mousedown"><![CDATA[
+        // Eventually show the opt-out notification even if the location bar is
+        // empty, focused, and the user clicks on it.
+        if (event.button == 0 && this.focused && this.textValue == "") {
+          this.maybeShowSearchSuggestionsNotificationOnFocus(true);
+        }
+      ]]></handler>
+
       <handler event="focus"><![CDATA[
         if (event.originalTarget == this.inputField) {
           this._hideURLTooltip();
@@ -1485,8 +1512,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             UpdatePopupNotificationsVisibility();
           }
 
-          // We show the opt-out notification on every kind of focus to the urlbar
-          // included opening a new tab, but we want to enforce at least one
+          // We show the opt-out notification when the mouse/keyboard focus the
+          // urlbar, but in any case we want to enforce at least one
           // notification when the user focuses it with the mouse.
           let whichNotification = this.whichSearchSuggestionsNotification;
           if (whichNotification == "opt-out" &&
@@ -1494,25 +1521,16 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             this._showSearchSuggestionNotificationOnMouseFocus = true;
           }
 
-          // Check whether the focus change came from a user mouse action.
+          // Check whether the focus change came from a keyboard/mouse action.
           let focusMethod = Services.focus.getLastFocusMethod(window);
-          let mouseFocused = !!(focusMethod & Services.focus.FLAG_BYMOUSE);
-          if (this._showSearchSuggestionNotificationOnMouseFocus &&
-              mouseFocused) {
-            // Force showing the opt-out notification.
-            this._whichSearchSuggestionsNotification = whichNotification = "opt-out";
+          // If it's a focus started by code and the primary user intention was
+          // not to go to the location bar, don't show a notification.
+          if (!focusMethod && !this.userInitiatedFocus) {
+            return;
           }
 
-          if (whichNotification == "opt-out") {
-            try {
-              this.popup.openAutocompletePopup(this, this);
-            } finally {
-              if (mouseFocused) {
-                delete this._whichSearchSuggestionsNotification;
-                this._showSearchSuggestionNotificationOnMouseFocus = false;
-              }
-            }
-          }
+          let mouseFocused = !!(focusMethod & Services.focus.FLAG_BYMOUSE);
+          this.maybeShowSearchSuggestionsNotificationOnFocus(mouseFocused);
         }
       ]]></handler>
 
@@ -1979,6 +1997,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // Don't show the one-off buttons if we are showing onboarding and
           // there's no result, since it would be ugly and pointless.
           this.footer.collapsed = this._matchCount == 0;
+          this.input.tabScrolling = this._matchCount != 0;
 
           // This event allows accessibility APIs to see the notification.
           if (!this.popupOpen) {
@@ -2197,6 +2216,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             // When a result is present the footer should always be visible.
             this.footer.collapsed = false;
+            this.input.tabScrolling = true;
 
             this.input.gotResultForCurrentQuery = true;
             this.input.maybeReplayDeferredKeyEvents();

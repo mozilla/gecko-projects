@@ -331,9 +331,9 @@ FindDXVABlacklistedDLL(
       auto infoData = MakeUnique<unsigned char[]>(infoSize);
       VS_FIXEDFILEINFO *vInfo;
       UINT vInfoLen;
-      if (!GetFileVersionInfoW(dllPath, 0, infoSize, infoData.get())
-          || !VerQueryValueW(infoData.get(), L"\\", (LPVOID*)&vInfo, &vInfoLen)
-          || !vInfo) {
+      if (!GetFileVersionInfoW(dllPath, 0, infoSize, infoData.get()) ||
+          !VerQueryValueW(infoData.get(), L"\\", (LPVOID*)&vInfo, &vInfoLen) ||
+          !vInfo) {
         // Can't find version -> Assume it's not blacklisted.
         continue;
       }
@@ -372,8 +372,8 @@ FindDXVABlacklistedDLL(
           continue;
         }
 
-        if (vInfo->dwFileVersionMS == ((numbers[0] << 16) | numbers[1])
-            && vInfo->dwFileVersionLS == ((numbers[2] << 16) | numbers[3])) {
+        if (vInfo->dwFileVersionMS == ((numbers[0] << 16) | numbers[1]) &&
+            vInfo->dwFileVersionLS == ((numbers[2] << 16) | numbers[3])) {
           // Blacklisted! Record bad DLL.
           aDLLBlacklistingCache->mBlacklistedDLL.SetLength(0);
           aDLLBlacklistingCache->mBlacklistedDLL.AppendPrintf(
@@ -532,9 +532,9 @@ WMFVideoMFTManager::ValidateVideoInfo()
   // we just reject streams which are less than the documented minimum.
   // https://msdn.microsoft.com/en-us/library/windows/desktop/dd797815(v=vs.85).aspx
   static const int32_t MIN_H264_FRAME_DIMENSION = 48;
-  if (mStreamType == H264
-      && (mVideoInfo.mImage.width < MIN_H264_FRAME_DIMENSION
-          || mVideoInfo.mImage.height < MIN_H264_FRAME_DIMENSION)) {
+  if (mStreamType == H264 &&
+      (mVideoInfo.mImage.width < MIN_H264_FRAME_DIMENSION ||
+       mVideoInfo.mImage.height < MIN_H264_FRAME_DIMENSION)) {
     LogToBrowserConsole(NS_LITERAL_STRING(
       "Can't decode H.264 stream with width or height less than 48 pixels."));
     mIsValid = false;
@@ -1179,6 +1179,18 @@ WMFVideoMFTManager::IsHardwareAccelerated(nsACString& aFailureReason) const
 {
   aFailureReason = mDXVAFailureReason;
   return mDecoder && mUseHwAccel;
+}
+
+nsCString
+WMFVideoMFTManager::GetDescriptionName() const
+{
+  nsCString failureReason;
+  if (mAMDVP9InUse) {
+      return NS_LITERAL_CSTRING("amd vp9 hardware video decoder");
+  }
+  return nsPrintfCString("wmf %s video decoder",
+                         IsHardwareAccelerated(failureReason) ? "hardware"
+                                                              : "software");
 }
 
 } // namespace mozilla

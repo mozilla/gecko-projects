@@ -9,6 +9,8 @@ use {Atom, LocalName};
 use applicable_declarations::ApplicableDeclarationBlock;
 use context::QuirksMode;
 use dom::TElement;
+use hash::{HashMap, HashSet};
+use hash::map as hash_map;
 use pdqsort::sort_by;
 use precomputed_hash::PrecomputedHash;
 use rule_tree::CascadeLevel;
@@ -16,9 +18,9 @@ use selector_parser::SelectorImpl;
 use selectors::matching::{matches_selector, MatchingContext, ElementSelectorFlags};
 use selectors::parser::{Component, Combinator, SelectorIter};
 use smallvec::{SmallVec, VecLike};
-use std::collections::{HashMap, HashSet};
-use std::collections::hash_map;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
+#[cfg(feature = "gecko")]
+use stylesheets::{MallocEnclosingSizeOfFn, MallocSizeOfHash};
 use stylist::Rule;
 
 /// A hasher implementation that doesn't hash anything, because it expects its
@@ -93,7 +95,7 @@ pub trait SelectorMapEntry : Sized + Clone {
 /// TODO: Tune the initial capacity of the HashMap
 #[derive(Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct SelectorMap<T> {
+pub struct SelectorMap<T: 'static> {
     /// A hash from an ID to rules which contain that ID selector.
     pub id_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
     /// A hash from a class name to rules which contain that class selector.
@@ -111,7 +113,10 @@ fn sort_by_key<T, F: Fn(&T) -> K, K: Ord>(v: &mut [T], f: F) {
     sort_by(v, |a, b| f(a).cmp(&f(b)))
 }
 
-impl<T> SelectorMap<T> {
+// FIXME(Manishearth) the 'static bound can be removed when
+// our HashMap fork (hashglobe) is able to use NonZero,
+// or when stdlib gets fallible collections
+impl<T: 'static> SelectorMap<T> {
     /// Trivially constructs an empty `SelectorMap`.
     pub fn new() -> Self {
         SelectorMap {
@@ -140,6 +145,22 @@ impl<T> SelectorMap<T> {
     /// Returns the number of entries.
     pub fn len(&self) -> usize {
         self.count
+    }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn malloc_size_of_children(&self, malloc_enclosing_size_of: MallocEnclosingSizeOfFn)
+                                   -> usize {
+        // Currently we measure the HashMap storage, but not things pointed to
+        // by keys and values.
+        let mut n = 0;
+        n += self.id_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
+        n += self.class_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
+        n += self.local_name_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
+
+        // We may measure other fields in the future if DMD says it's worth it.
+
+        n
     }
 }
 
@@ -461,9 +482,12 @@ fn find_push<Str: Eq + Hash, V, VL>(map: &mut PrecomputedHashMap<Str, VL>,
 /// Wrapper for PrecomputedHashMap that does ASCII-case-insensitive lookup in quirks mode.
 #[derive(Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V>(PrecomputedHashMap<K, V>);
+pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V: 'static>(PrecomputedHashMap<K, V>);
 
-impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
+// FIXME(Manishearth) the 'static bound can be removed when
+// our HashMap fork (hashglobe) is able to use NonZero,
+// or when stdlib gets fallible collections
+impl<V: 'static> MaybeCaseInsensitiveHashMap<Atom, V> {
     /// Empty map
     pub fn new() -> Self {
         MaybeCaseInsensitiveHashMap(PrecomputedHashMap::default())
@@ -496,3 +520,14 @@ impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
         }
     }
 }
+
+#[cfg(feature = "gecko")]
+impl<K, V> MallocSizeOfHash for MaybeCaseInsensitiveHashMap<K, V>
+    where K: PrecomputedHash + Eq + Hash
+{
+    fn malloc_shallow_size_of_hash(&self, malloc_enclosing_size_of: MallocEnclosingSizeOfFn)
+                                   -> usize {
+        self.0.malloc_shallow_size_of_hash(malloc_enclosing_size_of)
+    }
+}
+

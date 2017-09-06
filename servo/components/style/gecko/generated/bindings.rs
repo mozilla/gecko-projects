@@ -914,6 +914,10 @@ extern "C" {
     pub fn Gecko_nsFont_Destroy(dst: *mut nsFont);
 }
 extern "C" {
+    pub fn Gecko_ConstructFontFeatureValueSet()
+     -> *mut gfxFontFeatureValueSet;
+}
+extern "C" {
     pub fn Gecko_AppendFeatureValueHashEntry(value_set:
                                                  *mut gfxFontFeatureValueSet,
                                              family: *mut nsIAtom,
@@ -1930,7 +1934,7 @@ extern "C" {
     pub fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
                                           gecko_stylesheet:
                                               *mut ServoStyleSheet,
-                                          data: *const nsACString,
+                                          data: *const u8, data_len: usize,
                                           parsing_mode: SheetParsingMode,
                                           extra_data:
                                               *mut RawGeckoURLExtraData,
@@ -1981,6 +1985,11 @@ extern "C" {
     pub fn Servo_StyleSet_MediumFeaturesChanged(set: RawServoStyleSetBorrowed,
                                                 viewport_units_used:
                                                     *mut bool) -> u8;
+}
+extern "C" {
+    pub fn Servo_StyleSet_SetDevice(set: RawServoStyleSetBorrowed,
+                                    pres_context: RawGeckoPresContextOwned)
+     -> u8;
 }
 extern "C" {
     pub fn Servo_StyleSet_CompatModeChanged(raw_data:
@@ -2042,10 +2051,8 @@ extern "C" {
 }
 extern "C" {
     pub fn Servo_StyleSet_BuildFontFeatureValueSet(set:
-                                                       RawServoStyleSetBorrowed,
-                                                   list:
-                                                       *mut gfxFontFeatureValueSet)
-     -> bool;
+                                                       RawServoStyleSetBorrowed)
+     -> *mut gfxFontFeatureValueSet;
 }
 extern "C" {
     pub fn Servo_StyleSet_ResolveForDeclarations(set:
@@ -2058,8 +2065,12 @@ extern "C" {
 }
 extern "C" {
     pub fn Servo_StyleSet_AddSizeOfExcludingThis(malloc_size_of: MallocSizeOf,
-                                                 sizes: *mut ServoStyleSetSizes,
-                                                 set: RawServoStyleSetBorrowed);
+                                                 malloc_enclosing_size_of:
+                                                     MallocSizeOf,
+                                                 sizes:
+                                                     *mut ServoStyleSetSizes,
+                                                 set:
+                                                     RawServoStyleSetBorrowed);
 }
 extern "C" {
     pub fn Servo_StyleContext_AddRef(ctx: ServoStyleContextBorrowed);
@@ -2335,9 +2346,10 @@ extern "C" {
      -> u32;
 }
 extern "C" {
-    pub fn Servo_KeyframesRule_GetKeyframe(rule:
-                                               RawServoKeyframesRuleBorrowed,
-                                           index: u32)
+    pub fn Servo_KeyframesRule_GetKeyframeAt(rule:
+                                                 RawServoKeyframesRuleBorrowed,
+                                             index: u32, line: *mut u32,
+                                             column: *mut u32)
      -> RawServoKeyframeStrong;
 }
 extern "C" {
@@ -2936,6 +2948,12 @@ extern "C" {
     pub fn Servo_GetCustomPropertyNameAt(arg1: ServoStyleContextBorrowed,
                                          index: u32, name: *mut nsAString)
      -> bool;
+}
+extern "C" {
+    pub fn Servo_ProcessInvalidations(set: RawServoStyleSetBorrowed,
+                                      element: RawGeckoElementBorrowed,
+                                      snapshots:
+                                          *const ServoElementSnapshotTable);
 }
 extern "C" {
     pub fn Gecko_CreateCSSErrorReporter(sheet: *mut ServoStyleSheet,

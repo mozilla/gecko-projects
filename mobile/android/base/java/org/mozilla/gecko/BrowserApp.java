@@ -543,7 +543,7 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_R:
-                    tab.doReload(false);
+                    tab.doReload(event.isShiftPressed() ? true : false);
                     return true;
 
                 case KeyEvent.KEYCODE_PERIOD:
@@ -3720,7 +3720,7 @@ public class BrowserApp extends GeckoApp
     private int resolveMenuIconTint(final boolean isPrivate) {
         final int tintResId;
 
-        if (isPrivate && HardwareUtils.isTablet()) {
+        if (isPrivate && HardwareUtils.isLargeTablet()) {
             tintResId = R.color.menu_item_tint_private;
         } else {
             tintResId = R.color.menu_item_tint;

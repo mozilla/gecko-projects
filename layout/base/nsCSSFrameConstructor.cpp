@@ -2549,13 +2549,13 @@ nsCSSFrameConstructor::ConstructDocElementFrame(Element*                 aDocEle
 
   // --------- CREATE AREA OR BOX FRAME -------
   if (ServoStyleSet* set = mPresShell->StyleSet()->GetAsServo()) {
-    // We need to explicitly set a restyle root for the first traversal.
-    aDocElement->OwnerDoc()->SetServoRestyleRoot(aDocElement->OwnerDocAsNode(),
-                                                 ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
-    // NOTE(emilio): If the root has a non-null binding, we'll stop at the
-    // document element and won't process any children, loading the bindings (or
-    // failing to do so) will take care of the rest.
-    set->StyleDocument(ServoTraversalFlags::Empty);
+    // Ensure the document element is styled at this point.
+    if (!aDocElement->HasServoData()) {
+      // NOTE(emilio): If the root has a non-null binding, we'll stop at the
+      // document element and won't process any children, loading the bindings
+      // (or failing to do so) will take care of the rest.
+      set->StyleNewSubtree(aDocElement);
+    }
   }
 
   // FIXME: Should this use ResolveStyleContext?  (The calls in this
@@ -3836,10 +3836,6 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
 
   auto controlType = control->ControlType();
 
-  // Note that Android widgets don't have theming support and thus
-  // appearance:none is the same as any other appearance value.
-  // So this chunk doesn't apply there:
-#if !defined(MOZ_WIDGET_ANDROID)
   // radio and checkbox inputs with appearance:none should be constructed
   // by display type.  (Note that we're not checking that appearance is
   // not (respectively) NS_THEME_RADIO and NS_THEME_CHECKBOX.)
@@ -3848,7 +3844,6 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
       aStyleContext->StyleDisplay()->mAppearance == NS_THEME_NONE) {
     return nullptr;
   }
-#endif
 
   return FindDataByInt(controlType, aElement, aStyleContext,
                        sInputData, ArrayLength(sInputData));
@@ -4293,11 +4288,9 @@ SetFlagsOnSubtree(nsIContent *aNode, uintptr_t aFlagsToSet)
   aNode->SetFlags(aFlagsToSet);
 
   // Set the flag on all of its children recursively
-  uint32_t count;
-  nsIContent * const *children = aNode->GetChildArray(&count);
-
-  for (uint32_t index = 0; index < count; ++index) {
-    SetFlagsOnSubtree(children[index], aFlagsToSet);
+  for (nsIContent* child = aNode->GetFirstChild(); child;
+       child = child->GetNextSibling()) {
+    SetFlagsOnSubtree(child, aFlagsToSet);
   }
 }
 
@@ -9963,6 +9956,21 @@ nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(
 
   ReframeContainingBlock(parent, aInsertionKind, aFlags);
   return true;
+}
+
+void
+nsCSSFrameConstructor::UpdateTableCellSpans(nsIContent* aContent)
+{
+  nsTableCellFrame* cellFrame = do_QueryFrame(aContent->GetPrimaryFrame());
+
+  // It's possible that this warning could fire if some other style change
+  // simultaneously changes the 'display' of the element and makes it no
+  // longer be a table cell.
+  NS_WARNING_ASSERTION(cellFrame, "Hint should only be posted on table cells!");
+
+  if (cellFrame) {
+    cellFrame->GetTableFrame()->RowOrColSpanChanged(cellFrame);
+  }
 }
 
 void

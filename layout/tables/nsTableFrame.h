@@ -105,12 +105,6 @@ private:
 
 /* ============================================================================ */
 
-enum nsTableColGroupType {
-  eColGroupContent            = 0, // there is real col group content associated
-  eColGroupAnonymousCol       = 1, // the result of a col
-  eColGroupAnonymousCell      = 2  // the result of a cell alone
-};
-
 enum nsTableColType {
   eColContent            = 0, // there is real col content associated
   eColAnonymousCol       = 1, // the result of a span on a col
@@ -186,12 +180,12 @@ public:
                                             nsIFrame* aDestructRoot);
 
   nsPoint GetFirstSectionOrigin(const ReflowInput& aReflowInput) const;
+
   /*
-   * Notification that aAttribute has changed for content inside a table (cell, row, etc)
+   * Notification that rowspan or colspan has changed for content inside a
+   * table cell
    */
-  void AttributeChangedFor(nsIFrame*       aFrame,
-                           nsIContent*     aContent,
-                           nsIAtom*        aAttribute);
+  void RowOrColSpanChanged(nsTableCellFrame* aCellFrame);
 
   /** @see nsIFrame::DestroyFrom */
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
@@ -504,13 +498,12 @@ public:
   void InsertCol(nsTableColFrame& aColFrame,
                  int32_t          aColIndex);
 
-  nsTableColGroupFrame* CreateAnonymousColGroupFrame(nsTableColGroupType aType);
+  nsTableColGroupFrame* CreateSyntheticColGroupFrame();
 
   int32_t DestroyAnonymousColFrames(int32_t aNumFrames);
 
   // Append aNumColsToAdd anonymous col frames of type eColAnonymousCell to our
-  // last eColGroupAnonymousCell colgroup.  If we have no such colgroup, then
-  // create one.
+  // last synthetic colgroup.  If we have no such colgroup, then create one.
   void AppendAnonymousColFrames(int32_t aNumColsToAdd);
 
   // Append aNumColsToAdd anonymous col frames of type aColType to

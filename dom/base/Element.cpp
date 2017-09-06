@@ -1886,6 +1886,8 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   }
 #endif
 
+  ClearInDocument();
+
   // Ensure that CSS transitions don't continue on an element at a
   // different place in the tree (even if reinserted before next
   // animation refresh).
@@ -1900,8 +1902,6 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     DeleteProperty(nsGkAtoms::animationsOfAfterProperty);
     DeleteProperty(nsGkAtoms::animationsProperty);
   }
-
-  ClearInDocument();
 
   // Computed style data isn't useful for detached nodes, and we'll need to
   // recompute it anyway if we ever insert the nodes back into a document.
@@ -3044,9 +3044,15 @@ Element::List(FILE* out, int32_t aIndent,
           static_cast<unsigned long long>(State().GetInternalValue()));
   fprintf(out, " flags=[%08x]", static_cast<unsigned int>(GetFlags()));
   if (IsCommonAncestorForRangeInSelection()) {
-    const nsTHashtable<nsPtrHashKey<nsRange>>* ranges =
-      GetExistingCommonAncestorRanges();
-    fprintf(out, " ranges:%d", ranges ? ranges->Count() : 0);
+    const LinkedList<nsRange>* ranges = GetExistingCommonAncestorRanges();
+    int32_t count = 0;
+    if (ranges) {
+      // Can't use range-based iteration on a const LinkedList, unfortunately.
+      for (const nsRange* r = ranges->getFirst(); r; r = r->getNext()) {
+        ++count;
+      }
+    }
+    fprintf(out, " ranges:%d", count);
   }
   fprintf(out, " primaryframe=%p", static_cast<void*>(GetPrimaryFrame()));
   fprintf(out, " refcount=%" PRIuPTR "<", mRefCnt.get());
@@ -4357,6 +4363,13 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     //
     // We check for a frame to reduce the cases where we need the FFI call.
     if (!parent->GetPrimaryFrame() && Servo_Element_IsDisplayNone(parent)) {
+      return;
+    }
+
+    // The check above doesn't work for <area> element because <area> always
+    // have display:none, but before we fix bug 135040, it may have primary
+    // frame from <img>.
+    if (parent->IsHTMLElement(nsGkAtoms::area)) {
       return;
     }
   }

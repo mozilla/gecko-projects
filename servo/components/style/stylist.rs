@@ -43,7 +43,9 @@ use stylesheet_set::{OriginValidity, SheetRebuildKind, StylesheetSet, Stylesheet
 use stylesheets::{CounterStyleRule, FontFaceRule, FontFeatureValuesRule};
 use stylesheets::{CssRule, Origin, OriginSet, PerOrigin, PerOriginIter};
 #[cfg(feature = "gecko")]
-use stylesheets::{MallocSizeOf, MallocSizeOfFn};
+use stylesheets::{MallocEnclosingSizeOfFn, MallocSizeOf, MallocSizeOfBox, MallocSizeOfFn};
+#[cfg(feature = "gecko")]
+use stylesheets::{MallocSizeOfHash, MallocSizeOfVec};
 use stylesheets::StyleRule;
 use stylesheets::StylesheetInDocument;
 use stylesheets::UserAgentStylesheets;
@@ -357,6 +359,25 @@ impl DocumentCascadeData {
                 }
                 // We don't care about any other rule.
                 _ => {}
+            }
+        }
+    }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn malloc_add_size_of_children(&self, malloc_size_of: MallocSizeOfFn,
+                                       malloc_enclosing_size_of: MallocEnclosingSizeOfFn,
+                                       sizes: &mut ServoStyleSetSizes) {
+        self.per_origin.user_agent.malloc_add_size_of_children(malloc_size_of,
+                                                               malloc_enclosing_size_of, sizes);
+        self.per_origin.user.malloc_add_size_of_children(malloc_size_of,
+                                                         malloc_enclosing_size_of, sizes);
+        self.per_origin.author.malloc_add_size_of_children(malloc_size_of,
+                                                           malloc_enclosing_size_of, sizes);
+
+        for elem in self.precomputed_pseudo_element_decls.iter() {
+            if let Some(ref elem) = *elem {
+                sizes.mStylistPrecomputedPseudos += elem.malloc_shallow_size_of_vec(malloc_size_of);
             }
         }
     }
@@ -1070,34 +1091,32 @@ impl Stylist {
     /// Also, the device that arrives here may need to take the viewport rules
     /// into account.
     ///
-    /// feature = "servo" because gecko only has one device, and manually tracks
-    /// when the device is dirty.
-    ///
-    /// FIXME(emilio): The semantics of the device for Servo and Gecko are
-    /// different enough we may want to unify them.
-    #[cfg(feature = "servo")]
+    /// For Gecko, this is called when XBL bindings are used by different
+    /// documents.
     pub fn set_device(
         &mut self,
         mut device: Device,
         guard: &SharedRwLockReadGuard,
     ) -> OriginSet {
-        let cascaded_rule = {
-            let stylesheets = self.stylesheets.iter();
+        if viewport_rule::enabled() {
+            let cascaded_rule = {
+                let stylesheets = self.stylesheets.iter();
 
-            ViewportRule {
-                declarations: viewport_rule::Cascade::from_stylesheets(
-                    stylesheets.clone(),
-                    guard,
-                    &device
-                ).finish(),
+                ViewportRule {
+                    declarations: viewport_rule::Cascade::from_stylesheets(
+                        stylesheets.clone(),
+                        guard,
+                        &device
+                    ).finish(),
+                }
+            };
+
+            self.viewport_constraints =
+                ViewportConstraints::maybe_new(&device, &cascaded_rule, self.quirks_mode);
+
+            if let Some(ref constraints) = self.viewport_constraints {
+                device.account_for_viewport_rule(constraints);
             }
-        };
-
-        self.viewport_constraints =
-            ViewportConstraints::maybe_new(&device, &cascaded_rule, self.quirks_mode);
-
-        if let Some(ref constraints) = self.viewport_constraints {
-            device.account_for_viewport_rule(constraints);
         }
 
         self.device = device;
@@ -1567,9 +1586,13 @@ impl Stylist {
     /// Measures heap usage.
     #[cfg(feature = "gecko")]
     pub fn malloc_add_size_of_children(&self, malloc_size_of: MallocSizeOfFn,
+                                       malloc_enclosing_size_of: MallocEnclosingSizeOfFn,
                                        sizes: &mut ServoStyleSetSizes) {
-        // XXX: need to measure other fields
+        self.cascade_data.malloc_add_size_of_children(malloc_size_of, malloc_enclosing_size_of,
+                                                      sizes);
         sizes.mStylistRuleTree += self.rule_tree.malloc_size_of_children(malloc_size_of);
+
+        // We may measure other fields in the future if DMD says it's worth it.
     }
 }
 
@@ -1621,6 +1644,17 @@ impl ExtraStyleData {
             self.font_feature_values.clear();
             self.counter_styles.clear();
         }
+    }
+
+    /// Measure heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn,
+                                   malloc_enclosing_size_of: MallocEnclosingSizeOfFn) -> usize {
+        let mut n = 0;
+        n += self.font_faces.malloc_shallow_size_of_vec(malloc_size_of);
+        n += self.font_feature_values.malloc_shallow_size_of_vec(malloc_size_of);
+        n += self.counter_styles.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
+        n
     }
 }
 
@@ -1914,6 +1948,38 @@ impl CascadeData {
         self.state_dependencies = ElementState::empty();
         self.mapped_ids.clear();
         self.selectors_for_cache_revalidation.clear();
+    }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn malloc_add_size_of_children(&self, malloc_size_of: MallocSizeOfFn,
+                                       malloc_enclosing_size_of: MallocEnclosingSizeOfFn,
+                                       sizes: &mut ServoStyleSetSizes) {
+        sizes.mStylistElementAndPseudosMaps +=
+            self.element_map.malloc_size_of_children(malloc_enclosing_size_of);
+
+        for elem in self.pseudos_map.iter() {
+            if let Some(ref elem) = *elem {
+                sizes.mStylistElementAndPseudosMaps +=
+                    elem.malloc_shallow_size_of_box(malloc_size_of) +
+                    elem.malloc_size_of_children(malloc_enclosing_size_of)
+            }
+        }
+
+        sizes.mStylistOther +=
+            self.animations.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
+        for val in self.animations.values() {
+            sizes.mStylistOther += val.malloc_size_of_children(malloc_size_of);
+        }
+
+        sizes.mStylistInvalidationMap +=
+            self.invalidation_map.malloc_size_of_children(malloc_enclosing_size_of);
+
+        sizes.mStylistRevalidationSelectors +=
+            self.selectors_for_cache_revalidation.malloc_size_of_children(malloc_enclosing_size_of);
+
+        sizes.mStylistOther +=
+            self.effective_media_query_results.malloc_size_of_children(malloc_enclosing_size_of);
     }
 }
 

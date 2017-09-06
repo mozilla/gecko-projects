@@ -1586,7 +1586,7 @@ impl Document {
 
         self.running_animation_callbacks.set(true);
         let was_faking_animation_frames = self.is_faking_animation_frames();
-        let timing = self.window.Performance().Now();
+        let timing = self.global().performance().Now();
 
         for (_, callback) in animation_frame_list.drain(..) {
             if let Some(callback) = callback {
@@ -4015,8 +4015,6 @@ impl DocumentProgressHandler {
 }
 
 impl Runnable for DocumentProgressHandler {
-    fn name(&self) -> &'static str { "DocumentProgressHandler" }
-
     fn handler(self: Box<DocumentProgressHandler>) {
         let document = self.addr.root();
         let window = document.window();

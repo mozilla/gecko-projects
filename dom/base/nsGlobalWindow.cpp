@@ -1039,7 +1039,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mLargeAllocStatus(LargeAllocStatus::NONE),
   mHasTriedToCacheTopInnerWindow(false),
   mNumOfIndexedDBDatabases(0),
-  mNumOfOpenWebSockets(0)
+  mNumOfOpenWebSockets(0),
+  mNumOfActiveUserMedia(0)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -3343,9 +3344,8 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   // it runs JS code for this compartment. We skip the check if this window is
   // for chrome JS or an add-on.
   nsCOMPtr<nsIPrincipal> principal = mDoc->NodePrincipal();
-  nsString addonId;
-  principal->GetAddonId(addonId);
-  if (GetDocGroup() && !nsContentUtils::IsSystemPrincipal(principal) && addonId.IsEmpty()) {
+  if (GetDocGroup() && !nsContentUtils::IsSystemPrincipal(principal) &&
+      !BasePrincipal::Cast(principal)->AddonPolicy()) {
     js::SetCompartmentValidAccessPtr(cx, newInnerGlobal,
                                      newInnerWindow->GetDocGroup()->GetValidAccessPtr());
   }
@@ -4383,19 +4383,31 @@ nsPIDOMWindowInner::SyncStateFromParentWindow()
 void
 nsPIDOMWindowInner::AddPeerConnection()
 {
-  nsGlobalWindow::Cast(this)->AddPeerConnection();
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  mTopInnerWindow ? mTopInnerWindow->mActivePeerConnections++
+                  : mActivePeerConnections++;
 }
 
 void
 nsPIDOMWindowInner::RemovePeerConnection()
 {
-  nsGlobalWindow::Cast(this)->RemovePeerConnection();
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  MOZ_ASSERT(mTopInnerWindow ? mTopInnerWindow->mActivePeerConnections
+                             : mActivePeerConnections);
+
+  mTopInnerWindow ? mTopInnerWindow->mActivePeerConnections--
+                  : mActivePeerConnections--;
 }
 
 bool
 nsPIDOMWindowInner::HasActivePeerConnections()
 {
-  return nsGlobalWindow::Cast(this)->HasActivePeerConnections();
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  return mTopInnerWindow ? mTopInnerWindow->mActivePeerConnections
+                         : mActivePeerConnections;
 }
 
 bool
@@ -4522,6 +4534,30 @@ nsPIDOMWindowInner::HasOpenWebSockets() const
 
   return (mTopInnerWindow ? mTopInnerWindow->mNumOfOpenWebSockets
                           : mNumOfOpenWebSockets) > 0;
+}
+
+void
+nsPIDOMWindowInner::UpdateUserMediaCount(int32_t aDelta)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (aDelta == 0) {
+    return;
+  }
+
+  uint32_t& counter = mTopInnerWindow ? mTopInnerWindow->mNumOfActiveUserMedia
+                                      : mNumOfActiveUserMedia;
+
+  MOZ_DIAGNOSTIC_ASSERT(aDelta > 0 || ((aDelta + counter) < counter));
+
+  counter += aDelta;
+}
+
+bool
+nsPIDOMWindowInner::HasActiveUserMedia() const
+{
+  return (mTopInnerWindow ? mTopInnerWindow->mNumOfActiveUserMedia
+                          : mNumOfActiveUserMedia) > 0;
 }
 
 void
@@ -9790,8 +9826,7 @@ public:
             JSCompartment* cpt = js::GetObjectCompartment(obj);
             nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(cpt));
 
-            nsAutoString addonId;
-            if (NS_SUCCEEDED(pc->GetAddonId(addonId)) && !addonId.IsEmpty()) {
+            if (BasePrincipal::Cast(pc)->AddonPolicy()) {
               // We want to nuke all references to the add-on compartment.
               xpc::NukeAllWrappersForCompartment(cx, cpt,
                                                  win->IsInnerWindow() ? js::DontNukeWindowReferences
@@ -12616,31 +12651,6 @@ nsGlobalWindow::SyncStateFromParentWindow()
   for (uint32_t i = 0; i < (parentSuspendDepth - parentFreezeDepth); ++i) {
     Suspend();
   }
-}
-
-void
-nsGlobalWindow::AddPeerConnection()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
-  mActivePeerConnections++;
-}
-
-void
-nsGlobalWindow::RemovePeerConnection()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
-  MOZ_ASSERT(mActivePeerConnections);
-  mActivePeerConnections--;
-}
-
-bool
-nsGlobalWindow::HasActivePeerConnections()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
-  return mActivePeerConnections;
 }
 
 template<typename Method>

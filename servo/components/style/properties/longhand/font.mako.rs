@@ -273,7 +273,7 @@ macro_rules! impl_gecko_keyword_conversions {
                         % if product == "gecko":
                             // We should treat -moz-fixed as monospace
                             if name == &atom!("-moz-fixed") {
-                                return write!(dest, "monospace");
+                                return dest.write_str("monospace");
                             }
                         % endif
 
@@ -859,7 +859,7 @@ ${helpers.single_keyword_system("font-variant-caps",
                     base_size.resolve(context).scale_by(pc.0).into()
                 }
                 SpecifiedValue::Length(LengthOrPercentage::Calc(ref calc)) => {
-                    let calc = calc.to_computed_value_zoomed(context);
+                    let calc = calc.to_computed_value_zoomed(context, base_size);
                     calc.to_used_value(Some(base_size.resolve(context))).unwrap().into()
                 }
                 SpecifiedValue::Keyword(ref key, fraction) => {
@@ -1995,7 +1995,8 @@ variation_spec = """\
 https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-the-font-variation-settings-property\
 """
 %>
-<%helpers:longhand name="font-variation-settings" products="gecko" animation_value_type="none"
+<%helpers:longhand name="font-variation-settings" products="gecko"
+                   animation_value_type="ComputedValue"
                    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER"
                    spec="${variation_spec}">
     use values::computed::ComputedValueAsSpecified;

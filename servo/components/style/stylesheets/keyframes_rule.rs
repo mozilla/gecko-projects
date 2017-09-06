@@ -19,8 +19,8 @@ use shared_lock::{DeepCloneParams, DeepCloneWithLock, SharedRwLock, SharedRwLock
 use std::fmt;
 use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError, StyleParseError};
 use style_traits::PropertyDeclarationParseError;
-use stylesheets::{CssRuleType, StylesheetContents};
-use stylesheets::rule_parser::VendorPrefix;
+use stylesheets::{CssRuleType, MallocSizeOfFn, MallocSizeOfVec, StylesheetContents};
+use stylesheets::rule_parser::{VendorPrefix, get_location_with_offset};
 use values::{KeyframesName, serialize_percentage};
 
 /// A [`@keyframes`][keyframes] rule.
@@ -155,7 +155,7 @@ impl ToCss for KeyframeSelector {
         let mut iter = self.0.iter();
         iter.next().unwrap().to_css(dest)?;
         for percentage in iter {
-            write!(dest, ", ")?;
+            dest.write_str(", ")?;
             percentage.to_css(dest)?;
         }
         Ok(())
@@ -192,6 +192,9 @@ pub struct Keyframe {
     /// Note that `!important` rules in keyframes don't apply, but we keep this
     /// `Arc` just for convenience.
     pub block: Arc<Locked<PropertyDeclarationBlock>>,
+
+    /// The line and column of the rule's source code.
+    pub source_location: SourceLocation,
 }
 
 impl ToCssWithGuard for Keyframe {
@@ -249,6 +252,7 @@ impl DeepCloneWithLock for Keyframe {
         Keyframe {
             selector: self.selector.clone(),
             block: Arc::new(lock.wrap(self.block.read_with(guard).clone())),
+            source_location: self.source_location.clone(),
         }
     }
 }
@@ -438,6 +442,14 @@ impl KeyframesAnimation {
 
         result
     }
+
+    /// Measure heap usage.
+    pub fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn) -> usize {
+        let mut n = 0;
+        n += self.steps.malloc_shallow_size_of_vec(malloc_size_of);
+        n += self.properties_changed.malloc_shallow_size_of_vec(malloc_size_of);
+        n
+    }
 }
 
 /// Parses a keyframes list, like:
@@ -476,23 +488,35 @@ pub fn parse_keyframe_list<R>(
     }).filter_map(Result::ok).collect()
 }
 
-enum Void {}
 impl<'a, 'i, R> AtRuleParser<'i> for KeyframeListParser<'a, R> {
-    type Prelude = Void;
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = Arc<Locked<Keyframe>>;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }
 
+/// A wrapper to wraps the KeyframeSelector with its source location
+struct KeyframeSelectorParserPrelude {
+    selector: KeyframeSelector,
+    source_location: SourceLocation,
+}
+
 impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListParser<'a, R> {
-    type Prelude = KeyframeSelector;
+    type Prelude = KeyframeSelectorParserPrelude;
     type QualifiedRule = Arc<Locked<Keyframe>>;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 
     fn parse_prelude<'t>(&mut self, input: &mut Parser<'i, 't>) -> Result<Self::Prelude, ParseError<'i>> {
         let start_position = input.position();
         let start_location = input.current_source_location();
+        let location = get_location_with_offset(start_location);
         match KeyframeSelector::parse(input) {
-            Ok(sel) => Ok(sel),
+            Ok(sel) => {
+                Ok(KeyframeSelectorParserPrelude {
+                    selector: sel,
+                    source_location: location,
+                })
+            },
             Err(e) => {
                 let error = ContextualParseError::InvalidKeyframeRule(input.slice_from(start_position), e.clone());
                 self.context.log_css_error(self.error_context, start_location, error);
@@ -530,8 +554,9 @@ impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListPars
             // `parse_important` is not called here, `!important` is not allowed in keyframe blocks.
         }
         Ok(Arc::new(self.shared_lock.wrap(Keyframe {
-            selector: prelude,
+            selector: prelude.selector,
             block: Arc::new(self.shared_lock.wrap(block)),
+            source_location: prelude.source_location,
         })))
     }
 }
@@ -543,7 +568,8 @@ struct KeyframeDeclarationParser<'a, 'b: 'a> {
 
 /// Default methods reject all at rules.
 impl<'a, 'b, 'i> AtRuleParser<'i> for KeyframeDeclarationParser<'a, 'b> {
-    type Prelude = ();
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = ();
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }

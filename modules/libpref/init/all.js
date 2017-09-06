@@ -401,7 +401,6 @@ pref("media.opus.enabled", true);
 pref("media.wave.enabled", true);
 pref("media.webm.enabled", true);
 
-pref("media.eme.chromium-api.enabled", true);
 pref("media.eme.chromium-api.video-shmems", 6);
 
 #ifdef MOZ_APPLEMEDIA
@@ -664,11 +663,7 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
-#ifdef NIGHTLY_BUILD
 pref("apz.autoscroll.enabled", true);
-#else
-pref("apz.autoscroll.enabled", false);
-#endif
 
 // Whether to lock touch scrolling to one axis at a time
 // 0 = FREE (No locking at all)
@@ -4180,9 +4175,6 @@ pref("font.name-list.cursive.zh-HK", "Kaiti TC");
 
 // XP_MACOSX changes to default font sizes
 pref("font.minimum-size.th", 10);
-pref("font.size.variable.zh-CN", 15);
-pref("font.size.variable.zh-HK", 15);
-pref("font.size.variable.zh-TW", 15);
 
 // Apple's Symbol is Unicode so use it
 pref("font.name-list.serif.x-math", "Latin Modern Math, STIX Two Math, XITS Math, Cambria Math, Libertinus Math, DejaVu Math TeX Gyre, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times");
@@ -4261,7 +4253,6 @@ pref("browser.drag_out_of_frame_style", 1);
 
 // Middle-mouse handling
 pref("middlemouse.paste", true);
-pref("middlemouse.contentLoadURL", true);
 pref("middlemouse.openNewWindow", true);
 pref("middlemouse.scrollbarPosition", true);
 
@@ -4324,7 +4315,6 @@ pref("browser.drag_out_of_frame_style", 1);
 
 // Middle-mouse handling
 pref("middlemouse.paste", true);
-pref("middlemouse.contentLoadURL", true);
 pref("middlemouse.openNewWindow", true);
 pref("middlemouse.scrollbarPosition", true);
 
@@ -4645,6 +4635,13 @@ pref("toolkit.zoomManager.zoomValues", ".3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2
 //
 // Image-related prefs
 //
+
+// Maximum number of surfaces for an image before entering "factor of 2" mode.
+// This in addition to the number of "native" sizes of an image. A native size
+// is a size for which we can decode a frame without up or downscaling. Most
+// images only have 1, but some (i.e. ICOs) may have multiple frames for the
+// same data at different sizes.
+pref("image.cache.factor2.threshold-surfaces", 4);
 
 // The maximum size, in bytes, of the decoded images we cache
 pref("image.cache.size", 5242880);
@@ -5378,7 +5375,7 @@ pref("dom.flyweb.enabled", false);
 pref("dom.mapped_arraybuffer.enabled", true);
 
 // The tables used for Safebrowsing phishing and malware checks
-pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple,test-harmful-simple");
+pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-harmful-simple,test-malware-simple,test-unwanted-simple");
 #ifdef MOZILLA_OFFICIAL
 // In the official build, we are allowed to use google's private
 // phishing list "goog-phish-shavar". See Bug 1288840.

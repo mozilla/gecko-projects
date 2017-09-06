@@ -50,11 +50,7 @@ class PageAction extends EventEmitter {
 
         let popup = this.tabContext.get(tab.id).popup || this.defaults.popup;
         if (popup) {
-          let win = Services.wm.getMostRecentWindow("navigator:browser");
-          win.BrowserApp.addTab(popup, {
-            selected: true,
-            parentId: win.BrowserApp.selectedTab.id,
-          });
+          tabTracker.openExtensionPopupTab(popup);
         } else {
           this.emit("click", tab);
         }
@@ -151,7 +147,8 @@ class PageAction extends EventEmitter {
    * @returns {Promise} resolves when the page action is shown.
    */
   show() {
-    if (this.id) {
+    // The PageAction icon has been created or it is being converted.
+    if (this.id || this.shouldShow) {
       return Promise.resolve();
     }
 
@@ -181,6 +178,10 @@ class PageAction extends EventEmitter {
         this.id = PageActions.add(this.options);
       }
     }).catch(() => {
+      // The "icon conversion" promise has been rejected, set `this.shouldShow` to `false`
+      // so that we will try again on the next `pageAction.show` call.
+      this.shouldShow = false;
+
       return Promise.reject({
         message: "Failed to load PageAction icon",
       });

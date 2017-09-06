@@ -107,13 +107,15 @@ VideoDecoderChild::RecvError(const nsresult& aError)
 }
 
 mozilla::ipc::IPCResult
-VideoDecoderChild::RecvInitComplete(const bool& aHardware,
+VideoDecoderChild::RecvInitComplete(const nsCString& aDecoderDescription,
+                                    const bool& aHardware,
                                     const nsCString& aHardwareReason,
                                     const uint32_t& aConversion)
 {
   AssertOnManagerThread();
   mInitPromise.ResolveIfExists(TrackInfo::kVideoTrack, __func__);
   mInitialized = true;
+  mDescription = aDecoderDescription;
   mIsHardwareAccelerated = aHardware;
   mHardwareAcceleratedReason = aHardwareReason;
   mConversion = static_cast<MediaDataDecoder::ConversionRequired>(aConversion);
@@ -140,25 +142,26 @@ void
 VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (aWhy == AbnormalShutdown) {
+    // GPU process crashed, record the time and send back to MFR for telemetry.
+    mGPUCrashTime = TimeStamp::Now();
+
     // Defer reporting an error until we've recreated the manager so that
     // it'll be safe for MediaFormatReader to recreate decoders
     RefPtr<VideoDecoderChild> ref = this;
     GetManager()->RunWhenRecreated(
       NS_NewRunnableFunction("dom::VideoDecoderChild::ActorDestroy", [=]() {
+        MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
+        error.SetGPUCrashTimeStamp(ref->mGPUCrashTime);
         if (ref->mInitialized) {
           mDecodedData.Clear();
-          mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,
-                                        __func__);
-          mDrainPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,
-                                       __func__);
-          mFlushPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,
-                                       __func__);
+          mDecodePromise.RejectIfExists(error, __func__);
+          mDrainPromise.RejectIfExists(error, __func__);
+          mFlushPromise.RejectIfExists(error, __func__);
           // Make sure the next request will be rejected accordingly if ever
           // called.
           mNeedNewDecoder = true;
         } else {
-          ref->mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,
-                                           __func__);
+          ref->mInitPromise.RejectIfExists(error, __func__);
         }
       }));
   }
@@ -245,8 +248,9 @@ VideoDecoderChild::Decode(MediaRawData* aSample)
   AssertOnManagerThread();
 
   if (mNeedNewDecoder) {
-    return MediaDataDecoder::DecodePromise::CreateAndReject(
-      NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER, __func__);
+    MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
+    error.SetGPUCrashTimeStamp(mGPUCrashTime);
+    return MediaDataDecoder::DecodePromise::CreateAndReject(error, __func__);
   }
   if (!mCanSend) {
     // We're here if the IPC channel has died but we're still waiting for the
@@ -284,8 +288,9 @@ VideoDecoderChild::Flush()
   mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
   mDrainPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
   if (mNeedNewDecoder) {
-    return MediaDataDecoder::FlushPromise::CreateAndReject(
-      NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER, __func__);
+    MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
+    error.SetGPUCrashTimeStamp(mGPUCrashTime);
+    return MediaDataDecoder::FlushPromise::CreateAndReject(error, __func__);
   }
   if (mCanSend) {
     SendFlush();
@@ -298,8 +303,9 @@ VideoDecoderChild::Drain()
 {
   AssertOnManagerThread();
   if (mNeedNewDecoder) {
-    return MediaDataDecoder::DecodePromise::CreateAndReject(
-      NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER, __func__);
+    MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
+    error.SetGPUCrashTimeStamp(mGPUCrashTime);
+    return MediaDataDecoder::DecodePromise::CreateAndReject(error, __func__);
   }
   if (mCanSend) {
     SendDrain();
@@ -321,8 +327,16 @@ VideoDecoderChild::Shutdown()
 bool
 VideoDecoderChild::IsHardwareAccelerated(nsACString& aFailureReason) const
 {
+  AssertOnManagerThread();
   aFailureReason = mHardwareAcceleratedReason;
   return mIsHardwareAccelerated;
+}
+
+nsCString
+VideoDecoderChild::GetDescriptionName() const
+{
+  AssertOnManagerThread();
+  return mDescription;
 }
 
 void
@@ -337,6 +351,7 @@ VideoDecoderChild::SetSeekThreshold(const media::TimeUnit& aTime)
 MediaDataDecoder::ConversionRequired
 VideoDecoderChild::NeedsConversion() const
 {
+  AssertOnManagerThread();
   return mConversion;
 }
 

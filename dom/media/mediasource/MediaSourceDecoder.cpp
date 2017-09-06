@@ -42,6 +42,7 @@ MediaSourceDecoder::CreateStateMachine()
   init.mKnowsCompositor = GetCompositor();
   init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
   init.mFrameStats = mFrameStats;
+  init.mMediaDecoderOwnerID = mOwner;
   mReader = new MediaFormatReader(init, mDemuxer);
   return new MediaDecoderStateMachine(this, mReader);
 }
@@ -254,6 +255,7 @@ MediaSourceDecoder::SetMediaSourceDuration(double aDuration)
 void
 MediaSourceDecoder::GetMozDebugReaderData(nsACString& aString)
 {
+  aString += NS_LITERAL_CSTRING("Container Type: MediaSource\n");
   if (mReader && mDemuxer) {
     mReader->GetMozDebugReaderData(aString);
     mDemuxer->GetMozDebugReaderData(aString);
@@ -274,8 +276,8 @@ MediaSourceDecoder::NextFrameBufferedStatus()
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
 
-  if (!mMediaSource
-      || mMediaSource->ReadyState() == dom::MediaSourceReadyState::Closed) {
+  if (!mMediaSource ||
+      mMediaSource->ReadyState() == dom::MediaSourceReadyState::Closed) {
     return MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
   }
 

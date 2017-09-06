@@ -8,6 +8,7 @@
 
 #ifdef XP_WIN
 #include "WMFDecoderModule.h"
+#include "mozilla/WindowsVersion.h"
 #endif
 #ifdef MOZ_FFVPX
 #include "FFVPXRuntimeLinker.h"
@@ -123,9 +124,9 @@ public:
           // WMF H.264 Video Decoder and Apple ATDecoder
           // do not support YUV444 format.
           // For consistency, all decoders should be checked.
-          if (mp4_demuxer::H264::DecodeSPSFromExtraData(extraData, spsdata)
-              && (spsdata.profile_idc == 244 /* Hi444PP */
-                  || spsdata.chroma_format_idc == PDMFactory::kYUV444)) {
+          if (mp4_demuxer::H264::DecodeSPSFromExtraData(extraData, spsdata) &&
+              (spsdata.profile_idc == 244 /* Hi444PP */ ||
+               spsdata.chroma_format_idc == PDMFactory::kYUV444)) {
             return CheckResult(
               SupportChecker::Reason::kVideoFormatNotSupported,
               MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
@@ -229,7 +230,7 @@ PDMFactory::CreateDecoder(const CreateDecoderParams& aParams)
   }
 
   for (auto& current : mCurrentPDMs) {
-    if (!current->SupportsMimeType(config.mMimeType, diagnostics)) {
+    if (!current->Supports(config, diagnostics)) {
       continue;
     }
     RefPtr<MediaDataDecoder> m = CreateDecoderWithPDM(current, aParams);
@@ -341,7 +342,7 @@ PDMFactory::CreatePDMs()
   }
 
 #ifdef XP_WIN
-  if (MediaPrefs::PDMWMFEnabled()) {
+  if (MediaPrefs::PDMWMFEnabled() && !IsWin7AndPre2000Compatible()) {
     m = new WMFDecoderModule();
     RefPtr<PlatformDecoderModule> remote = new dom::RemoteDecoderModule(m);
     StartupPDM(remote);

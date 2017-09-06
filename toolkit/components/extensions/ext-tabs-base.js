@@ -491,6 +491,7 @@ class TabBase {
       active: this.selected,
       pinned: this.pinned,
       status: this.status,
+      discarded: this.discarded,
       incognito: this.incognito,
       width: this.width,
       height: this.height,
@@ -915,6 +916,18 @@ class WindowBase {
     throw new Error("Not implemented");
   }
 
+  /**
+   * @property {nsIURI | null} title
+   *        Returns the current title of this window if the extension has permission
+   *        to read it, or null otherwise.
+   *        @readonly
+   */
+  get title() {
+    if (this.activeTab.hasTabPermission) {
+      return this._title;
+    }
+  }
+
   // The JSDoc validator does not support @returns tags in abstract functions or
   // star functions without return statements.
   /* eslint-disable valid-jsdoc */
@@ -940,6 +953,13 @@ class WindowBase {
    * @returns {Iterator<TabBase>}
    */
   getTabs() {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * @property {TabBase} The window's currently active tab.
+   */
+  get activeTab() {
     throw new Error("Not implemented");
   }
   /* eslint-enable valid-jsdoc */

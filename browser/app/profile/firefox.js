@@ -1050,7 +1050,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
-pref("security.sandbox.content.level", 3);
+pref("security.sandbox.content.level", 4);
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1519,11 +1519,7 @@ pref("experiments.manifest.uri", "https://telemetry-experiment.cdn.mozilla.net/m
 pref("experiments.supported", true);
 
 // Ping Centre Telemetry settings.
-#ifdef NIGHTLY_BUILD
 pref("browser.ping-centre.telemetry", true);
-#else
-pref("browser.ping-centre.telemetry", false);
-#endif
 pref("browser.ping-centre.log", false);
 pref("browser.ping-centre.staging.endpoint", "https://onyx_tiles.stage.mozaws.net/v3/links/ping-centre");
 pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.com/v3/links/ping-centre");
@@ -1724,7 +1720,7 @@ pref("extensions.formautofill.loglevel", "Warn");
 pref("browser.sessionstore.restore_tabs_lazily", true);
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
-pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple,test-harmful-simple");
+pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
 #ifdef MOZILLA_OFFICIAL
 pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
 #else

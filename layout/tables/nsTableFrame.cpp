@@ -355,30 +355,24 @@ nsTableFrame::SetInitialChildList(ChildListID     aListID,
 }
 
 void
-nsTableFrame::AttributeChangedFor(nsIFrame*       aFrame,
-                                  nsIContent*     aContent,
-                                  nsIAtom*        aAttribute)
+nsTableFrame::RowOrColSpanChanged(nsTableCellFrame* aCellFrame)
 {
-  nsTableCellFrame *cellFrame = do_QueryFrame(aFrame);
-  if (cellFrame) {
-    if ((nsGkAtoms::rowspan == aAttribute) ||
-        (nsGkAtoms::colspan == aAttribute)) {
-      nsTableCellMap* cellMap = GetCellMap();
-      if (cellMap) {
-        // for now just remove the cell from the map and reinsert it
-        int32_t rowIndex, colIndex;
-        cellFrame->GetRowIndex(rowIndex);
-        cellFrame->GetColIndex(colIndex);
-        RemoveCell(cellFrame, rowIndex);
-        AutoTArray<nsTableCellFrame*, 1> cells;
-        cells.AppendElement(cellFrame);
-        InsertCells(cells, rowIndex, colIndex - 1);
+  if (aCellFrame) {
+    nsTableCellMap* cellMap = GetCellMap();
+    if (cellMap) {
+      // for now just remove the cell from the map and reinsert it
+      int32_t rowIndex, colIndex;
+      aCellFrame->GetRowIndex(rowIndex);
+      aCellFrame->GetColIndex(colIndex);
+      RemoveCell(aCellFrame, rowIndex);
+      AutoTArray<nsTableCellFrame*, 1> cells;
+      cells.AppendElement(aCellFrame);
+      InsertCells(cells, rowIndex, colIndex - 1);
 
-        // XXX Should this use eStyleChange?  It currently doesn't need
-        // to, but it might given more optimization.
-        PresContext()->PresShell()->
-          FrameNeedsReflow(this, nsIPresShell::eTreeChange, NS_FRAME_IS_DIRTY);
-      }
+      // XXX Should this use eStyleChange?  It currently doesn't need
+      // to, but it might given more optimization.
+      PresContext()->PresShell()->
+        FrameNeedsReflow(this, nsIPresShell::eTreeChange, NS_FRAME_IS_DIRTY);
     }
   }
 }
@@ -604,9 +598,10 @@ nsTableFrame::InsertCol(nsTableColFrame& aColFrame,
           if (eColAnonymousCell == lastColType) {
             // remove the col from the cache
             mColFrames.RemoveElementAt(numCacheCols - 1);
-            // remove the col from the eColGroupAnonymousCell col group
+            // remove the col from the synthetic col group
             nsTableColGroupFrame* lastColGroup = (nsTableColGroupFrame *)mColGroups.LastChild();
             if (lastColGroup) {
+              MOZ_ASSERT(lastColGroup->IsSynthetic());
               lastColGroup->RemoveChild(*lastCol, false);
 
               // remove the col group if it is empty
@@ -678,9 +673,8 @@ nsTableFrame::GetCellMap() const
   return static_cast<nsTableFrame*>(FirstInFlow())->mCellMap;
 }
 
-// XXX this needs to be moved to nsCSSFrameConstructor
 nsTableColGroupFrame*
-nsTableFrame::CreateAnonymousColGroupFrame(nsTableColGroupType aColGroupType)
+nsTableFrame::CreateSyntheticColGroupFrame()
 {
   nsIContent* colGroupContent = GetContent();
   nsPresContext* presContext = PresContext();
@@ -690,10 +684,11 @@ nsTableFrame::CreateAnonymousColGroupFrame(nsTableColGroupType aColGroupType)
   colGroupStyle = shell->StyleSet()->
     ResolveNonInheritingAnonymousBoxStyle(nsCSSAnonBoxes::tableColGroup);
   // Create a col group frame
-  nsIFrame* newFrame = NS_NewTableColGroupFrame(shell, colGroupStyle);
-  ((nsTableColGroupFrame *)newFrame)->SetColType(aColGroupType);
+  nsTableColGroupFrame* newFrame =
+    NS_NewTableColGroupFrame(shell, colGroupStyle);
+  newFrame->SetIsSynthetic();
   newFrame->Init(colGroupContent, this, nullptr);
-  return (nsTableColGroupFrame *)newFrame;
+  return newFrame;
 }
 
 void
@@ -704,12 +699,11 @@ nsTableFrame::AppendAnonymousColFrames(int32_t aNumColsToAdd)
   nsTableColGroupFrame* colGroupFrame =
     static_cast<nsTableColGroupFrame*>(mColGroups.LastChild());
 
-  if (!colGroupFrame ||
-      (colGroupFrame->GetColType() != eColGroupAnonymousCell)) {
+  if (!colGroupFrame || !colGroupFrame->IsSynthetic()) {
     int32_t colIndex = (colGroupFrame) ?
                         colGroupFrame->GetStartColumnIndex() +
                         colGroupFrame->GetColCount() : 0;
-    colGroupFrame = CreateAnonymousColGroupFrame(eColGroupAnonymousCell);
+    colGroupFrame = CreateSyntheticColGroupFrame();
     if (!colGroupFrame) {
       return;
     }

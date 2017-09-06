@@ -151,7 +151,7 @@ impl ToCss for ViewportLength {
     {
         match *self {
             ViewportLength::Specified(ref length) => length.to_css(dest),
-            ViewportLength::ExtendToZoom => write!(dest, "extend-to-zoom"),
+            ViewportLength::ExtendToZoom => dest.write_str("extend-to-zoom"),
         }
     }
 }
@@ -271,7 +271,8 @@ fn parse_shorthand<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
 }
 
 impl<'a, 'b, 'i> AtRuleParser<'i> for ViewportRuleParser<'a, 'b> {
-    type Prelude = ();
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = Vec<ViewportDescriptorDeclaration>;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }

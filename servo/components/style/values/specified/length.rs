@@ -80,6 +80,7 @@ impl ToCss for FontRelativeLength {
 }
 
 /// A source to resolve font-relative units against
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FontBaseSize {
     /// Use the font-size of the current element
     CurrentStyle,
@@ -423,7 +424,11 @@ impl ToCss for NoCalcLength {
             NoCalcLength::FontRelative(length) => length.to_css(dest),
             NoCalcLength::ViewportPercentage(length) => length.to_css(dest),
             /* This should only be reached from style dumping code */
-            NoCalcLength::ServoCharacterWidth(CharacterWidth(i)) => write!(dest, "CharWidth({})", i),
+            NoCalcLength::ServoCharacterWidth(CharacterWidth(i)) => {
+                dest.write_str("CharWidth(")?;
+                i.to_css(dest)?;
+                dest.write_char(')')
+            }
             #[cfg(feature = "gecko")]
             NoCalcLength::Physical(length) => length.to_css(dest),
         }

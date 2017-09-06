@@ -569,6 +569,10 @@ class Tab extends TabBase {
     return this.nativeTab.linkedBrowser;
   }
 
+  get discarded() {
+    return !this.nativeTab.linkedPanel;
+  }
+
   get frameLoader() {
     // If we don't have a frameLoader yet, just return a dummy with no width and
     // height.
@@ -719,7 +723,7 @@ class Window extends WindowBase {
     }
   }
 
-  get title() {
+  get _title() {
     return this.window.document.title;
   }
 
@@ -822,6 +826,12 @@ class Window extends WindowBase {
     for (let nativeTab of this.window.gBrowser.tabs) {
       yield tabManager.getWrapper(nativeTab);
     }
+  }
+
+  get activeTab() {
+    let {tabManager} = this.extension;
+
+    return tabManager.getWrapper(this.window.gBrowser.selectedTab);
   }
 
   /**

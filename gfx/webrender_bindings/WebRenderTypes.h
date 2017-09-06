@@ -587,6 +587,16 @@ struct ByteBuffer
     }
   }
 
+  ByteBuffer(ByteBuffer&& aFrom)
+  : mLength(aFrom.mLength)
+  , mData(aFrom.mData)
+  , mOwned(aFrom.mOwned)
+  {
+    aFrom.mLength = 0;
+    aFrom.mData = nullptr;
+    aFrom.mOwned = false;
+  }
+
   ByteBuffer()
     : mLength(0)
     , mData(nullptr)
@@ -693,6 +703,7 @@ typedef Variant<layers::FrameMetrics::ViewID, WrClipId> ScrollOrClipId;
 enum class WebRenderError : int8_t {
   INITIALIZE = 0,
   MAKE_CURRENT,
+  RENDER,
 
   Sentinel /* this must be last for serialization purposes. */
 };

@@ -123,7 +123,7 @@ var whitelist = [
   {file: "resource://shield-recipe-client-content/shield-content-process.js"},
 
   // New L10n API that is not yet used in production
-  {file: "resource://gre/modules/Localization.jsm"},
+  {file: "resource://gre/modules/DOMLocalization.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)
@@ -133,8 +133,6 @@ var whitelist = [
   {file: "chrome://global/content/customizeToolbar.xul"},
   // Bug 1343837
   {file: "chrome://global/content/findUtils.js"},
-  // Bug 1343843
-  {file: "chrome://global/content/url-classifier/unittests.xul"},
   // Bug 1348362
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
   // Bug 1348525

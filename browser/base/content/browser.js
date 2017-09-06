@@ -128,6 +128,7 @@ XPCOMUtils.defineLazyServiceGetters(this, {
   gDNSService: ["@mozilla.org/network/dns-service;1", "nsIDNSService"],
   gSerializationHelper: ["@mozilla.org/network/serialization-helper;1", "nsISerializationHelper"],
   Marionette: ["@mozilla.org/remote/marionette;1", "nsIMarionette"],
+  SessionStartup: ["@mozilla.org/browser/sessionstartup;1", "nsISessionStartup"],
   WindowsUIUtils: ["@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
 });
 
@@ -1785,9 +1786,7 @@ var gBrowserInit = {
 
       // The URI appears to be the the homepage. We want to load it only if
       // session restore isn't about to override the homepage.
-      let sessionStartup = Cc["@mozilla.org/browser/sessionstartup;1"]
-                             .getService(Ci.nsISessionStartup);
-      sessionStartup.willOverrideHomepagePromise.then(willOverrideHomepage => {
+      SessionStartup.willOverrideHomepagePromise.then(willOverrideHomepage => {
         resolve(willOverrideHomepage ? null : uri);
       });
     });
@@ -2240,7 +2239,18 @@ function loadOneOrMoreURIs(aURIString, aTriggeringPrincipal) {
   }
 }
 
-function focusAndSelectUrlBar() {
+/**
+ * Focuses the location bar input field and selects its contents.
+ *
+ * @param [optional] userInitiatedFocus
+ *        Whether this focus is caused by an user interaction whose intention
+ *        was to use the location bar. For example, using a shortcut to go to
+ *        the location bar, or a contextual menu to search from it.
+ *        The default is false and should be used in all those cases where the
+ *        code focuses the location bar but that's not the primary user
+ *        intention, like when opening a new tab.
+ */
+function focusAndSelectUrlBar(userInitiatedFocus = false) {
   // In customize mode, the url bar is disabled. If a new tab is opened or the
   // user switches to a different tab, this function gets called before we've
   // finished leaving customize mode, and the url bar will still be disabled.
@@ -2248,7 +2258,7 @@ function focusAndSelectUrlBar() {
   // we've finished leaving customize mode.
   if (CustomizationHandler.isExitingCustomizeMode) {
     gNavToolbox.addEventListener("aftercustomization", function() {
-      focusAndSelectUrlBar();
+      focusAndSelectUrlBar(userInitiatedFocus);
     }, {once: true});
 
     return true;
@@ -2258,7 +2268,9 @@ function focusAndSelectUrlBar() {
     if (window.fullScreen)
       FullScreen.showNavToolbox();
 
+    gURLBar.userInitiatedFocus = userInitiatedFocus;
     gURLBar.select();
+    gURLBar.userInitiatedFocus = false;
     if (document.activeElement == gURLBar.inputField)
       return true;
   }
@@ -2266,7 +2278,7 @@ function focusAndSelectUrlBar() {
 }
 
 function openLocation() {
-  if (focusAndSelectUrlBar())
+  if (focusAndSelectUrlBar(true))
     return;
 
   if (window.location.href != getBrowserURL()) {
@@ -2752,7 +2764,7 @@ function URLBarSetURI(aURI) {
       }
     }
 
-    valid = !isBlankPageURL(uri.spec);
+    valid = !isBlankPageURL(uri.spec) || uri.schemeIs("moz-extension");
   }
 
   let isDifferentValidValue = valid && value != gURLBar.value;
@@ -3816,7 +3828,7 @@ const BrowserSearch = {
 
     let focusUrlBarIfSearchFieldIsNotActive = function(aSearchBar) {
       if (!aSearchBar || document.activeElement != aSearchBar.textbox.inputField) {
-        focusAndSelectUrlBar();
+        focusAndSelectUrlBar(true);
       }
     };
 
@@ -4165,28 +4177,6 @@ function OpenBrowserWindow(options) {
   var telemetryObj = {};
   TelemetryStopwatch.start("FX_NEW_WINDOW_MS", telemetryObj);
 
-  function newDocumentShown(doc, topic, data) {
-    if (topic == "document-shown" &&
-        doc != document &&
-        doc.defaultView == win) {
-      Services.obs.removeObserver(newDocumentShown, "document-shown");
-      Services.obs.removeObserver(windowClosed, "domwindowclosed");
-      TelemetryStopwatch.finish("FX_NEW_WINDOW_MS", telemetryObj);
-    }
-  }
-
-  function windowClosed(subject) {
-    if (subject == win) {
-      Services.obs.removeObserver(newDocumentShown, "document-shown");
-      Services.obs.removeObserver(windowClosed, "domwindowclosed");
-    }
-  }
-
-  // Make sure to remove the 'document-shown' observer in case the window
-  // is being closed right after it was opened to avoid leaking.
-  Services.obs.addObserver(newDocumentShown, "document-shown");
-  Services.obs.addObserver(windowClosed, "domwindowclosed");
-
   var handler = Components.classes["@mozilla.org/browser/clh;1"]
                           .getService(Components.interfaces.nsIBrowserHandler);
   var defaultArgs = handler.defaultArgs;
@@ -4230,6 +4220,10 @@ function OpenBrowserWindow(options) {
     // forget about the charset information.
     win = window.openDialog("chrome://browser/content/", "_blank", "chrome,all,dialog=no" + extraFeatures, defaultArgs);
   }
+
+  win.addEventListener("MozAfterPaint", () => {
+    TelemetryStopwatch.finish("FX_NEW_WINDOW_MS", telemetryObj);
+  }, {once: true});
 
   return win;
 }
@@ -8307,6 +8301,8 @@ var RestoreLastSessionObserver = {
       }
       Services.obs.addObserver(this, "sessionstore-last-session-cleared", true);
       goSetCommandEnabled("Browser:RestoreLastSession", true);
+    } else if (SessionStartup.isAutomaticRestoreEnabled()) {
+      document.getElementById("Browser:RestoreLastSession").setAttribute("hidden", true);
     }
   },
 

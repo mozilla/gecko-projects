@@ -219,6 +219,7 @@ pub struct FontSettingTagInt(pub u32);
 /// because it serializes with the preceding space
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "gecko", derive(Animate, ComputeSquaredDistance))]
 pub struct FontSettingTagFloat(pub f32);
 
 impl ToCss for FontSettingTagInt {
@@ -226,7 +227,10 @@ impl ToCss for FontSettingTagInt {
         match self.0 {
             1 => Ok(()),
             0 => dest.write_str(" off"),
-            x => write!(dest, " {}", x)
+            x => {
+                dest.write_char(' ')?;
+                x.to_css(dest)
+            }
         }
     }
 }
