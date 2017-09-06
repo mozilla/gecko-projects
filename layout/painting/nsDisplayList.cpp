@@ -4772,7 +4772,9 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   // XXX Do something clever here for the common case where the border box
   // is obviously entirely inside mHitRegion.
   nsRect borderBox;
-  if (nsLayoutUtils::GetScrollableFrameFor(aFrame)) {
+
+  nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(aFrame);
+  if (scrollFrame) {
     // If the frame is content of a scrollframe, then we need to pick up the
     // area corresponding to the overflow rect as well. Otherwise the parts of
     // the overflow that are not occupied by descendants get skipped and the
@@ -4831,7 +4833,6 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   // Touch action region
 
   nsIFrame* touchActionFrame = aFrame;
-  nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(aFrame);
   if (scrollFrame) {
     touchActionFrame = do_QueryFrame(scrollFrame);
   }
