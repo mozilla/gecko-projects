@@ -55,7 +55,7 @@ def make_task_description(config, jobs):
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('kind', 'build')  # TODO: Update
+        treeherder.setdefault('kind', 'build')
         treeherder.setdefault('tier', 1)
 
         dependent_kind = str(dep_job.kind)

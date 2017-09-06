@@ -57,7 +57,7 @@ def make_task_description(config, jobs):
         dep_job = job['dependent-task']
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'p(N)')  # TODO
+        treeherder.setdefault('symbol', 'p(N)')
 
         label = job.get('label', "partials-{}".format(dep_job.label))
         dep_th_platform = dep_job.task.get('extra', {}).get(
@@ -65,7 +65,7 @@ def make_task_description(config, jobs):
 
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('kind', 'build')  # TODO: update
+        treeherder.setdefault('kind', 'build')
         treeherder.setdefault('tier', 1)
 
         dependent_kind = str(dep_job.kind)
@@ -78,7 +78,6 @@ def make_task_description(config, jobs):
         attributes = copy_attributes_from_dependent_job(dep_job)
         locale = dep_job.attributes.get('locale')
         if locale:
-            # locale = 'en-US'
             attributes['locale'] = locale
             treeherder['symbol'] = "p({})".format(locale)
 
@@ -98,7 +97,7 @@ def make_task_description(config, jobs):
                 signing_task = dependency
         signing_task_ref = '<{}>'.format(signing_task)
 
-        extra = {'funsize': { 'partials': list()}}
+        extra = {'funsize': {'partials': list()}}
         update_number = 1
         artifact_path = "{}{}".format(_generate_taskcluster_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
         for build in builds:
@@ -118,47 +117,6 @@ def make_task_description(config, jobs):
 
         worker = {
             'artifacts': _generate_task_output_files(builds.keys(), build_locale),
-        }
-
-        run = {
-            'using': 'mozharness',
-            'script': 'mozharness/scripts/funsize.py',
-            'config': ['funsize.py'],
-            'job-script': 'taskcluster/scripts/builder/funsize.sh',
-            'actions': [],
-        }
-        level = config.params['level']
-
-        task = {
-            'label': label,
-            'description': "{} Partials".format(
-                dep_job.task["metadata"]["description"]),  # TODO reformat
-            'worker-type': 'aws-provisioner-v1/gecko-%s-b-linux' % level,
-            'dependencies': dependencies,
-            'attributes': attributes,
-            'run-on-projects': dep_job.attributes.get('run_on_projects'),
-            'treeherder': treeherder,
-            'extra': extra,
-            'worker': worker,
-            # 'run': run,
-        }
-
-        yield task
-
-
-@transforms.add
-def make_task_worker(config, jobs):
-    for job in jobs:
-        locale = job['attributes'].get('locale', 'en-US')
-
-        repackage_signing_task = 'repackage-signing'  # default
-        for dependency in job['dependencies'].keys():
-            if 'repackage-signing' in dependency:
-                repackage_signing_task = dependency
-
-        task_ref = '<' + str(repackage_signing_task) + '>'
-
-        worker = {
             'implementation': 'docker-worker',
             'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
@@ -170,6 +128,19 @@ def make_task_worker(config, jobs):
             }
         }
 
-        job["worker"].update(worker)
+        level = config.params['level']
 
-        yield job
+        task = {
+            'label': label,
+            'description': "{} Partials".format(
+                dep_job.task["metadata"]["description"]),
+            'worker-type': 'aws-provisioner-v1/gecko-%s-b-linux' % level,
+            'dependencies': dependencies,
+            'attributes': attributes,
+            'run-on-projects': dep_job.attributes.get('run_on_projects'),
+            'treeherder': treeherder,
+            'extra': extra,
+            'worker': worker,
+        }
+
+        yield task

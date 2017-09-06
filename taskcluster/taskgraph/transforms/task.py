@@ -493,7 +493,7 @@ GROUP_NAMES = {
     'tc-L10n-Rpk': 'Localized Repackaged Repacks executed by Taskcluster',
     'tc-BM-L10n': 'Beetmover for locales executed by Taskcluster',
     'tc-BMR-L10n': 'Beetmover repackages for locales executed by Taskcluster',
-    'tc-Up': 'Balrog submission of updates, executed by Taskcluster',
+    'c-Up': 'Balrog submission of updates',
     'tc-cs': 'Checksum signing executed by Taskcluster',
     'tc-rs': 'Repackage signing executed by Taskcluster',
     'tc-BMcs': 'Beetmover checksums, executed by Taskcluster',
@@ -509,7 +509,7 @@ GROUP_NAMES = {
     'p': 'Partial generation',
     'ps': 'Partials signing',
     'pBM': 'Beetmover for partials',
-    'pUp': 'Partials Balrog upload',
+    'cp-Up': 'Balrog submission of updates, including partials',
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
