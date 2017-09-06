@@ -116,7 +116,7 @@ def make_task_description(config, jobs):
         cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
         worker = {
-            'artifacts': _generate_task_output_files(builds.keys(), build_locale),
+            'artifacts': _generate_task_output_files(builds.keys(), locale),
             'implementation': 'docker-worker',
             'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
