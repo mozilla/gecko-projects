@@ -71,7 +71,6 @@ def make_task_description(config, jobs):
             attributes['locale'] = dep_job.attributes.get('locale')
 
         label = job['label']
-        print("transforms:balrog:dep_job:kind:{}".format(dep_job.kind))
         if 'partials' in dep_job.kind:
             label = "partials-{}".format(label)
             temp_locale = dep_job.attributes.get('locale', 'N')
