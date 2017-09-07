@@ -3669,6 +3669,18 @@ public:
   DisplayItemKey mKey;
 };
 
+template<typename T>
+void SwapAndRemove(nsTArray<T>& aArray, uint32_t aIndex)
+{
+  if (aIndex != (aArray.Length() - 1)) {
+    T last = aArray.LastElement();
+    aArray.LastElement() = aArray[aIndex];
+    aArray[aIndex] = last;
+  }
+
+  aArray.RemoveElementAt(aArray.Length() - 1);
+}
+
 void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
                      nsDisplayLayerEventRegions* aNewItem,
                      nsDisplayLayerEventRegions::FrameRects nsDisplayLayerEventRegions::*aRectList,
@@ -3687,8 +3699,8 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
     if (IsAnyAncestorModified(f)) {
       MOZ_ASSERT(f != aOldItem->Frame());
       f->RealDisplayItemData().RemoveElement(aOldItem);
-      oldRects.mFrames.RemoveElementAt(i);
-      oldRects.mBoxes.RemoveElementAt(i);
+      SwapAndRemove(oldRects.mFrames, i);
+      SwapAndRemove(oldRects.mBoxes, i);
     } else {
       i++;
     }
@@ -3854,22 +3866,29 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         // here. Is there any other cached state that we need to update?
         MOZ_ASSERT(old && IsSameItem(i, old));
 
-        if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
-          if (old->GetChildren()) {
+        if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
+          // Event regions items don't have anything interesting other than
+          // the lists of regions and frames, so we have no need to use the
+          // newer item. Always use the old item instead since we assume it's
+          // likely to have the bigger lists and merging will be quicker.
+          MergeLayerEventRegions(old, i, true);
+          ReuseItem(old);
+          i->Destroy(aBuilder);
+        } else {
+          if (!IsAnyAncestorModified(old->FrameForInvalidation()) &&
+              old->GetChildren()) {
             MOZ_ASSERT(i->GetChildren());
             MergeDisplayLists(aBuilder, i->GetChildren(),
                               old->GetChildren(), i->GetChildren(),
                               aTotalDisplayItems, aReusedDisplayItems);
             i->UpdateBounds(aBuilder);
           }
-          if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
-            MergeLayerEventRegions(old, i, false);
-          }
+
+          old->Destroy(aBuilder);
+          merged.AppendToTop(i);
+          aTotalDisplayItems++;
         }
 
-        old->Destroy(aBuilder);
-        merged.AppendToTop(i);
-        aTotalDisplayItems++;
       }
     } else {
       merged.AppendToTop(i);
