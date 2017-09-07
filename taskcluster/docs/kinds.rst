@@ -244,7 +244,7 @@ the signed internal bits) and signs them.
 
 partials
 --------
-Partials take the complete.mar files produced in previous steps and generate partial
+Partials take the complete.mar files produced in previous tasks and generate partial
 updates between previous nightly releases and the new one.
 
 partials-signing

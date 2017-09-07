@@ -2,12 +2,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import, print_function, unicode_literals
 import json
 import os
+
+import requests
+import redo
 
 import logging
 logger = logging.getLogger(__name__)
 
+BALROG_API_ROOT = 'https://aus5.mozilla.org/api/v1'
 
 PLATFORM_RENAMES = {
     'windows2012-32': 'win32',
@@ -41,7 +46,7 @@ BALROG_PLATFORM_MAP = {
 
 
 def get_friendly_platform_name(platform):
-    '''Convert build platform names into friendly platform names'''
+    """Convert build platform names into friendly platform names"""
     if '-nightly' in platform:
         platform = platform.replace('-nightly', '')
     if '-devedition' in platform:
@@ -51,8 +56,11 @@ def get_friendly_platform_name(platform):
 
 def _open_release_history(release_history):
     # TODO the join here is fragile. Need to reliably determine artifact path
-    with open(os.path.join('artifacts', release_history), 'r') as f:
-        return json.load(f)
+    try:
+        with open(os.path.join('artifacts', release_history), 'r') as f:
+            return json.load(f)
+    except IOError:
+        return dict()
     return dict()
 
 
@@ -64,8 +72,8 @@ def _sanitize_platform(platform):
 
 
 def get_builds(release_history, platform, locale):
-    '''Examine cached balrog release history and return the list of
-    builds we need to generate diffs from'''
+    """Examine cached balrog release history and return the list of
+    builds we need to generate diffs from"""
     history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
     return history.get(platform, {}).get(locale, {})
@@ -87,3 +95,113 @@ def get_partials_artifacts_friendly(release_history, platform, locale, current_b
     history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
     return history.get(platform, {}).get(locale, {}).keys()
+
+
+def _retry_on_http_errors(url, verify, params, errors):
+    for _ in redo.retrier(sleeptime=5, max_sleeptime=30, attempts=10):
+        try:
+            req = requests.get(url, verify=verify, params=params)
+            req.raise_for_status()
+            return req
+        except requests.HTTPError as e:
+            if e.response.status_code in errors:
+                logger.exception("Got HTTP %s trying to reach %s",
+                                 e.response.status_code, url)
+            else:
+                raise
+    else:
+        raise
+
+
+def get_releases(product, branch):
+    """Returns a list of release names from Balrog.
+    :param product: product name, AKA appName
+    :param branch: branch name, e.g. mozilla-central
+    :return: a list of release names
+    """
+    url = "{}/releases".format(BALROG_API_ROOT)
+    params = {
+        "product": product,
+        # Adding -nightly-2 (2 stands for the beginning of build ID
+        # based on date) should filter out release and latest blobs.
+        # This should be changed to -nightly-3 in 3000 ;)
+        "name_prefix": "{}-{}-nightly-2".format(product, branch),
+        "names_only": True
+    }
+    params_str = "&".join("=".join([k, str(v)])
+                          for k, v in params.iteritems())
+    logger.info("Connecting to %s?%s", url, params_str)
+    req = _retry_on_http_errors(
+        url=url, verify=True, params=params,
+        errors=[500])
+    releases = req.json()["names"]
+    releases = sorted(releases, reverse=True)
+    return releases
+
+
+def get_release_builds(release):
+    url = "{}/releases/{}".format(BALROG_API_ROOT, release)
+    logger.info("Connecting to %s", url)
+    req = _retry_on_http_errors(
+        url=url, verify=True, params=None,
+        errors=[500])
+    return req.json()
+
+
+def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
+    """Find relevant releases in Balrog
+    Not all releases have all platforms and locales, due
+    to Taskcluster migration.
+
+        Args:
+            product (str): capitalized product name, AKA appName, e.g. Firefox
+            branch (str): branch name (mozilla-central)
+            maxbuilds (int): Maximum number of historical releases to populate
+        Returns:
+            json object based on data from balrog api
+
+            results = {
+                'platform1': {
+                    'locale1': {
+                        'buildid1': mar_url,
+                        'buildid2': mar_url,
+                        'buildid3': mar_url,
+                    },
+                    'locale2': {
+                        'target.partial-1.mar': ('buildid1': 'mar_url'),
+                    }
+                },
+                'platform2': {
+                }
+            }
+        """
+    last_releases = get_releases(product, branch)
+
+    partial_mar_tmpl = 'target.partial-{}.mar'
+
+    builds = dict()
+    for release in last_releases[:maxsearch]:
+        # maxbuilds in all categories, don't make any more queries
+        full = len(builds) > 0 and all(len(builds[b][p]) >= maxbuilds for b in builds for p in builds[b])
+        if full:
+            break
+        history = get_release_builds(release)
+
+        for platform in history['platforms']:
+            if 'alias' in history['platforms'][platform]:
+                continue
+            if platform not in builds:
+                builds[platform] = dict()
+            for locale in history['platforms'][platform]['locales']:
+                if locale not in builds[platform]:
+                    builds[platform][locale] = dict()
+                if len(builds[platform][locale]) >= maxbuilds:
+                    continue
+                buildid = history['platforms'][platform]['locales'][locale]['buildID']
+                url = history['platforms'][platform]['locales'][locale]['completes'][0]['fileUrl']
+                nextkey = len(builds[platform][locale]) + 1
+                builds[platform][locale][partial_mar_tmpl.format(nextkey)] = {
+                    'buildid': buildid,
+                    'mar_url': url,
+                }
+    return builds
