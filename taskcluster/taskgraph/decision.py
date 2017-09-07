@@ -110,9 +110,9 @@ def taskgraph_decision(options):
     parameters = get_decision_parameters(options)
 
     # Release history for partials generation, nightly only.
-    if parameters['include_nightly']:
-        release_history = populate_release_history('Firefox', parameters['project'])
-        write_artifact(parameters['release_history'], release_history)
+    release_history = populate_release_history('Firefox', parameters['project'])
+
+    write_artifact(parameters['release_history'], release_history)
 
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
