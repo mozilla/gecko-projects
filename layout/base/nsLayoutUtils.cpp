@@ -3866,7 +3866,8 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         // here. Is there any other cached state that we need to update?
         MOZ_ASSERT(old && IsSameItem(i, old));
 
-        if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
+        if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS &&
+            !IsAnyAncestorModified(old->FrameForInvalidation())) {
           // Event regions items don't have anything interesting other than
           // the lists of regions and frames, so we have no need to use the
           // newer item. Always use the old item instead since we assume it's
