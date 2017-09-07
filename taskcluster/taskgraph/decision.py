@@ -109,11 +109,6 @@ def taskgraph_decision(options):
 
     parameters = get_decision_parameters(options)
 
-    # Release history for partials generation, nightly only.
-    release_history = populate_release_history('Firefox', parameters['project'])
-
-    write_artifact(parameters['release_history'], release_history)
-
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
         root_dir=options['root'],
@@ -176,10 +171,6 @@ def get_decision_parameters(options):
     parameters['target_task_labels'] = []
     parameters['morph_templates'] = {}
 
-    # Define default build history file, to store balrog data required by
-    # partials generation
-    parameters['release_history'] = 'release_history.json'
-
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
     # case, fake it
     if '@' not in parameters['owner']:
@@ -212,6 +203,10 @@ def get_decision_parameters(options):
     # `target_tasks_method` has higher precedence than `project` parameters
     if options.get('target_tasks_method'):
         parameters['target_tasks_method'] = options['target_tasks_method']
+
+    parameters.setdefault('release_history', dict())
+    if 'nightly' in parameters.get('target_tasks_method', ''):
+        parameters['release_history'] = populate_release_history('Firefox', project)
 
     return Parameters(parameters)
 

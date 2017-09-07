@@ -108,9 +108,10 @@ syntax or reading a project-specific configuration file).
     If true, then nightly tasks are eligible for optimization.
 
 ``release_history``
-   A path to a filename containing the releases history for this project
-   from balrog. Used by the partial update generation. If missing, no
-   partials will be generated.
+   History of recent releases by platform and locale, used when generating
+   partial updates for nightly releases.
+   Suitable contents can be generated with ``mach release-history``,
+   which will print to the console by default.
 
 Morphed Set
 -----------

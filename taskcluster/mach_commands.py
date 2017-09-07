@@ -507,18 +507,19 @@ class TaskClusterImagesProvider(object):
 
 @CommandProvider
 class TaskClusterPartialsData(object):
-    @Command('partials', category="ci",
-             description="Qeury balrog for build history to enable partials")
+    @Command('release-history', category="ci",
+             description="Query balrog for release history used by enable partials generation")
     @CommandArgument('-b', '--branch',
-                     help="The project branch used in balrog branch, such as "
+                     help="The project branch used in balrog, such as "
                           "mozilla-central, release, date")
     @CommandArgument('--product', default='Firefox',
                      help="The product identifier, such as 'Firefox'")
     def generate_partials_builds(self, product, branch):
         from taskgraph.util.partials import populate_release_history
         try:
-            build_history = populate_release_history(product, branch)
-            print(json.dumps(build_history, sort_keys=True, indent=2, separators=(',', ': ')))
+            import yaml
+            release_history = {'release_history': populate_release_history(product, branch)}
+            print(yaml.safe_dump(release_history, allow_unicode=True, default_flow_style=False))
         except Exception:
             traceback.print_exc()
             sys.exit(1)

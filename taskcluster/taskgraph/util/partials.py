@@ -54,16 +54,6 @@ def get_friendly_platform_name(platform):
     return PLATFORM_RENAMES.get(platform, platform)
 
 
-def _open_release_history(release_history):
-    # TODO the join here is fragile. Need to reliably determine artifact path
-    try:
-        with open(os.path.join('artifacts', release_history), 'r') as f:
-            return json.load(f)
-    except IOError:
-        return dict()
-    return dict()
-
-
 def _sanitize_platform(platform):
     platform = get_friendly_platform_name(platform)
     if platform not in BALROG_PLATFORM_MAP:
@@ -74,27 +64,23 @@ def _sanitize_platform(platform):
 def get_builds(release_history, platform, locale):
     """Examine cached balrog release history and return the list of
     builds we need to generate diffs from"""
-    history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
-    return history.get(platform, {}).get(locale, {})
+    return release_history.get(platform, {}).get(locale, {})
 
 
 def get_partials_artifacts(release_history, platform, locale):
-    history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
-    return history.get(platform, {}).get(locale, {}).keys()
+    return release_history.get(platform, {}).get(locale, {}).keys()
 
 
 def get_partials_artifact_map(release_history, platform, locale):
-    history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
-    return {k: history[platform][locale][k]['buildid'] for k in history.get(platform, {}).get(locale, {})}
+    return {k: release_history[platform][locale][k]['buildid'] for k in release_history.get(platform, {}).get(locale, {})}
 
 
 def get_partials_artifacts_friendly(release_history, platform, locale, current_builid):
-    history = _open_release_history(release_history)
     platform = _sanitize_platform(platform)
-    return history.get(platform, {}).get(locale, {}).keys()
+    return release_history.get(platform, {}).get(locale, {}).keys()
 
 
 def _retry_on_http_errors(url, verify, params, errors):
