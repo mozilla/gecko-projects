@@ -50,6 +50,7 @@
 
 
 //#define USE_PRES_ARENA_ALLOCATOR 1
+//#define USE_HEAP_ALLOCATED_CLIP_CHAINS 1
 
 class gfxContext;
 class nsIContent;
