@@ -48,6 +48,9 @@
 #include <algorithm>
 #include <list>
 
+
+//#define USE_PRES_ARENA_ALLOCATOR 1
+
 class gfxContext;
 class nsIContent;
 class nsDisplayList;
@@ -1640,6 +1643,15 @@ public:
                                         AnimatedGeometryRoot* aParent = nullptr);
 
   nsDataHashtable<nsPtrHashKey<nsIFrame>, RefPtr<AnimatedGeometryRoot>> mFrameToAnimatedGeometryRootMap;
+
+  bool ShouldRecycle() {
+#ifdef USE_PRES_ARENA_ALLOCATOR
+    return false;
+#else
+    // If we've wasted a whole megabyte, then we should probably recycle ourselves.
+    return mFreedSize > (1024 * 1024);
+#endif
+  }
 private:
 
   /**
@@ -1694,7 +1706,14 @@ private:
   nsIFrame*                      mIgnoreScrollFrame;
   nsDisplayLayerEventRegions*    mLayerEventRegions;
 
+#ifdef USE_PRES_ARENA_ALLOCATOR
   nsPresArena mPool;
+#else
+  static const size_t kArenaAlignment =
+    mozilla::tl::Max<NS_ALIGNMENT_OF(void*), NS_ALIGNMENT_OF(double)>::value;
+  mozilla::ArenaAllocator<4096, kArenaAlignment> mPool;
+  uint32_t mFreedSize;
+#endif
 
   nsCOMPtr<nsISelection>         mBoundingSelection;
   AutoTArray<PresShellState,8> mPresShellStates;

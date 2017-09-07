@@ -887,6 +887,9 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
     : mReferenceFrame(aReferenceFrame),
       mIgnoreScrollFrame(nullptr),
       mLayerEventRegions(nullptr),
+#ifndef USE_PRES_ARENA_ALLOCATOR
+      mFreedSize(0),
+#endif
       mCurrentTableItem(nullptr),
       mCurrentActiveScrolledRoot(nullptr),
       mCurrentContainerASR(nullptr),
@@ -1432,16 +1435,31 @@ nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame)
   }
 }
 
+#ifndef USE_PRES_ARENA_ALLOCATOR
+uint32_t gDisplayItemSizes[static_cast<uint32_t>(DisplayItemType::TYPE_MAX)] = { 0 };
+#endif
+
 void*
 nsDisplayListBuilder::Allocate(size_t aSize, DisplayItemType aType)
 {
+#ifdef USE_PRES_ARENA_ALLOCATOR
   return mPool.AllocateByCustomID(static_cast<uint32_t>(aType), aSize);
+#else
+  MOZ_ASSERT(gDisplayItemSizes[static_cast<uint32_t>(aType)] == aSize ||
+             gDisplayItemSizes[static_cast<uint32_t>(aType)] == 0);
+  gDisplayItemSizes[static_cast<uint32_t>(aType)] = aSize;
+  return mPool.Allocate(aSize);
+#endif
 }
 
 void
 nsDisplayListBuilder::Destroy(DisplayItemType aType, void* aPtr)
 {
+#ifdef USE_PRES_ARENA_ALLOCATOR
   mPool.FreeByCustomID(static_cast<uint32_t>(aType), aPtr);
+#else
+  mFreedSize += gDisplayItemSizes[static_cast<uint32_t>(aType)];
+#endif
 }
 
 ActiveScrolledRoot*
