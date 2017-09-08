@@ -66,16 +66,17 @@ def make_task_description(config, jobs):
 
         attributes = copy_attributes_from_dependent_job(dep_job)
 
-        locale = dep_job.attributes.get('locale', 'N')
+        treeherder_job_symbol = dep_job.attributes.get('locale', 'N')
 
         if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'c-Up({})'.format(locale)
+            treeherder['symbol'] = 'c-Up({})'.format(treeherder_job_symbol)
             attributes['locale'] = dep_job.attributes.get('locale')
 
         label = job['label']
         if 'partials' in dep_job.kind:
             label = "partials-{}".format(label)
-            treeherder['symbol'] = 'cp-Up({})'.format(locale)
+            treeherder['symbol'] = 'cp-Up({})'.format(treeherder_job_symbol)
+            treeherder['tier'] = 3  # remove once proven stable
 
         description = (
             "Balrog submission for locale '{locale}' for build '"

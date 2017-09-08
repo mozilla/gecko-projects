@@ -8,7 +8,7 @@ Add partial update artifacts to a beetmover task.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.partials import (get_friendly_platform_name,
+from taskgraph.util.partials import (get_balrog_platform_name,
                                      get_partials_artifacts,
                                      get_partials_artifact_map)
 
@@ -19,7 +19,7 @@ transforms = TransformSequence()
 
 
 def generate_upstream_artifacts(release_history, platform, locale=None):
-    if locale == 'en-US':
+    if not locale or locale == 'en-US':
         artifact_prefix = 'public/build'
     else:
         artifact_prefix = 'public/build/{}'.format(locale)
@@ -47,9 +47,12 @@ def make_partials_artifacts(config, jobs):
             locale = 'en-US'
             job['treeherder']['symbol'] = 'pBM(N)'
 
+        # Remove when proved reliable
+        job['treeherder']['tier'] = 3
+
         platform = job["attributes"]["build_platform"]
 
-        platform = get_friendly_platform_name(platform)
+        platform = get_balrog_platform_name(platform)
         upstream_artifacts = generate_upstream_artifacts(
             config.params.get('release_history'), platform, locale
         )

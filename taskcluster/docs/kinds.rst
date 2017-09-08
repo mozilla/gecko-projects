@@ -244,9 +244,10 @@ the signed internal bits) and signs them.
 
 partials
 --------
-Partials take the complete.mar files produced in previous tasks and generate partial
-updates between previous nightly releases and the new one.
+Partials takes the complete.mar files produced in previous tasks and generates partial
+updates between previous nightly releases and the new one. Requires a release_history
+in the parameters. See ``mach release-history`` if doing this manually.
 
 partials-signing
 ----------------
-Partials-signing take the partial updates produced in Partials and sign them.
+Partials-signing takes the partial updates produced in Partials and signs them.

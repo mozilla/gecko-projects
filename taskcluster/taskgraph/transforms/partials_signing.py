@@ -8,11 +8,8 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import get_signing_cert_scope_per_platform
-from taskgraph.util.partials import get_friendly_platform_name, get_partials_artifacts
-from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
+from taskgraph.util.partials import get_balrog_platform_name, get_partials_artifacts
 
 import logging
 logger = logging.getLogger(__name__)
@@ -56,7 +53,7 @@ def make_task_description(config, jobs):
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
         treeherder.setdefault('kind', 'build')
-        treeherder.setdefault('tier', 1)
+        treeherder.setdefault('tier', 3)
 
         dependent_kind = str(dep_job.kind)
         dependencies = {dependent_kind: dep_job.label}
@@ -71,8 +68,8 @@ def make_task_description(config, jobs):
             attributes['locale'] = locale
             treeherder['symbol'] = 'ps({})'.format(locale)
 
-        platform = get_friendly_platform_name(dep_th_platform)
-        upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], platform, locale)
+        balrog_platform = get_balrog_platform_name(dep_th_platform)
+        upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], balrog_platform, locale)
 
         build_platform = dep_job.attributes.get('build_platform')
         is_nightly = dep_job.attributes.get('nightly')

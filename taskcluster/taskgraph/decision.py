@@ -204,6 +204,9 @@ def get_decision_parameters(options):
     if options.get('target_tasks_method'):
         parameters['target_tasks_method'] = options['target_tasks_method']
 
+    # If the target method is nightly, we should build partials. This means
+    # knowing what has been released previously.
+    # An empty release_history is fine, it just means no partials will be built
     parameters.setdefault('release_history', dict())
     if 'nightly' in parameters.get('target_tasks_method', ''):
         parameters['release_history'] = populate_release_history('Firefox', project)

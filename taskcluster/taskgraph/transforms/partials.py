@@ -8,26 +8,13 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.partials import get_friendly_platform_name, get_builds
-from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
+from taskgraph.util.partials import get_balrog_platform_name, get_builds
+from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
 
-import json
 import logging
 logger = logging.getLogger(__name__)
 
 transforms = TransformSequence()
-
-_TC_ARTIFACT_LOCATION = \
-        'https://queue.taskcluster.net/v1/task/{task_id}/artifacts/public/build/{postfix}'
-
-
-def _generate_taskcluster_prefix(task_id, postfix='', locale=None):
-    if locale:
-        postfix = '{}/{}'.format(locale, postfix)
-
-    return _TC_ARTIFACT_LOCATION.format(task_id=task_id, postfix=postfix)
 
 
 def _generate_task_output_files(filenames, locale=None):
@@ -37,12 +24,12 @@ def _generate_task_output_files(filenames, locale=None):
     for filename in filenames:
         data.append({
             'type': 'file',
-            'path': '/home/worker/artifacts/{}'.format(filename),
+            'path': '/builds/worker/workspace/build/artifacts/{}'.format(filename),
             'name': 'public/build/{}{}'.format(locale_output_path, filename)
         })
     data.append({
         'type': 'file',
-        'path': '/home/worker/artifacts/manifest.json',
+        'path': '/builds/worker/workspace/build/artifacts/manifest.json',
         'name': 'public/build/{}manifest.json'.format(locale_output_path)
     })
     return data
@@ -66,7 +53,7 @@ def make_task_description(config, jobs):
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
         treeherder.setdefault('kind', 'build')
-        treeherder.setdefault('tier', 1)
+        treeherder.setdefault('tier', 3)
 
         dependent_kind = str(dep_job.kind)
         dependencies = {dependent_kind: dep_job.label}
@@ -99,13 +86,13 @@ def make_task_description(config, jobs):
 
         extra = {'funsize': {'partials': list()}}
         update_number = 1
-        artifact_path = "{}{}".format(_generate_taskcluster_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
+        artifact_path = "{}{}".format(get_taskcluster_artifact_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
         for build in builds:
             extra['funsize']['partials'].append({
                 'locale': build_locale,
                 'from_mar': builds[build]['mar_url'],
                 'to_mar': {'task-reference': artifact_path},
-                'platform': get_friendly_platform_name(dep_th_platform),
+                'platform': get_balrog_platform_name(dep_th_platform),
                 'branch': config.params['project'],
                 'update_number': update_number,
                 'dest_mar': build,
@@ -118,7 +105,7 @@ def make_task_description(config, jobs):
         worker = {
             'artifacts': _generate_task_output_files(builds.keys(), locale),
             'implementation': 'docker-worker',
-            'docker-image': {'in-tree': 'funsize-update-generator'},
+            'docker-image': {'in-tree': 'partial-update-generator'},
             'os': 'linux',
             'max-run-time': 3600,
             'chain-of-trust': True,

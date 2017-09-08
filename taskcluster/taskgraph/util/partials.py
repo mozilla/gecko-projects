@@ -45,8 +45,8 @@ BALROG_PLATFORM_MAP = {
 }
 
 
-def get_friendly_platform_name(platform):
-    """Convert build platform names into friendly platform names"""
+def get_balrog_platform_name(platform):
+    """Convert build platform names into balrog platform names"""
     if '-nightly' in platform:
         platform = platform.replace('-nightly', '')
     if '-devedition' in platform:
@@ -55,7 +55,7 @@ def get_friendly_platform_name(platform):
 
 
 def _sanitize_platform(platform):
-    platform = get_friendly_platform_name(platform)
+    platform = get_balrog_platform_name(platform)
     if platform not in BALROG_PLATFORM_MAP:
         return platform
     return BALROG_PLATFORM_MAP[platform][0]
@@ -78,12 +78,13 @@ def get_partials_artifact_map(release_history, platform, locale):
     return {k: release_history[platform][locale][k]['buildid'] for k in release_history.get(platform, {}).get(locale, {})}
 
 
-def get_partials_artifacts_friendly(release_history, platform, locale, current_builid):
-    platform = _sanitize_platform(platform)
-    return release_history.get(platform, {}).get(locale, {}).keys()
-
-
 def _retry_on_http_errors(url, verify, params, errors):
+    if params:
+        params_str = "&".join("=".join([k, str(v)])
+                              for k, v in params.iteritems())
+    else:
+        params_str = ''
+    logger.info("Connecting to %s?%s", url, params_str)
     for _ in redo.retrier(sleeptime=5, max_sleeptime=30, attempts=10):
         try:
             req = requests.get(url, verify=verify, params=params)
@@ -99,11 +100,11 @@ def _retry_on_http_errors(url, verify, params, errors):
         raise
 
 
-def get_releases(product, branch):
+def get_sorted_releases(product, branch):
     """Returns a list of release names from Balrog.
     :param product: product name, AKA appName
     :param branch: branch name, e.g. mozilla-central
-    :return: a list of release names
+    :return: a sorted list of release names, most recent first.
     """
     url = "{}/releases".format(BALROG_API_ROOT)
     params = {
@@ -114,9 +115,6 @@ def get_releases(product, branch):
         "name_prefix": "{}-{}-nightly-2".format(product, branch),
         "names_only": True
     }
-    params_str = "&".join("=".join([k, str(v)])
-                          for k, v in params.iteritems())
-    logger.info("Connecting to %s?%s", url, params_str)
     req = _retry_on_http_errors(
         url=url, verify=True, params=params,
         errors=[500])
@@ -127,7 +125,6 @@ def get_releases(product, branch):
 
 def get_release_builds(release):
     url = "{}/releases/{}".format(BALROG_API_ROOT, release)
-    logger.info("Connecting to %s", url)
     req = _retry_on_http_errors(
         url=url, verify=True, params=None,
         errors=[500])
@@ -143,6 +140,8 @@ def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
             product (str): capitalized product name, AKA appName, e.g. Firefox
             branch (str): branch name (mozilla-central)
             maxbuilds (int): Maximum number of historical releases to populate
+            maxsearch(int): Traverse at most this many releases, to avoid
+                working through the entire history.
         Returns:
             json object based on data from balrog api
 
@@ -161,14 +160,15 @@ def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
                 }
             }
         """
-    last_releases = get_releases(product, branch)
+    last_releases = get_sorted_releases(product, branch)
 
     partial_mar_tmpl = 'target.partial-{}.mar'
 
     builds = dict()
     for release in last_releases[:maxsearch]:
         # maxbuilds in all categories, don't make any more queries
-        full = len(builds) > 0 and all(len(builds[b][p]) >= maxbuilds for b in builds for p in builds[b])
+        full = len(builds) > 0 and all(
+            len(builds[platform][locale]) >= maxbuilds for platform in builds for locale in builds[platform])
         if full:
             break
         history = get_release_builds(release)

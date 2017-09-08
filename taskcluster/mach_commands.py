@@ -510,7 +510,7 @@ class TaskClusterPartialsData(object):
     @Command('release-history', category="ci",
              description="Query balrog for release history used by enable partials generation")
     @CommandArgument('-b', '--branch',
-                     help="The project branch used in balrog, such as "
+                     help="The gecko project branch used in balrog, such as "
                           "mozilla-central, release, date")
     @CommandArgument('--product', default='Firefox',
                      help="The product identifier, such as 'Firefox'")
