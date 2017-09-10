@@ -4726,17 +4726,21 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     }
   }
 
-  builder.EndFrame();
+  {
+    AutoProfilerTracing tracing("Paint", "DisplayListResources");
 
-
-  // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  if (!retainedBuilder) {
-    list.DeleteAll(&builder);
-    delete listPtr;
-    delete builderPtr;
-  } else if (builder.ShouldRecycle()) {
-    aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
+    builder.EndFrame();
+    
+    // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
+    if (!retainedBuilder) {
+      list.DeleteAll(&builder);
+      delete listPtr;
+      delete builderPtr;
+    } else if (builder.ShouldRecycle()) {
+      aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
+    }
   }
+
   return NS_OK;
 }
 
