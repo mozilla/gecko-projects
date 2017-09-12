@@ -19,7 +19,7 @@ from taskgraph.util.time import current_json_time
 logger = logging.getLogger(__name__)
 
 # the maximum number of parallel createTask calls to make
-CONCURRENCY = 1
+CONCURRENCY = 50
 
 # this is set to true for `mach taskgraph action-callback --test`
 testing = False
