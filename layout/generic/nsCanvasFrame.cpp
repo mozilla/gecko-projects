@@ -568,14 +568,14 @@ nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
           DisplayListClipState::AutoSaveRestore bgImageClip(aBuilder);
           bgImageClip.Clear();
           bgItem = new (aBuilder) nsDisplayCanvasBackgroundImage(bgData);
-          bgItem->SetDependentFrame(dependentFrame);
+          bgItem->SetDependentFrame(aBuilder, dependentFrame);
         }
         thisItemList.AppendNewToTop(
           nsDisplayFixedPosition::CreateForFixedBackground(aBuilder, this, bgItem, i));
 
       } else {
         nsDisplayCanvasBackgroundImage* bgItem = new (aBuilder) nsDisplayCanvasBackgroundImage(bgData);
-        bgItem->SetDependentFrame(dependentFrame);
+        bgItem->SetDependentFrame(aBuilder, dependentFrame);
         thisItemList.AppendNewToTop(bgItem);
       }
 

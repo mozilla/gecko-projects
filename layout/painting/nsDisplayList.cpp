@@ -2852,7 +2852,9 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mPainted(false)
 #endif
 {
-  mFrame->RealDisplayItemData().AppendElement(this);
+  if (aBuilder->IsRetainingDisplayList()) {
+    mFrame->RealDisplayItemData().AppendElement(this);
+  }
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
   // This can return the wrong result if the item override ShouldFixToViewport(),
   // the item needs to set it again in its constructor.
@@ -3270,6 +3272,7 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(const InitData& aInitData,
   : nsDisplayImageContainer(aInitData.builder, aInitData.frame)
   , mBackgroundStyle(aInitData.backgroundStyle)
   , mImage(aInitData.image)
+  , mDependentFrame(nullptr)
   , mBackgroundRect(aInitData.backgroundRect)
   , mFillRect(aInitData.fillArea)
   , mDestRect(aInitData.destArea)
@@ -3476,7 +3479,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
           new (aBuilder) nsDisplayBackgroundColor(aBuilder, aFrame, bgRect, bg,
                                                   drawBackgroundColor ? color : NS_RGBA(0, 0, 0, 0));
     }
-    bgItem->SetDependentFrame(dependentFrame);
+    bgItem->SetDependentFrame(aBuilder, dependentFrame);
     bgItemList.AppendNewToTop(bgItem);
   }
 
@@ -3566,7 +3569,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
           bgItem = new (aBuilder) nsDisplayBackgroundImage(bgData);
         }
       }
-      bgItem->SetDependentFrame(dependentFrame);
+      bgItem->SetDependentFrame(aBuilder, dependentFrame);
       if (aSecondaryReferenceFrame) {
         thisItemList.AppendNewToTop(
           nsDisplayTableFixedPosition::CreateForFixedBackground(aBuilder,
@@ -3590,7 +3593,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
       } else {
         bgItem = new (aBuilder) nsDisplayBackgroundImage(bgData);
       }
-      bgItem->SetDependentFrame(dependentFrame);
+      bgItem->SetDependentFrame(aBuilder, dependentFrame);
       thisItemList.AppendNewToTop(bgItem);
     }
 
@@ -4761,7 +4764,8 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  if (aFrame != mFrame) {
+  if (aFrame != mFrame &&
+      aBuilder->IsRetainingDisplayList()) {
     MOZ_ASSERT(!aFrame->RealDisplayItemData().Contains(this));
     aFrame->RealDisplayItemData().AppendElement(this);
   }

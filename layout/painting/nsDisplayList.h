@@ -1894,20 +1894,19 @@ public:
     , mPainted(false)
 #endif
   {
-    mFrame->RealDisplayItemData().AppendElement(this);
   }
+
 protected:
-  virtual ~nsDisplayItem() {
-    if (mFrame) {
-      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
-      MOZ_ASSERT(removed);
-    }
-  }
+  virtual ~nsDisplayItem() {}
 public:
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder)
   {
     DisplayItemType type = GetType();
+    if (mFrame && aBuilder->IsRetainingDisplayList()) {
+      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+      MOZ_ASSERT(removed);
+    }
     this->~nsDisplayItem();
     aBuilder->Destroy(type, this);
   }
@@ -1940,13 +1939,13 @@ public:
     return nullptr;
   }
 
+  nsDisplayItem(const nsDisplayItem&) = delete;
   /**
    * The custom copy-constructor is implemented to prevent copying the saved
    * state of the item.
    * This is currently only used when creating temporary items for merging.
    */
-  // nsDisplayItem(const nsDisplayItem&) = default;
-  nsDisplayItem(const nsDisplayItem& aOther)
+  nsDisplayItem(nsDisplayListBuilder* aBuilder, const nsDisplayItem& aOther)
     : mFrame(aOther.mFrame)
     , mClipChain(aOther.mClipChain)
     , mClip(aOther.mClip)
@@ -1959,8 +1958,11 @@ public:
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
     , mReusedItem(false)
   {
-    mFrame->RealDisplayItemData().AppendElement(this);
+    if (aBuilder->IsRetainingDisplayList()) {
+      mFrame->RealDisplayItemData().AppendElement(this);
+    }
   }
+
 
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
@@ -3248,6 +3250,10 @@ public:
   // does not match TYPE_GENERIC that was used to allocate the object.
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
+    if (mFrame && aBuilder->IsRetainingDisplayList()) {
+      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+      MOZ_ASSERT(removed);
+    }
     this->~nsDisplayGeneric();
     aBuilder->Destroy(DisplayItemType::TYPE_GENERIC, this);
   }
@@ -3736,8 +3742,11 @@ public:
     return mDependentFrame;
   }
 
-  void SetDependentFrame(nsIFrame* aFrame)
+  void SetDependentFrame(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
   {
+    if (aBuilder->IsRetainingDisplayList()) {
+      return;
+    }
     mDependentFrame = aFrame;
     if (aFrame) {
       mDependentFrame->RealDisplayItemData().AppendElement(this);
@@ -3923,13 +3932,14 @@ public:
     : nsDisplayItem(aBuilder, aFrame)
     , mBackgroundRect(aBackgroundRect)
     , mBackgroundStyle(aBackgroundStyle)
+    , mDependentFrame(nullptr)
     , mColor(Color::FromABGR(aColor))
   {
     mState.mColor = mColor;
   }
   ~nsDisplayBackgroundColor()
   {
-    if (mDependentFrame) {
+    if (mDependentFrame ) {
       mDependentFrame->RealDisplayItemData().RemoveElement(this);
     }
   }
@@ -3993,8 +4003,11 @@ public:
     return mDependentFrame;
   }
 
-  void SetDependentFrame(nsIFrame* aFrame)
+  void SetDependentFrame(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
   {
+    if (!aBuilder->IsRetainingDisplayList()) {
+      return;
+    }
     mDependentFrame = aFrame;
     if (aFrame) {
       mDependentFrame->RealDisplayItemData().AppendElement(this);
@@ -4319,8 +4332,18 @@ public:
     MOZ_COUNT_CTOR(nsDisplayLayerEventRegions);
   }
 
+private:
   virtual ~nsDisplayLayerEventRegions() {
     MOZ_COUNT_DTOR(nsDisplayLayerEventRegions);
+  }
+
+public:
+  virtual void Destroy(nsDisplayListBuilder* aBuilder) override
+  {
+    if (!aBuilder->IsRetainingDisplayList()) {
+      nsDisplayItem::Destroy(aBuilder);
+      return;
+    }
 
     for (nsIFrame* f : mHitRegion.mFrames) {
       if (f != mFrame) {
@@ -4352,6 +4375,8 @@ public:
         f->RealDisplayItemData().RemoveElement(this);
       }
     }
+
+    nsDisplayItem::Destroy(aBuilder);
   }
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
@@ -4532,8 +4557,9 @@ public:
    * A custom copy-constructor that does not copy mList, as this would mutate
    * the other item.
    */
-  nsDisplayWrapList(const nsDisplayWrapList& aOther)
-    : nsDisplayItem(aOther)
+  nsDisplayWrapList(const nsDisplayWrapList& aOther) = delete;
+  nsDisplayWrapList(nsDisplayListBuilder* aBuilder, const nsDisplayWrapList& aOther)
+    : nsDisplayItem(aBuilder, aOther)
     , mListPtr(&mList)
     , mMergedFrames(aOther.mMergedFrames)
     , mBounds(aOther.mBounds)
@@ -4568,7 +4594,7 @@ public:
 
     // Create a new nsDisplayWrapList using a copy-constructor. This is done
     // to preserve the information about bounds.
-    nsDisplayWrapList* wrapper = new (aBuilder) nsDisplayWrapList(*wrappedItem);
+    nsDisplayWrapList* wrapper = new (aBuilder) nsDisplayWrapList(aBuilder, *wrappedItem);
 
     // Set the display list pointer of the new wrapper item to the display list
     // of the wrapped item.
@@ -4749,6 +4775,12 @@ public:
                    nsDisplayList* aList,
                    const ActiveScrolledRoot* aActiveScrolledRoot,
                    bool aForEventsAndPluginsOnly);
+  nsDisplayOpacity(nsDisplayListBuilder* aBuilder,
+                   const nsDisplayOpacity& aOther)
+    : nsDisplayWrapList(aBuilder, aOther)
+    , mOpacity(aOther.mOpacity)
+    , mForEventsAndPluginsOnly(aOther.mForEventsAndPluginsOnly)
+  {}
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayOpacity();
 #endif
@@ -4762,7 +4794,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayOpacity);
-    return new (aBuilder) nsDisplayOpacity(*this);
+    return new (aBuilder) nsDisplayOpacity(aBuilder, *this);
   }
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
@@ -4829,6 +4861,12 @@ public:
                         nsDisplayList* aList, uint8_t aBlendMode,
                         const ActiveScrolledRoot* aActiveScrolledRoot,
                         uint32_t aIndex = 0);
+  nsDisplayBlendMode(nsDisplayListBuilder* aBuilder,
+                     const nsDisplayBlendMode& aOther)
+    : nsDisplayWrapList(aBuilder, aOther)
+    , mBlendMode(aOther.mBlendMode)
+    , mIndex(aOther.mIndex)
+  {}
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayBlendMode();
 #endif
@@ -4836,7 +4874,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayBlendMode);
-    return new (aBuilder) nsDisplayBlendMode(*this);
+    return new (aBuilder) nsDisplayBlendMode(aBuilder, *this);
   }
 
   nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
@@ -4915,7 +4953,7 @@ public:
     virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
     {
       MOZ_COUNT_CTOR(nsDisplayBlendContainer);
-      return new (aBuilder) nsDisplayBlendContainer(*this);
+      return new (aBuilder) nsDisplayBlendContainer(aBuilder, *this);
     }
 
     virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
@@ -4951,6 +4989,11 @@ private:
                             nsDisplayList* aList,
                             const ActiveScrolledRoot* aActiveScrolledRoot,
                             bool aIsForBackground);
+    nsDisplayBlendContainer(nsDisplayListBuilder* aBuilder,
+                            const nsDisplayBlendContainer& aOther)
+      : nsDisplayWrapList(aBuilder, aOther)
+      , mIsForBackground(aOther.mIsForBackground)
+    {}
 
     // Used to distinguish containers created at building stacking
     // context or appending background.
@@ -4997,8 +5040,8 @@ public:
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayOwnLayer();
 #endif
-  nsDisplayOwnLayer(const nsDisplayOwnLayer& aOther)
-    : nsDisplayWrapList(aOther)
+  nsDisplayOwnLayer(nsDisplayListBuilder* aBuilder, const nsDisplayOwnLayer& aOther)
+    : nsDisplayWrapList(aBuilder, aOther)
     , mFlags(aOther.mFlags)
     , mScrollTarget(aOther.mFlags)
     , mThumbData(aOther.mThumbData)
@@ -5141,6 +5184,11 @@ public:
   nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                           nsDisplayList* aList,
                           const ActiveScrolledRoot* aActiveScrolledRoot);
+  nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder,
+                          const nsDisplayStickyPosition& aOther)
+    : nsDisplayOwnLayer(aBuilder, aOther)
+  {}
+
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayStickyPosition();
 #endif
@@ -5148,7 +5196,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayStickyPosition);
-    return new (aBuilder) nsDisplayStickyPosition(*this);
+    return new (aBuilder) nsDisplayStickyPosition(aBuilder, *this);
   }
 
   void SetClipChain(const DisplayItemClipChain* aClipChain,
@@ -5176,6 +5224,13 @@ public:
   nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                          nsDisplayList* aList,
                          const ActiveScrolledRoot* aActiveScrolledRoot);
+  nsDisplayFixedPosition(nsDisplayListBuilder* aBuilder,
+                         const nsDisplayFixedPosition& aOther)
+    : nsDisplayOwnLayer(aBuilder, aOther)
+    , mAnimatedGeometryRootForScrollMetadata(aOther.mAnimatedGeometryRootForScrollMetadata)
+    , mIndex(aOther.mIndex)
+    , mIsFixedBackground(aOther.mIsFixedBackground)
+  {}
 
   static nsDisplayFixedPosition* CreateForFixedBackground(nsDisplayListBuilder* aBuilder,
                                                           nsIFrame* aFrame,
@@ -5190,7 +5245,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayFixedPosition);
-    return new (aBuilder) nsDisplayFixedPosition(*this);
+    return new (aBuilder) nsDisplayFixedPosition(aBuilder, *this);
   }
 
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
@@ -5377,8 +5432,9 @@ public:
   virtual ~nsDisplaySVGEffects();
 #endif
 
-  nsDisplaySVGEffects(const nsDisplaySVGEffects& aOther)
-    : nsDisplayWrapList(aOther)
+  nsDisplaySVGEffects(nsDisplayListBuilder* aBuilder,
+                      const nsDisplaySVGEffects& aOther)
+    : nsDisplayWrapList(aBuilder, aOther)
     , mEffectsBounds(aOther.mEffectsBounds)
     , mHandleOpacity(aOther.mHandleOpacity)
   {
@@ -5421,6 +5477,11 @@ public:
   nsDisplayMask(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                 nsDisplayList* aList, bool aHandleOpacity,
                 const ActiveScrolledRoot* aActiveScrolledRoot);
+  nsDisplayMask(nsDisplayListBuilder* aBuilder,
+                const nsDisplayMask& aOther)
+    : nsDisplaySVGEffects(aBuilder, aOther)
+    , mDestRects(aOther.mDestRects)
+  {}
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayMask();
 #endif
@@ -5428,7 +5489,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayMask);
-    return new (aBuilder) nsDisplayMask(*this);
+    return new (aBuilder) nsDisplayMask(aBuilder, *this);
   }
 
   NS_DISPLAY_DECL_NAME("Mask", TYPE_MASK)
@@ -5510,6 +5571,11 @@ class nsDisplayFilter : public nsDisplaySVGEffects {
 public:
   nsDisplayFilter(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                   nsDisplayList* aList, bool aHandleOpacity);
+  nsDisplayFilter(nsDisplayListBuilder* aBuilder,
+                  const nsDisplayFilter& aOther)
+    : nsDisplaySVGEffects(aBuilder, aOther)
+    , mEffectsBounds(aOther.mEffectsBounds)
+  {}
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayFilter();
 #endif
@@ -5517,7 +5583,7 @@ public:
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayFilter);
-    return new (aBuilder) nsDisplayFilter(*this);
+    return new (aBuilder) nsDisplayFilter(aBuilder, *this);
   }
 
   NS_DISPLAY_DECL_NAME("Filter", TYPE_FILTER)
