@@ -82,6 +82,11 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
             deps_fs = [fs[dep] for dep in task_def.get('dependencies', [])
                        if dep in fs]
 
+            # Not all dependencies have been submitted yet
+            if len(deps_fs) != len(task_def.get('dependencies', [])):
+                tasklist.append(task_id)
+                continue
+
             if not all([f.done() for f in deps_fs]):
                 tasklist.append(task_id)
                 continue
