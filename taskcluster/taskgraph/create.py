@@ -111,7 +111,7 @@ def create_task(session, task_id, label, task_def):
     logger.debug("Creating task with taskId {} for {}".format(task_id, label))
     res = session.put('http://taskcluster/queue/v1/task/{}'.format(task_id),
                       data=json.dumps(task_def))
-    logger.debug("requests elapsed time for taskId {} is {}".format(task_id, r.elapsed))
+    logger.debug("requests elapsed time for taskId {} is {}".format(task_id, res.elapsed))
     if res.status_code != 200:
         try:
             logger.error(res.json()['message'])
