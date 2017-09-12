@@ -9,6 +9,9 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
+from taskgraph.util.partials import (get_balrog_platform_name,
+                                     get_partials_artifacts,
+                                     get_partials_artifact_map)
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope)
@@ -292,6 +295,23 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
     return upstream_artifacts
 
 
+def generate_partials_upstream_artifacts(artifacts, platform, locale=None):
+    if not locale or locale == 'en-US':
+        artifact_prefix = 'public/build'
+    else:
+        artifact_prefix = 'public/build/{}'.format(locale)
+
+    upstream_artifacts = [{
+        'taskId': {'task-reference': '<partials-signing>'},
+        'taskType': 'signing',
+        'paths': ["{}/{}".format(artifact_prefix, p)
+                  for p in artifacts],
+        'locale': locale or 'en-US',
+    }]
+
+    return upstream_artifacts
+
+
 def _check_platform_matched_only_one_regex(
     task_type, platform, plarform_was_previously_matched_by_regex, platform_regex
 ):
@@ -358,5 +378,59 @@ def make_task_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
+
+        yield job
+
+
+@transforms.add
+def make_partials_artifacts(config, jobs):
+    for job in jobs:
+        locale = job["attributes"].get("locale")
+        if not locale:
+            locale = 'en-US'
+
+        # Remove when proved reliable
+        # job['treeherder']['tier'] = 3
+
+        platform = job["attributes"]["build_platform"]
+
+        balrog_platform = get_balrog_platform_name(platform)
+
+        artifacts = get_partials_artifacts(config.params.get('release_history'),
+                                           balrog_platform, locale)
+
+        # Dependency:        | repackage-signing | partials-signing
+        # Partials artifacts |              Skip | Populate & yield
+        # No partials        |             Yield |         continue
+        if len(artifacts) == 0:
+            if 'partials-signing' in job['dependencies']:
+                continue
+            else:
+                yield job
+                continue
+        else:
+            if 'partials-signing' not in job['dependencies']:
+                continue
+
+        upstream_artifacts = generate_partials_upstream_artifacts(
+            artifacts, balrog_platform, locale
+        )
+
+        job['worker']['upstream-artifacts'].extend(upstream_artifacts)
+
+        extra = list()
+
+        artifact_map = get_partials_artifact_map(
+            config.params.get('release_history'), balrog_platform, locale)
+        for artifact in artifact_map:
+            extra.append({
+                'locale': locale,
+                'artifact_name': artifact,
+                'buildid': artifact_map[artifact],
+                'platform': balrog_platform,
+            })
+
+        job.setdefault('extra', {})
+        job['extra']['partials'] = extra
 
         yield job
