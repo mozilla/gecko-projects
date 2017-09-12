@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import logging
+from collections import deque
 
 from slugid import nice as slugid
 from taskgraph.util.parameterization import resolve_timestamps
@@ -59,7 +60,9 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
         # dependencies for task N+1 may be finished. If we need to optimize
         # this further, we can build a graph of task dependencies and walk
         # that.
-        for task_id in taskgraph.graph.visit_postorder():
+        tasklist = deque(taskgraph.graph.visit_postorder())
+        while tasklist:
+            task_id = tasklist.popleft()
             task_def = taskgraph.tasks[task_id].task
             attributes = taskgraph.tasks[task_id].attributes
 
@@ -78,8 +81,10 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
             # Wait for dependencies before submitting this.
             deps_fs = [fs[dep] for dep in task_def.get('dependencies', [])
                        if dep in fs]
-            for f in futures.as_completed(deps_fs):
-                f.result()
+
+            if not all([f.done() for f in deps_fs]):
+                tasklist.append(task_id)
+                continue
 
             fs[task_id] = e.submit(create_task, session, task_id,
                                    taskid_to_label[task_id], task_def)
