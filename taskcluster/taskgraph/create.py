@@ -19,7 +19,7 @@ from taskgraph.util.time import current_json_time
 logger = logging.getLogger(__name__)
 
 # the maximum number of parallel createTask calls to make
-CONCURRENCY = 100
+CONCURRENCY = 1
 
 # this is set to true for `mach taskgraph action-callback --test`
 testing = False
@@ -111,6 +111,7 @@ def create_task(session, task_id, label, task_def):
     logger.debug("Creating task with taskId {} for {}".format(task_id, label))
     res = session.put('http://taskcluster/queue/v1/task/{}'.format(task_id),
                       data=json.dumps(task_def))
+    logger.debug("requests elapsed time for taskId {} is {}".format(task_id, r.elapsed))
     if res.status_code != 200:
         try:
             logger.error(res.json()['message'])
