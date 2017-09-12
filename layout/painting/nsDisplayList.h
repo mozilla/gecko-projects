@@ -3742,7 +3742,7 @@ public:
 
   void SetDependentFrame(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
   {
-    if (aBuilder->IsRetainingDisplayList()) {
+    if (!aBuilder->IsRetainingDisplayList()) {
       return;
     }
     mDependentFrame = aFrame;
