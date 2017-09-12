@@ -25,6 +25,19 @@ CONCURRENCY = 50
 testing = False
 
 
+def make_session():
+    session = requests.Session()
+
+    # Default HTTPAdapter uses 10 connections. Mount custom adapter to increase
+    # that limit. Connections are established as needed, so using a large value
+    # should not negatively impact performance.
+    http_adapter = requests.adapters.HTTPAdapter(pool_connections=CONCURRENCY,
+                                                 pool_maxsize=CONCURRENCY)
+    session.mount('https://', http_adapter)
+    session.mount('http://', http_adapter)
+    return session
+
+
 def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
     taskid_to_label = {t: l for l, t in label_to_taskid.iteritems()}
 
@@ -87,7 +100,7 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
             # Schedule tasks as many times as task_duplicates indicates
             for i in range(1, attributes.get('task_duplicates', 1)):
                 # We use slugid() since we want a distinct task id
-                fs[task_id] = e.submit(create_task, session, slugid(),
+                fs[task_id] = e.submit(create_task, make_session(), slugid(),
                                        taskid_to_label[task_id], task_def)
 
         # Wait for all futures to complete.
