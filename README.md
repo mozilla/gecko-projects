@@ -3,7 +3,7 @@ gecko-projects
 
 This repository is synced from hg.mozilla.org and should be read-only.
 
-Note: 'master' branch is rairly updated - view the branch you care about
+Note: 'master' branch is rarely updated - view the branch you care about
 to see how recent it is. It should be within ~30 minutes of
 hg.mozilla.org copy.
 
