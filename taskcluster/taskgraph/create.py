@@ -61,6 +61,7 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
         # this further, we can build a graph of task dependencies and walk
         # that.
         tasklist = deque(taskgraph.graph.visit_postorder())
+        done_tasks = set()
         while tasklist:
             task_id = tasklist.popleft()
             task_def = taskgraph.tasks[task_id].task
@@ -87,12 +88,14 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
                 tasklist.append(task_id)
                 continue
 
-            if not all([f.done() for f in deps_fs]):
+            # Not all dependencies have finished
+            if not all([f in done_tasks for f in deps_fs]):
                 tasklist.append(task_id)
                 continue
 
             fs[task_id] = e.submit(create_task, session, task_id,
-                                   taskid_to_label[task_id], task_def)
+                                   taskid_to_label[task_id], task_def
+            futures.add_done_callback(lambda f: done_tasks.add(f))
 
             # Schedule tasks as many times as task_duplicates indicates
             for i in range(1, attributes.get('task_duplicates', 1)):
