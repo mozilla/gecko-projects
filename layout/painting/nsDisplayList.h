@@ -5672,6 +5672,7 @@ public:
   virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override
   {
     mStoredList.UpdateBounds(aBuilder);
+    mHasBounds = false;
   }
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
