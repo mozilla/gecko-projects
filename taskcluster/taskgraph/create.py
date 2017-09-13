@@ -11,7 +11,6 @@ import json
 import os
 import sys
 import logging
-from collections import deque
 
 from slugid import nice as slugid
 from taskgraph.util.parameterization import resolve_timestamps
@@ -60,10 +59,7 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
         # dependencies for task N+1 may be finished. If we need to optimize
         # this further, we can build a graph of task dependencies and walk
         # that.
-        tasklist = deque(taskgraph.graph.visit_postorder())
-        done_tasks = set()
-        while tasklist:
-            task_id = tasklist.popleft()
+        for task_id in taskgraph.graph.visit_postorder():
             task_def = taskgraph.tasks[task_id].task
             attributes = taskgraph.tasks[task_id].attributes
 
@@ -82,20 +78,11 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
             # Wait for dependencies before submitting this.
             deps_fs = [fs[dep] for dep in task_def.get('dependencies', [])
                        if dep in fs]
-
-            # Not all dependencies have been submitted yet
-            if len(deps_fs) != len(task_def.get('dependencies', [])):
-                tasklist.append(task_id)
-                continue
-
-            # Not all dependencies have finished
-            if not all([f in done_tasks for f in deps_fs]):
-                tasklist.append(task_id)
-                continue
+            for f in futures.as_completed(deps_fs):
+                f.result()
 
             fs[task_id] = e.submit(create_task, session, task_id,
-                                   taskid_to_label[task_id], task_def
-            futures.add_done_callback(lambda f: done_tasks.add(f))
+                                   taskid_to_label[task_id], task_def)
 
             # Schedule tasks as many times as task_duplicates indicates
             for i in range(1, attributes.get('task_duplicates', 1)):
