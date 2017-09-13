@@ -2612,12 +2612,14 @@ public:
 
   bool In3DContextAndBackfaceIsHidden()
   {
-    if (mReusedItem) {
-      return mState.mBackfaceHidden;
+    if (mBackfaceHidden) {
+      return *mBackfaceHidden;
     }
 
-    mState.mBackfaceHidden = mFrame->In3DContextAndBackfaceIsHidden();
-    return mState.mBackfaceHidden;
+    bool backfaceHidden = Frame()->In3DContextAndBackfaceIsHidden();
+    mBackfaceHidden.emplace(backfaceHidden);
+
+    return backfaceHidden;
   }
 
   virtual nsIFrame* GetDependentFrame()
@@ -2655,12 +2657,12 @@ protected:
   // True if this frame has been painted.
   bool      mPainted;
 #endif
+  mozilla::Maybe<bool> mBackfaceHidden;
 
   struct {
     nsRect mVisibleRect;
     RefPtr<const DisplayItemClipChain> mClipChain;
     const DisplayItemClip* mClip;
-    bool mBackfaceHidden;
   } mState;
 };
 
