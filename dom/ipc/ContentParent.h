@@ -36,8 +36,6 @@
 
 #define CHILD_PROCESS_SHUTDOWN_MESSAGE NS_LITERAL_STRING("child-process-shutdown")
 
-#define NO_REMOTE_TYPE ""
-
 // These must match the similar ones in E10SUtils.jsm.
 // Process names as reported by about:memory are defined in
 // ContentChild:RecvRemoteType.  Add your value there too or it will be called
@@ -169,7 +167,7 @@ public:
    * 3. normal iframe
    */
   static already_AddRefed<ContentParent>
-  GetNewOrUsedBrowserProcess(const nsAString& aRemoteType = NS_LITERAL_STRING(NO_REMOTE_TYPE),
+  GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
                              hal::ProcessPriority aPriority =
                              hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND,
                              ContentParent* aOpener = nullptr,
@@ -433,6 +431,11 @@ public:
    */
   already_AddRefed<embedding::PrintingParent> GetPrintingParent();
 #endif
+
+  virtual mozilla::ipc::IPCResult
+  RecvInitStreamFilter(const uint64_t& aChannelId,
+                       const nsString& aAddonId,
+                       InitStreamFilterResolver&& aResolver) override;
 
   virtual PChildToParentStreamParent* AllocPChildToParentStreamParent() override;
   virtual bool
@@ -856,22 +859,6 @@ private:
 
   virtual bool
   DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsCompatibleVersion(const nsString& aVersion,
-                                                                     bool* aIsCompatible) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
-                                                              nsTArray<uint8_t>&& aApplication,
-                                                              bool* aIsValidKeyHandle) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenRegister(nsTArray<uint8_t>&& aApplication,
-                                                          nsTArray<uint8_t>&& aChallenge,
-                                                          nsTArray<uint8_t>* aRegistration) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenSign(nsTArray<uint8_t>&& aApplication,
-                                                      nsTArray<uint8_t>&& aChallenge,
-                                                      nsTArray<uint8_t>&& aKeyHandle,
-                                                      nsTArray<uint8_t>* aSignature) override;
 
   virtual mozilla::ipc::IPCResult RecvIsSecureURI(const uint32_t& aType, const URIParams& aURI,
                                                   const uint32_t& aFlags,

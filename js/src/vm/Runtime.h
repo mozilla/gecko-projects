@@ -582,24 +582,15 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     }
 
     template <typename T>
-    struct GlobalObjectWatchersSiblingAccess {
-      static T* GetNext(T* elm) {
-        return elm->onNewGlobalObjectWatchersLink.mNext;
-      }
-      static void SetNext(T* elm, T* next) {
-        elm->onNewGlobalObjectWatchersLink.mNext = next;
-      }
-      static T* GetPrev(T* elm) {
-        return elm->onNewGlobalObjectWatchersLink.mPrev;
-      }
-      static void SetPrev(T* elm, T* prev) {
-        elm->onNewGlobalObjectWatchersLink.mPrev = prev;
+    struct GlobalObjectWatchersLinkAccess {
+      static mozilla::DoublyLinkedListElement<T>& Get(T* aThis) {
+        return aThis->onNewGlobalObjectWatchersLink;
       }
     };
 
     using WatchersList =
         mozilla::DoublyLinkedList<js::Debugger,
-                                  GlobalObjectWatchersSiblingAccess<js::Debugger>>;
+                                  GlobalObjectWatchersLinkAccess<js::Debugger>>;
   private:
     /*
      * List of all enabled Debuggers that have onNewGlobalObject handler
@@ -624,7 +615,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 #endif
 
     /* Number of zones which may be operated on by non-cooperating helper threads. */
-    js::UnprotectedData<size_t> numHelperThreadZones;
+    js::UnprotectedData<size_t> numActiveHelperThreadZones;
 
     friend class js::AutoLockForExclusiveAccess;
 
@@ -633,7 +624,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     void clearUsedByHelperThread(JS::Zone* zone);
 
     bool hasHelperThreadZones() const {
-        return numHelperThreadZones > 0;
+        return numActiveHelperThreadZones > 0;
     }
 
 #ifdef DEBUG

@@ -44,6 +44,7 @@ const {
   defineLazyGetter,
   getMessageManager,
   getUniqueId,
+  getWinUtils,
   withHandlingUserInput,
 } = ExtensionUtils;
 
@@ -86,9 +87,10 @@ function injectAPI(source, dest) {
  * wrapped promise from being garbage collected.
  */
 const StrongPromise = {
-  wrap(promise, id) {
+  wrap(promise, channelId, location) {
     return new Promise((resolve, reject) => {
-      const witness = finalizationService.make("extensions-sendMessage-witness", id);
+      const tag = `${channelId}|${location}`;
+      const witness = finalizationService.make("extensions-sendMessage-witness", tag);
       promise.then(value => {
         witness.forget();
         resolve(value);
@@ -98,8 +100,12 @@ const StrongPromise = {
       });
     });
   },
-  observe(subject, topic, id) {
-    MessageChannel.abortChannel(id, {message: "Response handle went out of scope"});
+  observe(subject, topic, tag) {
+    const pos = tag.indexOf("|");
+    const channel = tag.substr(0, pos);
+    const location = tag.substr(pos + 1);
+    const message = `Promised response from onMessage listener at ${location} went out of scope`;
+    MessageChannel.abortChannel(channel, {message});
   },
 };
 Services.obs.addObserver(StrongPromise, "extensions-sendMessage-witness");
@@ -380,6 +386,8 @@ class Messenger {
 
   _onMessage(name, filter) {
     return new EventManager(this.context, name, fire => {
+      const [location] = new this.context.cloneScope.Error().stack.split("\n", 1);
+
       let listener = {
         messageFilterPermissive: this.optionalFilter,
         messageFilterStrict: this.filter,
@@ -416,9 +424,9 @@ class Messenger {
           message = null;
 
           if (result instanceof this.context.cloneScope.Promise) {
-            return StrongPromise.wrap(result, channelId);
+            return StrongPromise.wrap(result, channelId, location);
           } else if (result === true) {
-            return StrongPromise.wrap(promise, channelId);
+            return StrongPromise.wrap(promise, channelId, location);
           }
           return response;
         },
@@ -677,8 +685,7 @@ class ProxyAPIImplementation extends SchemaAPIInterface {
   callAsyncFunction(args, callback, requireUserInput) {
     if (requireUserInput) {
       let context = this.childApiManager.context;
-      let winUtils = context.contentWindow.getInterface(Ci.nsIDOMWindowUtils);
-      if (!winUtils.isHandlingUserInput) {
+      if (!getWinUtils(context.contentWindow).isHandlingUserInput) {
         let err = new context.cloneScope.Error(`${this.path} may only be called from a user input handler`);
         return context.wrapPromise(Promise.reject(err), callback);
       }

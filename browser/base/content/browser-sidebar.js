@@ -15,8 +15,8 @@
  *  - sidebartitle or label (in that order) specify the title to
  *                 display on the sidebar.
  *  - checked      indicates whether the sidebar is currently displayed.
- *                 Note that toggleSidebar updates this attribute when
- *                 it changes the sidebar's visibility.
+ *                 Note that this attribute is updated when
+ *                 the sidebar's visibility is changed.
  *  - group        this attribute must be set to "sidebar".
  */
 var SidebarUI = {
@@ -194,7 +194,7 @@ var SidebarUI = {
     }
 
     this._box.setAttribute("width", sourceUI._box.boxObject.width);
-    this._show(commandID);
+    this.showInitially(commandID);
 
     return true;
   },
@@ -229,12 +229,19 @@ var SidebarUI = {
     }
 
     if (document.getElementById(commandID)) {
-      this._show(commandID);
+      this.showInitially(commandID);
     } else {
       // Remove the |sidebarcommand| attribute, because the element it
       // refers to no longer exists, so we should assume this sidebar
       // panel has been uninstalled. (249883)
       this._box.removeAttribute("sidebarcommand");
+      // On a startup in which the startup cache was invalidated (e.g. app update)
+      // extensions will not be started prior to delayedLoad, thus the
+      // sidebarcommand element will not exist yet.  Store the commandID so
+      // extensions may reopen if necessary.  A startup cache invalidation
+      // can be forced (for testing) by deleting compatibility.ini from the
+      // profile.
+      this.lastOpenedId = commandID;
     }
   },
 
@@ -256,9 +263,6 @@ var SidebarUI = {
   _fireFocusedEvent() {
     let event = new CustomEvent("SidebarFocused", {bubbles: true});
     this.browser.contentWindow.dispatchEvent(event);
-
-    // Run the original function for backwards compatibility.
-    fireSidebarFocusedEvent();
   },
 
   /**
@@ -332,9 +336,22 @@ var SidebarUI = {
       if (triggerNode) {
         updateToggleControlLabel(triggerNode);
       }
+
+      this._fireFocusedEvent();
       BrowserUITelemetry.countSidebarEvent(commandID, "show");
     });
   },
+
+  /**
+   * Show the sidebar, without firing the focused event or logging telemetry.
+   * This is intended to be used when the sidebar is opened automatically
+   * when a window opens (not triggered by user interaction).
+   *
+   * @param {string} commandID ID of the xul:broadcaster element to use.
+   */
+   showInitially(commandID) {
+     return this._show(commandID);
+   },
 
   /**
    * Implementation for show. Also used internally for sidebars that are shown
@@ -387,23 +404,16 @@ var SidebarUI = {
 
       if (this.browser.contentDocument.location.href != url) {
         this.browser.addEventListener("load", event => {
-
           // We're handling the 'load' event before it bubbles up to the usual
-          // (non-capturing) event handlers. Let it bubble up before firing the
-          // SidebarFocused event.
-          setTimeout(() => this._fireFocusedEvent(), 0);
+          // (non-capturing) event handlers. Let it bubble up before resolving.
+          setTimeout(() => {
+            resolve();
 
-          // Run the original function for backwards compatibility.
-          sidebarOnLoad(event);
-
-          resolve();
-
-          // Now that the currentId is updated, fire a show event.
-          this._fireShowEvent();
+            // Now that the currentId is updated, fire a show event.
+            this._fireShowEvent();
+          }, 0);
         }, {capture: true, once: true});
       } else {
-        // Older code handled this case, so we do it too.
-        this._fireFocusedEvent();
         resolve();
 
         // Now that the currentId is updated, fire a show event.
@@ -469,37 +479,3 @@ XPCOMUtils.defineLazyPreferenceGetter(SidebarUI, "_positionStart",
 XPCOMUtils.defineLazyGetter(SidebarUI, "isRTL", () => {
   return getComputedStyle(document.documentElement).direction == "rtl";
 });
-
-/**
- * This exists for backwards compatibility - it will be called once a sidebar is
- * ready, following any request to show it.
- *
- * @deprecated
- */
-function fireSidebarFocusedEvent() {}
-
-/**
- * This exists for backwards compatibility - it gets called when a sidebar has
- * been loaded.
- *
- * @deprecated
- */
-function sidebarOnLoad(event) {}
-
-/**
- * This exists for backwards compatibility, and is equivilent to
- * SidebarUI.toggle() without the forceOpen param. With forceOpen set to true,
- * it is equivalent to SidebarUI.show().
- *
- * @deprecated
- */
-function toggleSidebar(commandID, forceOpen = false) {
-  Deprecated.warning("toggleSidebar() is deprecated, please use SidebarUI.toggle() or SidebarUI.show() instead",
-                     "https://developer.mozilla.org/en-US/Add-ons/Code_snippets/Sidebar");
-
-  if (forceOpen) {
-    SidebarUI.show(commandID);
-  } else {
-    SidebarUI.toggle(commandID);
-  }
-}

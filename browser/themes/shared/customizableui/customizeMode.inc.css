@@ -57,14 +57,13 @@
 
 .customizationmode-button {
   border: 1px solid #b1b1b1;
-  margin: 6px 10px;
-  padding: 2px 5px;
   background-color: #fcfcfd;
-  color: rgb(71,71,71);
   -moz-appearance: none;
 }
 
-.customizationmode-checkbox {
+.customizationmode-checkbox,
+.customizationmode-button {
+  color: rgb(71, 71, 71);
   margin: 6px 10px;
   padding: 2px 5px;
 }
@@ -497,4 +496,13 @@ toolbarpaletteitem[place=toolbar] > toolbarspring {
   #customization-panelHolder > #widget-overflow-fixed-list:empty {
     background-image: url("chrome://browser/skin/customizableui/empty-overflow-panel@2x.png");
   }
+}
+
+#downloads-button-autohide-panel > .panel-arrowcontainer > .panel-arrowcontent {
+  padding: 5px 12px;
+}
+
+#downloads-button-autohide-checkbox {
+  margin: 0;
+  padding: 0;
 }

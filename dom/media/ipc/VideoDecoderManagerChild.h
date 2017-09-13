@@ -72,7 +72,10 @@ protected:
 
   PVideoDecoderChild* AllocPVideoDecoderChild(const VideoInfo& aVideoInfo,
                                               const layers::TextureFactoryIdentifier& aIdentifier,
-                                              bool* aSuccess) override;
+                                              bool* aSuccess,
+                                              nsCString* aBlacklistedD3D11Driver,
+                                              nsCString* aBlacklistedD3D9Driver,
+                                              nsCString* aErrorDescription) override;
   bool DeallocPVideoDecoderChild(PVideoDecoderChild* actor) override;
 
 private:

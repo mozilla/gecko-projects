@@ -29,8 +29,7 @@ const {ENABLED_AUTOFILL_ADDRESSES_PREF, ENABLED_AUTOFILL_CREDITCARDS_PREF} = For
 this.log = null;
 FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
 
-function FormAutofillPreferences({useOldOrganization}) {
-  this.useOldOrganization = useOldOrganization;
+function FormAutofillPreferences() {
   this.bundle = Services.strings.createBundle(BUNDLE_URI);
 }
 
@@ -62,30 +61,22 @@ FormAutofillPreferences.prototype = {
    * @param  {XULDocument} document
    */
   createPreferenceGroup(document) {
-    let formAutofillGroup;
+    let formAutofillGroup = document.createElementNS(XUL_NS, "vbox");
     let addressAutofill = document.createElementNS(XUL_NS, "hbox");
+    let addressAutofillCheckboxGroup = document.createElementNS(XUL_NS, "description");
     let addressAutofillCheckbox = document.createElementNS(XUL_NS, "checkbox");
+    let addressAutofillLearnMore = document.createElementNS(XUL_NS, "label");
     let savedAddressesBtn = document.createElementNS(XUL_NS, "button");
     let creditCardAutofill = document.createElementNS(XUL_NS, "hbox");
+    let creditCardAutofillCheckboxGroup = document.createElementNS(XUL_NS, "description");
     let creditCardAutofillCheckbox = document.createElementNS(XUL_NS, "checkbox");
+    let creditCardAutofillLearnMore = document.createElementNS(XUL_NS, "label");
     let savedCreditCardsBtn = document.createElementNS(XUL_NS, "button");
 
-    if (this.useOldOrganization) {
-      let caption = document.createElementNS(XUL_NS, "caption");
-      let captionLabel = document.createElementNS(XUL_NS, "label");
-
-      formAutofillGroup = document.createElementNS(XUL_NS, "groupbox");
-      formAutofillGroup.hidden = document.location.href != "about:preferences#privacy";
-      // Use .setAttribute because HTMLElement.dataset is not available on XUL elements
-      formAutofillGroup.setAttribute("data-category", "panePrivacy");
-      formAutofillGroup.appendChild(caption);
-      caption.appendChild(captionLabel);
-      captionLabel.textContent = this.bundle.GetStringFromName("preferenceGroupTitle");
-    } else {
-      formAutofillGroup = document.createElementNS(XUL_NS, "vbox");
-      savedAddressesBtn.className = "accessory-button";
-      savedCreditCardsBtn.className = "accessory-button";
-    }
+    savedAddressesBtn.className = "accessory-button";
+    savedCreditCardsBtn.className = "accessory-button";
+    addressAutofillLearnMore.className = "learnMore text-link";
+    creditCardAutofillLearnMore.className = "learnMore text-link";
 
     this.refs = {
       formAutofillGroup,
@@ -97,11 +88,20 @@ FormAutofillPreferences.prototype = {
 
     formAutofillGroup.id = "formAutofillGroup";
     addressAutofill.id = "addressAutofill";
+    addressAutofillLearnMore.id = "addressAutofillLearnMore";
+    creditCardAutofill.id = "creditCardAutofill";
+    creditCardAutofillLearnMore.id = "creditCardAutofillLearnMore";
+
+    addressAutofillLearnMore.setAttribute("value", this.bundle.GetStringFromName("learnMore"));
     addressAutofillCheckbox.setAttribute("label", this.bundle.GetStringFromName("enableAddressAutofill"));
     savedAddressesBtn.setAttribute("label", this.bundle.GetStringFromName("savedAddresses"));
-    creditCardAutofill.id = "creditCardAutofill";
+    creditCardAutofillLearnMore.setAttribute("value", this.bundle.GetStringFromName("learnMore"));
     creditCardAutofillCheckbox.setAttribute("label", this.bundle.GetStringFromName("enableCreditCardAutofill"));
     savedCreditCardsBtn.setAttribute("label", this.bundle.GetStringFromName("savedCreditCards"));
+
+    let learnMoreURL = Services.urlFormatter.formatURLPref("app.support.baseURL") + "autofill-card-address";
+    addressAutofillLearnMore.setAttribute("href", learnMoreURL);
+    creditCardAutofillLearnMore.setAttribute("href", learnMoreURL);
 
     // Manually set the checked state
     if (FormAutofillUtils.isAutofillAddressesEnabled) {
@@ -111,14 +111,18 @@ FormAutofillPreferences.prototype = {
       creditCardAutofillCheckbox.setAttribute("checked", true);
     }
 
-    addressAutofillCheckbox.flex = 1;
-    creditCardAutofillCheckbox.flex = 1;
+    addressAutofillCheckboxGroup.flex = 1;
+    creditCardAutofillCheckboxGroup.flex = 1;
 
     formAutofillGroup.appendChild(addressAutofill);
-    addressAutofill.appendChild(addressAutofillCheckbox);
+    addressAutofill.appendChild(addressAutofillCheckboxGroup);
+    addressAutofillCheckboxGroup.appendChild(addressAutofillCheckbox);
+    addressAutofillCheckboxGroup.appendChild(addressAutofillLearnMore);
     addressAutofill.appendChild(savedAddressesBtn);
     formAutofillGroup.appendChild(creditCardAutofill);
-    creditCardAutofill.appendChild(creditCardAutofillCheckbox);
+    creditCardAutofill.appendChild(creditCardAutofillCheckboxGroup);
+    creditCardAutofillCheckboxGroup.appendChild(creditCardAutofillCheckbox);
+    creditCardAutofillCheckboxGroup.appendChild(creditCardAutofillLearnMore);
     creditCardAutofill.appendChild(savedCreditCardsBtn);
   },
 

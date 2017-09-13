@@ -138,6 +138,7 @@ highbd_img_downshift(aom_image_t *dst, aom_image_t *src, int down_shift) {
     case AOM_IMG_FMT_I44016:
       break;
     default:
+      // We don't support anything that's not 16 bit
       return AOM_CODEC_UNSUP_BITSTREAM;
   }
   for (plane = 0; plane < 3; plane++) {
@@ -309,8 +310,7 @@ AOMDecoder::Drain()
 bool
 AOMDecoder::IsAV1(const nsACString& aMimeType)
 {
-  return aMimeType.EqualsLiteral("video/webm; codecs=av1")
-         || aMimeType.EqualsLiteral("video/av1");
+  return aMimeType.EqualsLiteral("video/av1");
 }
 
 /* static */

@@ -4,7 +4,7 @@
 
 use clip_scroll_node::{ClipScrollNode, NodeType, ScrollingState};
 use internal_types::{FastHashSet, FastHashMap};
-use print_tree::PrintTree;
+use print_tree::{PrintTree, PrintTreePrinter};
 use api::{ClipId, LayerPoint, LayerRect, LayerToScrollTransform, LayerToWorldTransform};
 use api::{LayerVector2D, PipelineId, ScrollClamping, ScrollEventPhase, ScrollLayerState};
 use api::{ScrollLocation, StickyFrameInfo, WorldPoint};
@@ -251,7 +251,7 @@ impl ClipScrollTree {
         // TODO(gw): This is an ugly borrow check workaround to clone these.
         //           Restructure this to avoid the clones!
         let (state, node_children) = {
-            let mut node = match self.nodes.get_mut(&layer_id) {
+            let node = match self.nodes.get_mut(&layer_id) {
                 Some(node) => node,
                 None => return,
             };
@@ -370,17 +370,17 @@ impl ClipScrollTree {
         }
     }
 
-    fn print_node(&self, id: &ClipId, pt: &mut PrintTree) {
+    fn print_node<T: PrintTreePrinter>(&self, id: &ClipId, pt: &mut T) {
         let node = self.nodes.get(id).unwrap();
 
         match node.node_type {
             NodeType::Clip(ref info) => {
                 pt.new_level("Clip".to_owned());
                 pt.add_item(format!("screen_bounding_rect: {:?}", info.screen_bounding_rect));
-                pt.add_item(format!("screen_inner_rect: {:?}", info.screen_inner_rect));
 
-                pt.new_level(format!("Clip Sources [{}]", info.clip_sources.len()));
-                for source in &info.clip_sources {
+                let clips = info.clip_sources.clips();
+                pt.new_level(format!("Clip Sources [{}]", clips.len()));
+                for source in clips {
                     pt.add_item(format!("{:?}", source));
                 }
                 pt.end_level();
@@ -416,7 +416,13 @@ impl ClipScrollTree {
     pub fn print(&self) {
         if !self.nodes.is_empty() {
             let mut pt = PrintTree::new("clip_scroll tree");
-            self.print_node(&self.root_reference_frame_id, &mut pt);
+            self.print_with(&mut pt);
+        }
+    }
+
+    pub fn print_with<T: PrintTreePrinter>(&self, pt: &mut T) {
+        if !self.nodes.is_empty() {
+            self.print_node(&self.root_reference_frame_id, pt);
         }
     }
 }

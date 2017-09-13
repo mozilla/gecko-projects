@@ -14,12 +14,6 @@ var {StyleEditorUI} = require("resource://devtools/client/styleeditor/StyleEdito
 var {getString} = require("resource://devtools/client/styleeditor/StyleEditorUtil.jsm");
 var {initCssProperties} = require("devtools/shared/fronts/css-properties");
 
-loader.lazyGetter(this, "StyleSheetsFront",
-  () => require("devtools/shared/fronts/stylesheets").StyleSheetsFront);
-
-loader.lazyGetter(this, "StyleEditorFront",
-  () => require("devtools/shared/fronts/styleeditor").StyleEditorFront);
-
 var StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
   EventEmitter.decorate(this);
 
@@ -54,12 +48,7 @@ StyleEditorPanel.prototype = {
 
     this.target.on("close", this.destroy);
 
-    if (this.target.form.styleSheetsActor) {
-      this._debuggee = StyleSheetsFront(this.target.client, this.target.form);
-    } else {
-      /* We're talking to a pre-Firefox 29 server-side */
-      this._debuggee = StyleEditorFront(this.target.client, this.target.form);
-    }
+    this._debuggee = this._toolbox.initStyleSheetsFront();
 
     // Initialize the CSS properties database.
     const {cssProperties} = yield initCssProperties(this._toolbox);

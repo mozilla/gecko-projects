@@ -3,6 +3,7 @@ package org.mozilla.gecko.tests;
 import android.util.Log;
 
 import org.mozilla.gecko.Actions;
+import org.mozilla.gecko.home.HomeConfig;
 
 /**
  * Tests session OOM save behavior.
@@ -10,6 +11,34 @@ import org.mozilla.gecko.Actions;
  * Builds a session and tests that the saved state is correct.
  */
 public class testSessionOOMSave extends SessionTest {
+
+    private HomeConfig.Editor mEditor;
+    private String mDefaultPanelId;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+
+        // Having the Activity Stream home panel active during this test seems to cause relatively
+        // frequent intermittent crashes, so for now, we avoid loading it by setting a different
+        // default panel for this test (bug 1396324).
+        // TODO: Remove the workaround once crashes have been fixed (bug 1398532).
+        final HomeConfig homeConfig = HomeConfig.getDefault(getInstrumentation().getTargetContext());
+        final HomeConfig.State state = homeConfig.load();
+        mEditor = state.edit();
+        mDefaultPanelId = mEditor.getDefaultPanelId();
+        mEditor.setDefault(HomeConfig.getIdForBuiltinPanelType(HomeConfig.PanelType.BOOKMARKS));
+        mEditor.apply();
+    }
+
+    @Override
+    public void tearDown() throws Exception {
+        mEditor.setDefault(mDefaultPanelId);
+        mEditor.apply();
+
+        super.tearDown();
+    }
+
     public void testSessionOOMSave() {
         final Actions.EventExpecter pageShowExpecter =
                 mActions.expectGlobalEvent(Actions.EventType.UI, "Content:PageShow");

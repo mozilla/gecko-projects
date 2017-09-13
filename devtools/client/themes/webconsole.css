@@ -630,7 +630,7 @@ a.learn-more-link.webconsole-learn-more-link {
   padding: 0 1px;
   -moz-box-align: stretch;
   --toolbarbutton-checked-color: var(--theme-body-color);
-  --toolbarbutton-checked-background: var(--theme-selection-background-semitransparent);
+  --toolbarbutton-checked-background: var(--theme-selection-background-hover);
 }
 
 .devtools-toolbarbutton > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
@@ -770,28 +770,43 @@ a.learn-more-link.webconsole-learn-more-link {
   display: flex;
   /* We want the toolbar (which contain the text search input) to be at least 200px
   so we don't allow to shrink it */
-  flex: 1 0 200px;
+  flex: 100 0 200px;
 }
 
 .devtools-toolbar.webconsole-filterbar-secondary {
-  height: initial;
-  /* This toolbar should always take the whole horizontal space */
+  display: flex;
   width: 100%;
+  align-items: center;
+  -moz-user-select: none;
 }
 
 .webconsole-filterbar-primary .devtools-plaininput {
   flex: 1 1 100%;
 }
 
+.webconsole-filterbar-primary .filter-checkbox {
+  flex-shrink: 0;
+  margin: 0 3px;
+  display: flex;
+  align-items: center;
+  -moz-user-select: none;
+}
+
+.webconsole-filterbar-secondary .devtools-separator {
+  margin: 0 5px;
+}
+
 .webconsole-filterbar-filtered-messages {
   /* Needed so the bar takes the whole horizontal space when it is wrapped */
   flex-grow: 1;
+  justify-content: flex-end;
   color: var(--theme-comment);
   text-align: end;
 }
 
 .webconsole-filterbar-filtered-messages .filter-message-text {
   font-style: italic;
+  -moz-user-select: none;
 }
 
 .webconsole-filterbar-filtered-messages .reset-filters-button {
@@ -849,13 +864,42 @@ a.learn-more-link.webconsole-learn-more-link {
   background-position: -36px -36px;
 }
 
+/* Network Messages */
+
 .message.network .method {
   margin-inline-end: 5px;
+}
+
+.network.message .network-info {
+  display: none;
+  margin-top: 8px;
+  border: solid 1px var(--theme-splitter-color);
+}
+
+.network.message.open .network-info {
+  display: block;
+}
+
+.network.message .network-info .panels {
+  max-height: 250px;
+  min-height: 100px;
+}
+
+/* Hide 'Edit And Resend' button since the feature isn't
+   supported in the Console panel. */
+.network.message #headers-panel .edit-and-resend-button {
+  display: none;
+}
+
+.network.message #response-panel .treeTable {
+  overflow-y: hidden;
 }
 
 .network .message-flex-body > .message-body {
   display: flex;
 }
+
+/* Output Wrapper */
 
 .webconsole-output-wrapper .message .indent {
   display: inline-block;

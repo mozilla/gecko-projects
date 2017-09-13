@@ -8,12 +8,16 @@ const SELECTORS = {
   creditCardAutofillCheckbox: "#creditCardAutofill checkbox",
   savedAddressesBtn: "#addressAutofill button",
   savedCreditCardsBtn: "#creditCardAutofill button",
+  addressAutofillLearnMore: "#addressAutofillLearnMore",
+  creditCardAutofillLearnMore: "#creditCardAutofillLearnMore",
 };
 
 // Visibility of form autofill group should be hidden when opening
 // preferences page.
 add_task(async function test_aboutPreferences() {
+  let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
   await BrowserTestUtils.withNewTab({gBrowser, url: PAGE_PREFS}, async function(browser) {
+    await finalPrefPaneLoaded;
     await ContentTask.spawn(browser, SELECTORS, (selectors) => {
       is(content.document.querySelector(selectors.group).hidden, true,
         "Form Autofill group should be hidden");
@@ -24,7 +28,9 @@ add_task(async function test_aboutPreferences() {
 // Visibility of form autofill group should be visible when opening
 // directly to privacy page. Checkbox is checked by default.
 add_task(async function test_aboutPreferencesPrivacy() {
+  let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
   await BrowserTestUtils.withNewTab({gBrowser, url: PAGE_PRIVACY}, async function(browser) {
+    await finalPrefPaneLoaded;
     await ContentTask.spawn(browser, SELECTORS, (selectors) => {
       is(content.document.querySelector(selectors.group).hidden, false,
         "Form Autofill group should be visible");
@@ -32,12 +38,18 @@ add_task(async function test_aboutPreferencesPrivacy() {
         "Autofill addresses checkbox should be checked");
       is(content.document.querySelector(selectors.creditCardAutofillCheckbox).checked, true,
         "Autofill credit cards checkbox should be checked");
+      ok(content.document.querySelector(selectors.addressAutofillLearnMore).href.includes("autofill-card-address"),
+        "Autofill addresses learn more link should contain autofill-card-address");
+      ok(content.document.querySelector(selectors.creditCardAutofillLearnMore).href.includes("autofill-card-address"),
+        "Autofill credit cards learn more link should contain autofill-card-address");
     });
   });
 });
 
 add_task(async function test_openManageAutofillDialogs() {
+  let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
   await BrowserTestUtils.withNewTab({gBrowser, url: PAGE_PRIVACY}, async function(browser) {
+    await finalPrefPaneLoaded;
     const args = [SELECTORS, MANAGE_ADDRESSES_DIALOG_URL, MANAGE_CREDIT_CARDS_DIALOG_URL];
     await ContentTask.spawn(browser, args, ([selectors, addrUrl, ccUrl]) => {
       function testManageDialogOpened(expectedUrl) {
@@ -58,8 +70,9 @@ add_task(async function test_openManageAutofillDialogs() {
 add_task(async function test_autofillDisabledCheckbox() {
   SpecialPowers.pushPrefEnv({set: [[ENABLED_AUTOFILL_ADDRESSES_PREF, false]]});
   SpecialPowers.pushPrefEnv({set: [[ENABLED_AUTOFILL_CREDITCARDS_PREF, false]]});
-
+  let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
   await BrowserTestUtils.withNewTab({gBrowser, url: PAGE_PRIVACY}, async function(browser) {
+    await finalPrefPaneLoaded;
     await ContentTask.spawn(browser, SELECTORS, (selectors) => {
       is(content.document.querySelector(selectors.group).hidden, false,
         "Form Autofill group should be visible");

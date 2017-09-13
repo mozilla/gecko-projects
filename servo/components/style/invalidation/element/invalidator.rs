@@ -23,6 +23,12 @@ use selectors::parser::{Combinator, Component, Selector};
 use smallvec::SmallVec;
 use std::fmt;
 
+#[derive(Debug, PartialEq)]
+enum VisitedDependent {
+    Yes,
+    No,
+}
+
 /// The struct that takes care of encapsulating all the logic on where and how
 /// element styles need to be invalidated.
 pub struct TreeStyleInvalidator<'a, 'b: 'a, E>
@@ -115,12 +121,48 @@ impl fmt::Debug for Invalidation {
 }
 
 /// The result of processing a single invalidation for a given element.
-struct InvalidationResult {
+struct SingleInvalidationResult {
     /// Whether the element itself was invalidated.
     invalidated_self: bool,
     /// Whether the invalidation matched, either invalidating the element or
     /// generating another invalidation.
     matched: bool,
+}
+
+/// The result of a whole invalidation process for a given element.
+pub struct InvalidationResult {
+    /// Whether the element itself was invalidated.
+    invalidated_self: bool,
+    /// Whether the element's descendants were invalidated.
+    invalidated_descendants: bool,
+    /// Whether the element's siblings were invalidated.
+    invalidated_siblings: bool,
+}
+
+impl InvalidationResult {
+    /// Create an emtpy result.
+    pub fn empty() -> Self {
+        Self {
+            invalidated_self: false,
+            invalidated_descendants: false,
+            invalidated_siblings: false,
+        }
+    }
+
+    /// Whether the invalidation has invalidate the element itself.
+    pub fn has_invalidated_self(&self) -> bool {
+        self.invalidated_self
+    }
+
+    /// Whether the invalidation has invalidate desendants.
+    pub fn has_invalidated_descendants(&self) -> bool {
+        self.invalidated_descendants
+    }
+
+    /// Whether the invalidation has invalidate siblings.
+    pub fn has_invalidated_siblings(&self) -> bool {
+        self.invalidated_siblings
+    }
 }
 
 impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
@@ -142,7 +184,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
     }
 
     /// Perform the invalidation pass.
-    pub fn invalidate(mut self) {
+    pub fn invalidate(mut self) -> InvalidationResult {
         debug!("StyleTreeInvalidator::invalidate({:?})", self.element);
         debug_assert!(self.element.has_snapshot(), "Why bothering?");
         debug_assert!(self.data.is_some(), "How exactly?");
@@ -155,7 +197,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         let snapshot = wrapper.snapshot().expect("has_snapshot lied");
 
         if !snapshot.has_attrs() && state_changes.is_empty() {
-            return;
+            return InvalidationResult::empty();
         }
 
         // If we are sensitive to visitedness and the visited state changed, we
@@ -167,7 +209,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             // We can't just return here because there may also be attribute
             // changes as well that imply additional hints.
             let data = self.data.as_mut().unwrap();
-            data.restyle.hint.insert(RestyleHint::restyle_subtree());
+            data.hint.insert(RestyleHint::restyle_subtree());
         }
 
         let mut classes_removed = SmallVec::<[Atom; 8]>::new();
@@ -245,15 +287,17 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if invalidated_self {
             if let Some(ref mut data) = self.data {
-                data.restyle.hint.insert(RESTYLE_SELF);
+                data.hint.insert(RESTYLE_SELF);
             }
         }
 
         debug!("Collected invalidations (self: {}): ", invalidated_self);
         debug!(" > descendants: {:?}", descendant_invalidations);
         debug!(" > siblings: {:?}", sibling_invalidations);
-        self.invalidate_descendants(&descendant_invalidations);
-        self.invalidate_siblings(&mut sibling_invalidations);
+        let invalidated_descendants = self.invalidate_descendants(&descendant_invalidations);
+        let invalidated_siblings = self.invalidate_siblings(&mut sibling_invalidations);
+
+        InvalidationResult { invalidated_self, invalidated_descendants, invalidated_siblings }
     }
 
     /// Go through later DOM siblings, invalidating style as needed using the
@@ -455,7 +499,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             Some(ref data) => {
                 // FIXME(emilio): Only needs to check RESTYLE_DESCENDANTS,
                 // really.
-                if data.restyle.hint.contains_subtree() {
+                if data.hint.contains_subtree() {
                     return false;
                 }
             }
@@ -463,7 +507,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if let Some(checker) = self.stack_limit_checker {
             if checker.limit_exceeded() {
-                self.data.as_mut().unwrap().restyle.hint.insert(RESTYLE_DESCENDANTS);
+                self.data.as_mut().unwrap().hint.insert(RESTYLE_DESCENDANTS);
                 return true;
             }
         }
@@ -585,7 +629,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         descendant_invalidations: &mut InvalidationVector,
         sibling_invalidations: &mut InvalidationVector,
         invalidation_kind: InvalidationKind,
-    ) -> InvalidationResult {
+    ) -> SingleInvalidationResult {
         debug!("TreeStyleInvalidator::process_invalidation({:?}, {:?}, {:?})",
                self.element, invalidation, invalidation_kind);
 
@@ -755,11 +799,11 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if invalidated_self {
             if let Some(ref mut data) = self.data {
-                data.restyle.hint.insert(RESTYLE_SELF);
+                data.hint.insert(RESTYLE_SELF);
             }
         }
 
-        InvalidationResult { invalidated_self, matched, }
+        SingleInvalidationResult { invalidated_self, matched, }
     }
 }
 
@@ -792,20 +836,26 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
         let removed_id = self.removed_id;
         if let Some(ref id) = removed_id {
             if let Some(deps) = map.id_to_selector.get(id, quirks_mode) {
-                self.collect_dependencies_in_map(deps)
+                for dep in deps {
+                    self.scan_dependency(dep, VisitedDependent::No);
+                }
             }
         }
 
         let added_id = self.added_id;
         if let Some(ref id) = added_id {
             if let Some(deps) = map.id_to_selector.get(id, quirks_mode) {
-                self.collect_dependencies_in_map(deps)
+                for dep in deps {
+                    self.scan_dependency(dep, VisitedDependent::No);
+                }
             }
         }
 
         for class in self.classes_added.iter().chain(self.classes_removed.iter()) {
             if let Some(deps) = map.class_to_selector.get(class, quirks_mode) {
-                self.collect_dependencies_in_map(deps)
+                for dep in deps {
+                    self.scan_dependency(dep, VisitedDependent::No);
+                }
             }
         }
 
@@ -839,10 +889,7 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
             self.removed_id,
             self.classes_removed,
             &mut |dependency| {
-                self.scan_dependency(
-                    dependency,
-                    /* is_visited_dependent = */ false
-                );
+                self.scan_dependency(dependency, VisitedDependent::No);
                 true
             },
         );
@@ -862,10 +909,13 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
                 if !dependency.state.intersects(state_changes) {
                     return true;
                 }
-                self.scan_dependency(
-                    &dependency.dep,
-                    dependency.state.intersects(IN_VISITED_OR_UNVISITED_STATE)
-                );
+                let visited_dependent =
+                    if dependency.state.intersects(IN_VISITED_OR_UNVISITED_STATE) {
+                        VisitedDependent::Yes
+                    } else {
+                        VisitedDependent::No
+                    };
+                self.scan_dependency(&dependency.dep, visited_dependent);
                 true
             },
         );
@@ -874,9 +924,9 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
     fn scan_dependency(
         &mut self,
         dependency: &Dependency,
-        is_visited_dependent: bool
+        is_visited_dependent: VisitedDependent,
     ) {
-        debug!("TreeStyleInvalidator::scan_dependency({:?}, {:?}, {})",
+        debug!("TreeStyleInvalidator::scan_dependency({:?}, {:?}, {:?})",
                self.element,
                dependency,
                is_visited_dependent);
@@ -943,7 +993,7 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
         //
         // NOTE: This thing is actually untested because testing it is flaky,
         // see the tests that were added and then backed out in bug 1328509.
-        if is_visited_dependent && now_context.relevant_link_found {
+        if is_visited_dependent == VisitedDependent::Yes && now_context.relevant_link_found {
             then_context.visited_handling = VisitedHandlingMode::RelevantLinkVisited;
             let matched_then =
                 matches_selector(&dependency.selector,

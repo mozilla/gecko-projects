@@ -449,7 +449,7 @@ Request::Constructor(const GlobalObject& aGlobal,
   }
 
   if (aInit.mSignal.WasPassed()) {
-    signal = &aInit.mSignal.Value();
+    signal = aInit.mSignal.Value();
   }
 
   if (NS_IsMainThread()) {
@@ -551,11 +551,6 @@ Request::Constructor(const GlobalObject& aGlobal,
       return nullptr;
     }
 
-    if (!request->GetIntegrity().IsEmpty()) {
-      aRv.ThrowTypeError<MSG_REQUEST_INTEGRITY_METADATA_NOT_EMPTY>();
-      return nullptr;
-    }
-
     requestHeaders->SetGuard(HeadersGuardEnum::Request_no_cors, aRv);
     if (aRv.Failed()) {
       return nullptr;
@@ -585,11 +580,11 @@ Request::Constructor(const GlobalObject& aGlobal,
       const fetch::OwningBodyInit& bodyInit = bodyInitNullable.Value();
       nsCOMPtr<nsIInputStream> stream;
       nsAutoCString contentTypeWithCharset;
-      uint64_t contentLengthUnused;
+      uint64_t contentLength = 0;
       aRv = ExtractByteStreamFromBody(bodyInit,
                                       getter_AddRefs(stream),
                                       contentTypeWithCharset,
-                                      contentLengthUnused);
+                                      contentLength);
       if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;
       }
@@ -609,10 +604,10 @@ Request::Constructor(const GlobalObject& aGlobal,
       request->ClearCreatedByFetchEvent();
 
       if (hasCopiedBody) {
-        request->SetBody(nullptr);
+        request->SetBody(nullptr, 0);
       }
 
-      request->SetBody(temporaryBody);
+      request->SetBody(temporaryBody, contentLength);
     }
   }
 
@@ -624,7 +619,7 @@ Request::Constructor(const GlobalObject& aGlobal,
     nsCOMPtr<nsIInputStream> body;
     inputReq->GetBody(getter_AddRefs(body));
     if (body) {
-      inputReq->SetBody(nullptr);
+      inputReq->SetBody(nullptr, 0);
       inputReq->SetBodyUsed(aGlobal.Context(), aRv);
       if (NS_WARN_IF(aRv.Failed())) {
         return nullptr;

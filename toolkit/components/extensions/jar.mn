@@ -10,6 +10,7 @@ toolkit.jar:
     content/extensions/ext-browser-content.js
     content/extensions/ext-browserSettings.js
     content/extensions/ext-contextualIdentities.js
+    content/extensions/ext-clipboard.js
     content/extensions/ext-cookies.js
     content/extensions/ext-downloads.js
     content/extensions/ext-extension.js
@@ -41,3 +42,4 @@ toolkit.jar:
     content/extensions/ext-c-storage.js
     content/extensions/ext-c-test.js
     content/extensions/ext-c-toolkit.js
+    content/extensions/ext-c-webRequest.js

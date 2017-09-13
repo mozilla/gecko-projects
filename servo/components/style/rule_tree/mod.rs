@@ -9,6 +9,8 @@
 use applicable_declarations::ApplicableDeclarationList;
 #[cfg(feature = "servo")]
 use heapsize::HeapSizeOf;
+#[cfg(feature = "gecko")]
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use properties::{Importance, LonghandIdSet, PropertyDeclarationBlock};
 use servo_arc::{Arc, ArcBorrow, NonZeroPtrMut};
 use shared_lock::{Locked, StylesheetGuards, SharedRwLockReadGuard};
@@ -59,6 +61,15 @@ impl Drop for RuleTree {
         // Any further drops of StrongRuleNodes must occur on the main thread,
         // and will trigger synchronous dropping of the Rule nodes.
         self.root.get().next_free.store(ptr::null_mut(), Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl MallocSizeOf for RuleTree {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let mut n = ops.malloc_size_of(self.root.ptr());
+        n += self.root.get().size_of(ops);
+        n
     }
 }
 
@@ -193,10 +204,11 @@ impl RuleTree {
         for (source, level) in iter {
             debug_assert!(last_level <= level, "Not really ordered");
             debug_assert!(!level.is_important(), "Important levels handled internally");
-            let (any_normal, any_important) = {
+            let any_important = {
                 let pdb = source.read(level.guard(guards));
-                (pdb.any_normal(), pdb.any_important())
+                pdb.any_important()
             };
+
             if any_important {
                 found_important = true;
                 match level {
@@ -210,19 +222,25 @@ impl RuleTree {
                     _ => {},
                 };
             }
-            // We really want to ensure empty rule nodes appear in the rule tree for
-            // devtools, this condition ensures that if we find an empty rule node, we
-            // insert it at the normal level.
-            if any_normal || !any_important {
-                if matches!(level, Transitions) && found_important {
-                    // There can be at most one transition, and it will come at
-                    // the end of the iterator. Stash it and apply it after
-                    // !important rules.
-                    debug_assert!(transition.is_none());
-                    transition = Some(source);
-                } else {
-                    current = current.ensure_child(self.root.downgrade(), source, level);
-                }
+
+            // We don't optimize out empty rules, even though we could.
+            //
+            // Inspector relies on every rule being inserted in the normal level
+            // at least once, in order to return the rules with the correct
+            // specificity order.
+            //
+            // TODO(emilio): If we want to apply these optimizations without
+            // breaking inspector's expectations, we'd need to run
+            // selector-matching again at the inspector's request. That may or
+            // may not be a better trade-off.
+            if matches!(level, Transitions) && found_important {
+                // There can be at most one transition, and it will come at
+                // the end of the iterator. Stash it and apply it after
+                // !important rules.
+                debug_assert!(transition.is_none());
+                transition = Some(source);
+            } else {
+                current = current.ensure_child(self.root.downgrade(), source, level);
             }
             last_level = level;
         }
@@ -783,6 +801,18 @@ impl RuleNode {
     }
 }
 
+#[cfg(feature = "gecko")]
+impl MallocSizeOf for RuleNode {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let mut n = 0;
+        for child in self.iter_children() {
+            n += ops.malloc_size_of(child.ptr());
+            n += unsafe { (*child.ptr()).size_of(ops) };
+        }
+        n
+    }
+}
+
 #[derive(Clone)]
 struct WeakRuleNode {
     p: NonZeroPtrMut<RuleNode>,
@@ -986,7 +1016,7 @@ impl StrongRuleNode {
 
     unsafe fn assert_free_list_has_no_duplicates_or_null(&self) {
         assert!(cfg!(debug_assertions), "This is an expensive check!");
-        use std::collections::HashSet;
+        use hash::HashSet;
 
         let me = &*self.ptr();
         assert!(me.is_root());
@@ -1190,15 +1220,15 @@ impl StrongRuleNode {
             for node in element_rule_node.self_and_ancestors() {
                 let source = node.style_source();
                 let declarations = if source.is_some() {
-                    source.read(node.cascade_level().guard(guards)).declarations()
+                    source.read(node.cascade_level().guard(guards)).declaration_importance_iter()
                 } else {
                     continue
                 };
 
                 // Iterate over declarations of the longhands we care about.
                 let node_importance = node.importance();
-                let longhands = declarations.iter().rev()
-                    .filter_map(|&(ref declaration, importance)| {
+                let longhands = declarations.rev()
+                    .filter_map(|(declaration, importance)| {
                         if importance != node_importance { return None }
                         match declaration.id() {
                             PropertyDeclarationId::Longhand(id) => {
@@ -1308,9 +1338,8 @@ impl StrongRuleNode {
         let mut result = (LonghandIdSet::new(), false);
         for node in iter {
             let style = node.style_source();
-            for &(ref decl, important) in style.read(node.cascade_level().guard(guards))
-                                               .declarations()
-                                               .iter() {
+            for (decl, important) in style.read(node.cascade_level().guard(guards))
+                                               .declaration_importance_iter() {
                 // Although we are only iterating over cascade levels that
                 // override animations, in a given property declaration block we
                 // can have a mixture of !important and non-!important

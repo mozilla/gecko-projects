@@ -62,8 +62,6 @@
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
                                   "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
-                                  "resource://gre/modules/PromiseUtils.jsm");
 
 const BOOKMARK_ITEM = 0;
 const BOOKMARK_FOLDER = 1;
@@ -381,12 +379,7 @@ var BookmarkPropertiesPanel = {
   _beginBatch() {
     if (this._batching)
       return;
-    if (PlacesUIUtils.useAsyncTransactions) {
-      this._batchBlockingDeferred = PromiseUtils.defer();
-      PlacesTransactions.batch(async () => {
-        await this._batchBlockingDeferred.promise;
-      });
-    } else {
+    if (!PlacesUIUtils.useAsyncTransactions) {
       PlacesUtils.transactionManager.beginBatch(null);
     }
     this._batching = true;
@@ -396,10 +389,7 @@ var BookmarkPropertiesPanel = {
     if (!this._batching)
       return;
 
-    if (PlacesUIUtils.useAsyncTransactions) {
-      this._batchBlockingDeferred.resolve();
-      this._batchBlockingDeferred = null;
-    } else {
+    if (!PlacesUIUtils.useAsyncTransactions) {
       PlacesUtils.transactionManager.endBatch(false);
     }
     this._batching = false;
@@ -447,10 +437,9 @@ var BookmarkPropertiesPanel = {
     // that force it to commit more transactions.
     gEditItemOverlay.uninitPanel(true);
     this._endBatch();
-    if (PlacesUIUtils.useAsyncTransactions)
-      PlacesTransactions.undo().catch(Components.utils.reportError);
-    else
+    if (!PlacesUIUtils.useAsyncTransactions) {
       PlacesUtils.transactionManager.undoTransaction();
+    }
     window.arguments[0].performed = false;
   },
 

@@ -9,20 +9,33 @@
 typedef double DOMHighResTimeStamp;
 typedef sequence<PerformanceEntry> PerformanceEntryList;
 
-[Exposed=(Window,Worker)]
+[Exposed=(Window, Worker)]
 interface Performance {
+  DOMHighResTimeStamp now();
+};
+
+[Exposed=(Window)]
+partial interface Performance {
   readonly attribute PerformanceTiming timing;
   /*  readonly attribute PerformanceNavigation navigation; */
 };
 
-partial interface Performance {
-  DOMHighResTimeStamp now();
-};
-
 // https://w3c.github.io/performance-timeline/#extensions-to-the-performance-interface
+[Exposed=(Window, Worker)]
 partial interface Performance {
   PerformanceEntryList getEntries();
   PerformanceEntryList getEntriesByType(DOMString type);
   PerformanceEntryList getEntriesByName(DOMString name,
                                         optional DOMString type);
+};
+
+// https://w3c.github.io/user-timing/#extensions-performance-interface
+[Exposed=(Window,Worker)]
+partial interface Performance {
+  [Throws]
+  void mark(DOMString markName);
+  void clearMarks(optional DOMString markName);
+  [Throws]
+  void measure(DOMString measureName, optional DOMString startMark, optional DOMString endMark);
+  void clearMeasures(optional DOMString measureName);
 };

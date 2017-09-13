@@ -1436,8 +1436,13 @@ Function CheckInstall
     Return
   ${EndIf}
 
-  IntOp $ProgressCompleted $ProgressCompleted + 1
-  Call SetProgressBars
+  ${If} $ProgressCompleted < ${PROGRESS_BAR_INSTALL_END_STEP}
+    IntOp $0 ${PROGRESS_BAR_INSTALL_END_STEP} - ${PROGRESS_BAR_DOWNLOAD_END_STEP}
+    IntOp $0 $InstallCounterStep * $0
+    IntOp $0 $0 / $InstallTotalSteps
+    IntOp $ProgressCompleted ${PROGRESS_BAR_DOWNLOAD_END_STEP} + $0
+    Call SetProgressBars
+  ${EndIf}
 
   ${If} ${FileExists} "$INSTDIR\install.log"
     Delete "$INSTDIR\install.tmp"
@@ -1572,6 +1577,10 @@ Function LaunchApp
   FindWindow $0 "${WindowClass}"
   ${If} $0 <> 0 ; integer comparison
     StrCpy $FirefoxLaunchCode "1"
+
+    StrCpy $ProgressCompleted ${PROGRESS_BAR_TOTAL_STEPS}
+    Call SetProgressBars
+
     MessageBox MB_OK|MB_ICONQUESTION "$(WARN_MANUALLY_CLOSE_APP_LAUNCH)"
     Call SendPing
     Return

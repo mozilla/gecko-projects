@@ -130,7 +130,7 @@ RuleEditor.prototype = {
     let header = createChild(code, "div", {});
 
     this.selectorText = createChild(header, "span", {
-      class: "ruleview-selectorcontainer theme-fg-color3",
+      class: "ruleview-selectorcontainer",
       tabindex: this.isSelectorEditable ? "0" : "-1",
     });
 
@@ -275,7 +275,7 @@ RuleEditor.prototype = {
       this.rule.getOriginalSourceStrings().then((strings) => {
         sourceLabel.textContent = strings.short;
         sourceLabel.setAttribute("title", strings.full);
-      }, e => console.error(e)).then(() => {
+      }, console.error).then(() => {
         this.emit("source-link-updated");
       });
     } else {

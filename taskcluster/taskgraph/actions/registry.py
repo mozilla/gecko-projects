@@ -10,6 +10,7 @@ import json
 import os
 import inspect
 import re
+import yaml
 from slugid import nice as slugid
 from mozbuild.util import memoize
 from types import FunctionType
@@ -221,7 +222,7 @@ def register_callback_action(name, title, symbol, description, order=10000,
                         'GECKO_HEAD_REPOSITORY': parameters['head_repository'],
                         'GECKO_HEAD_REF': parameters['head_ref'],
                         'GECKO_HEAD_REV': parameters['head_rev'],
-                        'HG_STORE_PATH': '/home/builds/checkouts/hg-store',
+                        'HG_STORE_PATH': '/builds/worker/checkouts/hg-store',
                         'ACTION_TASK_GROUP_ID': task_group_id,
                         'ACTION_TASK_ID': {'$json': {'$eval': 'taskId'}},
                         'ACTION_TASK': {'$json': {'$eval': 'task'}},
@@ -324,9 +325,14 @@ def trigger_action_callback(task_group_id, task_id, task, input, callback, param
 def _load():
     # Load all modules from this folder, relying on the side-effects of register_
     # functions to populate the action registry.
-    for f in os.listdir(os.path.dirname(__file__)):
+    actions_dir = os.path.dirname(__file__)
+    for f in os.listdir(actions_dir):
         if f.endswith('.py') and f not in ('__init__.py', 'registry.py', 'util.py'):
             __import__('taskgraph.actions.' + f[:-3])
+        if f.endswith('.yml'):
+            with open(os.path.join(actions_dir, f), 'r') as d:
+                frontmatter, template = yaml.safe_load_all(d)
+                register_task_action(**frontmatter)(lambda _: template)
     return callbacks, actions
 
 

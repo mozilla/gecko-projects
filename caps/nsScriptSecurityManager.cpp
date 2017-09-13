@@ -769,13 +769,8 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
                              &hasFlags);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (hasFlags) {
-      nsString addonId;
-      aPrincipal->GetAddonId(addonId);
-
-      if (!addonId.IsEmpty()) {
-        return NS_OK;
-      }
+    if (hasFlags && BasePrincipal::Cast(aPrincipal)->AddonPolicy()) {
+      return NS_OK;
     }
 
     // If we get here, check all the schemes can link to each other, from the top down:
@@ -1306,7 +1301,7 @@ nsScriptSecurityManager::CanCreateWrapper(JSContext *cx,
 
     // We want to expose nsIDOMXULCommandDispatcher and nsITreeSelection implementations
     // in XBL scopes.
-    if (xpc::IsContentXBLScope(contextCompartment)) {
+    if (xpc::IsContentXBLCompartment(contextCompartment)) {
       nsCOMPtr<nsIDOMXULCommandDispatcher> dispatcher = do_QueryInterface(aObj);
       if (dispatcher) {
         return NS_OK;

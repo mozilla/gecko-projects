@@ -853,11 +853,8 @@ class MochitestDesktop(object):
             "Mochitest specific tbpl formatter")
         self.log = commandline.setup_logging("mochitest", logger_options, {"tbpl": sys.stdout})
 
-        # Jetpack flavors still don't use the structured logger. We need to process their output
-        # slightly differently.
-        structured = not self.flavor.startswith('jetpack')
         self.message_logger = MessageLogger(
-                logger=self.log, buffering=quiet, structured=structured)
+                logger=self.log, buffering=quiet, structured=True)
 
         # Max time in seconds to wait for server startup before tests will fail -- if
         # this seems big, it's mostly for debug machines where cold startup
@@ -936,7 +933,7 @@ class MochitestDesktop(object):
         if options.logFile:
             options.logFile = self.getLogFilePath(options.logFile)
 
-        if options.flavor in ('a11y', 'browser', 'chrome', 'jetpack-addon', 'jetpack-package'):
+        if options.flavor in ('a11y', 'browser', 'chrome'):
             self.makeTestConfig(options)
         else:
             if options.autorun:
@@ -1028,11 +1025,6 @@ class MochitestDesktop(object):
         if options.flavor == 'browser':
             allow_js_css = True
             testPattern = re.compile(r"browser_.+\.js")
-        elif options.flavor == 'jetpack-package':
-            allow_js_css = True
-            testPattern = re.compile(r"test-.+\.js")
-        elif options.flavor == 'jetpack-addon':
-            testPattern = re.compile(r".+\.xpi")
         elif options.flavor in ('a11y', 'chrome'):
             testPattern = re.compile(r"(browser|test)_.+\.(xul|html|js|xhtml)")
         else:
@@ -1076,7 +1068,7 @@ class MochitestDesktop(object):
 
         if options.flavor in ('a11y', 'chrome'):
             testURL = "/".join([testHost, self.CHROME_PATH])
-        elif options.flavor in ('browser', 'jetpack-addon', 'jetpack-package'):
+        elif options.flavor == 'browser':
             testURL = "about:blank"
         if options.nested_oop:
             testURL = "/".join([testHost, self.NESTED_OOP_TEST_PATH])
@@ -1662,9 +1654,9 @@ toolbar#nav-bar {
 
         return browserEnv
 
-    def killNamedOrphans(self, pname):
-        """ Kill orphan processes matching the given command name """
-        self.log.info("Checking for orphan %s processes..." % pname)
+    def killNamedProc(self, pname):
+        """ Kill processes matching the given command name """
+        self.log.info("Checking for %s processes..." % pname)
 
         def _psInfo(line):
             if pname in line:
@@ -1679,8 +1671,8 @@ toolbar#nav-bar {
             parts = line.split()
             if len(parts) == 3 and parts[0].isdigit():
                 pid = int(parts[0])
-                if parts[2] == pname and parts[1] == '1':
-                    self.log.info("killing %s orphan with pid %d" % (pname, pid))
+                if parts[2] == pname:
+                    self.log.info("killing %s with pid %d" % (pname, pid))
                     killPid(pid, self.log)
         process = mozprocess.ProcessHandler(['ps', '-o', 'pid,ppid,comm'],
                                             processOutputLine=_psKill)
@@ -2343,6 +2335,7 @@ toolbar#nav-bar {
             stepOptions = copy.deepcopy(options)
             stepOptions.repeat = VERIFY_REPEAT
             stepOptions.keep_open = False
+            stepOptions.runUntilFailure = True
             result = self.runTests(stepOptions)
             self.message_logger.finish()
             return result
@@ -2419,10 +2412,10 @@ toolbar#nav-bar {
         # Despite our efforts to clean up servers started by this script, in practice
         # we still see infrequent cases where a process is orphaned and interferes
         # with future tests, typically because the old server is keeping the port in use.
-        # Try to avoid those failures by checking for and killing orphan servers before
+        # Try to avoid those failures by checking for and killing servers before
         # trying to start new ones.
-        self.killNamedOrphans('ssltunnel')
-        self.killNamedOrphans('xpcshell')
+        self.killNamedProc('ssltunnel')
+        self.killNamedProc('xpcshell')
 
         if options.cleanupCrashes:
             mozcrash.cleanup_pending_crash_reports()
@@ -2431,7 +2424,7 @@ toolbar#nav-bar {
         self.logPreamble(tests)
         tests = [t for t in tests if 'disabled' not in t]
 
-        # Until we have all green, this does not run on jetpack*, or a11y (for perf reasons)
+        # Until we have all green, this does not run on a11y (for perf reasons)
         if not options.runByManifest:
             return self.runMochitests(options, [t['path'] for t in tests])
 

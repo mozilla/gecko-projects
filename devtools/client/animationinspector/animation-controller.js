@@ -18,7 +18,7 @@ var { loader, require } = Cu.import("resource://devtools/shared/Loader.jsm", {})
 var { Task } = require("devtools/shared/task");
 
 loader.lazyRequireGetter(this, "promise");
-loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/old-event-emitter");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 loader.lazyRequireGetter(this, "AnimationsFront", "devtools/shared/fronts/animation", true);
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
@@ -64,10 +64,10 @@ var shutdown = Task.async(function* () {
 
 // This is what makes the sidebar widget able to load/unload the panel.
 function setPanel(panel) {
-  return startup(panel).catch(e => console.error(e));
+  return startup(panel).catch(console.error);
 }
 function destroy() {
-  return shutdown().catch(e => console.error(e));
+  return shutdown().catch(console.error);
 }
 
 /**
@@ -261,7 +261,7 @@ var AnimationsController = {
 
     return this.animationsFront.toggleAll()
       .then(() => this.emit(this.ALL_ANIMATIONS_TOGGLED_EVENT, this))
-      .catch(e => console.error(e));
+      .catch(console.error);
   },
 
   /**

@@ -1541,7 +1541,8 @@ var Impl = {
       if (Telemetry.canRecordExtended) {
         GCTelemetry.init();
       }
-    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY);
+    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY,
+    testing ? 0 : undefined);
 
     delayedTask.arm();
   },
@@ -1699,7 +1700,24 @@ var Impl = {
       };
       p.push(TelemetryController.submitExternalPing(getPingType(shutdownPayload), shutdownPayload, options)
                                 .catch(e => this._log.error("saveShutdownPings - failed to submit shutdown ping", e)));
-     }
+
+      // Send a duplicate of first-shutdown pings as a new ping type, in order to properly
+      // evaluate first session profiles (see bug 1390095).
+      const sendFirstShutdownPing =
+        Services.prefs.getBoolPref(Utils.Preferences.ShutdownPingSender, false) &&
+        Services.prefs.getBoolPref(Utils.Preferences.FirstShutdownPingEnabled, false) &&
+        TelemetryReportingPolicy.isFirstRun();
+
+      if (sendFirstShutdownPing) {
+        let options = {
+            addClientId: true,
+            addEnvironment: true,
+            usePingSender: true,
+          };
+        p.push(TelemetryController.submitExternalPing("first-shutdown", shutdownPayload, options)
+                                  .catch(e => this._log.error("saveShutdownPings - failed to submit first shutdown ping", e)));
+      }
+    }
 
     // As a temporary measure, we want to submit saved-session too if extended Telemetry is enabled
     // to keep existing performance analysis working.

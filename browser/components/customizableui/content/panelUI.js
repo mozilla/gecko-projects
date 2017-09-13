@@ -318,15 +318,15 @@ const PanelUI = {
    *
    * @return a Promise that resolves once the panel is ready to roll.
    */
-  ensureReady() {
-    if (this._readyPromise) {
-      return this._readyPromise;
+  async ensureReady() {
+    if (this._isReady) {
+      return;
     }
+
+    await window.delayedStartupPromise;
     this._ensureEventListenersAdded();
     this.panel.hidden = false;
-    this._readyPromise = Promise.resolve();
     this._isReady = true;
-    return this._readyPromise;
   },
 
   /**
@@ -359,6 +359,9 @@ const PanelUI = {
 
     let domEvent = null;
     if (aEvent) {
+      if (aEvent.type == "mousedown" && aEvent.button != 0) {
+        return;
+      }
       if (aEvent.type == "command" && aEvent.inputSource != null) {
         // Synthesize a new DOM mouse event to pass on the inputSource.
         domEvent = document.createEvent("MouseEvent");

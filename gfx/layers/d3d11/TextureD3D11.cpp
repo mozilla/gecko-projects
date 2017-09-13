@@ -373,7 +373,7 @@ D3D11TextureData::SyncWithObject(SyncObjectClient* aSyncObject)
 }
 
 bool
-DXGITextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
+DXGITextureData::SerializeSpecific(SurfaceDescriptorD3D10* const aOutDesc)
 {
   RefPtr<IDXGIResource> resource;
   GetDXGIResource((IDXGIResource**)getter_AddRefs(resource));
@@ -387,8 +387,29 @@ DXGITextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
     return false;
   }
 
-  aOutDescriptor = SurfaceDescriptorD3D10((WindowsHandle)sharedHandle, mFormat, mSize);
+  *aOutDesc = SurfaceDescriptorD3D10((WindowsHandle)sharedHandle, mFormat, mSize);
   return true;
+}
+
+bool
+DXGITextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
+{
+  SurfaceDescriptorD3D10 desc;
+  if (!SerializeSpecific(&desc))
+    return false;
+
+  aOutDescriptor = Move(desc);
+  return true;
+}
+
+void
+DXGITextureData::GetSubDescriptor(GPUVideoSubDescriptor* const aOutDesc)
+{
+  SurfaceDescriptorD3D10 ret;
+  if (!SerializeSpecific(&ret))
+    return;
+
+  *aOutDesc = Move(ret);
 }
 
 DXGITextureData*
@@ -464,24 +485,33 @@ D3D11TextureData::Create(IntSize aSize, SurfaceFormat aFormat, SourceSurface* aS
     uploadDataPtr = &uploadData;
   }
 
+  // See bug 1397040
+  RefPtr<ID3D10Multithread> mt;
+  device->QueryInterface((ID3D10Multithread**)getter_AddRefs(mt));
+
   RefPtr<ID3D11Texture2D> texture11;
-  HRESULT hr = device->CreateTexture2D(&newDesc, uploadDataPtr, getter_AddRefs(texture11));
 
-  if (FAILED(hr) || !texture11) {
-    gfxCriticalNote << "[D3D11] 2 CreateTexture2D failure Size: " << aSize
-      << "texture11: " << texture11 << " Code: " << gfx::hexa(hr);
-    return nullptr;
-  }
+  {
+    D3D11MTAutoEnter lock(mt.forget());
 
-  if (srcSurf && DeviceManagerDx::Get()->HasCrashyInitData()) {
-    D3D11_BOX box;
-    box.front = box.top = box.left = 0;
-    box.back = 1;
-    box.right = aSize.width;
-    box.bottom = aSize.height;
-    RefPtr<ID3D11DeviceContext> ctx;
-    device->GetImmediateContext(getter_AddRefs(ctx));
-    ctx->UpdateSubresource(texture11, 0, &box, sourceMap.mData, sourceMap.mStride, 0);
+    HRESULT hr = device->CreateTexture2D(&newDesc, uploadDataPtr, getter_AddRefs(texture11));
+
+    if (FAILED(hr) || !texture11) {
+      gfxCriticalNote << "[D3D11] 2 CreateTexture2D failure Size: " << aSize
+        << "texture11: " << texture11 << " Code: " << gfx::hexa(hr);
+      return nullptr;
+    }
+
+    if (srcSurf && DeviceManagerDx::Get()->HasCrashyInitData()) {
+      D3D11_BOX box;
+      box.front = box.top = box.left = 0;
+      box.back = 1;
+      box.right = aSize.width;
+      box.bottom = aSize.height;
+      RefPtr<ID3D11DeviceContext> ctx;
+      device->GetImmediateContext(getter_AddRefs(ctx));
+      ctx->UpdateSubresource(texture11, 0, &box, sourceMap.mData, sourceMap.mStride, 0);
+    }
   }
 
   if (srcSurf) {
@@ -659,14 +689,32 @@ DXGIYCbCrTextureData::FillInfo(TextureData::Info& aInfo) const
   aInfo.hasSynchronization = false;
 }
 
-bool
-DXGIYCbCrTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
+void
+DXGIYCbCrTextureData::SerializeSpecific(SurfaceDescriptorDXGIYCbCr* const aOutDesc)
 {
-  aOutDescriptor = SurfaceDescriptorDXGIYCbCr(
+  *aOutDesc = SurfaceDescriptorDXGIYCbCr(
     (WindowsHandle)mHandles[0], (WindowsHandle)mHandles[1], (WindowsHandle)mHandles[2],
     mSize, mSizeY, mSizeCbCr
   );
+}
+
+bool
+DXGIYCbCrTextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
+{
+  SurfaceDescriptorDXGIYCbCr desc;
+  SerializeSpecific(&desc);
+
+  aOutDescriptor = Move(desc);
   return true;
+}
+
+void
+DXGIYCbCrTextureData::GetSubDescriptor(GPUVideoSubDescriptor* const aOutDesc)
+{
+  SurfaceDescriptorDXGIYCbCr desc;
+  SerializeSpecific(&desc);
+
+  *aOutDesc = Move(desc);
 }
 
 void
@@ -1024,7 +1072,7 @@ DXGITextureHostD3D11::GetWRImageKeys(nsTArray<wr::ImageKey>& aImageKeys,
 }
 
 void
-DXGITextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
+DXGITextureHostD3D11::AddWRImage(wr::ResourceUpdateQueue& aResources,
                                  Range<const wr::ImageKey>& aImageKeys,
                                  const wr::ExternalImageId& aExtID)
 {
@@ -1038,11 +1086,11 @@ DXGITextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
       MOZ_ASSERT(aImageKeys.length() == 1);
 
       wr::ImageDescriptor descriptor(GetSize(), GetFormat());
-      aAPI->AddExternalImage(aImageKeys[0],
-                             descriptor,
-                             aExtID,
-                             wr::WrExternalImageBufferType::Texture2DHandle,
-                             0);
+      aResources.AddExternalImage(aImageKeys[0],
+                                  descriptor,
+                                  aExtID,
+                                  wr::WrExternalImageBufferType::Texture2DHandle,
+                                  0);
       break;
     }
     case gfx::SurfaceFormat::NV12: {
@@ -1050,16 +1098,16 @@ DXGITextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
 
       wr::ImageDescriptor descriptor0(GetSize(), gfx::SurfaceFormat::A8);
       wr::ImageDescriptor descriptor1(GetSize() / 2, gfx::SurfaceFormat::R8G8);
-      aAPI->AddExternalImage(aImageKeys[0],
-                             descriptor0,
-                             aExtID,
-                             wr::WrExternalImageBufferType::TextureExternalHandle,
-                             0);
-      aAPI->AddExternalImage(aImageKeys[1],
-                             descriptor1,
-                             aExtID,
-                             wr::WrExternalImageBufferType::TextureExternalHandle,
-                             1);
+      aResources.AddExternalImage(aImageKeys[0],
+                                  descriptor0,
+                                  aExtID,
+                                  wr::WrExternalImageBufferType::TextureExternalHandle,
+                                  0);
+      aResources.AddExternalImage(aImageKeys[1],
+                                  descriptor1,
+                                  aExtID,
+                                  wr::WrExternalImageBufferType::TextureExternalHandle,
+                                  1);
       break;
     }
     default: {
@@ -1274,7 +1322,7 @@ DXGIYCbCrTextureHostD3D11::GetWRImageKeys(nsTArray<wr::ImageKey>& aImageKeys,
 }
 
 void
-DXGIYCbCrTextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
+DXGIYCbCrTextureHostD3D11::AddWRImage(wr::ResourceUpdateQueue& aResources,
                                       Range<const wr::ImageKey>& aImageKeys,
                                       const wr::ExternalImageId& aExtID)
 {
@@ -1299,7 +1347,7 @@ DXGIYCbCrTextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
   IntSize size = dataSourceSurface->GetSize();
   wr::ImageDescriptor descriptor(size, map.mStride, dataSourceSurface->GetFormat());
   auto slice = Range<uint8_t>(map.mData, size.height * map.mStride);
-  aAPI->AddImage(aImageKeys[0], descriptor, slice);
+  aResources.AddImage(aImageKeys[0], descriptor, slice);
 
   dataSourceSurface->Unmap();
 }

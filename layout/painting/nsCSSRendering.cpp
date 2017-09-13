@@ -3387,9 +3387,9 @@ DrawSolidBorderSegment(DrawTarget&          aDrawTarget,
                        nscolor              aColor,
                        int32_t              aAppUnitsPerDevPixel,
                        nscoord              aTwipsPerPixel,
-                       uint8_t              aStartBevelSide = 0,
+                       mozilla::Side        aStartBevelSide = mozilla::eSideTop,
                        nscoord              aStartBevelOffset = 0,
-                       uint8_t              aEndBevelSide = 0,
+                       mozilla::Side        aEndBevelSide = mozilla::eSideTop,
                        nscoord              aEndBevelOffset = 0)
 {
   ColorPattern color(ToDeviceColor(aColor));
@@ -3484,9 +3484,9 @@ nsCSSRendering::DrawTableBorderSegment(DrawTarget&   aDrawTarget,
                                        const nsRect& aBorder,
                                        int32_t       aAppUnitsPerDevPixel,
                                        int32_t       aAppUnitsPerCSSPixel,
-                                       uint8_t       aStartBevelSide,
+                                       mozilla::Side aStartBevelSide,
                                        nscoord       aStartBevelOffset,
-                                       uint8_t       aEndBevelSide,
+                                       mozilla::Side aEndBevelSide,
                                        nscoord       aEndBevelOffset)
 {
   bool horizontal = ((eSideTop == aStartBevelSide) || (eSideBottom == aStartBevelSide));

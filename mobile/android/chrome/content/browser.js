@@ -22,6 +22,9 @@ if (AppConstants.ACCESSIBILITY) {
                                     "resource://gre/modules/accessibility/AccessFu.jsm");
 }
 
+XPCOMUtils.defineLazyModuleGetter(this, "AsyncPrefs",
+                                  "resource://gre/modules/AsyncPrefs.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "Manifests",
                                   "resource://gre/modules/Manifest.jsm");
 
@@ -148,6 +151,10 @@ lazilyLoadedBrowserScripts.forEach(function (aScript) {
 var lazilyLoadedObserverScripts = [
   ["MemoryObserver", ["memory-pressure", "Memory:Dump"], "chrome://browser/content/MemoryObserver.js"],
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
+  ["ExtensionPermissions", ["webextension-permission-prompt",
+                            "webextension-update-permissions",
+                            "webextension-optional-permission-prompt"],
+   "chrome://browser/content/ExtensionPermissions.js"],
 ];
 
 lazilyLoadedObserverScripts.forEach(function (aScript) {
@@ -528,6 +535,9 @@ var BrowserApp = {
 
       InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished"));
       InitLater(() => GlobalEventDispatcher.sendRequest({ type: "Gecko:DelayedStartup" }));
+
+      // AsyncPrefs is needed for reader mode.
+      InitLater(() => AsyncPrefs.init());
 
       if (!AppConstants.RELEASE_OR_BETA) {
         InitLater(() => WebcompatReporter.init());
@@ -1732,6 +1742,9 @@ var BrowserApp = {
         let appLocale = this.getUALocalePref();
 
         this.computeAcceptLanguages(languageTag, appLocale);
+
+        // Rebuild strings, in case we're mirroring OS locale.
+        Strings.flush();
         break;
       }
 
@@ -1741,6 +1754,11 @@ var BrowserApp = {
         } else {
           Services.locale.setRequestedLocales([]);
         }
+
+        console.log("Gecko display locale: " + this.getUALocalePref());
+
+        // Rebuild strings to reflect the new locale.
+        Strings.flush();
 
         // Make sure we use the right Accept-Language header.
         let osLocale;
@@ -1896,6 +1914,15 @@ var BrowserApp = {
         };
 
         params.userRequested = url;
+
+        if (data.referrerURI) {
+          try {
+            params.referrerURI = Services.io.newURI(data.referrerURI);
+          } catch (e) {
+            console.warn("Tab:Load referrerURI is invalid - ignoring."); // don't log exception to avoid leaking urls.
+            params.referrerURI = null;
+          }
+        }
 
         if (data.engine) {
           let engine = Services.search.getEngineByName(data.engine);

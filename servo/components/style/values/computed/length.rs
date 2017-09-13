@@ -113,6 +113,12 @@ impl CalcLengthOrPercentage {
     #[inline]
     pub fn length(&self) -> Au {
         debug_assert!(self.percentage.is_none());
+        self.length_component()
+    }
+
+    /// Returns the length component of this `calc()`
+    #[inline]
+    pub fn length_component(&self) -> Au {
         self.clamping_mode.clamp(self.length)
     }
 
@@ -217,12 +223,13 @@ impl ToCss for CalcLengthOrPercentage {
 
 impl specified::CalcLengthOrPercentage {
     /// Compute the value, zooming any absolute units by the zoom function.
-    fn to_computed_value_with_zoom<F>(&self, context: &Context, zoom_fn: F) -> CalcLengthOrPercentage
+    fn to_computed_value_with_zoom<F>(&self, context: &Context, zoom_fn: F,
+                                      base_size: FontBaseSize) -> CalcLengthOrPercentage
         where F: Fn(Au) -> Au {
         let mut length = Au(0);
 
         if let Some(absolute) = self.absolute {
-            length += zoom_fn(absolute);
+            length += zoom_fn(absolute.to_computed_value(context));
         }
 
         for val in &[self.vw.map(ViewportPercentageLength::Vw),
@@ -239,7 +246,7 @@ impl specified::CalcLengthOrPercentage {
                      self.ex.map(FontRelativeLength::Ex),
                      self.rem.map(FontRelativeLength::Rem)] {
             if let Some(val) = *val {
-                length += val.to_computed_value(context, FontBaseSize::CurrentStyle);
+                length += val.to_computed_value(context, base_size);
             }
         }
 
@@ -251,8 +258,8 @@ impl specified::CalcLengthOrPercentage {
     }
 
     /// Compute font-size or line-height taking into account text-zoom if necessary.
-    pub fn to_computed_value_zoomed(&self, context: &Context) -> CalcLengthOrPercentage {
-        self.to_computed_value_with_zoom(context, |abs| context.maybe_zoom_text(abs.into()).0)
+    pub fn to_computed_value_zoomed(&self, context: &Context, base_size: FontBaseSize) -> CalcLengthOrPercentage {
+        self.to_computed_value_with_zoom(context, |abs| context.maybe_zoom_text(abs.into()).0, base_size)
     }
 }
 
@@ -260,14 +267,15 @@ impl ToComputedValue for specified::CalcLengthOrPercentage {
     type ComputedValue = CalcLengthOrPercentage;
 
     fn to_computed_value(&self, context: &Context) -> CalcLengthOrPercentage {
-        self.to_computed_value_with_zoom(context, |abs| abs)
+        // normal properties don't zoom, and compute em units against the current style's font-size
+        self.to_computed_value_with_zoom(context, |abs| abs, FontBaseSize::CurrentStyle)
     }
 
     #[inline]
     fn from_computed_value(computed: &CalcLengthOrPercentage) -> Self {
         specified::CalcLengthOrPercentage {
             clamping_mode: computed.clamping_mode,
-            absolute: Some(computed.length),
+            absolute: Some(AbsoluteLength::from_computed_value(&computed.length)),
             percentage: computed.percentage,
             ..Default::default()
         }
@@ -400,7 +408,7 @@ impl ToComputedValue for specified::LengthOrPercentage {
                 LengthOrPercentage::Percentage(value)
             }
             specified::LengthOrPercentage::Calc(ref calc) => {
-                LengthOrPercentage::Calc(calc.to_computed_value(context))
+                LengthOrPercentage::Calc((**calc).to_computed_value(context))
             }
         }
     }
@@ -494,7 +502,7 @@ impl ToComputedValue for specified::LengthOrPercentageOrAuto {
                 LengthOrPercentageOrAuto::Auto
             }
             specified::LengthOrPercentageOrAuto::Calc(ref calc) => {
-                LengthOrPercentageOrAuto::Calc(calc.to_computed_value(context))
+                LengthOrPercentageOrAuto::Calc((**calc).to_computed_value(context))
             }
         }
     }
@@ -583,7 +591,7 @@ impl ToComputedValue for specified::LengthOrPercentageOrNone {
                 LengthOrPercentageOrNone::Percentage(value)
             }
             specified::LengthOrPercentageOrNone::Calc(ref calc) => {
-                LengthOrPercentageOrNone::Calc(calc.to_computed_value(context))
+                LengthOrPercentageOrNone::Calc((**calc).to_computed_value(context))
             }
             specified::LengthOrPercentageOrNone::None => {
                 LengthOrPercentageOrNone::None

@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use dom::bindings::cell::DOMRefCell;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
 use dom::bindings::codegen::Bindings::EventSourceBinding::{EventSourceInit, EventSourceMethods, Wrap};
 use dom::bindings::error::{Error, Fallible};
 use dom::bindings::inheritance::Castable;
@@ -475,8 +474,6 @@ pub struct AnnounceConnectionRunnable {
 }
 
 impl Runnable for AnnounceConnectionRunnable {
-    fn name(&self) -> &'static str { "EventSource AnnounceConnectionRunnable" }
-
     // https://html.spec.whatwg.org/multipage/#announce-the-connection
     fn handler(self: Box<AnnounceConnectionRunnable>) {
         let event_source = self.event_source.root();
@@ -492,8 +489,6 @@ pub struct FailConnectionRunnable {
 }
 
 impl Runnable for FailConnectionRunnable {
-    fn name(&self) -> &'static str { "EventSource FailConnectionRunnable" }
-
     // https://html.spec.whatwg.org/multipage/#fail-the-connection
     fn handler(self: Box<FailConnectionRunnable>) {
         let event_source = self.event_source.root();
@@ -510,8 +505,6 @@ pub struct ReestablishConnectionRunnable {
 }
 
 impl Runnable for ReestablishConnectionRunnable {
-    fn name(&self) -> &'static str { "EventSource ReestablishConnectionRunnable" }
-
     // https://html.spec.whatwg.org/multipage/#reestablish-the-connection
     fn handler(self: Box<ReestablishConnectionRunnable>) {
         let event_source = self.event_source.root();
@@ -569,8 +562,6 @@ pub struct DispatchEventRunnable {
 }
 
 impl Runnable for DispatchEventRunnable {
-    fn name(&self) -> &'static str { "EventSource DispatchEventRunnable" }
-
     // https://html.spec.whatwg.org/multipage/#dispatchMessage
     fn handler(self: Box<DispatchEventRunnable>) {
         let event_source = self.event_source.root();

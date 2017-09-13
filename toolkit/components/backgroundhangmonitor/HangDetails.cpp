@@ -37,6 +37,13 @@ nsHangDetails::GetProcess(nsACString& aName)
 }
 
 NS_IMETHODIMP
+nsHangDetails::GetRemoteType(nsAString& aName)
+{
+  aName.Assign(mDetails.mRemoteType);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsHangDetails::GetAnnotations(JSContext* aCx, JS::MutableHandleValue aVal)
 {
   // We create an object with { "key" : "value" } string pairs for each item in
@@ -63,6 +70,30 @@ nsHangDetails::GetAnnotations(JSContext* aCx, JS::MutableHandleValue aVal)
   return NS_OK;
 }
 
+namespace  {
+
+nsresult
+StringFrame(JSContext* aCx,
+            JS::RootedObject& aTarget,
+            size_t aIndex,
+            const char* aString)
+{
+  JSString* jsString = JS_NewStringCopyZ(aCx, aString);
+  if (!jsString) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  JS::RootedString string(aCx, jsString);
+  if (!string) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  if (!JS_DefineElement(aCx, aTarget, aIndex, string, JSPROP_ENUMERATE)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  return NS_OK;
+}
+
+} // anonymous namespace
+
 NS_IMETHODIMP
 nsHangDetails::GetStack(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
 {
@@ -74,17 +105,8 @@ nsHangDetails::GetStack(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
     const HangStack::Frame& frame = mDetails.mStack[i];
     switch (frame.GetKind()) {
       case HangStack::Frame::Kind::STRING: {
-        JSString* jsString = JS_NewStringCopyZ(aCx, frame.AsString());
-        if (!jsString) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        JS::RootedString string(aCx, jsString);
-        if (!string) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        if (!JS_DefineElement(aCx, ret, i, string, JSPROP_ENUMERATE)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
+        nsresult rv = StringFrame(aCx, ret, i, frame.AsString());
+        NS_ENSURE_SUCCESS(rv, rv);
         break;
       }
 
@@ -131,6 +153,31 @@ nsHangDetails::GetStack(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
         }
         break;
       }
+
+      case HangStack::Frame::Kind::CONTENT: {
+        nsresult rv = StringFrame(aCx, ret, i, "(content script)");
+        NS_ENSURE_SUCCESS(rv, rv);
+        break;
+      }
+
+      case HangStack::Frame::Kind::JIT: {
+        nsresult rv = StringFrame(aCx, ret, i, "(jit frame)");
+        NS_ENSURE_SUCCESS(rv, rv);
+        break;
+      }
+
+      case HangStack::Frame::Kind::WASM: {
+        nsresult rv = StringFrame(aCx, ret, i, "(wasm)");
+        NS_ENSURE_SUCCESS(rv, rv);
+        break;
+      }
+
+      case HangStack::Frame::Kind::SUPPRESSED: {
+        nsresult rv = StringFrame(aCx, ret, i, "(profiling suppressed)");
+        NS_ENSURE_SUCCESS(rv, rv);
+        break;
+      }
+
       default:
         MOZ_ASSERT_UNREACHABLE("Invalid variant");
         break;
@@ -197,6 +244,7 @@ nsHangDetails::Submit()
     case GeckoProcessType_Content: {
       auto cc = dom::ContentChild::GetSingleton();
       if (cc) {
+        hangDetails->mDetails.mRemoteType.Assign(cc->GetRemoteType());
         Unused << cc->SendBHRThreadHang(hangDetails->mDetails);
       }
       break;
@@ -256,6 +304,7 @@ ParamTraits<mozilla::HangDetails>::Write(Message* aMsg, const mozilla::HangDetai
 {
   WriteParam(aMsg, aParam.mDuration);
   WriteParam(aMsg, aParam.mProcess);
+  WriteParam(aMsg, aParam.mRemoteType);
   WriteParam(aMsg, aParam.mThreadName);
   WriteParam(aMsg, aParam.mRunnableName);
   WriteParam(aMsg, aParam.mStack);
@@ -271,6 +320,9 @@ ParamTraits<mozilla::HangDetails>::Read(const Message* aMsg,
     return false;
   }
   if (!ReadParam(aMsg, aIter, &aResult->mProcess)) {
+    return false;
+  }
+  if (!ReadParam(aMsg, aIter, &aResult->mRemoteType)) {
     return false;
   }
   if (!ReadParam(aMsg, aIter, &aResult->mThreadName)) {

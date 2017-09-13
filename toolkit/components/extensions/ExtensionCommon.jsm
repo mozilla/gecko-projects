@@ -23,7 +23,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   ConsoleAPI: "resource://gre/modules/Console.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
-  Preferences: "resource://gre/modules/Preferences.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
 });
@@ -32,7 +31,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "@mozilla.org/content/style-sheet-service;1",
                                    "nsIStyleSheetService");
 
-const global = this;
+const global = Cu.getGlobalForObject(this);
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -46,7 +45,7 @@ var {
   getConsole,
   getInnerWindowID,
   getUniqueId,
-  instanceOf,
+  getWinUtils,
 } = ExtensionUtils;
 
 XPCOMUtils.defineLazyGetter(this, "console", getConsole);
@@ -196,8 +195,7 @@ class BaseContext {
 
   setContentWindow(contentWindow) {
     let {document} = contentWindow;
-    let docShell = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDocShell);
+    let {docShell} = document;
 
     this.innerWindowID = getInnerWindowID(contentWindow);
     this.messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -377,8 +375,10 @@ class BaseContext {
       return error;
     }
     let message, fileName;
-    if (instanceOf(error, "Object") || error instanceof ExtensionError ||
-        (typeof error == "object" && this.principal.subsumes(Cu.getObjectPrincipal(error)))) {
+    if (error && typeof error === "object" &&
+        (ChromeUtils.getClassName(error) === "Object" ||
+         error instanceof ExtensionError ||
+         this.principal.subsumes(Cu.getObjectPrincipal(error)))) {
       message = error.message;
       fileName = error.fileName;
     } else {
@@ -668,9 +668,7 @@ class LocalAPIImplementation extends SchemaAPIInterface {
     let promise;
     try {
       if (requireUserInput) {
-        let winUtils = this.context.contentWindow
-                           .getInterface(Ci.nsIDOMWindowUtils);
-        if (!winUtils.isHandlingUserInput) {
+        if (!getWinUtils(this.context.contentWindow).isHandlingUserInput) {
           throw new ExtensionError(`${this.name} may only be called from a user input handler`);
         }
       }
@@ -916,6 +914,10 @@ class CanOfAPIs {
  *       The list events which will trigger the module to be loaded, and
  *       its appropriate event handler method to be called. Currently
  *       only accepts "startup".
+ *
+ * @property {Array<string>} permissions
+ *       An optional list of permissions, any of which must be present
+ *       in order for the module to load.
  *
  * @property {Array<Array<string>>} paths
  *       A list of paths from the root API object which, when accessed,
@@ -1219,6 +1221,10 @@ class SchemaAPIManager extends EventEmitter {
   _checkGetAPI(name, extension, scope = null) {
     let module = this.modules.get(name);
 
+    if (module.permissions && !module.permissions.some(perm => extension.hasPermission(perm))) {
+      return false;
+    }
+
     if (!scope) {
       return true;
     }
@@ -1442,6 +1448,9 @@ LocaleData.prototype = {
   addLocale(locale, messages, extension) {
     let result = new Map();
 
+    let isPlainObject = obj => (obj && typeof obj === "object" &&
+                                ChromeUtils.getClassName(obj) === "Object");
+
     // Chrome does not document the semantics of its localization
     // system very well. It handles replacements by pre-processing
     // messages, replacing |$[a-zA-Z0-9@_]+$| tokens with the value of their
@@ -1453,7 +1462,7 @@ LocaleData.prototype = {
     // 1. It also accepts |$| followed by any number of sequential
     // digits, but refuses to process a localized string which
     // provides more than 9 substitutions.
-    if (!instanceOf(messages, "Object")) {
+    if (!isPlainObject(messages)) {
       extension.packagingError(`Invalid locale data for ${locale}`);
       return result;
     }
@@ -1461,7 +1470,7 @@ LocaleData.prototype = {
     for (let key of Object.keys(messages)) {
       let msg = messages[key];
 
-      if (!instanceOf(msg, "Object") || typeof(msg.message) != "string") {
+      if (!isPlainObject(msg) || typeof(msg.message) != "string") {
         extension.packagingError(`Invalid locale message data for ${locale}, message ${JSON.stringify(key)}`);
         continue;
       }
@@ -1469,7 +1478,7 @@ LocaleData.prototype = {
       // Substitutions are case-insensitive, so normalize all of their names
       // to lower-case.
       let placeholders = new Map();
-      if (instanceOf(msg.placeholders, "Object")) {
+      if (isPlainObject(msg.placeholders)) {
         for (let key of Object.keys(msg.placeholders)) {
           placeholders.set(key.toLowerCase(), msg.placeholders[key]);
         }
@@ -1477,7 +1486,7 @@ LocaleData.prototype = {
 
       let replacer = (match, name) => {
         let replacement = placeholders.get(name.toLowerCase());
-        if (instanceOf(replacement, "Object") && "content" in replacement) {
+        if (isPlainObject(replacement) && "content" in replacement) {
           return replacement.content;
         }
         return "";
@@ -1494,7 +1503,7 @@ LocaleData.prototype = {
   },
 
   get acceptLanguages() {
-    let result = Preferences.get("intl.accept_languages", "", Ci.nsIPrefLocalizedString);
+    let result = Services.prefs.getComplexValue("intl.accept_languages", Ci.nsIPrefLocalizedString).data;
     return result.split(/\s*,\s*/g);
   },
 
@@ -1558,13 +1567,13 @@ EventManager.prototype = {
     let fire = {
       sync: (...args) => {
         if (shouldFire()) {
-          return this.context.runSafe(callback, ...args);
+          return this.context.applySafe(callback, args);
         }
       },
       async: (...args) => {
         return Promise.resolve().then(() => {
           if (shouldFire()) {
-            return this.context.runSafe(callback, ...args);
+            return this.context.applySafe(callback, args);
           }
         });
       },
@@ -1572,12 +1581,12 @@ EventManager.prototype = {
         if (!shouldFire()) {
           throw new Error("Called raw() on unloaded/inactive context");
         }
-        return callback(...args);
+        return Reflect.apply(callback, null, args);
       },
       asyncWithoutClone: (...args) => {
         return Promise.resolve().then(() => {
           if (shouldFire()) {
-            return this.context.runSafeWithoutClone(callback, ...args);
+            return this.context.applySafeWithoutClone(callback, args);
           }
         });
       },

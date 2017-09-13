@@ -483,6 +483,8 @@ add_task(async function() {
 add_task(async function() {
   info("Cmd+k should focus the search box in the toolbar when it's present");
 
+  Services.prefs.setBoolPref("browser.search.widget.inNavBar", true);
+
   await BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, async function(browser) {
     await BrowserTestUtils.synthesizeMouseAtCenter("#brandLogo", {}, browser);
 
@@ -494,6 +496,8 @@ add_task(async function() {
     await promiseWaitForCondition(() => doc.activeElement === searchInput);
     is(searchInput, doc.activeElement, "Search bar should be the active element.");
   });
+
+  Services.prefs.clearUserPref("browser.search.widget.inNavBar");
 });
 
 add_task(async function() {
@@ -528,7 +532,7 @@ add_task(async function() {
 
   await BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, async function(browser) {
     info("Waiting for about:addons tab to open...");
-    let promiseTabOpened = BrowserTestUtils.waitForNewTab(gBrowser, "about:addons");
+    let promiseTabLoaded = BrowserTestUtils.browserLoaded(browser, false, "about:addons");
 
     await ContentTask.spawn(browser, null, async function() {
       let addOnsButton = content.document.getElementById("addons");
@@ -536,10 +540,9 @@ add_task(async function() {
     });
     await BrowserTestUtils.synthesizeKey(" ", {}, browser);
 
-    let tab = await promiseTabOpened;
-    is(tab.linkedBrowser.currentURI.spec, "about:addons",
+    await promiseTabLoaded;
+    is(browser.currentURI.spec, "about:addons",
       "Should have seen the about:addons tab");
-    await BrowserTestUtils.removeTab(tab);
   });
 });
 

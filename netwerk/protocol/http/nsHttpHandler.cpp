@@ -198,6 +198,10 @@ nsHttpHandler::nsHttpHandler()
     , mThrottleResumeIn(400)
     , mThrottleTimeWindow(3000)
     , mUrgentStartEnabled(true)
+    , mTailBlockingEnabled(true)
+    , mTailDelayQuantum(600)
+    , mTailDelayQuantumAfterDCL(100)
+    , mTailDelayMax(6000)
     , mRedirectionLimit(10)
     , mPhishyUserPassLength(1)
     , mQoSBits(0x00)
@@ -457,16 +461,12 @@ nsHttpHandler::Init()
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
 
-    // Generating the spoofed userAgent for fingerprinting resistance.
-    // The browser version will be rounded down to a multiple of 10.
-    // By doing so, the anonymity group will cover more versions instead of one
-    // version.
-    uint32_t spoofedVersion = mAppVersion.ToInteger(&rv);
-    if (NS_SUCCEEDED(rv)) {
-        spoofedVersion = spoofedVersion - (spoofedVersion % 10);
-        mSpoofedUserAgent.Assign(nsPrintfCString(
-            "Mozilla/5.0 (%s; rv:%d.0) Gecko/%s Firefox/%d.0",
-            SPOOFED_OSCPU, spoofedVersion, LEGACY_BUILD_ID, spoofedVersion));
+    // Generating the spoofed User Agent for fingerprinting resistance.
+    rv = nsRFPService::GetSpoofedUserAgent(mSpoofedUserAgent);
+    if (NS_FAILED(rv)) {
+      // Empty mSpoofedUserAgent to make sure the unsuccessful spoofed UA string
+      // will not be used anywhere.
+      mSpoofedUserAgent.Truncate();
     }
 
     mSessionStartTime = NowInSeconds();
@@ -1653,6 +1653,22 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         Unused << prefs->GetBoolPref(HTTP_PREF("on_click_priority"), &mUrgentStartEnabled);
     }
 
+    if (PREF_CHANGED(HTTP_PREF("tailing.enabled"))) {
+        Unused << prefs->GetBoolPref(HTTP_PREF("tailing.enabled"), &mTailBlockingEnabled);
+    }
+    if (PREF_CHANGED(HTTP_PREF("tailing.delay-quantum"))) {
+        Unused << prefs->GetIntPref(HTTP_PREF("tailing.delay-quantum"), &val);
+        mTailDelayQuantum = (uint32_t)clamped(val, 0, 60000);
+    }
+    if (PREF_CHANGED(HTTP_PREF("tailing.delay-quantum-after-domcontentloaded"))) {
+        Unused << prefs->GetIntPref(HTTP_PREF("tailing.delay-quantum-after-domcontentloaded"), &val);
+        mTailDelayQuantumAfterDCL = (uint32_t)clamped(val, 0, 60000);
+    }
+    if (PREF_CHANGED(HTTP_PREF("tailing.delay-max"))) {
+        Unused << prefs->GetIntPref(HTTP_PREF("tailing.delay-max"), &val);
+        mTailDelayMax = (uint32_t)clamped(val, 0, 60000);
+    }
+
     if (PREF_CHANGED(HTTP_PREF("focused_window_transaction_ratio"))) {
         float ratio = 0;
         rv = prefs->GetFloatPref(HTTP_PREF("focused_window_transaction_ratio"), &ratio);
@@ -2258,6 +2274,15 @@ nsHttpHandler::GetMisc(nsACString &value)
     value = mMisc;
     return NS_OK;
 }
+
+NS_IMETHODIMP
+nsHttpHandler::DontPreconnect(nsACString const &host, int32_t port)
+{
+    if (mConnMgr) {
+        mConnMgr->DontPreconnect(host, port);
+    }
+    return NS_OK;
+};
 
 //-----------------------------------------------------------------------------
 // nsHttpHandler::nsIObserver

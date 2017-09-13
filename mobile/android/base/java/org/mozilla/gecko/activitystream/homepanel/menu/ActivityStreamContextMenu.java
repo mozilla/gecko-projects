@@ -18,6 +18,7 @@ import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.activitystream.ActivityStreamTelemetry;
 import org.mozilla.gecko.activitystream.homepanel.model.WebpageModel;
+import org.mozilla.gecko.activitystream.homepanel.topstories.PocketStoriesLoader;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.home.HomePager;
@@ -89,10 +90,10 @@ public abstract class ActivityStreamContextMenu
             pinItem.setTitle(R.string.contextmenu_top_sites_unpin);
         }
 
-        // Disable "dismiss" for topsites until we have decided on its behaviour for topsites
+        // Disable "dismiss" for topsites and topstories until we have decided on its behaviour
         // (currently "dismiss" adds the URL to a highlights-specific blocklist, which the topsites
         // query has no knowledge of).
-        if (mode == MenuMode.TOPSITE) {
+        if (mode == MenuMode.TOPSITE || mode == MenuMode.TOPSTORY) {
             final MenuItem dismissItem = getItemByID(R.id.dismiss);
             dismissItem.setVisible(false);
         }
@@ -181,6 +182,8 @@ public abstract class ActivityStreamContextMenu
         // information to handle correctly.
         telemetryExtraBuilder.fromMenuItemId(menuItemId);
 
+        final String referrerUri = mode == MenuMode.TOPSTORY ? PocketStoriesLoader.POCKET_REFERRER_URI : null;
+
         switch (menuItem.getItemId()) {
             case R.id.share:
                 // NB: Generic menu item action event will be sent at the end of this function.
@@ -225,12 +228,12 @@ public abstract class ActivityStreamContextMenu
 
                         if (item.isBookmarked()) {
                             db.removeBookmarksWithURL(context.getContentResolver(), item.getUrl());
-
                         } else {
                             // We only store raw URLs in history (and bookmarks), hence we won't ever show about:reader
                             // URLs in AS topsites or highlights. Therefore we don't need to do any special about:reader handling here.
                             db.addBookmark(context.getContentResolver(), item.getTitle(), item.getUrl());
                         }
+                        item.onStateCommitted();
                     }
                 });
                 break;
@@ -254,6 +257,7 @@ public abstract class ActivityStreamContextMenu
                         } else {
                             db.pinSiteForAS(context.getContentResolver(), item.getUrl(), item.getTitle());
                         }
+                        item.onStateCommitted();
                     }
                 });
                 break;
@@ -267,11 +271,13 @@ public abstract class ActivityStreamContextMenu
                 break;
 
             case R.id.open_new_tab:
-                onUrlOpenInBackgroundListener.onUrlOpenInBackground(item.getUrl(), EnumSet.noneOf(HomePager.OnUrlOpenInBackgroundListener.Flags.class));
+                onUrlOpenInBackgroundListener.onUrlOpenInBackgroundWithReferrer(item.getUrl(), referrerUri,
+                        EnumSet.noneOf(HomePager.OnUrlOpenInBackgroundListener.Flags.class));
                 break;
 
             case R.id.open_new_private_tab:
-                onUrlOpenInBackgroundListener.onUrlOpenInBackground(item.getUrl(), EnumSet.of(HomePager.OnUrlOpenInBackgroundListener.Flags.PRIVATE));
+                onUrlOpenInBackgroundListener.onUrlOpenInBackgroundWithReferrer(item.getUrl(), referrerUri,
+                        EnumSet.of(HomePager.OnUrlOpenInBackgroundListener.Flags.PRIVATE));
                 break;
 
             case R.id.dismiss:

@@ -8,6 +8,7 @@
 #define mozilla_SchedulerGroup_h
 
 #include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/TaskCategory.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/TimeStamp.h"
@@ -40,7 +41,7 @@ class TabGroup;
 // only functionality offered by a SchedulerGroup is the ability to dispatch
 // runnables to the group. TabGroup, DocGroup, and SystemGroup are the concrete
 // implementations of SchedulerGroup.
-class SchedulerGroup
+class SchedulerGroup : public LinkedListElement<SchedulerGroup>
 {
 public:
   SchedulerGroup();
@@ -72,6 +73,36 @@ public:
   void ValidateAccess() const
   {
     MOZ_ASSERT(IsSafeToRun());
+  }
+
+  enum EnqueueStatus
+  {
+    NewlyQueued,
+    AlreadyQueued,
+  };
+
+  // Records that this SchedulerGroup had an event enqueued in some
+  // queue. Returns whether the SchedulerGroup was already in a queue before
+  // EnqueueEvent() was called.
+  EnqueueStatus EnqueueEvent()
+  {
+    mEventCount++;
+    return mEventCount == 1 ? NewlyQueued : AlreadyQueued;
+  }
+
+  enum DequeueStatus
+  {
+    StillQueued,
+    NoLongerQueued,
+  };
+
+  // Records that this SchedulerGroup had an event dequeued from some
+  // queue. Returns whether the SchedulerGroup is still in a queue after
+  // DequeueEvent() returns.
+  DequeueStatus DequeueEvent()
+  {
+    mEventCount--;
+    return mEventCount == 0 ? NoLongerQueued : StillQueued;
   }
 
   class Runnable final : public mozilla::Runnable
@@ -165,6 +196,10 @@ protected:
   static MOZ_THREAD_LOCAL(bool) sTlsValidatingAccess;
 
   bool mIsRunning;
+
+  // Number of events that are currently enqueued for this SchedulerGroup
+  // (across all queues).
+  size_t mEventCount = 0;
 
   nsCOMPtr<nsISerialEventTarget> mEventTargets[size_t(TaskCategory::Count)];
   RefPtr<AbstractThread> mAbstractThreads[size_t(TaskCategory::Count)];

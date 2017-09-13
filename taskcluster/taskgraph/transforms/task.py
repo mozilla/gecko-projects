@@ -10,6 +10,7 @@ complexities of worker implementations, scopes, and treeherder annotations.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import hashlib
 import json
 import os
 import re
@@ -55,6 +56,9 @@ task_description_schema = Schema({
     # attributes for this task
     Optional('attributes'): {basestring: object},
 
+    # relative path (from config.path) to the file task was defined in
+    Optional('job-from'): basestring,
+
     # dependencies of this task, keyed by name; these are passed through
     # verbatim and subject to the interpretation of the Task's get_dependencies
     # method.
@@ -76,7 +80,7 @@ task_description_schema = Schema({
     Optional('scopes'): [basestring],
 
     # Tags
-    Optional('tags'): {basestring: object},
+    Optional('tags'): {basestring: basestring},
 
     # custom "task.extra" content
     Optional('extra'): {basestring: object},
@@ -476,14 +480,16 @@ GROUP_NAMES = {
     'tc-R': 'Reftests executed by TaskCluster',
     'tc-R-e10s': 'Reftests executed by TaskCluster with e10s',
     'tc-T': 'Talos performance tests executed by TaskCluster',
-    'tc-Ts': 'Talos Stylo performance tests executed by TaskCluster',
+    'tc-Tsd': 'Talos performance tests executed by TaskCluster with Stylo disabled',
+    'tc-Tss': 'Talos performance tests executed by TaskCluster with Stylo sequential',
     'tc-T-e10s': 'Talos performance tests executed by TaskCluster with e10s',
-    'tc-Ts-e10s': 'Talos Stylo performance tests executed by TaskCluster with e10s',
+    'tc-Tsd-e10s': 'Talos performance tests executed by TaskCluster with e10s, Stylo disabled',
+    'tc-Tss-e10s': 'Talos performance tests executed by TaskCluster with e10s, Stylo sequential',
     'tc-tt-c': 'Telemetry client marionette tests',
     'tc-tt-c-e10s': 'Telemetry client marionette tests with e10s',
     'tc-SY-e10s': 'Are we slim yet tests by TaskCluster with e10s',
-    'tc-SY-stylo-e10s': 'Are we slim yet tests by TaskCluster with e10s, stylo',
-    'tc-SY-stylo-seq-e10s': 'Are we slim yet tests by TaskCluster with e10s, stylo sequential',
+    'tc-SYsd-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo disabled',
+    'tc-SYss-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo sequential',
     'tc-VP': 'VideoPuppeteer tests executed by TaskCluster',
     'tc-W': 'Web platform tests executed by TaskCluster',
     'tc-W-e10s': 'Web platform tests executed by TaskCluster with e10s',
@@ -698,7 +704,17 @@ def build_docker_worker_payload(config, task, task_def):
             }
         payload['artifacts'] = artifacts
 
-    run_task = payload.get('command', [''])[0].endswith('run-task')
+    if isinstance(worker.get('docker-image'), basestring):
+        out_of_tree_image = worker['docker-image']
+    else:
+        out_of_tree_image = None
+
+    run_task = any([
+        payload.get('command', [''])[0].endswith('run-task'),
+        # image_builder is special and doesn't get detected like other tasks.
+        # It uses run-task so it needs our cache manipulations.
+        (out_of_tree_image or '').startswith('taskcluster/image_builder'),
+    ])
 
     if 'caches' in worker:
         caches = {}
@@ -710,9 +726,26 @@ def build_docker_worker_payload(config, task, task_def):
         # So, any time run-task changes, we should get a fresh set of caches.
         # This means run-task can make changes to cache interaction at any time
         # without regards for backwards or future compatibility.
-
+        #
+        # But this mechanism only works for in-tree Docker images that are built
+        # with the current run-task! For out-of-tree Docker images, we have no
+        # way of knowing their content of run-task. So, in addition to varying
+        # cache names by the contents of run-task, we also take the Docker image
+        # name into consideration. This means that different Docker images will
+        # never share the same cache. This is a bit unfortunate. But it is the
+        # safest thing to do. Fortunately, most images are defined in-tree.
+        #
+        # For out-of-tree Docker images, we don't strictly need to incorporate
+        # the run-task content into the cache name. However, doing so preserves
+        # the mechanism whereby changing run-task results in new caches
+        # everywhere.
         if run_task:
             suffix = '-%s' % _run_task_suffix()
+
+            if out_of_tree_image:
+                name_hash = hashlib.sha256(out_of_tree_image).hexdigest()
+                suffix += name_hash[0:12]
+
         else:
             suffix = ''
 

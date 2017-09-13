@@ -65,9 +65,6 @@ this.sidebarAction = class extends ExtensionAPI {
                                      extension);
 
     // We need to ensure our elements are available before session restore.
-    for (let window of windowTracker.browserWindows()) {
-      this.createMenuItem(window, this.defaults);
-    }
     this.windowOpenListener = (window) => {
       this.createMenuItem(window, this.defaults);
     };
@@ -137,11 +134,10 @@ this.sidebarAction = class extends ExtensionAPI {
                        (evt, tab) => { this.updateWindow(tab.ownerGlobal); });
 
     let install = this.extension.startupReason === "ADDON_INSTALL";
-    let upgrade = ["ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(this.extension.startupReason);
     for (let window of windowTracker.browserWindows()) {
       this.updateWindow(window);
       let {SidebarUI} = window;
-      if (install || (upgrade && SidebarUI.lastOpenedId == this.id)) {
+      if (install || SidebarUI.lastOpenedId == this.id) {
         SidebarUI.show(this.id);
       }
     }
@@ -420,6 +416,9 @@ this.sidebarAction = class extends ExtensionAPI {
             url = null;
           } else if (details.panel !== "") {
             url = context.uri.resolve(details.panel);
+            if (!context.checkLoadURL(url)) {
+              return Promise.reject({message: `Access denied for URL ${url}`});
+            }
           } else {
             throw new ExtensionError("Invalid url for sidebar panel.");
           }

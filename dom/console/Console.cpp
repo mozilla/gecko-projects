@@ -1052,6 +1052,11 @@ void
 Console::ProfileMethodInternal(JSContext* aCx, const nsAString& aAction,
                                const Sequence<JS::Value>& aData)
 {
+  // Make all Console API no-op if DevTools aren't enabled.
+  if (!nsContentUtils::DevToolsEnabled(aCx)) {
+    return;
+  }
+
   if (!NS_IsMainThread()) {
     // Here we are in a worker thread.
     RefPtr<ConsoleProfileRunnable> runnable =
@@ -1200,6 +1205,10 @@ Console::MethodInternal(JSContext* aCx, MethodName aMethodName,
                         const nsAString& aMethodString,
                         const Sequence<JS::Value>& aData)
 {
+  // Make all Console API no-op if DevTools aren't enabled.
+  if (!nsContentUtils::DevToolsEnabled(aCx)) {
+    return;
+  }
   AssertIsOnOwningThread();
 
   RefPtr<ConsoleCallData> callData(new ConsoleCallData());
@@ -1649,11 +1658,10 @@ Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
                                     JS::PrivateValue(aData->mStack.get()));
 
       if (NS_WARN_IF(!JS_DefineProperty(aCx, eventObj, "stacktrace",
-                                        JS::UndefinedHandleValue,
-                                        JSPROP_ENUMERATE | JSPROP_SHARED |
-                                        JSPROP_GETTER | JSPROP_SETTER,
                                         JS_DATA_TO_FUNC_PTR(JSNative, funObj.get()),
-                                        nullptr))) {
+                                        nullptr,
+                                        JSPROP_ENUMERATE | JSPROP_SHARED |
+                                        JSPROP_GETTER | JSPROP_SETTER))) {
         return false;
       }
     }

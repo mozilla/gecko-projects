@@ -13,9 +13,6 @@ pref("devtools.devedition.promo.url", "https://www.mozilla.org/firefox/developer
   pref("devtools.devedition.promo.enabled", false);
 #endif
 
-// DevTools development workflow
-pref("devtools.loader.hotreload", false);
-
 // Developer toolbar preferences
 pref("devtools.toolbar.enabled", true);
 
@@ -290,10 +287,11 @@ pref("devtools.webconsole.ui.filterbar", false);
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 50);
 
-// Persistent logging: |true| if you want the Web Console to keep all of the
+// Persistent logging: |true| if you want the relevant tool to keep all of the
 // logged messages after reloading the page, |false| if you want the output to
 // be cleared each time page navigation happens.
 pref("devtools.webconsole.persistlog", false);
+pref("devtools.netmonitor.persistlog", false);
 
 // Web Console timestamp: |true| if you want the logs and instructions
 // in the Web Console to display a timestamp, or |false| to not display
@@ -305,11 +303,7 @@ pref("devtools.webconsole.timestampMessages", false);
 pref("devtools.webconsole.autoMultiline", true);
 
 // Enable the new webconsole frontend
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
 pref("devtools.webconsole.new-frontend-enabled", true);
-#else
-pref("devtools.webconsole.new-frontend-enabled", false);
-#endif
 
 // Enable client-side mapping service for source maps
 pref("devtools.source-map.client-service.enabled", true);

@@ -514,12 +514,10 @@ class TabTracker extends TabTrackerBase {
   }
 
   getBrowserData(browser) {
-    if (browser.ownerGlobal.location.href === "about:addons") {
+    if (browser.ownerDocument.documentURI === "about:addons") {
       // When we're loaded into a <browser> inside about:addons, we need to go up
       // one more level.
-      browser = browser.ownerGlobal.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDocShell)
-                       .chromeEventHandler;
+      browser = browser.ownerDocument.docShell.chromeEventHandler;
     }
 
     let result = {
@@ -567,6 +565,10 @@ class Tab extends TabBase {
 
   get browser() {
     return this.nativeTab.linkedBrowser;
+  }
+
+  get discarded() {
+    return !this.nativeTab.linkedPanel;
   }
 
   get frameLoader() {
@@ -719,7 +721,7 @@ class Window extends WindowBase {
     }
   }
 
-  get title() {
+  get _title() {
     return this.window.document.title;
   }
 
@@ -822,6 +824,12 @@ class Window extends WindowBase {
     for (let nativeTab of this.window.gBrowser.tabs) {
       yield tabManager.getWrapper(nativeTab);
     }
+  }
+
+  get activeTab() {
+    let {tabManager} = this.extension;
+
+    return tabManager.getWrapper(this.window.gBrowser.selectedTab);
   }
 
   /**

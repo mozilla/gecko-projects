@@ -15,6 +15,7 @@
 #include "mozilla/Preferences.h"
 #include "nsIAddonInterposition.h"
 #include "nsIXULRuntime.h"
+#include "mozJSComponentLoader.h"
 
 #include "mozilla/dom/BindingUtils.h"
 
@@ -95,9 +96,7 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
         mWrappedNativeProtoMap(ClassInfo2WrappedNativeProtoMap::newMap(XPC_NATIVE_PROTO_MAP_LENGTH)),
         mComponents(nullptr),
         mNext(nullptr),
-        mGlobalJSObject(aGlobal),
-        mIsContentXBLScope(false),
-        mIsAddonScope(false)
+        mGlobalJSObject(aGlobal)
 {
     // add ourselves to the scopes list
     {
@@ -135,11 +134,11 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
     // Determine whether to use an XBL scope.
     mUseContentXBLScope = mAllowContentXBLScope;
     if (mUseContentXBLScope) {
-      const js::Class* clasp = js::GetObjectClass(mGlobalJSObject);
-      mUseContentXBLScope = !strcmp(clasp->name, "Window");
+        const js::Class* clasp = js::GetObjectClass(mGlobalJSObject);
+        mUseContentXBLScope = !strcmp(clasp->name, "Window");
     }
     if (mUseContentXBLScope) {
-      mUseContentXBLScope = principal && !nsContentUtils::IsSystemPrincipal(principal);
+        mUseContentXBLScope = principal && !nsContentUtils::IsSystemPrincipal(principal);
     }
 
     JSAddonId* addonId = JS::AddonIdOfObject(aGlobal);
@@ -150,22 +149,27 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext* cx,
         if (!waiveInterposition && interposition) {
             MOZ_RELEASE_ASSERT(isSystem);
             mInterposition = interposition->value();
+            priv->hasInterposition = HasInterposition();
         }
         // We also want multiprocessCompatible add-ons to have a default interposition.
         if (!mInterposition && addonId && isSystem) {
-          bool interpositionEnabled = mozilla::Preferences::GetBool(
-            "extensions.interposition.enabled", false);
-          if (interpositionEnabled) {
-            mInterposition = do_GetService("@mozilla.org/addons/default-addon-shims;1");
-            MOZ_ASSERT(mInterposition);
-            UpdateInterpositionWhitelist(cx, mInterposition);
-          }
+            bool interpositionEnabled = mozilla::Preferences::GetBool(
+                "extensions.interposition.enabled", false);
+            if (interpositionEnabled) {
+                mInterposition = do_GetService("@mozilla.org/addons/default-addon-shims;1");
+                MOZ_ASSERT(mInterposition);
+                priv->hasInterposition = true;
+                UpdateInterpositionWhitelist(cx, mInterposition);
+            }
         }
+        MOZ_ASSERT(HasInterposition() == priv->hasInterposition);
     }
 
     if (addonId) {
         // We forbid CPOWs unless they're specifically allowed.
         priv->allowCPOWs = gAllowCPOWAddonSet ? gAllowCPOWAddonSet->has(addonId) : false;
+        MOZ_ASSERT(!mozJSComponentLoader::Get()->IsLoaderGlobal(aGlobal),
+                   "Don't load addons into the shared JSM global");
     }
 }
 
@@ -260,7 +264,7 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
 {
     JS::RootedObject global(cx, GetGlobalJSObject());
     MOZ_ASSERT(js::IsObjectInContextCompartment(global, cx));
-    MOZ_ASSERT(!mIsContentXBLScope);
+    MOZ_ASSERT(!IsContentXBLScope());
     MOZ_ASSERT(strcmp(js::GetObjectClass(global)->name,
                       "nsXBLPrototypeScript compilation scope"));
 
@@ -288,6 +292,7 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     options.wantComponents = true;
     options.proto = global;
     options.sameZoneAs = global;
+    options.isContentXBLScope = true;
 
     // Use an ExpandedPrincipal to create asymmetric security.
     nsIPrincipal* principal = GetPrincipal();
@@ -306,8 +311,7 @@ XPCWrappedNativeScope::EnsureContentXBLScope(JSContext* cx)
     NS_ENSURE_SUCCESS(rv, nullptr);
     mContentXBLScope = &v.toObject();
 
-    // Tag it.
-    CompartmentPrivate::Get(js::UncheckedUnwrap(mContentXBLScope))->scope->mIsContentXBLScope = true;
+    MOZ_ASSERT(xpc::IsInContentXBLScope(js::UncheckedUnwrap(mContentXBLScope)));
 
     // Good to go!
     return mContentXBLScope;
@@ -391,8 +395,8 @@ XPCWrappedNativeScope::EnsureAddonScope(JSContext* cx, JSAddonId* addonId)
 {
     JS::RootedObject global(cx, GetGlobalJSObject());
     MOZ_ASSERT(js::IsObjectInContextCompartment(global, cx));
-    MOZ_ASSERT(!mIsContentXBLScope);
-    MOZ_ASSERT(!mIsAddonScope);
+    MOZ_ASSERT(!IsContentXBLScope());
+    MOZ_ASSERT(!IsAddonScope());
     MOZ_ASSERT(addonId);
     MOZ_ASSERT(nsContentUtils::IsSystemPrincipal(GetPrincipal()));
 
@@ -424,7 +428,7 @@ XPCWrappedNativeScope::EnsureAddonScope(JSContext* cx, JSAddonId* addonId)
     NS_ENSURE_SUCCESS(rv, nullptr);
     mAddonScopes.AppendElement(&v.toObject());
 
-    CompartmentPrivate::Get(js::UncheckedUnwrap(&v.toObject()))->scope->mIsAddonScope = true;
+    CompartmentPrivate::Get(js::UncheckedUnwrap(&v.toObject()))->isAddonCompartment = true;
     return &v.toObject();
 }
 

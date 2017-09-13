@@ -95,10 +95,10 @@ BlankAudioDataCreator::Create(MediaRawData* aSample)
   // rounding errors, so we get a consistent tone.
   CheckedInt64 frames = UsecsToFrames(
     aSample->mDuration.ToMicroseconds()+1, mSampleRate);
-  if (!frames.isValid()
-      || !mChannelCount
-      || !mSampleRate
-      || frames.value() > (UINT32_MAX / mChannelCount)) {
+  if (!frames.isValid() ||
+      !mChannelCount ||
+      !mSampleRate ||
+      frames.value() > (UINT32_MAX / mChannelCount)) {
     return nullptr;
   }
   AlignedAudioBuffer samples(frames.value() * mChannelCount);
@@ -131,8 +131,8 @@ BlankDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
   const VideoInfo& config = aParams.VideoConfig();
   UniquePtr<DummyDataCreator> creator =
     MakeUnique<BlankVideoDataCreator>(config.mDisplay.width, config.mDisplay.height, aParams.mImageContainer);
-  RefPtr<MediaDataDecoder> decoder =
-    new DummyMediaDataDecoder(Move(creator), "blank media data decoder", aParams);
+  RefPtr<MediaDataDecoder> decoder = new DummyMediaDataDecoder(
+    Move(creator), NS_LITERAL_CSTRING("blank media data decoder"), aParams);
   return decoder.forget();
 }
 
@@ -142,8 +142,8 @@ BlankDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
   const AudioInfo& config = aParams.AudioConfig();
   UniquePtr<DummyDataCreator> creator =
     MakeUnique<BlankAudioDataCreator>(config.mChannels, config.mRate);
-  RefPtr<MediaDataDecoder> decoder =
-    new DummyMediaDataDecoder(Move(creator), "blank media data decoder", aParams);
+  RefPtr<MediaDataDecoder> decoder = new DummyMediaDataDecoder(
+    Move(creator), NS_LITERAL_CSTRING("blank media data decoder"), aParams);
   return decoder.forget();
 }
 

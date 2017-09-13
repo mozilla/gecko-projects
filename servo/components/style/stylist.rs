@@ -6,22 +6,24 @@
 
 use {Atom, LocalName, Namespace};
 use applicable_declarations::{ApplicableDeclarationBlock, ApplicableDeclarationList};
-use bit_vec::BitVec;
 use context::{CascadeInputs, QuirksMode};
 use dom::TElement;
 use element_state::ElementState;
 use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")]
-use gecko_bindings::structs::{nsIAtom, StyleRuleInclusion};
+use gecko_bindings::structs::{nsIAtom, ServoStyleSetSizes, StyleRuleInclusion};
+use hashglobe::FailedAllocationError;
 use invalidation::element::invalidation_map::InvalidationMap;
 use invalidation::media_queries::{EffectiveMediaQueryResults, ToMediaListKey};
+#[cfg(feature = "gecko")]
+use malloc_size_of::{MallocShallowSizeOf, MallocSizeOf, MallocSizeOfOps};
 use media_queries::Device;
 use properties::{self, CascadeFlags, ComputedValues};
 use properties::{AnimationRules, PropertyDeclarationBlock};
 #[cfg(feature = "servo")]
 use properties::INHERIT_ALL;
 use properties::IS_LINK;
-use rule_tree::{CascadeLevel, RuleTree, StyleSource};
+use rule_tree::{CascadeLevel, RuleTree, StrongRuleNode, StyleSource};
 use selector_map::{PrecomputedHashMap, SelectorMap, SelectorMapEntry};
 use selector_parser::{SelectorImpl, PerPseudoElementMap, PseudoElement};
 use selectors::attr::NamespaceConstraint;
@@ -34,15 +36,17 @@ use selectors::sink::Push;
 use selectors::visitor::SelectorVisitor;
 use servo_arc::{Arc, ArcBorrow};
 use shared_lock::{Locked, SharedRwLockReadGuard, StylesheetGuards};
+use smallbitvec::SmallBitVec;
 use smallvec::VecLike;
 use std::fmt::Debug;
 use std::ops;
 use style_traits::viewport::ViewportConstraints;
 use stylesheet_set::{OriginValidity, SheetRebuildKind, StylesheetSet, StylesheetIterator, StylesheetFlusher};
 #[cfg(feature = "gecko")]
-use stylesheets::{CounterStyleRule, FontFaceRule, FontFeatureValuesRule};
-use stylesheets::{CssRule, StyleRule};
-use stylesheets::{StylesheetInDocument, Origin, OriginSet, PerOrigin, PerOriginIter};
+use stylesheets::{CounterStyleRule, FontFaceRule, FontFeatureValuesRule, PageRule};
+use stylesheets::{CssRule, Origin, OriginSet, PerOrigin, PerOriginIter};
+use stylesheets::StyleRule;
+use stylesheets::StylesheetInDocument;
 use stylesheets::UserAgentStylesheets;
 use stylesheets::keyframes_rule::KeyframesAnimation;
 use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
@@ -82,7 +86,8 @@ impl DocumentCascadeData {
     }
 
     /// Rebuild the cascade data for the given document stylesheets, and
-    /// optionally with a set of user agent stylesheets.
+    /// optionally with a set of user agent stylesheets.  Returns Err(..)
+    /// to signify OOM.
     fn rebuild<'a, 'b, S>(
         &mut self,
         device: &Device,
@@ -91,7 +96,7 @@ impl DocumentCascadeData {
         guards: &StylesheetGuards,
         ua_stylesheets: Option<&UserAgentStylesheets>,
         extra_data: &mut PerOrigin<ExtraStyleData>,
-    )
+    ) -> Result<(), FailedAllocationError>
     where
         'b: 'a,
         S: StylesheetInDocument + ToMediaListKey + PartialEq + 'static,
@@ -149,7 +154,7 @@ impl DocumentCascadeData {
                     guards.ua_or_user,
                     extra_data,
                     SheetRebuildKind::Full,
-                );
+                )?;
             }
 
             if quirks_mode != QuirksMode::NoQuirks {
@@ -178,7 +183,7 @@ impl DocumentCascadeData {
                         guards.ua_or_user,
                         extra_data,
                         SheetRebuildKind::Full,
-                    );
+                    )?;
                 }
             }
         }
@@ -191,10 +196,13 @@ impl DocumentCascadeData {
                 guards.author,
                 extra_data,
                 rebuild_kind,
-            );
+            )?;
         }
+
+        Ok(())
     }
 
+    // Returns Err(..) to signify OOM
     fn add_stylesheet<S>(
         &mut self,
         device: &Device,
@@ -203,13 +211,13 @@ impl DocumentCascadeData {
         guard: &SharedRwLockReadGuard,
         _extra_data: &mut PerOrigin<ExtraStyleData>,
         rebuild_kind: SheetRebuildKind,
-    )
+    ) -> Result<(), FailedAllocationError>
     where
         S: StylesheetInDocument + ToMediaListKey + 'static,
     {
         if !stylesheet.enabled() ||
            !stylesheet.is_effective_for_device(device, guard) {
-            return;
+            return Ok(());
         }
 
         let origin = stylesheet.origin(guard);
@@ -272,12 +280,12 @@ impl DocumentCascadeData {
                             origin_cascade_data.rules_source_order
                         );
 
-                        map.insert(rule, quirks_mode);
+                        map.insert(rule, quirks_mode)?;
 
                         if rebuild_kind.should_rebuild_invalidation() {
                             origin_cascade_data
                                 .invalidation_map
-                                .note_selector(selector, quirks_mode);
+                                .note_selector(selector, quirks_mode)?;
                             let mut visitor = StylistSelectorVisitor {
                                 needs_revalidation: false,
                                 passed_rightmost_selector: false,
@@ -293,7 +301,7 @@ impl DocumentCascadeData {
                                 origin_cascade_data.selectors_for_cache_revalidation.insert(
                                     RevalidationSelectorAndHashes::new(selector.clone(), hashes),
                                     quirks_mode
-                                );
+                                )?;
                             }
                         }
                     }
@@ -331,7 +339,8 @@ impl DocumentCascadeData {
                         let animation = KeyframesAnimation::from_keyframes(
                             &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
                         debug!("Found valid keyframe animation: {:?}", animation);
-                        origin_cascade_data.animations.insert(keyframes_rule.name.as_atom().clone(), animation);
+                        origin_cascade_data.animations
+                            .try_insert(keyframes_rule.name.as_atom().clone(), animation)?;
                     }
                 }
                 #[cfg(feature = "gecko")]
@@ -352,8 +361,30 @@ impl DocumentCascadeData {
                         .borrow_mut_for_origin(&origin)
                         .add_counter_style(guard, rule);
                 }
+                #[cfg(feature = "gecko")]
+                CssRule::Page(ref rule) => {
+                    _extra_data
+                        .borrow_mut_for_origin(&origin)
+                        .add_page(rule);
+                }
                 // We don't care about any other rule.
                 _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.per_origin.user_agent.add_size_of_children(ops, sizes);
+        self.per_origin.user.add_size_of_children(ops, sizes);
+        self.per_origin.author.add_size_of_children(ops, sizes);
+
+        for elem in self.precomputed_pseudo_element_decls.iter() {
+            if let Some(ref elem) = *elem {
+                sizes.mStylistPrecomputedPseudos += elem.shallow_size_of(ops);
             }
         }
     }
@@ -574,7 +605,7 @@ impl Stylist {
             guards,
             ua_sheets,
             extra_data,
-        );
+        ).unwrap_or_else(|_| warn!("OOM in Stylist::flush"));
 
         had_invalidations
     }
@@ -687,17 +718,33 @@ impl Stylist {
     ) -> Arc<ComputedValues> {
         debug_assert!(pseudo.is_precomputed());
 
-        let rule_node =
-            match self.cascade_data.precomputed_pseudo_element_decls.get(pseudo) {
-                Some(declarations) => {
-                    self.rule_tree.insert_ordered_rules_with_important(
-                        declarations.into_iter().map(|a| (a.source.clone(), a.level())),
-                        guards
-                    )
-                }
-                None => self.rule_tree.root().clone(),
-            };
+        let rule_node = self.rule_node_for_precomputed_pseudo(
+            guards,
+            pseudo,
+            None,
+        );
 
+        self.precomputed_values_for_pseudo_with_rule_node(
+            guards,
+            pseudo,
+            parent,
+            cascade_flags,
+            font_metrics,
+            &rule_node
+        )
+    }
+
+    /// Computes the style for a given "precomputed" pseudo-element with
+    /// given rule node.
+    pub fn precomputed_values_for_pseudo_with_rule_node(
+        &self,
+        guards: &StylesheetGuards,
+        pseudo: &PseudoElement,
+        parent: Option<&ComputedValues>,
+        cascade_flags: CascadeFlags,
+        font_metrics: &FontMetricsProvider,
+        rule_node: &StrongRuleNode
+    ) -> Arc<ComputedValues> {
         // NOTE(emilio): We skip calculating the proper layout parent style
         // here.
         //
@@ -715,17 +762,53 @@ impl Stylist {
         properties::cascade(
             &self.device,
             Some(pseudo),
-            &rule_node,
+            rule_node,
             guards,
             parent,
             parent,
             parent,
             None,
-            None,
             font_metrics,
             cascade_flags,
             self.quirks_mode,
         )
+    }
+
+    /// Returns the rule node for given precomputed pseudo-element.
+    ///
+    /// If we want to include extra declarations to this precomputed pseudo-element,
+    /// we can provide a vector of ApplicableDeclarationBlock to extra_declarations
+    /// argument. This is useful for providing extra @page rules.
+    pub fn rule_node_for_precomputed_pseudo(
+        &self,
+        guards: &StylesheetGuards,
+        pseudo: &PseudoElement,
+        extra_declarations: Option<Vec<ApplicableDeclarationBlock>>,
+    ) -> StrongRuleNode {
+        let mut decl;
+        let declarations = match self.cascade_data.precomputed_pseudo_element_decls.get(pseudo) {
+            Some(declarations) => {
+                match extra_declarations {
+                    Some(mut extra_decls) => {
+                        decl = declarations.clone();
+                        decl.append(&mut extra_decls);
+                        Some(&decl)
+                    },
+                    None => Some(declarations),
+                }
+            }
+            None => extra_declarations.as_ref(),
+        };
+
+        match declarations {
+            Some(decls) => {
+                self.rule_tree.insert_ordered_rules_with_important(
+                    decls.into_iter().map(|a| (a.source.clone(), a.level())),
+                    guards
+                )
+            },
+            None => self.rule_tree.root().clone(),
+        }
     }
 
     /// Returns the style for an anonymous box of the given type.
@@ -901,7 +984,6 @@ impl Stylist {
                 Some(inherited_style_ignoring_first_line),
                 Some(layout_parent_style_for_visited),
                 None,
-                None,
                 font_metrics,
                 cascade_flags,
                 self.quirks_mode,
@@ -927,7 +1009,6 @@ impl Stylist {
             Some(parent_style_ignoring_first_line),
             Some(layout_parent_style),
             visited_values,
-            None,
             font_metrics,
             cascade_flags,
             self.quirks_mode,
@@ -1070,34 +1151,32 @@ impl Stylist {
     /// Also, the device that arrives here may need to take the viewport rules
     /// into account.
     ///
-    /// feature = "servo" because gecko only has one device, and manually tracks
-    /// when the device is dirty.
-    ///
-    /// FIXME(emilio): The semantics of the device for Servo and Gecko are
-    /// different enough we may want to unify them.
-    #[cfg(feature = "servo")]
+    /// For Gecko, this is called when XBL bindings are used by different
+    /// documents.
     pub fn set_device(
         &mut self,
         mut device: Device,
         guard: &SharedRwLockReadGuard,
     ) -> OriginSet {
-        let cascaded_rule = {
-            let stylesheets = self.stylesheets.iter();
+        if viewport_rule::enabled() {
+            let cascaded_rule = {
+                let stylesheets = self.stylesheets.iter();
 
-            ViewportRule {
-                declarations: viewport_rule::Cascade::from_stylesheets(
-                    stylesheets.clone(),
-                    guard,
-                    &device
-                ).finish(),
+                ViewportRule {
+                    declarations: viewport_rule::Cascade::from_stylesheets(
+                        stylesheets.clone(),
+                        guard,
+                        &device
+                    ).finish(),
+                }
+            };
+
+            self.viewport_constraints =
+                ViewportConstraints::maybe_new(&device, &cascaded_rule, self.quirks_mode);
+
+            if let Some(ref constraints) = self.viewport_constraints {
+                device.account_for_viewport_rule(constraints);
             }
-        };
-
-        self.viewport_constraints =
-            ViewportConstraints::maybe_new(&device, &cascaded_rule, self.quirks_mode);
-
-        if let Some(ref constraints) = self.viewport_constraints {
-            device.account_for_viewport_rule(constraints);
         }
 
         self.device = device;
@@ -1474,7 +1553,7 @@ impl Stylist {
         element: &E,
         bloom: Option<&BloomFilter>,
         flags_setter: &mut F
-    ) -> BitVec
+    ) -> SmallBitVec
     where
         E: TElement,
         F: FnMut(&E, ElementSelectorFlags),
@@ -1489,7 +1568,7 @@ impl Stylist {
         // This means we're guaranteed to get the same rulehash buckets for all
         // the lookups, which means that the bitvecs are comparable. We verify
         // this in the caller by asserting that the bitvecs are same-length.
-        let mut results = BitVec::new();
+        let mut results = SmallBitVec::new();
         for (data, _) in self.cascade_data.iter_origins() {
             data.selectors_for_cache_revalidation.lookup(
                 *element,
@@ -1543,7 +1622,6 @@ impl Stylist {
             Some(parent_style),
             Some(parent_style),
             None,
-            None,
             &metrics,
             CascadeFlags::empty(),
             self.quirks_mode,
@@ -1564,6 +1642,15 @@ impl Stylist {
     pub fn rule_tree(&self) -> &RuleTree {
         &self.rule_tree
     }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.cascade_data.add_size_of_children(ops, sizes);
+        sizes.mStylistRuleTree += self.rule_tree.size_of(ops);
+
+        // We may measure other fields in the future if DMD says it's worth it.
+    }
 }
 
 /// This struct holds data which users of Stylist may want to extract
@@ -1581,6 +1668,10 @@ pub struct ExtraStyleData {
     /// A map of effective counter-style rules.
     #[cfg(feature = "gecko")]
     pub counter_styles: PrecomputedHashMap<Atom, Arc<Locked<CounterStyleRule>>>,
+
+    /// A map of effective page rules.
+    #[cfg(feature = "gecko")]
+    pub pages: Vec<Arc<Locked<PageRule>>>,
 }
 
 #[cfg(feature = "gecko")]
@@ -1604,6 +1695,11 @@ impl ExtraStyleData {
         let name = rule.read_with(guard).mName.raw::<nsIAtom>().into();
         self.counter_styles.insert(name, rule.clone());
     }
+
+    /// Add the given @page rule.
+    fn add_page(&mut self, rule: &Arc<Locked<PageRule>>) {
+        self.pages.push(rule.clone());
+    }
 }
 
 impl ExtraStyleData {
@@ -1613,13 +1709,30 @@ impl ExtraStyleData {
             self.font_faces.clear();
             self.font_feature_values.clear();
             self.counter_styles.clear();
+            self.pages.clear();
         }
     }
 }
 
+#[cfg(feature = "gecko")]
+impl MallocSizeOf for ExtraStyleData {
+    /// Measure heap usage.
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let mut n = 0;
+        n += self.font_faces.shallow_size_of(ops);
+        n += self.font_feature_values.shallow_size_of(ops);
+        n += self.counter_styles.shallow_size_of(ops);
+        n += self.pages.shallow_size_of(ops);
+        n
+    }
+}
+
 /// SelectorMapEntry implementation for use in our revalidation selector map.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[derive(Clone, Debug)]
 struct RevalidationSelectorAndHashes {
+    #[cfg_attr(feature = "gecko",
+               ignore_malloc_size_of = "CssRules have primary refs, we measure there")]
     selector: Selector<SelectorImpl>,
     selector_offset: usize,
     hashes: AncestorHashes,
@@ -1908,6 +2021,26 @@ impl CascadeData {
         self.mapped_ids.clear();
         self.selectors_for_cache_revalidation.clear();
     }
+
+    /// Measures heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        sizes.mStylistElementAndPseudosMaps += self.element_map.size_of(ops);
+
+        for elem in self.pseudos_map.iter() {
+            if let Some(ref elem) = *elem {
+                sizes.mStylistElementAndPseudosMaps += <Box<_> as MallocSizeOf>::size_of(elem, ops);
+            }
+        }
+
+        sizes.mStylistOther += self.animations.size_of(ops);
+
+        sizes.mStylistInvalidationMap += self.invalidation_map.size_of(ops);
+
+        sizes.mStylistRevalidationSelectors += self.selectors_for_cache_revalidation.size_of(ops);
+
+        sizes.mStylistOther += self.effective_media_query_results.size_of(ops);
+    }
 }
 
 impl Default for CascadeData {
@@ -1918,6 +2051,7 @@ impl Default for CascadeData {
 
 /// A rule, that wraps a style rule, but represents a single selector of the
 /// rule.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug)]
 pub struct Rule {
@@ -1925,16 +2059,24 @@ pub struct Rule {
     /// any_{important,normal} booleans inline in the Rule to avoid
     /// pointer-chasing when gathering applicable declarations, which
     /// can ruin performance when there are a lot of rules.
+    #[cfg_attr(feature = "gecko",
+               ignore_malloc_size_of = "CssRules have primary refs, we measure there")]
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub selector: Selector<SelectorImpl>,
+
     /// The ancestor hashes associated with the selector.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "No heap data")]
     pub hashes: AncestorHashes,
+
     /// The source order this style rule appears in. Note that we only use
     /// three bytes to store this value in ApplicableDeclarationsBlock, so
     /// we could repurpose that storage here if we needed to.
     pub source_order: u32,
+
     /// The actual style rule.
+    #[cfg_attr(feature = "gecko",
+               ignore_malloc_size_of =
+                   "Secondary ref. Primary ref is in StyleRule under Stylesheet.")]
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub style_rule: Arc<Locked<StyleRule>>,
 }

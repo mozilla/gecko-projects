@@ -54,7 +54,7 @@ pub fn serialize_dimension<W>(value: CSSFloat, unit: &str, dest: &mut W)
 
 /// Convenience void type to disable some properties and values through types.
 #[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
-#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue, ToCss)]
+#[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
 pub enum Impossible {}
 
 impl Parse for Impossible {
@@ -68,7 +68,7 @@ impl Parse for Impossible {
 
 /// A struct representing one of two kinds of values.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, HasViewportPercentage)]
+#[derive(Animate, Clone, ComputeSquaredDistance, Copy)]
 #[derive(PartialEq, ToAnimatedValue, ToAnimatedZero, ToComputedValue, ToCss)]
 pub enum Either<A, B> {
     /// The first value.
@@ -98,7 +98,7 @@ impl<A: Parse, B: Parse> Parse for Either<A, B> {
 }
 
 /// https://drafts.csswg.org/css-values-4/#custom-idents
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, ToComputedValue)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct CustomIdent(pub Atom);
 
@@ -127,7 +127,7 @@ impl ToCss for CustomIdent {
 }
 
 /// https://drafts.csswg.org/css-animations/#typedef-keyframes-name
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToComputedValue)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum KeyframesName {
     /// <custom-ident>
@@ -196,4 +196,3 @@ define_css_keyword_enum!(ExtremumLength:
                          "-moz-min-content" => MinContent,
                          "-moz-fit-content" => FitContent,
                          "-moz-available" => FillAvailable);
-no_viewport_percentage!(ExtremumLength);

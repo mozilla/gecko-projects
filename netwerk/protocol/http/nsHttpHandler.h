@@ -136,6 +136,11 @@ public:
 
     bool           PromptTempRedirect()      { return mPromptTempRedirect; }
     bool           IsUrgentStartEnabled() { return mUrgentStartEnabled; }
+    bool           IsTailBlockingEnabled() { return mTailBlockingEnabled; }
+    uint32_t       TailBlockingDelayQuantum(bool aAfterDOMContentLoaded) {
+      return aAfterDOMContentLoaded ? mTailDelayQuantumAfterDCL : mTailDelayQuantum;
+    }
+    uint32_t       TailBlockingDelayMax() { return mTailDelayMax; }
 
     // TCP Keepalive configuration values.
 
@@ -312,6 +317,12 @@ public:
         NotifyObservers(chan, NS_HTTP_ON_MODIFY_REQUEST_TOPIC);
     }
 
+    // Called by the channel before writing a request
+    void OnStopRequest(nsIHttpChannel *chan)
+    {
+        NotifyObservers(chan, NS_HTTP_ON_STOP_REQUEST_TOPIC);
+    }
+
     // Called by the channel and cached in the loadGroup
     void OnUserAgentRequest(nsIHttpChannel *chan)
     {
@@ -464,6 +475,10 @@ private:
     uint32_t mThrottleTimeWindow;
 
     bool mUrgentStartEnabled;
+    bool mTailBlockingEnabled;
+    uint32_t mTailDelayQuantum;
+    uint32_t mTailDelayQuantumAfterDCL;
+    uint32_t mTailDelayMax;
 
     uint8_t  mRedirectionLimit;
 

@@ -6,7 +6,7 @@ use gpu_cache::GpuCacheHandle;
 use internal_types::HardwareCompositeOp;
 use mask_cache::MaskCacheInfo;
 use prim_store::{BoxShadowPrimitiveCacheKey, PrimitiveIndex};
-use std::{cmp, f32, i32, mem, usize};
+use std::{cmp, f32, i32, usize};
 use tiling::{ClipScrollGroupIndex, PackedLayerIndex, RenderPass, RenderTargetIndex};
 use tiling::{RenderTargetKind, StackingContextIndex};
 use api::{ClipId, DeviceIntLength, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
@@ -68,6 +68,16 @@ impl RenderTaskTree {
             }
         }
 
+        // If this task can be shared between multiple
+        // passes, render it in the first pass so that
+        // it is available to all subsequent passes.
+        let pass_index = if task.is_shared() {
+            debug_assert!(task.children.is_empty());
+            0
+        } else {
+            pass_index
+        };
+
         let pass = &mut passes[pass_index];
         pass.add_render_task(id);
     }
@@ -107,13 +117,13 @@ pub enum RenderTaskKey {
     CacheMask(ClipId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum RenderTaskLocation {
     Fixed,
     Dynamic(Option<(DeviceIntPoint, RenderTargetIndex)>, DeviceIntSize),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AlphaRenderItem {
     Primitive(Option<ClipScrollGroupIndex>, PrimitiveIndex, i32),
     Blend(StackingContextIndex, RenderTaskId, FilterOp, i32),
@@ -122,7 +132,7 @@ pub enum AlphaRenderItem {
     HardwareComposite(StackingContextIndex, RenderTaskId, HardwareCompositeOp, i32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AlphaRenderTask {
     pub screen_origin: DeviceIntPoint,
     pub items: Vec<AlphaRenderItem>,
@@ -149,7 +159,7 @@ pub enum MaskGeometryKind {
 
 pub type ClipWorkItem = (PackedLayerIndex, MaskCacheInfo);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CacheMaskTask {
     actual_rect: DeviceIntRect,
     inner_rect: DeviceIntRect,
@@ -157,23 +167,16 @@ pub struct CacheMaskTask {
     pub geometry_kind: MaskGeometryKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RenderTaskData {
     pub data: [f32; FLOATS_PER_RENDER_TASK_INFO],
 }
 
-impl Default for RenderTaskData {
-    fn default() -> RenderTaskData {
-        RenderTaskData {
-            data: unsafe { mem::uninitialized() },
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum RenderTaskKind {
     Alpha(AlphaRenderTask),
     CachePrimitive(PrimitiveIndex),
+    BoxShadow(PrimitiveIndex),
     CacheMask(CacheMaskTask),
     VerticalBlur(DeviceIntLength),
     HorizontalBlur(DeviceIntLength),
@@ -181,7 +184,7 @@ pub enum RenderTaskKind {
     Alias(RenderTaskId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RenderTask {
     pub cache_key: Option<RenderTaskKey>,
     pub location: RenderTaskLocation,
@@ -225,7 +228,7 @@ impl RenderTask {
             cache_key: Some(RenderTaskKey::BoxShadow(key)),
             children: Vec::new(),
             location: RenderTaskLocation::Dynamic(None, size),
-            kind: RenderTaskKind::CachePrimitive(prim_index),
+            kind: RenderTaskKind::BoxShadow(prim_index),
         }
     }
 
@@ -241,7 +244,8 @@ impl RenderTask {
     pub fn new_mask(key: Option<ClipId>,
                     task_rect: DeviceIntRect,
                     raw_clips: &[ClipWorkItem],
-                    extra_clip: Option<ClipWorkItem>)
+                    extra_clip: Option<ClipWorkItem>,
+                    prim_rect: DeviceIntRect)
                     -> Option<RenderTask> {
         // Filter out all the clip instances that don't contribute to the result
         let mut inner_rect = Some(task_rect);
@@ -280,13 +284,20 @@ impl RenderTask {
         //           In the future, we'll expand this to handle the
         //           more complex types of clip mask geometry.
         let mut geometry_kind = MaskGeometryKind::Default;
-        if inner_rect.is_some() && clips.len() == 1 {
-            let (_, ref info) = clips[0];
-            if info.border_corners.is_empty() &&
-               info.image.is_none() &&
-               info.complex_clip_range.get_count() == 1 &&
-               info.layer_clip_range.get_count() == 0 {
-                geometry_kind = MaskGeometryKind::CornersOnly;
+        if let Some(inner_rect) = inner_rect {
+            // If the inner rect completely contains the primitive
+            // rect, then this mask can't affect the primitive.
+            if inner_rect.contains_rect(&prim_rect) {
+                return None;
+            }
+            if clips.len() == 1 {
+                let (_, ref info) = clips[0];
+                if info.border_corners.is_empty() &&
+                   info.image.is_none() &&
+                   info.complex_clip_range.get_count() == 1 &&
+                   info.layer_clip_range.get_count() == 0 {
+                    geometry_kind = MaskGeometryKind::CornersOnly;
+                }
             }
         }
 
@@ -352,6 +363,7 @@ impl RenderTask {
         match self.kind {
             RenderTaskKind::Alpha(ref mut task) => task,
             RenderTaskKind::CachePrimitive(..) |
+            RenderTaskKind::BoxShadow(..) |
             RenderTaskKind::CacheMask(..) |
             RenderTaskKind::VerticalBlur(..) |
             RenderTaskKind::Readback(..) |
@@ -364,6 +376,7 @@ impl RenderTask {
         match self.kind {
             RenderTaskKind::Alpha(ref task) => task,
             RenderTaskKind::CachePrimitive(..) |
+            RenderTaskKind::BoxShadow(..) |
             RenderTaskKind::CacheMask(..) |
             RenderTaskKind::VerticalBlur(..) |
             RenderTaskKind::Readback(..) |
@@ -404,7 +417,8 @@ impl RenderTask {
                     ],
                 }
             }
-            RenderTaskKind::CachePrimitive(..) => {
+            RenderTaskKind::CachePrimitive(..) |
+            RenderTaskKind::BoxShadow(..) => {
                 let (target_rect, target_index) = self.get_target_rect();
                 RenderTaskData {
                     data: [
@@ -508,9 +522,35 @@ impl RenderTask {
             RenderTaskKind::VerticalBlur(..) |
             RenderTaskKind::Readback(..) |
             RenderTaskKind::HorizontalBlur(..) => RenderTargetKind::Color,
-            RenderTaskKind::CacheMask(..) => RenderTargetKind::Alpha,
+
+            RenderTaskKind::CacheMask(..) |
+            RenderTaskKind::BoxShadow(..) => RenderTargetKind::Alpha,
+
             RenderTaskKind::Alias(..) => {
                 panic!("BUG: target_kind() called on invalidated task");
+            }
+        }
+    }
+
+    // Check if this task wants to be made available as an input
+    // to all passes (except the first) in the render task tree.
+    // To qualify for this, the task needs to have no children / dependencies.
+    // Currently, this is only supported for A8 targets, but it can be
+    // trivially extended to also support RGBA8 targets in the future
+    // if we decide that is useful.
+    pub fn is_shared(&self) -> bool {
+        match self.kind {
+            RenderTaskKind::Alpha(..) |
+            RenderTaskKind::CachePrimitive(..) |
+            RenderTaskKind::VerticalBlur(..) |
+            RenderTaskKind::Readback(..) |
+            RenderTaskKind::HorizontalBlur(..) => false,
+
+            RenderTaskKind::CacheMask(..) |
+            RenderTaskKind::BoxShadow(..) => true,
+
+            RenderTaskKind::Alias(..) => {
+                panic!("BUG: is_shared() called on aliased task");
             }
         }
     }

@@ -7,117 +7,13 @@ package org.mozilla.gecko;
 
 import android.Manifest;
 import android.annotation.TargetApi;
-import android.app.DownloadManager;
-import android.content.ContentProviderClient;
-import android.os.Environment;
-import android.support.annotation.NonNull;
-import android.support.annotation.UiThread;
-
-import org.mozilla.gecko.activitystream.ActivityStream;
-import org.mozilla.gecko.adjust.AdjustBrowserAppDelegate;
-import org.mozilla.gecko.annotation.RobocopTarget;
-import org.mozilla.gecko.AppConstants.Versions;
-import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
-import org.mozilla.gecko.Tabs.TabEvents;
-import org.mozilla.gecko.animation.PropertyAnimator;
-import org.mozilla.gecko.bookmarks.BookmarkEditFragment;
-import org.mozilla.gecko.bookmarks.BookmarkUtils;
-import org.mozilla.gecko.bookmarks.EditBookmarkTask;
-import org.mozilla.gecko.cleanup.FileCleanupController;
-import org.mozilla.gecko.dawn.DawnHelper;
-import org.mozilla.gecko.db.BrowserContract;
-import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.db.SuggestedSites;
-import org.mozilla.gecko.delegates.BrowserAppDelegate;
-import org.mozilla.gecko.delegates.OfflineTabStatusDelegate;
-import org.mozilla.gecko.delegates.ScreenshotDelegate;
-import org.mozilla.gecko.distribution.Distribution;
-import org.mozilla.gecko.distribution.DistributionStoreCallback;
-import org.mozilla.gecko.dlc.DownloadContentService;
-import org.mozilla.gecko.icons.IconsHelper;
-import org.mozilla.gecko.icons.decoders.IconDirectoryEntry;
-import org.mozilla.gecko.icons.decoders.FaviconDecoder;
-import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
-import org.mozilla.gecko.feeds.ContentNotificationsDelegate;
-import org.mozilla.gecko.feeds.FeedService;
-import org.mozilla.gecko.firstrun.FirstrunAnimationContainer;
-import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
-import org.mozilla.gecko.gfx.DynamicToolbarAnimator.PinReason;
-import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
-import org.mozilla.gecko.home.BrowserSearch;
-import org.mozilla.gecko.home.HomeBanner;
-import org.mozilla.gecko.home.HomeConfig;
-import org.mozilla.gecko.home.HomeConfig.PanelType;
-import org.mozilla.gecko.home.HomeConfigPrefsBackend;
-import org.mozilla.gecko.home.HomeFragment;
-import org.mozilla.gecko.home.HomePager.OnUrlOpenInBackgroundListener;
-import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
-import org.mozilla.gecko.home.HomePanelsManager;
-import org.mozilla.gecko.home.HomeScreen;
-import org.mozilla.gecko.home.SearchEngine;
-import org.mozilla.gecko.icons.Icons;
-import org.mozilla.gecko.media.VideoPlayer;
-import org.mozilla.gecko.menu.GeckoMenu;
-import org.mozilla.gecko.menu.GeckoMenuItem;
-import org.mozilla.gecko.mma.MmaDelegate;
-import org.mozilla.gecko.mozglue.GeckoLoader;
-import org.mozilla.gecko.mozglue.SafeIntent;
-import org.mozilla.gecko.notifications.NotificationHelper;
-import org.mozilla.gecko.overlays.ui.ShareDialog;
-import org.mozilla.gecko.permissions.Permissions;
-import org.mozilla.gecko.preferences.ClearOnShutdownPref;
-import org.mozilla.gecko.preferences.GeckoPreferences;
-import org.mozilla.gecko.promotion.AddToHomeScreenPromotion;
-import org.mozilla.gecko.delegates.BookmarkStateChangeDelegate;
-import org.mozilla.gecko.promotion.ReaderViewBookmarkPromotion;
-import org.mozilla.gecko.prompts.Prompt;
-import org.mozilla.gecko.reader.SavedReaderViewHelper;
-import org.mozilla.gecko.reader.ReaderModeUtils;
-import org.mozilla.gecko.reader.ReadingListHelper;
-import org.mozilla.gecko.restrictions.Restrictable;
-import org.mozilla.gecko.restrictions.Restrictions;
-import org.mozilla.gecko.search.SearchEngineManager;
-import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
-import org.mozilla.gecko.tabqueue.TabQueueHelper;
-import org.mozilla.gecko.tabqueue.TabQueuePrompt;
-import org.mozilla.gecko.tabs.TabHistoryController;
-import org.mozilla.gecko.tabs.TabHistoryController.OnShowTabHistory;
-import org.mozilla.gecko.tabs.TabHistoryFragment;
-import org.mozilla.gecko.tabs.TabHistoryPage;
-import org.mozilla.gecko.tabs.TabsPanel;
-import org.mozilla.gecko.telemetry.TelemetryUploadService;
-import org.mozilla.gecko.telemetry.TelemetryCorePingDelegate;
-import org.mozilla.gecko.telemetry.measurements.SearchCountMeasurements;
-import org.mozilla.gecko.toolbar.AutocompleteHandler;
-import org.mozilla.gecko.toolbar.BrowserToolbar;
-import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
-import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
-import org.mozilla.gecko.updater.PostUpdateHandler;
-import org.mozilla.gecko.updater.UpdateServiceHelper;
-import org.mozilla.gecko.util.ActivityUtils;
-import org.mozilla.gecko.util.Clipboard;
-import org.mozilla.gecko.util.ContextUtils;
-import org.mozilla.gecko.util.DrawableUtil;
-import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.GamepadUtils;
-import org.mozilla.gecko.util.GeckoBundle;
-import org.mozilla.gecko.util.HardwareUtils;
-import org.mozilla.gecko.util.IntentUtils;
-import org.mozilla.gecko.util.MenuUtils;
-import org.mozilla.gecko.util.PrefUtils;
-import org.mozilla.gecko.util.StringUtils;
-import org.mozilla.gecko.util.ThreadUtils;
-import org.mozilla.gecko.util.WindowUtil;
-import org.mozilla.gecko.widget.ActionModePresenter;
-import org.mozilla.gecko.widget.AnchoredPopup;
-import org.mozilla.gecko.widget.AnimatedProgressBar;
-import org.mozilla.gecko.widget.GeckoActionProvider;
-
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentProviderClient;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -138,7 +34,12 @@ import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.StrictMode;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.annotation.StringRes;
+import android.support.annotation.UiThread;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
@@ -166,8 +67,108 @@ import android.view.animation.Interpolator;
 import android.widget.Button;
 import android.widget.ListView;
 import android.widget.ViewFlipper;
+
+import org.mozilla.gecko.AppConstants.Versions;
+import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
+import org.mozilla.gecko.Tabs.TabEvents;
+import org.mozilla.gecko.activitystream.ActivityStream;
+import org.mozilla.gecko.activitystream.ActivityStreamTelemetry;
+import org.mozilla.gecko.adjust.AdjustBrowserAppDelegate;
+import org.mozilla.gecko.animation.PropertyAnimator;
+import org.mozilla.gecko.annotation.RobocopTarget;
+import org.mozilla.gecko.bookmarks.BookmarkEditFragment;
+import org.mozilla.gecko.bookmarks.BookmarkUtils;
+import org.mozilla.gecko.bookmarks.EditBookmarkTask;
+import org.mozilla.gecko.cleanup.FileCleanupController;
+import org.mozilla.gecko.dawn.DawnHelper;
+import org.mozilla.gecko.db.BrowserContract;
+import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.db.SuggestedSites;
+import org.mozilla.gecko.delegates.BookmarkStateChangeDelegate;
+import org.mozilla.gecko.delegates.BrowserAppDelegate;
+import org.mozilla.gecko.delegates.OfflineTabStatusDelegate;
+import org.mozilla.gecko.delegates.ScreenshotDelegate;
+import org.mozilla.gecko.distribution.Distribution;
+import org.mozilla.gecko.distribution.DistributionStoreCallback;
+import org.mozilla.gecko.dlc.DownloadContentService;
+import org.mozilla.gecko.extensions.ExtensionPermissionsHelper;
+import org.mozilla.gecko.firstrun.FirstrunAnimationContainer;
+import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
+import org.mozilla.gecko.gfx.DynamicToolbarAnimator.PinReason;
+import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
+import org.mozilla.gecko.home.BrowserSearch;
+import org.mozilla.gecko.home.HomeBanner;
+import org.mozilla.gecko.home.HomeConfig;
+import org.mozilla.gecko.home.HomeConfig.PanelType;
+import org.mozilla.gecko.home.HomeConfigPrefsBackend;
+import org.mozilla.gecko.home.HomeFragment;
+import org.mozilla.gecko.home.HomePager.OnUrlOpenInBackgroundListener;
+import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
+import org.mozilla.gecko.home.HomePanelsManager;
+import org.mozilla.gecko.home.HomeScreen;
+import org.mozilla.gecko.home.SearchEngine;
+import org.mozilla.gecko.icons.Icons;
+import org.mozilla.gecko.icons.IconsHelper;
+import org.mozilla.gecko.icons.decoders.FaviconDecoder;
+import org.mozilla.gecko.icons.decoders.IconDirectoryEntry;
+import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
+import org.mozilla.gecko.media.VideoPlayer;
+import org.mozilla.gecko.menu.GeckoMenu;
+import org.mozilla.gecko.menu.GeckoMenuItem;
+import org.mozilla.gecko.mma.MmaDelegate;
+import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.mozglue.SafeIntent;
+import org.mozilla.gecko.notifications.NotificationHelper;
+import org.mozilla.gecko.overlays.ui.ShareDialog;
+import org.mozilla.gecko.permissions.Permissions;
+import org.mozilla.gecko.preferences.ClearOnShutdownPref;
+import org.mozilla.gecko.preferences.GeckoPreferences;
+import org.mozilla.gecko.promotion.AddToHomeScreenPromotion;
+import org.mozilla.gecko.promotion.ReaderViewBookmarkPromotion;
+import org.mozilla.gecko.prompts.Prompt;
+import org.mozilla.gecko.reader.ReaderModeUtils;
+import org.mozilla.gecko.reader.ReadingListHelper;
+import org.mozilla.gecko.reader.SavedReaderViewHelper;
+import org.mozilla.gecko.restrictions.Restrictable;
+import org.mozilla.gecko.restrictions.Restrictions;
+import org.mozilla.gecko.search.SearchEngineManager;
 import org.mozilla.gecko.switchboard.AsyncConfigLoader;
 import org.mozilla.gecko.switchboard.SwitchBoard;
+import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
+import org.mozilla.gecko.tabqueue.TabQueueHelper;
+import org.mozilla.gecko.tabqueue.TabQueuePrompt;
+import org.mozilla.gecko.tabs.TabHistoryController;
+import org.mozilla.gecko.tabs.TabHistoryController.OnShowTabHistory;
+import org.mozilla.gecko.tabs.TabHistoryFragment;
+import org.mozilla.gecko.tabs.TabHistoryPage;
+import org.mozilla.gecko.tabs.TabsPanel;
+import org.mozilla.gecko.telemetry.TelemetryCorePingDelegate;
+import org.mozilla.gecko.telemetry.TelemetryUploadService;
+import org.mozilla.gecko.telemetry.measurements.SearchCountMeasurements;
+import org.mozilla.gecko.toolbar.AutocompleteHandler;
+import org.mozilla.gecko.toolbar.BrowserToolbar;
+import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
+import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
+import org.mozilla.gecko.updater.PostUpdateHandler;
+import org.mozilla.gecko.updater.UpdateServiceHelper;
+import org.mozilla.gecko.util.ActivityUtils;
+import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.ContextUtils;
+import org.mozilla.gecko.util.DrawableUtil;
+import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.GamepadUtils;
+import org.mozilla.gecko.util.GeckoBundle;
+import org.mozilla.gecko.util.HardwareUtils;
+import org.mozilla.gecko.util.IntentUtils;
+import org.mozilla.gecko.util.MenuUtils;
+import org.mozilla.gecko.util.PrefUtils;
+import org.mozilla.gecko.util.StringUtils;
+import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.util.WindowUtil;
+import org.mozilla.gecko.widget.ActionModePresenter;
+import org.mozilla.gecko.widget.AnchoredPopup;
+import org.mozilla.gecko.widget.AnimatedProgressBar;
+import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.SplashScreen;
 
 import java.io.File;
@@ -175,8 +176,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URLEncoder;
-import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -317,6 +318,8 @@ public class BrowserApp extends GeckoApp
 
     private AccountsHelper mAccountsHelper;
 
+    private ExtensionPermissionsHelper mExtensionPermissionsHelper;
+
     // The tab to be selected on editing mode exit.
     private Integer mTargetTabForEditingMode;
 
@@ -337,7 +340,6 @@ public class BrowserApp extends GeckoApp
             new ScreenshotDelegate(),
             new BookmarkStateChangeDelegate(),
             new ReaderViewBookmarkPromotion(),
-            new ContentNotificationsDelegate(),
             new PostUpdateHandler(),
             mTelemetryCorePingDelegate,
             new OfflineTabStatusDelegate(),
@@ -542,7 +544,7 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_R:
-                    tab.doReload(false);
+                    tab.doReload(event.isShiftPressed() ? true : false);
                     return true;
 
                 case KeyEvent.KEYCODE_PERIOD:
@@ -821,6 +823,7 @@ public class BrowserApp extends GeckoApp
         mSharedPreferencesHelper = new SharedPreferencesHelper(appContext);
         mReadingListHelper = new ReadingListHelper(appContext, profile);
         mAccountsHelper = new AccountsHelper(appContext, profile);
+        mExtensionPermissionsHelper = new ExtensionPermissionsHelper(this);
 
         if (AppConstants.MOZ_ANDROID_BEAM) {
             NfcAdapter nfc = NfcAdapter.getDefaultAdapter(this);
@@ -1451,6 +1454,40 @@ public class BrowserApp extends GeckoApp
             return true;
         }
 
+        if (itemId == R.id.pin_to_top_sites) {
+            final Tab selectedTab = Tabs.getInstance().getSelectedTab();
+            if (selectedTab != null) {
+                ThreadUtils.postToBackgroundThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final ActivityStreamTelemetry.Extras.Builder telemetryExtraBuilder = ActivityStreamTelemetry.Extras.builder();
+                        final BrowserDB db = BrowserDB.from(BrowserApp.this);
+                        final ContentResolver cr = getContentResolver();
+                        final String url = selectedTab.getURL();
+
+                        final @StringRes int snackbarText;
+                        if (!db.isPinnedForAS(cr, url)) {
+                            db.pinSiteForAS(getContentResolver(), url, selectedTab.getTitle());
+                            snackbarText = R.string.pinned_page_to_top_sites;
+                            telemetryExtraBuilder.set(ActivityStreamTelemetry.Contract.ITEM, ActivityStreamTelemetry.Contract.ITEM_PIN);
+                        } else {
+                            db.unpinSiteForAS(getContentResolver(), url);
+                            snackbarText = R.string.unpinned_page_from_top_sites;
+                            telemetryExtraBuilder.set(ActivityStreamTelemetry.Contract.ITEM, ActivityStreamTelemetry.Contract.ITEM_UNPIN);
+                        }
+
+                        SnackbarBuilder.builder(BrowserApp.this)
+                                .message(snackbarText)
+                                .buildAndShow();
+
+                        Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.MENU, // via browser menu.
+                                telemetryExtraBuilder.build());
+                    }
+                });
+            }
+            return true;
+        }
+
         if (itemId == R.id.add_to_launcher) {
             final Tab tab = Tabs.getInstance().getSelectedTab();
             if (tab == null) {
@@ -1537,6 +1574,11 @@ public class BrowserApp extends GeckoApp
         if (mAccountsHelper != null) {
             mAccountsHelper.uninit();
             mAccountsHelper = null;
+        }
+
+        if (mExtensionPermissionsHelper != null) {
+            mExtensionPermissionsHelper.uninit();
+            mExtensionPermissionsHelper = null;
         }
 
         mSearchEngineManager.unregisterListeners();
@@ -1818,7 +1860,6 @@ public class BrowserApp extends GeckoApp
                     DownloadContentService.startVerification(this);
                 }
 
-                FeedService.setup(this);
                 break;
 
             case "Accessibility:Enabled":
@@ -2452,18 +2493,19 @@ public class BrowserApp extends GeckoApp
     }
 
     public void openUrlAndStopEditing(String url) {
-        openUrlAndStopEditing(url, null, false);
+        openUrlAndStopEditing(url, null, null, false);
     }
 
-    private void openUrlAndStopEditing(String url, boolean newTab) {
-        openUrlAndStopEditing(url, null, newTab);
+    private void openUrlAndStopEditingWithReferrer(final String url, final String referrerUri) {
+        openUrlAndStopEditing(url, null, referrerUri, false);
     }
 
     private void openUrlAndStopEditing(String url, String searchEngine) {
-        openUrlAndStopEditing(url, searchEngine, false);
+        openUrlAndStopEditing(url, searchEngine, null, false);
     }
 
-    private void openUrlAndStopEditing(String url, String searchEngine, boolean newTab) {
+    private void openUrlAndStopEditing(String url, String searchEngine, @Nullable final String referrerUri,
+            boolean newTab) {
         int flags = Tabs.LOADURL_NONE;
         if (newTab) {
             flags |= Tabs.LOADURL_NEW_TAB;
@@ -2472,7 +2514,7 @@ public class BrowserApp extends GeckoApp
             }
         }
 
-        Tabs.getInstance().loadUrl(url, searchEngine, -1, flags);
+        Tabs.getInstance().loadUrl(url, searchEngine, referrerUri, Tabs.INVALID_TAB_ID, null, flags);
 
         mBrowserToolbar.cancelEdit();
     }
@@ -3524,8 +3566,15 @@ public class BrowserApp extends GeckoApp
             MenuUtils.safeSetEnabled(aMenu, R.id.page, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.subscribe, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.add_search_engine, false);
+            MenuUtils.safeSetEnabled(aMenu, R.id.pin_to_top_sites, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.add_to_launcher, false);
             MenuUtils.safeSetEnabled(aMenu, R.id.set_as_homepage, false);
+
+            final MenuItem pinToTopSitesItem = aMenu.findItem(R.id.pin_to_top_sites);
+            if (pinToTopSitesItem != null) {
+                // This title is set dynamically so we reset it for this edge case.
+                pinToTopSitesItem.setTitle(R.string.contextmenu_pin_to_top_sites);
+            }
 
             return true;
         }
@@ -3607,6 +3656,7 @@ public class BrowserApp extends GeckoApp
         MenuUtils.safeSetEnabled(aMenu, R.id.add_search_engine, tab.hasOpenSearch());
         MenuUtils.safeSetEnabled(aMenu, R.id.add_to_launcher, !isAboutHome(tab));
         MenuUtils.safeSetEnabled(aMenu, R.id.set_as_homepage, !isAboutHome(tab));
+        onPrepareOptionsMenuPinToTopSites(aMenu, tab);
 
         // This provider also applies to the quick share menu item.
         final GeckoActionProvider provider = ((GeckoMenuItem) share).getGeckoActionProvider();
@@ -3707,6 +3757,32 @@ public class BrowserApp extends GeckoApp
         return true;
     }
 
+    private void onPrepareOptionsMenuPinToTopSites(final Menu aMenu, final Tab tab) {
+        final MenuItem item = aMenu.findItem(R.id.pin_to_top_sites);
+        if (item == null) {
+            return;
+        }
+
+        // Set initial state before async query completes.
+        item.setEnabled(false); // Disable interaction.
+        item.setTitle(R.string.contextmenu_pin_to_top_sites);
+
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                final boolean isPinned = BrowserDB.from(BrowserApp.this).isPinnedForAS(getContentResolver(), tab.getURL());
+                ThreadUtils.postToUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        item.setTitle(isPinned ?
+                                R.string.contextmenu_unpin_from_top_sites : R.string.contextmenu_pin_to_top_sites);
+                        item.setEnabled(true);
+                    }
+                });
+            }
+        });
+    }
+
     private Drawable resolveBookmarkIconDrawable(final boolean isBookmark, final int tint) {
         if (isBookmark) {
             return ResourcesCompat.getDrawable(getResources(), R.drawable.star_blue, null);
@@ -3718,7 +3794,7 @@ public class BrowserApp extends GeckoApp
     private int resolveMenuIconTint(final boolean isPrivate) {
         final int tintResId;
 
-        if (isPrivate && HardwareUtils.isTablet()) {
+        if (isPrivate && HardwareUtils.isLargeTablet()) {
             tintResId = R.color.menu_item_tint_private;
         } else {
             tintResId = R.color.menu_item_tint;
@@ -4133,6 +4209,12 @@ public class BrowserApp extends GeckoApp
     // HomePager.OnUrlOpenListener
     @Override
     public void onUrlOpen(String url, EnumSet<OnUrlOpenListener.Flags> flags) {
+        onUrlOpenWithReferrer(url, null, flags);
+    }
+
+    @Override
+    public void onUrlOpenWithReferrer(final String url, @Nullable final String referrerUri,
+            final EnumSet<OnUrlOpenListener.Flags> flags) {
         if (flags.contains(OnUrlOpenListener.Flags.OPEN_WITH_INTENT)) {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setData(Uri.parse(url));
@@ -4150,7 +4232,7 @@ public class BrowserApp extends GeckoApp
             }
 
             if (!maybeSwitchToTab(pageURL, flags)) {
-                openUrlAndStopEditing(pageURL);
+                openUrlAndStopEditingWithReferrer(pageURL, referrerUri);
                 clearSelectedTabApplicationId();
             }
         }
@@ -4159,6 +4241,12 @@ public class BrowserApp extends GeckoApp
     // HomePager.OnUrlOpenInBackgroundListener
     @Override
     public void onUrlOpenInBackground(final String url, EnumSet<OnUrlOpenInBackgroundListener.Flags> flags) {
+        onUrlOpenInBackgroundWithReferrer(url, null, flags);
+    }
+
+    @Override
+    public void onUrlOpenInBackgroundWithReferrer(final String url, @Nullable final String referrerUri,
+            final EnumSet<OnUrlOpenInBackgroundListener.Flags> flags) {
         if (url == null) {
             throw new IllegalArgumentException("url must not be null");
         }
@@ -4177,7 +4265,7 @@ public class BrowserApp extends GeckoApp
             loadFlags |= Tabs.LOADURL_PRIVATE;
         }
 
-        final Tab newTab = Tabs.getInstance().loadUrl(pageURL, loadFlags);
+        final Tab newTab = Tabs.getInstance().loadUrl(pageURL, null, referrerUri, Tabs.INVALID_TAB_ID, null, loadFlags);
 
         // We switch to the desired tab by unique ID, which closes any window
         // for a race between opening the tab and closing it, and switching to

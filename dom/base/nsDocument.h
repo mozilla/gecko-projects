@@ -72,6 +72,7 @@
 #include "CustomElementRegistry.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/Maybe.h"
+#include "nsIURIClassifier.h"
 
 #define XML_DECLARATION_BITS_DECLARATION_EXISTS   (1 << 0)
 #define XML_DECLARATION_BITS_ENCODING_EXISTS      (1 << 1)
@@ -346,6 +347,9 @@ protected:
   bool mHaveShutDown;
 };
 
+// For classifying a flash document based on its principal.
+class PrincipalFlashClassifier;
+
 // Base class for our document implementations.
 class nsDocument : public nsIDocument,
                    public nsIDOMDocument,
@@ -598,7 +602,6 @@ public:
   // nsINode
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
   virtual nsIContent *GetChildAt(uint32_t aIndex) const override;
-  virtual nsIContent * const * GetChildArray(uint32_t* aChildCount) const override;
   virtual int32_t IndexOf(const nsINode* aPossibleChild) const override;
   virtual uint32_t GetChildCount() const override;
   virtual nsresult InsertChildAt(nsIContent* aKid, uint32_t aIndex,
@@ -836,7 +839,8 @@ public:
   virtual void MaybePreconnect(nsIURI* uri,
                                mozilla::CORSMode aCORSMode) override;
 
-  virtual void PreloadStyle(nsIURI* uri, const nsAString& charset,
+  virtual void PreloadStyle(nsIURI* uri,
+                            const mozilla::Encoding* aEncoding,
                             const nsAString& aCrossOriginAttr,
                             ReferrerPolicy aReferrerPolicy,
                             const nsAString& aIntegrity) override;
@@ -1184,6 +1188,7 @@ protected:
   // non-null when this document is in fullscreen mode.
   nsWeakPtr mFullscreenRoot;
 
+  RefPtr<PrincipalFlashClassifier> mPrincipalFlashClassifier;
   mozilla::dom::FlashClassification mFlashClassification;
   // Do not use this value directly. Call the |IsThirdParty()| method, which
   // caches its result here.

@@ -49,6 +49,8 @@ public:
   nsresult GetFileDescPtr(PRFileDesc** aFilePtr);
   nsresult SetFileDescPtr(PRFileDesc* aFilePtr);
 
+  bool IsSpeculative() { return mSpeculative; }
+
   bool IsHandshakePending() const { return mHandshakePending; }
   void SetHandshakeNotPending() { mHandshakePending = false; }
 
@@ -164,6 +166,8 @@ public:
   }
 #endif
 
+  void SetSharedOwningReference(mozilla::psm::SharedSSLState* ref);
+
 protected:
   virtual ~nsNSSSocketInfo();
 
@@ -182,6 +186,7 @@ private:
   nsresult ActivateSSL();
 
   nsCString mNegotiatedNPN;
+  bool      mSpeculative;
   bool      mNPNCompleted;
   bool      mEarlyDataAccepted;
   bool      mFalseStartCallbackCalled;
@@ -225,12 +230,19 @@ private:
   uint64_t mPlaintextBytesRead;
 
   nsCOMPtr<nsIX509Cert> mClientCert;
+
+  // if non-null this is a reference to the mSharedState (which is
+  // not an owning reference). If this is used, the info has a private
+  // state that does not share things like intolerance lists with the
+  // rest of the session. This is normally used when you have per
+  // socket tls flags overriding session wide defaults.
+  RefPtr<mozilla::psm::SharedSSLState> mOwningSharedRef;
 };
 
 class nsSSLIOLayerHelpers
 {
 public:
-  nsSSLIOLayerHelpers();
+  explicit nsSSLIOLayerHelpers(uint32_t aTlsFlags = 0);
   ~nsSSLIOLayerHelpers();
 
   nsresult Init();
@@ -288,6 +300,7 @@ public:
 private:
   mozilla::Mutex mutex;
   nsCOMPtr<nsIObserver> mPrefObserver;
+  uint32_t mTlsFlags;
 };
 
 nsresult nsSSLIOLayerNewSocket(int32_t family,

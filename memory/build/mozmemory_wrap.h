@@ -37,6 +37,7 @@
  *   - jemalloc_purge_freed_pages
  *   - jemalloc_free_dirty_pages
  *   - jemalloc_thread_local_arena
+ *   - jemalloc_ptr_info
  *   (these functions are native to mozjemalloc)
  *
  * These functions are all exported as part of libmozglue (see
@@ -85,31 +86,12 @@
  * That is, the implementation declaration for e.g. strdup would look like:
  *   char* strdup_impl(const char *)
  * That implementation would call malloc by using "malloc_impl".
- *
- *
- * When building with replace-malloc support, the above still holds, but
- * the malloc implementation and jemalloc specific functions are the
- * replace-malloc functions from replace_malloc.c.
- *
- * The actual mozjemalloc implementation is prefixed with "je_".
- *
- * Thus, when MOZ_REPLACE_MALLOC is defined, the "_impl" suffixed macros
- * expand to "je_" prefixed function when building mozjemalloc, where
- * MOZ_JEMALLOC_IMPL is defined.
- *
- * In other cases, the "_impl" suffixed macros follow the original scheme,
- * except on Windows and MacOSX, where they would expand to "je_" prefixed
- * functions. Instead, they are left unmodified (malloc_impl expands to
- * malloc_impl).
  */
 
 #ifndef MOZ_MEMORY
 #  error Should only include mozmemory_wrap.h when MOZ_MEMORY is set.
 #endif
 
-#if defined(MOZ_JEMALLOC_IMPL) && !defined(MOZ_MEMORY_IMPL)
-#  define MOZ_MEMORY_IMPL
-#endif
 #if defined(MOZ_MEMORY_IMPL) && !defined(IMPL_MFBT)
 #  ifdef MFBT_API /* mozilla/Types.h was already included */
 #    error mozmemory_wrap.h has to be included before mozilla/Types.h when MOZ_MEMORY_IMPL is set and IMPL_MFBT is not.
@@ -128,27 +110,18 @@
 #endif
 
 #ifdef MOZ_MEMORY_IMPL
-#  if defined(MOZ_JEMALLOC_IMPL) && defined(MOZ_REPLACE_MALLOC)
-#    define mozmem_malloc_impl(a)     je_ ## a
-#    define mozmem_jemalloc_impl(a)   je_ ## a
+#  define MOZ_JEMALLOC_API MOZ_EXTERN_C MFBT_API
+#  if defined(XP_WIN)
+#    define mozmem_malloc_impl(a)   je_ ## a
 #  else
-#    define MOZ_JEMALLOC_API MOZ_EXTERN_C MFBT_API
-#    if defined(XP_WIN)
-#      if defined(MOZ_REPLACE_MALLOC)
-#        define mozmem_malloc_impl(a)   a ## _impl
-#      else
-#        define mozmem_malloc_impl(a)   je_ ## a
-#      endif
-#    else
-#      define MOZ_MEMORY_API MOZ_EXTERN_C MFBT_API
-#      if defined(MOZ_WIDGET_ANDROID)
-#        define MOZ_WRAP_NEW_DELETE
-#      endif
+#    define MOZ_MEMORY_API MOZ_EXTERN_C MFBT_API
+#    if defined(MOZ_WIDGET_ANDROID)
+#      define MOZ_WRAP_NEW_DELETE
 #    endif
 #  endif
-#  ifdef XP_WIN
-#    define mozmem_dup_impl(a)      wrap_ ## a
-#  endif
+#endif
+#ifdef XP_WIN
+#  define mozmem_dup_impl(a)      wrap_ ## a
 #endif
 
 #if !defined(MOZ_MEMORY_IMPL)
@@ -207,5 +180,7 @@
 #define jemalloc_free_dirty_pages_impl   mozmem_jemalloc_impl(jemalloc_free_dirty_pages)
 #define jemalloc_thread_local_arena_impl \
           mozmem_jemalloc_impl(jemalloc_thread_local_arena)
+#define jemalloc_ptr_info_impl \
+          mozmem_jemalloc_impl(jemalloc_ptr_info)
 
 #endif /* mozmemory_wrap_h */

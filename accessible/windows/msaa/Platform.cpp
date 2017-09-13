@@ -35,8 +35,6 @@ static nsString* gInstantiator = nullptr;
 void
 a11y::PlatformInit()
 {
-  Compatibility::Init();
-
   nsWinUtils::MaybeStartWindowEmulation();
   ia2AccessibleText::InitTextChangeData();
 
@@ -197,14 +195,15 @@ a11y::IsHandlerRegistered()
     return false;
   }
 
-  nsAutoString subKey;
-  subKey.AppendLiteral("CLSID\\");
-  nsAutoString iid;
-  GUIDToString(CLSID_AccessibleHandler, iid);
-  subKey.Append(iid);
-  subKey.AppendLiteral("\\InprocHandler32");
+  nsAutoString clsid;
+  GUIDToString(CLSID_AccessibleHandler, clsid);
 
-  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT, subKey,
+  nsAutoString subKey;
+  subKey.AppendLiteral(u"SOFTWARE\\Classes\\CLSID\\");
+  subKey.Append(clsid);
+  subKey.AppendLiteral(u"\\InprocHandler32");
+
+  rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_LOCAL_MACHINE, subKey,
                     nsIWindowsRegKey::ACCESS_READ);
   if (NS_FAILED(rv)) {
     return false;

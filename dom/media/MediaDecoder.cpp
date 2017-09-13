@@ -757,12 +757,12 @@ MediaDecoder::EnsureTelemetryReported()
   }
 
   nsTArray<nsCString> codecs;
-  if (mInfo->HasAudio()
-      && !mInfo->mAudio.GetAsAudioInfo()->mMimeType.IsEmpty()) {
+  if (mInfo->HasAudio() &&
+      !mInfo->mAudio.GetAsAudioInfo()->mMimeType.IsEmpty()) {
     codecs.AppendElement(mInfo->mAudio.GetAsAudioInfo()->mMimeType);
   }
-  if (mInfo->HasVideo()
-      && !mInfo->mVideo.GetAsVideoInfo()->mMimeType.IsEmpty()) {
+  if (mInfo->HasVideo() &&
+      !mInfo->mVideo.GetAsVideoInfo()->mMimeType.IsEmpty()) {
     codecs.AppendElement(mInfo->mVideo.GetAsVideoInfo()->mMimeType);
   }
   if (codecs.IsEmpty()) {
@@ -1560,6 +1560,8 @@ MediaDecoder::RequestDebugInfo()
 void
 MediaDecoder::GetMozDebugReaderData(nsACString& aString)
 {
+  aString += nsPrintfCString("Container Type: %s\n",
+                             ContainerType().Type().AsString().get());
   if (mReader) {
     mReader->GetMozDebugReaderData(aString);
   }

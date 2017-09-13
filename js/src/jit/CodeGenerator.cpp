@@ -30,7 +30,6 @@
 #include "jit/AtomicOperations.h"
 #include "jit/BaselineCompiler.h"
 #include "jit/IonBuilder.h"
-#include "jit/IonCaches.h"
 #include "jit/IonIC.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/JitcodeMap.h"
@@ -4113,7 +4112,7 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     // Construct native exit frame.
     uint32_t safepointOffset = masm.buildFakeExitFrame(argJSContext);
     masm.loadJSContext(argJSContext);
-    masm.enterFakeExitFrame(argJSContext, argJSContext, IonDOMMethodExitFrameLayoutToken);
+    masm.enterFakeExitFrame(argJSContext, argJSContext, ExitFrameToken::IonDOMMethod);
 
     markSafepointAt(safepointOffset, call);
 
@@ -6617,7 +6616,7 @@ RangePopFront(MacroAssembler& masm, Register range, Register front, Register dat
 
 template <class OrderedHashTable>
 static inline void
-RangeDestruct(MacroAssembler& masm, Register range, Register temp0, Register temp1)
+RangeDestruct(MacroAssembler& masm, Register iter, Register range, Register temp0, Register temp1)
 {
     Register next = temp0;
     Register prevp = temp1;
@@ -6633,7 +6632,12 @@ RangeDestruct(MacroAssembler& masm, Register range, Register temp0, Register tem
 
     masm.bind(&hasNoNext);
 
+    Label nurseryAllocated;
+    masm.branchPtrInNurseryChunk(Assembler::Equal, iter, temp0, &nurseryAllocated);
+
     masm.callFreeStub(range);
+
+    masm.bind(&nurseryAllocated);
 }
 
 template <>
@@ -6727,7 +6731,7 @@ CodeGenerator::emitGetNextEntryForIterator(LGetNextEntryForIterator* lir)
     {
         masm.bind(&iterDone);
 
-        RangeDestruct<OrderedHashTable>(masm, range, temp, dataLength);
+        RangeDestruct<OrderedHashTable>(masm, iter, range, temp, dataLength);
 
         masm.storeValue(PrivateValue(nullptr),
                         Address(iter, NativeObject::getFixedSlotOffset(IteratorObject::RangeSlot)));
@@ -7987,7 +7991,7 @@ JitRuntime::generateLazyLinkStub(JSContext* cx)
     Register temp0 = regs.takeAny();
 
     masm.loadJSContext(temp0);
-    masm.enterFakeExitFrame(temp0, temp0, LazyLinkExitFrameLayoutToken);
+    masm.enterFakeExitFrame(temp0, temp0, ExitFrameToken::LazyLink);
     masm.PushStubCode();
 
     masm.setupUnalignedABICall(temp0);
@@ -11445,11 +11449,11 @@ CodeGenerator::visitAtomicIsLockFree(LAtomicIsLockFree* lir)
     Register value = ToRegister(lir->value());
     Register output = ToRegister(lir->output());
 
-    // Keep this in sync with isLockfree() in jit/AtomicOperations.h.
-    MOZ_ASSERT(AtomicOperations::isLockfree(1));  // Implementation artifact
-    MOZ_ASSERT(AtomicOperations::isLockfree(2));  // Implementation artifact
-    MOZ_ASSERT(AtomicOperations::isLockfree(4));  // Spec requirement
-    MOZ_ASSERT(!AtomicOperations::isLockfree(8)); // Implementation invariant, for now
+    // Keep this in sync with isLockfreeJS() in jit/AtomicOperations.h.
+    MOZ_ASSERT(AtomicOperations::isLockfreeJS(1));  // Implementation artifact
+    MOZ_ASSERT(AtomicOperations::isLockfreeJS(2));  // Implementation artifact
+    MOZ_ASSERT(AtomicOperations::isLockfreeJS(4));  // Spec requirement
+    MOZ_ASSERT(!AtomicOperations::isLockfreeJS(8)); // Implementation invariant, for now
 
     Label Ldone, Lfailed;
     masm.move32(Imm32(1), output);
@@ -11783,7 +11787,7 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
 
     uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
     masm.loadJSContext(JSContextReg);
-    masm.enterFakeExitFrame(JSContextReg, JSContextReg, IonDOMExitFrameLayoutGetterToken);
+    masm.enterFakeExitFrame(JSContextReg, JSContextReg, ExitFrameToken::IonDOMGetter);
 
     markSafepointAt(safepointOffset, ins);
 
@@ -11881,7 +11885,7 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
 
     uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
     masm.loadJSContext(JSContextReg);
-    masm.enterFakeExitFrame(JSContextReg, JSContextReg, IonDOMExitFrameLayoutSetterToken);
+    masm.enterFakeExitFrame(JSContextReg, JSContextReg, ExitFrameToken::IonDOMSetter);
 
     markSafepointAt(safepointOffset, ins);
 

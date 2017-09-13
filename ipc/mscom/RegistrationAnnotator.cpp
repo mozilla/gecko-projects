@@ -10,6 +10,7 @@
 #include "mozilla/mscom/Utils.h"
 #include "mozilla/NotNull.h"
 #include "nsExceptionHandler.h"
+#include "nsPrintfCString.h"
 #include "nsWindowsHelpers.h"
 #include "nsXULAppAPI.h"
 
@@ -48,20 +49,11 @@ static const char16_t kFlags[] = u"FLAGS";
 static const char16_t kProxyStubClsid32[] = u"\\ProxyStubClsid32";
 static const char16_t kClsid[] = u"\\CLSID\\";
 static const char16_t kInprocServer32[] = u"\\InprocServer32";
+static const char16_t kInprocHandler32[] = u"\\InprocHandler32";
 static const char16_t kTypeLib[] = u"\\TypeLib";
 static const char16_t kVersion[] = u"Version";
 static const char16_t kWin32[] = u"Win32";
 static const char16_t kWin64[] = u"Win64";
-
-template <size_t N>
-inline static bool
-GetStringValue(HKEY aBaseKey, const nsAString& aStrSubKey,
-               const char16_t (&aValueName)[N], nsAString& aOutput)
-{
-  return GetStringValue(aBaseKey, aStrSubKey,
-                        nsLiteralString(aValueName),
-                        aOutput);
-}
 
 static bool
 GetStringValue(HKEY aBaseKey, const nsAString& aStrSubKey,
@@ -92,6 +84,16 @@ GetStringValue(HKEY aBaseKey, const nsAString& aStrSubKey,
   }
 
   return result == ERROR_SUCCESS;
+}
+
+template <size_t N>
+inline static bool
+GetStringValue(HKEY aBaseKey, const nsAString& aStrSubKey,
+               const char16_t (&aValueName)[N], nsAString& aOutput)
+{
+  return GetStringValue(aBaseKey, aStrSubKey,
+                        nsLiteralString(aValueName),
+                        aOutput);
 }
 
 /**
@@ -169,6 +171,24 @@ AnnotateClsidRegistrationForHive(JSONWriter& aJson, HKEY aHive,
   nsAutoString apartment;
   if (GetStringValue(aHive, inprocServerSubkey, kThreadingModel, apartment)) {
     aJson.StringProperty("ThreadingModel", NS_ConvertUTF16toUTF8(apartment).get());
+  }
+
+  nsAutoString inprocHandlerSubkey(clsidSubkey);
+  inprocHandlerSubkey.AppendLiteral(kInprocHandler32);
+  nsAutoString pathToHandlerDll;
+  if (GetStringValue(aHive, inprocHandlerSubkey, kDefaultValue, pathToHandlerDll)) {
+    aJson.StringProperty("HandlerPath", NS_ConvertUTF16toUTF8(pathToHandlerDll).get());
+    if (GetLoadedPath(pathToHandlerDll)) {
+      aJson.StringProperty("LoadedHandlerPath",
+                           NS_ConvertUTF16toUTF8(pathToHandlerDll).get());
+    }
+  }
+
+  nsAutoString handlerApartment;
+  if (GetStringValue(aHive, inprocHandlerSubkey, kThreadingModel,
+                     handlerApartment)) {
+    aJson.StringProperty("HandlerThreadingModel",
+                         NS_ConvertUTF16toUTF8(handlerApartment).get());
   }
 }
 

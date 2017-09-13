@@ -44,12 +44,14 @@ overrider.set({
       addObserver() {},
       removeObserver() {}
     },
+    console: {logStringMessage: () => {}},
     prefs: {
       addObserver() {},
       prefHasUserValue() {},
       removeObserver() {},
       getStringPref() {},
       getBoolPref() {},
+      getBranch() {},
       getDefaultBranch() {
         return {
           setBoolPref() {},
@@ -61,7 +63,7 @@ overrider.set({
     },
     tm: {dispatchToMainThread: cb => cb()},
     eTLD: {getPublicSuffix() {}},
-    io: {NewURI() {}},
+    io: {newURI() {}},
     search: {
       init(cb) { cb(); },
       getVisibleEngines: () => [{identifier: "google"}, {identifier: "bing"}],

@@ -95,16 +95,17 @@ function promiseStateChangeURI() {
 
 function promiseContentSearchReady(browser) {
   return ContentTask.spawn(browser, {}, async function(args) {
-    return new Promise(resolve => {
-      content.addEventListener("ContentSearchService", function listener(aEvent) {
-        if (aEvent.detail.type == "State") {
-          content.removeEventListener("ContentSearchService", listener);
-          resolve();
-        }
-      });
-    });
+    await ContentTaskUtils.waitForCondition(() => content.wrappedJSObject.gContentSearchController &&
+      content.wrappedJSObject.gContentSearchController.defaultEngine
+    );
   });
 }
+
+add_task(async function() {
+  await SpecialPowers.pushPrefEnv({ set: [
+    ["browser.search.widget.inNavBar", true],
+  ]});
+});
 
 for (let engine of SEARCH_ENGINE_DETAILS) {
   add_task(async function() {

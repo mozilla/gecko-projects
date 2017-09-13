@@ -15,6 +15,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabGroup.h"
+#include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/ipc/FileDescriptorSetChild.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/NeckoChild.h"
@@ -203,7 +204,7 @@ HttpChannelChild::HttpChannelChild()
   // IPC HTTP channel is created.
   // We require that the parent cookie service actor exists while
   // processing HTTP responses.
-  CookieServiceChild::GetSingleton();
+  RefPtr<CookieServiceChild> cookieService = CookieServiceChild::GetSingleton();
 }
 
 HttpChannelChild::~HttpChannelChild()
@@ -1186,6 +1187,9 @@ HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
     mListener->OnStopRequest(aRequest, aContext, mStatus);
   }
   mOnStopRequestCalled = true;
+
+  // notify "http-on-stop-connect" observers
+  gHttpHandler->OnStopRequest(this);
 
   ReleaseListeners();
 
@@ -2300,6 +2304,18 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
              "security flags in loadInfo but asyncOpen2() not called");
 
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
+
+  if (LOG4_ENABLED()) {
+    JSContext* cx = nsContentUtils::GetCurrentJSContext();
+    if (cx) {
+      nsAutoCString fileNameString;
+      uint32_t line = 0, col = 0;
+      if (nsJSUtils::GetCallingLocation(cx, fileNameString, &line, &col)) {
+        LOG(("HttpChannelChild %p source script=%s:%u:%u",
+             this, fileNameString.get(), line, col));
+      }
+    }
+  }
 
 #ifdef DEBUG
   AssertPrivateBrowsingId();
@@ -3616,6 +3632,13 @@ mozilla::ipc::IPCResult
 HttpChannelChild::RecvSetPriority(const int16_t& aPriority)
 {
   mPriority = aPriority;
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+HttpChannelChild::RecvAttachStreamFilter(Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
+{
+  extensions::StreamFilterParent::Attach(this, Move(aEndpoint));
   return IPC_OK();
 }
 

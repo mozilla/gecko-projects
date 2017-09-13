@@ -59,6 +59,14 @@ enum class ExternalImageType : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class FontRenderMode : uint32_t {
+  Mono = 0,
+  Alpha = 1,
+  Subpixel = 2,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class ImageFormat : uint32_t {
   Invalid = 0,
   A8 = 1,
@@ -167,6 +175,9 @@ struct DocumentHandle;
 // RenderBackend.
 struct Renderer;
 
+// The resource updates for a given transaction (they must be applied in the same frame).
+struct ResourceUpdates;
+
 struct Vec_u8;
 
 struct WrRenderedEpochs;
@@ -178,83 +189,6 @@ struct WrThreadPool;
 typedef Vec_u8 VecU8;
 
 typedef Arc_VecU8 ArcVecU8;
-
-struct IdNamespace {
-  uint32_t mHandle;
-
-  bool operator==(const IdNamespace& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator!=(const IdNamespace& aOther) const {
-    return mHandle != aOther.mHandle;
-  }
-  bool operator<(const IdNamespace& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const IdNamespace& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
-};
-
-struct ImageKey {
-  IdNamespace mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const ImageKey& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
-  }
-};
-
-typedef ImageKey WrImageKey;
-
-struct WrImageDescriptor {
-  ImageFormat format;
-  uint32_t width;
-  uint32_t height;
-  uint32_t stride;
-  bool is_opaque;
-
-  bool operator==(const WrImageDescriptor& aOther) const {
-    return format == aOther.format &&
-           width == aOther.width &&
-           height == aOther.height &&
-           stride == aOther.stride &&
-           is_opaque == aOther.is_opaque;
-  }
-};
-
-struct ByteSlice {
-  const uint8_t *buffer;
-  size_t len;
-
-  bool operator==(const ByteSlice& aOther) const {
-    return buffer == aOther.buffer &&
-           len == aOther.len;
-  }
-};
-
-struct WrExternalImageId {
-  uint64_t mHandle;
-
-  bool operator==(const WrExternalImageId& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-};
-
-typedef ExternalImageType WrExternalImageBufferType;
-
-struct FontKey {
-  IdNamespace mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const FontKey& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
-  }
-};
-
-typedef FontKey WrFontKey;
 
 struct Epoch {
   uint32_t mHandle;
@@ -395,6 +329,23 @@ struct WrTransformProperty {
   LayoutTransform transform;
 };
 
+struct IdNamespace {
+  uint32_t mHandle;
+
+  bool operator==(const IdNamespace& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator!=(const IdNamespace& aOther) const {
+    return mHandle != aOther.mHandle;
+  }
+  bool operator<(const IdNamespace& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const IdNamespace& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
 typedef IdNamespace WrIdNamespace;
 
 // Represents RGBA screen colors with floating point numbers.
@@ -463,6 +414,18 @@ struct WrComplexClipRegion {
            radii == aOther.radii;
   }
 };
+
+struct ImageKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const ImageKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+typedef ImageKey WrImageKey;
 
 struct WrImageMask {
   WrImageKey image;
@@ -580,6 +543,18 @@ struct WrFilterOp {
   }
 };
 
+struct FontInstanceKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const FontInstanceKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+typedef FontInstanceKey WrFontInstanceKey;
+
 typedef uint32_t GlyphIndex;
 
 struct GlyphInstance {
@@ -589,6 +564,14 @@ struct GlyphInstance {
   bool operator==(const GlyphInstance& aOther) const {
     return index == aOther.index &&
            point == aOther.point;
+  }
+};
+
+struct GlyphOptions {
+  FontRenderMode render_mode;
+
+  bool operator==(const GlyphOptions& aOther) const {
+    return render_mode == aOther.render_mode;
   }
 };
 
@@ -605,6 +588,16 @@ struct TextShadow {
 };
 
 typedef YuvColorSpace WrYuvColorSpace;
+
+struct ByteSlice {
+  const uint8_t *buffer;
+  size_t len;
+
+  bool operator==(const ByteSlice& aOther) const {
+    return buffer == aOther.buffer &&
+           len == aOther.len;
+  }
+};
 
 struct TypedPoint2D_u16__Tiles {
   uint16_t x;
@@ -672,6 +665,14 @@ struct WrExternalImage {
   }
 };
 
+struct WrExternalImageId {
+  uint64_t mHandle;
+
+  bool operator==(const WrExternalImageId& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+};
+
 typedef WrExternalImage (*LockExternalImageCallback)(void*, WrExternalImageId, uint8_t);
 
 typedef void (*UnlockExternalImageCallback)(void*, WrExternalImageId, uint8_t);
@@ -685,6 +686,54 @@ struct WrExternalImageHandler {
     return external_image_obj == aOther.external_image_obj &&
            lock_func == aOther.lock_func &&
            unlock_func == aOther.unlock_func;
+  }
+};
+
+struct WrImageDescriptor {
+  ImageFormat format;
+  uint32_t width;
+  uint32_t height;
+  uint32_t stride;
+  bool is_opaque;
+
+  bool operator==(const WrImageDescriptor& aOther) const {
+    return format == aOther.format &&
+           width == aOther.width &&
+           height == aOther.height &&
+           stride == aOther.stride &&
+           is_opaque == aOther.is_opaque;
+  }
+};
+
+typedef ExternalImageType WrExternalImageBufferType;
+
+struct FontKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const FontKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+typedef FontKey WrFontKey;
+
+struct FontInstanceOptions {
+  FontRenderMode render_mode;
+
+  bool operator==(const FontInstanceOptions& aOther) const {
+    return render_mode == aOther.render_mode;
+  }
+};
+
+struct FontInstancePlatformOptions {
+  bool use_embedded_bitmap;
+  bool force_gdi_rendering;
+
+  bool operator==(const FontInstancePlatformOptions& aOther) const {
+    return use_embedded_bitmap == aOther.use_embedded_bitmap &&
+           force_gdi_rendering == aOther.force_gdi_rendering;
   }
 };
 
@@ -712,40 +761,9 @@ const VecU8 *wr_add_ref_arc(const ArcVecU8 *aArc)
 WR_FUNC;
 
 WR_INLINE
-void wr_api_add_blob_image(DocumentHandle *aDh,
-                           WrImageKey aImageKey,
-                           const WrImageDescriptor *aDescriptor,
-                           ByteSlice aBytes)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_add_external_image(DocumentHandle *aDh,
-                               WrImageKey aImageKey,
-                               const WrImageDescriptor *aDescriptor,
-                               WrExternalImageId aExternalImageId,
-                               WrExternalImageBufferType aBufferType,
-                               uint8_t aChannelIndex)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_add_image(DocumentHandle *aDh,
-                      WrImageKey aImageKey,
-                      const WrImageDescriptor *aDescriptor,
-                      ByteSlice aBytes)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_add_raw_font(DocumentHandle *aDh,
-                         WrFontKey aKey,
-                         uint8_t *aFontBuffer,
-                         size_t aBufferSize,
-                         uint32_t aIndex)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_clear_root_display_list(DocumentHandle *aDh,
-                                    WrEpoch aEpoch,
-                                    WrPipelineId aPipelineId)
+void wr_api_clear_display_list(DocumentHandle *aDh,
+                               WrEpoch aEpoch,
+                               WrPipelineId aPipelineId)
 WR_FUNC;
 
 WR_INLINE
@@ -756,16 +774,6 @@ WR_FUNC;
 WR_INLINE
 void wr_api_delete(DocumentHandle *aDh)
 WR_DESTRUCTOR_SAFE_FUNC;
-
-WR_INLINE
-void wr_api_delete_font(DocumentHandle *aDh,
-                        WrFontKey aKey)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_delete_image(DocumentHandle *aDh,
-                         WrImageKey aKey)
-WR_FUNC;
 
 WR_INLINE
 void wr_api_finalize_builder(WrState *aState,
@@ -796,16 +804,17 @@ void wr_api_send_external_event(DocumentHandle *aDh,
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
-void wr_api_set_root_display_list(DocumentHandle *aDh,
-                                  ColorF aColor,
-                                  WrEpoch aEpoch,
-                                  float aViewportWidth,
-                                  float aViewportHeight,
-                                  WrPipelineId aPipelineId,
-                                  LayoutSize aContentSize,
-                                  BuiltDisplayListDescriptor aDlDescriptor,
-                                  uint8_t *aDlData,
-                                  size_t aDlSize)
+void wr_api_set_display_list(DocumentHandle *aDh,
+                             ColorF aColor,
+                             WrEpoch aEpoch,
+                             float aViewportWidth,
+                             float aViewportHeight,
+                             WrPipelineId aPipelineId,
+                             LayoutSize aContentSize,
+                             BuiltDisplayListDescriptor aDlDescriptor,
+                             uint8_t *aDlData,
+                             size_t aDlSize,
+                             ResourceUpdates *aResources)
 WR_FUNC;
 
 WR_INLINE
@@ -820,26 +829,8 @@ void wr_api_set_window_parameters(DocumentHandle *aDh,
 WR_FUNC;
 
 WR_INLINE
-void wr_api_update_blob_image(DocumentHandle *aDh,
-                              WrImageKey aImageKey,
-                              const WrImageDescriptor *aDescriptor,
-                              ByteSlice aBytes)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_update_external_image(DocumentHandle *aDh,
-                                  WrImageKey aKey,
-                                  const WrImageDescriptor *aDescriptor,
-                                  WrExternalImageId aExternalImageId,
-                                  WrExternalImageBufferType aImageType,
-                                  uint8_t aChannelIndex)
-WR_FUNC;
-
-WR_INLINE
-void wr_api_update_image(DocumentHandle *aDh,
-                         WrImageKey aKey,
-                         const WrImageDescriptor *aDescriptor,
-                         ByteSlice aBytes)
+void wr_api_update_resources(DocumentHandle *aDh,
+                             ResourceUpdates *aResources)
 WR_FUNC;
 
 WR_INLINE
@@ -858,6 +849,13 @@ uint64_t wr_dp_define_clip(WrState *aState,
                            const WrComplexClipRegion *aComplex,
                            size_t aComplexCount,
                            const WrImageMask *aMask)
+WR_FUNC;
+
+WR_INLINE
+void wr_dp_define_scroll_layer(WrState *aState,
+                               uint64_t aScrollId,
+                               LayoutRect aContentRect,
+                               LayoutRect aClipRect)
 WR_FUNC;
 
 WR_INLINE
@@ -1027,9 +1025,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_scroll_layer(WrState *aState,
-                             uint64_t aScrollId,
-                             LayoutRect aContentRect,
-                             LayoutRect aClipRect)
+                             uint64_t aScrollId)
 WR_FUNC;
 
 WR_INLINE
@@ -1050,10 +1046,10 @@ void wr_dp_push_text(WrState *aState,
                      LayoutRect aBounds,
                      LayoutRect aClip,
                      ColorF aColor,
-                     WrFontKey aFontKey,
+                     WrFontInstanceKey aFontKey,
                      const GlyphInstance *aGlyphs,
                      uint32_t aGlyphCount,
-                     float aGlyphSize)
+                     const GlyphOptions *aGlyphOptions)
 WR_FUNC;
 
 WR_INLINE
@@ -1149,7 +1145,7 @@ void wr_renderer_readback(Renderer *aRenderer,
 WR_FUNC;
 
 WR_INLINE
-void wr_renderer_render(Renderer *aRenderer,
+bool wr_renderer_render(Renderer *aRenderer,
                         uint32_t aWidth,
                         uint32_t aHeight)
 WR_FUNC;
@@ -1166,6 +1162,105 @@ WR_FUNC;
 
 WR_INLINE
 void wr_renderer_update(Renderer *aRenderer)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_blob_image(ResourceUpdates *aResources,
+                                        WrImageKey aImageKey,
+                                        const WrImageDescriptor *aDescriptor,
+                                        ByteSlice aBytes)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_external_image(ResourceUpdates *aResources,
+                                            WrImageKey aImageKey,
+                                            const WrImageDescriptor *aDescriptor,
+                                            WrExternalImageId aExternalImageId,
+                                            WrExternalImageBufferType aBufferType,
+                                            uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_font_instance(ResourceUpdates *aResources,
+                                           WrFontInstanceKey aKey,
+                                           WrFontKey aFontKey,
+                                           float aGlyphSize,
+                                           const FontInstanceOptions *aOptions,
+                                           const FontInstancePlatformOptions *aPlatformOptions)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_image(ResourceUpdates *aResources,
+                                   WrImageKey aImageKey,
+                                   const WrImageDescriptor *aDescriptor,
+                                   ByteSlice aBytes)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_raw_font(ResourceUpdates *aResources,
+                                      WrFontKey aKey,
+                                      uint8_t *aFontBuffer,
+                                      size_t aBufferSize,
+                                      uint32_t aIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_clear(ResourceUpdates *aResources)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_delete(ResourceUpdates *aUpdates)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+void wr_resource_updates_delete_font(ResourceUpdates *aResources,
+                                     WrFontKey aKey)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_delete_font_instance(ResourceUpdates *aResources,
+                                              WrFontInstanceKey aKey)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_delete_image(ResourceUpdates *aResources,
+                                      WrImageKey aKey)
+WR_FUNC;
+
+WR_INLINE
+ResourceUpdates *wr_resource_updates_deserialize(ByteSlice aData)
+WR_FUNC;
+
+WR_INLINE
+ResourceUpdates *wr_resource_updates_new()
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_serialize(ResourceUpdates *aResources,
+                                   VecU8 *aInto)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_update_blob_image(ResourceUpdates *aResources,
+                                           WrImageKey aImageKey,
+                                           const WrImageDescriptor *aDescriptor,
+                                           ByteSlice aBytes)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_update_external_image(ResourceUpdates *aResources,
+                                               WrImageKey aKey,
+                                               const WrImageDescriptor *aDescriptor,
+                                               WrExternalImageId aExternalImageId,
+                                               WrExternalImageBufferType aImageType,
+                                               uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_update_image(ResourceUpdates *aResources,
+                                      WrImageKey aKey,
+                                      const WrImageDescriptor *aDescriptor,
+                                      ByteSlice aBytes)
 WR_FUNC;
 
 WR_INLINE

@@ -30,12 +30,6 @@
   color: currentColor;
 }
 
-#mainPrefPane groupbox,
-#mainPrefPane deck,
-#mainPrefPane description {
-  font-size: 1.36rem;
-}
-
 groupbox + groupbox {
   margin-top: 16px;
 }
@@ -47,12 +41,6 @@ groupbox + vbox groupbox > .groupbox-body {
 
 .groupbox-title {
   margin-top: 16px;
-}
-
-input,
-description.indent,
-.indent > description {
-  font-size: 1.18rem !important;
 }
 
 description.indent,
@@ -119,27 +107,22 @@ separator.thin:not([orient="vertical"]) {
   border-top: 1px solid rgba(12, 12, 13, 0.15);
 }
 
-.header-name {
-  font-size: 2rem;
-  font-weight: 300;
-}
-
 /* Category List */
 
 #category-general > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/general.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/general.svg");
 }
 
 #category-search > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/search.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/search.svg");
 }
 
 #category-privacy > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/privacy-security.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/privacy-security.svg");
 }
 
 #category-sync > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/sync.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/sync.svg");
 }
 
 /* header */
@@ -155,68 +138,29 @@ separator.thin:not([orient="vertical"]) {
 
 /* General Pane */
 
-#startupGroup {
-  margin-top: 0px !important;
+#isDefaultLabel {
+  font-weight: 600;
 }
 
-#startupTable {
-  margin-top: 32px;
-  margin-inline-end: -4px;
-  border-collapse: collapse;
-}
-
-#startupTable > tr > td {
-  padding: 0; /* remove the padding from html.css */
-}
-
-#startupTable > .tableGroup > td {
+#startupPageBox {
   padding-top: 32px;
 }
 
-#startupTable > .tableSubGroup > td {
-  padding-top: 8px;
+#browserHomePage {
+  margin-inline-start: 0;
+  margin-inline-end: 0;
 }
 
-#startupTable > tr > .label-cell {
-  text-align: end;
-  width: 0; /* make the column as small as possible */
+.homepage-button:first-of-type {
+  margin-inline-start: 0;
 }
 
-#startupTable > tr > .content-cell:not(:first-child) {
-  padding-inline-start: 8px;
-}
-
-#startupTable > tr > .label-cell > label {
-  white-space: nowrap;
-}
-
-#startupTable > tr > .content-cell > menulist,
-#startupTable > tr > .content-cell > textbox {
-  width: calc(100% - 8px);
-  margin-left: 4px;
-  margin-right: 4px;
-}
-
-#startupTable > tr > .homepage-buttons {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-#startupTable > tr > .homepage-buttons > .content-cell-item {
-  flex-grow: 1;
-}
-
-.content-cell-item {
-  margin: 2px 4px;
+.homepage-button:last-of-type {
+  margin-inline-end: 0;
 }
 
 #getStarted {
   font-size: 90%;
-}
-
-#isNotDefaultLabel,
-#signedOutAccountBoxTitle {
-  font-weight: 600;
 }
 
 #downloadFolder {
@@ -485,8 +429,12 @@ separator.thin:not([orient="vertical"]) {
  */
 
 /**
- * Font dialog menulist fixes
+ * Font group and font dialog menulist fixes
  */
+
+#defaultFont {
+  width: 0;
+}
 
 #defaultFontType,
 #serif,
@@ -504,7 +452,7 @@ separator.thin:not([orient="vertical"]) {
   height: 80px;
   border-radius: 50%;
   border: 1px solid transparent;
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/fxa-avatar.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/fxa-avatar.svg");
   margin-inline-end: 24px;
   -moz-user-focus: normal;
 }
@@ -542,7 +490,6 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #noFxaCaption {
-  font-weight: bold;
   line-height: 30px;
   margin-top: 0;
   margin-bottom: 4px;
@@ -553,7 +500,7 @@ separator.thin:not([orient="vertical"]) {
 }
 
 .fxaSyncIllustration {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/sync-devices.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/sync-devices.svg");
   width: 312px;
   height: 136px;
 }
@@ -570,10 +517,6 @@ separator.thin:not([orient="vertical"]) {
   margin-bottom: 32px;
 }
 
-#signedOutAccountBoxTitle {
-  font-weight: bold;
-}
-
 .openLink {
   line-height: 30px;
   cursor: pointer;
@@ -584,7 +527,6 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #fxaDisplayName {
-  font-weight: bold;
   margin-inline-end: 10px !important;
 }
 
@@ -607,11 +549,11 @@ separator.thin:not([orient="vertical"]) {
 }
 
 .androidLink {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/logo-android.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/logo-android.svg");
 }
 
 .iOSLink {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/logo-ios.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/logo-ios.svg");
 }
 
 .androidLink,
@@ -649,7 +591,6 @@ separator.thin:not([orient="vertical"]) {
   background-image: url("chrome://global/skin/icons/help.svg");
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
-  font-size: 13px;
   line-height: 36px;
   height: 36px;
   width: 168px;
@@ -678,7 +619,7 @@ separator.thin:not([orient="vertical"]) {
 }
 
 .face-sad {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/face-sad.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/face-sad.svg");
   width: 20px;
   height: 20px;
   margin-inline-end: 8px;
@@ -687,7 +628,7 @@ separator.thin:not([orient="vertical"]) {
 }
 
 .face-smile {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/face-smile.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/face-smile.svg");
   width: 20px;
   height: 20px;
   margin-inline-end: 8px;
@@ -704,7 +645,6 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #searchInput {
-  width: 250px;
   margin: 20px 0 30px 0;
 }
 
@@ -766,7 +706,7 @@ menulist[indicator=true] > menupopup menuitem:not([image]) > .menu-iconic-left >
 }
 
 menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url(chrome://browser/skin/preferences/in-content-new/search-arrow-indicator.svg);
+  list-style-image: url(chrome://browser/skin/preferences/in-content/search-arrow-indicator.svg);
 }
 
 menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .menu-iconic-left > .menu-iconic-icon:-moz-locale-dir(rtl) {
@@ -787,7 +727,7 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
 }
 
 .no-results-container > image {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/no-search-results.svg");
+  list-style-image: url("chrome://browser/skin/preferences/in-content/no-search-results.svg");
   width: 380px;
   height: 293px;
 }

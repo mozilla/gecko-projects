@@ -50,6 +50,7 @@ extern crate bitflags;
 extern crate thread_profiler;
 
 mod border;
+mod clip;
 mod clip_scroll_node;
 mod clip_scroll_tree;
 mod debug_colors;
@@ -66,6 +67,7 @@ mod geometry;
 mod glyph_cache;
 mod glyph_rasterizer;
 mod gpu_cache;
+mod gpu_types;
 mod internal_types;
 mod mask_cache;
 mod prim_store;

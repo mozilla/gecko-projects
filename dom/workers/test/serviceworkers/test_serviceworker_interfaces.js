@@ -42,7 +42,6 @@ var ecmaGlobals =
     "Int8Array",
     "InternalError",
     "Intl",
-    "Iterator",
     "JSON",
     "Map",
     "Math",
@@ -187,9 +186,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "PerformanceMeasure",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PerformanceObserver", nightly: true },
+    "PerformanceObserver",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    { name: "PerformanceObserverEntryList", nightly: true },
+    "PerformanceObserverEntryList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "ProgressEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!

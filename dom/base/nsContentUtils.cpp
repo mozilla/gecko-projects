@@ -44,6 +44,7 @@
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -295,6 +296,7 @@ bool nsContentUtils::sIsUserTimingLoggingEnabled = false;
 bool nsContentUtils::sIsFormAutofillAutocompleteEnabled = false;
 bool nsContentUtils::sIsWebComponentsEnabled = false;
 bool nsContentUtils::sIsCustomElementsEnabled = false;
+bool nsContentUtils::sDevToolsEnabled = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
 bool nsContentUtils::sUseActivityCursor = false;
 bool nsContentUtils::sAnimationsAPICoreEnabled = false;
@@ -303,6 +305,7 @@ bool nsContentUtils::sGetBoxQuadsEnabled = false;
 bool nsContentUtils::sSkipCursorMoveForSameValueSet = false;
 bool nsContentUtils::sRequestIdleCallbackEnabled = false;
 bool nsContentUtils::sLowerNetworkPriority = false;
+bool nsContentUtils::sTailingEnabled = false;
 bool nsContentUtils::sShowInputPlaceholderOnFocus = true;
 bool nsContentUtils::sAutoFocusEnabled = true;
 #ifndef RELEASE_OR_BETA
@@ -704,6 +707,9 @@ nsContentUtils::Init()
   Preferences::AddBoolVarCache(&sIsCustomElementsEnabled,
                                "dom.webcomponents.customelements.enabled", false);
 
+  Preferences::AddBoolVarCache(&sDevToolsEnabled,
+                               "devtools.enabled");
+
   Preferences::AddIntVarCache(&sPrivacyMaxInnerWidth,
                               "privacy.window.maxInnerWidth",
                               1000);
@@ -763,6 +769,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sLowerNetworkPriority,
                                "privacy.trackingprotection.lower_network_priority", false);
+
+  Preferences::AddBoolVarCache(&sTailingEnabled,
+                               "network.http.tailing.enabled", true);
 
   Preferences::AddBoolVarCache(&sShowInputPlaceholderOnFocus,
                                "dom.placeholder.show_on_focus", true);
@@ -2322,7 +2331,7 @@ nsContentUtils::CanCallerAccess(nsPIDOMWindowInner* aWindow)
 
 // static
 bool
-nsContentUtils::PrincipalHasPermission(nsIPrincipal* aPrincipal, const nsAString& aPerm)
+nsContentUtils::PrincipalHasPermission(nsIPrincipal* aPrincipal, const nsIAtom* aPerm)
 {
   // Chrome gets access by default.
   if (IsSystemPrincipal(aPrincipal)) {
@@ -2335,7 +2344,7 @@ nsContentUtils::PrincipalHasPermission(nsIPrincipal* aPrincipal, const nsAString
 
 // static
 bool
-nsContentUtils::CallerHasPermission(JSContext* aCx, const nsAString& aPerm)
+nsContentUtils::CallerHasPermission(JSContext* aCx, const nsIAtom* aPerm)
 {
   return PrincipalHasPermission(SubjectPrincipal(aCx), aPerm);
 }
@@ -2514,7 +2523,7 @@ nsContentUtils::IsCallerContentXBL()
       return true;
     }
 
-    return xpc::IsContentXBLScope(c);
+    return xpc::IsContentXBLCompartment(c);
 }
 
 bool
@@ -2635,6 +2644,26 @@ nsContentUtils::ContentIsFlattenedTreeDescendantOf(
       return true;
     }
     aPossibleDescendant = aPossibleDescendant->GetFlattenedTreeParentNode();
+  } while (aPossibleDescendant);
+
+  return false;
+}
+
+// static
+bool
+nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
+  const nsINode* aPossibleDescendant,
+  const nsINode* aPossibleAncestor)
+{
+  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
+  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+
+  do {
+    if (aPossibleDescendant == aPossibleAncestor) {
+      return true;
+    }
+    aPossibleDescendant =
+      aPossibleDescendant->GetFlattenedTreeParentNodeForStyle();
   } while (aPossibleDescendant);
 
   return false;
@@ -2765,6 +2794,16 @@ nsContentUtils::GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
 {
   return GetCommonAncestorInternal(aContent1, aContent2, [](nsIContent* aContent) {
     return aContent->GetFlattenedTreeParent();
+  });
+}
+
+/* static */
+Element*
+nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(Element* aElement1,
+                                                       Element* aElement2)
+{
+  return GetCommonAncestorInternal(aElement1, aElement2, [](Element* aElement) {
+    return aElement->GetFlattenedTreeParentElementForStyle();
   });
 }
 
@@ -3050,22 +3089,15 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
                                     /* aDeep = */ true,
                                     /* aLiveList = */ false);
     }
-    RefPtr<nsContentList> htmlFormControls = htmlDoc->GetExistingFormControls();
-    if (!htmlFormControls) {
-      // If the document doesn't have an existing form controls content list,
-      // create a new one, but avoid creating a live list since we only need to
-      // use the list here and it doesn't need to listen to mutation events.
-      htmlFormControls = new nsContentList(aDocument,
-                                           nsHTMLDocument::MatchFormControls,
-                                           nullptr, nullptr,
-                                           /* aDeep = */ true,
-                                           /* aMatchAtom = */ nullptr,
-                                           /* aMatchNameSpaceId = */ kNameSpaceID_None,
-                                           /* aFuncMayDependOnAttr = */ true,
-                                           /* aLiveList = */ false);
-    }
-
-    NS_ENSURE_TRUE(htmlForms && htmlFormControls, NS_ERROR_OUT_OF_MEMORY);
+    RefPtr<nsContentList> htmlFormControls =
+      new nsContentList(aDocument,
+                        nsHTMLDocument::MatchFormControls,
+                        nullptr, nullptr,
+                        /* aDeep = */ true,
+                        /* aMatchAtom = */ nullptr,
+                        /* aMatchNameSpaceId = */ kNameSpaceID_None,
+                        /* aFuncMayDependOnAttr = */ true,
+                        /* aLiveList = */ false);
 
     // If we have a form control and can calculate form information, use that
     // as the key - it is more reliable than just recording position in the
@@ -3082,7 +3114,7 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
     // XXXbz We don't?  Why not?  I don't follow.
     //
     nsCOMPtr<nsIFormControl> control(do_QueryInterface(aContent));
-    if (control && htmlFormControls && htmlForms) {
+    if (control) {
 
       // Append the control type
       KeyAppendInt(control->ControlType(), aKey);
@@ -7318,7 +7350,7 @@ nsContentUtils::IsCutCopyAllowed(nsIPrincipal* aSubjectPrincipal)
     return true;
   }
 
-  return PrincipalHasPermission(aSubjectPrincipal, NS_LITERAL_STRING("clipboardWrite"));
+  return PrincipalHasPermission(aSubjectPrincipal, nsGkAtoms::clipboardWrite);
 }
 
 /* static */
@@ -10850,3 +10882,17 @@ nsContentUtils::ExtractErrorValues(JSContext* aCx,
   }
 }
 
+/* static */ bool
+nsContentUtils::DevToolsEnabled(JSContext* aCx)
+{
+  if (NS_IsMainThread()) {
+    return sDevToolsEnabled;
+  }
+
+  workers::WorkerPrivate* workerPrivate = workers::GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->DevToolsEnabled();
+}

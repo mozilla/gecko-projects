@@ -116,6 +116,7 @@
   border: 1px solid var(--in-content-box-border-color);
   border-radius: 2px;
   background-color: #ebebeb;
+  text-align: center;
 }
 
 .alert .alert-title {
@@ -126,6 +127,10 @@
 
 .alert button {
   margin: 1em 2em;
+}
+
+.experiment-info-container > .alert button {
+  margin: 0 4px;
 }
 
 .loading {
@@ -149,7 +154,9 @@ button.warning {
 /*** category selector ***/
 
 #categories {
-  padding-top: 0;
+  /* With photon this should be 70px but there are some hidden forward/back
+     buttons that are 39px tall above this. */
+  padding-top: 31px;
 }
 
 .category[disabled] {
@@ -162,7 +169,6 @@ button.warning {
 }
 
 .category:not([disabled]) {
-  min-height: 40px;
   transition-property: min-height, opacity;
   transition-duration: 1s, 0.8s;
 }

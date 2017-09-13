@@ -7,7 +7,7 @@ use attr::{ParsedCaseSensitivity, SELECTOR_WHITESPACE, NamespaceConstraint};
 use bloom::BLOOM_HASH_MASK;
 use builder::{SelectorBuilder, SpecificityAndFlags};
 use context::QuirksMode;
-use cssparser::{ParseError, BasicParseError, CowRcStr};
+use cssparser::{ParseError, BasicParseError, CowRcStr, Delimiter};
 use cssparser::{Token, Parser as CssParser, parse_nth, ToCss, serialize_identifier, CssStringWriter};
 use precomputed_hash::PrecomputedHash;
 use servo_arc::ThinArc;
@@ -176,7 +176,7 @@ pub trait Parser<'i> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SelectorList<Impl: SelectorImpl>(pub Vec<Selector<Impl>>);
+pub struct SelectorList<Impl: SelectorImpl>(pub SmallVec<[Selector<Impl>; 1]>);
 
 impl<Impl: SelectorImpl> SelectorList<Impl> {
     /// Parse a comma-separated list of Selectors.
@@ -186,13 +186,20 @@ impl<Impl: SelectorImpl> SelectorList<Impl> {
     pub fn parse<'i, 't, P, E>(parser: &P, input: &mut CssParser<'i, 't>)
                                -> Result<Self, ParseError<'i, SelectorParseError<'i, E>>>
     where P: Parser<'i, Impl=Impl, Error=E> {
-        input.parse_comma_separated(|input| parse_selector(parser, input))
-             .map(SelectorList)
+        let mut values = SmallVec::new();
+        loop {
+            values.push(input.parse_until_before(Delimiter::Comma, |input| parse_selector(parser, input))?);
+            match input.next() {
+                Err(_) => return Ok(SelectorList(values)),
+                Ok(&Token::Comma) => continue,
+                Ok(_) => unreachable!(),
+            }
+        }
     }
 
     /// Creates a SelectorList from a Vec of selectors. Used in tests.
     pub fn from_vec(v: Vec<Selector<Impl>>) -> Self {
-        SelectorList(v)
+        SelectorList(SmallVec::from_vec(v))
     }
 }
 
@@ -211,7 +218,7 @@ impl<Impl: SelectorImpl> SelectorList<Impl> {
 /// off the upper bits) at the expense of making the fourth somewhat more
 /// complicated to assemble, because we often bail out before checking all the
 /// hashes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq)]
 pub struct AncestorHashes {
     pub packed_hashes: [u32; 3],
 }
@@ -416,7 +423,6 @@ impl<Impl: SelectorImpl> Selector<Impl> {
         ))
     }
 
-
     /// Returns an iterator over this selector in matching order (right-to-left).
     /// When a combinator is reached, the iterator will return None, and
     /// next_sequence() may be called to continue to the next sequence.
@@ -486,6 +492,11 @@ impl<Impl: SelectorImpl> Selector<Impl> {
     /// Returns count of simple selectors and combinators in the Selector.
     pub fn len(&self) -> usize {
         self.0.slice.len()
+    }
+
+    /// Returns the address on the heap of the ThinArc for memory reporting.
+    pub fn thin_arc_heap_ptr(&self) -> *const ::std::os::raw::c_void {
+        self.0.heap_ptr()
     }
 }
 
@@ -787,8 +798,8 @@ impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
                 // something like `... > ::before`, because we store `>` and `::`
                 // both as combinators internally.
                 //
-                // If we are in this case, we continue to the next iteration of the
-                // `for compound in compound_selectors` loop.
+                // If we are in this case, after we have serialized the universal
+                // selector, we skip Step 2 and continue with the algorithm.
                 let (can_elide_namespace, first_non_namespace) = match &compound[0] {
                     &Component::ExplicitAnyNamespace |
                     &Component::ExplicitNoNamespace |
@@ -796,6 +807,7 @@ impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
                     &Component::DefaultNamespace(_) => (true, 1),
                     _ => (true, 0),
                 };
+                let mut perform_step_2 = true;
                 if first_non_namespace == compound.len() - 1 {
                     match (combinators.peek(), &compound[first_non_namespace]) {
                         // We have to be careful here, because if there is a pseudo
@@ -811,7 +823,8 @@ impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
                             for simple in compound.iter() {
                                 simple.to_css(dest)?;
                             }
-                            continue
+                            // Skip step 2, which is an "otherwise".
+                            perform_step_2 = false;
                         }
                         (_, _) => (),
                     }
@@ -826,17 +839,19 @@ impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
                 // proposing to change this to match up with the behavior asserted
                 // in cssom/serialize-namespaced-type-selectors.html, which the
                 // following code tries to match.
-                for simple in compound.iter() {
-                    if let Component::ExplicitUniversalType = *simple {
-                        // Can't have a namespace followed by a pseudo-element
-                        // selector followed by a universal selector in the same
-                        // compound selector, so we don't have to worry about the
-                        // real namespace being in a different `compound`.
-                        if can_elide_namespace {
-                            continue
+                if perform_step_2 {
+                    for simple in compound.iter() {
+                        if let Component::ExplicitUniversalType = *simple {
+                            // Can't have a namespace followed by a pseudo-element
+                            // selector followed by a universal selector in the same
+                            // compound selector, so we don't have to worry about the
+                            // real namespace being in a different `compound`.
+                            if can_elide_namespace {
+                                continue
+                            }
                         }
+                        simple.to_css(dest)?;
                     }
-                    simple.to_css(dest)?;
                 }
             }
 

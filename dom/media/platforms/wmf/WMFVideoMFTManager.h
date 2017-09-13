@@ -8,6 +8,7 @@
 #define WMFVideoMFTManager_h_
 
 #include "MFTDecoder.h"
+#include "MediaResult.h"
 #include "WMF.h"
 #include "WMFMediaDataDecoder.h"
 #include "mozilla/Atomics.h"
@@ -28,7 +29,7 @@ public:
                      bool aDXVAEnabled);
   ~WMFVideoMFTManager();
 
-  bool Init();
+  MediaResult Init();
 
   HRESULT Input(MediaRawData* aSample) override;
 
@@ -40,15 +41,7 @@ public:
 
   TrackInfo::TrackType GetType() override { return TrackInfo::kVideoTrack; }
 
-  const char* GetDescriptionName() const override
-  {
-    nsCString failureReason;
-    return IsHardwareAccelerated(failureReason)
-      ? mAMDVP9InUse
-        ? "AMD VP9 hardware video decoder"
-        : "wmf hardware video decoder"
-      : "wmf software video decoder";
-  }
+  nsCString GetDescriptionName() const override;
 
   void Flush() override
   {
@@ -71,11 +64,11 @@ public:
   }
 
 private:
-  bool ValidateVideoInfo();
+  MediaResult ValidateVideoInfo();
 
   bool InitializeDXVA();
 
-  bool InitInternal();
+  MediaResult InitInternal();
 
   HRESULT CreateBasicVideoFrame(IMFSample* aSample,
                                 int64_t aStreamOffset,

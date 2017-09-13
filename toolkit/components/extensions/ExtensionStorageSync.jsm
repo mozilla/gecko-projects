@@ -57,7 +57,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Kinto: "resource://services-common/kinto-offline-client.js",
   FirefoxAdapter: "resource://services-common/kinto-storage-adapter.js",
   Observers: "resource://services-common/observers.js",
-  Sqlite: "resource://gre/modules/Sqlite.jsm",
   Utils: "resource://services-sync/util.js",
 });
 
@@ -72,12 +71,13 @@ XPCOMUtils.defineLazyGetter(this, "WeaveCrypto", function() {
 });
 
 const {
+  DefaultMap,
   runSafeSyncWithoutClone,
 } = ExtensionUtils;
 
 // Map of Extensions to Set<Contexts> to track contexts that are still
 // "live" and use storage.sync.
-const extensionContexts = new Map();
+const extensionContexts = new DefaultMap(() => new Set());
 // Borrow logger from Sync.
 const log = Log.repository.getLogger("Sync.Engine.Extension-Storage");
 
@@ -334,30 +334,25 @@ global.KeyRingEncryptionRemoteTransformer = KeyRingEncryptionRemoteTransformer;
  * - connection: a Sqlite connection. Meant for internal use only.
  * - kinto: a KintoBase object, suitable for using in Firefox. All
  *   collections in this database will use the same Sqlite connection.
+ * @returns {Promise<Object>}
  */
-const storageSyncInit = (async function() {
-  const path = "storage-sync.sqlite";
-  const opts = {path, sharedMemoryCache: false};
-  const connection = await Sqlite.openConnection(opts);
-  await FirefoxAdapter._init(connection);
-  return {
-    connection,
-    kinto: new Kinto({
-      adapter: FirefoxAdapter,
-      adapterOptions: {sqliteHandle: connection},
-      timeout: KINTO_REQUEST_TIMEOUT,
-    }),
-  };
-})();
-
-AsyncShutdown.profileBeforeChange.addBlocker(
-  "ExtensionStorageSync: close Sqlite handle",
-  async function() {
-    const ret = await storageSyncInit;
-    const {connection} = ret;
-    await connection.close();
+async function storageSyncInit() {
+  // Memoize the result to share the connection.
+  if (storageSyncInit.result === undefined) {
+    const path = "storage-sync.sqlite";
+    const connection = await FirefoxAdapter.openConnection({path});
+    storageSyncInit.result = {
+      connection,
+      kinto: new Kinto({
+        adapter: FirefoxAdapter,
+        adapterOptions: {sqliteHandle: connection},
+        timeout: KINTO_REQUEST_TIMEOUT,
+      }),
+    };
   }
-);
+  return storageSyncInit.result;
+}
+
 // Kinto record IDs have two condtions:
 //
 // - They must contain only ASCII alphanumerics plus - and _. To fix
@@ -432,7 +427,7 @@ class CryptoCollection {
 
   async getCollection() {
     throwIfNoFxA(this._fxaService, "tried to access cryptoCollection");
-    const {kinto} = await storageSyncInit;
+    const {kinto} = await storageSyncInit();
     return kinto.collection(STORAGE_SYNC_CRYPTO_COLLECTION_NAME, {
       idSchema: cryptoCollectionIdSchema,
       remoteTransformers: [new KeyRingEncryptionRemoteTransformer(this._fxaService)],
@@ -670,9 +665,6 @@ global.CollectionKeyEncryptionRemoteTransformer = CollectionKeyEncryptionRemoteT
  */
 function cleanUpForContext(extension, context) {
   const contexts = extensionContexts.get(extension);
-  if (!contexts) {
-    Cu.reportError(new Error(`Internal error: cannot find any contexts for extension ${extension.id}`));
-  }
   contexts.delete(context);
   if (contexts.size === 0) {
     // Nobody else is using this collection. Clean up.
@@ -695,7 +687,7 @@ function cleanUpForContext(extension, context) {
  */
 const openCollection = async function(cryptoCollection, extension, context) {
   let collectionId = extension.id;
-  const {kinto} = await storageSyncInit;
+  const {kinto} = await storageSyncInit();
   const remoteTransformers = [new CollectionKeyEncryptionRemoteTransformer(cryptoCollection, extension.id)];
   const coll = kinto.collection(collectionId, {
     idSchema: storageSyncIdSchema,
@@ -1091,6 +1083,19 @@ class ExtensionStorageSync {
     }
   }
 
+  registerInUse(extension, context) {
+    // Register that the extension and context are in use.
+    const contexts = extensionContexts.get(extension);
+    if (!contexts.has(context)) {
+      // New context. Register it and make sure it cleans itself up
+      // when it closes.
+      contexts.add(context);
+      context.callOnClose({
+        close: () => cleanUpForContext(extension, context),
+      });
+    }
+  }
+
   /**
    * Get the collection for an extension, and register the extension
    * as being "in use".
@@ -1107,20 +1112,7 @@ class ExtensionStorageSync {
     if (prefPermitsStorageSync !== true) {
       return Promise.reject({message: `Please set ${STORAGE_SYNC_ENABLED_PREF} to true in about:config`});
     }
-    // Register that the extension and context are in use.
-    if (!extensionContexts.has(extension)) {
-      extensionContexts.set(extension, new Set());
-    }
-    const contexts = extensionContexts.get(extension);
-    if (!contexts.has(context)) {
-      // New context. Register it and make sure it cleans itself up
-      // when it closes.
-      contexts.add(context);
-      context.callOnClose({
-        close: () => cleanUpForContext(extension, context),
-      });
-    }
-
+    this.registerInUse(extension, context);
     return openCollection(this.cryptoCollection, extension, context);
   }
 
@@ -1229,8 +1221,7 @@ class ExtensionStorageSync {
     listeners.add(listener);
     this.listeners.set(extension, listeners);
 
-    // Force opening the collection so that we will sync for this extension.
-    return this.getCollection(extension, context);
+    this.registerInUse(extension, context);
   }
 
   removeOnChangedListener(extension, listener) {

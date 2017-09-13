@@ -10,7 +10,7 @@ use bezier::Bezier;
 use context::SharedStyleContext;
 use dom::OpaqueNode;
 use font_metrics::FontMetricsProvider;
-use properties::{self, CascadeFlags, ComputedValues, Importance};
+use properties::{self, CascadeFlags, ComputedValues};
 use properties::animated_properties::{AnimatableLonghand, AnimatedProperty, TransitionProperty};
 use properties::longhands::animation_direction::computed_value::single_value::T as AnimationDirection;
 use properties::longhands::animation_iteration_count::single_value::computed_value::T as AnimationIterationCount;
@@ -419,17 +419,15 @@ impl PropertyAnimation {
 /// Inserts transitions into the queue of running animations as applicable for
 /// the given style difference. This is called from the layout worker threads.
 /// Returns true if any animations were kicked off and false otherwise.
-//
-// TODO(emilio): Take rid of this mutex splitting SharedLayoutContex into a
-// cloneable part and a non-cloneable part..
 #[cfg(feature = "servo")]
-pub fn start_transitions_if_applicable(new_animations_sender: &Sender<Animation>,
-                                       opaque_node: OpaqueNode,
-                                       old_style: &ComputedValues,
-                                       new_style: &mut Arc<ComputedValues>,
-                                       timer: &Timer,
-                                       possibly_expired_animations: &[PropertyAnimation])
-                                       -> bool {
+pub fn start_transitions_if_applicable(
+    new_animations_sender: &Sender<Animation>,
+    opaque_node: OpaqueNode,
+    old_style: &ComputedValues,
+    new_style: &mut Arc<ComputedValues>,
+    timer: &Timer,
+    possibly_expired_animations: &[PropertyAnimation]
+) -> bool {
     let mut had_animations = false;
     for i in 0..new_style.get_box().transition_property_count() {
         // Create any property animations, if applicable.
@@ -484,12 +482,11 @@ fn compute_style_for_animation_step(context: &SharedStyleContext,
             let guard = declarations.read_with(context.guards.author);
 
             // No !important in keyframes.
-            debug_assert!(guard.declarations().iter()
-                            .all(|&(_, importance)| importance == Importance::Normal));
+            debug_assert!(!guard.any_important());
 
             let iter = || {
                 guard.declarations().iter().rev()
-                     .map(|&(ref decl, _importance)| (decl, CascadeLevel::Animations))
+                     .map(|decl| (decl, CascadeLevel::Animations))
             };
 
             // This currently ignores visited styles, which seems acceptable,
@@ -502,7 +499,6 @@ fn compute_style_for_animation_step(context: &SharedStyleContext,
                                                Some(previous_style),
                                                Some(previous_style),
                                                Some(previous_style),
-                                               /* cascade_info = */ None,
                                                /* visited_style = */ None,
                                                font_metrics_provider,
                                                CascadeFlags::empty(),

@@ -195,7 +195,7 @@ Memory.prototype = {
         this._poller.disarm();
       }
       this._poller = new DeferredTask(this._emitAllocations,
-                                      this.drainAllocationsTimeoutTimer);
+                                      this.drainAllocationsTimeoutTimer, 0);
       this._poller.arm();
     }
 
@@ -395,7 +395,7 @@ Memory.prototype = {
    * Handler for GC events on the Debugger.Memory instance.
    */
   _onGarbageCollection: function (data) {
-    EventEmitter.emit(this, "garbage-collection", data);
+    this.emit("garbage-collection", data);
 
     // If `drainAllocationsTimeout` set, fire an allocations event with the drained log,
     // which will restart the timer.
@@ -412,7 +412,7 @@ Memory.prototype = {
    * Drains allocation log and emits as an event and restarts the timer.
    */
   _emitAllocations: function () {
-    EventEmitter.emit(this, "allocations", this.getAllocations());
+    this.emit("allocations", this.getAllocations());
     this._poller.arm();
   },
 

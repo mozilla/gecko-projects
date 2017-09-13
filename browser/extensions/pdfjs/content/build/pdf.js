@@ -101,7 +101,7 @@ return /******/ (function(modules) { // webpackBootstrap
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.unreachable = exports.warn = exports.utf8StringToString = exports.stringToUTF8String = exports.stringToPDFString = exports.stringToBytes = exports.string32 = exports.shadow = exports.setVerbosityLevel = exports.ReadableStream = exports.removeNullCharacters = exports.readUint32 = exports.readUint16 = exports.readInt8 = exports.log2 = exports.loadJpegStream = exports.isEvalSupported = exports.isLittleEndian = exports.createValidAbsoluteUrl = exports.isSameOrigin = exports.isNodeJS = exports.isSpace = exports.isString = exports.isNum = exports.isInt = exports.isEmptyObj = exports.isBool = exports.isArrayBuffer = exports.isArray = exports.info = exports.getVerbosityLevel = exports.getLookupTableFactory = exports.deprecated = exports.createObjectURL = exports.createPromiseCapability = exports.createBlob = exports.bytesToString = exports.assert = exports.arraysToBytes = exports.arrayByteLength = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.StatTimer = exports.PasswordResponses = exports.PasswordException = exports.PageViewport = exports.NotImplementedException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.MessageHandler = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VERBOSITY_LEVELS = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = undefined;
+exports.unreachable = exports.warn = exports.utf8StringToString = exports.stringToUTF8String = exports.stringToPDFString = exports.stringToBytes = exports.string32 = exports.shadow = exports.setVerbosityLevel = exports.ReadableStream = exports.removeNullCharacters = exports.readUint32 = exports.readUint16 = exports.readInt8 = exports.log2 = exports.loadJpegStream = exports.isEvalSupported = exports.isLittleEndian = exports.createValidAbsoluteUrl = exports.isSameOrigin = exports.isNodeJS = exports.isSpace = exports.isString = exports.isNum = exports.isEmptyObj = exports.isBool = exports.isArrayBuffer = exports.info = exports.getVerbosityLevel = exports.getLookupTableFactory = exports.deprecated = exports.createObjectURL = exports.createPromiseCapability = exports.createBlob = exports.bytesToString = exports.assert = exports.arraysToBytes = exports.arrayByteLength = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.StatTimer = exports.PasswordResponses = exports.PasswordException = exports.PageViewport = exports.NotImplementedException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.MessageHandler = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VERBOSITY_LEVELS = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = undefined;
 
 __w_pdfjs_require__(16);
 
@@ -714,7 +714,7 @@ var Util = function UtilClosure() {
   };
   var ROMAN_NUMBER_MAP = ['', 'C', 'CC', 'CCC', 'CD', 'D', 'DC', 'DCC', 'DCCC', 'CM', '', 'X', 'XX', 'XXX', 'XL', 'L', 'LX', 'LXX', 'LXXX', 'XC', '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
   Util.toRoman = function Util_toRoman(number, lowerCase) {
-    assert(isInt(number) && number > 0, 'The number should be a positive integer.');
+    assert(Number.isInteger(number) && number > 0, 'The number should be a positive integer.');
     var pos,
         romanBuf = [];
     while (number >= 1000) {
@@ -887,17 +887,11 @@ function isEmptyObj(obj) {
 function isBool(v) {
   return typeof v === 'boolean';
 }
-function isInt(v) {
-  return typeof v === 'number' && (v | 0) === v;
-}
 function isNum(v) {
   return typeof v === 'number';
 }
 function isString(v) {
   return typeof v === 'string';
-}
-function isArray(v) {
-  return v instanceof Array;
 }
 function isArrayBuffer(v) {
   return typeof v === 'object' && v !== null && v.byteLength !== undefined;
@@ -1023,6 +1017,12 @@ function wrapReason(reason) {
       return new UnknownErrorException(reason.message, reason.details);
   }
 }
+function makeReasonSerializable(reason) {
+  if (!(reason instanceof Error) || reason instanceof AbortException || reason instanceof MissingPDFException || reason instanceof UnexpectedResponseException || reason instanceof UnknownErrorException) {
+    return reason;
+  }
+  return new UnknownErrorException(reason.message, reason.toString());
+}
 function resolveOrReject(capability, success, reason) {
   if (success) {
     capability.resolve();
@@ -1080,15 +1080,12 @@ function MessageHandler(sourceName, targetName, comObj) {
             data: result
           });
         }, reason => {
-          if (reason instanceof Error) {
-            reason = reason + '';
-          }
           comObj.postMessage({
             sourceName,
             targetName,
             isReply: true,
             callbackId: data.callbackId,
-            error: reason
+            error: makeReasonSerializable(reason)
           });
         });
       } else if (data.streamId) {
@@ -1427,11 +1424,9 @@ exports.deprecated = deprecated;
 exports.getLookupTableFactory = getLookupTableFactory;
 exports.getVerbosityLevel = getVerbosityLevel;
 exports.info = info;
-exports.isArray = isArray;
 exports.isArrayBuffer = isArrayBuffer;
 exports.isBool = isBool;
 exports.isEmptyObj = isEmptyObj;
-exports.isInt = isInt;
 exports.isNum = isNum;
 exports.isString = isString;
 exports.isSpace = isSpace;
@@ -1467,7 +1462,7 @@ exports.unreachable = unreachable;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.DOMCMapReaderFactory = exports.DOMCanvasFactory = exports.DEFAULT_LINK_REL = exports.getDefaultSetting = exports.LinkTarget = exports.getFilenameFromUrl = exports.isValidUrl = exports.isExternalLinkTargetSet = exports.addLinkAttributes = exports.RenderingCancelledException = exports.CustomStyle = undefined;
+exports.DOMSVGFactory = exports.DOMCMapReaderFactory = exports.DOMCanvasFactory = exports.DEFAULT_LINK_REL = exports.getDefaultSetting = exports.LinkTarget = exports.getFilenameFromUrl = exports.isValidUrl = exports.isExternalLinkTargetSet = exports.addLinkAttributes = exports.RenderingCancelledException = exports.CustomStyle = undefined;
 
 var _util = __w_pdfjs_require__(0);
 
@@ -1477,7 +1472,8 @@ var _global_scope2 = _interopRequireDefault(_global_scope);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-var DEFAULT_LINK_REL = 'noopener noreferrer nofollow';
+const DEFAULT_LINK_REL = 'noopener noreferrer nofollow';
+const SVG_NS = 'http://www.w3.org/2000/svg';
 class DOMCanvasFactory {
   create(width, height) {
     if (width <= 0 || height <= 0) {
@@ -1551,6 +1547,22 @@ class DOMCMapReaderFactory {
       };
       request.send(null);
     });
+  }
+}
+class DOMSVGFactory {
+  create(width, height) {
+    (0, _util.assert)(width > 0 && height > 0, 'Invalid SVG dimensions');
+    let svg = document.createElementNS(SVG_NS, 'svg:svg');
+    svg.setAttribute('version', '1.1');
+    svg.setAttribute('width', width + 'px');
+    svg.setAttribute('height', height + 'px');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    return svg;
+  }
+  createElement(type) {
+    (0, _util.assert)(typeof type === 'string', 'Invalid SVG element type');
+    return document.createElementNS(SVG_NS, type);
   }
 }
 var CustomStyle = function CustomStyleClosure() {
@@ -1713,6 +1725,7 @@ exports.getDefaultSetting = getDefaultSetting;
 exports.DEFAULT_LINK_REL = DEFAULT_LINK_REL;
 exports.DOMCanvasFactory = DOMCanvasFactory;
 exports.DOMCMapReaderFactory = DOMCMapReaderFactory;
+exports.DOMSVGFactory = DOMSVGFactory;
 
 /***/ }),
 /* 2 */
@@ -1739,17 +1752,16 @@ var _dom_utils = __w_pdfjs_require__(1);
 
 var _util = __w_pdfjs_require__(0);
 
-function AnnotationElementFactory() {}
-AnnotationElementFactory.prototype = {
-  create: function AnnotationElementFactory_create(parameters) {
-    var subtype = parameters.data.annotationType;
+class AnnotationElementFactory {
+  static create(parameters) {
+    let subtype = parameters.data.annotationType;
     switch (subtype) {
       case _util.AnnotationType.LINK:
         return new LinkAnnotationElement(parameters);
       case _util.AnnotationType.TEXT:
         return new TextAnnotationElement(parameters);
       case _util.AnnotationType.WIDGET:
-        var fieldType = parameters.data.fieldType;
+        let fieldType = parameters.data.fieldType;
         switch (fieldType) {
           case 'Tx':
             return new TextWidgetAnnotationElement(parameters);
@@ -1769,6 +1781,10 @@ AnnotationElementFactory.prototype = {
         return new PopupAnnotationElement(parameters);
       case _util.AnnotationType.LINE:
         return new LineAnnotationElement(parameters);
+      case _util.AnnotationType.SQUARE:
+        return new SquareAnnotationElement(parameters);
+      case _util.AnnotationType.CIRCLE:
+        return new CircleAnnotationElement(parameters);
       case _util.AnnotationType.HIGHLIGHT:
         return new HighlightAnnotationElement(parameters);
       case _util.AnnotationType.UNDERLINE:
@@ -1783,10 +1799,10 @@ AnnotationElementFactory.prototype = {
         return new AnnotationElement(parameters);
     }
   }
-};
-var AnnotationElement = function AnnotationElementClosure() {
-  function AnnotationElement(parameters, isRenderable, ignoreBorder) {
-    this.isRenderable = isRenderable || false;
+}
+class AnnotationElement {
+  constructor(parameters, isRenderable = false, ignoreBorder = false) {
+    this.isRenderable = isRenderable;
     this.data = parameters.data;
     this.layer = parameters.layer;
     this.page = parameters.page;
@@ -1795,339 +1811,310 @@ var AnnotationElement = function AnnotationElementClosure() {
     this.downloadManager = parameters.downloadManager;
     this.imageResourcesPath = parameters.imageResourcesPath;
     this.renderInteractiveForms = parameters.renderInteractiveForms;
+    this.svgFactory = parameters.svgFactory;
     if (isRenderable) {
       this.container = this._createContainer(ignoreBorder);
     }
   }
-  AnnotationElement.prototype = {
-    _createContainer: function AnnotationElement_createContainer(ignoreBorder) {
-      var data = this.data,
-          page = this.page,
-          viewport = this.viewport;
-      var container = document.createElement('section');
-      var width = data.rect[2] - data.rect[0];
-      var height = data.rect[3] - data.rect[1];
-      container.setAttribute('data-annotation-id', data.id);
-      var rect = _util.Util.normalizeRect([data.rect[0], page.view[3] - data.rect[1] + page.view[1], data.rect[2], page.view[3] - data.rect[3] + page.view[1]]);
-      _dom_utils.CustomStyle.setProp('transform', container, 'matrix(' + viewport.transform.join(',') + ')');
-      _dom_utils.CustomStyle.setProp('transformOrigin', container, -rect[0] + 'px ' + -rect[1] + 'px');
-      if (!ignoreBorder && data.borderStyle.width > 0) {
-        container.style.borderWidth = data.borderStyle.width + 'px';
-        if (data.borderStyle.style !== _util.AnnotationBorderStyleType.UNDERLINE) {
-          width = width - 2 * data.borderStyle.width;
-          height = height - 2 * data.borderStyle.width;
-        }
-        var horizontalRadius = data.borderStyle.horizontalCornerRadius;
-        var verticalRadius = data.borderStyle.verticalCornerRadius;
-        if (horizontalRadius > 0 || verticalRadius > 0) {
-          var radius = horizontalRadius + 'px / ' + verticalRadius + 'px';
-          _dom_utils.CustomStyle.setProp('borderRadius', container, radius);
-        }
-        switch (data.borderStyle.style) {
-          case _util.AnnotationBorderStyleType.SOLID:
-            container.style.borderStyle = 'solid';
-            break;
-          case _util.AnnotationBorderStyleType.DASHED:
-            container.style.borderStyle = 'dashed';
-            break;
-          case _util.AnnotationBorderStyleType.BEVELED:
-            (0, _util.warn)('Unimplemented border style: beveled');
-            break;
-          case _util.AnnotationBorderStyleType.INSET:
-            (0, _util.warn)('Unimplemented border style: inset');
-            break;
-          case _util.AnnotationBorderStyleType.UNDERLINE:
-            container.style.borderBottomStyle = 'solid';
-            break;
-          default:
-            break;
-        }
-        if (data.color) {
-          container.style.borderColor = _util.Util.makeCssRgb(data.color[0] | 0, data.color[1] | 0, data.color[2] | 0);
-        } else {
-          container.style.borderWidth = 0;
-        }
+  _createContainer(ignoreBorder = false) {
+    let data = this.data,
+        page = this.page,
+        viewport = this.viewport;
+    let container = document.createElement('section');
+    let width = data.rect[2] - data.rect[0];
+    let height = data.rect[3] - data.rect[1];
+    container.setAttribute('data-annotation-id', data.id);
+    let rect = _util.Util.normalizeRect([data.rect[0], page.view[3] - data.rect[1] + page.view[1], data.rect[2], page.view[3] - data.rect[3] + page.view[1]]);
+    _dom_utils.CustomStyle.setProp('transform', container, 'matrix(' + viewport.transform.join(',') + ')');
+    _dom_utils.CustomStyle.setProp('transformOrigin', container, -rect[0] + 'px ' + -rect[1] + 'px');
+    if (!ignoreBorder && data.borderStyle.width > 0) {
+      container.style.borderWidth = data.borderStyle.width + 'px';
+      if (data.borderStyle.style !== _util.AnnotationBorderStyleType.UNDERLINE) {
+        width = width - 2 * data.borderStyle.width;
+        height = height - 2 * data.borderStyle.width;
       }
-      container.style.left = rect[0] + 'px';
-      container.style.top = rect[1] + 'px';
-      container.style.width = width + 'px';
-      container.style.height = height + 'px';
-      return container;
-    },
-    _createPopup: function AnnotationElement_createPopup(container, trigger, data) {
-      if (!trigger) {
-        trigger = document.createElement('div');
-        trigger.style.height = container.style.height;
-        trigger.style.width = container.style.width;
-        container.appendChild(trigger);
+      let horizontalRadius = data.borderStyle.horizontalCornerRadius;
+      let verticalRadius = data.borderStyle.verticalCornerRadius;
+      if (horizontalRadius > 0 || verticalRadius > 0) {
+        let radius = horizontalRadius + 'px / ' + verticalRadius + 'px';
+        _dom_utils.CustomStyle.setProp('borderRadius', container, radius);
       }
-      var popupElement = new PopupElement({
-        container,
-        trigger,
-        color: data.color,
-        title: data.title,
-        contents: data.contents,
-        hideWrapper: true
-      });
-      var popup = popupElement.render();
-      popup.style.left = container.style.width;
-      container.appendChild(popup);
-    },
-    render: function AnnotationElement_render() {
-      throw new Error('Abstract method AnnotationElement.render called');
+      switch (data.borderStyle.style) {
+        case _util.AnnotationBorderStyleType.SOLID:
+          container.style.borderStyle = 'solid';
+          break;
+        case _util.AnnotationBorderStyleType.DASHED:
+          container.style.borderStyle = 'dashed';
+          break;
+        case _util.AnnotationBorderStyleType.BEVELED:
+          (0, _util.warn)('Unimplemented border style: beveled');
+          break;
+        case _util.AnnotationBorderStyleType.INSET:
+          (0, _util.warn)('Unimplemented border style: inset');
+          break;
+        case _util.AnnotationBorderStyleType.UNDERLINE:
+          container.style.borderBottomStyle = 'solid';
+          break;
+        default:
+          break;
+      }
+      if (data.color) {
+        container.style.borderColor = _util.Util.makeCssRgb(data.color[0] | 0, data.color[1] | 0, data.color[2] | 0);
+      } else {
+        container.style.borderWidth = 0;
+      }
     }
-  };
-  return AnnotationElement;
-}();
-var LinkAnnotationElement = function LinkAnnotationElementClosure() {
-  function LinkAnnotationElement(parameters) {
-    AnnotationElement.call(this, parameters, true);
+    container.style.left = rect[0] + 'px';
+    container.style.top = rect[1] + 'px';
+    container.style.width = width + 'px';
+    container.style.height = height + 'px';
+    return container;
   }
-  _util.Util.inherit(LinkAnnotationElement, AnnotationElement, {
-    render: function LinkAnnotationElement_render() {
-      this.container.className = 'linkAnnotation';
-      var link = document.createElement('a');
-      (0, _dom_utils.addLinkAttributes)(link, {
-        url: this.data.url,
-        target: this.data.newWindow ? _dom_utils.LinkTarget.BLANK : undefined
-      });
-      if (!this.data.url) {
-        if (this.data.action) {
-          this._bindNamedAction(link, this.data.action);
-        } else {
-          this._bindLink(link, this.data.dest);
-        }
+  _createPopup(container, trigger, data) {
+    if (!trigger) {
+      trigger = document.createElement('div');
+      trigger.style.height = container.style.height;
+      trigger.style.width = container.style.width;
+      container.appendChild(trigger);
+    }
+    let popupElement = new PopupElement({
+      container,
+      trigger,
+      color: data.color,
+      title: data.title,
+      contents: data.contents,
+      hideWrapper: true
+    });
+    let popup = popupElement.render();
+    popup.style.left = container.style.width;
+    container.appendChild(popup);
+  }
+  render() {
+    throw new Error('Abstract method `AnnotationElement.render` called');
+  }
+}
+class LinkAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.url || parameters.data.dest || parameters.data.action);
+    super(parameters, isRenderable);
+  }
+  render() {
+    this.container.className = 'linkAnnotation';
+    let link = document.createElement('a');
+    (0, _dom_utils.addLinkAttributes)(link, {
+      url: this.data.url,
+      target: this.data.newWindow ? _dom_utils.LinkTarget.BLANK : undefined
+    });
+    if (!this.data.url) {
+      if (this.data.action) {
+        this._bindNamedAction(link, this.data.action);
+      } else {
+        this._bindLink(link, this.data.dest);
       }
-      this.container.appendChild(link);
-      return this.container;
-    },
-    _bindLink(link, destination) {
-      link.href = this.linkService.getDestinationHash(destination);
-      link.onclick = () => {
-        if (destination) {
-          this.linkService.navigateTo(destination);
-        }
-        return false;
-      };
+    }
+    this.container.appendChild(link);
+    return this.container;
+  }
+  _bindLink(link, destination) {
+    link.href = this.linkService.getDestinationHash(destination);
+    link.onclick = () => {
       if (destination) {
-        link.className = 'internalLink';
+        this.linkService.navigateTo(destination);
       }
-    },
-    _bindNamedAction(link, action) {
-      link.href = this.linkService.getAnchorUrl('');
-      link.onclick = () => {
-        this.linkService.executeNamedAction(action);
-        return false;
-      };
+      return false;
+    };
+    if (destination) {
       link.className = 'internalLink';
     }
-  });
-  return LinkAnnotationElement;
-}();
-var TextAnnotationElement = function TextAnnotationElementClosure() {
-  function TextAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable);
   }
-  _util.Util.inherit(TextAnnotationElement, AnnotationElement, {
-    render: function TextAnnotationElement_render() {
-      this.container.className = 'textAnnotation';
-      var image = document.createElement('img');
-      image.style.height = this.container.style.height;
-      image.style.width = this.container.style.width;
-      image.src = this.imageResourcesPath + 'annotation-' + this.data.name.toLowerCase() + '.svg';
-      image.alt = '[{{type}} Annotation]';
-      image.dataset.l10nId = 'text_annotation_type';
-      image.dataset.l10nArgs = JSON.stringify({ type: this.data.name });
-      if (!this.data.hasPopup) {
-        this._createPopup(this.container, image, this.data);
-      }
-      this.container.appendChild(image);
-      return this.container;
+  _bindNamedAction(link, action) {
+    link.href = this.linkService.getAnchorUrl('');
+    link.onclick = () => {
+      this.linkService.executeNamedAction(action);
+      return false;
+    };
+    link.className = 'internalLink';
+  }
+}
+class TextAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable);
+  }
+  render() {
+    this.container.className = 'textAnnotation';
+    let image = document.createElement('img');
+    image.style.height = this.container.style.height;
+    image.style.width = this.container.style.width;
+    image.src = this.imageResourcesPath + 'annotation-' + this.data.name.toLowerCase() + '.svg';
+    image.alt = '[{{type}} Annotation]';
+    image.dataset.l10nId = 'text_annotation_type';
+    image.dataset.l10nArgs = JSON.stringify({ type: this.data.name });
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, image, this.data);
     }
-  });
-  return TextAnnotationElement;
-}();
-var WidgetAnnotationElement = function WidgetAnnotationElementClosure() {
-  function WidgetAnnotationElement(parameters, isRenderable) {
-    AnnotationElement.call(this, parameters, isRenderable);
+    this.container.appendChild(image);
+    return this.container;
   }
-  _util.Util.inherit(WidgetAnnotationElement, AnnotationElement, {
-    render: function WidgetAnnotationElement_render() {
-      return this.container;
-    }
-  });
-  return WidgetAnnotationElement;
-}();
-var TextWidgetAnnotationElement = function TextWidgetAnnotationElementClosure() {
-  var TEXT_ALIGNMENT = ['left', 'center', 'right'];
-  function TextWidgetAnnotationElement(parameters) {
-    var isRenderable = parameters.renderInteractiveForms || !parameters.data.hasAppearance && !!parameters.data.fieldValue;
-    WidgetAnnotationElement.call(this, parameters, isRenderable);
+}
+class WidgetAnnotationElement extends AnnotationElement {
+  render() {
+    return this.container;
   }
-  _util.Util.inherit(TextWidgetAnnotationElement, WidgetAnnotationElement, {
-    render: function TextWidgetAnnotationElement_render() {
-      this.container.className = 'textWidgetAnnotation';
-      var element = null;
-      if (this.renderInteractiveForms) {
-        if (this.data.multiLine) {
-          element = document.createElement('textarea');
-          element.textContent = this.data.fieldValue;
-        } else {
-          element = document.createElement('input');
-          element.type = 'text';
-          element.setAttribute('value', this.data.fieldValue);
-        }
-        element.disabled = this.data.readOnly;
-        if (this.data.maxLen !== null) {
-          element.maxLength = this.data.maxLen;
-        }
-        if (this.data.comb) {
-          var fieldWidth = this.data.rect[2] - this.data.rect[0];
-          var combWidth = fieldWidth / this.data.maxLen;
-          element.classList.add('comb');
-          element.style.letterSpacing = 'calc(' + combWidth + 'px - 1ch)';
-        }
-      } else {
-        element = document.createElement('div');
+}
+class TextWidgetAnnotationElement extends WidgetAnnotationElement {
+  constructor(parameters) {
+    let isRenderable = parameters.renderInteractiveForms || !parameters.data.hasAppearance && !!parameters.data.fieldValue;
+    super(parameters, isRenderable);
+  }
+  render() {
+    const TEXT_ALIGNMENT = ['left', 'center', 'right'];
+    this.container.className = 'textWidgetAnnotation';
+    let element = null;
+    if (this.renderInteractiveForms) {
+      if (this.data.multiLine) {
+        element = document.createElement('textarea');
         element.textContent = this.data.fieldValue;
-        element.style.verticalAlign = 'middle';
-        element.style.display = 'table-cell';
-        var font = null;
-        if (this.data.fontRefName) {
-          font = this.page.commonObjs.getData(this.data.fontRefName);
-        }
-        this._setTextStyle(element, font);
+      } else {
+        element = document.createElement('input');
+        element.type = 'text';
+        element.setAttribute('value', this.data.fieldValue);
       }
-      if (this.data.textAlignment !== null) {
-        element.style.textAlign = TEXT_ALIGNMENT[this.data.textAlignment];
-      }
-      this.container.appendChild(element);
-      return this.container;
-    },
-    _setTextStyle: function TextWidgetAnnotationElement_setTextStyle(element, font) {
-      var style = element.style;
-      style.fontSize = this.data.fontSize + 'px';
-      style.direction = this.data.fontDirection < 0 ? 'rtl' : 'ltr';
-      if (!font) {
-        return;
-      }
-      style.fontWeight = font.black ? font.bold ? '900' : 'bold' : font.bold ? 'bold' : 'normal';
-      style.fontStyle = font.italic ? 'italic' : 'normal';
-      var fontFamily = font.loadedName ? '"' + font.loadedName + '", ' : '';
-      var fallbackName = font.fallbackName || 'Helvetica, sans-serif';
-      style.fontFamily = fontFamily + fallbackName;
-    }
-  });
-  return TextWidgetAnnotationElement;
-}();
-var CheckboxWidgetAnnotationElement = function CheckboxWidgetAnnotationElementClosure() {
-  function CheckboxWidgetAnnotationElement(parameters) {
-    WidgetAnnotationElement.call(this, parameters, parameters.renderInteractiveForms);
-  }
-  _util.Util.inherit(CheckboxWidgetAnnotationElement, WidgetAnnotationElement, {
-    render: function CheckboxWidgetAnnotationElement_render() {
-      this.container.className = 'buttonWidgetAnnotation checkBox';
-      var element = document.createElement('input');
       element.disabled = this.data.readOnly;
-      element.type = 'checkbox';
-      if (this.data.fieldValue && this.data.fieldValue !== 'Off') {
-        element.setAttribute('checked', true);
+      if (this.data.maxLen !== null) {
+        element.maxLength = this.data.maxLen;
       }
-      this.container.appendChild(element);
-      return this.container;
+      if (this.data.comb) {
+        let fieldWidth = this.data.rect[2] - this.data.rect[0];
+        let combWidth = fieldWidth / this.data.maxLen;
+        element.classList.add('comb');
+        element.style.letterSpacing = 'calc(' + combWidth + 'px - 1ch)';
+      }
+    } else {
+      element = document.createElement('div');
+      element.textContent = this.data.fieldValue;
+      element.style.verticalAlign = 'middle';
+      element.style.display = 'table-cell';
+      let font = null;
+      if (this.data.fontRefName) {
+        font = this.page.commonObjs.getData(this.data.fontRefName);
+      }
+      this._setTextStyle(element, font);
     }
-  });
-  return CheckboxWidgetAnnotationElement;
-}();
-var RadioButtonWidgetAnnotationElement = function RadioButtonWidgetAnnotationElementClosure() {
-  function RadioButtonWidgetAnnotationElement(parameters) {
-    WidgetAnnotationElement.call(this, parameters, parameters.renderInteractiveForms);
+    if (this.data.textAlignment !== null) {
+      element.style.textAlign = TEXT_ALIGNMENT[this.data.textAlignment];
+    }
+    this.container.appendChild(element);
+    return this.container;
   }
-  _util.Util.inherit(RadioButtonWidgetAnnotationElement, WidgetAnnotationElement, {
-    render: function RadioButtonWidgetAnnotationElement_render() {
-      this.container.className = 'buttonWidgetAnnotation radioButton';
-      var element = document.createElement('input');
-      element.disabled = this.data.readOnly;
-      element.type = 'radio';
-      element.name = this.data.fieldName;
-      if (this.data.fieldValue === this.data.buttonValue) {
-        element.setAttribute('checked', true);
-      }
-      this.container.appendChild(element);
-      return this.container;
+  _setTextStyle(element, font) {
+    let style = element.style;
+    style.fontSize = this.data.fontSize + 'px';
+    style.direction = this.data.fontDirection < 0 ? 'rtl' : 'ltr';
+    if (!font) {
+      return;
     }
-  });
-  return RadioButtonWidgetAnnotationElement;
-}();
-var ChoiceWidgetAnnotationElement = function ChoiceWidgetAnnotationElementClosure() {
-  function ChoiceWidgetAnnotationElement(parameters) {
-    WidgetAnnotationElement.call(this, parameters, parameters.renderInteractiveForms);
+    style.fontWeight = font.black ? font.bold ? '900' : 'bold' : font.bold ? 'bold' : 'normal';
+    style.fontStyle = font.italic ? 'italic' : 'normal';
+    let fontFamily = font.loadedName ? '"' + font.loadedName + '", ' : '';
+    let fallbackName = font.fallbackName || 'Helvetica, sans-serif';
+    style.fontFamily = fontFamily + fallbackName;
   }
-  _util.Util.inherit(ChoiceWidgetAnnotationElement, WidgetAnnotationElement, {
-    render: function ChoiceWidgetAnnotationElement_render() {
-      this.container.className = 'choiceWidgetAnnotation';
-      var selectElement = document.createElement('select');
-      selectElement.disabled = this.data.readOnly;
-      if (!this.data.combo) {
-        selectElement.size = this.data.options.length;
-        if (this.data.multiSelect) {
-          selectElement.multiple = true;
-        }
-      }
-      for (var i = 0, ii = this.data.options.length; i < ii; i++) {
-        var option = this.data.options[i];
-        var optionElement = document.createElement('option');
-        optionElement.textContent = option.displayValue;
-        optionElement.value = option.exportValue;
-        if (this.data.fieldValue.indexOf(option.displayValue) >= 0) {
-          optionElement.setAttribute('selected', true);
-        }
-        selectElement.appendChild(optionElement);
-      }
-      this.container.appendChild(selectElement);
-      return this.container;
-    }
-  });
-  return ChoiceWidgetAnnotationElement;
-}();
-var PopupAnnotationElement = function PopupAnnotationElementClosure() {
-  var IGNORE_TYPES = ['Line'];
-  function PopupAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable);
+}
+class CheckboxWidgetAnnotationElement extends WidgetAnnotationElement {
+  constructor(parameters) {
+    super(parameters, parameters.renderInteractiveForms);
   }
-  _util.Util.inherit(PopupAnnotationElement, AnnotationElement, {
-    render: function PopupAnnotationElement_render() {
-      this.container.className = 'popupAnnotation';
-      if (IGNORE_TYPES.indexOf(this.data.parentType) >= 0) {
-        return this.container;
+  render() {
+    this.container.className = 'buttonWidgetAnnotation checkBox';
+    let element = document.createElement('input');
+    element.disabled = this.data.readOnly;
+    element.type = 'checkbox';
+    if (this.data.fieldValue && this.data.fieldValue !== 'Off') {
+      element.setAttribute('checked', true);
+    }
+    this.container.appendChild(element);
+    return this.container;
+  }
+}
+class RadioButtonWidgetAnnotationElement extends WidgetAnnotationElement {
+  constructor(parameters) {
+    super(parameters, parameters.renderInteractiveForms);
+  }
+  render() {
+    this.container.className = 'buttonWidgetAnnotation radioButton';
+    let element = document.createElement('input');
+    element.disabled = this.data.readOnly;
+    element.type = 'radio';
+    element.name = this.data.fieldName;
+    if (this.data.fieldValue === this.data.buttonValue) {
+      element.setAttribute('checked', true);
+    }
+    this.container.appendChild(element);
+    return this.container;
+  }
+}
+class ChoiceWidgetAnnotationElement extends WidgetAnnotationElement {
+  constructor(parameters) {
+    super(parameters, parameters.renderInteractiveForms);
+  }
+  render() {
+    this.container.className = 'choiceWidgetAnnotation';
+    let selectElement = document.createElement('select');
+    selectElement.disabled = this.data.readOnly;
+    if (!this.data.combo) {
+      selectElement.size = this.data.options.length;
+      if (this.data.multiSelect) {
+        selectElement.multiple = true;
       }
-      var selector = '[data-annotation-id="' + this.data.parentId + '"]';
-      var parentElement = this.layer.querySelector(selector);
-      if (!parentElement) {
-        return this.container;
+    }
+    for (let i = 0, ii = this.data.options.length; i < ii; i++) {
+      let option = this.data.options[i];
+      let optionElement = document.createElement('option');
+      optionElement.textContent = option.displayValue;
+      optionElement.value = option.exportValue;
+      if (this.data.fieldValue.indexOf(option.displayValue) >= 0) {
+        optionElement.setAttribute('selected', true);
       }
-      var popup = new PopupElement({
-        container: this.container,
-        trigger: parentElement,
-        color: this.data.color,
-        title: this.data.title,
-        contents: this.data.contents
-      });
-      var parentLeft = parseFloat(parentElement.style.left);
-      var parentWidth = parseFloat(parentElement.style.width);
-      _dom_utils.CustomStyle.setProp('transformOrigin', this.container, -(parentLeft + parentWidth) + 'px -' + parentElement.style.top);
-      this.container.style.left = parentLeft + parentWidth + 'px';
-      this.container.appendChild(popup.render());
+      selectElement.appendChild(optionElement);
+    }
+    this.container.appendChild(selectElement);
+    return this.container;
+  }
+}
+class PopupAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable);
+  }
+  render() {
+    const IGNORE_TYPES = ['Line', 'Square', 'Circle'];
+    this.container.className = 'popupAnnotation';
+    if (IGNORE_TYPES.indexOf(this.data.parentType) >= 0) {
       return this.container;
     }
-  });
-  return PopupAnnotationElement;
-}();
-var PopupElement = function PopupElementClosure() {
-  var BACKGROUND_ENLIGHT = 0.7;
-  function PopupElement(parameters) {
+    let selector = '[data-annotation-id="' + this.data.parentId + '"]';
+    let parentElement = this.layer.querySelector(selector);
+    if (!parentElement) {
+      return this.container;
+    }
+    let popup = new PopupElement({
+      container: this.container,
+      trigger: parentElement,
+      color: this.data.color,
+      title: this.data.title,
+      contents: this.data.contents
+    });
+    let parentLeft = parseFloat(parentElement.style.left);
+    let parentWidth = parseFloat(parentElement.style.width);
+    _dom_utils.CustomStyle.setProp('transformOrigin', this.container, -(parentLeft + parentWidth) + 'px -' + parentElement.style.top);
+    this.container.style.left = parentLeft + parentWidth + 'px';
+    this.container.appendChild(popup.render());
+    return this.container;
+  }
+}
+class PopupElement {
+  constructor(parameters) {
     this.container = parameters.container;
     this.trigger = parameters.trigger;
     this.color = parameters.color;
@@ -2136,174 +2123,203 @@ var PopupElement = function PopupElementClosure() {
     this.hideWrapper = parameters.hideWrapper || false;
     this.pinned = false;
   }
-  PopupElement.prototype = {
-    render: function PopupElement_render() {
-      var wrapper = document.createElement('div');
-      wrapper.className = 'popupWrapper';
-      this.hideElement = this.hideWrapper ? wrapper : this.container;
+  render() {
+    const BACKGROUND_ENLIGHT = 0.7;
+    let wrapper = document.createElement('div');
+    wrapper.className = 'popupWrapper';
+    this.hideElement = this.hideWrapper ? wrapper : this.container;
+    this.hideElement.setAttribute('hidden', true);
+    let popup = document.createElement('div');
+    popup.className = 'popup';
+    let color = this.color;
+    if (color) {
+      let r = BACKGROUND_ENLIGHT * (255 - color[0]) + color[0];
+      let g = BACKGROUND_ENLIGHT * (255 - color[1]) + color[1];
+      let b = BACKGROUND_ENLIGHT * (255 - color[2]) + color[2];
+      popup.style.backgroundColor = _util.Util.makeCssRgb(r | 0, g | 0, b | 0);
+    }
+    let contents = this._formatContents(this.contents);
+    let title = document.createElement('h1');
+    title.textContent = this.title;
+    this.trigger.addEventListener('click', this._toggle.bind(this));
+    this.trigger.addEventListener('mouseover', this._show.bind(this, false));
+    this.trigger.addEventListener('mouseout', this._hide.bind(this, false));
+    popup.addEventListener('click', this._hide.bind(this, true));
+    popup.appendChild(title);
+    popup.appendChild(contents);
+    wrapper.appendChild(popup);
+    return wrapper;
+  }
+  _formatContents(contents) {
+    let p = document.createElement('p');
+    let lines = contents.split(/(?:\r\n?|\n)/);
+    for (let i = 0, ii = lines.length; i < ii; ++i) {
+      let line = lines[i];
+      p.appendChild(document.createTextNode(line));
+      if (i < ii - 1) {
+        p.appendChild(document.createElement('br'));
+      }
+    }
+    return p;
+  }
+  _toggle() {
+    if (this.pinned) {
+      this._hide(true);
+    } else {
+      this._show(true);
+    }
+  }
+  _show(pin = false) {
+    if (pin) {
+      this.pinned = true;
+    }
+    if (this.hideElement.hasAttribute('hidden')) {
+      this.hideElement.removeAttribute('hidden');
+      this.container.style.zIndex += 1;
+    }
+  }
+  _hide(unpin = true) {
+    if (unpin) {
+      this.pinned = false;
+    }
+    if (!this.hideElement.hasAttribute('hidden') && !this.pinned) {
       this.hideElement.setAttribute('hidden', true);
-      var popup = document.createElement('div');
-      popup.className = 'popup';
-      var color = this.color;
-      if (color) {
-        var r = BACKGROUND_ENLIGHT * (255 - color[0]) + color[0];
-        var g = BACKGROUND_ENLIGHT * (255 - color[1]) + color[1];
-        var b = BACKGROUND_ENLIGHT * (255 - color[2]) + color[2];
-        popup.style.backgroundColor = _util.Util.makeCssRgb(r | 0, g | 0, b | 0);
-      }
-      var contents = this._formatContents(this.contents);
-      var title = document.createElement('h1');
-      title.textContent = this.title;
-      this.trigger.addEventListener('click', this._toggle.bind(this));
-      this.trigger.addEventListener('mouseover', this._show.bind(this, false));
-      this.trigger.addEventListener('mouseout', this._hide.bind(this, false));
-      popup.addEventListener('click', this._hide.bind(this, true));
-      popup.appendChild(title);
-      popup.appendChild(contents);
-      wrapper.appendChild(popup);
-      return wrapper;
-    },
-    _formatContents: function PopupElement_formatContents(contents) {
-      var p = document.createElement('p');
-      var lines = contents.split(/(?:\r\n?|\n)/);
-      for (var i = 0, ii = lines.length; i < ii; ++i) {
-        var line = lines[i];
-        p.appendChild(document.createTextNode(line));
-        if (i < ii - 1) {
-          p.appendChild(document.createElement('br'));
-        }
-      }
-      return p;
-    },
-    _toggle: function PopupElement_toggle() {
-      if (this.pinned) {
-        this._hide(true);
-      } else {
-        this._show(true);
-      }
-    },
-    _show: function PopupElement_show(pin) {
-      if (pin) {
-        this.pinned = true;
-      }
-      if (this.hideElement.hasAttribute('hidden')) {
-        this.hideElement.removeAttribute('hidden');
-        this.container.style.zIndex += 1;
-      }
-    },
-    _hide: function PopupElement_hide(unpin) {
-      if (unpin) {
-        this.pinned = false;
-      }
-      if (!this.hideElement.hasAttribute('hidden') && !this.pinned) {
-        this.hideElement.setAttribute('hidden', true);
-        this.container.style.zIndex -= 1;
-      }
+      this.container.style.zIndex -= 1;
     }
-  };
-  return PopupElement;
-}();
-var LineAnnotationElement = function LineAnnotationElementClosure() {
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-  function LineAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable, true);
   }
-  _util.Util.inherit(LineAnnotationElement, AnnotationElement, {
-    render: function LineAnnotationElement_render() {
-      this.container.className = 'lineAnnotation';
-      var data = this.data;
-      var width = data.rect[2] - data.rect[0];
-      var height = data.rect[3] - data.rect[1];
-      var svg = document.createElementNS(SVG_NS, 'svg:svg');
-      svg.setAttributeNS(null, 'version', '1.1');
-      svg.setAttributeNS(null, 'width', width + 'px');
-      svg.setAttributeNS(null, 'height', height + 'px');
-      svg.setAttributeNS(null, 'preserveAspectRatio', 'none');
-      svg.setAttributeNS(null, 'viewBox', '0 0 ' + width + ' ' + height);
-      var line = document.createElementNS(SVG_NS, 'svg:line');
-      line.setAttributeNS(null, 'x1', data.rect[2] - data.lineCoordinates[0]);
-      line.setAttributeNS(null, 'y1', data.rect[3] - data.lineCoordinates[1]);
-      line.setAttributeNS(null, 'x2', data.rect[2] - data.lineCoordinates[2]);
-      line.setAttributeNS(null, 'y2', data.rect[3] - data.lineCoordinates[3]);
-      line.setAttributeNS(null, 'stroke-width', data.borderStyle.width);
-      line.setAttributeNS(null, 'stroke', 'transparent');
-      svg.appendChild(line);
-      this.container.append(svg);
-      this._createPopup(this.container, line, this.data);
-      return this.container;
-    }
-  });
-  return LineAnnotationElement;
-}();
-var HighlightAnnotationElement = function HighlightAnnotationElementClosure() {
-  function HighlightAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable, true);
+}
+class LineAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
   }
-  _util.Util.inherit(HighlightAnnotationElement, AnnotationElement, {
-    render: function HighlightAnnotationElement_render() {
-      this.container.className = 'highlightAnnotation';
-      if (!this.data.hasPopup) {
-        this._createPopup(this.container, null, this.data);
-      }
-      return this.container;
-    }
-  });
-  return HighlightAnnotationElement;
-}();
-var UnderlineAnnotationElement = function UnderlineAnnotationElementClosure() {
-  function UnderlineAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable, true);
+  render() {
+    this.container.className = 'lineAnnotation';
+    let data = this.data;
+    let width = data.rect[2] - data.rect[0];
+    let height = data.rect[3] - data.rect[1];
+    let svg = this.svgFactory.create(width, height);
+    let line = this.svgFactory.createElement('svg:line');
+    line.setAttribute('x1', data.rect[2] - data.lineCoordinates[0]);
+    line.setAttribute('y1', data.rect[3] - data.lineCoordinates[1]);
+    line.setAttribute('x2', data.rect[2] - data.lineCoordinates[2]);
+    line.setAttribute('y2', data.rect[3] - data.lineCoordinates[3]);
+    line.setAttribute('stroke-width', data.borderStyle.width);
+    line.setAttribute('stroke', 'transparent');
+    svg.appendChild(line);
+    this.container.append(svg);
+    this._createPopup(this.container, line, data);
+    return this.container;
   }
-  _util.Util.inherit(UnderlineAnnotationElement, AnnotationElement, {
-    render: function UnderlineAnnotationElement_render() {
-      this.container.className = 'underlineAnnotation';
-      if (!this.data.hasPopup) {
-        this._createPopup(this.container, null, this.data);
-      }
-      return this.container;
-    }
-  });
-  return UnderlineAnnotationElement;
-}();
-var SquigglyAnnotationElement = function SquigglyAnnotationElementClosure() {
-  function SquigglyAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable, true);
+}
+class SquareAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
   }
-  _util.Util.inherit(SquigglyAnnotationElement, AnnotationElement, {
-    render: function SquigglyAnnotationElement_render() {
-      this.container.className = 'squigglyAnnotation';
-      if (!this.data.hasPopup) {
-        this._createPopup(this.container, null, this.data);
-      }
-      return this.container;
-    }
-  });
-  return SquigglyAnnotationElement;
-}();
-var StrikeOutAnnotationElement = function StrikeOutAnnotationElementClosure() {
-  function StrikeOutAnnotationElement(parameters) {
-    var isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
-    AnnotationElement.call(this, parameters, isRenderable, true);
+  render() {
+    this.container.className = 'squareAnnotation';
+    let data = this.data;
+    let width = data.rect[2] - data.rect[0];
+    let height = data.rect[3] - data.rect[1];
+    let svg = this.svgFactory.create(width, height);
+    let borderWidth = data.borderStyle.width;
+    let square = this.svgFactory.createElement('svg:rect');
+    square.setAttribute('x', borderWidth / 2);
+    square.setAttribute('y', borderWidth / 2);
+    square.setAttribute('width', width - borderWidth);
+    square.setAttribute('height', height - borderWidth);
+    square.setAttribute('stroke-width', borderWidth);
+    square.setAttribute('stroke', 'transparent');
+    square.setAttribute('fill', 'none');
+    svg.appendChild(square);
+    this.container.append(svg);
+    this._createPopup(this.container, square, data);
+    return this.container;
   }
-  _util.Util.inherit(StrikeOutAnnotationElement, AnnotationElement, {
-    render: function StrikeOutAnnotationElement_render() {
-      this.container.className = 'strikeoutAnnotation';
-      if (!this.data.hasPopup) {
-        this._createPopup(this.container, null, this.data);
-      }
-      return this.container;
+}
+class CircleAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+  render() {
+    this.container.className = 'circleAnnotation';
+    let data = this.data;
+    let width = data.rect[2] - data.rect[0];
+    let height = data.rect[3] - data.rect[1];
+    let svg = this.svgFactory.create(width, height);
+    let borderWidth = data.borderStyle.width;
+    let circle = this.svgFactory.createElement('svg:ellipse');
+    circle.setAttribute('cx', width / 2);
+    circle.setAttribute('cy', height / 2);
+    circle.setAttribute('rx', width / 2 - borderWidth / 2);
+    circle.setAttribute('ry', height / 2 - borderWidth / 2);
+    circle.setAttribute('stroke-width', borderWidth);
+    circle.setAttribute('stroke', 'transparent');
+    circle.setAttribute('fill', 'none');
+    svg.appendChild(circle);
+    this.container.append(svg);
+    this._createPopup(this.container, circle, data);
+    return this.container;
+  }
+}
+class HighlightAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+  render() {
+    this.container.className = 'highlightAnnotation';
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
     }
-  });
-  return StrikeOutAnnotationElement;
-}();
-var FileAttachmentAnnotationElement = function FileAttachmentAnnotationElementClosure() {
-  function FileAttachmentAnnotationElement(parameters) {
-    AnnotationElement.call(this, parameters, true);
-    var file = this.data.file;
+    return this.container;
+  }
+}
+class UnderlineAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+  render() {
+    this.container.className = 'underlineAnnotation';
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
+    }
+    return this.container;
+  }
+}
+class SquigglyAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+  render() {
+    this.container.className = 'squigglyAnnotation';
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
+    }
+    return this.container;
+  }
+}
+class StrikeOutAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+  render() {
+    this.container.className = 'strikeoutAnnotation';
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
+    }
+    return this.container;
+  }
+}
+class FileAttachmentAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    super(parameters, true);
+    let file = this.data.file;
     this.filename = (0, _dom_utils.getFilenameFromUrl)(file.filename);
     this.content = file.content;
     this.linkService.onFileAttachmentAnnotation({
@@ -2312,65 +2328,60 @@ var FileAttachmentAnnotationElement = function FileAttachmentAnnotationElementCl
       content: file.content
     });
   }
-  _util.Util.inherit(FileAttachmentAnnotationElement, AnnotationElement, {
-    render: function FileAttachmentAnnotationElement_render() {
-      this.container.className = 'fileAttachmentAnnotation';
-      var trigger = document.createElement('div');
-      trigger.style.height = this.container.style.height;
-      trigger.style.width = this.container.style.width;
-      trigger.addEventListener('dblclick', this._download.bind(this));
-      if (!this.data.hasPopup && (this.data.title || this.data.contents)) {
-        this._createPopup(this.container, trigger, this.data);
-      }
-      this.container.appendChild(trigger);
-      return this.container;
-    },
-    _download: function FileAttachmentAnnotationElement_download() {
-      if (!this.downloadManager) {
-        (0, _util.warn)('Download cannot be started due to unavailable download manager');
-        return;
-      }
-      this.downloadManager.downloadData(this.content, this.filename, '');
+  render() {
+    this.container.className = 'fileAttachmentAnnotation';
+    let trigger = document.createElement('div');
+    trigger.style.height = this.container.style.height;
+    trigger.style.width = this.container.style.width;
+    trigger.addEventListener('dblclick', this._download.bind(this));
+    if (!this.data.hasPopup && (this.data.title || this.data.contents)) {
+      this._createPopup(this.container, trigger, this.data);
     }
-  });
-  return FileAttachmentAnnotationElement;
-}();
-var AnnotationLayer = function AnnotationLayerClosure() {
-  return {
-    render: function AnnotationLayer_render(parameters) {
-      var annotationElementFactory = new AnnotationElementFactory();
-      for (var i = 0, ii = parameters.annotations.length; i < ii; i++) {
-        var data = parameters.annotations[i];
-        if (!data) {
-          continue;
-        }
-        var element = annotationElementFactory.create({
-          data,
-          layer: parameters.div,
-          page: parameters.page,
-          viewport: parameters.viewport,
-          linkService: parameters.linkService,
-          downloadManager: parameters.downloadManager,
-          imageResourcesPath: parameters.imageResourcesPath || (0, _dom_utils.getDefaultSetting)('imageResourcesPath'),
-          renderInteractiveForms: parameters.renderInteractiveForms || false
-        });
-        if (element.isRenderable) {
-          parameters.div.appendChild(element.render());
-        }
-      }
-    },
-    update: function AnnotationLayer_update(parameters) {
-      for (var i = 0, ii = parameters.annotations.length; i < ii; i++) {
-        var data = parameters.annotations[i];
-        var element = parameters.div.querySelector('[data-annotation-id="' + data.id + '"]');
-        if (element) {
-          _dom_utils.CustomStyle.setProp('transform', element, 'matrix(' + parameters.viewport.transform.join(',') + ')');
-        }
-      }
-      parameters.div.removeAttribute('hidden');
+    this.container.appendChild(trigger);
+    return this.container;
+  }
+  _download() {
+    if (!this.downloadManager) {
+      (0, _util.warn)('Download cannot be started due to unavailable download manager');
+      return;
     }
-  };
-}();
+    this.downloadManager.downloadData(this.content, this.filename, '');
+  }
+}
+class AnnotationLayer {
+  static render(parameters) {
+    for (let i = 0, ii = parameters.annotations.length; i < ii; i++) {
+      let data = parameters.annotations[i];
+      if (!data) {
+        continue;
+      }
+      let element = AnnotationElementFactory.create({
+        data,
+        layer: parameters.div,
+        page: parameters.page,
+        viewport: parameters.viewport,
+        linkService: parameters.linkService,
+        downloadManager: parameters.downloadManager,
+        imageResourcesPath: parameters.imageResourcesPath || (0, _dom_utils.getDefaultSetting)('imageResourcesPath'),
+        renderInteractiveForms: parameters.renderInteractiveForms || false,
+        svgFactory: new _dom_utils.DOMSVGFactory()
+      });
+      if (element.isRenderable) {
+        parameters.div.appendChild(element.render());
+      }
+    }
+  }
+  static update(parameters) {
+    for (let i = 0, ii = parameters.annotations.length; i < ii; i++) {
+      let data = parameters.annotations[i];
+      let element = parameters.div.querySelector('[data-annotation-id="' + data.id + '"]');
+      if (element) {
+        _dom_utils.CustomStyle.setProp('transform', element, 'matrix(' + parameters.viewport.transform.join(',') + ')');
+      }
+    }
+    parameters.div.removeAttribute('hidden');
+  }
+}
 exports.AnnotationLayer = AnnotationLayer;
 
 /***/ }),
@@ -3566,7 +3577,7 @@ var WorkerTransport = function WorkerTransportClosure() {
       return this.messageHandler.sendWithPromise('GetData', null);
     },
     getPage: function WorkerTransport_getPage(pageNumber, capability) {
-      if (!(0, _util.isInt)(pageNumber) || pageNumber <= 0 || pageNumber > this.numPages) {
+      if (!Number.isInteger(pageNumber) || pageNumber <= 0 || pageNumber > this.numPages) {
         return Promise.reject(new Error('Invalid page request'));
       }
       var pageIndex = pageNumber - 1;
@@ -3846,8 +3857,8 @@ var _UnsupportedManager = function UnsupportedManagerClosure() {
 }();
 var version, build;
 {
-  exports.version = version = '1.9.489';
-  exports.build = build = 'b7fcaff0';
+  exports.version = version = '1.9.554';
+  exports.build = build = 'ba219965';
 }
 exports.getDocument = getDocument;
 exports.LoopbackPort = LoopbackPort;
@@ -3873,6 +3884,8 @@ Object.defineProperty(exports, "__esModule", {
 exports.SVGGraphics = undefined;
 
 var _util = __w_pdfjs_require__(0);
+
+var _dom_utils = __w_pdfjs_require__(1);
 
 var SVGGraphics = function () {
   throw new Error('Not implemented: SVGGraphics');
@@ -4903,8 +4916,8 @@ if (!_global_scope2.default.PDFJS) {
 }
 var PDFJS = _global_scope2.default.PDFJS;
 {
-  PDFJS.version = '1.9.489';
-  PDFJS.build = 'b7fcaff0';
+  PDFJS.version = '1.9.554';
+  PDFJS.build = 'ba219965';
 }
 PDFJS.pdfBug = false;
 if (PDFJS.verbosity !== undefined) {
@@ -9347,11 +9360,11 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
     paintFormXObjectBegin: function CanvasGraphics_paintFormXObjectBegin(matrix, bbox) {
       this.save();
       this.baseTransformStack.push(this.baseTransform);
-      if ((0, _util.isArray)(matrix) && matrix.length === 6) {
+      if (Array.isArray(matrix) && matrix.length === 6) {
         this.transform.apply(this, matrix);
       }
       this.baseTransform = this.ctx.mozCurrentTransform;
-      if ((0, _util.isArray)(bbox) && bbox.length === 4) {
+      if (Array.isArray(bbox) && bbox.length === 4) {
         var width = bbox[2] - bbox[0];
         var height = bbox[3] - bbox[1];
         this.ctx.rect(bbox[0], bbox[1], width, height);
@@ -9459,7 +9472,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       this.save();
       resetCtxToDefault(this.ctx);
       this.current = new CanvasExtraState();
-      if ((0, _util.isArray)(rect) && rect.length === 4) {
+      if (Array.isArray(rect) && rect.length === 4) {
         var width = rect[2] - rect[0];
         var height = rect[3] - rect[1];
         this.ctx.rect(rect[0], rect[1], width, height);
@@ -10189,7 +10202,7 @@ var TilingPattern = function TilingPatternClosure() {
       this.ctx.scale(1 / scale[0], 1 / scale[1]);
     },
     clipBbox: function clipBbox(graphics, bbox, x0, y0, x1, y1) {
-      if ((0, _util.isArray)(bbox) && bbox.length === 4) {
+      if (Array.isArray(bbox) && bbox.length === 4) {
         var bboxWidth = x1 - x0;
         var bboxHeight = y1 - y0;
         graphics.ctx.rect(x0, y0, bboxWidth, bboxHeight);
@@ -10470,8 +10483,8 @@ exports.PDFDataTransportStream = PDFDataTransportStream;
 "use strict";
 
 
-var pdfjsVersion = '1.9.489';
-var pdfjsBuild = 'b7fcaff0';
+var pdfjsVersion = '1.9.554';
+var pdfjsBuild = 'ba219965';
 var pdfjsSharedUtil = __w_pdfjs_require__(0);
 var pdfjsDisplayGlobal = __w_pdfjs_require__(9);
 var pdfjsDisplayAPI = __w_pdfjs_require__(4);

@@ -645,9 +645,6 @@ struct EffectOffsets {
   // target frame in app unit.
   nsPoint  offsetToBoundingBox;
   // The offset between the reference frame and the bounding box of the
-  // target frame in device unit.
-  gfxPoint offsetToBoundingBoxInDevPx;
-  // The offset between the reference frame and the bounding box of the
   // target frame in app unit.
   nsPoint  offsetToUserSpace;
   // The offset between the reference frame and the bounding box of the
@@ -699,9 +696,6 @@ ComputeEffectOffset(nsIFrame* aFrame, const PaintFramesParams& aParams)
 
   result.offsetToUserSpaceInDevPx =
     nsLayoutUtils::PointToGfxPoint(result.offsetToUserSpace,
-                                   aFrame->PresContext()->AppUnitsPerDevPixel());
-  result.offsetToBoundingBoxInDevPx =
-    nsLayoutUtils::PointToGfxPoint(result.offsetToBoundingBox,
                                    aFrame->PresContext()->AppUnitsPerDevPixel());
 
   return result;
@@ -1100,20 +1094,9 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
   RegularFramePaintCallback callback(aParams.builder, aParams.layerManager,
                                      offsets.offsetToUserSpaceInDevPx);
   nsRegion dirtyRegion = aParams.dirtyRect - offsets.offsetToBoundingBox;
-  gfxSize scaleFactors = context.CurrentMatrix().ScaleFactors(true);
-  gfxMatrix scaleMatrix(scaleFactors.width, 0.0f,
-                        0.0f, scaleFactors.height,
-                        0.0f, 0.0f);
-  gfxMatrix reverseScaleMatrix = scaleMatrix;
-  DebugOnly<bool> invertible = reverseScaleMatrix.Invert();
-  MOZ_ASSERT(invertible);
-  context.SetMatrix(reverseScaleMatrix * context.CurrentMatrix());
 
-  gfxMatrix tm =
-    scaleMatrix * nsSVGUtils::GetCSSPxToDevPxMatrix(frame);
-  nsFilterInstance::PaintFilteredFrame(frame, context.GetDrawTarget(),
-                                       tm, &callback, &dirtyRegion,
-                                       aParams.imgParams);
+  nsFilterInstance::PaintFilteredFrame(frame, &context, &callback,
+                                       &dirtyRegion, aParams.imgParams);
 
   if (opacity != 1.0f) {
     context.PopGroupAndBlend();

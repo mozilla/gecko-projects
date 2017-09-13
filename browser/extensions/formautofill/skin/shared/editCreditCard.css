@@ -4,15 +4,12 @@
 
 form {
   justify-content: center;
-  /* Add extra space to ensure invalid input box is displayed properly */
-  padding: 2px;
 }
 
 form > label,
 form > div {
   flex: 1 0 100%;
   align-self: center;
-  font-size: 1.3em;
   margin: 0 0 0.5em !important;
 }
 

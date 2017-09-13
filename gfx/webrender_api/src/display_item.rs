@@ -2,9 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use app_units::Au;
 use euclid::{SideOffsets2D, TypedSideOffsets2D};
-use {ColorF, FontKey, ImageKey, LayoutPoint, LayoutRect, LayoutSize, LayoutTransform};
+use {ColorF, FontInstanceKey, ImageKey, LayoutPoint, LayoutRect, LayoutSize, LayoutTransform};
 use {GlyphOptions, LayoutVector2D, PipelineId, PropertyBinding};
 
 // NOTE: some of these structs have an "IMPLICIT" comment.
@@ -139,8 +138,7 @@ pub enum LineStyle {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TextDisplayItem {
-    pub font_key: FontKey,
-    pub size: Au,
+    pub font_key: FontInstanceKey,
     pub color: ColorF,
     pub glyph_options: Option<GlyphOptions>,
 } // IMPLICIT: glyphs: Vec<GlyphInstance>
@@ -384,23 +382,6 @@ pub enum FilterOp {
     Opacity(PropertyBinding<f32>),
     Saturate(f32),
     Sepia(f32),
-}
-
-impl FilterOp {
-    pub fn is_noop(&self) -> bool {
-        match *self {
-            FilterOp::Blur(length) if length == 0.0 => true,
-            FilterOp::Brightness(amount) if amount == 1.0 => true,
-            FilterOp::Contrast(amount) if amount == 1.0 => true,
-            FilterOp::Grayscale(amount) if amount == 0.0 => true,
-            FilterOp::HueRotate(amount) if amount == 0.0 => true,
-            FilterOp::Invert(amount) if amount == 0.0 => true,
-            FilterOp::Opacity(amount) if amount == PropertyBinding::Value(1.0) => true,
-            FilterOp::Saturate(amount) if amount == 1.0 => true,
-            FilterOp::Sepia(amount) if amount == 0.0 => true,
-            _ => false,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]

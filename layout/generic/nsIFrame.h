@@ -632,6 +632,7 @@ public:
     , mHasFirstLetterChild(false)
     , mParentIsWrapperAnonBox(false)
     , mIsWrapperBoxNeedingRestyle(false)
+    , mReflowRequestedForCharDataChange(false)
   {
     mozilla::PodZero(&mOverflow);
   }
@@ -747,6 +748,7 @@ protected:
   friend class nsLineBox;   // needed to pass aDestructRoot through to children
   friend class nsContainerFrame; // needed to pass aDestructRoot through to children
   friend class nsFrame; // need to assign mParent
+  template<class Source> friend class do_QueryFrameHelper; // to read mClass
 public:
 
   /**
@@ -4244,7 +4246,24 @@ protected:
    */
   bool mIsWrapperBoxNeedingRestyle : 1;
 
-  // There is an 11-bit gap left here.
+  /**
+   * This bit is used in nsTextFrame::CharacterDataChanged() as an optimization
+   * to skip redundant reflow-requests when the character data changes multiple
+   * times between reflows. If this flag is set, then it implies that the
+   * NS_FRAME_IS_DIRTY state bit is also set (and that intrinsic sizes have
+   * been marked as dirty on our ancestor chain).
+   *
+   * XXXdholbert This bit is *only* used on nsTextFrame, but it lives here on
+   * nsIFrame simply because this is where we've got unused state bits
+   * available in a gap. If bits become more scarce, we should perhaps consider
+   * expanding the range of frame-specific state bits in nsFrameStateBits.h and
+   * moving this to be one of those (e.g. by swapping one of the adjacent
+   * general-purpose bits to take the place of this bool:1 here, so we can grow
+   * that range of frame-specific bits by 1).
+   */
+  bool mReflowRequestedForCharDataChange : 1;
+
+  // There is a 10-bit gap left here.
 
   // Helpers
   /**
@@ -4541,6 +4560,13 @@ private:
   nsIFrame*       mFrame;
 };
 
+// Use nsIFrame's fast-path to avoid QueryFrame:
+inline do_QueryFrameHelper<nsIFrame>
+do_QueryFrame(AutoWeakFrame& s)
+{
+  return do_QueryFrameHelper<nsIFrame>(s.GetFrame());
+}
+
 /**
  * @see AutoWeakFrame
  */
@@ -4597,6 +4623,13 @@ private:
 
   nsIFrame* mFrame;
 };
+
+// Use nsIFrame's fast-path to avoid QueryFrame:
+inline do_QueryFrameHelper<nsIFrame>
+do_QueryFrame(WeakFrame& s)
+{
+  return do_QueryFrameHelper<nsIFrame>(s.GetFrame());
+}
 
 inline bool
 nsFrameList::ContinueRemoveFrame(nsIFrame* aFrame)

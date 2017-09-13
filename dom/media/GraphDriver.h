@@ -15,6 +15,10 @@
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StaticPtr.h"
 
+#if defined(XP_WIN)
+#include "mozilla/audio/AudioNotificationReceiver.h"
+#endif
+
 struct cubeb_stream;
 
 template <>
@@ -146,6 +150,9 @@ public:
   void SetNextDriver(GraphDriver* aNextDriver);
   void SetPreviousDriver(GraphDriver* aPreviousDriver);
 
+  /* Return whether we have been scheduled to start. */
+  bool Scheduled();
+
   /**
    * If we are running a real time graph, get the current time stamp to schedule
    * video frames. This has to be reimplemented by real time drivers.
@@ -249,6 +256,9 @@ protected:
   // driver at the end of this iteration.
   // This must be accessed using the {Set,Get}NextDriver methods.
   RefPtr<GraphDriver> mNextDriver;
+  // This is initially false, but set to true as soon the driver has been
+  // scheduled to start through GraphDriver::Start().
+  bool mScheduled;
   virtual ~GraphDriver()
   { }
 };
@@ -376,6 +386,9 @@ enum AsyncCubebOperation {
  */
 class AudioCallbackDriver : public GraphDriver,
                             public MixerCallbackReceiver
+#if defined(XP_WIN)
+                            , public audio::DeviceChangeListener
+#endif
 {
 public:
   explicit AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl);
@@ -389,6 +402,9 @@ public:
   void RemoveCallback() override;
   void WaitForNextIteration() override;
   void WakeUp() override;
+#if defined(XP_WIN)
+  void ResetDefaultDevice() override;
+#endif
 
   /* Static wrapper function cubeb calls back. */
   static long DataCallback_s(cubeb_stream * aStream,
@@ -433,6 +449,12 @@ public:
 
   AudioCallbackDriver* AsAudioCallbackDriver() override {
     return this;
+  }
+
+  uint32_t OutputChannelCount()
+  {
+    MOZ_ASSERT(mOuputChannels != 0 && mOuputChannels <= 8);
+    return mOuputChannels;
   }
 
   /* Enqueue a promise that is going to be resolved when a specific operation

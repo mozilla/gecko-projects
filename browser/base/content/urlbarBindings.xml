@@ -41,17 +41,17 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                       allowevents="true"
                       inputmode="url"
                       xbl:inherits="tooltiptext=inputtooltiptext,value,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,focused,textoverflow"/>
-          <xul:image anonid="urlbar-go-button"
-                     class="urlbar-go-button urlbar-icon"
-                     onclick="gURLBar.handleCommand(event);"
-                     tooltiptext="&goEndCap.tooltip;"
-                     xbl:inherits="pageproxystate,parentfocused=focused"/>
         </xul:hbox>
+        <xul:image anonid="urlbar-go-button"
+                   class="urlbar-go-button urlbar-icon"
+                   onclick="gURLBar.handleCommand(event);"
+                   tooltiptext="&goEndCap.tooltip;"
+                   xbl:inherits="pageproxystate,parentfocused=focused,usertyping"/>
         <xul:dropmarker anonid="historydropmarker"
                         class="autocomplete-history-dropmarker urlbar-history-dropmarker urlbar-icon"
                         tooltiptext="&urlbar.openHistoryPopup.tooltip;"
                         allowevents="true"
-                        xbl:inherits="open,enablehistory,parentfocused=focused"/>
+                        xbl:inherits="open,enablehistory,parentfocused=focused,usertyping"/>
         <children includes="hbox"/>
       </xul:hbox>
       <xul:popupset anonid="popupset"
@@ -183,6 +183,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       -->
       <property name="maxRows"
                 onget="return this.popup.maxResults;"/>
+
+      <!--
+        Set by focusAndSelectUrlBar to indicate whether the next focus event was
+        initiated by an explicit user action. See the "focus" handler below.
+      -->
+      <field name="userInitiatedFocus">false</field>
 
       <!--
         onBeforeValueGet is called by the base-binding's .value getter.
@@ -1300,6 +1306,11 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             this._value = this.inputField.value;
             gBrowser.userTypedValue = this.value;
             this.valueIsTyped = true;
+            if (this.inputField.value) {
+              this.setAttribute("usertyping", "true");
+            } else {
+              this.removeAttribute("usertyping");
+            }
             // Only wait for a result when we are sure to get one.  In some
             // cases, like when pasting the same exact text, we may not fire
             // a new search and we won't get a result.
@@ -1440,6 +1451,27 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
+      <method name="maybeShowSearchSuggestionsNotificationOnFocus">
+        <parameter name="mouseFocused"/>
+        <body><![CDATA[
+          let whichNotification = this.whichSearchSuggestionsNotification;
+          if (this._showSearchSuggestionNotificationOnMouseFocus &&
+              mouseFocused) {
+            // Force showing the opt-out notification.
+            this._whichSearchSuggestionsNotification = whichNotification = "opt-out";
+          }
+          if (whichNotification == "opt-out") {
+            try {
+              this.popup.openAutocompletePopup(this, this);
+            } finally {
+              if (mouseFocused) {
+                delete this._whichSearchSuggestionsNotification;
+                this._showSearchSuggestionNotificationOnMouseFocus = false;
+              }
+            }
+          }
+        ]]></body>
+      </method>
     </implementation>
 
     <handlers>
@@ -1464,6 +1496,14 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         }
       ]]></handler>
 
+      <handler event="mousedown"><![CDATA[
+        // Eventually show the opt-out notification even if the location bar is
+        // empty, focused, and the user clicks on it.
+        if (event.button == 0 && this.focused && this.textValue == "") {
+          this.maybeShowSearchSuggestionsNotificationOnFocus(true);
+        }
+      ]]></handler>
+
       <handler event="focus"><![CDATA[
         if (event.originalTarget == this.inputField) {
           this._hideURLTooltip();
@@ -1472,8 +1512,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             UpdatePopupNotificationsVisibility();
           }
 
-          // We show the opt-out notification on every kind of focus to the urlbar
-          // included opening a new tab, but we want to enforce at least one
+          // We show the opt-out notification when the mouse/keyboard focus the
+          // urlbar, but in any case we want to enforce at least one
           // notification when the user focuses it with the mouse.
           let whichNotification = this.whichSearchSuggestionsNotification;
           if (whichNotification == "opt-out" &&
@@ -1481,25 +1521,16 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             this._showSearchSuggestionNotificationOnMouseFocus = true;
           }
 
-          // Check whether the focus change came from a user mouse action.
+          // Check whether the focus change came from a keyboard/mouse action.
           let focusMethod = Services.focus.getLastFocusMethod(window);
-          let mouseFocused = !!(focusMethod & Services.focus.FLAG_BYMOUSE);
-          if (this._showSearchSuggestionNotificationOnMouseFocus &&
-              mouseFocused) {
-            // Force showing the opt-out notification.
-            this._whichSearchSuggestionsNotification = whichNotification = "opt-out";
+          // If it's a focus started by code and the primary user intention was
+          // not to go to the location bar, don't show a notification.
+          if (!focusMethod && !this.userInitiatedFocus) {
+            return;
           }
 
-          if (whichNotification == "opt-out") {
-            try {
-              this.popup.openAutocompletePopup(this, this);
-            } finally {
-              if (mouseFocused) {
-                delete this._whichSearchSuggestionsNotification;
-                this._showSearchSuggestionNotificationOnMouseFocus = false;
-              }
-            }
-          }
+          let mouseFocused = !!(focusMethod & Services.focus.FLAG_BYMOUSE);
+          this.maybeShowSearchSuggestionsNotificationOnFocus(mouseFocused);
         }
       ]]></handler>
 
@@ -1912,9 +1943,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // Position the popup below the navbar.  To get the y-coordinate,
           // which is an offset from the bottom of the input, subtract the
           // bottom of the navbar from the buttom of the input.
-          let yOffset =
+          let yOffset = Math.round(
             this.DOMWindowUtils.getBoundsWithoutFlushing(document.getElementById("nav-bar")).bottom -
-            this.DOMWindowUtils.getBoundsWithoutFlushing(aInput).bottom;
+            this.DOMWindowUtils.getBoundsWithoutFlushing(aInput).bottom);
+
           this.openPopup(aElement, "after_start", 0, yOffset, false, false);
         ]]></body>
       </method>
@@ -1966,6 +1998,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // Don't show the one-off buttons if we are showing onboarding and
           // there's no result, since it would be ugly and pointless.
           this.footer.collapsed = this._matchCount == 0;
+          this.input.tabScrolling = this._matchCount != 0;
 
           // This event allows accessibility APIs to see the notification.
           if (!this.popupOpen) {
@@ -2184,6 +2217,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             // When a result is present the footer should always be visible.
             this.footer.collapsed = false;
+            this.input.tabScrolling = true;
 
             this.input.gotResultForCurrentQuery = true;
             this.input.maybeReplayDeferredKeyEvents();
@@ -2661,17 +2695,15 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
   <binding id="click-to-play-plugins-notification" extends="chrome://global/content/bindings/notification.xml#popup-notification">
     <content align="start" style="width: &pluginNotification.width;;">
-      <xul:vbox flex="1" align="stretch" class="popup-notification-main-box"
+      <xul:vbox flex="1" align="stretch" class="click-to-play-plugins-notification-main-box"
                 xbl:inherits="popupid">
         <xul:hbox class="click-to-play-plugins-notification-description-box" flex="1" align="start">
           <xul:description class="click-to-play-plugins-outer-description" flex="1">
             <html:span anonid="click-to-play-plugins-notification-description" />
-            <xul:label class="text-link click-to-play-plugins-notification-link" anonid="click-to-play-plugins-notification-link" />
+            <html:br/>
+            <xul:label class="text-link click-to-play-plugins-notification-link popup-notification-learnmore-link"
+                       anonid="click-to-play-plugins-notification-link" />
           </xul:description>
-          <xul:toolbarbutton anonid="closebutton"
-                             class="messageCloseButton popup-notification-closebutton tabbable close-icon"
-                             xbl:inherits="oncommand=closebuttoncommand"
-                             tooltiptext="&closeNotification.tooltip;"/>
         </xul:hbox>
         <xul:grid anonid="click-to-play-plugins-notification-center-box"
                   class="click-to-play-plugins-notification-center-box">
@@ -2693,11 +2725,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   class="click-to-play-plugins-notification-button-container"
                   pack="center" align="center">
           <xul:button anonid="primarybutton"
-                      class="click-to-play-popup-button"
+                      class="click-to-play-popup-button popup-notification-button"
                       oncommand="document.getBindingParent(this)._onButton(this)"
                       flex="1"/>
           <xul:button anonid="secondarybutton"
-                      class="click-to-play-popup-button"
+                      default="true"
+                      class="click-to-play-popup-button popup-notification-button"
                       oncommand="document.getBindingParent(this)._onButton(this);"
                       flex="1"/>
         </xul:hbox>

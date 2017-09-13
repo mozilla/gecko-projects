@@ -8,8 +8,6 @@ const { Task } = require("devtools/shared/task");
 
 loader.lazyRequireGetter(this, "Services");
 loader.lazyRequireGetter(this, "promise");
-loader.lazyRequireGetter(this, "Class",
-  "sdk/core/heritage", true);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "Memory",
@@ -153,7 +151,7 @@ PerformanceRecorder.prototype = {
     } else if (topic === "profiler-stopped") {
       this._onProfilerUnexpectedlyStopped();
     } else if (topic === "profiler-status") {
-      EventEmitter.emit(this, "profiler-status", data);
+      this.emit("profiler-status", data);
     }
   },
 
@@ -176,7 +174,7 @@ PerformanceRecorder.prototype = {
 
     // Immediately emit this so the client can start setting things up,
     // expecting a recording very soon.
-    EventEmitter.emit(this, "console-profile-start");
+    this.emit("console-profile-start");
 
     yield this.startRecording(Object.assign({}, getPerformanceRecordingPrefs(), {
       console: true,
@@ -273,7 +271,7 @@ PerformanceRecorder.prototype = {
     let activeRecordings = this._recordings.filter(r => r.isRecording());
 
     if (activeRecordings.length) {
-      EventEmitter.emit(this, "timeline-data", eventName, eventData, activeRecordings);
+      this.emit("timeline-data", eventName, eventData, activeRecordings);
     }
   },
 
@@ -373,7 +371,7 @@ PerformanceRecorder.prototype = {
     let model = new PerformanceRecordingActor(this.conn, options, data);
     this._recordings.push(model);
 
-    EventEmitter.emit(this, "recording-started", model);
+    this.emit("recording-started", model);
     return model;
   }),
 
@@ -397,7 +395,7 @@ PerformanceRecorder.prototype = {
     // Flag the recording as no longer recording, so that `model.isRecording()`
     // is false. Do this before we fetch all the data, and then subsequently
     // the recording can be considered "completed".
-    EventEmitter.emit(this, "recording-stopping", model);
+    this.emit("recording-stopping", model);
 
     // Currently there are two ways profiles stop recording. Either manually in the
     // performance tool, or via console.profileEnd. Once a recording is done,
@@ -432,7 +430,7 @@ PerformanceRecorder.prototype = {
       duration: profilerData.currentTime - startTime,
     };
 
-    EventEmitter.emit(this, "recording-stopped", model, recordingData);
+    this.emit("recording-stopped", model, recordingData);
     return model;
   }),
 

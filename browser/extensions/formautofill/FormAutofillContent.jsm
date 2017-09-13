@@ -126,9 +126,16 @@ AutofillProfileAutoCompleteSearch.prototype = {
       return;
     }
 
-    let collectionName = isAddressField ? ADDRESSES_COLLECTION_NAME : CREDITCARDS_COLLECTION_NAME;
+    let infoWithoutElement = Object.assign({}, info);
+    delete infoWithoutElement.elementWeakRef;
 
-    this._getRecords({collectionName, info, searchString}).then((records) => {
+    let data = {
+      collectionName: isAddressField ? ADDRESSES_COLLECTION_NAME : CREDITCARDS_COLLECTION_NAME,
+      info: infoWithoutElement,
+      searchString,
+    };
+
+    this._getRecords(data).then((records) => {
       if (this.forceStop) {
         return;
       }
@@ -365,10 +372,12 @@ var FormAutofillContent = {
    *
    * @param {Object} profile Submitted form's address/creditcard guid and record.
    * @param {Object} domWin Current content window.
+   * @param {int} timeStartedFillingMS Time of form filling started.
    */
-  _onFormSubmit(profile, domWin) {
+  _onFormSubmit(profile, domWin, timeStartedFillingMS) {
     let mm = this._messageManagerFromWindow(domWin);
-    mm.sendAsyncMessage("FormAutofill:OnFormSubmit", profile);
+    mm.sendAsyncMessage("FormAutofill:OnFormSubmit",
+                        {profile, timeStartedFillingMS});
   },
 
   /**
@@ -400,7 +409,7 @@ var FormAutofillContent = {
       return true;
     }
 
-    this._onFormSubmit(records, domWin);
+    this._onFormSubmit(records, domWin, handler.timeStartedFillingMS);
     return true;
   },
 

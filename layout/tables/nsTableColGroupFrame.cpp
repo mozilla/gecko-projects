@@ -17,24 +17,17 @@
 
 using namespace mozilla;
 
-#define COL_GROUP_TYPE_BITS          (NS_FRAME_STATE_BIT(30) | \
-                                      NS_FRAME_STATE_BIT(31))
-#define COL_GROUP_TYPE_OFFSET        30
+#define COLGROUP_SYNTHETIC_BIT NS_FRAME_STATE_BIT(30)
 
-nsTableColGroupType
-nsTableColGroupFrame::GetColType() const
+bool
+nsTableColGroupFrame::IsSynthetic() const
 {
-  return (nsTableColGroupType)((mState & COL_GROUP_TYPE_BITS) >> COL_GROUP_TYPE_OFFSET);
+  return HasAnyStateBits(COLGROUP_SYNTHETIC_BIT);
 }
 
-void nsTableColGroupFrame::SetColType(nsTableColGroupType aType)
+void nsTableColGroupFrame::SetIsSynthetic()
 {
-  NS_ASSERTION(GetColType() == eColGroupContent,
-               "should only call nsTableColGroupFrame::SetColType with aType "
-               "!= eColGroupContent once");
-  uint32_t type = aType - eColGroupContent;
-  RemoveStateBits(COL_GROUP_TYPE_BITS);
-  AddStateBits(nsFrameState(type << COL_GROUP_TYPE_OFFSET));
+  AddStateBits(COLGROUP_SYNTHETIC_BIT);
 }
 
 void nsTableColGroupFrame::ResetColIndices(nsIFrame*       aFirstColGroup,
@@ -114,23 +107,16 @@ nsTableColGroupFrame::GetLastRealColGroup(nsTableFrame* aTableFrame)
 {
   nsFrameList colGroups = aTableFrame->GetColGroups();
 
-  nsIFrame* nextToLastColGroup = nullptr;
-  nsFrameList::FrameLinkEnumerator link(colGroups);
-  for ( ; !link.AtEnd(); link.Next()) {
-    nextToLastColGroup = link.PrevFrame();
+  auto lastColGroup = static_cast<nsTableColGroupFrame*>(colGroups.LastChild());
+  if (!lastColGroup) {
+    return nullptr;
   }
 
-  if (!link.PrevFrame()) {
-    return nullptr; // there are no col group frames
+  if (!lastColGroup->IsSynthetic()) {
+    return lastColGroup;
   }
 
-  nsTableColGroupType lastColGroupType =
-    static_cast<nsTableColGroupFrame*>(link.PrevFrame())->GetColType();
-  if (eColGroupAnonymousCell == lastColGroupType) {
-    return static_cast<nsTableColGroupFrame*>(nextToLastColGroup);
-  }
-
-  return static_cast<nsTableColGroupFrame*>(link.PrevFrame());
+  return static_cast<nsTableColGroupFrame*>(lastColGroup->GetPrevSibling());
 }
 
 // don't set mColCount here, it is done in AddColsToTable
@@ -190,12 +176,10 @@ nsTableColGroupFrame::AppendFrames(ChildListID     aListID,
 
   // Our next colframe should be an eColContent.  We've removed all the
   // eColAnonymousColGroup colframes, eColAnonymousCol colframes always follow
-  // eColContent ones, and eColAnonymousCell colframes only appear in an
-  // eColGroupAnonymousCell colgroup, which never gets AppendFrames() called on
-  // it.
+  // eColContent ones, and eColAnonymousCell colframes only appear in a
+  // synthetic colgroup, which never gets AppendFrames() called on it.
   MOZ_ASSERT(!col || col->GetColType() == eColContent,
              "What's going on with our columns?");
-  RemoveStateBits(NS_FRAME_OWNS_ANON_BOXES);
 
   const nsFrameList::Slice& newFrames =
     mFrames.AppendFrames(this, aFrameList);
@@ -232,12 +216,10 @@ nsTableColGroupFrame::InsertFrames(ChildListID     aListID,
 
   // Our next colframe should be an eColContent.  We've removed all the
   // eColAnonymousColGroup colframes, eColAnonymousCol colframes always follow
-  // eColContent ones, and eColAnonymousCell colframes only appear in an
-  // eColGroupAnonymousCell colgroup, which never gets InsertFrames() called on
-  // it.
+  // eColContent ones, and eColAnonymousCell colframes only appear in a
+  // synthetic colgroup, which never gets InsertFrames() called on it.
   MOZ_ASSERT(!col || col->GetColType() == eColContent,
              "What's going on with our columns?");
-  RemoveStateBits(NS_FRAME_OWNS_ANON_BOXES);
 
   NS_ASSERTION(!aPrevFrame || aPrevFrame == aPrevFrame->LastContinuation(),
                "Prev frame should be last in continuation chain");
@@ -340,8 +322,7 @@ nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
 
     nsTableFrame* tableFrame = GetTableFrame();
     tableFrame->RemoveCol(this, colIndex, true, true);
-    if (mFrames.IsEmpty() && contentRemoval &&
-        GetColType() == eColGroupContent) {
+    if (mFrames.IsEmpty() && contentRemoval && !IsSynthetic()) {
       tableFrame->AppendAnonymousColFrames(this, GetSpan(),
                                            eColAnonymousColGroup, true);
     }
@@ -501,30 +482,6 @@ nsTableColGroupFrame::InvalidateFrameWithRect(const nsRect& aRect,
   GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey);
 }
 
-void
-nsTableColGroupFrame::AppendDirectlyOwnedAnonBoxes(
-  nsTArray<OwnedAnonBox>& aResult)
-{
-  nsTableColFrame* col = GetFirstColumn();
-  if (!col) {
-    // No columns, nothing to do.
-    return;
-  }
-
-  if (col->GetColType() == eColContent) {
-    // We have actual columns; no anon boxes here.
-    return;
-  }
-
-  for ( ; col; col = col->GetNextCol()) {
-    MOZ_ASSERT(col->GetColType() != eColContent,
-               "We should not have any real columns after anonymous ones");
-    MOZ_ASSERT(col->GetColType() != eColAnonymousCol,
-               "We shouldn't have spanning anonymous columns");
-    aResult.AppendElement(OwnedAnonBox(col));
-  }
-}
-
 #ifdef DEBUG_FRAME_DUMP
 nsresult
 nsTableColGroupFrame::GetFrameName(nsAString& aResult) const
@@ -541,20 +498,10 @@ void nsTableColGroupFrame::Dump(int32_t aIndent)
   }
   indent[aIndent] = 0;
 
-  printf("%s**START COLGROUP DUMP**\n%s startcolIndex=%d  colcount=%d span=%d coltype=",
-    indent, indent, GetStartColumnIndex(),  GetColCount(), GetSpan());
-  nsTableColGroupType colType = GetColType();
-  switch (colType) {
-  case eColGroupContent:
-    printf(" content ");
-    break;
-  case eColGroupAnonymousCol:
-    printf(" anonymous-column  ");
-    break;
-  case eColGroupAnonymousCell:
-    printf(" anonymous-cell ");
-    break;
-  }
+  printf("%s**START COLGROUP DUMP**\n%s startcolIndex=%d  colcount=%d span=%d isSynthetic=%s",
+         indent, indent, GetStartColumnIndex(),  GetColCount(), GetSpan(),
+         IsSynthetic() ? "true" : "false");
+
   // verify the colindices
   int32_t j = GetStartColumnIndex();
   nsTableColFrame* col = GetFirstColumn();

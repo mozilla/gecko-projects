@@ -84,7 +84,6 @@ pub mod values;
 pub mod viewport;
 
 pub use values::{Comma, CommaWithSpace, OneOrMoreSeparated, Separator, Space, ToCss};
-pub use viewport::HasViewportPercentage;
 
 /// The error type for all CSS parsing routines.
 pub type ParseError<'i> = cssparser::ParseError<'i, SelectorParseError<'i, StyleParseError<'i>>>;
@@ -108,7 +107,13 @@ pub enum StyleParseError<'i> {
     PropertyDeclarationValueNotExhausted,
     /// An unexpected dimension token was encountered.
     UnexpectedDimension(CowRcStr<'i>),
-    /// A media query using a ranged expression with no value was encountered.
+    /// Expected identifier not found.
+    ExpectedIdentifier(Token<'i>),
+    /// Missing or invalid media feature name.
+    MediaQueryExpectedFeatureName(CowRcStr<'i>),
+    /// Missing or invalid media feature value.
+    MediaQueryExpectedFeatureValue,
+    /// min- or max- properties must have a value.
     RangedExpressionWithNoValue,
     /// A function was encountered that was not expected.
     UnexpectedFunction(CowRcStr<'i>),
@@ -133,6 +138,14 @@ pub enum StyleParseError<'i> {
 pub enum ValueParseError<'i> {
     /// An invalid token was encountered while parsing a color value.
     InvalidColor(Token<'i>),
+    /// An invalid filter value was encountered.
+    InvalidFilter(Token<'i>),
+}
+
+impl<'a> From<ValueParseError<'a>> for ParseError<'a> {
+    fn from(this: ValueParseError<'a>) -> Self {
+        StyleParseError::ValueError(this).into()
+    }
 }
 
 impl<'i> ValueParseError<'i> {

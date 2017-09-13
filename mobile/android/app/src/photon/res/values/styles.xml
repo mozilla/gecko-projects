@@ -3,7 +3,10 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
-<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+<resources
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:tools="http://schemas.android.com/tools"
+        xmlns:gecko="http://schemas.android.com/apk/res-auto">
 
     <!--
         Base application styles. This could be overridden in other res/values-XXX/themes.xml.
@@ -80,6 +83,19 @@
 
     <style name="Widget.Spinner" parent="android:style/Widget.Spinner">
         <item name="android:minWidth">@dimen/doorhanger_input_width</item>
+    </style>
+
+    <style name="Gecko.PreferenceCategory" parent="TextAppearance.AppCompat.Body2">
+        <item name="android:textColor">@color/fennec_ui_accent</item>
+        <item name="android:padding">24dp</item>
+    </style>
+
+    <style name="Gecko.SwitchPreferenceView" parent="TextAppearance">
+        <item name="android:textSize">16sp</item>
+        <item name="android:paddingStart">@dimen/dialog_switchpreferenceview_padding</item>
+        <item name="android:paddingLeft">@dimen/dialog_switchpreferenceview_padding</item>
+        <item name="android:paddingEnd">@dimen/dialog_switchpreferenceview_padding</item>
+        <item name="android:paddingRight">@dimen/dialog_switchpreferenceview_padding</item>
     </style>
 
     <style name="Widget.GeckoMenuListView" parent="Widget.ListView">
@@ -160,10 +176,6 @@
         <item name="android:singleLine">true</item>
         <item name="android:ellipsize">none</item>
         <item name="android:background">@color/about_page_header_grey</item>
-        <item name="android:paddingLeft">20dp</item>
-        <item name="android:paddingStart">20dp</item>
-        <item name="android:paddingRight">0dp</item>
-        <item name="android:paddingEnd">0dp</item>
         <item name="android:drawablePadding">20dp</item>
     </style>
 
@@ -813,6 +825,15 @@
     <style name="ActivityStreamButton" parent="Widget.AppCompat.Button.Colored">
         <item name="colorButtonNormal">@color/link_blue</item>
         <item name="android:textColor">@android:color/white</item>
+    </style>
+
+    <!-- centerInside will downscale larger icons to fit or center smaller favicons and allow us to draw a colored
+         border around them. When changing these values, consider favicons downloaded from the internet and
+         those provided by suggested sites, including suggested sites from distributions. -->
+    <style name="ActivityStreamFaviconView">
+        <item name="enableRoundCorners">false</item>
+        <item name="overrideScaleType">false</item>
+        <item name="android:scaleType">centerInside</item>
     </style>
 
     <!-- URL bar - Site identity -->

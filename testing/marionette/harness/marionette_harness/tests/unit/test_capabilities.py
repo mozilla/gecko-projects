@@ -67,14 +67,14 @@ class TestCapabilities(MarionetteTestCase):
 
         self.assertIn("moz:accessibilityChecks", self.caps)
         self.assertFalse(self.caps["moz:accessibilityChecks"])
-        self.assertIn("specificationLevel", self.caps)
-        self.assertEqual(self.caps["specificationLevel"], 0)
+        self.assertIn("moz:webdriverClick", self.caps)
+        self.assertEqual(self.caps["moz:webdriverClick"], False)
 
-    def test_set_specification_level(self):
+    def test_set_webdriver_click(self):
         self.marionette.delete_session()
-        self.marionette.start_session({"specificationLevel": 2})
+        self.marionette.start_session({"moz:webdriverClick": True})
         caps = self.marionette.session_capabilities
-        self.assertEqual(2, caps["specificationLevel"])
+        self.assertEqual(True, caps["moz:webdriverClick"])
 
     def test_we_get_valid_uuid4_when_creating_a_session(self):
         self.assertNotIn("{", self.marionette.session_id,
@@ -118,37 +118,6 @@ class TestCapabilityMatching(MarionetteTestCase):
             print("invalid strategy {}".format(value))
             with self.assertRaisesRegexp(SessionNotCreatedException, "InvalidArgumentError"):
                 self.marionette.start_session({"pageLoadStrategy": value})
-
-    def test_proxy_none_by_default(self):
-        self.marionette.start_session()
-        self.assertNotIn("proxy", self.marionette.session_capabilities)
-
-    def test_invalid_proxy_type(self):
-        with self.assertRaises(SessionNotCreatedException):
-            self.marionette.start_session({"proxy": {"proxyAutoconfigUrl": None}})
-
-        with self.assertRaises(SessionNotCreatedException):
-            self.marionette.start_session({"proxy": {"proxyType": None}})
-
-    def test_proxy_type_pac_invalid_url(self):
-        with self.assertRaises(SessionNotCreatedException):
-            self.marionette.start_session({"proxy": {"proxyType": "pac"}})
-
-        with self.assertRaises(SessionNotCreatedException):
-            self.marionette.start_session({"proxy": {"proxyType": "pac",
-                                                     "proxyAutoconfigUrl": None}})
-
-    def test_proxy_type_direct(self):
-        self.marionette.start_session({"proxy": {"proxyType": "direct"}})
-        self.assertIn("proxy", self.marionette.session_capabilities)
-        self.assertEqual(self.marionette.session_capabilities["proxy"]["proxyType"], "direct")
-        self.assertEqual(self.marionette.get_pref("network.proxy.type"), 0)
-
-    def test_proxy_type_manual(self):
-        self.marionette.start_session({"proxy": {"proxyType": "manual"}})
-        self.assertIn("proxy", self.marionette.session_capabilities)
-        self.assertEqual(self.marionette.session_capabilities["proxy"]["proxyType"], "manual")
-        self.assertEqual(self.marionette.get_pref("network.proxy.type"), 1)
 
     def test_timeouts(self):
         timeouts = {u"implicit": 123, u"pageLoad": 456, u"script": 789}

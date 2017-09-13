@@ -952,7 +952,7 @@ protected:
 
 NS_IMPL_ADDREF_INHERITED(FakeTrackSourceGetter, MediaStreamTrackSourceGetter)
 NS_IMPL_RELEASE_INHERITED(FakeTrackSourceGetter, MediaStreamTrackSourceGetter)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(FakeTrackSourceGetter)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FakeTrackSourceGetter)
 NS_INTERFACE_MAP_END_INHERITING(MediaStreamTrackSourceGetter)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(FakeTrackSourceGetter,
                                    MediaStreamTrackSourceGetter,
@@ -2926,6 +2926,12 @@ MediaManager::AddWindowID(uint64_t aWindowId,
     MOZ_ASSERT(false, "Window already added");
     return;
   }
+
+  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowId);
+  if (window) {
+    window->AsInner()->UpdateUserMediaCount(1);
+  }
+
   GetActiveWindows()->Put(aWindowId, aListener);
 }
 
@@ -2940,6 +2946,8 @@ MediaManager::RemoveWindowID(uint64_t aWindowId)
     LOG(("No inner window for %" PRIu64, aWindowId));
     return;
   }
+
+  window->AsInner()->UpdateUserMediaCount(-1);
 
   nsPIDOMWindowOuter* outer = window->AsInner()->GetOuterWindow();
   if (!outer) {

@@ -166,8 +166,8 @@ const SQL_BOOKMARK_TAGS_FRAGMENT =
 
 // TODO bug 412736: in case of a frecency tie, we might break it with h.typed
 // and h.visit_count.  That is slower though, so not doing it yet...
-// NB: as a slight performance optimization, we only evaluate the "btitle"
-// and "tags" queries for bookmarked entries.
+// NB: as a slight performance optimization, we only evaluate the "bookmarked"
+// condition once, and avoid evaluating "btitle" and "tags" when it is false.
 function defaultQuery(conditions = "") {
   let query =
     `SELECT :query_type, h.url, h.title, ${SQL_BOOKMARK_TAGS_FRAGMENT},
@@ -177,16 +177,20 @@ function defaultQuery(conditions = "") {
             ON t.url = h.url
            AND t.userContextId = :userContextId
      WHERE h.frecency <> 0
-       AND AUTOCOMPLETE_MATCH(:searchString, h.url,
-                              CASE WHEN bookmarked THEN
-                                IFNULL(btitle, h.title)
-                              ELSE h.title END,
-                              CASE WHEN bookmarked THEN
-                                tags
-                              ELSE '' END,
+       AND CASE WHEN bookmarked
+         THEN
+           AUTOCOMPLETE_MATCH(:searchString, h.url,
+                              IFNULL(btitle, h.title), tags,
                               h.visit_count, h.typed,
-                              bookmarked, t.open_count,
+                              1, t.open_count,
                               :matchBehavior, :searchBehavior)
+         ELSE
+           AUTOCOMPLETE_MATCH(:searchString, h.url,
+                              h.title, '',
+                              h.visit_count, h.typed,
+                              0, t.open_count,
+                              :matchBehavior, :searchBehavior)
+         END
        ${conditions}
      ORDER BY h.frecency DESC, h.id DESC
      LIMIT :maxResults`;
@@ -1089,8 +1093,9 @@ Search.prototype = {
     // If we do not have enough results, and our match type is
     // MATCH_BOUNDARY_ANYWHERE, search again with MATCH_ANYWHERE to get more
     // results.
+    let count = this._counts[MATCHTYPE.GENERAL] + this._counts[MATCHTYPE.HEURISTIC];
     if (this._matchBehavior == MATCH_BOUNDARY_ANYWHERE &&
-        this._counts[MATCHTYPE.GENERAL] < Prefs.get("maxRichResults")) {
+        count < Prefs.get("maxRichResults")) {
       this._matchBehavior = MATCH_ANYWHERE;
       for (let [query, params] of [ this._adaptiveQuery,
                                     this._searchQuery ]) {
@@ -1746,7 +1751,8 @@ Search.prototype = {
     this._addMatch(match);
     // If the search has been canceled by the user or by _addMatch, or we
     // fetched enough results, we can stop the underlying Sqlite query.
-    if (!this.pending || this._counts[MATCHTYPE.GENERAL] == Prefs.get("maxRichResults"))
+    let count = this._counts[MATCHTYPE.GENERAL] + this._counts[MATCHTYPE.HEURISTIC];
+    if (!this.pending || count >= Prefs.get("maxRichResults"))
       cancel();
   },
 

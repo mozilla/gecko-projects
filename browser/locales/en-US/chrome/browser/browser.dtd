@@ -23,6 +23,10 @@
 <!ENTITY  reloadTab.accesskey                "R">
 <!ENTITY  reloadAllTabs.label                "Reload All Tabs">
 <!ENTITY  reloadAllTabs.accesskey            "A">
+<!-- LOCALIZATION NOTE (duplicateTab.label): This is a command to duplicate
+a tab (i.e. it is a verb, not adjective). -->
+<!ENTITY  duplicateTab.label                 "Duplicate Tab">
+<!ENTITY  duplicateTab.accesskey             "D">
 <!-- LOCALIZATION NOTE (closeTabsToTheEnd.label): This should indicate the
 direction in which tabs are closed, i.e. locales that use RTL mode should say
 left instead of right. -->
@@ -41,11 +45,11 @@ can reach it easily. -->
 <!ENTITY  unpinTab.label                     "Unpin Tab">
 <!ENTITY  unpinTab.accesskey                 "b">
 <!ENTITY  sendTabToDevice.label              "Send Tab to Device">
-<!ENTITY  sendTabToDevice.accesskey          "D">
+<!ENTITY  sendTabToDevice.accesskey          "n">
 <!ENTITY  sendPageToDevice.label             "Send Page to Device">
-<!ENTITY  sendPageToDevice.accesskey         "D">
+<!ENTITY  sendPageToDevice.accesskey         "n">
 <!ENTITY  sendLinkToDevice.label             "Send Link to Device">
-<!ENTITY  sendLinkToDevice.accesskey         "D">
+<!ENTITY  sendLinkToDevice.accesskey         "n">
 <!ENTITY  sendToDeviceFeedback.label         "Sent!">
 <!ENTITY  moveToNewWindow.label              "Move to New Window">
 <!ENTITY  moveToNewWindow.accesskey          "W">
@@ -257,6 +261,9 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY keywordfield.accesskey       "K">
 
 <!ENTITY downloads.label              "Downloads">
+<!-- LOCALIZATION NOTE (libraryDownloads.label): This label is similar to
+  -  downloads.label, but used in the Library panel. -->
+<!ENTITY libraryDownloads.label       "Downloads">
 <!ENTITY downloads.accesskey          "D">
 <!ENTITY downloads.commandkey         "j">
 <!ENTITY downloadsUnix.commandkey     "y">
@@ -549,7 +556,7 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY bookmarkThisLinkCmd.accesskey  "L">
 <!ENTITY bookmarkThisFrameCmd.label      "Bookmark This Frame">
 <!ENTITY bookmarkThisFrameCmd.accesskey  "m">
-<!ENTITY copyURLCmd.label             "Copy URL">
+<!ENTITY pageAction.copyLink.label    "Copy Link">
 <!ENTITY copyURLFeedback.label        "Copied!">
 <!ENTITY emailPageCmd.label           "Email Link…">
 <!ENTITY emailPageCmd.accesskey       "E">
@@ -574,8 +581,6 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY emailImageCmd.accesskey      "g">
 <!ENTITY emailVideoCmd.label          "Email Video…">
 <!ENTITY emailVideoCmd.accesskey      "a">
-<!ENTITY castVideoCmd.label           "Send Video To Device">
-<!ENTITY castVideoCmd.accesskey       "e">
 <!ENTITY emailAudioCmd.label          "Email Audio…">
 <!ENTITY emailAudioCmd.accesskey      "a">
 <!ENTITY playPluginCmd.label          "Activate this plugin">
@@ -861,6 +866,8 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY customizeMode.uidensity.menuTouch.accessKey "T">
 <!ENTITY customizeMode.uidensity.autoTouchMode.checkbox.label "Use Touch for Tablet Mode">
 
+<!ENTITY customizeMode.autoHideDownloadsButton.label "Auto-hide">
+
 <!ENTITY getUserMedia.selectCamera.label "Camera to share:">
 <!ENTITY getUserMedia.selectCamera.accesskey "C">
 <!ENTITY getUserMedia.selectMicrophone.label "Microphone to share:">
@@ -958,7 +965,7 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY updateManual.cancelButton.accesskey "N">
 <!ENTITY updateManual.panelUI.label "Download a fresh copy of &brandShorterName;">
 
-<!ENTITY updateRestart.message "After a quick restart, &brandShorterName; will restore all your open tabs and windows.">
+<!ENTITY updateRestart.message2 "After a quick restart, &brandShorterName; will restore all your open tabs and windows that are not in Private Browsing mode.">
 <!ENTITY updateRestart.header.message2 "Restart to update &brandShorterName;.">
 <!ENTITY updateRestart.acceptButton.label "Restart and Restore">
 <!ENTITY updateRestart.acceptButton.accesskey "R">
@@ -970,7 +977,7 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY pageAction.addToUrlbar.label "Add to Address Bar">
 <!ENTITY pageAction.removeFromUrlbar.label "Remove from Address Bar">
 
-<!ENTITY sendToDevice.label3 "Send Page to Device">
+<!ENTITY pageAction.sendTabToDevice.label "Send Tab to Device">
 <!ENTITY sendToDevice.syncNotReady.label "Syncing Devices…">
 
 <!ENTITY libraryButton.tooltip "View history, saved bookmarks, and more">

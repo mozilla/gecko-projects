@@ -9,8 +9,7 @@ const URLs = [ABOUT_HOME_URL, ABOUT_NEWTAB_URL];
 const TOUR_IDs = [
   "onboarding-tour-performance",
   "onboarding-tour-private-browsing",
-  // TODO: should enable in bug 1371538
-  // "onboarding-tour-screenshots",
+  "onboarding-tour-screenshots",
   "onboarding-tour-addons",
   "onboarding-tour-customize",
   "onboarding-tour-default-browser",
@@ -18,12 +17,13 @@ const TOUR_IDs = [
 const UPDATE_TOUR_IDs = [
   "onboarding-tour-performance",
   "onboarding-tour-library",
-  // TODO: should enable in bug 1371538
-  // "onboarding-tour-screenshots",
+  "onboarding-tour-screenshots",
   "onboarding-tour-singlesearch",
   "onboarding-tour-customize",
   "onboarding-tour-sync",
 ];
+const ICON_STATE_WATERMARK = "watermark";
+const ICON_STATE_DEFAULT = "default";
 
 registerCleanupFunction(resetOnboardingDefaultState);
 
@@ -31,10 +31,11 @@ function resetOnboardingDefaultState() {
   // All the prefs should be reset to the default states
   // and no need to revert back so we don't use `SpecialPowers.pushPrefEnv` here.
   Preferences.set("browser.onboarding.enabled", true);
-  Preferences.set("browser.onboarding.hidden", false);
+  Preferences.set("browser.onboarding.state", ICON_STATE_DEFAULT);
   Preferences.set("browser.onboarding.notification.finished", false);
   Preferences.set("browser.onboarding.notification.mute-duration-on-first-session-ms", 300000);
   Preferences.set("browser.onboarding.notification.max-life-time-per-tour-ms", 432000000);
+  Preferences.set("browser.onboarding.notification.max-life-time-all-tours-ms", 1209600000);
   Preferences.set("browser.onboarding.notification.max-prompt-count-per-tour", 8);
   Preferences.reset("browser.onboarding.notification.last-time-of-changing-tour-sec");
   Preferences.reset("browser.onboarding.notification.prompt-count");
@@ -91,7 +92,7 @@ function promiseOnboardingOverlayOpened(browser) {
     ContentTask.spawn(browser, {}, () =>
       content.document.querySelector("#onboarding-overlay").classList.contains(
         "onboarding-opened")),
-    "Should close onboarding overlay",
+    "Should open onboarding overlay",
     100,
     30
   );
@@ -275,5 +276,12 @@ function assertModalDialog(browser, args) {
       ok(!overlayButton.dataset.keyboardFocus,
         "Overlay button focus state should be cleared");
     }
+  });
+}
+
+function assertWatermarkIconDisplayed(browser) {
+  return ContentTask.spawn(browser, {}, function() {
+    let overlayButton = content.document.getElementById("onboarding-overlay-button");
+    ok(overlayButton.classList.contains("onboarding-watermark"), "Should display the watermark onboarding icon");
   });
 }

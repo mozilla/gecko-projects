@@ -83,8 +83,6 @@
         #[allow(unused_imports)]
         use smallvec::SmallVec;
         use std::fmt;
-        #[allow(unused_imports)]
-        use style_traits::HasViewportPercentage;
         use style_traits::{Separator, ToCss};
 
         pub mod single_value {
@@ -179,7 +177,7 @@
         }
 
         /// The specified value of ${name}.
-        #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct SpecifiedValue(pub Vec<single_value::SpecifiedValue>);
 
@@ -275,8 +273,6 @@
         #[allow(unused_imports)]
         use values::{Auto, Either, None_, Normal};
         #[allow(unused_imports)]
-        use cascade_info::CascadeInfo;
-        #[allow(unused_imports)]
         use error_reporting::ParseErrorReporter;
         #[allow(unused_imports)]
         use properties::longhands;
@@ -303,7 +299,6 @@
         pub fn cascade_property(
             declaration: &PropertyDeclaration,
             context: &mut computed::Context,
-            cascade_info: &mut Option<<&mut CascadeInfo>,
         ) {
             let value = match *declaration {
                 PropertyDeclaration::${property.camel_case}(ref value) => {
@@ -320,11 +315,8 @@
             };
 
             % if not property.derived_from:
-                if let Some(ref mut cascade_info) = *cascade_info {
-                    cascade_info.on_cascade_property(&declaration, &value);
-                }
                 match value {
-                    DeclaredValue::Value(ref specified_value) => {
+                    DeclaredValue::Value(specified_value) => {
                         % if property.ident in SYSTEM_FONT_LONGHANDS and product == "gecko":
                             if let Some(sf) = specified_value.get_system() {
                                 longhands::system_font::resolve_system_font(sf, context);
@@ -349,7 +341,11 @@
                             }
                             context.builder.put_${data.current_style_struct.name_lower}(s);
                         % else:
+                            % if property.boxed:
+                            let computed = (**specified_value).to_computed_value(context);
+                            % else:
                             let computed = specified_value.to_computed_value(context);
+                            % endif
                             % if property.ident == "font_size":
                                  longhands::font_size::cascade_specified_font_size(
                                      context,
@@ -426,7 +422,6 @@
     %>
     <%call expr="longhand(name, keyword=Keyword(name, values, **keyword_kwargs), **kwargs)">
         use properties::longhands::system_font::SystemFont;
-        no_viewport_percentage!(SpecifiedValue);
 
         pub mod computed_value {
             use cssparser::Parser;
@@ -509,33 +504,26 @@
 
 <%def name="single_keyword(name, values, vector=False, **kwargs)">
     <%call expr="single_keyword_computed(name, values, vector, **kwargs)">
-        % if not "extra_specified" in kwargs and ("aliases" in kwargs or (("extra_%s_aliases" % product) in kwargs)):
-            impl ToComputedValue for SpecifiedValue {
-                type ComputedValue = computed_value::T;
+        impl ToComputedValue for SpecifiedValue {
+            type ComputedValue = computed_value::T;
 
-                #[inline]
-                fn to_computed_value(&self, _context: &Context) -> computed_value::T {
-                    match *self {
-                        % for value in data.longhands_by_name[name].keyword.values_for(product):
-                            SpecifiedValue::${to_rust_ident(value)} => computed_value::T::${to_rust_ident(value)},
-                        % endfor
-                    }
-                }
-                #[inline]
-                fn from_computed_value(computed: &computed_value::T) -> Self {
-                    match *computed {
-                        % for value in data.longhands_by_name[name].keyword.values_for(product):
-                            computed_value::T::${to_rust_ident(value)} => SpecifiedValue::${to_rust_ident(value)},
-                        % endfor
-                    }
+            #[inline]
+            fn to_computed_value(&self, _context: &Context) -> computed_value::T {
+                match *self {
+                    % for value in data.longhands_by_name[name].keyword.values_for(product):
+                        SpecifiedValue::${to_rust_ident(value)} => computed_value::T::${to_rust_ident(value)},
+                    % endfor
                 }
             }
-        % else:
-            use values::computed::ComputedValueAsSpecified;
-            impl ComputedValueAsSpecified for SpecifiedValue {}
-        % endif
-
-        no_viewport_percentage!(SpecifiedValue);
+            #[inline]
+            fn from_computed_value(computed: &computed_value::T) -> Self {
+                match *computed {
+                    % for value in data.longhands_by_name[name].keyword.values_for(product):
+                        computed_value::T::${to_rust_ident(value)} => SpecifiedValue::${to_rust_ident(value)},
+                    % endfor
+                }
+            }
+        }
     </%call>
 </%def>
 
@@ -954,7 +942,7 @@
         }
 
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+        #[derive(Clone, Debug, PartialEq, ToCss)]
         pub struct SpecifiedValue(pub ${length_type});
 
         % if length_type == "MozLength":

@@ -501,6 +501,7 @@ private:
   DECL_GFX_PREF(Live, "gl.require-hardware",                   RequireHardwareGL, bool, false);
   DECL_GFX_PREF(Live, "gl.use-tls-is-current",                 UseTLSIsCurrent, int32_t, 0);
 
+  DECL_GFX_PREF(Live, "image.cache.factor2.threshold-surfaces", ImageCacheFactor2ThresholdSurfaces, int32_t, -1);
   DECL_GFX_PREF(Once, "image.cache.size",                      ImageCacheSize, int32_t, 5*1024*1024);
   DECL_GFX_PREF(Once, "image.cache.timeweight",                ImageCacheTimeWeight, int32_t, 500);
   DECL_GFX_PREF(Live, "image.decode-immediately.enabled",      ImageDecodeImmediatelyEnabled, bool, false);
@@ -590,7 +591,7 @@ private:
   DECL_GFX_PREF(Live, "layers.low-precision-opacity",          LowPrecisionOpacity, float, 1.0f);
   DECL_GFX_PREF(Live, "layers.low-precision-resolution",       LowPrecisionResolution, float, 0.25f);
   DECL_GFX_PREF(Live, "layers.max-active",                     MaxActiveLayers, int32_t, -1);
-  DECL_GFX_PREF(Once, "layers.mlgpu.dev-enabled",              AdvancedLayersEnabledDoNotUseDirectly, bool, false);
+  DECL_GFX_PREF(Once, "layers.mlgpu.enabled",                  AdvancedLayersEnabledDoNotUseDirectly, bool, false);
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-buffer-cache",      AdvancedLayersEnableBufferCache, bool, true);
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-buffer-sharing",    AdvancedLayersEnableBufferSharing, bool, true);
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-clear-view",        AdvancedLayersEnableClearView, bool, true);
@@ -671,6 +672,9 @@ private:
   DECL_GFX_PREF(Once, "media.windows-media-foundation.use-sync-texture", PDMWMFUseSyncTexture, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.low-latency.enabled", PDMWMFLowLatencyEnabled, bool, false);
   DECL_GFX_PREF(Live, "media.wmf.skip-blacklist", PDMWMFSkipBlacklist, bool, false);
+  DECL_GFX_PREF(Live, "media.wmf.deblacklisting-for-telemetry-in-gpu-process", PDMWMFDeblacklistingForTelemetryInGPUProcess, bool, false);
+  DECL_GFX_PREF(Live, "media.wmf.amd.vp9.enabled", PDMWMFAMDVP9DecoderEnabled, bool, true);
+  DECL_GFX_PREF(Live, "media.wmf.allow-unsupported-resolutions",  PDMWMFAllowUnsupportedResolutions, bool, false);
 #endif
 
   // These affect how line scrolls from wheel events will be accelerated.

@@ -210,7 +210,7 @@ Tools.styleEditor = {
   commands: "devtools/client/styleeditor/styleeditor-commands",
 
   isTargetSupported: function (target) {
-    return target.hasActor("styleEditor") || target.hasActor("styleSheets");
+    return target.hasActor("styleSheets");
   },
 
   build: function (iframeWindow, toolbox) {
@@ -278,7 +278,7 @@ Tools.performance = {
   inMenu: true,
 
   isTargetSupported: function (target) {
-    return target.hasActor("profiler");
+    return target.hasActor("performance");
   },
 
   build: function (frame, target) {

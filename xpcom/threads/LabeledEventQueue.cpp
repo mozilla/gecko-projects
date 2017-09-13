@@ -5,12 +5,36 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "LabeledEventQueue.h"
+#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/TabGroup.h"
 #include "mozilla/Scheduler.h"
 #include "mozilla/SchedulerGroup.h"
 #include "nsQueryObject.h"
 
+using namespace mozilla::dom;
+
+LinkedList<SchedulerGroup>* LabeledEventQueue::sSchedulerGroups;
+size_t LabeledEventQueue::sLabeledEventQueueCount;
+SchedulerGroup* LabeledEventQueue::sCurrentSchedulerGroup;
+
 LabeledEventQueue::LabeledEventQueue()
 {
+  // LabeledEventQueue should only be used by one consumer since it uses a
+  // single static sSchedulerGroups field. It's hard to assert this, though, so
+  // we assert NS_IsMainThread(), which is a reasonable proxy.
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (sLabeledEventQueueCount++ == 0) {
+    sSchedulerGroups = new LinkedList<SchedulerGroup>();
+  }
+}
+
+LabeledEventQueue::~LabeledEventQueue()
+{
+  if (--sLabeledEventQueueCount == 0) {
+    delete sSchedulerGroups;
+    sSchedulerGroups = nullptr;
+  }
 }
 
 static SchedulerGroup*
@@ -89,6 +113,16 @@ LabeledEventQueue::PutEvent(already_AddRefed<nsIRunnable>&& aEvent,
 
   RunnableEpochQueue* queue = isLabeled ? mLabeled.LookupOrAdd(group) : &mUnlabeled;
   queue->Push(QueueEntry(event.forget(), epoch->mEpochNumber));
+
+  if (group && group->EnqueueEvent() == SchedulerGroup::NewlyQueued) {
+    // This group didn't have any events before. Add it to the
+    // sSchedulerGroups list.
+    MOZ_ASSERT(!group->isInList());
+    sSchedulerGroups->insertBack(group);
+    if (!sCurrentSchedulerGroup) {
+      sCurrentSchedulerGroup = group;
+    }
+  }
 }
 
 void
@@ -105,6 +139,18 @@ LabeledEventQueue::PopEpoch()
   mNumEvents--;
 }
 
+// Returns the next SchedulerGroup after |aGroup| in sSchedulerGroups. Wraps
+// around to the beginning of the list when we hit the end.
+/* static */ SchedulerGroup*
+LabeledEventQueue::NextSchedulerGroup(SchedulerGroup* aGroup)
+{
+  SchedulerGroup* result = aGroup->getNext();
+  if (!result) {
+    result = sSchedulerGroups->getFirst();
+  }
+  return result;
+}
+
 already_AddRefed<nsIRunnable>
 LabeledEventQueue::GetEvent(EventPriority* aPriority,
                             const MutexAutoLock& aProofOfLock)
@@ -116,35 +162,87 @@ LabeledEventQueue::GetEvent(EventPriority* aPriority,
   Epoch epoch = mEpochs.FirstElement();
   if (!epoch.IsLabeled()) {
     QueueEntry entry = mUnlabeled.FirstElement();
-    if (IsReadyToRun(entry.mRunnable, nullptr)) {
-      PopEpoch();
-      mUnlabeled.Pop();
-      MOZ_ASSERT(entry.mEpochNumber == epoch.mEpochNumber);
-      MOZ_ASSERT(entry.mRunnable.get());
-      return entry.mRunnable.forget();
+    if (!IsReadyToRun(entry.mRunnable, nullptr)) {
+      return nullptr;
+    }
+
+    PopEpoch();
+    mUnlabeled.Pop();
+    MOZ_ASSERT(entry.mEpochNumber == epoch.mEpochNumber);
+    MOZ_ASSERT(entry.mRunnable.get());
+    return entry.mRunnable.forget();
+  }
+
+  if (!sCurrentSchedulerGroup) {
+    return nullptr;
+  }
+
+  // Move active tabs to the front of the queue. The mAvoidActiveTabCount field
+  // prevents us from preferentially processing events from active tabs twice in
+  // a row. This scheme is designed to prevent starvation.
+  if (TabChild::HasActiveTabs() && mAvoidActiveTabCount <= 0) {
+    for (TabChild* tabChild : TabChild::GetActiveTabs()) {
+      SchedulerGroup* group = tabChild->TabGroup();
+      if (!group->isInList() || group == sCurrentSchedulerGroup) {
+        continue;
+      }
+
+      // For each active tab we move to the front of the queue, we have to
+      // process two SchedulerGroups (the active tab and another one, presumably
+      // a background group) before we prioritize active tabs again.
+      mAvoidActiveTabCount += 2;
+
+      // We move |group| right before sCurrentSchedulerGroup and then set
+      // sCurrentSchedulerGroup to group.
+      MOZ_ASSERT(group != sCurrentSchedulerGroup);
+      group->removeFrom(*sSchedulerGroups);
+      sCurrentSchedulerGroup->setPrevious(group);
+      sCurrentSchedulerGroup = group;
     }
   }
 
-  for (auto iter = mLabeled.Iter(); !iter.Done(); iter.Next()) {
-    SchedulerGroup* key = iter.Key();
-    RunnableEpochQueue* queue = iter.Data();
+  // Iterate over each SchedulerGroup once, starting at sCurrentSchedulerGroup.
+  SchedulerGroup* firstGroup = sCurrentSchedulerGroup;
+  SchedulerGroup* group = firstGroup;
+  do {
+    mAvoidActiveTabCount--;
+
+    RunnableEpochQueue* queue = mLabeled.Get(group);
+    if (!queue) {
+      // This can happen if |group| is in a different LabeledEventQueue than |this|.
+      group = NextSchedulerGroup(group);
+      continue;
+    }
     MOZ_ASSERT(!queue->IsEmpty());
 
     QueueEntry entry = queue->FirstElement();
-    if (entry.mEpochNumber != epoch.mEpochNumber) {
-      continue;
-    }
+    if (entry.mEpochNumber == epoch.mEpochNumber &&
+        IsReadyToRun(entry.mRunnable, group)) {
+      sCurrentSchedulerGroup = NextSchedulerGroup(group);
 
-    if (IsReadyToRun(entry.mRunnable, key)) {
       PopEpoch();
 
+      if (group->DequeueEvent() == SchedulerGroup::NoLongerQueued) {
+        // Now we can take group out of sSchedulerGroups.
+        if (sCurrentSchedulerGroup == group) {
+          // Since we changed sCurrentSchedulerGroup above, we'll only get here
+          // if |group| was the only element in sSchedulerGroups. In that case
+          // set sCurrentSchedulerGroup to null.
+          MOZ_ASSERT(group->getNext() == nullptr);
+          MOZ_ASSERT(group->getPrevious() == nullptr);
+          sCurrentSchedulerGroup = nullptr;
+        }
+        group->removeFrom(*sSchedulerGroups);
+      }
       queue->Pop();
       if (queue->IsEmpty()) {
-        iter.Remove();
+        mLabeled.Remove(group);
       }
       return entry.mRunnable.forget();
     }
-  }
+
+    group = NextSchedulerGroup(group);
+  } while (group != firstGroup);
 
   return nullptr;
 }

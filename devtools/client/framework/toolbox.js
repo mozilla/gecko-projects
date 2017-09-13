@@ -12,6 +12,7 @@ const SPLITCONSOLE_HEIGHT_PREF = "devtools.toolbox.splitconsoleHeight";
 const DISABLE_AUTOHIDE_PREF = "ui.popup.disable_autohide";
 const HOST_HISTOGRAM = "DEVTOOLS_TOOLBOX_HOST";
 const SCREENSIZE_HISTOGRAM = "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER";
+const CURRENT_THEME_SCALAR = "devtools.current_theme";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 var {Ci, Cu, Cc} = require("chrome");
@@ -66,6 +67,8 @@ loader.lazyRequireGetter(this, "HUDService",
   "devtools/client/webconsole/hudservice", true);
 loader.lazyRequireGetter(this, "viewSource",
   "devtools/client/shared/view-source");
+loader.lazyRequireGetter(this, "StyleSheetsFront",
+  "devtools/shared/fronts/stylesheets", true);
 
 loader.lazyGetter(this, "domNodeConstants", () => {
   return require("devtools/shared/dom-node-constants");
@@ -103,6 +106,7 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this._initInspector = null;
   this._inspector = null;
+  this._styleSheets = null;
 
   // Map of frames (id => frame-info) and currently selected frame id.
   this.frameMap = new Map();
@@ -618,18 +622,17 @@ Toolbox.prototype = {
 
   /**
    * Clients wishing to use source maps but that want the toolbox to
-   * track the source actor mapping can use this source map service.
-   * This is a higher-level service than the one returned by
-   * |sourceMapService|, in that it automatically tracks source actor
-   * IDs.
+   * track the source and style sheet actor mapping can use this
+   * source map service.  This is a higher-level service than the one
+   * returned by |sourceMapService|, in that it automatically tracks
+   * source and style sheet actor IDs.
    */
   get sourceMapURLService() {
     if (this._sourceMapURLService) {
       return this._sourceMapURLService;
     }
     let sourceMaps = this._createSourceMapService();
-    this._sourceMapURLService = new SourceMapURLService(this._target, this.threadClient,
-                                                        sourceMaps);
+    this._sourceMapURLService = new SourceMapURLService(this, sourceMaps);
     return this._sourceMapURLService;
   },
 
@@ -650,6 +653,11 @@ Toolbox.prototype = {
     this._telemetry.logOncePerBrowserVersion(SCREENSIZE_HISTOGRAM,
                                              system.getScreenDimensions());
     this._telemetry.log(HOST_HISTOGRAM, this._getTelemetryHostId());
+
+    // Log current theme. The question we want to answer is:
+    // "What proportion of users use which themes?"
+    let currentTheme = Services.prefs.getCharPref("devtools.theme");
+    this._telemetry.logKeyedScalar(CURRENT_THEME_SCALAR, currentTheme, 1);
   },
 
   /**
@@ -1973,6 +1981,7 @@ Toolbox.prototype = {
     front.setBoolPref(DISABLE_AUTOHIDE_PREF, toggledValue);
 
     this.autohideButton.isChecked = toggledValue;
+    this._autohideHasBeenToggled = true;
   }),
 
   _isDisableAutohideEnabled: Task.async(function* () {
@@ -2539,6 +2548,12 @@ Toolbox.prototype = {
     // Destroy the preference front
     outstanding.push(this.destroyPreference());
 
+    // Destroy the style sheet front.
+    if (this._styleSheets) {
+      this._styleSheets.destroy();
+      this._styleSheets = null;
+    }
+
     // Detach the thread
     detachThread(this._threadClient);
     this._threadClient = null;
@@ -2668,9 +2683,9 @@ Toolbox.prototype = {
    * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
   initPerformance: Task.async(function* () {
-    // If target does not have profiler actor (addons), do not
+    // If target does not have performance actor (addons), do not
     // even register the shared performance connection.
-    if (!this.target.hasActor("profiler")) {
+    if (!this.target.hasActor("performance")) {
       return promise.resolve();
     }
 
@@ -2710,12 +2725,30 @@ Toolbox.prototype = {
   }),
 
   /**
+   * Return the style sheets front, creating it if necessary.  If the
+   * style sheets front is not supported by the target, returns null.
+   */
+  initStyleSheetsFront: function () {
+    if (!this._styleSheets && this.target.hasActor("styleSheets")) {
+      this._styleSheets = StyleSheetsFront(this.target.client, this.target.form);
+    }
+    return this._styleSheets;
+  },
+
+  /**
    * Destroy the preferences actor when the toolbox is unloaded.
    */
   destroyPreference: Task.async(function* () {
     if (!this._preferenceFront) {
       return;
     }
+
+    // Only reset the autohide pref in the Browser Toolbox if it's been toggled
+    // in the UI (don't reset the pref if it was already set before opening)
+    if (this._autohideHasBeenToggled) {
+      yield this._preferenceFront.clearUserPref(DISABLE_AUTOHIDE_PREF);
+    }
+
     this._preferenceFront.destroy();
     this._preferenceFront = null;
   }),

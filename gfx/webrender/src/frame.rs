@@ -9,12 +9,12 @@ use api::{LayerVector2D, LayoutSize, LayoutTransform, LocalClip, MixBlendMode, P
 use api::{PropertyBinding, ScrollClamping, ScrollEventPhase, ScrollLayerState, ScrollLocation};
 use api::{ScrollPolicy, ScrollSensitivity, SpecificDisplayItem, StackingContext, TileOffset};
 use api::{TransformStyle, WorldPoint};
+use clip::ClipRegion;
 use clip_scroll_tree::{ClipScrollTree, ScrollStates};
 use euclid::rect;
 use gpu_cache::GpuCache;
 use internal_types::{FastHashMap, RendererFrame};
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
-use mask_cache::ClipRegion;
 use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
 use resource_cache::{ResourceCache, TiledImageMap};
 use scene::{Scene, SceneProperties};
@@ -36,6 +36,7 @@ static DEFAULT_SCROLLBAR_COLOR: ColorF = ColorF { r: 0.3, g: 0.3, b: 0.3, a: 0.6
 /// This structure keeps track of what ids are the "root" for one particular level of
 /// nesting as well as keeping and index, which can make ClipIds used internally unique
 /// in the full ClipScrollTree.
+#[derive(Debug)]
 struct NestedDisplayListInfo {
     /// The index of this nested display list, which is used to generate
     /// new ClipIds for clips that are defined inside it.
@@ -82,11 +83,19 @@ impl NestedDisplayListInfo {
             self.convert_id_to_nested(id)
         }
     }
+
+    fn convert_new_id_to_nested(&self, id: &ClipId) -> ClipId {
+        if id.pipeline_id() != self.clip_node_id.pipeline_id() {
+            return *id;
+        }
+        self.convert_id_to_nested(id)
+    }
 }
 
 struct FlattenContext<'a> {
     scene: &'a Scene,
     builder: &'a mut FrameBuilder,
+    resource_cache: &'a ResourceCache,
     tiled_image_map: TiledImageMap,
     replacements: Vec<(ClipId, ClipId)>,
     nested_display_list_info: Vec<NestedDisplayListInfo>,
@@ -96,11 +105,12 @@ struct FlattenContext<'a> {
 impl<'a> FlattenContext<'a> {
     fn new(scene: &'a Scene,
            builder: &'a mut FrameBuilder,
-           resource_cache: &ResourceCache)
+           resource_cache: &'a ResourceCache)
            -> FlattenContext<'a> {
         FlattenContext {
             scene,
             builder,
+            resource_cache,
             tiled_image_map: resource_cache.get_tiled_image_map(),
             replacements: Vec::new(),
             nested_display_list_info: Vec::new(),
@@ -123,7 +133,7 @@ impl<'a> FlattenContext<'a> {
 
     fn convert_new_id_to_nested(&self, id: &ClipId) -> ClipId {
         if let Some(nested_info) = self.nested_display_list_info.last() {
-            nested_info.convert_id_to_nested(id)
+            nested_info.convert_new_id_to_nested(id)
         } else {
             *id
         }
@@ -179,6 +189,46 @@ pub struct Frame {
     frame_builder: Option<FrameBuilder>,
 }
 
+trait FilterOpHelpers {
+    fn resolve(self, properties: &SceneProperties) -> FilterOp;
+    fn is_noop(&self) -> bool;
+}
+
+impl FilterOpHelpers for FilterOp {
+    fn resolve(self, properties: &SceneProperties) -> FilterOp {
+        match self {
+            FilterOp::Opacity(ref value) => {
+                let amount = properties.resolve_float(value, 1.0);
+                FilterOp::Opacity(PropertyBinding::Value(amount))
+            }
+            _ => self
+        }
+    }
+
+    fn is_noop(&self) -> bool {
+        match *self {
+            FilterOp::Blur(length) => length == 0.0,
+            FilterOp::Brightness(amount) => amount == 1.0,
+            FilterOp::Contrast(amount) => amount == 1.0,
+            FilterOp::Grayscale(amount) => amount == 0.0,
+            FilterOp::HueRotate(amount) => amount == 0.0,
+            FilterOp::Invert(amount) => amount == 0.0,
+            FilterOp::Opacity(value) => {
+                match value {
+                    PropertyBinding::Value(amount) => {
+                        amount == 1.0
+                    }
+                    PropertyBinding::Binding(..) => {
+                        panic!("bug: binding value should be resolved");
+                    }
+                }
+            }
+            FilterOp::Saturate(amount) => amount == 1.0,
+            FilterOp::Sepia(amount) => amount == 0.0,
+        }
+    }
+}
+
 trait StackingContextHelpers {
     fn mix_blend_mode_for_compositing(&self) -> Option<MixBlendMode>;
     fn filter_ops_for_compositing(&self,
@@ -201,15 +251,11 @@ impl StackingContextHelpers for StackingContext {
                                   properties: &SceneProperties) -> Vec<FilterOp> {
         let mut filters = vec![];
         for filter in display_list.get(input_filters) {
+            let filter = filter.resolve(properties);
             if filter.is_noop() {
                 continue;
             }
-            if let FilterOp::Opacity(ref value) = filter {
-                let amount = properties.resolve_float(value, 1.0);
-                filters.push(FilterOp::Opacity(PropertyBinding::Value(amount)));
-            } else {
-                filters.push(filter);
-            }
+            filters.push(filter);
         }
         filters
     }
@@ -391,11 +437,6 @@ impl Frame {
                 stacking_context.mix_blend_mode_for_compositing())
         };
 
-        if composition_operations.will_make_invisible() {
-            traversal.skip_current_stacking_context();
-            return;
-        }
-
         if stacking_context.scroll_policy == ScrollPolicy::Fixed {
             context.replacements.push((context_scroll_node_id,
                                        context.builder.current_reference_frame_id()));
@@ -557,16 +598,22 @@ impl Frame {
                                               info.image_rendering);
             }
             SpecificDisplayItem::Text(ref text_info) => {
-                context.builder.add_text(clip_and_scroll,
-                                         reference_frame_relative_offset,
-                                         item_rect_with_offset,
-                                         &clip_with_offset,
-                                         text_info.font_key,
-                                         text_info.size,
-                                         &text_info.color,
-                                         item.glyphs(),
-                                         item.display_list().get(item.glyphs()).count(),
-                                         text_info.glyph_options);
+                match context.resource_cache.get_font_instance(text_info.font_key) {
+                    Some(instance) => {
+                        context.builder.add_text(clip_and_scroll,
+                                                 reference_frame_relative_offset,
+                                                 item_rect_with_offset,
+                                                 &clip_with_offset,
+                                                 instance,
+                                                 &text_info.color,
+                                                 item.glyphs(),
+                                                 item.display_list().get(item.glyphs()).count(),
+                                                 text_info.glyph_options);
+                    }
+                    None => {
+                        warn!("Unknown font instance key: {:?}", text_info.font_key);
+                    }
+                }
             }
             SpecificDisplayItem::Rectangle(ref info) => {
                 if !self.try_to_add_rectangle_splitting_on_clip(context,

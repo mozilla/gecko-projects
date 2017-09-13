@@ -76,6 +76,7 @@
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/DefineEnum.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
@@ -338,14 +339,12 @@ private:
 
 class WatchdogManager;
 
-enum WatchdogTimestampCategory
-{
-    TimestampContextStateChange = 0,
+MOZ_DEFINE_ENUM(WatchdogTimestampCategory, (
     TimestampWatchdogWakeup,
     TimestampWatchdogHibernateStart,
     TimestampWatchdogHibernateStop,
-    TimestampCount
-};
+    TimestampContextStateChange
+));
 
 class AsyncFreeSnowWhite;
 
@@ -396,6 +395,7 @@ private:
 };
 
 class XPCJSContext final : public mozilla::CycleCollectedJSContext
+                         , public mozilla::LinkedListElement<XPCJSContext>
 {
 public:
     static void InitTLS();
@@ -458,8 +458,6 @@ public:
         IDX_CREATE_INSTANCE         ,
         IDX_ITEM                    ,
         IDX_PROTO                   ,
-        IDX_ITERATOR                ,
-        IDX_EXPOSEDPROPS            ,
         IDX_EVAL                    ,
         IDX_CONTROLLERS             ,
         IDX_CONTROLLERS_CLASS       ,
@@ -493,7 +491,12 @@ private:
     AutoMarkingPtr*          mAutoRoots;
     jsid                     mResolveName;
     XPCWrappedNative*        mResolvingWrapper;
-    RefPtr<WatchdogManager>  mWatchdogManager;
+    WatchdogManager*         mWatchdogManager;
+
+    // Number of XPCJSContexts currently alive.
+    static uint32_t         sInstanceCount;
+    static mozilla::StaticRefPtr<WatchdogManager> sWatchdogInstance;
+    static WatchdogManager* GetWatchdogManager();
 
     // If we spend too much time running JS code in an event handler, then we
     // want to show the slow script UI. The timeout T is controlled by prefs. We
@@ -521,8 +524,13 @@ private:
     // meaningful while calling through XPCWrappedJS.
     nsresult mPendingResult;
 
+    // These members must be accessed via WatchdogManager.
+    enum { CONTEXT_ACTIVE, CONTEXT_INACTIVE } mActive;
+    PRTime mLastStateChange;
+
     friend class XPCJSRuntime;
     friend class Watchdog;
+    friend class WatchdogManager;
     friend class AutoLockWatchdog;
 };
 
@@ -1002,14 +1010,16 @@ public:
 
     nsAutoPtr<JSObject2JSObjectMap> mWaiverWrapperMap;
 
-    bool IsContentXBLScope() { return mIsContentXBLScope; }
+    JSCompartment* Compartment() const { return js::GetObjectCompartment(mGlobalJSObject); }
+
+    bool IsContentXBLScope() { return xpc::IsContentXBLCompartment(Compartment()); }
     bool AllowContentXBLScope();
     bool UseContentXBLScope() { return mUseContentXBLScope; }
     void ClearContentXBLScope() { mContentXBLScope = nullptr; }
 
-    bool IsAddonScope() { return mIsAddonScope; }
+    bool IsAddonScope() { return xpc::IsAddonCompartment(Compartment()); }
 
-    bool HasInterposition() { return mInterposition; }
+    inline bool HasInterposition() { return mInterposition; }
     nsCOMPtr<nsIAddonInterposition> GetInterposition();
 
     static bool SetAddonInterposition(JSContext* cx,
@@ -1068,9 +1078,6 @@ private:
     nsCOMPtr<nsIAddonInterposition>  mInterposition;
 
     JS::WeakMapPtr<JSObject*, JSObject*> mXrayExpandos;
-
-    bool mIsContentXBLScope;
-    bool mIsAddonScope;
 
     // For remote XUL domains, we run all XBL in the content scope for compat
     // reasons (though we sometimes pref this off for automation). We separately
@@ -2786,6 +2793,7 @@ public:
         , writeToGlobalPrototype(false)
         , sameZoneAs(cx)
         , freshZone(false)
+        , isContentXBLScope(false)
         , invisibleToDebugger(false)
         , discardSource(false)
         , metadata(cx)
@@ -2807,6 +2815,7 @@ public:
     bool writeToGlobalPrototype;
     JS::RootedObject sameZoneAs;
     bool freshZone;
+    bool isContentXBLScope;
     bool invisibleToDebugger;
     bool discardSource;
     GlobalProperties globalProperties;
@@ -3061,6 +3070,11 @@ public:
     // receives various bits of special compatibility behavior.
     bool isWebExtensionContentScript;
 
+    // True if wrappers in this compartment will interpose on some property
+    // accesses on objects from other compartments, for add-on compatibility
+    // reasons.
+    bool hasInterposition;
+
     // Even if an add-on needs interposition, it does not necessary need it
     // for every compartment. If this flag is set we waive interposition for
     // this compartment.
@@ -3077,6 +3091,15 @@ public:
     // to opt into CPOWs. It's necessary for the implementation of
     // RemoteAddonsParent.jsm.
     bool allowCPOWs;
+
+    // True if this compartment is a content XBL compartment. Every global in
+    // such a compartment is a content XBL scope.
+    bool isContentXBLCompartment;
+
+    // True if EnsureAddonCompartment has been called for this compartment.
+    // Note that this is false for extensions that ship with the browser, like
+    // browser/extensions/activity-stream.
+    bool isAddonCompartment;
 
     // This is only ever set during mochitest runs when enablePrivilege is called.
     // It's intended as a temporary stopgap measure until we can finish ripping out

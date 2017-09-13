@@ -92,8 +92,6 @@ const char* const XPCJSRuntime::mStrings[] = {
     "createInstance",       // IDX_CREATE_INSTANCE
     "item",                 // IDX_ITEM
     "__proto__",            // IDX_PROTO
-    "__iterator__",         // IDX_ITERATOR
-    "__exposedProps__",     // IDX_EXPOSEDPROPS
     "eval",                 // IDX_EVAL
     "controllers",          // IDX_CONTROLLERS
     "Controllers",          // IDX_CONTROLLERS_CLASS
@@ -174,9 +172,12 @@ CompartmentPrivate::CompartmentPrivate(JSCompartment* c)
     , writeToGlobalPrototype(false)
     , skipWriteToGlobalPrototype(false)
     , isWebExtensionContentScript(false)
+    , hasInterposition(false)
     , waiveInterposition(false)
     , addonCallInterposition(false)
     , allowCPOWs(false)
+    , isContentXBLCompartment(false)
+    , isAddonCompartment(false)
     , universalXPConnectEnabled(false)
     , forcePermissiveCOWs(false)
     , wasNuked(false)
@@ -425,25 +426,35 @@ Scriptability::Get(JSObject* aScope)
 }
 
 bool
-IsContentXBLScope(JSCompartment* compartment)
+IsContentXBLCompartment(JSCompartment* compartment)
 {
-    // We always eagerly create compartment privates for XBL scopes.
+    // We always eagerly create compartment privates for content XBL compartments.
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
-    if (!priv || !priv->scope)
-        return false;
-    return priv->scope->IsContentXBLScope();
+    return priv && priv->isContentXBLCompartment;
+}
+
+bool
+IsContentXBLScope(JS::Realm* realm)
+{
+    return IsContentXBLCompartment(JS::GetCompartmentForRealm(realm));
 }
 
 bool
 IsInContentXBLScope(JSObject* obj)
 {
-    return IsContentXBLScope(js::GetObjectCompartment(obj));
+    return IsContentXBLCompartment(js::GetObjectCompartment(obj));
+}
+
+bool
+IsAddonCompartment(JSCompartment* compartment)
+{
+    return CompartmentPrivate::Get(compartment)->isAddonCompartment;
 }
 
 bool
 IsInAddonScope(JSObject* obj)
 {
-    return ObjectScope(obj)->IsAddonScope();
+    return IsAddonCompartment(js::GetObjectCompartment(obj));
 }
 
 bool

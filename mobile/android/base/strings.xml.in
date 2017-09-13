@@ -169,8 +169,6 @@
 
   <string name="pref_category_notifications">&pref_category_notifications;</string>
   <string name="pref_category_notifications_summary">&pref_category_notifications_summary;</string>
-  <string name="pref_content_notifications">&pref_content_notifications;</string>
-  <string name="pref_content_notifications_summary">&pref_content_notifications_summary2;</string>
 
   <string name="pref_category_home">&pref_category_home;</string>
   <string name="pref_category_home_summary">&pref_category_home_summary;</string>
@@ -304,12 +302,6 @@
   <string name="tab_queue_notification_title">&tab_queue_notification_title;</string>
   <string name="tab_queue_notification_settings">&tab_queue_notification_settings;</string>
 
-  <string name="content_notification_summary">&content_notification_summary;</string>
-  <string name="content_notification_title_plural">&content_notification_title_plural;</string>
-  <string name="content_notification_action_settings">&content_notification_action_settings2;</string>
-  <string name="content_notification_action_read_now">&content_notification_action_read_now;</string>
-  <string name="content_notification_updated_on">&content_notification_updated_on;</string>
-
   <string name="pref_default_browser">&pref_default_browser;</string>
   <string name="pref_default_browser_mozilla_support_tablet">&pref_default_browser_mozilla_support_tablet;</string>
 
@@ -327,6 +319,10 @@
   <string name="pref_dialog_set_default">&pref_dialog_set_default;</string>
   <string name="pref_default">&pref_dialog_default;</string>
   <string name="pref_dialog_remove">&pref_dialog_remove;</string>
+  <string name="pref_dialog_activitystream_header_content">&pref_dialog_activitystream_header_content;</string>
+  <string name="pref_dialog_activitystream_recentBookmarks">&pref_dialog_activitystream_recentBookmarks;</string>
+  <string name="pref_dialog_activitystream_visited">&pref_dialog_activitystream_visited;</string>
+
 
   <string name="pref_search_last_toast">&pref_search_last_toast;</string>
 
@@ -398,7 +394,12 @@
   <string name="contextmenu_top_sites_edit">&contextmenu_top_sites_edit;</string>
   <string name="contextmenu_top_sites_pin">&contextmenu_top_sites_pin;</string>
   <string name="contextmenu_top_sites_unpin">&contextmenu_top_sites_unpin;</string>
+  <string name="contextmenu_pin_to_top_sites">&contextmenu_pin_to_top_sites;</string>
+  <string name="contextmenu_unpin_from_top_sites">&contextmenu_unpin_from_top_sites;</string>
   <string name="contextmenu_add_search_engine">&contextmenu_add_search_engine;</string>
+
+  <string name="pinned_page_to_top_sites">&pinned_page_to_top_sites;</string>
+  <string name="unpinned_page_from_top_sites">&unpinned_page_from_top_sites;</string>
 
   <string name="doorhanger_login_no_username">&doorhanger_login_no_username;</string>
   <string name="doorhanger_login_edit_title">&doorhanger_login_edit_title;</string>
@@ -630,9 +631,7 @@
   <string name="activity_stream_remove">&activity_stream_remove;</string>
   <string name="activity_stream_delete_history">&activity_stream_delete_history;</string>
 
-  <string name="activity_stream_welcome_title">&activity_stream_welcome_title;</string>
-  <string name="activity_stream_welcome_content">&activity_stream_welcome_content1;</string>
-  <string name="activity_stream_welcome_dismiss">&activity_stream_welcome_dismiss;</string>
+  <string name="activity_stream_highlights_empty">&activity_stream_highlights_empty;</string>
 
   <string name="private_tab_panel_title">&private_tab_panel_title;</string>
   <string name="private_tab_panel_description">&private_tab_panel_description;</string>

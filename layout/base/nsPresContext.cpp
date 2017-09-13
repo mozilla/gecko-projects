@@ -676,7 +676,7 @@ nsPresContext::GetUserPreferences()
   // We don't need to force reflow: either we are initializing a new
   // prescontext or we are being called from UpdateAfterPreferencesChanged()
   // which triggers a reflow anyway.
-  SetBidi(bidiOptions, false);
+  SetBidi(bidiOptions);
 }
 
 void
@@ -1312,7 +1312,7 @@ nsPresContext::SetSMILAnimations(nsIDocument *aDoc, uint16_t aNewMode,
 }
 
 void
-nsPresContext::SetImageAnimationModeInternal(uint16_t aMode)
+nsPresContext::SetImageAnimationMode(uint16_t aMode)
 {
   NS_ASSERTION(aMode == imgIContainer::kNormalAnimMode ||
                aMode == imgIContainer::kDontAnimMode ||
@@ -1338,12 +1338,6 @@ nsPresContext::SetImageAnimationModeInternal(uint16_t aMode)
   }
 
   mImageAnimationMode = aMode;
-}
-
-void
-nsPresContext::SetImageAnimationModeExternal(uint16_t aMode)
-{
-  SetImageAnimationModeInternal(aMode);
 }
 
 already_AddRefed<nsIAtom>
@@ -1606,15 +1600,9 @@ nsPresContext::SetContainer(nsIDocShell* aDocShell)
 }
 
 nsISupports*
-nsPresContext::GetContainerWeakInternal() const
+nsPresContext::GetContainerWeak() const
 {
   return static_cast<nsIDocShell*>(mContainer);
-}
-
-nsISupports*
-nsPresContext::GetContainerWeakExternal() const
-{
-  return GetContainerWeakInternal();
 }
 
 nsIDocShell*
@@ -1631,13 +1619,7 @@ nsPresContext::Detach()
 }
 
 bool
-nsPresContext::BidiEnabledExternal() const
-{
-  return BidiEnabledInternal();
-}
-
-bool
-nsPresContext::BidiEnabledInternal() const
+nsPresContext::BidiEnabled() const
 {
   return Document()->GetBidiEnabled();
 }
@@ -1654,15 +1636,12 @@ nsPresContext::SetBidiEnabled() const
 }
 
 void
-nsPresContext::SetBidi(uint32_t aSource, bool aForceRestyle)
+nsPresContext::SetBidi(uint32_t aSource)
 {
   // Don't do all this stuff unless the options have changed.
   if (aSource == GetBidi()) {
     return;
   }
-
-  NS_ASSERTION(!(aForceRestyle && (GetBidi() == 0)),
-               "ForceReflow on new prescontext");
 
   Document()->SetBidiOptions(aSource);
   if (IBMBIDI_TEXTDIRECTION_RTL == GET_BIDI_OPTION_DIRECTION(aSource)
@@ -1680,12 +1659,6 @@ nsPresContext::SetBidi(uint32_t aSource, bool aForceRestyle)
     if (doc) {
       SetVisualMode(IsVisualCharset(doc->GetDocumentCharacterSet()));
     }
-  }
-  if (aForceRestyle && mShell) {
-    // Reconstruct the root document element's frame and its children,
-    // because we need to trigger frame reconstruction for direction change.
-    mDocument->RebuildUserFontSet();
-    mShell->ReconstructFrames();
   }
 }
 

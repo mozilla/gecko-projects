@@ -95,6 +95,7 @@ async function promiseTagsFolderId() {
 
 const MATCH_ANYWHERE_UNMODIFIED = Ci.mozIPlacesAutoComplete.MATCH_ANYWHERE_UNMODIFIED;
 const BEHAVIOR_BOOKMARK = Ci.mozIPlacesAutoComplete.BEHAVIOR_BOOKMARK;
+const SQLITE_MAX_VARIABLE_NUMBER = 999;
 
 var Bookmarks = Object.freeze({
   /**
@@ -1086,6 +1087,8 @@ var Bookmarks = Object.freeze({
    * This is intended as an interim API for the web-extensions implementation.
    * It will be removed as soon as we have a new querying API.
    *
+   * Note also that this used to exclude separators but no longer does so.
+   *
    * If you just want to search bookmarks by URL, use .fetch() instead.
    *
    * @param query
@@ -1436,6 +1439,15 @@ function insertBookmarkTree(items, source, parent, urls, lastAddedForParent) {
          NULLIF(:title, ""), :date_added, :last_modified, :guid,
          :syncChangeCounter, :syncStatus)`, items);
 
+      // Remove stale tombstones for new items.
+      for (let chunk of chunkArray(items, SQLITE_MAX_VARIABLE_NUMBER)) {
+        await db.executeCached(
+          `DELETE FROM moz_bookmarks_deleted WHERE guid IN (${
+            new Array(chunk.length).fill("?").join(",")})`,
+          chunk.map(item => item.guid)
+        );
+      }
+
       await setAncestorsLastModified(db, parent.guid, lastAddedForParent,
                                      syncChangeDelta);
     });
@@ -1548,11 +1560,9 @@ async function handleBookmarkItemSpecialData(itemId, item) {
 async function queryBookmarks(info) {
   let queryParams = {
     tags_folder: await promiseTagsFolderId(),
-    type: Bookmarks.TYPE_SEPARATOR,
   };
-  // We're searching for bookmarks, so exclude tags and separators.
-  let queryString = "WHERE b.type <> :type";
-  queryString += " AND b.parent <> :tags_folder";
+  // We're searching for bookmarks, so exclude tags.
+  let queryString = "WHERE b.parent <> :tags_folder";
   queryString += " AND p.parent <> :tags_folder";
 
   if (info.title) {
@@ -2383,4 +2393,15 @@ function adjustSeparatorsSyncCounter(db, parentId, startIndex, syncChangeDelta) 
       start_index: startIndex,
       item_type: Bookmarks.TYPE_SEPARATOR
     });
+}
+
+function* chunkArray(array, chunkLength) {
+  if (array.length <= chunkLength) {
+    yield array;
+    return;
+  }
+  let startIndex = 0;
+  while (startIndex < array.length) {
+    yield array.slice(startIndex, startIndex += chunkLength);
+  }
 }

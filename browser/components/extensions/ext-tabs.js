@@ -262,6 +262,9 @@ this.tabs = class extends ExtensionAPI {
               needed.push("pinned");
             } else if (event.type == "TabUnpinned") {
               needed.push("pinned");
+            } else if (event.type == "TabBrowserInserted" &&
+                       !event.detail.insertedOnTabCreation) {
+              needed.push("discarded");
             }
 
             let tab = tabManager.getWrapper(event.originalTarget);
@@ -290,12 +293,14 @@ this.tabs = class extends ExtensionAPI {
           windowTracker.addListener("TabAttrModified", listener);
           windowTracker.addListener("TabPinned", listener);
           windowTracker.addListener("TabUnpinned", listener);
+          windowTracker.addListener("TabBrowserInserted", listener);
 
           return () => {
             windowTracker.removeListener("status", statusListener);
             windowTracker.removeListener("TabAttrModified", listener);
             windowTracker.removeListener("TabPinned", listener);
             windowTracker.removeListener("TabUnpinned", listener);
+            windowTracker.removeListener("TabBrowserInserted", listener);
           };
         }).api(),
 
@@ -433,7 +438,10 @@ this.tabs = class extends ExtensionAPI {
               return Promise.reject({message: `Illegal URL: ${url}`});
             }
 
-            nativeTab.linkedBrowser.loadURI(url);
+            let flags = updateProperties.loadReplace
+              ? Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY
+              : Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
+            nativeTab.linkedBrowser.loadURIWithFlags(url, {flags});
           }
 
           if (updateProperties.active !== null) {
@@ -445,7 +453,7 @@ this.tabs = class extends ExtensionAPI {
           }
           if (updateProperties.muted !== null) {
             if (nativeTab.muted != updateProperties.muted) {
-              nativeTab.toggleMuteAudio(extension.uuid);
+              nativeTab.toggleMuteAudio(extension.id);
             }
           }
           if (updateProperties.pinned !== null) {
@@ -726,9 +734,7 @@ this.tabs = class extends ExtensionAPI {
             // For non-remote browsers, this event is dispatched on the document
             // rather than on the <browser>.
             if (browser instanceof Ci.nsIDOMDocument) {
-              browser = browser.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIDocShell)
-                               .chromeEventHandler;
+              browser = browser.docShell.chromeEventHandler;
             }
 
             let {gBrowser} = browser.ownerGlobal;

@@ -28,7 +28,7 @@ use servo_arc::{Arc, ArcBorrow};
 use shared_lock::Locked;
 use smallvec::VecLike;
 use std::fmt;
-#[cfg(feature = "gecko")] use std::collections::HashMap;
+#[cfg(feature = "gecko")] use hash::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -137,12 +137,6 @@ pub trait TNode : Sized + Copy + Clone + Debug + NodeInfo {
 
     /// Get this node as an element, if it's one.
     fn as_element(&self) -> Option<Self::ConcreteElement>;
-
-    /// Whether this node needs to be laid out on viewport size change.
-    fn needs_dirty_on_viewport_size_changed(&self) -> bool;
-
-    /// Mark this node as needing layout on viewport size change.
-    unsafe fn set_dirty_on_viewport_size_changed(&self);
 
     /// Whether this node can be fragmented. This is used for multicol, and only
     /// for Servo.
@@ -442,7 +436,7 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
             // animation in a SequentialTask) is processed after the normal
             // traversal in that we had elements that handled snapshot.
             return data.has_styles() &&
-                   !data.restyle.hint.has_animation_hint_or_recascade();
+                   !data.hint.has_animation_hint_or_recascade();
         }
 
         if traversal_flags.contains(traversal_flags::UnstyledOnly) {
@@ -454,7 +448,7 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
             return false;
         }
 
-        data.has_styles() && !data.restyle.hint.has_non_animation_invalidations()
+        data.has_styles() && !data.hint.has_non_animation_invalidations()
     }
 
     /// Returns whether the element's styles are up-to-date after traversal
@@ -476,7 +470,7 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
         //
         // https://bugzilla.mozilla.org/show_bug.cgi?id=1389675 tracks fixing
         // this.
-        !data.restyle.hint.has_non_animation_invalidations()
+        !data.hint.has_non_animation_invalidations()
     }
 
     /// Flag that this element has a descendant for style processing.
@@ -626,7 +620,7 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
             Some(d) => d,
             None => return false,
         };
-        return data.restyle.hint.has_animation_hint()
+        return data.hint.has_animation_hint()
     }
 
     /// Returns the anonymous content for the current element's XBL binding,

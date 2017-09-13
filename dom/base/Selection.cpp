@@ -923,6 +923,19 @@ Selection::FocusOffset()
   return mAnchorFocusRange->StartOffset();
 }
 
+nsIContent*
+Selection::GetChildAtAnchorOffset()
+{
+  if (!mAnchorFocusRange)
+    return nullptr;
+
+  if (GetDirection() == eDirNext) {
+    return mAnchorFocusRange->GetChildAtStartOffset();
+  }
+
+  return mAnchorFocusRange->GetChildAtEndOffset();
+}
+
 static nsresult
 CompareToRangeStart(nsINode* aCompareNode, int32_t aCompareOffset,
                     nsRange* aRange, int32_t* aCmp)
@@ -3819,7 +3832,9 @@ Selection::NotifySelectionListeners()
       nsFocusManager* fm = nsFocusManager::GetFocusManager();
       nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
       nsIContent* focusedContent =
-        fm->GetFocusedDescendant(window, false, getter_AddRefs(focusedWindow));
+        nsFocusManager::GetFocusedDescendant(window,
+                                             nsFocusManager::eOnlyCurrentWindow,
+                                             getter_AddRefs(focusedWindow));
       nsCOMPtr<Element> focusedElement = do_QueryInterface(focusedContent);
       // When all selected ranges are in an editing host, it should take focus.
       // But otherwise, we shouldn't move focus since Chromium doesn't move
@@ -3866,32 +3881,22 @@ Selection::NotifySelectionListeners()
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Selection::StartBatchChanges()
 {
   if (mFrameSelection) {
     RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
     frameSelection->StartBatchChanges();
   }
-  return NS_OK;
 }
 
-
-
-NS_IMETHODIMP
-Selection::EndBatchChanges()
-{
-  return EndBatchChangesInternal();
-}
-
-nsresult
-Selection::EndBatchChangesInternal(int16_t aReason)
+void
+Selection::EndBatchChanges(int16_t aReason)
 {
   if (mFrameSelection) {
     RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
     frameSelection->EndBatchChanges(aReason);
   }
-  return NS_OK;
 }
 
 void

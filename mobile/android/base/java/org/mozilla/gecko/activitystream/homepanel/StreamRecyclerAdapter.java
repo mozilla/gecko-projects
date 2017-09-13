@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko.activitystream.homepanel;
 
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.support.annotation.NonNull;
 import android.support.v7.widget.RecyclerView;
@@ -13,6 +14,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
+import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
@@ -20,14 +22,15 @@ import org.mozilla.gecko.activitystream.ActivityStreamTelemetry;
 import org.mozilla.gecko.activitystream.homepanel.menu.ActivityStreamContextMenu;
 import org.mozilla.gecko.activitystream.homepanel.model.RowModel;
 import org.mozilla.gecko.activitystream.homepanel.model.WebpageRowModel;
+import org.mozilla.gecko.activitystream.homepanel.stream.HighlightsEmptyStateRow;
 import org.mozilla.gecko.activitystream.homepanel.stream.TopPanelRow;
 import org.mozilla.gecko.activitystream.homepanel.model.TopStory;
+import org.mozilla.gecko.activitystream.homepanel.topstories.PocketStoriesLoader;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.activitystream.homepanel.model.Highlight;
 import org.mozilla.gecko.activitystream.homepanel.stream.WebpageItemRow;
 import org.mozilla.gecko.activitystream.homepanel.stream.StreamTitleRow;
 import org.mozilla.gecko.activitystream.homepanel.stream.StreamViewHolder;
-import org.mozilla.gecko.activitystream.homepanel.stream.WelcomePanelRow;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.widget.RecyclerViewClickSupport;
 
@@ -50,7 +53,8 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
     private List<RowModel> recyclerViewModel; // List of item types backing this RecyclerView.
     private List<TopStory> topStoriesQueue;
 
-    private final RowItemType[] FIXED_ROWS = {RowItemType.TOP_PANEL, RowItemType.WELCOME, RowItemType.TOP_STORIES_TITLE, RowItemType.HIGHLIGHTS_TITLE};
+    // Content sections available on the Activity Stream page. These may be hidden if the sections are disabled.
+    private final RowItemType[] ACTIVITY_STREAM_SECTIONS = { RowItemType.TOP_PANEL, RowItemType.TOP_STORIES_TITLE, RowItemType.HIGHLIGHTS_TITLE };
     private final int MAX_TOP_STORIES = 3;
 
     private HomePager.OnUrlOpenListener onUrlOpenListener;
@@ -61,10 +65,10 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
 
     public enum RowItemType {
         TOP_PANEL (-2), // RecyclerView.NO_ID is -1, so start hard-coded stableIds at -2.
-        WELCOME (-3),
-        TOP_STORIES_TITLE(-4),
+        TOP_STORIES_TITLE(-3),
         TOP_STORIES_ITEM(-1), // There can be multiple Top Stories items so caller should handle as a special case.
-        HIGHLIGHTS_TITLE (-5),
+        HIGHLIGHTS_TITLE (-4),
+        HIGHLIGHTS_EMPTY_STATE(-5),
         HIGHLIGHT_ITEM (-1); // There can be multiple Highlight Items so caller should handle as a special case.
 
         public final int stableId;
@@ -90,7 +94,7 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
     public StreamRecyclerAdapter() {
         setHasStableIds(true);
         recyclerViewModel = new LinkedList<>();
-        for (RowItemType type : FIXED_ROWS) {
+        for (RowItemType type : ACTIVITY_STREAM_SECTIONS) {
             recyclerViewModel.add(makeRowModelFromType(type));
         }
         topStoriesQueue = Collections.emptyList();
@@ -123,15 +127,19 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
         if (type == RowItemType.TOP_PANEL.getViewType()) {
             return new TopPanelRow(inflater.inflate(TopPanelRow.LAYOUT_ID, parent, false), onUrlOpenListener, onUrlOpenInBackgroundListener);
         } else if (type == RowItemType.TOP_STORIES_TITLE.getViewType()) {
-            return new StreamTitleRow(inflater.inflate(StreamTitleRow.LAYOUT_ID, parent, false), R.string.activity_stream_topstories);
+            final boolean pocketEnabled = GeckoSharedPrefs.forProfile(parent.getContext()).getBoolean(ActivityStreamPanel.PREF_POCKET_ENABLED, true);
+            return new StreamTitleRow(inflater.inflate(StreamTitleRow.LAYOUT_ID, parent, false), R.string.activity_stream_topstories, pocketEnabled);
         } else if (type == RowItemType.TOP_STORIES_ITEM.getViewType()) {
             return new WebpageItemRow(inflater.inflate(WebpageItemRow.LAYOUT_ID, parent, false), this);
-        } else if (type == RowItemType.WELCOME.getViewType()) {
-            return new WelcomePanelRow(inflater.inflate(WelcomePanelRow.LAYOUT_ID, parent, false), this);
         } else if (type == RowItemType.HIGHLIGHT_ITEM.getViewType()) {
             return new WebpageItemRow(inflater.inflate(WebpageItemRow.LAYOUT_ID, parent, false), this);
         } else if (type == RowItemType.HIGHLIGHTS_TITLE.getViewType()) {
-            return new StreamTitleRow(inflater.inflate(StreamTitleRow.LAYOUT_ID, parent, false), R.string.activity_stream_highlights);
+            final SharedPreferences sharedPreferences = GeckoSharedPrefs.forProfile(parent.getContext());
+            final boolean bookmarksEnabled = sharedPreferences.getBoolean(ActivityStreamPanel.PREF_BOOKMARKS_ENABLED, true);
+            final boolean visitedEnabled = sharedPreferences.getBoolean(ActivityStreamPanel.PREF_VISITED_ENABLED, true);
+            return new StreamTitleRow(inflater.inflate(StreamTitleRow.LAYOUT_ID, parent, false), R.string.activity_stream_highlights, bookmarksEnabled || visitedEnabled);
+        } else if (type == RowItemType.HIGHLIGHTS_EMPTY_STATE.getViewType()) {
+            return new HighlightsEmptyStateRow(inflater.inflate(HighlightsEmptyStateRow.LAYOUT_ID, parent, false));
         } else {
             throw new IllegalStateException("Missing inflation for ViewType " + type);
         }
@@ -186,16 +194,19 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
         final String sourceType;
         final int actionPosition;
         final int size;
+        final String referrerUri;
         final int viewType = getItemViewType(position);
 
         if (viewType == RowItemType.HIGHLIGHT_ITEM.getViewType()) {
             sourceType = ActivityStreamTelemetry.Contract.TYPE_HIGHLIGHTS;
             actionPosition = getHighlightsIndexFromAdapterPosition(position);
             size = getNumOfTypeShown(RowItemType.HIGHLIGHT_ITEM);
+            referrerUri = null;
         } else {
             sourceType = ActivityStreamTelemetry.Contract.TYPE_POCKET;
             actionPosition = getTopStoriesIndexFromAdapterPosition(position);
             size = getNumOfTypeShown(RowItemType.TOP_STORIES_ITEM);
+            referrerUri = PocketStoriesLoader.POCKET_REFERRER_URI;
         }
 
         ActivityStreamTelemetry.Extras.Builder extras = ActivityStreamTelemetry.Extras.builder()
@@ -213,7 +224,8 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
         // NB: This is hacky. We need to process telemetry data first, otherwise we run a risk of
         // not having a cursor to work with once url is opened and BrowserApp closes A-S home screen
         // and clears its resources (read: cursors). See Bug 1326018.
-        onUrlOpenListener.onUrlOpen(model.getUrl(), EnumSet.of(HomePager.OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
+        onUrlOpenListener.onUrlOpenWithReferrer(model.getUrl(), referrerUri,
+                EnumSet.of(HomePager.OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
     }
 
     @Override
@@ -299,8 +311,12 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
     }
 
     public void swapHighlights(List<Highlight> highlights) {
-        recyclerViewModel = recyclerViewModel.subList(0, FIXED_ROWS.length + getNumOfTypeShown(RowItemType.TOP_STORIES_ITEM));
-        recyclerViewModel.addAll(highlights);
+        recyclerViewModel = recyclerViewModel.subList(0, ACTIVITY_STREAM_SECTIONS.length + getNumOfTypeShown(RowItemType.TOP_STORIES_ITEM));
+        if (!highlights.isEmpty()) {
+            recyclerViewModel.addAll(highlights);
+        } else {
+            recyclerViewModel.add(makeRowModelFromType(RowItemType.HIGHLIGHTS_EMPTY_STATE));
+        }
         notifyDataSetChanged();
     }
 

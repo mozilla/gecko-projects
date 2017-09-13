@@ -10,9 +10,6 @@ use cssparser::{Parser, ParserInput};
 use devtools_traits::{ScriptToDevtoolsControlMsg, TimelineMarker, TimelineMarkerType};
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, DocumentReadyState};
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::OnBeforeUnloadEventHandlerNonNull;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::OnErrorEventHandlerNonNull;
 use dom::bindings::codegen::Bindings::FunctionBinding::Function;
 use dom::bindings::codegen::Bindings::PermissionStatusBinding::PermissionState;
 use dom::bindings::codegen::Bindings::RequestBinding::RequestInit;
@@ -713,7 +710,8 @@ impl WindowMethods for Window {
     // NavigationTiming/Overview.html#sec-window.performance-attribute
     fn Performance(&self) -> Root<Performance> {
         self.performance.or_init(|| {
-            Performance::new(self, self.navigation_start.get(),
+            let global_scope = self.upcast::<GlobalScope>();
+            Performance::new(global_scope, self.navigation_start.get(),
                              self.navigation_start_precise.get())
         })
     }
@@ -1014,7 +1012,8 @@ impl WindowMethods for Window {
         let context = CssParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       quirks_mode);
-        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser);
+        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser,
+                                                                     self.css_error_reporter());
         let document = self.Document();
         let mql = MediaQueryList::new(&document, media_query_list);
         self.media_query_lists.push(&*mql);

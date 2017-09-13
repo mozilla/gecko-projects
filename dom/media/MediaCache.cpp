@@ -450,8 +450,6 @@ MediaCacheStream::MediaCacheStream(ChannelMediaResource* aClient,
                                    bool aIsPrivateBrowsing)
   : mMediaCache(nullptr)
   , mClient(aClient)
-  , mHasHadUpdate(false)
-  , mClosed(false)
   , mDidNotifyDataEnded(false)
   , mResourceID(0)
   , mIsTransportSeekable(false)
@@ -675,7 +673,7 @@ MediaCache::CloseStreamsForPrivateBrowsing()
   MOZ_ASSERT(NS_IsMainThread());
   for (MediaCacheStream* s : mStreams) {
     if (s->mIsPrivateBrowsing) {
-      s->Close();
+      s->mClient->Close();
     }
   }
 }
@@ -1426,7 +1424,6 @@ MediaCache::Update()
     default:
       break;
     }
-    stream->mHasHadUpdate = true;
   }
 
   for (uint32_t i = 0; i < mStreams.Length(); ++i) {
@@ -1459,8 +1456,7 @@ MediaCache::Update()
       // Close the streams that failed due to error. This will cause all
       // client Read and Seek operations on those streams to fail. Blocked
       // Reads will also be woken up.
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      stream->CloseInternal(mon);
+      stream->mClient->Close();
     }
   }
 
@@ -1880,11 +1876,11 @@ void
 MediaCacheStream::NotifyDataReceived(int64_t aSize, const char* aData,
     nsIPrincipal* aPrincipal)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
+  // This might happen off the main thread.
 
-  if (mClosed) {
-    return;
-  }
+  // It is safe to read mClosed without holding the monitor because this
+  // function is guaranteed to happen before Close().
+  MOZ_DIAGNOSTIC_ASSERT(!mClosed);
 
   // Update principals before putting the data in the cache. This is important,
   // we want to make sure all principals are updated before any consumer
@@ -2112,33 +2108,25 @@ MediaCacheStream::Close()
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
 
-  if (!mMediaCache) {
+  if (!mMediaCache || mClosed) {
     return;
   }
 
-  ReentrantMonitorAutoEnter mon(mMediaCache->GetReentrantMonitor());
-  CloseInternal(mon);
-  // Queue an Update since we may have created more free space. Don't do
-  // it from CloseInternal since that gets called by Update() itself
-  // sometimes, and we try to not to queue updates from Update().
-  mMediaCache->QueueUpdate();
-}
-
-void
-MediaCacheStream::CloseInternal(ReentrantMonitorAutoEnter& aReentrantMonitor)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
-
-  if (mClosed)
-    return;
-  mClosed = true;
   // Closing a stream will change the return value of
   // MediaCacheStream::AreAllStreamsForResourceSuspended as well as
   // ChannelMediaResource::IsSuspendedByCache. Let's notify it.
   mMediaCache->QueueSuspendedStatusUpdate(mResourceID);
+
+  ReentrantMonitorAutoEnter mon(mMediaCache->GetReentrantMonitor());
+  mClosed = true;
   mMediaCache->ReleaseStreamBlocks(this);
   // Wake up any blocked readers
-  aReentrantMonitor.NotifyAll();
+  mon.NotifyAll();
+
+  // Queue an Update since we may have created more free space. Don't do
+  // it from CloseInternal since that gets called by Update() itself
+  // sometimes, and we try to not to queue updates from Update().
+  mMediaCache->QueueUpdate();
 }
 
 void
@@ -2167,6 +2155,13 @@ MediaCacheStream::GetLength()
 {
   ReentrantMonitorAutoEnter mon(mMediaCache->GetReentrantMonitor());
   return mStreamLength;
+}
+
+int64_t
+MediaCacheStream::GetOffset() const
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mChannelOffset;
 }
 
 int64_t
@@ -2547,10 +2542,7 @@ nsresult
 MediaCacheStream::Init(int64_t aContentLength)
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
-
-  if (mMediaCache) {
-    return NS_OK;
-  }
+  MOZ_ASSERT(!mMediaCache, "Has been initialized.");
 
   if (aContentLength > 0) {
     uint32_t length = uint32_t(std::min(aContentLength, int64_t(UINT32_MAX)));
@@ -2572,17 +2564,13 @@ MediaCacheStream::Init(int64_t aContentLength)
   return NS_OK;
 }
 
-nsresult
+void
 MediaCacheStream::InitAsClone(MediaCacheStream* aOriginal)
 {
-  if (!aOriginal->IsAvailableForSharing())
-    return NS_ERROR_FAILURE;
+  MOZ_ASSERT(aOriginal->IsAvailableForSharing());
+  MOZ_ASSERT(!mMediaCache, "Has been initialized.");
+  MOZ_ASSERT(aOriginal->mMediaCache, "Don't clone an uninitialized stream.");
 
-  if (mMediaCache) {
-    return NS_OK;
-  }
-
-  NS_ASSERTION(aOriginal->mMediaCache, "Don't clone an uninitialized stream");
   // Use the same MediaCache as our clone.
   mMediaCache = aOriginal->mMediaCache;
 
@@ -2620,8 +2608,6 @@ MediaCacheStream::InitAsClone(MediaCacheStream* aOriginal)
     // stream offset is zero
     mMediaCache->AddBlockOwnerAsReadahead(cacheBlockIndex, this, i);
   }
-
-  return NS_OK;
 }
 
 nsresult MediaCacheStream::GetCachedRanges(MediaByteRangeSet& aRanges)

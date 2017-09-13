@@ -701,7 +701,7 @@ TabChild::UpdateFrameType()
                            nsIDocShell::FRAME_TYPE_REGULAR);
 }
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChild)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabChild)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome2)
   NS_INTERFACE_MAP_ENTRY(nsIEmbeddingSiteWindow)
@@ -1524,13 +1524,6 @@ TabChild::RecvStopIMEStateManagement()
 }
 
 mozilla::ipc::IPCResult
-TabChild::RecvMenuKeyboardListenerInstalled(const bool& aInstalled)
-{
-  IMEStateManager::OnInstalledMenuKeyboardListener(aInstalled);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 TabChild::RecvNotifyAttachGroupedSHistory(const uint32_t& aOffset)
 {
   // nsISHistory uses int32_t
@@ -1608,9 +1601,10 @@ TabChild::MaybeDispatchCoalescedMouseMoveEvents()
   RecvRealMouseButtonEvent(*event,
                            mCoalescedWheelData.GetScrollableLayerGuid(),
                            mCoalescedWheelData.GetInputBlockId());
-  MOZ_ASSERT(mCoalescedMouseEventFlusher);
-  mCoalescedMouseData.Reset();
-  mCoalescedMouseEventFlusher->RemoveObserver();
+  if (mCoalescedMouseEventFlusher) {
+    mCoalescedMouseData.Reset();
+    mCoalescedMouseEventFlusher->RemoveObserver();
+  }
 }
 
 mozilla::ipc::IPCResult
@@ -1618,8 +1612,7 @@ TabChild::RecvRealMouseMoveEvent(const WidgetMouseEvent& aEvent,
                                  const ScrollableLayerGuid& aGuid,
                                  const uint64_t& aInputBlockId)
 {
-  if (mCoalesceMouseMoveEvents) {
-    MOZ_ASSERT(mCoalescedMouseEventFlusher);
+  if (mCoalesceMouseMoveEvents && mCoalescedMouseEventFlusher) {
     if (mCoalescedMouseData.CanCoalesce(aEvent, aGuid, aInputBlockId)) {
       mCoalescedMouseData.Coalesce(aEvent, aGuid, aInputBlockId);
       mCoalescedMouseEventFlusher->StartObserver();
@@ -2564,20 +2557,14 @@ TabChild::InternalSetDocShellIsActive(bool aIsActive, bool aPreserveLayers)
   });
 
   if (mCompositorOptions) {
-    // Note that |GetLayerManager()| has side-effects in that it creates a layer
-    // manager if one doesn't exist already. Calling it inside a debug-only
-    // assertion is generally bad but in this case we call it unconditionally
-    // just below so it's ok.
     MOZ_ASSERT(mPuppetWidget);
-    MOZ_ASSERT(mPuppetWidget->GetLayerManager());
-    MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT
-            || mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR
-            || (gfxPlatform::IsHeadless() && mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC));
+    RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
+    MOZ_ASSERT(lm);
 
     // We send the current layer observer epoch to the compositor so that
     // TabParent knows whether a layer update notification corresponds to the
     // latest SetDocShellIsActive request that was made.
-    mPuppetWidget->GetLayerManager()->SetLayerObserverEpoch(mLayerObserverEpoch);
+    lm->SetLayerObserverEpoch(mLayerObserverEpoch);
   }
 
   // docshell is consider prerendered only if not active yet
@@ -3073,12 +3060,10 @@ TabChild::DidComposite(uint64_t aTransactionId,
                        const TimeStamp& aCompositeEnd)
 {
   MOZ_ASSERT(mPuppetWidget);
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager());
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT
-             || mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR
-             || (gfxPlatform::IsHeadless() && mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC));
+  RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
+  MOZ_ASSERT(lm);
 
-  mPuppetWidget->GetLayerManager()->DidComposite(aTransactionId, aCompositeStart, aCompositeEnd);
+  lm->DidComposite(aTransactionId, aCompositeStart, aCompositeEnd);
 }
 
 void
@@ -3111,24 +3096,19 @@ void
 TabChild::ClearCachedResources()
 {
   MOZ_ASSERT(mPuppetWidget);
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager());
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT
-             || mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR
-             || (gfxPlatform::IsHeadless() && mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC));
+  RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
+  MOZ_ASSERT(lm);
 
-  mPuppetWidget->GetLayerManager()->ClearCachedResources();
+  lm->ClearCachedResources();
 }
 
 void
 TabChild::InvalidateLayers()
 {
   MOZ_ASSERT(mPuppetWidget);
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager());
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT
-             || mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR
-             || (gfxPlatform::IsHeadless() && mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC));
-
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
+  MOZ_ASSERT(lm);
+
   FrameLayerBuilder::InvalidateAllLayers(lm);
 }
 
@@ -3224,10 +3204,6 @@ void
 TabChild::CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier,
                             uint64_t aDeviceResetSeqNo)
 {
-  MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT
-             || mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR
-             || (gfxPlatform::IsHeadless() && mPuppetWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC));
-
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
 
   mTextureFactoryIdentifier = aNewIdentifier;
@@ -3622,7 +3598,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(TabChildGlobal,
   tmp->TraverseHostObjectURIs(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChildGlobal)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)

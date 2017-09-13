@@ -49,6 +49,15 @@ ProxyStream::ProxyStream(REFIID aIID, const BYTE* aInitBuf,
   NS_NAMED_LITERAL_CSTRING(kCrashReportKey, "ProxyStreamUnmarshalStatus");
 #endif
 
+  if (!aInitBufSize) {
+#if defined(MOZ_CRASHREPORTER)
+    CrashReporter::AnnotateCrashReport(kCrashReportKey,
+                                       NS_LITERAL_CSTRING("!aInitBufSize"));
+#endif // defined(MOZ_CRASHREPORTER)
+    // We marshaled a nullptr. Nothing else to do here.
+    return;
+  }
+
   HRESULT createStreamResult = CreateStream(aInitBuf, aInitBufSize,
                                             getter_AddRefs(mStream));
   if (FAILED(createStreamResult)) {
@@ -59,14 +68,6 @@ ProxyStream::ProxyStream(REFIID aIID, const BYTE* aInitBuf,
     return;
   }
 
-  if (!aInitBufSize) {
-#if defined(MOZ_CRASHREPORTER)
-    CrashReporter::AnnotateCrashReport(kCrashReportKey,
-                                       NS_LITERAL_CSTRING("!aInitBufSize"));
-#endif // defined(MOZ_CRASHREPORTER)
-    // We marshaled a nullptr. Nothing else to do here.
-    return;
-  }
   // NB: We can't check for a null mStream until after we have checked for
   // the zero aInitBufSize above. This is because InitStream will also fail
   // in that case, even though marshaling a nullptr is allowable.
@@ -90,7 +91,11 @@ ProxyStream::ProxyStream(REFIID aIID, const BYTE* aInitBuf,
   // correctness with IPDL. We'll request an IUnknown and then QI the
   // actual interface later.
 
+#if defined(ACCESSIBILITY) && defined(MOZ_CRASHREPORTER)
   auto marshalFn = [this, &strActCtx, &unmarshalResult, &aIID]() -> void
+#else
+  auto marshalFn = [this, &unmarshalResult, &aIID]() -> void
+#endif // defined(ACCESSIBILITY) && defined(MOZ_CRASHREPORTER)
   {
 #if defined(ACCESSIBILITY) && defined(MOZ_CRASHREPORTER)
     auto curActCtx = ActivationContext::GetCurrent();
@@ -123,6 +128,11 @@ ProxyStream::ProxyStream(REFIID aIID, const BYTE* aInitBuf,
     CrashReporter::AnnotateCrashReport(
         NS_LITERAL_CSTRING("CoUnmarshalInterfaceResult"), hrAsStr);
     AnnotateInterfaceRegistration(aIID);
+    if (!mUnmarshaledProxy) {
+      CrashReporter::AnnotateCrashReport(kCrashReportKey,
+                                         NS_LITERAL_CSTRING("!mUnmarshaledProxy"));
+    }
+
 #if defined(ACCESSIBILITY)
     AnnotateClassRegistration(CLSID_AccessibleHandler);
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("UnmarshalActCtx"),
@@ -249,13 +259,6 @@ ProxyStream::GetInterface(void** aOutInterface)
   if (!aOutInterface) {
     return false;
   }
-
-#if defined(MOZ_CRASHREPORTER)
-  if (!mUnmarshaledProxy) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ProxyStreamUnmarshalStatus"),
-                                       NS_LITERAL_CSTRING("!mUnmarshaledProxy"));
-  }
-#endif // defined(MOZ_CRASHREPORTER)
 
   *aOutInterface = mUnmarshaledProxy.release();
   return true;

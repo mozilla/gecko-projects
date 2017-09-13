@@ -10,7 +10,7 @@ use ServoArc;
 use app_units::Au;
 use canvas_traits::canvas::CanvasMsg;
 use context::{LayoutContext, with_thread_local_font_context};
-use euclid::{Transform3D, Point2D, Vector2D, Radians, Rect, Size2D};
+use euclid::{Transform3D, Point2D, Vector2D, Rect, Size2D};
 use floats::ClearType;
 use flow::{self, ImmutableFlowUtils};
 use flow_ref::FlowRef;
@@ -25,7 +25,7 @@ use ipc_channel::ipc::IpcSender;
 #[cfg(debug_assertions)]
 use layout_debug;
 use model::{self, IntrinsicISizes, IntrinsicISizesContribution, MaybeAuto, SizeConstraint};
-use model::{style_length, ToGfxMatrix};
+use model::style_length;
 use msg::constellation_msg::{BrowsingContextId, PipelineId};
 use net_traits::image::base::{Image, ImageMetadata};
 use net_traits::image_cache::{ImageOrMetadataAvailable, UsePlaceholder};
@@ -41,16 +41,18 @@ use std::cmp::{Ordering, max, min};
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};
 use style::computed_values::{border_collapse, box_sizing, clear, color, display, mix_blend_mode};
-use style::computed_values::{overflow_wrap, overflow_x, position, text_decoration_line, transform};
-use style::computed_values::{transform_style, vertical_align, white_space, word_break};
+use style::computed_values::{overflow_wrap, overflow_x, position, text_decoration_line};
+use style::computed_values::{transform_style, white_space, word_break};
 use style::computed_values::content::ContentItem;
 use style::logical_geometry::{Direction, LogicalMargin, LogicalRect, LogicalSize, WritingMode};
 use style::properties::ComputedValues;
+use style::properties::longhands::transform::computed_value::T as TransformList;
 use style::selector_parser::RestyleDamage;
 use style::servo::restyle_damage::RECONSTRUCT_FLOW;
 use style::str::char_is_whitespace;
 use style::values::{self, Either, Auto};
 use style::values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
+use style::values::generics::box_::VerticalAlign;
 use text;
 use text::TextRunScanner;
 use webrender_api;
@@ -2221,8 +2223,8 @@ impl Fragment {
             // FIXME(#5624, pcwalton): This passes our current reftests but isn't the right thing
             // to do.
             match style.get_box().vertical_align {
-                vertical_align::T::baseline => {}
-                vertical_align::T::middle => {
+                VerticalAlign::Baseline => {}
+                VerticalAlign::Middle => {
                     let font_metrics = with_thread_local_font_context(layout_context, |font_context| {
                         text::font_metrics_for_style(font_context, self.style.clone_font())
                     });
@@ -2230,42 +2232,41 @@ impl Fragment {
                                content_inline_metrics.space_below_baseline -
                                font_metrics.x_height).scale_by(0.5)
                 }
-                vertical_align::T::sub => {
+                VerticalAlign::Sub => {
                     offset += minimum_line_metrics.space_needed()
                                                   .scale_by(FONT_SUBSCRIPT_OFFSET_RATIO)
                 }
-                vertical_align::T::super_ => {
+                VerticalAlign::Super => {
                     offset -= minimum_line_metrics.space_needed()
                                                   .scale_by(FONT_SUPERSCRIPT_OFFSET_RATIO)
                 }
-                vertical_align::T::text_top => {
+                VerticalAlign::TextTop => {
                     offset = self.content_inline_metrics(layout_context).ascent -
                         minimum_line_metrics.space_above_baseline
                 }
-                vertical_align::T::text_bottom => {
+                VerticalAlign::TextBottom => {
                     offset = minimum_line_metrics.space_below_baseline -
                         self.content_inline_metrics(layout_context).space_below_baseline
                 }
-                vertical_align::T::top => {
+                VerticalAlign::Top => {
                     if let Some(actual_line_metrics) = actual_line_metrics {
                         offset = content_inline_metrics.ascent -
                             actual_line_metrics.space_above_baseline
                     }
                 }
-                vertical_align::T::bottom => {
+                VerticalAlign::Bottom => {
                     if let Some(actual_line_metrics) = actual_line_metrics {
                         offset = actual_line_metrics.space_below_baseline -
                             content_inline_metrics.space_below_baseline
                     }
                 }
-                vertical_align::T::LengthOrPercentage(LengthOrPercentage::Length(length)) => {
+                VerticalAlign::Length(LengthOrPercentage::Length(length)) => {
                     offset -= length
                 }
-                vertical_align::T::LengthOrPercentage(LengthOrPercentage::Percentage(
-                        percentage)) => {
+                VerticalAlign::Length(LengthOrPercentage::Percentage(percentage)) => {
                     offset -= minimum_line_metrics.space_needed().scale_by(percentage.0)
                 }
-                vertical_align::T::LengthOrPercentage(LengthOrPercentage::Calc(formula)) => {
+                VerticalAlign::Length(LengthOrPercentage::Calc(formula)) => {
                     offset -= formula.to_used_value(Some(minimum_line_metrics.space_needed())).unwrap()
                 }
             }
@@ -2517,8 +2518,9 @@ impl Fragment {
             return true
         }
 
-        // Fixed position blocks always create stacking contexts.
-        if self.style.get_box().position == position::T::fixed {
+        // Fixed position and sticky position always create stacking contexts.
+        if self.style().get_box().position == position::T::fixed ||
+           self.style().get_box().position == position::T::sticky  {
             return true
         }
 
@@ -2823,13 +2825,13 @@ impl Fragment {
     /// `vertical-align` set to `top` or `bottom`.
     pub fn is_vertically_aligned_to_top_or_bottom(&self) -> bool {
         match self.style.get_box().vertical_align {
-            vertical_align::T::top | vertical_align::T::bottom => return true,
+            VerticalAlign::Top | VerticalAlign::Bottom => return true,
             _ => {}
         }
         if let Some(ref inline_context) = self.inline_context {
             for node in &inline_context.nodes {
                 match node.style.get_box().vertical_align {
-                    vertical_align::T::top | vertical_align::T::bottom => return true,
+                    VerticalAlign::Top | VerticalAlign::Bottom => return true,
                     _ => {}
                 }
             }
@@ -2863,12 +2865,12 @@ impl Fragment {
 
     /// Returns the 4D matrix representing this fragment's transform.
     pub fn transform_matrix(&self, stacking_relative_border_box: &Rect<Au>) -> Option<Transform3D<f32>> {
-        let operations = match self.style.get_box().transform.0 {
+        let list = &self.style.get_box().transform;
+        let transform = match list.to_transform_3d_matrix(Some(stacking_relative_border_box)) {
+            Some(transform) => transform,
             None => return None,
-            Some(ref operations) => operations,
         };
 
-        let mut transform = Transform3D::identity();
         let transform_origin = &self.style.get_box().transform_origin;
         let transform_origin_x =
             transform_origin.horizontal
@@ -2886,55 +2888,6 @@ impl Fragment {
         let post_transform = Transform3D::create_translation(-transform_origin_x,
                                                              -transform_origin_y,
                                                              -transform_origin_z);
-
-        for operation in operations {
-            let matrix = match *operation {
-                transform::ComputedOperation::Rotate(ax, ay, az, theta) => {
-                    // https://www.w3.org/TR/css-transforms-1/#funcdef-rotate3d
-                    // A direction vector that cannot be normalized, such as [0, 0, 0], will cause
-                    // the rotation to not be applied, so we use identity matrix in this case.
-                    let len = (ax * ax + ay * ay + az * az).sqrt();
-                    if len > 0. {
-                        let theta = 2.0f32 * f32::consts::PI - theta.radians();
-                        Transform3D::create_rotation(ax / len, ay / len, az / len,
-                                                     Radians::new(theta))
-                    } else {
-                        Transform3D::identity()
-                    }
-                }
-                transform::ComputedOperation::Perspective(d) => {
-                    create_perspective_matrix(d)
-                }
-                transform::ComputedOperation::Scale(sx, sy, sz) => {
-                    Transform3D::create_scale(sx, sy, sz)
-                }
-                transform::ComputedOperation::Translate(tx, ty, tz) => {
-                    let tx = tx.to_used_value(stacking_relative_border_box.size.width).to_f32_px();
-                    let ty = ty.to_used_value(stacking_relative_border_box.size.height).to_f32_px();
-                    let tz = tz.to_f32_px();
-                    Transform3D::create_translation(tx, ty, tz)
-                }
-                transform::ComputedOperation::Matrix(m) => {
-                    m.to_gfx_matrix()
-                }
-                transform::ComputedOperation::MatrixWithPercents(_) => {
-                    // `-moz-transform` is not implemented in Servo yet.
-                    unreachable!()
-                }
-                transform::ComputedOperation::Skew(theta_x, theta_y) => {
-                    Transform3D::create_skew(Radians::new(theta_x.radians()),
-                                          Radians::new(theta_y.radians()))
-                }
-                transform::ComputedOperation::InterpolateMatrix { .. } |
-                transform::ComputedOperation::AccumulateMatrix { .. } => {
-                    // TODO: Convert InterpolateMatrix/AccmulateMatrix into a valid Transform3D by
-                    // the reference box.
-                    Transform3D::identity()
-                }
-            };
-
-            transform = transform.pre_mul(&matrix);
-        }
 
         Some(pre_transform.pre_mul(&transform).pre_mul(&post_transform))
     }
@@ -2960,7 +2913,7 @@ impl Fragment {
                                                                      -perspective_origin.y,
                                                                      0.0);
 
-                let perspective_matrix = create_perspective_matrix(length);
+                let perspective_matrix = TransformList::create_perspective_matrix(length);
 
                 Some(pre_transform.pre_mul(&perspective_matrix).pre_mul(&post_transform))
             }
@@ -3202,22 +3155,5 @@ impl Serialize for DebugId {
 impl Serialize for DebugId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_u16(self.0)
-    }
-}
-
-// TODO(gw): The transforms spec says that perspective length must
-// be positive. However, there is some confusion between the spec
-// and browser implementations as to handling the case of 0 for the
-// perspective value. Until the spec bug is resolved, at least ensure
-// that a provided perspective value of <= 0.0 doesn't cause panics
-// and behaves as it does in other browsers.
-// See https://lists.w3.org/Archives/Public/www-style/2016Jan/0020.html for more details.
-#[inline]
-fn create_perspective_matrix(d: Au) -> Transform3D<f32> {
-    let d = d.to_f32_px();
-    if d <= 0.0 {
-        Transform3D::identity()
-    } else {
-        Transform3D::create_perspective(d)
     }
 }

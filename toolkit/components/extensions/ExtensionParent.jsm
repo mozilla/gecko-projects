@@ -52,7 +52,6 @@ var {
   defineLazyGetter,
   promiseDocumentLoaded,
   promiseEvent,
-  promiseFileContents,
   promiseObserved,
 } = ExtensionUtils;
 
@@ -80,7 +79,9 @@ let apiManager = new class extends SchemaAPIManager {
       let promises = [];
       for (let apiName of this.eventModules.get("startup")) {
         promises.push(this.asyncGetAPI(apiName, extension).then(api => {
-          api.onStartup(extension.startupReason);
+          if (api) {
+            api.onStartup(extension.startupReason);
+          }
         }));
       }
 
@@ -414,10 +415,10 @@ class ProxyContextParent extends BaseContext {
     return this.sandbox;
   }
 
-  runSafe(...args) {
+  applySafe(callback, args) {
     // There's no need to clone when calling listeners for a proxied
     // context.
-    return this.runSafeWithoutClone(...args);
+    return this.applySafeWithoutClone(callback, args);
   }
 
   get xulBrowser() {
@@ -483,8 +484,7 @@ class ExtensionPageContextParent extends ProxyContextParent {
   // The window that contains this context. This may change due to moving tabs.
   get xulWindow() {
     let win = this.xulBrowser.ownerGlobal;
-    return win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDocShell)
-              .QueryInterface(Ci.nsIDocShellTreeItem).rootTreeItem
+    return win.document.docShell.rootTreeItem
               .QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
   }
 
@@ -1433,9 +1433,9 @@ StartupCache = {
   async _readData() {
     let result = new Map();
     try {
-      let data = await promiseFileContents(this.file);
+      let {buffer} = await OS.File.read(this.file);
 
-      result = aomStartup.decodeBlob(data);
+      result = aomStartup.decodeBlob(buffer);
     } catch (e) {
       if (!e.becauseNoSuchFile) {
         Cu.reportError(e);

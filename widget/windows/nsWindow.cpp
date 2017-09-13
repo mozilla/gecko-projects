@@ -655,7 +655,6 @@ nsWindow::nsWindow(bool aIsChildWindow)
 #if defined(ACCESSIBILITY)
     mozilla::TIPMessageHandler::Initialize();
 #endif // defined(ACCESSIBILITY)
-    IMEHandler::Initialize();
     if (SUCCEEDED(::OleInitialize(nullptr))) {
       sIsOleInitialized = TRUE;
     }
@@ -3772,7 +3771,10 @@ nsWindow::ClientToWindowSize(const LayoutDeviceIntSize& aClientSize)
 void
 nsWindow::EnableDragDrop(bool aEnable)
 {
-  NS_ASSERTION(mWnd, "nsWindow::EnableDragDrop() called after Destroy()");
+  if (!mWnd) {
+    // Return early if the window already closed
+    return;
+  }
 
   if (aEnable) {
     if (!mNativeDragTarget) {

@@ -21,7 +21,6 @@ Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 var {
   DefaultMap,
   DefaultWeakMap,
-  instanceOf,
 } = ExtensionUtils;
 
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionParent",
@@ -250,11 +249,8 @@ function getValueBaseType(value) {
       if (value === null) {
         return "null";
       }
-      switch (ChromeUtils.getClassName(value, true)) {
-        case "Array":
-          return "array";
-        case "ArrayBuffer":
-          return "binary";
+      if (Array.isArray(value)) {
+        return "array";
       }
       break;
 
@@ -1630,7 +1626,7 @@ class ObjectType extends Type {
           }
         }
 
-        if (!instanceOf(value, this.isInstanceOf)) {
+        if (ChromeUtils.getClassName(value) !== this.isInstanceOf) {
           return context.error(`Object must be an instance of ${this.isInstanceOf}`,
                                `be an instance of ${this.isInstanceOf}`);
         }

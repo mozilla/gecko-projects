@@ -89,6 +89,9 @@
       <menuitem id="context_unpinTab" label="&unpinTab.label;" hidden="true"
                 accesskey="&unpinTab.accesskey;"
                 oncommand="gBrowser.unpinTab(TabContextMenu.contextTab);"/>
+      <menuitem id="context_duplicateTab" label="&duplicateTab.label;"
+                accesskey="&duplicateTab.accesskey;"
+                oncommand="duplicateTabIn(TabContextMenu.contextTab, 'tab');"/>
       <menuitem id="context_openTabInWindow" label="&moveToNewWindow.label;"
                 accesskey="&moveToNewWindow.accesskey;"
                 tbattr="tabbrowser-multiple"
@@ -430,12 +433,13 @@
            type="arrow"
            hidden="true"
            flip="slide"
+           photon="true"
            position="bottomcenter topright"
            tabspecific="true"
            noautofocus="true"
-           copyURL-title="&copyURLCmd.label;"
+           copyURL-title="&pageAction.copyLink.label;"
            emailLink-title="&emailPageCmd.label;"
-           sendToDevice-title="&sendToDevice.label3;"
+           sendToDevice-title="&pageAction.sendTabToDevice.label;"
            sendToDevice-notReadyTitle="&sendToDevice.syncNotReady.label;">
       <photonpanelmultiview id="pageActionPanelMultiView"
                             mainViewId="pageActionPanelMainView"
@@ -774,6 +778,7 @@
                        onclick="BrowserGoHome(event);"
                        cui-areatype="toolbar"
                        aboutHomeOverrideTooltip="&abouthome.pageTitle;"/>
+        <toolbarspring cui-areatype="toolbar" class="chromeclass-toolbar-additional"/>
         <toolbaritem id="urlbar-container" flex="400" persist="width"
                      removable="false"
                      class="chromeclass-location" overflows="false">
@@ -881,11 +886,13 @@
                 </hbox>
                 <image id="page-report-button"
                        class="urlbar-icon urlbar-page-action"
+                       role="button"
                        hidden="true"
                        tooltiptext="&pageReportIcon.tooltip;"
                        onmousedown="gPopupBlockerObserver.onReportButtonMousedown(event);"/>
                 <image id="reader-mode-button"
                        class="urlbar-icon urlbar-page-action"
+                       role="button"
                        hidden="true"
                        onclick="ReaderParent.buttonClick(event);"/>
                 <toolbarbutton id="urlbar-zoom-button"
@@ -895,8 +902,9 @@
                 <box id="pageActionSeparator" class="urlbar-page-action"/>
                 <image id="pageActionButton"
                        class="urlbar-icon urlbar-page-action"
+                       role="button"
                        tooltiptext="&pageActionButton.tooltip;"
-                       onclick="BrowserPageActions.mainButtonClicked(event);"/>
+                       onmousedown="BrowserPageActions.mainButtonClicked(event);"/>
                 <hbox id="star-button-box"
                       hidden="true"
                       class="urlbar-icon-wrapper urlbar-page-action"
@@ -905,9 +913,11 @@
                       onclick="BrowserPageActions.bookmark.onUrlbarNodeClicked(event);">
                   <image id="star-button"
                          class="urlbar-icon"
+                         role="button"
                          observes="bookmarkThisPageBroadcaster"/>
                   <hbox id="star-button-animatable-box">
                     <image id="star-button-animatable-image"
+                           role="presentation"
                            observes="bookmarkThisPageBroadcaster"/>
                   </hbox>
                 </hbox>
@@ -915,12 +925,7 @@
             </textbox>
         </toolbaritem>
 
-        <toolbaritem id="search-container" title="&searchItem.title;"
-                     align="center" class="chromeclass-toolbar-additional panel-wide-item"
-                     cui-areatype="toolbar"
-                     flex="100" persist="width" removable="true">
-          <searchbar id="searchbar" flex="1"/>
-        </toolbaritem>
+        <toolbarspring cui-areatype="toolbar" class="chromeclass-toolbar-additional"/>
 
         <!-- This is a placeholder for the Downloads Indicator.  It is visible
              during the customization of the toolbar, in the palette, and before
@@ -928,18 +933,20 @@
         <toolbarbutton id="downloads-button"
                        class="toolbarbutton-1 chromeclass-toolbar-additional badged-button"
                        key="key_openDownloads"
-                       oncommand="DownloadsIndicatorView.onCommand(event);"
+                       onmousedown="DownloadsIndicatorView.onCommand(event);"
                        ondrop="DownloadsIndicatorView.onDrop(event);"
                        ondragover="DownloadsIndicatorView.onDragOver(event);"
                        ondragenter="DownloadsIndicatorView.onDragOver(event);"
                        label="&downloads.label;"
                        removable="true"
+                       overflows="false"
                        cui-areatype="toolbar"
+                       hidden="true"
                        tooltip="dynamic-shortcut-tooltip"/>
 
         <toolbarbutton id="library-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                        removable="true"
-                       oncommand="PanelUI.showSubView('appMenu-libraryView', this, null, event);"
+                       onmousedown="PanelUI.showSubView('appMenu-libraryView', this, null, event);"
                        closemenu="none"
                        cui-areatype="toolbar"
                        tooltiptext="&libraryButton.tooltip;"
@@ -1071,7 +1078,6 @@
 
       <toolbarbutton id="bookmarks-menu-button"
                      class="toolbarbutton-1 chromeclass-toolbar-additional"
-                     removable="true"
                      type="menu"
                      label="&bookmarksMenuButton2.label;"
                      tooltip="dynamic-shortcut-tooltip"
@@ -1080,7 +1086,6 @@
                      ondragover="PlacesMenuDNDHandler.onDragOver(event);"
                      ondragleave="PlacesMenuDNDHandler.onDragLeave(event);"
                      ondrop="PlacesMenuDNDHandler.onDrop(event);"
-                     cui-areatype="toolbar"
                      oncommand="BookmarkingUI.onCommand(event);">
         <observes element="bookmarkThisPageBroadcaster" attribute="starred"/>
         <observes element="bookmarkThisPageBroadcaster" attribute="buttontooltiptext"/>
@@ -1166,6 +1171,15 @@
                     key="manBookmarkKb"/>
         </menupopup>
       </toolbarbutton>
+
+      <toolbaritem id="search-container"
+                   class="chromeclass-toolbar-additional panel-wide-item"
+                   title="&searchItem.title;"
+                   align="center"
+                   flex="100"
+                   persist="width">
+        <searchbar id="searchbar" flex="1"/>
+      </toolbaritem>
     </toolbarpalette>
     <box id="library-animatable-box" class="toolbarbutton-animatable-box">
       <image class="toolbarbutton-animatable-image"/>

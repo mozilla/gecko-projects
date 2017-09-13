@@ -1649,16 +1649,21 @@ impl ElementMethods for Element {
 
     // https://dom.spec.whatwg.org/#dom-element-setattributenode
     fn SetAttributeNode(&self, attr: &Attr) -> Fallible<Option<Root<Attr>>> {
-        // Workaround for https://github.com/servo/servo/issues/17366
-        // This ensures that if this is an "id" attr, its value is an Atom
-        attr.swap_value(&mut self.parse_plain_attribute(attr.local_name(), attr.Value()));
-
         // Step 1.
         if let Some(owner) = attr.GetOwnerElement() {
             if &*owner != self {
                 return Err(Error::InUseAttribute);
             }
         }
+
+        let vtable = vtable_for(self.upcast());
+
+        // This ensures that the attribute is of the expected kind for this
+        // specific element. This is inefficient and should probably be done
+        // differently.
+        attr.swap_value(
+            &mut vtable.parse_plain_attribute(attr.local_name(), attr.Value()),
+        );
 
         // Step 2.
         let position = self.attrs.borrow().iter().position(|old_attr| {
@@ -1688,7 +1693,7 @@ impl ElementMethods for Element {
             self.attrs.borrow_mut()[position] = JS::from_ref(attr);
             old_attr.set_owner(None);
             if attr.namespace() == &ns!() {
-                vtable_for(self.upcast()).attribute_mutated(
+                vtable.attribute_mutated(
                     &attr, AttributeMutation::Set(Some(&old_attr.value())));
             }
 
@@ -2296,6 +2301,16 @@ impl ElementMethods for Element {
 impl VirtualMethods for Element {
     fn super_type(&self) -> Option<&VirtualMethods> {
         Some(self.upcast::<Node>() as &VirtualMethods)
+    }
+
+    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+        // FIXME: This should be more fine-grained, not all elements care about these.
+        if attr.local_name() == &local_name!("width") ||
+           attr.local_name() == &local_name!("height") {
+            return true;
+        }
+
+        self.super_type().unwrap().attribute_affects_presentational_hints(attr)
     }
 
     fn attribute_mutated(&self, attr: &Attr, mutation: AttributeMutation) {
@@ -3030,8 +3045,6 @@ impl ElementPerformFullscreenEnter {
 }
 
 impl Runnable for ElementPerformFullscreenEnter {
-    fn name(&self) -> &'static str { "ElementPerformFullscreenEnter" }
-
     #[allow(unrooted_must_root)]
     fn handler(self: Box<ElementPerformFullscreenEnter>) {
         let element = self.element.root();
@@ -3085,8 +3098,6 @@ impl ElementPerformFullscreenExit {
 }
 
 impl Runnable for ElementPerformFullscreenExit {
-    fn name(&self) -> &'static str { "ElementPerformFullscreenExit" }
-
     #[allow(unrooted_must_root)]
     fn handler(self: Box<ElementPerformFullscreenExit>) {
         let element = self.element.root();

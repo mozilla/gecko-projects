@@ -10,15 +10,16 @@
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
-#[cfg(feature = "servo")] use app_units::Au;
+use app_units::Au;
 use servo_arc::{Arc, UniqueArc};
+use smallbitvec::SmallBitVec;
 use std::borrow::Cow;
-use std::collections::HashSet;
+use hash::HashSet;
 use std::{fmt, mem, ops};
 #[cfg(feature = "gecko")] use std::ptr;
 
 #[cfg(feature = "servo")] use cssparser::RGBA;
-use cssparser::{Parser, TokenSerializationType, serialize_identifier};
+use cssparser::{CowRcStr, Parser, TokenSerializationType, serialize_identifier};
 use cssparser::ParserInput;
 #[cfg(feature = "servo")] use euclid::SideOffsets2D;
 use computed_values;
@@ -28,6 +29,7 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::{self, nsCSSPropertyID};
 #[cfg(feature = "servo")] use logical_geometry::{LogicalMargin, PhysicalSide};
 use logical_geometry::WritingMode;
+#[cfg(feature = "gecko")] use malloc_size_of::{MallocShallowSizeOf, MallocSizeOf, MallocSizeOfOps};
 use media_queries::Device;
 use parser::ParserContext;
 use properties::animated_properties::AnimatableLonghand;
@@ -36,14 +38,13 @@ use selector_parser::PseudoElement;
 use selectors::parser::SelectorParseError;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
-use style_traits::{PARSING_MODE_DEFAULT, HasViewportPercentage, ToCss, ParseError};
+use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError};
 use style_traits::{PropertyDeclarationParseError, StyleParseError, ValueParseError};
-use stylesheets::{CssRuleType, MallocSizeOf, MallocSizeOfFn, Origin, UrlExtraData};
+use stylesheets::{CssRuleType, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
 use values::computed;
 use values::computed::NonNegativeAu;
-use cascade_info::CascadeInfo;
 use rule_tree::{CascadeLevel, StrongRuleNode};
 use self::computed_value_flags::ComputedValueFlags;
 use style_adjuster::StyleAdjuster;
@@ -93,43 +94,27 @@ pub trait MaybeBoxed<Out> {
 
 /// This is where we store extra font data while
 /// while computing font sizes.
-#[derive(Clone, Debug)]
-pub struct FontComputationData {
-    /// font-size keyword values (and font-size-relative values applied
-    /// to keyword values) need to preserve their identity as originating
-    /// from keywords and relative font sizes. We store this information
-    /// out of band in the ComputedValues. When None, the font size on the
-    /// current struct was computed from a value that was not a keyword
-    /// or a chain of font-size-relative values applying to successive parents
-    /// terminated by a keyword. When Some, this means the font-size was derived
-    /// from a keyword value or a keyword value on some ancestor with only
-    /// font-size-relative keywords and regular inheritance in between. The
-    /// integer stores the final ratio of the chain of font size relative values.
-    /// and is 1 when there was just a keyword and no relative values.
-    ///
-    /// When this is Some, we compute font sizes by computing the keyword against
-    /// the generic font, and then multiplying it by the ratio.
-    pub font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>
-}
+///
+/// font-size keyword values (and font-size-relative values applied
+/// to keyword values) need to preserve their identity as originating
+/// from keywords and relative font sizes. We store this information
+/// out of band in the ComputedValues. When None, the font size on the
+/// current struct was computed from a value that was not a keyword
+/// or a chain of font-size-relative values applying to successive parents
+/// terminated by a keyword. When Some, this means the font-size was derived
+/// from a keyword value or a keyword value on some ancestor with only
+/// font-size-relative keywords and regular inheritance in between. The
+/// integer stores the final ratio of the chain of font size relative values.
+/// and is 1 when there was just a keyword and no relative values.
+///
+/// When this is Some, we compute font sizes by computing the keyword against
+/// the generic font, and then multiplying it by the ratio (as well as adding any
+/// absolute offset from calcs)
+pub type FontComputationData = Option<(longhands::font_size::KeywordSize, f32, NonNegativeAu)>;
 
-
-impl FontComputationData {
-    /// Assigns values for variables in struct FontComputationData
-    pub fn new(font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>) -> Self {
-        FontComputationData {
-            font_size_keyword: font_size_keyword
-        }
-    }
-
-    /// Assigns default values for variables in struct FontComputationData
-    pub fn default_font_size_keyword() -> Option<(longhands::font_size::KeywordSize, f32)> {
-        Some((Default::default(), 1.))
-    }
-
-    /// Gets a FontComputationData with the default values.
-    pub fn default_values() -> Self {
-        Self::new(Self::default_font_size_keyword())
-    }
+/// Default value for FontComputationData
+pub fn default_font_size_keyword() -> FontComputationData {
+    Some((Default::default(), 1., Au(0).into()))
 }
 
 impl<T> MaybeBoxed<T> for T {
@@ -291,6 +276,7 @@ static ${name}: LonghandIdSet = LonghandIdSet {
 </%def>
 
 /// A set of longhand properties
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[derive(Clone, PartialEq)]
 pub struct LonghandIdSet {
     storage: [u32; (${len(data.longhands)} - 1 + 32) / 32]
@@ -874,19 +860,6 @@ impl UnparsedValue {
     }
 }
 
-impl<'a, T: HasViewportPercentage> HasViewportPercentage for DeclaredValue<'a, T> {
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            DeclaredValue::Value(ref v) => v.has_viewport_percentage(),
-            DeclaredValue::WithVariables(_) => {
-                panic!("DeclaredValue::has_viewport_percentage without \
-                        resolving variables!")
-            },
-            DeclaredValue::CSSWideKeyword(_) => false,
-        }
-    }
-}
-
 impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
         where W: fmt::Write,
@@ -1300,26 +1273,6 @@ pub enum PropertyDeclaration {
     Custom(::custom_properties::Name, DeclaredValueOwned<Box<::custom_properties::SpecifiedValue>>),
 }
 
-impl HasViewportPercentage for PropertyDeclaration {
-    fn has_viewport_percentage(&self) -> bool {
-        match *self {
-            % for property in data.longhands:
-                PropertyDeclaration::${property.camel_case}(ref val) => {
-                    val.has_viewport_percentage()
-                },
-            % endfor
-            PropertyDeclaration::WithVariables(..) => {
-                panic!("DeclaredValue::has_viewport_percentage without \
-                        resolving variables!")
-            },
-            PropertyDeclaration::CSSWideKeyword(..) => false,
-            PropertyDeclaration::Custom(_, ref val) => {
-                val.borrow().has_viewport_percentage()
-            }
-        }
-    }
-}
-
 impl fmt::Debug for PropertyDeclaration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.id().to_css(f)?;
@@ -1361,11 +1314,28 @@ impl ToCss for PropertyDeclaration {
     }
 }
 
+#[cfg(feature = "gecko")]
 impl MallocSizeOf for PropertyDeclaration {
-    fn malloc_size_of_children(&self, _malloc_size_of: MallocSizeOfFn) -> usize {
-        // The variants of PropertyDeclaration mostly (entirely?) contain
-        // scalars, so this is reasonable.
-        0
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        match *self {
+            % for property in data.longhands:
+                % if property.boxed and property.is_vector:
+                    <% raise Exception("this should not happen! not smart to box a vector here") %>
+                % elif property.boxed:
+                    PropertyDeclaration::${property.camel_case}(ref sv_box) => {
+                        <Box<_> as MallocShallowSizeOf>::shallow_size_of(sv_box, ops)
+                    }
+                % elif property.is_vector:
+                    PropertyDeclaration::${property.camel_case}(ref sv_vec) => {
+                        sv_vec.0.shallow_size_of(ops)
+                    }
+                % endif
+            % endfor
+            PropertyDeclaration::CSSWideKeyword(..) => 0,
+            PropertyDeclaration::WithVariables(..) => 0,
+            PropertyDeclaration::Custom(..) => 0,
+            _ => 0,
+        }
     }
 }
 
@@ -1544,12 +1514,13 @@ impl PropertyDeclaration {
     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
     /// we only set them here so that we don't have to reallocate
     pub fn parse_into<'i, 't>(declarations: &mut SourcePropertyDeclaration,
-                              id: PropertyId, context: &ParserContext, input: &mut Parser<'i, 't>)
+                              id: PropertyId, name: CowRcStr<'i>,
+                              context: &ParserContext, input: &mut Parser<'i, 't>)
                               -> Result<(), PropertyDeclarationParseError<'i>> {
         assert!(declarations.is_empty());
         let start = input.state();
         match id {
-            PropertyId::Custom(name) => {
+            PropertyId::Custom(property_name) => {
                 // FIXME: fully implement https://github.com/w3c/csswg-drafts/issues/774
                 // before adding skip_whitespace here.
                 // This probably affects some test results.
@@ -1561,7 +1532,7 @@ impl PropertyDeclaration {
                         ValueParseError::from_parse_error(e))),
                     }
                 };
-                declarations.push(PropertyDeclaration::Custom(name, value));
+                declarations.push(PropertyDeclaration::Custom(property_name, value));
                 Ok(())
             }
             PropertyId::Longhand(id) => {
@@ -1577,7 +1548,7 @@ impl PropertyDeclaration {
                             input.reset(&start);
                             let (first_token_type, css) =
                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
-                                    PropertyDeclarationParseError::InvalidValue(id.name().into(),
+                                    PropertyDeclarationParseError::InvalidValue(name,
                                         ValueParseError::from_parse_error(e))
                                 })?;
                             Ok(PropertyDeclaration::WithVariables(id, Arc::new(UnparsedValue {
@@ -1587,7 +1558,7 @@ impl PropertyDeclaration {
                                 from_shorthand: None,
                             })))
                         } else {
-                            Err(PropertyDeclarationParseError::InvalidValue(id.name().into(),
+                            Err(PropertyDeclarationParseError::InvalidValue(name,
                                 ValueParseError::from_parse_error(err)))
                         }
                     })
@@ -1616,7 +1587,7 @@ impl PropertyDeclaration {
                             input.reset(&start);
                             let (first_token_type, css) =
                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
-                                    PropertyDeclarationParseError::InvalidValue(id.name().into(),
+                                    PropertyDeclarationParseError::InvalidValue(name,
                                         ValueParseError::from_parse_error(e))
                                 })?;
                             let unparsed = Arc::new(UnparsedValue {
@@ -1636,7 +1607,7 @@ impl PropertyDeclaration {
                             }
                             Ok(())
                         } else {
-                            Err(PropertyDeclarationParseError::InvalidValue(id.name().into(),
+                            Err(PropertyDeclarationParseError::InvalidValue(name,
                                 ValueParseError::from_parse_error(err)))
                         }
                     })
@@ -2022,7 +1993,7 @@ impl ComputedValues {
         _: Option<<&PseudoElement>,
         custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
-        font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+        font_size_keyword: FontComputationData,
         flags: ComputedValueFlags,
         rules: Option<StrongRuleNode>,
         visited_style: Option<Arc<ComputedValues>>,
@@ -2055,7 +2026,7 @@ impl ComputedValuesInner {
     pub fn new(
         custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
-        font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+        font_size_keyword: FontComputationData,
         flags: ComputedValueFlags,
         rules: Option<StrongRuleNode>,
         visited_style: Option<Arc<ComputedValues>>,
@@ -2066,7 +2037,7 @@ impl ComputedValuesInner {
         ComputedValuesInner {
             custom_properties: custom_properties,
             writing_mode: writing_mode,
-            font_computation_data: FontComputationData::new(font_size_keyword),
+            font_computation_data: font_size_keyword,
             rules: rules,
             visited_style: visited_style,
             flags: flags,
@@ -2579,7 +2550,7 @@ pub struct StyleBuilder<'a> {
     /// TODO(emilio): Make private.
     pub writing_mode: WritingMode,
     /// The keyword behind the current font-size property, if any.
-    pub font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+    pub font_size_keyword: FontComputationData,
     /// Flags for the computed value.
     pub flags: ComputedValueFlags,
     /// The element's style if visited, only computed if there's a relevant link
@@ -2602,7 +2573,7 @@ impl<'a> StyleBuilder<'a> {
         rules: Option<StrongRuleNode>,
         custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
-        font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+        font_size_keyword: FontComputationData,
         flags: ComputedValueFlags,
         visited_style: Option<Arc<ComputedValues>>,
     ) -> Self {
@@ -2672,7 +2643,7 @@ impl<'a> StyleBuilder<'a> {
             rules: None, // FIXME(emilio): Dubious...
             custom_properties: style_to_derive_from.custom_properties(),
             writing_mode: style_to_derive_from.writing_mode,
-            font_size_keyword: style_to_derive_from.font_computation_data.font_size_keyword,
+            font_size_keyword: style_to_derive_from.font_computation_data,
             flags: style_to_derive_from.flags,
             visited_style: style_to_derive_from.clone_visited_style(),
             % for style_struct in data.active_style_structs():
@@ -2693,6 +2664,10 @@ impl<'a> StyleBuilder<'a> {
             self.inherited_style.get_${property.style_struct.name_lower}();
         % else:
             self.inherited_style_ignoring_first_line.get_${property.style_struct.name_lower}();
+        % endif
+
+        % if not property.style_struct.inherited:
+        self.flags.insert(::properties::computed_value_flags::INHERITS_RESET_STYLE);
         % endif
 
         % if property.ident == "content":
@@ -2768,7 +2743,7 @@ impl<'a> StyleBuilder<'a> {
             /* rules = */ None,
             parent.custom_properties(),
             parent.writing_mode,
-            parent.font_computation_data.font_size_keyword,
+            parent.font_computation_data,
             parent.flags,
             parent.clone_visited_style()
         )
@@ -2923,7 +2898,8 @@ pub use self::lazy_static_module::INITIAL_SERVO_VALUES;
 mod lazy_static_module {
     use logical_geometry::WritingMode;
     use servo_arc::Arc;
-    use super::{ComputedValues, ComputedValuesInner, longhands, style_structs, FontComputationData};
+    use super::{ComputedValues, ComputedValuesInner, longhands, style_structs};
+    use super::default_font_size_keyword;
     use super::computed_value_flags::ComputedValueFlags;
 
     /// The initial values for all style structs as defined by the specification.
@@ -2942,7 +2918,7 @@ mod lazy_static_module {
                 % endfor
                 custom_properties: None,
                 writing_mode: WritingMode::empty(),
-                font_computation_data: FontComputationData::default_values(),
+                font_computation_data: default_font_size_keyword(),
                 rules: None,
                 visited_style: None,
                 flags: ComputedValueFlags::empty(),
@@ -2953,9 +2929,10 @@ mod lazy_static_module {
 
 /// A per-longhand function that performs the CSS cascade for that longhand.
 pub type CascadePropertyFn =
-    extern "Rust" fn(declaration: &PropertyDeclaration,
-                     context: &mut computed::Context,
-                     cascade_info: &mut Option<<&mut CascadeInfo>);
+    extern "Rust" fn(
+        declaration: &PropertyDeclaration,
+        context: &mut computed::Context,
+    );
 
 /// A per-longhand array of functions to perform the CSS cascade on each of
 /// them, effectively doing virtual dispatch.
@@ -3030,7 +3007,6 @@ pub fn cascade(
     parent_style_ignoring_first_line: Option<<&ComputedValues>,
     layout_parent_style: Option<<&ComputedValues>,
     visited_style: Option<Arc<ComputedValues>>,
-    cascade_info: Option<<&mut CascadeInfo>,
     font_metrics_provider: &FontMetricsProvider,
     flags: CascadeFlags,
     quirks_mode: QuirksMode
@@ -3041,25 +3017,26 @@ pub fn cascade(
                   ptr::eq(parent_style.unwrap(),
                           parent_style_ignoring_first_line.unwrap()) ||
                   parent_style.unwrap().pseudo() == Some(PseudoElement::FirstLine));
+    let empty = SmallBitVec::new();
     let iter_declarations = || {
         rule_node.self_and_ancestors().flat_map(|node| {
             let cascade_level = node.cascade_level();
             let source = node.style_source();
+
             let declarations = if source.is_some() {
-                source.read(cascade_level.guard(guards)).declarations()
+                source.read(cascade_level.guard(guards)).declaration_importance_iter()
             } else {
                 // The root node has no style source.
-                &[]
+                DeclarationImportanceIterator::new(&[], &empty)
             };
             let node_importance = node.importance();
 
             let property_restriction = pseudo.and_then(|p| p.property_restriction());
 
             declarations
-                .iter()
                 // Yield declarations later in source order (with more precedence) first.
                 .rev()
-                .filter_map(move |&(ref declaration, declaration_importance)| {
+                .filter_map(move |(declaration, declaration_importance)| {
                     if let Some(property_restriction) = property_restriction {
                         // declaration.id() is either a longhand or a custom
                         // property.  Custom properties are always allowed, but
@@ -3089,7 +3066,6 @@ pub fn cascade(
         parent_style_ignoring_first_line,
         layout_parent_style,
         visited_style,
-        cascade_info,
         font_metrics_provider,
         flags,
         quirks_mode,
@@ -3108,7 +3084,6 @@ pub fn apply_declarations<'a, F, I>(
     parent_style_ignoring_first_line: Option<<&ComputedValues>,
     layout_parent_style: Option<<&ComputedValues>,
     visited_style: Option<Arc<ComputedValues>>,
-    mut cascade_info: Option<<&mut CascadeInfo>,
     font_metrics_provider: &FontMetricsProvider,
     flags: CascadeFlags,
     quirks_mode: QuirksMode,
@@ -3164,7 +3139,7 @@ where
             Some(rules.clone()),
             custom_properties,
             WritingMode::empty(),
-            inherited_style.font_computation_data.font_size_keyword,
+            inherited_style.font_computation_data,
             ComputedValueFlags::empty(),
             visited_style,
         ),
@@ -3280,9 +3255,7 @@ where
             % endif
 
             let discriminant = longhand_id as usize;
-            (CASCADE_PROPERTY[discriminant])(&*declaration,
-                                             &mut context,
-                                             &mut cascade_info);
+            (CASCADE_PROPERTY[discriminant])(&*declaration, &mut context);
         }
         % if category_to_cascade_now == "early":
             let writing_mode = get_writing_mode(context.builder.get_inheritedbox());
@@ -3363,9 +3336,7 @@ where
                 if let Some(ref declaration) = font_family {
 
                     let discriminant = LonghandId::FontFamily as usize;
-                    (CASCADE_PROPERTY[discriminant])(declaration,
-                                                     &mut context,
-                                                     &mut cascade_info);
+                    (CASCADE_PROPERTY[discriminant])(declaration, &mut context);
                     % if product == "gecko":
                         let device = context.builder.device;
                         if let PropertyDeclaration::FontFamily(ref val) = **declaration {
@@ -3383,9 +3354,7 @@ where
 
             if let Some(ref declaration) = font_size {
                 let discriminant = LonghandId::FontSize as usize;
-                (CASCADE_PROPERTY[discriminant])(declaration,
-                                                 &mut context,
-                                                 &mut cascade_info);
+                (CASCADE_PROPERTY[discriminant])(declaration, &mut context);
             % if product == "gecko":
             // Font size must be explicitly inherited to handle lang changes and
             // scriptlevel changes.
@@ -3397,9 +3366,7 @@ where
                 let size = PropertyDeclaration::CSSWideKeyword(
                     LonghandId::FontSize, CSSWideKeyword::Inherit);
 
-                (CASCADE_PROPERTY[discriminant])(&size,
-                                                 &mut context,
-                                                 &mut cascade_info);
+                (CASCADE_PROPERTY[discriminant])(&size, &mut context);
             % endif
             }
         % endif

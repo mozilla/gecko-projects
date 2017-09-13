@@ -158,7 +158,6 @@ Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", this);
 Cu.import("resource://gre/modules/Timer.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/debug.js", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
 
 XPCOMUtils.defineLazyServiceGetters(this, {
@@ -368,6 +367,10 @@ this.SessionStore = {
 
   undoCloseById(aClosedId) {
     return SessionStoreInternal.undoCloseById(aClosedId);
+  },
+
+  resetBrowserToLazyState(tab) {
+    return SessionStoreInternal.resetBrowserToLazyState(tab);
   },
 
   /**
@@ -971,6 +974,8 @@ var SessionStoreInternal = {
         SessionStoreInternal.restoreNextTab();
 
         this._sendTabRestoredNotification(tab, data.isRemotenessUpdate);
+
+        Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
         break;
       case "SessionStore:crashedTabRevived":
         // The browser was revived by navigating to a different page
@@ -1149,6 +1154,7 @@ var SessionStoreInternal = {
 
           // Nothing to restore now, notify observers things are complete.
           Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+          Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
           this._deferredAllWindowsRestored.resolve();
         } else {
           TelemetryTimestamps.add("sessionRestoreRestoring");
@@ -1168,6 +1174,7 @@ var SessionStoreInternal = {
       } else {
         // Nothing to restore, notify observers things are complete.
         Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+        Services.obs.notifyObservers(null, "sessionstore-one-or-no-tab-restored");
         this._deferredAllWindowsRestored.resolve();
       }
     // this window was opened by _openWindowWithState
@@ -1894,19 +1901,7 @@ var SessionStoreInternal = {
    *        bool Do not save state if we're updating an existing tab
    */
   onTabRemove: function ssi_onTabRemove(aWindow, aTab, aNoNotification) {
-    let browser = aTab.linkedBrowser;
-    browser.removeEventListener("SwapDocShells", this);
-    browser.removeEventListener("oop-browser-crashed", this);
-
-    // If this tab was in the middle of restoring or still needs to be restored,
-    // we need to reset that state. If the tab was restoring, we will attempt to
-    // restore the next tab.
-    let previousState = browser.__SS_restoreState;
-    if (previousState) {
-      this._resetTabRestoringState(aTab);
-      if (previousState == TAB_STATE_RESTORING)
-        this.restoreNextTab();
-    }
+    this.cleanUpRemovedBrowser(aTab);
 
     if (!aNoNotification) {
       this.saveStateDelayed(aWindow);
@@ -1973,6 +1968,57 @@ var SessionStoreInternal = {
     // Remember the closed tab to properly handle any last updates included in
     // the final "update" message sent by the frame script's unload handler.
     this._closedTabs.set(permanentKey, {closedTabs, tabData});
+  },
+
+  /**
+   * Remove listeners which were added when browser was inserted and reset restoring state.
+   * Also re-instate lazy data and basically revert tab to its lazy browser state.
+   * @param aTab
+   *        Tab reference
+   */
+  resetBrowserToLazyState(aTab) {
+    let browser = aTab.linkedBrowser;
+    // Browser is already lazy so don't do anything.
+    if (!browser.isConnected) {
+      return;
+    }
+
+    this.cleanUpRemovedBrowser(aTab);
+
+    aTab.setAttribute("pending", "true");
+
+    this._lastKnownFrameLoader.delete(browser.permanentKey);
+    this._crashedBrowsers.delete(browser.permanentKey);
+    aTab.removeAttribute("crashed");
+
+    aTab.__SS_lazyData = {
+      url: browser.currentURI.spec,
+      title: aTab.label,
+      userTypedValue: browser.userTypedValue || "",
+      userTypedClear: browser.userTypedClear || 0
+    }
+  },
+
+  /**
+   * When a tab is removed or suspended, remove listeners and reset restoring state.
+   * @param aBrowser
+   *        Browser reference
+   */
+  cleanUpRemovedBrowser(aTab) {
+    let browser = aTab.linkedBrowser;
+
+    browser.removeEventListener("SwapDocShells", this);
+    browser.removeEventListener("oop-browser-crashed", this);
+
+    // If this tab was in the middle of restoring or still needs to be restored,
+    // we need to reset that state. If the tab was restoring, we will attempt to
+    // restore the next tab.
+    let previousState = browser.__SS_restoreState;
+    if (previousState) {
+      this._resetTabRestoringState(aTab);
+      if (previousState == TAB_STATE_RESTORING)
+        this.restoreNextTab();
+    }
   },
 
   /**
@@ -2111,9 +2157,6 @@ var SessionStoreInternal = {
    *        The <xul:browser> that is now in the crashed state.
    */
   onBrowserCrashed(aBrowser) {
-    NS_ASSERT(aBrowser.isRemoteBrowser,
-              "Only remote browsers should be able to crash");
-
     this.enterCrashedState(aBrowser);
     // The browser crashed so we might never receive flush responses.
     // Resolve all pending flush requests for the crashed browser.
@@ -2849,7 +2892,12 @@ var SessionStoreInternal = {
    */
   navigateAndRestore(tab, loadArguments, historyIndex) {
     let window = tab.ownerGlobal;
-    NS_ASSERT(window.__SSi, "tab's window must be tracked");
+
+    if (!window.__SSi) {
+      Cu.reportError("Tab's window must be tracked.");
+      return;
+    }
+
     let browser = tab.linkedBrowser;
 
     // Were we already waiting for a flush from a previous call to
@@ -3597,11 +3645,14 @@ var SessionStoreInternal = {
 
   // Restores the given tab state for a given tab.
   restoreTab(tab, tabData, options = {}) {
-    NS_ASSERT(!tab.linkedBrowser.__SS_restoreState,
-              "must reset tab before calling restoreTab()");
+    let browser = tab.linkedBrowser;
+
+    if (browser.__SS_restoreState) {
+      Cu.reportError("Must reset tab before calling restoreTab.");
+      return;
+    }
 
     let loadArguments = options.loadArguments;
-    let browser = tab.linkedBrowser;
     let window = tab.ownerGlobal;
     let tabbrowser = window.gBrowser;
     let forceOnDemand = options.forceOnDemand;
@@ -4040,7 +4091,7 @@ var SessionStoreInternal = {
       }
       var sidebar = aWindow.document.getElementById("sidebar-box");
       if (sidebar.getAttribute("sidebarcommand") != aSidebar) {
-        aWindow.SidebarUI.show(aSidebar);
+        aWindow.SidebarUI.showInitially(aSidebar);
       }
       // since resizing/moving a window brings it to the foreground,
       // we might want to re-focus the last focused window
@@ -4635,13 +4686,15 @@ var SessionStoreInternal = {
    *        The tab that will be "reset"
    */
   _resetLocalTabRestoringState(aTab) {
-    NS_ASSERT(aTab.linkedBrowser.__SS_restoreState,
-              "given tab is not restoring");
-
     let browser = aTab.linkedBrowser;
 
     // Keep the tab's previous state for later in this method
     let previousState = browser.__SS_restoreState;
+
+    if (!previousState) {
+      Cu.reportError("Given tab is not restoring.");
+      return;
+    }
 
     // The browser is no longer in any sort of restoring state.
     delete browser.__SS_restoreState;
@@ -4660,10 +4713,13 @@ var SessionStoreInternal = {
   },
 
   _resetTabRestoringState(tab) {
-    NS_ASSERT(tab.linkedBrowser.__SS_restoreState,
-              "given tab is not restoring");
-
     let browser = tab.linkedBrowser;
+
+    if (!browser.__SS_restoreState) {
+      Cu.reportError("Given tab is not restoring.");
+      return;
+    }
+
     browser.messageManager.sendAsyncMessage("SessionStore:resetRestore", {});
     this._resetLocalTabRestoringState(tab);
   },

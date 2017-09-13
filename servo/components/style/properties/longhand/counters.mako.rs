@@ -8,7 +8,6 @@
 
 <%helpers:longhand name="content" boxed="True" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-content/#propdef-content">
-    use values::computed::ComputedValueAsSpecified;
     #[cfg(feature = "gecko")]
     use values::generics::CounterStyleOrNone;
     #[cfg(feature = "gecko")]
@@ -21,9 +20,6 @@
 
     pub use self::computed_value::T as SpecifiedValue;
     pub use self::computed_value::ContentItem;
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
-    no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
         use cssparser;
@@ -40,8 +36,8 @@
         #[cfg(feature = "gecko")]
         use values::specified::Attr;
 
-        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue)]
         pub enum ContentItem {
             /// Literal string content.
             String(String),
@@ -101,8 +97,8 @@
             }
         }
 
-        #[derive(Clone, Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue)]
         pub enum T {
             Normal,
             None,
@@ -296,7 +292,6 @@
         computed_value::T(Vec::new())
     }
 
-    no_viewport_percentage!(SpecifiedValue);
 
     impl ToCss for SpecifiedValue {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result

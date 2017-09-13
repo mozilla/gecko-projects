@@ -34,10 +34,10 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ErrorNames.h"
 #include "mozilla/LoadContext.h"
+#include "mozilla/SystemGroup.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "mozilla/dom/Headers.h"
@@ -953,17 +953,6 @@ ServiceWorkerManager::Register(mozIDOMWindow* aWindow,
 
   AssertIsOnMainThread();
   Telemetry::Accumulate(Telemetry::SERVICE_WORKER_REGISTRATIONS, 1);
-
-  ContentChild* contentChild = ContentChild::GetSingleton();
-  if (contentChild &&
-      contentChild->GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE)) {
-    nsString message(NS_LITERAL_STRING("ServiceWorker registered by document "
-                                       "embedded in a file:/// URI.  This may "
-                                       "result in unexpected behavior."));
-    ReportToAllClients(cleanedScope, message, EmptyString(),
-                       EmptyString(), 0, 0, nsIScriptError::warningFlag);
-    Telemetry::Accumulate(Telemetry::FILE_EMBEDDED_SERVICEWORKERS, 1);
-  }
 
   promise.forget(aPromise);
   return NS_OK;
@@ -4311,6 +4300,10 @@ ServiceWorkerManager::ScheduleUpdateTimer(nsIPrincipal* aPrincipal,
     data->mUpdateTimers.Remove(aScope); // another lookup, but very rare
     return;
   }
+
+  // Label with SystemGroup because UpdateTimerCallback only sends an IPC message
+  // (PServiceWorkerUpdaterConstructor) without touching any web contents.
+  timer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::Other));
 
   nsCOMPtr<nsITimerCallback> callback = new UpdateTimerCallback(aPrincipal,
                                                                 aScope);

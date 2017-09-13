@@ -193,7 +193,6 @@ class WidgetRenderingContext;
   float mCumulativeMagnification;
   float mCumulativeRotation;
 
-  BOOL mDidForceRefreshOpenGL;
   BOOL mWaitingForPaint;
 
 #ifdef __LP64__
@@ -223,8 +222,6 @@ class WidgetRenderingContext;
 
 // Stop NSView hierarchy being changed during [ChildView drawRect:]
 - (void)delayedTearDown;
-
-- (void)sendFocusEvent:(mozilla::EventMessage)eventMessage;
 
 - (void)handleMouseMoved:(NSEvent*)aEvent;
 

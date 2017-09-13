@@ -36,7 +36,8 @@ static const char* kObservedPrefs[] = {
 using namespace mozilla::intl;
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS(LocaleService, mozILocaleService, nsIObserver)
+NS_IMPL_ISUPPORTS(LocaleService, mozILocaleService, nsIObserver,
+                  nsISupportsWeakReference)
 
 mozilla::StaticRefPtr<LocaleService> LocaleService::sInstance;
 
@@ -182,7 +183,7 @@ LocaleService::GetInstance()
     if (sInstance->IsServer()) {
       // We're going to observe for requested languages changes which come
       // from prefs.
-      DebugOnly<nsresult> rv = Preferences::AddStrongObservers(sInstance, kObservedPrefs);
+      DebugOnly<nsresult> rv = Preferences::AddWeakObservers(sInstance, kObservedPrefs);
       MOZ_ASSERT(NS_SUCCEEDED(rv), "Adding observers failed.");
     }
     ClearOnShutdown(&sInstance);
@@ -193,7 +194,7 @@ LocaleService::GetInstance()
 LocaleService::~LocaleService()
 {
   if (mIsServer) {
-    Preferences::RemoveObservers(sInstance, kObservedPrefs);
+    Preferences::RemoveObservers(this, kObservedPrefs);
   }
 }
 
@@ -530,9 +531,14 @@ LocaleService::Observe(nsISupports *aSubject, const char *aTopic,
 {
   MOZ_ASSERT(mIsServer, "This should only be called in the server mode.");
 
+  NS_ConvertUTF16toUTF8 pref(aData);
+
+  // This is a temporary solution until we get bug 1337078 landed.
+  if (pref.EqualsLiteral(ANDROID_OS_LOCALE_PREF)) {
+    OSPreferences::GetInstance()->Refresh();
+  }
   // At the moment the only thing we're observing are settings indicating
   // user requested locales.
-  NS_ConvertUTF16toUTF8 pref(aData);
   if (pref.EqualsLiteral(MATCH_OS_LOCALE_PREF) ||
       pref.EqualsLiteral(SELECTED_LOCALE_PREF) ||
       pref.EqualsLiteral(ANDROID_OS_LOCALE_PREF)) {

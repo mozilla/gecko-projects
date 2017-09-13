@@ -38,6 +38,10 @@ Services.scriptloader.loadSubScript(
   this
 );
 var { Toolbox } = require("devtools/client/framework/toolbox");
+const sourceUtils = {
+  isLoaded: source => source.get("loadedState") === "loaded"
+};
+
 const EXAMPLE_URL =
   "http://example.com/browser/devtools/client/debugger/new/test/mochitest/examples/";
 
@@ -207,14 +211,16 @@ function waitForSource(dbg, url) {
   });
 }
 
-function waitForElement(dbg, selector) {
-  return waitUntil(() => findElementWithSelector(dbg, selector));
+async function waitForElement(dbg, selector) {
+  await waitUntil(() => findElementWithSelector(dbg, selector));
+  return findElementWithSelector(dbg, selector);
 }
 
 function waitForSelectedSource(dbg, sourceId) {
   return waitForState(dbg, state => {
     const source = dbg.selectors.getSelectedSource(state);
-    const isLoaded = source && source.has("loading") && !source.get("loading");
+    const isLoaded =
+      source && source.has("loadedState") && sourceUtils.isLoaded(source);
     if (sourceId) {
       return isLoaded && sourceId == source.get("id");
     }
@@ -240,9 +246,12 @@ function assertPausedLocation(dbg) {
   // Check the pause location
   const pause = getPause(getState());
   const pauseLine = pause && pause.frame && pause.frame.location.line;
+  assertDebugLine(dbg, pauseLine);
+}
 
+function assertDebugLine(dbg, line) {
   // Check the debug line
-  const lineInfo = getCM(dbg).lineInfo(pauseLine - 1);
+  const lineInfo = getCM(dbg).lineInfo(line - 1);
   ok(
     lineInfo.wrapClass.includes("debug-line"),
     "Line is highlighted as paused"
@@ -282,7 +291,9 @@ function assertHighlightLocation(dbg, source, line) {
     "Highlighted line is visible"
   );
   ok(
-    getCM(dbg).lineInfo(line - 1).wrapClass.includes("highlight-line"),
+    getCM(dbg)
+      .lineInfo(line - 1)
+      .wrapClass.includes("highlight-line"),
     "Line is highlighted"
   );
 }
@@ -331,7 +342,7 @@ function isTopFrameSelected(dbg, state) {
     return false;
   }
 
-  const isLoaded = source.has("loading") && !source.get("loading");
+  const isLoaded = source.has("loadedState") && sourceUtils.isLoaded(source);
   if (!isLoaded) {
     return false;
   }
@@ -722,7 +733,8 @@ const selectors = {
   sourceNode: i => `.sources-list .tree-node:nth-child(${i})`,
   sourceNodes: ".sources-list .tree-node",
   sourceArrow: i => `.sources-list .tree-node:nth-child(${i}) .arrow`,
-  resultItems: `.result-list .result-item`
+  resultItems: `.result-list .result-item`,
+  fileMatch: `.managed-tree .result`
 };
 
 function getSelector(elementName, ...args) {
@@ -762,12 +774,17 @@ function findAllElements(dbg, elementName, ...args) {
  * @return {Promise}
  * @static
  */
-function clickElement(dbg, elementName, ...args) {
+async function clickElement(dbg, elementName, ...args) {
   const selector = getSelector(elementName, ...args);
-  const el = findElement(dbg, elementName, ...args);
+  const el = await waitForElement(dbg, selector);
+
   el.scrollIntoView();
 
-  return EventUtils.synthesizeMouseAtCenter(
+  return clickElementWithSelector(dbg, selector);
+}
+
+function clickElementWithSelector(dbg, selector) {
+  EventUtils.synthesizeMouseAtCenter(
     findElementWithSelector(dbg, selector),
     {},
     dbg.win

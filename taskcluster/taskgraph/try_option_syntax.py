@@ -91,7 +91,6 @@ UNITTEST_ALIASES = {
     'mochitest-gpu-e10s': alias_prefix('mochitest-gpu-e10s'),
     'mochitest-clipboard': alias_prefix('mochitest-clipboard'),
     'mochitest-clipboard-e10s': alias_prefix('mochitest-clipboard-e10s'),
-    'mochitest-jetpack': alias_prefix('mochitest-jetpack'),
     'mochitest-media': alias_prefix('mochitest-media'),
     'mochitest-media-e10s': alias_prefix('mochitest-media-e10s'),
     'mochitest-vg': alias_prefix('mochitest-valgrind'),
@@ -123,8 +122,19 @@ UNITTEST_ALIASES = {
 #
 # Note that the test platforms here are only the prefix up to the `/`.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
-    'Ubuntu': ['linux32', 'linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
-    'x64': ['linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
+    'Ubuntu': [
+        'linux32',
+        'linux64',
+        'linux64-asan',
+        'linux64-stylo-disabled',
+        'linux64-stylo-sequential'
+    ],
+    'x64': [
+        'linux64',
+        'linux64-asan',
+        'linux64-stylo-disabled',
+        'linux64-stylo-sequential'
+    ],
     'Android 4.3': ['android-4.3-arm7-api-16'],
     '10.10': ['macosx64'],
     # other commonly-used substrings for platforms not yet supported with
@@ -167,6 +177,7 @@ RIDEALONG_BUILDS = {
         'sm-mozjs-sys',
         'sm-msan',
         'sm-fuzzing',
+        'sm-rust-bindings',
     ],
 }
 

@@ -233,7 +233,6 @@ public:
   NS_IMETHOD SetValueChanged(bool aValueChanged) override;
   NS_IMETHOD_(bool) IsSingleLineTextControl() const override;
   NS_IMETHOD_(bool) IsTextArea() const override;
-  NS_IMETHOD_(bool) IsPlainTextControl() const override;
   NS_IMETHOD_(bool) IsPasswordTextControl() const override;
   NS_IMETHOD_(int32_t) GetCols() override;
   NS_IMETHOD_(int32_t) GetWrapCols() override;
@@ -342,6 +341,12 @@ public:
   bool HasPatternAttribute() const
   {
     return mHasPatternAttribute;
+  }
+
+  virtual already_AddRefed<nsITextControlElement> GetAsTextControlElement() override
+  {
+    nsCOMPtr<nsITextControlElement> txt = this;
+    return txt.forget();
   }
 
   // nsIConstraintValidation

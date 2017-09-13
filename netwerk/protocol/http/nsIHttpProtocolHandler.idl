@@ -47,6 +47,12 @@ interface nsIHttpProtocolHandler : nsIProxiedProtocolHandler
      */
     [must_use] readonly attribute ACString misc;
 
+    /**
+     * Blocks preconnection for the given host:port
+     * This is used mainly to prevent client cert selection dialogs
+     * to pop-up too early.
+     */
+    void dontPreconnect(in ACString host, in int32_t port);
 };
 
 %{C++
@@ -132,5 +138,11 @@ interface nsIHttpProtocolHandler : nsIProxiedProtocolHandler
  */
 #define NS_HTTP_ON_USERAGENT_REQUEST_TOPIC "http-on-useragent-request"
 
+/**
+ * This topic is notified for every http channel right after it called
+ * OnStopRequest on its listener, regardless whether it was finished
+ * successfully, failed or has been canceled.
+ */
+#define NS_HTTP_ON_STOP_REQUEST_TOPIC "http-on-stop-request"
 
 %}

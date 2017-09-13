@@ -100,6 +100,7 @@ impl DeepCloneWithLock for KeyframesRule {
 /// A number from 0 to 1, indicating the percentage of the animation when this
 /// keyframe should run.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct KeyframePercentage(pub f32);
 
@@ -155,7 +156,7 @@ impl ToCss for KeyframeSelector {
         let mut iter = self.0.iter();
         iter.next().unwrap().to_css(dest)?;
         for percentage in iter {
-            write!(dest, ", ")?;
+            dest.write_str(", ")?;
             percentage.to_css(dest)?;
         }
         Ok(())
@@ -192,6 +193,9 @@ pub struct Keyframe {
     /// Note that `!important` rules in keyframes don't apply, but we keep this
     /// `Arc` just for convenience.
     pub block: Arc<Locked<PropertyDeclarationBlock>>,
+
+    /// The line and column of the rule's source code.
+    pub source_location: SourceLocation,
 }
 
 impl ToCssWithGuard for Keyframe {
@@ -249,6 +253,7 @@ impl DeepCloneWithLock for Keyframe {
         Keyframe {
             selector: self.selector.clone(),
             block: Arc::new(lock.wrap(self.block.read_with(guard).clone())),
+            source_location: self.source_location.clone(),
         }
     }
 }
@@ -259,11 +264,14 @@ impl DeepCloneWithLock for Keyframe {
 ///
 /// TODO: Find a better name for this?
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum KeyframesStepValue {
     /// A step formed by a declaration block specified by the CSS.
     Declarations {
         /// The declaration block per se.
+        #[cfg_attr(feature = "gecko",
+                   ignore_malloc_size_of = "XXX: Primary ref, measure if DMD says it's worthwhile")]
         #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
         block: Arc<Locked<PropertyDeclarationBlock>>
     },
@@ -274,6 +282,7 @@ pub enum KeyframesStepValue {
 
 /// A single step from a keyframe animation.
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct KeyframesStep {
     /// The percentage of the animation duration when this step starts.
@@ -295,7 +304,7 @@ impl KeyframesStep {
            guard: &SharedRwLockReadGuard) -> Self {
         let declared_timing_function = match value {
             KeyframesStepValue::Declarations { ref block } => {
-                block.read_with(guard).declarations().iter().any(|&(ref prop_decl, _)| {
+                block.read_with(guard).declarations().iter().any(|prop_decl| {
                     match *prop_decl {
                         PropertyDeclaration::AnimationTimingFunction(..) => true,
                         _ => false,
@@ -321,7 +330,7 @@ impl KeyframesStep {
         match self.value {
             KeyframesStepValue::Declarations { ref block } => {
                 let guard = block.read_with(guard);
-                let &(ref declaration, _) =
+                let (declaration, _) =
                     guard.get(PropertyDeclarationId::Longhand(LonghandId::AnimationTimingFunction)).unwrap();
                 match *declaration {
                     PropertyDeclaration::AnimationTimingFunction(ref value) => {
@@ -345,6 +354,7 @@ impl KeyframesStep {
 ///
 /// It only takes into account animable properties.
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct KeyframesAnimation {
     /// The difference steps of the animation.
@@ -365,7 +375,7 @@ fn get_animated_properties(keyframes: &[Arc<Locked<Keyframe>>], guard: &SharedRw
     for keyframe in keyframes {
         let keyframe = keyframe.read_with(&guard);
         let block = keyframe.block.read_with(guard);
-        for &(ref declaration, importance) in block.declarations().iter() {
+        for (declaration, importance) in block.declaration_importance_iter() {
             assert!(!importance.important());
 
             if let Some(property) = AnimatableLonghand::from_declaration(declaration) {
@@ -476,15 +486,21 @@ pub fn parse_keyframe_list<R>(
     }).filter_map(Result::ok).collect()
 }
 
-enum Void {}
 impl<'a, 'i, R> AtRuleParser<'i> for KeyframeListParser<'a, R> {
-    type Prelude = Void;
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = Arc<Locked<Keyframe>>;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }
 
+/// A wrapper to wraps the KeyframeSelector with its source location
+struct KeyframeSelectorParserPrelude {
+    selector: KeyframeSelector,
+    source_location: SourceLocation,
+}
+
 impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListParser<'a, R> {
-    type Prelude = KeyframeSelector;
+    type Prelude = KeyframeSelectorParserPrelude;
     type QualifiedRule = Arc<Locked<Keyframe>>;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 
@@ -492,7 +508,12 @@ impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListPars
         let start_position = input.position();
         let start_location = input.current_source_location();
         match KeyframeSelector::parse(input) {
-            Ok(sel) => Ok(sel),
+            Ok(sel) => {
+                Ok(KeyframeSelectorParserPrelude {
+                    selector: sel,
+                    source_location: start_location,
+                })
+            },
             Err(e) => {
                 let error = ContextualParseError::InvalidKeyframeRule(input.slice_from(start_position), e.clone());
                 self.context.log_css_error(self.error_context, start_location, error);
@@ -530,8 +551,9 @@ impl<'a, 'i, R: ParseErrorReporter> QualifiedRuleParser<'i> for KeyframeListPars
             // `parse_important` is not called here, `!important` is not allowed in keyframe blocks.
         }
         Ok(Arc::new(self.shared_lock.wrap(Keyframe {
-            selector: prelude,
+            selector: prelude.selector,
             block: Arc::new(self.shared_lock.wrap(block)),
+            source_location: prelude.source_location,
         })))
     }
 }
@@ -543,7 +565,8 @@ struct KeyframeDeclarationParser<'a, 'b: 'a> {
 
 /// Default methods reject all at rules.
 impl<'a, 'b, 'i> AtRuleParser<'i> for KeyframeDeclarationParser<'a, 'b> {
-    type Prelude = ();
+    type PreludeNoBlock = ();
+    type PreludeBlock = ();
     type AtRule = ();
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 }
@@ -557,8 +580,8 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for KeyframeDeclarationParser<'a, 'b> {
         let property_context = PropertyParserContext::new(self.context);
 
         let id = PropertyId::parse(&name, Some(&property_context))
-            .map_err(|()| PropertyDeclarationParseError::UnknownProperty(name))?;
-        match PropertyDeclaration::parse_into(self.declarations, id, self.context, input) {
+            .map_err(|()| PropertyDeclarationParseError::UnknownProperty(name.clone()))?;
+        match PropertyDeclaration::parse_into(self.declarations, id, name, self.context, input) {
             Ok(()) => {
                 // In case there is still unparsed text in the declaration, we should roll back.
                 input.expect_exhausted().map_err(|e| e.into())

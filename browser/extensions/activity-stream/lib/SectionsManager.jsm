@@ -4,6 +4,7 @@
 "use strict";
 
 const {utils: Cu} = Components;
+Cu.import("resource://gre/modules/Services.jsm");
 const {actionCreators: ac, actionTypes: at} = Cu.import("resource://activity-stream/common/Actions.jsm", {});
 Cu.import("resource://gre/modules/EventEmitter.jsm");
 
@@ -17,28 +18,48 @@ const BUILT_IN_SECTIONS = {
     id: "topstories",
     pref: {
       titleString: {id: "header_recommended_by", values: {provider: options.provider_name}},
-      descString: {id: options.provider_description}
+      descString: {id: options.provider_description || "pocket_feedback_body"}
     },
     shouldHidePref:  options.hidden,
     eventSource: "TOP_STORIES",
     icon: options.provider_icon,
     title: {id: "header_recommended_by", values: {provider: options.provider_name}},
     maxRows: 1,
-    contextMenuOptions: ["CheckBookmark", "SaveToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"],
+    availableContextMenuOptions: ["CheckBookmark", "SaveToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"],
     infoOption: {
-      header: {id: "pocket_feedback_header"},
-      body: {id: options.provider_description},
-      link: {href: options.survey_link, id: "pocket_send_feedback"}
+      header: {id: options.provider_header || "pocket_feedback_header"},
+      body: {id: options.provider_description || "pocket_feedback_body"},
+      link: {href: options.info_link, id: "section_info_privacy_notice"}
     },
     emptyState: {
       message: {id: "topstories_empty_state", values: {provider: options.provider_name}},
       icon: "check"
-    }
+    },
+    order: 0
+  }),
+  "feeds.section.highlights": options => ({
+    id: "highlights",
+    pref: {
+      titleString: {id: "settings_pane_highlights_header"},
+      descString: {id: "settings_pane_highlights_body2"}
+    },
+    shouldHidePref:  false,
+    eventSource: "HIGHLIGHTS",
+    icon: "highlights",
+    title: {id: "header_highlights"},
+    maxRows: 3,
+    availableContextMenuOptions: ["CheckBookmark", "SaveToPocket", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"],
+    emptyState: {
+      message: {id: "highlights_empty_state"},
+      icon: "highlights"
+    },
+    order: 1
   })
 };
 
 const SectionsManager = {
   ACTIONS_TO_PROXY: ["SYSTEM_TICK", "NEW_TAB_LOAD"],
+  CONTEXT_MENU_PREFS: {"SaveToPocket": "extensions.pocket.enabled"},
   initialized: false,
   sections: new Map(),
   init(prefs = {}) {
@@ -46,8 +67,23 @@ const SectionsManager = {
       const optionsPrefName = `${feedPrefName}.options`;
       this.addBuiltInSection(feedPrefName, prefs[optionsPrefName]);
     }
+
+    Object.keys(this.CONTEXT_MENU_PREFS).forEach(k =>
+      Services.prefs.addObserver(this.CONTEXT_MENU_PREFS[k], this));
+
     this.initialized = true;
     this.emit(this.INIT);
+  },
+  observe(subject, topic, data) {
+    switch (topic) {
+      case "nsPref:changed":
+        for (const pref of Object.keys(this.CONTEXT_MENU_PREFS)) {
+          if (data === this.CONTEXT_MENU_PREFS[pref]) {
+            this.updateSections();
+          }
+        }
+        break;
+    }
   },
   addBuiltInSection(feedPrefName, optionsPrefValue = "{}") {
     let options;
@@ -62,6 +98,7 @@ const SectionsManager = {
     this.addSection(section.id, Object.assign(section, {options}));
   },
   addSection(id, options) {
+    this.updateSectionContextMenuOptions(options);
     this.sections.set(id, options);
     this.emit(this.ADD_SECTION, id, options);
   },
@@ -71,14 +108,55 @@ const SectionsManager = {
   },
   enableSection(id) {
     this.updateSection(id, {enabled: true}, true);
+    this.emit(this.ENABLE_SECTION, id);
   },
   disableSection(id) {
-    this.updateSection(id, {enabled: false, rows: []}, true);
+    this.updateSection(id, {enabled: false, rows: [], initialized: false}, true);
+    this.emit(this.DISABLE_SECTION, id);
+  },
+  updateSections() {
+    this.sections.forEach((section, id) => this.updateSection(id, section, true));
   },
   updateSection(id, options, shouldBroadcast) {
+    this.updateSectionContextMenuOptions(options);
+
     if (this.sections.has(id)) {
       this.sections.set(id, Object.assign(this.sections.get(id), options));
       this.emit(this.UPDATE_SECTION, id, options, shouldBroadcast);
+    }
+  },
+
+  /**
+   * Sets the section's context menu options. These are all available context menu
+   * options minus the ones that are tied to a pref (see CONTEXT_MENU_PREFS) set
+   * to false.
+   *
+   * @param options section options
+   */
+  updateSectionContextMenuOptions(options) {
+    if (options.availableContextMenuOptions) {
+      options.contextMenuOptions = options.availableContextMenuOptions.filter(
+        o => !this.CONTEXT_MENU_PREFS[o] || Services.prefs.getBoolPref(this.CONTEXT_MENU_PREFS[o]));
+    }
+  },
+
+  /**
+   * Update a specific section card by its url. This allows an action to be
+   * broadcast to all existing pages to update a specific card without having to
+   * also force-update the rest of the section's cards and state on those pages.
+   *
+   * @param id              The id of the section with the card to be updated
+   * @param url             The url of the card to update
+   * @param options         The options to update for the card
+   * @param shouldBroadcast Whether or not to broadcast the update
+   */
+  updateSectionCard(id, url, options, shouldBroadcast) {
+    if (this.sections.has(id)) {
+      const card = this.sections.get(id).rows.find(elem => elem.url === url);
+      if (card) {
+        Object.assign(card, options);
+      }
+      this.emit(this.UPDATE_SECTION_CARD, id, url, options, shouldBroadcast);
     }
   },
   onceInitialized(callback) {
@@ -87,6 +165,11 @@ const SectionsManager = {
     } else {
       this.once(this.INIT, callback);
     }
+  },
+  uninit() {
+    Object.keys(this.CONTEXT_MENU_PREFS).forEach(k =>
+      Services.prefs.removeObserver(this.CONTEXT_MENU_PREFS[k], this));
+    SectionsManager.initialized = false;
   }
 };
 
@@ -94,7 +177,10 @@ for (const action of [
   "ACTION_DISPATCHED",
   "ADD_SECTION",
   "REMOVE_SECTION",
+  "ENABLE_SECTION",
+  "DISABLE_SECTION",
   "UPDATE_SECTION",
+  "UPDATE_SECTION_CARD",
   "INIT",
   "UNINIT"
 ]) {
@@ -109,23 +195,26 @@ class SectionsFeed {
     this.onAddSection = this.onAddSection.bind(this);
     this.onRemoveSection = this.onRemoveSection.bind(this);
     this.onUpdateSection = this.onUpdateSection.bind(this);
+    this.onUpdateSectionCard = this.onUpdateSectionCard.bind(this);
   }
 
   init() {
     SectionsManager.on(SectionsManager.ADD_SECTION, this.onAddSection);
     SectionsManager.on(SectionsManager.REMOVE_SECTION, this.onRemoveSection);
     SectionsManager.on(SectionsManager.UPDATE_SECTION, this.onUpdateSection);
+    SectionsManager.on(SectionsManager.UPDATE_SECTION_CARD, this.onUpdateSectionCard);
     // Catch any sections that have already been added
     SectionsManager.sections.forEach((section, id) =>
       this.onAddSection(SectionsManager.ADD_SECTION, id, section));
   }
 
   uninit() {
-    SectionsManager.initialized = false;
+    SectionsManager.uninit();
     SectionsManager.emit(SectionsManager.UNINIT);
     SectionsManager.off(SectionsManager.ADD_SECTION, this.onAddSection);
     SectionsManager.off(SectionsManager.REMOVE_SECTION, this.onRemoveSection);
     SectionsManager.off(SectionsManager.UPDATE_SECTION, this.onUpdateSection);
+    SectionsManager.off(SectionsManager.UPDATE_SECTION_CARD, this.onUpdateSectionCard);
   }
 
   onAddSection(event, id, options) {
@@ -141,6 +230,13 @@ class SectionsFeed {
   onUpdateSection(event, id, options, shouldBroadcast = false) {
     if (options) {
       const action = {type: at.SECTION_UPDATE, data: Object.assign(options, {id})};
+      this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : action);
+    }
+  }
+
+  onUpdateSectionCard(event, id, url, options, shouldBroadcast = false) {
+    if (options) {
+      const action = {type: at.SECTION_UPDATE_CARD, data: {id, url, options}};
       this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : action);
     }
   }
@@ -164,6 +260,9 @@ class SectionsFeed {
         break;
       case at.SECTION_ENABLE:
         SectionsManager.enableSection(action.data);
+        break;
+      case at.UNINIT:
+        this.uninit();
         break;
     }
     if (SectionsManager.ACTIONS_TO_PROXY.includes(action.type) && SectionsManager.sections.size > 0) {

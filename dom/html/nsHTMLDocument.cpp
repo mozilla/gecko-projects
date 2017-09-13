@@ -203,18 +203,13 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsDocument,
                                    mAnchors,
                                    mScripts,
                                    mForms,
-                                   mFormControls,
                                    mWyciwygChannel,
                                    mMidasCommandManager)
 
-NS_IMPL_ADDREF_INHERITED(nsHTMLDocument, nsDocument)
-NS_IMPL_RELEASE_INHERITED(nsHTMLDocument, nsDocument)
-
-// QueryInterface implementation for nsHTMLDocument
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsHTMLDocument)
-  NS_INTERFACE_TABLE_INHERITED(nsHTMLDocument, nsIHTMLDocument,
-                               nsIDOMHTMLDocument)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsDocument)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(nsHTMLDocument,
+                                             nsDocument,
+                                             nsIHTMLDocument,
+                                             nsIDOMHTMLDocument)
 
 JSObject*
 nsHTMLDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
@@ -2827,7 +2822,8 @@ nsHTMLDocument::EditingStateChanged()
     if (designMode) {
       nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
       nsIContent* focusedContent =
-        nsFocusManager::GetFocusedDescendant(window, false,
+        nsFocusManager::GetFocusedDescendant(window,
+                                             nsFocusManager::eOnlyCurrentWindow,
                                              getter_AddRefs(focusedWindow));
       if (focusedContent) {
         nsIFrame* focusedFrame = focusedContent->GetPrimaryFrame();
@@ -3246,9 +3242,10 @@ nsHTMLDocument::ExecCommand(const nsAString& commandID,
 
   bool isCutCopy = (commandID.LowerCaseEqualsLiteral("cut") ||
                     commandID.LowerCaseEqualsLiteral("copy"));
+  bool isPaste = commandID.LowerCaseEqualsLiteral("paste");
 
   // if editing is not on, bail
-  if (!isCutCopy && !IsEditingOnAfterFlush()) {
+  if (!isCutCopy && !isPaste && !IsEditingOnAfterFlush()) {
     return false;
   }
 
@@ -3289,9 +3286,8 @@ nsHTMLDocument::ExecCommand(const nsAString& commandID,
     return false;
   }
 
-  bool restricted = commandID.LowerCaseEqualsLiteral("paste");
-  if (restricted && !nsContentUtils::PrincipalHasPermission(&aSubjectPrincipal,
-                                                            NS_LITERAL_STRING("clipboardRead"))) {
+  if (isPaste && !nsContentUtils::PrincipalHasPermission(&aSubjectPrincipal,
+                                                         nsGkAtoms::clipboardRead)) {
     return false;
   }
 
@@ -3719,7 +3715,6 @@ nsHTMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const
   // - mAnchors
   // - mScripts
   // - mForms
-  // - mFormControls
   // - mWyciwygChannel
   // - mMidasCommandManager
 }

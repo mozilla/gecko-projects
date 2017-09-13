@@ -4,10 +4,10 @@
 
 use api::{BorderSide, BorderStyle, BorderWidths, ClipAndScrollInfo, ColorF, LayerPoint, LayerRect};
 use api::{LayerSize, LocalClip, NormalBorder};
+use clip::ClipSource;
 use ellipse::Ellipse;
 use gpu_cache::GpuDataRequest;
 use frame_builder::FrameBuilder;
-use mask_cache::ClipSource;
 use prim_store::{BorderPrimitiveCpu, PrimitiveContainer};
 use tiling::PrimitiveFlags;
 use util::{lerp, pack_as_float};
@@ -228,7 +228,7 @@ impl FrameBuilder {
                                    clip_and_scroll: ClipAndScrollInfo,
                                    local_clip: &LocalClip,
                                    corner_instances: [BorderCornerInstance; 4],
-                                   extra_clips: &[ClipSource]) {
+                                   clip_sources: Vec<ClipSource>) {
         let radius = &border.radius;
         let left = &border.left;
         let right = &border.right;
@@ -274,7 +274,7 @@ impl FrameBuilder {
         self.add_primitive(clip_and_scroll,
                            &rect,
                            local_clip,
-                           extra_clips,
+                           clip_sources,
                            PrimitiveContainer::Border(prim_cpu));
     }
 
@@ -425,7 +425,7 @@ impl FrameBuilder {
                                              clip_and_scroll,
                                              local_clip,
                                              corner_instances,
-                                             &extra_clips);
+                                             extra_clips);
         }
     }
 }

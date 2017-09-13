@@ -7,6 +7,7 @@ Runs the reftest test harness.
 """
 
 import collections
+import copy
 import itertools
 import json
 import multiprocessing
@@ -18,6 +19,7 @@ import signal
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta
 
 SCRIPT_DIRECTORY = os.path.abspath(
     os.path.realpath(os.path.dirname(__file__)))
@@ -310,11 +312,12 @@ class RefTest(object):
                 sandbox_whitelist_paths.append(options.workPath)
         except AttributeError:
             pass
-        try:
-            if options.objPath:
-                sandbox_whitelist_paths.append(options.objPath)
-        except AttributeError:
-            pass
+        if platform.system() == "Linux":
+            try:
+                if options.objPath:
+                    sandbox_whitelist_paths.append(options.objPath)
+            except AttributeError:
+                pass
         if (platform.system() == "Linux" or
             platform.system() in ("Windows", "Microsoft")):
             # Trailing slashes are needed to indicate directories on Linux and Windows
@@ -410,50 +413,86 @@ class RefTest(object):
         browserEnv["XPCOM_MEM_BLOAT_LOG"] = self.leakLogFile
         return browserEnv
 
-    def killNamedOrphans(self, pname):
-        """ Kill orphan processes matching the given command name """
-        self.log.info("Checking for orphan %s processes..." % pname)
-
-        def _psInfo(line):
-            if pname in line:
-                self.log.info(line)
-        process = mozprocess.ProcessHandler(['ps', '-f'],
-                                            processOutputLine=_psInfo)
-        process.run()
-        process.wait()
-
-        def _psKill(line):
-            parts = line.split()
-            if len(parts) == 3 and parts[0].isdigit():
-                pid = int(parts[0])
-                if parts[2] == pname and parts[1] == '1':
-                    self.log.info("killing %s orphan with pid %d" % (pname, pid))
-                    try:
-                        os.kill(
-                            pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-                    except Exception as e:
-                        self.log.info("Failed to kill process %d: %s" %
-                                      (pid, str(e)))
-        process = mozprocess.ProcessHandler(['ps', '-o', 'pid,ppid,comm'],
-                                            processOutputLine=_psKill)
-        process.run()
-        process.wait()
-
     def cleanup(self, profileDir):
         if profileDir:
             shutil.rmtree(profileDir, True)
 
+    def verifyTests(self, tests, options):
+        """
+        Support --verify mode: Run test(s) many times in a variety of
+        configurations/environments in an effort to find intermittent
+        failures.
+        """
+
+        self._populate_logger(options)
+
+        # Number of times to repeat test(s) when running with --repeat
+        VERIFY_REPEAT = 20
+        # Number of times to repeat test(s) when running test in separate browser
+        VERIFY_REPEAT_SINGLE_BROWSER = 10
+
+        def step1():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = VERIFY_REPEAT
+            stepOptions.runUntilFailure = True
+            result = self.runTests(tests, stepOptions)
+            return result
+
+        def step2():
+            stepOptions = copy.deepcopy(options)
+            for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                result = self.runTests(tests, stepOptions)
+                if result != 0:
+                    break
+            return result
+
+        steps = [
+            ("1. Run each test %d times in one browser." % VERIFY_REPEAT,
+             step1),
+            ("2. Run each test %d times in a new browser each time." %
+             VERIFY_REPEAT_SINGLE_BROWSER,
+             step2),
+        ]
+
+        stepResults = {}
+        for (descr, step) in steps:
+            stepResults[descr] = "not run / incomplete"
+
+        startTime = datetime.now()
+        maxTime = timedelta(seconds=options.verify_max_time)
+        finalResult = "PASSED"
+        for (descr, step) in steps:
+            if (datetime.now() - startTime) > maxTime:
+                self.log.info("::: Test verification is taking too long: Giving up!")
+                self.log.info("::: So far, all checks passed, but not all checks were run.")
+                break
+            self.log.info(':::')
+            self.log.info('::: Running test verification step "%s"...' % descr)
+            self.log.info(':::')
+            result = step()
+            if result != 0:
+                stepResults[descr] = "FAIL"
+                finalResult = "FAILED!"
+                break
+            stepResults[descr] = "Pass"
+
+        self.log.info(':::')
+        self.log.info('::: Test verification summary for:')
+        self.log.info(':::')
+        for test in tests:
+            self.log.info('::: '+test)
+        self.log.info(':::')
+        for descr in sorted(stepResults.keys()):
+            self.log.info('::: %s : %s' % (descr, stepResults[descr]))
+        self.log.info(':::')
+        self.log.info('::: Test verification %s' % finalResult)
+        self.log.info(':::')
+
+        return result
+
     def runTests(self, tests, options, cmdargs=None):
         cmdargs = cmdargs or []
         self._populate_logger(options)
-
-        # Despite our efforts to clean up servers started by this script, in practice
-        # we still see infrequent cases where a process is orphaned and interferes
-        # with future tests, typically because the old server is keeping the port in use.
-        # Try to avoid those failures by checking for and killing orphan servers before
-        # trying to start new ones.
-        self.killNamedOrphans('ssltunnel')
-        self.killNamedOrphans('xpcshell')
 
         if options.cleanupCrashes:
             mozcrash.cleanup_pending_crash_reports()
@@ -799,7 +838,12 @@ def run_test_harness(parser, options):
     if options.xrePath is None:
         options.xrePath = os.path.dirname(options.app)
 
-    return reftest.runTests(options.tests, options)
+    if options.verify:
+        result = reftest.verifyTests(options.tests, options)
+    else:
+        result = reftest.runTests(options.tests, options)
+
+    return result
 
 
 if __name__ == "__main__":

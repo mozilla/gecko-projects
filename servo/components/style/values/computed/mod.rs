@@ -4,7 +4,7 @@
 
 //! Computed values.
 
-use Atom;
+use {Atom, Namespace};
 use context::QuirksMode;
 use euclid::Size2D;
 use font_metrics::FontMetricsProvider;
@@ -14,16 +14,16 @@ use properties;
 use properties::{ComputedValues, StyleBuilder};
 #[cfg(feature = "servo")]
 use servo_url::ServoUrl;
-use std::f32;
-use std::fmt;
+use std::{f32, fmt, ops};
 #[cfg(feature = "servo")]
 use std::sync::Arc;
 use style_traits::ToCss;
+use style_traits::cursor::Cursor;
 use super::{CSSFloat, CSSInteger};
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
-use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
+use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
+use super::generics::grid::{TrackSize as GenericTrackSize, TrackList as GenericTrackList};
 use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
-use super::generics::grid::TrackList as GenericTrackList;
 use super::specified;
 
 pub use app_units::Au;
@@ -34,7 +34,8 @@ pub use self::angle::Angle;
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderCornerRadius};
-pub use self::color::{Color, RGBAColor};
+pub use self::box_::VerticalAlign;
+pub use self::color::{Color, ColorPropertyValue, RGBAColor};
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
 pub use self::flex::FlexBasis;
 pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, MozImageRect};
@@ -43,7 +44,6 @@ pub use self::gecko::ScrollSnapPoint;
 pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
 pub use super::specified::BorderStyle;
-pub use super::generics::grid::GridLine;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
 pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::length::NonNegativeLengthOrPercentage;
@@ -60,6 +60,8 @@ pub mod angle;
 pub mod background;
 pub mod basic_shape;
 pub mod border;
+#[path = "box.rs"]
+pub mod box_;
 pub mod color;
 pub mod effects;
 pub mod flex;
@@ -294,6 +296,22 @@ impl<T> ToComputedValue for Vec<T>
     }
 }
 
+impl<T> ToComputedValue for Box<T>
+    where T: ToComputedValue
+{
+    type ComputedValue = Box<<T as ToComputedValue>::ComputedValue>;
+
+    #[inline]
+    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
+        Box::new(T::to_computed_value(self, context))
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
+        Box::new(T::from_computed_value(computed))
+    }
+}
+
 impl<T> ToComputedValue for Box<[T]>
     where T: ToComputedValue
 {
@@ -310,31 +328,18 @@ impl<T> ToComputedValue for Box<[T]>
     }
 }
 
-/// A marker trait to represent that the specified value is also the computed
-/// value.
-pub trait ComputedValueAsSpecified {}
-
-impl<T> ToComputedValue for T
-    where T: ComputedValueAsSpecified + Clone,
-{
-    type ComputedValue = T;
-
-    #[inline]
-    fn to_computed_value(&self, _context: &Context) -> T {
-        self.clone()
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &T) -> Self {
-        computed.clone()
-    }
-}
-
-impl ComputedValueAsSpecified for Atom {}
-impl ComputedValueAsSpecified for bool {}
-impl ComputedValueAsSpecified for f32 {}
-
-impl ComputedValueAsSpecified for specified::BorderStyle {}
+trivial_to_computed_value!(());
+trivial_to_computed_value!(bool);
+trivial_to_computed_value!(f32);
+trivial_to_computed_value!(i32);
+trivial_to_computed_value!(u8);
+trivial_to_computed_value!(u16);
+trivial_to_computed_value!(u32);
+trivial_to_computed_value!(Atom);
+trivial_to_computed_value!(BorderStyle);
+trivial_to_computed_value!(Cursor);
+trivial_to_computed_value!(Namespace);
+trivial_to_computed_value!(String);
 
 /// A `<number>` value.
 pub type Number = CSSFloat;
@@ -445,7 +450,7 @@ pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNe
 
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, ComputeSquaredDistance, Copy, Debug, Eq, PartialEq)]
 /// A computed cliprect for clip and image-region
 pub struct ClipRect {
     pub top: Option<Au>,
@@ -498,10 +503,13 @@ pub type TrackSize = GenericTrackSize<LengthOrPercentage>;
 
 /// The computed value of a grid `<track-list>`
 /// (could also be `<auto-track-list>` or `<explicit-track-list>`)
-pub type TrackList = GenericTrackList<LengthOrPercentage>;
+pub type TrackList = GenericTrackList<LengthOrPercentage, Integer>;
+
+/// The computed value of a `<grid-line>`.
+pub type GridLine = GenericGridLine<Integer>;
 
 /// `<grid-template-rows> | <grid-template-columns>`
-pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage>;
+pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage, Integer>;
 
 impl ClipRectOrAuto {
     /// Return an auto (default for clip-rect and image-region) value
@@ -548,6 +556,13 @@ impl NonNegativeAu {
     pub fn scale_by(self, factor: f32) -> Self {
         // scale this by zero if factor is negative.
         NonNegative::<Au>(self.0.scale_by(factor.max(0.)))
+    }
+}
+
+impl ops::Add<NonNegativeAu> for NonNegativeAu {
+    type Output = NonNegativeAu;
+    fn add(self, other: Self) -> Self {
+        (self.0 + other.0).into()
     }
 }
 

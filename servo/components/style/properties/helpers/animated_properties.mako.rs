@@ -8,7 +8,6 @@
 
 use app_units::Au;
 use cssparser::Parser;
-use euclid::Point3D;
 #[cfg(feature = "gecko")] use gecko_bindings::bindings::RawServoAnimationValueMap;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::RawGeckoGfxMatrix4x4;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::nsCSSPropertyID;
@@ -21,11 +20,12 @@ use properties::longhands::background_size::computed_value::T as BackgroundSizeL
 use properties::longhands::border_spacing::computed_value::T as BorderSpacing;
 use properties::longhands::font_weight::computed_value::T as FontWeight;
 use properties::longhands::font_stretch::computed_value::T as FontStretch;
+#[cfg(feature = "gecko")]
+use properties::longhands::font_variation_settings::computed_value::T as FontVariationSettings;
 use properties::longhands::line_height::computed_value::T as LineHeight;
 use properties::longhands::transform::computed_value::ComputedMatrix;
 use properties::longhands::transform::computed_value::ComputedOperation as TransformOperation;
 use properties::longhands::transform::computed_value::T as TransformList;
-use properties::longhands::vertical_align::computed_value::T as VerticalAlign;
 use properties::longhands::visibility::computed_value::T as Visibility;
 #[cfg(feature = "gecko")] use properties::{PropertyId, PropertyDeclarationId, LonghandId};
 #[cfg(feature = "gecko")] use properties::{ShorthandId};
@@ -33,7 +33,7 @@ use selectors::parser::SelectorParseError;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp;
-#[cfg(feature = "gecko")] use fnv::FnvHashMap;
+#[cfg(feature = "gecko")] use hash::FnvHashMap;
 use style_traits::ParseError;
 use super::ComputedValues;
 #[cfg(feature = "gecko")]
@@ -46,7 +46,7 @@ use values::animated::effects::Filter as AnimatedFilter;
 use values::animated::effects::FilterList as AnimatedFilterList;
 use values::animated::effects::TextShadowList as AnimatedTextShadowList;
 use values::computed::{Angle, BorderCornerRadius, CalcLengthOrPercentage};
-use values::computed::{ClipRect, Context, ComputedUrl, ComputedValueAsSpecified};
+use values::computed::{ClipRect, Context, ComputedUrl};
 use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
 use values::computed::{LengthOrPercentageOrNone, MaxLength, NonNegativeAu};
 use values::computed::{NonNegativeNumber, Number, NumberOrPercentage, Percentage};
@@ -54,7 +54,11 @@ use values::computed::{PositiveIntegerOrAuto, ToComputedValue};
 #[cfg(feature = "gecko")] use values::computed::MozLength;
 use values::computed::length::{NonNegativeLengthOrAuto, NonNegativeLengthOrNormal};
 use values::computed::length::NonNegativeLengthOrPercentage;
+use values::computed::transform::DirectionVector;
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
+#[cfg(feature = "gecko")] use values::generics::FontSettings as GenericFontSettings;
+#[cfg(feature = "gecko")] use values::generics::FontSettingTag as GenericFontSettingTag;
+#[cfg(feature = "gecko")] use values::generics::FontSettingTagFloat;
 use values::generics::NonNegative;
 use values::generics::effects::Filter;
 use values::generics::position as generic_position;
@@ -70,6 +74,7 @@ pub trait RepeatableListAnimatable: Animate {}
 /// not animatable from CSS animations or Web Animations. CSS transitions also does not allow
 /// animating 'display', but for CSS transitions we have the separate TransitionProperty type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum AnimatableLonghand {
     % for prop in data.longhands:
@@ -199,7 +204,7 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
 // NB: This needs to be here because it needs all the longhands generated
 // beforehand.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, Eq, Hash, PartialEq, ToCss)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, ToCss, ToComputedValue)]
 pub enum TransitionProperty {
     /// All, any transitionable property changing should generate a transition.
     All,
@@ -213,10 +218,6 @@ pub enum TransitionProperty {
     /// unknown property.
     Unsupported(CustomIdent)
 }
-
-no_viewport_percentage!(TransitionProperty);
-
-impl ComputedValueAsSpecified for TransitionProperty {}
 
 impl TransitionProperty {
     /// Iterates over each longhand property.
@@ -244,21 +245,15 @@ impl TransitionProperty {
     /// Parse a transition-property value.
     pub fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let ident = input.expect_ident()?;
-        let supported = match_ignore_ascii_case! { &ident,
-            "all" => Ok(Some(TransitionProperty::All)),
+        match_ignore_ascii_case! { &ident,
+            "all" => Ok(TransitionProperty::All),
             % for prop in data.longhands + data.shorthands_except_all():
                 % if prop.transitionable:
-                    "${prop.name}" => Ok(Some(TransitionProperty::${prop.camel_case})),
+                    "${prop.name}" => Ok(TransitionProperty::${prop.camel_case}),
                 % endif
             % endfor
-            "none" => Err(()),
-            _ => Ok(None),
-        };
-
-        match supported {
-            Ok(Some(property)) => Ok(property),
-            Ok(None) => CustomIdent::from_ident(ident, &[]).map(TransitionProperty::Unsupported),
-            Err(()) => Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
+            "none" => Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
+            _ => CustomIdent::from_ident(ident, &[]).map(TransitionProperty::Unsupported),
         }
     }
 
@@ -549,7 +544,11 @@ impl AnimationValue {
                     longhands::system_font::resolve_system_font(sf, context);
                 }
             % endif
+            % if prop.boxed:
+            let computed = (**val).to_computed_value(context);
+            % else:
             let computed = val.to_computed_value(context);
+            % endif
             Some(AnimationValue::${prop.camel_case}(
             % if prop.is_animatable_with_computed_value:
                 computed
@@ -788,11 +787,6 @@ impl ToAnimatedZero for Visibility {
     }
 }
 
-impl ToAnimatedZero for VerticalAlign {
-    #[inline]
-    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
-}
-
 /// https://drafts.csswg.org/css-transitions/#animtype-lpcalc
 impl Animate for CalcLengthOrPercentage {
     #[inline]
@@ -922,8 +916,200 @@ impl Into<FontStretch> for f64 {
     }
 }
 
+/// https://drafts.csswg.org/css-fonts-4/#font-variation-settings-def
+#[cfg(feature = "gecko")]
+impl Animate for FontVariationSettings {
+    #[inline]
+    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
+        FontSettingTagIter::new(self, other)?
+            .map(|r| r.and_then(|(st, ot)| st.animate(&ot, procedure)))
+            .collect::<Result<Vec<FontSettingTag>, ()>>()
+            .map(GenericFontSettings::Tag)
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl ComputeSquaredDistance for FontVariationSettings {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        FontSettingTagIter::new(self, other)?
+            .map(|r| r.and_then(|(st, ot)| st.compute_squared_distance(&ot)))
+            .sum()
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl ToAnimatedZero for FontVariationSettings {
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        Err(())
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl Animate for FontSettingTag {
+    #[inline]
+    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
+        if self.tag != other.tag {
+            return Err(());
+        }
+        let value = self.value.animate(&other.value, procedure)?;
+        Ok(FontSettingTag {
+            tag: self.tag,
+            value,
+        })
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl ComputeSquaredDistance for FontSettingTag {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        if self.tag != other.tag {
+            return Err(());
+        }
+        self.value.compute_squared_distance(&other.value)
+    }
+}
+
+#[cfg(feature = "gecko")]
+type FontSettingTag = GenericFontSettingTag<FontSettingTagFloat>;
+
+#[cfg(feature = "gecko")]
+struct FontSettingTagIterState<'a> {
+    tags: Vec<(&'a FontSettingTag)>,
+    index: usize,
+    prev_tag: u32,
+}
+
+#[cfg(feature = "gecko")]
+impl<'a> FontSettingTagIterState<'a> {
+    fn new(tags: Vec<(&'a FontSettingTag)>) -> FontSettingTagIterState<'a> {
+        FontSettingTagIterState {
+            index: tags.len(),
+            tags,
+            prev_tag: 0,
+        }
+    }
+}
+
+/// Iterator for font-variation-settings tag lists
+///
+/// [CSS fonts level 4](https://drafts.csswg.org/css-fonts-4/#descdef-font-face-font-variation-settings)
+/// defines the animation of font-variation-settings as follows:
+///
+///   Two declarations of font-feature-settings[sic] can be animated between if they are "like".
+///   "Like" declarations are ones where the same set of properties appear (in any order).
+///   Because succesive[sic] duplicate properties are applied instead of prior duplicate
+///   properties, two declarations can be "like" even if they have differing number of
+///   properties. If two declarations are "like" then animation occurs pairwise between
+///   corresponding values in the declarations.
+///
+/// In other words if we have the following lists:
+///
+///   "wght" 1.4, "wdth" 5, "wght" 2
+///   "wdth" 8, "wght" 4, "wdth" 10
+///
+/// We should animate between:
+///
+///   "wdth" 5, "wght" 2
+///   "wght" 4, "wdth" 10
+///
+/// This iterator supports this by sorting the two lists, then iterating them in reverse,
+/// and skipping entries with repeated tag names. It will return Some(Err()) if it reaches the
+/// end of one list before the other, or if the tag names do not match.
+///
+/// For the above example, this iterator would return:
+///
+///   Some(Ok("wght" 2, "wght" 4))
+///   Some(Ok("wdth" 5, "wdth" 10))
+///   None
+///
+#[cfg(feature = "gecko")]
+struct FontSettingTagIter<'a> {
+    a_state: FontSettingTagIterState<'a>,
+    b_state: FontSettingTagIterState<'a>,
+}
+
+#[cfg(feature = "gecko")]
+impl<'a> FontSettingTagIter<'a> {
+    fn new(
+        a_settings: &'a FontVariationSettings,
+        b_settings: &'a FontVariationSettings,
+    ) -> Result<FontSettingTagIter<'a>, ()> {
+        if let (&GenericFontSettings::Tag(ref a_tags), &GenericFontSettings::Tag(ref b_tags)) = (a_settings, b_settings)
+        {
+            fn as_new_sorted_tags(tags: &Vec<FontSettingTag>) -> Vec<(&FontSettingTag)> {
+                use std::iter::FromIterator;
+                let mut sorted_tags: Vec<(&FontSettingTag)> = Vec::from_iter(tags.iter());
+                sorted_tags.sort_by_key(|k| k.tag);
+                sorted_tags
+            };
+
+            Ok(FontSettingTagIter {
+                a_state: FontSettingTagIterState::new(as_new_sorted_tags(a_tags)),
+                b_state: FontSettingTagIterState::new(as_new_sorted_tags(b_tags)),
+            })
+        } else {
+            Err(())
+        }
+    }
+
+    fn next_tag(state: &mut FontSettingTagIterState<'a>) -> Option<(&'a FontSettingTag)> {
+        if state.index == 0 {
+            return None;
+        }
+
+        state.index -= 1;
+        let tag = state.tags[state.index];
+        if tag.tag == state.prev_tag {
+            FontSettingTagIter::next_tag(state)
+        } else {
+            state.prev_tag = tag.tag;
+            Some(tag)
+        }
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl<'a> Iterator for FontSettingTagIter<'a> {
+    type Item = Result<(&'a FontSettingTag, &'a FontSettingTag), ()>;
+
+    fn next(&mut self) -> Option<Result<(&'a FontSettingTag, &'a FontSettingTag), ()>> {
+        match (
+            FontSettingTagIter::next_tag(&mut self.a_state),
+            FontSettingTagIter::next_tag(&mut self.b_state),
+        ) {
+            (Some(at), Some(bt)) if at.tag == bt.tag => Some(Ok((at, bt))),
+            (None, None) => None,
+            _ => Some(Err(())), // Mismatch number of unique tags or tag names.
+        }
+    }
+}
+
 impl<H, V> RepeatableListAnimatable for generic_position::Position<H, V>
     where H: RepeatableListAnimatable, V: RepeatableListAnimatable {}
+
+/// https://drafts.csswg.org/css-transitions/#animtype-rect
+impl Animate for ClipRect {
+    #[inline]
+    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
+        let animate_component = |this: &Option<Au>, other: &Option<Au>| {
+            match (this.animate(other, procedure)?, procedure) {
+                (None, Procedure::Interpolate { .. }) => Ok(None),
+                (None, _) => Err(()),
+                (result, _) => Ok(result),
+            }
+        };
+
+        Ok(ClipRect {
+            top:    animate_component(&self.top, &other.top)?,
+            right:  animate_component(&self.right, &other.right)?,
+            bottom: animate_component(&self.bottom, &other.bottom)?,
+            left:   animate_component(&self.left, &other.left)?,
+        })
+    }
+}
 
 impl ToAnimatedZero for ClipRect {
     #[inline]
@@ -960,7 +1146,7 @@ impl ToAnimatedZero for TransformOperation {
                 Ok(TransformOperation::Scale(1.0, 1.0, 1.0))
             },
             TransformOperation::Rotate(x, y, z, a) => {
-                let (x, y, z, _) = get_normalized_vector_and_angle(x, y, z, a);
+                let (x, y, z, _) = TransformList::get_normalized_vector_and_angle(x, y, z, a);
                 Ok(TransformOperation::Rotate(x, y, z, Angle::zero()))
             },
             TransformOperation::Perspective(..) |
@@ -1037,8 +1223,10 @@ impl Animate for TransformOperation {
                 &TransformOperation::Rotate(fx, fy, fz, fa),
                 &TransformOperation::Rotate(tx, ty, tz, ta),
             ) => {
-                let (fx, fy, fz, fa) = get_normalized_vector_and_angle(fx, fy, fz, fa);
-                let (tx, ty, tz, ta) = get_normalized_vector_and_angle(tx, ty, tz, ta);
+                let (fx, fy, fz, fa) =
+                    TransformList::get_normalized_vector_and_angle(fx, fy, fz, fa);
+                let (tx, ty, tz, ta) =
+                    TransformList::get_normalized_vector_and_angle(tx, ty, tz, ta);
                 if (fx, fy, fz) == (tx, ty, tz) {
                     let ia = fa.animate(&ta, procedure)?;
                     Ok(TransformOperation::Rotate(fx, fy, fz, ia))
@@ -1451,17 +1639,12 @@ pub struct MatrixDecomposed3D {
     pub quaternion: Quaternion,
 }
 
-/// A wrapper of Point3D to represent the direction vector (rotate axis) for Rotate3D.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct DirectionVector(Point3D<f64>);
-
 impl Quaternion {
     /// Return a quaternion from a unit direction vector and angle (unit: radian).
     #[inline]
     fn from_direction_and_angle(vector: &DirectionVector, angle: f64) -> Self {
-        debug_assert!((vector.length() - 1.).abs() < 0.0001f64,
-                       "Only accept an unit direction vector to create a quaternion");
+        debug_assert!((vector.length() - 1.).abs() < 0.0001,
+                      "Only accept an unit direction vector to create a quaternion");
         // Reference:
         // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
         //
@@ -1471,9 +1654,9 @@ impl Quaternion {
         //   q = cos(theta/2) + (xi + yj + zk)(sin(theta/2))
         //     = cos(theta/2) +
         //       x*sin(theta/2)i + y*sin(theta/2)j + z*sin(theta/2)k
-        Quaternion(vector.0.x * (angle / 2.).sin(),
-                   vector.0.y * (angle / 2.).sin(),
-                   vector.0.z * (angle / 2.).sin(),
+        Quaternion(vector.x as f64 * (angle / 2.).sin(),
+                   vector.y as f64 * (angle / 2.).sin(),
+                   vector.z as f64 * (angle / 2.).sin(),
                    (angle / 2.).cos())
     }
 
@@ -1492,47 +1675,6 @@ impl ComputeSquaredDistance for Quaternion {
         // cos(theta/2) = (q1 dot q2) / (|q1| * |q2|) = q1 dot q2.
         let distance = self.dot(other).max(-1.0).min(1.0).acos() * 2.0;
         Ok(SquaredDistance::Value(distance * distance))
-    }
-}
-
-impl DirectionVector {
-    /// Create a DirectionVector.
-    #[inline]
-    fn new(x: f32, y: f32, z: f32) -> Self {
-        DirectionVector(Point3D::new(x as f64, y as f64, z as f64))
-    }
-
-    /// Return the normalized direction vector.
-    #[inline]
-    fn normalize(&mut self) -> bool {
-        let len = self.length();
-        if len > 0. {
-            self.0.x = self.0.x / len;
-            self.0.y = self.0.y / len;
-            self.0.z = self.0.z / len;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Get the length of this vector.
-    #[inline]
-    fn length(&self) -> f64 {
-        self.0.to_array().iter().fold(0f64, |sum, v| sum + v * v).sqrt()
-    }
-}
-
-/// Return the normalized direction vector and its angle.
-// A direction vector that cannot be normalized, such as [0,0,0], will cause the
-// rotation to not be applied. i.e. Use an identity matrix or rotate3d(0, 0, 1, 0).
-fn get_normalized_vector_and_angle(x: f32, y: f32, z: f32, angle: Angle)
-                                   -> (f32, f32, f32, Angle) {
-    let mut vector = DirectionVector::new(x, y, z);
-    if vector.normalize() {
-        (vector.0.x as f32, vector.0.y as f32, vector.0.z as f32, angle)
-    } else {
-        (0., 0., 1., Angle::zero())
     }
 }
 
@@ -1692,8 +1834,8 @@ fn decompose_2d_matrix(matrix: &ComputedMatrix) -> Result<MatrixDecomposed3D, ()
     // |   0   0  0   1 |
     let (mut m11, mut m12) = (matrix.m11, matrix.m12);
     let (mut m21, mut m22) = (matrix.m21, matrix.m22);
+    // Check if this is a singular matrix.
     if m11 * m22 == m12 * m21 {
-        // singular matrix
         return Err(());
     }
 
@@ -1711,8 +1853,10 @@ fn decompose_2d_matrix(matrix: &ComputedMatrix) -> Result<MatrixDecomposed3D, ()
     shear_xy /= scale_y;
 
     let determinant = m11 * m22 - m12 * m21;
-    debug_assert!(0.99 < determinant.abs() && determinant.abs() < 1.01,
-                  "determinant should now be 1 or -1");
+    // Determinant should now be 1 or -1.
+    if 0.99 > determinant.abs() || determinant.abs() > 1.01 {
+        return Err(());
+    }
 
     if determinant < 0. {
         m11 = -m11;
@@ -2200,8 +2344,10 @@ impl ComputeSquaredDistance for TransformOperation {
                 &TransformOperation::Rotate(fx, fy, fz, fa),
                 &TransformOperation::Rotate(tx, ty, tz, ta),
             ) => {
-                let (fx, fy, fz, angle1) = get_normalized_vector_and_angle(fx, fy, fz, fa);
-                let (tx, ty, tz, angle2) = get_normalized_vector_and_angle(tx, ty, tz, ta);
+                let (fx, fy, fz, angle1) =
+                    TransformList::get_normalized_vector_and_angle(fx, fy, fz, fa);
+                let (tx, ty, tz, angle2) =
+                    TransformList::get_normalized_vector_and_angle(tx, ty, tz, ta);
                 if (fx, fy, fz) == (tx, ty, tz) {
                     angle1.compute_squared_distance(&angle2)
                 } else {
@@ -2248,10 +2394,10 @@ impl ComputeSquaredDistance for TransformOperation {
 impl ComputeSquaredDistance for TransformList {
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
-        let this = self.0.as_ref().map_or(&[][..], |l| l);
-        let other = other.0.as_ref().map_or(&[][..], |l| l);
+        let list1 = self.0.as_ref().map_or(&[][..], |l| l);
+        let list2 = other.0.as_ref().map_or(&[][..], |l| l);
 
-        this.iter().zip_longest(other).map(|it| {
+        let squared_dist: Result<SquaredDistance, _> = list1.iter().zip_longest(list2).map(|it| {
             match it {
                 EitherOrBoth::Both(this, other) => {
                     this.compute_squared_distance(other)
@@ -2260,7 +2406,16 @@ impl ComputeSquaredDistance for TransformList {
                     list.to_animated_zero()?.compute_squared_distance(list)
                 },
             }
-        }).sum()
+        }).sum();
+
+        // Roll back to matrix interpolation if there is any Err(()) in the transform lists, such
+        // as mismatched transform functions.
+        if let Err(_) = squared_dist {
+            let matrix1: ComputedMatrix = self.to_transform_3d_matrix(None).ok_or(())?.into();
+            let matrix2: ComputedMatrix = other.to_transform_3d_matrix(None).ok_or(())?.into();
+            return matrix1.compute_squared_distance(&matrix2);
+        }
+        squared_dist
     }
 }
 

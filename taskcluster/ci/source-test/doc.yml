@@ -1,4 +1,4 @@
-doc-generate:
+generate:
     description: Generate the Sphinx documentation
     platform: lint/opt
     treeherder:
@@ -18,13 +18,14 @@ doc-generate:
         command: >
             cd /builds/worker/checkouts/gecko &&
             ./mach doc --outdir docs-out --no-open --archive
+        sparse-profile: sphinx-docs
     when:
         files-changed:
             - '**/*.py'
             - '**/*.rst'
             - 'tools/docs/**'
 
-doc-upload:
+upload:
     description: Generate and upload the Sphinx documentation
     platform: lint/opt
     treeherder:
@@ -40,6 +41,7 @@ doc-upload:
     run:
         using: run-task
         command: cd /builds/worker/checkouts/gecko && ./mach doc --upload --no-open
+        sparse-profile: sphinx-docs
     scopes:
         - secrets:get:project/releng/gecko/build/level-{level}/gecko-docs-upload
     when:

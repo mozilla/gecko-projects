@@ -84,7 +84,7 @@ FormAutofillParent.prototype = {
    * Initializes ProfileStorage and registers the message handler.
    */
   async init() {
-    Services.obs.addObserver(this, "advanced-pane-loaded");
+    Services.obs.addObserver(this, "sync-pane-loaded");
     Services.ppmm.addMessageListener("FormAutofill:InitStorage", this);
     Services.ppmm.addMessageListener("FormAutofill:GetRecords", this);
     Services.ppmm.addMessageListener("FormAutofill:SaveAddress", this);
@@ -104,18 +104,12 @@ FormAutofillParent.prototype = {
   observe(subject, topic, data) {
     log.debug("observe:", topic, "with data:", data);
     switch (topic) {
-      case "advanced-pane-loaded": {
-        let useOldOrganization = Services.prefs.getBoolPref("browser.preferences.useOldOrganization",
-                                                            false);
-        let formAutofillPreferences = new FormAutofillPreferences({useOldOrganization});
+      case "sync-pane-loaded": {
+        let formAutofillPreferences = new FormAutofillPreferences();
         let document = subject.document;
         let prefGroup = formAutofillPreferences.init(document);
-        let parentNode = useOldOrganization ?
-                         document.getElementById("mainPrefPane") :
-                         document.getElementById("passwordsGroup");
-        let insertBeforeNode = useOldOrganization ?
-                               document.getElementById("locationBarGroup") :
-                               document.getElementById("masterPasswordRow");
+        let parentNode = document.getElementById("passwordsGroup");
+        let insertBeforeNode = document.getElementById("masterPasswordRow");
         parentNode.insertBefore(prefGroup, insertBeforeNode);
         break;
       }
@@ -257,7 +251,7 @@ FormAutofillParent.prototype = {
     Services.ppmm.removeMessageListener("FormAutofill:SaveCreditCard", this);
     Services.ppmm.removeMessageListener("FormAutofill:RemoveAddresses", this);
     Services.ppmm.removeMessageListener("FormAutofill:RemoveCreditCards", this);
-    Services.obs.removeObserver(this, "advanced-pane-loaded");
+    Services.obs.removeObserver(this, "sync-pane-loaded");
     Services.prefs.removeObserver(ENABLED_AUTOFILL_ADDRESSES_PREF, this);
     Services.prefs.removeObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
   },
@@ -355,7 +349,7 @@ FormAutofillParent.prototype = {
     this._updateStatus();
   },
 
-  _onAddressSubmit(address, target) {
+  _onAddressSubmit(address, target, timeStartedFillingMS) {
     if (address.guid) {
       // Avoid updating the fields that users don't modify.
       let originalAddress = this.profileStorage.addresses.get(address.guid);
@@ -366,6 +360,8 @@ FormAutofillParent.prototype = {
       }
 
       if (!this.profileStorage.addresses.mergeIfPossible(address.guid, address.record)) {
+        this._recordFormFillingTime("address", "autofill-update", timeStartedFillingMS);
+
         FormAutofillDoorhanger.show(target, "update").then((state) => {
           let changedGUIDs = this.profileStorage.addresses.mergeToStorage(address.record);
           switch (state) {
@@ -376,7 +372,7 @@ FormAutofillParent.prototype = {
               break;
             case "update":
               if (!changedGUIDs.length) {
-                this.profileStorage.addresses.update(address.guid, address.record);
+                this.profileStorage.addresses.update(address.guid, address.record, true);
                 changedGUIDs.push(address.guid);
               } else {
                 this.profileStorage.addresses.remove(address.guid);
@@ -389,6 +385,7 @@ FormAutofillParent.prototype = {
         Services.telemetry.scalarAdd("formautofill.addresses.fill_type_autofill_update", 1);
         return;
       }
+      this._recordFormFillingTime("address", "autofill", timeStartedFillingMS);
       this.profileStorage.addresses.notifyUsed(address.guid);
       // Address is merged successfully
       Services.telemetry.scalarAdd("formautofill.addresses.fill_type_autofill", 1);
@@ -398,6 +395,7 @@ FormAutofillParent.prototype = {
         changedGUIDs.push(this.profileStorage.addresses.add(address.record));
       }
       changedGUIDs.forEach(guid => this.profileStorage.addresses.notifyUsed(guid));
+      this._recordFormFillingTime("address", "manual", timeStartedFillingMS);
 
       // Show first time use doorhanger
       if (Services.prefs.getBoolPref("extensions.formautofill.firstTimeUse")) {
@@ -423,8 +421,15 @@ FormAutofillParent.prototype = {
     //   - User fills form manually
     if (creditCard.guid &&
         Object.keys(creditCard.record).every(key => creditCard.untouchedFields.includes(key))) {
+      // Add probe to record credit card autofill(without modification).
+      Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill", 1);
       return;
     }
+
+    // Add the probe to record credit card manual filling or autofill but modified case.
+    let ccScalar = creditCard.guid ? "formautofill.creditCards.fill_type_autofill_modified" :
+                                     "formautofill.creditCards.fill_type_manual";
+    Services.telemetry.scalarAdd(ccScalar, 1);
 
     let state = await FormAutofillDoorhanger.show(target, "creditCard");
     if (state == "cancel") {
@@ -441,13 +446,28 @@ FormAutofillParent.prototype = {
   },
 
   _onFormSubmit(data, target) {
-    let {address, creditCard} = data;
+    let {profile: {address, creditCard}, timeStartedFillingMS} = data;
 
     if (address) {
-      this._onAddressSubmit(address, target);
+      this._onAddressSubmit(address, target, timeStartedFillingMS);
     }
     if (creditCard) {
       this._onCreditCardSubmit(creditCard, target);
     }
+  },
+  /**
+   * Set the probes for the filling time with specific filling type and form type.
+   *
+   * @private
+   * @param  {string} formType
+   *         3 type of form (address/creditcard/address-creditcard).
+   * @param  {string} fillingType
+   *         3 filling type (manual/autofill/autofill-update).
+   * @param  {int} startedFillingMS
+   *         Time that form started to filling in ms.
+   */
+  _recordFormFillingTime(formType, fillingType, startedFillingMS) {
+    let histogram = Services.telemetry.getKeyedHistogramById("FORM_FILLING_REQUIRED_TIME_MS");
+    histogram.add(`${formType}-${fillingType}`, Date.now() - startedFillingMS);
   },
 };

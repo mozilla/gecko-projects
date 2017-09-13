@@ -67,9 +67,6 @@ enum class ServoTraversalFlags : uint32_t {
   // pre-traversal. A forgetful traversal is usually the right thing if you
   // aren't going to do a post-traversal.
   Forgetful = 1 << 3,
-  // Actively seeks out and clears change hints that may have been posted into
-  // the tree. Nonsensical without also passing Forgetful.
-  AggressivelyForgetful = 1 << 4,
   // Clears all the dirty bits (dirty descendants, animation-only dirty-descendants,
   // needs frame, descendants need frames) on the elements traversed.
   // in the subtree.
@@ -161,6 +158,7 @@ enum ServoKeywordSize {
 struct ServoFontComputationData {
   ServoKeywordSize mKeyword;
   float/*32_t*/ mRatio;
+  int32_t mAbsolute;
 
   static_assert(sizeof(float) == 4, "float should be 32 bit");
 };
@@ -192,7 +190,7 @@ struct ServoRawOffsetArc {
 };
 
 struct ServoComputedValueFlags {
-  uint8_t mFlags;
+  uint16_t mFlags;
 };
 
 #define STYLE_STRUCT(name_, checkdata_cb_) struct Gecko##name_;
@@ -200,6 +198,28 @@ struct ServoComputedValueFlags {
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+
+class ServoStyleSetSizes
+{
+public:
+  size_t mStylistRuleTree;
+  size_t mStylistPrecomputedPseudos;
+  size_t mStylistElementAndPseudosMaps;
+  size_t mStylistInvalidationMap;
+  size_t mStylistRevalidationSelectors;
+  size_t mStylistOther;
+  size_t mOther;
+
+  ServoStyleSetSizes()
+    : mStylistRuleTree(0)
+    , mStylistPrecomputedPseudos(0)
+    , mStylistElementAndPseudosMaps(0)
+    , mStylistInvalidationMap(0)
+    , mStylistRevalidationSelectors(0)
+    , mStylistOther(0)
+    , mOther(0)
+  {}
+};
 
 } // namespace mozilla
 

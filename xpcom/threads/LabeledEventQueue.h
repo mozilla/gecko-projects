@@ -7,6 +7,7 @@
 #ifndef mozilla_LabeledEventQueue_h
 #define mozilla_LabeledEventQueue_h
 
+#include <stdint.h>
 #include "mozilla/AbstractEventQueue.h"
 #include "mozilla/Queue.h"
 #include "nsClassHashtable.h"
@@ -29,6 +30,7 @@ class LabeledEventQueue final : public AbstractEventQueue
 {
 public:
   LabeledEventQueue();
+  ~LabeledEventQueue();
 
   void PutEvent(already_AddRefed<nsIRunnable>&& aEvent,
                 EventPriority aPriority,
@@ -126,15 +128,31 @@ private:
   };
 
   void PopEpoch();
+  static SchedulerGroup* NextSchedulerGroup(SchedulerGroup* aGroup);
 
   using RunnableEpochQueue = Queue<QueueEntry, 32>;
   using LabeledMap = nsClassHashtable<nsRefPtrHashKey<SchedulerGroup>, RunnableEpochQueue>;
   using EpochQueue = Queue<Epoch, 8>;
 
+  // List of SchedulerGroups that might have events. This is static, so it
+  // covers all LabeledEventQueues. If a SchedulerGroup is in this list, it may
+  // not have an event in *this* LabeledEventQueue (although it will have an
+  // event in *some* LabeledEventQueue). sCurrentSchedulerGroup cycles through
+  // the elements of sSchedulerGroups in order.
+  static LinkedList<SchedulerGroup>* sSchedulerGroups;
+  static size_t sLabeledEventQueueCount;
+  static SchedulerGroup* sCurrentSchedulerGroup;
+
   LabeledMap mLabeled;
   RunnableEpochQueue mUnlabeled;
   EpochQueue mEpochs;
   size_t mNumEvents = 0;
+
+  // Number of SchedulerGroups that must be processed before we prioritize an
+  // active tab. This field is designed to guarantee a 1:1 interleaving between
+  // foreground and background SchedulerGroups. For details, see its usage in
+  // LabeledEventQueue.cpp.
+  int64_t mAvoidActiveTabCount = 0;
 };
 
 } // namespace mozilla

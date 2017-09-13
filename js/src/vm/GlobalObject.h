@@ -365,6 +365,13 @@ class GlobalObject : public NativeObject
         return &global->getPrototype(JSProto_SavedFrame).toObject().as<NativeObject>();
     }
 
+    static JSFunction*
+    getOrCreateArrayBufferConstructor(JSContext* cx, Handle<GlobalObject*> global) {
+        if (!ensureConstructor(cx, global, JSProto_ArrayBuffer))
+            return nullptr;
+        return &global->getConstructor(JSProto_ArrayBuffer).toObject().as<JSFunction>();
+    }
+
     static JSObject*
     getOrCreateArrayBufferPrototype(JSContext* cx, Handle<GlobalObject*> global) {
         if (!ensureConstructor(cx, global, JSProto_ArrayBuffer))
@@ -438,10 +445,6 @@ class GlobalObject : public NativeObject
     getOrCreateSimdTypeDescr(JSContext* cx, Handle<GlobalObject*> global, SimdType simdType);
 
     TypedObjectModuleObject& getTypedObjectModule() const;
-
-    JSObject* getLegacyIteratorPrototype() {
-        return &getPrototype(JSProto_Iterator).toObject();
-    }
 
     static JSObject*
     getOrCreateCollatorPrototype(JSContext* cx, Handle<GlobalObject*> global) {

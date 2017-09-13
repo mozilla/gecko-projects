@@ -89,8 +89,8 @@ use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
 use script_runtime::{ScriptPort, StackRootTLS, get_reports, new_rt_and_cx};
 use script_traits::{CompositorEvent, ConstellationControlMsg, PaintMetricType};
 use script_traits::{DocumentActivity, DiscardBrowsingContext, EventResult};
-use script_traits::{InitialScriptState, LayoutMsg, LoadData, MouseButton, MouseEventType, MozBrowserEvent};
-use script_traits::{NewLayoutInfo, ScriptToConstellationChan, ScriptMsg, UpdatePipelineIdReason};
+use script_traits::{InitialScriptState, JsEvalResult, LayoutMsg, LoadData, MouseButton, MouseEventType};
+use script_traits::{MozBrowserEvent, NewLayoutInfo, ScriptToConstellationChan, ScriptMsg, UpdatePipelineIdReason};
 use script_traits::{ScriptThreadFactory, TimerEvent, TimerSchedulerMsg, TimerSource};
 use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{KeyEvent, MouseButtonEvent, MouseMoveEvent, ResizeEvent};
@@ -102,6 +102,7 @@ use servo_url::{ImmutableOrigin, MutableOrigin, ServoUrl};
 use std::cell::Cell;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::default::Default;
+use std::intrinsics;
 use std::ops::Deref;
 use std::option::Option;
 use std::ptr;
@@ -113,14 +114,15 @@ use std::sync::mpsc::{Receiver, Select, Sender, channel};
 use std::thread;
 use style::context::ReflowGoal;
 use style::thread_state;
-use task_source::dom_manipulation::{DOMManipulationTask, DOMManipulationTaskSource};
+use task_source::dom_manipulation::DOMManipulationTaskSource;
 use task_source::file_reading::FileReadingTaskSource;
 use task_source::history_traversal::HistoryTraversalTaskSource;
 use task_source::networking::NetworkingTaskSource;
-use task_source::performance_timeline::{PerformanceTimelineTask, PerformanceTimelineTaskSource};
-use task_source::user_interaction::{UserInteractionTask, UserInteractionTaskSource};
+use task_source::performance_timeline::PerformanceTimelineTaskSource;
+use task_source::user_interaction::UserInteractionTaskSource;
 use time::{get_time, precise_time_ns, Tm};
 use url::Position;
+use url::percent_encoding::percent_decode;
 use webdriver_handlers;
 use webvr_traits::{WebVREvent, WebVRMsg};
 
@@ -220,28 +222,39 @@ pub struct CancellableRunnable<T: Runnable + Send> {
     inner: Box<T>,
 }
 
-impl<T: Runnable + Send> Runnable for CancellableRunnable<T> {
-    fn name(&self) -> &'static str { self.inner.name() }
-
+impl<T> CancellableRunnable<T>
+where
+    T: Runnable + Send,
+{
     fn is_cancelled(&self) -> bool {
-        self.cancelled.as_ref()
-            .map(|cancelled| cancelled.load(Ordering::SeqCst))
-            .unwrap_or(false)
+        self.cancelled.as_ref().map_or(false, |cancelled| {
+            cancelled.load(Ordering::SeqCst)
+        })
     }
+}
 
+impl<T> Runnable for CancellableRunnable<T>
+where
+    T: Runnable + Send,
+{
     fn main_thread_handler(self: Box<CancellableRunnable<T>>, script_thread: &ScriptThread) {
-        self.inner.main_thread_handler(script_thread);
+        if !self.is_cancelled() {
+            self.inner.main_thread_handler(script_thread);
+        }
     }
 
     fn handler(self: Box<CancellableRunnable<T>>) {
-        self.inner.handler()
+        if !self.is_cancelled() {
+            self.inner.handler()
+        }
     }
 }
 
 pub trait Runnable {
-    fn is_cancelled(&self) -> bool { false }
-    fn name(&self) -> &'static str { "generic runnable" }
-    fn handler(self: Box<Self>) {}
+    fn name(&self) -> &'static str { unsafe { intrinsics::type_name::<Self>() } }
+    fn handler(self: Box<Self>) {
+        panic!("This should probably be redefined.")
+    }
     fn main_thread_handler(self: Box<Self>, _script_thread: &ScriptThread) { self.handler(); }
 }
 
@@ -266,15 +279,9 @@ pub enum MainThreadScriptMsg {
     /// dispatched to ScriptThread). Allows for a replace bool to be passed. If true,
     /// the current entry will be replaced instead of a new entry being added.
     Navigate(PipelineId, LoadData, bool),
-    /// Tasks that originate from the DOM manipulation task source
-    DOMManipulation(DOMManipulationTask),
-    /// Tasks that originate from the user interaction task source
-    UserInteraction(UserInteractionTask),
     /// Notifies the script thread that a new worklet has been loaded, and thus the page should be
     /// reflowed.
     WorkletLoaded(PipelineId),
-    /// Tasks that originate from the performance timeline task source.
-    PerformanceTimeline(PerformanceTimelineTask),
 }
 
 impl OpaqueSender<CommonScriptMsg> for Box<ScriptChan + Send> {
@@ -861,9 +868,9 @@ impl ScriptThread {
             dom_manipulation_task_source: DOMManipulationTaskSource(chan.clone()),
             user_interaction_task_source: UserInteractionTaskSource(chan.clone()),
             networking_task_source: NetworkingTaskSource(boxed_script_sender.clone()),
-            history_traversal_task_source: HistoryTraversalTaskSource(chan.clone()),
-            file_reading_task_source: FileReadingTaskSource(boxed_script_sender),
-            performance_timeline_task_source: PerformanceTimelineTaskSource(chan),
+            history_traversal_task_source: HistoryTraversalTaskSource(chan),
+            file_reading_task_source: FileReadingTaskSource(boxed_script_sender.clone()),
+            performance_timeline_task_source: PerformanceTimelineTaskSource(boxed_script_sender),
 
             control_chan: state.control_chan,
             control_port: control_port,
@@ -1193,6 +1200,7 @@ impl ScriptThread {
                 ScriptThreadEventCategory::ServiceWorkerEvent => ProfilerCategory::ScriptServiceWorkerEvent,
                 ScriptThreadEventCategory::EnterFullscreen => ProfilerCategory::ScriptEnterFullscreen,
                 ScriptThreadEventCategory::ExitFullscreen => ProfilerCategory::ScriptExitFullscreen,
+                ScriptThreadEventCategory::PerformanceTimelineTask => ProfilerCategory::ScriptPerformanceEvent,
             };
             profile(profiler_cat, None, self.time_profiler_chan.clone(), f)
         } else {
@@ -1276,30 +1284,21 @@ impl ScriptThread {
 
     fn handle_msg_from_script(&self, msg: MainThreadScriptMsg) {
         match msg {
-            MainThreadScriptMsg::Navigate(parent_pipeline_id, load_data, replace) =>
-                self.handle_navigate(parent_pipeline_id, None, load_data, replace),
-            MainThreadScriptMsg::ExitWindow(id) =>
-                self.handle_exit_window_msg(id),
+            MainThreadScriptMsg::Navigate(parent_pipeline_id, load_data, replace) => {
+                self.handle_navigate(parent_pipeline_id, None, load_data, replace)
+            },
+            MainThreadScriptMsg::ExitWindow(id) => {
+                self.handle_exit_window_msg(id)
+            },
             MainThreadScriptMsg::Common(CommonScriptMsg::RunnableMsg(_, runnable)) => {
-                // The category of the runnable is ignored by the pattern, however
-                // it is still respected by profiling (see categorize_msg).
-                if !runnable.is_cancelled() {
-                    debug!("Running runnable.");
-                    runnable.main_thread_handler(self)
-                } else {
-                    debug!("Not running cancelled runnable.");
-                }
+                runnable.main_thread_handler(self)
             }
-            MainThreadScriptMsg::Common(CommonScriptMsg::CollectReports(reports_chan)) =>
-                self.collect_reports(reports_chan),
-            MainThreadScriptMsg::WorkletLoaded(pipeline_id) =>
-                self.handle_worklet_loaded(pipeline_id),
-            MainThreadScriptMsg::DOMManipulation(task) =>
-                task.handle_task(self),
-            MainThreadScriptMsg::PerformanceTimeline(task) =>
-                task.handle_task(self),
-            MainThreadScriptMsg::UserInteraction(task) =>
-                task.handle_task(self),
+            MainThreadScriptMsg::Common(CommonScriptMsg::CollectReports(chan)) => {
+                self.collect_reports(chan)
+            },
+            MainThreadScriptMsg::WorkletLoaded(pipeline_id) => {
+                self.handle_worklet_loaded(pipeline_id)
+            },
         }
     }
 
@@ -1511,7 +1510,7 @@ impl ScriptThread {
                                            load_data.url.clone(),
                                            origin);
         if load_data.url.as_str() == "about:blank" {
-            self.start_page_load_about_blank(new_load);
+            self.start_page_load_about_blank(new_load, load_data.js_eval_result);
         } else {
             self.pre_page_load(new_load, load_data);
         }
@@ -1681,6 +1680,18 @@ impl ScriptThread {
         // the pipeline exited before the page load completed.
         match idx {
             Some(idx) => {
+                // https://html.spec.whatwg.org/multipage/#process-a-navigate-response
+                // 2. If response's status is 204 or 205, then abort these steps.
+                match metadata {
+                    Some(Metadata { status: Some((204 ... 205, _)), .. }) => {
+                        self.script_sender
+                            .send((id.clone(), ScriptMsg::AbortLoadUrl))
+                            .unwrap();
+                        return None;
+                    },
+                    _ => ()
+                };
+
                 let load = self.incomplete_loads.borrow_mut().remove(idx);
                 metadata.map(|meta| self.load(meta, load))
             }
@@ -2010,7 +2021,6 @@ impl ScriptThread {
         let DOMManipulationTaskSource(ref dom_sender) = self.dom_manipulation_task_source;
         let UserInteractionTaskSource(ref user_sender) = self.user_interaction_task_source;
         let HistoryTraversalTaskSource(ref history_sender) = self.history_traversal_task_source;
-        let PerformanceTimelineTaskSource(ref performance_sender) = self.performance_timeline_task_source;
 
         let (ipc_timer_event_chan, ipc_timer_event_port) = ipc::channel().unwrap();
         ROUTER.route_ipc_receiver_to_mpsc_sender(ipc_timer_event_port,
@@ -2035,7 +2045,7 @@ impl ScriptThread {
                                  self.networking_task_source.clone(),
                                  HistoryTraversalTaskSource(history_sender.clone()),
                                  self.file_reading_task_source.clone(),
-                                 PerformanceTimelineTaskSource(performance_sender.clone()),
+                                 self.performance_timeline_task_source.clone(),
                                  self.image_cache_channel.clone(),
                                  self.image_cache.clone(),
                                  self.resource_threads.clone(),
@@ -2121,39 +2131,7 @@ impl ScriptThread {
         // Notify devtools that a new script global exists.
         self.notify_devtools(document.Title(), final_url.clone(), (incomplete.pipeline_id, None));
 
-        let is_javascript = incomplete.url.scheme() == "javascript";
-        let parse_input = if is_javascript {
-            use url::percent_encoding::percent_decode;
-
-            // Turn javascript: URL into JS code to eval, according to the steps in
-            // https://html.spec.whatwg.org/multipage/#javascript-protocol
-
-            // This slice of the URL’s serialization is equivalent to (5.) to (7.):
-            // Start with the scheme data of the parsed URL;
-            // append question mark and query component, if any;
-            // append number sign and fragment component if any.
-            let encoded = &incomplete.url[Position::BeforePath..];
-
-            // Percent-decode (8.) and UTF-8 decode (9.)
-            let script_source = percent_decode(encoded.as_bytes()).decode_utf8_lossy();
-
-            // Script source is ready to be evaluated (11.)
-            unsafe {
-                let _ac = JSAutoCompartment::new(self.get_cx(), window.reflector().get_jsobject().get());
-                rooted!(in(self.get_cx()) let mut jsval = UndefinedValue());
-                window.upcast::<GlobalScope>().evaluate_js_on_global_with_result(
-                    &script_source, jsval.handle_mut());
-                let strval = DOMString::from_jsval(self.get_cx(),
-                                                   jsval.handle(),
-                                                   StringificationBehavior::Empty);
-                match strval {
-                    Ok(ConversionResult::Success(s)) => s,
-                    _ => DOMString::new(),
-                }
-            }
-        } else {
-            DOMString::new()
-        };
+        let parse_input = DOMString::new();
 
         document.set_https_state(metadata.https_state);
 
@@ -2332,8 +2310,16 @@ impl ScriptThread {
     /// for the given pipeline (specifically the "navigate" algorithm).
     fn handle_navigate(&self, parent_pipeline_id: PipelineId,
                               browsing_context_id: Option<BrowsingContextId>,
-                              load_data: LoadData,
+                              mut load_data: LoadData,
                               replace: bool) {
+        let is_javascript = load_data.url.scheme() == "javascript";
+        if is_javascript {
+            let window = self.documents.borrow().find_window(parent_pipeline_id);
+            if let Some(window) = window {
+                ScriptThread::eval_js_url(window.upcast::<GlobalScope>(), &mut load_data);
+            }
+        }
+
         match browsing_context_id {
             Some(browsing_context_id) => {
                 let iframe = self.documents.borrow().find_iframe(parent_pipeline_id, browsing_context_id);
@@ -2347,6 +2333,43 @@ impl ScriptThread {
                     .unwrap();
             }
         }
+    }
+
+    pub fn eval_js_url(global_scope: &GlobalScope, load_data: &mut LoadData) {
+        // Turn javascript: URL into JS code to eval, according to the steps in
+        // https://html.spec.whatwg.org/multipage/#javascript-protocol
+
+        // This slice of the URL’s serialization is equivalent to (5.) to (7.):
+        // Start with the scheme data of the parsed URL;
+        // append question mark and query component, if any;
+        // append number sign and fragment component if any.
+        let encoded = &load_data.url.clone()[Position::BeforePath..];
+
+        // Percent-decode (8.) and UTF-8 decode (9.)
+        let script_source = percent_decode(encoded.as_bytes()).decode_utf8_lossy();
+
+        // Script source is ready to be evaluated (11.)
+        let _ac = JSAutoCompartment::new(global_scope.get_cx(), global_scope.reflector().get_jsobject().get());
+        rooted!(in(global_scope.get_cx()) let mut jsval = UndefinedValue());
+        global_scope.evaluate_js_on_global_with_result(&script_source, jsval.handle_mut());
+
+        load_data.js_eval_result = if jsval.get().is_string() {
+            unsafe {
+                let strval = DOMString::from_jsval(global_scope.get_cx(),
+                                                   jsval.handle(),
+                                                   StringificationBehavior::Empty);
+                match strval {
+                    Ok(ConversionResult::Success(s)) => {
+                        Some(JsEvalResult::Ok(String::from(s).as_bytes().to_vec()))
+                    },
+                    _ => None,
+                }
+            }
+        } else {
+            Some(JsEvalResult::NoContent)
+        };
+
+        load_data.url = ServoUrl::parse("about:blank").unwrap();
     }
 
     fn handle_resize_event(&self, pipeline_id: PipelineId, new_size: WindowSizeData, size_type: WindowSizeType) {
@@ -2380,7 +2403,7 @@ impl ScriptThread {
     /// argument until a notification is received that the fetch is complete.
     fn pre_page_load(&self, incomplete: InProgressLoad, load_data: LoadData) {
         let id = incomplete.pipeline_id.clone();
-        let mut req_init = RequestInit {
+        let req_init = RequestInit {
             url: load_data.url.clone(),
             method: load_data.method,
             destination: Destination::Document,
@@ -2395,10 +2418,6 @@ impl ScriptThread {
             origin: incomplete.origin.immutable().clone(),
             .. RequestInit::default()
         };
-
-        if req_init.url.scheme() == "javascript" {
-            req_init.url = ServoUrl::parse("about:blank").unwrap();
-        }
 
         let context = ParserContext::new(id, load_data.url);
         self.incomplete_parser_contexts.borrow_mut().push((id, context));
@@ -2439,7 +2458,7 @@ impl ScriptThread {
 
     /// Synchronously fetch `about:blank`. Stores the `InProgressLoad`
     /// argument until a notification is received that the fetch is complete.
-    fn start_page_load_about_blank(&self, incomplete: InProgressLoad) {
+    fn start_page_load_about_blank(&self, incomplete: InProgressLoad, js_eval_result: Option<JsEvalResult>) {
         let id = incomplete.pipeline_id;
 
         self.incomplete_loads.borrow_mut().push(incomplete);
@@ -2449,8 +2468,20 @@ impl ScriptThread {
 
         let mut meta = Metadata::default(url);
         meta.set_content_type(Some(&mime!(Text / Html)));
+
+        // If this page load is the result of a javascript scheme url, map
+        // the evaluation result into a response.
+        let chunk = match js_eval_result {
+            Some(JsEvalResult::Ok(content)) => content,
+            Some(JsEvalResult::NoContent) => {
+                meta.status = Some((204, b"No Content".to_vec()));
+                vec![]
+            },
+            None => vec![]
+        };
+
         context.process_response(Ok(FetchMetadata::Unfiltered(meta)));
-        context.process_response_chunk(vec![]);
+        context.process_response_chunk(chunk);
         context.process_response_eof(Ok(()));
     }
 

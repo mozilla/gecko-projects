@@ -3058,6 +3058,8 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
 
   builder.EndFrame();
 
+  builder.EndFrame();
+
   return true;
 }
 
@@ -3333,7 +3335,9 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   builder.BeginFrame();
   nsDisplayList list;
 
-  builder.IgnorePaintSuppression(aFlags & IGNORE_PAINT_SUPPRESSION);
+  if (aFlags & IGNORE_PAINT_SUPPRESSION) {
+    builder.IgnorePaintSuppression();
+  }
 
   if (aFlags & IGNORE_ROOT_SCROLL_FRAME) {
     nsIFrame* rootScrollFrame =
@@ -4274,24 +4278,16 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
-  } else {
-    builder.SetInTransform(false);
   }
   if (aFlags & PaintFrameFlags::PAINT_SYNC_DECODE_IMAGES) {
     builder.SetSyncDecodeImages(true);
-  } else {
-    builder.SetSyncDecodeImages(false);
   }
   if (aFlags & (PaintFrameFlags::PAINT_WIDGET_LAYERS |
                 PaintFrameFlags::PAINT_TO_WINDOW)) {
     builder.SetPaintingToWindow(true);
-  } else {
-    builder.SetPaintingToWindow(false);
   }
   if (aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION) {
-    builder.IgnorePaintSuppression(true);
-  } else {
-    builder.IgnorePaintSuppression(false);
+    builder.IgnorePaintSuppression();
   }
 
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
@@ -4729,18 +4725,18 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   {
     AutoProfilerTracing tracing("Paint", "DisplayListResources");
 
-    builder.EndFrame();
     
     // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
     if (!retainedBuilder) {
       list.DeleteAll(&builder);
+      builder.EndFrame();
       delete listPtr;
       delete builderPtr;
     } else if (builder.ShouldRecycle()) {
       aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
+      builder.EndFrame();
     }
   }
-
   return NS_OK;
 }
 
@@ -9956,6 +9952,65 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   }
 
   return metadata;
+}
+
+/*static*/ Maybe<ScrollMetadata>
+nsLayoutUtils::GetRootMetadata(nsDisplayListBuilder* aBuilder,
+                               Layer* aRootLayer,
+                               const ContainerLayerParameters& aContainerParameters,
+                               const std::function<bool(ViewID& aScrollId)>& aCallback)
+{
+  nsIFrame* frame = aBuilder->RootReferenceFrame();
+  nsPresContext* presContext = frame->PresContext();
+  nsIPresShell* presShell = presContext->PresShell();
+  nsIDocument* document = presShell->GetDocument();
+
+  // If we're using containerless scrolling, there is still one case where we
+  // want the root container layer to have metrics. If the parent process is
+  // using XUL windows, there is no root scrollframe, and without explicitly
+  // creating metrics there will be no guaranteed top-level APZC.
+  bool addMetrics = gfxPrefs::LayoutUseContainersForRootFrames() ||
+      (XRE_IsParentProcess() && !presShell->GetRootScrollFrame());
+
+  // Add metrics if there are none in the layer tree with the id (create an id
+  // if there isn't one already) of the root scroll frame/root content.
+  bool ensureMetricsForRootId =
+    nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
+    !gfxPrefs::LayoutUseContainersForRootFrames() &&
+    aBuilder->IsPaintingToWindow() &&
+    !presContext->GetParentPresContext();
+
+  nsIContent* content = nullptr;
+  nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
+  if (rootScrollFrame) {
+    content = rootScrollFrame->GetContent();
+  } else {
+    // If there is no root scroll frame, pick the document element instead.
+    // The only case we don't want to do this is in non-APZ fennec, where
+    // we want the root xul document to get a null scroll id so that the root
+    // content document gets the first non-null scroll id.
+    content = document->GetDocumentElement();
+  }
+
+  if (ensureMetricsForRootId && content) {
+    ViewID scrollId = nsLayoutUtils::FindOrCreateIDFor(content);
+    if (aCallback(scrollId)) {
+      ensureMetricsForRootId = false;
+    }
+  }
+
+  if (addMetrics || ensureMetricsForRootId) {
+    bool isRootContent = presContext->IsRootContentDocument();
+
+    nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
+    return Some(nsLayoutUtils::ComputeScrollMetadata(frame,
+                           rootScrollFrame, content,
+                           aBuilder->FindReferenceFrameFor(frame),
+                           aRootLayer, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
+                           isRootContent, aContainerParameters));
+  }
+
+  return Nothing();
 }
 
 /* static */ bool

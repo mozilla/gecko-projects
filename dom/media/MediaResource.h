@@ -13,6 +13,7 @@
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
 #include "nsIInterfaceRequestor.h"
+#include "nsIThreadRetargetableStreamListener.h"
 #include "Intervals.h"
 #include "MediaCache.h"
 #include "MediaContainerType.h"
@@ -371,7 +372,6 @@ class ChannelSuspendAgent {
 public:
   explicit ChannelSuspendAgent(nsIChannel* aChannel)
   : mChannel(aChannel),
-    mSuspendCount(0),
     mIsChannelSuspended(false)
   {}
 
@@ -399,7 +399,7 @@ private:
   void SuspendInternal();
 
   nsIChannel* mChannel;
-  Atomic<uint32_t> mSuspendCount;
+  uint32_t mSuspendCount = 0;
   bool mIsChannelSuspended;
 };
 
@@ -462,8 +462,6 @@ public:
   void     Suspend(bool aCloseImmediately) override;
   void     Resume() override;
   already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
-  // Return true if the stream has been closed.
-  bool     IsClosed() const { return mCacheStream.IsClosed(); }
   bool     CanClone() override;
   already_AddRefed<BaseMediaResource> CloneData(
     MediaResourceCallback* aDecoder) override;
@@ -492,7 +490,6 @@ public:
     // Might be useful to track in the future:
     //   - mListener (seems minor)
     //   - mChannelStatistics (seems minor)
-    //   - mDataReceivedEvent (seems minor)
     size_t size = BaseMediaResource::SizeOfExcludingThis(aMallocSizeOf);
     size += mCacheStream.SizeOfExcludingThis(aMallocSizeOf);
 
@@ -503,24 +500,31 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  class Listener final : public nsIStreamListener,
-                         public nsIInterfaceRequestor,
-                         public nsIChannelEventSink
+  class Listener final
+    : public nsIStreamListener
+    , public nsIInterfaceRequestor
+    , public nsIChannelEventSink
+    , public nsIThreadRetargetableStreamListener
   {
     ~Listener() {}
   public:
-    explicit Listener(ChannelMediaResource* aResource) : mResource(aResource) {}
+    Listener(ChannelMediaResource* aResource, int64_t aOffset)
+      : mResource(aResource)
+      , mOffset(aOffset)
+    {}
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
     NS_DECL_NSICHANNELEVENTSINK
     NS_DECL_NSIINTERFACEREQUESTOR
+    NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
     void Revoke() { mResource = nullptr; }
 
   private:
     RefPtr<ChannelMediaResource> mResource;
+    const int64_t mOffset;
   };
   friend class Listener;
 
@@ -534,16 +538,21 @@ protected:
   nsresult OnDataAvailable(nsIRequest* aRequest,
                            nsIInputStream* aStream,
                            uint32_t aCount);
-  nsresult OnChannelRedirect(nsIChannel* aOld, nsIChannel* aNew, uint32_t aFlags);
+  nsresult OnChannelRedirect(nsIChannel* aOld,
+                             nsIChannel* aNew,
+                             uint32_t aFlags,
+                             int64_t aOffset);
 
-  // Opens the channel, using an HTTP byte range request to start at mOffset
+  // Opens the channel, using an HTTP byte range request to start at aOffset
   // if possible. Main thread only.
-  nsresult OpenChannel(nsIStreamListener** aStreamListener);
+  nsresult OpenChannel(int64_t aOffset);
   nsresult RecreateChannel();
   // Add headers to HTTP request. Main thread only.
-  nsresult SetupChannelHeaders();
+  nsresult SetupChannelHeaders(int64_t aOffset);
   // Closes the channel. Main thread only.
   void CloseChannel();
+
+  int64_t GetOffset() const;
 
   // Parses 'Content-Range' header and returns results via parameters.
   // Returns error if header is not available, values are not parse-able or
@@ -552,8 +561,6 @@ protected:
                                    int64_t& aRangeStart,
                                    int64_t& aRangeEnd,
                                    int64_t& aRangeTotal);
-
-  void DoNotifyDataReceived();
 
   static nsresult CopySegmentToCache(nsIInputStream* aInStream,
                                      void* aClosure,
@@ -568,30 +575,15 @@ protected:
                               uint32_t* aWriteCount);
 
   // Main thread access only
-  int64_t            mOffset;
   RefPtr<Listener> mListener;
-  // A data received event for the decoder that has been dispatched but has
-  // not yet been processed.
-  nsRevocableEventPtr<nsRunnableMethod<ChannelMediaResource, void, false> > mDataReceivedEvent;
   // When this flag is set, if we get a network error we should silently
   // reopen the stream.
   bool               mReopenOnError;
-  // When this flag is set, we should not report the next close of the
-  // channel.
-  bool               mIgnoreClose;
 
   // Any thread access
   MediaCacheStream mCacheStream;
 
-  // This lock protects mChannelStatistics
-  Mutex               mLock;
   MediaChannelStatistics mChannelStatistics;
-
-  // True if we couldn't suspend the stream and we therefore don't want
-  // to resume later. This is usually due to the channel not being in the
-  // isPending state at the time of the suspend request.
-  bool mIgnoreResume;
-
   ChannelSuspendAgent mSuspendAgent;
 };
 

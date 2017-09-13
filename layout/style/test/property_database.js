@@ -439,6 +439,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
 
     // Initial side/corner/point (valid only for -moz/-webkit prefixed):
     "-webkit-linear-gradient(left, red, blue)",
+    "-webkit-linear-gradient(bottom, red, blue)",
     "-webkit-linear-gradient(right top, red, blue)",
     "-webkit-linear-gradient(top right, red, blue)",
     "-webkit-radial-gradient(right, red, blue)",
@@ -661,7 +662,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.gradients")) {
     "-moz-linear-gradient(10% 10em, red, blue)",
     "-moz-linear-gradient(44px top, red, blue)",
     "-moz-linear-gradient(left, red, blue)",
-    "-moz-linear-gradient(top, red, blue)",
+    "-moz-linear-gradient(bottom, red, blue)",
 
     "-moz-linear-gradient(0px, red, blue)",
     "-moz-linear-gradient(0, red, blue)",
@@ -4172,7 +4173,7 @@ var gCSSProperties = {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "transition-property", "transition-duration", "transition-timing-function", "transition-delay" ],
     initial_values: [ "all 0s ease 0s", "all", "0s", "0s 0s", "ease" ],
-    other_values: [ "all 0s cubic-bezier(0.25, 0.1, 0.25, 1.0) 0s", "width 1s linear 2s", "width 1s 2s linear", "width linear 1s 2s", "linear width 1s 2s", "linear 1s width 2s", "linear 1s 2s width", "1s width linear 2s", "1s width 2s linear", "1s 2s width linear", "1s linear width 2s", "1s linear 2s width", "1s 2s linear width", "width linear 1s", "width 1s linear", "linear width 1s", "linear 1s width", "1s width linear", "1s linear width", "1s 2s width", "1s width 2s", "width 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "width 1s", "1s width", "linear 1s", "1s linear", "1s 2s", "2s 1s", "width", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s width, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32width linear 2s", "1s -width linear 2s", "1s -\\32width linear 2s", "1s \\32 0width linear 2s", "1s -\\32 0width linear 2s", "1s \\2width linear 2s", "1s -\\2width linear 2s", "2s, 1s width", "1s width, 2s", "2s all, 1s width", "1s width, 2s all", "2s all, 1s width", "2s width, 1s all", "3s --my-color" ],
+    other_values: [ "all 0s cubic-bezier(0.25, 0.1, 0.25, 1.0) 0s", "width 1s linear 2s", "width 1s 2s linear", "width linear 1s 2s", "linear width 1s 2s", "linear 1s width 2s", "linear 1s 2s width", "1s width linear 2s", "1s width 2s linear", "1s 2s width linear", "1s linear width 2s", "1s linear 2s width", "1s 2s linear width", "width linear 1s", "width 1s linear", "linear width 1s", "linear 1s width", "1s width linear", "1s linear width", "1s 2s width", "1s width 2s", "width 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "width 1s", "1s width", "linear 1s", "1s linear", "1s 2s", "2s 1s", "width", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s width, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32width linear 2s", "1s -width linear 2s", "1s -\\32width linear 2s", "1s \\32 0width linear 2s", "1s -\\32 0width linear 2s", "1s \\2width linear 2s", "1s -\\2width linear 2s", "2s, 1s width", "1s width, 2s", "2s all, 1s width", "1s width, 2s all", "2s all, 1s width", "2s width, 1s all", "3s --my-color", "none", "none 2s linear 2s" ],
     invalid_values: [ "1s width, 2s none", "2s none, 1s width", "2s inherit", "inherit 2s", "2s width, 1s inherit", "2s inherit, 1s width", "2s initial", "1s width,,2s color", "1s width, ,2s color", "bounce 1s cubic-bezier(0, rubbish) 2s", "bounce 1s steps(rubbish) 2s" ]
   },
   "transition-delay": {
@@ -6743,8 +6744,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
       "grid-auto-flow",
       "grid-auto-rows",
       "grid-auto-columns",
-      "grid-column-gap",
-      "grid-row-gap",
     ],
     initial_values: [
       "none",

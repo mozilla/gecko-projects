@@ -35,7 +35,8 @@ const int32_t kTimeBetweenChecks = 45; /* seconds */
 nsWindowMemoryReporter::nsWindowMemoryReporter()
   : mLastCheckForGhostWindows(TimeStamp::NowLoRes()),
     mCycleCollectorIsRunning(false),
-    mCheckTimerWaitingForCCEnd(false)
+    mCheckTimerWaitingForCCEnd(false),
+    mGhostWindowCount(0)
 {
 }
 
@@ -120,8 +121,7 @@ nsWindowMemoryReporter::Init()
                     /* weakRef = */ true);
   }
 
-  RegisterStrongMemoryReporter(new GhostWindowsReporter());
-  RegisterGhostWindowsDistinguishedAmount(GhostWindowsReporter::DistinguishedAmount);
+  RegisterGhostWindowsDistinguishedAmount(GhostWindowsDistinguishedAmount);
 }
 
 /* static */ nsWindowMemoryReporter*
@@ -354,9 +354,10 @@ CollectWindowReports(nsGlobalWindow *aWindow,
               "other 'dom/' numbers.");
   aWindowTotalSizes->mDOMOtherSize += windowSizes.mDOMOtherSize;
 
-  REPORT_SIZE("/style-sheets", windowSizes.mStyleSheetsSize,
+  REPORT_SIZE("/layout/style-sheets", windowSizes.mLayoutStyleSheetsSize,
               "Memory used by style sheets within a window.");
-  aWindowTotalSizes->mStyleSheetsSize += windowSizes.mStyleSheetsSize;
+  aWindowTotalSizes->mLayoutStyleSheetsSize +=
+    windowSizes.mLayoutStyleSheetsSize;
 
   REPORT_SIZE("/layout/pres-shell", windowSizes.mLayoutPresShellSize,
               "Memory used by layout's PresShell, along with any structures "
@@ -364,9 +365,65 @@ CollectWindowReports(nsGlobalWindow *aWindow,
               "within a window.");
   aWindowTotalSizes->mLayoutPresShellSize += windowSizes.mLayoutPresShellSize;
 
-  REPORT_SIZE("/layout/style-sets", windowSizes.mLayoutStyleSetsSize,
-              "Memory used by style sets within a window.");
-  aWindowTotalSizes->mLayoutStyleSetsSize += windowSizes.mLayoutStyleSetsSize;
+  REPORT_SIZE("/layout/gecko-style-sets", windowSizes.mLayoutGeckoStyleSets,
+              "Memory used by Gecko style sets within a window.");
+  aWindowTotalSizes->mLayoutGeckoStyleSets += windowSizes.mLayoutGeckoStyleSets;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/rule-tree",
+              windowSizes.mLayoutServoStyleSetsStylistRuleTree,
+              "Memory used by rule trees within Servo style sets within a "
+              "window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistRuleTree +=
+    windowSizes.mLayoutServoStyleSetsStylistRuleTree;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/precomputed-pseudos",
+              windowSizes.mLayoutServoStyleSetsStylistPrecomputedPseudos,
+              "Memory used by precomputed pseudo-element declarations within "
+              "Servo style sets within a window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistPrecomputedPseudos +=
+    windowSizes.mLayoutServoStyleSetsStylistPrecomputedPseudos;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/element-and-pseudos-maps",
+              windowSizes.mLayoutServoStyleSetsStylistElementAndPseudosMaps,
+              "Memory used by element and pseudos maps within Servo style "
+              "sets within a window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistElementAndPseudosMaps +=
+    windowSizes.mLayoutServoStyleSetsStylistElementAndPseudosMaps;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/invalidation-map",
+              windowSizes.mLayoutServoStyleSetsStylistInvalidationMap,
+              "Memory used by invalidation maps within Servo style sets "
+              "within a window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistInvalidationMap +=
+    windowSizes.mLayoutServoStyleSetsStylistInvalidationMap;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/revalidation-selectors",
+              windowSizes.mLayoutServoStyleSetsStylistRevalidationSelectors,
+              "Memory used by selectors for cache revalidation within Servo "
+              "style sets within a window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistRevalidationSelectors +=
+    windowSizes.mLayoutServoStyleSetsStylistRevalidationSelectors;
+
+  REPORT_SIZE("/layout/servo-style-sets/stylist/other",
+              windowSizes.mLayoutServoStyleSetsStylistOther,
+              "Memory used by other Stylist data within Servo style sets "
+              "within a window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsStylistOther +=
+    windowSizes.mLayoutServoStyleSetsStylistOther;
+
+  REPORT_SIZE("/layout/servo-style-sets/other",
+              windowSizes.mLayoutServoStyleSetsOther,
+              "Memory used by other parts of Servo style sets within a "
+              "window.");
+  aWindowTotalSizes->mLayoutServoStyleSetsOther +=
+    windowSizes.mLayoutServoStyleSetsOther;
+
+  REPORT_SIZE("/layout/servo-element-data-objects",
+              windowSizes.mLayoutServoElementDataObjects,
+              "Memory used for Servo ElementData objects, but not the things"
+              "hanging off them.");
+  aWindowTotalSizes->mLayoutServoElementDataObjects +=
+    windowSizes.mLayoutServoElementDataObjects;
 
   REPORT_SIZE("/layout/text-runs", windowSizes.mLayoutTextRunsSize,
               "Memory used for text-runs (glyph layout) in the PresShell's "
@@ -579,6 +636,17 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
       aData);
   }
 
+  MOZ_COLLECT_REPORT(
+    "ghost-windows", KIND_OTHER, UNITS_COUNT, ghostWindows.Count(),
+"The number of ghost windows present (the number of nodes underneath "
+"explicit/window-objects/top(none)/ghost, modulo race conditions).  A ghost "
+"window is not shown in any tab, does not share a domain with any non-detached "
+"windows, and has met these criteria for at least "
+"memory.ghost_window_timeout_seconds, or has survived a round of "
+"about:memory's minimize memory usage button.\n\n"
+"Ghost windows can happen legitimately, but they are often indicative of "
+"leaks in the browser or add-ons.");
+
   WindowPaths windowPaths;
   WindowPaths topWindowPaths;
 
@@ -631,16 +699,32 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
   REPORT("window-objects/dom/other", windowTotalSizes.mDOMOtherSize,
          "This is the sum of all windows' 'dom/other' numbers.");
 
-  REPORT("window-objects/style-sheets", windowTotalSizes.mStyleSheetsSize,
-         "This is the sum of all windows' 'style-sheets' numbers.");
+  REPORT("window-objects/layout/style-sheets",
+         windowTotalSizes.mLayoutStyleSheetsSize,
+         "This is the sum of all windows' 'layout/style-sheets' numbers.");
 
   REPORT("window-objects/layout/pres-shell",
          windowTotalSizes.mLayoutPresShellSize,
          "This is the sum of all windows' 'layout/arenas' numbers.");
 
-  REPORT("window-objects/layout/style-sets",
-         windowTotalSizes.mLayoutStyleSetsSize,
-         "This is the sum of all windows' 'layout/style-sets' numbers.");
+  REPORT("window-objects/layout/gecko-style-sets",
+         windowTotalSizes.mLayoutGeckoStyleSets,
+         "This is the sum of all windows' 'layout/gecko-style-sets' numbers.");
+
+  REPORT("window-objects/layout/servo-style-sets",
+         windowTotalSizes.mLayoutServoStyleSetsStylistRuleTree +
+         windowTotalSizes.mLayoutServoStyleSetsStylistPrecomputedPseudos +
+         windowTotalSizes.mLayoutServoStyleSetsStylistElementAndPseudosMaps +
+         windowTotalSizes.mLayoutServoStyleSetsStylistInvalidationMap +
+         windowTotalSizes.mLayoutServoStyleSetsStylistRevalidationSelectors +
+         windowTotalSizes.mLayoutServoStyleSetsStylistOther +
+         windowTotalSizes.mLayoutServoStyleSetsOther,
+         "This is the sum of all windows' 'layout/servo-style-sets/' numbers.");
+
+  REPORT("window-objects/layout/servo-element-data-objects",
+         windowTotalSizes.mLayoutServoElementDataObjects,
+         "This is the sum of all windows' 'layout/servo-element-data-objects' "
+         "numbers.");
 
   REPORT("window-objects/layout/text-runs", windowTotalSizes.mLayoutTextRunsSize,
          "This is the sum of all windows' 'layout/text-runs' numbers.");
@@ -861,6 +945,7 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   KillCheckTimer();
 
   nsTHashtable<nsCStringHashKey> nonDetachedWindowDomains;
+  nsDataHashtable<nsISupportsHashKey, nsCString> domainMap;
 
   // Populate nonDetachedWindowDomains.
   for (auto iter = windowsById->Iter(); !iter.Done(); iter.Next()) {
@@ -875,8 +960,13 @@ nsWindowMemoryReporter::CheckForGhostWindows(
     nsCOMPtr<nsIURI> uri = GetWindowURI(window);
     nsAutoCString domain;
     if (uri) {
-      tldService->GetBaseDomain(uri, 0, domain);
+      domain = domainMap.LookupForAdd(uri).OrInsert([&]() {
+        nsCString d;
+        tldService->GetBaseDomain(uri, 0, d);
+        return d;
+      });
     }
+
     nonDetachedWindowDomains.PutEntry(domain);
   }
 
@@ -884,6 +974,7 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   // if it's not null.
   uint32_t ghostTimeout = GetGhostTimeout();
   TimeStamp now = mLastCheckForGhostWindows;
+  mGhostWindowCount = 0;
   for (auto iter = mDetachedWindows.Iter(); !iter.Done(); iter.Next()) {
     nsWeakPtr weakKey = do_QueryInterface(iter.Key());
     nsCOMPtr<mozIDOMWindow> iwindow = do_QueryReferent(weakKey);
@@ -934,6 +1025,7 @@ nsWindowMemoryReporter::CheckForGhostWindows(
       } else if ((now - timeStamp).ToSeconds() > ghostTimeout) {
         // This definitely is a ghost window, so add it to aOutGhostIDs, if
         // that is not null.
+        mGhostWindowCount++;
         if (aOutGhostIDs && window) {
           aOutGhostIDs->PutEntry(window->WindowID());
         }
@@ -942,15 +1034,10 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   }
 }
 
-NS_IMPL_ISUPPORTS(nsWindowMemoryReporter::GhostWindowsReporter,
-                  nsIMemoryReporter)
-
 /* static */ int64_t
-nsWindowMemoryReporter::GhostWindowsReporter::DistinguishedAmount()
+nsWindowMemoryReporter::GhostWindowsDistinguishedAmount()
 {
-  nsTHashtable<nsUint64HashKey> ghostWindows;
-  sWindowReporter->CheckForGhostWindows(&ghostWindows);
-  return ghostWindows.Count();
+  return sWindowReporter->mGhostWindowCount;
 }
 
 void

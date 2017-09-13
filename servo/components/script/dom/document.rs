@@ -15,8 +15,6 @@ use dom::bindings::codegen::Bindings::DOMRectBinding::DOMRectMethods;
 use dom::bindings::codegen::Bindings::DocumentBinding;
 use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, DocumentReadyState, ElementCreationOptions};
 use dom::bindings::codegen::Bindings::ElementBinding::ElementMethods;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNonNull;
-use dom::bindings::codegen::Bindings::EventHandlerBinding::OnErrorEventHandlerNonNull;
 use dom::bindings::codegen::Bindings::HTMLIFrameElementBinding::HTMLIFrameElementBinding::HTMLIFrameElementMethods;
 use dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use dom::bindings::codegen::Bindings::NodeFilterBinding::NodeFilter;
@@ -90,6 +88,7 @@ use dom::touchevent::TouchEvent;
 use dom::touchlist::TouchList;
 use dom::treewalker::TreeWalker;
 use dom::uievent::UIEvent;
+use dom::virtualmethods::vtable_for;
 use dom::webglcontextevent::WebGLContextEvent;
 use dom::window::{ReflowReason, Window};
 use dom::windowproxy::WindowProxy;
@@ -1588,7 +1587,7 @@ impl Document {
 
         self.running_animation_callbacks.set(true);
         let was_faking_animation_frames = self.is_faking_animation_frames();
-        let timing = self.window.Performance().Now();
+        let timing = self.global().performance().Now();
 
         for (_, callback) in animation_frame_list.drain(..) {
             if let Some(callback) = callback {
@@ -2501,10 +2500,7 @@ impl Document {
             entry.hint.insert(RESTYLE_STYLE_ATTRIBUTE);
         }
 
-        // FIXME(emilio): This should become something like
-        // element.is_attribute_mapped(attr.local_name()).
-        if attr.local_name() == &local_name!("width") ||
-           attr.local_name() == &local_name!("height") {
+        if vtable_for(el.upcast()).attribute_affects_presentational_hints(attr) {
             entry.hint.insert(RESTYLE_SELF);
         }
 
@@ -4017,8 +4013,6 @@ impl DocumentProgressHandler {
 }
 
 impl Runnable for DocumentProgressHandler {
-    fn name(&self) -> &'static str { "DocumentProgressHandler" }
-
     fn handler(self: Box<DocumentProgressHandler>) {
         let document = self.addr.root();
         let window = document.window();

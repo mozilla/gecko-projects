@@ -68,6 +68,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "DownloadsViewUI",
                                   "resource:///modules/DownloadsViewUI.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadsSubview",
+                                  "resource:///modules/DownloadsSubview.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
@@ -220,6 +222,9 @@ var DownloadsPanel = {
       this._focusPanel();
       return;
     }
+
+    // As a belt-and-suspenders check, ensure the button is not hidden.
+    DownloadsButton.unhide();
 
     this.initialize(() => {
       // Delay displaying the panel because this function will sometimes be

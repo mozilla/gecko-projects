@@ -639,8 +639,8 @@ private:
     }
 
     // Get the clip extents in device space.
-    mSourceCtx->SetMatrix(gfxMatrix());
-    gfxRect clippedFrameSurfaceRect = mSourceCtx->GetClipExtents();
+    gfxRect clippedFrameSurfaceRect =
+      mSourceCtx->GetClipExtents(gfxContext::eDeviceSpace);
     clippedFrameSurfaceRect.RoundOut();
 
     IntRect result;
@@ -853,9 +853,19 @@ nsSVGUtils::PaintFrameWithEffects(nsIFrame *aFrame,
       dirtyRegion = &tmpDirtyRegion;
     }
 
+    gfxContextMatrixAutoSaveRestore autoSR(target);
+
+    // 'target' is currently scaled such that its user space units are CSS
+    // pixels (SVG user space units). But PaintFilteredFrame expects it to be
+    // scaled in such a way that its user space units are device pixels. So we
+    // have to adjust the scale.
+    gfxMatrix reverseScaleMatrix = nsSVGUtils::GetCSSPxToDevPxMatrix(aFrame);
+    DebugOnly<bool> invertible = reverseScaleMatrix.Invert();
+    target->SetMatrix(reverseScaleMatrix * aTransform *
+                      target->CurrentMatrix());
+
     SVGPaintCallback paintCallback;
-    nsFilterInstance::PaintFilteredFrame(aFrame, target->GetDrawTarget(),
-                                         aTransform, &paintCallback,
+    nsFilterInstance::PaintFilteredFrame(aFrame, target, &paintCallback,
                                          dirtyRegion, aImgParams);
   } else {
      svgFrame->PaintSVG(*target, aTransform, aImgParams, aDirtyRect);
@@ -1113,6 +1123,14 @@ nsSVGUtils::GetBBox(nsIFrame* aFrame, uint32_t aFlags,
     return gfxRect();
   }
 
+  // Clean out flags which have no effects on returning bbox from now, so that
+  // we can cache and reuse ObjectBoundingBoxProperty() in the code below.
+  aFlags &= ~eIncludeOnlyCurrentFrameForNonSVGElement;
+  aFlags &= ~eUseFrameBoundsForOuterSVG;
+  if (!aFrame->IsSVGUseFrame()) {
+    aFlags &= ~eUseUserSpaceOfUseElement;
+  }
+
   if (aFlags == eBBoxIncludeFillGeometry &&
       // We only cache bbox in element's own user space
       !aToBoundsSpace) {
@@ -1127,7 +1145,8 @@ nsSVGUtils::GetBBox(nsIFrame* aFrame, uint32_t aFlags,
     matrix = *aToBoundsSpace;
   }
 
-  if (aFrame->IsSVGForeignObjectFrame()) {
+  if (aFrame->IsSVGForeignObjectFrame() ||
+      aFlags & nsSVGUtils::eUseUserSpaceOfUseElement) {
     // The spec says getBBox "Returns the tight bounding box in *current user
     // space*". So we should really be doing this for all elements, but that
     // needs investigation to check that we won't break too much content.

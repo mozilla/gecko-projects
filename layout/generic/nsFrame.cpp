@@ -2531,7 +2531,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
         dirtyRect = untransformedDirtyRect;
         nsDisplayTransform::UntransformRect(visibleRect, overflow, this, &visibleRect);
       } else {
-        NS_WARNING("Unable to untransform dirty rect!");
         // This should only happen if the transform is singular, in which case nothing is visible anyway
         dirtyRect.SetEmpty();
         visibleRect.SetEmpty();
@@ -5250,7 +5249,7 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
   auto parentFrame = GetParent();
   auto alignCB = parentFrame;
   bool isGridItem = parentFrame && parentFrame->IsGridContainerFrame() &&
-                    !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
+    !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   if (parentFrame && parentFrame->IsTableWrapperFrame() && IsTableFrame()) {
     // An inner table frame is sized as a grid item if its table wrapper is,
     // because they actually have the same CB (the wrapper's CB).
@@ -5266,7 +5265,8 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     }
   }
   bool isFlexItem = parentFrame && parentFrame->IsFlexContainerFrame() &&
-                    !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
+    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_LEGACY_WEBKIT_BOX) &&
+    !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   bool isInlineFlexItem = false;
   if (isFlexItem) {
     // Flex items use their "flex-basis" property in place of their main-size
@@ -5494,9 +5494,10 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(gfxContext*          aRenderingConte
   const nsStyleCoord* blockStyleCoord = &stylePos->BSize(aWM);
   auto* parentFrame = GetParent();
   const bool isGridItem = parentFrame && parentFrame->IsGridContainerFrame() &&
-                          !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
+    !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   const bool isFlexItem = parentFrame && parentFrame->IsFlexContainerFrame() &&
-                          !(GetStateBits() & NS_FRAME_OUT_OF_FLOW);
+    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_LEGACY_WEBKIT_BOX) &&
+    !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   bool isInlineFlexItem = false;
   Maybe<nsStyleCoord> imposedMainSizeStyleCoord;
 
@@ -10402,15 +10403,17 @@ void
 nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
                                     ServoRestyleState& aRestyleState)
 {
-  MOZ_ASSERT(aChildFrame->GetParent() == this ||
-             (aChildFrame->IsTableFrame() &&
-              aChildFrame->GetParent()->GetParent() == this) ||
-             (aChildFrame->GetParent()->IsLineFrame() &&
-              aChildFrame->GetParent()->GetParent() == this) ||
-             (aChildFrame->IsTableFrame() &&
-              aChildFrame->GetParent()->GetParent()->IsLineFrame() &&
-              aChildFrame->GetParent()->GetParent()->GetParent() == this),
+#ifdef DEBUG
+  nsIFrame* parent = aChildFrame->GetParent();;
+  if (aChildFrame->IsTableFrame()) {
+    parent = parent->GetParent();
+  }
+  if (parent->IsLineFrame()) {
+    parent = parent->GetParent();
+  }
+  MOZ_ASSERT(nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent) == this,
              "This should only be used for children!");
+#endif // DEBUG
   MOZ_ASSERT(!GetContent() || !aChildFrame->GetContent() ||
              aChildFrame->GetContent() == GetContent(),
              "What content node is it a frame for?");

@@ -54,6 +54,12 @@ function FormAutofillHandler(form) {
      */
     filledRecordGUID: null,
   };
+
+  this._cacheValue = {
+    allFieldNames: null,
+    oneLineStreetAddress: null,
+    matchingSelectOption: null,
+  };
 }
 
 FormAutofillHandler.prototype = {
@@ -115,6 +121,11 @@ FormAutofillHandler.prototype = {
   },
 
   /**
+   * Time in milliseconds since epoch when a user started filling in the form.
+   */
+  timeStartedFillingMS: null,
+
+  /**
    * Set fieldDetails from the form about fields that can be autofilled.
    *
    * @param {boolean} allowDuplicates
@@ -147,9 +158,17 @@ FormAutofillHandler.prototype = {
       log.debug("Ignoring credit card related fields since it's without credit card number field");
       this.creditCard.fieldDetails = [];
     }
+    let validDetails = Array.of(...(this.address.fieldDetails),
+                                ...(this.creditCard.fieldDetails));
+    for (let detail of validDetails) {
+      let input = detail.elementWeakRef.get();
+      if (!input) {
+        continue;
+      }
+      input.addEventListener("input", this);
+    }
 
-    return Array.of(...(this.address.fieldDetails),
-                    ...(this.creditCard.fieldDetails));
+    return validDetails;
   },
 
   getFieldDetailByName(fieldName) {
@@ -167,12 +186,6 @@ FormAutofillHandler.prototype = {
       return this.creditCard.fieldDetails;
     }
     return [];
-  },
-
-  _cacheValue: {
-    allFieldNames: null,
-    oneLineStreetAddress: null,
-    matchingSelectOption: null,
   },
 
   get allFieldNames() {
@@ -536,6 +549,8 @@ FormAutofillHandler.prototype = {
           // are multiple options being selected. The empty option is usually
           // assumed to be default along with a meaningless text to users.
           if (!value || element.selectedOptions.length != 1) {
+            // Keep the property and preserve more information for address updating
+            data[type].record[detail.fieldName] = "";
             return;
           }
 
@@ -544,6 +559,8 @@ FormAutofillHandler.prototype = {
         }
 
         if (!value) {
+          // Keep the property and preserve more information for updating
+          data[type].record[detail.fieldName] = "";
           return;
         }
 
@@ -555,8 +572,11 @@ FormAutofillHandler.prototype = {
       });
     });
 
+    this._normalizeAddress(data.address);
+
     if (data.address &&
-        Object.keys(data.address.record).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
+        Object.values(data.address.record).filter(v => v).length <
+        FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
       log.debug("No address record saving since there are only",
                      Object.keys(data.address.record).length,
                      "usable fields");
@@ -572,6 +592,49 @@ FormAutofillHandler.prototype = {
     return data;
   },
 
+  _normalizeAddress(address) {
+    if (!address) {
+      return;
+    }
+
+    // Normalize Country
+    if (address.record.country) {
+      let detail = this.getFieldDetailByName("country");
+      // Try identifying country field aggressively if it doesn't come from
+      // @autocomplete.
+      if (detail._reason != "autocomplete") {
+        let countryCode = FormAutofillUtils.identifyCountryCode(address.record.country);
+        if (countryCode) {
+          address.record.country = countryCode;
+        }
+      }
+    }
+
+    // Normalize Tel
+    FormAutofillUtils.compressTel(address.record);
+    if (address.record.tel) {
+      let allTelComponentsAreUntouched = Object.keys(address.record)
+        .filter(field => FormAutofillUtils.getCategoryFromFieldName(field) == "tel")
+        .every(field => address.untouchedFields.includes(field));
+      if (allTelComponentsAreUntouched) {
+        // No need to verify it if none of related fields are modified after autofilling.
+        if (!address.untouchedFields.includes("tel")) {
+          address.untouchedFields.push("tel");
+        }
+      } else {
+        let strippedNumber = address.record.tel.replace(/[\s\(\)-]/g, "");
+
+        // Remove "tel" if it contains invalid characters or the length of its
+        // number part isn't between 5 and 15.
+        // (The maximum length of a valid number in E.164 format is 15 digits
+        //  according to https://en.wikipedia.org/wiki/E.164 )
+        if (!/^(\+?)[\da-zA-Z]{5,15}$/.test(strippedNumber)) {
+          address.record.tel = "";
+        }
+      }
+    }
+  },
+
   async _decrypt(cipherText, reauth) {
     return new Promise((resolve) => {
       Services.cpmm.addMessageListener("FormAutofill:DecryptedString", function getResult(result) {
@@ -581,5 +644,24 @@ FormAutofillHandler.prototype = {
 
       Services.cpmm.sendAsyncMessage("FormAutofill:GetDecryptedString", {cipherText, reauth});
     });
+  },
+
+  handleEvent(event) {
+    switch (event.type) {
+      case "input":
+        if (!event.isTrusted) {
+          return;
+        }
+
+        for (let detail of this.fieldDetails) {
+          let input = detail.elementWeakRef.get();
+          if (!input) {
+            continue;
+          }
+          input.removeEventListener("input", this);
+        }
+        this.timeStartedFillingMS = Date.now();
+        break;
+    }
   },
 };

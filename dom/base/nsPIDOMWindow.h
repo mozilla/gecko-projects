@@ -748,6 +748,12 @@ protected:
 
   // The number of active IndexedDB databases. Inner window only.
   uint32_t mNumOfIndexedDBDatabases;
+
+  // The number of open WebSockets. Inner window only.
+  uint32_t mNumOfOpenWebSockets;
+
+  // The number of active user media. Inner window only.
+  uint32_t mNumOfActiveUserMedia;
 };
 
 #define NS_PIDOMWINDOWINNER_IID \
@@ -779,6 +785,9 @@ public:
   // is not identical to IsCurrentInnerWindow() because document.open() will
   // keep the same document active but create a new window.
   inline bool HasActiveDocument();
+
+  // Returns true if this window is the same as mTopInnerWindow
+  inline bool IsTopInnerWindow() const;
 
   bool AddAudioContext(mozilla::dom::AudioContext* aAudioContext);
   void RemoveAudioContext(mozilla::dom::AudioContext* aAudioContext);
@@ -925,6 +934,19 @@ public:
   // Return true if there is any active IndexedDB databases which could block
   // timeout-throttling.
   bool HasActiveIndexedDBDatabases();
+
+  // Increase/Decrease the number of open WebSockets.
+  void UpdateWebSocketCount(int32_t aDelta);
+
+  // Return true if there are any open WebSockets that could block
+  // timeout-throttling.
+  bool HasOpenWebSockets() const;
+
+  // Increase/Decrease the number of active user media.
+  void UpdateUserMediaCount(int32_t aDelta);
+
+  // Return true if there are any currently ongoing user media.
+  bool HasActiveUserMedia() const;
 
 protected:
   void CreatePerformanceObjectIfNeeded();

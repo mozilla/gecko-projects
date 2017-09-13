@@ -85,7 +85,7 @@ pub type GradientKind = GenericGradientKind<
 >;
 
 /// A specified gradient line direction.
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum LineDirection {
     /// An angular direction.
@@ -105,7 +105,7 @@ pub enum LineDirection {
 }
 
 /// A binary enum to hold either Position or LegacyPosition.
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss)]
 #[cfg(feature = "gecko")]
 pub enum GradientPosition {
     /// 1, 2, 3, 4-valued <position>.
@@ -138,7 +138,7 @@ impl Parse for Image {
             return Ok(GenericImage::Url(url));
         }
         if let Ok(gradient) = input.try(|i| Gradient::parse(context, i)) {
-            return Ok(GenericImage::Gradient(gradient));
+            return Ok(GenericImage::Gradient(Box::new(gradient)));
         }
         #[cfg(feature = "servo")]
         {
@@ -151,7 +151,7 @@ impl Parse for Image {
             {
                 image_rect.url.build_image_value();
             }
-            return Ok(GenericImage::Rect(image_rect));
+            return Ok(GenericImage::Rect(Box::new(image_rect)));
         }
         Ok(GenericImage::Element(Image::parse_element(input)?))
     }
@@ -526,7 +526,10 @@ impl GradientKind {
             input.expect_comma()?;
             d
         } else {
-            LineDirection::Vertical(Y::Bottom)
+            match *compat_mode {
+                CompatMode::Modern => LineDirection::Vertical(Y::Bottom),
+                _ => LineDirection::Vertical(Y::Top),
+            }
         };
         Ok(GenericGradientKind::Linear(direction))
     }
@@ -615,10 +618,13 @@ impl GradientKind {
 }
 
 impl GenericsLineDirection for LineDirection {
-    fn points_downwards(&self) -> bool {
+    fn points_downwards(&self, compat_mode: CompatMode) -> bool {
         match *self {
             LineDirection::Angle(ref angle) => angle.radians() == PI,
-            LineDirection::Vertical(Y::Bottom) => true,
+            LineDirection::Vertical(Y::Bottom)
+                if compat_mode == CompatMode::Modern => true,
+            LineDirection::Vertical(Y::Top)
+                if compat_mode != CompatMode::Modern => true,
             _ => false,
         }
     }

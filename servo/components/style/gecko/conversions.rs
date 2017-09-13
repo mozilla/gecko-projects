@@ -12,14 +12,15 @@ use app_units::Au;
 use gecko::values::{convert_rgba_to_nscolor, GeckoStyleCoordConvertible};
 use gecko_bindings::bindings::{Gecko_CreateGradient, Gecko_SetGradientImageValue, Gecko_SetLayerImageImageValue};
 use gecko_bindings::bindings::{Gecko_InitializeImageCropRect, Gecko_SetImageElement};
-use gecko_bindings::structs::{nsCSSUnit, nsStyleCoord_CalcValue, nsStyleImage};
-use gecko_bindings::structs::{nsresult, SheetType};
+use gecko_bindings::structs::{self, nsCSSUnit, nsStyleCoord_CalcValue};
+use gecko_bindings::structs::{nsStyleImage, nsresult, SheetType};
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
 use std::f32::consts::PI;
 use stylesheets::{Origin, RulesMutateError};
 use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
-use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto, Percentage};
-use values::generics::grid::TrackSize;
+use values::computed::{Integer, LengthOrPercentage, LengthOrPercentageOrAuto, Percentage};
+use values::generics::box_::VerticalAlign;
+use values::generics::grid::{TrackListValue, TrackSize};
 use values::generics::image::{CompatMode, Image as GenericImage, GradientItem};
 use values::generics::rect::Rect;
 use values::specified::url::SpecifiedUrl;
@@ -150,8 +151,8 @@ impl nsStyleImage {
     /// Set a given Servo `Image` value into this `nsStyleImage`.
     pub fn set(&mut self, image: Image) {
         match image {
-            GenericImage::Gradient(gradient) => {
-                self.set_gradient(gradient)
+            GenericImage::Gradient(boxed_gradient) => {
+                self.set_gradient(*boxed_gradient)
             },
             GenericImage::Url(ref url) => {
                 unsafe {
@@ -398,7 +399,7 @@ impl nsStyleImage {
                            NumberOrPercentage::from_gecko_style_coord(&rect.data_at(2)),
                            NumberOrPercentage::from_gecko_style_coord(&rect.data_at(3))) {
                         (Some(top), Some(right), Some(bottom), Some(left)) =>
-                            Some(GenericImage::Rect(MozImageRect { url, top, right, bottom, left } )),
+                            Some(GenericImage::Rect(Box::new(MozImageRect { url, top, right, bottom, left } ))),
                         _ => {
                             debug_assert!(false, "mCropRect could not convert to NumberOrPercentage");
                             None
@@ -427,7 +428,7 @@ impl nsStyleImage {
         url
     }
 
-    unsafe fn get_gradient(self: &nsStyleImage) -> Gradient {
+    unsafe fn get_gradient(self: &nsStyleImage) -> Box<Gradient> {
         use gecko::values::convert_nscolor_to_rgba;
         use gecko_bindings::bindings::Gecko_GetGradientImageValue;
         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_CIRCULAR, NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL};
@@ -580,7 +581,7 @@ impl nsStyleImage {
                 CompatMode::Modern
             };
 
-        Gradient { items, repeating: gecko_gradient.mRepeating, kind, compat_mode }
+        Box::new(Gradient { items, repeating: gecko_gradient.mRepeating, kind, compat_mode })
     }
 }
 
@@ -895,6 +896,23 @@ impl TrackSize<LengthOrPercentage> {
     }
 }
 
+impl TrackListValue<LengthOrPercentage, Integer> {
+    /// Return TrackSize from given two nsStyleCoord
+    pub fn from_gecko_style_coords<T: CoordData>(gecko_min: &T, gecko_max: &T) -> Self {
+        TrackListValue::TrackSize(TrackSize::from_gecko_style_coords(gecko_min, gecko_max))
+    }
+
+    /// Save TrackSize to given gecko fields.
+    pub fn to_gecko_style_coords<T: CoordDataMut>(&self, gecko_min: &mut T, gecko_max: &mut T) {
+        use values::generics::grid::TrackListValue;
+
+        match *self {
+            TrackListValue::TrackSize(ref size) => size.to_gecko_style_coords(gecko_min, gecko_max),
+            _ => unreachable!("Should only transform from track-size computed values"),
+        }
+    }
+}
+
 impl<T> Rect<T> where T: GeckoStyleCoordConvertible {
     /// Convert this generic Rect to given Gecko fields.
     pub fn to_gecko_rect(&self, sides: &mut ::gecko_bindings::structs::nsStyleSides) {
@@ -917,6 +935,26 @@ impl<T> Rect<T> where T: GeckoStyleCoordConvertible {
                 T::from_gecko_style_coord(&sides.data_at(3)).expect("coord[3] cound not convert")
             )
         )
+    }
+}
+
+impl<L> VerticalAlign<L> {
+    /// Converts an enumerated value coming from Gecko to a `VerticalAlign<L>`.
+    pub fn from_gecko_keyword(value: u32) -> Self {
+        match value {
+            structs::NS_STYLE_VERTICAL_ALIGN_BASELINE => VerticalAlign::Baseline,
+            structs::NS_STYLE_VERTICAL_ALIGN_SUB => VerticalAlign::Sub,
+            structs::NS_STYLE_VERTICAL_ALIGN_SUPER => VerticalAlign::Super,
+            structs::NS_STYLE_VERTICAL_ALIGN_TOP => VerticalAlign::Top,
+            structs::NS_STYLE_VERTICAL_ALIGN_TEXT_TOP => VerticalAlign::TextTop,
+            structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE => VerticalAlign::Middle,
+            structs::NS_STYLE_VERTICAL_ALIGN_BOTTOM => VerticalAlign::Bottom,
+            structs::NS_STYLE_VERTICAL_ALIGN_TEXT_BOTTOM => VerticalAlign::TextBottom,
+            structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE => {
+                VerticalAlign::MozMiddleWithBaseline
+            },
+            _ => panic!("unexpected enumerated value for vertical-align"),
+        }
     }
 }
 

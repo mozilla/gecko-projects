@@ -87,9 +87,6 @@ var whitelist = [
   {file: "resource://app/modules/NewTabSearchProvider.jsm"},
   {file: "resource://app/modules/NewTabWebChannel.jsm"},
 
-  // browser/modules/PingCentre.jsm will soon be used (bug 1393604)
-  {file: "resource://app/modules/PingCentre.jsm"},
-
   // layout/mathml/nsMathMLChar.cpp
   {file: "resource://gre/res/fonts/mathfontSTIXGeneral.properties"},
   {file: "resource://gre/res/fonts/mathfontUnicode.properties"},
@@ -97,6 +94,9 @@ var whitelist = [
   // toolkit/components/places/ColorAnalyzer_worker.js
   {file: "resource://gre/modules/ClusterLib.js"},
   {file: "resource://gre/modules/ColorConversion.js"},
+
+  // Needed by HiddenFrame.jsm, but can't be packaged test-only
+  {file: "chrome://global/content/win.xul"},
 
   // The l10n build system can't package string files only for some platforms.
   {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/accessible.properties",
@@ -126,11 +126,9 @@ var whitelist = [
   {file: "resource://shield-recipe-client-content/shield-content-process.js"},
 
   // New L10n API that is not yet used in production
-  {file: "resource://gre/modules/Localization.jsm"},
+  {file: "resource://gre/modules/DOMLocalization.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
-  // Bug 1339420
-  {file: "chrome://branding/content/icon128.png"},
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
    platforms: ["linux", "macosx"]},
@@ -138,8 +136,6 @@ var whitelist = [
   {file: "chrome://global/content/customizeToolbar.xul"},
   // Bug 1343837
   {file: "chrome://global/content/findUtils.js"},
-  // Bug 1343843
-  {file: "chrome://global/content/url-classifier/unittests.xul"},
   // Bug 1348362
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
   // Bug 1348525
@@ -174,8 +170,6 @@ var whitelist = [
   {file: "resource://gre/modules/Manifest.jsm"},
   // Bug 1351097
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
-  // Bug 1351637
-  {file: "resource://gre/modules/sdk/bootstrap.js"},
 ];
 
 whitelist = new Set(whitelist.filter(item =>

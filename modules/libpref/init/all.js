@@ -176,11 +176,7 @@ pref("dom.permissions.revoke.enable", false);
 pref("dom.performance.time_to_non_blank_paint.enabled", false);
 
 // Enable Performance Observer API
-#ifdef NIGHTLY_BUILD
 pref("dom.enable_performance_observer", true);
-#else
-pref("dom.enable_performance_observer", false);
-#endif
 
 // Enable requestIdleCallback API
 pref("dom.requestIdleCallback.enabled", true);
@@ -369,10 +365,12 @@ pref("media.wmf.decoder.thread-count", -1);
 pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 pref("media.wmf.vp9.enabled", true);
+pref("media.wmf.amd.vp9.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
-pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 22.21.13.8253, 22.21.13.8233, 22.21.13.8205, 22.21.13.8189, 22.21.13.8178, 22.21.13.8165, 21.21.13.7892, 21.21.13.7878, 21.21.13.7866, 21.21.13.7849, 21.21.13.7654, 21.21.13.7653, 21.21.13.7633, 21.21.13.7619, 21.21.13.7563, 21.21.13.7306, 21.21.13.7290, 21.21.13.7270, 21.21.13.7254, 21.21.13.6939, 21.21.13.6926, 21.21.13.6909, 21.21.13.4201, 21.21.13.4200, 10.18.13.6881, 10.18.13.6839, 10.18.13.6510, 10.18.13.6472, 10.18.13.6143, 10.18.13.5946, 10.18.13.5923, 10.18.13.5921, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5445, 10.18.13.5382, 10.18.13.5362, 9.18.13.4788, 9.18.13.4752, 9.18.13.4725, 9.18.13.4709, 9.18.13.4195, 9.18.13.4192, 9.18.13.4144, 9.18.13.4052, 9.18.13.3788, 9.18.13.3523, 9.18.13.3235, 9.18.13.3165, 9.18.13.2723, 9.18.13.2702, 9.18.13.1422, 9.18.13.1407, 9.18.13.1106, 9.18.13.546; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
+pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2884, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2884, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 22.21.13.8253, 22.21.13.8233, 22.21.13.8205, 22.21.13.8189, 22.21.13.8178, 22.21.13.8165, 21.21.13.7892, 21.21.13.7878, 21.21.13.7866, 21.21.13.7849, 21.21.13.7654, 21.21.13.7653, 21.21.13.7633, 21.21.13.7619, 21.21.13.7563, 21.21.13.7306, 21.21.13.7290, 21.21.13.7270, 21.21.13.7254, 21.21.13.6939, 21.21.13.6926, 21.21.13.6909, 21.21.13.4201, 21.21.13.4200, 10.18.13.6881, 10.18.13.6839, 10.18.13.6510, 10.18.13.6472, 10.18.13.6143, 10.18.13.5946, 10.18.13.5923, 10.18.13.5921, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5445, 10.18.13.5382, 10.18.13.5362, 9.18.13.4788, 9.18.13.4752, 9.18.13.4725, 9.18.13.4709, 9.18.13.4195, 9.18.13.4192, 9.18.13.4144, 9.18.13.4052, 9.18.13.3788, 9.18.13.3523, 9.18.13.3235, 9.18.13.3165, 9.18.13.2723, 9.18.13.2702, 9.18.13.1422, 9.18.13.1407, 9.18.13.1106, 9.18.13.546; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
 pref("media.wmf.disable-d3d9-for-dlls", "igdumd64.dll: 8.15.10.2189, 8.15.10.2119, 8.15.10.2104, 8.15.10.2102, 8.771.1.0; atiumd64.dll: 7.14.10.833, 7.14.10.867, 7.14.10.885, 7.14.10.903, 7.14.10.911, 8.14.10.768, 9.14.10.1001, 9.14.10.1017, 9.14.10.1080, 9.14.10.1128, 9.14.10.1162, 9.14.10.1171, 9.14.10.1183, 9.14.10.1197, 9.14.10.945, 9.14.10.972, 9.14.10.984, 9.14.10.996");
+pref("media.wmf.deblacklisting-for-telemetry-in-gpu-process", true);
 #endif
 #if defined(MOZ_FFMPEG)
 #if defined(XP_MACOSX)
@@ -399,7 +397,6 @@ pref("media.opus.enabled", true);
 pref("media.wave.enabled", true);
 pref("media.webm.enabled", true);
 
-pref("media.eme.chromium-api.enabled", true);
 pref("media.eme.chromium-api.video-shmems", 6);
 
 #ifdef MOZ_APPLEMEDIA
@@ -493,6 +490,7 @@ pref("media.peerconnection.video.min_bitrate_estimate", 0);
 pref("media.peerconnection.video.denoising", false);
 pref("media.navigator.audio.fake_frequency", 1000);
 pref("media.navigator.permission.disabled", false);
+pref("media.navigator.streams.fake", false);
 pref("media.peerconnection.simulcast", true);
 pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
@@ -661,11 +659,7 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
-#ifdef NIGHTLY_BUILD
 pref("apz.autoscroll.enabled", true);
-#else
-pref("apz.autoscroll.enabled", false);
-#endif
 
 // Whether to lock touch scrolling to one axis at a time
 // 0 = FREE (No locking at all)
@@ -697,12 +691,8 @@ pref("apz.fling_friction", "0.002");
 pref("apz.fling_min_velocity_threshold", "0.5");
 pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
-#ifdef NIGHTLY_BUILD
 pref("apz.frame_delay.enabled", true);
-#else
-pref("apz.frame_delay.enabled", false);
-#endif
-#if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
 pref("apz.keyboard.enabled", true);
 pref("apz.keyboard.passive-listeners", true);
 #else
@@ -1028,6 +1018,12 @@ pref("toolkit.asyncshutdown.crash_timeout", 60000);
 // Extra logging for AsyncShutdown barriers and phases
 pref("toolkit.asyncshutdown.log", false);
 
+// Tells if DevTools have been explicitely enabled by the user.
+// This pref allows to disable all features related to DevTools
+// for users that never use them.
+// Until bug 1361080 lands, we always consider them enabled.
+pref("devtools.enabled", true);
+
 // Enable deprecation warnings.
 pref("devtools.errorconsole.deprecation_warnings", true);
 
@@ -1043,10 +1039,13 @@ sticky_pref("devtools.debugger.prompt-connection", true);
 sticky_pref("devtools.chrome.enabled", false);
 // Disable remote debugging connections
 sticky_pref("devtools.debugger.remote-enabled", false);
+// enable JS dump() function.
+sticky_pref("browser.dom.window.dump.enabled", false);
 #else
 // In local builds, enable the browser toolbox by default
 sticky_pref("devtools.chrome.enabled", true);
 sticky_pref("devtools.debugger.remote-enabled", true);
+sticky_pref("browser.dom.window.dump.enabled", true);
 #endif
 
 
@@ -1381,7 +1380,7 @@ pref("privacy.popups.disable_from_plugins", 3);
 
 // send "do not track" HTTP header, disabled by default
 pref("privacy.donottrackheader.enabled",    false);
-// If true, close buton will be shown on permission prompts
+// If true, close button will be shown on permission prompts
 // and for all PopupNotifications, the secondary action of
 // the popup will be called when the popup is dismissed.
 pref("privacy.permissionPrompts.showCloseButton", false);
@@ -1410,7 +1409,11 @@ pref("privacy.trackingprotection.lower_network_priority", false);
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
+#ifdef NIGHTLY_BUILD
+pref("dom.event.coalesce_mouse_move",       true);
+#else
 pref("dom.event.coalesce_mouse_move",       false);
+#endif
 
 pref("dom.webcomponents.enabled",           false);
 pref("dom.webcomponents.customelements.enabled", false);
@@ -1828,6 +1831,7 @@ pref("network.http.rcwn.cache_queue_priority_threshold", 2);
 // is smaller than this size.
 pref("network.http.rcwn.small_resource_size_kb", 256);
 
+pref("network.http.rcwn.min_wait_before_racing_ms", 0);
 pref("network.http.rcwn.max_wait_before_racing_ms", 500);
 
 // The ratio of the transaction count for the focused window and the count of
@@ -2239,6 +2243,19 @@ pref("network.http.throttle.time-window", 3000);
 // Give higher priority to requests resulting from a user interaction event
 // like click-to-play, image fancy-box zoom, navigation.
 pref("network.http.on_click_priority", true);
+
+// Some requests during a page load are marked as "tail", mainly trackers, but not only.
+// This pref controls whether such requests are put to the tail, behind other requests
+// emerging during page loading process.
+pref("network.http.tailing.enabled", true);
+// When the page load has not yet reached DOMContentLoaded point, tail requestes are delayed
+// by (non-tailed requests count + 1) * delay-quantum milliseconds.
+pref("network.http.tailing.delay-quantum", 600);
+// The same as above, but applied after the document load reached DOMContentLoaded event.
+pref("network.http.tailing.delay-quantum-after-domcontentloaded", 100);
+// Upper limit for the calculated delay, prevents long standing and comet-like requests
+// tail forever.  This is in milliseconds as well.
+pref("network.http.tailing.delay-max", 6000);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -3187,11 +3204,7 @@ pref("dom.idle_period.throttled_length", 10000);
 pref("idle_queue.long_period", 50);
 
 // Support the input event queue on the main thread of content process
-#ifdef NIGHTLY_BUILD
-pref("input_event_queue.supported", false);
-#else
-pref("input_event_queue.supported", false);
-#endif
+pref("input_event_queue.supported", true);
 
 // The maximum and minimum time (milliseconds) we reserve for handling input
 // events in each frame.
@@ -3330,7 +3343,7 @@ pref("dom.ipc.useNativeEventProcessing.content", false);
 
 // Quantum DOM scheduling:
 pref("dom.ipc.scheduler", false);
-pref("dom.ipc.scheduler.useMultipleQueues", false);
+pref("dom.ipc.scheduler.useMultipleQueues", true);
 pref("dom.ipc.scheduler.preemption", false);
 pref("dom.ipc.scheduler.threadCount", 2);
 pref("dom.ipc.scheduler.chaoticScheduling", false);
@@ -3691,7 +3704,7 @@ pref("font.name-list.sans-serif.ja", "Meiryo, Yu Gothic, MS PGothic, MS Gothic, 
 pref("font.name-list.monospace.ja", "MS Gothic, MS Mincho, Meiryo, Yu Gothic, Yu Mincho, MS PGothic, MS PMincho");
 
 pref("font.name-list.serif.ko", "Batang, Gulim");
-pref("font.name-list.sans-serif.ko", "Gulim");
+pref("font.name-list.sans-serif.ko", "Gulim, Malgun Gothic");
 pref("font.name-list.monospace.ko", "GulimChe");
 pref("font.name-list.cursive.ko", "Gungsuh");
 
@@ -4142,26 +4155,35 @@ pref("font.name-list.monospace.x-western", "Courier, Courier New");
 pref("font.name-list.cursive.x-western", "Apple Chancery");
 pref("font.name-list.fantasy.x-western", "Papyrus");
 
+#ifdef EARLY_BETA_OR_EARLIER
+pref("font.name-list.serif.zh-CN", "Times, Songti SC, STSong, Heiti SC");
+#else
 pref("font.name-list.serif.zh-CN", "Times, STSong, Heiti SC");
+#endif
 pref("font.name-list.sans-serif.zh-CN", "Helvetica, PingFang SC, STHeiti, Heiti SC");
 pref("font.name-list.monospace.zh-CN", "Courier, PingFang SC, STHeiti, Heiti SC");
 pref("font.name-list.cursive.zh-CN", "Kaiti SC");
 
+#ifdef EARLY_BETA_OR_EARLIER
+pref("font.name-list.serif.zh-TW", "Times, Songti TC, LiSong Pro, Heiti TC");
+#else
 pref("font.name-list.serif.zh-TW", "Times, LiSong Pro, Heiti TC");
+#endif
 pref("font.name-list.sans-serif.zh-TW", "Helvetica, PingFang TC, Heiti TC, LiHei Pro");
 pref("font.name-list.monospace.zh-TW", "Courier, PingFang TC, Heiti TC, LiHei Pro");
 pref("font.name-list.cursive.zh-TW", "Kaiti TC");
 
+#ifdef EARLY_BETA_OR_EARLIER
+pref("font.name-list.serif.zh-HK", "Times, Songti TC, LiSong Pro, Heiti TC");
+#else
 pref("font.name-list.serif.zh-HK", "Times, LiSong Pro, Heiti TC");
+#endif
 pref("font.name-list.sans-serif.zh-HK", "Helvetica, PingFang TC, Heiti TC, LiHei Pro");
 pref("font.name-list.monospace.zh-HK", "Courier, PingFang TC, Heiti TC, LiHei Pro");
 pref("font.name-list.cursive.zh-HK", "Kaiti TC");
 
 // XP_MACOSX changes to default font sizes
 pref("font.minimum-size.th", 10);
-pref("font.size.variable.zh-CN", 15);
-pref("font.size.variable.zh-HK", 15);
-pref("font.size.variable.zh-TW", 15);
 
 // Apple's Symbol is Unicode so use it
 pref("font.name-list.serif.x-math", "Latin Modern Math, STIX Two Math, XITS Math, Cambria Math, Libertinus Math, DejaVu Math TeX Gyre, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Symbol, Times");
@@ -4240,7 +4262,6 @@ pref("browser.drag_out_of_frame_style", 1);
 
 // Middle-mouse handling
 pref("middlemouse.paste", true);
-pref("middlemouse.contentLoadURL", true);
 pref("middlemouse.openNewWindow", true);
 pref("middlemouse.scrollbarPosition", true);
 
@@ -4303,7 +4324,6 @@ pref("browser.drag_out_of_frame_style", 1);
 
 // Middle-mouse handling
 pref("middlemouse.paste", true);
-pref("middlemouse.contentLoadURL", true);
 pref("middlemouse.openNewWindow", true);
 pref("middlemouse.scrollbarPosition", true);
 
@@ -4625,6 +4645,13 @@ pref("toolkit.zoomManager.zoomValues", ".3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2
 // Image-related prefs
 //
 
+// Maximum number of surfaces for an image before entering "factor of 2" mode.
+// This in addition to the number of "native" sizes of an image. A native size
+// is a size for which we can decode a frame without up or downscaling. Most
+// images only have 1, but some (i.e. ICOs) may have multiple frames for the
+// same data at different sizes.
+pref("image.cache.factor2.threshold-surfaces", 4);
+
 // The maximum size, in bytes, of the decoded images we cache
 pref("image.cache.size", 5242880);
 
@@ -4791,7 +4818,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", true);
+pref("network.tcp.tcp_fastopen_enable", false);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -5063,13 +5090,10 @@ pref("dom.battery.enabled", true);
 pref("dom.streams.enabled", false);
 
 // Abort API
-#ifdef NIGHTLY_BUILD
 pref("dom.abortController.enabled", true);
+
+// Fetch + Abort API
 pref("dom.abortController.fetch.enabled", true);
-#else
-pref("dom.abortController.enabled", false);
-pref("dom.abortController.fetch.enabled", false);
-#endif
 
 // Push
 
@@ -5164,9 +5188,6 @@ pref("layout.css.touch_action.enabled", true);
 // This only has an effect in DEBUG-builds.
 pref("layout.css.expensive-style-struct-assertions.enabled", false);
 
-// enable JS dump() function.
-pref("browser.dom.window.dump.enabled", false);
-
 #if defined(MOZ_WIDGET_ANDROID)
 // Network Information API
 pref("dom.netinfo.enabled", true);
@@ -5198,8 +5219,9 @@ pref("memory.low_memory_notification_interval_ms", 10000);
 // window to be collected via the GC/CC.
 pref("memory.ghost_window_timeout_seconds", 60);
 
-// Disable freeing dirty pages when minimizing memory.
-pref("memory.free_dirty_pages", false);
+// On memory pressure, release dirty but unused pages held by jemalloc
+// back to the system.
+pref("memory.free_dirty_pages", true);
 
 // Disable the Linux-specific, system-wide memory reporter.
 #ifdef XP_LINUX
@@ -5233,6 +5255,12 @@ pref("dom.idle-observers-api.fuzz_time.disabled", true);
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
 pref("network.activity.blipIntervalMilliseconds", 0);
+
+// If true, reuse the same global for (almost) everything loaded by the component
+// loader (JS components, JSMs, etc). This saves memory, but makes it possible
+// for the scripts to interfere with each other.  A restart is required for this
+// to take effect.
+pref("jsloader.shareGlobal", false);
 
 // When we're asked to take a screenshot, don't wait more than 2000ms for the
 // event loop to become idle before actually taking the screenshot.
@@ -5360,7 +5388,7 @@ pref("dom.flyweb.enabled", false);
 pref("dom.mapped_arraybuffer.enabled", true);
 
 // The tables used for Safebrowsing phishing and malware checks
-pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple,test-harmful-simple");
+pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-harmful-simple,test-malware-simple,test-unwanted-simple");
 #ifdef MOZILLA_OFFICIAL
 // In the official build, we are allowed to use google's private
 // phishing list "goog-phish-shavar". See Bug 1288840.
@@ -5413,7 +5441,11 @@ pref("browser.safebrowsing.id", "Firefox");
 #endif
 
 // Download protection
+#ifdef MOZILLA_OFFICIAL
 pref("browser.safebrowsing.downloads.enabled", true);
+#else
+pref("browser.safebrowsing.downloads.enabled", false);
+#endif
 pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
 pref("browser.safebrowsing.downloads.remote.url", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
@@ -5848,16 +5880,11 @@ pref("fuzzing.enabled", false);
 #endif
 
 #if defined(XP_WIN)
-#if defined(NIGHTLY_BUILD)
-pref("layers.mlgpu.dev-enabled", true);
+pref("layers.mlgpu.enabled", true);
 
 // Both this and the master "enabled" pref must be on to use Advanced Layers
 // on Windows 7.
 pref("layers.mlgpu.enable-on-windows7", true);
-#else
-pref("layers.mlgpu.dev-enabled", false);
-pref("layers.mlgpu.enable-on-windows7", false);
-#endif
 #endif
 
 // Set advanced layers preferences here to have them show up in about:config or

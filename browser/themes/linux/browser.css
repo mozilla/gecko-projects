@@ -8,7 +8,6 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
-@namespace svg url("http://www.w3.org/2000/svg");
 
 %include ../shared/browser.inc.css
 
@@ -469,17 +468,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   border-top: 1px solid ThreeDShadow;
 }
 
-.autocomplete-richlistitem:hover,
-treechildren.searchbar-treebody::-moz-tree-row(hover) {
-  background-color: var(--arrowpanel-dimmed);
-  border-color: var(--panel-separator-color);
-}
-
-.autocomplete-richlistitem[selected],
-treechildren.searchbar-treebody::-moz-tree-row(selected) {
-  background-color: Highlight;
-}
-
 .ac-title {
   font-size: 1.05em;
 }
@@ -599,7 +587,11 @@ html|span.ac-emphasize-text-url {
 }
 
 .sidebar-splitter {
-  border-color: ThreeDShadow;
+  -moz-appearance: none;
+  width: 6px;
+  background-color: -moz-dialog;
+  border: 1px ThreeDShadow;
+  border-style: none solid;
 }
 
 .browserContainer > findbar {

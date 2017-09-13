@@ -9,6 +9,10 @@ use {Atom, LocalName};
 use applicable_declarations::ApplicableDeclarationBlock;
 use context::QuirksMode;
 use dom::TElement;
+use fallible::FallibleVec;
+use hash::{HashMap, HashSet};
+use hash::map as hash_map;
+use hashglobe::FailedAllocationError;
 use pdqsort::sort_by;
 use precomputed_hash::PrecomputedHash;
 use rule_tree::CascadeLevel;
@@ -16,8 +20,6 @@ use selector_parser::SelectorImpl;
 use selectors::matching::{matches_selector, MatchingContext, ElementSelectorFlags};
 use selectors::parser::{Component, Combinator, SelectorIter};
 use smallvec::{SmallVec, VecLike};
-use std::collections::{HashMap, HashSet};
-use std::collections::hash_map;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use stylist::Rule;
 
@@ -92,8 +94,9 @@ pub trait SelectorMapEntry : Sized + Clone {
 ///
 /// TODO: Tune the initial capacity of the HashMap
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct SelectorMap<T> {
+pub struct SelectorMap<T: 'static> {
     /// A hash from an ID to rules which contain that ID selector.
     pub id_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
     /// A hash from a class name to rules which contain that class selector.
@@ -111,7 +114,10 @@ fn sort_by_key<T, F: Fn(&T) -> K, K: Ord>(v: &mut [T], f: F) {
     sort_by(v, |a, b| f(a).cmp(&f(b)))
 }
 
-impl<T> SelectorMap<T> {
+// FIXME(Manishearth) the 'static bound can be removed when
+// our HashMap fork (hashglobe) is able to use NonZero,
+// or when stdlib gets fallible collections
+impl<T: 'static> SelectorMap<T> {
     /// Trivially constructs an empty `SelectorMap`.
     pub fn new() -> Self {
         SelectorMap {
@@ -236,18 +242,20 @@ impl SelectorMap<Rule> {
 
 impl<T: SelectorMapEntry> SelectorMap<T> {
     /// Inserts into the correct hash, trying id, class, and localname.
-    pub fn insert(&mut self, entry: T, quirks_mode: QuirksMode) {
+    pub fn insert(
+        &mut self,
+        entry: T,
+        quirks_mode: QuirksMode
+    ) -> Result<(), FailedAllocationError> {
         self.count += 1;
 
         let vector = match find_bucket(entry.selector()) {
             Bucket::ID(id) => {
-                self.id_hash
-                    .entry(id.clone(), quirks_mode)
+                self.id_hash.try_entry(id.clone(), quirks_mode)?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::Class(class) => {
-                self.class_hash
-                    .entry(class.clone(), quirks_mode)
+                self.class_hash.try_entry(class.clone(), quirks_mode)?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::LocalName { name, lower_name } => {
@@ -263,10 +271,12 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
                 // rulehash lookup may produce superfluous selectors, but the
                 // subsequent selector matching work will filter them out.
                 if name != lower_name {
-                    find_push(&mut self.local_name_hash, lower_name.clone(), entry.clone());
+                    self.local_name_hash
+                        .try_entry(lower_name.clone())?
+                        .or_insert_with(SmallVec::new)
+                        .try_push(entry.clone())?;
                 }
-                self.local_name_hash
-                    .entry(name.clone())
+                self.local_name_hash.try_entry(name.clone())?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::Universal => {
@@ -274,7 +284,7 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
             }
         };
 
-        vector.push(entry);
+        vector.try_push(entry)
     }
 
     /// Looks up entries by id, class, local name, and other (in order).
@@ -449,21 +459,16 @@ fn find_bucket<'a>(mut iter: SelectorIter<'a, SelectorImpl>) -> Bucket<'a> {
     return current_bucket
 }
 
-#[inline]
-fn find_push<Str: Eq + Hash, V, VL>(map: &mut PrecomputedHashMap<Str, VL>,
-                                    key: Str,
-                                    value: V)
-    where VL: VecLike<V> + Default
-{
-    map.entry(key).or_insert_with(VL::default).push(value)
-}
-
 /// Wrapper for PrecomputedHashMap that does ASCII-case-insensitive lookup in quirks mode.
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V>(PrecomputedHashMap<K, V>);
+pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V: 'static>(PrecomputedHashMap<K, V>);
 
-impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
+// FIXME(Manishearth) the 'static bound can be removed when
+// our HashMap fork (hashglobe) is able to use NonZero,
+// or when stdlib gets fallible collections
+impl<V: 'static> MaybeCaseInsensitiveHashMap<Atom, V> {
     /// Empty map
     pub fn new() -> Self {
         MaybeCaseInsensitiveHashMap(PrecomputedHashMap::default())
@@ -475,6 +480,18 @@ impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
             key = key.to_ascii_lowercase()
         }
         self.0.entry(key)
+    }
+
+    /// HashMap::try_entry
+    pub fn try_entry(
+        &mut self,
+        mut key: Atom,
+        quirks_mode: QuirksMode
+    ) -> Result<hash_map::Entry<Atom, V>, FailedAllocationError> {
+        if quirks_mode == QuirksMode::Quirks {
+            key = key.to_ascii_lowercase()
+        }
+        self.0.try_entry(key)
     }
 
     /// HashMap::iter
@@ -496,3 +513,4 @@ impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
         }
     }
 }
+

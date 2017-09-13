@@ -50,20 +50,22 @@ import java.util.concurrent.TimeUnit;
 public class PocketStoriesLoader extends AsyncTaskLoader<List<TopStory>> {
     public static String LOGTAG = "PocketStoriesLoader";
 
+    public static final String POCKET_REFERRER_URI = "https://getpocket.com/recommendations";
+
     // Pocket SharedPreferences keys
     private static final String POCKET_PREFS_FILE = "PocketStories";
     private static final String CACHE_TIMESTAMP_MILLIS_PREFIX = "timestampMillis-";
     private static final String STORIES_CACHE_PREFIX = "storiesCache-";
 
     // Pocket API params and defaults
-    private static final String GLOBAL_ENDPOINT = "https://getpocket.com/v3/firefox/global-recs";
+    private static final String GLOBAL_ENDPOINT = "https://getpocket.cdn.mozilla.net/v3/firefox/global-recs";
     private static final String PARAM_APIKEY = "consumer_key";
     private static final String APIKEY = AppConstants.MOZ_POCKET_API_KEY;
     private static final String PARAM_COUNT = "count";
     private static final int DEFAULT_COUNT = 3;
     private static final String PARAM_LOCALE = "locale_lang";
 
-    private static final long REFRESH_INTERVAL_MILLIS = TimeUnit.HOURS.toMillis(3);
+    private static final long REFRESH_INTERVAL_MILLIS = TimeUnit.HOURS.toMillis(1);
 
     private static final int BUFFER_SIZE = 2048;
     private static final int CONNECT_TIMEOUT = (int) TimeUnit.SECONDS.toMillis(15);
@@ -145,7 +147,8 @@ public class PocketStoriesLoader extends AsyncTaskLoader<List<TopStory>> {
         }
     }
 
-    private static List<TopStory> jsonStringToTopStories(String jsonResponse) {
+    /* package-private */
+    static List<TopStory> jsonStringToTopStories(String jsonResponse) {
         final List<TopStory> topStories = new LinkedList<>();
 
         if (TextUtils.isEmpty(jsonResponse)) {
@@ -174,9 +177,10 @@ public class PocketStoriesLoader extends AsyncTaskLoader<List<TopStory>> {
 
     private static List<TopStory> makePlaceholderStories() {
         final List<TopStory> stories = new LinkedList<>();
-        final String[] TITLES = {"Placeholder 1", "Placeholder 2", "Placeholder 3"};
-        for (String title : TITLES) {
-            stories.add(new TopStory(title, "https://www.mozilla.org/", null));
+        final String TITLE_PREFIX = "Placeholder ";
+        for (int i = 0; i < 3; i++) {
+            // Urls must be different for bookmark/pinning UI to work properly. Assume this is true for Pocket stories.
+            stories.add(new TopStory(TITLE_PREFIX + i, "https://www.mozilla.org/#" + i, null));
         }
         return stories;
     }

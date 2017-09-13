@@ -66,7 +66,10 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
+            "email": "",
             "tel": "1-650-903-0800",
           },
           untouchedFields: [],
@@ -116,7 +119,10 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
+            "email": "",
             "tel": "1-650-903-0800",
           },
           untouchedFields: [],
@@ -148,7 +154,10 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
+            "email": "",
             "tel": "1-650-903-0800",
           },
           untouchedFields: [],
@@ -171,7 +180,10 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
+            "email": "",
             "tel": "1-650-903-0800",
           },
           untouchedFields: [],
@@ -193,8 +205,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "CA",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -215,8 +230,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "CA",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -237,8 +255,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "AR",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -259,8 +280,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "CA",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -281,8 +305,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "AZ",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -303,8 +330,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "address-level1": "Arizonac",
+            "address-level2": "",
             "street-address": "331 E. Evelyn Avenue",
             "country": "USA",
+            "email": "",
+            "tel": "",
           },
           untouchedFields: [],
         },
@@ -326,8 +356,11 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
             "tel": "1-650-903-0800",
+            "email": "",
           },
           untouchedFields: [],
         },
@@ -349,15 +382,95 @@ const TESTCASES = [
           guid: null,
           record: {
             "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "",
+            "address-level2": "",
             "country": "USA",
             "tel": "1-650-903-0800",
+            "email": "",
           },
           untouchedFields: [],
         },
       },
     },
   },
-
+  {
+    description: "Shouldn't save tel whose length is too short",
+    formValue: {
+      "street-addr": "331 E. Evelyn Avenue",
+      "address-level1": "CA",
+      "country": "US",
+      "tel": "1234",
+    },
+    expectedResult: {
+      formSubmission: true,
+      records: {
+        address: {
+          guid: null,
+          record: {
+            "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "CA",
+            "address-level2": "",
+            "country": "US",
+            "tel": "",
+            "email": "",
+          },
+          untouchedFields: [],
+        },
+      },
+    },
+  },
+  {
+    description: "Shouldn't save tel whose length is too long",
+    formValue: {
+      "street-addr": "331 E. Evelyn Avenue",
+      "address-level1": "CA",
+      "country": "US",
+      "tel": "1234567890123456",
+    },
+    expectedResult: {
+      formSubmission: true,
+      records: {
+        address: {
+          guid: null,
+          record: {
+            "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "CA",
+            "address-level2": "",
+            "country": "US",
+            "tel": "",
+            "email": "",
+          },
+          untouchedFields: [],
+        },
+      },
+    },
+  },
+  {
+    description: "Shouldn't save tel which contains invalid characters",
+    formValue: {
+      "street-addr": "331 E. Evelyn Avenue",
+      "address-level1": "CA",
+      "country": "US",
+      "tel": "12345###!!",
+    },
+    expectedResult: {
+      formSubmission: true,
+      records: {
+        address: {
+          guid: null,
+          record: {
+            "street-address": "331 E. Evelyn Avenue",
+            "address-level1": "CA",
+            "address-level2": "",
+            "country": "US",
+            "tel": "",
+            "email": "",
+          },
+          untouchedFields: [],
+        },
+      },
+    },
+  },
 ];
 
 add_task(async function handle_earlyformsubmit_event() {

@@ -42,7 +42,8 @@ body {
 .heading {
   display: flex;
   flex-direction: column;
-  font-size: 18px;
+  font-size: 17px;
+  font-weight: 600;
   pointer-events: none;
   padding: 12px 8px;
 }
@@ -153,6 +154,27 @@ section:not(.active) {
   border-bottom-style: solid;
 }
 
+#no-search-results {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+}
+
+#no-search-results-text {
+  font-size: 17px;
+  margin-bottom: 2em;
+}
+
+.no-search-results-image {
+  background-image: url("chrome://browser/skin/preferences/in-content/no-search-results.svg");
+  width: 380px;
+  height: 293px;
+}
+
 .hidden {
   display: none !important;
 }
@@ -230,7 +252,13 @@ body[dir="rtl"] .histogram {
   white-space: nowrap;
   position: relative; /* required for position:absolute of the contained .copy-node */
   overflow: hidden;
+  margin-bottom: 1em;
 }
+
+.keyed-scalar, .sub-section {
+  margin-bottom: 1em;
+}
+
 
 .keyed-title {
   text-overflow: ellipsis;
@@ -272,7 +300,6 @@ table {
   table-layout: fixed;
   width: 100%;
   font-size: 15px;
-  margin-bottom: 2em;
 }
 
 td {

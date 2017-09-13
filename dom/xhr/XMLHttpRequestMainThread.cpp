@@ -45,6 +45,7 @@
 #include "nsStringStream.h"
 #include "nsIAuthPrompt.h"
 #include "nsIAuthPrompt2.h"
+#include "nsIClassOfService.h"
 #include "nsIOutputStream.h"
 #include "nsISupportsPrimitives.h"
 #include "nsISupportsPriority.h"
@@ -380,7 +381,7 @@ XMLHttpRequestMainThread::IsCertainlyAliveForCC() const
 }
 
 // QueryInterface implementation for XMLHttpRequestMainThread
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(XMLHttpRequestMainThread)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(XMLHttpRequestMainThread)
   NS_INTERFACE_MAP_ENTRY(nsIXMLHttpRequest)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
@@ -620,6 +621,12 @@ XMLHttpRequestMainThread::GetResponseText(XMLHttpRequestStringSnapshot& aSnapsho
   }
 
   if (mState != State::loading && mState != State::done) {
+    return;
+  }
+
+  // Main Fetch step 18 requires to ignore body for head/connect methods.
+  if (mRequestMethod.EqualsLiteral("HEAD") ||
+      mRequestMethod.EqualsLiteral("CONNECT")) {
     return;
   }
 
@@ -2080,15 +2087,11 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
   }
 
   // Set up responseXML
-  bool parseBody = mResponseType == XMLHttpRequestResponseType::_empty ||
-                   mResponseType == XMLHttpRequestResponseType::Document;
-  nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(mChannel));
-  if (parseBody && httpChannel) {
-    nsAutoCString method;
-    rv = httpChannel->GetRequestMethod(method);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    parseBody = !method.EqualsLiteral("HEAD");
-  }
+  // Note: Main Fetch step 18 requires to ignore body for head/connect methods.
+  bool parseBody = (mResponseType == XMLHttpRequestResponseType::_empty ||
+                    mResponseType == XMLHttpRequestResponseType::Document) &&
+                   !(mRequestMethod.EqualsLiteral("HEAD") ||
+                     mRequestMethod.EqualsLiteral("CONNECT"));
 
   mIsHtml = false;
   mWarnAboutSyncHtml = false;
@@ -2620,12 +2623,21 @@ XMLHttpRequestMainThread::MaybeLowerChannelPriority()
     return;
   }
 
-  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
-  if (!p) {
-    return;
+  if (nsContentUtils::IsTailingEnabled()) {
+    nsCOMPtr<nsIClassOfService> cos = do_QueryInterface(mChannel);
+    if (cos) {
+      // Adding TailAllowed to overrule the Unblocked flag, but to preserve
+      // the effect of Unblocked when tailing is off.
+      cos->AddClassFlags(nsIClassOfService::Throttleable |
+                         nsIClassOfService::Tail |
+                         nsIClassOfService::TailAllowed);
+    }
   }
 
-  p->SetPriority(nsISupportsPriority::PRIORITY_LOWEST);
+  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
+  if (p) {
+    p->SetPriority(nsISupportsPriority::PRIORITY_LOWEST);
+  }
 }
 
 nsresult

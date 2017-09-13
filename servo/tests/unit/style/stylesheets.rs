@@ -217,7 +217,11 @@ fn test_parse_stylesheet() {
                                 (PropertyDeclaration::Width(
                                     LengthOrPercentageOrAuto::Percentage(Percentage(0.))),
                                  Importance::Normal),
-                            ])))
+                            ]))),
+                            source_location: SourceLocation {
+                                line: 17,
+                                column: 13,
+                            },
                         })),
                         Arc::new(stylesheet.shared_lock.wrap(Keyframe {
                             selector: KeyframeSelector::new_for_unit_testing(
@@ -231,6 +235,10 @@ fn test_parse_stylesheet() {
                                         vec![TimingFunction::ease()])),
                                  Importance::Normal),
                             ]))),
+                            source_location: SourceLocation {
+                                line: 18,
+                                column: 13,
+                            },
                         })),
                     ],
                     vendor_prefix: None,
@@ -280,7 +288,7 @@ impl ParseErrorReporter for CSSInvalidErrorReporterTest {
                 url: url.clone(),
                 line: location.line,
                 column: location.column,
-                message: error.to_string()
+                message: error.to_string(),
             }
         );
     }
@@ -312,13 +320,13 @@ fn test_report_error_stylesheet() {
     assert_eq!("Unsupported property declaration: 'invalid: true;', \
                 Custom(PropertyDeclaration(UnknownProperty(\"invalid\")))", error.message);
     assert_eq!(9, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     let error = errors.pop().unwrap();
     assert_eq!("Unsupported property declaration: 'display: invalid;', \
                 Custom(PropertyDeclaration(InvalidValue(\"display\", None)))", error.message);
     assert_eq!(8, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     // testing for the url
     assert_eq!(url, error.url);

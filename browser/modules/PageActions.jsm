@@ -9,6 +9,7 @@ this.EXPORTED_SYMBOLS = [
   // PageActions.Action
   // PageActions.Button
   // PageActions.Subview
+  // PageActions.ACTION_ID_BOOKMARK
   // PageActions.ACTION_ID_BOOKMARK_SEPARATOR
   // PageActions.ACTION_ID_BUILT_IN_SEPARATOR
 ];
@@ -24,10 +25,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "BinarySearch",
   "resource://gre/modules/BinarySearch.jsm");
 
 
+const ACTION_ID_BOOKMARK = "bookmark";
 const ACTION_ID_BOOKMARK_SEPARATOR = "bookmarkSeparator";
 const ACTION_ID_BUILT_IN_SEPARATOR = "builtInSeparator";
 
 const PREF_PERSISTED_ACTIONS = "browser.pageActions.persistedActions";
+const PERSISTED_ACTIONS_CURRENT_VERSION = 1
 
 
 this.PageActions = {
@@ -40,11 +43,20 @@ this.PageActions = {
 
     this._loadPersistedActions();
 
-    // Add the built-in actions, which are defined below in this file.
+    // Register the built-in actions, which are defined below in this file.
     for (let options of gBuiltInActions) {
       if (!this.actionForID(options.id)) {
-        this.addAction(new Action(options));
+        this._registerAction(new Action(options));
       }
+    }
+
+    // Now place them all in each window.  Instead of splitting the register and
+    // place steps, we could simply call addAction, which does both, but doing
+    // it this way means that all windows initially place their actions the same
+    // way -- placeAllActions -- regardless of whether they're open when this
+    // method is called or opened later.
+    for (let bpa of allBrowserPageActions()) {
+      bpa.placeAllActions();
     }
 
     // These callbacks are deferred until init happens and all built-in actions
@@ -95,6 +107,22 @@ this.PageActions = {
   },
 
   /**
+   * The list of actions in the urlbar, sorted in the order in which they should
+   * appear there.  Not live.  (array of Action objects)
+   */
+  get actionsInUrlbar() {
+    // Remember that IDs in idsInUrlbar may belong to actions that aren't
+    // currently registered.
+    return this._persistedActions.idsInUrlbar.reduce((actions, id) => {
+      let action = this.actionForID(id);
+      if (action) {
+        actions.push(action);
+      }
+      return actions;
+    }, []);
+  },
+
+  /**
    * Gets an action.
    *
    * @param  id (string, required)
@@ -128,21 +156,35 @@ this.PageActions = {
       return action;
     }
 
+    let hadSep = this.actions.some(a => a.id == ACTION_ID_BUILT_IN_SEPARATOR);
+
+    this._registerAction(action);
+
+    let sep = null;
+    if (!hadSep) {
+      sep = this.actions.find(a => a.id == ACTION_ID_BUILT_IN_SEPARATOR);
+    }
+
+    for (let bpa of allBrowserPageActions()) {
+      if (sep) {
+        // There are now both built-in and non-built-in actions, so place the
+        // separator between the two groups.
+        bpa.placeAction(sep);
+      }
+      bpa.placeAction(action);
+    }
+
+    return action;
+  },
+
+  _registerAction(action) {
     if (this.actionForID(action.id)) {
       throw new Error(`Action with ID '${action.id}' already added`);
     }
     this._actionsByID.set(action.id, action);
 
-    // The IDs of the actions in the panel and urlbar before which the new
-    // action shoud be inserted.  null means at the end, or it's irrelevant.
-    let panelInsertBeforeID = null;
-    let urlbarInsertBeforeID = null;
-
-    let oldBuiltInCount = this._builtInActions.length;
-    let oldNonBuiltInCount = this._nonBuiltInActions.length;
-
     // Insert the action into the appropriate list, either _builtInActions or
-    // _nonBuiltInActions, and find panelInsertBeforeID.
+    // _nonBuiltInActions.
 
     // Keep in mind that _insertBeforeActionID may be present but null, which
     // means the action should be appended to the built-ins.
@@ -158,33 +200,22 @@ this.PageActions = {
       if (index < 0) {
         // Append the action.
         index = this._builtInActions.length;
-        if (this._nonBuiltInActions.length) {
-          panelInsertBeforeID = ACTION_ID_BUILT_IN_SEPARATOR;
-        }
-      } else {
-        panelInsertBeforeID = this._builtInActions[index].id;
       }
       this._builtInActions.splice(index, 0, action);
     } else if (gBuiltInActions.find(a => a.id == action.id)) {
       // A built-in action.  These are always added on init before all other
       // actions, one after the other, so just push onto the array.
       this._builtInActions.push(action);
-      if (this._nonBuiltInActions.length) {
-        panelInsertBeforeID = ACTION_ID_BUILT_IN_SEPARATOR;
-      }
     } else {
       // A non-built-in action, like a non-bundled extension potentially.
       // Keep this list sorted by title.
       let index = BinarySearch.insertionIndexOf((a1, a2) => {
         return a1.title.localeCompare(a2.title);
       }, this._nonBuiltInActions, action);
-      if (index < this._nonBuiltInActions.length) {
-        panelInsertBeforeID = this._nonBuiltInActions[index].id;
-      }
       this._nonBuiltInActions.splice(index, 0, action);
     }
 
-    if (this._persistedActions.ids[action.id]) {
+    if (this._persistedActions.ids.includes(action.id)) {
       // The action has been seen before.  Override its shownInUrlbar value
       // with the persisted value.  Set the private version of that property
       // so that onActionToggledShownInUrlbar isn't called, which happens when
@@ -193,42 +224,27 @@ this.PageActions = {
         this._persistedActions.idsInUrlbar.includes(action.id);
     } else {
       // The action is new.  Store it in the persisted actions.
-      this._persistedActions.ids[action.id] = true;
-      if (action.shownInUrlbar) {
-        this._persistedActions.idsInUrlbar.push(action.id);
-      }
-      this._storePersistedActions();
+      this._persistedActions.ids.push(action.id);
+      this._updateIDsInUrlbarForAction(action);
     }
+  },
 
+  _updateIDsInUrlbarForAction(action) {
+    let index = this._persistedActions.idsInUrlbar.indexOf(action.id);
     if (action.shownInUrlbar) {
-      urlbarInsertBeforeID = this.insertBeforeActionIDInUrlbar(action);
-    }
-
-    // If there are now both built-in and non-built-in actions, add a separator
-    // in the panel between the two groups.
-    let placeBuiltInSeparator =
-      (oldNonBuiltInCount == 0 &&
-       this._nonBuiltInActions.length &&
-       this._builtInActions.length) ||
-      (oldBuiltInCount == 0 &&
-       this._builtInActions.length &&
-       this._nonBuiltInActions.length);
-
-    for (let win of browserWindows()) {
-      if (placeBuiltInSeparator) {
-        let sep = new Action({
-          id: ACTION_ID_BUILT_IN_SEPARATOR,
-          _isSeparator: true,
-        });
-        let sepPanelInsertBeforeID =
-          this._nonBuiltInActions.length ? this._nonBuiltInActions[0].id : null;
-        browserPageActions(win).placeAction(sep, sepPanelInsertBeforeID, null);
+      if (index < 0) {
+        let nextID = this.nextActionIDInUrlbar(action.id);
+        let nextIndex =
+          nextID ? this._persistedActions.idsInUrlbar.indexOf(nextID) : -1;
+        if (nextIndex < 0) {
+          nextIndex = this._persistedActions.idsInUrlbar.length;
+        }
+        this._persistedActions.idsInUrlbar.splice(nextIndex, 0, action.id);
       }
-      browserPageActions(win).placeAction(action, panelInsertBeforeID,
-                                          urlbarInsertBeforeID);
+    } else if (index >= 0) {
+      this._persistedActions.idsInUrlbar.splice(index, 1);
     }
-
-    return action;
+    this._storePersistedActions();
   },
 
   _builtInActions: [],
@@ -236,59 +252,66 @@ this.PageActions = {
   _actionsByID: new Map(),
 
   /**
-   * Returns the ID of the action among the actions in the panel before which
-   * the given action should be inserted.
+   * Returns the ID of the action before which the given action should be
+   * inserted in the urlbar.
    *
+   * @param  action (Action object, required)
+   *         The action you're inserting.
+   * @return The ID of the reference action, or null if your action should be
+   *         appended.
+   */
+  nextActionIDInUrlbar(action) {
+    // Actions in the urlbar are always inserted before the bookmark action,
+    // which always comes last if it's present.
+    if (action.id == ACTION_ID_BOOKMARK) {
+      return null;
+    }
+    let id = this._nextActionID(action, this.actionsInUrlbar);
+    return id || ACTION_ID_BOOKMARK;
+  },
+
+  /**
+   * Returns the ID of the action before which the given action should be
+   * inserted in the panel.
+   *
+   * @param  action (Action object, required)
+   *         The action you're inserting.
+   * @return The ID of the reference action, or null if your action should be
+   *         appended.
+   */
+  nextActionIDInPanel(action) {
+    return this._nextActionID(action, this.actions);
+  },
+
+  /**
+   * The DOM nodes of actions should be ordered properly, both in the panel and
+   * the urlbar.  This method returns the ID of the action that comes after the
+   * given action in the given array.  You can use the returned ID to get a DOM
+   * node ID to pass to node.insertBefore().
+   *
+   * Pass PageActions.actions to get the ID of the next action in the panel.
+   * Pass PageActions.actionsInUrlbar to get the ID of the next action in the
+   * urlbar.
+   *
+   * @param  action
+   *         The action whose node you want to insert into your DOM.
+   * @param  actionArray
+   *         The relevant array of actions, either PageActions.actions or
+   *         actionsInUrlbar.
    * @return The ID of the action before which the given action should be
    *         inserted.  If the given action should be inserted last, returns
    *         null.
    */
-  insertBeforeActionIDInPanel(action) {
-    let index = this._builtInActions.findIndex(a => {
-      return a.id == action.id;
-    });
-    if (index >= 0) {
-      return this._builtInActions[index + 1] ||
-             this._nonBuiltInActions.length ? ACTION_ID_BUILT_IN_SEPARATOR
-                                            : null;
-    }
-
-    index = this._nonBuiltInActions.findIndex(a => {
-      return a.id == action.id;
-    });
-    if (index >= 0) {
-      return this._nonBuiltInActions[index + 1] || null;
-    }
-
-    return null;
-  },
-
-  /**
-   * Returns the ID of the action among the current registered actions in the
-   * urlbar before which the given action should be inserted, ignoring whether
-   * the given action's shownInUrlbar is true or false.
-   *
-   * @return The ID of the action before which the given action should be
-   *         inserted.  If the given action should be inserted last or it should
-   *         not be inserted at all, returns null.
-   */
-  insertBeforeActionIDInUrlbar(action) {
-    // First, find the index of the given action.
-    let idsInUrlbar = this._persistedActions.idsInUrlbar;
-    let index = idsInUrlbar.indexOf(action.id);
+  _nextActionID(action, actionArray) {
+    let index = actionArray.findIndex(a => a.id == action.id);
     if (index < 0) {
       return null;
     }
-    // Now start at the next index and find the ID of the first action that's
-    // currently registered.  Remember that IDs in idsInUrlbar may belong to
-    // actions that aren't currently registered.
-    for (let i = index + 1; i < idsInUrlbar.length; i++) {
-      let id = idsInUrlbar[i];
-      if (this.actionForID(id)) {
-        return id;
-      }
+    let nextAction = actionArray[index + 1];
+    if (!nextAction) {
+      return null;
     }
-    return null;
+    return nextAction.id;
   },
 
   /**
@@ -313,15 +336,17 @@ this.PageActions = {
     }
 
     // Remove the action from persisted storage.
-    delete this._persistedActions.ids[action.id];
-    let index = this._persistedActions.idsInUrlbar.indexOf(action.id);
-    if (index >= 0) {
-      this._persistedActions.idsInUrlbar.splice(index, 1);
+    for (let name of ["ids", "idsInUrlbar"]) {
+      let array = this._persistedActions[name];
+      let index = array.indexOf(action.id);
+      if (index >= 0) {
+        array.splice(index, 1);
+      }
     }
     this._storePersistedActions();
 
-    for (let win of browserWindows()) {
-      browserPageActions(win).removeAction(action);
+    for (let bpa of allBrowserPageActions()) {
+      bpa.removeAction(action);
     }
   },
 
@@ -336,8 +361,8 @@ this.PageActions = {
       // This may be called before the action has been added.
       return;
     }
-    for (let win of browserWindows()) {
-      browserPageActions(win).updateActionIconURL(action);
+    for (let bpa of allBrowserPageActions()) {
+      bpa.updateActionIconURL(action);
     }
   },
 
@@ -352,8 +377,8 @@ this.PageActions = {
       // This may be called before the action has been added.
       return;
     }
-    for (let win of browserWindows()) {
-      browserPageActions(win).updateActionTitle(action);
+    for (let bpa of allBrowserPageActions()) {
+      bpa.updateActionTitle(action);
     }
   },
 
@@ -368,21 +393,9 @@ this.PageActions = {
       // This may be called before the action has been added.
       return;
     }
-
-    // Update persisted storage.
-    let index = this._persistedActions.idsInUrlbar.indexOf(action.id);
-    if (action.shownInUrlbar) {
-      if (index < 0) {
-        this._persistedActions.idsInUrlbar.push(action.id);
-      }
-    } else if (index >= 0) {
-      this._persistedActions.idsInUrlbar.splice(index, 1);
-    }
-    this._storePersistedActions();
-
-    let insertBeforeID = this.insertBeforeActionIDInUrlbar(action);
-    for (let win of browserWindows()) {
-      browserPageActions(win).placeActionInUrlbar(action, insertBeforeID);
+    this._updateIDsInUrlbarForAction(action);
+    for (let bpa of allBrowserPageActions()) {
+      bpa.placeActionInUrlbar(action);
     }
   },
 
@@ -394,13 +407,47 @@ this.PageActions = {
   _loadPersistedActions() {
     try {
       let json = Services.prefs.getStringPref(PREF_PERSISTED_ACTIONS);
-      this._persistedActions = JSON.parse(json);
+      this._persistedActions = this._migratePersistedActions(JSON.parse(json));
     } catch (ex) {}
   },
 
+  _migratePersistedActions(actions) {
+    // Start with actions.version and migrate one version at a time, all the way
+    // up to the current version.
+    for (let version = actions.version || 0;
+         version < PERSISTED_ACTIONS_CURRENT_VERSION;
+         version++) {
+      let methodName = `_migratePersistedActionsTo${version + 1}`;
+      actions = this[methodName](actions);
+      actions.version = version + 1;
+    }
+    return actions;
+  },
+
+  _migratePersistedActionsTo1(actions) {
+    // The `ids` object is a mapping: action ID => true.  Convert it to an array
+    // to save space in the prefs.
+    let ids = [];
+    for (let id in actions.ids) {
+      ids.push(id);
+    }
+    // Move the bookmark ID to the end of idsInUrlbar.  The bookmark action
+    // should always remain at the end of the urlbar, if present.
+    let bookmarkIndex = actions.idsInUrlbar.indexOf(ACTION_ID_BOOKMARK);
+    if (bookmarkIndex >= 0) {
+      actions.idsInUrlbar.splice(bookmarkIndex, 1);
+      actions.idsInUrlbar.push(ACTION_ID_BOOKMARK);
+    }
+    return {
+      ids,
+      idsInUrlbar: actions.idsInUrlbar,
+    };
+  },
+
   _persistedActions: {
-    // action ID => true, for actions that have ever been seen and not removed
-    ids: {},
+    version: PERSISTED_ACTIONS_CURRENT_VERSION,
+    // action IDs that have ever been seen and not removed, order not important
+    ids: [],
     // action IDs ordered by position in urlbar
     idsInUrlbar: [],
   },
@@ -509,8 +556,8 @@ function Action(options) {
     // private
 
     // (string, optional)
-    // The ID of another action before which to insert this new action.  Applies
-    // to the page action panel only, not the urlbar.
+    // The ID of another action before which to insert this new action in the
+    // panel.
     _insertBeforeActionID: false,
 
     // (bool, optional)
@@ -900,9 +947,10 @@ Button.prototype = {
 this.PageActions.Button = Button;
 
 
-// This is only necessary so that Pocket and the test can specify it for
-// action._insertBeforeActionID.
+// These are only necessary so that Pocket and the test can use them.
+this.PageActions.ACTION_ID_BOOKMARK = ACTION_ID_BOOKMARK;
 this.PageActions.ACTION_ID_BOOKMARK_SEPARATOR = ACTION_ID_BOOKMARK_SEPARATOR;
+this.PageActions.PREF_PERSISTED_ACTIONS = PREF_PERSISTED_ACTIONS;
 
 // This is only necessary so that the test can access it.
 this.PageActions.ACTION_ID_BUILT_IN_SEPARATOR = ACTION_ID_BUILT_IN_SEPARATOR;
@@ -915,7 +963,7 @@ var gBuiltInActions = [
 
   // bookmark
   {
-    id: "bookmark",
+    id: ACTION_ID_BOOKMARK,
     urlbarIDOverride: "star-button-box",
     _urlbarNodeInMarkup: true,
     title: "",
@@ -1010,10 +1058,16 @@ function browserPageActions(obj) {
 /**
  * A generator function for all open browser windows.
  */
-function* browserWindows() {
+function* allBrowserWindows() {
   let windows = Services.wm.getEnumerator("navigator:browser");
   while (windows.hasMoreElements()) {
     yield windows.getNext();
+  }
+}
+
+function* allBrowserPageActions() {
+  for (let win of allBrowserWindows()) {
+    yield browserPageActions(win);
   }
 }
 

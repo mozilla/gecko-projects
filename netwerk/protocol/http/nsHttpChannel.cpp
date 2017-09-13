@@ -99,6 +99,7 @@
 #include "nsICompressConvStats.h"
 #include "nsCORSListenerProxy.h"
 #include "nsISocketProvider.h"
+#include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/net/Predictor.h"
 #include "mozilla/MathAlgorithms.h"
 #include "CacheControlParser.h"
@@ -127,6 +128,7 @@ static bool sRCWNEnabled = false;
 static uint32_t sRCWNQueueSizeNormal = 50;
 static uint32_t sRCWNQueueSizePriority = 10;
 static uint32_t sRCWNSmallResourceSizeKB = 256;
+static uint32_t sRCWNMinWaitMs = 0;
 static uint32_t sRCWNMaxWaitMs = 500;
 
 // True if the local cache should be bypassed when processing a request.
@@ -276,6 +278,10 @@ AutoRedirectVetoNotifier::ReportRedirectResult(bool succeeded)
 
     mChannel->mRedirectChannel = nullptr;
 
+    if (succeeded) {
+        mChannel->RemoveAsNonTailRequest();
+    }
+
     nsCOMPtr<nsIRedirectResultListener> vetoHook;
     NS_QueryNotificationCallbacks(mChannel,
                                   NS_GET_IID(nsIRedirectResultListener),
@@ -332,10 +338,9 @@ nsHttpChannel::nsHttpChannel()
     , mStronglyFramed(false)
     , mUsedNetwork(0)
     , mAuthConnectionRestartable(0)
-    , mReqContentLengthDetermined(0)
-    , mReqContentLength(0U)
     , mPushedStream(nullptr)
     , mLocalBlocklist(false)
+    , mOnTailUnblock(nullptr)
     , mWarningReporter(nullptr)
     , mIsReadingFromCache(false)
     , mFirstResponseSource(RESPONSE_PENDING)
@@ -536,17 +541,40 @@ nsHttpChannel::Connect()
 {
     LOG(("nsHttpChannel::Connect [this=%p]\n", this));
 
-    // Consider opening a TCP connection right away.
-    SpeculativeConnect();
-
     // Don't allow resuming when cache must be used
     if (mResuming && (mLoadFlags & LOAD_ONLY_FROM_CACHE)) {
         LOG(("Resuming from cache is not supported yet"));
         return NS_ERROR_DOCUMENT_NOT_CACHED;
     }
 
-    // open a cache entry for this channel...
+    bool isTrackingResource = mIsTrackingResource; // is atomic
+    LOG(("nsHttpChannel %p tracking resource=%d, local blocklist=%d, cos=%u",
+          this, isTrackingResource, mLocalBlocklist, mClassOfService));
+
+    if (isTrackingResource || mLocalBlocklist) {
+        AddClassFlags(nsIClassOfService::Tail);
+    }
+
+    if (WaitingForTailUnblock()) {
+        MOZ_DIAGNOSTIC_ASSERT(!mOnTailUnblock);
+        mOnTailUnblock = &nsHttpChannel::ConnectOnTailUnblock;
+        return NS_OK;
+    }
+
+    return ConnectOnTailUnblock();
+}
+
+nsresult
+nsHttpChannel::ConnectOnTailUnblock()
+{
     nsresult rv;
+
+    LOG(("nsHttpChannel::ConnectOnTailUnblock [this=%p]\n", this));
+
+    // Consider opening a TCP connection right away.
+    SpeculativeConnect();
+
+    // open a cache entry for this channel...
     bool isHttps = false;
     rv = mURI->SchemeIs("https", &isHttps);
     NS_ENSURE_SUCCESS(rv,rv);
@@ -598,7 +626,7 @@ nsHttpChannel::Connect()
         Unused << ReadFromCache(true);
     }
 
-    return TriggerNetwork(0);
+    return TriggerNetwork();
 }
 
 nsresult
@@ -1064,30 +1092,6 @@ nsHttpChannel::ContinueHandleAsyncFallback(nsresult rv)
     return rv;
 }
 
-void
-nsHttpChannel::SetupTransactionRequestContext()
-{
-    if (!EnsureRequestContextID()) {
-        return;
-    }
-
-    nsIRequestContextService *rcsvc =
-        gHttpHandler->GetRequestContextService();
-    if (!rcsvc) {
-        return;
-    }
-
-    nsCOMPtr<nsIRequestContext> rc;
-    nsresult rv = rcsvc->GetRequestContext(mRequestContextID,
-                                           getter_AddRefs(rc));
-
-    if (NS_FAILED(rv)) {
-        return;
-    }
-
-    mTransaction->SetRequestContext(rc);
-}
-
 nsresult
 nsHttpChannel::SetupTransaction()
 {
@@ -1317,7 +1321,9 @@ nsHttpChannel::SetupTransaction()
     }
 
     mTransaction->SetClassOfService(mClassOfService);
-    SetupTransactionRequestContext();
+    if (EnsureRequestContext()) {
+        mTransaction->SetRequestContext(mRequestContext);
+    }
 
     rv = nsInputStreamPump::Create(getter_AddRefs(mTransactionPump),
                                    responseStream);
@@ -1718,8 +1724,12 @@ nsHttpChannel::CallOnStartRequest()
         // We must keep the cache entry in case of partial request.
         // Concurrent access is the same, we need the entry in
         // OnStopRequest.
-        if (!mCachedContentIsPartial && !mConcurrentCacheAccess)
+        // We also need the cache entry when racing cache with network to find
+        // out what is the source of the data.
+        if (!mCachedContentIsPartial && !mConcurrentCacheAccess &&
+            !(mRaceCacheWithNetwork && mFirstResponseSource == RESPONSE_FROM_CACHE)) {
             CloseCacheEntry(false);
+        }
     }
 
     if (!mCanceled) {
@@ -4504,7 +4514,7 @@ nsHttpChannel::OnCacheEntryAvailableInternal(nsICacheEntry *entry,
         Unused << ReadFromCache(true);
     }
 
-    return TriggerNetwork(0);
+    return TriggerNetwork();
 }
 
 nsresult
@@ -5967,6 +5977,7 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
     NS_INTERFACE_MAP_ENTRY(nsIHstsPrimingCallback)
     NS_INTERFACE_MAP_ENTRY(nsIChannelWithDivertableParentListener)
+    NS_INTERFACE_MAP_ENTRY(nsIRequestTailUnblockCallback)
     // we have no macro that covers this case.
     if (aIID.Equals(NS_GET_IID(nsHttpChannel)) ) {
         AddRef();
@@ -6008,6 +6019,12 @@ nsHttpChannel::Cancel(nsresult status)
         mAuthProvider->Cancel(status);
     if (mPreflightChannel)
         mPreflightChannel->Cancel(status);
+    if (mRequestContext && mOnTailUnblock) {
+        mOnTailUnblock = nullptr;
+        mRequestContext->CancelTailedRequest(this);
+        CloseCacheEntry(false);
+        Unused << AsyncAbort(status);
+    }
     return NS_OK;
 }
 
@@ -6120,6 +6137,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
         Preferences::AddUintVarCache(&sRCWNQueueSizeNormal, "network.http.rcwn.cache_queue_normal_threshold");
         Preferences::AddUintVarCache(&sRCWNQueueSizePriority, "network.http.rcwn.cache_queue_priority_threshold");
         Preferences::AddUintVarCache(&sRCWNSmallResourceSizeKB, "network.http.rcwn.small_resource_size_kb");
+        Preferences::AddUintVarCache(&sRCWNMinWaitMs, "network.http.rcwn.min_wait_before_racing_ms");
         Preferences::AddUintVarCache(&sRCWNMaxWaitMs, "network.http.rcwn.max_wait_before_racing_ms");
     }
 
@@ -6127,6 +6145,21 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     if (NS_FAILED(rv)) {
         ReleaseListeners();
         return rv;
+    }
+
+    if (WaitingForTailUnblock()) {
+        // This channel is marked as Tail and is part of a request context
+        // that has positive number of non-tailed requestst, hence this channel
+        // has been put to a queue.
+        // When tail is unblocked, OnTailUnblock on this channel will be called
+        // to continue AsyncOpen.
+        mListener = listener;
+        mListenerContext = context;
+        MOZ_DIAGNOSTIC_ASSERT(!mOnTailUnblock);
+        mOnTailUnblock = &nsHttpChannel::AsyncOpenOnTailUnblock;
+
+        LOG(("  put on hold until tail is unblocked"));
+        return NS_OK;
     }
 
     if (mInterceptCache != INTERCEPTED && ShouldIntercept()) {
@@ -6191,6 +6224,12 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     }
 
     return NS_OK;
+}
+
+nsresult
+nsHttpChannel::AsyncOpenOnTailUnblock()
+{
+    return AsyncOpen(mListener, mListenerContext);
 }
 
 namespace {
@@ -6533,7 +6572,12 @@ nsHttpChannel::BeginConnectContinue()
     // will return false and then we can BeginConnectActual() right away.
     RefPtr<nsHttpChannel> self = this;
     bool willCallback = InitLocalBlockList([self](bool aLocalBlockList) -> void  {
+        MOZ_ASSERT(self->mLocalBlocklist <= aLocalBlockList, "Unmarking local block-list flag?");
+
         self->mLocalBlocklist = aLocalBlockList;
+
+        LOG(("nsHttpChannel %p on-local-blacklist=%d", self.get(), aLocalBlockList));
+
         nsresult rv = self->BeginConnectActual();
         if (NS_FAILED(rv)) {
             // Since this error is thrown asynchronously so that the caller
@@ -6673,6 +6717,33 @@ nsHttpChannel::SetChannelIsForDownload(bool aChannelIsForDownload)
   return HttpBaseChannel::SetChannelIsForDownload(aChannelIsForDownload);
 }
 
+base::ProcessId
+nsHttpChannel::ProcessId()
+{
+  nsCOMPtr<nsIParentChannel> parentChannel;
+  NS_QueryNotificationCallbacks(this, parentChannel);
+  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
+  if (httpParent) {
+    return httpParent->OtherPid();
+  }
+  return base::GetCurrentProcId();
+}
+
+bool
+nsHttpChannel::AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
+
+{
+  nsCOMPtr<nsIParentChannel> parentChannel;
+  NS_QueryNotificationCallbacks(this, parentChannel);
+  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
+  if (httpParent) {
+    return httpParent->SendAttachStreamFilter(Move(aEndpoint));
+  }
+
+  extensions::StreamFilterParent::Attach(this, Move(aEndpoint));
+  return true;
+}
+
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsISupportsPriority
 //-----------------------------------------------------------------------------
@@ -6737,6 +6808,8 @@ nsHttpChannel::ContinueBeginConnectWithResult()
 void
 nsHttpChannel::ContinueBeginConnect()
 {
+    LOG(("nsHttpChannel::ContinueBeginConnect this=%p", this));
+
     nsresult rv = ContinueBeginConnectWithResult();
     if (NS_FAILED(rv)) {
         CloseCacheEntry(false);
@@ -6751,8 +6824,16 @@ nsHttpChannel::ContinueBeginConnect()
 void
 nsHttpChannel::OnClassOfServiceUpdated()
 {
+    LOG(("nsHttpChannel::OnClassOfServiceUpdated this=%p, cos=%u",
+         this, mClassOfService));
+
     if (mTransaction) {
         gHttpHandler->UpdateClassOfServiceOnTransaction(mTransaction, mClassOfService);
+    }
+    if (EligibleForTailing()) {
+        RemoveAsNonTailRequest();
+    } else {
+        AddAsNonTailRequest();
     }
 }
 
@@ -7526,6 +7607,11 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         mListener->OnStopRequest(this, mListenerContext, status);
         mOnStopRequestCalled = true;
     }
+
+    // notify "http-on-stop-connect" observers
+    gHttpHandler->OnStopRequest(this);
+
+    RemoveAsNonTailRequest();
 
     // If a preferred alt-data type was set, this signals the consumer is
     // interested in reading and/or writing the alt-data representation.
@@ -9220,47 +9306,83 @@ nsHttpChannel::Test_triggerDelayedOpenCacheEntry()
 }
 
 nsresult
-nsHttpChannel::TriggerNetwork(int32_t aTimeout)
+nsHttpChannel::TriggerNetworkWithDelay(uint32_t aDelay)
 {
     MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
+
+    LOG(("nsHttpChannel::TriggerNetworkWithDelay [this=%p, delay=%u]\n",
+         this, aDelay));
+
+    if (mCanceled) {
+        LOG(("  channel was canceled.\n"));
+        return mStatus;
+    }
+
     // If a network request has already gone out, there is no point in
     // doing this again.
-    LOG(("nsHttpChannel::TriggerNetwork [this=%p]\n", this));
     if (mNetworkTriggered) {
         LOG(("  network already triggered. Returning.\n"));
         return NS_OK;
     }
 
-    if (!aTimeout) {
-        mNetworkTriggered = true;
-        if (mNetworkTriggerTimer) {
-            mNetworkTriggerTimer->Cancel();
-            mNetworkTriggerTimer = nullptr;
-        }
-
-        // If we are waiting for a proxy request, that means we can't trigger
-        // the next step just yet. We need for mConnectionInfo to be non-null
-        // before we call TryHSTSPriming. OnProxyAvailable will trigger
-        // BeginConnect, and Connect will call TryHSTSPriming even if it's
-        // for the cache callbacks.
-        if (mProxyRequest) {
-            LOG(("  proxy request in progress. Delaying network trigger.\n"));
-            mWaitingForProxy = true;
-            return NS_OK;
-        }
-
-        if (mCacheAsyncOpenCalled && !mOnCacheAvailableCalled) {
-            mRaceCacheWithNetwork = true;
-        }
-
-        LOG(("  triggering network\n"));
-        return TryHSTSPriming();
+    if (!aDelay) {
+        // We cannot call TriggerNetwork() directly here, because it would
+        // cause performance regression in tp6 tests, see bug 1398847.
+        return NS_DispatchToMainThread(
+            NewRunnableMethod("net::nsHttpChannel::TriggerNetworkWithDelay",
+                              this, &nsHttpChannel::TriggerNetwork),
+            NS_DISPATCH_NORMAL);
     }
 
-    LOG(("  setting timer to trigger network: %d ms\n", aTimeout));
-    mNetworkTriggerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-    mNetworkTriggerTimer->InitWithCallback(this, aTimeout, nsITimer::TYPE_ONE_SHOT);
+    if (!mNetworkTriggerTimer) {
+        mNetworkTriggerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+    }
+    mNetworkTriggerTimer->InitWithCallback(this, aDelay, nsITimer::TYPE_ONE_SHOT);
     return NS_OK;
+}
+
+nsresult
+nsHttpChannel::TriggerNetwork()
+{
+    MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
+
+    LOG(("nsHttpChannel::TriggerNetwork [this=%p]\n", this));
+
+    if (mCanceled) {
+        LOG(("  channel was canceled.\n"));
+        return mStatus;
+    }
+
+    // If a network request has already gone out, there is no point in
+    // doing this again.
+    if (mNetworkTriggered) {
+        LOG(("  network already triggered. Returning.\n"));
+        return NS_OK;
+    }
+
+    mNetworkTriggered = true;
+    if (mNetworkTriggerTimer) {
+        mNetworkTriggerTimer->Cancel();
+        mNetworkTriggerTimer = nullptr;
+    }
+
+    // If we are waiting for a proxy request, that means we can't trigger
+    // the next step just yet. We need for mConnectionInfo to be non-null
+    // before we call TryHSTSPriming. OnProxyAvailable will trigger
+    // BeginConnect, and Connect will call TryHSTSPriming even if it's
+    // for the cache callbacks.
+    if (mProxyRequest) {
+        LOG(("  proxy request in progress. Delaying network trigger.\n"));
+        mWaitingForProxy = true;
+        return NS_OK;
+    }
+
+    if (mCacheAsyncOpenCalled && !mOnCacheAvailableCalled) {
+        mRaceCacheWithNetwork = true;
+    }
+
+    LOG(("  triggering network\n"));
+    return TryHSTSPriming();
 }
 
 nsresult
@@ -9291,23 +9413,22 @@ nsHttpChannel::MaybeRaceCacheWithNetwork()
         // We use microseconds in CachePerfStats but we need milliseconds
         // for TriggerNetwork.
         mRaceDelay /= 1000;
-        if (mRaceDelay > sRCWNMaxWaitMs) {
-            mRaceDelay = sRCWNMaxWaitMs;
-        }
     }
 
-    MOZ_ASSERT(sRCWNEnabled, "The pref must be truned on.");
+    mRaceDelay = clamped<uint32_t>(mRaceDelay, sRCWNMinWaitMs, sRCWNMaxWaitMs);
+
+    MOZ_ASSERT(sRCWNEnabled, "The pref must be turned on.");
     LOG(("nsHttpChannel::MaybeRaceCacheWithNetwork [this=%p, delay=%u]\n",
          this, mRaceDelay));
 
-    return TriggerNetwork(mRaceDelay);
+    return TriggerNetworkWithDelay(mRaceDelay);
 }
 
 NS_IMETHODIMP
 nsHttpChannel::Test_triggerNetwork(int32_t aTimeout)
 {
     MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
-    return TriggerNetwork(aTimeout);
+    return TriggerNetworkWithDelay(aTimeout);
 }
 
 NS_IMETHODIMP
@@ -9317,9 +9438,101 @@ nsHttpChannel::Notify(nsITimer *aTimer)
     if (aTimer == mCacheOpenTimer) {
         return Test_triggerDelayedOpenCacheEntry();
     } else if (aTimer == mNetworkTriggerTimer) {
-        return TriggerNetwork(0);
+        return TriggerNetwork();
     } else {
         MOZ_CRASH("Unknown timer");
+    }
+
+    return NS_OK;
+}
+
+bool
+nsHttpChannel::EligibleForTailing()
+{
+  if (!(mClassOfService & nsIClassOfService::Tail)) {
+      return false;
+  }
+
+  if (mClassOfService & (nsIClassOfService::UrgentStart |
+                         nsIClassOfService::Leader |
+                         nsIClassOfService::TailForbidden)) {
+      return false;
+  }
+
+  if (mClassOfService & nsIClassOfService::Unblocked &&
+      !(mClassOfService & nsIClassOfService::TailAllowed)) {
+      return false;
+  }
+
+  if (IsNavigation()) {
+      return false;
+  }
+
+  return true;
+}
+
+bool
+nsHttpChannel::WaitingForTailUnblock()
+{
+  nsresult rv;
+
+  if (!gHttpHandler->IsTailBlockingEnabled()) {
+    LOG(("nsHttpChannel %p tail-blocking disabled", this));
+    return false;
+  }
+
+  if (!EligibleForTailing()) {
+    LOG(("nsHttpChannel %p not eligible for tail-blocking", this));
+    AddAsNonTailRequest();
+    return false;
+  }
+
+  if (!EnsureRequestContext()) {
+    LOG(("nsHttpChannel %p no request context", this));
+    return false;
+  }
+
+  LOG(("nsHttpChannel::WaitingForTailUnblock this=%p, rc=%p",
+       this, mRequestContext.get()));
+
+  bool blocked;
+  rv = mRequestContext->IsContextTailBlocked(this, &blocked);
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  LOG(("  blocked=%d", blocked));
+
+  return blocked;
+}
+
+//-----------------------------------------------------------------------------
+// nsHttpChannel::nsIRequestTailUnblockCallback
+//-----------------------------------------------------------------------------
+
+// Must be implemented in the leaf class because we don't have
+// AsyncAbort in HttpBaseChannel.
+NS_IMETHODIMP
+nsHttpChannel::OnTailUnblock(nsresult rv)
+{
+    LOG(("nsHttpChannel::OnTailUnblock this=%p rv=%" PRIx32 " rc=%p",
+         this, static_cast<uint32_t>(rv), mRequestContext.get()));
+
+    MOZ_RELEASE_ASSERT(mOnTailUnblock);
+
+    if (NS_FAILED(mStatus)) {
+        rv = mStatus;
+    }
+
+    if (NS_SUCCEEDED(rv)) {
+        auto callback = mOnTailUnblock;
+        mOnTailUnblock = nullptr;
+        rv = (this->*callback)();
+    }
+
+    if (NS_FAILED(rv)) {
+        CloseCacheEntry(false);
+        return AsyncAbort(rv);
     }
 
     return NS_OK;

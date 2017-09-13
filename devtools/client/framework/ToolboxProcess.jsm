@@ -11,6 +11,7 @@ const { interfaces: Ci, utils: Cu, results: Cr } = Components;
 const DBG_XUL = "chrome://devtools/content/framework/toolbox-process-window.xul";
 const CHROME_DEBUGGER_PROFILE_NAME = "chrome_debugger_profile";
 
+const { console } = Cu.import("resource://gre/modules/Console.jsm", {});
 const { require, DevToolsLoader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -20,6 +21,9 @@ XPCOMUtils.defineLazyGetter(this, "Telemetry", function () {
 });
 XPCOMUtils.defineLazyGetter(this, "EventEmitter", function () {
   return require("devtools/shared/old-event-emitter");
+});
+XPCOMUtils.defineLazyGetter(this, "system", function () {
+  return require("devtools/shared/system");
 });
 const promise = require("promise");
 const Services = require("Services");
@@ -265,7 +269,7 @@ BrowserToolboxProcess.prototype = {
     // well.
     //
     // As an approximation of "isLocalBuild", check for an unofficial build.
-    if (!Services.appinfo.isOfficial) {
+    if (!system.constants.MOZILLA_OFFICIAL) {
       args.push("-purgecaches");
     }
 
@@ -273,6 +277,7 @@ BrowserToolboxProcess.prototype = {
       command,
       arguments: args,
       environmentAppend: true,
+      stderr: "stdout",
       environment: {
         // Disable safe mode for the new process in case this was opened via the
         // keyboard shortcut.
@@ -299,6 +304,8 @@ BrowserToolboxProcess.prototype = {
       proc.wait().then(() => this.close());
 
       return proc;
+    }, err => {
+      console.log(`Error loading Browser Toolbox: ${command} ${args.join(" ")}`, err);
     });
   },
 

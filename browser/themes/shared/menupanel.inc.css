@@ -120,10 +120,17 @@ toolbarpaletteitem[place="palette"] > #bookmarks-menu-button,
 }
 
 #appMenuRestoreLastSession {
-  list-style-image: url("chrome://browser/skin/reload.svg");
+  list-style-image: url("chrome://browser/skin/restore-session.svg");
 }
 
 #appMenuRecentlyClosedWindows {
   list-style-image: url(chrome://browser/skin/window.svg);
 }
 
+#appMenu-library-downloads-button {
+  list-style-image: url("chrome://browser/skin/downloads/download-icons.svg#arrow-with-bar");
+}
+
+#appMenu-library-downloads-show-button {
+  list-style-image: url("chrome://browser/skin/folder.svg");
+}

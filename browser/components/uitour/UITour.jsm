@@ -257,6 +257,12 @@ this.UITour = {
         return aDocument.getElementById("pageAction-urlbar-sendToDevice") ||
                aDocument.getElementById("pageAction-panel-sendToDevice");
       },
+    }],
+    ["screenshots", {
+      query: (aDocument) => {
+        return aDocument.getElementById("pageAction-urlbar-screenshots") ||
+               aDocument.getElementById("pageAction-panel-screenshots");
+      },
     }]
   ]),
 
@@ -552,38 +558,28 @@ this.UITour = {
           log.warn("openPreferences: Invalid pane specified");
           return false;
         }
-
-        let paneID = data.pane;
-        let extraArgs = { origin: "UITour" };
-        if (Services.prefs.getBoolPref("browser.preferences.useOldOrganization", true)) {
-          // We are heading to the old Preferences so
-          // let's map the new one to the old one if the `paneID` was for the new Preferences.
-          // Currently only the old advanced pane > dataChoicesTab has the mapping need,
-          // so here only do mapping for it right now.
-          // We could add another mapping when there is need.
-          if (paneID == "privacy-reports") {
-            paneID = "advanced";
-            extraArgs.advancedTab = "dataChoicesTab";
-          }
-        }
-
-        window.openPreferences(paneID, extraArgs);
+        window.openPreferences(data.pane, { origin: "UITour" });
         break;
       }
 
       case "showFirefoxAccounts": {
-        // 'signup' is the only action that makes sense currently, so we don't
-        // accept arbitrary actions just to be safe...
-        let p = new URLSearchParams("action=signup&entrypoint=uitour");
+        let p;
+        if (data.email) {
+          // With email parameter added, we need to use 'email' action to help FxA determine
+          // whether the email is registered or not and direct the user down the correct flow
+          p =  new URLSearchParams("action=email&entrypoint=uitour");
+          p.append("email", data.email);
+        } else {
+          // 'signup' is the default action that makes sense currently, so we don't
+          // accept arbitrary actions just to be safe...
+          p =  new URLSearchParams("action=signup&entrypoint=uitour");
+        }
         // Call our helper to validate extraURLCampaignParams and populate URLSearchParams
         if (!this._populateCampaignParams(p, data.extraURLCampaignParams)) {
           log.warn("showFirefoxAccounts: invalid campaign args specified");
           return false;
         }
 
-        if (data.email) {
-          p.append("email", data.email);
-        }
         // We want to replace the current tab.
         browser.loadURI("about:accounts?" + p.toString());
         break;

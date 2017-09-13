@@ -9,6 +9,7 @@
 #include "jsfriendapi.h"
 #include "LabeledEventQueue.h"
 #include "LeakRefPtr.h"
+#include "MainThreadQueue.h"
 #include "mozilla/CooperativeThreadPool.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ipc/BackgroundChild.h"
@@ -90,9 +91,6 @@ class mozilla::SchedulerImpl
 {
 public:
   explicit SchedulerImpl(SchedulerEventQueue* aQueue);
-
-  static already_AddRefed<SchedulerEventQueue>
-  CreateQueue(nsIIdlePeriod* aIdlePeriod, nsThread** aThread);
 
   void Start();
   void Shutdown();
@@ -207,11 +205,11 @@ private:
   JSContext* mContexts[CooperativeThreadPool::kMaxThreads];
 };
 
-bool SchedulerImpl::sPrefScheduler;
-bool SchedulerImpl::sPrefChaoticScheduling;
-bool SchedulerImpl::sPrefPreemption;
-bool SchedulerImpl::sPrefUseMultipleQueues;
-size_t SchedulerImpl::sPrefThreadCount;
+bool SchedulerImpl::sPrefScheduler = false;
+bool SchedulerImpl::sPrefChaoticScheduling = false;
+bool SchedulerImpl::sPrefPreemption = false;
+bool SchedulerImpl::sPrefUseMultipleQueues = false;
+size_t SchedulerImpl::sPrefThreadCount = 2;
 
 size_t SchedulerImpl::sNumThreadsRunning;
 bool SchedulerImpl::sUnlabeledEventRunning;
@@ -440,49 +438,6 @@ SchedulerImpl::Switcher()
 SchedulerImpl::SwitcherThread(void* aData)
 {
   static_cast<SchedulerImpl*>(aData)->Switcher();
-}
-
-/* static */ already_AddRefed<SchedulerEventQueue>
-SchedulerImpl::CreateQueue(nsIIdlePeriod* aIdlePeriod, nsThread** aThread)
-{
-  UniquePtr<AbstractEventQueue> queue;
-  RefPtr<nsThread> mainThread;
-
-  if (sPrefUseMultipleQueues) {
-    using MainThreadQueueT = PrioritizedEventQueue<LabeledEventQueue>;
-
-    queue = MakeUnique<MainThreadQueueT>(
-      MakeUnique<LabeledEventQueue>(),
-      MakeUnique<LabeledEventQueue>(),
-      MakeUnique<LabeledEventQueue>(),
-      MakeUnique<LabeledEventQueue>(),
-      do_AddRef(aIdlePeriod));
-  } else {
-    using MainThreadQueueT = PrioritizedEventQueue<EventQueue>;
-
-    queue = MakeUnique<MainThreadQueueT>(
-      MakeUnique<EventQueue>(),
-      MakeUnique<EventQueue>(),
-      MakeUnique<EventQueue>(),
-      MakeUnique<EventQueue>(),
-      do_AddRef(aIdlePeriod));
-  }
-
-  auto prioritized = static_cast<PrioritizedEventQueue<AbstractEventQueue>*>(queue.get());
-
-  RefPtr<SchedulerEventQueue> synchronizedQueue = new SchedulerEventQueue(Move(queue));
-
-  prioritized->SetMutexRef(synchronizedQueue->MutexRef());
-
-  // Setup "main" thread
-  mainThread = new nsThread(WrapNotNull(synchronizedQueue), nsThread::MAIN_THREAD, 0);
-
-#ifndef RELEASE_OR_BETA
-  prioritized->SetNextIdleDeadlineRef(mainThread->NextIdleDeadlineRef());
-#endif
-
-  mainThread.forget(aThread);
-  return synchronizedQueue.forget();
 }
 
 void
@@ -738,8 +693,14 @@ Scheduler::Init(nsIIdlePeriod* aIdlePeriod)
 {
   MOZ_ASSERT(!sScheduler);
 
+  RefPtr<SchedulerEventQueue> queue;
   RefPtr<nsThread> mainThread;
-  RefPtr<SchedulerEventQueue> queue = SchedulerImpl::CreateQueue(aIdlePeriod, getter_AddRefs(mainThread));
+  if (Scheduler::UseMultipleQueues()) {
+    mainThread = CreateMainThread<SchedulerEventQueue, LabeledEventQueue>(aIdlePeriod, getter_AddRefs(queue));
+  } else {
+    mainThread = CreateMainThread<SchedulerEventQueue, EventQueue>(aIdlePeriod, getter_AddRefs(queue));
+  }
+
   sScheduler = MakeUnique<SchedulerImpl>(queue);
   return mainThread.forget();
 }
@@ -763,11 +724,17 @@ Scheduler::GetPrefs()
 {
   MOZ_ASSERT(XRE_IsParentProcess());
   nsPrintfCString result("%d%d%d%d,%d",
-                         Preferences::GetBool("dom.ipc.scheduler", false),
-                         Preferences::GetBool("dom.ipc.scheduler.chaoticScheduling", false),
-                         Preferences::GetBool("dom.ipc.scheduler.preemption", false) ,
-                         Preferences::GetBool("dom.ipc.scheduler.useMultipleQueues", false),
-                         Preferences::GetInt("dom.ipc.scheduler.threadCount", 2));
+                         Preferences::GetBool("dom.ipc.scheduler",
+                                              SchedulerImpl::sPrefScheduler),
+                         Preferences::GetBool("dom.ipc.scheduler.chaoticScheduling",
+                                              SchedulerImpl::sPrefChaoticScheduling),
+                         Preferences::GetBool("dom.ipc.scheduler.preemption",
+                                              SchedulerImpl::sPrefPreemption),
+                         Preferences::GetBool("dom.ipc.scheduler.useMultipleQueues",
+                                              SchedulerImpl::sPrefUseMultipleQueues),
+                         Preferences::GetInt("dom.ipc.scheduler.threadCount",
+                                             SchedulerImpl::sPrefThreadCount));
+
   return result;
 }
 
@@ -775,6 +742,16 @@ Scheduler::GetPrefs()
 Scheduler::SetPrefs(const char* aPrefs)
 {
   MOZ_ASSERT(XRE_IsContentProcess());
+
+  // If the prefs weren't sent to this process, use the default values.
+  if (!aPrefs) {
+    return;
+  }
+
+  // If the pref string appears truncated, use the default values.
+  if (strlen(aPrefs) < 6) {
+    return;
+  }
 
   SchedulerImpl::sPrefScheduler = aPrefs[0] == '1';
   SchedulerImpl::sPrefChaoticScheduling = aPrefs[1] == '1';
@@ -788,6 +765,12 @@ Scheduler::SetPrefs(const char* aPrefs)
 Scheduler::IsSchedulerEnabled()
 {
   return SchedulerImpl::sPrefScheduler;
+}
+
+/* static */ bool
+Scheduler::UseMultipleQueues()
+{
+  return SchedulerImpl::sPrefUseMultipleQueues;
 }
 
 /* static */ bool

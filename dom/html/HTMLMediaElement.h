@@ -25,6 +25,7 @@
 #include "nsGkAtoms.h"
 #include "PrincipalChangeObserver.h"
 #include "nsStubMutationObserver.h"
+#include "MediaSegment.h" // for PrincipalHandle
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
 #ifdef CurrentTime
@@ -115,7 +116,6 @@ public:
   typedef mozilla::MetadataTags MetadataTags;
 
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(HTMLMediaElement)
-  NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
   CORSMode GetCORSMode() {
@@ -817,14 +817,12 @@ protected:
 
   class WakeLockBoolWrapper {
   public:
-    explicit WakeLockBoolWrapper(bool val = false)
-      : mValue(val)
-      , mOuter(nullptr)
+    WakeLockBoolWrapper(bool aVal, HTMLMediaElement& aOuter)
+      : mValue(aVal)
+      , mOuter(aOuter)
     {}
 
     ~WakeLockBoolWrapper() {};
-
-    void SetOuter(HTMLMediaElement* outer) { mOuter = outer; }
 
     MOZ_IMPLICIT operator bool() const { return mValue; }
 
@@ -835,7 +833,7 @@ protected:
     void UpdateWakeLock();
   private:
     bool mValue;
-    HTMLMediaElement* mOuter;
+    HTMLMediaElement& mOuter;
   };
 
   // Holds references to the DOM wrappers for the MediaStreams that we're
@@ -1406,16 +1404,15 @@ protected:
 
   RefPtr<ChannelLoader> mChannelLoader;
 
-  // The current media load ID. This is incremented every time we start a
-  // new load. Async events note the ID when they're first sent, and only fire
-  // if the ID is unchanged when they come to fire.
-  uint32_t mCurrentLoadID;
-
   // Points to the child source elements, used to iterate through the children
-  // when selecting a resource to load.  This is the index of the child element
-  // that is the current 'candidate' in:
+  // when selecting a resource to load.  This is the previous sibling of the
+  // child considered the current 'candidate' in:
   // https://html.spec.whatwg.org/multipage/media.html#concept-media-load-algorithm
-  uint32_t mSourcePointer;
+  //
+  // mSourcePointer == nullptr, we will next try to load |GetFirstChild()|.
+  // mSourcePointer == GetLastChild(), we've exhausted all sources, waiting
+  // for new elements to be appended.
+  nsCOMPtr<nsIContent> mSourcePointer;
 
   // Points to the document whose load we're blocking. This is the document
   // we're bound to when loading starts.
@@ -1441,6 +1438,11 @@ protected:
     WAITING_FOR_SOURCE
   };
 
+  // The current media load ID. This is incremented every time we start a
+  // new load. Async events note the ID when they're first sent, and only fire
+  // if the ID is unchanged when they come to fire.
+  uint32_t mCurrentLoadID;
+
   // Denotes the waiting state of a load algorithm instance. When the load
   // algorithm is waiting for a source element child to be added, this is set
   // to WAITING_FOR_SOURCE, otherwise it's NOT_WAITING.
@@ -1448,6 +1450,18 @@ protected:
 
   // Current audio volume
   double mVolume;
+
+  // True if the audio track is not silent.
+  bool mIsAudioTrackAudible;
+
+  enum MutedReasons {
+    MUTED_BY_CONTENT               = 0x01,
+    MUTED_BY_INVALID_PLAYBACK_RATE = 0x02,
+    MUTED_BY_AUDIO_CHANNEL         = 0x04,
+    MUTED_BY_AUDIO_TRACK           = 0x08
+  };
+
+  uint32_t mMuted;
 
   UniquePtr<const MetadataTags> mTags;
 
@@ -1549,15 +1563,6 @@ protected:
   // Playback of the video is paused either due to calling the
   // 'Pause' method, or playback not yet having started.
   WakeLockBoolWrapper mPaused;
-
-  enum MutedReasons {
-    MUTED_BY_CONTENT               = 0x01,
-    MUTED_BY_INVALID_PLAYBACK_RATE = 0x02,
-    MUTED_BY_AUDIO_CHANNEL         = 0x04,
-    MUTED_BY_AUDIO_TRACK           = 0x08
-  };
-
-  uint32_t mMuted;
 
   // True if the media statistics are currently being shown by the builtin
   // video controls
@@ -1778,9 +1783,6 @@ private:
   // initially be set to zero seconds. This time is used to allow the element to
   // be seeked even before the media is loaded.
   double mDefaultPlaybackStartPosition;
-
-  // True if the audio track is not silent.
-  bool mIsAudioTrackAudible;
 
   // True if media element has been marked as 'tainted' and can't
   // participate in video decoder suspending.

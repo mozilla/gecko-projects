@@ -205,10 +205,10 @@ public:
   nsresult Init(int64_t aContentLength);
 
   // Set up this stream with the cache, assuming it's for the same data
-  // as the aOriginal stream. Can fail on OOM.
+  // as the aOriginal stream.
   // Exactly one of InitAsClone or Init must be called before any other method
-  // on this class. Does nothing if already initialized.
-  nsresult InitAsClone(MediaCacheStream* aOriginal);
+  // on this class.
+  void InitAsClone(MediaCacheStream* aOriginal);
 
   // These are called on the main thread.
   // Tell us whether the stream is seekable or not. Non-seekable streams
@@ -221,9 +221,11 @@ public:
   // This must be called (and return) before the ChannelMediaResource
   // used to create this MediaCacheStream is deleted.
   void Close();
-  // This returns true when the stream has been closed
+  // This returns true when the stream has been closed.
+  // Must be used on the main thread or while holding the cache lock.
   bool IsClosed() const { return mClosed; }
-  // Returns true when this stream is can be shared by a new resource load
+  // Returns true when this stream is can be shared by a new resource load.
+  // Called on the main thread only.
   bool IsAvailableForSharing() const
   {
     return !mClosed && !mIsPrivateBrowsing &&
@@ -285,6 +287,8 @@ public:
   // If we've successfully read data beyond the originally reported length,
   // we return the end of the data we've read.
   int64_t GetLength();
+  // Return the offset where next channel data will write to. Main thread only.
+  int64_t GetOffset() const;
   // Returns the unique resource ID. Call only on the main thread or while
   // holding the media cache lock.
   int64_t GetResourceID() { return mResourceID; }
@@ -425,12 +429,6 @@ private:
   // If |aNotifyAll| is true, this function will wake up readers who may be
   // waiting on the media cache monitor. Called on the main thread only.
   void FlushPartialBlockInternal(bool aNotify, ReentrantMonitorAutoEnter& aReentrantMonitor);
-  // A helper function to do the work of closing the stream. Assumes
-  // that the cache monitor is held. Main thread only.
-  // aReentrantMonitor is the nsAutoReentrantMonitor wrapper holding the cache monitor.
-  // This is used to NotifyAll to wake up threads that might be
-  // blocked on reading from this stream.
-  void CloseInternal(ReentrantMonitorAutoEnter& aReentrantMonitor);
   // Update mPrincipal given that data has been received from aPrincipal
   bool UpdatePrincipal(nsIPrincipal* aPrincipal);
 
@@ -440,12 +438,6 @@ private:
   // These fields are main-thread-only.
   ChannelMediaResource*  mClient;
   nsCOMPtr<nsIPrincipal> mPrincipal;
-  // Set to true when MediaCache::Update() has finished while this stream
-  // was present.
-  bool                   mHasHadUpdate;
-  // Set to true when the stream has been closed either explicitly or
-  // due to an internal cache error
-  bool                   mClosed;
   // True if CacheClientNotifyDataEnded has been called for this stream.
   bool                   mDidNotifyDataEnded;
 
@@ -453,6 +445,9 @@ private:
   // only on the main thread, thus can be read either on the main thread
   // or while holding the cache's monitor.
 
+  // Set to true when the stream has been closed either explicitly or
+  // due to an internal cache error
+  bool mClosed = false;
   // This is a unique ID representing the resource we're loading.
   // All streams with the same mResourceID are loading the same
   // underlying resource and should share data.

@@ -92,10 +92,6 @@
                        label="&appMenuHistory.clearRecent.label;"
                        class="subviewbutton subviewbutton-iconic"
                        command="Tools:Sanitize"/>
-        <toolbarbutton id="appMenuRestoreLastSession"
-                       label="&appMenuHistory.restoreSession.label;"
-                       class="subviewbutton subviewbutton-iconic"
-                       command="Browser:RestoreLastSession"/>
         <toolbarseparator/>
         <toolbarbutton id="appMenuRecentlyClosedTabs"
                        label="&historyUndoMenu.label;"
@@ -164,7 +160,7 @@
             <hbox id="PanelUI-remotetabs-tabsdisabledpane" pack="center" flex="1">
               <vbox class="PanelUI-remotetabs-instruction-box" align="center">
                 <hbox pack="center">
-                  <html:img class="fxaSyncIllustration" src="chrome://browser/skin/fxa/sync-illustration.svg"/>
+                  <image class="fxaSyncIllustration"/>
                 </hbox>
                 <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.tabsnotsyncing.label;</label>
                 <hbox pack="center">
@@ -182,7 +178,7 @@
             <hbox id="PanelUI-remotetabs-nodevicespane" pack="center" flex="1">
               <vbox class="PanelUI-remotetabs-instruction-box">
                 <hbox pack="center">
-                  <html:img class="fxaSyncIllustration" src="chrome://browser/skin/fxa/sync-illustration.svg"/>
+                  <image class="fxaSyncIllustration"/>
                 </hbox>
                 <label class="PanelUI-remotetabs-instruction-title">&appMenuRemoteTabs.noclients.title;</label>
                 <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.noclients.subtitle;</label>
@@ -200,7 +196,7 @@
                 align="center"
                 class="PanelUI-remotetabs-instruction-box"
                 observes="sync-setup-state">
-            <html:img class="fxaSyncIllustration" src="chrome://browser/skin/fxa/sync-illustration.svg"/>
+            <image class="fxaSyncIllustration"/>
             <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.notsignedin.label;</label>
             <toolbarbutton class="PanelUI-remotetabs-prefs-button"
                            label="&appMenuRemoteTabs.signin.label;"
@@ -214,7 +210,7 @@
                 align="center"
                 class="PanelUI-remotetabs-instruction-box"
                 observes="sync-reauth-state">
-            <html:img class="fxaSyncIllustration" src="chrome://browser/skin/fxa/sync-illustration.svg"/>
+            <image class="fxaSyncIllustration"/>
             <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.notsignedin.label;</label>
             <toolbarbutton class="PanelUI-remotetabs-prefs-button"
                            label="&appMenuRemoteTabs.signin.label;"
@@ -334,8 +330,9 @@
        type="arrow"
        noautofocus="true"
        position="bottomcenter topright"
+       photon="true"
        hidden="true">
-  <photonpanelmultiview mainViewId="widget-overflow-mainView">
+  <photonpanelmultiview mainViewId="widget-overflow-mainView" disablekeynav="true">
     <panelview id="widget-overflow-mainView"
                context="toolbar-context-menu">
       <vbox class="panel-subview-body">
@@ -478,7 +475,7 @@
                      checkboxhidden="true"
                      hidden="true">
     <popupnotificationcontent id="update-restart-notification-content" orient="vertical">
-      <description id="update-restart-description">&updateRestart.message;</description>
+      <description id="update-restart-description">&updateRestart.message2;</description>
     </popupnotificationcontent>
   </popupnotification>
 </panel>
@@ -556,6 +553,10 @@
                        label="&newPrivateWindow.label;"
                        key="key_privatebrowsing"
                        command="Tools:PrivateBrowsing"/>
+        <toolbarbutton id="appMenuRestoreLastSession"
+                       label="&appMenuHistory.restoreSession.label;"
+                       class="subviewbutton subviewbutton-iconic"
+                       command="Browser:RestoreLastSession"/>
         <toolbarseparator/>
         <toolbaritem id="appMenu-zoom-controls" class="toolbaritem-combined-buttons">
           <label value="&fullZoom.label;"/>
@@ -717,6 +718,11 @@
                        label="&appMenuRemoteTabs.label;"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('PanelUI-remotetabs', this)"/>
+        <toolbarbutton id="appMenu-library-downloads-button"
+                       class="subviewbutton subviewbutton-iconic subviewbutton-nav"
+                       label="&libraryDownloads.label;"
+                       closemenu="none"
+                       oncommand="DownloadsSubview.show(this);"/>
       </vbox>
     </panelview>
 
@@ -746,4 +752,18 @@
       </vbox>
     </panelview>
   </photonpanelmultiview>
+</panel>
+
+<panel id="downloads-button-autohide-panel"
+       role="group"
+       type="arrow"
+       hidden="true"
+       onpopupshown="gCustomizeMode._downloadPanelAutoHideTimeout = setTimeout(() => event.target.hidePopup(), 4000);"
+       onmouseover="clearTimeout(gCustomizeMode._downloadPanelAutoHideTimeout);"
+       onmouseout="gCustomizeMode._downloadPanelAutoHideTimeout = setTimeout(() => event.target.hidePopup(), 2000);"
+       onpopuphidden="clearTimeout(gCustomizeMode._downloadPanelAutoHideTimeout);"
+       >
+  <checkbox id="downloads-button-autohide-checkbox"
+            label="&customizeMode.autoHideDownloadsButton.label;" checked="true"
+            oncommand="gCustomizeMode.onDownloadsAutoHideChange(event)"/>
 </panel>

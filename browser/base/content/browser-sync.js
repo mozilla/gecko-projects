@@ -340,7 +340,6 @@ var gSync = {
         this.remoteClients.map(client => client.id);
 
       clients.forEach(clientId => this.sendTabToDevice(url, clientId, title));
-      BrowserPageActions.panelNode.hidePopup();
     }
 
     function addTargetDevice(clientId, name, clientType) {
@@ -355,7 +354,9 @@ var gSync = {
 
     const clients = this.remoteClients;
     for (let client of clients) {
-      addTargetDevice(client.id, client.name, client.type);
+      const type = client.formfactor && client.formfactor.includes("tablet") ?
+                   "tablet" : client.type;
+      addTargetDevice(client.id, client.name, type);
     }
 
     // "Send to All Devices" menu item
@@ -373,7 +374,6 @@ var gSync = {
     const learnMore = this.fxaStrings.GetStringFromName("sendTabToDevice.singledevice");
     this._appendSendTabInfoItems(fragment, createDeviceNodeFn, noDevices, learnMore, () => {
       this.openSendToDevicePromo();
-      BrowserPageActions.panelNode.hidePopup();
     });
   },
 
@@ -382,7 +382,6 @@ var gSync = {
     const verifyAccount = this.fxaStrings.GetStringFromName("sendTabToDevice.verify");
     this._appendSendTabInfoItems(fragment, createDeviceNodeFn, notVerified, verifyAccount, () => {
       this.openPrefs("sendtab");
-      BrowserPageActions.panelNode.hidePopup();
     });
   },
 
@@ -391,7 +390,6 @@ var gSync = {
     const learnMore = this.fxaStrings.GetStringFromName("sendTabToDevice.unconfigured");
     this._appendSendTabInfoItems(fragment, createDeviceNodeFn, notConnected, learnMore, () => {
       this.openSendToDevicePromo();
-      BrowserPageActions.panelNode.hidePopup();
     });
 
     // Now add a 'sign in to sync' item above the 'learn more' item.
@@ -405,7 +403,6 @@ var gSync = {
     }
     signInItem.addEventListener("command", () => {
       this.openPrefs("sendtab");
-      BrowserPageActions.panelNode.hidePopup();
     });
     fragment.insertBefore(signInItem, fragment.lastChild);
   },

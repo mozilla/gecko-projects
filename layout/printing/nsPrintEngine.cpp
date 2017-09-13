@@ -1847,9 +1847,7 @@ nsPrintEngine::SetupToPrintContent()
   printData->mPrintSettings->GetPrintToFile(&isPrintToFile);
   if (isPrintToFile) {
     // On some platforms The BeginDocument needs to know the name of the file.
-    char16_t* fileName = nullptr;
-    printData->mPrintSettings->GetToFileName(&fileName);
-    fileNameStr = fileName;
+    printData->mPrintSettings->GetToFileName(getter_Copies(fileNameStr));
   }
 
   nsAutoString docTitleStr;
@@ -3193,7 +3191,8 @@ nsPrintEngine::FindFocusedDOMWindow()
   NS_ENSURE_TRUE(rootWindow, nullptr);
 
   nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
-  nsFocusManager::GetFocusedDescendant(rootWindow, true,
+  nsFocusManager::GetFocusedDescendant(rootWindow,
+                                       nsFocusManager::eIncludeAllDescendants,
                                        getter_AddRefs(focusedWindow));
   NS_ENSURE_TRUE(focusedWindow, nullptr);
 

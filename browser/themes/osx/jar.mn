@@ -75,9 +75,7 @@ browser.jar:
   skin/classic/browser/preferences/saveFile.png             (preferences/saveFile.png)
 * skin/classic/browser/preferences/preferences.css          (preferences/preferences.css)
 * skin/classic/browser/preferences/in-content/preferences.css (preferences/in-content/preferences.css)
-* skin/classic/browser/preferences/in-content-new/preferences.css     (preferences/in-content-new/preferences.css)
 * skin/classic/browser/preferences/in-content/dialog.css      (preferences/in-content/dialog.css)
-* skin/classic/browser/preferences/in-content-new/dialog.css          (preferences/in-content-new/dialog.css)
   skin/classic/browser/preferences/applications.css         (preferences/applications.css)
   skin/classic/browser/tabbrowser/tabDragIndicator.png                   (tabbrowser/tabDragIndicator.png)
   skin/classic/browser/tabbrowser/tabDragIndicator@2x.png                (tabbrowser/tabDragIndicator@2x.png)
@@ -89,9 +87,7 @@ browser.jar:
   skin/classic/browser/yosemite/menuPanel-exit@2x.png                  (menuPanel-exit-yosemite@2x.png)
   skin/classic/browser/yosemite/menuPanel-help.png                     (menuPanel-help-yosemite.png)
   skin/classic/browser/yosemite/menuPanel-help@2x.png                  (menuPanel-help-yosemite@2x.png)
-#ifdef E10S_TESTING_ONLY
-  skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
-#endif
+  skin/classic/browser/e10s-64@2x.png                                  (../shared/e10s-64@2x.png)
 
 [extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}] chrome.jar:
 % override chrome://browser/skin/feeds/audioFeedIcon.png                   chrome://browser/skin/feeds/feedIcon.png

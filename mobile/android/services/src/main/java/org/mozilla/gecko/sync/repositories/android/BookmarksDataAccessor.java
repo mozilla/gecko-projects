@@ -115,6 +115,11 @@ public class BookmarksDataAccessor extends DataAccessor {
    */
   /* package-private */ boolean updateAssertingLocalVersion(String guid, int expectedLocalVersion, boolean shouldIncrementLocalVersion, Record newRecord) {
     final ContentValues cv = getContentValues(newRecord);
+
+    // A (hopefully) temporary hack, see https://bugzilla.mozilla.org/show_bug.cgi?id=1395703#c1
+    // We don't need this flag in CVs, since we're signaling the same thing via uri (see below).
+    cv.remove(BrowserContract.Bookmarks.PARAM_INSERT_FROM_SYNC_AS_MODIFIED);
+
     final Bundle data = new Bundle();
     data.putString(BrowserContract.SyncColumns.GUID, guid);
     data.putInt(BrowserContract.VersionColumns.LOCAL_VERSION, expectedLocalVersion);
@@ -344,7 +349,7 @@ public class BookmarksDataAccessor extends DataAccessor {
     // We might want to indicate that this record is to be inserted as "modified". Incoming records
     // might be modified as we're processing them for insertion, and so should be re-uploaded.
     // Our data provider layer manages versions, so we don't pass in localVersion explicitly.
-    if (rec.insertFromSyncAsModified) {
+    if (rec.modifiedBySync) {
       cv.put(BrowserContract.Bookmarks.PARAM_INSERT_FROM_SYNC_AS_MODIFIED, true);
     }
 

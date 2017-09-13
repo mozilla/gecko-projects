@@ -7,11 +7,12 @@
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use dom::TElement;
 use gecko_bindings::bindings::{self, RawServoStyleSet};
-use gecko_bindings::structs::{ServoStyleSheet, StyleSheetInfo, ServoStyleSheetInner};
-use gecko_bindings::structs::RawGeckoPresContextOwned;
+use gecko_bindings::structs::{RawGeckoPresContextOwned, ServoStyleSetSizes, ServoStyleSheet};
+use gecko_bindings::structs::{StyleSheetInfo, ServoStyleSheetInner};
 use gecko_bindings::structs::nsIDocument;
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasBoxFFI, HasFFI, HasSimpleFFI};
 use invalidation::media_queries::{MediaListKey, ToMediaListKey};
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use media_queries::{Device, MediaList};
 use properties::ComputedValues;
 use servo_arc::Arc;
@@ -183,6 +184,12 @@ impl PerDocumentStyleDataImpl {
     /// Returns whether visited styles are enabled.
     pub fn visited_styles_enabled(&self) -> bool {
         self.visited_links_enabled() && !self.is_private_browsing_enabled()
+    }
+
+    /// Measure heap usage.
+    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.stylist.add_size_of_children(ops, sizes);
+        sizes.mStylistOther += self.extra_style_data.size_of(ops);
     }
 }
 
