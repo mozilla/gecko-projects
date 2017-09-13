@@ -5677,6 +5677,10 @@ class nsDisplayTransform: public nsDisplayItem
     virtual void Destroy(nsDisplayListBuilder* aBuilder) override
     {
       mList.DeleteAll(aBuilder);
+      if (mFrame && aBuilder->IsRetainingDisplayList()) {
+        mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+        MOZ_ASSERT(removed);
+      }
     }
 
     virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
