@@ -5381,7 +5381,7 @@ ContainerState::Finish(uint32_t* aTextContentFlags,
       // now.
       mContainerLayer->InsertAfter(layer, prevChild);
     } else {
-      MOZ_ASSERT(layer->GetParent() == mContainerLayer,
+      NS_ASSERTION(layer->GetParent() == mContainerLayer,
                    "Layer shouldn't be the child of some other container");
       if (layer->GetPrevSibling() != prevChild) {
         mContainerLayer->RepositionChild(layer, prevChild);
@@ -5889,8 +5889,7 @@ FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame, DisplayItemType aDisplayI
 
 
       Layer* layer = element->mLayer;
-      if (layer &&
-          !layer->HasUserData(&gColorLayerUserData) &&
+      if (!layer->HasUserData(&gColorLayerUserData) &&
           !layer->HasUserData(&gImageLayerUserData) &&
           !layer->HasUserData(&gPaintedDisplayItemLayerUserData)) {
         return layer;

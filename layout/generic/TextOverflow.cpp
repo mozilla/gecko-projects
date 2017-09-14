@@ -177,15 +177,12 @@ public:
     MOZ_COUNT_DTOR(nsDisplayTextOverflowMarker);
   }
 #endif
-
-  nsIFrame* StyleFrame() const override { return mStyleFrame; }
-
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override
   {
     *aSnap = false;
     nsRect shadowRect =
-      nsLayoutUtils::GetTextShadowRectsUnion(mRect, mStyleFrame);
+      nsLayoutUtils::GetTextShadowRectsUnion(mRect, mFrame);
     return mRect.Union(shadowRect);
   }
 
@@ -195,21 +192,12 @@ public:
       // On OS X, web authors can turn off subpixel text rendering using the
       // CSS property -moz-osx-font-smoothing. If they do that, we don't need
       // to use component alpha layers for the affected text.
-      if (mStyleFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+      if (mFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
         return nsRect();
       }
     }
     bool snap;
     return GetBounds(aBuilder, &snap);
-  }
-
-  virtual bool IsInvalid(nsRect& aRect) const override
-  {
-    if (mStyleFrame->IsInvalid(aRect) && aRect.IsEmpty()) {
-      return true;
-    }
-    aRect += ToReferenceFrame();
-    return !aRect.IsEmpty();
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
@@ -222,7 +210,6 @@ public:
                           nsPoint aOffsetFromRect);
   NS_DISPLAY_DECL_NAME("TextOverflow", TYPE_TEXT_OVERFLOW)
 private:
-  nsIFrame*       mStyleFrame;
   nsRect          mRect;   // in reference frame coordinates
   const nsStyleTextOverflowSide* mStyle;
   nscoord         mAscent; // baseline for the marker text in mRect
@@ -244,10 +231,10 @@ nsDisplayTextOverflowMarker::Paint(nsDisplayListBuilder* aBuilder,
                                    gfxContext*           aCtx)
 {
   nscolor foregroundColor = nsLayoutUtils::
-    GetColor(mStyleFrame, &nsStyleText::mWebkitTextFillColor);
+    GetColor(mFrame, &nsStyleText::mWebkitTextFillColor);
 
   // Paint the text-shadows for the overflow marker
-  nsLayoutUtils::PaintTextShadow(mStyleFrame, aCtx, mRect, mVisibleRect,
+  nsLayoutUtils::PaintTextShadow(mFrame, aCtx, mRect, mVisibleRect,
                                  foregroundColor, PaintTextShadowCallback,
                                  (void*)this);
   aCtx->SetColor(gfx::Color::FromABGR(foregroundColor));
@@ -258,24 +245,24 @@ void
 nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
                                                 nsPoint aOffsetFromRect)
 {
-  WritingMode wm = mStyleFrame->GetWritingMode();
+  WritingMode wm = mFrame->GetWritingMode();
   nsPoint pt(mRect.x, mRect.y);
   if (wm.IsVertical()) {
     if (wm.IsVerticalLR()) {
       pt.x = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineX(
-        mStyleFrame, aCtx, pt.x, mAscent));
+        mFrame, aCtx, pt.x, mAscent));
     } else {
       pt.x = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineX(
-        mStyleFrame, aCtx, pt.x + mRect.width, -mAscent));
+        mFrame, aCtx, pt.x + mRect.width, -mAscent));
     }
   } else {
     pt.y = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineY(
-      mStyleFrame, aCtx, pt.y, mAscent));
+      mFrame, aCtx, pt.y, mAscent));
   }
   pt += aOffsetFromRect;
 
   if (mStyle->mType == NS_STYLE_TEXT_OVERFLOW_ELLIPSIS) {
-    gfxTextRun* textRun = GetEllipsisTextRun(mStyleFrame);
+    gfxTextRun* textRun = GetEllipsisTextRun(mFrame);
     if (textRun) {
       NS_ASSERTION(!textRun->IsRightToLeft(),
                    "Ellipsis textruns should always be LTR!");
@@ -285,8 +272,8 @@ nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
     }
   } else {
     RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(mStyleFrame);
-    nsLayoutUtils::DrawString(mStyleFrame, *fm, aCtx, mStyle->mString.get(),
+      nsLayoutUtils::GetInflatedFontMetricsForFrame(mFrame);
+    nsLayoutUtils::DrawString(mFrame, *fm, aCtx, mStyle->mString.get(),
                               mStyle->mString.Length(), pt);
   }
 }

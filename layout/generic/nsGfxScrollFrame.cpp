@@ -3230,8 +3230,7 @@ ClipItemsExceptCaret(nsDisplayList* aList,
                      nsDisplayListBuilder* aBuilder,
                      nsIFrame* aClipFrame,
                      const DisplayItemClipChain* aExtraClip,
-                     nsDataHashtable<nsPtrHashKey<const DisplayItemClipChain>,
-                     const DisplayItemClipChain*>& aCache)
+                     nsDataHashtable<nsPtrHashKey<const DisplayItemClipChain>, const DisplayItemClipChain*>& aCache)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
     if (!ShouldBeClippedByFrame(aClipFrame, i->Frame())) {

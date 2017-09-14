@@ -3058,8 +3058,6 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
 
   builder.EndFrame();
 
-  builder.EndFrame();
-
   return true;
 }
 

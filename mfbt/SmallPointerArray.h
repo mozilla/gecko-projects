@@ -9,6 +9,7 @@
 #define mozilla_SmallPointerArray_h
 
 #include "mozilla/Assertions.h"
+#include <algorithm>
 #include <iterator>
 #include <vector>
 
