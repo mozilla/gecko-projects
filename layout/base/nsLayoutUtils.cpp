@@ -4730,8 +4730,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       builder.EndFrame();
       delete listPtr;
       delete builderPtr;
-    } else if (builder.ShouldRecycle()) {
-      aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
+    } else {
+      if (builder.ShouldRecycle()) {
+        aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
+      }
       builder.EndFrame();
     }
   }
