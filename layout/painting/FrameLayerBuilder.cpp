@@ -477,10 +477,10 @@ public:
    */
   void Accumulate(ContainerState* aState,
                   nsDisplayItem* aItem,
+                  const nsIntRegion& aClippedOpaqueRegion,
                   const nsIntRect& aVisibleRect,
                   const DisplayItemClip& aClip,
-                  LayerState aLayerState,
-                  nsDisplayList *aList);
+                  LayerState aLayerState);
   AnimatedGeometryRoot* GetAnimatedGeometryRoot() { return mAnimatedGeometryRoot; }
 
   /**
@@ -3450,10 +3450,10 @@ IsItemAreaInWindowOpaqueRegion(nsDisplayListBuilder* aBuilder,
 void
 PaintedLayerData::Accumulate(ContainerState* aState,
                             nsDisplayItem* aItem,
+                            const nsIntRegion& aClippedOpaqueRegion,
                             const nsIntRect& aVisibleRect,
                             const DisplayItemClip& aClip,
-                            LayerState aLayerState,
-                            nsDisplayList* aList)
+                            LayerState aLayerState)
 {
   FLB_LOG_PAINTED_LAYER_DECISION(this, "Accumulating dp=%s(%p), f=%p against pld=%p\n", aItem->Name(), aItem, aItem->Frame(), this);
 
@@ -3489,16 +3489,11 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     return;
   }
 
-  nsIntRegion opaquePixels = aState->ComputeOpaqueRect(aItem,
-                                                       mAnimatedGeometryRoot, mASR, aClip, aList,
-                                                       &mHideAllLayersBelow, &mOpaqueForAnimatedGeometryRootParent);
-  opaquePixels.AndWith(aVisibleRect);
-
   /* Mark as available for conversion to image layer if this is a nsDisplayImage and
    * it's the only thing visible in this layer.
    */
   if (nsIntRegion(aVisibleRect).Contains(mVisibleRegion) &&
-      opaquePixels.Contains(mVisibleRegion) &&
+      aClippedOpaqueRegion.Contains(mVisibleRegion) &&
       aItem->SupportsOptimizingToImage()) {
     mImage = static_cast<nsDisplayImageContainer*>(aItem);
     FLB_LOG_PAINTED_LAYER_DECISION(this, "  Tracking image: nsDisplayImageContainer covers the layer\n");
@@ -3555,8 +3550,8 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     mVisibleRegion.SimplifyOutward(4);
   }
 
-  if (!opaquePixels.IsEmpty()) {
-    for (auto iter = opaquePixels.RectIter(); !iter.Done(); iter.Next()) {
+  if (!aClippedOpaqueRegion.IsEmpty()) {
+    for (auto iter = aClippedOpaqueRegion.RectIter(); !iter.Done(); iter.Next()) {
       // We don't use SimplifyInward here since it's not defined exactly
       // what it will discard. For our purposes the most important case
       // is a large opaque background at the bottom of z-order (e.g.,
@@ -3963,31 +3958,6 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
   aLayer->SetMaskLayer(maskLayer);
 }
 
-static nsDisplayItem*
-MergeItems(nsDisplayListBuilder* aBuilder,
-           nsTArray<nsDisplayItem*>& aMergedItems)
-{
-  nsDisplayItem* merged = nullptr;
-
-  // Clone the last item in the aMergedItems list and merge the items into it.
-  for (nsDisplayItem* item : Reversed(aMergedItems)) {
-    MOZ_ASSERT(item);
-
-    if (!merged) {
-      merged = item->Clone(aBuilder);
-      MOZ_ASSERT(merged);
-
-      aBuilder->AddTemporaryItem(merged);
-    } else {
-      merged->Merge(item);
-    }
-
-    merged->MergeDisplayListFromItem(aBuilder, item);
-  }
-
-  return merged;
-}
-
 static bool
 IsScrollThumbLayer(nsDisplayItem* aItem)
 {
@@ -4061,8 +4031,8 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       }
     }
 
-    // Peek ahead to the next item and try merging the current item with it.
-    // This will create a list of consecutive items that can be merged together.
+    // Peek ahead to the next item and see if it can be merged with the current
+    // item. We create a list of consecutive items that can be merged together.
     AutoTArray<nsDisplayItem*, 1> mergedItems;
     mergedItems.AppendElement(item);
     for (nsDisplayItem* peek = item->GetAbove(); peek; peek = peek->GetAbove()) {
@@ -4077,7 +4047,9 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     }
 
     if (mergedItems.Length() > 1) {
-      item = MergeItems(mBuilder, mergedItems);
+      // We have items that can be merged together. Merge them into a temporary
+      // item and process that item immediately.
+      item = mBuilder->MergeItems(mergedItems);
       MOZ_ASSERT(item && itemType == item->GetType());
     }
 
@@ -4546,7 +4518,14 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         if (mManager->IsWidgetLayerManager()) {
           paintedLayerData->UpdateCommonClipCount(itemClip);
         }
-        paintedLayerData->Accumulate(this, item, itemVisibleRect, itemClip, layerState, aList);
+        nsIntRegion opaquePixels = ComputeOpaqueRect(item,
+            animatedGeometryRoot, itemASR, itemClip, aList,
+            &paintedLayerData->mHideAllLayersBelow,
+            &paintedLayerData->mOpaqueForAnimatedGeometryRootParent);
+        MOZ_ASSERT(nsIntRegion(itemDrawRect).Contains(opaquePixels));
+        opaquePixels.AndWith(itemVisibleRect);
+        paintedLayerData->Accumulate(this, item, opaquePixels,
+            itemVisibleRect, itemClip, layerState);
 
         if (!paintedLayerData->mLayer) {
           // Try to recycle the old layer of this display item.

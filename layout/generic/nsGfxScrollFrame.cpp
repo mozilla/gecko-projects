@@ -3234,17 +3234,11 @@ ClipItemsExceptCaret(nsDisplayList* aList,
                      const DisplayItemClipChain*>& aCache)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
-    const DisplayItemType type = i->GetType();
-
-    // nsDisplayTextOverflowMarkers use a different frame for geometry
-    nsIFrame* aClippedFrame = type != DisplayItemType::TYPE_TEXT_OVERFLOW
-                            ? i->Frame() : i->StyleFrame();
-
-    if (!ShouldBeClippedByFrame(aClipFrame, aClippedFrame)) {
+    if (!ShouldBeClippedByFrame(aClipFrame, i->Frame())) {
       continue;
     }
 
-    if (type != DisplayItemType::TYPE_CARET) {
+    if (i->GetType() != DisplayItemType::TYPE_CARET) {
       const DisplayItemClipChain* clip = i->GetClipChain();
       const DisplayItemClipChain* intersection = nullptr;
       if (aCache.Get(clip, &intersection)) {

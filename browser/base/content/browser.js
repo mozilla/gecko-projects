@@ -301,6 +301,10 @@ var gInitialPages = [
   "about:sessionrestore"
 ];
 
+function isInitialPage(url) {
+  return gInitialPages.includes(url) || url == BROWSER_NEW_TAB_URL;
+}
+
 function* browserWindows() {
   let windows = Services.wm.getEnumerator("navigator:browser");
   while (windows.hasMoreElements())
@@ -1242,34 +1246,22 @@ var gBrowserInit = {
     let isRemote = gMultiProcessBrowser;
     let remoteType;
     let sameProcessAsFrameLoader;
-    if (window.arguments) {
-      let argToLoad = window.arguments[0];
-      if (argToLoad instanceof XULElement) {
-        // The window's first argument is a tab if and only if we are swapping tabs.
-        // We must set the browser's usercontextid before updateBrowserRemoteness(),
-        // so that the newly created remote tab child has the correct usercontextid.
-        if (argToLoad.hasAttribute("usercontextid")) {
-          initBrowser.setAttribute("usercontextid",
-                                   argToLoad.getAttribute("usercontextid"));
-        }
 
-        let linkedBrowser = argToLoad.linkedBrowser;
-        if (linkedBrowser) {
-          remoteType = linkedBrowser.remoteType;
-          isRemote = remoteType != E10SUtils.NOT_REMOTE;
-          sameProcessAsFrameLoader = linkedBrowser.frameLoader;
-        }
-      } else if (argToLoad instanceof String) {
-        // argToLoad is String, so should be a URL.
-        remoteType = E10SUtils.getRemoteTypeForURI(argToLoad, gMultiProcessBrowser);
+    let tabArgument = window.arguments && window.arguments[0];
+    if (tabArgument instanceof XULElement) {
+      // The window's first argument is a tab if and only if we are swapping tabs.
+      // We must set the browser's usercontextid before updateBrowserRemoteness(),
+      // so that the newly created remote tab child has the correct usercontextid.
+      if (tabArgument.hasAttribute("usercontextid")) {
+        initBrowser.setAttribute("usercontextid",
+                                 tabArgument.getAttribute("usercontextid"));
+      }
+
+      let linkedBrowser = tabArgument.linkedBrowser;
+      if (linkedBrowser) {
+        remoteType = linkedBrowser.remoteType;
         isRemote = remoteType != E10SUtils.NOT_REMOTE;
-      } else if (argToLoad instanceof Ci.nsIArray) {
-        // argToLoad is nsIArray, so should be an array of URLs, set the remote
-        // type for the initial browser to match the first one.
-        let urisstring = argToLoad.queryElementAt(0, Ci.nsISupportsString);
-        remoteType = E10SUtils.getRemoteTypeForURI(urisstring.data,
-                                                   gMultiProcessBrowser);
-        isRemote = remoteType != E10SUtils.NOT_REMOTE;
+        sameProcessAsFrameLoader = linkedBrowser.frameLoader;
       }
     }
 
@@ -1332,6 +1324,10 @@ var gBrowserInit = {
     Services.obs.notifyObservers(window, "browser-window-before-show");
 
     gUIDensity.init();
+
+    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+      gDragSpaceObserver.init();
+    }
 
     let isResistFingerprintingEnabled = gPrefService.getBoolPref("privacy.resistFingerprinting");
 
@@ -1820,6 +1816,10 @@ var gBrowserInit = {
     Services.obs.removeObserver(gPluginHandler.NPAPIPluginCrashed, "plugin-crashed");
 
     gUIDensity.uninit();
+
+    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+      gDragSpaceObserver.uninit();
+    }
 
     try {
       gBrowser.removeProgressListener(window.XULBrowserWindow);
@@ -2755,7 +2755,7 @@ function URLBarSetURI(aURI) {
 
     // Replace initial page URIs with an empty string
     // only if there's no opener (bug 370555).
-    if (gInitialPages.includes(uri.spec) &&
+    if (isInitialPage(uri.spec) &&
         checkEmptyPageOrigin(gBrowser.selectedBrowser, uri)) {
       value = "";
     } else {
@@ -2768,6 +2768,10 @@ function URLBarSetURI(aURI) {
     }
 
     valid = !isBlankPageURL(uri.spec) || uri.schemeIs("moz-extension");
+  } else if (isInitialPage(value) &&
+             checkEmptyPageOrigin(gBrowser.selectedBrowser)) {
+    value = "";
+    valid = true;
   }
 
   let isDifferentValidValue = valid && value != gURLBar.value;
@@ -5514,6 +5518,10 @@ function setToolbarVisibility(toolbar, isVisible, persist = true) {
   toolbar.dispatchEvent(event);
 
   BookmarkingUI.onToolbarVisibilityChange();
+
+  if (toolbar.getAttribute("type") == "menubar" && CustomizationHandler.isCustomizing()) {
+    gCustomizeMode._updateDragSpaceCheckbox();
+  }
 }
 
 function updateToggleControlLabel(control) {
@@ -5590,6 +5598,38 @@ var gTabletModePageCounter = {
 function displaySecurityInfo() {
   BrowserPageInfo(null, "securityTab");
 }
+
+// Adds additional drag space to the window by listening to
+// the corresponding preference.
+var gDragSpaceObserver = {
+  pref: "browser.tabs.extraDragSpace",
+
+  init() {
+    this.update();
+    gPrefService.addObserver(this.pref, this);
+  },
+
+  uninit() {
+    gPrefService.removeObserver(this.pref, this);
+  },
+
+  observe(aSubject, aTopic, aPrefName) {
+    if (aTopic != "nsPref:changed" || aPrefName != this.pref) {
+      return;
+    }
+
+    this.update();
+  },
+
+  update() {
+    if (gPrefService.getBoolPref(this.pref)) {
+      document.documentElement.setAttribute("extradragspace", "true");
+    } else {
+      document.documentElement.removeAttribute("extradragspace");
+    }
+    TabsInTitlebar.updateAppearance(true);
+  },
+};
 
 // Updates the UI density (for touch and compact mode) based on the uidensity pref.
 var gUIDensity = {
@@ -8475,12 +8515,6 @@ var ResponsiveUI = {
     this.ResponsiveUIManager.toggle(window, gBrowser.selectedTab);
   }
 };
-
-XPCOMUtils.defineLazyGetter(ResponsiveUI, "ResponsiveUIManager", function() {
-  let tmp = {};
-  Cu.import("resource://devtools/client/responsivedesign/responsivedesign.jsm", tmp);
-  return tmp.ResponsiveUIManager;
-});
 
 var MousePosTracker = {
   _listeners: new Set(),

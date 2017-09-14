@@ -851,6 +851,39 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
   animationInfo.TransferMutatedFlagToLayer(aLayer);
 }
 
+nsDisplayItem*
+nsDisplayListBuilder::MergeItems(nsTArray<nsDisplayItem*>& aMergedItems)
+{
+  // For merging, we create a temporary item by cloning the last item of the
+  // mergeable items list. This ensures that the temporary item will have the
+  // correct frame and bounds.
+  nsDisplayItem* merged = nullptr;
+
+  for (nsDisplayItem* item : Reversed(aMergedItems)) {
+    MOZ_ASSERT(item);
+
+    if (!merged) {
+      // Create the temporary item.
+      merged = item->Clone(this);
+      MOZ_ASSERT(merged);
+
+      AddTemporaryItem(merged);
+    } else {
+      // Merge the item properties (frame/bounds/etc) with the previously
+      // created temporary item.
+      MOZ_ASSERT(merged->CanMerge(item));
+      merged->Merge(item);
+    }
+
+    // Create nsDisplayWrapList that points to the internal display list of the
+    // item we are merging. This nsDisplayWrapList is added to the display list
+    // of the temporary item.
+    merged->MergeDisplayListFromItem(this, item);
+  }
+
+  return merged;
+}
+
 void
 nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter::InsertScrollFrame(nsIScrollableFrame* aScrollableFrame)
 {
@@ -1163,6 +1196,9 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
                "All presshells should have been exited");
   NS_ASSERTION(!mCurrentTableItem, "No table item should be active");
 
+  for (nsDisplayItem* i : mTemporaryItems) {
+    i->Destroy(this);
+  }
   for (nsDisplayItem* i : mTemporaryItems) {
     i->Destroy(this);
   }
@@ -5979,6 +6015,24 @@ nsDisplayWrapList::~nsDisplayWrapList() {
 }
 
 void
+nsDisplayWrapList::MergeDisplayListFromItem(nsDisplayListBuilder* aBuilder,
+                                            const nsDisplayItem* aItem)
+{
+  const nsDisplayWrapList* wrappedItem = aItem->AsDisplayWrapList();
+  MOZ_ASSERT(wrappedItem);
+
+  // Create a new nsDisplayWrapList using a copy-constructor. This is done
+  // to preserve the information about bounds.
+  nsDisplayWrapList* wrapper = new (aBuilder) nsDisplayWrapList(aBuilder, *wrappedItem);
+
+  // Set the display list pointer of the new wrapper item to the display list
+  // of the wrapped item.
+  wrapper->mListPtr = wrappedItem->mListPtr;
+
+  mListPtr->AppendToBottom(wrapper);
+}
+
+void
 nsDisplayWrapList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                            HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) {
   mListPtr->HitTest(aBuilder, aRect, aState, aOutFrames);
@@ -6291,23 +6345,39 @@ nsDisplayOpacity::CanApplyOpacity() const
   return true;
 }
 
+/**
+ * Recursively iterates through |aList| and collects at most |aMaxChildCount|
+ * display item pointers to items that return true for CanApplyOpacity().
+ * The item pointers are added to |aArray|.
+ *
+ * LayerEventRegions and WrapList items are ignored.
+ *
+ * We need to do this recursively, because the child display items might contain
+ * nested nsDisplayWrapLists.
+ *
+ * Returns false if there are more than |aMaxChildCount| items, or if an item
+ * that returns false for CanApplyOpacity() is encountered.
+ * Otherwise returns true.
+ */
 static bool
-CopyItemsWithOpacity(nsDisplayList* aList,
+CollectItemsWithOpacity(nsDisplayList* aList,
                      nsTArray<nsDisplayItem*>& aArray,
                      const size_t aMaxChildCount)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+    DisplayItemType type = i->GetType();
     nsDisplayList* children = i->GetChildren();
 
-    if (children) {
+    // Descend only into wraplists.
+    if (type == DisplayItemType::TYPE_WRAP_LIST && children) {
       // The current display item has children, process them first.
-      if (!CopyItemsWithOpacity(children, aArray, aMaxChildCount)) {
+      if (!CollectItemsWithOpacity(children, aArray, aMaxChildCount)) {
         return false;
       }
     }
 
-    if (i->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS ||
-        i->GetType() == DisplayItemType::TYPE_WRAP_LIST) {
+    if (type == DisplayItemType::TYPE_LAYER_EVENT_REGIONS ||
+        type == DisplayItemType::TYPE_WRAP_LIST) {
       continue;
     }
 
@@ -6321,16 +6391,6 @@ CopyItemsWithOpacity(nsDisplayList* aList,
   return true;
 }
 
-// TODO: Flattened and non-flattened nsDisplayOpacities can cause different
-// rendering result. This is a bug that some reftests rely on. Below is a
-// non-exhaustive list of such reftests.
-//
-// layout/reftests/box-shadow/boxshadow-opacity.html
-// layout/reftests/bugs/759036-1.html
-// layout/reftests/bugs/797797-1.html
-// layout/reftests/bugs/797797-2.html
-// layout/reftests/bugs/991046-1.html
-// layout/reftests/text/475092-pos.html
 bool
 nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
 {
@@ -6350,11 +6410,10 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
   // children that don't overlap and can all apply the opacity to themselves.
   static const size_t kMaxChildCount = 3;
 
-  // Copy and flatten the children. This is required because the child display
-  // items might be nsDisplayWrapLists.
+  // Iterate through the child display list and copy at most kMaxChildCount
+  // child display item pointers to a temporary list.
   AutoTArray<nsDisplayItem*, kMaxChildCount> items;
-
-  if (!CopyItemsWithOpacity(&mList, items, kMaxChildCount)) {
+  if (!CollectItemsWithOpacity(&mList, items, kMaxChildCount)) {
     return false;
   }
 
@@ -6385,7 +6444,7 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
   // usually never have their own clip because during display item creation
   // time we propagated the clip to our contents, so maybe we should just
   // remove the clip parameter from ApplyOpacity completely.
-  DisplayItemClipChain clip(GetClip(), mActiveScrolledRoot, nullptr);
+  DisplayItemClipChain clip { GetClip(), mActiveScrolledRoot, nullptr };
 
   for (uint32_t i = 0; i < childCount; i++) {
     children[i].item->ApplyOpacity(aBuilder, mOpacity, mClip ? &clip : nullptr);
@@ -6566,6 +6625,26 @@ nsDisplayBlendMode::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   nsRegion visibleUnderChildren;
   visibleUnderChildren.And(*aVisibleRegion, bounds);
   return nsDisplayWrapList::ComputeVisibility(aBuilder, &visibleUnderChildren);
+}
+
+bool
+nsDisplayBlendMode::CanMerge(const nsDisplayItem* aItem) const
+{
+  // Items for the same content element should be merged into a single
+  // compositing group.
+  if (!HasSameTypeAndClip(aItem) || !HasSameContent(aItem)) {
+    return false;
+  }
+
+  const nsDisplayBlendMode* item =
+    static_cast<const nsDisplayBlendMode*>(aItem);
+
+  if (item->mIndex != 0 || mIndex != 0) {
+    // Don't merge background-blend-mode items
+    return false;
+  }
+
+  return true;
 }
 
 /* static */ nsDisplayBlendContainer*
@@ -9039,6 +9118,19 @@ nsDisplayMask::~nsDisplayMask()
   MOZ_COUNT_DTOR(nsDisplayMask);
 }
 #endif
+
+bool
+nsDisplayMask::CanMerge(const nsDisplayItem* aItem) const
+{
+  // Items for the same content element should be merged into a single
+  // compositing group.
+  // Do not merge if mFrame has mask. Continuation frames should apply mask
+  // independently (just like nsDisplayBackgroundImage).
+  return HasSameTypeAndClip(aItem) && HasSameContent(aItem) &&
+         !mFrame->StyleSVGReset()->HasMask() &&
+         (mFrame->StyleBorder()->mBoxDecorationBreak !=
+            mozilla::StyleBoxDecorationBreak::Clone);
+}
 
 already_AddRefed<Layer>
 nsDisplayMask::BuildLayer(nsDisplayListBuilder* aBuilder,

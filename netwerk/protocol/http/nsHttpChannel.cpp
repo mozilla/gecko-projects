@@ -3977,6 +3977,7 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
             mCacheAsyncOpenCalled = true;
             if (mNetworkTriggered) {
                 mRaceCacheWithNetwork = true;
+                MOZ_RELEASE_ASSERT(sRCWNEnabled, "Racing should be enabled");
             }
             rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, this);
         } else {
@@ -3987,6 +3988,9 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
                 self->mCacheAsyncOpenCalled = true;
                 if (self->mNetworkTriggered) {
                     self->mRaceCacheWithNetwork = true;
+                    // This is only done in xpcshell-test to simulate a slow
+                    // opening of the cache, so we don't need to assert that
+                    // sRCWNEnabled == true
                 }
                 cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
             };
@@ -4437,7 +4441,16 @@ nsHttpChannel::OnCacheEntryAvailable(nsICacheEntry *entry,
     rv = OnCacheEntryAvailableInternal(entry, aNew, aAppCache, status);
     if (NS_FAILED(rv)) {
         CloseCacheEntry(false);
-        Unused << AsyncAbort(rv);
+        if (mRaceCacheWithNetwork && mNetworkTriggered &&
+            mFirstResponseSource != RESPONSE_FROM_CACHE) {
+            // Ignore the error if we're racing cache with network and the cache
+            // didn't win, The network part will handle cancelation or any other
+            // error. Otherwise we could end up calling the listener twice, see
+            // bug 1397593.
+            LOG(("  not calling AsyncAbort() because we're racing cache with network"));
+        } else {
+            Unused << AsyncAbort(rv);
+        }
     }
 
     return NS_OK;
@@ -9379,6 +9392,7 @@ nsHttpChannel::TriggerNetwork()
 
     if (mCacheAsyncOpenCalled && !mOnCacheAvailableCalled) {
         mRaceCacheWithNetwork = true;
+        MOZ_RELEASE_ASSERT(sRCWNEnabled, "Racing should be enabled");
     }
 
     LOG(("  triggering network\n"));

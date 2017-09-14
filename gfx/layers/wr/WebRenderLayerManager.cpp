@@ -202,31 +202,6 @@ PopulateScrollData(WebRenderScrollData& aTarget, Layer* aLayer)
   return descendants + 1;
 }
 
-static nsDisplayItem*
-MergeItems(nsDisplayListBuilder* aBuilder,
-           nsTArray<nsDisplayItem*>& aMergedItems)
-{
-  nsDisplayItem* merged = nullptr;
-
-  // Clone the last item in the aMergedItems list and merge the items into it.
-  for (nsDisplayItem* item : Reversed(aMergedItems)) {
-    MOZ_ASSERT(item);
-
-    if (!merged) {
-      merged = item->Clone(aBuilder);
-      MOZ_ASSERT(merged);
-
-      aBuilder->AddTemporaryItem(merged);
-    } else {
-      merged->Merge(item);
-    }
-
-    merged->MergeDisplayListFromItem(aBuilder, item);
-  }
-
-  return merged;
-}
-
 void
 WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDisplayList,
                                                               nsDisplayListBuilder* aDisplayListBuilder,
@@ -268,7 +243,7 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
     }
 
     if (mergedItems.Length() > 1) {
-      item = MergeItems(aDisplayListBuilder, mergedItems);
+      item = aDisplayListBuilder->MergeItems(mergedItems);
       MOZ_ASSERT(item && itemType == item->GetType());
     }
 

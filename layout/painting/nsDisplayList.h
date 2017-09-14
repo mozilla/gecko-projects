@@ -973,6 +973,13 @@ public:
                                                  nsCSSPropertyID aProperty);
 
   /**
+   * Merges the display items in |aMergedItems| and returns a new temporary
+   * display item.
+   * The display items in |aMergedItems| have to be mergeable with each other.
+   */
+  nsDisplayItem* MergeItems(nsTArray<nsDisplayItem*>& aMergedItems);
+
+  /**
    * A helper class to temporarily set the value of
    * mIsAtRootOfPseudoStackingContext, and temporarily
    * set mCurrentFrame and related state. Also temporarily sets mDirtyRect.
@@ -4590,24 +4597,11 @@ public:
 
   /**
    * Creates a new nsDisplayWrapList that holds a pointer to the display list
-   * owned by the given nsDisplayItem.
+   * owned by the given nsDisplayItem. The new nsDisplayWrapList will be added
+   * to the bottom of this item's contents.
    */
   virtual void MergeDisplayListFromItem(nsDisplayListBuilder* aBuilder,
-                                        const nsDisplayItem* aItem) override
-  {
-    const nsDisplayWrapList* wrappedItem = aItem->AsDisplayWrapList();
-    MOZ_ASSERT(wrappedItem);
-
-    // Create a new nsDisplayWrapList using a copy-constructor. This is done
-    // to preserve the information about bounds.
-    nsDisplayWrapList* wrapper = new (aBuilder) nsDisplayWrapList(aBuilder, *wrappedItem);
-
-    // Set the display list pointer of the new wrapper item to the display list
-    // of the wrapped item.
-    wrapper->mListPtr = wrappedItem->mListPtr;
-
-    mListPtr->AppendNewToBottom(wrapper);
-  }
+                                        const nsDisplayItem* aItem) override;
 
   /**
    * Call this if the wrapped list is changed.
@@ -4909,24 +4903,7 @@ public:
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                  nsRegion* aVisibleRegion) override;
 
-  virtual bool CanMerge(const nsDisplayItem* aItem) const override
-  {
-    // Items for the same content element should be merged into a single
-    // compositing group.
-    if (!HasSameTypeAndClip(aItem) || !HasSameContent(aItem)) {
-      return false;
-    }
-
-    const nsDisplayBlendMode* item =
-      static_cast<const nsDisplayBlendMode*>(aItem);
-
-    if (item->mIndex != 0 || mIndex != 0) {
-      // Don't merge background-blend-mode items
-      return false;
-    }
-
-    return true;
-  }
+  virtual bool CanMerge(const nsDisplayItem* aItem) const override;
 
   virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
   {
@@ -5076,7 +5053,8 @@ public:
     return false;
   }
 
-  virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override {
+  virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
+  {
     return false;
   }
 
@@ -5199,14 +5177,13 @@ public:
   virtual ~nsDisplayStickyPosition();
 #endif
 
+  void SetClipChain(const DisplayItemClipChain* aClipChain, bool aStore) override;
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayStickyPosition);
     return new (aBuilder) nsDisplayStickyPosition(aBuilder, *this);
   }
 
-  void SetClipChain(const DisplayItemClipChain* aClipChain,
-                    bool aStore) override;
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
@@ -5500,16 +5477,7 @@ public:
 
   NS_DISPLAY_DECL_NAME("Mask", TYPE_MASK)
 
-  virtual bool CanMerge(const nsDisplayItem* aItem) const override
-  {
-    // Items for the same content element should be merged into a single
-    // compositing group.
-    // Do not merge if mFrame has mask. Continuation frames should apply mask
-    // independently (just like nsDisplayBackgroundImage).
-    return HasSameTypeAndClip(aItem) && HasSameContent(aItem) &&
-           !mFrame->StyleSVGReset()->HasMask() &&
-           mFrame->StyleBorder()->mBoxDecorationBreak != mozilla::StyleBoxDecorationBreak::Clone;
-  }
+  virtual bool CanMerge(const nsDisplayItem* aItem) const override;
 
   virtual void Merge(const nsDisplayItem* aItem) override
   {

@@ -1359,11 +1359,7 @@ nsSliderFrame::ShouldScrollToClickForEvent(WidgetGUIEvent* aEvent)
     return false;
   }
 
-  if (aEvent->mMessage == eTouchStart) {
-    return GetScrollToClick();
-  }
-
-  if (aEvent->mMessage != eMouseDown) {
+  if (aEvent->mMessage != eMouseDown && aEvent->mMessage != eTouchStart) {
     return false;
   }
 
@@ -1373,6 +1369,10 @@ nsSliderFrame::ShouldScrollToClickForEvent(WidgetGUIEvent* aEvent)
     return false;
   }
 #endif
+
+  if (aEvent->mMessage == eTouchStart) {
+    return GetScrollToClick();
+  }
 
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   if (mouseEvent->button == WidgetMouseEvent::eLeftButton) {
