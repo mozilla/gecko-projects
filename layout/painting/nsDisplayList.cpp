@@ -1199,9 +1199,6 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
   for (nsDisplayItem* i : mTemporaryItems) {
     i->Destroy(this);
   }
-  for (nsDisplayItem* i : mTemporaryItems) {
-    i->Destroy(this);
-  }
   for (DisplayItemClipChain* c : mClipChainsToDestroy) {
 #ifdef USE_HEAP_ALLOCATED_CLIP_CHAINS
     delete c;
