@@ -5717,6 +5717,7 @@ public:
   {
     mStoredList.UpdateBounds(aBuilder);
     mHasBounds = false;
+    UpdateBoundsFor3D(aBuilder);
   }
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
@@ -6066,6 +6067,11 @@ public:
                            bool* aSnap) const override
   {
     return mList.GetBounds(aBuilder, aSnap);
+  }
+
+  virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override
+  {
+    mList.UpdateBounds(aBuilder);
   }
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
