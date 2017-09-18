@@ -3757,6 +3757,9 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
       if (!aBuilder->IsPartialUpdate() ||
           aBuilder->InInvalidSubtree()) {
         *aDirtyRect = displayPort;
+        if (aUsingDisplayPortInvalidRect) {
+          *aUsingDisplayPortInvalidRect = true;
+        }
       } else if (mOuter->HasOverrideDirtyRegion()) {
         nsRect* rect =
           mOuter->GetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
