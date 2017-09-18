@@ -4061,6 +4061,14 @@ GetModifiedFrames(nsIFrame* aDisplayRootFrame)
   return modifiedFrames;
 }
 
+// ComputeRebuildRegion  debugging
+// #define CRR_DEBUG 0
+#if CRR_DEBUG
+#  define CRR_LOG(...) printf_stderr(__VA_ARGS__)
+#else
+#  define CRR_LOG(...)
+#endif
+
 static bool
 ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
                      std::vector<WeakFrame>& aModifiedFrames,
@@ -4070,6 +4078,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
                      AnimatedGeometryRoot** aOutModifiedAGR,
                      nsTArray<nsIFrame*>* aOutFramesWithProps)
 {
+  CRR_LOG("Computing rebuild regions for %d frames:\n", aModifiedFrames.size());
   for (nsIFrame* f : aModifiedFrames) {
     if (!f) {
       continue;
@@ -4082,6 +4091,8 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
     // walk for TransformFrameRectToAncestor.
     AnimatedGeometryRoot* agr = aBuilder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
+
+    CRR_LOG("Processing frame %p with agr %p\n", f, agr->mFrame);
 
 
     // Convert the frame's overflow rect into the coordinate space
@@ -4103,6 +4114,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
       MOZ_ASSERT(currentFrame);
 
       if (nsLayoutUtils::FrameHasDisplayPort(currentFrame)) {
+        CRR_LOG("Frame belongs to displayport frame %p\n", currentFrame);
         nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
         MOZ_ASSERT(sf);
         nsRect displayPort;
@@ -4122,6 +4134,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
           }
           rect->UnionRect(*rect, r);
           aOutFramesWithProps->AppendElement(currentFrame);
+          CRR_LOG("Adding area to displayport draw area: %d %d %d %d\n", r.x, r.y, r.width, r.height);
 
           // TODO: Can we just use MarkFrameForDisplayIfVisible, plus MarkFramesForDifferentAGR to
           // ensure that this displayport, plus any items that move relative to it get rebuilt,
@@ -4135,6 +4148,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
       }
 
       if (currentFrame->IsStackingContext()) {
+        CRR_LOG("Frame belongs to stacking context frame %p\n", currentFrame);
         // If we found an intermediate stacking context with an existing display item
         // then we can store the dirty rect there and stop.
         if (currentFrame != aDisplayRootFrame &&
@@ -4153,10 +4167,12 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
             aOutFramesWithProps->AppendElement(currentFrame);
           }
           data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+          CRR_LOG("Adding area to stacking context draw area: %d %d %d %d\n", overflow.x, overflow.y, overflow.width, overflow.height);
           if (!data->mModifiedAGR) {
             data->mModifiedAGR = agr;
           } else if (data->mModifiedAGR != agr) {
             data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
+            CRR_LOG("Found multiple modified AGRs within this stacking context, giving up\n");
           }
 
           // Don't contribute to the root dirty area at all.
@@ -4167,6 +4183,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
       }
     }
     aOutDirty->UnionRect(*aOutDirty, overflow);
+    CRR_LOG("Adding area to root draw area: %d %d %d %d\n", overflow.x, overflow.y, overflow.width, overflow.height);
 
     // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
     // track which items would need to be marked in MarkFramesForDifferentAGR.
@@ -4175,6 +4192,7 @@ ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     if (!*aOutModifiedAGR) {
       *aOutModifiedAGR = agr;
     } else if (agr && *aOutModifiedAGR != agr) {
+      CRR_LOG("Found multiple AGRs in root stacking context, giving up\n");
       return false;
     }
   }
