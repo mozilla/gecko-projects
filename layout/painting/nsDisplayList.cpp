@@ -38,6 +38,7 @@
 #include "nsThemeConstants.h"
 #include "BorderConsts.h"
 #include "LayerTreeInvalidation.h"
+#include "mozilla/MathAlgorithms.h"
 
 #include "imgIContainer.h"
 #include "BasicLayers.h"
@@ -1476,7 +1477,7 @@ nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame)
   }
 }
 
-#ifndef USE_PRES_ARENA_ALLOCATOR
+#if !defined(USE_PRES_ARENA_ALLOCATOR) || defined(USE_POW2_ARENA_BUCKETS)
 uint32_t gDisplayItemSizes[static_cast<uint32_t>(DisplayItemType::TYPE_MAX)] = { 0 };
 #endif
 
@@ -1484,7 +1485,17 @@ void*
 nsDisplayListBuilder::Allocate(size_t aSize, DisplayItemType aType)
 {
 #ifdef USE_PRES_ARENA_ALLOCATOR
+#ifdef USE_POW2_ARENA_BUCKETS
+  size_t roundedUpSize = RoundUpPow2(aSize);
+  uint_fast8_t type = FloorLog2Size(roundedUpSize);
+
+  MOZ_ASSERT(gDisplayItemSizes[static_cast<uint32_t>(aType)] == type ||
+             gDisplayItemSizes[static_cast<uint32_t>(aType)] == 0);
+  gDisplayItemSizes[static_cast<uint32_t>(aType)] = type;
+  return mPool.AllocateByCustomID(type, roundedUpSize);
+#else
   return mPool.AllocateByCustomID(static_cast<uint32_t>(aType), aSize);
+#endif
 #else
   MOZ_ASSERT(gDisplayItemSizes[static_cast<uint32_t>(aType)] == aSize ||
              gDisplayItemSizes[static_cast<uint32_t>(aType)] == 0);
@@ -1497,7 +1508,11 @@ void
 nsDisplayListBuilder::Destroy(DisplayItemType aType, void* aPtr)
 {
 #ifdef USE_PRES_ARENA_ALLOCATOR
+#ifdef USE_POW2_ARENA_BUCKETS
+  mPool.FreeByCustomID(gDisplayItemSizes[static_cast<uint32_t>(aType)], aPtr);
+#else
   mPool.FreeByCustomID(static_cast<uint32_t>(aType), aPtr);
+#endif
 #else
   mFreedSize += gDisplayItemSizes[static_cast<uint32_t>(aType)];
 #endif
