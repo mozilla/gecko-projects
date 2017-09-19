@@ -3011,24 +3011,6 @@ private:
   bool mForceTransparentSurface;
 };
 
-struct RetainedDisplayListBuilder {
-  RetainedDisplayListBuilder(nsIFrame* aReferenceFrame,
-                             nsDisplayListBuilderMode aMode,
-                             bool aBuildCaret)
-    : mBuilder(aReferenceFrame, aMode, aBuildCaret, true)
-  {}
-  ~RetainedDisplayListBuilder()
-  {
-    mList.DeleteAll(&mBuilder);
-  }
-
-  nsDisplayListBuilder mBuilder;
-  nsDisplayList mList;
-  WeakFrame mPreviousCaret;
-
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
-};
-
 /**
  * This is passed as a parameter to nsIFrame::BuildDisplayList. That method
  * will put any generated items onto the appropriate list given here. It's
