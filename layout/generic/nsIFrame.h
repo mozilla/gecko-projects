@@ -633,6 +633,7 @@ public:
     , mParentIsWrapperAnonBox(false)
     , mIsWrapperBoxNeedingRestyle(false)
     , mReflowRequestedForCharDataChange(false)
+    , mIsPrimaryFrame(false)
   {
     mozilla::PodZero(&mOverflow);
   }
@@ -2058,6 +2059,13 @@ public:
   {
     return mState & aBits;
   }
+
+  /**
+   * Return true if this frame is the primary frame for mContent.
+   */
+  bool IsPrimaryFrame() const { return mIsPrimaryFrame; }
+
+  void SetIsPrimaryFrame(bool aIsPrimary) { mIsPrimaryFrame = aIsPrimary; }
 
   /**
    * This call is invoked on the primary frame for a character data content
@@ -4263,7 +4271,15 @@ protected:
    */
   bool mReflowRequestedForCharDataChange : 1;
 
-  // There is a 10-bit gap left here.
+private:
+  /**
+   * True if this is the primary frame for mContent.
+   */
+  bool mIsPrimaryFrame : 1;
+
+protected:
+
+  // There is a 9-bit gap left here.
 
   // Helpers
   /**

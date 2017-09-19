@@ -1318,12 +1318,8 @@ pref("dom.forms.number", true);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
-// Support for input type=date and type=time. Enabled by default on Nightly.
-#ifdef NIGHTLY_BUILD
+// Support for input type=date and type=time.
 pref("dom.forms.datetime", true);
-#else
-pref("dom.forms.datetime", false);
-#endif
 
 // Support for input type=month, type=week and type=datetime-local. By default,
 // disabled.
@@ -1441,7 +1437,7 @@ pref("javascript.options.asyncstack",       false);
 pref("javascript.options.throw_on_asmjs_validation_failure", false);
 pref("javascript.options.ion.offthread_compilation", true);
 #ifdef DEBUG
-pref("javascript.options.jit.full_debug_checks", true);
+pref("javascript.options.jit.full_debug_checks", false);
 #endif
 // This preference instructs the JS engine to discard the
 // source of any privileged JS after compilation. This saves
@@ -2933,9 +2929,6 @@ pref("layout.css.scroll-snap.prediction-max-velocity", 2000);
 // best suited for this position is selected, enabling the user to perform fling
 // gestures.
 pref("layout.css.scroll-snap.prediction-sensitivity", "0.750");
-
-// Is support for basic shapes in clip-path enabled?
-pref("layout.css.clip-path-shapes.enabled", true);
 
 // Is support for DOMPoint enabled?
 pref("layout.css.DOMPoint.enabled", true);
@@ -5832,11 +5825,14 @@ pref("security.mixed_content.hsts_priming_request_timeout", 2000);
 // behavior of Firefox.
 pref("security.data_uri.unique_opaque_origin", true);
 
-// TODO: Bug 1380959: Block toplevel data: URI navigations
+#ifdef EARLY_BETA_OR_EARLIER
 // If true, all toplevel data: URI navigations will be blocked.
 // Please note that manually entering a data: URI in the
 // URL-Bar will not be blocked when flipping this pref.
+pref("security.data_uri.block_toplevel_data_uri_navigations", true);
+#else
 pref("security.data_uri.block_toplevel_data_uri_navigations", false);
+#endif
 
 // Enable Storage API for all platforms except Android.
 #if !defined(MOZ_WIDGET_ANDROID)
@@ -5849,11 +5845,7 @@ pref("dom.storageManager.prompt.testing.allow", false);
 
 // Enable the Storage management in about:preferences and persistent-storage permission request
 // To enable the DOM implementation, turn on "dom.storageManager.enabled"
-#ifdef NIGHTLY_BUILD
 pref("browser.storageManager.enabled", true);
-#else
-pref("browser.storageManager.enabled", false);
-#endif
 pref("browser.storageManager.pressureNotification.minIntervalMS", 1200000);
 pref("browser.storageManager.pressureNotification.usageThresholdGB", 5);
 

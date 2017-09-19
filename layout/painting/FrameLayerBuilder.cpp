@@ -440,7 +440,6 @@ public:
     mLayer(nullptr),
     mSolidColor(NS_RGBA(0, 0, 0, 0)),
     mIsSolidColorInVisibleRegion(false),
-    mFontSmoothingBackgroundColor(NS_RGBA(0,0,0,0)),
     mNeedComponentAlpha(false),
     mForceTransparentSurface(false),
     mHideAllLayersBelow(false),
@@ -477,10 +476,10 @@ public:
    */
   void Accumulate(ContainerState* aState,
                   nsDisplayItem* aItem,
-                  const nsIntRegion& aClippedOpaqueRegion,
                   const nsIntRect& aVisibleRect,
                   const DisplayItemClip& aClip,
-                  LayerState aLayerState);
+                  LayerState aLayerState,
+                  nsDisplayList *aList);
   AnimatedGeometryRoot* GetAnimatedGeometryRoot() { return mAnimatedGeometryRoot; }
 
   /**
@@ -595,11 +594,6 @@ public:
    * True if every pixel in mVisibleRegion will have color mSolidColor.
    */
   bool mIsSolidColorInVisibleRegion;
-  /**
-   * The target background color for smoothing fonts that are drawn on top of
-   * transparent parts of the layer.
-   */
-  nscolor mFontSmoothingBackgroundColor;
   /**
    * True if there is any text visible in the layer that's over
    * transparent pixels in the layer.
@@ -1498,7 +1492,6 @@ public:
   PaintedDisplayItemLayerUserData() :
     mMaskClipCount(0),
     mForcedBackgroundColor(NS_RGBA(0,0,0,0)),
-    mFontSmoothingBackgroundColor(NS_RGBA(0,0,0,0)),
     mXScale(1.f), mYScale(1.f),
     mAppUnitsPerDevPixel(0),
     mTranslation(0, 0),
@@ -1516,12 +1509,6 @@ public:
    * region before any other content is painted.
    */
   nscolor mForcedBackgroundColor;
-
-  /**
-   * The target background color for smoothing fonts that are drawn on top of
-   * transparent parts of the layer.
-   */
-  nscolor mFontSmoothingBackgroundColor;
 
   /**
    * The resolution scale used.
@@ -3294,8 +3281,6 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
     }
     userData->mForcedBackgroundColor = backgroundColor;
 
-    userData->mFontSmoothingBackgroundColor = data->mFontSmoothingBackgroundColor;
-
     // use a mask layer for rounded rect clipping.
     // data->mCommonClipCount may be -1 if we haven't put any actual
     // drawable items in this layer (i.e. it's only catching events).
@@ -3450,10 +3435,10 @@ IsItemAreaInWindowOpaqueRegion(nsDisplayListBuilder* aBuilder,
 void
 PaintedLayerData::Accumulate(ContainerState* aState,
                             nsDisplayItem* aItem,
-                            const nsIntRegion& aClippedOpaqueRegion,
                             const nsIntRect& aVisibleRect,
                             const DisplayItemClip& aClip,
-                            LayerState aLayerState)
+                            LayerState aLayerState,
+                            nsDisplayList* aList)
 {
   FLB_LOG_PAINTED_LAYER_DECISION(this, "Accumulating dp=%s(%p), f=%p against pld=%p\n", aItem->Name(), aItem, aItem->Frame(), this);
 
@@ -3489,11 +3474,16 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     return;
   }
 
+  nsIntRegion opaquePixels = aState->ComputeOpaqueRect(aItem,
+                                                       mAnimatedGeometryRoot, mASR, aClip, aList,
+                                                       &mHideAllLayersBelow, &mOpaqueForAnimatedGeometryRootParent);
+  opaquePixels.AndWith(aVisibleRect);
+
   /* Mark as available for conversion to image layer if this is a nsDisplayImage and
    * it's the only thing visible in this layer.
    */
   if (nsIntRegion(aVisibleRect).Contains(mVisibleRegion) &&
-      aClippedOpaqueRegion.Contains(mVisibleRegion) &&
+      opaquePixels.Contains(mVisibleRegion) &&
       aItem->SupportsOptimizingToImage()) {
     mImage = static_cast<nsDisplayImageContainer*>(aItem);
     FLB_LOG_PAINTED_LAYER_DECISION(this, "  Tracking image: nsDisplayImageContainer covers the layer\n");
@@ -3503,12 +3493,6 @@ PaintedLayerData::Accumulate(ContainerState* aState,
   }
 
   bool isFirstVisibleItem = mVisibleRegion.IsEmpty();
-  if (isFirstVisibleItem) {
-    nscolor fontSmoothingBGColor;
-    if (aItem->ProvidesFontSmoothingBackgroundColor(&fontSmoothingBGColor)) {
-      mFontSmoothingBackgroundColor = fontSmoothingBGColor;
-    }
-  }
 
   Maybe<nscolor> uniformColor = aItem->IsUniform(aState->mBuilder);
 
@@ -3550,8 +3534,8 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     mVisibleRegion.SimplifyOutward(4);
   }
 
-  if (!aClippedOpaqueRegion.IsEmpty()) {
-    for (auto iter = aClippedOpaqueRegion.RectIter(); !iter.Done(); iter.Next()) {
+  if (!opaquePixels.IsEmpty()) {
+    for (auto iter = opaquePixels.RectIter(); !iter.Done(); iter.Next()) {
       // We don't use SimplifyInward here since it's not defined exactly
       // what it will discard. For our purposes the most important case
       // is a large opaque background at the bottom of z-order (e.g.,
@@ -4518,14 +4502,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         if (mManager->IsWidgetLayerManager()) {
           paintedLayerData->UpdateCommonClipCount(itemClip);
         }
-        nsIntRegion opaquePixels = ComputeOpaqueRect(item,
-            animatedGeometryRoot, itemASR, itemClip, aList,
-            &paintedLayerData->mHideAllLayersBelow,
-            &paintedLayerData->mOpaqueForAnimatedGeometryRootParent);
-        MOZ_ASSERT(nsIntRegion(itemDrawRect).Contains(opaquePixels));
-        opaquePixels.AndWith(itemVisibleRect);
-        paintedLayerData->Accumulate(this, item, opaquePixels,
-            itemVisibleRect, itemClip, layerState);
+        paintedLayerData->Accumulate(this, item, itemVisibleRect, itemClip, layerState, aList);
 
         if (!paintedLayerData->mLayer) {
           // Try to recycle the old layer of this display item.
@@ -6204,11 +6181,6 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
                               userData->mForcedBackgroundColor);
   }
 
-  if (NS_GET_A(userData->mFontSmoothingBackgroundColor) > 0) {
-    aContext->SetFontSmoothingBackgroundColor(
-      Color::FromABGR(userData->mFontSmoothingBackgroundColor));
-  }
-
   // make the origin of the context coincide with the origin of the
   // PaintedLayer
   gfxContextMatrixAutoSaveRestore saveMatrix(aContext);
@@ -6272,8 +6244,6 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
         aRegionToDraw.GetBounds().Area());
     }
   }
-
-  aContext->SetFontSmoothingBackgroundColor(Color());
 
   bool isActiveLayerManager = !aLayer->Manager()->IsInactiveLayerManager();
 

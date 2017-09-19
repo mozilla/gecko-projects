@@ -15,8 +15,7 @@ ${helpers.predefined_type(
     animation_value_type="AnimatedRGBA",
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     ignored_when_colors_disabled="True",
-    spec="https://drafts.csswg.org/css-color/#color",
-    need_clone="True"
+    spec="https://drafts.csswg.org/css-color/#color"
 )}
 
 // FIXME(#15973): Add servo support for system colors
@@ -40,6 +39,10 @@ pub mod system_colors {
                            -moz-mac-defaultbuttontext -moz-mac-focusring -moz-mac-menuselect
                            -moz-mac-menushadow -moz-mac-menutextdisable -moz-mac-menutextselect
                            -moz-mac-disabledtoolbartext -moz-mac-secondaryhighlight
+                           -moz-mac-vibrancy-light -moz-mac-vibrancy-dark -moz-mac-menupopup
+                           -moz-mac-menuitem -moz-mac-active-menuitem -moz-mac-source-list
+                           -moz-mac-source-list-selection -moz-mac-active-source-list-selection
+                           -moz-mac-tooltip
                            -moz-menuhover -moz-menuhovertext -moz-menubartext -moz-menubarhovertext
                            -moz-oddtreerow -moz-win-mediatext -moz-win-communicationstext
                            -moz-win-accentcolor -moz-win-accentcolortext
@@ -66,6 +69,10 @@ pub mod system_colors {
     use values::computed::{Context, ToComputedValue};
 
     pub type SystemColor = LookAndFeel_ColorID;
+
+    // It's hard to implement MallocSizeOf for LookAndFeel_ColorID because it
+    // is a bindgen type. So we implement it on the typedef instead.
+    size_of_is_0!(SystemColor);
 
     impl ToCss for SystemColor {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {

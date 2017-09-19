@@ -1640,14 +1640,6 @@ public class BrowserApp extends GeckoApp
 
         deleteTempFiles(getApplicationContext());
 
-        if (mDoorHangerPopup != null) {
-            mDoorHangerPopup.destroy();
-            mDoorHangerPopup = null;
-        }
-        if (mFormAssistPopup != null)
-            mFormAssistPopup.destroy();
-        if (mTextSelection != null)
-            mTextSelection.destroy();
         NotificationHelper.destroy();
         GeckoNetworkManager.destroy();
 
@@ -3737,6 +3729,14 @@ public class BrowserApp extends GeckoApp
 
         if (SwitchBoard.isInExperiment(this, Experiments.TOP_ADDONS_MENU)) {
             MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, true);
+            GeckoMenuItem item = (GeckoMenuItem) aMenu.findItem(R.id.addons_top_level);
+            if (item != null) {
+                if (mExtensionPermissionsHelper.getShowUpdateIcon()) {
+                    item.setIcon(R.drawable.ic_addon_update);
+                } else {
+                    item.setIcon(null);
+                }
+            }
             MenuUtils.safeSetVisible(aMenu, R.id.addons, false);
         } else {
             MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, false);

@@ -647,11 +647,7 @@
                        class="subviewbutton subviewbutton-iconic"
                        label="&printCmd.label;"
                        key="printKb"
-#ifdef XP_MACOSX
                        command="cmd_print"
-#else
-                       command="cmd_printPreview"
-#endif
                        />
         <toolbarseparator/>
         <toolbarbutton id="appMenu-find-button"
@@ -716,16 +712,16 @@
                        label="&historyMenu.label;"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('PanelUI-history', this)"/>
-        <toolbarbutton id="appMenu-library-remotetabs-button"
-                       class="subviewbutton subviewbutton-iconic subviewbutton-nav"
-                       label="&appMenuRemoteTabs.label;"
-                       closemenu="none"
-                       oncommand="PanelUI.showSubView('PanelUI-remotetabs', this)"/>
         <toolbarbutton id="appMenu-library-downloads-button"
                        class="subviewbutton subviewbutton-iconic subviewbutton-nav"
                        label="&libraryDownloads.label;"
                        closemenu="none"
                        oncommand="DownloadsSubview.show(this);"/>
+        <toolbarbutton id="appMenu-library-remotetabs-button"
+                       class="subviewbutton subviewbutton-iconic subviewbutton-nav"
+                       label="&appMenuRemoteTabs.label;"
+                       closemenu="none"
+                       oncommand="PanelUI.showSubView('PanelUI-remotetabs', this)"/>
       </vbox>
     </panelview>
 

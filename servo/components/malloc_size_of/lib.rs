@@ -56,17 +56,19 @@
 //!   measured as well as the thing it points to. E.g.
 //!   `<Box<_> as MallocSizeOf>::size_of(field, ops)`.
 
+extern crate app_units;
+extern crate cssparser;
+extern crate euclid;
 extern crate hashglobe;
 extern crate servo_arc;
 extern crate smallbitvec;
 extern crate smallvec;
 
-use hashglobe::hash_map::HashMap;
+use euclid::TypedSize2D;
 use servo_arc::Arc;
-use smallbitvec::SmallBitVec;
 use smallvec::{Array, SmallVec};
-use std::collections::HashSet;
 use std::hash::{BuildHasher, Hash};
+use std::ops::Range;
 use std::os::raw::c_void;
 
 /// A C function that takes a pointer to a heap allocation and returns its size.
@@ -80,9 +82,8 @@ pub struct MallocSizeOfOps {
     /// A function that returns the size of a heap allocation.
     size_of_op: VoidPtrToSizeFn,
 
-    /// Like `size_of_op`, but can take an interior pointer. Optional, because
-    /// many places don't need it.
-    enclosing_size_of_op: Option<VoidPtrToSizeFn>,
+    /// Like `size_of_op`, but can take an interior pointer.
+    enclosing_size_of_op: VoidPtrToSizeFn,
 
     /// Check if a pointer has been seen before, and remember it for next time.
     /// Useful when measuring `Rc`s and `Arc`s. Optional, because many places
@@ -91,8 +92,7 @@ pub struct MallocSizeOfOps {
 }
 
 impl MallocSizeOfOps {
-    pub fn new(size_of: VoidPtrToSizeFn,
-               malloc_enclosing_size_of: Option<VoidPtrToSizeFn>,
+    pub fn new(size_of: VoidPtrToSizeFn, malloc_enclosing_size_of: VoidPtrToSizeFn,
                have_seen_ptr: Option<Box<VoidPtrToBoolFnMut>>) -> Self {
         MallocSizeOfOps {
             size_of_op: size_of,
@@ -127,8 +127,7 @@ impl MallocSizeOfOps {
     /// Call `enclosing_size_of_op` on `ptr`, which must not be empty.
     pub unsafe fn malloc_enclosing_size_of<T>(&self, ptr: *const T) -> usize {
         assert!(!MallocSizeOfOps::is_empty(ptr));
-        let enclosing_size_of_op = self.enclosing_size_of_op.expect("missing enclosing_size_of_op");
-        enclosing_size_of_op(ptr as *const c_void)
+        (self.enclosing_size_of_op)(ptr as *const c_void)
     }
 
     /// Call `have_seen_ptr_op` on `ptr`.
@@ -184,6 +183,12 @@ pub trait MallocConditionalSizeOf {
 pub trait MallocConditionalShallowSizeOf {
     /// `conditional_size_of` combined with `shallow_size_of`.
     fn conditional_shallow_size_of(&self, ops: &mut MallocSizeOfOps) -> usize;
+}
+
+impl MallocSizeOf for String {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        unsafe { ops.malloc_size_of(self.as_ptr()) }
+    }
 }
 
 impl<T: ?Sized> MallocShallowSizeOf for Box<T> {
@@ -263,7 +268,7 @@ impl<A> MallocSizeOf for SmallVec<A>
     }
 }
 
-impl<T, S> MallocShallowSizeOf for HashSet<T, S>
+impl<T, S> MallocShallowSizeOf for std::collections::HashSet<T, S>
     where T: Eq + Hash,
           S: BuildHasher
 {
@@ -276,7 +281,7 @@ impl<T, S> MallocShallowSizeOf for HashSet<T, S>
     }
 }
 
-impl<T, S> MallocSizeOf for HashSet<T, S>
+impl<T, S> MallocSizeOf for std::collections::HashSet<T, S>
     where T: Eq + Hash + MallocSizeOf,
           S: BuildHasher,
 {
@@ -289,20 +294,40 @@ impl<T, S> MallocSizeOf for HashSet<T, S>
     }
 }
 
-impl<K, V, S> MallocShallowSizeOf for HashMap<K, V, S>
+impl<T, S> MallocShallowSizeOf for hashglobe::hash_set::HashSet<T, S>
+    where T: Eq + Hash,
+          S: BuildHasher
+{
+    fn shallow_size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        // See the implementation for std::collections::HashSet for details.
+        self.iter().next().map_or(0, |t| unsafe { ops.malloc_enclosing_size_of(t) })
+    }
+}
+
+impl<T, S> MallocSizeOf for hashglobe::hash_set::HashSet<T, S>
+    where T: Eq + Hash + MallocSizeOf,
+          S: BuildHasher,
+{
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let mut n = self.shallow_size_of(ops);
+        for t in self.iter() {
+            n += t.size_of(ops);
+        }
+        n
+    }
+}
+
+impl<K, V, S> MallocShallowSizeOf for hashglobe::hash_map::HashMap<K, V, S>
     where K: Eq + Hash,
           S: BuildHasher
 {
     fn shallow_size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
-        // The first value from the iterator gives us an interior pointer.
-        // `ops.malloc_enclosing_size_of()` then gives us the storage size.
-        // This assumes that the `HashMap`'s contents (keys, values, and
-        // hashes) are all stored in a single contiguous heap allocation.
+        // See the implementation for std::collections::HashSet for details.
         self.values().next().map_or(0, |v| unsafe { ops.malloc_enclosing_size_of(v) })
     }
 }
 
-impl<K, V, S> MallocSizeOf for HashMap<K, V, S>
+impl<K, V, S> MallocSizeOf for hashglobe::hash_map::HashMap<K, V, S>
     where K: Eq + Hash + MallocSizeOf,
           V: MallocSizeOf,
           S: BuildHasher,
@@ -356,6 +381,24 @@ impl<T: MallocSizeOf> MallocConditionalSizeOf for Arc<T> {
     }
 }
 
+impl MallocSizeOf for smallbitvec::SmallBitVec {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        if let Some(ptr) = self.heap_ptr() {
+            unsafe { ops.malloc_size_of(ptr) }
+        } else {
+            0
+        }
+    }
+}
+
+impl<T: MallocSizeOf, U> MallocSizeOf for TypedSize2D<T, U> {
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let n = self.width.size_of(ops) + self.width.size_of(ops);
+        assert!(n == 0);    // It would be very strange to have a non-zero value here...
+        n
+    }
+}
+
 /// For use on types where size_of() returns 0.
 #[macro_export]
 macro_rules! size_of_is_0(
@@ -381,12 +424,14 @@ macro_rules! size_of_is_0(
     );
 );
 
-size_of_is_0!(char, str);
+size_of_is_0!(bool, char, str);
 size_of_is_0!(u8, u16, u32, u64, usize);
 size_of_is_0!(i8, i16, i32, i64, isize);
-size_of_is_0!(bool, f32, f64);
+size_of_is_0!(f32, f64);
 
-// XXX: once we upgrade smallbitvec to 1.0.4, use the new heap_ptr() method to
-// implement this properly
-size_of_is_0!(SmallBitVec);
+size_of_is_0!(Range<u8>, Range<u16>, Range<u32>, Range<u64>, Range<usize>);
+size_of_is_0!(Range<i8>, Range<i16>, Range<i32>, Range<i64>, Range<isize>);
+size_of_is_0!(Range<f32>, Range<f64>);
 
+size_of_is_0!(app_units::Au);
+size_of_is_0!(cssparser::RGBA, cssparser::TokenSerializationType);

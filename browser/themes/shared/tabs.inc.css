@@ -25,6 +25,16 @@
   --tab-line-color: var(--lwt-accent-color);
 }
 
+tabbrowser {
+  /* Value for --in-content-page-background in in-content/common.inc.css */
+  background-color: #f9f9fa;
+}
+
+:root[privatebrowsingmode=temporary] tabbrowser {
+  /* Value for --in-content-page-background in aboutPrivateBrowsing.css */
+  background-color: #25003e;
+}
+
 #tabbrowser-tabs,
 #tabbrowser-tabs > .tabbrowser-arrowscrollbox,
 .tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-tab[pinned] {
@@ -160,6 +170,10 @@
 :root[sessionrestored] .tab-throbber[progress]::before {
   fill: var(--tab-loading-fill);
   opacity: 1;
+}
+
+#TabsToolbar[brighttext] .tabbrowser-tab:not([visuallyselected=true]) {
+  --tab-loading-fill: #fff;
 }
 
 .tab-sharing-icon-overlay,
@@ -392,6 +406,10 @@
   color: inherit;
 }
 
+.tabbrowser-tab[visuallyselected=true]:-moz-lwtheme {
+  color: var(--toolbar-color, inherit);
+}
+
 .tab-line {
   height: 2px;
 }
@@ -546,8 +564,9 @@
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
   list-style-image: url(chrome://browser/skin/arrow-left.svg);
-  -moz-context-properties: fill;
+  -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
+  fill-opacity: .8;
 }
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up:-moz-locale-dir(rtl),

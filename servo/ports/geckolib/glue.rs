@@ -9,9 +9,11 @@ use malloc_size_of::MallocSizeOfOps;
 use selectors::Element;
 use selectors::matching::{MatchingContext, MatchingMode, matches_selector};
 use servo_arc::{Arc, ArcBorrow, RawOffsetArc};
+use std::cell::RefCell;
 use std::env;
 use std::fmt::Write;
 use std::iter;
+use std::mem;
 use std::ptr;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::context::{CascadeInputs, QuirksMode, SharedStyleContext, StyleContext};
@@ -76,7 +78,7 @@ use style::gecko_bindings::bindings::nsTimingFunctionBorrowedMut;
 use style::gecko_bindings::structs;
 use style::gecko_bindings::structs::{CSSPseudoElementType, CompositeOperation};
 use style::gecko_bindings::structs::{Loader, LoaderReusableStyleSheets};
-use style::gecko_bindings::structs::{RawServoStyleRule, ServoStyleContextStrong};
+use style::gecko_bindings::structs::{RawServoStyleRule, ServoStyleContextStrong, RustString};
 use style::gecko_bindings::structs::{ServoStyleSheet, SheetParsingMode, nsIAtom, nsCSSPropertyID};
 use style::gecko_bindings::structs::{nsCSSFontFaceRule, nsCSSCounterStyleRule};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint, PropertyValuePair};
@@ -116,6 +118,7 @@ use style::properties::PROHIBIT_DISPLAY_CONTENTS;
 use style::properties::animated_properties::{AnimatableLonghand, AnimationValue};
 use style::properties::animated_properties::compare_property_priority;
 use style::properties::parse_one_declaration_into;
+use style::rule_cache::RuleCacheConditions;
 use style::rule_tree::{CascadeLevel, StyleSource};
 use style::selector_parser::PseudoElementCascadeType;
 use style::shared_lock::{SharedRwLockReadGuard, StylesheetGuards, ToCssWithGuard, Locked};
@@ -128,7 +131,7 @@ use style::stylesheets::{StylesheetContents, SupportsRule};
 use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
 use style::stylesheets::keyframes_rule::{Keyframe, KeyframeSelector, KeyframesStepValue};
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
-use style::stylist::RuleInclusion;
+use style::stylist::{RuleInclusion, Stylist};
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::DomTraversal;
@@ -136,7 +139,7 @@ use style::traversal::resolve_style;
 use style::traversal_flags::{TraversalFlags, self};
 use style::values::{CustomIdent, KeyframesName};
 use style::values::animated::{Animate, Procedure, ToAnimatedZero};
-use style::values::computed::Context;
+use style::values::computed::{Context, ToComputedValue};
 use style::values::distance::ComputeSquaredDistance;
 use style_traits::{PARSING_MODE_DEFAULT, ToCss};
 use super::error_reporter::ErrorReporter;
@@ -184,6 +187,7 @@ pub extern "C" fn Servo_Shutdown() {
     // The dummy url will be released after shutdown, so clear the
     // reference to avoid use-after-free.
     unsafe { DUMMY_URL_DATA = ptr::null_mut(); }
+    Stylist::shutdown();
 }
 
 unsafe fn dummy_url_data() -> &'static RefPtr<URLExtraData> {
@@ -729,7 +733,7 @@ pub extern "C" fn Servo_StyleSet_GetBaseComputedValuesForElement(raw_data: RawSe
     // Actually `PseudoElementResolution` doesn't matter.
     StyleResolverForElement::new(element, &mut context, RuleInclusion::All, PseudoElementResolution::IfApplicable)
         .cascade_style_and_visited_with_default_parents(inputs)
-        .into()
+        .0.into()
 }
 
 #[no_mangle]
@@ -777,13 +781,16 @@ pub extern "C" fn Servo_Element_ClearData(element: RawGeckoElementBorrowed) {
 
 #[no_mangle]
 pub extern "C" fn Servo_Element_SizeOfExcludingThisAndCVs(malloc_size_of: GeckoMallocSizeOf,
+                                                          malloc_enclosing_size_of:
+                                                              GeckoMallocSizeOf,
                                                           seen_ptrs: *mut SeenPtrs,
                                                           element: RawGeckoElementBorrowed) -> usize {
     let element = GeckoElement(element);
     let borrow = element.borrow_data();
     if let Some(data) = borrow {
         let have_seen_ptr = move |ptr| { unsafe { Gecko_HaveSeenPtr(seen_ptrs, ptr) } };
-        let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(), None,
+        let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(),
+                                           malloc_enclosing_size_of.unwrap(),
                                            Some(Box::new(have_seen_ptr)));
         (*data).size_of_excluding_cvs(&mut ops)
     } else {
@@ -941,8 +948,9 @@ pub extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
         *viewport_units_used = data.stylist.device().used_viewport_size();
     }
     data.stylist.device_mut().reset_computed_values();
+    let guards = StylesheetGuards::same(&guard);
     let origins_in_which_rules_changed =
-        data.stylist.media_features_change_changed_style(&guard);
+        data.stylist.media_features_change_changed_style(&guards);
 
     // We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
     // work as return values with the Linux 32-bit ABI at the moment because
@@ -960,8 +968,9 @@ pub extern "C" fn Servo_StyleSet_SetDevice(
 
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     let device = Device::new(pres_context);
+    let guards = StylesheetGuards::same(&guard);
     let origins_in_which_rules_changed =
-        data.stylist.set_device(device, &guard);
+        data.stylist.set_device(device, &guards);
 
     // We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
     // work as return values with the Linux 32-bit ABI at the moment because
@@ -1081,11 +1090,14 @@ pub extern "C" fn Servo_StyleSheet_Clone(
 #[no_mangle]
 pub extern "C" fn Servo_StyleSheet_SizeOfIncludingThis(
     malloc_size_of: GeckoMallocSizeOf,
+    malloc_enclosing_size_of: GeckoMallocSizeOf,
     sheet: RawServoStyleSheetContentsBorrowed
 ) -> usize {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
-    let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(), None, None);
+    let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(),
+                                       malloc_enclosing_size_of.unwrap(),
+                                       None);
     StylesheetContents::as_arc(&sheet).size_of(&guard, &mut ops)
 }
 
@@ -1111,6 +1123,18 @@ pub extern "C" fn Servo_StyleSheet_GetSourceMapURL(
 ) {
     let contents = StylesheetContents::as_arc(&sheet);
     let url_opt = contents.source_map_url.read();
+    if let Some(ref url) = *url_opt {
+        write!(unsafe { &mut *result }, "{}", url).unwrap();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleSheet_GetSourceURL(
+    sheet: RawServoStyleSheetContentsBorrowed,
+    result: *mut nsAString
+) {
+    let contents = StylesheetContents::as_arc(&sheet);
+    let url_opt = contents.source_url.read();
     if let Some(ref url) = *url_opt {
         write!(unsafe { &mut *result }, "{}", url).unwrap();
     }
@@ -2616,7 +2640,9 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(declarations:
             // We rely on Gecko passing in font-size values (0...7) here.
             longhands::font_size::SpecifiedValue::from_html_size(value as u8)
         },
-        FontStyle => longhands::font_style::computed_value::T::from_gecko_keyword(value).into(),
+        FontStyle => {
+            ToComputedValue::from_computed_value(&longhands::font_style::computed_value::T::from_gecko_keyword(value))
+        },
         FontWeight => longhands::font_weight::SpecifiedValue::from_gecko_keyword(value),
         ListStyleType => Box::new(longhands::list_style_type::SpecifiedValue::from_gecko_keyword(value)),
         MozMathVariant => longhands::_moz_math_variant::SpecifiedValue::from_gecko_keyword(value),
@@ -2660,9 +2686,8 @@ pub extern "C" fn Servo_DeclarationBlock_SetPixelValue(declarations:
     use style::properties::longhands::border_spacing::SpecifiedValue as BorderSpacing;
     use style::properties::longhands::height::SpecifiedValue as Height;
     use style::properties::longhands::width::SpecifiedValue as Width;
-    use style::values::specified::BorderSideWidth;
-    use style::values::specified::MozLength;
-    use style::values::specified::length::{NoCalcLength, LengthOrPercentage};
+    use style::values::specified::{BorderSideWidth, MozLength, BorderCornerRadius};
+    use style::values::specified::length::{NoCalcLength, NonNegativeLength, LengthOrPercentage};
 
     let long = get_longhand_from_id!(property);
     let nocalc = NoCalcLength::from_px(value);
@@ -2682,16 +2707,26 @@ pub extern "C" fn Servo_DeclarationBlock_SetPixelValue(declarations:
         PaddingRight => nocalc.into(),
         PaddingBottom => nocalc.into(),
         PaddingLeft => nocalc.into(),
-        BorderSpacing => Box::new(
-            BorderSpacing {
-                horizontal: nocalc.into(),
-                vertical: None,
-            }
-        ),
-        BorderTopLeftRadius => Box::new(LengthOrPercentage::from(nocalc).into()),
-        BorderTopRightRadius => Box::new(LengthOrPercentage::from(nocalc).into()),
-        BorderBottomLeftRadius => Box::new(LengthOrPercentage::from(nocalc).into()),
-        BorderBottomRightRadius => Box::new(LengthOrPercentage::from(nocalc).into()),
+        BorderSpacing => {
+            let v = NonNegativeLength::from(nocalc);
+            Box::new(BorderSpacing::new(v.clone(), v))
+        },
+        BorderTopLeftRadius => {
+            let length = LengthOrPercentage::from(nocalc);
+            Box::new(BorderCornerRadius::new(length.clone(), length))
+        },
+        BorderTopRightRadius => {
+            let length = LengthOrPercentage::from(nocalc);
+            Box::new(BorderCornerRadius::new(length.clone(), length))
+        },
+        BorderBottomLeftRadius => {
+            let length = LengthOrPercentage::from(nocalc);
+            Box::new(BorderCornerRadius::new(length.clone(), length))
+        },
+        BorderBottomRightRadius => {
+            let length = LengthOrPercentage::from(nocalc);
+            Box::new(BorderCornerRadius::new(length.clone(), length))
+        },
     };
     write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
         decls.push(prop, Importance::Normal);
@@ -3184,6 +3219,7 @@ fn create_context<'a>(
     parent_style: Option<&'a ComputedValues>,
     pseudo: Option<&'a PseudoElement>,
     for_smil_animation: bool,
+    rule_cache_conditions: &'a mut RuleCacheConditions,
 ) -> Context<'a> {
     Context {
         is_root_element: false,
@@ -3198,6 +3234,8 @@ fn create_context<'a>(
         in_media_query: false,
         quirks_mode: per_doc_data.stylist.quirks_mode(),
         for_smil_animation,
+        for_non_inherited_property: None,
+        rule_cache_conditions: RefCell::new(rule_cache_conditions),
     }
 }
 
@@ -3267,6 +3305,7 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
+    let mut conditions = Default::default();
     let mut context = create_context(
         &data,
         &metrics,
@@ -3274,6 +3313,7 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
         parent_style,
         pseudo.as_ref(),
         /* for_smil_animation = */ false,
+        &mut conditions,
     );
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
@@ -3354,13 +3394,15 @@ pub extern "C" fn Servo_GetAnimationValues(declarations: RawServoDeclarationBloc
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
+    let mut conditions = Default::default();
     let mut context = create_context(
         &data,
         &metrics,
         &style,
         parent_style,
         pseudo.as_ref(),
-        /* for_smil_animation = */ true
+        /* for_smil_animation = */ true,
+        &mut conditions,
     );
 
     let default_values = data.default_computed_values();
@@ -3390,13 +3432,15 @@ pub extern "C" fn Servo_AnimationValue_Compute(element: RawGeckoElementBorrowed,
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
+    let mut conditions = Default::default();
     let mut context = create_context(
         &data,
         &metrics,
         style,
         parent_style,
         pseudo.as_ref(),
-        /* for_smil_animation = */ false
+        /* for_smil_animation = */ false,
+        &mut conditions,
     );
 
     let default_values = data.default_computed_values();
@@ -3713,7 +3757,8 @@ pub extern "C" fn Servo_StyleSet_AddSizeOfExcludingThis(
 ) {
     let data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(),
-                                       malloc_enclosing_size_of, None);
+                                       malloc_enclosing_size_of.unwrap(),
+                                       None);
     let sizes = unsafe { sizes.as_mut() }.unwrap();
     data.add_size_of_children(&mut ops, sizes);
 }
@@ -3816,6 +3861,31 @@ pub extern "C" fn Servo_GetCustomPropertyNameAt(computed_values: ServoStyleConte
     name.assign(&*property_name.as_slice());
 
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_ReleaseArcStringData(string: *const RawOffsetArc<RustString>) {
+    let string = string as *const RawOffsetArc<String>;
+    // Cause RawOffsetArc::drop to run, releasing the strong reference to the string data.
+    let _ = ptr::read(string);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_CloneArcStringData(string: *const RawOffsetArc<RustString>)
+                                                  -> RawOffsetArc<RustString> {
+    let string = string as *const RawOffsetArc<String>;
+    let cloned = (*string).clone();
+    mem::transmute::<_, RawOffsetArc<RustString>>(cloned)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_GetArcStringData(string: *const RustString,
+                                                utf8_chars: *mut *const u8,
+                                                utf8_len: *mut u32)
+{
+    let string = &*(string as *const String);
+    *utf8_len = string.len() as u32;
+    *utf8_chars = string.as_ptr();
 }
 
 #[no_mangle]

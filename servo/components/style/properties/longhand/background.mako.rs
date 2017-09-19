@@ -24,7 +24,6 @@ ${helpers.predefined_type("background-image", "ImageLayer",
     spec="https://drafts.csswg.org/css-backgrounds/#the-background-image",
     vector="True",
     animation_value_type="discrete",
-    has_uncacheable_values="True" if product == "gecko" else "False",
     ignored_when_colors_disabled="True",
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER")}
 
@@ -53,6 +52,7 @@ ${helpers.predefined_type("background-image", "ImageLayer",
                              "round" => Round,
                              "no-repeat" => NoRepeat);
 
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     #[derive(Clone, Debug, PartialEq, ToCss)]
     pub enum SpecifiedValue {
@@ -65,6 +65,7 @@ ${helpers.predefined_type("background-image", "ImageLayer",
         pub use super::RepeatKeyword;
 
         #[derive(Clone, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T(pub RepeatKeyword, pub RepeatKeyword);
     }
@@ -165,8 +166,8 @@ ${helpers.single_keyword("background-origin",
                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER")}
 
 ${helpers.predefined_type("background-size", "BackgroundSize",
-    initial_value="computed::LengthOrPercentageOrAuto::Auto.into()",
-    initial_specified_value="specified::LengthOrPercentageOrAuto::Auto.into()",
+    initial_value="computed::BackgroundSize::auto()",
+    initial_specified_value="specified::BackgroundSize::auto()",
     spec="https://drafts.csswg.org/css-backgrounds/#the-background-size",
     vector=True,
     animation_value_type="BackgroundSizeList",

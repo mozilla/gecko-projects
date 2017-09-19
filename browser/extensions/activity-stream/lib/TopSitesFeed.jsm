@@ -12,6 +12,8 @@ const {insertPinned, TOP_SITES_SHOWMORE_LENGTH} = Cu.import("resource://activity
 const {Dedupe} = Cu.import("resource://activity-stream/common/Dedupe.jsm", {});
 const {shortURL} = Cu.import("resource://activity-stream/lib/ShortURL.jsm", {});
 
+XPCOMUtils.defineLazyModuleGetter(this, "filterAdult",
+  "resource://activity-stream/lib/FilterAdult.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NewTabUtils",
   "resource://gre/modules/NewTabUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Screenshots",
@@ -74,12 +76,17 @@ this.TopSitesFeed = class TopSitesFeed {
         });
     }
 
-    // Remove any duplicates from frecent and default sites then insert the
-    // original pinned sites into the deduped frecent ([1]) and defaults ([2])
-    const deduped = this.dedupe.group(pinned, frecent, notBlockedDefaultSites);
-    pinned = insertPinned([...deduped[1], ...deduped[2]], pinned);
+    // Remove any duplicates from frecent and default sites
+    const [, dedupedFrecent, dedupedDefaults] = this.dedupe.group(
+      pinned, frecent, notBlockedDefaultSites);
+    const dedupedUnpinned = [...dedupedFrecent, ...dedupedDefaults];
 
-    return pinned.slice(0, TOP_SITES_SHOWMORE_LENGTH);
+    // Remove adult sites if we need to
+    const checkedAdult = this.store.getState().Prefs.values.filterAdult ?
+      filterAdult(dedupedUnpinned) : dedupedUnpinned;
+
+    // Insert the original pinned sites into the deduped frecent and defaults
+    return insertPinned(checkedAdult, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
   }
   async refresh(target = null) {
     if (!this._tippyTopProvider.initialized) {
@@ -99,17 +106,7 @@ this.TopSitesFeed = class TopSitesFeed {
     // Now, get a tippy top icon, a rich icon, or screenshot for every item
     for (let link of links) {
       if (!link) { continue; }
-
-      // Check for tippy top icon or a rich icon.
-      link = this._tippyTopProvider.processSite(link);
-      if (link.tippyTopIcon || link.faviconSize >= MIN_FAVICON_SIZE) { continue; }
-
-      // If no tippy top, then we get a screenshot.
-      if (currentScreenshots[link.url]) {
-        link.screenshot = currentScreenshots[link.url];
-      } else {
-        this.getScreenshot(link.url);
-      }
+      this._fetchIcon(link, currentScreenshots);
     }
     const newAction = {type: at.TOP_SITES_UPDATED, data: links};
 
@@ -122,18 +119,34 @@ this.TopSitesFeed = class TopSitesFeed {
     }
     this.lastUpdated = Date.now();
   }
+  _fetchIcon(link, screenshotCache = {}) {
+    // Check for tippy top icon or a rich icon.
+    this._tippyTopProvider.processSite(link);
+    if (!link.tippyTopIcon && (!link.favicon || link.faviconSize < MIN_FAVICON_SIZE)) {
+      // If no tippy top, then we get a screenshot.
+      if (screenshotCache[link.url]) {
+        link.screenshot = screenshotCache[link.url];
+      } else {
+        this.getScreenshot(link.url);
+      }
+    }
+  }
   _getPinnedWithData(links) {
     // Augment the pinned links with any other extra data we have for them already in the store.
     // Alternatively you can pass in some links that you know have data you want the pinned links
     // to also have. This is useful for start up to make sure pinned links have favicons
     // (See github ticket #3428 fore more details)
-    let originalLinks = links ? links : this.store.getState().TopSites.rows;
+    const originalLinks = links || this.store.getState().TopSites.rows;
     const pinned = NewTabUtils.pinnedLinks.links;
     return pinned.map(pinnedLink => {
       if (pinnedLink) {
         const hostname = shortURL(pinnedLink);
         const originalLink = originalLinks.find(link => link && link.url === pinnedLink.url);
-        return Object.assign(pinnedLink, originalLink || {hostname});
+        // If it's a new link then it won't have an icon, so fetch one
+        if (!originalLink) {
+          this._fetchIcon(pinnedLink);
+        }
+        return Object.assign(originalLink || {hostname}, pinnedLink);
       }
       return pinnedLink;
     });

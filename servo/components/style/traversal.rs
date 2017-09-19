@@ -419,9 +419,9 @@ where
                     layout_parent_style.as_ref().map(|s| &**s)
                 );
 
-        let is_display_contents = primary_style.style.is_display_contents();
+        let is_display_contents = primary_style.style().is_display_contents();
 
-        style = Some(primary_style.style);
+        style = Some(primary_style.style.0);
         if !is_display_contents {
             layout_parent_style = style.clone();
         }
@@ -434,7 +434,7 @@ where
         .resolve_style(
             style.as_ref().map(|s| &**s),
             layout_parent_style.as_ref().map(|s| &**s)
-        )
+        ).into()
 }
 
 /// Calculates the style for a single node.
@@ -646,6 +646,10 @@ where
                                               traversal_data.current_dom_depth);
 
             context.thread_local.bloom_filter.assert_complete(element);
+            debug_assert_eq!(
+                context.thread_local.bloom_filter.matching_depth(),
+                traversal_data.current_dom_depth
+            );
 
             // This is only relevant for animations as of right now.
             important_rules_changed = true;
@@ -655,9 +659,9 @@ where
             // Now that our bloom filter is set up, try the style sharing
             // cache.
             match target.share_style_if_possible(context) {
-                Some(styles) => {
+                Some(shared_styles) => {
                     context.thread_local.statistics.styles_shared += 1;
-                    styles
+                    shared_styles
                 }
                 None => {
                     context.thread_local.statistics.elements_matched += 1;
@@ -674,14 +678,12 @@ where
                         resolver.resolve_style_with_default_parents()
                     };
 
-                    context.thread_local
-                        .sharing_cache
-                        .insert_if_possible(
-                            &element,
-                            new_styles.primary(),
-                            &mut target,
-                            context.thread_local.bloom_filter.matching_depth(),
-                        );
+                    context.thread_local.sharing_cache.insert_if_possible(
+                        &element,
+                        &new_styles.primary,
+                        Some(&mut target),
+                        traversal_data.current_dom_depth,
+                    );
 
                     new_styles
                 }
@@ -709,15 +711,43 @@ where
             let cascade_inputs =
                 ElementCascadeInputs::new_from_element_data(data);
 
-            let mut resolver =
-                StyleResolverForElement::new(
-                    element,
-                    context,
-                    RuleInclusion::All,
-                    PseudoElementResolution::IfApplicable
-                );
+            let new_styles = {
+                let mut resolver =
+                    StyleResolverForElement::new(
+                        element,
+                        context,
+                        RuleInclusion::All,
+                        PseudoElementResolution::IfApplicable
+                    );
 
-            resolver.cascade_styles_with_default_parents(cascade_inputs)
+                resolver.cascade_styles_with_default_parents(cascade_inputs)
+            };
+
+            // Insert into the cache, but only if this style isn't reused from a
+            // sibling or cousin. Otherwise, recascading a bunch of identical
+            // elements would unnecessarily flood the cache with identical entries.
+            //
+            // This is analagous to the obvious "don't insert an element that just
+            // got a hit in the style sharing cache" behavior in the MatchAndCascade
+            // handling above.
+            //
+            // Note that, for the MatchAndCascade path, we still insert elements that
+            // shared styles via the rule node, because we know that there's something
+            // different about them that caused them to miss the sharing cache before
+            // selector matching. If we didn't, we would still end up with the same
+            // number of eventual styles, but would potentially miss out on various
+            // opportunities for skipping selector matching, which could hurt
+            // performance.
+            if !new_styles.primary.reused_via_rule_node {
+                context.thread_local.sharing_cache.insert_if_possible(
+                    &element,
+                    &new_styles.primary,
+                    None,
+                    traversal_data.current_dom_depth,
+                );
+            }
+
+            new_styles
         }
     };
 

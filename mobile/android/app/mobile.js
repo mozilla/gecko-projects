@@ -145,6 +145,10 @@ pref("browser.sessionstore.max_resumed_crashes", 2);
 pref("browser.sessionstore.privacy_level", 0); // saving data: 0 = all, 1 = unencrypted sites, 2 = never
 pref("browser.sessionstore.debug_logging", false);
 
+// Download protection lists are not available on Fennec.
+pref("urlclassifier.downloadAllowTable", "");
+pref("urlclassifier.downloadBlockTable", "");
+
 /* these should help performance */
 pref("mozilla.widget.force-24bpp", true);
 pref("mozilla.widget.use-buffer-pixmap", true);
@@ -570,8 +574,11 @@ pref("apz.second_tap_tolerance", "0.3");
 pref("apz.touch_move_tolerance", "0.03");
 pref("apz.touch_start_tolerance", "0.06");
 
-// Enabling this on Fennec is blocked on a proper fix for bug 1390145.
+#ifdef NIGHTLY_BUILD
+pref("apz.frame_delay.enabled", true);
+#else
 pref("apz.frame_delay.enabled", false);
+#endif
 
 pref("layers.progressive-paint", true);
 pref("layers.low-precision-buffer", true);

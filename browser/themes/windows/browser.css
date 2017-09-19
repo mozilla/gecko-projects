@@ -22,6 +22,7 @@
 
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) - 1px);
   --toolbarbutton-border-radius: 2px;
+  --toolbarbutton-icon-fill-opacity: 1;
 
   --panel-separator-color: ThreeDLightShadow;
   --arrowpanel-dimmed: hsla(0,0%,80%,.3);
@@ -40,6 +41,8 @@
     --toolbar-non-lwt-bgcolor: #f9f9fa;
     --toolbar-non-lwt-textcolor: #0c0c0d;
     --toolbar-non-lwt-bgimage: none;
+
+    --toolbarbutton-icon-fill-opacity: .7;
 
     --panel-separator-color: hsla(210,4%,10%,.14);
 
@@ -75,6 +78,14 @@
   margin-top: var(--space-above-tabbar);
 }
 
+/* Add 4px extra margin on top of the tabs toolbar on Windows 7. */
+@media (-moz-os-version: windows-win7) {
+  :root[sizemode="normal"][chromehidden~="menubar"] #toolbar-menubar ~ #TabsToolbar,
+  :root[sizemode="normal"] #toolbar-menubar[autohide="true"][inactive] ~ #TabsToolbar {
+    margin-top: calc(var(--space-above-tabbar) + 4px);
+  }
+}
+
 #navigator-toolbox,
 #navigator-toolbox > toolbar {
   -moz-appearance: none;
@@ -84,6 +95,7 @@
   background-color: var(--toolbar-bgcolor);
   background-image: var(--toolbar-bgimage);
   background-clip: padding-box;
+  color: var(--toolbar-color, inherit);
 }
 
 #toolbar-menubar,
@@ -592,8 +604,6 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
   outline: 1px dotted;
   outline-offset: -3px;
 }
-
-/* page proxy icon */
 
 %include ../shared/identity-block/identity-block.inc.css
 

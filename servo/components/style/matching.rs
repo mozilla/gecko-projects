@@ -7,8 +7,9 @@
 #![allow(unsafe_code)]
 #![deny(missing_docs)]
 
-use context::{ElementCascadeInputs, SelectorFlagsMap, SharedStyleContext, StyleContext};
-use data::{ElementData, ElementStyles};
+use context::{ElementCascadeInputs, QuirksMode, SelectorFlagsMap};
+use context::{SharedStyleContext, StyleContext};
+use data::ElementData;
 use dom::TElement;
 use invalidation::element::restyle_hints::{RESTYLE_CSS_ANIMATIONS, RESTYLE_CSS_TRANSITIONS};
 use invalidation::element::restyle_hints::{RESTYLE_SMIL, RESTYLE_STYLE_ATTRIBUTE};
@@ -18,6 +19,7 @@ use rule_tree::{CascadeLevel, StrongRuleNode};
 use selector_parser::{PseudoElement, RestyleDamage};
 use selectors::matching::ElementSelectorFlags;
 use servo_arc::{Arc, ArcBorrow};
+use style_resolver::ResolvedElementStyles;
 use traversal_flags;
 
 /// Represents the result of comparing an element's old and new style.
@@ -156,7 +158,7 @@ trait PrivateMatchMethods: TElement {
             StyleResolverForElement::new(*self, context, RuleInclusion::All, PseudoElementResolution::IfApplicable)
                 .cascade_style_and_visited_with_default_parents(inputs);
 
-        Some(style)
+        Some(style.0)
     }
 
     #[cfg(feature = "gecko")]
@@ -530,33 +532,26 @@ pub trait MatchMethods : TElement {
         &self,
         context: &mut StyleContext<Self>,
         data: &mut ElementData,
-        mut new_styles: ElementStyles,
+        mut new_styles: ResolvedElementStyles,
         important_rules_changed: bool,
     ) -> ChildCascadeRequirement {
         use app_units::Au;
         use dom::TNode;
         use std::cmp;
-        use std::mem;
-
-        debug_assert!(new_styles.primary.is_some(), "How did that happen?");
 
         self.process_animations(
             context,
             &mut data.styles.primary,
-            &mut new_styles.primary.as_mut().unwrap(),
+            &mut new_styles.primary.style.0,
             data.hint,
             important_rules_changed,
         );
 
         // First of all, update the styles.
-        let old_styles = mem::replace(&mut data.styles, new_styles);
+        let old_styles = data.set_styles(new_styles);
 
         // Propagate the "can be fragmented" bit. It would be nice to
         // encapsulate this better.
-        //
-        // Note that this is technically not needed for pseudos since we already
-        // do that when we resolve the non-pseudo style, but it doesn't hurt
-        // anyway.
         if cfg!(feature = "servo") {
             let layout_parent =
                 self.inheritance_parent().map(|e| e.layout_parent());
@@ -589,6 +584,21 @@ pub trait MatchMethods : TElement {
                 if device.used_root_font_size() {
                     cascade_requirement = ChildCascadeRequirement::MustCascadeDescendants;
                 }
+            }
+        }
+
+        if context.shared.stylist.quirks_mode() == QuirksMode::Quirks {
+            if self.is_html_document_body_element() {
+                // NOTE(emilio): We _could_ handle dynamic changes to it if it
+                // changes and before we reach our children the cascade stops,
+                // but we don't track right now whether we use the document body
+                // color, and nobody else handles that properly anyway.
+
+                let device = context.shared.stylist.device();
+
+                // Needed for the "inherit from body" quirk.
+                let text_color = new_primary_style.get_color().clone_color();
+                device.set_body_text_color(text_color);
             }
         }
 

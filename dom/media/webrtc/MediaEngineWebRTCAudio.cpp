@@ -408,14 +408,18 @@ MediaEngineWebRTCMicrophoneSource::UpdateSingleSource(
     }
   }
 
-  mSkipProcessing = !(prefs.mAecOn || prefs.mAgcOn || prefs.mNoiseOn);
-  if (mSkipProcessing) {
-    mSampleFrequency = MediaEngine::USE_GRAPH_RATE;
-    mAudioOutputObserver = nullptr;
-  } else {
-    // make sure we route a copy of the mixed audio output of this MSG to the
-    // AEC
-    mAudioOutputObserver = new AudioOutputObserver();
+  // we don't allow switching from non-fast-path to fast-path on the fly yet
+  if (mState != kStarted) {
+    mSkipProcessing = !(prefs.mAecOn || prefs.mAgcOn || prefs.mNoiseOn);
+    if (mSkipProcessing) {
+      mSampleFrequency = MediaEngine::USE_GRAPH_RATE;
+    } else {
+      // make sure we route a copy of the mixed audio output of this MSG to the
+      // AEC
+      if (!mAudioOutputObserver) {
+        mAudioOutputObserver = new AudioOutputObserver();
+      }
+    }
   }
   SetLastPrefs(prefs);
   return NS_OK;
@@ -468,6 +472,13 @@ MediaEngineWebRTCMicrophoneSource::Start(SourceMediaStream *aStream,
   AssertIsOnOwningThread();
   if (sChannelsOpen == 0 || !aStream) {
     return NS_ERROR_FAILURE;
+  }
+
+  // Until we fix bug 1400488 we need to block a second tab (OuterWindow)
+  // from opening an already-open device.  If it's the same tab, they
+  // will share a Graph(), and we can allow it.
+  if (!mSources.IsEmpty() && aStream->Graph() != mSources[0]->Graph()) {
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
   {
@@ -643,6 +654,7 @@ MediaEngineWebRTCMicrophoneSource::InsertInGraph(const T* aBuffer,
                                                  size_t aFrames,
                                                  uint32_t aChannels)
 {
+  MonitorAutoLock lock(mMonitor);
   if (mState != kStarted) {
     return;
   }
@@ -957,10 +969,6 @@ MediaEngineWebRTCMicrophoneSource::Process(int channel,
       }
     }
   }
-
-  MonitorAutoLock lock(mMonitor);
-  if (mState != kStarted)
-    return;
 
   uint32_t channels = isStereo ? 2 : 1;
   InsertInGraph<int16_t>(audio10ms, length, channels);

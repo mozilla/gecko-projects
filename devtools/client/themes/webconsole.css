@@ -609,12 +609,12 @@ a.learn-more-link.webconsole-learn-more-link {
 
 .elementNode:hover .open-inspector,
 .open-inspector:hover {
-  filter: url(images/filters.svg#checked-icon-state);
+  filter: var(--theme-icon-checked-filter);
 }
 
 .elementNode:hover .open-inspector:active,
 .open-inspector:active {
-  filter: url(images/filters.svg#checked-icon-state) brightness(0.9);
+  filter: var(--theme-icon-checked-filter) brightness(0.9);
 }
 
 /* Old console frontend filters */
@@ -889,10 +889,6 @@ a.learn-more-link.webconsole-learn-more-link {
    supported in the Console panel. */
 .network.message #headers-panel .edit-and-resend-button {
   display: none;
-}
-
-.network.message #response-panel .treeTable {
-  overflow-y: hidden;
 }
 
 .network .message-flex-body > .message-body {

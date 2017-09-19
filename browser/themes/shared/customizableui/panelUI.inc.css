@@ -92,14 +92,14 @@
   to { transform: perspective(5000px) rotateY(360deg); }
 }
 
-#PanelUI-button {
+:root:not([uidensity=compact]) #PanelUI-button {
   margin-inline-start: 3px;
   border-inline-start: 1px solid;
   border-image: linear-gradient(transparent 4px, rgba(0,0,0,.1) 4px, rgba(0,0,0,.1) calc(100% - 4px), transparent calc(100% - 4px));
   border-image-slice: 1;
 }
 
-#nav-bar[brighttext] > #PanelUI-button {
+:root:not([uidensity=compact]) #nav-bar[brighttext] > #PanelUI-button {
   border-image-source: linear-gradient(transparent 4px, rgba(100%,100%,100%,.2) 4px, rgba(100%,100%,100%,.2) calc(100% - 4px), transparent calc(100% - 4px));
 }
 
@@ -121,12 +121,11 @@
   background: #74BF43 url(chrome://browser/skin/update-badge.svg) no-repeat center;
   border-radius: 50%;
   box-shadow: none;
-  border: 2px solid -moz-dialog;
   /* "!important" is necessary to override the rule in toolbarbutton.css */
-  margin: -9px 0 0 !important;
-  margin-inline-end: -6px !important;
-  min-width: 16px;
-  min-height: 16px;
+  margin: -7px 0 0 !important;
+  margin-inline-end: -4px !important;
+  min-width: 12px;
+  min-height: 12px;
 }
 
 .panel-banner-item[notificationid^=update]::after {
@@ -223,12 +222,14 @@ panelview {
 .subviewbutton.panel-subview-footer {
   box-sizing: border-box;
   min-height: 41px;
-  padding: 11px 12px;
 }
 
-.cui-widget-panelview .subviewbutton.panel-subview-footer {
+.cui-widget-panelview menuitem.subviewbutton.panel-subview-footer {
   margin: 4px 0 0;
-  -moz-box-pack: center;
+}
+
+.cui-widget-panelview .subviewbutton.panel-subview-footer > .menu-text {
+  -moz-box-flex: 1;
 }
 
 #appMenu-popup > arrowscrollbox > autorepeatbutton,
@@ -384,7 +385,8 @@ panelview[id^=PanelUI-webext-] {
 }
 
 panelview:not([mainview]) .toolbarbutton-text,
-.cui-widget-panel toolbarbutton:not([wrap]) > .toolbarbutton-text {
+.cui-widget-panel toolbarbutton:not([wrap]) > .toolbarbutton-text,
+#overflowMenu-customize-button > .toolbarbutton-text {
   text-align: start;
   display: -moz-box;
 }
@@ -1209,7 +1211,7 @@ panelview .toolbarbutton-1,
 
 .subviewbutton > .toolbarbutton-text {
   padding: 0;
-  padding-inline-start: 24px; /* This is 16px for the icon + 8px for the padding as defined above. */
+  padding-inline-start: 24px; /* This is 16px for the icon + 8px for the padding as defined below. */
 }
 
 .subviewbutton > .menu-right,
@@ -1254,11 +1256,21 @@ panelview .toolbarbutton-1,
 .subviewbutton.panel-subview-footer > .menu-text {
   -moz-appearance: none;
   padding-inline-end: 6px;
+  padding-inline-start: 0 !important; /* to override menu.css on Windows */
   -moz-box-flex: 0;
+}
+
+.subviewbutton.panel-subview-footer > .toolbarbutton-text {
+  padding-inline-start: 0;
 }
 
 .subviewbutton.panel-subview-footer > .menu-accel-container {
   padding-inline-start: 6px;
+}
+
+.subviewbutton > .menu-accel-container > .menu-iconic-accel,
+.subviewbutton > .menu-accel-container > .menu-accel {
+  margin-inline-end: 0 !important; /* to override menu.css on Windows */
 }
 
 #widget-overflow-fixed-list .toolbarbutton-1 > .toolbarbutton-text,
@@ -1503,7 +1515,7 @@ menuitem.panel-subview-footer@menuStateActive@,
 }
 
 .subviewbutton > .menu-accel-container {
-  -moz-box-pack: start;
+  -moz-box-pack: end;
   margin-inline-start: 10px;
   margin-inline-end: auto;
   color: GrayText;
@@ -1984,12 +1996,6 @@ menuitem[checked="true"].subviewbutton > .menu-iconic-left {
 
   #PanelUI-panic-actionlist-newwindow {
     background-image: -moz-image-rect(url(chrome://browser/skin/panic-panel/icons@2x.png), 0, 128, 32, 96);
-  }
-
-  #PanelUI-menu-button[badge-status="update-available"] > .toolbarbutton-badge-stack > .toolbarbutton-badge,
-  #PanelUI-menu-button[badge-status="update-manual"] > .toolbarbutton-badge-stack > .toolbarbutton-badge,
-  #PanelUI-menu-button[badge-status="update-restart"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
-    border: 1px solid -moz-dialog;
   }
 }
 

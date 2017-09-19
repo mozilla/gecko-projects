@@ -216,7 +216,6 @@
   <string name="pref_show_web_fonts_summary">&pref_show_web_fonts_summary2;</string>
 
   <string name="pref_tracking_protection_title">&pref_tracking_protection_title2;</string>
-  <string name="pref_tracking_protection_summary">&pref_tracking_protection_summary3;</string>
   <string name="pref_donottrack_title">&pref_donottrack_title;</string>
   <string name="pref_donottrack_summary">&pref_donottrack_summary;</string>
 
@@ -625,6 +624,8 @@
   <string name="activity_stream_topsites">&activity_stream_topsites;</string>
   <string name="activity_stream_topstories">&activity_stream_topstories;</string>
   <string name="activity_stream_highlights">&activity_stream_highlights;</string>
+  <string name="activity_stream_link_more">&activity_stream_link_more;</string>
+
   <string name="activity_stream_highlight_label_bookmarked">&activity_stream_highlight_label_bookmarked;</string>
   <string name="activity_stream_highlight_label_visited">&activity_stream_highlight_label_visited;</string>
   <string name="activity_stream_highlight_label_trending">&activity_stream_highlight_label_trending;</string>

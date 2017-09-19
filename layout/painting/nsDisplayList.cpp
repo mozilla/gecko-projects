@@ -3144,6 +3144,7 @@ nsDisplaySolidColor::WriteDebugInfo(std::stringstream& aStream)
 
 bool
 nsDisplaySolidColor::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                             mozilla::wr::IpcResourceUpdateQueue& aResources,
                                              const StackingContextHelper& aSc,
                                              nsTArray<WebRenderParentCommand>& aParentCommands,
                                              mozilla::layers::WebRenderLayerManager* aManager,
@@ -3201,6 +3202,7 @@ nsDisplaySolidColorRegion::WriteDebugInfo(std::stringstream& aStream)
 
 bool
 nsDisplaySolidColorRegion::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                   mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                    const StackingContextHelper& aSc,
                                                    nsTArray<WebRenderParentCommand>& aParentCommands,
                                                    mozilla::layers::WebRenderLayerManager* aManager,
@@ -3862,6 +3864,7 @@ nsDisplayBackgroundImage::CanBuildWebRenderDisplayItems(LayerManager* aManager)
 
 bool
 nsDisplayBackgroundImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                  mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                   const StackingContextHelper& aSc,
                                                   nsTArray<WebRenderParentCommand>& aParentCommands,
                                                   WebRenderLayerManager* aManager,
@@ -4232,13 +4235,6 @@ nsDisplayThemedBackground::IsUniform(nsDisplayListBuilder* aBuilder) const
   return Nothing();
 }
 
-bool
-nsDisplayThemedBackground::ProvidesFontSmoothingBackgroundColor(nscolor* aColor) const
-{
-  nsITheme* theme = mFrame->PresContext()->GetTheme();
-  return theme->WidgetProvidesFontSmoothingBackgroundColor(mFrame, mAppearance, aColor);
-}
-
 nsRect
 nsDisplayThemedBackground::GetPositioningArea() const
 {
@@ -4498,6 +4494,7 @@ nsDisplayBackgroundColor::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayBackgroundColor::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                  mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                   const StackingContextHelper& aSc,
                                                   nsTArray<WebRenderParentCommand>& aParentCommands,
                                                   mozilla::layers::WebRenderLayerManager* aManager,
@@ -4718,6 +4715,7 @@ nsDisplayOutline::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayOutline::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                          mozilla::wr::IpcResourceUpdateQueue& aResources,
                                           const StackingContextHelper& aSc,
                                           nsTArray<WebRenderParentCommand>& aParentCommands,
                                           mozilla::layers::WebRenderLayerManager* aManager,
@@ -4730,7 +4728,7 @@ nsDisplayOutline::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuil
     }
   }
 
-  mBorderRenderer->CreateWebRenderCommands(aBuilder, aSc);
+  mBorderRenderer->CreateWebRenderCommands(aBuilder, aResources, aSc);
   return true;
 }
 
@@ -5035,6 +5033,7 @@ nsDisplayCaret::Paint(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayCaret::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                         const StackingContextHelper& aSc,
                                         nsTArray<WebRenderParentCommand>& aParentCommands,
                                         mozilla::layers::WebRenderLayerManager* aManager,
@@ -5300,6 +5299,7 @@ nsDisplayBorder::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayBorder::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                         mozilla::wr::IpcResourceUpdateQueue& aResources,
                                          const StackingContextHelper& aSc,
                                          nsTArray<WebRenderParentCommand>& aParentCommands,
                                          mozilla::layers::WebRenderLayerManager* aManager,
@@ -5316,7 +5316,7 @@ nsDisplayBorder::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
     CreateBorderImageWebRenderCommands(aBuilder, aSc, aParentCommands,
                                        aManager, aDisplayListBuilder);
   } else if (mBorderRenderer) {
-    mBorderRenderer->CreateWebRenderCommands(aBuilder, aSc);
+    mBorderRenderer->CreateWebRenderCommands(aBuilder, aResources, aSc);
   }
 
   return true;
@@ -5666,6 +5666,7 @@ nsDisplayBoxShadowOuter::CanBuildWebRenderDisplayItems()
 
 bool
 nsDisplayBoxShadowOuter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                  const StackingContextHelper& aSc,
                                                  nsTArray<WebRenderParentCommand>& aParentCommands,
                                                  mozilla::layers::WebRenderLayerManager* aManager,
@@ -5808,18 +5809,32 @@ nsDisplayBoxShadowInner::CanCreateWebRenderCommands(nsDisplayListBuilder* aBuild
                                                     nsIFrame* aFrame,
                                                     nsPoint aReferenceOffset)
 {
-  nsRect borderRect = nsRect(aReferenceOffset, aFrame->GetSize());
-  RectCornerRadii innerRadii;
-  bool hasBorderRadius =
-      nsCSSRendering::GetShadowInnerRadii(aFrame, borderRect, innerRadii);
-  if (hasBorderRadius) {
-    return false;
-  }
-
   nsCSSShadowArray *shadows = aFrame->StyleEffects()->mBoxShadow;
   if (!shadows) {
     // Means we don't have to paint anything
     return true;
+  }
+
+  bool hasBorderRadius;
+  bool nativeTheme =
+    nsCSSRendering::HasBoxShadowNativeTheme(aFrame, hasBorderRadius);
+
+  // We don't support native themed things yet like box shadows around
+  // input buttons.
+  if (nativeTheme) {
+    return false;
+  }
+
+  nsRect borderRect = nsRect(aReferenceOffset, aFrame->GetSize());
+  RectCornerRadii innerRadii;
+
+  if (hasBorderRadius) {
+    hasBorderRadius =
+      nsCSSRendering::GetShadowInnerRadii(aFrame, borderRect, innerRadii);
+  }
+
+  if (hasBorderRadius && !innerRadii.AreRadiiSame()) {
+    return false;
   }
 
   return true;
@@ -5911,6 +5926,7 @@ nsDisplayBoxShadowInner::CreateInsetBoxShadowWebRenderCommands(mozilla::wr::Disp
 
 bool
 nsDisplayBoxShadowInner::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                  const StackingContextHelper& aSc,
                                                  nsTArray<WebRenderParentCommand>& aParentCommands,
                                                  mozilla::layers::WebRenderLayerManager* aManager,
@@ -6175,6 +6191,7 @@ nsDisplayWrapList::SetReferenceFrame(const nsIFrame* aFrame)
 
 bool
 nsDisplayWrapList::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                           mozilla::wr::IpcResourceUpdateQueue& aResources,
                                            const StackingContextHelper& aSc,
                                            nsTArray<WebRenderParentCommand>& aParentCommands,
                                            mozilla::layers::WebRenderLayerManager* aManager,
@@ -6189,7 +6206,8 @@ nsDisplayWrapList::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
   aManager->CreateWebRenderCommandsFromDisplayList(GetChildren(),
                                                    aDisplayListBuilder,
                                                    aSc,
-                                                   aBuilder);
+                                                   aBuilder,
+                                                   aResources);
   return true;
 }
 
@@ -6509,6 +6527,7 @@ nsDisplayOpacity::WriteDebugInfo(std::stringstream& aStream)
 
 bool
 nsDisplayOpacity::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                          mozilla::wr::IpcResourceUpdateQueue& aResources,
                                           const StackingContextHelper& aSc,
                                           nsTArray<WebRenderParentCommand>& aParentCommands,
                                           mozilla::layers::WebRenderLayerManager* aManager,
@@ -6551,7 +6570,8 @@ nsDisplayOpacity::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuil
   aManager->CreateWebRenderCommandsFromDisplayList(&mList,
                                                    aDisplayListBuilder,
                                                    sc,
-                                                   aBuilder);
+                                                   aBuilder,
+                                                   aResources);
   return true;
 }
 
@@ -6591,6 +6611,7 @@ nsDisplayBlendMode::GetLayerState(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayBlendMode::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                            mozilla::wr::IpcResourceUpdateQueue& aResources,
                                             const StackingContextHelper& aSc,
                                             nsTArray<WebRenderParentCommand>& aParentCommands,
                                             mozilla::layers::WebRenderLayerManager* aManager,
@@ -6601,7 +6622,7 @@ nsDisplayBlendMode::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBu
                            &mList, nullptr, 0, nullptr, nullptr, nullptr,
                            filters, nsCSSRendering::GetGFXBlendMode(mBlendMode));
 
-  return nsDisplayWrapList::CreateWebRenderCommands(aBuilder, sc, aParentCommands,
+  return nsDisplayWrapList::CreateWebRenderCommands(aBuilder,aResources, sc, aParentCommands,
                                                     aManager, aDisplayListBuilder);
 }
 
@@ -6722,6 +6743,7 @@ nsDisplayBlendContainer::GetLayerState(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayBlendContainer::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                  const StackingContextHelper& aSc,
                                                  nsTArray<WebRenderParentCommand>& aParentCommands,
                                                  mozilla::layers::WebRenderLayerManager* aManager,
@@ -6730,7 +6752,7 @@ nsDisplayBlendContainer::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
   StackingContextHelper sc(aSc, aBuilder, aDisplayListBuilder, this,
                            &mList, nullptr, 0, nullptr, nullptr);
 
-  return nsDisplayWrapList::CreateWebRenderCommands(aBuilder, sc, aParentCommands,
+  return nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aResources, sc, aParentCommands,
                                                     aManager, aDisplayListBuilder);
 }
 
@@ -6815,6 +6837,7 @@ nsDisplayOwnLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayOwnLayer::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                           mozilla::wr::IpcResourceUpdateQueue& aResources,
                                            const StackingContextHelper& aSc,
                                            nsTArray<WebRenderParentCommand>& aParentCommands,
                                            WebRenderLayerManager* aManager,
@@ -6822,7 +6845,7 @@ nsDisplayOwnLayer::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
 {
   if (!aManager->AsyncPanZoomEnabled() ||
       mThumbData.mDirection == ScrollDirection::NONE) {
-    return nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aSc,
+    return nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aResources, aSc,
         aParentCommands, aManager, aDisplayListBuilder);
   }
 
@@ -6837,7 +6860,7 @@ nsDisplayOwnLayer::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
   StackingContextHelper sc(aSc, aBuilder, aDisplayListBuilder, this,
                            &mList, nullptr, mWrAnimationId, nullptr, nullptr);
 
-  nsDisplayWrapList::CreateWebRenderCommands(aBuilder, sc,
+  nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aResources, sc,
       aParentCommands, aManager, aDisplayListBuilder);
   return true;
 }
@@ -8167,6 +8190,7 @@ nsDisplayTransform::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuild
 
 bool
 nsDisplayTransform::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                            mozilla::wr::IpcResourceUpdateQueue& aResources,
                                             const StackingContextHelper& aSc,
                                             nsTArray<WebRenderParentCommand>& aParentCommands,
                                             WebRenderLayerManager* aManager,
@@ -8197,12 +8221,18 @@ nsDisplayTransform::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBu
     // transform animation, the transform value will be resolved
     // after animation sampling on the compositor
     transformForSC = nullptr;
+
+    // Pass default transform to compositor in case gecko fails to
+    // get animated value after animation sampling.
+    OptionalTransform transformForCompositor = newTransformMatrix;
+
+    OpAddCompositorAnimations
+      anim(CompositorAnimations(animationInfo.GetAnimations(), animationsId),
+           transformForCompositor, void_t());
+    aManager->WrBridge()->AddWebRenderParentCommand(anim);
   }
 
-  gfx::Matrix4x4Typed<LayerPixel, LayerPixel> boundTransform = ViewAs< gfx::Matrix4x4Typed<LayerPixel, LayerPixel> >(newTransformMatrix);
-  boundTransform._41 = 0.0f;
-  boundTransform._42 = 0.0f;
-  boundTransform._43 = 0.0f;
+  gfx::Matrix4x4Typed<LayerPixel, LayerPixel> boundTransform = ViewAs<gfx::Matrix4x4Typed<LayerPixel, LayerPixel>>(newTransformMatrix);
 
   nsTArray<mozilla::wr::WrFilterOp> filters;
   StackingContextHelper sc(aSc,
@@ -8217,34 +8247,7 @@ nsDisplayTransform::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBu
                            nullptr,
                            filters);
 
-  if (animationsId) {
-    // Get the inheritedScale from parent and pass the scale to compositor
-    // to get correct sampling result
-    gfx::Size scale = aSc.GetInheritedScale();
-    for (layers::Animation& animation : animationInfo.GetAnimations()) {
-      if (animation.property() == eCSSProperty_transform) {
-        TransformData& transformData = animation.data().get_TransformData();
-        transformData.inheritedXScale() = scale.width;
-        transformData.inheritedYScale() = scale.height;
-        transformData.hasPerspectiveParent() = aSc.HasPerspectiveTransform();
-      }
-    }
-
-    // Pass default transform to compositor in case gecko fails to
-    // get animated value after animation sampling.
-    OptionalTransform transformForCompositor = newTransformMatrix;
-    OpAddCompositorAnimations
-      anim(CompositorAnimations(animationInfo.GetAnimations(), animationsId),
-           transformForCompositor, void_t());
-    aManager->WrBridge()->AddWebRenderParentCommand(anim);
-
-    // Since we passed a nullptr transformForSC to the StackingContextHelper,
-    // we now set up the correct inherited scale for the stacking context.
-    newTransformMatrix.PostScale(scale.width, scale.height, 1.0f);
-    sc.SetInheritedScale(newTransformMatrix.As2D().ScaleFactors(true));
-
-  }
-  return mStoredList.CreateWebRenderCommands(aBuilder, sc, aParentCommands,
+  return mStoredList.CreateWebRenderCommands(aBuilder, aResources, sc, aParentCommands,
                                              aManager, aDisplayListBuilder);
 }
 
@@ -8800,6 +8803,7 @@ nsDisplayPerspective::GetLayerState(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayPerspective::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                              mozilla::wr::IpcResourceUpdateQueue& aResources,
                                               const StackingContextHelper& aSc,
                                               nsTArray<WebRenderParentCommand>& aParentCommands,
                                               WebRenderLayerManager* aManager,
@@ -8849,7 +8853,7 @@ nsDisplayPerspective::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& a
                            &perspectiveMatrix,
                            filters);
 
-  return mList.CreateWebRenderCommands(aBuilder, sc, aParentCommands,
+  return mList.CreateWebRenderCommands(aBuilder, aResources, sc, aParentCommands,
                                        aManager, aDisplayListBuilder);
 }
 
@@ -9313,6 +9317,7 @@ nsDisplayMask::PaintAsLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayMask::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                       mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
                                        nsTArray<WebRenderParentCommand>& aParentCommands,
                                        mozilla::layers::WebRenderLayerManager* aManager,
@@ -9324,7 +9329,8 @@ nsDisplayMask::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
   LayerRect bounds = ViewAs<LayerPixel>(LayoutDeviceRect::FromAppUnits(displayBound, appUnitsPerDevPixel),
                                         PixelCastJustification::WebRenderHasUnitResolution);
 
-  Maybe<wr::WrImageMask> mask = aManager->BuildWrMaskImage(this, aBuilder, aSc, aDisplayListBuilder, bounds);
+  Maybe<wr::WrImageMask> mask = aManager->BuildWrMaskImage(this, aBuilder, aResources,
+                                                           aSc, aDisplayListBuilder, bounds);
   if (mask) {
     wr::WrClipId clipId = aBuilder.DefineClip(
         aSc.ToRelativeLayoutRect(bounds), nullptr, mask.ptr());
@@ -9334,7 +9340,7 @@ nsDisplayMask::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
     aBuilder.PushClip(clipId, /*aRecordInStack*/ false);
   }
 
-  nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, aSc, aParentCommands, aManager, aDisplayListBuilder);
+  nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, aResources, aSc, aParentCommands, aManager, aDisplayListBuilder);
 
   if (mask) {
     aBuilder.PopClip(/*aRecordInStack*/ false);
@@ -9538,6 +9544,7 @@ nsDisplayFilter::PaintAsLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                         mozilla::wr::IpcResourceUpdateQueue& aResources,
                                          const StackingContextHelper& aSc,
                                          nsTArray<WebRenderParentCommand>& aParentCommands,
                                          mozilla::layers::WebRenderLayerManager* aManager,
@@ -9570,7 +9577,7 @@ nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
                            nullptr,
                            wrFilters);
 
-  nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, sc, aParentCommands, aManager, aDisplayListBuilder);
+  nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, aResources, sc, aParentCommands, aManager, aDisplayListBuilder);
   return true;
 }
 

@@ -25,6 +25,7 @@ pub mod grid;
 pub mod image;
 pub mod position;
 pub mod rect;
+pub mod size;
 pub mod svg;
 pub mod text;
 pub mod transform;
@@ -71,6 +72,7 @@ impl SymbolsType {
 ///
 /// Since wherever <counter-style> is used, 'none' is a valid value as
 /// well, we combine them into one type to make code simpler.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss)]
 pub enum CounterStyleOrNone {
     /// `none`
@@ -129,6 +131,7 @@ impl Parse for CounterStyleOrNone {
 ///
 /// For font-feature-settings, this is a tag and an integer,
 /// for font-variation-settings this is a tag and a float
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue)]
 pub struct FontSettingTag<T> {
@@ -186,6 +189,7 @@ impl<T: Parse> Parse for FontSettingTag<T> {
 
 
 /// A font settings value for font-variation-settings or font-feature-settings
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss)]
 pub enum FontSettings<T> {
@@ -210,6 +214,7 @@ impl<T: Parse> Parse for FontSettings<T> {
 ///
 /// Do not use this type anywhere except within FontSettings
 /// because it serializes with the preceding space
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ToComputedValue)]
 pub struct FontSettingTagInt(pub u32);
@@ -218,7 +223,7 @@ pub struct FontSettingTagInt(pub u32);
 ///
 /// Do not use this type anywhere except within FontSettings
 /// because it serializes with the preceding space
-#[cfg_attr(feature = "gecko", derive(Animate, ComputeSquaredDistance))]
+#[cfg_attr(feature = "gecko", derive(Animate, ComputeSquaredDistance, MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, PartialEq, ToComputedValue)]
 pub struct FontSettingTagFloat(pub f32);
@@ -273,12 +278,14 @@ impl ToCss for FontSettingTagFloat {
 }
 
 /// A wrapper of Non-negative values.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
 #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug)]
 #[derive(PartialEq, PartialOrd, ToAnimatedZero, ToComputedValue, ToCss)]
 pub struct NonNegative<T>(pub T);
 
 /// A wrapper of greater-than-or-equal-to-one values.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
 #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug)]
 #[derive(PartialEq, PartialOrd, ToAnimatedZero, ToComputedValue, ToCss)]

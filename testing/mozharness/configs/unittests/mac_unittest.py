@@ -86,6 +86,7 @@ config = {
                 "--log-errorsummary=%(error_summary_file)s",
                 "--screenshot-on-fail",
                 "--cleanup-crashes",
+                "--marionette-startup-timeout=180",
                 "--work-path=%(abs_work_dir)s",
             ],
             "run_filename": "runtests.py",
@@ -241,8 +242,7 @@ config = {
     "default_blob_upload_servers": [
         "https://blobupload.elasticbeanstalk.com",
     ],
-    "unstructured_flavors": {"mochitest": [],
-                            "xpcshell": [],
+    "unstructured_flavors": {"xpcshell": [],
                             "gtest": [],
                             "mozmill": [],
                             "cppunittest": [],

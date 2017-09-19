@@ -40,6 +40,7 @@ use smallbitvec::SmallBitVec;
 use smallvec::VecLike;
 use std::fmt::Debug;
 use std::ops;
+use std::sync::Mutex;
 use style_traits::viewport::ViewportConstraints;
 use stylesheet_set::{OriginValidity, SheetRebuildKind, StylesheetSet, StylesheetFlusher};
 #[cfg(feature = "gecko")]
@@ -47,12 +48,9 @@ use stylesheets::{CounterStyleRule, FontFaceRule, FontFeatureValuesRule, PageRul
 use stylesheets::{CssRule, Origin, OriginSet, PerOrigin, PerOriginIter};
 use stylesheets::StyleRule;
 use stylesheets::StylesheetInDocument;
-use stylesheets::UserAgentStylesheets;
 use stylesheets::keyframes_rule::KeyframesAnimation;
 use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
 use thread_state;
-
-pub use ::fnv::FnvHashMap;
 
 /// The type of the stylesheets that the stylist contains.
 #[cfg(feature = "servo")]
@@ -62,12 +60,87 @@ pub type StylistSheet = ::stylesheets::DocumentStyleSheet;
 #[cfg(feature = "gecko")]
 pub type StylistSheet = ::gecko::data::GeckoStyleSheet;
 
-/// All the computed information for a stylesheet.
+/// A cache of computed user-agent data, to be shared across documents.
+lazy_static! {
+    static ref UA_CASCADE_DATA_CACHE: Mutex<UserAgentCascadeDataCache> =
+        Mutex::new(UserAgentCascadeDataCache::new());
+}
+
+struct UserAgentCascadeDataCache {
+    entries: Vec<Arc<UserAgentCascadeData>>,
+}
+
+impl UserAgentCascadeDataCache {
+    fn new() -> Self {
+        Self {
+            entries: vec![],
+        }
+    }
+
+    fn lookup<'a, I, S>(
+        &'a mut self,
+        sheets: I,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        guard: &SharedRwLockReadGuard,
+    ) -> Result<Arc<UserAgentCascadeData>, FailedAllocationError>
+    where
+        I: Iterator<Item = &'a S> + Clone,
+        S: StylesheetInDocument + ToMediaListKey + PartialEq + 'static,
+    {
+        let mut key = EffectiveMediaQueryResults::new();
+        for sheet in sheets.clone() {
+            CascadeData::collect_applicable_media_query_results_into(
+                device,
+                sheet,
+                guard,
+                &mut key,
+            )
+        }
+
+        for entry in &self.entries {
+            if entry.cascade_data.effective_media_query_results == key {
+                return Ok(entry.clone());
+            }
+        }
+
+        let mut new_data = UserAgentCascadeData {
+            cascade_data: CascadeData::new(),
+            precomputed_pseudo_element_decls: PrecomputedPseudoElementDeclarations::default(),
+        };
+
+        for sheet in sheets {
+            new_data.cascade_data.add_stylesheet(
+                device,
+                quirks_mode,
+                sheet,
+                guard,
+                SheetRebuildKind::Full,
+                Some(&mut new_data.precomputed_pseudo_element_decls),
+            )?;
+        }
+
+        let new_data = Arc::new(new_data);
+
+        self.entries.push(new_data.clone());
+        Ok(new_data)
+    }
+
+    fn expire_unused(&mut self) {
+        self.entries.retain(|e| !e.is_unique())
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+type PrecomputedPseudoElementDeclarations =
+    PerPseudoElementMap<Vec<ApplicableDeclarationBlock>>;
+
 #[derive(Default)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-struct DocumentCascadeData {
-    /// Common data for all the origins.
-    per_origin: PerOrigin<CascadeData>,
+struct UserAgentCascadeData {
+    cascade_data: CascadeData,
 
     /// Applicable declarations for a given non-eagerly cascaded pseudo-element.
     ///
@@ -75,300 +148,153 @@ struct DocumentCascadeData {
     /// computed values on the fly on layout.
     ///
     /// These are only filled from UA stylesheets.
-    ///
-    /// FIXME(emilio): Use the rule tree!
-    precomputed_pseudo_element_decls: PerPseudoElementMap<Vec<ApplicableDeclarationBlock>>,
+    precomputed_pseudo_element_decls: PrecomputedPseudoElementDeclarations,
+}
+
+/// All the computed information for a stylesheet.
+#[derive(Default)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+struct DocumentCascadeData {
+    #[cfg_attr(
+        feature = "servo",
+        ignore_heap_size_of = "Arc, owned by UserAgentCascadeDataCache"
+    )]
+    user_agent: Arc<UserAgentCascadeData>,
+    user: CascadeData,
+    author: CascadeData,
+    per_origin: PerOrigin<()>,
+}
+
+struct DocumentCascadeDataIter<'a> {
+    iter: PerOriginIter<'a, ()>,
+    cascade_data: &'a DocumentCascadeData,
+}
+
+impl<'a> Iterator for DocumentCascadeDataIter<'a> {
+    type Item = (&'a CascadeData, Origin);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (_, origin) = match self.iter.next() {
+            Some(o) => o,
+            None => return None,
+        };
+
+        Some((self.cascade_data.borrow_for_origin(origin), origin))
+    }
 }
 
 impl DocumentCascadeData {
-    fn iter_origins(&self) -> PerOriginIter<CascadeData> {
-        self.per_origin.iter_origins()
+    fn borrow_for_origin(&self, origin: Origin) -> &CascadeData {
+        match origin {
+            Origin::UserAgent => &self.user_agent.cascade_data,
+            Origin::Author => &self.author,
+            Origin::User => &self.user,
+        }
     }
 
-    fn iter_origins_rev(&self) -> PerOriginIter<CascadeData> {
-        self.per_origin.iter_origins_rev()
+    fn iter_origins(&self) -> DocumentCascadeDataIter {
+        DocumentCascadeDataIter {
+            iter: self.per_origin.iter_origins(),
+            cascade_data: self,
+        }
     }
 
-    /// Rebuild the cascade data for the given document stylesheets, and
-    /// optionally with a set of user agent stylesheets.  Returns Err(..)
-    /// to signify OOM.
-    fn rebuild<'a, 'b, S>(
-        &mut self,
+    fn iter_origins_rev(&self) -> DocumentCascadeDataIter {
+        DocumentCascadeDataIter {
+            iter: self.per_origin.iter_origins_rev(),
+            cascade_data: self,
+        }
+    }
+
+    fn rebuild_origin<'a, S>(
         device: &Device,
         quirks_mode: QuirksMode,
-        flusher: StylesheetFlusher<'a, 'b, S>,
+        flusher: &mut StylesheetFlusher<'a, S>,
         guards: &StylesheetGuards,
-        ua_stylesheets: Option<&UserAgentStylesheets>,
+        origin: Origin,
+        cascade_data: &mut CascadeData,
     ) -> Result<(), FailedAllocationError>
     where
-        'b: 'a,
         S: StylesheetInDocument + ToMediaListKey + PartialEq + 'static,
     {
-        debug_assert!(!flusher.nothing_to_do());
+        debug_assert_ne!(origin, Origin::UserAgent);
 
-        for (cascade_data, origin) in self.per_origin.iter_mut_origins() {
-            let validity = flusher.origin_validity(origin);
+        let validity = flusher.origin_validity(origin);
 
-            if validity == OriginValidity::Valid {
-                continue;
-            }
-
-            if origin == Origin::UserAgent {
-                self.precomputed_pseudo_element_decls.clear();
-            }
-
-            if validity == OriginValidity::CascadeInvalid {
-                cascade_data.clear_cascade_data()
-            } else {
-                debug_assert_eq!(validity, OriginValidity::FullyInvalid);
-                cascade_data.clear();
-            }
+        match validity {
+            OriginValidity::Valid => {},
+            OriginValidity::CascadeInvalid => cascade_data.clear_cascade_data(),
+            OriginValidity::FullyInvalid => cascade_data.clear(),
         }
 
-        if let Some(ua_stylesheets) = ua_stylesheets {
-            debug_assert!(cfg!(feature = "servo"));
-
-            for stylesheet in &ua_stylesheets.user_or_user_agent_stylesheets {
-                let sheet_origin =
-                    stylesheet.contents(guards.ua_or_user).origin;
-
-                debug_assert!(matches!(
-                    sheet_origin,
-                    Origin::UserAgent | Origin::User
-                ));
-
-                let validity = flusher.origin_validity(sheet_origin);
-
-                // Servo doesn't support to incrementally mutate UA sheets.
-                debug_assert!(matches!(
-                    validity,
-                    OriginValidity::Valid | OriginValidity::FullyInvalid
-                ));
-
-                if validity == OriginValidity::Valid {
-                    continue;
-                }
-
-                self.add_stylesheet(
-                    device,
-                    quirks_mode,
-                    stylesheet,
-                    guards.ua_or_user,
-                    SheetRebuildKind::Full,
-                )?;
-            }
-
-            if quirks_mode != QuirksMode::NoQuirks {
-                let stylesheet = &ua_stylesheets.quirks_mode_stylesheet;
-                let sheet_origin =
-                    stylesheet.contents(guards.ua_or_user).origin;
-
-                debug_assert!(matches!(
-                    sheet_origin,
-                    Origin::UserAgent | Origin::User
-                ));
-
-                let validity = flusher.origin_validity(sheet_origin);
-
-                // Servo doesn't support to incrementally mutate UA sheets.
-                debug_assert!(matches!(
-                    validity,
-                    OriginValidity::Valid | OriginValidity::FullyInvalid
-                ));
-
-                if validity != OriginValidity::Valid {
-                    self.add_stylesheet(
-                        device,
-                        quirks_mode,
-                        &ua_stylesheets.quirks_mode_stylesheet,
-                        guards.ua_or_user,
-                        SheetRebuildKind::Full,
-                    )?;
-                }
-            }
-        }
-
-        for (stylesheet, rebuild_kind) in flusher {
-            self.add_stylesheet(
+        let guard = guards.for_origin(origin);
+        for (stylesheet, rebuild_kind) in flusher.origin_sheets(origin) {
+            cascade_data.add_stylesheet(
                 device,
                 quirks_mode,
                 stylesheet,
-                guards.author,
+                guard,
                 rebuild_kind,
+                /* precomputed_pseudo_element_decls = */ None,
             )?;
         }
 
         Ok(())
     }
 
-    // Returns Err(..) to signify OOM
-    fn add_stylesheet<S>(
+    /// Rebuild the cascade data for the given document stylesheets, and
+    /// optionally with a set of user agent stylesheets.  Returns Err(..)
+    /// to signify OOM.
+    fn rebuild<'a, S>(
         &mut self,
         device: &Device,
         quirks_mode: QuirksMode,
-        stylesheet: &S,
-        guard: &SharedRwLockReadGuard,
-        rebuild_kind: SheetRebuildKind,
+        mut flusher: StylesheetFlusher<'a, S>,
+        guards: &StylesheetGuards,
     ) -> Result<(), FailedAllocationError>
     where
-        S: StylesheetInDocument + ToMediaListKey + 'static,
+        S: StylesheetInDocument + ToMediaListKey + PartialEq + 'static,
     {
-        if !stylesheet.enabled() ||
-           !stylesheet.is_effective_for_device(device, guard) {
-            return Ok(());
-        }
+        debug_assert!(!flusher.nothing_to_do());
 
-        let origin = stylesheet.origin(guard);
-        let origin_cascade_data =
-            self.per_origin.borrow_mut_for_origin(&origin);
+        // First do UA sheets.
+        {
+            if flusher.origin_dirty(Origin::UserAgent) {
+                let mut ua_cache = UA_CASCADE_DATA_CACHE.lock().unwrap();
+                let origin_sheets =
+                    flusher.manual_origin_sheets(Origin::UserAgent);
 
-        if rebuild_kind.should_rebuild_invalidation() {
-            origin_cascade_data
-                .effective_media_query_results
-                .saw_effective(stylesheet);
-        }
+                let ua_cascade_data = ua_cache.lookup(
+                    origin_sheets,
+                    device,
+                    quirks_mode,
+                    guards.ua_or_user
+                )?;
 
-        for rule in stylesheet.effective_rules(device, guard) {
-            match *rule {
-                CssRule::Style(ref locked) => {
-                    let style_rule = locked.read_with(&guard);
-                    origin_cascade_data.num_declarations +=
-                        style_rule.block.read_with(&guard).len();
-                    for selector in &style_rule.selectors.0 {
-                        origin_cascade_data.num_selectors += 1;
-
-                        let map = match selector.pseudo_element() {
-                            Some(pseudo) if pseudo.is_precomputed() => {
-                                if !selector.is_universal() ||
-                                   !matches!(origin, Origin::UserAgent) {
-                                    // ::-moz-tree selectors may appear in
-                                    // non-UA sheets (even though they never
-                                    // match).
-                                    continue;
-                                }
-
-                                self.precomputed_pseudo_element_decls
-                                    .get_or_insert_with(&pseudo.canonical(), Vec::new)
-                                    .expect("Unexpected tree pseudo-element?")
-                                    .push(ApplicableDeclarationBlock::new(
-                                        StyleSource::Style(locked.clone()),
-                                        origin_cascade_data.rules_source_order,
-                                        CascadeLevel::UANormal,
-                                        selector.specificity()
-                                    ));
-
-                                continue;
-                            }
-                            None => &mut origin_cascade_data.element_map,
-                            Some(pseudo) => {
-                                origin_cascade_data
-                                    .pseudos_map
-                                    .get_or_insert_with(&pseudo.canonical(), || Box::new(SelectorMap::new()))
-                                    .expect("Unexpected tree pseudo-element?")
-                            }
-                        };
-
-                        let hashes =
-                            AncestorHashes::new(&selector, quirks_mode);
-
-                        let rule = Rule::new(
-                            selector.clone(),
-                            hashes.clone(),
-                            locked.clone(),
-                            origin_cascade_data.rules_source_order
-                        );
-
-                        map.insert(rule, quirks_mode)?;
-
-                        if rebuild_kind.should_rebuild_invalidation() {
-                            origin_cascade_data
-                                .invalidation_map
-                                .note_selector(selector, quirks_mode)?;
-                            let mut visitor = StylistSelectorVisitor {
-                                needs_revalidation: false,
-                                passed_rightmost_selector: false,
-                                attribute_dependencies: &mut origin_cascade_data.attribute_dependencies,
-                                style_attribute_dependency: &mut origin_cascade_data.style_attribute_dependency,
-                                state_dependencies: &mut origin_cascade_data.state_dependencies,
-                                mapped_ids: &mut origin_cascade_data.mapped_ids,
-                            };
-
-                            selector.visit(&mut visitor);
-
-                            if visitor.needs_revalidation {
-                                origin_cascade_data.selectors_for_cache_revalidation.insert(
-                                    RevalidationSelectorAndHashes::new(selector.clone(), hashes),
-                                    quirks_mode
-                                )?;
-                            }
-                        }
-                    }
-                    origin_cascade_data.rules_source_order += 1;
-                }
-                CssRule::Import(ref lock) => {
-                    if rebuild_kind.should_rebuild_invalidation() {
-                        let import_rule = lock.read_with(guard);
-                        origin_cascade_data
-                            .effective_media_query_results
-                            .saw_effective(import_rule);
-                    }
-
-                    // NOTE: effective_rules visits the inner stylesheet if
-                    // appropriate.
-                }
-                CssRule::Media(ref lock) => {
-                    if rebuild_kind.should_rebuild_invalidation() {
-                        let media_rule = lock.read_with(guard);
-                        origin_cascade_data
-                            .effective_media_query_results
-                            .saw_effective(media_rule);
-                    }
-                }
-                CssRule::Keyframes(ref keyframes_rule) => {
-                    let keyframes_rule = keyframes_rule.read_with(guard);
-                    debug!("Found valid keyframes rule: {:?}", *keyframes_rule);
-
-                    // Don't let a prefixed keyframes animation override a non-prefixed one.
-                    let needs_insertion =
-                        keyframes_rule.vendor_prefix.is_none() ||
-                        origin_cascade_data.animations.get(keyframes_rule.name.as_atom())
-                            .map_or(true, |rule| rule.vendor_prefix.is_some());
-                    if needs_insertion {
-                        let animation = KeyframesAnimation::from_keyframes(
-                            &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
-                        debug!("Found valid keyframe animation: {:?}", animation);
-                        origin_cascade_data.animations
-                            .try_insert(keyframes_rule.name.as_atom().clone(), animation)?;
-                    }
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::FontFace(ref rule) => {
-                    origin_cascade_data
-                        .extra_data
-                        .add_font_face(rule);
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::FontFeatureValues(ref rule) => {
-                    origin_cascade_data
-                        .extra_data
-                        .add_font_feature_values(rule);
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::CounterStyle(ref rule) => {
-                    origin_cascade_data
-                        .extra_data
-                        .add_counter_style(guard, rule);
-                }
-                #[cfg(feature = "gecko")]
-                CssRule::Page(ref rule) => {
-                    origin_cascade_data
-                        .extra_data
-                        .add_page(rule);
-                }
-                // We don't care about any other rule.
-                _ => {}
+                ua_cache.expire_unused();
+                self.user_agent = ua_cascade_data;
             }
         }
+
+        // Now do the user sheets.
+        Self::rebuild_origin(
+            device,
+            quirks_mode,
+            &mut flusher,
+            guards,
+            Origin::User,
+            &mut self.user,
+        )?;
+
+        // And now the author sheets.
+        Self::rebuild_origin(
+            device,
+            quirks_mode,
+            &mut flusher,
+            guards,
+            Origin::Author,
+            &mut self.author,
+        )?;
 
         Ok(())
     }
@@ -376,15 +302,11 @@ impl DocumentCascadeData {
     /// Measures heap usage.
     #[cfg(feature = "gecko")]
     pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
-        self.per_origin.user_agent.add_size_of_children(ops, sizes);
-        self.per_origin.user.add_size_of_children(ops, sizes);
-        self.per_origin.author.add_size_of_children(ops, sizes);
+        self.user.add_size_of_children(ops, sizes);
+        self.author.add_size_of_children(ops, sizes);
 
-        for elem in self.precomputed_pseudo_element_decls.iter() {
-            if let Some(ref elem) = *elem {
-                sizes.mStylistPrecomputedPseudos += elem.shallow_size_of(ops);
-            }
-        }
+        // FIXME(emilio): UA_CASCADE_DATA_CACHE is shared, we should do whatever
+        // we do for RuleProcessorCache in Gecko.
     }
 }
 
@@ -557,7 +479,6 @@ impl Stylist {
     pub fn flush<E>(
         &mut self,
         guards: &StylesheetGuards,
-        ua_sheets: Option<&UserAgentStylesheets>,
         document_element: Option<E>,
     ) -> bool
     where
@@ -586,7 +507,7 @@ impl Stylist {
             let cascaded_rule = ViewportRule {
                 declarations: viewport_rule::Cascade::from_stylesheets(
                     self.stylesheets.iter(),
-                    guards.author,
+                    guards,
                     &self.device,
                 ).finish()
             };
@@ -603,7 +524,7 @@ impl Stylist {
             }
         }
 
-        let flusher = self.stylesheets.flush(document_element, &guards.author);
+        let flusher = self.stylesheets.flush(document_element);
 
         let had_invalidations = flusher.had_invalidations();
 
@@ -612,7 +533,6 @@ impl Stylist {
             self.quirks_mode,
             flusher,
             guards,
-            ua_sheets,
         ).unwrap_or_else(|_| warn!("OOM in Stylist::flush"));
 
         had_invalidations
@@ -771,6 +691,8 @@ impl Stylist {
             font_metrics,
             cascade_flags,
             self.quirks_mode,
+            /* rule_cache = */ None,
+            &mut Default::default(),
         )
     }
 
@@ -786,7 +708,7 @@ impl Stylist {
         extra_declarations: Option<Vec<ApplicableDeclarationBlock>>,
     ) -> StrongRuleNode {
         let mut decl;
-        let declarations = match self.cascade_data.precomputed_pseudo_element_decls.get(pseudo) {
+        let declarations = match self.cascade_data.user_agent.precomputed_pseudo_element_decls.get(pseudo) {
             Some(declarations) => {
                 match extra_declarations {
                     Some(mut extra_decls) => {
@@ -987,6 +909,8 @@ impl Stylist {
                 font_metrics,
                 cascade_flags,
                 self.quirks_mode,
+                /* rule_cache = */ None,
+                &mut Default::default(),
             ))
         } else {
             None
@@ -1012,6 +936,8 @@ impl Stylist {
             font_metrics,
             cascade_flags,
             self.quirks_mode,
+            /* rule_cache = */ None,
+            &mut Default::default(),
         )
     }
 
@@ -1156,7 +1082,7 @@ impl Stylist {
     pub fn set_device(
         &mut self,
         mut device: Device,
-        guard: &SharedRwLockReadGuard,
+        guards: &StylesheetGuards,
     ) -> OriginSet {
         if viewport_rule::enabled() {
             let cascaded_rule = {
@@ -1165,7 +1091,7 @@ impl Stylist {
                 ViewportRule {
                     declarations: viewport_rule::Cascade::from_stylesheets(
                         stylesheets.clone(),
-                        guard,
+                        guards,
                         &device
                     ).finish(),
                 }
@@ -1180,117 +1106,42 @@ impl Stylist {
         }
 
         self.device = device;
-        self.media_features_change_changed_style(guard)
+        self.media_features_change_changed_style(guards)
     }
 
     /// Returns whether, given a media feature change, any previously-applicable
     /// style has become non-applicable, or vice-versa for each origin.
     pub fn media_features_change_changed_style(
         &self,
-        guard: &SharedRwLockReadGuard,
+        guards: &StylesheetGuards,
     ) -> OriginSet {
-        use invalidation::media_queries::PotentiallyEffectiveMediaRules;
-
         debug!("Stylist::media_features_change_changed_style");
 
         let mut origins = OriginSet::empty();
         let stylesheets = self.stylesheets.iter();
 
-        'stylesheets_loop: for stylesheet in stylesheets {
-            let effective_now =
-                stylesheet.is_effective_for_device(&self.device, guard);
-
-            let origin = stylesheet.origin(guard);
-
+        for (stylesheet, origin) in stylesheets {
             if origins.contains(origin.into()) {
                 continue;
             }
 
+            let guard = guards.for_origin(origin);
             let origin_cascade_data =
-                self.cascade_data.per_origin.borrow_for_origin(&origin);
+                self.cascade_data.borrow_for_origin(origin);
 
-            let effective_then =
-                origin_cascade_data
-                    .effective_media_query_results
-                    .was_effective(stylesheet);
+            let affected_changed = !origin_cascade_data.media_feature_affected_matches(
+                stylesheet,
+                guard,
+                &self.device,
+                self.quirks_mode
+            );
 
-            if effective_now != effective_then {
-                debug!(" > Stylesheet changed -> {}, {}",
-                       effective_then, effective_now);
+            if affected_changed {
                 origins |= origin;
-                continue;
-            }
-
-            if !effective_now {
-                continue;
-            }
-
-            let mut iter =
-                stylesheet.iter_rules::<PotentiallyEffectiveMediaRules>(
-                    &self.device,
-                    guard
-                );
-
-            while let Some(rule) = iter.next() {
-                match *rule {
-                    CssRule::Style(..) |
-                    CssRule::Namespace(..) |
-                    CssRule::FontFace(..) |
-                    CssRule::CounterStyle(..) |
-                    CssRule::Supports(..) |
-                    CssRule::Keyframes(..) |
-                    CssRule::Page(..) |
-                    CssRule::Viewport(..) |
-                    CssRule::Document(..) |
-                    CssRule::FontFeatureValues(..) => {
-                        // Not affected by device changes.
-                        continue;
-                    }
-                    CssRule::Import(ref lock) => {
-                        let import_rule = lock.read_with(guard);
-                        let effective_now =
-                            import_rule.stylesheet
-                                .is_effective_for_device(&self.device, guard);
-                        let effective_then =
-                            origin_cascade_data
-                                .effective_media_query_results
-                                .was_effective(import_rule);
-                        if effective_now != effective_then {
-                            debug!(" > @import rule changed {} -> {}",
-                                   effective_then, effective_now);
-                            origins |= origin;
-                            continue 'stylesheets_loop;
-                        }
-
-                        if !effective_now {
-                            iter.skip_children();
-                        }
-                    }
-                    CssRule::Media(ref lock) => {
-                        let media_rule = lock.read_with(guard);
-                        let mq = media_rule.media_queries.read_with(guard);
-                        let effective_now =
-                            mq.evaluate(&self.device, self.quirks_mode);
-                        let effective_then =
-                            origin_cascade_data
-                                .effective_media_query_results
-                                .was_effective(media_rule);
-                        if effective_now != effective_then {
-                            debug!(" > @media rule changed {} -> {}",
-                                   effective_then, effective_now);
-                            origins |= origin;
-                            continue 'stylesheets_loop;
-                        }
-
-                        if !effective_now {
-                            iter.skip_children();
-                        }
-                    }
-                }
             }
         }
 
-        return origins
+        origins
     }
 
     /// Returns the viewport constraints that apply to this document because of
@@ -1335,7 +1186,7 @@ impl Stylist {
 
         // nsXBLPrototypeResources::LoadResources() loads Chrome XBL style
         // sheets under eAuthorSheetFeatures level.
-        if let Some(map) = self.cascade_data.per_origin.author.borrow_for_pseudo(pseudo_element) {
+        if let Some(map) = self.cascade_data.author.borrow_for_pseudo(pseudo_element) {
             map.get_all_matching_rules(
                 element,
                 &rule_hash_target,
@@ -1383,7 +1234,7 @@ impl Stylist {
         let only_default_rules = rule_inclusion == RuleInclusion::DefaultOnly;
 
         // Step 1: Normal user-agent rules.
-        if let Some(map) = self.cascade_data.per_origin.user_agent.borrow_for_pseudo(pseudo_element) {
+        if let Some(map) = self.cascade_data.user_agent.cascade_data.borrow_for_pseudo(pseudo_element) {
             map.get_all_matching_rules(
                 element,
                 &rule_hash_target,
@@ -1421,7 +1272,7 @@ impl Stylist {
         // Which may be more what you would probably expect.
         if rule_hash_target.matches_user_and_author_rules() {
             // Step 3a: User normal rules.
-            if let Some(map) = self.cascade_data.per_origin.user.borrow_for_pseudo(pseudo_element) {
+            if let Some(map) = self.cascade_data.user.borrow_for_pseudo(pseudo_element) {
                 map.get_all_matching_rules(
                     element,
                     &rule_hash_target,
@@ -1448,7 +1299,7 @@ impl Stylist {
             // See nsStyleSet::FileRules().
             if !cut_off_inheritance {
                 // Step 3c: Author normal rules.
-                if let Some(map) = self.cascade_data.per_origin.author.borrow_for_pseudo(pseudo_element) {
+                if let Some(map) = self.cascade_data.author.borrow_for_pseudo(pseudo_element) {
                     map.get_all_matching_rules(
                         element,
                         &rule_hash_target,
@@ -1625,6 +1476,8 @@ impl Stylist {
             &metrics,
             CascadeFlags::empty(),
             self.quirks_mode,
+            /* rule_cache = */ None,
+            &mut Default::default(),
         )
     }
 
@@ -1650,6 +1503,11 @@ impl Stylist {
         sizes.mStylistRuleTree += self.rule_tree.size_of(ops);
 
         // We may measure other fields in the future if DMD says it's worth it.
+    }
+
+    /// Shutdown the static data that this module stores.
+    pub fn shutdown() {
+        UA_CASCADE_DATA_CACHE.lock().unwrap().clear()
     }
 }
 
@@ -1679,6 +1537,8 @@ pub struct ExtraStyleData {
 // nsCSSFontFaceRules or nsCSSCounterStyleRules OMT (which we don't).
 #[cfg(feature = "gecko")]
 unsafe impl Sync for ExtraStyleData {}
+#[cfg(feature = "gecko")]
+unsafe impl Send for ExtraStyleData {}
 
 #[cfg(feature = "gecko")]
 impl ExtraStyleData {
@@ -1721,7 +1581,7 @@ impl ExtraStyleData {
 }
 
 /// An iterator over the different ExtraStyleData.
-pub struct ExtraStyleDataIterator<'a>(PerOriginIter<'a, CascadeData>);
+pub struct ExtraStyleDataIterator<'a>(DocumentCascadeDataIter<'a>);
 
 impl<'a> Iterator for ExtraStyleDataIterator<'a> {
     type Item = (&'a ExtraStyleData, Origin);
@@ -2009,6 +1869,292 @@ impl CascadeData {
             num_selectors: 0,
             num_declarations: 0,
         }
+    }
+
+    /// Collects all the applicable media query results into `results`.
+    ///
+    /// This duplicates part of the logic in `add_stylesheet`, which is
+    /// a bit unfortunate.
+    ///
+    /// FIXME(emilio): With a bit of smartness in
+    /// `media_feature_affected_matches`, we could convert
+    /// `EffectiveMediaQueryResults` into a vector without too much effort.
+    fn collect_applicable_media_query_results_into<S>(
+        device: &Device,
+        stylesheet: &S,
+        guard: &SharedRwLockReadGuard,
+        results: &mut EffectiveMediaQueryResults,
+    )
+    where
+        S: StylesheetInDocument + ToMediaListKey + 'static,
+    {
+        if !stylesheet.enabled() ||
+           !stylesheet.is_effective_for_device(device, guard) {
+           return;
+        }
+
+        results.saw_effective(stylesheet);
+
+        for rule in stylesheet.effective_rules(device, guard) {
+            match *rule {
+                CssRule::Import(ref lock) => {
+                    let import_rule = lock.read_with(guard);
+                    results.saw_effective(import_rule);
+                }
+                CssRule::Media(ref lock) => {
+                    let media_rule = lock.read_with(guard);
+                    results.saw_effective(media_rule);
+                }
+                _ => {},
+            }
+        }
+    }
+
+    // Returns Err(..) to signify OOM
+    fn add_stylesheet<S>(
+        &mut self,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        stylesheet: &S,
+        guard: &SharedRwLockReadGuard,
+        rebuild_kind: SheetRebuildKind,
+        mut precomputed_pseudo_element_decls: Option<&mut PrecomputedPseudoElementDeclarations>,
+    ) -> Result<(), FailedAllocationError>
+    where
+        S: StylesheetInDocument + ToMediaListKey + 'static,
+    {
+        if !stylesheet.enabled() ||
+           !stylesheet.is_effective_for_device(device, guard) {
+            return Ok(());
+        }
+
+        let origin = stylesheet.origin(guard);
+
+        if rebuild_kind.should_rebuild_invalidation() {
+            self.effective_media_query_results.saw_effective(stylesheet);
+        }
+
+        for rule in stylesheet.effective_rules(device, guard) {
+            match *rule {
+                CssRule::Style(ref locked) => {
+                    let style_rule = locked.read_with(&guard);
+                    self.num_declarations +=
+                        style_rule.block.read_with(&guard).len();
+                    for selector in &style_rule.selectors.0 {
+                        self.num_selectors += 1;
+
+                        let map = match selector.pseudo_element() {
+                            Some(pseudo) if pseudo.is_precomputed() => {
+                                if !selector.is_universal() ||
+                                   !matches!(origin, Origin::UserAgent) {
+                                    // ::-moz-tree selectors may appear in
+                                    // non-UA sheets (even though they never
+                                    // match).
+                                    continue;
+                                }
+
+                                precomputed_pseudo_element_decls
+                                    .as_mut()
+                                    .expect("Expected precomputed declarations for the UA level")
+                                    .get_or_insert_with(&pseudo.canonical(), Vec::new)
+                                    .expect("Unexpected tree pseudo-element?")
+                                    .push(ApplicableDeclarationBlock::new(
+                                        StyleSource::Style(locked.clone()),
+                                        self.rules_source_order,
+                                        CascadeLevel::UANormal,
+                                        selector.specificity()
+                                    ));
+
+                                continue;
+                            }
+                            None => &mut self.element_map,
+                            Some(pseudo) => {
+                                self.pseudos_map
+                                    .get_or_insert_with(&pseudo.canonical(), || Box::new(SelectorMap::new()))
+                                    .expect("Unexpected tree pseudo-element?")
+                            }
+                        };
+
+                        let hashes =
+                            AncestorHashes::new(&selector, quirks_mode);
+
+                        let rule = Rule::new(
+                            selector.clone(),
+                            hashes.clone(),
+                            locked.clone(),
+                            self.rules_source_order
+                        );
+
+                        map.insert(rule, quirks_mode)?;
+
+                        if rebuild_kind.should_rebuild_invalidation() {
+                            self.invalidation_map
+                                .note_selector(selector, quirks_mode)?;
+                            let mut visitor = StylistSelectorVisitor {
+                                needs_revalidation: false,
+                                passed_rightmost_selector: false,
+                                attribute_dependencies: &mut self.attribute_dependencies,
+                                style_attribute_dependency: &mut self.style_attribute_dependency,
+                                state_dependencies: &mut self.state_dependencies,
+                                mapped_ids: &mut self.mapped_ids,
+                            };
+
+                            selector.visit(&mut visitor);
+
+                            if visitor.needs_revalidation {
+                                self.selectors_for_cache_revalidation.insert(
+                                    RevalidationSelectorAndHashes::new(selector.clone(), hashes),
+                                    quirks_mode
+                                )?;
+                            }
+                        }
+                    }
+                    self.rules_source_order += 1;
+                }
+                CssRule::Import(ref lock) => {
+                    if rebuild_kind.should_rebuild_invalidation() {
+                        let import_rule = lock.read_with(guard);
+                        self.effective_media_query_results
+                            .saw_effective(import_rule);
+                    }
+
+                    // NOTE: effective_rules visits the inner stylesheet if
+                    // appropriate.
+                }
+                CssRule::Media(ref lock) => {
+                    if rebuild_kind.should_rebuild_invalidation() {
+                        let media_rule = lock.read_with(guard);
+                        self.effective_media_query_results
+                            .saw_effective(media_rule);
+                    }
+                }
+                CssRule::Keyframes(ref keyframes_rule) => {
+                    let keyframes_rule = keyframes_rule.read_with(guard);
+                    debug!("Found valid keyframes rule: {:?}", *keyframes_rule);
+
+                    // Don't let a prefixed keyframes animation override a non-prefixed one.
+                    let needs_insertion =
+                        keyframes_rule.vendor_prefix.is_none() ||
+                        self.animations.get(keyframes_rule.name.as_atom())
+                            .map_or(true, |rule| rule.vendor_prefix.is_some());
+                    if needs_insertion {
+                        let animation = KeyframesAnimation::from_keyframes(
+                            &keyframes_rule.keyframes, keyframes_rule.vendor_prefix.clone(), guard);
+                        debug!("Found valid keyframe animation: {:?}", animation);
+                        self.animations
+                            .try_insert(keyframes_rule.name.as_atom().clone(), animation)?;
+                    }
+                }
+                #[cfg(feature = "gecko")]
+                CssRule::FontFace(ref rule) => {
+                    self.extra_data.add_font_face(rule);
+                }
+                #[cfg(feature = "gecko")]
+                CssRule::FontFeatureValues(ref rule) => {
+                    self.extra_data.add_font_feature_values(rule);
+                }
+                #[cfg(feature = "gecko")]
+                CssRule::CounterStyle(ref rule) => {
+                    self.extra_data.add_counter_style(guard, rule);
+                }
+                #[cfg(feature = "gecko")]
+                CssRule::Page(ref rule) => {
+                    self.extra_data.add_page(rule);
+                }
+                // We don't care about any other rule.
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns whether all the media-feature affected values matched before and
+    /// match now in the given stylesheet.
+    fn media_feature_affected_matches<S>(
+        &self,
+        stylesheet: &S,
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+    ) -> bool
+    where
+        S: StylesheetInDocument + ToMediaListKey + 'static,
+    {
+        use invalidation::media_queries::PotentiallyEffectiveMediaRules;
+
+        let effective_now =
+            stylesheet.is_effective_for_device(device, guard);
+
+        let effective_then =
+            self.effective_media_query_results.was_effective(stylesheet);
+
+        if effective_now != effective_then {
+            debug!(" > Stylesheet changed -> {}, {}",
+                   effective_then, effective_now);
+            return false;
+        }
+
+        if !effective_now {
+            return true;
+        }
+
+        let mut iter =
+            stylesheet.iter_rules::<PotentiallyEffectiveMediaRules>(device, guard);
+
+        while let Some(rule) = iter.next() {
+            match *rule {
+                CssRule::Style(..) |
+                CssRule::Namespace(..) |
+                CssRule::FontFace(..) |
+                CssRule::CounterStyle(..) |
+                CssRule::Supports(..) |
+                CssRule::Keyframes(..) |
+                CssRule::Page(..) |
+                CssRule::Viewport(..) |
+                CssRule::Document(..) |
+                CssRule::FontFeatureValues(..) => {
+                    // Not affected by device changes.
+                    continue;
+                }
+                CssRule::Import(ref lock) => {
+                    let import_rule = lock.read_with(guard);
+                    let effective_now =
+                        import_rule.stylesheet
+                            .is_effective_for_device(&device, guard);
+                    let effective_then =
+                        self.effective_media_query_results.was_effective(import_rule);
+                    if effective_now != effective_then {
+                        debug!(" > @import rule changed {} -> {}",
+                               effective_then, effective_now);
+                        return false;
+                    }
+
+                    if !effective_now {
+                        iter.skip_children();
+                    }
+                }
+                CssRule::Media(ref lock) => {
+                    let media_rule = lock.read_with(guard);
+                    let mq = media_rule.media_queries.read_with(guard);
+                    let effective_now = mq.evaluate(device, quirks_mode);
+                    let effective_then =
+                        self.effective_media_query_results.was_effective(media_rule);
+
+                    if effective_now != effective_then {
+                        debug!(" > @media rule changed {} -> {}",
+                               effective_then, effective_now);
+                        return false;
+                    }
+
+                    if !effective_now {
+                        iter.skip_children();
+                    }
+                }
+            }
+        }
+
+        true
     }
 
     #[inline]

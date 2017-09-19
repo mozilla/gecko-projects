@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::{mem, slice};
 use std::path::PathBuf;
+use std::ptr;
 use std::sync::Arc;
 use std::os::raw::{c_void, c_char, c_float};
 use gleam::gl;
@@ -85,6 +86,16 @@ impl WrVecU8 {
     fn to_vec(self) -> Vec<u8> {
         unsafe { Vec::from_raw_parts(self.data, self.length, self.capacity) }
     }
+
+    // Equivalent to `to_vec` but clears self instead of consuming the value.
+    fn flush_into_vec(&mut self) -> Vec<u8> {
+        let vec = unsafe { Vec::from_raw_parts(self.data, self.length, self.capacity) };
+        self.data = ptr::null_mut();
+        self.length = 0;
+        self.capacity = 0;
+        return vec;
+    }
+
     fn from_vec(mut v: Vec<u8>) -> WrVecU8 {
         let w = WrVecU8 {
             data: v.as_mut_ptr(),
@@ -94,6 +105,18 @@ impl WrVecU8 {
         mem::forget(v);
         w
     }
+
+    fn push_bytes(&mut self, bytes: &[u8]) {
+        let mut vec = self.flush_into_vec();
+        vec.extend_from_slice(bytes);
+        *self = Self::from_vec(vec);
+    }
+}
+
+
+#[no_mangle]
+pub extern "C" fn wr_vec_u8_push_bytes(v: &mut WrVecU8, bytes: ByteSlice) {
+    v.push_bytes(bytes.as_slice());
 }
 
 #[no_mangle]
@@ -666,13 +689,12 @@ pub extern "C" fn wr_resource_updates_add_image(
     resources: &mut ResourceUpdates,
     image_key: WrImageKey,
     descriptor: &WrImageDescriptor,
-    bytes: ByteSlice
+    bytes: &mut WrVecU8,
 ) {
-    let copied_bytes = bytes.as_slice().to_owned();
     resources.add_image(
         image_key,
         descriptor.into(),
-        ImageData::new(copied_bytes),
+        ImageData::new(bytes.flush_into_vec()),
         None
     );
 }
@@ -682,13 +704,12 @@ pub extern "C" fn wr_resource_updates_add_blob_image(
     resources: &mut ResourceUpdates,
     image_key: WrImageKey,
     descriptor: &WrImageDescriptor,
-    bytes: ByteSlice
+    bytes: &mut WrVecU8,
 ) {
-    let copied_bytes = bytes.as_slice().to_owned();
     resources.add_image(
         image_key,
         descriptor.into(),
-        ImageData::new_blob_image(copied_bytes),
+        ImageData::new_blob_image(bytes.flush_into_vec()),
         None
     );
 }
@@ -721,10 +742,14 @@ pub extern "C" fn wr_resource_updates_update_image(
     resources: &mut ResourceUpdates,
     key: WrImageKey,
     descriptor: &WrImageDescriptor,
-    bytes: ByteSlice
+    bytes: &mut WrVecU8,
 ) {
-    let copied_bytes = bytes.as_slice().to_owned();
-    resources.update_image(key, descriptor.into(), ImageData::new(copied_bytes), None);
+    resources.update_image(
+        key,
+        descriptor.into(),
+        ImageData::new(bytes.flush_into_vec()),
+        None
+    );
 }
 
 #[no_mangle]
@@ -755,13 +780,12 @@ pub extern "C" fn wr_resource_updates_update_blob_image(
     resources: &mut ResourceUpdates,
     image_key: WrImageKey,
     descriptor: &WrImageDescriptor,
-    bytes: ByteSlice
+    bytes: &mut WrVecU8,
 ) {
-    let copied_bytes = bytes.as_slice().to_owned();
     resources.update_image(
         image_key,
         descriptor.into(),
-        ImageData::new_blob_image(copied_bytes),
+        ImageData::new_blob_image(bytes.flush_into_vec()),
         None
     );
 }
@@ -917,15 +941,10 @@ pub extern "C" fn wr_api_send_external_event(dh: &mut DocumentHandle,
 pub extern "C" fn wr_resource_updates_add_raw_font(
     resources: &mut ResourceUpdates,
     key: WrFontKey,
-    font_buffer: *mut u8,
-    buffer_size: usize,
+    bytes: &mut WrVecU8,
     index: u32
 ) {
-    let font_slice = make_slice(font_buffer, buffer_size);
-    let mut font_vector = Vec::new();
-    font_vector.extend_from_slice(font_slice);
-
-    resources.add_raw_font(key, font_vector, index);
+    resources.add_raw_font(key, bytes.flush_into_vec(), index);
 }
 
 #[no_mangle]
@@ -1067,10 +1086,16 @@ pub extern "C" fn wr_dp_begin(state: &mut WrState,
     let bounds = LayoutRect::new(LayoutPoint::new(0.0, 0.0),
                                  LayoutSize::new(width as f32, height as f32));
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: None,
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_stacking_context(webrender_api::ScrollPolicy::Scrollable,
-                                bounds,
+         .push_stacking_context(&prim_info,
+                                webrender_api::ScrollPolicy::Scrollable,
                                 None,
                                 TransformStyle::Flat,
                                 None,
@@ -1135,10 +1160,17 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
         Some(perspective) => Some(perspective.clone()),
         None => None,
     };
+
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: None,
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_stacking_context(webrender_api::ScrollPolicy::Scrollable,
-                                bounds,
+         .push_stacking_context(&prim_info,
+                                webrender_api::ScrollPolicy::Scrollable,
                                 transform_binding,
                                 transform_style,
                                 perspective,
@@ -1253,7 +1285,13 @@ pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
                                     pipeline_id: WrPipelineId) {
     assert!(unsafe { is_in_main_thread() });
 
-    state.frame_builder.dl_builder.push_iframe(rect, None, pipeline_id);
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: None,
+        is_backface_visible: true,
+    };
+
+    state.frame_builder.dl_builder.push_iframe(&prim_info, pipeline_id);
 }
 
 #[no_mangle]
@@ -1263,8 +1301,13 @@ pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
                                   color: ColorF) {
     assert!(unsafe { !is_in_render_thread() });
 
-    state.frame_builder.dl_builder.push_rect(rect,
-                                             Some(LocalClip::Rect(clip)),
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
+    state.frame_builder.dl_builder.push_rect(&prim_info,
                                              color);
 }
 
@@ -1278,10 +1321,15 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    key: WrImageKey) {
     assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_image(bounds,
-                     Some(LocalClip::Rect(clip)),
+         .push_image(&prim_info,
                      stretch_size,
                      tile_spacing,
                      image_rendering,
@@ -1300,10 +1348,15 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
                                               image_rendering: ImageRendering) {
     assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds,
-                         Some(LocalClip::Rect(clip.into())),
+         .push_yuv_image(&prim_info,
                          YuvData::PlanarYCbCr(image_key_0, image_key_1, image_key_2),
                          color_space,
                          image_rendering);
@@ -1320,10 +1373,15 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
                                             image_rendering: ImageRendering) {
     assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds,
-                         Some(LocalClip::Rect(clip.into())),
+         .push_yuv_image(&prim_info,
                          YuvData::NV12(image_key_0, image_key_1),
                          color_space,
                          image_rendering);
@@ -1339,10 +1397,15 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
                                                    image_rendering: ImageRendering) {
     assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_yuv_image(bounds,
-                         Some(LocalClip::Rect(clip.into())),
+         .push_yuv_image(&prim_info,
                          YuvData::InterleavedYCbCr(image_key_0),
                          color_space,
                          image_rendering);
@@ -1361,10 +1424,15 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
 
     let glyph_slice = make_slice(glyphs, glyph_count as usize);
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_text(bounds,
-                    Some(LocalClip::Rect(clip.into())),
+         .push_text(&prim_info,
                     &glyph_slice,
                     font_key,
                     color,
@@ -1378,7 +1446,13 @@ pub extern "C" fn wr_dp_push_text_shadow(state: &mut WrState,
                                          shadow: TextShadow) {
     assert!(unsafe { is_in_main_thread() });
 
-    state.frame_builder.dl_builder.push_text_shadow(bounds, Some(LocalClip::Rect(clip.into())), shadow.into());
+    let prim_info = LayoutPrimitiveInfo {
+        rect: bounds,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
+    state.frame_builder.dl_builder.push_text_shadow(&prim_info, shadow.into());
 }
 
 #[no_mangle]
@@ -1400,9 +1474,15 @@ pub extern "C" fn wr_dp_push_line(state: &mut WrState,
                                   style: LineStyle) {
     assert!(unsafe { is_in_main_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: LayoutRect::zero(),
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_line(Some(LocalClip::Rect(clip.into())),
+         .push_line(&prim_info,
                     baseline,
                     start,
                     end,
@@ -1432,10 +1512,15 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                                                    bottom: bottom.into(),
                                                    radius: radius.into(),
                                                });
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_border(rect,
-                      Some(LocalClip::Rect(clip.into())),
+         .push_border(&prim_info,
                       widths,
                       border_details);
 }
@@ -1460,10 +1545,15 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                  repeat_horizontal: repeat_horizontal.into(),
                                  repeat_vertical: repeat_vertical.into(),
                              });
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_border(rect.into(),
-                      Some(LocalClip::Rect(clip.into())),
+         .push_border(&prim_info,
                       widths.into(),
                       border_details);
 }
@@ -1494,10 +1584,15 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                                                                extend_mode.into()),
                                                      outset: outset.into(),
                                                  });
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_border(rect.into(),
-                      Some(LocalClip::Rect(clip.into())),
+         .push_border(&prim_info,
                       widths.into(),
                       border_details);
 }
@@ -1529,10 +1624,15 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                                            extend_mode.into()),
                                           outset: outset.into(),
                                       });
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_border(rect.into(),
-                      Some(LocalClip::Rect(clip.into())),
+         .push_border(&prim_info,
                       widths.into(),
                       border_details);
 }
@@ -1559,10 +1659,15 @@ pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
                                          end_point.into(),
                                          stops_vector,
                                          extend_mode.into());
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_gradient(rect.into(),
-                        Some(LocalClip::Rect(clip.into())),
+         .push_gradient(&prim_info,
                         gradient,
                         tile_size.into(),
                         tile_spacing.into());
@@ -1590,10 +1695,15 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                                 radius.into(),
                                                 stops_vector,
                                                 extend_mode.into());
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_radial_gradient(rect,
-                               Some(LocalClip::Rect(clip.into())),
+         .push_radial_gradient(&prim_info,
                                gradient,
                                tile_size,
                                tile_spacing);
@@ -1612,10 +1722,15 @@ pub extern "C" fn wr_dp_push_box_shadow(state: &mut WrState,
                                         clip_mode: BoxShadowClipMode) {
     assert!(unsafe { is_in_main_thread() });
 
+    let prim_info = LayoutPrimitiveInfo {
+        rect: rect,
+        local_clip: Some(LocalClip::Rect(clip.into())),
+        is_backface_visible: true,
+    };
+
     state.frame_builder
          .dl_builder
-         .push_box_shadow(rect,
-                          Some(LocalClip::Rect(clip.into())),
+         .push_box_shadow(&prim_info,
                           box_bounds,
                           offset,
                           color,

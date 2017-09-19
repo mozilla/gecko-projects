@@ -844,10 +844,11 @@ Gecko_FillAllMaskLists(nsStyleImageLayers* aLayers, uint32_t aMaxLen)
   nsRuleNode::FillAllMaskLists(*aLayers, aMaxLen);
 }
 
-RawGeckoElementBorrowedOrNull
-Gecko_GetBody(RawGeckoPresContextBorrowed aPresContext)
+bool
+Gecko_IsDocumentBody(RawGeckoElementBorrowed aElement)
 {
-  return aPresContext->Document()->GetBodyElement();
+  nsIDocument* doc = aElement->GetUncomposedDoc();
+  return doc && doc->GetBodyElement() == aElement;
 }
 
 nscolor
@@ -1517,14 +1518,20 @@ CreateStyleImageRequest(nsStyleImageRequest::Mode aModeFlags,
 }
 
 mozilla::css::ImageValue*
-Gecko_ImageValue_Create(ServoBundledURI aURI)
+Gecko_ImageValue_Create(ServoBundledURI aURI, ServoRawOffsetArc<RustString> aURIString)
 {
-  NS_ConvertUTF8toUTF16 url(reinterpret_cast<const char*>(aURI.mURLString),
-                            aURI.mURLStringLength);
-
   RefPtr<css::ImageValue> value(
-    new css::ImageValue(url, do_AddRef(aURI.mExtraData)));
+    new css::ImageValue(aURIString, do_AddRef(aURI.mExtraData)));
   return value.forget().take();
+}
+
+MOZ_DEFINE_MALLOC_SIZE_OF(GeckoImageValueMallocSizeOf)
+
+size_t
+Gecko_ImageValue_SizeOfIncludingThis(mozilla::css::ImageValue* aImageValue)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return aImageValue->SizeOfIncludingThis(GeckoImageValueMallocSizeOf);
 }
 
 void

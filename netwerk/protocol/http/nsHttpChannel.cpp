@@ -3858,6 +3858,8 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
     uint32_t cacheEntryOpenFlags;
     bool offline = gIOService->IsOffline();
 
+    bool maybeRCWN = false;
+
     nsAutoCString cacheControlRequestHeader;
     Unused << mRequestHead.GetHeader(nsHttp::Cache_Control, cacheControlRequestHeader);
     CacheControlParser cacheControlRequest(cacheControlRequestHeader);
@@ -3906,9 +3908,13 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
             getter_AddRefs(cacheStorage));
     }
     else {
-        rv = cacheStorageService->DiskCacheStorage(info,
-            !mPostID && (mChooseApplicationCache || (mLoadFlags & LOAD_CHECK_OFFLINE_CACHE)),
-            getter_AddRefs(cacheStorage));
+        bool lookupAppCache = !mPostID && (mChooseApplicationCache ||
+                              (mLoadFlags & LOAD_CHECK_OFFLINE_CACHE));
+        // Try to race only if we use disk cache storage and we don't lookup
+        // app cache first
+        maybeRCWN = !lookupAppCache;
+        rv = cacheStorageService->DiskCacheStorage(
+            info, lookupAppCache, getter_AddRefs(cacheStorage));
     }
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3959,27 +3965,33 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
         mCacheOpenWithPriority = cacheEntryOpenFlags & nsICacheStorage::OPEN_PRIORITY;
         mCacheQueueSizeWhenOpen = CacheStorageService::CacheQueueSize(mCacheOpenWithPriority);
 
-        bool hasAltData = false;
-        uint32_t sizeInKb = 0;
-        rv = cacheStorage->GetCacheIndexEntryAttrs(openURI, extension,
-                                                   &hasAltData, &sizeInKb);
+        if (sRCWNEnabled && maybeRCWN && !mApplicationCacheForWrite &&
+            mInterceptCache != INTERCEPTED) {
+            bool hasAltData = false;
+            uint32_t sizeInKb = 0;
+            rv = cacheStorage->GetCacheIndexEntryAttrs(openURI, extension,
+                                                       &hasAltData, &sizeInKb);
 
-        // We will attempt to race the network vs the cache if we've found this
-        // entry in the cache index, and it has appropriate
-        // attributes (doesn't have alt-data, and has a small size)
-        if (sRCWNEnabled && mInterceptCache != INTERCEPTED &&
-            NS_SUCCEEDED(rv) && !hasAltData && sizeInKb < sRCWNSmallResourceSizeKB) {
-            MaybeRaceCacheWithNetwork();
+            // We will attempt to race the network vs the cache if we've found
+            // this entry in the cache index, and it has appropriate attributes
+            // (doesn't have alt-data, and has a small size)
+            if (NS_SUCCEEDED(rv) && !hasAltData &&
+                sizeInKb < sRCWNSmallResourceSizeKB) {
+                MaybeRaceCacheWithNetwork();
+            }
         }
 
         if (!mCacheOpenDelay) {
             MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
             mCacheAsyncOpenCalled = true;
             if (mNetworkTriggered) {
-                mRaceCacheWithNetwork = true;
-                MOZ_RELEASE_ASSERT(sRCWNEnabled, "Racing should be enabled");
+                mRaceCacheWithNetwork = sRCWNEnabled;
             }
             rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, this);
+            if (NS_FAILED(rv)) {
+                // Drop the flag since the cache open failed
+                mCacheAsyncOpenCalled = false;
+            }
         } else {
             // We pass `this` explicitly as a parameter due to the raw pointer
             // to refcounted object in lambda analysis.
@@ -3988,11 +4000,11 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
                 self->mCacheAsyncOpenCalled = true;
                 if (self->mNetworkTriggered) {
                     self->mRaceCacheWithNetwork = true;
-                    // This is only done in xpcshell-test to simulate a slow
-                    // opening of the cache, so we don't need to assert that
-                    // sRCWNEnabled == true
                 }
-                cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
+                nsresult rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
+                if (NS_FAILED(rv)) {
+                    self->mCacheAsyncOpenCalled = false;
+                }
             };
 
             mCacheOpenTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -5867,7 +5879,9 @@ NS_IMETHODIMP nsHttpChannel::OnAuthAvailable()
     mAuthRetryPending = true;
     mProxyAuthPending = false;
     LOG(("Resuming the transaction, we got credentials from user"));
-    mTransactionPump->Resume();
+    if (mTransactionPump) {
+        mTransactionPump->Resume();
+    }
 
     return NS_OK;
 }
@@ -9391,8 +9405,7 @@ nsHttpChannel::TriggerNetwork()
     }
 
     if (mCacheAsyncOpenCalled && !mOnCacheAvailableCalled) {
-        mRaceCacheWithNetwork = true;
-        MOZ_RELEASE_ASSERT(sRCWNEnabled, "Racing should be enabled");
+        mRaceCacheWithNetwork = sRCWNEnabled;
     }
 
     LOG(("  triggering network\n"));

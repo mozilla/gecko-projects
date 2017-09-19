@@ -4298,9 +4298,6 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument,
     // XXXheycam ServoStyleSets don't support document state selectors,
     // but these are only used in chrome documents, which we are not
     // aiming to support yet.
-    NS_WARNING("stylo: ServoStyleSets cannot respond to document state "
-               "changes yet (only matters for chrome documents). See bug 1290285.");
-
   } else if (mDidInitialize &&
              geckoSet->HasDocumentStateDependentStyle(mDocument->GetRootElement(),
                                                       aStateMask)) {
@@ -4811,10 +4808,15 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
           }
           surfaceRect.UnionRect(surfaceRect, textRect);
 
+          const ActiveScrolledRoot* asr = i->GetActiveScrolledRoot();
+
           DisplayItemClip newClip;
           newClip.SetTo(textRect);
-          DisplayItemClipChain newClipChain(newClip, i->GetActiveScrolledRoot(), nullptr);
-          i->IntersectClip(aBuilder, &newClipChain);
+
+          const DisplayItemClipChain* newClipChain =
+            aBuilder->AllocateDisplayItemClipChain(newClip, asr, nullptr);
+
+          i->IntersectClip(aBuilder, newClipChain);
           itemToInsert = i;
         }
       }

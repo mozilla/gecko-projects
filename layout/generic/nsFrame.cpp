@@ -759,6 +759,12 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     }
   }
 
+  // XXXneerja All instances of 'mContent->GetPrimaryFrame() == this' have been
+  // replaced with IsPrimaryFrame() except for this one.  The reason is that
+  // for native anonymous content our subclass Destroy method has already
+  // called UnbindFromTree so nsINode::mSubtreeRoot might be in use here and
+  // we don't want to call mContent->SetPrimaryFrame(nullptr) in that case.
+  // (bug 1400618 will fix that order)
   bool isPrimaryFrame = (mContent && mContent->GetPrimaryFrame() == this);
   if (isPrimaryFrame) {
     // This needs to happen before we clear our Properties() table.
@@ -1409,7 +1415,7 @@ nsIFrame::HasAnimationOfTransform(EffectSet* aEffectSet) const
   return mContent &&
     nsLayoutUtils::HasAnimationOfProperty(effects, eCSSProperty_transform) &&
     IsFrameOfType(eSupportsCSSTransforms) &&
-    mContent->GetPrimaryFrame() == this;
+    IsPrimaryFrame();
 }
 
 bool
@@ -1424,7 +1430,7 @@ nsIFrame::HasOpacityInternal(float aThreshold,
 
   EffectSet* effects =
     aEffectSet ? aEffectSet : EffectSet::GetEffectSet(this);
-  return (mContent && mContent->GetPrimaryFrame() == this &&
+  return (IsPrimaryFrame() &&
           nsLayoutUtils::HasAnimationOfProperty(effects, eCSSProperty_opacity));
 }
 
@@ -9605,7 +9611,7 @@ nsFrame::DoGetParentStyleContext(nsIFrame** aProviderFrame) const
            // Ensure that we don't return the display:contents style
            // of the parent content for pseudos that have the same content
            // as their primary frame (like -moz-list-bullets do):
-           mContent->GetPrimaryFrame() == this) ||
+           IsPrimaryFrame()) ||
           /* if next is true then it's really a request for the table frame's
              parent context, see nsTable[Outer]Frame::GetParentStyleContext. */
           pseudo == nsCSSAnonBoxes::tableWrapper) {

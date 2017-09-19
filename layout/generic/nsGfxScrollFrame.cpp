@@ -3429,7 +3429,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   mScrollParentID = aBuilder->GetCurrentScrollParentId();
 
   Maybe<nsRect> contentBoxClip;
-  Maybe<DisplayItemClipChain> extraContentBoxClipForNonCaretContent;
+  Maybe<const DisplayItemClipChain*> extraContentBoxClipForNonCaretContent;
   if (MOZ_UNLIKELY(mOuter->StyleDisplay()->mOverflowClipBox ==
                      NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX)) {
     // We only clip if there is *scrollable* overflow, to avoid clipping
@@ -3444,8 +3444,14 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // We prepare an extra DisplayItemClipChain here that will be intersected
       // with those items after they've been created.
       const ActiveScrolledRoot* asr = aBuilder->CurrentActiveScrolledRoot();
-      extraContentBoxClipForNonCaretContent = Some(DisplayItemClipChain(DisplayItemClip(), asr, nullptr));
-      extraContentBoxClipForNonCaretContent->mClip.SetTo(clipRect);
+
+      DisplayItemClip newClip;
+      newClip.SetTo(clipRect);
+
+      const DisplayItemClipChain* extraClip =
+        aBuilder->AllocateDisplayItemClipChain(newClip, asr, nullptr);
+
+      extraContentBoxClipForNonCaretContent = Some(extraClip);
 
       nsIFrame* caretFrame = aBuilder->GetCaretFrame();
       // Avoid clipping it in a zero-height line box (heuristic only).
@@ -3564,7 +3570,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // the non-inflated clip to the non-caret items now, by intersecting
       // it with their existing clip.
       ClipListsExceptCaret(&scrolledContent, aBuilder, mScrolledFrame,
-                           extraContentBoxClipForNonCaretContent.ptr());
+                           *extraContentBoxClipForNonCaretContent);
     }
 
     if (aBuilder->IsPaintingToWindow()) {

@@ -88,17 +88,21 @@ FormAutofillParent.prototype = {
     Services.ppmm.addMessageListener("FormAutofill:InitStorage", this);
     Services.ppmm.addMessageListener("FormAutofill:GetRecords", this);
     Services.ppmm.addMessageListener("FormAutofill:SaveAddress", this);
-    Services.ppmm.addMessageListener("FormAutofill:SaveCreditCard", this);
     Services.ppmm.addMessageListener("FormAutofill:RemoveAddresses", this);
-    Services.ppmm.addMessageListener("FormAutofill:RemoveCreditCards", this);
     Services.ppmm.addMessageListener("FormAutofill:OpenPreferences", this);
-    Services.ppmm.addMessageListener("FormAutofill:GetDecryptedString", this);
     Services.mm.addMessageListener("FormAutofill:OnFormSubmit", this);
 
     // Observing the pref and storage changes
     Services.prefs.addObserver(ENABLED_AUTOFILL_ADDRESSES_PREF, this);
-    Services.prefs.addObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
     Services.obs.addObserver(this, "formautofill-storage-changed");
+
+    // Only listen to credit card related messages if it is available
+    if (FormAutofillUtils.isAutofillCreditCardsAvailable) {
+      Services.ppmm.addMessageListener("FormAutofill:SaveCreditCard", this);
+      Services.ppmm.addMessageListener("FormAutofill:RemoveCreditCards", this);
+      Services.ppmm.addMessageListener("FormAutofill:GetDecryptedString", this);
+      Services.prefs.addObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
+    }
   },
 
   observe(subject, topic, data) {
@@ -248,12 +252,16 @@ FormAutofillParent.prototype = {
     Services.ppmm.removeMessageListener("FormAutofill:InitStorage", this);
     Services.ppmm.removeMessageListener("FormAutofill:GetRecords", this);
     Services.ppmm.removeMessageListener("FormAutofill:SaveAddress", this);
-    Services.ppmm.removeMessageListener("FormAutofill:SaveCreditCard", this);
     Services.ppmm.removeMessageListener("FormAutofill:RemoveAddresses", this);
-    Services.ppmm.removeMessageListener("FormAutofill:RemoveCreditCards", this);
     Services.obs.removeObserver(this, "sync-pane-loaded");
     Services.prefs.removeObserver(ENABLED_AUTOFILL_ADDRESSES_PREF, this);
-    Services.prefs.removeObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
+
+    if (FormAutofillUtils.isAutofillCreditCardsAvailable) {
+      Services.ppmm.removeMessageListener("FormAutofill:SaveCreditCard", this);
+      Services.ppmm.removeMessageListener("FormAutofill:RemoveCreditCards", this);
+      Services.ppmm.removeMessageListener("FormAutofill:GetDecryptedString", this);
+      Services.prefs.removeObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
+    }
   },
 
   /**
@@ -415,7 +423,7 @@ FormAutofillParent.prototype = {
     }
   },
 
-  async _onCreditCardSubmit(creditCard, target) {
+  async _onCreditCardSubmit(creditCard, target, timeStartedFillingMS) {
     // We'll show the credit card doorhanger if:
     //   - User applys autofill and changed
     //   - User fills form manually
@@ -423,13 +431,18 @@ FormAutofillParent.prototype = {
         Object.keys(creditCard.record).every(key => creditCard.untouchedFields.includes(key))) {
       // Add probe to record credit card autofill(without modification).
       Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill", 1);
+      this._recordFormFillingTime("creditCard", "autofill", timeStartedFillingMS);
       return;
     }
 
     // Add the probe to record credit card manual filling or autofill but modified case.
-    let ccScalar = creditCard.guid ? "formautofill.creditCards.fill_type_autofill_modified" :
-                                     "formautofill.creditCards.fill_type_manual";
-    Services.telemetry.scalarAdd(ccScalar, 1);
+    if (creditCard.guid) {
+      Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill_modified", 1);
+      this._recordFormFillingTime("creditCard", "autofill-update", timeStartedFillingMS);
+    } else {
+      Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_manual", 1);
+      this._recordFormFillingTime("creditCard", "manual", timeStartedFillingMS);
+    }
 
     let state = await FormAutofillDoorhanger.show(target, "creditCard");
     if (state == "cancel") {
@@ -452,7 +465,7 @@ FormAutofillParent.prototype = {
       this._onAddressSubmit(address, target, timeStartedFillingMS);
     }
     if (creditCard) {
-      this._onCreditCardSubmit(creditCard, target);
+      this._onCreditCardSubmit(creditCard, target, timeStartedFillingMS);
     }
   },
   /**
@@ -463,10 +476,13 @@ FormAutofillParent.prototype = {
    *         3 type of form (address/creditcard/address-creditcard).
    * @param  {string} fillingType
    *         3 filling type (manual/autofill/autofill-update).
-   * @param  {int} startedFillingMS
-   *         Time that form started to filling in ms.
+   * @param  {int|null} startedFillingMS
+   *         Time that form started to filling in ms. Early return if start time is null.
    */
   _recordFormFillingTime(formType, fillingType, startedFillingMS) {
+    if (!startedFillingMS) {
+      return;
+    }
     let histogram = Services.telemetry.getKeyedHistogramById("FORM_FILLING_REQUIRED_TIME_MS");
     histogram.add(`${formType}-${fillingType}`, Date.now() - startedFillingMS);
   },

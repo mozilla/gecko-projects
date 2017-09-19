@@ -23,6 +23,7 @@
 
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) + 1px);
   --toolbarbutton-border-radius: 4px;
+  --toolbarbutton-icon-fill-opacity: .7;
 
   --panel-separator-color: hsla(210,4%,10%,.14);
   --arrowpanel-dimmed: hsla(210,4%,10%,.07);
@@ -125,6 +126,7 @@
 #navigator-toolbox > toolbar:not(#TabsToolbar) {
   -moz-appearance: none;
   background: var(--toolbar-bgcolor);
+  color: var(--toolbar-color, inherit);
 }
 
 /* Draw the bottom border of the tabs toolbar when it's not using
@@ -357,16 +359,6 @@
 }
 
 %include ../shared/identity-block/identity-block.inc.css
-
-#identity-box:-moz-locale-dir(ltr) {
-  border-top-left-radius: 2px;
-  border-bottom-left-radius: 2px;
-}
-
-#identity-box:-moz-locale-dir(rtl) {
-  border-top-right-radius: 2px;
-  border-bottom-right-radius: 2px;
-}
 
 #identity-box:not(:active):-moz-focusring {
   box-shadow: var(--focus-ring-box-shadow);
@@ -812,6 +804,7 @@ html|span.ac-emphasize-text-url {
 
 #sidebar-box {
   -moz-appearance: -moz-mac-source-list;
+  -moz-font-smoothing-background-color: -moz-mac-source-list;
 }
 
 #sidebar-header {
@@ -896,6 +889,7 @@ html|span.ac-emphasize-text-url {
   -moz-appearance: none;
   /* overlap the nav-bar's top border */
   margin-bottom: calc(-1 * var(--tab-toolbar-navbar-overlap));
+  padding-top: var(--space-above-tabbar);
 }
 
 :root:not([customizing]):not([tabsintitlebar]):not([inFullscreen]) #TabsToolbar:not(:-moz-lwtheme) {
@@ -907,12 +901,16 @@ html|span.ac-emphasize-text-url {
   text-shadow: @loweredShadow@;
 }
 
-#main-window[tabsintitlebar] > #titlebar:not(:-moz-lwtheme),
 :root:-moz-any([inFullscreen], [tabsintitlebar]) #TabsToolbar:not(:-moz-lwtheme) {
   -moz-appearance: -moz-mac-vibrancy-dark;
+  -moz-font-smoothing-background-color: -moz-mac-vibrancy-dark;
   background-color: #232323;
   color: hsl(240, 9%, 98%);
   text-shadow: none;
+}
+
+.tabbrowser-tab[visuallyselected=true] {
+  -moz-font-smoothing-background-color: var(--toolbar-bgcolor);
 }
 
 #tabbrowser-tabs {

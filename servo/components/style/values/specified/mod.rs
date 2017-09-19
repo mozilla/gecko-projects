@@ -29,7 +29,7 @@ pub use self::angle::Angle;
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
-pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth};
+pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth, BorderSpacing};
 pub use self::box_::VerticalAlign;
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
@@ -174,6 +174,7 @@ impl BorderStyle {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub struct Number {
@@ -215,6 +216,15 @@ impl Number {
     pub fn parse_at_least_one<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                                       -> Result<Number, ParseError<'i>> {
         parse_number_with_clamping_mode(context, input, AllowedNumericType::AtLeastOne)
+    }
+
+    /// Clamp to 1.0 if the value is over 1.0.
+    #[inline]
+    pub fn clamp_to_one(self) -> Self {
+        Number {
+            value: self.value.min(1.),
+            calc_clamping_mode: self.calc_clamping_mode,
+        }
     }
 }
 
@@ -281,6 +291,7 @@ impl Parse for GreaterThanOrEqualToOneNumber {
 ///
 /// FIXME(emilio): Should probably use Either.
 #[allow(missing_docs)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum NumberOrPercentage {
@@ -316,6 +327,7 @@ impl Parse for NumberOrPercentage {
 }
 
 #[allow(missing_docs)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, ToCss)]
 pub struct Opacity(Number);
@@ -352,6 +364,7 @@ impl ToComputedValue for Opacity {
 ///
 /// https://drafts.csswg.org/css-values/#integers
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct Integer {
     value: CSSInteger,
@@ -504,6 +517,7 @@ pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
 pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 /// rect(<top>, <left>, <bottom>, <right>) used by clip and image-region
 pub struct ClipRect {
@@ -674,6 +688,7 @@ pub type NamespaceId = ();
 /// An attr(...) rule
 ///
 /// `[namespace? `|`]? ident`
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue)]
 pub struct Attr {

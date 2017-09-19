@@ -13,7 +13,9 @@ use media_queries::MediaType;
 use parser::ParserContext;
 use properties::{ComputedValues, StyleBuilder};
 use properties::longhands::font_size;
+use rule_cache::RuleCacheConditions;
 use selectors::parser::SelectorParseError;
+use std::cell::RefCell;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use style_traits::{CSSPixel, DevicePixel, ToCss, ParseError};
@@ -88,6 +90,13 @@ impl Device {
     /// Set the font size of the root element (for rem)
     pub fn set_root_font_size(&self, size: Au) {
         self.root_font_size.store(size.0 as isize, Ordering::Relaxed)
+    }
+
+    /// Sets the body text color for the "inherit color from body" quirk.
+    ///
+    /// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    pub fn set_body_text_color(&self, _color: RGBA) {
+        // Servo doesn't implement this quirk (yet)
     }
 
     /// Returns whether we ever looked up the root font size of the Device.
@@ -244,6 +253,7 @@ pub enum Range<T> {
 impl Range<specified::Length> {
     fn to_computed_range(&self, device: &Device, quirks_mode: QuirksMode) -> Range<Au> {
         let default_values = device.default_computed_values();
+        let mut conditions = RuleCacheConditions::default();
         // http://dev.w3.org/csswg/mediaqueries3/#units
         // em units are relative to the initial font-size.
         let context = computed::Context {
@@ -257,6 +267,8 @@ impl Range<specified::Length> {
             cached_system_font: None,
             quirks_mode: quirks_mode,
             for_smil_animation: false,
+            for_non_inherited_property: None,
+            rule_cache_conditions: RefCell::new(&mut conditions),
         };
 
         match *self {
