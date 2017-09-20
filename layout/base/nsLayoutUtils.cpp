@@ -3780,7 +3780,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
     TimeStamp dlStart = TimeStamp::Now();
 
-    builder.EnterPresShell(aFrame);
     {
       // If a scrollable container layer is created in nsDisplayList::PaintForFrame,
       // it will be the scroll parent for display items that are built in the
@@ -3811,11 +3810,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       builder.SetVisibleRect(dirtyRect);
       builder.SetIsBuilding(true);
 
-      bool merged = false;
-
       const bool paintedPreviously =
         aFrame->HasProperty(nsIFrame::ModifiedFrameList());
 
+      bool merged = false;
       if (retainedBuilder && paintedPreviously) {
         merged = retainedBuilder->AttemptPartialUpdate(&list, aFrame, aBackstop);
       }
@@ -3834,10 +3832,13 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
       if (!merged) {
         list.DeleteAll(&builder);
+        builder.EnterPresShell(aFrame);
         builder.SetDirtyRect(dirtyRect);
         builder.ClearWindowDraggingRegion();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
         AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
+  
+        builder.LeavePresShell(aFrame, &list);
       }
     }
 
@@ -3848,7 +3849,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     //   nsFrame::PrintDisplayList(&builder, list);
     // }
 
-    builder.LeavePresShell(aFrame, &list);
     builder.IncrementPresShellPaintCount(presShell);
 
     if (gfxPrefs::LayersDrawFPS()) {

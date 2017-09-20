@@ -594,6 +594,8 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nsDisplayList* aList,
     MarkFramesWithItemsAndImagesModified(&mList);
   }
 
+  mBuilder.EnterPresShell(aFrame);
+
   std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(aFrame);
 
   if (mPreviousCaret != mBuilder.GetCaretFrame()) {
@@ -633,8 +635,6 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nsDisplayList* aList,
       //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
       //nsFrame::PrintDisplayList(&builder, modifiedDL);
 
-      mBuilder.LeavePresShell(aFrame, &modifiedDL);
-      mBuilder.EnterPresShell(aFrame);
     } else {
       // TODO: We can also skip layer building and painting if
       // PreProcessDisplayList didn't end up changing anything
@@ -654,6 +654,8 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nsDisplayList* aList,
 
     merged = true;
   }
+      
+  mBuilder.LeavePresShell(aFrame, aList);
 
   // TODO: Do we mark frames as modified during displaylist building? If
   // we do this isn't gonna work.
