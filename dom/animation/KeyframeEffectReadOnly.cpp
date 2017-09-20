@@ -978,7 +978,7 @@ KeyframeEffectReadOnly::UpdateTargetRegistration()
     mInEffectSet = true;
     UpdateEffectSet(effectSet);
     if (mTarget->mElement->GetPrimaryFrame()) {
-      mTarget->mElement->GetPrimaryFrame()->SchedulePaint();
+      mTarget->mElement->GetPrimaryFrame()->MarkNeedsDisplayItemRebuild();
     }
   } else if (!isRelevant && mInEffectSet) {
     UnregisterTarget();
@@ -1005,7 +1005,7 @@ KeyframeEffectReadOnly::UnregisterTarget()
     }
   }
   if (mTarget->mElement->GetPrimaryFrame()) {
-    mTarget->mElement->GetPrimaryFrame()->SchedulePaint();
+    mTarget->mElement->GetPrimaryFrame()->MarkNeedsDisplayItemRebuild();
   }
 }
 
