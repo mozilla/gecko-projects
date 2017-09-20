@@ -3799,7 +3799,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     AutoProfilerTracing tracing("Paint", "DisplayList");
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
-    TimeStamp dlStart = TimeStamp::Now();
+
+    TimeStamp dlTotalStart = TimeStamp::Now();
+    double retainedBuildTime = 0.0, fullBuildTime = 0.0;
+    DisplayListStatistics stats;
 
     {
       // If a scrollable container layer is created in nsDisplayList::PaintForFrame,
@@ -3831,23 +3834,21 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       builder.SetVisibleRect(dirtyRect);
       builder.SetIsBuilding(true);
 
+      TimeStamp dlStart = TimeStamp::Now();
+
       const bool paintedPreviously =
         aFrame->HasProperty(nsIFrame::ModifiedFrameList());
 
       bool merged = false;
       if (retainedBuilder && paintedPreviously) {
-        merged = retainedBuilder->AttemptPartialUpdate(aBackstop);
+        merged = retainedBuilder->AttemptPartialUpdate(aBackstop, stats);
+        stats.triedPartial = true;
+        stats.merged = merged;
       }
+      retainedBuildTime = (TimeStamp::Now() - dlStart).ToMilliseconds();
 
       if (merged && gfxPrefs::LayoutDisplayListBuildTwice()) {
         merged = false;
-        if (gfxPrefs::LayersDrawFPS()) {
-          if (RefPtr<LayerManager> lm = builder.GetWidgetLayerManager()) {
-            if (PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm)) {
-              pt->dl2Ms() = (TimeStamp::Now() - dlStart).ToMilliseconds();
-            }
-          }
-        }
         dlStart = TimeStamp::Now();
       }
 
@@ -3861,6 +3862,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   
         builder.LeavePresShell(aFrame, &list);
       }
+      fullBuildTime = (TimeStamp::Now() - dlStart).ToMilliseconds();
     }
 
     builder.SetIsBuilding(false);
@@ -3873,11 +3875,23 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     builder.IncrementPresShellPaintCount(presShell);
 
     if (gfxPrefs::LayersDrawFPS()) {
-      if (RefPtr<LayerManager> lm = builder.GetWidgetLayerManager()) {
-        if (PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm)) {
-          pt->dlMs() = (TimeStamp::Now() - dlStart).ToMilliseconds();
-        }
+      RefPtr<LayerManager> lm = builder.GetWidgetLayerManager();
+      PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm);
+
+      if (pt && gfxPrefs::LayoutDisplayListBuildTwice()) {
+        pt->dlMs() = retainedBuildTime;
+        pt->dl2Ms() = fullBuildTime;
+      } else if (pt) {
+        pt->dlMs() = (TimeStamp::Now() - dlTotalStart).ToMilliseconds();
       }
+    }
+
+    if (stats.triedPartial && gfxPrefs::LayoutDisplayListBuildTwice()) {
+      printf(R"({ "retained": %.3f, "full": %.3f, "modifiedFrames": %d, )"
+             R"("listSize": %d, "hadCanvas": %d, "hadViewPort": %d, )"
+             R"("merged": %d },)" "\n",
+        retainedBuildTime, fullBuildTime, stats.modifiedFrames, list.Count(),
+        stats.hadCanvas, stats.hadViewport, stats.merged);
     }
   }
 

@@ -682,7 +682,8 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(std::vector<WeakFrame>& aModifi
 
 
 bool
-RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
+RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
+                                                 DisplayListStatistics& aStats)
 {
   mBuilder.RemoveModifiedWindowDraggingRegion();
   if (mBuilder.ShouldSyncDecodeImages()) {
@@ -692,6 +693,23 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
   mBuilder.EnterPresShell(mBuilder.RootReferenceFrame());
 
   std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(mBuilder.RootReferenceFrame());
+
+  aStats.modifiedFrames = modifiedFrames.size();
+  for (WeakFrame& frame : modifiedFrames) {
+    if (!frame) {
+      continue;
+    }
+
+    LayoutFrameType type = frame->Type();
+    if (type == LayoutFrameType::Viewport ||
+        type == LayoutFrameType::PageContent) {
+      aStats.hadViewport = true;
+    }
+
+    if (type == LayoutFrameType::Canvas) {
+      aStats.hadCanvas = true;
+    }
+  }
 
   if (mPreviousCaret != mBuilder.GetCaretFrame()) {
     if (mPreviousCaret) {

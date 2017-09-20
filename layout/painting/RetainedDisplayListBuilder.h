@@ -7,6 +7,15 @@
 
 #include "nsDisplayList.h"
 
+struct DisplayListStatistics {
+  uint32_t modifiedFrames = 0;
+  bool triedPartial = false;
+  bool merged = false;
+
+  bool hadCanvas = false;
+  bool hadViewport = false;
+};
+
 struct RetainedDisplayListBuilder {
   RetainedDisplayListBuilder(nsIFrame* aReferenceFrame,
                              nsDisplayListBuilderMode aMode,
@@ -22,7 +31,7 @@ struct RetainedDisplayListBuilder {
 
   nsDisplayList* List() { return &mList; }
 
-  bool AttemptPartialUpdate(nscolor aBackstop);
+  bool AttemptPartialUpdate(nscolor aBackstop, DisplayListStatistics& aStats);
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 
