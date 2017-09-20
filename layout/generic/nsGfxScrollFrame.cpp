@@ -2420,12 +2420,6 @@ static void AdjustViews(nsIFrame* aFrame)
   }
 }
 
-static bool
-NeedToInvalidateOnScroll(nsIFrame* aFrame)
-{
-  return (aFrame->GetStateBits() & NS_SCROLLFRAME_INVALIDATE_CONTENTS_ON_SCROLL) != 0;
-}
-
 bool ScrollFrameHelper::IsIgnoringViewportClipping() const
 {
   if (!mIsRoot)
@@ -2602,14 +2596,7 @@ void ScrollFrameHelper::ScrollVisual()
   AdjustViews(mScrolledFrame);
   // We need to call this after fixing up the view positions
   // to be consistent with the frame hierarchy.
-  bool needToInvalidateOnScroll = NeedToInvalidateOnScroll(mOuter);
-  mOuter->RemoveStateBits(NS_SCROLLFRAME_INVALIDATE_CONTENTS_ON_SCROLL);
-  if (needToInvalidateOnScroll) {
-    MarkNotRecentlyScrolled();
-  } else {
-    MarkRecentlyScrolled();
-  }
-
+  MarkRecentlyScrolled();
 }
 
 /**
@@ -3282,9 +3269,6 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   if (aBuilder->IsPaintingToWindow()) {
     mScrollPosAtLastPaint = GetScrollPosition();
-    if (IsMaybeScrollingActive() && NeedToInvalidateOnScroll(mOuter)) {
-      MarkNotRecentlyScrolled();
-    }
     if (IsMaybeScrollingActive()) {
       if (mScrollPosForLayerPixelAlignment == nsPoint(-1,-1)) {
         mScrollPosForLayerPixelAlignment = mScrollPosAtLastPaint;
