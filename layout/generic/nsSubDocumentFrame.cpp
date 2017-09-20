@@ -456,6 +456,17 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 
   if (aBuilder->IsRetainingDisplayList()) {
+    // The value of needsOwnLayer can change between builds without
+    // an invalidation recorded for this frame. If this happens,
+    // then we need to notify the builder so that merging can
+    // happen correctly.
+    if (!mPreviouslyNeededLayer ||
+        mPreviouslyNeededLayer.value() != needsOwnLayer) {
+      dirty = visible;
+      aBuilder->MarkFrameModifiedDuringBuilding(this);
+    }
+    mPreviouslyNeededLayer = Some(needsOwnLayer);
+
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
     // areas and save some work here.
