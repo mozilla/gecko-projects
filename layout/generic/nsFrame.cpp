@@ -955,13 +955,13 @@ nsIFrame::RemoveDisplayItemDataForDeletion()
   FrameLayerBuilder::RemoveFrameFromLayerManager(this, DisplayItemData());
   DisplayItemData().Clear();
 
-  DisplayItemArray* items = GetProperty(DisplayItems());
+  DisplayItemArray* items = RemoveProperty(DisplayItems());
   if (items) {
     for (nsDisplayItem* item : *items) {
       item->RemoveFrame(this);
     }
+    delete items;
   }
-  DeleteProperty(DisplayItems());
 }
 
 void

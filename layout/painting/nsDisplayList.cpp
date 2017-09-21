@@ -2860,6 +2860,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mPainted(false)
 #endif
 {
+  MOZ_COUNT_CTOR(nsDisplayItem);
   if (aBuilder->IsRetainingDisplayList()) {
     mFrame->AddDisplayItem(this);
   }

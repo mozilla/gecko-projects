@@ -1902,19 +1902,21 @@ public:
     , mPainted(false)
 #endif
   {
+    MOZ_COUNT_CTOR(nsDisplayItem);
   }
 
 protected:
-  virtual ~nsDisplayItem() {}
+  virtual ~nsDisplayItem() {
+    MOZ_COUNT_DTOR(nsDisplayItem);
+    if (mFrame) {
+      mFrame->RemoveDisplayItem(this);
+    }
+  }
 public:
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder)
   {
     DisplayItemType type = GetType();
-    if (mFrame && aBuilder->IsRetainingDisplayList()) {
-      mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
-      MOZ_ASSERT(removed);
-    }
     this->~nsDisplayItem();
     aBuilder->Destroy(type, this);
   }
@@ -1930,6 +1932,7 @@ public:
   virtual void RemoveFrame(nsIFrame* aFrame)
   {
     if (aFrame == mFrame) {
+      MOZ_ASSERT(!mFrame->HasDisplayItem(this));
       mFrame = nullptr;
     }
   }
@@ -1966,6 +1969,7 @@ public:
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
     , mReusedItem(false)
   {
+    MOZ_COUNT_CTOR(nsDisplayItem);
     if (aBuilder->IsRetainingDisplayList()) {
       mFrame->AddDisplayItem(this);
     }
@@ -3236,10 +3240,6 @@ public:
   // does not match TYPE_GENERIC that was used to allocate the object.
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
-    if (mFrame && aBuilder->IsRetainingDisplayList()) {
-      mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
-      MOZ_ASSERT(removed);
-    }
     this->~nsDisplayGeneric();
     aBuilder->Destroy(DisplayItemType::TYPE_GENERIC, this);
   }
@@ -5626,16 +5626,6 @@ class nsDisplayTransform: public nsDisplayItem
       nsDisplayWrapList(aBuilder, aFrame, aItem) {}
     virtual ~StoreList() {}
 
-    // This override is needed since StoreList is only allocated from the stack.
-    virtual void Destroy(nsDisplayListBuilder* aBuilder) override
-    {
-      mList.DeleteAll(aBuilder);
-      if (mFrame && aBuilder->IsRetainingDisplayList()) {
-        mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
-        MOZ_ASSERT(removed);
-      }
-    }
-
     virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
       // For extending 3d rendering context, the bounds would be
       // updated by DoUpdateBoundsPreserves3D(), not here.
@@ -5699,7 +5689,7 @@ public:
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
-    mStoredList.Destroy(aBuilder);
+    mStoredList.GetChildren()->DeleteAll(aBuilder);
     nsDisplayItem::Destroy(aBuilder);
   }
 
