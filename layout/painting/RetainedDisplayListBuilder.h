@@ -22,7 +22,7 @@ struct RetainedDisplayListBuilder {
 
   nsDisplayList* List() { return &mList; }
 
-  bool AttemptPartialUpdate(nsDisplayList* aList, nsIFrame* aFrame, nscolor aBackstop);
+  bool AttemptPartialUpdate(nscolor aBackstop);
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 
@@ -34,7 +34,6 @@ private:
                          nsDisplayList* aOutList);
 
   bool ComputeRebuildRegion(std::vector<WeakFrame>& aModifiedFrames,
-                            nsIFrame* aDisplayRootFrame,
                             nsRect* aOutDirty,
                             AnimatedGeometryRoot** aOutModifiedAGR,
                             nsTArray<nsIFrame*>* aOutFramesWithProps);

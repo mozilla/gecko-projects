@@ -3815,7 +3815,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
       bool merged = false;
       if (retainedBuilder && paintedPreviously) {
-        merged = retainedBuilder->AttemptPartialUpdate(&list, aFrame, aBackstop);
+        merged = retainedBuilder->AttemptPartialUpdate(aBackstop);
       }
 
       if (merged && gfxPrefs::LayoutDisplayListBuildTwice()) {
