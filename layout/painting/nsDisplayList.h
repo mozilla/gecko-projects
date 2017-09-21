@@ -3933,9 +3933,9 @@ public:
   {
     mState.mColor = mColor;
   }
-  ~nsDisplayBackgroundColor()
+  virtual ~nsDisplayBackgroundColor()
   {
-    if (mDependentFrame ) {
+    if (mDependentFrame) {
       mDependentFrame->RemoveDisplayItem(this);
     }
   }
