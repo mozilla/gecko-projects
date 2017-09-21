@@ -907,6 +907,64 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
 }
 
 void
+nsIFrame::AddDisplayItem(nsDisplayItem* aItem)
+{
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (!items) {
+    items = new DisplayItemArray;
+    AddProperty(DisplayItems(), items);
+  }
+  MOZ_ASSERT(!items->Contains(aItem));
+  items->AppendElement(aItem);
+}
+
+bool
+nsIFrame::RemoveDisplayItem(nsDisplayItem* aItem)
+{
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (!items) {
+    return false;
+  }
+  bool result = items->RemoveElement(aItem);
+  if (items->IsEmpty()) {
+    DeleteProperty(DisplayItems());
+  }
+  return result;
+}
+
+bool
+nsIFrame::HasDisplayItems()
+{
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  return !!items;
+}
+
+bool
+nsIFrame::HasDisplayItem(nsDisplayItem* aItem)
+{
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (!items) {
+    return false;
+  }
+  return items->Contains(aItem);
+}
+
+void
+nsIFrame::RemoveDisplayItemDataForDeletion()
+{
+  FrameLayerBuilder::RemoveFrameFromLayerManager(this, DisplayItemData());
+  DisplayItemData().Clear();
+
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (items) {
+    for (nsDisplayItem* item : *items) {
+      item->RemoveFrame(this);
+    }
+  }
+  DeleteProperty(DisplayItems());
+}
+
+void
 nsIFrame::MarkNeedsDisplayItemRebuild()
 {
   if (!XRE_IsContentProcess() || IsFrameModified()) {
@@ -950,10 +1008,13 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
 
   // Hopefully this is cheap, but we could use a frame state bit to note
   // the presence of dependencies to speed it up.
-  for (nsDisplayItem* i : RealDisplayItemData()) {
-    if (i->GetDependentFrame() == this &&
-        !i->HasDeletedFrame()) {
-      i->Frame()->MarkNeedsDisplayItemRebuild();
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (items) {
+    for (nsDisplayItem* i : *items) {
+      if (i->GetDependentFrame() == this &&
+          !i->HasDeletedFrame()) {
+        i->Frame()->MarkNeedsDisplayItemRebuild();
+      }
     }
   }
 }

@@ -176,7 +176,7 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
     nsIFrame* f = oldRects.mFrames[i];
     if (IsAnyAncestorModified(f)) {
       MOZ_ASSERT(f != aOldItem->Frame());
-      f->RealDisplayItemData().RemoveElement(aOldItem);
+      f->RemoveDisplayItem(aOldItem);
       SwapAndRemove(oldRects.mFrames, i);
       SwapAndRemove(oldRects.mBoxes, i);
     } else {
@@ -204,7 +204,7 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
 
   for (uint32_t i = 0; i < srcRects->mFrames.Length(); i++) {
     nsIFrame* f = srcRects->mFrames[i];
-    if (!f->RealDisplayItemData().Contains(destItem)) {
+    if (!f->HasDisplayItem(destItem)) {
       // If this frame isn't already in the destination item,
       // then add it!
       destRects->Add(f, srcRects->mBoxes[i]);
@@ -242,8 +242,8 @@ void MergeLayerEventRegions(nsDisplayItem* aOldItem,
   // ones. Fix that up now.
   nsDisplayItem* dest = aUpdateOld ? aOldItem : aNewItem;
   for (nsIFrame* f : addedFrames) {
-    if (!f->RealDisplayItemData().Contains(dest)) {
-      f->RealDisplayItemData().AppendElement(dest);
+    if (!f->HasDisplayItem(dest)) {
+      f->AddDisplayItem(dest);
     }
   }
 }
@@ -535,7 +535,7 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(std::vector<WeakFrame>& aModifi
         // If we found an intermediate stacking context with an existing display item
         // then we can store the dirty rect there and stop.
         if (currentFrame != aDisplayRootFrame &&
-            currentFrame->RealDisplayItemData().Length() != 0) {
+            currentFrame->HasDisplayItems()) {
           mBuilder.MarkFrameForDisplayIfVisible(currentFrame);
 
           // Store the stacking context relative dirty area such

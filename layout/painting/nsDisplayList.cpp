@@ -2861,7 +2861,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
 #endif
 {
   if (aBuilder->IsRetainingDisplayList()) {
-    mFrame->RealDisplayItemData().AppendElement(this);
+    mFrame->AddDisplayItem(this);
   }
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
   // This can return the wrong result if the item override ShouldFixToViewport(),
@@ -3332,7 +3332,7 @@ nsDisplayBackgroundImage::~nsDisplayBackgroundImage()
   MOZ_COUNT_DTOR(nsDisplayBackgroundImage);
 #endif
   if (mDependentFrame) {
-    mDependentFrame->RealDisplayItemData().RemoveElement(this);
+    mDependentFrame->RemoveDisplayItem(this);
   }
 }
 
@@ -4795,8 +4795,7 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
 
   if (aFrame != mFrame &&
       aBuilder->IsRetainingDisplayList()) {
-    MOZ_ASSERT(!aFrame->RealDisplayItemData().Contains(this));
-    aFrame->RealDisplayItemData().AppendElement(this);
+    aFrame->AddDisplayItem(this);
   }
 
 

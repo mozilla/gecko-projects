@@ -2070,13 +2070,7 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
   // We must remove these from FrameLayerBuilder::DisplayItemData::mFrameList here,
   // otherwise the DisplayItemData destructor will use the destroyed frame when it
   // tries to remove it from the (array) value of this property.
-  FrameLayerBuilder::RemoveFrameFromLayerManager(aFrame, aFrame->DisplayItemData());
-  aFrame->DisplayItemData().Clear();
-
-  for (nsDisplayItem* item : aFrame->RealDisplayItemData()) {
-    item->RemoveFrame(aFrame);
-  }
-  aFrame->RealDisplayItemData().Clear();
+  aFrame->RemoveDisplayItemDataForDeletion();
 
   if (!mIgnoreFrameDestruction) {
     if (aFrame->HasImageRequest()) {

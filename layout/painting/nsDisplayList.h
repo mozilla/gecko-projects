@@ -1912,7 +1912,7 @@ public:
   {
     DisplayItemType type = GetType();
     if (mFrame && aBuilder->IsRetainingDisplayList()) {
-      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+      mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
       MOZ_ASSERT(removed);
     }
     this->~nsDisplayItem();
@@ -1967,7 +1967,7 @@ public:
     , mReusedItem(false)
   {
     if (aBuilder->IsRetainingDisplayList()) {
-      mFrame->RealDisplayItemData().AppendElement(this);
+      mFrame->AddDisplayItem(this);
     }
   }
 
@@ -3237,7 +3237,7 @@ public:
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
     if (mFrame && aBuilder->IsRetainingDisplayList()) {
-      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+      mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
       MOZ_ASSERT(removed);
     }
     this->~nsDisplayGeneric();
@@ -3746,7 +3746,7 @@ public:
     }
     mDependentFrame = aFrame;
     if (aFrame) {
-      mDependentFrame->RealDisplayItemData().AppendElement(this);
+      mDependentFrame->AddDisplayItem(this);
     }
   }
 
@@ -3936,7 +3936,7 @@ public:
   ~nsDisplayBackgroundColor()
   {
     if (mDependentFrame ) {
-      mDependentFrame->RealDisplayItemData().RemoveElement(this);
+      mDependentFrame->RemoveDisplayItem(this);
     }
   }
 
@@ -4007,7 +4007,7 @@ public:
     }
     mDependentFrame = aFrame;
     if (aFrame) {
-      mDependentFrame->RealDisplayItemData().AppendElement(this);
+      mDependentFrame->AddDisplayItem(this);
     }
   }
 
@@ -4347,32 +4347,32 @@ public:
 
     for (nsIFrame* f : mHitRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
     for (nsIFrame* f : mMaybeHitRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
     for (nsIFrame* f : mDispatchToContentHitRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
     for (nsIFrame* f : mNoActionRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
     for (nsIFrame* f : mHorizontalPanRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
     for (nsIFrame* f : mVerticalPanRegion.mFrames) {
       if (f != mFrame) {
-        f->RealDisplayItemData().RemoveElement(this);
+        f->RemoveDisplayItem(this);
       }
     }
 
@@ -5648,7 +5648,7 @@ class nsDisplayTransform: public nsDisplayItem
     {
       mList.DeleteAll(aBuilder);
       if (mFrame && aBuilder->IsRetainingDisplayList()) {
-        mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+        mozilla::DebugOnly<bool> removed = mFrame->RemoveDisplayItem(this);
         MOZ_ASSERT(removed);
       }
     }
