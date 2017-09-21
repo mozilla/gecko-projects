@@ -911,7 +911,7 @@ nsIFrame::AddDisplayItem(nsDisplayItem* aItem)
 {
   DisplayItemArray* items = GetProperty(DisplayItems());
   if (!items) {
-    items = new DisplayItemArray;
+    items = new DisplayItemArray();
     AddProperty(DisplayItems(), items);
   }
   MOZ_ASSERT(!items->Contains(aItem));
