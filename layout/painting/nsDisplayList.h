@@ -4332,12 +4332,6 @@ public:
     MOZ_COUNT_CTOR(nsDisplayLayerEventRegions);
   }
 
-private:
-  virtual ~nsDisplayLayerEventRegions() {
-    MOZ_COUNT_DTOR(nsDisplayLayerEventRegions);
-  }
-
-public:
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
     if (!aBuilder->IsRetainingDisplayList()) {
@@ -4345,37 +4339,12 @@ public:
       return;
     }
 
-    for (nsIFrame* f : mHitRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-    for (nsIFrame* f : mMaybeHitRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-    for (nsIFrame* f : mDispatchToContentHitRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-    for (nsIFrame* f : mNoActionRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-    for (nsIFrame* f : mHorizontalPanRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-    for (nsIFrame* f : mVerticalPanRegion.mFrames) {
-      if (f != mFrame) {
-        f->RemoveDisplayItem(this);
-      }
-    }
-
+    RemoveItemFromFrames(mHitRegion);
+    RemoveItemFromFrames(mMaybeHitRegion);
+    RemoveItemFromFrames(mDispatchToContentHitRegion);
+    RemoveItemFromFrames(mNoActionRegion);
+    RemoveItemFromFrames(mHorizontalPanRegion);
+    RemoveItemFromFrames(mVerticalPanRegion);
     nsDisplayItem::Destroy(aBuilder);
   }
 
@@ -4491,6 +4460,20 @@ public:
   virtual void RemoveFrame(nsIFrame* aFrame) override;
 
 private:
+  virtual ~nsDisplayLayerEventRegions()
+  {
+    MOZ_COUNT_DTOR(nsDisplayLayerEventRegions);
+  }
+
+  void RemoveItemFromFrames(FrameRects& aFrameRects)
+  {
+    for (nsIFrame* f : aFrameRects.mFrames) {
+      if (f != mFrame) {
+        f->RemoveDisplayItem(this);
+      }
+    }
+  }
+
   friend void MergeLayerEventRegions(nsDisplayItem*, nsDisplayItem*, bool);
 
   // Relative to aFrame's reference frame.
