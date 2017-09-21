@@ -6,10 +6,14 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import requests
+
 from taskgraph import create
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.optimize import optimize_task_graph
-from taskgraph.util.taskcluster import get_session, find_task_id
+from taskgraph.util.taskcluster import get_artifact, get_session, find_task_id
+
+PUSHLOG_TMPL = '{}/json-pushes?version=2&changeset={}&tipsonly=1&full=1'
 
 
 def find_decision_task(parameters):
@@ -18,6 +22,37 @@ def find_decision_task(parameters):
     return find_task_id('gecko.v2.{}.pushlog-id.{}.decision'.format(
         parameters['project'],
         parameters['pushlog_id']))
+
+
+def find_hg_revision_pushlog_id(parameters, revision):
+    """Given the parameters for this action and a revision, find the
+    pushlog_id of the revision."""
+    pushlog_url = PUSHLOG_TMPL.format(parameters['head_repository'], revision)
+    r = requests.get(pushlog_url)
+    r.raise_for_status()
+    pushes = r.json()['pushes'].keys()
+    if len(pushes) != 1:
+        raise RuntimeError(
+            "Unable to find a single pushlog_id for {} revision {}: {}".format(
+                parameters['head_repository'], revision, pushes
+            )
+        )
+    return pushes[0]
+
+
+def find_existing_tasks_from_previous_kinds(full_task_graph, previous_graph_ids,
+                                            previous_graph_kinds):
+    """Given a list of previous decision/action taskIds and kinds to replace
+    from the previous graphs, return a dictionary of labels-to-taskids to use
+    as ``existing_tasks`` in the optimization step."""
+    existing_tasks = {}
+    for previous_graph_id in previous_graph_ids:
+        label_to_taskid = get_artifact(previous_graph_id, "public/label-to-taskid.json")
+        kind_labels = set(t.label for t in full_task_graph.tasks.itervalues()
+                          if t.attributes['kind'] in previous_graph_kinds)
+        for label in set(label_to_taskid.keys()).intersection(kind_labels):
+            existing_tasks[label] = label_to_taskid[label]
+    return existing_tasks
 
 
 def create_task_from_def(task_id, task_def, level):

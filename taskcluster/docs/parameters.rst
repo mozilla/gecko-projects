@@ -26,6 +26,11 @@ Push Information
    The repository from which to do an initial clone, utilizing any available
    caching.
 
+``existing_tasks``
+   Specify tasks to optimize out of the graph. This is a dictionary of label to taskId.
+   Any tasks in the graph matching one of the labels will use the previously-run
+   taskId rather than submitting a new task.
+
 ``head_repository``
    The repository containing the changeset to be built.  This may differ from
    ``base_repository`` in cases where ``base_repository`` is likely to be cached
