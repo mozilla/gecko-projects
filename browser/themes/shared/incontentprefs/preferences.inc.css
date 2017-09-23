@@ -30,7 +30,7 @@
   color: currentColor;
 }
 
-groupbox + groupbox {
+prefpane > groupbox + groupbox {
   margin-top: 16px;
 }
 
@@ -62,16 +62,13 @@ label {
   margin-bottom: 0 !important;
 }
 
-description > checkbox {
-  vertical-align: bottom;
+menuitem > label,
+button > hbox > label {
+  line-height: unset;
 }
 
 .indent {
   margin-inline-start: 28px !important;
-}
-
-separator.thin:not([orient="vertical"]) {
-  height: 8px;
 }
 
 .checkbox-check {
@@ -80,15 +77,21 @@ separator.thin:not([orient="vertical"]) {
   height: 20px;
 }
 
+.tail-with-learn-more {
+  margin-inline-start: 0px;
+  margin-inline-end: 10px;
+}
+
 .learnMore {
-  margin-inline-start: 10px;
+  margin-inline-start: 0px;
   font-weight: normal;
   white-space: nowrap;
 }
 
 .accessory-button {
-  min-width: 145px;
-  margin: 2px 0;
+  height: 30px;
+  min-width: 150px;
+  margin: 4px 0;
 }
 
 #searchInput {
@@ -149,6 +152,7 @@ separator.thin:not([orient="vertical"]) {
 #browserHomePage {
   margin-inline-start: 0;
   margin-inline-end: 0;
+  margin-bottom: 4px;
 }
 
 .homepage-button:first-of-type {
@@ -157,6 +161,13 @@ separator.thin:not([orient="vertical"]) {
 
 .homepage-button:last-of-type {
   margin-inline-end: 0;
+}
+
+.extension-controlled-icon {
+  height: 20px;
+  margin-bottom: 6px;
+  vertical-align: bottom;
+  width: 20px;
 }
 
 #getStarted {
@@ -183,7 +194,7 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #updateBox {
-  margin-top: 8px;
+  margin-top: 4px;
   margin-bottom: 32px;
 }
 
@@ -201,7 +212,8 @@ separator.thin:not([orient="vertical"]) {
   margin-inline-start: 6px !important;
 }
 
-#updateRadioGroup > radio {
+#updateRadioGroup > radio,
+#browserStartupPage > radio {
   height: 30px;
   margin: 2px 0;
 }
@@ -216,7 +228,14 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #handlersView > richlistitem {
-  min-height: 36px !important;
+  min-height: 30px !important;
+}
+
+#handlersView > richlistitem > hbox > hbox > menulist {
+  margin-top: 0;
+  margin-bottom: 0;
+  margin-inline-end: 0;
+  min-height: 0;
 }
 
 .typeIcon {
@@ -242,11 +261,6 @@ separator.thin:not([orient="vertical"]) {
 }
 
 /* Search Pane */
-
-#defaultEngine {
-  margin-top: 2px;
-  margin-bottom: 6px;
-}
 
 #engineList {
   margin: 2px 0 5px 0;
@@ -429,8 +443,12 @@ separator.thin:not([orient="vertical"]) {
  */
 
 /**
- * Font dialog menulist fixes
+ * Font group and font dialog menulist fixes
  */
+
+#defaultFont {
+  width: 25ch;
+}
 
 #defaultFontType,
 #serif,
@@ -476,9 +494,13 @@ separator.thin:not([orient="vertical"]) {
 }
 
 #fxaSyncComputerName {
-  margin-top: 3px;
   margin-inline-start: 0;
-  margin-bottom: 0;
+  margin-bottom: 4px;
+}
+
+#fxaChangeDeviceName {
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 #tosPP-small-ToS {
@@ -581,20 +603,22 @@ separator.thin:not([orient="vertical"]) {
 }
 
 .help-button {
+  display: flex;
+  align-items: center;
   position: fixed;
   left: 0;
   bottom: 36px;
   background-image: url("chrome://global/skin/icons/help.svg");
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
-  line-height: 36px;
-  height: 36px;
+  line-height: 22px;
+  height: unset;
+  min-height: 36px;
   width: 168px;
-  background-position: left 10px top 10px;
+  background-position: left 10px center;
   background-size: 16px;
   padding-inline-start: 38px;
   margin-inline-start: 34px;
-  white-space: nowrap;
 }
 
 .help-button:-moz-locale-dir(rtl) {
@@ -655,7 +679,7 @@ separator.thin:not([orient="vertical"]) {
   background-color: #ffe900;
   border: 1px solid #d7b600;
   -moz-user-select: none;
-  bottom: 35px;
+  bottom: 36px;
 }
 
 .search-tooltip:hover,
@@ -687,6 +711,12 @@ separator.thin:not([orient="vertical"]) {
 
 .visually-hidden {
   visibility: hidden;
+}
+
+menulist {
+  height: 30px;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 menulist[indicator=true] > menupopup menuitem:not([image]) > .menu-iconic-left {

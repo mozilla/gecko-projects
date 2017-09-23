@@ -14,6 +14,7 @@
   padding: 0;
   margin: 0 5px;
   min-height: 30px;
+  overflow: -moz-hidden-unscrollable;
 }
 
 #urlbar:hover,
@@ -88,7 +89,7 @@
 
 #pageAction-panel-emailLink,
 #pageAction-urlbar-emailLink {
-  list-style-image: url("chrome://browser/skin/email-link.svg");
+  list-style-image: url("chrome://browser/skin/mail.svg");
 }
 
 #pageAction-panel-sendToDevice,
@@ -164,8 +165,6 @@
   fill: currentColor;
   fill-opacity: 0.6;
   color: inherit;
-  transition-property: background-color;
-  transition-duration: var(--toolbarbutton-hover-transition-duration);
 }
 
 :root[uidensity=compact] .urlbar-icon {
@@ -182,30 +181,32 @@
   padding: 7px;
 }
 
-.urlbar-icon:hover {
+.urlbar-icon:hover,
+.urlbar-icon-wrapper:hover {
   background-color: hsla(0,0%,80%,.4);
 }
 
-.urlbar-icon:hover:active {
-  background-color: hsla(0,0%,80%,.45);
-  transition-duration: var(--toolbarbutton-active-transition-duration);
+.urlbar-icon[open],
+.urlbar-icon-wrapper[open],
+.urlbar-icon:hover:active,
+.urlbar-icon-wrapper:hover:active {
+  background-color: hsla(0,0%,80%,.6);
+}
+
+.urlbar-icon-wrapper[open] > .urlbar-icon,
+.urlbar-icon-wrapper > .urlbar-icon:hover,
+.urlbar-icon-wrapper > .urlbar-icon:hover:active {
+  background-color: transparent;
 }
 
 .urlbar-go-button,
 .search-go-button {
-  list-style-image: url("chrome://browser/skin/back.svg");
-  width: 26px;
+  list-style-image: url("chrome://browser/skin/forward.svg");
 }
 
-.urlbar-go-button:-moz-locale-dir(ltr),
-.search-go-button:-moz-locale-dir(ltr) {
+.urlbar-go-button:-moz-locale-dir(rtl),
+.search-go-button:-moz-locale-dir(rtl) {
   transform: scaleX(-1);
-}
-
-.urlbar-go-button:hover,
-.search-go-button:hover {
-  fill: #058b00;
-  fill-opacity: 1;
 }
 
 .urlbar-history-dropmarker {
@@ -218,7 +219,7 @@
   transition: none;
 }
 
-#navigator-toolbox:not(:hover) > #nav-bar:not([customizing="true"]) > #nav-bar-customization-target > #urlbar-container > #urlbar:not([focused]) > .urlbar-textbox-container > .urlbar-history-dropmarker {
+#nav-bar:not([customizing="true"]) > #nav-bar-customization-target > #urlbar-container:not(:hover) > #urlbar:not([focused]) > .urlbar-textbox-container > .urlbar-history-dropmarker {
   opacity: 0;
 }
 
@@ -274,6 +275,16 @@
   max-width: 33px;
   min-height: 33px;
   max-height: 33px;
+}
+
+:root[uidensity=compact] #star-button-box[animationsenabled] > #star-button[starred][animate] + #star-button-animatable-box {
+  /* .urlbar-icon has width 24px in this case */
+  margin-inline-start: -4.5px;
+}
+
+:root[uidensity=touch] #star-button-box[animationsenabled] > #star-button[starred][animate] + #star-button-animatable-box {
+  /* .urlbar-icon has width 30px in this case */
+  margin-inline-start: -1.5px;
 }
 
 #star-button-box[animationsenabled] > #star-button[starred][animate] + #star-button-animatable-box > #star-button-animatable-image {

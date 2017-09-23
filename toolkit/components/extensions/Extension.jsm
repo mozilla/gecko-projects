@@ -57,6 +57,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   OS: "resource://gre/modules/osfile.jsm",
+  PluralForm: "resource://gre/modules/PluralForm.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
@@ -81,8 +82,6 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCount.extension");
-XPCOMUtils.defineLazyPreferenceGetter(this, "useRemoteWebExtensions",
-                                      "extensions.webextensions.remote", false);
 
 var {
   GlobalManager,
@@ -101,7 +100,7 @@ XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
 XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData);
 
 // The maximum time to wait for extension shutdown blockers to complete.
-const SHUTDOWN_BLOCKER_MAX_MS = 1000;
+const SHUTDOWN_BLOCKER_MAX_MS = 8000;
 
 // The list of properties that themes are allowed to contain.
 XPCOMUtils.defineLazyGetter(this, "allowedThemeProperties", () => {
@@ -381,7 +380,7 @@ this.ExtensionData = class {
 
   async readDirectory(path) {
     if (this.rootURI instanceof Ci.nsIFileURL) {
-      let uri = Services.io.newURI(this.rootURI.resolve("./" + path));
+      let uri = Services.io.newURI("./" + path, null, this.rootURI);
       let fullPath = uri.QueryInterface(Ci.nsIFileURL).file.path;
 
       let iter = new OS.File.DirectoryIterator(fullPath);
@@ -394,7 +393,9 @@ this.ExtensionData = class {
       } catch (e) {
         // Always return a list, even if the directory does not exist (or is
         // not a directory) for symmetry with the ZipReader behavior.
-        Cu.reportError(e);
+        if (!e.becauseNoSuchFile) {
+          Cu.reportError(e);
+        }
       }
       iter.close();
 
@@ -573,6 +574,10 @@ this.ExtensionData = class {
     let webAccessibleResources = [];
 
     if (this.type === "extension") {
+      if (this.manifest.devtools_page) {
+        permissions.add("devtools");
+      }
+
       for (let perm of manifest.permissions) {
         if (perm === "geckoProfiler") {
           const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
@@ -790,6 +795,159 @@ this.ExtensionData = class {
     this.localeData.selectedLocale = locale;
     return results[0];
   }
+
+  /**
+   * Formats all the strings for a permissions dialog/notification.
+   *
+   * @param {object} info Information about the permissions being requested.
+   *
+   * @param {array<string>} info.permissions.origins
+   *                        Origin permissions requested.
+   * @param {array<string>} info.permissions.permissions
+   *                        Regular (non-origin) permissions requested.
+   * @param {AddonWrapper} info.addonName
+   *                       The name of the addon for which permissions are
+   *                       being requested.
+   * @param {boolean} info.unsigned
+   *                  True if the prompt is for installing an unsigned addon.
+   * @param {string} info.type
+   *                 The type of prompt being shown.  May be one of "update",
+   *                 "sideload", "optional", or omitted for a regular
+   *                 install prompt.
+   * @param {string} info.appName
+   *                 The localized name of the application, to be substituted
+   *                 in computed strings as needed.
+   * @param {nsIStringBundle} bundle
+   *                          The string bundle to use for l10n.
+   *
+   * @returns {object} An object with properties containing localized strings
+   *                   for various elements of a permission dialog.
+   */
+  static formatPermissionStrings(info, bundle) {
+    let result = {};
+
+    let perms = info.permissions || {origins: [], permissions: []};
+
+    // First classify our host permissions
+    let allUrls = false, wildcards = new Set(), sites = new Set();
+    for (let permission of perms.origins) {
+      if (permission == "<all_urls>") {
+        allUrls = true;
+        break;
+      }
+      let match = /^[htps*]+:\/\/([^/]+)\//.exec(permission);
+      if (!match) {
+        Cu.reportError(`Unparseable host permission ${permission}`);
+        continue;
+      }
+      if (match[1] == "*") {
+        allUrls = true;
+      } else if (match[1].startsWith("*.")) {
+        wildcards.add(match[1].slice(2));
+      } else {
+        sites.add(match[1]);
+      }
+    }
+
+    // Format the host permissions.  If we have a wildcard for all urls,
+    // a single string will suffice.  Otherwise, show domain wildcards
+    // first, then individual host permissions.
+    result.msgs = [];
+    if (allUrls) {
+      result.msgs.push(bundle.GetStringFromName("webextPerms.hostDescription.allUrls"));
+    } else {
+      // Formats a list of host permissions.  If we have 4 or fewer, display
+      // them all, otherwise display the first 3 followed by an item that
+      // says "...plus N others"
+      let format = (list, itemKey, moreKey) => {
+        function formatItems(items) {
+          result.msgs.push(...items.map(item => bundle.formatStringFromName(itemKey, [item], 1)));
+        }
+        if (list.length < 5) {
+          formatItems(list);
+        } else {
+          formatItems(list.slice(0, 3));
+
+          let remaining = list.length - 3;
+          result.msgs.push(PluralForm.get(remaining, bundle.GetStringFromName(moreKey))
+                                     .replace("#1", remaining));
+        }
+      };
+
+      format(Array.from(wildcards), "webextPerms.hostDescription.wildcard",
+             "webextPerms.hostDescription.tooManyWildcards");
+      format(Array.from(sites), "webextPerms.hostDescription.oneSite",
+             "webextPerms.hostDescription.tooManySites");
+    }
+
+    let permissionKey = perm => `webextPerms.description.${perm}`;
+
+    // Next, show the native messaging permission if it is present.
+    const NATIVE_MSG_PERM = "nativeMessaging";
+    if (perms.permissions.includes(NATIVE_MSG_PERM)) {
+      result.msgs.push(bundle.formatStringFromName(permissionKey(NATIVE_MSG_PERM), [info.appName], 1));
+    }
+
+    // Finally, show remaining permissions, in any order.
+    for (let permission of perms.permissions) {
+      // Handled above
+      if (permission == "nativeMessaging") {
+        continue;
+      }
+      try {
+        result.msgs.push(bundle.GetStringFromName(permissionKey(permission)));
+      } catch (err) {
+        // We deliberately do not include all permissions in the prompt.
+        // So if we don't find one then just skip it.
+      }
+    }
+
+    const haveAccessKeys = (AppConstants.platform !== "android");
+
+    result.header = bundle.formatStringFromName("webextPerms.header", [info.addonName], 1);
+    result.text = info.unsigned ?
+                  bundle.GetStringFromName("webextPerms.unsignedWarning") : "";
+    result.listIntro = bundle.GetStringFromName("webextPerms.listIntro");
+
+    result.acceptText = bundle.GetStringFromName("webextPerms.add.label");
+    result.cancelText = bundle.GetStringFromName("webextPerms.cancel.label");
+    if (haveAccessKeys) {
+      result.acceptKey = bundle.GetStringFromName("webextPerms.add.accessKey");
+      result.cancelKey = bundle.GetStringFromName("webextPerms.cancel.accessKey");
+    }
+
+    if (info.type == "sideload") {
+      result.header = bundle.formatStringFromName("webextPerms.sideloadHeader", [info.addonName], 1);
+      let key = result.msgs.length == 0 ?
+                "webextPerms.sideloadTextNoPerms" : "webextPerms.sideloadText2";
+      result.text = bundle.GetStringFromName(key);
+      result.acceptText = bundle.GetStringFromName("webextPerms.sideloadEnable.label");
+      result.cancelText = bundle.GetStringFromName("webextPerms.sideloadCancel.label");
+      if (haveAccessKeys) {
+        result.acceptKey = bundle.GetStringFromName("webextPerms.sideloadEnable.accessKey");
+        result.cancelKey = bundle.GetStringFromName("webextPerms.sideloadCancel.accessKey");
+      }
+    } else if (info.type == "update") {
+      result.header = "";
+      result.text = bundle.formatStringFromName("webextPerms.updateText", [info.addonName], 1);
+      result.acceptText = bundle.GetStringFromName("webextPerms.updateAccept.label");
+      if (haveAccessKeys) {
+        result.acceptKey = bundle.GetStringFromName("webextPerms.updateAccept.accessKey");
+      }
+    } else if (info.type == "optional") {
+      result.header = bundle.formatStringFromName("webextPerms.optionalPermsHeader", [info.addonName], 1);
+      result.text = "";
+      result.listIntro = bundle.GetStringFromName("webextPerms.optionalPermsListIntro");
+      result.acceptText = bundle.GetStringFromName("webextPerms.optionalPermsAllow.label");
+      result.cancelText = bundle.GetStringFromName("webextPerms.optionalPermsDeny.label");
+      if (haveAccessKeys) {
+        result.acceptKey = bundle.GetStringFromName("webextPerms.optionalPermsAllow.accessKey");
+        result.cancelKey = bundle.GetStringFromName("webextPerms.optionalPermsDeny.accessKey");
+      }
+    }
+
+    return result;
+  }
 };
 
 const PROXIED_EVENTS = new Set(["test-harness-message", "add-permissions", "remove-permissions"]);
@@ -866,7 +1024,7 @@ this.Extension = class extends ExtensionData {
       StartupCache.clearAddonData(addonData.id);
     }
 
-    this.remote = useRemoteWebExtensions;
+    this.remote = !WebExtensionPolicy.isExtensionProcess;
 
     if (this.remote && processCount !== 1) {
       throw new Error("Out-of-process WebExtensions are not supported with multiple child processes");
@@ -1568,7 +1726,6 @@ this.Langpack = class extends ExtensionData {
             chromeEntries.push(["locale", alias, language, path[platform]]);
           }
         }
-
       }
     }
     return chromeEntries;

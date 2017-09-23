@@ -8,12 +8,12 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
-@namespace svg url("http://www.w3.org/2000/svg");
 
 %include ../shared/browser.inc.css
 
 :root {
   --tabs-border: rgba(0,0,0,.3);
+  --tab-line-color: highlight;
 
   --toolbar-non-lwt-bgcolor: -moz-dialog;
   --toolbar-non-lwt-textcolor: -moz-dialogtext;
@@ -23,6 +23,7 @@
 
   --toolbarbutton-border-radius: 4px;
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) - 1px);
+  --toolbarbutton-icon-fill-opacity: .85;
 
   --panel-separator-color: ThreeDShadow;
   --arrowpanel-dimmed: hsla(0,0%,80%,.3);
@@ -58,6 +59,7 @@
 #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
   background-color: var(--toolbar-bgcolor);
   background-image: var(--toolbar-bgimage);
+  color: var(--toolbar-color, inherit);
   -moz-appearance: none;
   border-style: none;
 }
@@ -175,20 +177,6 @@ menuitem.bookmark-item {
 }
 
 %include ../shared/bookmarked-notification.inc.css
-
-.unified-nav-back[_moz-menuactive] {
-  list-style-image: url("moz-icon://stock/gtk-go-back-ltr?size=menu") !important;
-}
-.unified-nav-back[_moz-menuactive]:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-back-rtl?size=menu") !important;
-}
-.unified-nav-forward[_moz-menuactive] {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-ltr?size=menu") !important;
-}
-.unified-nav-forward[_moz-menuactive]:-moz-locale-dir(rtl) {
-  list-style-image: url("moz-icon://stock/gtk-go-forward-rtl?size=menu") !important;
-}
-
 %include ../shared/toolbarbuttons.inc.css
 %include ../shared/toolbarbutton-icons.inc.css
 %include ../shared/menupanel.inc.css
@@ -296,16 +284,6 @@ menuitem.bookmark-item {
 }
 
 /* identity box */
-
-#identity-box:-moz-locale-dir(ltr) {
-  border-top-left-radius: 1.5px;
-  border-bottom-left-radius: 1.5px;
-}
-
-#identity-box:-moz-locale-dir(rtl) {
-  border-top-right-radius: 1.5px;
-  border-bottom-right-radius: 1.5px;
-}
 
 #identity-box:not(:active):-moz-focusring {
   outline: 1px dotted;
@@ -588,7 +566,11 @@ html|span.ac-emphasize-text-url {
 }
 
 .sidebar-splitter {
-  border-color: ThreeDShadow;
+  -moz-appearance: none;
+  width: 6px;
+  background-color: -moz-dialog;
+  border: 1px ThreeDShadow;
+  border-style: none solid;
 }
 
 .browserContainer > findbar {
@@ -742,8 +724,6 @@ html|span.ac-emphasize-text-url {
 
 #UITourTooltipClose {
   margin-inline-end: -4px;
-  height: 16px;
-  width: 16px;
 }
 
 /**

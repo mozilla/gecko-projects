@@ -6,17 +6,17 @@
 //!
 //! [calc]: https://drafts.csswg.org/css-values/#calc-notation
 
-use app_units::Au;
 use cssparser::{Parser, Token, BasicParseError};
 use parser::ParserContext;
 use std::ascii::AsciiExt;
 use std::fmt;
 use style_traits::{ToCss, ParseError, StyleParseError};
-use style_traits::values::specified::AllowedLengthType;
+use style_traits::values::specified::AllowedNumericType;
 use values::{CSSInteger, CSSFloat};
 use values::computed;
 use values::specified::{Angle, Time};
-use values::specified::length::{FontRelativeLength, NoCalcLength, ViewportPercentageLength};
+use values::specified::length::{AbsoluteLength, FontRelativeLength, NoCalcLength};
+use values::specified::length::ViewportPercentageLength;
 
 /// A node inside a `Calc` expression's AST.
 #[derive(Clone, Debug)]
@@ -64,11 +64,12 @@ pub enum CalcUnit {
 
 /// A struct to hold a simplified `<length>` or `<percentage>` expression.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub struct CalcLengthOrPercentage {
-    pub clamping_mode: AllowedLengthType,
-    pub absolute: Option<Au>,
+    pub clamping_mode: AllowedNumericType,
+    pub absolute: Option<AbsoluteLength>,
     pub vw: Option<CSSFloat>,
     pub vh: Option<CSSFloat>,
     pub vmin: Option<CSSFloat>,
@@ -118,6 +119,17 @@ impl ToCss for CalcLengthOrPercentage {
             };
         }
 
+        macro_rules! serialize_abs {
+            ( $( $val:ident ),+ ) => {
+                $(
+                    if let Some(AbsoluteLength::$val(v)) = self.absolute {
+                        first_value_check!(v);
+                        AbsoluteLength::$val(v.abs()).to_css(dest)?;
+                    }
+                )+
+            };
+        }
+
         dest.write_str("calc(")?;
 
         // NOTE(emilio): Percentages first because of web-compat problems, see:
@@ -129,18 +141,17 @@ impl ToCss for CalcLengthOrPercentage {
 
         // NOTE(emilio): The order here it's very intentional, and alphabetic
         // per the spec linked above.
-        serialize!(ch, em, ex);
+        serialize!(ch);
+        serialize_abs!(Cm);
+        serialize!(em, ex);
+        serialize_abs!(In);
 
         #[cfg(feature = "gecko")]
         {
             serialize!(mozmm);
         }
 
-        if let Some(val) = self.absolute {
-            first_value_check!(val);
-            val.abs().to_css(dest)?;
-        }
-
+        serialize_abs!(Mm, Pc, Pt, Px, Q);
         serialize!(rem, vh, vmax, vmin, vw);
 
         dest.write_str(")")
@@ -281,7 +292,7 @@ impl CalcNode {
 
     /// Tries to simplify this expression into a `<length>` or `<percentage`>
     /// value.
-    fn to_length_or_percentage(&self, clamping_mode: AllowedLengthType)
+    fn to_length_or_percentage(&self, clamping_mode: AllowedNumericType)
                                -> Result<CalcLengthOrPercentage, ()> {
         let mut ret = CalcLengthOrPercentage {
             clamping_mode: clamping_mode,
@@ -349,8 +360,10 @@ impl CalcNode {
                 match *l {
                     NoCalcLength::Absolute(abs) => {
                         ret.absolute = Some(
-                            ret.absolute.unwrap_or(Au(0)) +
-                            Au::from(abs).scale_by(factor)
+                            match ret.absolute {
+                                Some(value) => value + abs * factor,
+                                None => abs * factor,
+                            }
                         );
                     }
                     NoCalcLength::FontRelative(rel) => {
@@ -553,7 +566,7 @@ impl CalcNode {
     pub fn parse_length_or_percentage<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
-        clamping_mode: AllowedLengthType
+        clamping_mode: AllowedNumericType
     ) -> Result<CalcLengthOrPercentage, ParseError<'i>> {
         Self::parse(context, input, CalcUnit::LengthOrPercentage)?
             .to_length_or_percentage(clamping_mode)
@@ -574,7 +587,7 @@ impl CalcNode {
     pub fn parse_length<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
-        clamping_mode: AllowedLengthType
+        clamping_mode: AllowedNumericType
     ) -> Result<CalcLengthOrPercentage, ParseError<'i>> {
         Self::parse(context, input, CalcUnit::Length)?
             .to_length_or_percentage(clamping_mode)

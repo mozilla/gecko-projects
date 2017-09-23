@@ -32,7 +32,7 @@ const STYLE_INSPECTOR_PROPERTIES = "devtools/shared/locales/styleinspector.prope
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const STYLE_INSPECTOR_L10N = new LocalizationHelper(STYLE_INSPECTOR_PROPERTIES);
 
-const PREF_ORIG_SOURCES = "devtools.styleeditor.source-maps-enabled";
+const PREF_ORIG_SOURCES = "devtools.source-map.client-service.enabled";
 
 /**
  * RuleEditor is responsible for the following:
@@ -130,7 +130,7 @@ RuleEditor.prototype = {
     let header = createChild(code, "div", {});
 
     this.selectorText = createChild(header, "span", {
-      class: "ruleview-selectorcontainer theme-fg-color3",
+      class: "ruleview-selectorcontainer",
       tabindex: this.isSelectorEditable ? "0" : "-1",
     });
 

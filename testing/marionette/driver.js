@@ -673,12 +673,11 @@ GeckoDriver.prototype.listeningPromise = function() {
  *  <dt><code>proxy</code> (Proxy object)
  *  <dd>Defines the proxy configuration.
  *
- *  <dt><code>specificationLevel</code> (number)
- *  <dd>If set to 1, a WebDriver conforming <i>WebDriver::ElementClick</i>
- *   implementation will be used.
- *
  *  <dt><code>moz:accessibilityChecks</code> (boolean)
  *  <dd>Run a11y checks when clicking elements.
+ *
+ *  <dt><code>moz:webdriverClick</code> (boolean)
+ *  <dd>Use a WebDriver conforming <i>WebDriver::ElementClick</i>.
  * </dl>
  *
  * <h4>Timeouts object</h4>
@@ -1481,34 +1480,10 @@ GeckoDriver.prototype.setWindowRect = async function(cmd, resp) {
   let {x, y, width, height} = cmd.parameters;
   let origRect = this.curBrowser.rect;
 
-  // Throttle resize event by forcing the event queue to flush and delay
-  // until the main thread is idle.
-  function optimisedResize(resolve) {
-    return () => Services.tm.idleDispatchToMainThread(() => {
-      win.requestAnimationFrame(resolve);
-    });
-  }
-
-  // Exit fullscreen and wait for window to resize.
-  async function exitFullscreen() {
-    return new Promise(resolve => {
-      win.addEventListener("sizemodechange", optimisedResize(resolve), {once: true});
-      win.fullScreen = false;
-    });
-  }
-
-  // Restore window and wait for the window state to change.
-  async function restoreWindow() {
-    return new Promise(resolve => {
-      win.addEventListener("sizemodechange", resolve, {once: true});
-      win.restore();
-    });
-  }
-
   // Synchronous resize to |width| and |height| dimensions.
   async function resizeWindow(width, height) {
     return new Promise(resolve => {
-      win.addEventListener("resize", optimisedResize(resolve), {once: true});
+      win.addEventListener("resize", whenIdle(win, resolve), {once: true});
       win.resizeTo(width, height);
     });
   }
@@ -1540,13 +1515,13 @@ GeckoDriver.prototype.setWindowRect = async function(cmd, resp) {
     });
   }
 
-  switch (win.windowState) {
-    case win.STATE_FULLSCREEN:
-      await exitFullscreen();
+  switch (WindowState.from(win.windowState)) {
+    case WindowState.Fullscreen:
+      await exitFullscreen(win);
       break;
 
-    case win.STATE_MINIMIZED:
-      await restoreWindow();
+    case WindowState.Minimized:
+      await restoreWindow(win, this.curBrowser.eventObserver);
       break;
   }
 
@@ -3024,10 +2999,13 @@ GeckoDriver.prototype.minimizeWindow = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
   assert.noUserPrompt(this.dialog);
 
-  let state = WindowState.from(win.windowState);
-  if (state != WindowState.Minimized) {
+  if (WindowState.from(win.windowState) == WindowState.Fullscreen) {
+    await exitFullscreen(win);
+  }
+
+  if (WindowState.from(win.windowState) != WindowState.Minimized) {
     await new Promise(resolve => {
-      win.addEventListener("sizemodechange", resolve, {once: true});
+      this.curBrowser.eventObserver.addEventListener("visibilitychange", resolve, {once: true});
       win.minimize();
     });
   }
@@ -3058,6 +3036,16 @@ GeckoDriver.prototype.maximizeWindow = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
   assert.noUserPrompt(this.dialog);
 
+  switch (WindowState.from(win.windowState)) {
+    case WindowState.Fullscreen:
+      await exitFullscreen(win);
+      break;
+
+    case WindowState.Minimized:
+      await restoreWindow(win, this.curBrowser.eventObserver);
+      break;
+  }
+
   const origSize = {
     outerWidth: win.outerWidth,
     outerHeight: win.outerHeight,
@@ -3079,8 +3067,7 @@ GeckoDriver.prototype.maximizeWindow = async function(cmd, resp) {
     });
   }
 
-  let state = WindowState.from(win.windowState);
-  if (state != WindowState.Maximized) {
+  if (WindowState.from(win.windowState) != win.Maximized) {
     await new TimedPromise(resolve => {
       win.addEventListener("sizemodechange", resolve, {once: true});
       win.maximize();
@@ -3135,8 +3122,11 @@ GeckoDriver.prototype.fullscreenWindow = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
   assert.noUserPrompt(this.dialog);
 
-  let state = WindowState.from(win.windowState);
-  if (state != WindowState.Fullscreen) {
+  if (WindowState.from(win.windowState) == WindowState.Minimized) {
+    await restoreWindow(win, this.curBrowser.eventObserver);
+  }
+
+  if (WindowState.from(win.windowState) != WindowState.Fullscreen) {
     await new Promise(resolve => {
       win.addEventListener("sizemodechange", resolve, {once: true});
       win.fullScreen = true;
@@ -3705,4 +3695,52 @@ function getOuterWindowId(win) {
   return win.QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIDOMWindowUtils)
       .outerWindowID;
+}
+
+/**
+ * Exit fullscreen and wait for <var>window</var> to resize.
+ *
+ * @param {ChromeWindow} window
+ *     Window to exit fullscreen.
+ */
+async function exitFullscreen(window) {
+  return new Promise(resolve => {
+    window.addEventListener("sizemodechange", whenIdle(window, resolve), {once: true});
+    window.fullScreen = false;
+  });
+}
+
+/**
+ * Restore window and wait for the window state to change.
+ *
+ * @param {ChromeWindow} chromWindow
+ *     Window to restore.
+ * @param {WebElementEventTarget} contentWindow
+ *     Content window to listen for events in.
+ */
+async function restoreWindow(chromeWindow, contentWindow) {
+  return new Promise(resolve => {
+    contentWindow.addEventListener("visibilitychange", resolve, {once: true});
+    chromeWindow.restore();
+  });
+}
+
+/**
+ * Throttle <var>callback</var> until the main thread is idle and
+ * <var>window</var> has performed an animation frame.
+ *
+ * @param {ChromeWindow} window
+ *     Window to request the animation frame from.
+ * @param {function()} callback
+ *     Called when done.
+ *
+ * @return {function()}
+ *     Anonymous function that when invoked will wait for the main
+ *     thread to clear up and request an animation frame before calling
+ *     <var>callback</var>.
+ */
+function whenIdle(window, callback) {
+  return () => Services.tm.idleDispatchToMainThread(() => {
+    window.requestAnimationFrame(callback);
+  });
 }

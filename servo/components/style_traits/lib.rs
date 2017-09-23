@@ -19,6 +19,8 @@ extern crate app_units;
 extern crate euclid;
 #[cfg(feature = "servo")] extern crate heapsize;
 #[cfg(feature = "servo")] #[macro_use] extern crate heapsize_derive;
+#[cfg(feature = "gecko")] extern crate malloc_size_of;
+#[cfg(feature = "gecko")] #[macro_use] extern crate malloc_size_of_derive;
 extern crate selectors;
 #[cfg(feature = "servo")] #[macro_use] extern crate serde;
 #[cfg(feature = "servo")] extern crate webrender_api;
@@ -107,7 +109,13 @@ pub enum StyleParseError<'i> {
     PropertyDeclarationValueNotExhausted,
     /// An unexpected dimension token was encountered.
     UnexpectedDimension(CowRcStr<'i>),
-    /// A media query using a ranged expression with no value was encountered.
+    /// Expected identifier not found.
+    ExpectedIdentifier(Token<'i>),
+    /// Missing or invalid media feature name.
+    MediaQueryExpectedFeatureName(CowRcStr<'i>),
+    /// Missing or invalid media feature value.
+    MediaQueryExpectedFeatureValue,
+    /// min- or max- properties must have a value.
     RangedExpressionWithNoValue,
     /// A function was encountered that was not expected.
     UnexpectedFunction(CowRcStr<'i>),
@@ -132,6 +140,14 @@ pub enum StyleParseError<'i> {
 pub enum ValueParseError<'i> {
     /// An invalid token was encountered while parsing a color value.
     InvalidColor(Token<'i>),
+    /// An invalid filter value was encountered.
+    InvalidFilter(Token<'i>),
+}
+
+impl<'a> From<ValueParseError<'a>> for ParseError<'a> {
+    fn from(this: ValueParseError<'a>) -> Self {
+        StyleParseError::ValueError(this).into()
+    }
 }
 
 impl<'i> ValueParseError<'i> {

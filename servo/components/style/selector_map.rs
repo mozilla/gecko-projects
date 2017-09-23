@@ -9,8 +9,10 @@ use {Atom, LocalName};
 use applicable_declarations::ApplicableDeclarationBlock;
 use context::QuirksMode;
 use dom::TElement;
+use fallible::FallibleVec;
 use hash::{HashMap, HashSet};
 use hash::map as hash_map;
+use hashglobe::FailedAllocationError;
 use pdqsort::sort_by;
 use precomputed_hash::PrecomputedHash;
 use rule_tree::CascadeLevel;
@@ -19,8 +21,6 @@ use selectors::matching::{matches_selector, MatchingContext, ElementSelectorFlag
 use selectors::parser::{Component, Combinator, SelectorIter};
 use smallvec::{SmallVec, VecLike};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
-#[cfg(feature = "gecko")]
-use stylesheets::{MallocEnclosingSizeOfFn, MallocSizeOfHash};
 use stylist::Rule;
 
 /// A hasher implementation that doesn't hash anything, because it expects its
@@ -94,6 +94,7 @@ pub trait SelectorMapEntry : Sized + Clone {
 ///
 /// TODO: Tune the initial capacity of the HashMap
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct SelectorMap<T: 'static> {
     /// A hash from an ID to rules which contain that ID selector.
@@ -145,22 +146,6 @@ impl<T: 'static> SelectorMap<T> {
     /// Returns the number of entries.
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    /// Measures heap usage.
-    #[cfg(feature = "gecko")]
-    pub fn malloc_size_of_children(&self, malloc_enclosing_size_of: MallocEnclosingSizeOfFn)
-                                   -> usize {
-        // Currently we measure the HashMap storage, but not things pointed to
-        // by keys and values.
-        let mut n = 0;
-        n += self.id_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
-        n += self.class_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
-        n += self.local_name_hash.malloc_shallow_size_of_hash(malloc_enclosing_size_of);
-
-        // We may measure other fields in the future if DMD says it's worth it.
-
-        n
     }
 }
 
@@ -257,18 +242,20 @@ impl SelectorMap<Rule> {
 
 impl<T: SelectorMapEntry> SelectorMap<T> {
     /// Inserts into the correct hash, trying id, class, and localname.
-    pub fn insert(&mut self, entry: T, quirks_mode: QuirksMode) {
+    pub fn insert(
+        &mut self,
+        entry: T,
+        quirks_mode: QuirksMode
+    ) -> Result<(), FailedAllocationError> {
         self.count += 1;
 
         let vector = match find_bucket(entry.selector()) {
             Bucket::ID(id) => {
-                self.id_hash
-                    .entry(id.clone(), quirks_mode)
+                self.id_hash.try_entry(id.clone(), quirks_mode)?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::Class(class) => {
-                self.class_hash
-                    .entry(class.clone(), quirks_mode)
+                self.class_hash.try_entry(class.clone(), quirks_mode)?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::LocalName { name, lower_name } => {
@@ -284,10 +271,12 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
                 // rulehash lookup may produce superfluous selectors, but the
                 // subsequent selector matching work will filter them out.
                 if name != lower_name {
-                    find_push(&mut self.local_name_hash, lower_name.clone(), entry.clone());
+                    self.local_name_hash
+                        .try_entry(lower_name.clone())?
+                        .or_insert_with(SmallVec::new)
+                        .try_push(entry.clone())?;
                 }
-                self.local_name_hash
-                    .entry(name.clone())
+                self.local_name_hash.try_entry(name.clone())?
                     .or_insert_with(SmallVec::new)
             }
             Bucket::Universal => {
@@ -295,7 +284,7 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
             }
         };
 
-        vector.push(entry);
+        vector.try_push(entry)
     }
 
     /// Looks up entries by id, class, local name, and other (in order).
@@ -470,17 +459,9 @@ fn find_bucket<'a>(mut iter: SelectorIter<'a, SelectorImpl>) -> Bucket<'a> {
     return current_bucket
 }
 
-#[inline]
-fn find_push<Str: Eq + Hash, V, VL>(map: &mut PrecomputedHashMap<Str, VL>,
-                                    key: Str,
-                                    value: V)
-    where VL: VecLike<V> + Default
-{
-    map.entry(key).or_insert_with(VL::default).push(value)
-}
-
 /// Wrapper for PrecomputedHashMap that does ASCII-case-insensitive lookup in quirks mode.
 #[derive(Debug)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V: 'static>(PrecomputedHashMap<K, V>);
 
@@ -501,6 +482,18 @@ impl<V: 'static> MaybeCaseInsensitiveHashMap<Atom, V> {
         self.0.entry(key)
     }
 
+    /// HashMap::try_entry
+    pub fn try_entry(
+        &mut self,
+        mut key: Atom,
+        quirks_mode: QuirksMode
+    ) -> Result<hash_map::Entry<Atom, V>, FailedAllocationError> {
+        if quirks_mode == QuirksMode::Quirks {
+            key = key.to_ascii_lowercase()
+        }
+        self.0.try_entry(key)
+    }
+
     /// HashMap::iter
     pub fn iter(&self) -> hash_map::Iter<Atom, V> {
         self.0.iter()
@@ -518,16 +511,6 @@ impl<V: 'static> MaybeCaseInsensitiveHashMap<Atom, V> {
         } else {
             self.0.get(key)
         }
-    }
-}
-
-#[cfg(feature = "gecko")]
-impl<K, V> MallocSizeOfHash for MaybeCaseInsensitiveHashMap<K, V>
-    where K: PrecomputedHash + Eq + Hash
-{
-    fn malloc_shallow_size_of_hash(&self, malloc_enclosing_size_of: MallocEnclosingSizeOfFn)
-                                   -> usize {
-        self.0.malloc_shallow_size_of_hash(malloc_enclosing_size_of)
     }
 }
 

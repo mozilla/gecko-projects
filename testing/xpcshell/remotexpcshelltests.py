@@ -4,9 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import, print_function
+
 import logging
 import posixpath
-import sys, os
+import os
+import sys
 import subprocess
 import runxpcshelltests as xpcshell
 import tempfile
@@ -23,8 +26,10 @@ from xpcshellcommandline import parser_remote
 
 here = os.path.dirname(os.path.abspath(__file__))
 
+
 def remoteJoin(path1, path2):
     return posixpath.join(path1, path2)
+
 
 class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
     def __init__(self, *args, **kwargs):
@@ -43,7 +48,7 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
         else:
             remoteName = remoteJoin(remoteDir, os.path.basename(name))
         return ['-e', 'const _TEST_FILE = ["%s"];' %
-                 remoteName.replace('\\', '/')]
+                remoteName.replace('\\', '/')]
 
     def remoteForLocal(self, local):
         for mapping in self.pathMapping:
@@ -168,12 +173,14 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
             # The minidumps directory is automatically created when Fennec
             # (first) starts, so its lack of presence is a hint that
             # something went wrong.
-            print "Automation Error: No crash directory (%s) found on remote device" % self.remoteMinidumpDir
+            print("Automation Error: No crash directory (%s) found on remote device" %
+                  self.remoteMinidumpDir)
             # Whilst no crash was found, the run should still display as a failure
             return True
         with mozfile.TemporaryDirectory() as dumpDir:
             self.device.getDirectory(self.remoteMinidumpDir, dumpDir)
-            crashed = xpcshell.XPCShellTestThread.checkForCrashes(self, dumpDir, symbols_path, test_name)
+            crashed = xpcshell.XPCShellTestThread.checkForCrashes(
+                  self, dumpDir, symbols_path, test_name)
             self.clearRemoteDir(self.remoteMinidumpDir)
         return crashed
 
@@ -215,8 +222,8 @@ class RemoteXPCShellTestThread(xpcshell.XPCShellTestThread):
             except mozdevice.DMError:
                 self.log.error("failed to delete %s: '%s'" % (remoteDir, str(out)))
 
-    #TODO: consider creating a separate log dir.  We don't have the test file structure,
-    #      so we use filename.log.  Would rather see ./logs/filename.log
+    # TODO: consider creating a separate log dir.  We don't have the test file structure,
+    # so we use filename.log.  Would rather see ./logs/filename.log
     def createLogFile(self, test, stdout):
         try:
             f = None
@@ -275,7 +282,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         elif os.path.isdir(os.path.join(here, 'tests')):
             self.xpcDir = os.path.join(here, 'tests')
         else:
-            print >> sys.stderr, "Couldn't find local xpcshell test directory"
+            print("Couldn't find local xpcshell test directory", file=sys.stderr)
             sys.exit(1)
 
         if options['localAPK']:
@@ -375,7 +382,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
                 if packageName:
                     self.appRoot = self.device.getAppRoot(packageName.strip())
             except Exception as detail:
-                print "unable to determine app root: " + str(detail)
+                print("unable to determine app root: " + str(detail))
                 pass
         return None
 
@@ -383,11 +390,11 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         if (not self.device.dirExists(self.remoteBinDir)):
             # device.mkDir may fail here where shellCheckOutput may succeed -- see bug 817235
             try:
-                self.device.shellCheckOutput(["mkdir", self.remoteBinDir]);
+                self.device.shellCheckOutput(["mkdir", self.remoteBinDir])
             except mozdevice.DMError:
                 # Might get a permission error; try again as root, if available
-                self.device.shellCheckOutput(["mkdir", self.remoteBinDir], root=True);
-                self.device.shellCheckOutput(["chmod", "777", self.remoteBinDir], root=True);
+                self.device.shellCheckOutput(["mkdir", self.remoteBinDir], root=True)
+                self.device.shellCheckOutput(["chmod", "777", self.remoteBinDir], root=True)
 
         remotePrefDir = remoteJoin(self.remoteBinDir, "defaults/pref")
         if (self.device.dirExists(self.remoteTmpDir)):
@@ -417,11 +424,12 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         for fname in binaries:
             local = os.path.join(self.localBin, fname)
             if os.path.isfile(local):
-                print >> sys.stderr, "Pushing %s.." % fname
+                print("Pushing %s.." % fname, file=sys.stderr)
                 remoteFile = remoteJoin(self.remoteBinDir, fname)
                 self.device.pushFile(local, remoteFile)
             else:
-                print >> sys.stderr, "*** Expected binary %s not found in %s!" % (fname, self.localBin)
+                print("*** Expected binary %s not found in %s!" %
+                      (fname, self.localBin), file=sys.stderr)
 
         local = os.path.join(self.localBin, "components/httpd.js")
         remoteFile = remoteJoin(self.remoteComponentsDir, "httpd.js")
@@ -448,7 +456,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
                 dir = tempfile.mkdtemp()
                 for info in self.localAPKContents.infolist():
                     if info.filename.endswith(".so"):
-                        print >> sys.stderr, "Pushing %s.." % info.filename
+                        print("Pushing %s.." % info.filename, file=sys.stderr)
                         remoteFile = remoteJoin(self.remoteBinDir, os.path.basename(info.filename))
                         self.localAPKContents.extract(info, dir)
                         localFile = os.path.join(dir, info.filename)
@@ -467,9 +475,9 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
 
         for file in os.listdir(self.localLib):
             if (file.endswith(".so")):
-                print >> sys.stderr, "Pushing %s.." % file
+                print("Pushing %s.." % file, file=sys.stderr)
                 if 'libxul' in file:
-                    print >> sys.stderr, "This is a big file, it could take a while."
+                    print("This is a big file, it could take a while.", file=sys.stderr)
                 localFile = os.path.join(self.localLib, file)
                 remoteFile = remoteJoin(self.remoteBinDir, file)
                 self.device.pushFile(localFile, remoteFile)
@@ -481,7 +489,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
             for root, dirs, files in os.walk(localArmLib):
                 for file in files:
                     if (file.endswith(".so")):
-                        print >> sys.stderr, "Pushing %s.." % file
+                        print("Pushing %s.." % file, file=sys.stderr)
                         localFile = os.path.join(root, file)
                         remoteFile = remoteJoin(self.remoteBinDir, file)
                         self.device.pushFile(localFile, remoteFile)
@@ -494,7 +502,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
             self.device.pushDir(self.testingModulesDir, self.remoteModulesDir)
 
     def setupTestDir(self):
-        print 'pushing %s' % self.xpcDir
+        print('pushing %s' % self.xpcDir)
         try:
             # The tests directory can be quite large: 5000 files and growing!
             # Sometimes - like on a low-end aws instance running an emulator - the push
@@ -510,7 +518,8 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         self.device.mkDir(self.remoteMinidumpDir)
 
     def buildTestList(self, test_tags=None, test_paths=None, verify=False):
-        xpcshell.XPCShellTests.buildTestList(self, test_tags=test_tags, test_paths=test_paths, verify=verify)
+        xpcshell.XPCShellTests.buildTestList(
+            self, test_tags=test_tags, test_paths=test_paths, verify=verify)
         uniqueTestPaths = set([])
         for test in self.alltests:
             uniqueTestPaths.add(test['here'])
@@ -518,6 +527,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
             abbrevTestDir = os.path.relpath(testdir, self.xpcDir)
             remoteScriptDir = remoteJoin(self.remoteScriptsDir, abbrevTestDir)
             self.pathMapping.append(PathMapping(testdir, remoteScriptDir))
+
 
 def verifyRemoteOptions(parser, options):
     if isinstance(options, Namespace):
@@ -554,15 +564,17 @@ def verifyRemoteOptions(parser, options):
             parser.error("Couldn't find local binary dir, specify --local-bin-dir")
     return options
 
+
 class PathMapping:
 
     def __init__(self, localDir, remoteDir):
         self.local = localDir
         self.remote = remoteDir
 
+
 def main():
-    if sys.version_info < (2,7):
-        print >>sys.stderr, "Error: You must use python version 2.7 or newer but less than 3.0"
+    if sys.version_info < (2, 7):
+        print("Error: You must use python version 2.7 or newer but less than 3.0", file=sys.stderr)
         sys.exit(1)
 
     parser = parser_remote()
@@ -572,10 +584,10 @@ def main():
             if (file.endswith(".apk") and file.startswith("fennec")):
                 options.localAPK = os.path.join(options.objdir, "dist")
                 options.localAPK = os.path.join(options.localAPK, file)
-                print >>sys.stderr, "using APK: " + options.localAPK
+                print("using APK: " + options.localAPK, file=sys.stderr)
                 break
         else:
-            print >>sys.stderr, "Error: please specify an APK"
+            print("Error: please specify an APK", file=sys.stderr)
             sys.exit(1)
 
     options = verifyRemoteOptions(parser, options)
@@ -592,7 +604,7 @@ def main():
     dm = mozdevice.DroidADB(**dm_args)
 
     if options['interactive'] and not options['testPath']:
-        print >>sys.stderr, "Error: You must specify a test filename in interactive mode!"
+        print("Error: You must specify a test filename in interactive mode!", file=sys.stderr)
         sys.exit(1)
 
     if options['xpcshell'] is None:

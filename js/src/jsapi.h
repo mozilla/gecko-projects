@@ -1157,7 +1157,11 @@ class JS_PUBLIC_API(ContextOptions) {
         werror_(false),
         strictMode_(false),
         extraWarnings_(false),
-        forEachStatement_(false)
+        forEachStatement_(false),
+        streams_(false)
+#ifdef FUZZING
+        , fuzzing_(false)
+#endif
     {
     }
 
@@ -2278,6 +2282,9 @@ inline int CheckIsSetterOp(JSSetterOp op);
 #define JS_PSGS(name, getter, setter, flags) \
     JS_PS_ACCESSOR_SPEC(name, JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(setter), flags, \
                          JSPROP_SHARED)
+#define JS_SYM_GET(symbol, getter, flags) \
+    JS_PS_ACCESSOR_SPEC(reinterpret_cast<const char*>(uint32_t(::JS::SymbolCode::symbol) + 1), \
+                        JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(nullptr), flags, JSPROP_SHARED)
 #define JS_SELF_HOSTED_GET(name, getterName, flags) \
     JS_PS_ACCESSOR_SPEC(name, SELFHOSTED_WRAPPER(getterName), JSNATIVE_WRAPPER(nullptr), flags, \
                          JSPROP_SHARED | JSPROP_GETTER)
@@ -5513,10 +5520,11 @@ JS_ParseJSONWithReviver(JSContext* cx, JS::HandleString str, JS::HandleValue rev
  * The locale string remains owned by the caller.
  */
 extern JS_PUBLIC_API(bool)
-JS_SetDefaultLocale(JSContext* cx, const char* locale);
+JS_SetDefaultLocale(JSRuntime* rt, const char* locale);
 
 /**
  * Look up the default locale for the ECMAScript Internationalization API.
+ * NB: The locale information is retrieved from cx's runtime.
  */
 extern JS_PUBLIC_API(JS::UniqueChars)
 JS_GetDefaultLocale(JSContext* cx);
@@ -5525,7 +5533,7 @@ JS_GetDefaultLocale(JSContext* cx);
  * Reset the default locale to OS defaults.
  */
 extern JS_PUBLIC_API(void)
-JS_ResetDefaultLocale(JSContext* cx);
+JS_ResetDefaultLocale(JSRuntime* rt);
 
 /**
  * Locale specific string conversion and error message callbacks.
@@ -5542,14 +5550,14 @@ struct JSLocaleCallbacks {
  * JSContext.  Passing nullptr restores the default behaviour.
  */
 extern JS_PUBLIC_API(void)
-JS_SetLocaleCallbacks(JSContext* cx, const JSLocaleCallbacks* callbacks);
+JS_SetLocaleCallbacks(JSRuntime* rt, const JSLocaleCallbacks* callbacks);
 
 /**
  * Return the address of the current locale callbacks struct, which may
  * be nullptr.
  */
 extern JS_PUBLIC_API(const JSLocaleCallbacks*)
-JS_GetLocaleCallbacks(JSContext* cx);
+JS_GetLocaleCallbacks(JSRuntime* rt);
 
 /************************************************************************/
 

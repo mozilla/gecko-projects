@@ -5,6 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAutoPtr.h"
+#include "nsIDocShell.h"
+#include "nsIDocument.h"
+#include "nsIDocumentLoader.h"
 #include "nsIObserverService.h"
 #include "nsIXULRuntime.h"
 #include "nsServiceManagerUtils.h"
@@ -16,6 +19,8 @@
 #include "mozilla/Services.h"
 #include "mozilla/TimeStamp.h"
 
+#include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/PSpdyPush.h"
 
 #include "../protocol/http/nsHttpHandler.h"
@@ -120,9 +125,11 @@ RequestContext::DOMContentLoaded()
 
   LOG(("RequestContext::DOMContentLoaded %p", this));
 
-  if (IsNeckoChild() && gNeckoChild) {
+  if (IsNeckoChild()) {
     // Tailing is not supported on the child process
-    gNeckoChild->SendRequestContextAfterDOMContentLoaded(mID);
+    if (gNeckoChild) {
+      gNeckoChild->SendRequestContextAfterDOMContentLoaded(mID);
+    }
     return NS_OK;
   }
 
@@ -379,6 +386,17 @@ RequestContext::CancelTailedRequest(nsIRequestTailUnblockCallback * aRequest)
 
   LOG(("RequestContext::CancelTailedRequest %p req=%p removed=%d",
        this, aRequest, removed));
+
+  // Stop untail timer if all tail requests are canceled.
+  if (removed && mTailQueue.IsEmpty()) {
+    if (mUntailTimer) {
+      mUntailTimer->Cancel();
+      mUntailTimer = nullptr;
+    }
+
+    // Must drop to stop tailing requests
+    mUntailAt = TimeStamp();
+  }
 
   return NS_OK;
 }

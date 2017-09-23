@@ -8,7 +8,7 @@
 #include "mozilla/dom/U2FTokenTransport.h"
 #include "mozilla/dom/U2FHIDTokenManager.h"
 #include "mozilla/dom/U2FSoftTokenManager.h"
-#include "mozilla/dom/WebAuthnTransactionParent.h"
+#include "mozilla/dom/PWebAuthnTransactionParent.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/dom/WebAuthnUtil.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -165,7 +165,7 @@ U2FTokenManager::AbortTransaction(const nsresult& aError)
 }
 
 void
-U2FTokenManager::MaybeClearTransaction(WebAuthnTransactionParent* aParent)
+U2FTokenManager::MaybeClearTransaction(PWebAuthnTransactionParent* aParent)
 {
   // Only clear if we've been requested to do so by our current transaction
   // parent.
@@ -197,28 +197,27 @@ U2FTokenManager::GetTokenManagerImpl()
   }
 
   auto pm = U2FPrefManager::Get();
-  bool useSoftToken = pm->GetSoftTokenEnabled();
-  bool useUsbToken = pm->GetUsbTokenEnabled();
 
-  // At least one token type must be enabled.
-  // We currently don't support soft and USB tokens enabled at
-  // the same time as the softtoken would always win the race to register.
+  // Prefer the HW token, even if the softtoken is enabled too.
+  // We currently don't support soft and USB tokens enabled at the
+  // same time as the softtoken would always win the race to register.
   // We could support it for signing though...
-  if (!(useSoftToken ^ useUsbToken)) {
-    return nullptr;
+  if (pm->GetUsbTokenEnabled()) {
+    return new U2FHIDTokenManager();
   }
 
-  if (useSoftToken) {
+  if (pm->GetSoftTokenEnabled()) {
     return new U2FSoftTokenManager(pm->GetSoftTokenCounter());
   }
 
   // TODO Use WebAuthnRequest to aggregate results from all transports,
   //      once we have multiple HW transport types.
-  return new U2FHIDTokenManager();
+
+  return nullptr;
 }
 
 void
-U2FTokenManager::Register(WebAuthnTransactionParent* aTransactionParent,
+U2FTokenManager::Register(PWebAuthnTransactionParent* aTransactionParent,
                           const WebAuthnTransactionInfo& aTransactionInfo)
 {
   MOZ_LOG(gU2FTokenManagerLog, LogLevel::Debug, ("U2FAuthRegister"));
@@ -300,7 +299,7 @@ U2FTokenManager::MaybeAbortRegister(uint64_t aTransactionId,
 }
 
 void
-U2FTokenManager::Sign(WebAuthnTransactionParent* aTransactionParent,
+U2FTokenManager::Sign(PWebAuthnTransactionParent* aTransactionParent,
                       const WebAuthnTransactionInfo& aTransactionInfo)
 {
   MOZ_LOG(gU2FTokenManagerLog, LogLevel::Debug, ("U2FAuthSign"));
@@ -379,7 +378,7 @@ U2FTokenManager::MaybeAbortSign(uint64_t aTransactionId, const nsresult& aError)
 }
 
 void
-U2FTokenManager::Cancel(WebAuthnTransactionParent* aParent)
+U2FTokenManager::Cancel(PWebAuthnTransactionParent* aParent)
 {
   if (mTransactionParent != aParent) {
     return;

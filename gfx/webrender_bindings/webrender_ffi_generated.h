@@ -439,6 +439,16 @@ struct WrImageMask {
   }
 };
 
+struct StickySideConstraint {
+  float margin;
+  float max_offset;
+
+  bool operator==(const StickySideConstraint& aOther) const {
+    return margin == aOther.margin &&
+           max_offset == aOther.max_offset;
+  }
+};
+
 struct BorderWidths {
   float left;
   float top;
@@ -719,11 +729,13 @@ struct FontKey {
 
 typedef FontKey WrFontKey;
 
-struct FontInstanceOptions {
+struct WrFontInstanceOptions {
   FontRenderMode render_mode;
+  bool synthetic_italics;
 
-  bool operator==(const FontInstanceOptions& aOther) const {
-    return render_mode == aOther.render_mode;
+  bool operator==(const WrFontInstanceOptions& aOther) const {
+    return render_mode == aOther.render_mode &&
+           synthetic_italics == aOther.synthetic_italics;
   }
 };
 
@@ -859,6 +871,15 @@ void wr_dp_define_scroll_layer(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+uint64_t wr_dp_define_sticky_frame(WrState *aState,
+                                   LayoutRect aContentRect,
+                                   const StickySideConstraint *aTopRange,
+                                   const StickySideConstraint *aRightRange,
+                                   const StickySideConstraint *aBottomRange,
+                                   const StickySideConstraint *aLeftRange)
+WR_FUNC;
+
+WR_INLINE
 void wr_dp_end(WrState *aState)
 WR_FUNC;
 
@@ -886,6 +907,7 @@ WR_INLINE
 void wr_dp_push_border(WrState *aState,
                        LayoutRect aRect,
                        LayoutRect aClip,
+                       bool aIsBackfaceVisible,
                        BorderWidths aWidths,
                        BorderSide aTop,
                        BorderSide aRight,
@@ -898,6 +920,7 @@ WR_INLINE
 void wr_dp_push_border_gradient(WrState *aState,
                                 LayoutRect aRect,
                                 LayoutRect aClip,
+                                bool aIsBackfaceVisible,
                                 BorderWidths aWidths,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
@@ -911,6 +934,7 @@ WR_INLINE
 void wr_dp_push_border_image(WrState *aState,
                              LayoutRect aRect,
                              LayoutRect aClip,
+                             bool aIsBackfaceVisible,
                              BorderWidths aWidths,
                              WrImageKey aImage,
                              NinePatchDescriptor aPatch,
@@ -923,6 +947,7 @@ WR_INLINE
 void wr_dp_push_border_radial_gradient(WrState *aState,
                                        LayoutRect aRect,
                                        LayoutRect aClip,
+                                       bool aIsBackfaceVisible,
                                        BorderWidths aWidths,
                                        LayoutPoint aCenter,
                                        LayoutSize aRadius,
@@ -936,6 +961,7 @@ WR_INLINE
 void wr_dp_push_box_shadow(WrState *aState,
                            LayoutRect aRect,
                            LayoutRect aClip,
+                           bool aIsBackfaceVisible,
                            LayoutRect aBoxBounds,
                            LayoutVector2D aOffset,
                            ColorF aColor,
@@ -965,6 +991,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_iframe(WrState *aState,
                        LayoutRect aRect,
+                       bool aIsBackfaceVisible,
                        WrPipelineId aPipelineId)
 WR_FUNC;
 
@@ -972,6 +999,7 @@ WR_INLINE
 void wr_dp_push_image(WrState *aState,
                       LayoutRect aBounds,
                       LayoutRect aClip,
+                      bool aIsBackfaceVisible,
                       LayoutSize aStretchSize,
                       LayoutSize aTileSpacing,
                       ImageRendering aImageRendering,
@@ -981,6 +1009,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_line(WrState *aState,
                      LayoutRect aClip,
+                     bool aIsBackfaceVisible,
                      float aBaseline,
                      float aStart,
                      float aEnd,
@@ -994,6 +1023,7 @@ WR_INLINE
 void wr_dp_push_linear_gradient(WrState *aState,
                                 LayoutRect aRect,
                                 LayoutRect aClip,
+                                bool aIsBackfaceVisible,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
                                 const GradientStop *aStops,
@@ -1007,6 +1037,7 @@ WR_INLINE
 void wr_dp_push_radial_gradient(WrState *aState,
                                 LayoutRect aRect,
                                 LayoutRect aClip,
+                                bool aIsBackfaceVisible,
                                 LayoutPoint aCenter,
                                 LayoutSize aRadius,
                                 const GradientStop *aStops,
@@ -1020,6 +1051,7 @@ WR_INLINE
 void wr_dp_push_rect(WrState *aState,
                      LayoutRect aRect,
                      LayoutRect aClip,
+                     bool aIsBackfaceVisible,
                      ColorF aColor)
 WR_FUNC;
 
@@ -1038,13 +1070,15 @@ void wr_dp_push_stacking_context(WrState *aState,
                                  const LayoutTransform *aPerspective,
                                  MixBlendMode aMixBlendMode,
                                  const WrFilterOp *aFilters,
-                                 size_t aFilterCount)
+                                 size_t aFilterCount,
+                                 bool aIsBackfaceVisible)
 WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_text(WrState *aState,
                      LayoutRect aBounds,
                      LayoutRect aClip,
+                     bool aIsBackfaceVisible,
                      ColorF aColor,
                      WrFontInstanceKey aFontKey,
                      const GlyphInstance *aGlyphs,
@@ -1056,6 +1090,7 @@ WR_INLINE
 void wr_dp_push_text_shadow(WrState *aState,
                             LayoutRect aBounds,
                             LayoutRect aClip,
+                            bool aIsBackfaceVisible,
                             TextShadow aShadow)
 WR_FUNC;
 
@@ -1064,6 +1099,7 @@ WR_INLINE
 void wr_dp_push_yuv_NV12_image(WrState *aState,
                                LayoutRect aBounds,
                                LayoutRect aClip,
+                               bool aIsBackfaceVisible,
                                WrImageKey aImageKey0,
                                WrImageKey aImageKey1,
                                WrYuvColorSpace aColorSpace,
@@ -1075,6 +1111,7 @@ WR_INLINE
 void wr_dp_push_yuv_interleaved_image(WrState *aState,
                                       LayoutRect aBounds,
                                       LayoutRect aClip,
+                                      bool aIsBackfaceVisible,
                                       WrImageKey aImageKey0,
                                       WrYuvColorSpace aColorSpace,
                                       ImageRendering aImageRendering)
@@ -1085,6 +1122,7 @@ WR_INLINE
 void wr_dp_push_yuv_planar_image(WrState *aState,
                                  LayoutRect aBounds,
                                  LayoutRect aClip,
+                                 bool aIsBackfaceVisible,
                                  WrImageKey aImageKey0,
                                  WrImageKey aImageKey1,
                                  WrImageKey aImageKey2,
@@ -1168,7 +1206,7 @@ WR_INLINE
 void wr_resource_updates_add_blob_image(ResourceUpdates *aResources,
                                         WrImageKey aImageKey,
                                         const WrImageDescriptor *aDescriptor,
-                                        ByteSlice aBytes)
+                                        WrVecU8 *aBytes)
 WR_FUNC;
 
 WR_INLINE
@@ -1185,22 +1223,22 @@ void wr_resource_updates_add_font_instance(ResourceUpdates *aResources,
                                            WrFontInstanceKey aKey,
                                            WrFontKey aFontKey,
                                            float aGlyphSize,
-                                           const FontInstanceOptions *aOptions,
-                                           const FontInstancePlatformOptions *aPlatformOptions)
+                                           const WrFontInstanceOptions *aOptions,
+                                           const FontInstancePlatformOptions *aPlatformOptions,
+                                           WrVecU8 *aVariations)
 WR_FUNC;
 
 WR_INLINE
 void wr_resource_updates_add_image(ResourceUpdates *aResources,
                                    WrImageKey aImageKey,
                                    const WrImageDescriptor *aDescriptor,
-                                   ByteSlice aBytes)
+                                   WrVecU8 *aBytes)
 WR_FUNC;
 
 WR_INLINE
 void wr_resource_updates_add_raw_font(ResourceUpdates *aResources,
                                       WrFontKey aKey,
-                                      uint8_t *aFontBuffer,
-                                      size_t aBufferSize,
+                                      WrVecU8 *aBytes,
                                       uint32_t aIndex)
 WR_FUNC;
 
@@ -1244,7 +1282,7 @@ WR_INLINE
 void wr_resource_updates_update_blob_image(ResourceUpdates *aResources,
                                            WrImageKey aImageKey,
                                            const WrImageDescriptor *aDescriptor,
-                                           ByteSlice aBytes)
+                                           WrVecU8 *aBytes)
 WR_FUNC;
 
 WR_INLINE
@@ -1260,7 +1298,7 @@ WR_INLINE
 void wr_resource_updates_update_image(ResourceUpdates *aResources,
                                       WrImageKey aKey,
                                       const WrImageDescriptor *aDescriptor,
-                                      ByteSlice aBytes)
+                                      WrVecU8 *aBytes)
 WR_FUNC;
 
 WR_INLINE
@@ -1289,6 +1327,11 @@ WR_FUNC;
 
 WR_INLINE
 void wr_vec_u8_free(WrVecU8 aV)
+WR_FUNC;
+
+WR_INLINE
+void wr_vec_u8_push_bytes(WrVecU8 *aV,
+                          ByteSlice aBytes)
 WR_FUNC;
 
 WR_INLINE

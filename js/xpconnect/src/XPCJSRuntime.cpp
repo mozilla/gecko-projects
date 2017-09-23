@@ -92,7 +92,6 @@ const char* const XPCJSRuntime::mStrings[] = {
     "createInstance",       // IDX_CREATE_INSTANCE
     "item",                 // IDX_ITEM
     "__proto__",            // IDX_PROTO
-    "__exposedProps__",     // IDX_EXPOSEDPROPS
     "eval",                 // IDX_EVAL
     "controllers",          // IDX_CONTROLLERS
     "Controllers",          // IDX_CONTROLLERS_CLASS
@@ -170,17 +169,16 @@ namespace xpc {
 CompartmentPrivate::CompartmentPrivate(JSCompartment* c)
     : wantXrays(false)
     , allowWaivers(true)
-    , writeToGlobalPrototype(false)
-    , skipWriteToGlobalPrototype(false)
     , isWebExtensionContentScript(false)
+    , hasInterposition(false)
     , waiveInterposition(false)
     , addonCallInterposition(false)
     , allowCPOWs(false)
+    , isContentXBLCompartment(false)
+    , isAddonCompartment(false)
     , universalXPConnectEnabled(false)
     , forcePermissiveCOWs(false)
     , wasNuked(false)
-    , scriptability(c)
-    , scope(nullptr)
     , mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH))
 {
     MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
@@ -192,6 +190,14 @@ CompartmentPrivate::~CompartmentPrivate()
     MOZ_COUNT_DTOR(xpc::CompartmentPrivate);
     mWrappedJSMap->ShutdownMarker();
     delete mWrappedJSMap;
+}
+
+RealmPrivate::RealmPrivate(JS::Realm* realm)
+    : writeToGlobalPrototype(false)
+    , skipWriteToGlobalPrototype(false)
+    , scriptability(JS::GetCompartmentForRealm(realm))
+    , scope(nullptr)
+{
 }
 
 static bool
@@ -420,29 +426,39 @@ Scriptability::SetDocShellAllowsScript(bool aAllowed)
 Scriptability&
 Scriptability::Get(JSObject* aScope)
 {
-    return CompartmentPrivate::Get(aScope)->scriptability;
+    return RealmPrivate::Get(aScope)->scriptability;
 }
 
 bool
-IsContentXBLScope(JSCompartment* compartment)
+IsContentXBLCompartment(JSCompartment* compartment)
 {
-    // We always eagerly create compartment privates for XBL scopes.
+    // We always eagerly create compartment privates for content XBL compartments.
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
-    if (!priv || !priv->scope)
-        return false;
-    return priv->scope->IsContentXBLScope();
+    return priv && priv->isContentXBLCompartment;
+}
+
+bool
+IsContentXBLScope(JS::Realm* realm)
+{
+    return IsContentXBLCompartment(JS::GetCompartmentForRealm(realm));
 }
 
 bool
 IsInContentXBLScope(JSObject* obj)
 {
-    return IsContentXBLScope(js::GetObjectCompartment(obj));
+    return IsContentXBLCompartment(js::GetObjectCompartment(obj));
+}
+
+bool
+IsAddonCompartment(JSCompartment* compartment)
+{
+    return CompartmentPrivate::Get(compartment)->isAddonCompartment;
 }
 
 bool
 IsInAddonScope(JSObject* obj)
 {
-    return ObjectScope(obj)->IsAddonScope();
+    return IsAddonCompartment(js::GetObjectCompartment(obj));
 }
 
 bool
@@ -489,7 +505,8 @@ EnableUniversalXPConnect(JSContext* cx)
     // The Components object normally isn't defined for unprivileged web content,
     // but we define it when UniversalXPConnect is enabled to support legacy
     // tests.
-    XPCWrappedNativeScope* scope = priv->scope;
+    Realm* realm = GetCurrentRealmOrNull(cx);
+    XPCWrappedNativeScope* scope = RealmPrivate::Get(realm)->scope;
     if (!scope)
         return true;
     scope->ForcePrivilegedComponents();
@@ -586,9 +603,11 @@ NukeAllWrappersForCompartment(JSContext* cx, JSCompartment* compartment,
     // compartment. Set the wasNuked bit so WrapperFactory will return a
     // DeadObjectProxy when asked to create a new wrapper for it, and mark as
     // unscriptable.
-    auto compartmentPrivate = xpc::CompartmentPrivate::Get(compartment);
-    compartmentPrivate->wasNuked = true;
-    compartmentPrivate->scriptability.Block();
+    xpc::CompartmentPrivate::Get(compartment)->wasNuked = true;
+
+    // TODO: Loop over all realms in the compartment instead.
+    Realm* realm = GetRealmForCompartment(compartment);
+    xpc::RealmPrivate::Get(realm)->scriptability.Block();
 }
 
 } // namespace xpc
@@ -1047,6 +1066,7 @@ XPCJSRuntime::Shutdown(JSContext* cx)
     JS_RemoveFinalizeCallback(cx, FinalizeCallback);
     JS_RemoveWeakPointerZonesCallback(cx, WeakPointerZonesCallback);
     JS_RemoveWeakPointerCompartmentCallback(cx, WeakPointerCompartmentCallback);
+    xpc_DelocalizeRuntime(JS_GetRuntime(cx));
 
     JS::SetGCSliceCallback(cx, mPrevGCSliceCallback);
 
@@ -2204,18 +2224,18 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         for (size_t i = 0; i != compartmentStatsVector.length(); ++i)
             delete static_cast<xpc::CompartmentStatsExtras*>(compartmentStatsVector[i].extra);
 
-
         for (size_t i = 0; i != zoneStatsVector.length(); ++i)
             delete static_cast<xpc::ZoneStatsExtras*>(zoneStatsVector[i].extra);
     }
 
     virtual void initExtraZoneStats(JS::Zone* zone, JS::ZoneStats* zStats) override {
-        // Get the compartment's global.
+        // Get some global in this zone.
         AutoSafeJSContext cx;
         JSCompartment* comp = js::GetAnyCompartmentInZone(zone);
+        Rooted<Realm*> realm(cx, JS::GetRealmForCompartment(comp));
         xpc::ZoneStatsExtras* extras = new xpc::ZoneStatsExtras;
         extras->pathPrefix.AssignLiteral("explicit/js-non-window/zones/");
-        RootedObject global(cx, JS_GetGlobalForCompartmentOrNull(cx, comp));
+        RootedObject global(cx, JS::GetRealmGlobalOrNull(realm));
         if (global) {
             RefPtr<nsGlobalWindow> window;
             if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, global, window))) {
@@ -2254,7 +2274,8 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         // Get the compartment's global.
         AutoSafeJSContext cx;
         bool needZone = true;
-        RootedObject global(cx, JS_GetGlobalForCompartmentOrNull(cx, c));
+        Rooted<Realm*> realm(cx, JS::GetRealmForCompartment(c));
+        RootedObject global(cx, JS::GetRealmGlobalOrNull(realm));
         if (global) {
             RefPtr<nsGlobalWindow> window;
             if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, global, window))) {
@@ -2691,9 +2712,18 @@ CompartmentNameCallback(JSContext* cx, JSCompartment* comp,
 }
 
 static void
-GetRealmName(JSContext* cx, JS::Handle<JS::Realm*> realm, char* buf, size_t bufsize)
+DestroyRealm(JSFreeOp* fop, JS::Realm* realm)
 {
-    JSCompartment* comp = JS::GetCompartmentForRealm(realm);
+    // Get the current compartment private into an AutoPtr (which will do the
+    // cleanup for us), and null out the private field.
+    mozilla::UniquePtr<RealmPrivate> priv(RealmPrivate::Get(realm));
+    JS::SetRealmPrivate(realm, nullptr);
+}
+
+static void
+GetRealmName(JSContext* cx, Handle<Realm*> realm, char* buf, size_t bufsize)
+{
+    JSCompartment* comp = GetCompartmentForRealm(realm);
     CompartmentNameCallback(cx, comp, buf, bufsize);
 }
 
@@ -2868,6 +2898,7 @@ XPCJSRuntime::Initialize(JSContext* cx)
     JS_SetDestroyCompartmentCallback(cx, CompartmentDestroyedCallback);
     JS_SetSizeOfIncludingThisCompartmentCallback(cx, CompartmentSizeOfIncludingThisCallback);
     JS_SetCompartmentNameCallback(cx, CompartmentNameCallback);
+    JS::SetDestroyRealmCallback(cx, DestroyRealm);
     JS::SetRealmNameCallback(cx, GetRealmName);
     mPrevGCSliceCallback = JS::SetGCSliceCallback(cx, GCSliceCallback);
     mPrevDoCycleCollectionCallback = JS::SetDoCycleCollectionCallback(cx,
@@ -2910,6 +2941,8 @@ XPCJSRuntime::Initialize(JSContext* cx)
     RegisterJSMainRuntimeCompartmentsSystemDistinguishedAmount(JSMainRuntimeCompartmentsSystemDistinguishedAmount);
     RegisterJSMainRuntimeCompartmentsUserDistinguishedAmount(JSMainRuntimeCompartmentsUserDistinguishedAmount);
     mozilla::RegisterJSSizeOfTab(JSSizeOfTab);
+
+    xpc_LocalizeRuntime(JS_GetRuntime(cx));
 }
 
 bool

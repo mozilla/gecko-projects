@@ -247,9 +247,7 @@ public:
   NS_IMETHOD_(void) UnbindFromFrame(nsTextControlFrame* aFrame) override;
   NS_IMETHOD CreateEditor() override;
   NS_IMETHOD_(Element*) GetRootEditorNode() override;
-  NS_IMETHOD_(Element*) CreatePlaceholderNode() override;
   NS_IMETHOD_(Element*) GetPlaceholderNode() override;
-  NS_IMETHOD_(Element*) CreatePreviewNode() override;
   NS_IMETHOD_(Element*) GetPreviewNode() override;
   NS_IMETHOD_(void) UpdateOverlayTextVisibility(bool aNotify) override;
   NS_IMETHOD_(void) SetPreviewValue(const nsAString& aValue) override;
@@ -343,6 +341,12 @@ public:
     return mHasPatternAttribute;
   }
 
+  virtual already_AddRefed<nsITextControlElement> GetAsTextControlElement() override
+  {
+    nsCOMPtr<nsITextControlElement> txt = this;
+    return txt.forget();
+  }
+
   // nsIConstraintValidation
   bool     IsTooLong();
   bool     IsTooShort();
@@ -362,7 +366,14 @@ public:
   void     UpdateRangeUnderflowValidityState();
   void     UpdateStepMismatchValidityState();
   void     UpdateBadInputValidityState();
+  // Update all our validity states and then update our element state
+  // as needed.  aNotify controls whether the element state update
+  // needs to notify.
   void     UpdateAllValidityStates(bool aNotify);
+  // Update all our validity states without updating element state.
+  // This should be called instead of UpdateAllValidityStates any time
+  // we're guaranteed that element state will be updated anyway.
+  void     UpdateAllValidityStatesButNotElementState();
   void     UpdateBarredFromConstraintValidation();
   nsresult GetValidationMessage(nsAString& aValidationMessage,
                                 ValidityStateType aType) override;

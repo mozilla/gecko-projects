@@ -33,10 +33,11 @@ public:
 
 protected:
   virtual ~WebRenderCanvasLayer();
-
+  Maybe<wr::ImageKey> mKey;
 public:
   Layer* GetLayer() override { return this; }
   void RenderLayer(wr::DisplayListBuilder& aBuilder,
+                   wr::IpcResourceUpdateQueue& aResources,
                    const StackingContextHelper& aSc) override;
 };
 

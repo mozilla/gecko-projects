@@ -35,7 +35,7 @@ impl ParserState {
     pub fn source_location(&self) -> SourceLocation {
         SourceLocation {
             line: self.current_line_number,
-            column: (self.position - self.current_line_start_position) as u32,
+            column: (self.position - self.current_line_start_position + 1) as u32,
         }
     }
 }
@@ -291,6 +291,15 @@ impl<'i: 't, 't> Parser<'i, 't> {
         self.input.tokenizer.current_source_map_url()
     }
 
+    /// The source URL, if known.
+    ///
+    /// The source URL is extracted from a specially formatted
+    /// comment.  The last such comment is used, so this value may
+    /// change as parsing proceeds.
+    pub fn current_source_url(&self) -> Option<&str> {
+        self.input.tokenizer.current_source_url()
+    }
+
     /// Return the current internal state of the parser (including position within the input).
     ///
     /// This state can later be restored with the `Parser::reset` method.
@@ -478,7 +487,11 @@ impl<'i: 't, 't> Parser<'i, 't> {
     #[inline]
     pub fn parse_comma_separated<F, T, E>(&mut self, mut parse_one: F) -> Result<Vec<T>, ParseError<'i, E>>
     where F: for<'tt> FnMut(&mut Parser<'i, 'tt>) -> Result<T, ParseError<'i, E>> {
-        let mut values = vec![];
+        // Vec grows from 0 to 4 by default on first push().  So allocate with
+        // capacity 1, so in the somewhat common case of only one item we don't
+        // way overallocate.  Note that we always push at least one item if
+        // parsing succeeds.
+        let mut values = Vec::with_capacity(1);
         loop {
             self.skip_whitespace();  // Unnecessary for correctness, but may help try() in parse_one rewind less.
             values.push(self.parse_until_before(Delimiter::Comma, &mut parse_one)?);

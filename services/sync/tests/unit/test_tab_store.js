@@ -4,7 +4,6 @@
 Cu.import("resource://services-sync/engines/tabs.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
-Cu.import("resource://testing-common/services/common/utils.js");
 
 async function getMockStore() {
   let engine = new TabEngine(Service);
@@ -95,8 +94,9 @@ add_task(async function test_createRecord() {
   store.getTabState = mockGetTabState;
   store.shouldSkipWindow = mockShouldSkipWindow;
   store.getWindowEnumerator = mockGetWindowEnumerator.bind(this, "http://foo.com", 1, 1);
-
-  let numtabs = 2600; // Note: this number is connected to DEFAULT_MAX_RECORD_PAYLOAD_BYTES
+  // This number is sensitive to our hard-coded default max record payload size
+  // in service.js (256 * 1024)
+  let numtabs = 2600;
 
   store.getWindowEnumerator = mockGetWindowEnumerator.bind(this, "http://foo.com", 1, 1);
   record = await store.createRecord("fake-guid");

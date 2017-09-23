@@ -48,7 +48,26 @@
 <pre id="test">
 <script type="application/javascript">
 
-SimpleTest.waitForFocus(runTests, window);
+// Until the first non-blank paint, the parent will set the opacity of our
+// browser to 0 using the 'blank' attribute.
+// Until the blank attribute is removed, we can't send scroll events.
+SimpleTest.waitForFocus(function() {
+  let chromeScript = SpecialPowers.loadChromeScript(_ => {
+    Components.utils.import("resource://gre/modules/Services.jsm");
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    win.requestAnimationFrame(() => {
+      win.gBrowser.selectedBrowser.removeAttribute("blank");
+      win.requestAnimationFrame(() => {
+        sendAsyncMessage("blank-attribute-removed");
+      });
+    });
+  });
+  chromeScript.promiseOneMessage("blank-attribute-removed").then(() => {
+    chromeScript.destroy();
+    runTests();
+  });
+}, window);
+
 SimpleTest.requestFlakyTimeout("untriaged");
 
 var winUtils = SpecialPowers.getDOMWindowUtils(window);

@@ -5,6 +5,9 @@
 
 const {actionTypes: at} = Components.utils.import("resource://activity-stream/common/Actions.jsm", {});
 
+// Locales that should be displayed RTL
+const RTL_LIST = ["ar", "he", "fa", "ur"];
+
 const TOP_SITES_DEFAULT_LENGTH = 6;
 const TOP_SITES_SHOWMORE_LENGTH = 12;
 
@@ -16,6 +19,8 @@ const INITIAL_STATE = {
     locale: "",
     // Localized strings with defaults
     strings: null,
+    // The text direction for the locale
+    textDirection: "",
     // The version of the system-addon
     version: null
   },
@@ -24,7 +29,13 @@ const INITIAL_STATE = {
     // Have we received real data from history yet?
     initialized: false,
     // The history (and possibly default) links
-    rows: []
+    rows: [],
+    // Used in content only to dispatch action from
+    // context menu to TopSitesEdit.
+    editForm: {
+      visible: false,
+      site: null
+    }
   },
   Prefs: {
     initialized: false,
@@ -48,7 +59,8 @@ function App(prevState = INITIAL_STATE.App, action) {
       let {locale, strings} = action.data;
       return Object.assign({}, prevState, {
         locale,
-        strings
+        strings,
+        textDirection: RTL_LIST.indexOf(locale.split("-")[0]) >= 0 ? "rtl" : "ltr"
       });
     }
     default:
@@ -92,13 +104,16 @@ function insertPinned(links, pinned) {
 function TopSites(prevState = INITIAL_STATE.TopSites, action) {
   let hasMatch;
   let newRows;
-  let pinned;
   switch (action.type) {
     case at.TOP_SITES_UPDATED:
       if (!action.data) {
         return prevState;
       }
       return Object.assign({}, prevState, {initialized: true, rows: action.data});
+    case at.TOP_SITES_EDIT:
+      return Object.assign({}, prevState, {editForm: {visible: true, site: action.data}});
+    case at.TOP_SITES_CANCEL_EDIT:
+      return Object.assign({}, prevState, {editForm: {visible: false}});
     case at.SCREENSHOT_UPDATED:
       newRows = prevState.rows.map(row => {
         if (row && row.url === action.data.url) {
@@ -114,8 +129,8 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       }
       newRows = prevState.rows.map(site => {
         if (site && site.url === action.data.url) {
-          const {bookmarkGuid, bookmarkTitle, lastModified} = action.data;
-          return Object.assign({}, site, {bookmarkGuid, bookmarkTitle, bookmarkDateCreated: lastModified});
+          const {bookmarkGuid, bookmarkTitle, dateAdded} = action.data;
+          return Object.assign({}, site, {bookmarkGuid, bookmarkTitle, bookmarkDateCreated: dateAdded});
         }
         return site;
       });
@@ -141,10 +156,6 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       // events and removing the site that was blocked/deleted with an empty slot.
       // Once refresh() finishes, we update the UI again with a new site
       newRows = prevState.rows.filter(val => val && val.url !== action.data.url);
-      return Object.assign({}, prevState, {rows: newRows});
-    case at.PINNED_SITES_UPDATED:
-      pinned = action.data;
-      newRows = insertPinned(prevState.rows, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
       return Object.assign({}, prevState, {rows: newRows});
     default:
       return prevState;
@@ -203,12 +214,16 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         let order;
         let index;
         if (prevState.length > 0) {
-          order = action.data.order || prevState[0].order - 1;
+          order = action.data.order !== undefined ? action.data.order : prevState[0].order - 1;
           index = newState.findIndex(section => section.order >= order);
+          if (index === -1) {
+            index = newState.length;
+          }
         } else {
-          order = action.data.order || 1;
+          order = action.data.order !== undefined ? action.data.order : 0;
           index = 0;
         }
+
         const section = Object.assign({title: "", rows: [], order, enabled: false}, action.data, {initialized});
         newState.splice(index, 0, section);
       }
@@ -223,6 +238,19 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         }
         return section;
       });
+    case at.SECTION_UPDATE_CARD:
+      return prevState.map(section => {
+        if (section && section.id === action.data.id && section.rows) {
+          const newRows = section.rows.map(card => {
+            if (card.url === action.data.url) {
+              return Object.assign({}, card, action.data.options);
+            }
+            return card;
+          });
+          return Object.assign({}, section, {rows: newRows});
+        }
+        return section;
+      });
     case at.PLACES_BOOKMARK_ADDED:
       if (!action.data) {
         return prevState;
@@ -231,8 +259,11 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
         rows: section.rows.map(item => {
           // find the item within the rows that is attempted to be bookmarked
           if (item.url === action.data.url) {
-            const {bookmarkGuid, bookmarkTitle, lastModified} = action.data;
-            Object.assign(item, {bookmarkGuid, bookmarkTitle, bookmarkDateCreated: lastModified});
+            const {bookmarkGuid, bookmarkTitle, dateAdded} = action.data;
+            Object.assign(item, {bookmarkGuid, bookmarkTitle, bookmarkDateCreated: dateAdded});
+            if (!item.type || item.type === "history") {
+              item.type = "bookmark";
+            }
           }
           return item;
         })
@@ -249,6 +280,9 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
             delete newSite.bookmarkGuid;
             delete newSite.bookmarkTitle;
             delete newSite.bookmarkDateCreated;
+            if (!newSite.type || newSite.type === "bookmark") {
+              newSite.type = "history";
+            }
             return newSite;
           }
           return item;

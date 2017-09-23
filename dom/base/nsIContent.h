@@ -21,6 +21,7 @@ class nsAttrName;
 class nsTextFragment;
 class nsIFrame;
 class nsXBLBinding;
+class nsITextControlElement;
 
 namespace mozilla {
 class EventChainPreVisitor;
@@ -910,12 +911,9 @@ public:
   {
     return (IsInUncomposedDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
   }
-  void SetPrimaryFrame(nsIFrame* aFrame) {
-    MOZ_ASSERT(IsInUncomposedDoc() || IsInShadowTree(), "This will end badly!");
-    NS_PRECONDITION(!aFrame || !mPrimaryFrame || aFrame == mPrimaryFrame,
-                    "Losing track of existing primary frame");
-    mPrimaryFrame = aFrame;
-  }
+
+  // Defined in nsIContentInlines.h because it needs nsIFrame.
+  inline void SetPrimaryFrame(nsIFrame* aFrame);
 
   nsresult LookupNamespaceURIInternal(const nsAString& aNamespacePrefix,
                                       nsAString& aNamespaceURI) const;
@@ -979,6 +977,11 @@ public:
   virtual void RemovePurple() = 0;
 
   virtual bool OwnedOnlyByTheDOMTree() { return false; }
+
+  virtual already_AddRefed<nsITextControlElement> GetAsTextControlElement()
+  {
+    return nullptr;
+  }
 
 protected:
   /**

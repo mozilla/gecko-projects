@@ -1292,6 +1292,7 @@ EnvironmentCache.prototype = {
       platformVersion: Services.appinfo.platformVersion || null,
       xpcomAbi: Services.appinfo.XPCOMABI,
       hotfixVersion: Services.prefs.getStringPref(PREF_HOTFIX_LASTVERSION, null),
+      updaterAvailable: AppConstants.MOZ_UPDATER,
     };
 
     // Add |architecturesInBinary| only for Mac Universal builds.
@@ -1362,7 +1363,13 @@ EnvironmentCache.prototype = {
       updateChannel = UpdateUtils.getUpdateChannel(false);
     } catch (e) {}
 
+    // Make sure to retain the attribution code across environment changes.
+    const attributionCode =
+      (this._currentEnvironment.settings &&
+       this._currentEnvironment.settings.attribution) || {};
+
     this._currentEnvironment.settings = {
+      attribution: attributionCode,
       blocklistEnabled: Services.prefs.getBoolPref(PREF_BLOCKLIST_ENABLED, true),
       e10sEnabled: Services.appinfo.browserTabsRemoteAutostart,
       e10sMultiProcesses: Services.appinfo.maxWebProcessCount,

@@ -8,7 +8,6 @@
 
 :root {
   --tab-toolbar-navbar-overlap: 1px;
-  --tab-line-color: highlight;
   --tab-min-height: 33px;
   --tab-loading-fill: #0A84FF;
 }
@@ -25,7 +24,18 @@
   --tab-line-color: var(--lwt-accent-color);
 }
 
+tabbrowser {
+  /* Value for --in-content-page-background in in-content/common.inc.css */
+  background-color: #f9f9fa;
+}
+
+:root[privatebrowsingmode=temporary] tabbrowser {
+  /* Value for --in-content-page-background in aboutPrivateBrowsing.css */
+  background-color: #25003e;
+}
+
 #tabbrowser-tabs,
+#tabbrowser-tabs > .tabbrowser-arrowscrollbox,
 .tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-tab[pinned] {
   min-height: var(--tab-min-height);
 }
@@ -161,6 +171,10 @@
   opacity: 1;
 }
 
+#TabsToolbar[brighttext] .tabbrowser-tab:not([visuallyselected=true]) {
+  --tab-loading-fill: #fff;
+}
+
 .tab-sharing-icon-overlay,
 .tab-icon-image {
   height: 16px;
@@ -229,9 +243,14 @@
   width: 16px;
   height: 16px;
   margin-top: -8px;
+  margin-inline-start: -15px;
+  margin-inline-end: -1px;
+  position: relative;
+}
+
+.tab-icon-overlay[pinned] {
   margin-inline-start: -6px;
   margin-inline-end: -10px;
-  position: relative;
 }
 
 .tab-icon-overlay[crashed] {
@@ -285,6 +304,8 @@
 .tab-close-button {
   margin-inline-end: -2px;
   padding: 0;
+  -moz-context-properties: fill, fill-opacity, stroke-opacity;
+  stroke-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 :root[uidensity=touch] .tab-close-button {
@@ -345,6 +366,7 @@
   width: 18px;
   background-image: url(chrome://browser/skin/tabbrowser/tab-overflow-indicator.png);
   background-size: 17px 100%;
+  background-repeat: no-repeat;
   border-left: 1px solid;
   border-image: linear-gradient(rgba(255,255,255,.2),
                                 rgba(255,255,255,.2) calc(100% - 1px - var(--tab-toolbar-navbar-overlap)),
@@ -383,6 +405,10 @@
 .tabbrowser-tab:not([visuallyselected=true]),
 .tabbrowser-tab:-moz-lwtheme {
   color: inherit;
+}
+
+.tabbrowser-tab[visuallyselected=true]:-moz-lwtheme {
+  color: var(--toolbar-color, inherit);
 }
 
 .tab-line {
@@ -515,11 +541,11 @@
 
 %ifdef CAN_DRAW_IN_TITLEBAR
 %ifdef MENUBAR_CAN_AUTOHIDE
-:root[tabsintitlebar] #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::after,
-:root[tabsintitlebar] #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::before
+:root[tabsintitlebar]:not([extradragspace]) #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::after,
+:root[tabsintitlebar]:not([extradragspace]) #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::before
 %else
-:root[tabsintitlebar] .tabbrowser-tab::after,
-:root[tabsintitlebar] .tabbrowser-tab::before
+:root[tabsintitlebar]:not([extradragspace]) .tabbrowser-tab::after,
+:root[tabsintitlebar]:not([extradragspace]) .tabbrowser-tab::before
 %endif
 {
   border-image: none;
@@ -539,8 +565,9 @@
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
   list-style-image: url(chrome://browser/skin/arrow-left.svg);
-  -moz-context-properties: fill;
+  -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
+  fill-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up:-moz-locale-dir(rtl),

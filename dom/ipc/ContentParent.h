@@ -432,6 +432,11 @@ public:
   already_AddRefed<embedding::PrintingParent> GetPrintingParent();
 #endif
 
+  virtual mozilla::ipc::IPCResult
+  RecvInitStreamFilter(const uint64_t& aChannelId,
+                       const nsString& aAddonId,
+                       InitStreamFilterResolver&& aResolver) override;
+
   virtual PChildToParentStreamParent* AllocPChildToParentStreamParent() override;
   virtual bool
   DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor) override;
@@ -855,22 +860,6 @@ private:
   virtual bool
   DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor) override;
 
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsCompatibleVersion(const nsString& aVersion,
-                                                                     bool* aIsCompatible) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
-                                                              nsTArray<uint8_t>&& aApplication,
-                                                              bool* aIsValidKeyHandle) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenRegister(nsTArray<uint8_t>&& aApplication,
-                                                          nsTArray<uint8_t>&& aChallenge,
-                                                          nsTArray<uint8_t>* aRegistration) override;
-
-  virtual mozilla::ipc::IPCResult RecvNSSU2FTokenSign(nsTArray<uint8_t>&& aApplication,
-                                                      nsTArray<uint8_t>&& aChallenge,
-                                                      nsTArray<uint8_t>&& aKeyHandle,
-                                                      nsTArray<uint8_t>* aSignature) override;
-
   virtual mozilla::ipc::IPCResult RecvIsSecureURI(const uint32_t& aType, const URIParams& aURI,
                                                   const uint32_t& aFlags,
                                                   const OriginAttributes& aOriginAttributes,
@@ -1158,9 +1147,9 @@ private:
                           const bool& aIsFromNsIFile) override;
 
   virtual mozilla::ipc::IPCResult RecvAccumulateChildHistograms(
-    InfallibleTArray<Accumulation>&& aAccumulations) override;
+    InfallibleTArray<HistogramAccumulation>&& aAccumulations) override;
   virtual mozilla::ipc::IPCResult RecvAccumulateChildKeyedHistograms(
-    InfallibleTArray<KeyedAccumulation>&& aAccumulations) override;
+    InfallibleTArray<KeyedHistogramAccumulation>&& aAccumulations) override;
   virtual mozilla::ipc::IPCResult RecvUpdateChildScalars(
     InfallibleTArray<ScalarAction>&& aScalarActions) override;
   virtual mozilla::ipc::IPCResult RecvUpdateChildKeyedScalars(

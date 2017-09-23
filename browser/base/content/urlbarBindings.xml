@@ -37,21 +37,21 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
           <children/>
           <html:input anonid="input"
-                      class="autocomplete-textbox urlbar-input textbox-input uri-element-right-align"
+                      class="autocomplete-textbox urlbar-input textbox-input"
                       allowevents="true"
                       inputmode="url"
                       xbl:inherits="tooltiptext=inputtooltiptext,value,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,focused,textoverflow"/>
-          <xul:image anonid="urlbar-go-button"
-                     class="urlbar-go-button urlbar-icon"
-                     onclick="gURLBar.handleCommand(event);"
-                     tooltiptext="&goEndCap.tooltip;"
-                     xbl:inherits="pageproxystate,parentfocused=focused"/>
         </xul:hbox>
+        <xul:image anonid="urlbar-go-button"
+                   class="urlbar-go-button urlbar-icon"
+                   onclick="gURLBar.handleCommand(event);"
+                   tooltiptext="&goEndCap.tooltip;"
+                   xbl:inherits="pageproxystate,parentfocused=focused,usertyping"/>
         <xul:dropmarker anonid="historydropmarker"
                         class="autocomplete-history-dropmarker urlbar-history-dropmarker urlbar-icon"
                         tooltiptext="&urlbar.openHistoryPopup.tooltip;"
                         allowevents="true"
-                        xbl:inherits="open,enablehistory,parentfocused=focused"/>
+                        xbl:inherits="open,enablehistory,parentfocused=focused,usertyping"/>
         <children includes="hbox"/>
       </xul:hbox>
       <xul:popupset anonid="popupset"
@@ -1943,9 +1943,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // Position the popup below the navbar.  To get the y-coordinate,
           // which is an offset from the bottom of the input, subtract the
           // bottom of the navbar from the buttom of the input.
-          let yOffset =
+          let yOffset = Math.round(
             this.DOMWindowUtils.getBoundsWithoutFlushing(document.getElementById("nav-bar")).bottom -
-            this.DOMWindowUtils.getBoundsWithoutFlushing(aInput).bottom;
+            this.DOMWindowUtils.getBoundsWithoutFlushing(aInput).bottom);
+
           this.openPopup(aElement, "after_start", 0, yOffset, false, false);
         ]]></body>
       </method>
@@ -2694,17 +2695,15 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
   <binding id="click-to-play-plugins-notification" extends="chrome://global/content/bindings/notification.xml#popup-notification">
     <content align="start" style="width: &pluginNotification.width;;">
-      <xul:vbox flex="1" align="stretch" class="popup-notification-main-box"
+      <xul:vbox flex="1" align="stretch" class="click-to-play-plugins-notification-main-box"
                 xbl:inherits="popupid">
         <xul:hbox class="click-to-play-plugins-notification-description-box" flex="1" align="start">
           <xul:description class="click-to-play-plugins-outer-description" flex="1">
             <html:span anonid="click-to-play-plugins-notification-description" />
-            <xul:label class="text-link click-to-play-plugins-notification-link" anonid="click-to-play-plugins-notification-link" />
+            <html:br/>
+            <xul:label class="text-link click-to-play-plugins-notification-link popup-notification-learnmore-link"
+                       anonid="click-to-play-plugins-notification-link" />
           </xul:description>
-          <xul:toolbarbutton anonid="closebutton"
-                             class="messageCloseButton popup-notification-closebutton tabbable close-icon"
-                             xbl:inherits="oncommand=closebuttoncommand"
-                             tooltiptext="&closeNotification.tooltip;"/>
         </xul:hbox>
         <xul:grid anonid="click-to-play-plugins-notification-center-box"
                   class="click-to-play-plugins-notification-center-box">
@@ -2726,11 +2725,13 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   class="click-to-play-plugins-notification-button-container"
                   pack="center" align="center">
           <xul:button anonid="primarybutton"
-                      class="click-to-play-popup-button"
+                      class="click-to-play-popup-button popup-notification-button"
                       oncommand="document.getBindingParent(this)._onButton(this)"
                       flex="1"/>
           <xul:button anonid="secondarybutton"
-                      class="click-to-play-popup-button"
+                      default="true"
+                      highlight="true"
+                      class="click-to-play-popup-button popup-notification-button"
                       oncommand="document.getBindingParent(this)._onButton(this);"
                       flex="1"/>
         </xul:hbox>

@@ -27,6 +27,7 @@ pub type HorizontalPosition = PositionComponent<X>;
 pub type VerticalPosition = PositionComponent<Y>;
 
 /// The specified value of a component of a CSS `<position>`.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, PartialEq, ToCss)]
 pub enum PositionComponent<S> {
@@ -210,7 +211,8 @@ impl<S: Side> ToComputedValue for PositionComponent<S> {
                     },
                     ComputedLengthOrPercentage::Calc(calc) => {
                         let p = Percentage(1. - calc.percentage.map_or(0., |p| p.0));
-                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage::new(-calc.unclamped_length(), Some(p)))
+                        let l = -calc.unclamped_length();
+                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage::new(l, Some(p)))
                     },
                 }
             },

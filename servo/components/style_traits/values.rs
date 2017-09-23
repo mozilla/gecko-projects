@@ -415,9 +415,12 @@ macro_rules! __define_css_keyword_enum__add_optional_traits {
 #[cfg(not(feature = "servo"))]
 #[macro_export]
 macro_rules! __define_css_keyword_enum__add_optional_traits {
-    ($name: ident [ $( $css: expr => $variant: ident ),+ ] [ $( $alias: expr => $alias_variant: ident),* ]) => {
+    ($name: ident [ $( $css: expr => $variant: ident ),+ ]
+                  [ $( $alias: expr => $alias_variant: ident),* ]) => {
         __define_css_keyword_enum__actual! {
-            $name [] [ $( $css => $variant ),+ ] [ $( $alias => $alias_variant ),* ]
+            $name [ MallocSizeOf ]
+                  [ $( $css => $variant ),+ ]
+                  [ $( $alias => $alias_variant ),* ]
         }
     };
 }
@@ -469,52 +472,10 @@ macro_rules! __define_css_keyword_enum__actual {
 /// Helper types for the handling of specified values.
 pub mod specified {
     use ParsingMode;
-    use app_units::Au;
-    use std::cmp;
 
     /// Whether to allow negative lengths or not.
     #[repr(u8)]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub enum AllowedLengthType {
-        /// Allow all kind of lengths.
-        All,
-        /// Allow only non-negative lengths.
-        NonNegative
-    }
-
-    impl Default for AllowedLengthType {
-        #[inline]
-        fn default() -> Self {
-            AllowedLengthType::All
-        }
-    }
-
-    impl AllowedLengthType {
-        /// Whether value is valid for this allowed length type.
-        #[inline]
-        pub fn is_ok(&self, parsing_mode: ParsingMode, value: f32) -> bool {
-            if parsing_mode.allows_all_numeric_values() {
-                return true;
-            }
-            match *self {
-                AllowedLengthType::All => true,
-                AllowedLengthType::NonNegative => value >= 0.,
-            }
-        }
-
-        /// Clamp the value following the rules of this numeric type.
-        #[inline]
-        pub fn clamp(&self, val: Au) -> Au {
-            match *self {
-                AllowedLengthType::All => val,
-                AllowedLengthType::NonNegative => cmp::max(Au(0), val),
-            }
-        }
-    }
-
-    /// Whether to allow negative lengths or not.
-    #[repr(u8)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
     pub enum AllowedNumericType {
@@ -524,6 +485,13 @@ pub mod specified {
         NonNegative,
         /// Allow only numeric values greater or equal to 1.0.
         AtLeastOne,
+    }
+
+    impl Default for AllowedNumericType {
+        #[inline]
+        fn default() -> Self {
+            AllowedNumericType::All
+        }
     }
 
     impl AllowedNumericType {

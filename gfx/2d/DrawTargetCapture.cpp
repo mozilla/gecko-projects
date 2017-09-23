@@ -78,6 +78,17 @@ DrawTargetCaptureImpl::DetachAllSnapshots()
 #define AppendCommand(arg) new (AppendToCommandList<arg>()) arg
 
 void
+DrawTargetCaptureImpl::SetPermitSubpixelAA(bool aPermitSubpixelAA)
+{
+  AppendCommand(SetPermitSubpixelAACommand)(aPermitSubpixelAA);
+
+  // Have to update mPermitSubpixelAA for this DT
+  // because some code paths query the current setting
+  // to determine subpixel AA eligibility.
+  DrawTarget::SetPermitSubpixelAA(aPermitSubpixelAA);
+}
+
+void
 DrawTargetCaptureImpl::DrawSurface(SourceSurface *aSurface,
                                    const Rect &aDest,
                                    const Rect &aSource,
@@ -216,6 +227,13 @@ DrawTargetCaptureImpl::PushLayer(bool aOpaque,
                                  const IntRect& aBounds,
                                  bool aCopyBackground)
 {
+  // Have to update mPermitSubpixelAA for this DT
+  // because some code paths query the current setting
+  // to determine subpixel AA eligibility.
+  PushedLayer layer(GetPermitSubpixelAA());
+  mPushedLayers.push_back(layer);
+  DrawTarget::SetPermitSubpixelAA(aOpaque);
+
   AppendCommand(PushLayerCommand)(aOpaque,
                                   aOpacity,
                                   aMask,
@@ -227,6 +245,10 @@ DrawTargetCaptureImpl::PushLayer(bool aOpaque,
 void
 DrawTargetCaptureImpl::PopLayer()
 {
+  MOZ_ASSERT(mPushedLayers.size());
+  DrawTarget::SetPermitSubpixelAA(mPushedLayers.back().mOldPermitSubpixelAA);
+  mPushedLayers.pop_back();
+
   AppendCommand(PopLayerCommand)();
 }
 

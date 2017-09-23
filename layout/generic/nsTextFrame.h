@@ -538,6 +538,7 @@ public:
                                      SelectionType aSelectionType);
 
   void DrawEmphasisMarks(gfxContext* aContext,
+                         TextDrawTarget* aTextDrawer,
                          mozilla::WritingMode aWM,
                          const gfxPoint& aTextBaselinePt,
                          const gfxPoint& aFramePt,
@@ -828,6 +829,7 @@ protected:
    * Utility methods to paint selection.
    */
   void DrawSelectionDecorations(gfxContext* aContext,
+                                TextDrawTarget* aTextDrawer,
                                 const LayoutDeviceRect& aDirtyRect,
                                 mozilla::SelectionType aSelectionType,
                                 nsTextPaintStyle& aTextPaintStyle,

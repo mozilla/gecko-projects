@@ -190,12 +190,13 @@ AsyncImagePipelineManager::GenerateImageKeyForTextureHost(wr::ResourceUpdateQueu
       return false;
     }
     gfx::IntSize size = dSurf->GetSize();
+    wr::Vec_u8 imgBytes;
+    imgBytes.PushBytes(Range<uint8_t>(map.mData, size.height * map.mStride));
     wr::ImageDescriptor descriptor(size, map.mStride, dSurf->GetFormat());
-    auto slice = Range<uint8_t>(map.mData, size.height * map.mStride);
 
     wr::ImageKey key = GenerateImageKey();
     aKeys.AppendElement(key);
-    aResources.AddImage(key, descriptor, slice);
+    aResources.AddImage(key, descriptor, imgBytes);
     dSurf->Unmap();
   }
   return false;
@@ -290,7 +291,8 @@ AsyncImagePipelineManager::ApplyAsyncImages()
                                   wr::TransformStyle::Flat,
                                   nullptr,
                                   pipeline->mMixBlendMode,
-                                  nsTArray<wr::WrFilterOp>());
+                                  nsTArray<wr::WrFilterOp>(),
+                                  true);
 
       LayerRect rect(0, 0, pipeline->mCurrentTexture->GetSize().width, pipeline->mCurrentTexture->GetSize().height);
       if (pipeline->mScaleToSize.isSome()) {
@@ -310,6 +312,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
         MOZ_ASSERT(keys.Length() == 1);
         builder.PushImage(wr::ToLayoutRect(rect),
                           wr::ToLayoutRect(rect),
+                          true,
                           pipeline->mFilter,
                           keys[0]);
       }

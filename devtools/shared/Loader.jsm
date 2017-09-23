@@ -30,8 +30,6 @@ BuiltinProvider.prototype = {
   load: function () {
     const paths = {
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
-      "": "resource://gre/modules/commonjs/",
-      // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       // Modules here are intended to have one implementation for
       // chrome, and a separate implementation for content.  Here we
       // map the directory to the chrome subdirectory, but the content
@@ -74,7 +72,7 @@ BuiltinProvider.prototype = {
       sharedGlobal: true,
       sandboxName: "DevTools (Module loader)",
       requireHook: (id, require) => {
-        if (id.startsWith("raw!")) {
+        if (id.startsWith("raw!") || id.startsWith("theme-loader!")) {
           return requireRawId(id, require);
         }
         return require(id);

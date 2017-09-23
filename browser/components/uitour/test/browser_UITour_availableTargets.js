@@ -29,8 +29,7 @@ function getExpectedTargets() {
     "privateWindow",
       ...(hasQuit ? ["quit"] : []),
     "readerMode-urlBar",
-    "search",
-    "searchIcon",
+    "screenshots",
     "trackingProtection",
     "urlbar",
   ];
@@ -39,6 +38,7 @@ function getExpectedTargets() {
 add_task(setup_UITourTest);
 
 add_UITour_task(async function test_availableTargets() {
+  await ensureScreenshotsEnabled();
   let data = await getConfigurationPromise("availableTargets");
   let expecteds = getExpectedTargets();
   ok_targets(data, expecteds);
@@ -62,17 +62,16 @@ add_UITour_task(async function test_availableTargets_changeWidgets() {
      "Targets should not be cached after reset");
 });
 
-add_UITour_task(async function test_availableTargets_exceptionFromGetTarget() {
-  // The query function for the "search" target will throw if it's not found.
-  // Make sure the callback still fires with the other available targets.
-  CustomizableUI.removeWidgetFromArea("search-container");
-  let data = await getConfigurationPromise("availableTargets");
-  let expecteds = getExpectedTargets();
-  // Default minus "search" and "searchIcon"
-  expecteds = expecteds.filter(target => target != "search" && target != "searchIcon");
-  ok_targets(data, expecteds);
-
-  CustomizableUI.reset();
+add_UITour_task(async function test_availableTargets_search() {
+  Services.prefs.setBoolPref("browser.search.widget.inNavBar", true);
+  try {
+    let data = await getConfigurationPromise("availableTargets");
+    let expecteds = getExpectedTargets();
+    expecteds = ["search", "searchIcon", ...expecteds];
+    ok_targets(data, expecteds);
+  } finally {
+    Services.prefs.clearUserPref("browser.search.widget.inNavBar");
+  }
 });
 
 add_UITour_task(async function test_availableTargets_removeUrlbarPageActionsAll() {
@@ -83,6 +82,7 @@ add_UITour_task(async function test_availableTargets_removeUrlbarPageActionsAll(
   ok_targets(data, expecteds);
   let expectedActions = [
     [ "pocket", "pageAction-panel-pocket" ],
+    [ "screenshots", "pageAction-panel-screenshots" ],
     [ "pageAction-bookmark", "pageAction-panel-bookmark" ],
     [ "pageAction-copyURL", "pageAction-panel-copyURL" ],
     [ "pageAction-emailLink", "pageAction-panel-emailLink" ],
@@ -102,6 +102,7 @@ add_UITour_task(async function test_availableTargets_addUrlbarPageActionsAll() {
   ok_targets(data, expecteds);
   let expectedActions = [
     [ "pocket", "pocket-button-box" ],
+    [ "screenshots", "pageAction-urlbar-screenshots" ],
     [ "pageAction-bookmark", "star-button-box" ],
     [ "pageAction-copyURL", "pageAction-urlbar-copyURL" ],
     [ "pageAction-emailLink", "pageAction-urlbar-emailLink" ],
@@ -153,3 +154,13 @@ var pageActionsHelper = {
     this._originalStates = null;
   }
 };
+
+function ensureScreenshotsEnabled() {
+  SpecialPowers.pushPrefEnv({ set: [
+    [ "extensions.screenshots.disabled", false ],
+    [ "extensions.screenshots.system-disabled", false ]
+  ]});
+  return BrowserTestUtils.waitForCondition(() => {
+    return PageActions.actionForID("screenshots");
+  }, "Should enable Screenshots");
+}

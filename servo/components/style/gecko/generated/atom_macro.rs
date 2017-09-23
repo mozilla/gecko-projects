@@ -1798,6 +1798,8 @@ cfg_if! {
             pub static nsGkAtoms_only: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms9onmessageE"]
             pub static nsGkAtoms_onmessage: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms14onmessageerrorE"]
+            pub static nsGkAtoms_onmessageerror: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms11onmousedownE"]
             pub static nsGkAtoms_onmousedown: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms12onmouseenterE"]
@@ -4058,6 +4060,16 @@ cfg_if! {
             pub static nsGkAtoms_moz_extension: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms18all_urlsPermissionE"]
             pub static nsGkAtoms_all_urlsPermission: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms13clipboardReadE"]
+            pub static nsGkAtoms_clipboardRead: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms14clipboardWriteE"]
+            pub static nsGkAtoms_clipboardWrite: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms8debuggerE"]
+            pub static nsGkAtoms_debugger: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms4tabsE"]
+            pub static nsGkAtoms_tabs: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms18webRequestBlockingE"]
+            pub static nsGkAtoms_webRequestBlocking: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms4httpE"]
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms5httpsE"]
@@ -6951,6 +6963,8 @@ cfg_if! {
             pub static nsGkAtoms_only: *mut nsIAtom;
             #[link_name = "?onmessage@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onmessage: *mut nsIAtom;
+            #[link_name = "?onmessageerror@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_onmessageerror: *mut nsIAtom;
             #[link_name = "?onmousedown@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onmousedown: *mut nsIAtom;
             #[link_name = "?onmouseenter@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -9211,6 +9225,16 @@ cfg_if! {
             pub static nsGkAtoms_moz_extension: *mut nsIAtom;
             #[link_name = "?all_urlsPermission@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_all_urlsPermission: *mut nsIAtom;
+            #[link_name = "?clipboardRead@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_clipboardRead: *mut nsIAtom;
+            #[link_name = "?clipboardWrite@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_clipboardWrite: *mut nsIAtom;
+            #[link_name = "?debugger@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_debugger: *mut nsIAtom;
+            #[link_name = "?tabs@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_tabs: *mut nsIAtom;
+            #[link_name = "?webRequestBlocking@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_webRequestBlocking: *mut nsIAtom;
             #[link_name = "?http@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "?https@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -12104,6 +12128,8 @@ cfg_if! {
             pub static nsGkAtoms_only: *mut nsIAtom;
             #[link_name = "\x01?onmessage@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onmessage: *mut nsIAtom;
+            #[link_name = "\x01?onmessageerror@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_onmessageerror: *mut nsIAtom;
             #[link_name = "\x01?onmousedown@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onmousedown: *mut nsIAtom;
             #[link_name = "\x01?onmouseenter@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -14364,6 +14390,16 @@ cfg_if! {
             pub static nsGkAtoms_moz_extension: *mut nsIAtom;
             #[link_name = "\x01?all_urlsPermission@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_all_urlsPermission: *mut nsIAtom;
+            #[link_name = "\x01?clipboardRead@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_clipboardRead: *mut nsIAtom;
+            #[link_name = "\x01?clipboardWrite@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_clipboardWrite: *mut nsIAtom;
+            #[link_name = "\x01?debugger@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_debugger: *mut nsIAtom;
+            #[link_name = "\x01?tabs@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_tabs: *mut nsIAtom;
+            #[link_name = "\x01?webRequestBlocking@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_webRequestBlocking: *mut nsIAtom;
             #[link_name = "\x01?http@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "\x01?https@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -17260,6 +17296,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_only as *mut _) } };
 ("onmessage") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onmessage as *mut _) } };
+("onmessageerror") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onmessageerror as *mut _) } };
 ("onmousedown") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onmousedown as *mut _) } };
 ("onmouseenter") =>
@@ -19520,6 +19558,16 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_moz_extension as *mut _) } };
 ("<all_urls>") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_all_urlsPermission as *mut _) } };
+("clipboardRead") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_clipboardRead as *mut _) } };
+("clipboardWrite") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_clipboardWrite as *mut _) } };
+("debugger") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_debugger as *mut _) } };
+("tabs") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_tabs as *mut _) } };
+("webRequestBlocking") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_webRequestBlocking as *mut _) } };
 ("http") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_http as *mut _) } };
 ("https") =>

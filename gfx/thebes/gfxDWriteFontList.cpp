@@ -340,6 +340,19 @@ gfxDWriteFontFamily::LocalizedName(nsAString &aLocalizedName)
     aLocalizedName = nsDependentString(famName.Elements());
 }
 
+bool
+gfxDWriteFontFamily::IsSymbolFontFamily() const
+{
+    // Just check the first font in the family
+    if (mDWFamily->GetFontCount() > 0) {
+        RefPtr<IDWriteFont> font;
+        if (SUCCEEDED(mDWFamily->GetFont(0, getter_AddRefs(font)))) {
+            return font->IsSymbolFont();
+        }
+    }
+    return false;
+}
+
 void
 gfxDWriteFontFamily::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
                                             FontListSizes* aSizes) const
@@ -369,16 +382,6 @@ gfxDWriteFontEntry::Clone() const
 
 gfxDWriteFontEntry::~gfxDWriteFontEntry()
 {
-}
-
-bool
-gfxDWriteFontEntry::IsSymbolFont()
-{
-    if (mFont) {
-        return mFont->IsSymbolFont();
-    } else {
-        return false;
-    }
 }
 
 static bool
@@ -532,11 +535,9 @@ gfxDWriteFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
 
     RefPtr<gfxCharacterMap> charmap;
     nsresult rv;
-    bool symbolFont;
 
     if (aFontInfoData && (charmap = GetCMAPFromFontInfo(aFontInfoData,
-                                                        mUVSOffset,
-                                                        symbolFont))) {
+                                                        mUVSOffset))) {
         rv = NS_OK;
     } else {
         uint32_t kCMAP = TRUETYPE_TAG('c','m','a','p');
@@ -544,14 +545,12 @@ gfxDWriteFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
         AutoTable cmapTable(this, kCMAP);
 
         if (cmapTable) {
-            bool unicodeFont = false, symbolFont = false; // currently ignored
             uint32_t cmapLen;
             const uint8_t* cmapData =
                 reinterpret_cast<const uint8_t*>(hb_blob_get_data(cmapTable,
                                                                   &cmapLen));
             rv = gfxFontUtils::ReadCMAP(cmapData, cmapLen,
-                                        *charmap, mUVSOffset,
-                                        unicodeFont, symbolFont);
+                                        *charmap, mUVSOffset);
         } else {
             rv = NS_ERROR_NOT_AVAILABLE;
         }
@@ -700,11 +699,17 @@ gfxDWriteFontEntry::IsCJKFont()
     mIsCJK = false;
 
     const uint32_t kOS2Tag = TRUETYPE_TAG('O','S','/','2');
-    AutoTArray<uint8_t, 128> buffer;
-    if (CopyFontTable(kOS2Tag, buffer) != NS_OK) {
+    hb_blob_t* blob = GetFontTable(kOS2Tag);
+    if (!blob) {
         return mIsCJK;
     }
+    // |blob| is an owning reference, but is not RAII-managed, so it must be
+    // explicitly freed using |hb_blob_destroy| before we return. (Beware of
+    // adding any early-return codepaths!)
 
+    uint32_t len;
+    const OS2Table* os2 =
+        reinterpret_cast<const OS2Table*>(hb_blob_get_data(blob, &len));
     // ulCodePageRange bit definitions for the CJK codepages,
     // from http://www.microsoft.com/typography/otspec/os2.htm#cpr
     const uint32_t CJK_CODEPAGE_BITS =
@@ -713,14 +718,12 @@ gfxDWriteFontEntry::IsCJKFont()
         (1 << 19) | // codepage 949 - Korean Wansung
         (1 << 20) | // codepage 950 - Chinese (traditional)
         (1 << 21);  // codepage 1361 - Korean Johab
-
-    if (buffer.Length() >= offsetof(OS2Table, sxHeight)) {
-        const OS2Table* os2 =
-            reinterpret_cast<const OS2Table*>(buffer.Elements());
+    if (len >= offsetof(OS2Table, sxHeight)) {
         if ((uint32_t(os2->codePageRange1) & CJK_CODEPAGE_BITS) != 0) {
             mIsCJK = true;
         }
     }
+    hb_blob_destroy(blob);
 
     return mIsCJK;
 }
@@ -1673,7 +1676,6 @@ DirectWriteFontInfo::LoadFontFamilyData(const nsAString& aFamilyName)
 
             if (SUCCEEDED(hr)) {
                 bool cmapLoaded = false;
-                bool unicodeFont = false, symbolFont = false;
                 RefPtr<gfxCharacterMap> charmap = new gfxCharacterMap();
                 uint32_t offset;
 
@@ -1681,10 +1683,9 @@ DirectWriteFontInfo::LoadFontFamilyData(const nsAString& aFamilyName)
                     cmapSize > 0 &&
                     NS_SUCCEEDED(
                         gfxFontUtils::ReadCMAP(cmapData, cmapSize, *charmap,
-                                               offset, unicodeFont, symbolFont))) {
+                                               offset))) {
                     fontData.mCharacterMap = charmap;
                     fontData.mUVSOffset = offset;
-                    fontData.mSymbolFont = symbolFont;
                     cmapLoaded = true;
                     mLoadStats.cmaps++;
                 }

@@ -73,7 +73,9 @@ public:
   mozilla::ipc::IPCResult RecvShutdown() override;
   mozilla::ipc::IPCResult RecvShutdownSync() override;
   mozilla::ipc::IPCResult RecvDeleteCompositorAnimations(InfallibleTArray<uint64_t>&& aIds) override;
-  mozilla::ipc::IPCResult RecvUpdateResources(const ByteBuffer& aUpdates) override;
+  mozilla::ipc::IPCResult RecvUpdateResources(nsTArray<OpUpdateResource>&& aUpdates,
+                                              nsTArray<ipc::Shmem>&& aSmallShmems,
+                                              nsTArray<ipc::Shmem>&& aLargeShmems) override;
   mozilla::ipc::IPCResult RecvSetDisplayList(const gfx::IntSize& aSize,
                                              InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                              InfallibleTArray<OpDestroy>&& aToDestroy,
@@ -83,7 +85,9 @@ public:
                                              const wr::ByteBuffer& dl,
                                              const wr::BuiltDisplayListDescriptor& dlDesc,
                                              const WebRenderScrollData& aScrollData,
-                                             const wr::ByteBuffer& aResourceUpdates,
+                                             nsTArray<OpUpdateResource>&& aResourceUpdates,
+                                             nsTArray<ipc::Shmem>&& aSmallShmems,
+                                             nsTArray<ipc::Shmem>&& aLargeShmems,
                                              const wr::IdNamespace& aIdNamespace,
                                              const TimeStamp& aTxnStartTime,
                                              const TimeStamp& aFwdTime) override;
@@ -96,7 +100,9 @@ public:
                                                  const wr::ByteBuffer& dl,
                                                  const wr::BuiltDisplayListDescriptor& dlDesc,
                                                  const WebRenderScrollData& aScrollData,
-                                                 const wr::ByteBuffer& aResourceUpdates,
+                                                 nsTArray<OpUpdateResource>&& aResourceUpdates,
+                                                 nsTArray<ipc::Shmem>&& aSmallShmems,
+                                                 nsTArray<ipc::Shmem>&& aLargeShmems,
                                                  const wr::IdNamespace& aIdNamespace,
                                                  const TimeStamp& aTxnStartTime,
                                                  const TimeStamp& aFwdTime) override;
@@ -181,21 +187,22 @@ public:
                        CompositorAnimationStorage* aAnimStorage);
 
 private:
+  void DeallocShmems(nsTArray<ipc::Shmem>& aShmems);
+
   explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
   virtual ~WebRenderBridgeParent();
 
+  bool UpdateResources(const nsTArray<OpUpdateResource>& aResourceUpdates,
+                       const nsTArray<ipc::Shmem>& aSmallShmems,
+                       const nsTArray<ipc::Shmem>& aLargeShmems,
+                       wr::ResourceUpdateQueue& aUpdates);
+  bool AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
+                        wr::ResourceUpdateQueue& aResources);
+
   uint64_t GetLayersId() const;
-  void DeleteOldImages();
   void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
                                       wr::ResourceUpdateQueue& aResources);
-  void ProcessWebRenderCommands(const gfx::IntSize &aSize,
-                                InfallibleTArray<WebRenderParentCommand>& commands,
-                                const wr::Epoch& aEpoch,
-                                const wr::LayoutSize& aContentSize,
-                                const wr::ByteBuffer& dl,
-                                const wr::BuiltDisplayListDescriptor& dlDesc,
-                                wr::ResourceUpdateQueue& aResourceUpdates,
-                                const wr::IdNamespace& aIdNamespace);
+
   void ClearResources();
   uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }
   bool ShouldParentObserveEpoch();
@@ -240,7 +247,6 @@ private:
   RefPtr<AsyncImagePipelineManager> mAsyncImageManager;
   RefPtr<CompositorVsyncScheduler> mCompositorScheduler;
   RefPtr<CompositorAnimationStorage> mAnimStorage;
-  std::vector<wr::ImageKey> mKeysToDelete;
   // mActiveAnimations is used to avoid leaking animations when WebRenderBridgeParent is
   // destroyed abnormally and Tab move between different windows.
   std::unordered_set<uint64_t> mActiveAnimations;

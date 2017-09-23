@@ -99,20 +99,26 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   policy->AddPath(rdonly, "/dev/urandom");
   policy->AddPath(rdonly, "/proc/cpuinfo");
   policy->AddPath(rdonly, "/proc/meminfo");
+  policy->AddDir(rdonly, "/sys/devices/cpu");
+  policy->AddDir(rdonly, "/sys/devices/system/cpu");
   policy->AddDir(rdonly, "/lib");
   policy->AddDir(rdonly, "/lib64");
-  policy->AddDir(rdonly, "/etc");
-  policy->AddDir(rdonly, "/usr/share");
-  policy->AddDir(rdonly, "/usr/local/share");
   policy->AddDir(rdonly, "/usr/lib");
   policy->AddDir(rdonly, "/usr/lib32");
   policy->AddDir(rdonly, "/usr/lib64");
-  policy->AddDir(rdonly, "/usr/X11R6/lib/X11/fonts");
+  policy->AddDir(rdonly, "/etc");
+#ifdef MOZ_PULSEAUDIO
+  policy->AddPath(rdonly, "/var/lib/dbus/machine-id");
+#endif
+  policy->AddDir(rdonly, "/usr/share");
+  policy->AddDir(rdonly, "/usr/local/share");
   policy->AddDir(rdonly, "/usr/tmp");
   policy->AddDir(rdonly, "/var/tmp");
-  policy->AddDir(rdonly, "/sys/devices/cpu");
-  policy->AddDir(rdonly, "/sys/devices/system/cpu");
+  // Various places where fonts reside
+  policy->AddDir(rdonly, "/usr/X11R6/lib/X11/fonts");
   policy->AddDir(rdonly, "/nix/store");
+  policy->AddDir(rdonly, "/run/host/fonts");
+  policy->AddDir(rdonly, "/run/host/user-fonts");
 
   // Bug 1384178: Mesa driver loader
   policy->AddPrefix(rdonly, "/sys/dev/char/226:");
@@ -127,10 +133,20 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   }
 #endif
 
-  // Configuration dirs in the homedir that we want to allow read
+  // Allow access to XDG_CONFIG_PATH and XDG_CONFIG_DIRS
+  if (const auto xdgConfigPath = PR_GetEnv("XDG_CONFIG_PATH")) {
+    policy->AddDir(rdonly, xdgConfigPath);
+  }
+
+  nsAutoCString xdgConfigDirs(PR_GetEnv("XDG_CONFIG_DIRS"));
+  for (const auto& path : xdgConfigDirs.Split(':')) {
+    policy->AddDir(rdonly, PromiseFlatCString(path).get());
+  }
+
+  // Extra configuration dirs in the homedir that we want to allow read
   // access to.
-  mozilla::Array<const char*, 3> confDirs = {
-    ".config",
+  mozilla::Array<const char*, 3> extraConfDirs = {
+    ".config",   // Fallback if XDG_CONFIG_PATH isn't set
     ".themes",
     ".fonts",
   };
@@ -140,7 +156,7 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   if (NS_SUCCEEDED(rv)) {
     nsCOMPtr<nsIFile> confDir;
 
-    for (auto dir : confDirs) {
+    for (const auto& dir : extraConfDirs) {
       rv = homeDir->Clone(getter_AddRefs(confDir));
       if (NS_SUCCEEDED(rv)) {
         rv = confDir->AppendNative(nsDependentCString(dir));

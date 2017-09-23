@@ -3666,22 +3666,6 @@ BytecodeEmitter::reportExtraWarning(ParseNode* pn, unsigned errorNumber, ...)
 }
 
 bool
-BytecodeEmitter::reportStrictModeError(ParseNode* pn, unsigned errorNumber, ...)
-{
-    TokenPos pos = pn ? pn->pn_pos : tokenStream().currentToken().pos;
-
-    va_list args;
-    va_start(args, errorNumber);
-    // FIXME: parser.tokenStream() should be a TokenStreamAnyChars for bug 1351107,
-    // but caused problems, cf. bug 1363116.
-    bool result = parser.tokenStream()
-                        .reportStrictModeErrorNumberVA(nullptr, pos.begin, sc->strict(),
-                                                       errorNumber, args);
-    va_end(args);
-    return result;
-}
-
-bool
 BytecodeEmitter::emitNewInit(JSProtoKey key)
 {
     const size_t len = 1 + UINT32_INDEX_LEN;
@@ -3710,18 +3694,12 @@ BytecodeEmitter::iteratorResultShape(unsigned* shape)
     if (!obj)
         return false;
 
-    Rooted<jsid> value_id(cx, AtomToId(cx->names().value));
-    Rooted<jsid> done_id(cx, AtomToId(cx->names().done));
-    if (!NativeDefineProperty(cx, obj, value_id, UndefinedHandleValue, nullptr, nullptr,
-                              JSPROP_ENUMERATE))
-    {
+    Rooted<jsid> value_id(cx, NameToId(cx->names().value));
+    Rooted<jsid> done_id(cx, NameToId(cx->names().done));
+    if (!NativeDefineDataProperty(cx, obj, value_id, UndefinedHandleValue, JSPROP_ENUMERATE))
         return false;
-    }
-    if (!NativeDefineProperty(cx, obj, done_id, UndefinedHandleValue, nullptr, nullptr,
-                              JSPROP_ENUMERATE))
-    {
+    if (!NativeDefineDataProperty(cx, obj, done_id, UndefinedHandleValue, JSPROP_ENUMERATE))
         return false;
-    }
 
     ObjectBox* objbox = parser.newObjectBox(obj);
     if (!objbox)
@@ -3756,18 +3734,6 @@ BytecodeEmitter::emitFinishIteratorResult(bool done)
     if (!emit1(done ? JSOP_TRUE : JSOP_FALSE))
         return false;
     if (!emitIndex32(JSOP_INITPROP, done_id))
-        return false;
-    return true;
-}
-
-bool
-BytecodeEmitter::emitToIteratorResult(bool done)
-{
-    if (!emitPrepareIteratorResult())    // VALUE OBJ
-        return false;
-    if (!emit1(JSOP_SWAP))               // OBJ VALUE
-        return false;
-    if (!emitFinishIteratorResult(done)) // RESULT
         return false;
     return true;
 }
@@ -6099,11 +6065,8 @@ BytecodeEmitter::emitDestructuringObjRestExclusionSet(ParseNode* pattern)
             if (obj) {
                 MOZ_ASSERT(!obj->inDictionaryMode());
                 Rooted<jsid> id(cx, AtomToId(pnatom));
-                if (!NativeDefineProperty(cx, obj, id, UndefinedHandleValue, nullptr, nullptr,
-                                          JSPROP_ENUMERATE))
-                {
+                if (!NativeDefineDataProperty(cx, obj, id, UndefinedHandleValue, JSPROP_ENUMERATE))
                     return false;
-                }
                 if (obj->inDictionaryMode())
                     obj.set(nullptr);
             }
@@ -7508,6 +7471,11 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
         auto loopDepth = this->stackDepth;
 #endif
         MOZ_ASSERT(loopDepth >= 2);
+
+        if (iflags == JSITER_ENUMERATE) {
+            if (!emit1(JSOP_ITERNEXT))                    // ITER ITERVAL
+                return false;
+        }
 
         if (!emitInitializeForInOrOfTarget(forInHead))    // ITER ITERVAL
             return false;
@@ -9822,8 +9790,6 @@ BytecodeEmitter::emitIncOrDec(ParseNode* pn)
       default:
         return emitNameIncDec(pn);
     }
-
-    return true;
 }
 
 // Using MOZ_NEVER_INLINE in here is a workaround for llvm.org/pr14047. See
@@ -10025,8 +9991,8 @@ BytecodeEmitter::emitPropertyList(ParseNode* pn, MutableHandlePlainObject objp, 
                 MOZ_ASSERT(!IsHiddenInitOp(op));
                 MOZ_ASSERT(!objp->inDictionaryMode());
                 Rooted<jsid> id(cx, AtomToId(key->pn_atom));
-                if (!NativeDefineProperty(cx, objp, id, UndefinedHandleValue, nullptr, nullptr,
-                                          JSPROP_ENUMERATE))
+                if (!NativeDefineDataProperty(cx, objp, id, UndefinedHandleValue,
+                                              JSPROP_ENUMERATE))
                 {
                     return false;
                 }

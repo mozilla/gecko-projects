@@ -499,27 +499,14 @@ class TabTracker extends TabTrackerBase {
     let windowId = windowTracker.getId(nativeTab.ownerGlobal);
     let tabId = this.getId(nativeTab);
 
-    // When addons run in-process, `window.close()` is synchronous. Most other
-    // addon-invoked calls are asynchronous since they go through a proxy
-    // context via the message manager. This includes event registrations such
-    // as `tabs.onRemoved.addListener`.
-    //
-    // So, even if `window.close()` were to be called (in-process) after calling
-    // `tabs.onRemoved.addListener`, then the tab would be closed before the
-    // event listener is registered. To make sure that the event listener is
-    // notified, we dispatch `tabs.onRemoved` asynchronously.
-    Services.tm.dispatchToMainThread(() => {
-      this.emit("tab-removed", {nativeTab, tabId, windowId, isWindowClosing});
-    });
+    this.emit("tab-removed", {nativeTab, tabId, windowId, isWindowClosing});
   }
 
   getBrowserData(browser) {
-    if (browser.ownerGlobal.location.href === "about:addons") {
+    if (browser.ownerDocument.documentURI === "about:addons") {
       // When we're loaded into a <browser> inside about:addons, we need to go up
       // one more level.
-      browser = browser.ownerGlobal.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDocShell)
-                       .chromeEventHandler;
+      browser = browser.ownerDocument.docShell.chromeEventHandler;
     }
 
     let result = {
@@ -678,7 +665,10 @@ class Tab extends TabBase {
 
     if (extension.tabManager.hasTabPermission(tabData)) {
       let entries = tabData.state ? tabData.state.entries : tabData.entries;
-      let entry = entries[entries.length - 1];
+      let lastTabIndex = tabData.state ? tabData.state.index : tabData.index;
+      // We need to take lastTabIndex - 1 because the index in the tab data is
+      // 1-based rather than 0-based.
+      let entry = entries[lastTabIndex - 1];
       result.url = entry.url;
       result.title = entry.title;
       if (tabData.image) {

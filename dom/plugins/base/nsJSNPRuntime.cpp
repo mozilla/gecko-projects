@@ -232,6 +232,8 @@ public:
     return false;
   }
   void finalize(JSFreeOp* fop, JSObject* proxy) const override;
+
+  size_t objectMoved(JSObject* obj, JSObject* old) const override;
 };
 
 const char NPObjWrapperProxyHandler::family = 0;
@@ -241,25 +243,18 @@ static bool
 NPObjWrapper_Resolve(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
                      bool* resolved, JS::MutableHandle<JSObject*> method);
 
-static void
-NPObjWrapper_ObjectMoved(JSObject *obj, const JSObject *old);
-
 static bool
 NPObjWrapper_toPrimitive(JSContext *cx, unsigned argc, JS::Value *vp);
 
 static bool
-CreateNPObjectMember(NPP npp, JSContext *cx, JSObject *obj, NPObject* npobj,
+CreateNPObjectMember(NPP npp, JSContext *cx,
+                     JS::Handle<JSObject*> obj, NPObject* npobj,
                      JS::Handle<jsid> id,  NPVariant* getPropertyResult,
                      JS::MutableHandle<JS::Value> vp);
 
-static const js::ClassExtension sNPObjWrapperProxyClassExtension = PROXY_MAKE_EXT(
-    NPObjWrapper_ObjectMoved
-);
-
-const js::Class sNPObjWrapperProxyClass = PROXY_CLASS_WITH_EXT(
+const js::Class sNPObjWrapperProxyClass = PROXY_CLASS_DEF(
     NPRUNTIME_JSCLASS_NAME,
-    JSCLASS_HAS_RESERVED_SLOTS(1),
-    &sNPObjWrapperProxyClassExtension);
+    JSCLASS_HAS_RESERVED_SLOTS(1));
 
 typedef struct NPObjectMemberPrivate {
     JS::Heap<JSObject *> npobjWrapper;
@@ -1173,9 +1168,10 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JS::Handle<JSObject*> obj)
 // compartment for callers that plan to hold onto the result or do anything
 // substantial with it.
 static JSObject *
-GetNPObjectWrapper(JSContext *cx, JSObject *aObj, bool wrapResult = true)
+GetNPObjectWrapper(JSContext *cx, JS::Handle<JSObject*> aObj, bool wrapResult = true)
 {
   JS::Rooted<JSObject*> obj(cx, aObj);
+
   while (obj && (obj = js::CheckedUnwrap(obj))) {
     if (nsNPObjWrapper::IsWrapper(obj)) {
       if (wrapResult && !JS_WrapObject(cx, &obj)) {
@@ -1193,8 +1189,9 @@ GetNPObjectWrapper(JSContext *cx, JSObject *aObj, bool wrapResult = true)
 }
 
 static NPObject *
-GetNPObject(JSContext *cx, JSObject *obj)
+GetNPObject(JSContext *cx, JS::Handle<JSObject*> aObj)
 {
+  JS::Rooted<JSObject*> obj(cx, aObj);
   obj = GetNPObjectWrapper(cx, obj, /* wrapResult = */ false);
   if (!obj) {
     return nullptr;
@@ -1784,19 +1781,19 @@ NPObjWrapperProxyHandler::finalize(JSFreeOp* fop, JSObject* proxy) const
   sDelayedReleases->AppendElement(npobj);
 }
 
-static void
-NPObjWrapper_ObjectMoved(JSObject *obj, const JSObject *old)
+size_t
+NPObjWrapperProxyHandler::objectMoved(JSObject *obj, JSObject *old) const
 {
   // The wrapper JSObject has been moved, so we need to update the entry in the
   // sNPObjWrappers hash table, if present.
 
   if (!sNPObjWrappers) {
-    return;
+    return 0;
   }
 
   NPObject *npobj = (NPObject *)js::GetProxyPrivate(obj).toPrivate();
   if (!npobj) {
-    return;
+    return 0;
   }
 
   // Calling PLDHashTable::Search() will not result in GC.
@@ -1807,6 +1804,7 @@ NPObjWrapper_ObjectMoved(JSObject *obj, const JSObject *old)
   MOZ_ASSERT(entry && entry->mJSObj);
   MOZ_ASSERT(entry->mJSObj == old);
   entry->mJSObj = obj;
+  return 0;
 }
 
 bool
@@ -2129,7 +2127,8 @@ LookupNPP(NPObject *npobj)
 }
 
 static bool
-CreateNPObjectMember(NPP npp, JSContext *cx, JSObject *obj, NPObject* npobj,
+CreateNPObjectMember(NPP npp, JSContext *cx,
+                     JS::Handle<JSObject*> aObj, NPObject* npobj,
                      JS::Handle<jsid> id,  NPVariant* getPropertyResult,
                      JS::MutableHandle<JS::Value> vp)
 {
@@ -2148,6 +2147,8 @@ CreateNPObjectMember(NPP npp, JSContext *cx, JSObject *obj, NPObject* npobj,
   // Make sure to clear all members in case something fails here
   // during initialization.
   memset(memberPrivate, 0, sizeof(NPObjectMemberPrivate));
+
+  JS::Rooted<JSObject*> obj(cx, aObj);
 
   JS::Rooted<JSObject*> memobj(cx, ::JS_NewObject(cx, &sNPObjectMemberClass));
   if (!memobj) {
@@ -2234,7 +2235,8 @@ NPObjectMember_Call(JSContext *cx, unsigned argc, JS::Value *vp)
   if (!memberPrivate || !memberPrivate->npobjWrapper)
     return false;
 
-  NPObject *npobj = GetNPObject(cx, memberPrivate->npobjWrapper);
+  JS::Rooted<JSObject*> objWrapper(cx, memberPrivate->npobjWrapper);
+  NPObject *npobj = GetNPObject(cx, objWrapper);
   if (!npobj) {
     ThrowJSExceptionASCII(cx, "Call on invalid member object");
 

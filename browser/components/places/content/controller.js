@@ -282,7 +282,7 @@ PlacesController.prototype = {
       this.showBookmarkPropertiesForSelection();
       break;
     case "placesCmd_moveBookmarks":
-      this.moveSelectedBookmarks();
+      this.moveSelectedBookmarks().catch(Components.utils.reportError);
       break;
     case "placesCmd_reload":
       this.reloadSelectedLivemark();
@@ -778,10 +778,38 @@ PlacesController.prototype = {
   /**
    * Opens a dialog for moving the selected nodes.
    */
-  moveSelectedBookmarks: function PC_moveBookmarks() {
+  async moveSelectedBookmarks() {
+    let args = {
+      // The guid of the folder to move bookmarks to. This will only be
+      // set in the useAsyncTransactions case.
+      moveToGuid: null,
+      // nodes is passed to support !useAsyncTransactions.
+      nodes: this._view.selectedNodes,
+    };
     window.openDialog("chrome://browser/content/places/moveBookmarks.xul",
                       "", "chrome, modal",
-                      this._view.selectedNodes);
+                      args);
+
+    if (!args.moveToGuid) {
+      return;
+    }
+
+    let transactions = [];
+
+    for (let node of this._view.selectedNodes) {
+      // Nothing to do if the node is already under the selected folder.
+      if (node.parent.bookmarkGuid == args.moveToGuid) {
+        continue;
+      }
+      transactions.push(PlacesTransactions.Move({
+        guid: node.bookmarkGuid,
+        newParentGuid: args.moveToGuid,
+      }));
+    }
+
+    if (transactions.length) {
+      await PlacesTransactions.batch(transactions);
+    }
   },
 
   /**
@@ -862,10 +890,10 @@ PlacesController.prototype = {
         if (PlacesUIUtils.useAsyncTransactions) {
           let tag = node.parent.title;
           if (!tag) {
-            let tagGuid = PlacesUtils.getConcreteItemGuid(node.parent);
+            let tagGuid = await PlacesUtils.promiseItemGuid(tagItemId);
             tag = (await PlacesUtils.bookmarks.fetch(tagGuid)).title;
           }
-          transactions.push(PlacesTransactions.Untag({ uri, tag }));
+          transactions.push(PlacesTransactions.Untag({ urls: [uri], tag }));
         } else {
           let txn = new PlacesUntagURITransaction(uri, [tagItemId]);
           transactions.push(txn);
@@ -1570,6 +1598,10 @@ var PlacesControllerDragHelper = {
     duplicable.set(PlacesUtils.TYPE_UNICODE, new Set());
     duplicable.set(PlacesUtils.TYPE_X_MOZ_URL, new Set());
 
+    // Collect all data from the DataTransfer before processing it, as the
+    // DataTransfer is only valid during the synchronous handling of the `drop`
+    // event handler callback.
+    let dtItems = [];
     for (let i = 0; i < dropCount; ++i) {
       let flavor = this.getFirstValidFlavor(dt.mozTypesAt(i));
       if (!flavor)
@@ -1582,7 +1614,10 @@ var PlacesControllerDragHelper = {
           continue;
         handled.add(data);
       }
+      dtItems.push({flavor, data});
+    }
 
+    for (let {flavor, data} of dtItems) {
       let nodes;
       if (flavor != TAB_DROP_TYPE) {
         nodes = PlacesUtils.unwrapNodes(data, flavor);
@@ -1599,28 +1634,39 @@ var PlacesControllerDragHelper = {
       for (let unwrapped of nodes) {
         let index = await insertionPoint.getIndex();
 
-        // Adjust insertion index to prevent reversal of dragged items. When you
-        // drag multiple elts upward: need to increment index or each successive
-        // elt will be inserted at the same index, each above the previous.
         if (index != -1 && unwrapped.itemGuid) {
           // Note: we use the parent from the existing bookmark as the sidebar
           // gives us an unwrapped.parent that is actually a query and not the real
           // parent.
           let existingBookmark = await PlacesUtils.bookmarks.fetch(unwrapped.itemGuid);
-          let dragginUp = parentGuid == existingBookmark.parentGuid &&
-                          index < existingBookmark.index;
 
-          if (dragginUp) {
-            index += movedCount++;
-          } else if (PlacesUIUtils.useAsyncTransactions) {
-            if (index == existingBookmark.index) {
-              // We're moving to the same index, so there's nothing for us to do.
-              continue;
+          // If we're dropping on the same folder, then we may need to adjust
+          // the index to insert at the correct place.
+          if (existingBookmark && parentGuid == existingBookmark.parentGuid) {
+            if (PlacesUIUtils.useAsyncTransactions) {
+              if (index < existingBookmark.index) {
+                // When you drag multiple elts upward: need to increment index or
+                // each successive elt will be inserted at the same index, each
+                // above the previous.
+                index += movedCount++;
+              } else if (index > existingBookmark.index) {
+                // If we're dragging down, we need to go one lower to insert at
+                // the real point as moving the element changes the index of
+                // everything below by 1.
+                index--;
+              } else {
+                // This isn't moving so we skip it.
+                continue;
+              }
+            } else {
+              // Sync Transactions. Adjust insertion index to prevent reversal
+              // of dragged items. When you drag multiple elts upward: need to
+              // increment index or each successive elt will be inserted at the
+              // same index, each above the previous.
+              if (index < existingBookmark.index) { // eslint-disable-line no-lonely-if
+                index += movedCount++;
+              }
             }
-            // If we're dragging down, we need to go one lower to insert at
-            // the real point as moving the element changes the index of
-            // everything below by 1.
-            index--;
           }
         }
 

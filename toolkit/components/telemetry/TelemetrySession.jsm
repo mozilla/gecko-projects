@@ -393,6 +393,31 @@ var TelemetryScheduler = {
   },
 
   /**
+   * Creates an object with a method `dispatch` that will call `dispatchFn` unless
+   * the method `cancel` is called beforehand.
+   *
+   * This is used to wrap main thread idle dispatch since it does not provide a
+   * cancel mechanism.
+   */
+  _makeIdleDispatch(dispatchFn) {
+    this._log.trace("_makeIdleDispatch");
+    let fn = dispatchFn;
+    let l = (msg) => this._log.trace(msg); // need to bind `this`
+    return {
+      cancel() {
+        fn = undefined;
+      },
+      dispatch(resolve, reject) {
+        l("_makeIdleDispatch.dispatch - !!fn: " + !!fn);
+        if (!fn) {
+          return Promise.resolve().then(resolve, reject);
+        }
+        return fn(resolve, reject);
+      },
+    };
+  },
+
+  /**
    * Performs a scheduler tick. This function manages Telemetry recurring operations.
    * @param {Boolean} [dispatchOnIdle=false] If true, the tick is dispatched in the
    *                  next idle cycle of the main thread.
@@ -400,9 +425,14 @@ var TelemetryScheduler = {
    *                   operation completes.
    */
   _onSchedulerTick(dispatchOnIdle = false) {
+    this._log.trace("_onSchedulerTick - dispatchOnIdle: " + dispatchOnIdle);
     // This call might not be triggered from a timeout. In that case we don't want to
     // leave any previously scheduled timeouts pending.
     this._clearTimeout();
+
+    if (this._idleDispatch) {
+      this._idleDispatch.cancel();
+    }
 
     if (this._shuttingDown) {
       this._log.warn("_onSchedulerTick - already shutdown.");
@@ -412,9 +442,17 @@ var TelemetryScheduler = {
     let promise = Promise.resolve();
     try {
       if (dispatchOnIdle) {
+        this._idleDispatch = this._makeIdleDispatch((resolve, reject) => {
+          this._log.trace("_onSchedulerTick - ildeDispatchToMainThread dispatch");
+          return this._schedulerTickLogic().then(resolve, reject);
+        });
         promise = new Promise((resolve, reject) =>
-          Services.tm.idleDispatchToMainThread(() => this._schedulerTickLogic().then(resolve, reject)),
-                                               SCHEDULER_TICK_MAX_IDLE_DELAY_MS);
+          Services.tm.idleDispatchToMainThread(() => {
+            return this._idleDispatch
+              ? this._idleDispatch.dispatch(resolve, reject)
+              : Promise.resolve().then(resolve, reject)
+            },
+            SCHEDULER_TICK_MAX_IDLE_DELAY_MS));
       } else {
         promise = this._schedulerTickLogic();
       }
@@ -1541,7 +1579,8 @@ var Impl = {
       if (Telemetry.canRecordExtended) {
         GCTelemetry.init();
       }
-    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY);
+    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY,
+    testing ? 0 : undefined);
 
     delayedTask.arm();
   },
@@ -1699,7 +1738,24 @@ var Impl = {
       };
       p.push(TelemetryController.submitExternalPing(getPingType(shutdownPayload), shutdownPayload, options)
                                 .catch(e => this._log.error("saveShutdownPings - failed to submit shutdown ping", e)));
-     }
+
+      // Send a duplicate of first-shutdown pings as a new ping type, in order to properly
+      // evaluate first session profiles (see bug 1390095).
+      const sendFirstShutdownPing =
+        Services.prefs.getBoolPref(Utils.Preferences.ShutdownPingSender, false) &&
+        Services.prefs.getBoolPref(Utils.Preferences.FirstShutdownPingEnabled, false) &&
+        TelemetryReportingPolicy.isFirstRun();
+
+      if (sendFirstShutdownPing) {
+        let options = {
+            addClientId: true,
+            addEnvironment: true,
+            usePingSender: true,
+          };
+        p.push(TelemetryController.submitExternalPing("first-shutdown", shutdownPayload, options)
+                                  .catch(e => this._log.error("saveShutdownPings - failed to submit first shutdown ping", e)));
+      }
+    }
 
     // As a temporary measure, we want to submit saved-session too if extended Telemetry is enabled
     // to keep existing performance analysis working.

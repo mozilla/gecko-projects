@@ -36,6 +36,7 @@ class ChannelMediaDecoder : public MediaDecoder
 
   private:
     /* MediaResourceCallback functions */
+    AbstractThread* AbstractMainThread() const override;
     MediaDecoderOwner* GetMediaOwner() const override;
     void NotifyNetworkError() override;
     void NotifyDataArrived() override;
@@ -92,7 +93,6 @@ private:
   // Create a new state machine to run this decoder.
   MediaDecoderStateMachine* CreateStateMachine();
 
-  nsresult OpenResource(nsIStreamListener** aStreamListener);
   nsresult Load(BaseMediaResource* aOriginal);
 
   // Called by MediaResource when the download has ended.

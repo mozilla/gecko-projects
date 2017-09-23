@@ -256,11 +256,18 @@ StreamFilterChild::MaybeStopRequest()
     return;
   }
 
+  if (mStreamFilter) {
+    Unused << mStreamFilter->CheckAlive();
+  }
+
   switch (mState) {
   case State::Suspending:
   case State::Resuming:
     mNextState = State::FinishedTransferringData;
     return;
+
+  case State::Disconnecting:
+    break;
 
   default:
     mState = State::FinishedTransferringData;
@@ -278,8 +285,8 @@ StreamFilterChild::MaybeStopRequest()
  * State change acknowledgment callbacks
  *****************************************************************************/
 
-IPCResult
-StreamFilterChild::RecvInitialized(const bool& aSuccess)
+void
+StreamFilterChild::RecvInitialized(bool aSuccess)
 {
   MOZ_ASSERT(mState == State::Uninitialized);
 
@@ -292,7 +299,6 @@ StreamFilterChild::RecvInitialized(const bool& aSuccess)
       mStreamFilter = nullptr;
     }
   }
-  return IPC_OK();
 }
 
 IPCResult
@@ -431,6 +437,7 @@ StreamFilterChild::RecvStartRequest()
 
   if (mStreamFilter) {
     mStreamFilter->FireEvent(NS_LITERAL_STRING("start"));
+    Unused << mStreamFilter->CheckAlive();
   }
   return IPC_OK();
 }
@@ -473,6 +480,10 @@ StreamFilterChild::RecvData(Data&& aData)
 {
   MOZ_ASSERT(!mReceivedOnStop);
 
+  if (mStreamFilter) {
+    Unused << mStreamFilter->CheckAlive();
+  }
+
   switch (mState) {
   case State::TransferringData:
   case State::Resuming:
@@ -512,6 +523,12 @@ void
 StreamFilterChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   mStreamFilter = nullptr;
+}
+
+void
+StreamFilterChild::DeallocPStreamFilterChild()
+{
+  RefPtr<StreamFilterChild> self = dont_AddRef(this);
 }
 
 } // namespace extensions

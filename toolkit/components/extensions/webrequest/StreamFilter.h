@@ -14,22 +14,24 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIAtom.h"
-#include "nsIIPCBackgroundChildCreateCallback.h"
 
 namespace mozilla {
+namespace ipc {
+  template <class T> class Endpoint;
+}
+
 namespace extensions {
 
+class PStreamFilterChild;
 class StreamFilterChild;
 
 using namespace mozilla::dom;
 
 class StreamFilter : public DOMEventTargetHelper
-                   , public nsIIPCBackgroundChildCreateCallback
 {
   friend class StreamFilterChild;
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(StreamFilter, DOMEventTargetHelper)
 
   static already_AddRefed<StreamFilter>
@@ -77,9 +79,14 @@ protected:
 
   void FireErrorEvent(const nsAString& aError);
 
+  bool CheckAlive();
+
 private:
   void
-  ConnectToPBackground();
+  Connect();
+
+  void
+  FinishConnect(mozilla::ipc::Endpoint<PStreamFilterChild>&& aEndpoint);
 
   void ForgetActor();
 

@@ -8,13 +8,6 @@ xul|caption {
   background-color: transparent;
 }
 
-xul|button,
-html|button,
-xul|colorpicker[type="button"],
-xul|menulist {
-  margin: 2px 4px;
-}
-
 xul|menulist:not([editable="true"]) > xul|*.menulist-dropmarker {
   margin-top: 1px;
   margin-bottom: 1px;
@@ -78,25 +71,10 @@ html|input[type="checkbox"]:-moz-focusring + html|label:before {
   }
 }
 
-html|html *,
-xul|page *,
-xul|window * {
-  font-size: 1.25rem;
-}
-
 *|*.header-name {
   font-size: 1.83rem;
 }
 
 *|*.category-name {
   font-size: 1.33rem;
-}
-
-xul|caption > xul|label {
-  font-size: 1.42rem;
-}
-
-.tip-caption,
-.help-button {
-  font-size: 1.08rem;
 }

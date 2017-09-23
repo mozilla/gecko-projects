@@ -18,6 +18,7 @@ function BHRTelemetryService() {
 
   Services.obs.addObserver(this, "profile-before-change");
   Services.obs.addObserver(this, "bhr-thread-hang");
+  Services.obs.addObserver(this, "idle-daily");
 
   this.resetPayload();
 }
@@ -90,8 +91,7 @@ BHRTelemetryService.prototype = Object.freeze({
     // when running tests so that we run as much of BHR as possible (to catch
     // errors) while avoiding timeouts caused by invoking `pingsender` during
     // testing.
-    if (Services.prefs.getBoolPref("toolkit.telemetry.bhrPing.enabled", false) &&
-        this.payload.hangs.length > 0) {
+    if (Services.prefs.getBoolPref("toolkit.telemetry.bhrPing.enabled", false)) {
       this.payload.timeSinceLastPing = new Date() - this.startTime;
       TelemetryController.submitExternalPing("bhr", this.payload, {
         addEnvironment: true,
@@ -103,6 +103,7 @@ BHRTelemetryService.prototype = Object.freeze({
   shutdown() {
     Services.obs.removeObserver(this, "profile-before-change");
     Services.obs.removeObserver(this, "bhr-thread-hang");
+    Services.obs.removeObserver(this, "idle-daily");
     this.submit();
   },
 
@@ -116,6 +117,9 @@ BHRTelemetryService.prototype = Object.freeze({
       break;
     case "profile-before-change":
       this.shutdown();
+      break;
+    case "idle-daily":
+      this.submit();
       break;
     }
   },

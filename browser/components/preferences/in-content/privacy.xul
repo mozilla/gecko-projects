@@ -272,7 +272,6 @@
       <hbox align="center" flex="1">
         <vbox flex="1">
           <description>&rememberDescription.label;</description>
-          <separator class="thin"/>
           <description>&rememberActions.pre.label;<label
           class="text-link" id="historyRememberClear"
           >&rememberActions.clearHistory.label;</label>&rememberActions.middle.label;<label
@@ -285,7 +284,6 @@
       <hbox align="center" flex="1">
         <vbox flex="1">
           <description>&dontrememberDescription.label;</description>
-          <separator class="thin"/>
           <description>&dontrememberActions.pre.label;<label
           class="text-link" id="historyDontRememberClear"
           >&dontrememberActions.clearHistory.label;</label>&dontrememberActions.post.label;</description>
@@ -293,7 +291,6 @@
       </hbox>
     </vbox>
     <vbox id="historyCustomPane">
-      <separator class="thin"/>
       <vbox>
         <checkbox id="privateBrowsingAutoStart"
                   label="&privateBrowsingPermanent2.label;"
@@ -315,25 +312,39 @@
                       onsyncfrompreference="return gPrivacyPane.readAcceptCookies();"
                       onsynctopreference="return gPrivacyPane.writeAcceptCookies();"
                       flex="1" />
-            <button id="cookieExceptions"
-                    class="accessory-button"
-                    label="&cookieExceptions.label;" accesskey="&cookieExceptions.accesskey;"
-                    preference="pref.privacy.disable_button.cookie_exceptions"/>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <button id="cookieExceptions"
+                      class="accessory-button"
+                      label="&cookieExceptions.label;" accesskey="&cookieExceptions.accesskey;"
+                      preference="pref.privacy.disable_button.cookie_exceptions"
+                      searchkeywords="&address2.label;
+                                      &block.label;
+                                      &session.label;
+                                      &allow.label;
+                                      &removepermission2.label;
+                                      &removeallpermissions2.label;
+                                      &button.cancel.label;
+                                      &button.ok.label;"/>
+            </hbox>
           </hbox>
           <hbox id="acceptThirdPartyRow"
                 class="indent"
                 align="center">
             <label id="acceptThirdPartyLabel" control="acceptThirdPartyMenu"
                    accesskey="&acceptThirdParty2.pre.accesskey;">&acceptThirdParty2.pre.label;</label>
-            <menulist id="acceptThirdPartyMenu" preference="network.cookie.cookieBehavior"
-            onsyncfrompreference="return gPrivacyPane.readAcceptThirdPartyCookies();"
-            onsynctopreference="return gPrivacyPane.writeAcceptThirdPartyCookies();">
-              <menupopup>
-                <menuitem label="&acceptThirdParty.always.label;" value="always"/>
-                <menuitem label="&acceptThirdParty.visited.label;" value="visited"/>
-                <menuitem label="&acceptThirdParty.never.label;" value="never"/>
-              </menupopup>
-            </menulist>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <menulist id="acceptThirdPartyMenu" preference="network.cookie.cookieBehavior"
+              onsyncfrompreference="return gPrivacyPane.readAcceptThirdPartyCookies();"
+              onsynctopreference="return gPrivacyPane.writeAcceptThirdPartyCookies();">
+                <menupopup>
+                  <menuitem label="&acceptThirdParty.always.label;" value="always"/>
+                  <menuitem label="&acceptThirdParty.visited.label;" value="visited"/>
+                  <menuitem label="&acceptThirdParty.never.label;" value="never"/>
+                </menupopup>
+              </menulist>
+            </hbox>
           </hbox>
           <hbox id="keepRow"
                 class="indent"
@@ -341,18 +352,25 @@
             <label id="keepUntil"
                    control="keepCookiesUntil"
                    accesskey="&keepUntil2.accesskey;">&keepUntil2.label;</label>
-            <menulist id="keepCookiesUntil"
-                      preference="network.cookie.lifetimePolicy">
-              <menupopup>
-                <menuitem label="&expire.label;" value="0"/>
-                <menuitem label="&close.label;" value="2"/>
-              </menupopup>
-            </menulist>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <menulist id="keepCookiesUntil"
+                        preference="network.cookie.lifetimePolicy">
+                <menupopup>
+                  <menuitem label="&expire.label;" value="0"/>
+                  <menuitem label="&close.label;" value="2"/>
+                </menupopup>
+              </menulist>
+            </hbox>
             <spacer flex="1"/>
-            <button id="showCookiesButton"
-                    class="accessory-button"
-                    label="&showCookies.label;" accesskey="&showCookies.accesskey;"
-                    preference="pref.privacy.disable_button.view_cookies"/>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <button id="showCookiesButton"
+                      class="accessory-button"
+                      label="&showCookies.label;"
+                      accesskey="&showCookies.accesskey;"
+                      preference="pref.privacy.disable_button.view_cookies"/>
+            </hbox>
           </hbox>
           <hbox id="clearDataBox"
                 align="center">
@@ -361,10 +379,23 @@
                       label="&clearOnClose.label;"
                       accesskey="&clearOnClose.accesskey;"
                       flex="1" />
-            <button id="clearDataSettings"
-                    class="accessory-button"
-                    label="&clearOnCloseSettings.label;"
-                    accesskey="&clearOnCloseSettings.accesskey;"/>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <button id="clearDataSettings"
+                      class="accessory-button"
+                      label="&clearOnCloseSettings.label;"
+                      accesskey="&clearOnCloseSettings.accesskey;"
+                      searchkeywords="&clearDataSettings2.label;
+                                      &historySection.label;
+                                      &itemHistoryAndDownloads.label;
+                                      &itemCookies.label;
+                                      &itemActiveLogins.label;
+                                      &itemCache.label;
+                                      &itemFormSearchHistory.label;
+                                      &dataSection.label;
+                                      &itemSitePreferences.label;
+                                      &itemOfflineApps.label;"/>
+            </hbox>
           </hbox>
         </vbox>
       </vbox>
@@ -426,7 +457,7 @@
   <hbox align="baseline">
     <vbox flex="1">
       <description flex="1">
-        <label id="totalSiteDataSize"></label>
+        <label id="totalSiteDataSize" class="tail-with-learn-more"></label>
         <label id="siteDataLearnMoreLink" class="learnMore text-link">&siteDataLearnMoreLink.label;</label>
       </description>
     </vbox>
@@ -463,7 +494,7 @@
       <vbox id="trackingProtectionBox" flex="1" hidden="true">
         <description id="trackingProtectionDesc"
                      control="trackingProtectionRadioGroup">
-          &trackingProtection2.radioGroupLabel;
+           <label class="tail-with-learn-more">&trackingProtection2.radioGroupLabel;</label>
            <label id="trackingProtectionLearnMore" class="learnMore text-link">&trackingProtectionLearnMore.label;</label>
         </description>
         <radiogroup id="trackingProtectionRadioGroup" aria-labelledby="trackingProtectionDesc">
@@ -516,7 +547,7 @@
       </vbox>
     </hbox>
     <vbox id="doNotTrackLearnMoreBox">
-      <label>&doNotTrack.description;<label
+      <label><label class="tail-with-learn-more">&doNotTrack.description;</label><label
       class="learnMore text-link" href="https://www.mozilla.org/dnt"
       >&doNotTrack.learnMore.label;</label></label>
       <radiogroup id="doNotTrackRadioGroup" aria-labelledby="doNotTrackDesc" preference="privacy.donottrackheader.enabled">
@@ -602,7 +633,7 @@
         <description flex="1">
           <image class="desktop-notification-icon permission-icon" />
           <separator orient="vertical" class="thin"/>
-          <label id="notificationPermissionsLabel">&notificationPermissions.label;</label>
+          <label id="notificationPermissionsLabel" class="tail-with-learn-more">&notificationPermissions.label;</label>
           <label id="notificationPermissionsLearnMore"
                  class="learnMore text-link">&notificationPermissionsLearnMore.label;</label>
         </description>
@@ -625,8 +656,8 @@
   <vbox id="notificationsDoNotDisturbBox" hidden="true">
     <checkbox id="notificationsDoNotDisturb" label="&notificationsDoNotDisturb.label;"
               accesskey="&notificationsDoNotDisturb.accesskey;"/>
-    <label id="notificationsDoNotDisturbDetails"
-           class="indent">&notificationsDoNotDisturbDetails.value;</label>
+    <description id="notificationsDoNotDisturbDetails"
+           class="indent tip-caption">&notificationsDoNotDisturbDetails.value;</description>
   </vbox>
 
   <hbox align="start">
@@ -668,13 +699,14 @@
   </hbox>
 
   <vbox id="a11yPermissionsBox">
-    <description flex="1">
-      <checkbox id="a11yPrivacyCheckbox" label="&a11yPrivacy.checkbox.label;"
+    <hbox flex="1" align="center">
+      <checkbox id="a11yPrivacyCheckbox" class="tail-with-learn-more"
+                label="&a11yPrivacy.checkbox.label;"
                 accesskey="&a11yPrivacy.checkbox.accesskey;"
                 oncommand="return gPrivacyPane.updateA11yPrefs(this.checked)"/>
       <label id="a11yLearnMoreLink" class="learnMore text-link"
               value="&a11yPrivacy.learnmore.label;"></label>
-    </description>
+    </hbox>
   </vbox>
 </groupbox>
 
@@ -693,11 +725,12 @@
 
   <vbox>
     <description>
-      &dataCollectionDesc.label;<label id="dataCollectionPrivacyNotice" class="learnMore text-link">&dataCollectionPrivacyNotice.label;</label>
+      <label class="tail-with-learn-more">&dataCollectionDesc.label;</label><label id="dataCollectionPrivacyNotice" class="learnMore text-link">&dataCollectionPrivacyNotice.label;</label>
     </description>
     <description flex="1">
-      <checkbox id="submitHealthReportBox" label="&enableHealthReport1.label;"
-                accesskey="&enableHealthReport1.accesskey;"/>
+      <checkbox id="submitHealthReportBox" label="&enableHealthReport2.label;"
+                class="tail-with-learn-more"
+                accesskey="&enableHealthReport2.accesskey;"/>
       <label id="FHRLearnMore"
              class="learnMore text-link">&healthReportLearnMore.label;</label>
     </description>
@@ -708,6 +741,7 @@
 #ifdef MOZ_CRASHREPORTER
   <hbox align="center">
     <checkbox id="automaticallySubmitCrashesBox"
+              class="tail-with-learn-more"
               preference="browser.crashReports.unsubmittedCheck.autoSubmit"
               label="&alwaysSubmitCrashReports1.label;"
               accesskey="&alwaysSubmitCrashReports1.accesskey;"/>
@@ -726,11 +760,16 @@
 </hbox>
 
 <!-- addons, forgery (phishing) UI Security -->
-<groupbox id="addonsPhishingGroup" data-category="panePrivacy" hidden="true">
-  <caption><label>&phishingProtection.label;</label></caption>
-  <checkbox id="enableSafeBrowsing"
-            label="&enableSafeBrowsing.label;"
-            accesskey="&enableSafeBrowsing.accesskey;" />
+<groupbox id="browsingProtectionGroup" data-category="panePrivacy" hidden="true">
+  <caption><label>&browsingProtection.label;</label></caption>
+  <hbox align = "center">
+    <checkbox id="enableSafeBrowsing"
+              label="&enableSafeBrowsing.label;"
+              class="tail-with-learn-more"
+              accesskey="&enableSafeBrowsing.accesskey;" />
+    <label id="enableSafeBrowsingLearnMore"
+           class="learnMore text-link">&enableSafeBrowsingLearnMore.label;</label>
+  </hbox>
   <vbox class="indent">
 #ifdef MOZILLA_OFFICIAL
     <checkbox id="blockDownloads"

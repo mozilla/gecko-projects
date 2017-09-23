@@ -6,7 +6,6 @@
 
 <% from data import to_idl_name, SYSTEM_FONT_LONGHANDS %>
 
-use app_units::Au;
 use cssparser::Parser;
 #[cfg(feature = "gecko")] use gecko_bindings::bindings::RawServoAnimationValueMap;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::RawGeckoGfxMatrix4x4;
@@ -16,13 +15,10 @@ use cssparser::Parser;
 use itertools::{EitherOrBoth, Itertools};
 use properties::{CSSWideKeyword, PropertyDeclaration};
 use properties::longhands;
-use properties::longhands::background_size::computed_value::T as BackgroundSizeList;
-use properties::longhands::border_spacing::computed_value::T as BorderSpacing;
 use properties::longhands::font_weight::computed_value::T as FontWeight;
 use properties::longhands::font_stretch::computed_value::T as FontStretch;
 #[cfg(feature = "gecko")]
 use properties::longhands::font_variation_settings::computed_value::T as FontVariationSettings;
-use properties::longhands::line_height::computed_value::T as LineHeight;
 use properties::longhands::transform::computed_value::ComputedMatrix;
 use properties::longhands::transform::computed_value::ComputedOperation as TransformOperation;
 use properties::longhands::transform::computed_value::T as TransformList;
@@ -33,27 +29,22 @@ use selectors::parser::SelectorParseError;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp;
+use std::fmt;
 #[cfg(feature = "gecko")] use hash::FnvHashMap;
 use style_traits::ParseError;
 use super::ComputedValues;
-#[cfg(feature = "gecko")]
-use values::Auto;
 use values::{CSSFloat, CustomIdent, Either};
 use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
-use values::animated::color::{Color as AnimatedColor, RGBA as AnimatedRGBA};
-use values::animated::effects::BoxShadowList as AnimatedBoxShadowList;
+use values::animated::color::RGBA as AnimatedRGBA;
 use values::animated::effects::Filter as AnimatedFilter;
 use values::animated::effects::FilterList as AnimatedFilterList;
-use values::animated::effects::TextShadowList as AnimatedTextShadowList;
-use values::computed::{Angle, BorderCornerRadius, CalcLengthOrPercentage};
-use values::computed::{ClipRect, Context, ComputedUrl, ComputedValueAsSpecified};
-use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
-use values::computed::{LengthOrPercentageOrNone, MaxLength, NonNegativeAu};
+use values::computed::{Angle, CalcLengthOrPercentage};
+use values::computed::{ClipRect, Context, ComputedUrl};
+use values::computed::{Length, LengthOrPercentage, LengthOrPercentageOrAuto};
+use values::computed::{LengthOrPercentageOrNone, MaxLength};
 use values::computed::{NonNegativeNumber, Number, NumberOrPercentage, Percentage};
-use values::computed::{PositiveIntegerOrAuto, ToComputedValue};
-#[cfg(feature = "gecko")] use values::computed::MozLength;
-use values::computed::length::{NonNegativeLengthOrAuto, NonNegativeLengthOrNormal};
 use values::computed::length::NonNegativeLengthOrPercentage;
+use values::computed::ToComputedValue;
 use values::computed::transform::DirectionVector;
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
 #[cfg(feature = "gecko")] use values::generics::FontSettings as GenericFontSettings;
@@ -73,7 +64,8 @@ pub trait RepeatableListAnimatable: Animate {}
 /// NOTE: This includes the 'display' property since it is animatable from SMIL even though it is
 /// not animatable from CSS animations or Web Animations. CSS transitions also does not allow
 /// animating 'display', but for CSS transitions we have the separate TransitionProperty type.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum AnimatableLonghand {
     % for prop in data.longhands:
@@ -82,6 +74,19 @@ pub enum AnimatableLonghand {
             ${prop.camel_case},
         % endif
     % endfor
+}
+
+impl fmt::Debug for AnimatableLonghand {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let name = match *self {
+            % for property in data.longhands:
+                % if property.animatable:
+                    AnimatableLonghand::${property.camel_case} => "${property.camel_case}",
+                % endif
+            % endfor
+        };
+        formatter.write_str(name)
+    }
 }
 
 impl AnimatableLonghand {
@@ -202,8 +207,9 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
 /// a shorthand with at least one transitionable longhand component, or an unsupported property.
 // NB: This needs to be here because it needs all the longhands generated
 // beforehand.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, Eq, Hash, PartialEq, ToCss)]
+#[derive(Clone, Eq, Hash, PartialEq, ToCss, ToComputedValue)]
 pub enum TransitionProperty {
     /// All, any transitionable property changing should generate a transition.
     All,
@@ -218,8 +224,24 @@ pub enum TransitionProperty {
     Unsupported(CustomIdent)
 }
 
-
-impl ComputedValueAsSpecified for TransitionProperty {}
+impl fmt::Debug for TransitionProperty {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let name = match *self {
+            % for property in data.longhands + data.shorthands_except_all():
+                % if property.transitionable:
+                    TransitionProperty::${property.camel_case} => "${property.camel_case}",
+                % endif
+            % endfor
+            TransitionProperty::All => "All",
+            TransitionProperty::Unsupported(ref ident) => {
+                formatter.write_str("Unsupported(")?;
+                ident.fmt(formatter)?;
+                return formatter.write_str(")");
+            }
+        };
+        formatter.write_str(name)
+    }
+}
 
 impl TransitionProperty {
     /// Iterates over each longhand property.
@@ -247,21 +269,15 @@ impl TransitionProperty {
     /// Parse a transition-property value.
     pub fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         let ident = input.expect_ident()?;
-        let supported = match_ignore_ascii_case! { &ident,
-            "all" => Ok(Some(TransitionProperty::All)),
+        match_ignore_ascii_case! { &ident,
+            "all" => Ok(TransitionProperty::All),
             % for prop in data.longhands + data.shorthands_except_all():
                 % if prop.transitionable:
-                    "${prop.name}" => Ok(Some(TransitionProperty::${prop.camel_case})),
+                    "${prop.name}" => Ok(TransitionProperty::${prop.camel_case}),
                 % endif
             % endfor
-            "none" => Err(()),
-            _ => Ok(None),
-        };
-
-        match supported {
-            Ok(Some(property)) => Ok(property),
-            Ok(None) => CustomIdent::from_ident(ident, &[]).map(TransitionProperty::Unsupported),
-            Err(()) => Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
+            "none" => Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
+            _ => CustomIdent::from_ident(ident, &[]).map(TransitionProperty::Unsupported),
         }
     }
 
@@ -324,19 +340,20 @@ impl<'a> From< &'a TransitionProperty> for nsCSSPropertyID {
 #[allow(non_upper_case_globals)]
 impl From<nsCSSPropertyID> for TransitionProperty {
     fn from(property: nsCSSPropertyID) -> TransitionProperty {
-        match property {
+        let unsupported = match property {
             % for prop in data.longhands + data.shorthands_except_all():
                 % if prop.transitionable:
                     ${helpers.to_nscsspropertyid(prop.ident)}
-                        => TransitionProperty::${prop.camel_case},
+                        => return TransitionProperty::${prop.camel_case},
                 % else:
                     ${helpers.to_nscsspropertyid(prop.ident)}
-                        => TransitionProperty::Unsupported(CustomIdent(Atom::from("${prop.ident}"))),
+                        => "${prop.ident}",
                 % endif
             % endfor
-            nsCSSPropertyID::eCSSPropertyExtra_all_properties => TransitionProperty::All,
+            nsCSSPropertyID::eCSSPropertyExtra_all_properties => return TransitionProperty::All,
             _ => panic!("Unconvertable nsCSSPropertyID: {:?}", property),
-        }
+        };
+        TransitionProperty::Unsupported(CustomIdent(Atom::from(unsupported)))
     }
 }
 
@@ -362,10 +379,9 @@ pub enum AnimatedProperty {
     % for prop in data.longhands:
         % if prop.animatable:
             <%
-                if prop.is_animatable_with_computed_value:
-                    value_type = "longhands::{}::computed_value::T".format(prop.ident)
-                else:
-                    value_type = prop.animation_value_type
+                value_type = "longhands::{}::computed_value::T".format(prop.ident)
+                if not prop.is_animatable_with_computed_value:
+                    value_type = "<{} as ToAnimatedValue>::AnimatedValue".format(value_type)
             %>
             /// ${prop.name}
             ${prop.camel_case}(${value_type}, ${value_type}),
@@ -491,7 +507,7 @@ unsafe impl HasSimpleFFI for AnimationValueMap {}
 ///
 /// FIXME: We need to add a path for custom properties, but that's trivial after
 /// this (is a similar path to that of PropertyDeclaration).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum AnimationValue {
     % for prop in data.longhands:
@@ -500,10 +516,23 @@ pub enum AnimationValue {
             % if prop.is_animatable_with_computed_value:
                 ${prop.camel_case}(longhands::${prop.ident}::computed_value::T),
             % else:
-                ${prop.camel_case}(${prop.animation_value_type}),
+                ${prop.camel_case}(<longhands::${prop.ident}::computed_value::T as ToAnimatedValue>::AnimatedValue),
             % endif
         % endif
     % endfor
+}
+
+impl fmt::Debug for AnimationValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let name = match *self {
+        % for prop in data.longhands:
+            % if prop.animatable:
+                AnimationValue::${prop.camel_case}(..) => "${prop.camel_case}",
+            % endif
+        % endfor
+        };
+        formatter.write_str(name)
+    }
 }
 
 impl AnimationValue {
@@ -547,12 +576,22 @@ impl AnimationValue {
             % for prop in data.longhands:
             % if prop.animatable:
             PropertyDeclaration::${prop.camel_case}(ref val) => {
+                context.for_non_inherited_property =
+                    % if prop.style_struct.inherited:
+                        None;
+                    % else:
+                        Some(LonghandId::${prop.camel_case});
+                    % endif
             % if prop.ident in SYSTEM_FONT_LONGHANDS and product == "gecko":
                 if let Some(sf) = val.get_system() {
                     longhands::system_font::resolve_system_font(sf, context);
                 }
             % endif
+            % if prop.boxed:
+            let computed = (**val).to_computed_value(context);
+            % else:
             let computed = val.to_computed_value(context);
+            % endif
             Some(AnimationValue::${prop.camel_case}(
             % if prop.is_animatable_with_computed_value:
                 computed
@@ -817,7 +856,7 @@ impl ToAnimatedZero for LengthOrPercentageOrAuto {
             LengthOrPercentageOrAuto::Length(_) |
             LengthOrPercentageOrAuto::Percentage(_) |
             LengthOrPercentageOrAuto::Calc(_) => {
-                Ok(LengthOrPercentageOrAuto::Length(Au(0)))
+                Ok(LengthOrPercentageOrAuto::Length(Length::new(0.)))
             },
             LengthOrPercentageOrAuto::Auto => Err(()),
         }
@@ -831,7 +870,7 @@ impl ToAnimatedZero for LengthOrPercentageOrNone {
             LengthOrPercentageOrNone::Length(_) |
             LengthOrPercentageOrNone::Percentage(_) |
             LengthOrPercentageOrNone::Calc(_) => {
-                Ok(LengthOrPercentageOrNone::Length(Au(0)))
+                Ok(LengthOrPercentageOrNone::Length(Length::new(0.)))
             },
             LengthOrPercentageOrNone::None => Err(()),
         }
@@ -1098,7 +1137,8 @@ impl<H, V> RepeatableListAnimatable for generic_position::Position<H, V>
 impl Animate for ClipRect {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        let animate_component = |this: &Option<Au>, other: &Option<Au>| {
+        use values::computed::Length;
+        let animate_component = |this: &Option<Length>, other: &Option<Length>| {
             match (this.animate(other, procedure)?, procedure) {
                 (None, Procedure::Interpolate { .. }) => Ok(None),
                 (None, _) => Err(()),
@@ -1248,11 +1288,11 @@ impl Animate for TransformOperation {
             ) => {
                 let mut fd_matrix = ComputedMatrix::identity();
                 let mut td_matrix = ComputedMatrix::identity();
-                if fd.0 > 0 {
-                    fd_matrix.m34 = -1. / fd.to_f32_px();
+                if fd.px() > 0. {
+                    fd_matrix.m34 = -1. / fd.px();
                 }
-                if td.0 > 0 {
-                    td_matrix.m34 = -1. / td.to_f32_px();
+                if td.px() > 0. {
+                    td_matrix.m34 = -1. / td.px();
                 }
                 Ok(TransformOperation::Matrix(
                     fd_matrix.animate(&td_matrix, procedure)?,
@@ -1419,11 +1459,10 @@ impl Animate for ComputedMatrix {
                 (Ok(this), Ok(other)) => {
                     Ok(ComputedMatrix::from(this.animate(&other, procedure)?))
                 },
-                _ => {
-                    let (this_weight, other_weight) = procedure.weights();
-                    let result = if this_weight > other_weight { *self } else { *other };
-                    Ok(result)
-                },
+                // Matrices can be undecomposable due to couple reasons, e.g.,
+                // non-invertible matrices. In this case, we should report Err
+                // here, and let the caller do the fallback procedure.
+                _ => Err(())
             }
         } else {
             let this = MatrixDecomposed2D::from(*self);
@@ -1443,11 +1482,10 @@ impl Animate for ComputedMatrix {
             (Ok(from), Ok(to)) => {
                 Ok(ComputedMatrix::from(from.animate(&to, procedure)?))
             },
-            _ => {
-                let (this_weight, other_weight) = procedure.weights();
-                let result = if this_weight > other_weight { *self } else { *other };
-                Ok(result)
-            },
+            // Matrices can be undecomposable due to couple reasons, e.g.,
+            // non-invertible matrices. In this case, we should report Err here,
+            // and let the caller do the fallback procedure.
+            _ => Err(())
         }
     }
 }
@@ -2317,9 +2355,9 @@ impl ComputeSquaredDistance for TransformOperation {
                 // convert Au into px.
                 let extract_pixel_length = |lop: &LengthOrPercentage| {
                     match *lop {
-                        LengthOrPercentage::Length(au) => au.to_f64_px(),
+                        LengthOrPercentage::Length(px) => px.px(),
                         LengthOrPercentage::Percentage(_) => 0.,
-                        LengthOrPercentage::Calc(calc) => calc.length().to_f64_px(),
+                        LengthOrPercentage::Calc(calc) => calc.length().px(),
                     }
                 };
 
@@ -2331,7 +2369,7 @@ impl ComputeSquaredDistance for TransformOperation {
                 Ok(
                     fx.compute_squared_distance(&tx)? +
                     fy.compute_squared_distance(&ty)? +
-                    fz.to_f64_px().compute_squared_distance(&tz.to_f64_px())?,
+                    fz.compute_squared_distance(&tz)?,
                 )
             },
             (
@@ -2368,12 +2406,12 @@ impl ComputeSquaredDistance for TransformOperation {
             ) => {
                 let mut fd_matrix = ComputedMatrix::identity();
                 let mut td_matrix = ComputedMatrix::identity();
-                if fd.0 > 0 {
-                    fd_matrix.m34 = -1. / fd.to_f32_px();
+                if fd.px() > 0. {
+                    fd_matrix.m34 = -1. / fd.px();
                 }
 
-                if td.0 > 0 {
-                    td_matrix.m34 = -1. / td.to_f32_px();
+                if td.px() > 0. {
+                    td_matrix.m34 = -1. / td.px();
                 }
                 fd_matrix.compute_squared_distance(&td_matrix)
             }
@@ -2385,8 +2423,8 @@ impl ComputeSquaredDistance for TransformOperation {
                 &TransformOperation::Perspective(ref p),
             ) => {
                 let mut p_matrix = ComputedMatrix::identity();
-                if p.0 > 0 {
-                    p_matrix.m34 = -1. / p.to_f32_px();
+                if p.px() > 0. {
+                    p_matrix.m34 = -1. / p.px();
                 }
                 p_matrix.compute_squared_distance(&m)
             }
@@ -2468,7 +2506,7 @@ impl From<NonNegativeNumber> for NumberOrPercentage {
 impl From<LengthOrPercentage> for NumberOrPercentage {
     fn from(lop: LengthOrPercentage) -> NumberOrPercentage {
         match lop {
-            LengthOrPercentage::Length(len) => NumberOrPercentage::Number(len.to_f32_px()),
+            LengthOrPercentage::Length(len) => NumberOrPercentage::Number(len.px()),
             LengthOrPercentage::Percentage(p) => NumberOrPercentage::Percentage(p),
             LengthOrPercentage::Calc(_) => {
                 panic!("We dont't expected calc interpolation for SvgLengthOrPercentageOrNumber");

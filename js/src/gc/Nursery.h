@@ -40,11 +40,11 @@
     _(ClearNewObjectCache,      "clrNOC")                                     \
     _(CollectToFP,              "collct")                                     \
     _(ObjectsTenuredCallback,   "tenCB")                                      \
-    _(SweepArrayBufferViewList, "swpABO")                                     \
+    _(Sweep,                    "sweep")                                      \
     _(UpdateJitActivations,     "updtIn")                                     \
     _(FreeMallocedBuffers,      "frSlts")                                     \
     _(ClearStoreBuffer,         "clrSB")                                      \
-    _(Sweep,                    "sweep")                                      \
+    _(ClearNursery,             "clear")                                      \
     _(Resize,                   "resize")                                     \
     _(Pretenure,                "pretnr")
 
@@ -186,6 +186,13 @@ class Nursery
      */
     void* allocateBuffer(JSObject* obj, size_t nbytes);
 
+    /*
+     * Allocate a buffer for a given object, always using the nursery if obj is
+     * in the nursery. The requested size must be less than or equal to
+     * MaxNurseryBufferSize.
+     */
+    void* allocateBufferSameLocation(JSObject* obj, size_t nbytes);
+
     /* Resize an existing object buffer. */
     void* reallocateBuffer(JSObject* obj, void* oldBuffer,
                            size_t oldBytes, size_t newBytes);
@@ -210,7 +217,12 @@ class Nursery
     void forwardBufferPointer(HeapSlot** pSlotsElems);
 
     void maybeSetForwardingPointer(JSTracer* trc, void* oldData, void* newData, bool direct) {
-        if (trc->isTenuringTracer() && isInside(oldData))
+        if (trc->isTenuringTracer())
+            setForwardingPointerWhileTenuring(oldData, newData, direct);
+    }
+
+    void setForwardingPointerWhileTenuring(void* oldData, void* newData, bool direct) {
+        if (isInside(oldData))
             setForwardingPointer(oldData, newData, direct);
     }
 
@@ -474,10 +486,16 @@ class Nursery
     void freeMallocedBuffers();
 
     /*
+     * Updates pointers to nursery objects that have been tenured and discards
+     * pointers to objects that have been freed.
+     */
+    void sweep(JSTracer* trc);
+
+    /*
      * Frees all non-live nursery-allocated things at the end of a minor
      * collection.
      */
-    void sweep();
+    void clear();
 
     void sweepDictionaryModeObjects();
 

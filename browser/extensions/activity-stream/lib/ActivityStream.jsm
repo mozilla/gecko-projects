@@ -22,6 +22,7 @@ const {SystemTickFeed} = Cu.import("resource://activity-stream/lib/SystemTickFee
 const {TelemetryFeed} = Cu.import("resource://activity-stream/lib/TelemetryFeed.jsm", {});
 const {TopSitesFeed} = Cu.import("resource://activity-stream/lib/TopSitesFeed.jsm", {});
 const {TopStoriesFeed} = Cu.import("resource://activity-stream/lib/TopStoriesFeed.jsm", {});
+const {HighlightsFeed} = Cu.import("resource://activity-stream/lib/HighlightsFeed.jsm", {});
 
 const DEFAULT_SITES = new Map([
   // This first item is the global list fallback for any unexpected geos
@@ -40,6 +41,10 @@ const REASON_ADDON_UNINSTALL = 6;
 // Configure default Activity Stream prefs with a plain `value` or a `getValue`
 // that computes a value. A `value_local_dev` is used for development defaults.
 const PREFS_CONFIG = new Map([
+  ["aboutHome.autoFocus", {
+    title: "Focus the about:home search box on load",
+    value: false
+  }],
   ["default.sites", {
     title: "Comma-separated list of default top sites to fill in behind visited sites",
     getValue: ({geo}) => DEFAULT_SITES.get(DEFAULT_SITES.has(geo) ? geo : "")
@@ -51,18 +56,22 @@ const PREFS_CONFIG = new Map([
       api_key_pref: "extensions.pocket.oAuthConsumerKey",
       // Use the opposite value as what default value the feed would have used
       hidden: !PREFS_CONFIG.get("feeds.section.topstories").getValue(args),
-      learn_more_endpoint: "https://getpocket.cdn.mozilla.net/firefox_learnmore?src=ff_newtab",
       provider_header: "pocket_feedback_header",
       provider_description: "pocket_description",
       provider_icon: "pocket",
       provider_name: "Pocket",
-      read_more_endpoint: "https://getpocket.cdn.mozilla.net/explore/trending?src=ff_new_tab",
+      read_more_endpoint: "https://getpocket.cdn.mozilla.net/explore/trending?src=fx_new_tab",
       stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       stories_referrer: "https://getpocket.com/recommendations",
       info_link: "https://www.mozilla.org/privacy/firefox/#pocketstories",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
+      show_spocs: false,
       personalized: false
     })
+  }],
+  ["filterAdult", {
+    title: "Remove adult pages from sites, highlights, etc.",
+    value: true
   }],
   ["migrationExpired", {
     title: "Boolean flag that decides whether to show the migration message or not.",
@@ -75,6 +84,10 @@ const PREFS_CONFIG = new Map([
   ["migrationRemainingDays", {
     title: "Number of days to show the manual migration message",
     value: 4
+  }],
+  ["prerender", {
+    title: "Use the prerendered version of activity-stream.html. This is set automatically by PrefsFeed.jsm.",
+    value: true
   }],
   ["showSearch", {
     title: "Show the Search bar on the New Tab page",
@@ -150,6 +163,12 @@ const FEEDS_DATA = [
     value: true
   },
   {
+    name: "section.highlights",
+    factory: () => new HighlightsFeed(),
+    title: "Fetches content recommendations from places db",
+    value: true
+  },
+  {
     name: "section.topstories",
     factory: () => new TopStoriesFeed(),
     title: "Fetches content recommendations from a configurable content provider",
@@ -214,16 +233,26 @@ this.ActivityStream = class ActivityStream {
     this._defaultPrefs = new DefaultPrefs(PREFS_CONFIG);
   }
   init() {
-    this._updateDynamicPrefs();
-    this._defaultPrefs.init();
+    try {
+      this._updateDynamicPrefs();
+      this._defaultPrefs.init();
 
-    // Hook up the store and let all feeds and pages initialize
-    this.store.init(this.feeds, ac.BroadcastToContent({
-      type: at.INIT,
-      data: {version: this.options.version}
-    }), {type: at.UNINIT});
+      // Hook up the store and let all feeds and pages initialize
+      this.store.init(this.feeds, ac.BroadcastToContent({
+        type: at.INIT,
+        data: {version: this.options.version}
+      }), {type: at.UNINIT});
 
-    this.initialized = true;
+      this.initialized = true;
+    } catch (e) {
+      // TelemetryFeed could be unavailable if the telemetry is disabled, or
+      // the telemetry feed is not yet initialized.
+      const telemetryFeed = this.store.feeds.get("feeds.telemetry");
+      if (telemetryFeed) {
+        telemetryFeed.handleUndesiredEvent({data: {event: "ADDON_INIT_FAILED"}});
+      }
+      throw e;
+    }
   }
   uninit() {
     if (this.geo === "") {

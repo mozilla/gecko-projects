@@ -23,6 +23,7 @@
 #include "nsIProperties.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
+#include "nsTHashtable.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/security_level.h"
 #include "WinUtils.h"
@@ -49,6 +50,9 @@ static LazyLogModule sSandboxBrokerLog("SandboxBroker");
 
 #define LOG_E(...) MOZ_LOG(sSandboxBrokerLog, LogLevel::Error, (__VA_ARGS__))
 #define LOG_W(...) MOZ_LOG(sSandboxBrokerLog, LogLevel::Warning, (__VA_ARGS__))
+
+// Used to store whether we have accumulated an error combination for this session.
+static UniquePtr<nsTHashtable<nsCStringHashKey>> sLaunchErrors;
 
 /* static */
 void
@@ -93,7 +97,7 @@ CacheDirAndAutoClear(nsIProperties* aDirSvc, const char* aDirKey,
   MOZ_ALWAYS_SUCCEEDS(dirToCache->GetPath(**cacheVar));
 
   // Convert network share path to format for sandbox policy.
-  if (Substring(**cacheVar, 0, 2).Equals(L"\\\\")) {
+  if (Substring(**cacheVar, 0, 2).Equals(NS_LITERAL_STRING("\\\\"))) {
     (*cacheVar)->InsertLiteral(u"??\\UNC", 1);
   }
 }
@@ -135,6 +139,7 @@ SandboxBroker::SandboxBroker()
 bool
 SandboxBroker::LaunchApp(const wchar_t *aPath,
                          const wchar_t *aArguments,
+                         GeckoProcessType aProcessType,
                          const bool aEnableLogging,
                          void **aProcessHandle)
 {
@@ -206,9 +211,25 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
   result = sBrokerService->SpawnTarget(aPath, aArguments, mPolicy,
                                        &last_warning, &last_error, &targetInfo);
   if (sandbox::SBOX_ALL_OK != result) {
-    Telemetry::Accumulate(Telemetry::SANDBOX_FAILED_LAUNCH, result);
+    nsAutoCString key;
+    key.AppendASCII(XRE_ChildProcessTypeToString(aProcessType));
+    key.AppendLiteral("/0x");
+    key.AppendInt(static_cast<uint32_t>(last_error), 16);
+
+    if (!sLaunchErrors) {
+      sLaunchErrors = MakeUnique<nsTHashtable<nsCStringHashKey>>();
+      ClearOnShutdown(&sLaunchErrors);
+    }
+
+    // Only accumulate for each combination once per session.
+    if (!sLaunchErrors->Contains(key)) {
+      Telemetry::Accumulate(Telemetry::SANDBOX_FAILED_LAUNCH_KEYED, key, result);
+      sLaunchErrors->PutEntry(key);
+    }
+
     LOG_E("Failed (ResultCode %d) to SpawnTarget with last_error=%d, last_warning=%d",
           result, last_error, last_warning);
+
     return false;
   } else if (sandbox::SBOX_ALL_OK != last_warning) {
     // If there was a warning (but the result was still ok), log it and proceed.
@@ -398,12 +419,6 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                      "SetDelayedIntegrityLevel should never fail, what happened?");
 
-  if (aSandboxLevel > 3) {
-    result = mPolicy->SetAlternateDesktop(false);
-    MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
-                       "Failed to create alternate desktop for sandbox.");
-  }
-
   sandbox::MitigationFlags mitigations =
     sandbox::MITIGATION_BOTTOM_UP_ASLR |
     sandbox::MITIGATION_HEAP_TERMINATE |
@@ -411,6 +426,20 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     sandbox::MITIGATION_DEP_NO_ATL_THUNK |
     sandbox::MITIGATION_DEP |
     sandbox::MITIGATION_EXTENSION_POINT_DISABLE;
+
+  if (aSandboxLevel > 3) {
+    result = mPolicy->SetAlternateDesktop(false);
+    MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
+                       "Failed to create alternate desktop for sandbox.");
+
+    mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
+    // If we're running from a network drive then we can't block loading from
+    // remote locations.
+    if (!sRunningFromNetworkDrive) {
+      mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE;
+    }
+  }
+
 
   result = mPolicy->SetProcessMitigations(mitigations);
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,

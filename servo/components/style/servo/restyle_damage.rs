@@ -65,7 +65,14 @@ impl ServoRestyleDamage {
         new: &ComputedValues,
     ) -> StyleDifference {
         let damage = compute_damage(old, new);
-        let change = if damage.is_empty() { StyleChange::Unchanged } else { StyleChange::Changed };
+        let change = if damage.is_empty() {
+            StyleChange::Unchanged
+        } else {
+            // FIXME(emilio): Differentiate between reset and inherited
+            // properties here, and set `reset_only` appropriately so the
+            // optimization to skip the cascade in those cases applies.
+            StyleChange::Changed { reset_only: false }
+        };
         StyleDifference::new(damage, change)
     }
 
@@ -191,7 +198,6 @@ fn compute_damage(old: &ComputedValues, new: &ComputedValues) -> ServoRestyleDam
                        REFLOW, RECONSTRUCT_FLOW], [
         get_box.clear, get_box.float, get_box.display, get_box.position, get_counters.content,
         get_counters.counter_reset, get_counters.counter_increment,
-        get_inheritedbox._servo_under_display_none,
         get_list.quotes, get_list.list_style_type,
 
         // If these text or font properties change, we need to reconstruct the flow so that

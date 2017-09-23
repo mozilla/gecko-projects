@@ -113,8 +113,11 @@
 
   RmDir /r /REBOOTOK "$INSTDIR\${TO_BE_DELETED}"
 
-  ; Register AccessibleHandler.dll with COM (this writes to HKLM)
+  ; Register AccessibleHandler.dll with COM (this requires write access to HKLM)
   ${RegisterAccessibleHandler}
+
+  ; Register AccessibleMarshal.dll with COM (this requires write access to HKLM)
+  ${RegisterAccessibleMarshal}
 
 !ifdef MOZ_MAINTENANCE_SERVICE
   Call IsUserAdmin
@@ -1014,6 +1017,11 @@
 !macroend
 !define RegisterAccessibleHandler "!insertmacro RegisterAccessibleHandler"
 
+!macro RegisterAccessibleMarshal
+  ${RegisterDLL} "$INSTDIR\AccessibleMarshal.dll"
+!macroend
+!define RegisterAccessibleMarshal "!insertmacro RegisterAccessibleMarshal"
+
 ; Removes various registry entries for reasons noted below (does not use SHCTX).
 !macro RemoveDeprecatedKeys
   StrCpy $0 "SOFTWARE\Classes"
@@ -1616,11 +1624,11 @@ Function SetAsDefaultAppUser
     ${StrFilter} "${FileMainEXE}" "+" "" "" $R9
     ClearErrors
     ReadRegStr $0 HKCU "Software\Clients\StartMenuInternet\$R9\DefaultIcon" ""
-  ${EndIf}
-  ${If} ${Errors}
-  ${OrIf} ${AtMostWin2008R2}
-    ClearErrors
-    ReadRegStr $0 HKLM "Software\Clients\StartMenuInternet\$R9\DefaultIcon" ""
+    ${If} ${Errors}
+    ${OrIf} ${AtMostWin2008R2}
+      ClearErrors
+      ReadRegStr $0 HKLM "Software\Clients\StartMenuInternet\$R9\DefaultIcon" ""
+    ${EndIf}
   ${EndIf}
 
   ${Unless} ${Errors}

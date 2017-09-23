@@ -23,7 +23,8 @@ describe("ActivityStream", () => {
       "lib/SystemTickFeed.jsm": {SystemTickFeed: Fake},
       "lib/TelemetryFeed.jsm": {TelemetryFeed: Fake},
       "lib/TopSitesFeed.jsm": {TopSitesFeed: Fake},
-      "lib/TopStoriesFeed.jsm": {TopStoriesFeed: Fake}
+      "lib/TopStoriesFeed.jsm": {TopStoriesFeed: Fake},
+      "lib/HighlightsFeed.jsm": {HighlightsFeed: Fake}
     }));
     as = new ActivityStream();
     sandbox.stub(as.store, "init");
@@ -229,6 +230,19 @@ describe("ActivityStream", () => {
       clock.tick(1);
 
       assert.isTrue(PREFS_CONFIG.get("feeds.section.topstories").value);
+    });
+  });
+  describe("telemetry reporting on init failure", () => {
+    it("should send a ping on init error", () => {
+      as = new ActivityStream();
+      const telemetry = {handleUndesiredEvent: sandbox.spy()};
+      sandbox.stub(as.store, "init").throws();
+      sandbox.stub(as.store.feeds, "get").returns(telemetry);
+      try {
+        as.init();
+      } catch (e) {
+      }
+      assert.calledOnce(telemetry.handleUndesiredEvent);
     });
   });
 });

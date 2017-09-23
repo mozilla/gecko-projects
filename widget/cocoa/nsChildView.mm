@@ -69,6 +69,7 @@
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/BasicCompositor.h"
 #include "mozilla/layers/InputAPZContext.h"
+#include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/widget/CompositorWidget.h"
@@ -2079,13 +2080,12 @@ nsChildView::CleanupWindowEffects()
 
 void
 nsChildView::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWrBridge,
-                                               wr::DisplayListBuilder& aBuilder)
+                                               wr::DisplayListBuilder& aBuilder,
+                                               wr::IpcResourceUpdateQueue& aResources)
 {
   PrepareWindowEffects();
 
-  LayoutDeviceIntRegion updatedTitlebarRegion;
-  updatedTitlebarRegion.And(mUpdatedTitlebarRegion, mTitlebarRect);
-  updatedTitlebarRegion.MoveBy(-mTitlebarRect.TopLeft());
+  bool needUpdate = mUpdatedTitlebarRegion.Intersects(mTitlebarRect);
   mUpdatedTitlebarRegion.SetEmpty();
 
   if (mTitlebarCGContext) {
@@ -2102,36 +2102,36 @@ nsChildView::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWr
     if (mTitlebarImageKey &&
         mTitlebarImageSize != size) {
       // Delete wr::ImageKey. wr::ImageKey does not support size change.
-      CleanupWebRenderWindowOverlay(aWrBridge);
+      // TODO: that's not true anymore! (size change is now supported).
+      CleanupWebRenderWindowOverlay(aWrBridge, aResources);
       MOZ_ASSERT(mTitlebarImageKey.isNothing());
     }
 
     if (!mTitlebarImageKey) {
       mTitlebarImageKey = Some(aWrBridge->GetNextImageKey());
       wr::ImageDescriptor descriptor(size, stride, format);
-      aBuilder.Resources().AddImage(*mTitlebarImageKey, descriptor, buffer);
+      aResources.AddImage(*mTitlebarImageKey, descriptor, buffer);
       mTitlebarImageSize = size;
-      updatedTitlebarRegion.SetEmpty();
+      needUpdate = false;
     }
 
-    if (!updatedTitlebarRegion.IsEmpty()) {
+    if (needUpdate) {
       wr::ImageDescriptor descriptor(size, stride, format);
-      aBuilder.Resources().UpdateImageBuffer(*mTitlebarImageKey, descriptor, buffer);
+      aResources.UpdateImageBuffer(*mTitlebarImageKey, descriptor, buffer);
     }
 
     wr::LayoutRect rect = wr::ToLayoutRect(mTitlebarRect);
-    aBuilder.PushImage(wr::LayoutRect{ { 0, 0 }, { float(size.width), float(size.height) } },
-                       rect, wr::ImageRendering::Auto, *mTitlebarImageKey);
+    aBuilder.PushImage(wr::LayoutRect{ rect.origin, { float(size.width), float(size.height) } },
+                       rect, true, wr::ImageRendering::Auto, *mTitlebarImageKey);
   }
 }
 
 void
-nsChildView::CleanupWebRenderWindowOverlay(layers::WebRenderBridgeChild* aWrBridge)
+nsChildView::CleanupWebRenderWindowOverlay(layers::WebRenderBridgeChild* aWrBridge,
+                                           wr::IpcResourceUpdateQueue& aResources)
 {
   if (mTitlebarImageKey) {
-    wr::ResourceUpdateQueue resources;
-    resources.DeleteImage(*mTitlebarImageKey);
-    aWrBridge->UpdateResources(resources);
+    aResources.DeleteImage(*mTitlebarImageKey);
     mTitlebarImageKey = Nothing();
   }
 }
@@ -2421,7 +2421,7 @@ void
 nsChildView::MaybeDrawTitlebar(GLManager* aManager)
 {
   MutexAutoLock lock(mEffectsLock);
-  if (!mIsCoveringTitlebar || mIsFullscreen) {
+  if (!mIsCoveringTitlebar || mIsFullscreen || mTitlebarRect.IsEmpty()) {
     return;
   }
 
@@ -2697,16 +2697,6 @@ nsChildView::VibrancyFillColorForThemeGeometryType(nsITheme::ThemeGeometryType a
       ThemeGeometryTypeToVibrancyType(aThemeGeometryType));
   }
   return [NSColor whiteColor];
-}
-
-NSColor*
-nsChildView::VibrancyFontSmoothingBackgroundColorForThemeGeometryType(nsITheme::ThemeGeometryType aThemeGeometryType)
-{
-  if (VibrancyManager::SystemSupportsVibrancy()) {
-    return EnsureVibrancyManager().VibrancyFontSmoothingBackgroundColorForType(
-      ThemeGeometryTypeToVibrancyType(aThemeGeometryType));
-  }
-  return [NSColor clearColor];
 }
 
 mozilla::VibrancyManager&
@@ -3724,14 +3714,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return [NSColor whiteColor];
   }
   return mGeckoChild->VibrancyFillColorForThemeGeometryType(aThemeGeometryType);
-}
-
-- (NSColor*)vibrancyFontSmoothingBackgroundColorForThemeGeometryType:(nsITheme::ThemeGeometryType)aThemeGeometryType
-{
-  if (!mGeckoChild) {
-    return [NSColor clearColor];
-  }
-  return mGeckoChild->VibrancyFontSmoothingBackgroundColorForThemeGeometryType(aThemeGeometryType);
 }
 
 - (LayoutDeviceIntRegion)nativeDirtyRegionWithBoundingRect:(NSRect)aRect

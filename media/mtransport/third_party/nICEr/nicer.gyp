@@ -119,8 +119,6 @@
                 "./src/util/cb_args.h",
                 "./src/util/ice_util.c",
                 "./src/util/ice_util.h",
-                "./src/util/mbslen.c",
-                "./src/util/mbslen.h",
 
 
           ],
@@ -238,7 +236,12 @@
                'defines': [
                   "DONT_HAVE_ETHTOOL_SPEED_HI",
                ]
-             }]
+             }],
+        ['libfuzzer == 1', {
+          'cflags_mozilla': [
+            '-fsanitize-coverage=trace-pc-guard',
+         ],
+        }],
           ],
       }]
 }

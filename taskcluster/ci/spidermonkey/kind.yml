@@ -10,7 +10,7 @@ kind-dependencies:
 transforms:
    - taskgraph.transforms.spidermonkey:transforms
    - taskgraph.transforms.build_attrs:transforms
-   - taskgraph.transforms.toolchain:transforms
+   - taskgraph.transforms.use_toolchains:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -135,7 +135,6 @@ jobs:
         treeherder:
             platform: windows2012-32/debug
             symbol: SM-tc(p)
-            tier: 3
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
             max-run-time: 36000
@@ -165,7 +164,6 @@ jobs:
         treeherder:
             platform: windows2012-32/opt
             symbol: SM-tc(p)
-            tier: 3
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
             max-run-time: 36000
@@ -240,7 +238,6 @@ jobs:
         treeherder:
             platform: windows2012-32/debug
             symbol: SM-tc(cgc)
-            tier: 3
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
             max-run-time: 36000

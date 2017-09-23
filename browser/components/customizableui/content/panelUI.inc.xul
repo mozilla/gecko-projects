@@ -332,7 +332,7 @@
        position="bottomcenter topright"
        photon="true"
        hidden="true">
-  <photonpanelmultiview mainViewId="widget-overflow-mainView">
+  <photonpanelmultiview mainViewId="widget-overflow-mainView" disablekeynav="true">
     <panelview id="widget-overflow-mainView"
                context="toolbar-context-menu">
       <vbox class="panel-subview-body">
@@ -379,25 +379,6 @@
   </menupopup>
 </panel>
 
-<panel id="customization-tipPanel"
-       type="arrow"
-       flip="none"
-       side="left"
-       position="leftcenter topright"
-       noautohide="true"
-       hidden="true">
-  <hbox class="customization-tipPanel-wrapper">
-    <vbox class="customization-tipPanel-infoBox"/>
-    <vbox class="customization-tipPanel-content" flex="1">
-      <description class="customization-tipPanel-contentMessage"/>
-      <image class="customization-tipPanel-contentImage"/>
-    </vbox>
-    <vbox pack="start" align="end" class="customization-tipPanel-closeBox">
-      <toolbarbutton oncommand="gCustomizeMode.hideTip()" class="close-icon"/>
-    </vbox>
-  </hbox>
-</panel>
-
 <panel id="panic-button-success-notification"
        type="arrow"
        position="bottomcenter topright"
@@ -437,11 +418,11 @@
                      secondarybuttonaccesskey="&updateAvailable.cancelButton.accesskey;"
                      dropmarkerhidden="true"
                      checkboxhidden="true"
+                     buttonhighlight="true"
                      hidden="true">
     <popupnotificationcontent id="update-available-notification-content" orient="vertical">
-      <description id="update-available-description">&updateAvailable.message;
-        <label id="update-available-whats-new" class="text-link" value="&updateAvailable.whatsnew.label;" />
-      </description>
+      <description id="update-available-description">&updateAvailable.message;</description>
+      <label id="update-available-whats-new" class="text-link" value="&updateAvailable.whatsnew.label;" />
     </popupnotificationcontent>
   </popupnotification>
 
@@ -455,11 +436,11 @@
                      secondarybuttonaccesskey="&updateManual.cancelButton.accesskey;"
                      dropmarkerhidden="true"
                      checkboxhidden="true"
+                     buttonhighlight="true"
                      hidden="true">
     <popupnotificationcontent id="update-manual-notification-content" orient="vertical">
-      <description id="update-manual-description">&updateManual.message;
-        <label id="update-manual-whats-new" class="text-link" value="&updateManual.whatsnew.label;" />
-      </description>
+      <description id="update-manual-description">&updateManual.message;</description>
+      <label id="update-manual-whats-new" class="text-link" value="&updateManual.whatsnew.label;" />
     </popupnotificationcontent>
   </popupnotification>
 
@@ -473,9 +454,10 @@
                      secondarybuttonaccesskey="&updateRestart.cancelButton.accesskey;"
                      dropmarkerhidden="true"
                      checkboxhidden="true"
+                     buttonhighlight="true"
                      hidden="true">
     <popupnotificationcontent id="update-restart-notification-content" orient="vertical">
-      <description id="update-restart-description">&updateRestart.message;</description>
+      <description id="update-restart-description">&updateRestart.message2;</description>
     </popupnotificationcontent>
   </popupnotification>
 </panel>
@@ -558,28 +540,27 @@
                        class="subviewbutton subviewbutton-iconic"
                        command="Browser:RestoreLastSession"/>
         <toolbarseparator/>
-        <toolbaritem id="appMenu-zoom-controls" class="toolbaritem-combined-buttons">
+        <toolbaritem id="appMenu-zoom-controls" class="toolbaritem-combined-buttons" closemenu="none">
           <label value="&fullZoom.label;"/>
           <toolbarbutton id="appMenu-zoomReduce-button"
                          class="subviewbutton subviewbutton-iconic"
                          command="cmd_fullZoomReduce"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarbutton id="appMenu-zoomReset-button"
                          class="subviewbutton"
                          command="cmd_fullZoomReset"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarbutton id="appMenu-zoomEnlarge-button"
                          class="subviewbutton subviewbutton-iconic"
                          command="cmd_fullZoomEnlarge"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarseparator orient="vertical"/>
           <toolbarbutton id="appMenu-fullscreen-button"
                          class="subviewbutton subviewbutton-iconic"
                          observes="View:FullScreen"
                          type="checkbox"
+                         closemenu="auto"
+                         onclick="if (event.button == 0) this.closest('panel').hidePopup();"
                          tooltip="dynamic-shortcut-tooltip"/>
         </toolbaritem>
         <toolbarseparator/>
@@ -643,8 +624,8 @@
         <toolbarbutton id="appMenu-print-button"
                        class="subviewbutton subviewbutton-iconic"
                        label="&printCmd.label;"
-                       key="printKb"
 #ifdef XP_MACOSX
+                       key="printKb"
                        command="cmd_print"
 #else
                        command="cmd_printPreview"
@@ -713,11 +694,26 @@
                        label="&historyMenu.label;"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('PanelUI-history', this)"/>
+        <toolbarbutton id="appMenu-library-downloads-button"
+                       class="subviewbutton subviewbutton-iconic subviewbutton-nav"
+                       label="&libraryDownloads.label;"
+                       closemenu="none"
+                       oncommand="DownloadsSubview.show(this);"/>
         <toolbarbutton id="appMenu-library-remotetabs-button"
                        class="subviewbutton subviewbutton-iconic subviewbutton-nav"
                        label="&appMenuRemoteTabs.label;"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('PanelUI-remotetabs', this)"/>
+        <toolbarseparator/>
+        <label value="&appMenuRecentHighlights.label;"
+               class="subview-subheader"/>
+        <toolbaritem id="appMenu-library-recentHighlights"
+                     orient="vertical"
+                     smoothscroll="false"
+                     flatList="true"
+                     tooltip="bhTooltip">
+          <!-- Recent Highlights will go here -->
+        </toolbaritem>
       </vbox>
     </panelview>
 
@@ -747,4 +743,18 @@
       </vbox>
     </panelview>
   </photonpanelmultiview>
+</panel>
+
+<panel id="downloads-button-autohide-panel"
+       role="group"
+       type="arrow"
+       hidden="true"
+       onpopupshown="gCustomizeMode._downloadPanelAutoHideTimeout = setTimeout(() => event.target.hidePopup(), 4000);"
+       onmouseover="clearTimeout(gCustomizeMode._downloadPanelAutoHideTimeout);"
+       onmouseout="gCustomizeMode._downloadPanelAutoHideTimeout = setTimeout(() => event.target.hidePopup(), 2000);"
+       onpopuphidden="clearTimeout(gCustomizeMode._downloadPanelAutoHideTimeout);"
+       >
+  <checkbox id="downloads-button-autohide-checkbox"
+            label="&customizeMode.autoHideDownloadsButton.label;" checked="true"
+            oncommand="gCustomizeMode.onDownloadsAutoHideChange(event)"/>
 </panel>

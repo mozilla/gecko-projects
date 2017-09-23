@@ -4,7 +4,6 @@ py2:
     include: ['.']
     exclude:
         - accessible/xpcom/AccEventGen.py
-        - addon-sdk
         - browser
         - build
         - client.py
@@ -32,13 +31,10 @@ py2:
         - python/mach
         - python/mozboot
         - python/mozbuild
-        - python/mozlint
         - python/mozversioncontrol
         - security
         - services/common/tests/mach_commands.py
         - servo
-        - taskcluster/docker
-        - taskcluster/taskgraph
         - testing/awsy
         - testing/firefox-ui
         - testing/geckodriver
@@ -51,11 +47,9 @@ py2:
         - testing/remotecppunittests.py
         - testing/runcppunittests.py
         - testing/runtimes
-        - testing/talos
         - testing/tools
         - testing/tps
         - testing/web-platform
-        - testing/xpcshell
         - third_party
         - toolkit
         - tools/docs
@@ -67,7 +61,6 @@ py2:
         - tools/power/mach_commands.py
         - tools/profiler
         - tools/rb
-        - tools/tryselect
         - tools/update-packaging
         - xpcom
     extensions: ['py']

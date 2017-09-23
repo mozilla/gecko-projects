@@ -105,6 +105,7 @@ this.browserAction = class extends ExtensionAPI {
       extension, ["browserAction", "default_icon"],
       () => IconDetails.normalize({
         path: options.default_icon,
+        iconType: "browserAction",
         themeIcons: options.theme_icons,
       }, extension));
 
@@ -194,12 +195,6 @@ this.browserAction = class extends ExtensionAPI {
         // Google Chrome onClicked extension API.
         if (popupURL) {
           try {
-            if (event.target.closest("panelmultiview")) {
-              // FIXME: The line below needs to change eventually, but for now:
-              // ensure the view is _always_ visible _before_ `popup.attach()` is
-              // called. PanelMultiView.jsm dictates different behavior.
-              event.target.setAttribute("current", true);
-            }
             let popup = this.getPopup(document.defaultView, popupURL);
             let attachPromise = popup.attach(event.target);
             event.detail.addBlocker(attachPromise);
@@ -622,6 +617,8 @@ this.browserAction = class extends ExtensionAPI {
         setIcon: function(details) {
           let tab = getTab(details.tabId);
 
+          details.iconType = "browserAction";
+
           let icon = IconDetails.normalize(details, extension, context);
           browserAction.setProperty(tab, "icon", icon);
         },
@@ -648,6 +645,9 @@ this.browserAction = class extends ExtensionAPI {
           // For internal consistency, we currently resolve both relative to the
           // calling context.
           let url = details.popup && context.uri.resolve(details.popup);
+          if (url && !context.checkLoadURL(url)) {
+            return Promise.reject({message: `Access denied for URL ${url}`});
+          }
           browserAction.setProperty(tab, "popup", url);
         },
 

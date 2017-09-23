@@ -44,6 +44,7 @@
 #include "vm/Compression.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Printer.h"
 #include "vm/RegExpObject.h"
 #include "vm/String.h"
 #include "vm/StringBuffer.h"
@@ -186,13 +187,12 @@ intrinsic_IsConstructor(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 1);
 
-    RootedValue val(cx, args[0]);
-    if (!IsConstructor(val)) {
+    if (!IsConstructor(args[0])) {
         args.rval().setBoolean(false);
         return true;
     }
 
-    RootedObject obj(cx, &val.toObject());
+    JSObject* obj = &args[0].toObject();
     if (!IsWrapper(obj)) {
         args.rval().setBoolean(true);
         return true;
@@ -411,9 +411,10 @@ intrinsic_AssertionFailed(JSContext* cx, unsigned argc, Value* vp)
         // try to dump the informative string
         JSString* str = ToString<CanGC>(cx, args[0]);
         if (str) {
-            fprintf(stderr, "Self-hosted JavaScript assertion info: ");
-            str->dumpCharsNoNewline();
-            fputc('\n', stderr);
+            js::Fprinter out(stderr);
+            out.put("Self-hosted JavaScript assertion info: ");
+            str->dumpCharsNoNewline(out);
+            out.putChar('\n');
         }
     }
 #endif
@@ -431,10 +432,11 @@ intrinsic_DumpMessage(JSContext* cx, unsigned argc, Value* vp)
 #ifdef DEBUG
     if (args.length() > 0) {
         // try to dump the informative string
+        js::Fprinter out(stderr);
         JSString* str = ToString<CanGC>(cx, args[0]);
         if (str) {
-            str->dumpCharsNoNewline();
-            fputc('\n', stderr);
+            str->dumpCharsNoNewline(out);
+            out.putChar('\n');
         } else {
             cx->recoverFromOutOfMemory();
         }
@@ -457,9 +459,8 @@ intrinsic_MakeConstructible(JSContext* cx, unsigned argc, Value* vp)
     // Normal .prototype properties aren't enumerable.  But for this to clone
     // correctly, it must be enumerable.
     RootedObject ctor(cx, &args[0].toObject());
-    if (!DefineProperty(cx, ctor, cx->names().prototype, args[1],
-                        nullptr, nullptr,
-                        JSPROP_READONLY | JSPROP_ENUMERATE | JSPROP_PERMANENT))
+    if (!DefineDataProperty(cx, ctor, cx->names().prototype, args[1],
+                            JSPROP_READONLY | JSPROP_ENUMERATE | JSPROP_PERMANENT))
     {
         return false;
     }

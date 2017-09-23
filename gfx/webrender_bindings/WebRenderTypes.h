@@ -28,6 +28,7 @@ typedef wr::WrPipelineId PipelineId;
 typedef wr::WrImageKey ImageKey;
 typedef wr::WrFontKey FontKey;
 typedef wr::WrFontInstanceKey FontInstanceKey;
+typedef wr::WrFontInstanceOptions FontInstanceOptions;
 typedef wr::WrEpoch Epoch;
 typedef wr::WrExternalImageId ExternalImageId;
 typedef wr::WrDebugFlags DebugFlags;
@@ -95,6 +96,16 @@ ImageFormatToSurfaceFormat(ImageFormat aFormat) {
 }
 
 struct ImageDescriptor: public wr::WrImageDescriptor {
+  // We need a default constructor for ipdl serialization.
+  ImageDescriptor()
+  {
+    format = wr::ImageFormat::Invalid;
+    width = 0;
+    height = 0;
+    stride = 0;
+    is_opaque = false;
+  }
+
   ImageDescriptor(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat)
   {
     format = wr::SurfaceFormatToImageFormat(aFormat).value();
@@ -112,6 +123,16 @@ struct ImageDescriptor: public wr::WrImageDescriptor {
     stride = aByteStride;
     is_opaque = gfx::IsOpaqueFormat(aFormat);
   }
+
+  ImageDescriptor(const gfx::IntSize& aSize, uint32_t aByteStride, gfx::SurfaceFormat aFormat, bool opaque)
+  {
+    format = wr::SurfaceFormatToImageFormat(aFormat).value();
+    width = aSize.width;
+    height = aSize.height;
+    stride = aByteStride;
+    is_opaque = opaque;
+  }
+
 };
 
 // Whenever possible, use wr::WindowId instead of manipulating uint64_t.
@@ -523,6 +544,18 @@ static inline wr::WrExternalImage NativeTextureToWrExternalImage(uint32_t aHandl
   };
 }
 
+inline wr::ByteSlice RangeToByteSlice(mozilla::Range<uint8_t> aRange) {
+  return wr::ByteSlice { aRange.begin().get(), aRange.length() };
+}
+
+inline mozilla::Range<const uint8_t> ByteSliceToRange(wr::ByteSlice aWrSlice) {
+  return mozilla::Range<const uint8_t>(aWrSlice.buffer, aWrSlice.len);
+}
+
+inline mozilla::Range<uint8_t> MutByteSliceToRange(wr::MutByteSlice aWrSlice) {
+  return mozilla::Range<uint8_t>(aWrSlice.buffer, aWrSlice.len);
+}
+
 struct Vec_u8 {
   wr::WrVecU8 inner;
   Vec_u8() {
@@ -553,6 +586,13 @@ struct Vec_u8 {
     inner.data = (uint8_t*)1;
     inner.capacity = 0;
     inner.length = 0;
+  }
+
+  size_t Length() { return inner.length; }
+
+  void PushBytes(Range<uint8_t> aBytes)
+  {
+    wr_vec_u8_push_bytes(&inner, RangeToByteSlice(aBytes));
   }
 
   ~Vec_u8() {
@@ -597,6 +637,17 @@ struct ByteBuffer
     aFrom.mOwned = false;
   }
 
+  ByteBuffer(ByteBuffer& aFrom)
+  : mLength(aFrom.mLength)
+  , mData(aFrom.mData)
+  , mOwned(aFrom.mOwned)
+  {
+    aFrom.mLength = 0;
+    aFrom.mData = nullptr;
+    aFrom.mOwned = false;
+  }
+
+
   ByteBuffer()
     : mLength(0)
     , mData(nullptr)
@@ -636,18 +687,6 @@ struct ByteBuffer
   uint8_t* mData;
   bool mOwned;
 };
-
-inline wr::ByteSlice RangeToByteSlice(mozilla::Range<uint8_t> aRange) {
-  return wr::ByteSlice { aRange.begin().get(), aRange.length() };
-}
-
-inline mozilla::Range<const uint8_t> ByteSliceToRange(wr::ByteSlice aWrSlice) {
-  return mozilla::Range<const uint8_t>(aWrSlice.buffer, aWrSlice.len);
-}
-
-inline mozilla::Range<uint8_t> MutByteSliceToRange(wr::MutByteSlice aWrSlice) {
-  return mozilla::Range<uint8_t>(aWrSlice.buffer, aWrSlice.len);
-}
 
 struct BuiltDisplayList {
   wr::VecU8 dl;
@@ -691,6 +730,16 @@ static inline wr::WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
 // instead of a typedef so that this is a distinct type from FrameMetrics::ViewID
 // and the compiler will catch accidental conversions between the two.
 struct WrClipId {
+  uint64_t id;
+
+  bool operator==(const WrClipId& other) const {
+    return id == other.id;
+  }
+};
+
+// Corresponds to a clip id for a position:sticky clip in webrender. Similar
+// to WrClipId but a separate struct so we don't get them mixed up in C++.
+struct WrStickyId {
   uint64_t id;
 
   bool operator==(const WrClipId& other) const {

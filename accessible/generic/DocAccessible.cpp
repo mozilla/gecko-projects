@@ -530,7 +530,7 @@ DocAccessible::RelativeBounds(nsIFrame** aRelativeFrame) const
       return nsRect();
 
     nsRect scrollPort;
-    nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollableExternal();
+    nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
     if (sf) {
       scrollPort = sf->GetScrollPortRect();
     } else {
@@ -1311,9 +1311,9 @@ DocAccessible::BindToDocument(Accessible* aAccessible,
 
   aAccessible->SetRoleMapEntry(aRoleMapEntry);
 
-  AddDependentIDsFor(aAccessible);
-
   if (aAccessible->HasOwnContent()) {
+    AddDependentIDsFor(aAccessible);
+
     nsIContent* el = aAccessible->GetContent();
     if (el->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_owns)) {
       mNotificationController->ScheduleRelocation(aAccessible);
@@ -1502,7 +1502,8 @@ DocAccessible::DoInitialUpdate()
         }
 
 #if defined(XP_WIN)
-        IAccessibleHolder holder(CreateHolderFromAccessible(this));
+        IAccessibleHolder holder(CreateHolderFromAccessible(WrapNotNull(this)));
+        MOZ_DIAGNOSTIC_ASSERT(!holder.IsNull());
         int32_t childID = AccessibleWrap::GetChildIDFor(this);
 #else
         int32_t holder = 0, childID = 0;
@@ -1606,6 +1607,11 @@ DocAccessible::AddDependentIDsFor(Accessible* aRelProvider, nsIAtom* aRelAttr)
       if (id.IsEmpty())
         break;
 
+      nsIContent* dependentContent = iter.GetElem(id);
+      if (relAttr == nsGkAtoms::aria_owns && dependentContent &&
+          !aRelProvider->IsAcceptableChild(dependentContent))
+        continue;
+
       AttrRelProviderArray* providers = mDependentIDsHash.Get(id);
       if (!providers) {
         providers = new AttrRelProviderArray();
@@ -1624,7 +1630,6 @@ DocAccessible::AddDependentIDsFor(Accessible* aRelProvider, nsIAtom* aRelAttr)
           // content is not accessible then store it to pend its container
           // children invalidation (this happens immediately after the caching
           // is finished).
-          nsIContent* dependentContent = iter.GetElem(id);
           if (dependentContent) {
             if (!HasAccessible(dependentContent)) {
               mInvalidationList.AppendElement(dependentContent);

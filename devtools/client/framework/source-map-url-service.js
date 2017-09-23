@@ -8,44 +8,78 @@ const SOURCE_MAP_PREF = "devtools.source-map.client-service.enabled";
 
 /**
  * A simple service to track source actors and keep a mapping between
- * original URLs and objects holding the source actor's ID (which is
- * used as a cookie by the devtools-source-map service) and the source
- * map URL.
+ * original URLs and objects holding the source or style actor's ID
+ * (which is used as a cookie by the devtools-source-map service) and
+ * the source map URL.
  *
- * @param {object} target
- *        The object the toolbox is debugging.
- * @param {object} threadClient
- *        The toolbox's thread client
+ * @param {object} toolbox
+ *        The toolbox.
  * @param {SourceMapService} sourceMapService
  *        The devtools-source-map functions
  */
-function SourceMapURLService(target, threadClient, sourceMapService) {
-  this._target = target;
+function SourceMapURLService(toolbox, sourceMapService) {
+  this._toolbox = toolbox;
+  this._target = toolbox.target;
   this._sourceMapService = sourceMapService;
+  // Map from content URLs to descriptors.  Descriptors are later
+  // passed to the source map worker.
   this._urls = new Map();
+  // Map from (stringified) locations to callbacks that are called
+  // when the service decides a location should change (say, a source
+  // map is available or the user changes the pref).
   this._subscriptions = new Map();
+  // A backward map from actor IDs to the original URL.  This is used
+  // to support pretty-printing.
+  this._idMap = new Map();
 
   this._onSourceUpdated = this._onSourceUpdated.bind(this);
   this.reset = this.reset.bind(this);
   this._prefValue = Services.prefs.getBoolPref(SOURCE_MAP_PREF);
   this._onPrefChanged = this._onPrefChanged.bind(this);
+  this._onNewStyleSheet = this._onNewStyleSheet.bind(this);
 
-  target.on("source-updated", this._onSourceUpdated);
-  target.on("will-navigate", this.reset);
+  this._target.on("source-updated", this._onSourceUpdated);
+  this._target.on("will-navigate", this.reset);
 
   Services.prefs.addObserver(SOURCE_MAP_PREF, this._onPrefChanged);
 
-  // Start fetching the sources now.
-  this._loadingPromise = threadClient.getSources().then(({sources}) => {
-    // Ignore errors.  Register the sources we got; we can't rely on
-    // an event to arrive if the source actor already existed.
-    for (let source of sources) {
-      this._onSourceUpdated(null, {source});
-    }
-  }, e => {
-    // Also ignore any protocol-based errors.
-  });
+  this._stylesheetsFront = null;
+  this._loadingPromise = null;
 }
+
+/**
+ * Lazy initialization.  Returns a promise that will resolve when all
+ * the relevant URLs have been registered.
+ */
+SourceMapURLService.prototype._getLoadingPromise = function () {
+  if (!this._loadingPromise) {
+    let styleSheetsLoadingPromise = null;
+    this._stylesheetsFront = this._toolbox.initStyleSheetsFront();
+    if (this._stylesheetsFront) {
+      this._stylesheetsFront.on("stylesheet-added", this._onNewStyleSheet);
+      styleSheetsLoadingPromise =
+          this._stylesheetsFront.getStyleSheets().then(sheets => {
+            sheets.forEach(this._onNewStyleSheet);
+          }, () => {
+            // Ignore any protocol-based errors.
+          });
+    }
+
+    // Start fetching the sources now.
+    let loadingPromise = this._toolbox.threadClient.getSources().then(({sources}) => {
+      // Ignore errors.  Register the sources we got; we can't rely on
+      // an event to arrive if the source actor already existed.
+      for (let source of sources) {
+        this._onSourceUpdated(null, {source});
+      }
+    }, e => {
+      // Also ignore any protocol-based errors.
+    });
+
+    this._loadingPromise = Promise.all([styleSheetsLoadingPromise, loadingPromise]);
+  }
+  return this._loadingPromise;
+};
 
 /**
  * Reset the service.  This flushes the internal cache.
@@ -54,6 +88,7 @@ SourceMapURLService.prototype.reset = function () {
   this._sourceMapService.clearSourceMaps();
   this._urls.clear();
   this._subscriptions.clear();
+  this._idMap.clear();
 };
 
 /**
@@ -65,14 +100,22 @@ SourceMapURLService.prototype.destroy = function () {
   this.reset();
   this._target.off("source-updated", this._onSourceUpdated);
   this._target.off("will-navigate", this.reset);
+  if (this._stylesheetsFront) {
+    this._stylesheetsFront.off("stylesheet-added", this._onNewStyleSheet);
+  }
   Services.prefs.removeObserver(SOURCE_MAP_PREF, this._onPrefChanged);
-  this._target = this._urls = this._subscriptions = null;
+  this._target = this._urls = this._subscriptions = this._idMap = null;
 };
 
 /**
  * A helper function that is called when a new source is available.
  */
 SourceMapURLService.prototype._onSourceUpdated = function (_, sourceEvent) {
+  // Maybe we were shut down while waiting.
+  if (!this._urls) {
+    return;
+  }
+
   let { source } = sourceEvent;
   let { generatedUrl, url, actor: id, sourceMapURL } = source;
 
@@ -80,6 +123,60 @@ SourceMapURLService.prototype._onSourceUpdated = function (_, sourceEvent) {
   // source code by SpiderMonkey.
   let seenUrl = generatedUrl || url;
   this._urls.set(seenUrl, { id, url: seenUrl, sourceMapURL });
+  this._idMap.set(id, seenUrl);
+};
+
+/**
+ * A helper function that is called when a new style sheet is
+ * available.
+ * @param {StyleSheetActor} sheet
+ *        The new style sheet's actor.
+ */
+SourceMapURLService.prototype._onNewStyleSheet = function (sheet) {
+  // Maybe we were shut down while waiting.
+  if (!this._urls) {
+    return;
+  }
+
+  let {href: url, sourceMapURL, actor: id} = sheet._form;
+  this._urls.set(url, { id, url, sourceMapURL});
+  this._idMap.set(id, url);
+};
+
+/**
+ * A callback that is called from the lower-level source map service
+ * proxy (see toolbox.js) when some tool has installed a new source
+ * map.  This happens when pretty-printing a source.
+ *
+ * @param {String} id
+ *        The actor ID (used as a cookie here as elsewhere in this file)
+ * @param {String} newUrl
+ *        The URL of the pretty-printed source
+ */
+SourceMapURLService.prototype.sourceMapChanged = function (id, newUrl) {
+  if (!this._urls) {
+    return;
+  }
+
+  let urlKey = this._idMap.get(id);
+  if (urlKey) {
+    // The source map URL here doesn't actually matter.
+    this._urls.set(urlKey, { id, url: newUrl, sourceMapURL: "" });
+
+    // Walk over all the location subscribers, looking for any that
+    // are subscribed to a location coming from |urlKey|.  Then,
+    // re-notify any such subscriber by clearing the stored promise
+    // and forcing a re-evaluation.
+    for (let [, subscriptionEntry] of this._subscriptions) {
+      if (subscriptionEntry.url === urlKey) {
+        // Force an update.
+        subscriptionEntry.promise = null;
+        for (let callback of subscriptionEntry.callbacks) {
+          this._callOneCallback(subscriptionEntry, callback);
+        }
+      }
+    }
+  }
 };
 
 /**
@@ -99,7 +196,7 @@ SourceMapURLService.prototype._onSourceUpdated = function (_, sourceEvent) {
  */
 SourceMapURLService.prototype.originalPositionFor = async function (url, line, column) {
   // Ensure the sources are loaded before replying.
-  await this._loadingPromise;
+  await this._getLoadingPromise();
 
   // Maybe we were shut down while waiting.
   if (!this._urls) {

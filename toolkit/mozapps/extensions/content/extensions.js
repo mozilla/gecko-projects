@@ -163,13 +163,6 @@ function initialize(event) {
     gDragDrop.onDrop(event);
   });
   addonPage.addEventListener("keypress", function(event) {
-    // If there is an embedded preferences <browser> running in a remote
-    // process, we will see the event here first before it gets a chance
-    // to bubble up through the embedded page.  To avoid stealing focus,
-    // we just ignore events when focus is in an options browser.
-    if (event.target.classList.contains("inline-options-browser")) {
-      return;
-    }
     gHeader.onKeyPress(event);
   });
 
@@ -2793,7 +2786,7 @@ var gLegacyView = {
   },
 
   async show(type, request) {
-    let addons = await AddonManager.getAddonsByTypes(["extension"]);
+    let addons = await AddonManager.getAddonsByTypes(["extension", "theme"]);
     addons = addons.filter(a => !a.hidden &&
                               (isDisabledLegacy(a) || isDisabledUnsigned(a)));
 
@@ -2831,7 +2824,7 @@ var gLegacyView = {
       return;
     }
 
-    let extensions = await AddonManager.getAddonsByTypes(["extension"]);
+    let extensions = await AddonManager.getAddonsByTypes(["extension", "theme"]);
 
     let haveUnsigned = false;
     let haveLegacy = false;
@@ -2970,7 +2963,21 @@ var gListView = {
       }
 
       this.filterDisabledUnsigned(showOnlyDisabledUnsigned);
-      document.getElementById("legacy-extensions-notice").hidden = !showLegacyInfo;
+      let legacyNotice = document.getElementById("legacy-extensions-notice");
+      if (showLegacyInfo) {
+        let el = document.getElementById("legacy-extensions-description");
+        if (el.childNodes[0].nodeName == "#text") {
+          el.removeChild(el.childNodes[0]);
+        }
+
+        let descriptionId = (aType == "theme") ?
+                            "legacyThemeWarning.description" : "legacyWarning.description";
+        let text = gStrings.ext.formatStringFromName(descriptionId, [gStrings.brandShortName], 1) + " ";
+        el.insertBefore(document.createTextNode(text), el.childNodes[0]);
+        legacyNotice.hidden = false;
+      } else {
+        legacyNotice.hidden = true;
+      }
 
       gEventManager.registerInstallListener(this);
       gViewController.updateCommands();
@@ -3149,7 +3156,7 @@ var gDetailView = {
         legacy = !(aAddon.isWebExtension || aAddon.id.endsWith("@personas.mozilla.org"));
       }
 
-      if (legacy && aAddon.signedStatus == AddonManager.SIGNEDSTATE_PRIVILEGED) {
+      if (legacy && aAddon.signedState == AddonManager.SIGNEDSTATE_PRIVILEGED) {
         legacy = false;
       }
 
@@ -3747,6 +3754,13 @@ var gDetailView = {
     browser.setAttribute("class", "inline-options-browser");
     browser.setAttribute("forcemessagemanager", "true");
     browser.setAttribute("selectmenulist", "ContentSelectDropdown");
+
+    // The outer about:addons document listens for key presses to focus
+    // the search box when / is pressed.  But if we're focused inside an
+    // options page, don't let those keypresses steal focus.
+    browser.addEventListener("keypress", event => {
+      event.stopPropagation();
+    });
 
     let {optionsURL} = this._addon;
     let remote = !E10SUtils.canLoadURIInProcess(optionsURL, Services.appinfo.PROCESS_TYPE_DEFAULT);

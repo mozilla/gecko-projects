@@ -1668,31 +1668,26 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 
   uint32_t editableDescendantCount = 0;
 
-  // If NODE_FORCE_XBL_BINDINGS was set we might have anonymous children
-  // that also need to be told that they are moving.
-  nsresult rv;
-  if (hadForceXBL) {
-    nsBindingManager* bmgr = OwnerDoc()->BindingManager();
+  UpdateEditableState(false);
 
-    nsXBLBinding* contBinding = bmgr->GetBindingWithContent(this);
-    // First check if we have a binding...
-    if (contBinding) {
-      nsCOMPtr<nsIContent> anonRoot = contBinding->GetAnonymousContent();
-      bool allowScripts = contBinding->AllowScripts();
-      for (nsCOMPtr<nsIContent> child = anonRoot->GetFirstChild();
-           child;
-           child = child->GetNextSibling()) {
-        rv = child->BindToTree(aDocument, this, this, allowScripts);
-        NS_ENSURE_SUCCESS(rv, rv);
+  // If NODE_FORCE_XBL_BINDINGS was set, or we had a pre-existing XBL binding,
+  // we might have anonymous children that also need to be told that they are
+  // moving.
+  if (hadForceXBL ||
+      (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) && !GetShadowRoot())) {
+    nsXBLBinding* binding =
+      OwnerDoc()->BindingManager()->GetBindingWithContent(this);
 
-        editableDescendantCount += EditableInclusiveDescendantCount(child);
-      }
+    if (binding) {
+      binding->BindAnonymousContent(
+        binding->GetAnonymousContent(),
+        this,
+        binding->PrototypeBinding()->ChromeOnlyContent());
     }
   }
 
-  UpdateEditableState(false);
-
   // Now recurse into our kids
+  nsresult rv;
   for (nsIContent* child = GetFirstChild(); child;
        child = child->GetNextSibling()) {
     rv = child->BindToTree(aDocument, this, aBindingParent,
@@ -1878,8 +1873,8 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
       nsPresContext* presContext = presShell->GetPresContext();
       if (presContext) {
         MOZ_ASSERT(this !=
-                   presContext->GetViewportScrollbarStylesOverrideNode(),
-                   "Leaving behind a raw pointer to this node (as having "
+                   presContext->GetViewportScrollbarStylesOverrideElement(),
+                   "Leaving behind a raw pointer to this element (as having "
                    "propagated scrollbar styles) - that's dangerous...");
       }
     }
@@ -1903,19 +1898,6 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     DeleteProperty(nsGkAtoms::animationsProperty);
   }
 
-  // Computed style data isn't useful for detached nodes, and we'll need to
-  // recompute it anyway if we ever insert the nodes back into a document.
-  if (IsStyledByServo()) {
-    if (document) {
-      ClearServoData(document);
-    } else {
-      MOZ_ASSERT(!HasServoData());
-      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
-    }
-  } else {
-    MOZ_ASSERT(!HasServoData());
-  }
-
   // Editable descendant count only counts descendants that
   // are in the uncomposed document.
   ResetEditableDescendantCount();
@@ -1927,6 +1909,26 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     SetSubtreeRootPointer(aNullParent ? this : mParent->SubtreeRoot());
   }
 
+  // Unset this since that's what the old code effectively did.
+  UnsetFlags(NODE_FORCE_XBL_BINDINGS);
+  bool clearBindingParent = true;
+
+#ifdef MOZ_XUL
+  if (nsXULElement* xulElem = nsXULElement::FromContent(this)) {;
+    xulElem->SetXULBindingParent(nullptr);
+    clearBindingParent = false;
+  }
+#endif
+
+  if (nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots()) {
+    if (clearBindingParent) {
+      slots->mBindingParent = nullptr;
+    }
+    if (aNullParent || !mParent->IsInShadowTree()) {
+      slots->mContainingShadow = nullptr;
+    }
+  }
+
   if (document) {
     // Notify XBL- & nsIAnonymousContentCreator-generated
     // anonymous content that the document is changing.
@@ -1934,8 +1936,16 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     // do not get uninstalled.
     if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR) && !GetShadowRoot()) {
       nsContentUtils::AddScriptRunner(
-        new RemoveFromBindingManagerRunnable(document->BindingManager(), this,
-                                             document));
+        new RemoveFromBindingManagerRunnable(
+          document->BindingManager(), this, document));
+      nsXBLBinding* binding =
+        document->BindingManager()->GetBindingWithContent(this);
+      if (binding) {
+        nsXBLBinding::UnbindAnonymousContent(
+          document,
+          binding->GetAnonymousContent(),
+          /* aNullParent */ false);
+      }
     }
 
     document->ClearBoxObjectFor(this);
@@ -1946,28 +1956,6 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
       // Enqueue a detached callback for the custom element.
       nsContentUtils::EnqueueLifecycleCallback(
         document, nsIDocument::eDetached, this);
-    }
-  }
-
-  // Unset this since that's what the old code effectively did.
-  UnsetFlags(NODE_FORCE_XBL_BINDINGS);
-  bool clearBindingParent = true;
-
-#ifdef MOZ_XUL
-  nsXULElement* xulElem = nsXULElement::FromContent(this);
-  if (xulElem) {
-    xulElem->SetXULBindingParent(nullptr);
-    clearBindingParent = false;
-  }
-#endif
-
-  nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
-  if (slots) {
-    if (clearBindingParent) {
-      slots->mBindingParent = nullptr;
-    }
-    if (aNullParent || !mParent->IsInShadowTree()) {
-      slots->mContainingShadow = nullptr;
     }
   }
 
@@ -1995,14 +1983,26 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   nsNodeUtils::ParentChainChanged(this);
 
   // Unbind children of shadow root.
-  ShadowRoot* shadowRoot = GetShadowRoot();
-  if (shadowRoot) {
+  if (ShadowRoot* shadowRoot = GetShadowRoot()) {
     for (nsIContent* child = shadowRoot->GetFirstChild(); child;
          child = child->GetNextSibling()) {
       child->UnbindFromTree(true, false);
     }
 
     shadowRoot->SetIsComposedDocParticipant(false);
+  }
+
+  // Computed style data isn't useful for detached nodes, and we'll need to
+  // recompute it anyway if we ever insert the nodes back into a document.
+  if (IsStyledByServo()) {
+    if (document) {
+      ClearServoData(document);
+    } else {
+      MOZ_ASSERT(!HasServoData());
+      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
+    }
+  } else {
+    MOZ_ASSERT(!HasServoData());
   }
 }
 
@@ -2158,7 +2158,9 @@ Element::ShouldBlur(nsIContent *aContent)
 
   nsCOMPtr<nsPIDOMWindowOuter> focusedFrame;
   nsIContent* contentToBlur =
-    nsFocusManager::GetFocusedDescendant(window, false, getter_AddRefs(focusedFrame));
+    nsFocusManager::GetFocusedDescendant(window,
+                                         nsFocusManager::eOnlyCurrentWindow,
+                                         getter_AddRefs(focusedFrame));
   if (contentToBlur == aContent)
     return true;
 
@@ -2640,9 +2642,9 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           aModType == nsIDOMMutationEvent::ADDITION ?
-            NullString() : nsDependentAtomString(oldValueAtom),
+            VoidString() : nsDependentAtomString(oldValueAtom),
           nsDependentAtomString(newValueAtom),
-          (ns.IsEmpty() ? NullString() : ns)
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
@@ -2936,8 +2938,8 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           nsDependentAtomString(oldValueAtom),
-          NullString(),
-          (ns.IsEmpty() ? NullString() : ns)
+          VoidString(),
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
@@ -4192,10 +4194,7 @@ Element::ClearServoData(nsIDocument* aDoc) {
   // is necessary for correctness, since we invoke ClearServoData in various
   // places where an element's flattened tree parent changes, and such a change
   // may also make an element invalid to be used as a restyle root.
-  //
-  // Note that we need to null-check aDoc, which may be null in some situations
-  // when invoked from UnbindFromTree.
-  if (aDoc && aDoc->GetServoRestyleRoot() == this) {
+  if (aDoc->GetServoRestyleRoot() == this) {
     aDoc->ClearServoRestyleRoot();
   }
 #else
@@ -4212,6 +4211,7 @@ Element::SetCustomElementData(CustomElementData* aData)
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)
+MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF(ServoElementMallocEnclosingSizeOf)
 
 void
 Element::AddSizeOfExcludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
@@ -4219,12 +4219,18 @@ Element::AddSizeOfExcludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
   FragmentOrElement::AddSizeOfExcludingThis(aSizes, aNodeSize);
 
   if (HasServoData()) {
+    // Measure the ElementData object itself.
+    aSizes.mLayoutServoElementDataObjects +=
+      aSizes.mState.mMallocSizeOf(mServoData.Get());
+
     // Measure mServoData, excluding the ComputedValues. This measurement
-    // counts towards the element's size. We use ServoElementMallocSizeOf
-    // rather thang |aState.mMallocSizeOf| to better distinguish in DMD's
-    // output the memory measured within Servo code.
+    // counts towards the element's size. We use ServoElementMallocSizeOf and
+    // ServoElementMallocEnclosingSizeOf rather than |aState.mMallocSizeOf| to
+    // better distinguish in DMD's output the memory measured within Servo
+    // code.
     *aNodeSize +=
       Servo_Element_SizeOfExcludingThisAndCVs(ServoElementMallocSizeOf,
+                                              ServoElementMallocEnclosingSizeOf,
                                               &aSizes.mState.mSeenPtrs, this);
 
     // Now measure just the ComputedValues (and style structs) under

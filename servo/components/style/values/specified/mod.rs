@@ -19,9 +19,8 @@ use style_traits::values::specified::AllowedNumericType;
 use super::{Auto, CSSFloat, CSSInteger, Either, None_};
 use super::computed::{Context, ToComputedValue};
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
-use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
-use super::generics::grid::TrackList as GenericTrackList;
-use values::computed::ComputedValueAsSpecified;
+use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
+use super::generics::grid::{TrackSize as GenericTrackSize, TrackList as GenericTrackList};
 use values::specified::calc::CalcNode;
 
 pub use properties::animated_properties::TransitionProperty;
@@ -30,7 +29,7 @@ pub use self::angle::Angle;
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
-pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth};
+pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth, BorderSpacing};
 pub use self::box_::VerticalAlign;
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
@@ -52,7 +51,6 @@ pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDash
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::time::Time;
 pub use self::transform::{TimingFunction, TransformOrigin};
-pub use super::generics::grid::GridLine;
 pub use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 
 #[cfg(feature = "gecko")]
@@ -85,8 +83,6 @@ pub mod url {
 use cssparser::Parser;
 use parser::{Parse, ParserContext};
 use style_traits::ParseError;
-#[cfg(feature = "gecko")]
-use values::computed::ComputedValueAsSpecified;
 
 #[cfg(feature = "servo")]
 pub use ::servo::url::*;
@@ -101,10 +97,6 @@ impl Parse for SpecifiedUrl {
 }
 
 impl Eq for SpecifiedUrl {}
-
-#[cfg(feature = "gecko")]
-impl ComputedValueAsSpecified for SpecifiedUrl {}
-
 }
 
 /// Parse an `<integer>` value, handling `calc()` correctly.
@@ -182,6 +174,7 @@ impl BorderStyle {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub struct Number {
@@ -223,6 +216,15 @@ impl Number {
     pub fn parse_at_least_one<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                                       -> Result<Number, ParseError<'i>> {
         parse_number_with_clamping_mode(context, input, AllowedNumericType::AtLeastOne)
+    }
+
+    /// Clamp to 1.0 if the value is over 1.0.
+    #[inline]
+    pub fn clamp_to_one(self) -> Self {
+        Number {
+            value: self.value.min(1.),
+            calc_clamping_mode: self.calc_clamping_mode,
+        }
     }
 }
 
@@ -289,6 +291,7 @@ impl Parse for GreaterThanOrEqualToOneNumber {
 ///
 /// FIXME(emilio): Should probably use Either.
 #[allow(missing_docs)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum NumberOrPercentage {
@@ -324,6 +327,7 @@ impl Parse for NumberOrPercentage {
 }
 
 #[allow(missing_docs)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, ToCss)]
 pub struct Opacity(Number);
@@ -356,9 +360,12 @@ impl ToComputedValue for Opacity {
     }
 }
 
+/// An specified `<integer>`, optionally coming from a `calc()` expression.
+///
+/// https://drafts.csswg.org/css-values/#integers
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[allow(missing_docs)]
 pub struct Integer {
     value: CSSInteger,
     was_calc: bool,
@@ -387,7 +394,6 @@ impl Integer {
     }
 }
 
-
 impl Parse for Integer {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
         parse_integer(context, input)
@@ -395,25 +401,37 @@ impl Parse for Integer {
 }
 
 impl Integer {
-    #[allow(missing_docs)]
-    pub fn parse_with_minimum<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>, min: i32)
-                                      -> Result<Integer, ParseError<'i>> {
+    /// Parse an integer value which is at least `min`.
+    pub fn parse_with_minimum<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        min: i32
+    ) -> Result<Integer, ParseError<'i>> {
         match parse_integer(context, input) {
+            // FIXME(emilio): The spec asks us to avoid rejecting it at parse
+            // time except until computed value time.
+            //
+            // It's not totally clear it's worth it though, and no other browser
+            // does this.
             Ok(value) if value.value() >= min => Ok(value),
             Ok(_value) => Err(StyleParseError::UnspecifiedError.into()),
             Err(e) => Err(e),
         }
     }
 
-    #[allow(missing_docs)]
-    pub fn parse_non_negative<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                                      -> Result<Integer, ParseError<'i>> {
+    /// Parse a non-negative integer.
+    pub fn parse_non_negative<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Integer, ParseError<'i>> {
         Integer::parse_with_minimum(context, input, 0)
     }
 
-    #[allow(missing_docs)]
-    pub fn parse_positive<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                                  -> Result<Integer, ParseError<'i>> {
+    /// Parse a positive integer (>= 1).
+    pub fn parse_positive<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>
+    ) -> Result<Integer, ParseError<'i>> {
         Integer::parse_with_minimum(context, input, 1)
     }
 }
@@ -484,10 +502,13 @@ pub type TrackSize = GenericTrackSize<LengthOrPercentage>;
 
 /// The specified value of a grid `<track-list>`
 /// (could also be `<auto-track-list>` or `<explicit-track-list>`)
-pub type TrackList = GenericTrackList<LengthOrPercentage>;
+pub type TrackList = GenericTrackList<LengthOrPercentage, Integer>;
+
+/// The specified value of a `<grid-line>`.
+pub type GridLine = GenericGridLine<Integer>;
 
 /// `<grid-template-rows> | <grid-template-columns>`
-pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage>;
+pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage, Integer>;
 
 /// <length> | <percentage> | <number>
 pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
@@ -496,6 +517,7 @@ pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
 pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 /// rect(<top>, <left>, <bottom>, <right>) used by clip and image-region
 pub struct ClipRect {
@@ -666,8 +688,9 @@ pub type NamespaceId = ();
 /// An attr(...) rule
 ///
 /// `[namespace? `|`]? ident`
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, Eq, PartialEq, ToComputedValue)]
 pub struct Attr {
     /// Optional namespace
     pub namespace: Option<(Namespace, NamespaceId)>,
@@ -762,5 +785,3 @@ impl ToCss for Attr {
         dest.write_str(")")
     }
 }
-
-impl ComputedValueAsSpecified for Attr {}

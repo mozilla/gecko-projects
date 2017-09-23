@@ -36,26 +36,37 @@ const ObserverService = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIO
  */
 class CachedIterable {
   constructor(iterable) {
-    if (!(Symbol.iterator in Object(iterable))) {
-      throw new TypeError('Argument must implement the iteration protocol.');
+    if (!(Symbol.asyncIterator in Object(iterable))) {
+      throw new TypeError('Argument must implement the async iteration protocol.');
     }
 
-    this.iterator = iterable[Symbol.iterator]();
+    this.iterator = iterable[Symbol.asyncIterator]();
     this.seen = [];
   }
 
-  [Symbol.iterator]() {
+  [Symbol.asyncIterator]() {
     const { seen, iterator } = this;
     let cur = 0;
 
     return {
-      next() {
+      async next() {
         if (seen.length <= cur) {
-          seen.push(iterator.next());
+          seen.push(await iterator.next());
         }
         return seen[cur++];
       }
     };
+  }
+
+  /**
+   * This method allows user to consume the next element from the iterator
+   * into the cache.
+   */
+  touchNext() {
+    const { seen, iterator } = this;
+    if (seen.length === 0 || seen[seen.length - 1].done === false) {
+      seen.push(iterator.next());
+    }
   }
 }
 
@@ -131,7 +142,7 @@ class Localization {
    */
   async formatWithFallback(keys, method) {
     const translations = [];
-    for (let ctx of this.ctxs) {
+    for await (let ctx of this.ctxs) {
       // This can operate on synchronous and asynchronous
       // contexts coming from the iterator.
       if (typeof ctx.then === 'function') {

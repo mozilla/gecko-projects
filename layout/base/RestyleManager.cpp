@@ -1337,7 +1337,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
         // to reconstruct - we can just reflow, because no scrollframe is being
         // added/removed.
         nsIContent* prevOverrideNode =
-          presContext->GetViewportScrollbarStylesOverrideNode();
+          presContext->GetViewportScrollbarStylesOverrideElement();
         nsIContent* newOverrideNode =
           presContext->UpdateViewportScrollbarStylesOverride();
 
@@ -1401,9 +1401,17 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
       nsIContent* container = start->GetParent();
       MOZ_ASSERT(container);
       if (!end) {
-        frameConstructor->ContentAppended(container, start, false);
+        frameConstructor->ContentAppended(
+            container,
+            start,
+            nsCSSFrameConstructor::InsertionKind::Sync);
       } else {
-        frameConstructor->ContentRangeInserted(container, start, end, nullptr, false);
+        frameConstructor->ContentRangeInserted(
+            container,
+            start,
+            end,
+            nullptr,
+            nsCSSFrameConstructor::InsertionKind::Sync);
       }
     }
     for (size_t j = lazyRangeStart; j < i; ++j) {
@@ -1504,9 +1512,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
       // on elements whose frames are reconstructed, since we depend on
       // the reconstruction happening synchronously.
       frameConstructor->RecreateFramesForContent(
-        content,
-        nsCSSFrameConstructor::InsertionKind::Sync,
-        nsCSSFrameConstructor::REMOVE_FOR_RECONSTRUCTION);
+        content, nsCSSFrameConstructor::InsertionKind::Sync);
     } else {
       NS_ASSERTION(frame, "This shouldn't happen");
 
@@ -1548,18 +1554,30 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
       if (hint & nsChangeHint_UpdateEffects) {
         for (nsIFrame* cont = frame; cont;
              cont = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(cont)) {
-          nsSVGEffects::UpdateEffects(cont);
+          SVGObserverUtils::UpdateEffects(cont);
         }
       }
       if ((hint & nsChangeHint_InvalidateRenderingObservers) ||
           ((hint & nsChangeHint_UpdateOpacityLayer) &&
            frame->IsFrameOfType(nsIFrame::eSVG) &&
            !(frame->GetStateBits() & NS_STATE_IS_OUTER_SVG))) {
-        nsSVGEffects::InvalidateRenderingObservers(frame);
+        SVGObserverUtils::InvalidateRenderingObservers(frame);
       }
       if (hint & nsChangeHint_NeedReflow) {
         StyleChangeReflow(frame, hint);
         didReflowThisFrame = true;
+      }
+
+      // Here we need to propagate repaint frame change hint instead of update
+      // opacity layer change hint when we do opacity optimization for SVG.
+      // We can't do it in nsStyleEffects::CalcDifference() just like we do
+      // for the optimization for 0.99 over opacity values since we have no way
+      // to call nsSVGUtils::CanOptimizeOpacity() there.
+      if ((hint & nsChangeHint_UpdateOpacityLayer) &&
+          nsSVGUtils::CanOptimizeOpacity(frame) &&
+          frame->IsFrameOfType(nsIFrame::eSVGGeometry)) {
+        hint &= ~nsChangeHint_UpdateOpacityLayer;
+        hint |= nsChangeHint_RepaintFrame;
       }
 
       if ((hint & nsChangeHint_UpdateUsesOpacity) &&

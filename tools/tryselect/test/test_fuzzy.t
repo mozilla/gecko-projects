@@ -4,28 +4,42 @@
 Test fuzzy selector
 
   $ ./mach try fuzzy $testargs -q "'foo"
-  Calculated try selector:
+  Commit message:
+  Fuzzy with query: 'foo
+  
+  Pushed via `mach try fuzzy`
+  Calculated try_task_config.json:
   {
     "tasks":[
       "test/foo-debug",
       "test/foo-opt"
     ]
   }
+  
   $ ./mach try fuzzy $testargs -q "'bar"
   no tasks selected
   $ ./mach try fuzzy $testargs --full -q "'bar"
-  Calculated try selector:
+  Commit message:
+  Fuzzy with query: 'bar
+  
+  Pushed via `mach try fuzzy`
+  Calculated try_task_config.json:
   {
     "tasks":[
       "test/bar-debug",
       "test/bar-opt"
     ]
   }
+  
 
 Test templates
 
   $ ./mach try fuzzy --no-push --artifact -q "'foo"
-  Calculated try selector:
+  Commit message:
+  Fuzzy with query: 'foo
+  
+  Pushed via `mach try fuzzy`
+  Calculated try_task_config.json:
   {
     "templates":{
       "artifact":{
@@ -37,8 +51,13 @@ Test templates
       "test/foo-opt"
     ]
   }
+  
   $ ./mach try fuzzy $testargs --env FOO=1 --env BAR=baz -q "'foo"
-  Calculated try selector:
+  Commit message:
+  Fuzzy with query: 'foo
+  
+  Pushed via `mach try fuzzy`
+  Calculated try_task_config.json:
   {
     "templates":{
       "env":{
@@ -51,3 +70,4 @@ Test templates
       "test/foo-opt"
     ]
   }
+  

@@ -1139,6 +1139,61 @@ LoadLoadableRootsTask::Run()
 }
 
 nsresult
+nsNSSComponent::HasActiveSmartCards(bool& result)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
+  if (!NS_IsMainThread()) {
+    return NS_ERROR_NOT_SAME_THREAD;
+  }
+
+#ifndef MOZ_NO_SMART_CARDS
+  nsNSSShutDownPreventionLock lock;
+  MutexAutoLock nsNSSComponentLock(mMutex);
+
+  // A non-null list means at least one smart card thread was active
+  if (mThreadList) {
+    result = true;
+    return NS_OK;
+  }
+#endif
+  result = false;
+  return NS_OK;
+}
+
+nsresult
+nsNSSComponent::HasUserCertsInstalled(bool& result)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
+  if (!NS_IsMainThread()) {
+    return NS_ERROR_NOT_SAME_THREAD;
+  }
+
+  nsNSSShutDownPreventionLock lock;
+  MutexAutoLock nsNSSComponentLock(mMutex);
+
+  if (!mNSSInitialized) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  result = false;
+  UniqueCERTCertList certList(
+    CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), certUsageSSLClient,
+                              false, true, nullptr));
+  if (!certList) {
+    return NS_OK;
+  }
+
+  // check if the list is empty
+  if (CERT_LIST_END(CERT_LIST_HEAD(certList), certList)) {
+    return NS_OK;
+  }
+
+  // The list is not empty, meaning at least one cert is installed
+  result = true;
+  return NS_OK;
+}
+
+nsresult
 nsNSSComponent::BlockUntilLoadableRootsLoaded()
 {
   MonitorAutoLock rootsLoadedLock(mLoadableRootsLoadedMonitor);
@@ -1886,13 +1941,11 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
   }
 
 
-  const nsCString& profilePathCStr = PromiseFlatCString(profilePath);
   // Try read/write mode. If we're in safeMode, we won't load PKCS#11 modules.
 #ifndef ANDROID
   PRErrorCode savedPRErrorCode1;
 #endif // ifndef ANDROID
-  SECStatus srv = ::mozilla::psm::InitializeNSS(profilePathCStr.get(), false,
-                                                !safeMode);
+  SECStatus srv = ::mozilla::psm::InitializeNSS(profilePath, false, !safeMode);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r/w mode"));
     return NS_OK;
@@ -1902,7 +1955,7 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
   PRErrorCode savedPRErrorCode2;
 #endif // ifndef ANDROID
   // That failed. Try read-only mode.
-  srv = ::mozilla::psm::InitializeNSS(profilePathCStr.get(), true, !safeMode);
+  srv = ::mozilla::psm::InitializeNSS(profilePath, true, !safeMode);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r-o mode"));
     return NS_OK;
@@ -1929,7 +1982,7 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
     // problem, but for some reason the combination of read-only and no-moddb
     // flags causes NSS initialization to fail, so unfortunately we have to use
     // read-write mode.
-    srv = ::mozilla::psm::InitializeNSS(profilePathCStr.get(), false, false);
+    srv = ::mozilla::psm::InitializeNSS(profilePath, false, false);
     if (srv == SECSuccess) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("FIPS may be the problem"));
       // Unload NSS so we can attempt to fix this situation for the user.
@@ -1945,12 +1998,12 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
       if (NS_FAILED(rv)) {
         return rv;
       }
-      srv = ::mozilla::psm::InitializeNSS(profilePathCStr.get(), false, true);
+      srv = ::mozilla::psm::InitializeNSS(profilePath, false, true);
       if (srv == SECSuccess) {
         MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized in r/w mode"));
         return NS_OK;
       }
-      srv = ::mozilla::psm::InitializeNSS(profilePathCStr.get(), true, true);
+      srv = ::mozilla::psm::InitializeNSS(profilePath, true, true);
       if (srv == SECSuccess) {
         MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized in r-o mode"));
         return NS_OK;

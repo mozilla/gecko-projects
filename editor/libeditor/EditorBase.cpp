@@ -106,15 +106,11 @@
 #include "prtime.h"                     // for PR_Now
 
 class nsIOutputStream;
-class nsIParserService;
 class nsITransferable;
 
 #ifdef DEBUG
 #include "nsIDOMHTMLDocument.h"         // for nsIDOMHTMLDocument
 #endif
-
-// Defined in nsEditorRegistration.cpp
-extern nsIParserService *sParserService;
 
 namespace mozilla {
 
@@ -2747,13 +2743,14 @@ EditorBase::SetTextImpl(Selection& aSelection, const nsAString& aString,
     return rv;
   }
 
-  // Only set selection to insertion point if editor gives permission
-  if (GetShouldTxnSetSelection()) {
+  {
+    // Create a nested scope to not overwrite rv from the outer scope.
     RefPtr<Selection> selection = GetSelection();
-    DebugOnly<nsresult> rv = selection->Collapse(&aCharData, length);
+    DebugOnly<nsresult> rv = selection->Collapse(&aCharData, aString.Length());
     NS_ASSERTION(NS_SUCCEEDED(rv),
                  "Selection could not be collapsed after insert");
   }
+
   mRangeUpdater.SelAdjDeleteText(&aCharData, 0, length);
   mRangeUpdater.SelAdjInsertText(aCharData, 0, aString);
 
@@ -5210,7 +5207,8 @@ EditorBase::IsActiveInDOMWindow()
   nsPIDOMWindowOuter* ourWindow = document->GetWindow();
   nsCOMPtr<nsPIDOMWindowOuter> win;
   nsIContent* content =
-    nsFocusManager::GetFocusedDescendant(ourWindow, false,
+    nsFocusManager::GetFocusedDescendant(ourWindow,
+                                         nsFocusManager::eOnlyCurrentWindow,
                                          getter_AddRefs(win));
   return SameCOMIdentity(content, piTarget);
 }

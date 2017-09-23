@@ -22,6 +22,7 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsChangeHint.h"
 #include "nsIAtom.h"
+#include "nsIMemoryReporter.h"
 #include "nsTArray.h"
 
 namespace mozilla {
@@ -95,6 +96,13 @@ public:
     MOZ_ASSERT(sInServoTraversal || NS_IsMainThread());
     return sInServoTraversal;
   }
+
+#ifdef DEBUG
+  // Used for debug assertions. We make this debug-only to prevent callers from
+  // accidentally using it instead of IsInServoTraversal, which is cheaper. We
+  // can change this if a use-case arises.
+  static bool IsCurrentThreadInServoTraversal();
+#endif
 
   static ServoStyleSet* Current()
   {
@@ -262,13 +270,6 @@ public:
   ProbePseudoElementStyle(dom::Element* aOriginatingElement,
                           mozilla::CSSPseudoElementType aType,
                           ServoStyleContext* aParentContext);
-
-  // Test if style is dependent on content state
-  nsRestyleHint HasStateDependentStyle(dom::Element* aElement,
-                                       EventStates aStateMask);
-  nsRestyleHint HasStateDependentStyle(
-    dom::Element* aElement, mozilla::CSSPseudoElementType aPseudoType,
-    dom::Element* aPseudoElement, EventStates aStateMask);
 
   /**
    * Performs a Servo traversal to compute style for all dirty nodes in the
@@ -619,6 +620,15 @@ private:
   RefPtr<nsBindingManager> mBindingManager;
 
   static ServoStyleSet* sInServoTraversal;
+};
+
+class UACacheReporter final : public nsIMemoryReporter
+{
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIMEMORYREPORTER
+
+private:
+  ~UACacheReporter() {}
 };
 
 } // namespace mozilla

@@ -5,6 +5,7 @@
 //! Generic types for CSS values related to backgrounds.
 
 /// A generic value for the `background-size` property.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug)]
 #[derive(PartialEq, ToComputedValue, ToCss)]
@@ -22,13 +23,4 @@ pub enum BackgroundSize<LengthOrPercentageOrAuto> {
     /// `contain`
     #[animation(error)]
     Contain,
-}
-
-impl<L> From<L> for BackgroundSize<L>
-    where L: Clone,
-{
-    #[inline]
-    fn from(value: L) -> Self {
-        BackgroundSize::Explicit { width: value.clone(), height: value }
-    }
 }

@@ -785,6 +785,11 @@ body,
   overflow-y: auto;
 }
 
+.panel-container .tree-container .objectBox {
+  white-space: normal;
+  word-wrap: break-word;
+}
+
 .properties-view {
   flex-grow: 1;
 }
@@ -816,8 +821,14 @@ body,
 /* Empty notices in tab panels */
 
 .empty-notice {
-  color: var(--theme-body-color-alt);
+  color: var(--theme-body-color-inactive);
   padding: 3px 8px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 24px;
 }
 
 /* Text inputs in tab panels */
@@ -1176,7 +1187,7 @@ body,
 
 .requests-list-network-summary-button > .summary-info-icon {
   background: url(chrome://devtools/skin/images/profiler-stopwatch.svg) no-repeat;
-  filter: var(--icon-filter);
+  filter: var(--theme-icon-filter);
   width: 16px;
   height: 16px;
   opacity: 0.8;

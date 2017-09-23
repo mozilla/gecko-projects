@@ -199,6 +199,19 @@ typedef GenericFlingAnimation FlingAnimation;
  * disable the expiry behavior entirely.
  * Units: milliseconds
  *
+ * \li\b apz.drag.enabled
+ * Setting this pref to true will cause APZ to handle mouse-dragging of
+ * scrollbar thumbs.
+ *
+ * \li\b apz.drag.initial.enabled
+ * Setting this pref to true will cause APZ to try to handle mouse-dragging
+ * of scrollbar thumbs without an initial round-trip to content to start it
+ * if possible. Only has an effect if apz.drag.enabled is also true.
+ *
+ * \li\b apz.drag.touch.enabled
+ * Setting this pref to true will cause APZ to handle touch-dragging of
+ * scrollbar thumbs. Only has an effect if apz.drag.enabled is also true.
+ *
  * \li\b apz.enlarge_displayport_when_clipped
  * Pref that enables enlarging of the displayport along one axis when the
  * generated displayport's size is beyond that of the scrollable rect on the
@@ -2986,10 +2999,14 @@ void AsyncPanZoomController::AdjustScrollForSurfaceShift(const ScreenPoint& aShi
     / mFrameMetrics.GetZoom();
   APZC_LOG("%p adjusting scroll position by %s for surface shift\n",
     this, Stringify(adjustment).c_str());
-  CSSPoint scrollOffset = mFrameMetrics.GetScrollOffset();
-  scrollOffset.y = mY.ClampOriginToScrollableRect(scrollOffset.y + adjustment.y);
-  scrollOffset.x = mX.ClampOriginToScrollableRect(scrollOffset.x + adjustment.x);
-  mFrameMetrics.SetScrollOffset(scrollOffset);
+  CSSRect scrollRange = mFrameMetrics.CalculateScrollRange();
+  // Apply shift to mFrameMetrics.mScrollOffset.
+  mFrameMetrics.SetScrollOffset(scrollRange.ClampPoint(
+      mFrameMetrics.GetScrollOffset() + adjustment));
+  // Apply shift to mCompositedScrollOffset, since the dynamic toolbar expects
+  // the shift to take effect right away, without the usual frame delay.
+  mCompositedScrollOffset = scrollRange.ClampPoint(
+      mCompositedScrollOffset + adjustment);
   RequestContentRepaint();
   UpdateSharedCompositorFrameMetrics();
 }

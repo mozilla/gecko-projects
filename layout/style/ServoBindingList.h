@@ -21,8 +21,9 @@
 // Element data
 SERVO_BINDING_FUNC(Servo_Element_ClearData, void, RawGeckoElementBorrowed node)
 SERVO_BINDING_FUNC(Servo_Element_SizeOfExcludingThisAndCVs, size_t,
-                   mozilla::MallocSizeOf, mozilla::SeenPtrs* seen_ptrs,
-                   RawGeckoElementBorrowed node)
+                   mozilla::MallocSizeOf malloc_size_of,
+                   mozilla::MallocSizeOf malloc_enclosing_size_of,
+                   mozilla::SeenPtrs* seen_ptrs, RawGeckoElementBorrowed node)
 SERVO_BINDING_FUNC(Servo_Element_HasPrimaryComputedValues, bool,
                    RawGeckoElementBorrowed node)
 SERVO_BINDING_FUNC(Servo_Element_GetPrimaryComputedValues,
@@ -34,6 +35,9 @@ SERVO_BINDING_FUNC(Servo_Element_GetPseudoComputedValues,
                    ServoStyleContextStrong,
                    RawGeckoElementBorrowed node, size_t index)
 SERVO_BINDING_FUNC(Servo_Element_IsDisplayNone,
+                   bool,
+                   RawGeckoElementBorrowed element)
+SERVO_BINDING_FUNC(Servo_Element_IsPrimaryStyleReusedViaRuleNode,
                    bool,
                    RawGeckoElementBorrowed element)
 
@@ -60,8 +64,11 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_Clone, RawServoStyleSheetContentsStrong,
                    const mozilla::ServoStyleSheet* reference_sheet);
 SERVO_BINDING_FUNC(Servo_StyleSheet_SizeOfIncludingThis, size_t,
                    mozilla::MallocSizeOf malloc_size_of,
+                   mozilla::MallocSizeOf malloc_enclosing_size_of,
                    RawServoStyleSheetContentsBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSheet_GetSourceMapURL, void,
+                   RawServoStyleSheetContentsBorrowed sheet, nsAString* result)
+SERVO_BINDING_FUNC(Servo_StyleSheet_GetSourceURL, void,
                    RawServoStyleSheetContentsBorrowed sheet, nsAString* result)
 // We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
 // work as return values with the Linux 32-bit ABI at the moment because
@@ -127,6 +134,10 @@ SERVO_BINDING_FUNC(Servo_StyleSet_AddSizeOfExcludingThis, void,
                    mozilla::MallocSizeOf malloc_enclosing_size_of,
                    mozilla::ServoStyleSetSizes* sizes,
                    RawServoStyleSetBorrowed set)
+SERVO_BINDING_FUNC(Servo_UACache_AddSizeOf, void,
+                   mozilla::MallocSizeOf malloc_size_of,
+                   mozilla::MallocSizeOf malloc_enclosing_size_of,
+                   mozilla::ServoStyleSetSizes* sizes)
 SERVO_BINDING_FUNC(Servo_StyleContext_AddRef, void, ServoStyleContextBorrowed ctx);
 SERVO_BINDING_FUNC(Servo_StyleContext_Release, void, ServoStyleContextBorrowed ctx);
 
@@ -538,6 +549,8 @@ SERVO_BINDING_FUNC(Servo_ComputedValues_GetStyleRuleList, void,
 // Initialize Servo components. Should be called exactly once at startup.
 SERVO_BINDING_FUNC(Servo_Initialize, void,
                    RawGeckoURLExtraData* dummy_url_data)
+// Initialize Servo on a cooperative Quantum DOM thread.
+SERVO_BINDING_FUNC(Servo_InitializeCooperativeThread, void);
 // Shut down Servo components. Should be called exactly once at shutdown.
 SERVO_BINDING_FUNC(Servo_Shutdown, void)
 
@@ -609,6 +622,9 @@ SERVO_BINDING_FUNC(Servo_TraverseSubtree,
 // Assert that the tree has no pending or unconsumed restyles.
 SERVO_BINDING_FUNC(Servo_AssertTreeIsClean, void, RawGeckoElementBorrowed root)
 
+// Returns true if the current thread is a Servo parallel worker thread.
+SERVO_BINDING_FUNC(Servo_IsWorkerThread, bool, )
+
 // Checks whether the rule tree has crossed its threshold for unused rule nodes,
 // and if so, frees them.
 SERVO_BINDING_FUNC(Servo_MaybeGCRuleTree, void, RawServoStyleSetBorrowed set)
@@ -645,6 +661,16 @@ SERVO_BINDING_FUNC(Servo_ProcessInvalidations, void,
                    RawGeckoElementBorrowed element,
                    const mozilla::ServoElementSnapshotTable* snapshots)
 
+
+SERVO_BINDING_FUNC(Servo_HasPendingRestyleAncestor, bool,
+                   RawGeckoElementBorrowed element)
+
+SERVO_BINDING_FUNC(Servo_GetArcStringData, void,
+                   RustString*, uint8_t** chars, uint32_t* len);
+SERVO_BINDING_FUNC(Servo_ReleaseArcStringData, void,
+                   mozilla::ServoRawOffsetArc<RustString>* string);
+SERVO_BINDING_FUNC(Servo_CloneArcStringData, mozilla::ServoRawOffsetArc<RustString>,
+                   mozilla::ServoRawOffsetArc<RustString>* string);
 
 // AddRef / Release functions
 #define SERVO_ARC_TYPE(name_, type_)                                \

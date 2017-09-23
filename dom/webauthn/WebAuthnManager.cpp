@@ -7,19 +7,19 @@
 #include "hasht.h"
 #include "nsICryptoHash.h"
 #include "nsNetCID.h"
-#include "nsNetUtil.h" // Used by WD-05 compat support (Remove in Bug 1381126)
 #include "nsThreadUtils.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/AuthenticatorAttestationResponse.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/PWebAuthnTransaction.h"
+#include "mozilla/dom/U2FUtil.h"
 #include "mozilla/dom/WebAuthnCBORUtil.h"
 #include "mozilla/dom/WebAuthnManager.h"
-#include "mozilla/dom/WebAuthnUtil.h"
-#include "mozilla/dom/PWebAuthnTransaction.h"
 #include "mozilla/dom/WebAuthnTransactionChild.h"
+#include "mozilla/dom/WebAuthnUtil.h"
 #include "mozilla/dom/WebCryptoCommon.h"
-#include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/PBackgroundChild.h"
 
 using namespace mozilla::ipc;
 
@@ -56,8 +56,6 @@ static nsresult
 GetAlgorithmName(const OOS& aAlgorithm,
                  /* out */ nsString& aName)
 {
-  MOZ_ASSERT(aAlgorithm.IsString()); // TODO: remove assertion when we coerce.
-
   if (aAlgorithm.IsString()) {
     // If string, then treat as algorithm name
     aName.Assign(aAlgorithm.GetAsString());
@@ -73,35 +71,6 @@ GetAlgorithmName(const OOS& aAlgorithm,
   }
 
   return NS_OK;
-}
-
-static nsresult
-HashCString(nsICryptoHash* aHashService, const nsACString& aIn,
-            /* out */ CryptoBuffer& aOut)
-{
-  MOZ_ASSERT(aHashService);
-
-  nsresult rv = aHashService->Init(nsICryptoHash::SHA256);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = aHashService->Update(
-    reinterpret_cast<const uint8_t*>(aIn.BeginReading()),aIn.Length());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsAutoCString fullHash;
-  // Passing false below means we will get a binary result rather than a
-  // base64-encoded string.
-  rv = aHashService->Finish(false, fullHash);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  aOut.Assign(fullHash);
-  return rv;
 }
 
 static nsresult
@@ -191,25 +160,7 @@ RelaxSameOrigin(nsPIDOMWindowInner* aParent,
     return NS_ERROR_FAILURE;
   }
 
-  // WD-05 origin compatibility support - aInputRpId might be a URI/origin,
-  // so catch that (Bug 1380421). Remove in Bug 1381126.
-  nsAutoString inputRpId(aInputRpId);
-  nsCOMPtr<nsIURI> inputUri;
-  if (NS_SUCCEEDED(NS_NewURI(getter_AddRefs(inputUri), aInputRpId))) {
-    // If we parsed the input as a URI, then pull out the host and use it as the
-    // input
-    nsAutoCString uriHost;
-    if (NS_FAILED(inputUri->GetHost(uriHost))) {
-      return NS_ERROR_FAILURE;
-    }
-    CopyUTF8toUTF16(uriHost, inputRpId);
-    MOZ_LOG(gWebAuthnManagerLog, LogLevel::Debug,
-            ("WD-05 Fallback: Parsed input %s URI into host %s",
-             NS_ConvertUTF16toUTF8(aInputRpId).get(), uriHost.get()));
-  }
-  // End WD-05 origin compatibility support (Bug 1380421)
-
-  if (!html->IsRegistrableDomainSuffixOfOrEqualTo(inputRpId, originHost)) {
+  if (!html->IsRegistrableDomainSuffixOfOrEqualTo(aInputRpId, originHost)) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
@@ -491,10 +442,8 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent,
     return promise.forget();
   }
 
-  // WD-05 vs. WD-06: In WD-06, the first parameter should be "origin". Fix
-  // this in Bug 1384776
   nsAutoCString clientDataJSON;
-  srv = AssembleClientData(NS_ConvertUTF8toUTF16(rpId), challenge, clientDataJSON);
+  srv = AssembleClientData(origin, challenge, clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
@@ -655,9 +604,7 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
   }
 
   nsAutoCString clientDataJSON;
-  // WD-05 vs. WD-06: In WD-06, the first parameter should be "origin". Fix
-  // this in Bug 1384776
-  srv = AssembleClientData(NS_ConvertUTF8toUTF16(rpId), challenge, clientDataJSON);
+  srv = AssembleClientData(origin, challenge, clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();

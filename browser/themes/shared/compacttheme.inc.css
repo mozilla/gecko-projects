@@ -7,13 +7,17 @@
    there are overrides for each platform in their compacttheme.css files. */
 
 :root:-moz-lwtheme {
+  text-shadow: none;
+
   --toolbar-bgcolor: var(--chrome-secondary-background-color);
   --toolbar-gbimage: none;
   --toolbar-non-lwt-bgcolor: var(--toolbar-bgcolor);
   --toolbar-non-lwt-textcolor: var(--chrome-color);
   --toolbar-non-lwt-bgimage: none;
 
-  --tab-line-color: highlight;
+  --toolbarbutton-icon-fill-opacity: .7;
+
+  --tab-line-color: #0a84ff;
 }
 
 :root:-moz-lwtheme-brighttext {
@@ -53,7 +57,7 @@
 .toolbarbutton-animatable-box[brighttext],
 toolbar[brighttext] .toolbarbutton-animatable-box,
 toolbar[brighttext] .toolbarbutton-1 {
-  fill: rgba(249, 249, 250, .7);
+  fill: rgb(249, 249, 250);
 }
 
 #urlbar ::-moz-selection,
@@ -83,17 +87,6 @@ toolbar[brighttext] .toolbarbutton-1 {
 .browserContainer > findbar .findbar-find-status,
 .browserContainer > findbar .found-matches {
   color: inherit;
-}
-
-#navigator-toolbox .toolbarbutton-1,
-.browserContainer > findbar .findbar-button,
-#PlacesToolbar toolbarbutton.bookmark-item {
-  color: var(--chrome-color);
-  text-shadow: none;
-}
-
-#TabsToolbar {
-  text-shadow: none !important;
 }
 
 /* URL bar and search bar*/

@@ -22,7 +22,9 @@ const BRAND_SHORT_NAME = Services.strings
 const PROMPT_COUNT_PREF = "browser.onboarding.notification.prompt-count";
 const ONBOARDING_DIALOG_ID = "onboarding-overlay-dialog";
 const ONBOARDING_MIN_WIDTH_PX = 960;
-const SPEECH_BUBBLE_MIN_WIDTH_PX = 1150;
+const SPEECH_BUBBLE_MIN_WIDTH_PX = 1130;
+const ICON_STATE_WATERMARK = "watermark";
+const ICON_STATE_DEFAULT = "default";
 
 /**
  * Add any number of tours, key is the tourId, value should follow the format below
@@ -234,7 +236,7 @@ var onboardingTourset = {
       div.innerHTML = `
         <section class="onboarding-tour-description">
           <h1 data-l10n-id="onboarding.tour-library.title"></h1>
-          <p data-l10n-id="onboarding.tour-library.description"></p>
+          <p data-l10n-id="onboarding.tour-library.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_library.svg" role="presentation"/>
@@ -419,6 +421,8 @@ class Onboarding {
     this._loadJS(TOUR_AGENT_JS_URI);
 
     this._initPrefObserver();
+    this._onIconStateChange(Services.prefs.getStringPref("browser.onboarding.state", ICON_STATE_DEFAULT));
+
     // Doing tour notification takes some effort. Let's do it on idle.
     this._window.requestIdleCallback(() => this._initNotification());
   }
@@ -452,19 +456,28 @@ class Onboarding {
     }
 
     this._prefsObserved = new Map();
-    this._prefsObserved.set("browser.onboarding.hidden", prefValue => {
-      if (prefValue) {
-        this.destroy();
-      }
+    this._prefsObserved.set("browser.onboarding.state", () => {
+      this._onIconStateChange(Services.prefs.getStringPref("browser.onboarding.state", ICON_STATE_DEFAULT));
     });
     this._tours.forEach(tour => {
       let tourId = tour.id;
       this._prefsObserved.set(`browser.onboarding.tour.${tourId}.completed`, () => {
         this.markTourCompletionState(tourId);
+        this._checkWatermarkByTours();
       });
     });
     for (let [name, callback] of this._prefsObserved) {
       Services.prefs.addObserver(name, callback);
+    }
+  }
+
+  _checkWatermarkByTours() {
+    let tourDone = this._tours.every(tour => this.isTourCompleted(tour.id));
+    if (tourDone) {
+      sendMessageToChrome("set-prefs", [{
+        name: "browser.onboarding.state",
+        value: ICON_STATE_WATERMARK
+      }]);
     }
   }
 
@@ -498,6 +511,11 @@ class Onboarding {
       case "onboarding-overlay-button":
         this.showOverlay();
         this.gotoPage(this._firstUncompleteTour.id);
+        break;
+      case "onboarding-skip-tour-button":
+        this.hideNotification();
+        this.hideOverlay();
+        this.skipTour();
         break;
       case "onboarding-overlay-close-btn":
       // If the clicking target is directly on the outer-most overlay,
@@ -655,6 +673,18 @@ class Onboarding {
     this._overlayIcon = this._overlay = this._notificationBar = null;
   }
 
+  _onIconStateChange(state) {
+    switch (state) {
+      case ICON_STATE_DEFAULT:
+        this._overlayIcon.classList.remove("onboarding-watermark");
+        break;
+      case ICON_STATE_WATERMARK:
+        this._overlayIcon.classList.add("onboarding-watermark");
+        break;
+    }
+    return true;
+  }
+
   showOverlay() {
     if (this._tourItems.length == 0) {
       // Lazy loading until first toggle.
@@ -666,10 +696,6 @@ class Onboarding {
   }
 
   hideOverlay() {
-    let hiddenCheckbox = this._window.document.getElementById("onboarding-tour-hidden-checkbox");
-    if (hiddenCheckbox.checked) {
-      this.hide();
-    }
     this.toggleModal(this._overlay.classList.toggle("onboarding-opened"));
   }
 
@@ -812,15 +838,16 @@ class Onboarding {
     return this._firstSession;
   }
 
-  _muteNotificationOnFirstSession() {
+  _getLastTourChangeTime() {
+    return 1000 * Services.prefs.getIntPref("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
+  }
+
+  _muteNotificationOnFirstSession(lastTourChangeTime) {
     if (!this._isFirstSession) {
       return false;
     }
 
-    // Reuse the `last-time-of-changing-tour-sec` to save the time that
-    // we try to prompt on the 1st session.
-    let lastTime = 1000 * Services.prefs.getIntPref("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
-    if (lastTime <= 0) {
+    if (lastTourChangeTime <= 0) {
       sendMessageToChrome("set-prefs", [{
         name: "browser.onboarding.notification.last-time-of-changing-tour-sec",
         value: Math.floor(Date.now() / 1000)
@@ -828,19 +855,18 @@ class Onboarding {
       return true;
     }
     let muteDuration = Services.prefs.getIntPref("browser.onboarding.notification.mute-duration-on-first-session-ms");
-    return Date.now() - lastTime <= muteDuration;
+    return Date.now() - lastTourChangeTime <= muteDuration;
   }
 
-  _isTimeForNextTourNotification() {
+  _isTimeForNextTourNotification(lastTourChangeTime) {
     let promptCount = Services.prefs.getIntPref("browser.onboarding.notification.prompt-count", 0);
     let maxCount = Services.prefs.getIntPref("browser.onboarding.notification.max-prompt-count-per-tour");
     if (promptCount >= maxCount) {
       return true;
     }
 
-    let lastTime = 1000 * Services.prefs.getIntPref("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
     let maxTime = Services.prefs.getIntPref("browser.onboarding.notification.max-life-time-per-tour-ms");
-    if (lastTime && Date.now() - lastTime >= maxTime) {
+    if (lastTourChangeTime && Date.now() - lastTourChangeTime >= maxTime) {
       return true;
     }
 
@@ -892,7 +918,8 @@ class Onboarding {
       return;
     }
 
-    if (this._muteNotificationOnFirstSession()) {
+    let lastTime = this._getLastTourChangeTime();
+    if (this._muteNotificationOnFirstSession(lastTime)) {
       return;
     }
     // After the notification mute on the 1st session,
@@ -900,9 +927,16 @@ class Onboarding {
     this._overlayIcon.classList.remove("onboarding-speech-bubble");
 
     let queue = this._getNotificationQueue();
+    let totalMaxTime = Services.prefs.getIntPref("browser.onboarding.notification.max-life-time-all-tours-ms");
+    if (lastTime && Date.now() - lastTime >= totalMaxTime) {
+      // Reach total max life time for all tour notifications.
+      // Clear the queue so that we would finish tour notifications below
+      queue = [];
+    }
+
     let startQueueLength = queue.length;
     // See if need to move on to the next tour
-    if (queue.length > 0 && this._isTimeForNextTourNotification()) {
+    if (queue.length > 0 && this._isTimeForNextTourNotification(lastTime)) {
       queue.shift();
     }
     // We don't want to prompt completed tour.
@@ -919,6 +953,10 @@ class Onboarding {
         {
           name: "browser.onboarding.notification.tour-ids-queue",
           value: ""
+        },
+        {
+          name: "browser.onboarding.state",
+          value: ICON_STATE_WATERMARK
         }
       ]);
       return;
@@ -985,7 +1023,7 @@ class Onboarding {
           <h1 id="onboarding-notification-tour-title"></h1>
           <p id="onboarding-notification-tour-message"></p>
         </div>
-        <button id="onboarding-notification-action-btn"></button>
+        <button id="onboarding-notification-action-btn" class="onboarding-action-button"></button>
       </section>
       <button id="onboarding-notification-close-btn" class="onboarding-close-btn"></button>
     `;
@@ -996,16 +1034,16 @@ class Onboarding {
     return footer;
   }
 
-  hide() {
+  skipTour() {
     this.setToursCompleted(this._tours.map(tour => tour.id));
     sendMessageToChrome("set-prefs", [
       {
-        name: "browser.onboarding.hidden",
+        name: "browser.onboarding.notification.finished",
         value: true
       },
       {
-        name: "browser.onboarding.notification.finished",
-        value: true
+        name: "browser.onboarding.state",
+        value: ICON_STATE_WATERMARK
       }
     ]);
   }
@@ -1022,7 +1060,7 @@ class Onboarding {
           <ul id="onboarding-tour-list" role="tablist"></ul>
         </nav>
         <footer id="onboarding-footer">
-          <input type="checkbox" id="onboarding-tour-hidden-checkbox" /><label for="onboarding-tour-hidden-checkbox"></label>
+          <button id="onboarding-skip-tour-button" class="onboarding-action-button"></button>
         </footer>
         <button id="onboarding-overlay-close-btn" class="onboarding-close-btn"></button>
       </div>
@@ -1031,8 +1069,8 @@ class Onboarding {
     this._dialog = div.querySelector(`[role="dialog"]`);
     this._dialog.id = ONBOARDING_DIALOG_ID;
 
-    div.querySelector("label[for='onboarding-tour-hidden-checkbox']").textContent =
-      this._bundle.GetStringFromName("onboarding.hidden-checkbox-label-text");
+    div.querySelector("#onboarding-skip-tour-button").textContent =
+      this._bundle.GetStringFromName("onboarding.skip-tour-button-label");
     div.querySelector("#onboarding-header").textContent =
       this._bundle.GetStringFromName("onboarding.overlay-title2");
     let closeBtn = div.querySelector("#onboarding-overlay-close-btn");
@@ -1050,11 +1088,16 @@ class Onboarding {
     button.id = "onboarding-overlay-button";
     button.setAttribute("aria-haspopup", true);
     button.setAttribute("aria-controls", `${ONBOARDING_DIALOG_ID}`);
-    let img = this._window.document.createElement("img");
-    img.id = "onboarding-overlay-button-icon";
-    img.setAttribute("role", "presentation");
-    img.src = "chrome://branding/content/icon64.png";
-    button.appendChild(img);
+    let defaultImg = this._window.document.createElement("img");
+    defaultImg.id = "onboarding-overlay-button-icon";
+    defaultImg.setAttribute("role", "presentation");
+    defaultImg.src = "chrome://branding/content/icon64.png";
+    button.appendChild(defaultImg);
+    let watermarkImg = this._window.document.createElement("img");
+    watermarkImg.id = "onboarding-overlay-button-watermark-icon";
+    watermarkImg.setAttribute("role", "presentation");
+    watermarkImg.src = "resource://onboarding/img/watermark.svg";
+    button.appendChild(watermarkImg);
     return button;
   }
 
@@ -1146,20 +1189,18 @@ if (Services.prefs.getBoolPref("browser.onboarding.enabled", false)) {
       return;
     }
 
-    if (!Services.prefs.getBoolPref("browser.onboarding.hidden", false)) {
-      let window = evt.target.defaultView;
-      let location = window.location.href;
-      if (location == ABOUT_NEWTAB_URL || location == ABOUT_HOME_URL) {
-        // We just want to run tests as quick as possible
-        // so in the automation test, we don't do `requestIdleCallback`.
-        if (Cu.isInAutomation) {
-          new Onboarding(window);
-          return;
-        }
-        window.requestIdleCallback(() => {
-          new Onboarding(window);
-        });
+    let window = evt.target.defaultView;
+    let location = window.location.href;
+    if (location == ABOUT_NEWTAB_URL || location == ABOUT_HOME_URL) {
+      // We just want to run tests as quick as possible
+      // so in the automation test, we don't do `requestIdleCallback`.
+      if (Cu.isInAutomation) {
+        new Onboarding(window);
+        return;
       }
+      window.requestIdleCallback(() => {
+        new Onboarding(window);
+      });
     }
   }, true);
 }

@@ -133,13 +133,16 @@ var tests = [
       isnot(PanelUI.panel.state, "closed", "Panel should have opened");
       isnot(highlight.classList.contains("rounded-highlight"), true, "Highlight should not be round-rectangle styled.");
 
+      let hiddenPromise = promisePanelElementHidden(window, PanelUI.panel);
       // Move the highlight outside which should close the app menu.
       gContentAPI.showHighlight("appMenu");
-      waitForElementToBeVisible(highlight, function checkPanelIsClosed() {
-        isnot(PanelUI.panel.state, "open",
-              "Panel should have closed after the highlight moved elsewhere.");
-        done();
-      }, "Highlight should move to the appMenu button");
+      hiddenPromise.then(() => {
+        waitForElementToBeVisible(highlight, function checkPanelIsClosed() {
+          isnot(PanelUI.panel.state, "open",
+                "Panel should have closed after the highlight moved elsewhere.");
+          done();
+        }, "Highlight should move to the appMenu button");
+      });
     }, "Highlight should be shown after showHighlight() for fixed panel items");
   },
   function test_highlight_customize_manual_open_close(done) {
@@ -273,11 +276,18 @@ var tests = [
     is(icon.src, "", "Popup should have no icon");
     is(buttons.hasChildNodes(), false, "Popup should have no buttons");
 
+    // Place the search bar in the navigation toolbar temporarily.
+    await SpecialPowers.pushPrefEnv({ set: [
+      ["browser.search.widget.inNavBar", true],
+    ]});
+
     await showInfoPromise("search", "search title", "search text");
 
     is(popup.popupBoxObject.anchorNode, document.getElementById("searchbar"), "Popup should be anchored to the searchbar");
     is(title.textContent, "search title", "Popup should have correct title");
     is(desc.textContent, "search text", "Popup should have correct description text");
+
+    await SpecialPowers.popPrefEnv();
   }),
   function test_getConfigurationVersion(done) {
     function callback(result) {

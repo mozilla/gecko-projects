@@ -78,6 +78,9 @@ const backgroundPageThumbsContent = {
     this._nextCapture = {
       id: msg.data.id,
       url: msg.data.url,
+      isImage: msg.data.isImage,
+      targetWidth: msg.data.targetWidth,
+      backgroundColor: msg.data.backgroundColor
     };
     if (this._currentCapture) {
       if (this._state == STATE_LOADING) {
@@ -106,8 +109,6 @@ const backgroundPageThumbsContent = {
                            null, null, null);
     } catch (e) {
       this._failCurrentCapture("BAD_URI");
-      delete this._currentCapture;
-      this._startNextCapture();
     }
   },
 
@@ -161,9 +162,7 @@ const backgroundPageThumbsContent = {
   },
 
   _captureCurrentPage() {
-    let win = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindow);
-    win.requestIdleCallback(() => {
+    const doCapture = async () => {
       let capture = this._currentCapture;
       capture.finalURL = this._webNav.currentURI.spec;
       capture.pageLoadTime = new Date() - capture.pageLoadStartDate;
@@ -171,7 +170,14 @@ const backgroundPageThumbsContent = {
       let canvasDrawDate = new Date();
 
       docShell.isActive = true;
-      let finalCanvas = PageThumbUtils.createSnapshotThumbnail(content, null);
+
+      let finalCanvas;
+      if (capture.isImage || content.document instanceof content.ImageDocument) {
+        finalCanvas = await PageThumbUtils.createImageThumbnailCanvas(content, capture.url, capture.targetWidth, capture.backgroundColor);
+      } else {
+        finalCanvas = PageThumbUtils.createSnapshotThumbnail(content, null);
+      }
+
       docShell.isActive = false;
       capture.canvasDrawTime = new Date() - canvasDrawDate;
 
@@ -180,7 +186,10 @@ const backgroundPageThumbsContent = {
         // Load about:blank to finish the capture and wait for onStateChange.
         this._loadAboutBlank();
       });
-    });
+    };
+    let win = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIDOMWindow);
+    win.requestIdleCallback(() => doCapture().catch(ex => this._failCurrentCapture(ex.message)));
   },
 
   _finishCurrentCapture() {
@@ -206,6 +215,8 @@ const backgroundPageThumbsContent = {
       id: capture.id,
       failReason: reason,
     });
+    delete this._currentCapture;
+    this._startNextCapture();
   },
 
   // We load about:blank to finish all captures, even canceled captures.  Two

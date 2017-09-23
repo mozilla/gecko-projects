@@ -24,11 +24,11 @@
 }
 
 #onboarding-overlay-button {
-  padding: 0;
-  position: absolute;
+  padding: 10px 0 0 0;
+  position: fixed;
   cursor: pointer;
-  top: 34px;
-  offset-inline-start: 34px;
+  top: 4px;
+  offset-inline-start: 12px;
   border: none;
   /* Set to none so no grey contrast background in the high-contrast mode */
   background: none;
@@ -45,7 +45,7 @@
   transition: outline-offset 150ms;
 }
 
-#onboarding-overlay-button-icon {
+#onboarding-overlay-button > img {
   width: 32px;
   vertical-align: top;
 }
@@ -90,6 +90,20 @@
   box-shadow: -2px 0 5px 0 rgba(74, 74, 79, 0.25);
 }
 
+#onboarding-overlay-button:dir(rtl)::after {
+  box-shadow: 2px 0 5px 0 rgba(74, 74, 79, 0.25);
+}
+
+#onboarding-overlay-button-watermark-icon,
+#onboarding-overlay-button.onboarding-watermark::after,
+#onboarding-overlay-button.onboarding-watermark:not(:hover) > #onboarding-overlay-button-icon {
+  display: none;
+}
+
+#onboarding-overlay-button.onboarding-watermark:not(:hover) > #onboarding-overlay-button-watermark-icon {
+  display: block;
+}
+
 #onboarding-overlay-dialog,
 .onboarding-hidden,
 #onboarding-tour-sync-page[data-login-state=logged-in] .show-on-logged-out,
@@ -113,6 +127,7 @@
   content: url("chrome://global/skin/icons/close.svg");
   -moz-context-properties: fill, fill-opacity;
   fill-opacity: 0;
+  fill: currentColor;
 }
 
 .onboarding-close-btn:-moz-any(:hover, :active, :focus, :-moz-focusring)::before {
@@ -161,14 +176,13 @@
 }
 
 #onboarding-overlay-dialog > footer {
-  grid-row: footer-start;
   grid-column: dialog-start / tour-end;
   font-size: 13px;
 }
 
-#onboarding-tour-hidden-checkbox {
+#onboarding-skip-tour-button {
   margin-inline-start: 27px;
-  margin-inline-end: 10px;
+  margin-bottom: 27px;
 }
 
 /* Onboarding tour list */
@@ -195,6 +209,7 @@
   background-size: 20px;
   font-size: 16px;
   cursor: pointer;
+  max-height: 54px;
 }
 
 #onboarding-tour-list .onboarding-tour-item:dir(rtl) {
@@ -320,6 +335,8 @@
 }
 
 .onboarding-tour-button-container {
+  /* Get higher z-index in order to ensure buttons within container are selectable */
+  z-index: 2;
   grid-row: tour-button-start / tour-page-end;
   grid-column: tour-content-start / tour-page-end;
 }
@@ -346,14 +363,14 @@
 }
 
 /* Remove default dotted outline around buttons' text */
-.onboarding-tour-action-button::-moz-focus-inner,
+#onboarding-overlay button::-moz-focus-inner,
 #onboarding-overlay-button::-moz-focus-inner {
   border: 0;
 }
 
 /* Keyboard focus specific outline */
-.onboarding-tour-action-button:-moz-focusring,
-#onboarding-notification-action-btn:-moz-focusring,
+#onboarding-overlay button:-moz-focusring,
+.onboarding-action-button:-moz-focusring,
 #onboarding-tour-list .onboarding-tour-item:focus {
   outline: 2px solid rgba(0,149,221,0.5);
   outline-offset: 1px;
@@ -380,7 +397,7 @@
 }
 
 #onboarding-tour-singlesearch.onboarding-active,
-#onboarding-tour-singlesearch:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-singlesearch {
   background-image: url("img/icons_singlesearch-colored.svg");
 }
 
@@ -390,7 +407,7 @@
 }
 
 #onboarding-tour-private-browsing.onboarding-active,
-#onboarding-tour-private-browsing:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-private-browsing {
   background-image: url("img/icons_private-colored.svg");
 }
 
@@ -400,7 +417,7 @@
 }
 
 #onboarding-tour-addons.onboarding-active,
-#onboarding-tour-addons:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-addons {
   background-image: url("img/icons_addons-colored.svg");
 }
 
@@ -410,7 +427,7 @@
 }
 
 #onboarding-tour-customize.onboarding-active,
-#onboarding-tour-customize:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-customize {
   background-image: url("img/icons_customize-colored.svg");
 }
 
@@ -420,7 +437,7 @@
 }
 
 #onboarding-tour-default-browser.onboarding-active,
-#onboarding-tour-default-browser:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-default-browser {
   background-image: url("img/icons_default-colored.svg");
 }
 
@@ -430,7 +447,7 @@
 }
 
 #onboarding-tour-sync.onboarding-active,
-#onboarding-tour-sync:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-sync {
   background-image: url("img/icons_sync-colored.svg");
 }
 
@@ -440,7 +457,7 @@
 }
 
 #onboarding-tour-library.onboarding-active,
-#onboarding-tour-library:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-library {
   background-image: url("img/icons_library-colored.svg");
 }
 
@@ -450,7 +467,7 @@
 }
 
 #onboarding-tour-performance.onboarding-active,
-#onboarding-tour-performance:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-performance {
   background-image: url("img/icons_performance-colored.svg");
 }
 
@@ -460,7 +477,7 @@
 }
 
 #onboarding-tour-screenshots.onboarding-active,
-#onboarding-tour-screenshots:hover {
+.onboarding-tour-item-container:hover #onboarding-tour-screenshots {
   background-image: url("img/icons_screenshots-colored.svg");
 }
 
@@ -514,7 +531,7 @@ a#onboarding-tour-screenshots-button:visited {
   margin: 0 18px;
   color: #0c0c0d;
   display: inline-block;
-  max-height: 100%;
+  max-height: 120px;
   overflow: auto;
   padding: 15px 0;
   box-sizing: border-box;
@@ -522,7 +539,7 @@ a#onboarding-tour-screenshots-button:visited {
 
 #onboarding-notification-body * {
   font-size: 12px;
-  font-weight: 200;
+  font-weight: normal;
   margin-top: 5px;
 }
 
@@ -552,7 +569,7 @@ a#onboarding-tour-screenshots-button:visited {
   background-image: url("chrome://branding/content/icon64.png");
 }
 
-#onboarding-notification-action-btn {
+.onboarding-action-button {
   background: #fbfbfb;
   /* With 1px border, could see a border in the high-constrast mode */
   border: 1px solid #c1c1c1;
@@ -565,12 +582,12 @@ a#onboarding-tour-screenshots-button:visited {
   min-width: 130px;
 }
 
-#onboarding-notification-action-btn:hover {
+.onboarding-action-button:hover {
   background-color: #ebebeb;
   cursor: pointer;
 }
 
-#onboarding-notification-action-btn:active {
+.onboarding-action-button:active {
   background-color: #dadada;
 }
 

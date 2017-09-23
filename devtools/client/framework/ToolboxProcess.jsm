@@ -11,6 +11,7 @@ const { interfaces: Ci, utils: Cu, results: Cr } = Components;
 const DBG_XUL = "chrome://devtools/content/framework/toolbox-process-window.xul";
 const CHROME_DEBUGGER_PROFILE_NAME = "chrome_debugger_profile";
 
+const { console } = Cu.import("resource://gre/modules/Console.jsm", {});
 const { require, DevToolsLoader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -248,18 +249,22 @@ BrowserToolboxProcess.prototype = {
 
     let command = Services.dirsvc.get("XREExeF", Ci.nsIFile).path;
 
-    let xulURI = `${DBG_XUL}?port=${this.port}`;
-    if (this._options.addonID) {
-      xulURI += `&addonID=${this._options.addonID}`;
-    }
-
     dumpn("Running chrome debugging process.");
     let args = [
       "-no-remote",
       "-foreground",
       "-profile", this._dbgProfilePath,
-      "-chrome", xulURI
+      "-chrome", DBG_XUL
     ];
+    let environment = {
+      // Disable safe mode for the new process in case this was opened via the
+      // keyboard shortcut.
+      MOZ_DISABLE_SAFE_MODE_KEY: "1",
+      MOZ_BROWSER_TOOLBOX_PORT: String(this.port),
+    };
+    if (this._options.addonID) {
+      environment.MOZ_BROWSER_TOOLBOX_ADDONID = String(this._options.addonID);
+    }
 
     // During local development, incremental builds can trigger the main process
     // to clear its startup cache with the "flag file" .purgecaches, but this
@@ -276,11 +281,8 @@ BrowserToolboxProcess.prototype = {
       command,
       arguments: args,
       environmentAppend: true,
-      environment: {
-        // Disable safe mode for the new process in case this was opened via the
-        // keyboard shortcut.
-        MOZ_DISABLE_SAFE_MODE_KEY: "1",
-      },
+      stderr: "stdout",
+      environment,
     }).then(proc => {
       this._dbgProcess = proc;
 
@@ -302,6 +304,8 @@ BrowserToolboxProcess.prototype = {
       proc.wait().then(() => this.close());
 
       return proc;
+    }, err => {
+      console.log(`Error loading Browser Toolbox: ${command} ${args.join(" ")}`, err);
     });
   },
 

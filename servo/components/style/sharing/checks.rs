@@ -10,26 +10,31 @@ use Atom;
 use bloom::StyleBloom;
 use context::{SelectorFlagsMap, SharedStyleContext};
 use dom::TElement;
-use servo_arc::Arc;
+use selectors::NthIndexCache;
 use sharing::{StyleSharingCandidate, StyleSharingTarget};
 
-/// Whether styles may be shared across the children of the given parent elements.
-/// This is used to share style across cousins.
-///
-/// Both elements need to be styled already.
-pub fn can_share_style_across_parents<E>(first: Option<E>, second: Option<E>) -> bool
+/// Determines whether a target and a candidate have compatible parents for sharing.
+pub fn parents_allow_sharing<E>(
+    target: &mut StyleSharingTarget<E>,
+    candidate: &mut StyleSharingCandidate<E>
+) -> bool
     where E: TElement,
 {
-    let (first, second) = match (first, second) {
-        (Some(f), Some(s)) => (f, s),
-        _ => return false,
-    };
+    // If the identity of the parent style isn't equal, we can't share. We check
+    // this first, because the result is cached.
+    if target.parent_style_identity() != candidate.parent_style_identity() {
+        return false;
+    }
 
-    debug_assert_ne!(first, second);
+    // Siblings can always share.
+    let parent = target.inheritance_parent().unwrap();
+    let candidate_parent = candidate.element.inheritance_parent().unwrap();
+    if parent == candidate_parent {
+        return true;
+    }
 
-    let first_data = first.borrow_data().unwrap();
-    let second_data = second.borrow_data().unwrap();
-
+    // Cousins are a bit more complicated.
+    //
     // If a parent element was already styled and we traversed past it without
     // restyling it, that may be because our clever invalidation logic was able
     // to prove that the styles of that element would remain unchanged despite
@@ -40,15 +45,13 @@ pub fn can_share_style_across_parents<E>(first: Option<E>, second: Option<E>) ->
     //
     // This is a somewhat conservative check. We could tighten it by having the
     // invalidation logic explicitly flag elements for which it ellided styling.
-    if first_data.restyle.traversed_without_styling() ||
-       second_data.restyle.traversed_without_styling() {
+    let parent_data = parent.borrow_data().unwrap();
+    let candidate_parent_data = candidate_parent.borrow_data().unwrap();
+    if !parent_data.safe_for_cousin_sharing() || !candidate_parent_data.safe_for_cousin_sharing() {
         return false;
     }
 
-    let same_computed_values =
-        Arc::ptr_eq(first_data.styles.primary(), second_data.styles.primary());
-
-    same_computed_values
+    true
 }
 
 /// Whether two elements have the same same style attribute (by pointer identity).
@@ -97,16 +100,25 @@ pub fn revalidate<E>(target: &mut StyleSharingTarget<E>,
                      candidate: &mut StyleSharingCandidate<E>,
                      shared_context: &SharedStyleContext,
                      bloom: &StyleBloom<E>,
+                     nth_index_cache: &mut NthIndexCache,
                      selector_flags_map: &mut SelectorFlagsMap<E>)
                      -> bool
     where E: TElement,
 {
     let stylist = &shared_context.stylist;
 
-    let for_element =
-        target.revalidation_match_results(stylist, bloom, selector_flags_map);
+    let for_element = target.revalidation_match_results(
+        stylist,
+        bloom,
+        nth_index_cache,
+        selector_flags_map,
+    );
 
-    let for_candidate = candidate.revalidation_match_results(stylist, bloom);
+    let for_candidate = candidate.revalidation_match_results(
+        stylist,
+        bloom,
+        nth_index_cache,
+    );
 
     // This assert "ensures", to some extent, that the two candidates have
     // matched the same rulehash buckets, and as such, that the bits we're

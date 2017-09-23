@@ -109,7 +109,6 @@ body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  color: var(--theme-content-color3);
 }
 
 /* The top toolbar, containing the toggle-all button. And the timeline toolbar,
@@ -264,6 +263,11 @@ body {
   height: var(--detail-animation-height);
 }
 
+.time-body.track-container {
+  height: 0;
+  pointer-events: none;
+}
+
 .animation-timeline .scrubber-wrapper {
   position: absolute;
   z-index: 5;
@@ -344,7 +348,6 @@ body {
 .animation-timeline .time-body .time-tick {
   -moz-user-select: none;
   position: absolute;
-  height: 100%;
 }
 
 .progress-tick-container .progress-tick::before,
@@ -537,12 +540,12 @@ body {
 }
 
 .animation-target .node-highlighter:hover {
-  filter: url(images/filters.svg#checked-icon-state);
+  filter: var(--theme-icon-checked-filter);
 }
 
 .animation-target .node-highlighter:active,
 .animation-target .node-highlighter.selected {
-  filter: url(images/filters.svg#checked-icon-state) brightness(0.9);
+  filter: var(--theme-icon-checked-filter) brightness(0.9);
 }
 
 /* Inline keyframes info in the timeline */

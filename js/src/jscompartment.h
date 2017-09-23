@@ -40,7 +40,9 @@ template <typename Node, typename Derived> class ComponentFinder;
 
 class GlobalObject;
 class LexicalEnvironmentObject;
+class MapObject;
 class ScriptSourceObject;
+class SetObject;
 struct NativeIterator;
 
 /*
@@ -943,6 +945,7 @@ struct JSCompartment
     bool preserveJitCode() { return creationOptions_.preserveJitCode(); }
 
     void sweepAfterMinorGC(JSTracer* trc);
+    void sweepMapAndSetObjectsAfterMinorGC();
 
     void sweepCrossCompartmentWrappers();
     void sweepSavedStacks();
@@ -1195,6 +1198,7 @@ struct JSCompartment
 
     js::ReadBarriered<js::ArgumentsObject*> mappedArgumentsTemplate_;
     js::ReadBarriered<js::ArgumentsObject*> unmappedArgumentsTemplate_;
+    js::ReadBarriered<js::NativeObject*> iterResultTemplate_;
 
   public:
     bool ensureJitCompartmentExists(JSContext* cx);
@@ -1205,6 +1209,10 @@ struct JSCompartment
     js::ArgumentsObject* getOrCreateArgumentsTemplateObject(JSContext* cx, bool mapped);
 
     js::ArgumentsObject* maybeArgumentsTemplateObject(bool mapped) const;
+
+    static const size_t IterResultObjectValueSlot = 0;
+    static const size_t IterResultObjectDoneSlot = 1;
+    js::NativeObject* getOrCreateIterResultTemplateObject(JSContext* cx);
 
   private:
     // Used for collecting telemetry on SpiderMonkey's deprecated language extensions.
@@ -1219,6 +1227,27 @@ struct JSCompartment
     // Aggregated output used to collect JSScript hit counts when code coverage
     // is enabled.
     js::coverage::LCovCompartment lcovOutput;
+
+    bool addMapWithNurseryMemory(js::MapObject* obj) {
+        MOZ_ASSERT_IF(!mapsWithNurseryMemory.empty(),
+                      mapsWithNurseryMemory.back() != obj);
+        return mapsWithNurseryMemory.append(obj);
+    }
+
+    bool addSetWithNurseryMemory(js::SetObject* obj) {
+        MOZ_ASSERT_IF(!setsWithNurseryMemory.empty(),
+                      setsWithNurseryMemory.back() != obj);
+        return setsWithNurseryMemory.append(obj);
+    }
+
+  private:
+
+    /*
+     * Lists of map and set objects allocated in the nursery or with iterators
+     * allocated there. Such objects need to be swept after minor GC.
+     */
+    js::Vector<js::MapObject*, 0, js::SystemAllocPolicy> mapsWithNurseryMemory;
+    js::Vector<js::SetObject*, 0, js::SystemAllocPolicy> setsWithNurseryMemory;
 };
 
 namespace js {

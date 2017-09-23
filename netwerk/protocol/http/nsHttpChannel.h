@@ -31,6 +31,7 @@
 #include "AlternateServices.h"
 #include "nsIHstsPrimingCallback.h"
 #include "nsIRaceCacheWithNetwork.h"
+#include "mozilla/extensions/PStreamFilterParent.h"
 #include "mozilla/Mutex.h"
 
 class nsDNSPrefetch;
@@ -292,6 +293,10 @@ public: /* internal necko use only */
     // Return true if the latest ODA is invoked by mCachePump.
     // Should only be called on the same thread as ODA.
     bool IsReadingFromCache() const { return mIsReadingFromCache; }
+
+    base::ProcessId ProcessId();
+
+    MOZ_MUST_USE bool AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint);
 
 private: // used for alternate service validation
     RefPtr<TransactionObserver> mTransactionObserver;
@@ -656,10 +661,6 @@ private:
     // the next authentication request can be sent on a whole new connection
     uint32_t                          mAuthConnectionRestartable : 1;
 
-    uint32_t                          mReqContentLengthDetermined : 1;
-
-    uint64_t                          mReqContentLength;
-
     nsTArray<nsContinueRedirectionFunc> mRedirectFuncStack;
 
     // Needed for accurate DNS timing
@@ -721,7 +722,8 @@ private:
     // with the cache fetch, and proceeds to do so.
     nsresult MaybeRaceCacheWithNetwork();
 
-    nsresult TriggerNetwork(int32_t aTimeout);
+    nsresult TriggerNetworkWithDelay(uint32_t aDelay);
+    nsresult TriggerNetwork();
     void CancelNetworkRequest(nsresult aStatus);
     // Timer used to delay the network request, or to trigger the network
     // request if retrieving the cache entry takes too long.

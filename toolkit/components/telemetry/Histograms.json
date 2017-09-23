@@ -257,7 +257,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 100000,
     "n_buckets": 50,
@@ -267,7 +267,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 66355200,
     "n_buckets": 50,
@@ -277,7 +277,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 1000000,
     "n_buckets": 50,
@@ -287,7 +287,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 1073741824,
     "n_buckets": 50,
@@ -363,7 +363,7 @@
   },
   "COMPOSITOR_ANIMATION_DURATION" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "description": "Duration of animations running on the compositor in milliseconds",
     "kind": "exponential",
     "high": 20000,
@@ -373,7 +373,7 @@
   },
   "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_APZ" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "For APZ/scrolling compositor animations, the maximum number of contiguous frame drops encountered",
     "kind": "exponential",
     "high": 7200,
@@ -383,7 +383,7 @@
   },
   "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CHROME" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "For compositor animations of chrome-process layers, the maximum number of contiguous frame drops encountered",
     "kind": "exponential",
     "high": 7200,
@@ -393,7 +393,7 @@
   },
   "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CONTENT" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "For compositor animations of content-process layers, the maximum number of contiguous frame drops encountered",
     "kind": "exponential",
     "high": 7200,
@@ -403,7 +403,7 @@
   },
   "COMPOSITOR_ANIMATION_MAX_LAYER_AREA" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "description": "High-watermark of layer area affected during a compositor animation. Units are layer pixels squared.",
     "kind": "exponential",
     "high": 8294400,
@@ -413,7 +413,7 @@
   },
   "COMPOSITOR_ANIMATION_THROUGHPUT_APZ" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "Frame throughput ratio (scaled up to 1000) for APZ/scrolling animations in the compositor.",
     "kind": "linear",
     "high": 1500,
@@ -423,7 +423,7 @@
   },
   "COMPOSITOR_ANIMATION_THROUGHPUT_CHROME" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of chrome-process layers.",
     "kind": "linear",
     "high": 1500,
@@ -433,7 +433,7 @@
   },
   "COMPOSITOR_ANIMATION_THROUGHPUT_CONTENT" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "60",
+    "expires_in_version": "62",
     "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of content-process layers.",
     "kind": "linear",
     "high": 1500,
@@ -456,7 +456,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1261373],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "description": "Main thread response times for APZ notifications about input events (ms)",
     "kind" : "exponential",
     "high": 60000,
@@ -2191,7 +2191,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QSMALL_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2200,7 +2200,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QMED_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2209,7 +2209,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QBIG_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2218,7 +2218,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QSMALL_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2227,7 +2227,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QMED_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2236,7 +2236,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QBIG_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2245,7 +2245,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QSMALL_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2254,7 +2254,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QMED_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2263,7 +2263,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QBIG_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2272,7 +2272,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QSMALL_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2281,7 +2281,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QMED_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2290,7 +2290,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QBIG_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2299,7 +2299,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_SMALL_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2308,7 +2308,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_LARGE_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2317,7 +2317,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_REVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2326,7 +2326,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_NOTREVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2335,7 +2335,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_REVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2344,7 +2344,7 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_NOTREVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
@@ -2353,7 +2353,7 @@
   },
   "HTTP_ONSTART_SUSPEND_TOTAL_TIME": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
       "alert_emails": ["necko@mozilla.com"],
       "bug_numbers": [1347948],
       "kind": "exponential",
@@ -2363,7 +2363,7 @@
   },
   "NETWORK_RACE_CACHE_WITH_NETWORK_USAGE_2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "alert_emails": ["necko@mozilla.com"],
     "bug_numbers": [1377340],
     "kind": "categorical",
@@ -2481,7 +2481,7 @@
   },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "enumerated",
     "n_values": 3,
     "description": "Sending TLS early data was possible: 0 - not possible, 1 - possible but not used, 2 - possible and used.",
@@ -2490,7 +2490,7 @@
   },
   "TLS_EARLY_DATA_ACCEPTED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "boolean",
     "description": "TLS early data was used and it was accepted (true) or rejected (false) by the remote host.",
     "alert_emails": ["necko@mozilla.com"],
@@ -2498,7 +2498,7 @@
   },
   "TLS_EARLY_DATA_BYTES_WRITTEN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 60000,
     "n_buckets": 100,
@@ -9220,6 +9220,14 @@
     "kind": "boolean",
     "description": "Was DataChannels negotiated"
   },
+  "WEBRTC_RTCP_MUX": {
+    "record_in_processes": ["main", "content"],
+    "bug_numbers": [1402221],
+    "alert_emails": ["webrtc-telemetry-alerts@mozilla.com", "nohlmeier@mozilla.com"],
+    "expires_in_version": "62",
+    "kind": "boolean",
+    "description": "Was RTCP-MUX negotiated for a track"
+  },
   "WEBRTC_CALL_TYPE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["webrtc-telemetry-alerts@mozilla.com"],
@@ -11381,16 +11389,6 @@
     "description": "720p VP9 decode benchmark measurement in frames per second",
     "releaseChannelCollection": "opt-out"
   },
-  "VIDEO_CDM_CREATED": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "58",
-    "bug_numbers": [1304207],
-    "kind": "enumerated",
-    "n_values": 6,
-    "description": "Note the type of CDM (0=ClearKey, 1=Primetime, 2=Widevine, 3=unknown) every time we successfully instantiate an EME MediaKeys object.",
-    "releaseChannelCollection": "opt-out"
-  },
   "MEDIA_CODEC_USED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["cpearce@mozilla.com"],
@@ -11766,14 +11764,6 @@
     "n_buckets": 20,
     "description": "Tracking how long a ServiceWorker stays alive after it is spawned. File bugs in Core::DOM in case of a Telemetry regression."
   },
-  "FILE_EMBEDDED_SERVICEWORKERS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dparks@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "count",
-    "bug_numbers": [1312788],
-    "description": "Count ServiceWorkers that are embedded in pages loading with the file:/// protocol."
-  },
   "GRAPHICS_SANITY_TEST": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -11785,7 +11775,7 @@
   },
   "READER_MODE_PARSE_RESULT" : {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "never",
     "alert_emails": ["firefox-dev@mozilla.org", "gijs@mozilla.com"],
     "kind": "enumerated",
     "n_values": 5,
@@ -11793,7 +11783,7 @@
   },
   "READER_MODE_DOWNLOAD_RESULT" : {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "never",
     "alert_emails": ["firefox-dev@mozilla.org", "gijs@mozilla.com"],
     "kind": "enumerated",
     "n_values": 5,
@@ -12323,7 +12313,7 @@
   "DOM_SCRIPT_LOADING_SOURCE": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "categorical",
     "bug_numbers": [1362114],
     "labels": ["Inline", "SourceFallback", "Source", "AltData"],
@@ -12332,7 +12322,7 @@
   "DOM_SCRIPT_INLINE_SIZE": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "low": 64,
     "high": 16000000,
@@ -12343,7 +12333,7 @@
   "DOM_SCRIPT_SOURCE_SIZE": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "low": 64,
     "high": 16000000,
@@ -12354,7 +12344,7 @@
   "DOM_SCRIPT_BYTECODE_SIZE": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "low": 64,
     "high": 16000000,
@@ -12365,7 +12355,7 @@
   "DOM_SCRIPT_FETCH_COUNT": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "linear",
     "low": 1,
     "high": 100,
@@ -12376,7 +12366,7 @@
   "DOM_SCRIPT_MAIN_THREAD_PARSE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12386,7 +12376,7 @@
   "DOM_SCRIPT_MAIN_THREAD_PARSE_ENCODE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12396,7 +12386,7 @@
   "DOM_SCRIPT_MAIN_THREAD_DECODE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12406,7 +12396,7 @@
   "DOM_SCRIPT_OFF_THREAD_PARSE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12416,7 +12406,7 @@
   "DOM_SCRIPT_OFF_THREAD_PARSE_ENCODE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12426,7 +12416,7 @@
   "DOM_SCRIPT_OFF_THREAD_DECODE_EXEC_MS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 50000,
     "n_buckets": 100,
@@ -12436,7 +12426,7 @@
   "DOM_SCRIPT_ENCODING_MS_PER_DOCUMENT": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "linear",
     "high": 64,
     "n_buckets": 32,
@@ -12446,7 +12436,7 @@
   "DOM_SCRIPT_ENCODING_STATUS": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "categorical",
     "bug_numbers": [1362114],
     "labels": ["EncodingFailure", "BufferTooLarge", "OpenFailure", "WriteFailure", "CloseFailure", "EncodingSuccess"],
@@ -12455,7 +12445,7 @@
   "DOM_SCRIPT_EVAL_PER_DOCUMENT": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "linear",
     "low": 1,
     "high": 200,
@@ -12598,15 +12588,16 @@
     "cpp_guard": "XP_LINUX",
     "description": "System calls blocked by a seccomp-bpf sandbox policy; limited to syscalls where we would crash on Nightly.  The key is generally the architecture and syscall ID but in some cases we include non-personally-identifying information from the syscall arguments; see the function SubmitToTelemetry in security/sandbox/linux/reporter/SandboxReporter.cpp for details."
   },
-  "SANDBOX_FAILED_LAUNCH": {
+  "SANDBOX_FAILED_LAUNCH_KEYED": {
     "record_in_processes": ["main"],
     "alert_emails": ["bowen@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "enumerated",
+    "keyed": true,
     "n_values": 50,
     "bug_numbers": [1368600],
     "cpp_guard": "XP_WIN",
-    "description": "Error code when a Windows sandboxed process fails to launch. See https://dxr.mozilla.org/mozilla-central/search?q=ResultCode++path%3Asandbox_types.h&redirect=true for definitions of the error codes."
+    "description": "Error code when a Windows sandboxed process fails to launch, keyed by process type and Windows error code. See https://dxr.mozilla.org/mozilla-central/search?q=ResultCode++path%3Asandbox_types.h&redirect=true for definitions of the error codes."
   },
   "SYNC_WORKER_OPERATION": {
     "record_in_processes": ["main", "content"],
@@ -12732,7 +12723,7 @@
   "UNIQUE_CONTAINERS_OPENED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "59",
     "bug_numbers": [1276006],
     "kind": "count",
     "description": "Tracking the unique number of opened Containers."
@@ -12740,7 +12731,7 @@
   "TOTAL_CONTAINERS_OPENED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "59",
     "bug_numbers": [1276006],
     "kind": "count",
     "description": "Tracking the total number of opened Containers."
@@ -12748,7 +12739,7 @@
   "STORAGE_SYNC_GET_OPS_SIZE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["eglassercamp@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "64",
     "bug_numbers": [1328974],
     "kind": "exponential",
     "high": 100000,
@@ -12760,7 +12751,7 @@
   "STORAGE_SYNC_SET_OPS_SIZE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["eglassercamp@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "64",
     "bug_numbers": [1328974],
     "kind": "exponential",
     "high": 100000,
@@ -12772,7 +12763,7 @@
   "STORAGE_SYNC_REMOVE_OPS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["eglassercamp@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "64",
     "bug_numbers": [1328974],
     "kind": "count",
     "keyed": true,
@@ -12806,18 +12797,10 @@
     "description": "Both the main session file and its backup could not be read and and the first run pref is false.",
     "cpp_guard": "ANDROID"
   },
-  "SHARED_WORKER_COUNT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "count",
-    "bug_numbers": [1295980],
-    "description": "Number of the use of SharedWorkers."
-  },
   "NUMBER_OF_PROFILES": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
+    "expires_in_version": "59",
     "bug_numbers": [1296606],
     "kind": "count",
     "description": "Number of named browser profiles for the current user, as reported by the profile service at startup."
@@ -12890,14 +12873,6 @@
     "high": 50000,
     "n_buckets": 100,
     "description": "Time in milliseconds from the first non-blank paint to the creation time of the next click, key, mouse or scroll event per top-level content browsing context."
-  },
-  "DOCUMENT_WITH_EXPANDED_PRINCIPAL": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-platform@lists.mozilla.org"],
-    "bug_numbers": [1301123],
-    "expires_in_version": "58",
-    "kind": "count",
-    "description": "Number of documents encountered using an expanded principal."
   },
   "CONTENT_PAINT_TIME": {
     "record_in_processes": ["main", "content"],
@@ -12995,24 +12970,6 @@
     "n_buckets": 10,
     "bug_numbers": [1331804],
     "description": "The time a given main thread runnable took to run (in milliseconds). The key comes from the runnables nsINamed::name value."
-  },
-  "MOZ_BLOB_IN_XHR": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "boolean",
-    "bug_numbers": [1335365],
-    "releaseChannelCollection": "opt-out",
-    "description": "XMLHttpRequest.responseType set to moz-blob"
-  },
-  "MOZ_CHUNKED_TEXT_IN_XHR": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "boolean",
-    "bug_numbers": [1335365],
-    "releaseChannelCollection": "opt-out",
-    "description": "XMLHttpRequest.responseType set to moz-chunked-text"
   },
   "MOZ_CHUNKED_ARRAYBUFFER_IN_XHR": {
     "record_in_processes": ["main", "content"],
@@ -13574,6 +13531,28 @@
     "releaseChannelCollection": "opt-out",
     "description": "The amount of time spent(ms) of a session for viewing content in OpenVR."
   },
+  "WEBVR_DROPPED_FRAMES_IN_OCULUS": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["dmu@mozilla.com"],
+    "bug_numbers": [1392476],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": 200,
+    "n_buckets": 100,
+    "releaseChannelCollection": "opt-out",
+    "description": "The average number of dropped frames per sec in Oculus, sent when user exits WebVR content."
+  },
+  "WEBVR_DROPPED_FRAMES_IN_OPENVR": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["dmu@mozilla.com"],
+    "bug_numbers": [1392476],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": 200,
+    "n_buckets": 100,
+    "releaseChannelCollection": "opt-out",
+    "description": "The average number of dropped frames per sec in OpenVR, sent when user exits WebVR content."
+  },
   "URLCLASSIFIER_UI_EVENTS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "francois@mozilla.com"],
@@ -13637,5 +13616,16 @@
     "n_buckets": 100,
     "bug_numbers": [1393399],
     "description": "Time in milliseconds to recover a video decoder from a HW video decoder crash, calculated since MFR gets a NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER error. The data is sent when video decoding is recovered from a GPU crash and the first frame is decoded."
+  },
+  "FORM_FILLING_REQUIRED_TIME_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["autofill@lists.mozilla.org", "jcheng@mozilla.com", "chsiang@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 300000,
+    "n_buckets": 22,
+    "keyed": true,
+    "bug_numbers": [1341569],
+    "description": "Milliseconds between starting to fill an autofill-eligible form field and submitting the form, keyed by the combination of form type and filling type."
   }
 }

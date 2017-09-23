@@ -223,7 +223,7 @@ js::SetPropertyIgnoringNamedGetter(JSContext* cx, HandleObject obj, HandleId id,
             ? JSPROP_IGNORE_ENUMERATE | JSPROP_IGNORE_READONLY | JSPROP_IGNORE_PERMANENT
             : JSPROP_ENUMERATE;
 
-        return DefineProperty(cx, receiverObj, id, v, nullptr, nullptr, attrs, result);
+        return DefineDataProperty(cx, receiverObj, id, v, attrs, result);
     }
 
     // Step 6.
@@ -373,9 +373,10 @@ BaseProxyHandler::finalize(JSFreeOp* fop, JSObject* proxy) const
 {
 }
 
-void
-BaseProxyHandler::objectMoved(JSObject* proxy, const JSObject* old) const
+size_t
+BaseProxyHandler::objectMoved(JSObject* proxy, JSObject* old) const
 {
+    return 0;
 }
 
 JSObject*

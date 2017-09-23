@@ -136,7 +136,6 @@ linux64-stylo-sequential/opt:
     build-platform: linux64/opt
     test-sets:
         - awsy-stylo-sequential
-        - talos
 
 # QR builds just run a subset right now. Note that the tests in this
 # test set are further restricted in tests.yml to run on certain projects
@@ -170,12 +169,15 @@ linux64-jsdcov/opt:
 windows7-32/debug:
     build-platform: win32/debug
     test-sets:
+        - windows-reftest-gpu
         - windows-tests
+
 windows7-32/opt:
     build-platform: win32/opt
     test-sets:
         - awsy
         - desktop-screenshot-capture
+        - windows-reftest-gpu
         - windows-talos
         - windows-talos-stylo-disabled
         - windows-tests
@@ -185,21 +187,24 @@ windows7-32-pgo/opt:
     test-sets:
         - awsy
         - desktop-screenshot-capture
-        - windows-tests
+        - windows-reftest-gpu
         - windows-talos
         - windows-talos-stylo-disabled
+        - windows-tests
 
 windows7-32-nightly/opt:
     build-platform: win32-nightly/opt
     test-sets:
         - awsy
         - desktop-screenshot-capture
+        - windows-reftest-gpu
         - windows-tests
 
 windows7-32-devedition/opt:
     build-platform: win32-devedition-nightly/opt
     test-sets:
         - desktop-screenshot-capture
+        - windows-reftest-gpu
         - windows-tests
 
 # win64
@@ -243,28 +248,6 @@ windows10-64-asan/opt:
     build-platform: win64-asan/opt
     test-sets:
         - common-tests
-
-# Windows8 tests; all via BBB
-windows8-64/debug:
-    build-platform: win64/debug
-    test-sets:
-        - windows8-tests
-windows8-64/opt:
-    build-platform: win64/opt
-    test-sets:
-        - windows8-tests
-windows8-64-pgo/opt:
-    build-platform: win64-pgo/opt
-    test-sets:
-        - windows8-tests
-windows8-64-nightly/opt:
-    build-platform: win64-nightly/opt
-    test-sets:
-        - windows8-tests
-windows8-64-devedition/opt:
-    build-platform: win64-devedition-nightly/opt
-    test-sets:
-        - windows8-tests
 
 ##
 # MacOS X platforms (matching /macosx.*/)

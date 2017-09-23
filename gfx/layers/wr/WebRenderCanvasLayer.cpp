@@ -16,6 +16,7 @@
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
+#include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "PersistentBufferProvider.h"
 #include "SharedSurface.h"
 #include "SharedSurfaceGL.h"
@@ -38,6 +39,7 @@ WebRenderCanvasLayer::CreateCanvasRendererInternal()
 
 void
 WebRenderCanvasLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
+                                  wr::IpcResourceUpdateQueue& aResources,
                                   const StackingContextHelper& aSc)
 {
   WebRenderCanvasRendererSync* canvasRenderer = mCanvasRenderer->AsWebRenderCanvasRendererSync();
@@ -49,7 +51,7 @@ WebRenderCanvasLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
     transform = Some(GetTransform().PreTranslate(0, mBounds.Height(), 0).PreScale(1, -1, 1));
   }
 
-  ScrollingLayersHelper scroller(this, aBuilder, aSc);
+  ScrollingLayersHelper scroller(this, aBuilder, aResources, aSc);
   StackingContextHelper sc(aSc, aBuilder, this, transform);
 
   LayerRect rect(0, 0, mBounds.Width(), mBounds.Height());
@@ -63,12 +65,15 @@ WebRenderCanvasLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
                   Stringify(filter).c_str());
   }
 
+  // Eww. Re-creating image keys every time is bad. Probably not worth fixing here
+  // since layers-full webrender is going away soon-ish. But don't reproduce what
+  // you see here.
   wr::WrImageKey key = GenerateImageKey();
-  WrBridge()->AddWebRenderParentCommand(OpAddExternalImage(canvasRenderer->GetExternalImageId().value(), key));
+  aResources.AddExternalImage(canvasRenderer->GetExternalImageId().value(), key);
   WrManager()->AddImageKeyForDiscard(key);
 
   wr::LayoutRect r = sc.ToRelativeLayoutRect(rect);
-  aBuilder.PushImage(r, r, filter, key);
+  aBuilder.PushImage(r, r, true, filter, key);
 }
 
 void

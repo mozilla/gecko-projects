@@ -15,9 +15,7 @@
 #include "nsIToolkitChromeRegistry.h"
 #include "nsXULAppAPI.h"
 
-#ifdef ENABLE_INTL_API
 #include "unicode/uloc.h"
-#endif
 
 #define MATCH_OS_LOCALE_PREF "intl.locale.matchOS"
 #define SELECTED_LOCALE_PREF "general.useragent.locale"
@@ -36,7 +34,8 @@ static const char* kObservedPrefs[] = {
 using namespace mozilla::intl;
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS(LocaleService, mozILocaleService, nsIObserver)
+NS_IMPL_ISUPPORTS(LocaleService, mozILocaleService, nsIObserver,
+                  nsISupportsWeakReference)
 
 mozilla::StaticRefPtr<LocaleService> LocaleService::sInstance;
 
@@ -52,7 +51,6 @@ mozilla::StaticRefPtr<LocaleService> LocaleService::sInstance;
 static void
 SanitizeForBCP47(nsACString& aLocale)
 {
-#ifdef ENABLE_INTL_API
   // Currently, the only locale code we use that's not BCP47-conformant is
   // "ja-JP-mac" on OS X, but let's try to be more general than just
   // hard-coding that here.
@@ -67,15 +65,6 @@ SanitizeForBCP47(nsACString& aLocale)
   if (U_SUCCESS(err) && len > 0) {
     aLocale.Assign(langTag, len);
   }
-#else
-  // This is only really needed for Intl API purposes, AFAIK,
-  // so probably won't be used in a non-ENABLE_INTL_API build.
-  // But let's fix up the single anomalous code we actually ship,
-  // just in case:
-  if (aLocale.EqualsLiteral("ja-JP-mac")) {
-    aLocale.AssignLiteral("ja-JP");
-  }
-#endif
 }
 
 static bool
@@ -182,7 +171,7 @@ LocaleService::GetInstance()
     if (sInstance->IsServer()) {
       // We're going to observe for requested languages changes which come
       // from prefs.
-      DebugOnly<nsresult> rv = Preferences::AddStrongObservers(sInstance, kObservedPrefs);
+      DebugOnly<nsresult> rv = Preferences::AddWeakObservers(sInstance, kObservedPrefs);
       MOZ_ASSERT(NS_SUCCEEDED(rv), "Adding observers failed.");
     }
     ClearOnShutdown(&sInstance);
@@ -193,7 +182,7 @@ LocaleService::GetInstance()
 LocaleService::~LocaleService()
 {
   if (mIsServer) {
-    Preferences::RemoveObservers(sInstance, kObservedPrefs);
+    Preferences::RemoveObservers(this, kObservedPrefs);
   }
 }
 
@@ -349,7 +338,7 @@ LocaleService::OnLocalesChanged()
  * This is the raw algorithm for language negotiation based roughly
  * on RFC4647 language filtering, with changes from LDML language matching.
  *
- * The exact algorithm is custom, and consist of 5 level strategy:
+ * The exact algorithm is custom, and consists of a 6 level strategy:
  *
  * 1) Attempt to find an exact match for each requested locale in available
  *    locales.
@@ -372,7 +361,14 @@ LocaleService::OnLocalesChanged()
  *               ^^^^^^^^^
  *               |----------- replace variant with range: 'ja-JP-*'
  *
- * 5) Attempt to look up for a different region of the same locale.
+ * 5) Attempt to look up for a maximized version of the requested locale,
+ *    stripped of the region code.
+ *    Example: ['en-CA'] * ['en-ZA', 'en-US'] = ['en-US', 'en-ZA']
+ *               ^^^^^
+ *               |----------- look for likelySubtag of 'en': 'en-Latn-US'
+ *
+ *
+ * 6) Attempt to look up for a different region of the same locale.
  *    Example: ['en-GB'] * ['en-AU'] = ['en-AU']
  *               ^^^^^
  *               |----- replace region with range: 'en-*'
@@ -458,7 +454,15 @@ LocaleService::FilterMatches(const nsTArray<nsCString>& aRequested,
       HANDLE_STRATEGY;
     }
 
-    // 5) Try to match against a region as a range
+    // 5) Try to match against the likely subtag without region
+    if (requestedLocale.AddLikelySubtagsWithoutRegion()) {
+      if (findRangeMatches(requestedLocale)) {
+        HANDLE_STRATEGY;
+      }
+    }
+
+
+    // 6) Try to match against a region as a range
     requestedLocale.SetRegionRange();
     if (findRangeMatches(requestedLocale)) {
       HANDLE_STRATEGY;
@@ -500,28 +504,11 @@ LocaleService::IsAppLocaleRTL()
   nsAutoCString locale;
   GetAppLocaleAsBCP47(locale);
 
-#ifdef ENABLE_INTL_API
   int pref = Preferences::GetInt("intl.uidirection", -1);
   if (pref >= 0) {
     return (pref > 0);
   }
   return uloc_isRightToLeft(locale.get());
-#else
-  // first check the intl.uidirection.<locale> preference, and if that is not
-  // set, check the same preference but with just the first two characters of
-  // the locale. If that isn't set, default to left-to-right.
-  nsAutoCString prefString = NS_LITERAL_CSTRING("intl.uidirection.") + locale;
-  nsAutoCString dir;
-  Preferences::GetCString(prefString.get(), dir);
-  if (dir.IsEmpty()) {
-    int32_t hyphen = prefString.FindChar('-');
-    if (hyphen >= 1) {
-      prefString.Truncate(hyphen);
-      Preferences::GetCString(prefString.get(), dir);
-    }
-  }
-  return dir.EqualsLiteral("rtl");
-#endif
 }
 
 NS_IMETHODIMP
@@ -530,9 +517,14 @@ LocaleService::Observe(nsISupports *aSubject, const char *aTopic,
 {
   MOZ_ASSERT(mIsServer, "This should only be called in the server mode.");
 
+  NS_ConvertUTF16toUTF8 pref(aData);
+
+  // This is a temporary solution until we get bug 1337078 landed.
+  if (pref.EqualsLiteral(ANDROID_OS_LOCALE_PREF)) {
+    OSPreferences::GetInstance()->Refresh();
+  }
   // At the moment the only thing we're observing are settings indicating
   // user requested locales.
-  NS_ConvertUTF16toUTF8 pref(aData);
   if (pref.EqualsLiteral(MATCH_OS_LOCALE_PREF) ||
       pref.EqualsLiteral(SELECTED_LOCALE_PREF) ||
       pref.EqualsLiteral(ANDROID_OS_LOCALE_PREF)) {
@@ -816,12 +808,33 @@ LocaleService::Locale::SetRegionRange()
 bool
 LocaleService::Locale::AddLikelySubtags()
 {
-#ifdef ENABLE_INTL_API
+  return AddLikelySubtagsForLocale(mLocaleStr);
+}
+
+bool
+LocaleService::Locale::AddLikelySubtagsWithoutRegion()
+{
+  nsAutoCString locale(mLanguage);
+
+  if (!mScript.IsEmpty()) {
+    locale.Append("-");
+    locale.Append(mScript);
+  }
+
+  // We don't add variant here because likelySubtag doesn't care about it.
+
+  return AddLikelySubtagsForLocale(locale);
+}
+
+bool
+LocaleService::Locale::AddLikelySubtagsForLocale(const nsACString& aLocale)
+{
   const int32_t kLocaleMax = 160;
   char maxLocale[kLocaleMax];
+  nsAutoCString locale(aLocale);
 
   UErrorCode status = U_ZERO_ERROR;
-  uloc_addLikelySubtags(mLocaleStr.get(), maxLocale, kLocaleMax, &status);
+  uloc_addLikelySubtags(locale.get(), maxLocale, kLocaleMax, &status);
 
   if (U_FAILURE(status)) {
     return false;
@@ -837,11 +850,11 @@ LocaleService::Locale::AddLikelySubtags()
   mLanguage = loc.mLanguage;
   mScript = loc.mScript;
   mRegion = loc.mRegion;
-  mVariant = loc.mVariant;
+
+  // We don't update variant from likelySubtag since it's not going to
+  // provide it and we want to preserve the range
+
   return true;
-#else
-  return false;
-#endif
 }
 
 NS_IMETHODIMP

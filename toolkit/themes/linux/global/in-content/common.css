@@ -12,13 +12,6 @@ xul|tab[visuallyselected] {
   border-bottom-right-radius: 0;
 }
 
-xul|button,
-html|button,
-xul|colorpicker[type="button"],
-xul|menulist {
-  margin: 2px 4px;
-}
-
 xul|button:-moz-focusring {
   outline: 1px dotted;
   outline-offset: -2px;
@@ -117,25 +110,10 @@ xul|treechildren::-moz-tree-row(selected) {
   background-color: var(--in-content-item-selected);
 }
 
-html|html *,
-xul|page *,
-xul|window * {
-  font-size: 1.11rem;
-}
-
 *|*.header-name {
   font-size: 1.64rem;
 }
 
 *|*.category-name {
   font-size: 1.19rem;
-}
-
-xul|caption > xul|label {
-  font-size: 1.27rem;
-}
-
-.tip-caption,
-.help-button {
-  font-size: 1rem;
 }

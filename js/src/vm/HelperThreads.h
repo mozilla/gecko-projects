@@ -56,7 +56,7 @@ enum class ParseTaskKind
 
 namespace wasm {
 
-class CompileTask;
+struct CompileTask;
 typedef Vector<CompileTask*, 0, SystemAllocPolicy> CompileTaskPtrVector;
 
 struct Tier2GeneratorTask
@@ -106,35 +106,14 @@ class GlobalHelperThreadState
     // Ion compilation worklist and finished jobs.
     IonBuilderVector ionWorklist_, ionFinishedList_, ionFreeList_;
 
-    // wasm worklist and finished jobs.
-    wasm::CompileTaskPtrVector wasmWorklist_tier1_, wasmFinishedList_tier1_;
-    wasm::CompileTaskPtrVector wasmWorklist_tier2_, wasmFinishedList_tier2_;
+    // wasm worklists.
+    wasm::CompileTaskPtrVector wasmWorklist_tier1_;
+    wasm::CompileTaskPtrVector wasmWorklist_tier2_;
     wasm::Tier2GeneratorTaskPtrVector wasmTier2GeneratorWorklist_;
 
-    // For now, only allow a single parallel wasm compilation at each tier to
-    // happen at a time.  This avoids race conditions on
-    // wasmWorklist/wasmFinishedList/etc, for which there is one for each tier.
-    //
-    // TODO: remove this restriction by making the work and finish lists
-    // per-compilation state, not part of the global state.
+    // Count of finished Tier2Generator tasks.
+    uint32_t wasmTier2GeneratorsFinished_;
 
-    mozilla::Atomic<bool> wasmCompilationInProgress_tier1;
-    mozilla::Atomic<bool> wasmCompilationInProgress_tier2;
-
-  public:
-    mozilla::Atomic<bool>& wasmCompilationInProgress(wasm::CompileMode m) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            return wasmCompilationInProgress_tier1;
-          case wasm::CompileMode::Tier2:
-            return wasmCompilationInProgress_tier2;
-          default:
-            MOZ_CRASH();
-        }
-    }
-
-  private:
     // Async tasks that, upon completion, are dispatched back to the JSContext's
     // owner thread via embedding callbacks instead of a finished list.
     PromiseHelperTaskVector promiseHelperTasks_;
@@ -160,14 +139,10 @@ class GlobalHelperThreadState
     // GC tasks needing to be done in parallel.
     GCParallelTaskVector gcParallelWorklist_;
 
-    // Count of finished Tier2Generator tasks.
-    uint32_t wasmTier2GeneratorsFinished_;
-
     ParseTask* removeFinishedParseTask(ParseTaskKind kind, void* token);
 
   public:
     size_t maxIonCompilationThreads() const;
-    size_t maxUnpausedIonCompilationThreads() const;
     size_t maxWasmCompilationThreads() const;
     size_t maxWasmTier2GeneratorThreads() const;
     size_t maxParseThreads() const;
@@ -197,10 +172,6 @@ class GlobalHelperThreadState
         // make progress, ie, a work item has been enqueued and an idle helper
         // thread may pick up up the work item and perform it.
         PRODUCER,
-
-        // For notifying threads doing work which are paused that they may be
-        // able to resume making progress.
-        PAUSE
     };
 
     void wait(AutoLockHelperThreadState& locked, CondVar which,
@@ -236,17 +207,6 @@ class GlobalHelperThreadState
             return wasmWorklist_tier1_;
           case wasm::CompileMode::Tier2:
             return wasmWorklist_tier2_;
-          default:
-            MOZ_CRASH();
-        }
-    }
-    wasm::CompileTaskPtrVector& wasmFinishedList(const AutoLockHelperThreadState&, wasm::CompileMode m) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            return wasmFinishedList_tier1_;
-          case wasm::CompileMode::Tier2:
-            return wasmFinishedList_tier2_;
           default:
             MOZ_CRASH();
         }
@@ -315,85 +275,7 @@ class GlobalHelperThreadState
     void scheduleCompressionTasks(const AutoLockHelperThreadState&);
 
   public:
-    // Unlike the public methods above, the value returned by this method can
-    // change over time, even if the helper thread state lock is held
-    // throughout.
-    bool pendingIonCompileHasSufficientPriority(const AutoLockHelperThreadState& lock);
-
-    jit::IonBuilder* highestPriorityPendingIonCompile(const AutoLockHelperThreadState& lock,
-                                                      bool remove = false);
-    HelperThread* lowestPriorityUnpausedIonCompileAtThreshold(
-        const AutoLockHelperThreadState& lock);
-    HelperThread* highestPriorityPausedIonCompile(const AutoLockHelperThreadState& lock);
-
-    uint32_t harvestFailedWasmJobs(const AutoLockHelperThreadState&, wasm::CompileMode m) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1: {
-              uint32_t n = numWasmFailedJobs_tier1;
-              numWasmFailedJobs_tier1 = 0;
-              return n;
-          }
-          case wasm::CompileMode::Tier2: {
-              uint32_t n = numWasmFailedJobs_tier2;
-              numWasmFailedJobs_tier2 = 0;
-              return n;
-          }
-          default:
-            MOZ_CRASH();
-        }
-    }
-    UniqueChars harvestWasmError(const AutoLockHelperThreadState&, wasm::CompileMode m) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            return Move(firstWasmError_tier1);
-          case wasm::CompileMode::Tier2:
-            return Move(firstWasmError_tier2);
-          default:
-            MOZ_CRASH();
-        }
-    }
-    void noteWasmFailure(const AutoLockHelperThreadState&, wasm::CompileMode m) {
-        // Be mindful to signal the active thread after calling this function.
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            numWasmFailedJobs_tier1++;
-            break;
-          case wasm::CompileMode::Tier2:
-            numWasmFailedJobs_tier2++;
-            break;
-          default:
-            MOZ_CRASH();
-        }
-    }
-    void setWasmError(const AutoLockHelperThreadState&, wasm::CompileMode m, UniqueChars error) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            if (!firstWasmError_tier1)
-                firstWasmError_tier1 = Move(error);
-            break;
-          case wasm::CompileMode::Tier2:
-            if (!firstWasmError_tier2)
-                firstWasmError_tier2 = Move(error);
-            break;
-          default:
-            MOZ_CRASH();
-        }
-    }
-    bool wasmFailed(const AutoLockHelperThreadState&, wasm::CompileMode m) {
-        switch (m) {
-          case wasm::CompileMode::Once:
-          case wasm::CompileMode::Tier1:
-            return bool(numWasmFailedJobs_tier1);
-          case wasm::CompileMode::Tier2:
-            return bool(numWasmFailedJobs_tier2);
-          default:
-            MOZ_CRASH();
-        }
-    }
+    jit::IonBuilder* highestPriorityPendingIonCompile(const AutoLockHelperThreadState& lock);
 
     template <
         typename F,
@@ -416,21 +298,6 @@ class GlobalHelperThreadState
 
     void trace(JSTracer* trc);
 
-  private:
-    /*
-     * Number of wasm jobs that encountered failure for the active module.
-     * Their parent is logically the active thread, and this number serves for harvesting.
-     */
-    uint32_t numWasmFailedJobs_tier1;
-    uint32_t numWasmFailedJobs_tier2;
-    /*
-     * Error string from wasm validation. Arbitrarily choose to keep the first one that gets
-     * reported. Nondeterministic if multiple threads have errors.
-     */
-    UniqueChars firstWasmError_tier1;
-    UniqueChars firstWasmError_tier2;
-
-  public:
     JSScript* finishScriptParseTask(JSContext* cx, void* token);
     JSScript* finishScriptDecodeTask(JSContext* cx, void* token);
     bool finishMultiScriptsDecodeTask(JSContext* cx, void* token, MutableHandle<ScriptVector> scripts);
@@ -454,13 +321,11 @@ class GlobalHelperThreadState
     /* Condvars for threads waiting/notifying each other. */
     js::ConditionVariable consumerWakeup;
     js::ConditionVariable producerWakeup;
-    js::ConditionVariable pauseWakeup;
 
     js::ConditionVariable& whichWakeup(CondVar which) {
         switch (which) {
           case CONSUMER: return consumerWakeup;
           case PRODUCER: return producerWakeup;
-          case PAUSE: return pauseWakeup;
           default: MOZ_CRASH("Invalid CondVar in |whichWakeup|");
         }
     }
@@ -494,13 +359,6 @@ struct HelperThread
      * or written with the helper thread state lock held.
      */
     bool terminate;
-
-    /*
-     * Indicate to a thread that it should pause execution. This is only
-     * written with the helper thread state lock held, but may be read from
-     * without the lock held.
-     */
-    mozilla::Atomic<bool, mozilla::Relaxed> pause;
 
     /* The current task being executed by this thread, if any. */
     mozilla::Maybe<HelperTaskUnion> currentTask;
@@ -591,10 +449,6 @@ SetFakeCPUCount(size_t count);
 HelperThread*
 CurrentHelperThread();
 
-// Pause the current thread until it's pause flag is unset.
-void
-PauseCurrentHelperThread();
-
 // Enqueues a wasm compilation task.
 bool
 StartOffThreadWasmCompile(wasm::CompileTask* task, wasm::CompileMode mode);
@@ -602,8 +456,8 @@ StartOffThreadWasmCompile(wasm::CompileTask* task, wasm::CompileMode mode);
 namespace wasm {
 
 // Called on a helper thread after StartOffThreadWasmCompile.
-MOZ_MUST_USE bool
-CompileFunction(CompileTask* task, UniqueChars* error);
+void
+ExecuteCompileTaskFromHelperThread(CompileTask* task);
 
 }
 

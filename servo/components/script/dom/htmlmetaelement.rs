@@ -110,6 +110,7 @@ impl HTMLMetaElement {
                             quirks_mode: document.quirks_mode(),
                             url_data: RwLock::new(window_from_node(self).get_url()),
                             source_map_url: RwLock::new(None),
+                            source_url: RwLock::new(None),
                         },
                         media: Arc::new(shared_lock.wrap(MediaList::empty())),
                         shared_lock: shared_lock.clone(),
@@ -196,8 +197,8 @@ impl VirtualMethods for HTMLMetaElement {
         if context.tree_in_doc {
             self.process_referrer_attribute();
 
-            if let Some(ref s) = *self.stylesheet.borrow() {
-                document_from_node(self).remove_stylesheet(self.upcast(), s);
+            if let Some(s) = self.stylesheet.borrow_mut().take() {
+                document_from_node(self).remove_stylesheet(self.upcast(), &s);
             }
         }
     }

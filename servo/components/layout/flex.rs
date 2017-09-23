@@ -10,6 +10,7 @@ use app_units::{Au, MAX_AU};
 use block::{AbsoluteAssignBSizesTraversal, BlockFlow, MarginsMayCollapseFlag};
 use context::LayoutContext;
 use display_list_builder::{DisplayListBuildState, FlexFlowDisplayListBuilding};
+use display_list_builder::StackingContextCollectionState;
 use euclid::Point2D;
 use floats::FloatKind;
 use flow;
@@ -45,7 +46,7 @@ impl AxisSize {
     pub fn new(size: LengthOrPercentageOrAuto, content_size: Option<Au>, min: LengthOrPercentage,
                max: LengthOrPercentageOrNone) -> AxisSize {
         match size {
-            LengthOrPercentageOrAuto::Length(length) => AxisSize::Definite(length),
+            LengthOrPercentageOrAuto::Length(length) => AxisSize::Definite(Au::from(length)),
             LengthOrPercentageOrAuto::Percentage(percent) => {
                 match content_size {
                     Some(size) => AxisSize::Definite(size.scale_by(percent.0)),
@@ -76,7 +77,7 @@ fn from_flex_basis(
 ) -> MaybeAuto {
     match (flex_basis, containing_length) {
         (GenericFlexBasis::Length(LengthOrPercentage::Length(length)), _) =>
-            MaybeAuto::Specified(length),
+            MaybeAuto::Specified(Au::from(length)),
         (GenericFlexBasis::Length(LengthOrPercentage::Percentage(percent)), Some(size)) =>
             MaybeAuto::Specified(size.scale_by(percent.0)),
         (GenericFlexBasis::Length(LengthOrPercentage::Percentage(_)), None) =>
@@ -89,7 +90,7 @@ fn from_flex_basis(
             MaybeAuto::from_style(main_length, size),
         (GenericFlexBasis::Auto, None) => {
             if let LengthOrPercentageOrAuto::Length(length) = main_length {
-                MaybeAuto::Specified(length)
+                MaybeAuto::Specified(Au::from(length))
             } else {
                 MaybeAuto::Auto
             }
@@ -988,7 +989,7 @@ impl Flow for FlexFlow {
         self.build_display_list_for_flex(state);
     }
 
-    fn collect_stacking_contexts(&mut self, state: &mut DisplayListBuildState) {
+    fn collect_stacking_contexts(&mut self, state: &mut StackingContextCollectionState) {
         self.block_flow.collect_stacking_contexts(state);
     }
 

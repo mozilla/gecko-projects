@@ -4,10 +4,10 @@
 
 use api::{ApiMsg, DebugCommand};
 use api::channel::MsgSender;
+use print_tree::PrintTreePrinter;
 use std::sync::mpsc::{channel, Receiver};
-use std::thread;
 use std::sync::mpsc::Sender;
-
+use std::thread;
 use ws;
 
 // Messages that are sent from the render backend to the renderer
@@ -28,43 +28,34 @@ struct Server {
 
 impl ws::Handler for Server {
     fn on_open(&mut self, _: ws::Handshake) -> ws::Result<()> {
-        self.debug_tx.send(DebugMsg::AddSender(self.ws.clone())).ok();
+        self.debug_tx
+            .send(DebugMsg::AddSender(self.ws.clone()))
+            .ok();
 
         Ok(())
     }
 
     fn on_close(&mut self, _: ws::CloseCode, _: &str) {
-        self.debug_tx.send(DebugMsg::RemoveSender(self.ws.token())).ok();
+        self.debug_tx
+            .send(DebugMsg::RemoveSender(self.ws.token()))
+            .ok();
     }
 
     fn on_message(&mut self, msg: ws::Message) -> ws::Result<()> {
         match msg {
             ws::Message::Text(string) => {
                 let cmd = match string.as_str() {
-                    "enable_profiler" => {
-                        DebugCommand::EnableProfiler(true)
-                    }
-                    "disable_profiler" => {
-                        DebugCommand::EnableProfiler(false)
-                    }
-                    "enable_texture_cache_debug" => {
-                        DebugCommand::EnableTextureCacheDebug(true)
-                    }
-                    "disable_texture_cache_debug" => {
-                        DebugCommand::EnableTextureCacheDebug(false)
-                    }
-                    "enable_render_target_debug" => {
-                        DebugCommand::EnableRenderTargetDebug(true)
-                    }
-                    "disable_render_target_debug" => {
-                        DebugCommand::EnableRenderTargetDebug(false)
-                    }
-                    "fetch_passes" => {
-                        DebugCommand::FetchPasses
-                    }
-                    "fetch_documents" => {
-                        DebugCommand::FetchDocuments
-                    }
+                    "enable_profiler" => DebugCommand::EnableProfiler(true),
+                    "disable_profiler" => DebugCommand::EnableProfiler(false),
+                    "enable_texture_cache_debug" => DebugCommand::EnableTextureCacheDebug(true),
+                    "disable_texture_cache_debug" => DebugCommand::EnableTextureCacheDebug(false),
+                    "enable_render_target_debug" => DebugCommand::EnableRenderTargetDebug(true),
+                    "disable_render_target_debug" => DebugCommand::EnableRenderTargetDebug(false),
+                    "enable_alpha_rects_debug" => DebugCommand::EnableAlphaRectsDebug(true),
+                    "disable_alpha_rects_debug" => DebugCommand::EnableAlphaRectsDebug(false),
+                    "fetch_passes" => DebugCommand::FetchPasses,
+                    "fetch_documents" => DebugCommand::FetchDocuments,
+                    "fetch_clipscrolltree" => DebugCommand::FetchClipScrollTree,
                     msg => {
                         println!("unknown msg {}", msg);
                         return Ok(());
@@ -94,18 +85,22 @@ impl DebugServer {
     pub fn new(api_tx: MsgSender<ApiMsg>) -> DebugServer {
         let (debug_tx, debug_rx) = channel();
 
-        let socket = ws::Builder::new().build(move |out| {
-            Server {
-                ws: out,
-                debug_tx: debug_tx.clone(),
-                api_tx: api_tx.clone(),
-            }
-        }).unwrap();
+        let socket = ws::Builder::new()
+            .build(move |out| {
+                Server {
+                    ws: out,
+                    debug_tx: debug_tx.clone(),
+                    api_tx: api_tx.clone(),
+                }
+            })
+            .unwrap();
 
         let broadcaster = socket.broadcaster();
 
         let join_handle = Some(thread::spawn(move || {
-            if let Err(..) = socket.listen("127.0.0.1:3583") {
+            let address = "127.0.0.1:3583";
+            println!("WebRender debug server started: {}", address);
+            if let Err(..) = socket.listen(address) {
                 println!("ERROR: Unable to bind debugger websocket (port may be in use).");
             }
         }));
@@ -126,9 +121,7 @@ impl DebugServer {
                     self.senders.push(sender);
                 }
                 DebugMsg::RemoveSender(token) => {
-                    self.senders.retain(|sender| {
-                        sender.token() != token
-                    });
+                    self.senders.retain(|sender| sender.token() != token);
                 }
             }
         }
@@ -279,5 +272,66 @@ impl DocumentList {
 
     pub fn add(&mut self, item: TreeNode) {
         self.root.add_child(item);
+    }
+}
+
+// A serializable list of debug information about clip-scroll trees
+// that can be sent to the client
+
+#[derive(Serialize)]
+pub struct ClipScrollTreeList {
+    kind: &'static str,
+    root: TreeNode,
+}
+
+impl ClipScrollTreeList {
+    pub fn new() -> ClipScrollTreeList {
+        ClipScrollTreeList {
+            kind: "clipscrolltree",
+            root: TreeNode::new("root"),
+        }
+    }
+
+    pub fn add(&mut self, item: TreeNode) {
+        self.root.add_child(item);
+    }
+}
+
+// A TreeNode-based PrintTreePrinter to serialize pretty-printed
+// trees as json
+pub struct TreeNodeBuilder {
+    levels: Vec<TreeNode>,
+}
+
+impl TreeNodeBuilder {
+    pub fn new(root: TreeNode) -> TreeNodeBuilder {
+        TreeNodeBuilder { levels: vec![root] }
+    }
+
+    fn current_level_mut(&mut self) -> &mut TreeNode {
+        assert!(!self.levels.is_empty());
+        self.levels.last_mut().unwrap()
+    }
+
+    pub fn build(mut self) -> TreeNode {
+        assert!(self.levels.len() == 1);
+        self.levels.pop().unwrap()
+    }
+}
+
+impl PrintTreePrinter for TreeNodeBuilder {
+    fn new_level(&mut self, title: String) {
+        let level = TreeNode::new(&title);
+        self.levels.push(level);
+    }
+
+    fn end_level(&mut self) {
+        assert!(!self.levels.is_empty());
+        let last_level = self.levels.pop().unwrap();
+        self.current_level_mut().add_child(last_level);
+    }
+
+    fn add_item(&mut self, text: String) {
+        self.current_level_mut().add_item(&text);
     }
 }

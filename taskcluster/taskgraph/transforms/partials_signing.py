@@ -69,7 +69,8 @@ def make_task_description(config, jobs):
             treeherder['symbol'] = 'ps({})'.format(locale)
 
         balrog_platform = get_balrog_platform_name(dep_th_platform)
-        upstream_artifacts = generate_upstream_artifacts(config.params['release_history'], balrog_platform, locale)
+        upstream_artifacts = generate_upstream_artifacts(
+            config.params['release_history'], balrog_platform, locale)
 
         build_platform = dep_job.attributes.get('build_platform')
         is_nightly = dep_job.attributes.get('nightly')

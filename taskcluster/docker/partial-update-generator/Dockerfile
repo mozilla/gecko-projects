@@ -27,7 +27,8 @@ RUN mkdir /home/worker/bin
 COPY scripts/* /home/worker/bin/
 
 COPY runme.sh /runme.sh
-RUN chmod 755 /home/worker/bin/* /runme.sh
+COPY recompress.sh /recompress.sh
+RUN chmod 755 /home/worker/bin/* /*.sh
 RUN mkdir /home/worker/keys
 COPY *.pubkey /home/worker/keys/
 

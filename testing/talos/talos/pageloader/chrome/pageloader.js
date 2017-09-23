@@ -51,6 +51,9 @@ var scrollTest = false;
 var gDisableE10S = false;
 var gUseE10S = false;
 var profilingInfo = false;
+var baseVsRef = false;
+
+var isIdleCallbackPending = false;
 
 // when TEST_DOES_OWN_TIMING, we need to store the time from the page as MozAfterPaint can be slower than pageload
 var gTime = -1;
@@ -200,7 +203,6 @@ function plInit() {
     pages = pages.slice(startIndex, endIndex + 1);
     pageUrls = pages.map(function(p) { return p.url.spec.toString(); });
     report = new Report();
-
     if (doRenderTest)
       renderReport = new Report();
 
@@ -267,6 +269,17 @@ function plInit() {
         let contentScript = "data:,function _contentLoadHandler(e) { " +
           "  if (e.originalTarget.defaultView == content) { " +
           "    content.wrappedJSObject.tpRecordTime = function(t, s, n) { sendAsyncMessage('PageLoader:RecordTime', { time: t, startTime: s, testName: n }); }; ";
+        // setup idle-callback
+        contentScript += "" +
+        "var idleCallbackHandle; " +
+        "function _idleCallbackHandler() { " +
+        "  content.window.cancelIdleCallback(idleCallbackHandle); " +
+        "  sendAsyncMessage('PageLoader:IdleCallbackReceived', {}); " +
+        "}; " +
+        "function _setIdleCallback() { " +
+        "  idleCallbackHandle = content.window.requestIdleCallback(_idleCallbackHandler); " +
+        "  sendAsyncMessage('PageLoader:IdleCallbackSet', {}); " +
+        "}; ";
         if (useFNBPaint) {
           contentScript += "" +
           "var gRetryCounter = 0; " +
@@ -307,6 +320,7 @@ function plInit() {
           contentScript += "    sendAsyncMessage('PageLoader:LoadEvent', {}); ";
         }
         contentScript += "" +
+          "  content.setTimeout(_setIdleCallback, 0); " +
           "  }" +
           "} " +
           "addEventListener('load', _contentLoadHandler, true); ";
@@ -340,6 +354,8 @@ var ContentListener = {
       case "PageLoader:LoadEvent": return plLoadHandlerMessage(message);
       case "PageLoader:FNBPaintError": return plFNBPaintErrorMessage(message);
       case "PageLoader:RecordTime": return plRecordTimeMessage(message);
+      case "PageLoader:IdleCallbackSet": return plIdleCallbackSet();
+      case "PageLoader:IdleCallbackReceived": return plIdleCallbackReceived();
     }
     return undefined;
   },
@@ -369,6 +385,8 @@ function plLoadPage() {
   let mm = content.selectedBrowser.messageManager;
   mm.addMessageListener("PageLoader:LoadEvent", ContentListener);
   mm.addMessageListener("PageLoader:RecordTime", ContentListener);
+  mm.addMessageListener("PageLoader:IdleCallbackSet", ContentListener);
+  mm.addMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
   if (useFNBPaint) {
     mm.addMessageListener("PageLoader:FNBPaintError", ContentListener);
   }
@@ -376,13 +394,13 @@ function plLoadPage() {
   removeLastAddedMsgListener = function() {
     mm.removeMessageListener("PageLoader:LoadEvent", ContentListener);
     mm.removeMessageListener("PageLoader:RecordTime", ContentListener);
+    mm.removeMessageListener("PageLoader:IdleCallbackSet", ContentListener);
+    mm.removeMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
     if (useFNBPaint) {
       mm.removeMessageListener("PageLoader:FNBPaintError", ContentListener);
     }
   };
-
   failTimeout.register(loadFail, timeout);
-
   // record which page we are about to open
   TalosParentProfiler.mark("Opening " + pages[pageIndex].url.pathQueryRef);
 
@@ -459,6 +477,12 @@ function loadFail() {
 var plNextPage = async function() {
   var doNextPage = false;
 
+  // ensure we've receive idle-callback before proceeding
+  if (isIdleCallbackPending) {
+    dumpLine("Waiting for idle-callback");
+    await waitForIdleCallback();
+  }
+
   if (profilingInfo) {
     await TalosParentProfiler.finishTest();
   }
@@ -495,6 +519,29 @@ var plNextPage = async function() {
   }
 };
 
+function waitForIdleCallback() {
+  return new Promise(resolve => {
+    function checkForIdleCallback() {
+      if (!isIdleCallbackPending) {
+        resolve();
+      } else {
+        setTimeout(checkForIdleCallback, 5);
+      }
+    }
+    checkForIdleCallback();
+  });
+}
+
+function plIdleCallbackSet() {
+  if (!scrollTest) {
+    isIdleCallbackPending = true;
+  }
+}
+
+function plIdleCallbackReceived() {
+  isIdleCallbackPending = false;
+}
+
 function forceContentGC() {
   return new Promise((resolve) => {
     let mm = browserWindow.getBrowser().selectedBrowser.messageManager;
@@ -516,7 +563,15 @@ function plRecordTime(time) {
   }
   var nextName = pages[i].url.spec;
   if (!recordedName) {
-    recordedName = pageUrls[pageIndex];
+    // when doing base vs ref type of test, add pre 'base' or 'ref' to reported page name;
+    // this is necessary so that if multiple subtests use same reference page, results for
+    // each ref page run will be kept separate for each base vs ref run, and not grouped
+    // into just one set of results values for everytime that reference page was loaded
+    if (baseVsRef) {
+      recordedName = pages[pageIndex].pre + pageUrls[pageIndex];
+    } else {
+      recordedName = pageUrls[pageIndex];
+    }
   }
   if (typeof(time) == "string") {
     var times = time.split(",");
@@ -809,6 +864,11 @@ function plStopAll(force) {
       mm.removeMessageListener("PageLoader:FNBPaintError", ContentListener);
     }
 
+    if (isIdleCallbackPending) {
+      mm.removeMessageListener("PageLoader:IdleCallbackSet", ContentListener);
+      mm.removeMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
+    }
+
     mm.loadFrameScript("data:,removeEventListener('load', _contentLoadHandler, true);", false, true);
   }
 
@@ -839,10 +899,11 @@ function plLoadURLsFromURI(manifestUri) {
 
   var lstream = fstream.QueryInterface(Ci.nsILineInputStream);
 
-  var d = [];
+  var url_array = [];
 
   var lineNo = 0;
   var line = {value: null};
+  var baseVsRefIndex = 0;
   var more;
   do {
     lineNo++;
@@ -860,6 +921,7 @@ function plLoadURLsFromURI(manifestUri) {
 
     var flags = 0;
     var urlspec = s;
+    baseVsRefIndex += 1;
 
     // split on whitespace, and figure out if we have any flags
     var items = s.split(/\s+/);
@@ -878,7 +940,7 @@ function plLoadURLsFromURI(manifestUri) {
       var subItems = plLoadURLsFromURI(subManifest);
       if (subItems == null)
         return null;
-      d = d.concat(subItems);
+      url_array = url_array.concat(subItems);
     } else {
       // For scrollTest flag, we accept "normal" pages but treat them as TEST_DOES_OWN_TIMING
       // together with EXECUTE_SCROLL_TEST which makes us run the scroll test on load.
@@ -898,22 +960,58 @@ function plLoadURLsFromURI(manifestUri) {
           flags |= TEST_DOES_OWN_TIMING;
 
         urlspec = items[1];
+      } else if (items.length == 3) {
+        // base vs ref type of talos test
+        // expect each manifest line to be in the format of:
+        // & http://localhost/tests/perf-reftest/base-page.html, http://localhost/tests/perf-reftest/reference-page.html
+        // test will run with the base page, then with the reference page; and ultimately the actual test results will
+        // be the comparison values of those two pages; more than one line will result in base vs ref subtests
+        if (items[0].indexOf("&") != -1) {
+          baseVsRef = true;
+          flags |= TEST_DOES_OWN_TIMING;
+          // for the base, must remove the comma on the end of the actual url
+          var urlspecBase = items[1].slice(0, -1);
+          var urlspecRef = items[2];
+        } else {
+          dumpLine("tp: Error on line " + lineNo + " in " + manifestUri.spec + ": unknown manifest format!");
+          return null;
+        }
       } else if (items.length != 1) {
         dumpLine("tp: Error on line " + lineNo + " in " + manifestUri.spec + ": whitespace must be %-escaped!");
         return null;
       }
 
-      var url = gIOS.newURI(urlspec, null, manifestUri);
+      var url;
 
-      if (pageFilterRegexp && !pageFilterRegexp.test(url.spec))
-        continue;
+      if (!baseVsRef) {
+        url = gIOS.newURI(urlspec, null, manifestUri);
 
-      d.push({   url,
-               flags });
+        if (pageFilterRegexp && !pageFilterRegexp.test(url.spec))
+          continue;
+
+        url_array.push({ url, flags });
+      } else {
+        // base vs ref type of talos test
+        // we add a 'pre' prefix here indicating that this particular page is a base page or a reference
+        // page; later on this 'pre' is used when recording the actual time value/result; because in
+        // the results we use the url as the results key; but we might use the same test page as a reference
+        // page in the same test suite, so we need to add a prefix so this results key is always unique
+        url = gIOS.newURI(urlspecBase, null, manifestUri);
+        if (pageFilterRegexp && !pageFilterRegexp.test(url.spec))
+          continue;
+        var pre = "base_page_" + baseVsRefIndex + "_";
+        url_array.push({ url, flags, pre });
+
+        url = gIOS.newURI(urlspecRef, null, manifestUri);
+        if (pageFilterRegexp && !pageFilterRegexp.test(url.spec))
+          continue;
+        pre = "ref_page_" + baseVsRefIndex + "_";
+        url_array.push({ url, flags, pre });
+      }
     }
   } while (more);
 
-  return d;
+  return url_array;
 }
 
 function dumpLine(str) {

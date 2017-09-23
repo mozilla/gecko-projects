@@ -485,24 +485,33 @@ D3D11TextureData::Create(IntSize aSize, SurfaceFormat aFormat, SourceSurface* aS
     uploadDataPtr = &uploadData;
   }
 
+  // See bug 1397040
+  RefPtr<ID3D10Multithread> mt;
+  device->QueryInterface((ID3D10Multithread**)getter_AddRefs(mt));
+
   RefPtr<ID3D11Texture2D> texture11;
-  HRESULT hr = device->CreateTexture2D(&newDesc, uploadDataPtr, getter_AddRefs(texture11));
 
-  if (FAILED(hr) || !texture11) {
-    gfxCriticalNote << "[D3D11] 2 CreateTexture2D failure Size: " << aSize
-      << "texture11: " << texture11 << " Code: " << gfx::hexa(hr);
-    return nullptr;
-  }
+  {
+    D3D11MTAutoEnter lock(mt.forget());
 
-  if (srcSurf && DeviceManagerDx::Get()->HasCrashyInitData()) {
-    D3D11_BOX box;
-    box.front = box.top = box.left = 0;
-    box.back = 1;
-    box.right = aSize.width;
-    box.bottom = aSize.height;
-    RefPtr<ID3D11DeviceContext> ctx;
-    device->GetImmediateContext(getter_AddRefs(ctx));
-    ctx->UpdateSubresource(texture11, 0, &box, sourceMap.mData, sourceMap.mStride, 0);
+    HRESULT hr = device->CreateTexture2D(&newDesc, uploadDataPtr, getter_AddRefs(texture11));
+
+    if (FAILED(hr) || !texture11) {
+      gfxCriticalNote << "[D3D11] 2 CreateTexture2D failure Size: " << aSize
+        << "texture11: " << texture11 << " Code: " << gfx::hexa(hr);
+      return nullptr;
+    }
+
+    if (srcSurf && DeviceManagerDx::Get()->HasCrashyInitData()) {
+      D3D11_BOX box;
+      box.front = box.top = box.left = 0;
+      box.back = 1;
+      box.right = aSize.width;
+      box.bottom = aSize.height;
+      RefPtr<ID3D11DeviceContext> ctx;
+      device->GetImmediateContext(getter_AddRefs(ctx));
+      ctx->UpdateSubresource(texture11, 0, &box, sourceMap.mData, sourceMap.mStride, 0);
+    }
   }
 
   if (srcSurf) {
@@ -1120,13 +1129,14 @@ DXGITextureHostD3D11::PushExternalImage(wr::DisplayListBuilder& aBuilder,
     case gfx::SurfaceFormat::B8G8R8A8:
     case gfx::SurfaceFormat::B8G8R8X8: {
       MOZ_ASSERT(aImageKeys.length() == 1);
-      aBuilder.PushImage(aBounds, aClip, aFilter, aImageKeys[0]);
+      aBuilder.PushImage(aBounds, aClip, true, aFilter, aImageKeys[0]);
       break;
     }
     case gfx::SurfaceFormat::NV12: {
       MOZ_ASSERT(aImageKeys.length() == 2);
       aBuilder.PushNV12Image(aBounds,
                              aClip,
+                             true,
                              aImageKeys[0],
                              aImageKeys[1],
                              wr::WrYuvColorSpace::Rec601,
@@ -1317,6 +1327,8 @@ DXGIYCbCrTextureHostD3D11::AddWRImage(wr::ResourceUpdateQueue& aResources,
                                       Range<const wr::ImageKey>& aImageKeys,
                                       const wr::ExternalImageId& aExtID)
 {
+  // TODO - This implementation is very slow (read-back, copy on the copy and re-upload).
+
   MOZ_ASSERT(mTextures[0] && mTextures[1] && mTextures[2]);
   MOZ_ASSERT(aImageKeys.length() == 1);
 
@@ -1337,8 +1349,9 @@ DXGIYCbCrTextureHostD3D11::AddWRImage(wr::ResourceUpdateQueue& aResources,
 
   IntSize size = dataSourceSurface->GetSize();
   wr::ImageDescriptor descriptor(size, map.mStride, dataSourceSurface->GetFormat());
-  auto slice = Range<uint8_t>(map.mData, size.height * map.mStride);
-  aResources.AddImage(aImageKeys[0], descriptor, slice);
+  wr::Vec_u8 imgBytes;
+  imgBytes.PushBytes(Range<uint8_t>(map.mData, size.height * map.mStride));
+  aResources.AddImage(aImageKeys[0], descriptor, imgBytes);
 
   dataSourceSurface->Unmap();
 }
@@ -1352,7 +1365,7 @@ DXGIYCbCrTextureHostD3D11::PushExternalImage(wr::DisplayListBuilder& aBuilder,
 {
   // 1 image key
   MOZ_ASSERT(aImageKeys.length() == 1);
-  aBuilder.PushImage(aBounds, aClip, aFilter, aImageKeys[0]);
+  aBuilder.PushImage(aBounds, aClip, true, aFilter, aImageKeys[0]);
 }
 
 bool

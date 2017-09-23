@@ -505,6 +505,7 @@ class TaskClusterImagesProvider(object):
             traceback.print_exc()
             sys.exit(1)
 
+
 @CommandProvider
 class TaskClusterPartialsData(object):
     @Command('release-history', category="ci",

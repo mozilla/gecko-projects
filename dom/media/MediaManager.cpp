@@ -426,7 +426,7 @@ public:
       if (globalWindow) {
         RefPtr<GetUserMediaRequest> req =
           new GetUserMediaRequest(globalWindow->AsInner(),
-                                  NullString(), NullString());
+                                  VoidString(), VoidString());
         obs->NotifyObservers(req, "recording-device-stopped", nullptr);
       }
       return;
@@ -1232,8 +1232,13 @@ public:
                                                  self->mSourceListener->GetPrincipalHandle());
         if (NS_FAILED(rv)) {
           nsString log;
-          log.AssignASCII("Starting audio failed");
-          error = new MediaMgrError(NS_LITERAL_STRING("InternalError"), log);
+          if (rv == NS_ERROR_NOT_AVAILABLE) {
+            log.AssignASCII("Concurrent mic process limit.");
+            error = new MediaMgrError(NS_LITERAL_STRING("NotReadableError"), log);
+          } else {
+            log.AssignASCII("Starting audio failed");
+            error = new MediaMgrError(NS_LITERAL_STRING("InternalError"), log);
+          }
         }
       }
 
@@ -2060,6 +2065,9 @@ void MediaManager::OnDeviceChange() {
   RefPtr<MediaManager> self(this);
   NS_DispatchToMainThread(media::NewRunnableFrom([self]() mutable {
     MOZ_ASSERT(NS_IsMainThread());
+    if (sInShutdown) {
+      return NS_OK;
+    }
     self->DeviceChangeCallback::OnDeviceChange();
 
     // On some Windows machine, if we call EnumertaeRawDevices immediately after receiving

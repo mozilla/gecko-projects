@@ -109,6 +109,7 @@
 #include "nsHtml5Module.h"
 #include "nsHtml5StringParser.h"
 #include "nsHTMLDocument.h"
+#include "nsHTMLTags.h"
 #include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -161,7 +162,6 @@
 #include "nsIObserverService.h"
 #include "nsIOfflineCacheUpdate.h"
 #include "nsIParser.h"
-#include "nsIParserService.h"
 #include "nsIPermissionManager.h"
 #include "nsIPluginHost.h"
 #include "nsIRequest.h"
@@ -252,7 +252,6 @@ nsIXPConnect *nsContentUtils::sXPConnect;
 nsIScriptSecurityManager *nsContentUtils::sSecurityManager;
 nsIPrincipal *nsContentUtils::sSystemPrincipal;
 nsIPrincipal *nsContentUtils::sNullSubjectPrincipal;
-nsIParserService *nsContentUtils::sParserService = nullptr;
 nsNameSpaceManager *nsContentUtils::sNameSpaceManager;
 nsIIOService *nsContentUtils::sIOService;
 nsIUUIDGenerator *nsContentUtils::sUUIDGenerator;
@@ -444,7 +443,6 @@ static const nsAttrValue::EnumTable kAutocompleteContactFieldHintTable[] = {
 
 namespace {
 
-static NS_DEFINE_CID(kParserServiceCID, NS_PARSERSERVICE_CID);
 static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
 
 static PLDHashTable* sEventListenerManagersHash;
@@ -616,6 +614,8 @@ nsContentUtils::Init()
 
     return NS_OK;
   }
+
+  nsHTMLTags::AddRefTable();
 
   sNameSpaceManager = nsNameSpaceManager::GetInstance();
   NS_ENSURE_TRUE(sNameSpaceManager, NS_ERROR_OUT_OF_MEMORY);
@@ -1570,27 +1570,6 @@ nsContentUtils::IsUserIdle(uint32_t aRequestedIdleTimeInMS, bool* aUserIsIdle)
 }
 
 /**
- * Access a cached parser service. Don't addref. We need only one
- * reference to it and this class has that one.
- */
-/* static */
-nsIParserService*
-nsContentUtils::GetParserService()
-{
-  // XXX: This isn't accessed from several threads, is it?
-  if (!sParserService) {
-    // Lock, recheck sCachedParserService and aquire if this should be
-    // safe for multiple threads.
-    nsresult rv = CallGetService(kParserServiceCID, &sParserService);
-    if (NS_FAILED(rv)) {
-      sParserService = nullptr;
-    }
-  }
-
-  return sParserService;
-}
-
-/**
 * A helper function that parses a sandbox attribute (of an <iframe> or a CSP
 * directive) and converts it to the set of flags used internally.
 *
@@ -2156,6 +2135,8 @@ nsContentUtils::Shutdown()
 {
   sInitialized = false;
 
+  nsHTMLTags::ReleaseTable();
+
   NS_IF_RELEASE(sContentPolicyService);
   sTriedToGetContentPolicy = false;
   uint32_t i;
@@ -2168,7 +2149,6 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sSecurityManager);
   NS_IF_RELEASE(sSystemPrincipal);
   NS_IF_RELEASE(sNullSubjectPrincipal);
-  NS_IF_RELEASE(sParserService);
   NS_IF_RELEASE(sIOService);
   NS_IF_RELEASE(sUUIDGenerator);
   NS_IF_RELEASE(sLineBreaker);
@@ -2510,20 +2490,23 @@ nsContentUtils::ThreadsafeIsCallerChrome()
 bool
 nsContentUtils::IsCallerContentXBL()
 {
-    JSContext *cx = GetCurrentJSContext();
-    if (!cx)
-        return false;
+  JSContext *cx = GetCurrentJSContext();
+  if (!cx)
+    return false;
 
-    JSCompartment *c = js::GetContextCompartment(cx);
+  JS::Realm* realm = JS::GetCurrentRealmOrNull(cx);
+  if (!realm)
+    return false;
 
-    // For remote XUL, we run XBL in the XUL scope. Given that we care about
-    // compat and not security for remote XUL, just always claim to be XBL.
-    if (!xpc::AllowContentXBLScope(c)) {
-      MOZ_ASSERT(nsContentUtils::AllowXULXBLForPrincipal(xpc::GetCompartmentPrincipal(c)));
-      return true;
-    }
+  // For remote XUL, we run XBL in the XUL scope. Given that we care about
+  // compat and not security for remote XUL, just always claim to be XBL.
+  if (!xpc::AllowContentXBLScope(realm)) {
+    DebugOnly<JSCompartment*> c = JS::GetCompartmentForRealm(realm);
+    MOZ_ASSERT(nsContentUtils::AllowXULXBLForPrincipal(xpc::GetCompartmentPrincipal(c)));
+    return true;
+  }
 
-    return xpc::IsContentXBLScope(c);
+  return xpc::IsContentXBLScope(realm);
 }
 
 bool
@@ -3071,33 +3054,10 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
 
   if (htmlDocument) {
     nsHTMLDocument* htmlDoc = static_cast<nsHTMLDocument*> (htmlDocument.get());
-    // Flush our content model so it'll be up to date
-    // If this becomes unnecessary and the following line is removed,
-    // please also remove the corresponding flush operation from
-    // nsHtml5TreeBuilderCppSupplement.h. (Look for "See bug 497861." there.)
-    aContent->GetUncomposedDoc()->FlushPendingNotifications(FlushType::Content);
-
-    RefPtr<nsContentList> htmlForms = htmlDoc->GetExistingForms();
-    if (!htmlForms) {
-      // If the document doesn't have an existing forms content list, create a
-      // new one, but avoid creating a live list since we only need to use the
-      // list here and it doesn't need to listen to mutation events.
-
-      // Please keep this in sync with nsHTMLDocument::GetForms().
-      htmlForms = new nsContentList(aDocument, kNameSpaceID_XHTML,
-                                    nsGkAtoms::form, nsGkAtoms::form,
-                                    /* aDeep = */ true,
-                                    /* aLiveList = */ false);
-    }
-    RefPtr<nsContentList> htmlFormControls =
-      new nsContentList(aDocument,
-                        nsHTMLDocument::MatchFormControls,
-                        nullptr, nullptr,
-                        /* aDeep = */ true,
-                        /* aMatchAtom = */ nullptr,
-                        /* aMatchNameSpaceId = */ kNameSpaceID_None,
-                        /* aFuncMayDependOnAttr = */ true,
-                        /* aLiveList = */ false);
+    RefPtr<nsContentList> htmlForms;
+    RefPtr<nsContentList> htmlFormControls;
+    htmlDoc->GetFormsAndFormControls(getter_AddRefs(htmlForms),
+                                     getter_AddRefs(htmlFormControls));
 
     // If we have a form control and can calculate form information, use that
     // as the key - it is more reliable than just recording position in the
@@ -3754,7 +3714,9 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
 nsresult
 nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                           nsIDocument* aLoadingDocument,
-                          nsIPrincipal* aLoadingPrincipal, nsIURI* aReferrer,
+                          nsIPrincipal* aLoadingPrincipal,
+                          uint64_t aRequestContextID,
+                          nsIURI* aReferrer,
                           net::ReferrerPolicy aReferrerPolicy,
                           imgINotificationObserver* aObserver, int32_t aLoadFlags,
                           const nsAString& initiatorType,
@@ -3791,6 +3753,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                               aReferrer,            /* referrer */
                               aReferrerPolicy,      /* referrer policy */
                               aLoadingPrincipal,    /* loading principal */
+                              aRequestContextID,    /* request context ID */
                               loadGroup,            /* loadgroup */
                               aObserver,            /* imgINotificationObserver */
                               aContext,             /* loading context */
@@ -5587,7 +5550,8 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
 
     handler->OnLinkClick(aContent, aLinkURI,
                          fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
-                         fileName, nullptr, nullptr, aIsTrusted, aContent->NodePrincipal());
+                         fileName, nullptr, -1, nullptr, aIsTrusted,
+                         aContent->NodePrincipal());
   }
 }
 
@@ -9102,6 +9066,20 @@ nsContentUtils::StorageAllowedForWindow(nsPIDOMWindowInner* aWindow)
 
 // static, public
 nsContentUtils::StorageAccess
+nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
+{
+  MOZ_ASSERT(aDoc);
+
+  if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
+    nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
+    return InternalStorageAllowedForPrincipal(principal, inner);
+  }
+
+  return StorageAccess::eDeny;
+}
+
+// static, public
+nsContentUtils::StorageAccess
 nsContentUtils::StorageAllowedForPrincipal(nsIPrincipal* aPrincipal)
 {
   return InternalStorageAllowedForPrincipal(aPrincipal, nullptr);
@@ -9179,7 +9157,7 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   if (aWindow) {
     // If the document is sandboxed, then it is not permitted to use storage
     nsIDocument* document = aWindow->GetExtantDoc();
-    if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
+    if (document && document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
       return StorageAccess::eDeny;
     }
 
@@ -10447,8 +10425,11 @@ nsContentUtils::AppendNativeAnonymousChildren(
 /* static */ void
 nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
                                                       nsIPrincipal** aLoadingPrincipal,
-                                                      nsContentPolicyType& aContentPolicyType)
+                                                      nsContentPolicyType& aContentPolicyType,
+                                                      uint64_t* aRequestContextID)
 {
+  MOZ_ASSERT(aRequestContextID);
+
   // Use the serialized loadingPrincipal from the image element. Fall back
   // to mContent's principal (SystemPrincipal) if not available.
   aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
@@ -10466,6 +10447,15 @@ nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
       // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
       // indicating it's a favicon loading.
       aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
+
+      nsAutoString requestContextID;
+      aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::requestcontextid,
+                            requestContextID);
+      nsresult rv;
+      int64_t val  = requestContextID.ToInteger64(&rv);
+      *aRequestContextID = NS_SUCCEEDED(rv)
+        ? val
+        : 0;
     } else {
       // Fallback if the deserialization is failed.
       loadingPrincipal = aLoadingNode->NodePrincipal();
@@ -10660,12 +10650,12 @@ nsContentUtils::GetEventTargetByLoadInfo(nsILoadInfo* aLoadInfo, TaskCategory aC
   return target.forget();
 }
 
-/* static */ bool
-nsContentUtils::IsLocalRefURL(const nsString& aString)
-{
+namespace {
+template<class T>
+bool IsLocalRefURL(const T& aString) {
   // Find the first non-"C0 controls + space" character.
-  const char16_t* current = aString.get();
-  for (; *current != '\0'; current++) {
+  const typename T::char_type* current = aString.BeginReading();
+  for (; current != aString.EndReading(); current++) {
     if (*current > 0x20) {
       // if the first non-"C0 controls + space" character is '#', this is a
       // local-ref URL.
@@ -10674,6 +10664,19 @@ nsContentUtils::IsLocalRefURL(const nsString& aString)
   }
 
   return false;
+}
+}
+
+/* static */ bool
+nsContentUtils::IsLocalRefURL(const nsString& aString)
+{
+  return ::IsLocalRefURL(aString);
+}
+
+/* static */ bool
+nsContentUtils::IsLocalRefURL(const nsACString& aString)
+{
+  return ::IsLocalRefURL(aString);
 }
 
 // Tab ID is composed in a similar manner of Window ID.

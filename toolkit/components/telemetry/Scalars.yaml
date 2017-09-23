@@ -371,7 +371,7 @@ storage.sync.api.usage:
       This includes extensions that have not used the storage.sync API this session.
       This includes items that were not stored this session.
       This scalar is collected after every sync.
-    expires: "58"
+    expires: "64"
     kind: uint
     keyed: false
     notification_emails:
@@ -387,7 +387,7 @@ storage.sync.api.usage:
       This includes extensions that have not used the storage.sync API this session.
       This includes items that were not stored this session.
       This scalar is collected after every sync.
-    expires: "58"
+    expires: "64"
     kind: uint
     keyed: true
     notification_emails:
@@ -403,7 +403,7 @@ storage.sync.api.usage:
       This includes extensions that have not used the storage.sync API this session.
       This includes items that were not stored this session.
       This scalar is collected after every sync.
-    expires: "58"
+    expires: "64"
     kind: uint
     keyed: true
     notification_emails:
@@ -670,7 +670,7 @@ devtools.copy.unique.css.selector:
       - 1323700
       - 1352115
     description: Number of times the DevTools copy unique CSS selector has been used.
-    expires: "57"
+    expires: "59"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -684,7 +684,7 @@ devtools.copy.full.css.selector:
       - 1323700
       - 1352115
     description: Number of times the DevTools copy full CSS selector has been used.
-    expires: "57"
+    expires: "59"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -697,7 +697,7 @@ devtools.copy.xpath:
     bug_numbers:
       - 987877
     description: Number of times the DevTools copy XPath has been used.
-    expires: "58"
+    expires: "59"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -769,6 +769,21 @@ devtools.grid.showInfiniteLines:
       Number of times the DevTools grid inspector's "Extend grid lines infinitely" was checked.
     expires: never
     kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools:
+  current_theme:
+    bug_numbers:
+      - 1396811
+    description: >
+      Number of times DevTools was opened, keyed by theme.
+    expires: never
+    kind: uint
+    keyed: true
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
     release_channel_collection: opt-out
@@ -1036,6 +1051,35 @@ network.tcp:
       - ddamjanovic@mozilla.com
     record_in_processes:
       - 'main'
+
+idb.type:
+  persistent_count:
+    bug_numbers:
+      - 1360567
+    description: >
+      Number of times indexeddb.open(name, {storage: "persistent"}) has been used.
+    expires: "60"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  temporary_count:
+    bug_numbers:
+      - 1360567
+    description: >
+      Number of times indexeddb.open(name, {storage: "temporary"}) has been used.
+    expires: "60"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
 
 # The following section contains probes that record timestamps.
 timestamps:

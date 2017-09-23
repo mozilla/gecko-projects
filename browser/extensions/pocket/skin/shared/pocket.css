@@ -59,6 +59,16 @@
   margin-inline-start: 4px;
 }
 
+:root[uidensity=compact] #pocket-button-box[animate="true"] > #pocket-animatable-box {
+  /* .urlbar-icon has width 24px in this case */
+  margin-inline-start: 2px;
+}
+
+:root[uidensity=touch] #pocket-button-box[animate="true"] > #pocket-animatable-box {
+  /* .urlbar-icon has width 30px in this case */
+  margin-inline-start: 5px;
+}
+
 #pocket-button-box[animate="true"] > #pocket-animatable-box > #pocket-animatable-image,
 #pocket-button > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
   height: var(--toolbarbutton-height); /* Height must be equal to height of toolbarbutton padding-box */
@@ -197,16 +207,12 @@
   list-style-image: url("chrome://pocket-shared/skin/pocket.svg");
 }
 
-#panelMenu_pocket,
-#menu_pocket,
-#BMB_pocket {
+#panelMenu_pocket {
   list-style-image: url("chrome://pocket/content/panels/img/pocketmenuitem16.png");
 }
 
 @media (min-resolution: 2dppx) {
-  #panelMenu_pocket,
-  #menu_pocket,
-  #BMB_pocket {
+  #panelMenu_pocket {
     list-style-image: url("chrome://pocket/content/panels/img/pocketmenuitem16@2x.png");
   }
 

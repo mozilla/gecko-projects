@@ -79,14 +79,18 @@ def make_task_description(config, jobs):
             continue
 
         signing_task = None
-        for dependency in dependencies.keys():
+        for dependency in sorted(dependencies.keys()):
             if 'repackage-signing' in dependency:
                 signing_task = dependency
+                break
         signing_task_ref = '<{}>'.format(signing_task)
 
         extra = {'funsize': {'partials': list()}}
         update_number = 1
-        artifact_path = "{}{}".format(get_taskcluster_artifact_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
+        artifact_path = "{}{}".format(
+            get_taskcluster_artifact_prefix(signing_task_ref, locale=locale),
+            'target.complete.mar'
+        )
         for build in builds:
             extra['funsize']['partials'].append({
                 'locale': build_locale,
@@ -105,7 +109,7 @@ def make_task_description(config, jobs):
         worker = {
             'artifacts': _generate_task_output_files(builds.keys(), locale),
             'implementation': 'docker-worker',
-            'docker-image': {'in-tree': 'partial-update-generator'},
+            'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
             'max-run-time': 3600,
             'chain-of-trust': True,

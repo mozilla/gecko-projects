@@ -4,7 +4,6 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
-@namespace svg url("http://www.w3.org/2000/svg");
 
 :root {
   --panelui-subview-transition-duration: 150ms;
@@ -96,6 +95,11 @@ panelview:not([mainview]):not([current]) {
   visibility: collapse;
 }
 
+photonpanelmultiview panelview:not([current]) {
+  transition: none;
+  visibility: collapse;
+}
+
 panelview[mainview] > .panel-header,
 panelview:not([title]) > .panel-header {
   display: none;
@@ -178,6 +182,29 @@ tabbrowser {
 .tabbrowser-tab[tabdrop-samewindow],
 .tabbrowser-tabs[movingtab] > .tabbrowser-tab[fadein]:not([selected]) {
   transition: transform 200ms var(--animation-easing-function);
+}
+
+/* The next 3 rules allow dragging tabs slightly outside of the tabstrip
+ * to make it easier to drag tabs. */
+#TabsToolbar[movingtab] {
+  padding-bottom: 15px;
+}
+
+#TabsToolbar[movingtab] > .tabbrowser-tabs {
+  padding-bottom: 15px;
+  margin-bottom: -15px;
+}
+
+#TabsToolbar[movingtab] + #nav-bar {
+  margin-top: -15px;
+  pointer-events: none;
+}
+
+/* Allow dropping a tab on buttons with associated drop actions. */
+#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #home-button,
+#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #downloads-button,
+#TabsToolbar[movingtab] + #nav-bar > #nav-bar-customization-target > #bookmarks-menu-button {
+  pointer-events: auto;
 }
 
 .new-tab-popup,
@@ -436,9 +463,12 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-b
   display: -moz-box;
 }
 
+#personal-bookmarks {
+  position: relative;
+}
+
 #PlacesToolbarDropIndicatorHolder {
   position: absolute;
-  top: 25%;
 }
 
 #nav-bar-customization-target > #personal-bookmarks,
@@ -464,6 +494,11 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   opacity: 1 !important;
 }
 
+/* Ensure stop-button and reload-button are displayed correctly when in the overflow menu */
+.widget-overflow-list > #stop-reload-button > .toolbarbutton-1 {
+  -moz-box-flex: 1;
+}
+
 #PanelUI-feeds > .feed-toolbarbutton:-moz-locale-dir(rtl) {
   direction: rtl;
 }
@@ -471,6 +506,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 #appMenu_historyMenu > .bookmark-item,
 #appMenu-library-recentlyClosedTabs > .panel-subview-body > .bookmark-item,
 #appMenu-library-recentlyClosedWindows > .panel-subview-body > .bookmark-item,
+#appMenu-library-recentHighlights > .bookmark-item,
 #panelMenu_bookmarksMenu > .bookmark-item {
   max-width: none;
 }
@@ -504,10 +540,9 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 /* ::::: location bar & search bar ::::: */
 
-#urlbar-container {
-  min-width: 50ch;
-}
-
+/* url bar min-width is defined further down, together with the maximum size
+ * of the identity icon block, for different window sizes.
+ */
 #search-container {
   min-width: 25ch;
 }
@@ -522,6 +557,19 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 #urlbar {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
+}
+
+/* Display URLs left-to-right but right aligned in RTL mode. */
+html|input.urlbar-input:-moz-locale-dir(rtl) {
+  direction: ltr !important;
+  text-align: right !important;
+}
+
+/* Make sure that the location bar's alignment in RTL mode changes according
+   to the input box direction if the user switches the text direction using
+   cmd_switchTextDirection (which applies a dir attribute to the <input>). */
+html|input.urlbar-input[dir=ltr]:-moz-locale-dir(rtl) {
+  text-align: left !important;
 }
 
 /*
@@ -668,9 +716,9 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 }
 
 #urlbar[pageproxystate=invalid] > #page-action-buttons > .urlbar-page-action,
-#identity-box.chromeUI ~ #page-action-buttons > .urlbar-page-action,
-#urlbar[usertyping] > .urlbar-textbox-container > .urlbar-history-dropmarker,
-.urlbar-go-button[pageproxystate="valid"],
+#identity-box.chromeUI ~ #page-action-buttons > .urlbar-page-action:not(#star-button-box),
+.urlbar-history-dropmarker[usertyping],
+.urlbar-go-button:not([usertyping]),
 .urlbar-go-button:not([parentfocused="true"]),
 #urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
 #urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box,
@@ -687,39 +735,67 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
   -moz-user-focus: ignore;
 }
 
+
+/* We leave 49ch plus whatever space the download button will need when it
+ * appears. Normally this should be 16px for the icon, plus 2 * 2px padding
+ * plus the toolbarbutton-inner-padding. We're adding 4px to ensure things
+ * like rounding on hidpi don't accidentally result in the button going
+ * into overflow.
+ */
+#urlbar-container {
+  min-width: calc(49ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+}
+
+#nav-bar[downloadsbuttonshown] #urlbar-container {
+  min-width: 49ch;
+}
+
 #identity-icon-labels {
-  max-width: 18em;
+  max-width: 17em;
 }
 @media (max-width: 700px) {
   #urlbar-container {
-    min-width: 45ch;
+    min-width: calc(44ch + 24px + 2 * var(--toolbarbutton-inner-padding));
   }
-  #identity-icon-labels {
-    max-width: 70px;
+  #nav-bar[downloadsbuttonshown] #urlbar-container {
+    min-width: 44ch;
   }
-}
-@media (max-width: 600px) {
-  #urlbar-container {
-    min-width: 40ch;
-  }
+
   #identity-icon-labels {
     max-width: 60px;
   }
 }
-@media (max-width: 500px) {
+@media (max-width: 600px) {
   #urlbar-container {
-    min-width: 35ch;
+    min-width: calc(39ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+  }
+  #nav-bar[downloadsbuttonshown] #urlbar-container {
+    min-width: 39ch;
   }
   #identity-icon-labels {
     max-width: 50px;
   }
 }
-@media (max-width: 400px) {
+@media (max-width: 500px) {
   #urlbar-container {
-    min-width: 28ch;
+    min-width: calc(34ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+  }
+  #nav-bar[downloadsbuttonshown] #urlbar-container {
+    min-width: 34ch;
   }
   #identity-icon-labels {
     max-width: 40px;
+  }
+}
+@media (max-width: 400px) {
+  #urlbar-container {
+    min-width: calc(27ch + 24px + 2 * var(--toolbarbutton-inner-padding));
+  }
+  #nav-bar[downloadsbuttonshown] #urlbar-container {
+    min-width: 27ch;
+  }
+  #identity-icon-labels {
+    max-width: 30px;
   }
 }
 

@@ -18,6 +18,15 @@
 
 %include downloads/indicator.inc.css
 
+:root {
+  /* Note: Setting this to 0 (without px) breaks CSS calculations for OSX. */
+  --space-above-tabbar: 0px;
+}
+
+:root[extradragspace][tabsintitlebar]:not([inFullscreen]) {
+  --space-above-tabbar: 8px;
+}
+
 /* Toolbar / content area border */
 
 #navigator-toolbox::after {
@@ -36,7 +45,7 @@
   overflow: -moz-hidden-unscrollable;
   max-height: 4em;
   transition: min-height 170ms ease-out, max-height 170ms ease-out;
-  padding: 0 4px 1px;
+  padding: 0 6px 2px;
 }
 
 #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar)[collapsed=true] {
@@ -56,9 +65,9 @@
   min-height: 22px;
 }
 
-/* Library animation */
+/* Required for Library animation */
 
-#navigator-toolbox[animate] {
+#navigator-toolbox {
   position: relative;
 }
 
@@ -68,6 +77,22 @@
 
 #library-animatable-box[animate] {
   display: -moz-box;
+}
+
+/* Back / Forward context menu */
+
+.unified-nav-back[_moz-menuactive]:-moz-locale-dir(ltr),
+.unified-nav-forward[_moz-menuactive]:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://browser/skin/back.svg") !important;
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
+.unified-nav-forward[_moz-menuactive]:-moz-locale-dir(ltr),
+.unified-nav-back[_moz-menuactive]:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://browser/skin/forward.svg") !important;
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 /* Private browsing and accessibility indicators */
@@ -81,6 +106,10 @@
   height: 24px;
   margin-left: 8px;
   margin-right: 8px;
+  position: relative;
+  /* Need to ensure this gets positioned on top of the position:relative #navigator-toolbox
+   * in case the dark/light themes give that item a background. */
+  z-index: 1;
 }
 
 .accessibility-indicator {

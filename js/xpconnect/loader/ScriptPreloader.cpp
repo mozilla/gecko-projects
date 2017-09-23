@@ -6,6 +6,7 @@
 
 #include "ScriptPreloader-inl.h"
 #include "mozilla/ScriptPreloader.h"
+#include "mozJSComponentLoader.h"
 #include "mozilla/loader/ScriptCacheActors.h"
 
 #include "mozilla/URLPreloader.h"
@@ -600,8 +601,6 @@ ScriptPreloader::WriteCache()
 {
     MOZ_ASSERT(!NS_IsMainThread());
 
-    Unused << URLPreloader::GetSingleton().WriteCache();
-
     if (!mDataPrepared && !mSaveComplete) {
         MOZ_ASSERT(!mBlockedOnSyncDispatch);
         mBlockedOnSyncDispatch = true;
@@ -694,7 +693,10 @@ ScriptPreloader::Run()
         mal.Wait(10000);
     }
 
-    auto result = WriteCache();
+    auto result = URLPreloader::GetSingleton().WriteCache();
+    Unused << NS_WARN_IF(result.isErr());
+
+    result = WriteCache();
     Unused << NS_WARN_IF(result.isErr());
 
     result = mChildCache->WriteCache();
@@ -907,6 +909,12 @@ ScriptPreloader::DoFinishOffThreadDecode()
     MaybeFinishOffThreadDecode();
 }
 
+JSObject*
+ScriptPreloader::CompilationScope(JSContext* cx)
+{
+    return mozJSComponentLoader::Get()->CompilationScope(cx);
+}
+
 void
 ScriptPreloader::MaybeFinishOffThreadDecode()
 {
@@ -922,10 +930,10 @@ ScriptPreloader::MaybeFinishOffThreadDecode()
         DecodeNextBatch(OFF_THREAD_CHUNK_SIZE);
     });
 
-    AutoJSAPI jsapi;
-    MOZ_RELEASE_ASSERT(jsapi.Init(xpc::CompilationScope()));
-
+    AutoSafeJSAPI jsapi;
     JSContext* cx = jsapi.cx();
+
+    JSAutoCompartment ac(cx, CompilationScope(cx));
     JS::Rooted<JS::ScriptVector> jsScripts(cx, JS::ScriptVector(cx));
 
     // If this fails, we still need to mark the scripts as finished. Any that
@@ -993,9 +1001,9 @@ ScriptPreloader::DecodeNextBatch(size_t chunkSize)
         return;
     }
 
-    AutoJSAPI jsapi;
-    MOZ_RELEASE_ASSERT(jsapi.Init(xpc::CompilationScope()));
+    AutoSafeJSAPI jsapi;
     JSContext* cx = jsapi.cx();
+    JSAutoCompartment ac(cx, CompilationScope(cx));
 
     JS::CompileOptions options(cx, JSVERSION_DEFAULT);
     options.setNoScriptRval(true)

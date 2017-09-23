@@ -27,7 +27,7 @@ loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel
 // Other dependencies
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
 loader.lazyRequireGetter(this, "CommandState", "devtools/shared/gcli/command-state", true);
-loader.lazyImporter(this, "ResponsiveUIManager", "resource://devtools/client/responsivedesign/responsivedesign.jsm");
+loader.lazyRequireGetter(this, "ResponsiveUIManager", "devtools/client/responsivedesign/responsivedesign");
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 
 const {MultiLocalizationHelper} = require("devtools/shared/l10n");
@@ -210,7 +210,7 @@ Tools.styleEditor = {
   commands: "devtools/client/styleeditor/styleeditor-commands",
 
   isTargetSupported: function (target) {
-    return target.hasActor("styleEditor") || target.hasActor("styleSheets");
+    return target.hasActor("styleSheets");
   },
 
   build: function (iframeWindow, toolbox) {

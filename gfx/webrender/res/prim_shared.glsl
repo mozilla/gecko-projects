@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include rect
+
 #define EXTEND_MODE_CLAMP  0
 #define EXTEND_MODE_REPEAT 1
 
@@ -22,39 +24,8 @@ uniform sampler2DArray sSharedCacheA8;
 
 uniform sampler2D sGradients;
 
-struct RectWithSize {
-    vec2 p0;
-    vec2 size;
-};
-
-struct RectWithEndpoint {
-    vec2 p0;
-    vec2 p1;
-};
-
-RectWithEndpoint to_rect_with_endpoint(RectWithSize rect) {
-    RectWithEndpoint result;
-    result.p0 = rect.p0;
-    result.p1 = rect.p0 + rect.size;
-
-    return result;
-}
-
-RectWithSize to_rect_with_size(RectWithEndpoint rect) {
-    RectWithSize result;
-    result.p0 = rect.p0;
-    result.size = rect.p1 - rect.p0;
-
-    return result;
-}
-
 vec2 clamp_rect(vec2 point, RectWithSize rect) {
     return clamp(point, rect.p0, rect.p0 + rect.size);
-}
-
-RectWithSize intersect_rect(RectWithSize a, RectWithSize b) {
-    vec4 p = clamp(vec4(a.p0, a.p0 + a.size), b.p0.xyxy, b.p0.xyxy + b.size.xyxy);
-    return RectWithSize(p.xy, max(vec2(0.0), p.zw - p.xy));
 }
 
 float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
@@ -85,16 +56,16 @@ uniform HIGHP_SAMPLER_FLOAT sampler2D sResourceCache;
 
 vec4[2] fetch_from_resource_cache_2_direct(ivec2 address) {
     return vec4[2](
-        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0))
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(1, 0))
     );
 }
 
 vec4[2] fetch_from_resource_cache_2(int address) {
     ivec2 uv = get_resource_cache_uv(address);
     return vec4[2](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0))
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(1, 0))
     );
 }
 
@@ -124,42 +95,42 @@ in ivec4 aData1;
 vec4[8] fetch_from_resource_cache_8(int address) {
     ivec2 uv = get_resource_cache_uv(address);
     return vec4[8](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(4, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(5, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(6, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(7, 0))
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(1, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(2, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(3, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(4, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(5, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(6, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(7, 0))
     );
 }
 
 vec4[3] fetch_from_resource_cache_3(int address) {
     ivec2 uv = get_resource_cache_uv(address);
     return vec4[3](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0))
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(1, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(2, 0))
     );
 }
 
 vec4[4] fetch_from_resource_cache_4_direct(ivec2 address) {
     return vec4[4](
-        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(3, 0))
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(1, 0)),
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(2, 0)),
+        TEXEL_FETCH(sResourceCache, address, 0, ivec2(3, 0))
     );
 }
 
 vec4[4] fetch_from_resource_cache_4(int address) {
     ivec2 uv = get_resource_cache_uv(address);
     return vec4[4](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0))
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(0, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(1, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(2, 0)),
+        TEXEL_FETCH(sResourceCache, uv, 0, ivec2(3, 0))
     );
 }
 
@@ -189,17 +160,17 @@ Layer fetch_layer(int index) {
     ivec2 uv0 = ivec2(uv.x + 0, uv.y);
     ivec2 uv1 = ivec2(uv.x + 8, uv.y);
 
-    layer.transform[0] = texelFetchOffset(sLayers, uv0, 0, ivec2(0, 0));
-    layer.transform[1] = texelFetchOffset(sLayers, uv0, 0, ivec2(1, 0));
-    layer.transform[2] = texelFetchOffset(sLayers, uv0, 0, ivec2(2, 0));
-    layer.transform[3] = texelFetchOffset(sLayers, uv0, 0, ivec2(3, 0));
+    layer.transform[0] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(0, 0));
+    layer.transform[1] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(1, 0));
+    layer.transform[2] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(2, 0));
+    layer.transform[3] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(3, 0));
 
-    layer.inv_transform[0] = texelFetchOffset(sLayers, uv0, 0, ivec2(4, 0));
-    layer.inv_transform[1] = texelFetchOffset(sLayers, uv0, 0, ivec2(5, 0));
-    layer.inv_transform[2] = texelFetchOffset(sLayers, uv0, 0, ivec2(6, 0));
-    layer.inv_transform[3] = texelFetchOffset(sLayers, uv0, 0, ivec2(7, 0));
+    layer.inv_transform[0] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(4, 0));
+    layer.inv_transform[1] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(5, 0));
+    layer.inv_transform[2] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(6, 0));
+    layer.inv_transform[3] = TEXEL_FETCH(sLayers, uv0, 0, ivec2(7, 0));
 
-    vec4 clip_rect = texelFetchOffset(sLayers, uv1, 0, ivec2(0, 0));
+    vec4 clip_rect = TEXEL_FETCH(sLayers, uv1, 0, ivec2(0, 0));
     layer.local_clip_rect = RectWithSize(clip_rect.xy, clip_rect.zw);
 
     return layer;
@@ -216,9 +187,9 @@ RenderTaskData fetch_render_task(int index) {
 
     ivec2 uv = get_fetch_uv(index, VECS_PER_RENDER_TASK);
 
-    task.data0 = texelFetchOffset(sRenderTasks, uv, 0, ivec2(0, 0));
-    task.data1 = texelFetchOffset(sRenderTasks, uv, 0, ivec2(1, 0));
-    task.data2 = texelFetchOffset(sRenderTasks, uv, 0, ivec2(2, 0));
+    task.data0 = TEXEL_FETCH(sRenderTasks, uv, 0, ivec2(0, 0));
+    task.data1 = TEXEL_FETCH(sRenderTasks, uv, 0, ivec2(1, 0));
+    task.data2 = TEXEL_FETCH(sRenderTasks, uv, 0, ivec2(2, 0));
 
     return task;
 }
@@ -238,23 +209,6 @@ AlphaBatchTask fetch_alpha_batch_task(int index) {
     task.size = data.data0.zw;
     task.screen_space_origin = data.data1.xy;
     task.render_target_layer_index = data.data1.z;
-
-    return task;
-}
-
-struct ReadbackTask {
-    vec2 render_target_origin;
-    vec2 size;
-    float render_target_layer_index;
-};
-
-ReadbackTask fetch_readback_task(int index) {
-    RenderTaskData data = fetch_render_task(index);
-
-    ReadbackTask task;
-    task.render_target_origin = data.data0.xy;
-    task.size = data.data0.zw;
-    task.render_target_layer_index = data.data1.x;
 
     return task;
 }
@@ -327,7 +281,9 @@ Glyph fetch_glyph(int specific_prim_address,
                         glyph_index / 2;
     vec4 data = fetch_from_resource_cache_1(glyph_address);
     // Select XY or ZW based on glyph index.
-    vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 == 1));
+    // We use "!= 0" instead of "== 1" here in order to work around a driver
+    // bug with equality comparisons on integers.
+    vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 != 0));
 
     // In subpixel mode, the subpixel offset has already been
     // accounted for while rasterizing the glyph.
@@ -335,19 +291,18 @@ Glyph fetch_glyph(int specific_prim_address,
         case SUBPX_DIR_NONE:
             break;
         case SUBPX_DIR_HORIZONTAL:
-            glyph.x = trunc(glyph.x);
+            // Glyphs positioned [-0.125, 0.125] get a
+            // subpx position of zero. So include that
+            // offset in the glyph position to ensure
+            // we round to the correct whole position.
+            glyph.x = floor(glyph.x + 0.125);
             break;
         case SUBPX_DIR_VERTICAL:
-            glyph.y = trunc(glyph.y);
+            glyph.y = floor(glyph.y + 0.125);
             break;
     }
 
     return Glyph(glyph);
-}
-
-RectWithSize fetch_instance_geometry(int address) {
-    vec4 data = fetch_from_resource_cache_1(address);
-    return RectWithSize(data.xy, data.zw);
 }
 
 struct PrimitiveInstance {
@@ -710,17 +665,6 @@ TextShadow fetch_text_shadow(int address) {
     return TextShadow(data[0], data[1].xy, data[1].z);
 }
 
-struct Line {
-    vec4 color;
-    float style;
-    float orientation;
-};
-
-Line fetch_line(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return Line(data[0], data[1].x, data[1].y);
-}
-
 struct TextRun {
     vec4 color;
     vec2 offset;
@@ -741,15 +685,6 @@ struct Image {
 Image fetch_image(int address) {
     vec4 data[2] = fetch_from_resource_cache_2(address);
     return Image(data[0], data[1]);
-}
-
-struct YuvImage {
-    vec2 size;
-};
-
-YuvImage fetch_yuv_image(int address) {
-    vec4 data = fetch_from_resource_cache_1(address);
-    return YuvImage(data.xy);
 }
 
 struct BoxShadow {

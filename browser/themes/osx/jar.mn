@@ -11,8 +11,6 @@ browser.jar:
 * skin/classic/browser/browser.css
 * skin/classic/browser/compacttheme.css
   skin/classic/browser/subtle-pattern.png
-  skin/classic/browser/menu-back.png
-  skin/classic/browser/menu-forward.png
   skin/classic/browser/menuPanel-customize.png
   skin/classic/browser/menuPanel-customize@2x.png
   skin/classic/browser/menuPanel-exit.png
@@ -83,9 +81,7 @@ browser.jar:
   skin/classic/browser/yosemite/menuPanel-exit@2x.png                  (menuPanel-exit-yosemite@2x.png)
   skin/classic/browser/yosemite/menuPanel-help.png                     (menuPanel-help-yosemite.png)
   skin/classic/browser/yosemite/menuPanel-help@2x.png                  (menuPanel-help-yosemite@2x.png)
-#ifdef E10S_TESTING_ONLY
-  skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
-#endif
+  skin/classic/browser/e10s-64@2x.png                                  (../shared/e10s-64@2x.png)
 
 [extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}] chrome.jar:
 % override chrome://browser/skin/feeds/audioFeedIcon.png                   chrome://browser/skin/feeds/feedIcon.png

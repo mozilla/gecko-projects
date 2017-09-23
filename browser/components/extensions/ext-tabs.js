@@ -438,7 +438,10 @@ this.tabs = class extends ExtensionAPI {
               return Promise.reject({message: `Illegal URL: ${url}`});
             }
 
-            nativeTab.linkedBrowser.loadURI(url);
+            let flags = updateProperties.loadReplace
+              ? Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY
+              : Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
+            nativeTab.linkedBrowser.loadURIWithFlags(url, {flags});
           }
 
           if (updateProperties.active !== null) {
@@ -731,9 +734,7 @@ this.tabs = class extends ExtensionAPI {
             // For non-remote browsers, this event is dispatched on the document
             // rather than on the <browser>.
             if (browser instanceof Ci.nsIDOMDocument) {
-              browser = browser.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIDocShell)
-                               .chromeEventHandler;
+              browser = browser.docShell.chromeEventHandler;
             }
 
             let {gBrowser} = browser.ownerGlobal;

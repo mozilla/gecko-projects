@@ -26,6 +26,9 @@ const char* mozilla::dom::ContentPrefs::gInitPrefs[] = {
   "browser.dom.window.dump.enabled",
   "browser.sessionhistory.max_entries",
   "browser.sessionhistory.max_total_viewers",
+#if defined(NIGHTLY_BUILD) || defined(DEBUG)
+  "browser.startup.record",
+#endif
   "content.cors.disable",
   "content.cors.no_private_data",
   "content.notify.backoffcount",
@@ -117,6 +120,7 @@ const char* mozilla::dom::ContentPrefs::gInitPrefs[] = {
   "javascript.options.wasm_ionjit",
   "javascript.options.werror",
   "javascript.use_us_english_locale",
+  "jsloader.shareGlobal",
   "layout.idle_period.required_quiescent_frames",
   "layout.idle_period.time_limit",
   "layout.interruptible-reflow.enabled",

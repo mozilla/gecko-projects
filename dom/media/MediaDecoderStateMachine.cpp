@@ -34,6 +34,7 @@
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
 #include "nsIEventTarget.h"
+#include "nsIMemoryReporter.h"
 #include "nsITimer.h"
 #include "nsPrintfCString.h"
 #include "nsTArray.h"
@@ -3787,11 +3788,10 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void* operator()(void* aObject)
+  virtual void operator()(void* aObject)
   {
     const VideoData* v = static_cast<const VideoData*>(aObject);
     mSize += v->SizeOfIncludingThis(MallocSizeOf);
-    return nullptr;
   }
 
   size_t mSize;
@@ -3807,11 +3807,10 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void* operator()(void* aObject)
+  virtual void operator()(void* aObject)
   {
     const AudioData* audioData = static_cast<const AudioData*>(aObject);
     mSize += audioData->SizeOfIncludingThis(MallocSizeOf);
-    return nullptr;
   }
 
   size_t mSize;

@@ -1648,6 +1648,7 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
   }
 
   mSheet->SetSourceMapURLFromComment(scanner.GetSourceMapURL());
+  mSheet->SetSourceURL(scanner.GetSourceURL());
   ReleaseScanner();
 
   mParsingMode = css::eAuthorSheetFeatures;
@@ -9451,13 +9452,6 @@ CSSParserImpl::ParseGrid()
     return true;
   }
 
-  // https://drafts.csswg.org/css-grid/#grid-shorthand
-  // "Also, the gutter properties are reset by this shorthand,
-  //  even though they can't be set by it."
-  value.SetFloatValue(0.0f, eCSSUnit_Pixel);
-  AppendValue(eCSSProperty_grid_row_gap, value);
-  AppendValue(eCSSProperty_grid_column_gap, value);
-
   // [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
   auto res = ParseGridShorthandAutoProps(NS_STYLE_GRID_AUTO_FLOW_ROW);
   if (res == CSSParseResult::Error) {
@@ -11808,7 +11802,6 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
     return ParsePaintOrder();
   case eCSSProperty_scroll_snap_type:
     return ParseScrollSnapType();
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
   case eCSSProperty_mask:
     return ParseImageLayers(nsStyleImageLayers::kMaskLayerTable);
   case eCSSProperty_mask_repeat:
@@ -11821,7 +11814,6 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
                aPropID == eCSSProperty_mask_position_x);
   case eCSSProperty_mask_size:
     return ParseImageLayerSize(eCSSProperty_mask_size);
-#endif
   case eCSSProperty__webkit_text_stroke:
     return ParseWebkitTextStroke();
   case eCSSProperty_all:
@@ -16437,13 +16429,6 @@ CSSParserImpl::ParseClipPath(nsCSSValue& aValue)
 {
   if (ParseSingleTokenVariant(aValue, VARIANT_HUO, nullptr)) {
     return true;
-  }
-
-  if (!nsLayoutUtils::CSSClipPathShapesEnabled()) {
-    // With CSS Clip Path Shapes disabled, we should only accept
-    // SVG clipPath reference and none.
-    REPORT_UNEXPECTED_TOKEN(PEExpectedNoneOrURL);
-    return false;
   }
 
   return ParseReferenceBoxAndBasicShape(

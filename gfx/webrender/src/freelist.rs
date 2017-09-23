@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::marker::PhantomData;
+use util::recycle_vec;
 
 // TODO(gw): Add an occupied list head, for fast
 //           iteration of the occupied list to implement
@@ -14,7 +15,28 @@ struct Epoch(u32);
 #[derive(Debug)]
 pub struct FreeListHandle<T> {
     index: u32,
+    epoch: Epoch,
     _marker: PhantomData<T>,
+}
+
+impl<T> FreeListHandle<T> {
+    pub fn weak(&self) -> WeakFreeListHandle<T> {
+        WeakFreeListHandle {
+            index: self.index,
+            epoch: self.epoch,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Clone for WeakFreeListHandle<T> {
+    fn clone(&self) -> WeakFreeListHandle<T> {
+        WeakFreeListHandle {
+            index: self.index,
+            epoch: self.epoch,
+            _marker: PhantomData,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -48,20 +70,21 @@ impl<T> FreeList<T> {
         }
     }
 
+    pub fn recycle(self) -> FreeList<T> {
+        FreeList {
+            slots: recycle_vec(self.slots),
+            free_list_head: None,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn get(&self, id: &FreeListHandle<T>) -> &T {
-        self.slots[id.index as usize]
-            .value
-            .as_ref()
-            .unwrap()
+        self.slots[id.index as usize].value.as_ref().unwrap()
     }
 
     #[allow(dead_code)]
     pub fn get_mut(&mut self, id: &FreeListHandle<T>) -> &mut T {
-        self.slots[id.index as usize]
-            .value
-            .as_mut()
-            .unwrap()
+        self.slots[id.index as usize].value.as_mut().unwrap()
     }
 
     pub fn get_opt(&self, id: &WeakFreeListHandle<T>) -> Option<&T> {
@@ -82,22 +105,11 @@ impl<T> FreeList<T> {
         }
     }
 
-    pub fn create_weak_handle(&self, id: &FreeListHandle<T>) -> WeakFreeListHandle<T> {
-        let slot = &self.slots[id.index as usize];
-        WeakFreeListHandle {
-            index: id.index,
-            epoch: slot.epoch,
-            _marker: PhantomData,
-        }
-    }
-
     // Perform a database style UPSERT operation. If the provided
     // handle is a valid entry, update the value and return the
     // previous data. If the provided handle is invalid, then
     // insert the data into a new slot and return the new handle.
-    pub fn upsert(&mut self,
-                  id: &WeakFreeListHandle<T>,
-                  data: T) -> UpsertResult<T> {
+    pub fn upsert(&mut self, id: &WeakFreeListHandle<T>, data: T) -> UpsertResult<T> {
         if self.slots[id.index as usize].epoch == id.epoch {
             let slot = &mut self.slots[id.index as usize];
             let result = UpsertResult::Updated(slot.value.take().unwrap());
@@ -120,20 +132,23 @@ impl<T> FreeList<T> {
 
                 FreeListHandle {
                     index: free_index,
+                    epoch: slot.epoch,
                     _marker: PhantomData,
                 }
             }
             None => {
                 let index = self.slots.len() as u32;
+                let epoch = Epoch(0);
 
                 self.slots.push(Slot {
                     next: None,
-                    epoch: Epoch(0),
+                    epoch,
                     value: Some(item),
                 });
 
                 FreeListHandle {
                     index,
+                    epoch,
                     _marker: PhantomData,
                 }
             }

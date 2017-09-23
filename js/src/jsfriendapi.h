@@ -1005,11 +1005,11 @@ IsObjectInContextCompartment(JSObject* obj, const JSContext* cx);
 
 /*
  * NB: keep these in sync with the copy in builtin/SelfHostingDefines.h.
- * The first three are omitted because they shouldn't be used in new code.
+ * The first two are omitted because they shouldn't be used in new code.
  */
 #define JSITER_ENUMERATE  0x1   /* for-in compatible hidden default iterator */
 #define JSITER_FOREACH    0x2   /* get obj[key] for each property */
-#define JSITER_KEYVALUE   0x4   /* obsolete destructuring for-in wants [key, value] */
+/* 0x4 is no longer used */
 #define JSITER_OWNONLY    0x8   /* iterate over obj's own properties only */
 #define JSITER_HIDDEN     0x10  /* also enumerate non-enumerable properties */
 #define JSITER_SYMBOLS    0x20  /* also include symbol property keys */
@@ -1052,6 +1052,9 @@ MOZ_ALWAYS_INLINE bool
 CheckRecursionLimit(JSContext* cx, uintptr_t limit)
 {
     int stackDummy;
+
+    JS_STACK_OOM_POSSIBLY_FAIL_REPORT();
+
     if (!JS_CHECK_STACK_SIZE(limit, &stackDummy)) {
         ReportOverRecursed(cx);
         return false;
@@ -1063,12 +1066,17 @@ MOZ_ALWAYS_INLINE bool
 CheckRecursionLimitDontReport(JSContext* cx, uintptr_t limit)
 {
     int stackDummy;
+
+    JS_STACK_OOM_POSSIBLY_FAIL();
+
     return JS_CHECK_STACK_SIZE(limit, &stackDummy);
 }
 
 MOZ_ALWAYS_INLINE bool
 CheckRecursionLimit(JSContext* cx)
 {
+    JS_STACK_OOM_POSSIBLY_FAIL_REPORT();
+
     // GetNativeStackLimit(cx) is pretty slow because it has to do an uninlined
     // call to RunningWithTrustedPrincipals to determine which stack limit to
     // use. To work around this, check the untrusted limit first to avoid the
@@ -1088,12 +1096,16 @@ CheckRecursionLimitDontReport(JSContext* cx)
 MOZ_ALWAYS_INLINE bool
 CheckRecursionLimitWithStackPointerDontReport(JSContext* cx, void* sp)
 {
+    JS_STACK_OOM_POSSIBLY_FAIL();
+
     return JS_CHECK_STACK_SIZE(GetNativeStackLimit(cx), sp);
 }
 
 MOZ_ALWAYS_INLINE bool
 CheckRecursionLimitWithStackPointer(JSContext* cx, void* sp)
 {
+    JS_STACK_OOM_POSSIBLY_FAIL_REPORT();
+
     if (!JS_CHECK_STACK_SIZE(GetNativeStackLimit(cx), sp)) {
         ReportOverRecursed(cx);
         return false;
@@ -2887,6 +2899,70 @@ SetPropertyIgnoringNamedGetter(JSContext* cx, JS::HandleObject obj, JS::HandleId
 extern JS_FRIEND_API(bool)
 ExecuteInGlobalAndReturnScope(JSContext* cx, JS::HandleObject obj, JS::HandleScript script,
                               JS::MutableHandleObject scope);
+
+// These functions are provided for the JSM component loader in Gecko.
+//
+// A 'JSMEnvironment' refers to an environment chain constructed for JSM loading
+// in a shared global. Internally it is a NonSyntacticVariablesObject with a
+// corresponding extensible LexicalEnvironmentObject that is accessible by
+// JS_ExtensibleLexicalEnvironment. The |this| value of that lexical environment
+// is the NSVO itself.
+//
+// Normal global environment (ES6):     JSM "global" environment:
+//
+//                                      * - extensible lexical environment
+//                                      |   (code runs in this environment;
+//                                      |    `let/const` bindings go here)
+//                                      |
+//                                      * - JSMEnvironment (=== `this`)
+//                                      |   (`var` bindings go here)
+//                                      |
+// * - extensible lexical environment   * - extensible lexical environment
+// |   (code runs in this environment;  |   (empty)
+// |    `let/const` bindings go here)   |
+// |                                    |
+// * - actual global (=== `this`)       * - shared JSM global
+//     (var bindings go here; and           (Object, Math, etc. live here)
+//      Object, Math, etc. live here)
+
+// Allocate a new environment in current compartment that is compatible with JSM
+// shared loading.
+extern JS_FRIEND_API(JSObject*)
+NewJSMEnvironment(JSContext* cx);
+
+// Execute the given script (copied into compartment if necessary) in the given
+// JSMEnvironment. The script must have been compiled for hasNonSyntacticScope.
+// The |jsmEnv| must have been previously allocated by NewJSMEnvironment.
+//
+// NOTE: The associated extensible lexical environment is reused.
+extern JS_FRIEND_API(bool)
+ExecuteInJSMEnvironment(JSContext* cx, JS::HandleScript script, JS::HandleObject jsmEnv);
+
+// Additionally, target objects may be specified as required by the Gecko
+// subscript loader. These are wrapped in non-syntactic WithEnvironments and
+// temporarily placed on environment chain.
+//
+// See also: JS::CloneAndExecuteScript(...)
+extern JS_FRIEND_API(bool)
+ExecuteInJSMEnvironment(JSContext* cx, JS::HandleScript script, JS::HandleObject jsmEnv,
+                        JS::AutoObjectVector& targetObj);
+
+// Used by native methods to determine the JSMEnvironment of caller if possible
+// by looking at stack frames. Returns nullptr if top frame isn't a scripted
+// caller in a JSM.
+//
+// NOTE: This may find NonSyntacticVariablesObject generated by other embedding
+// such as a Gecko FrameScript. Caller can check the compartment if needed.
+extern JS_FRIEND_API(JSObject*)
+GetJSMEnvironmentOfScriptedCaller(JSContext* cx);
+
+// Determine if obj is a JSMEnvironment
+//
+// NOTE: This may return true for an NonSyntacticVariablesObject generated by
+// other embedding such as a Gecko FrameScript. Caller can check compartment.
+extern JS_FRIEND_API(bool)
+IsJSMEnvironment(JSObject* obj);
+
 
 #if defined(XP_WIN) && defined(_WIN64)
 // Parameters use void* types to avoid #including windows.h. The return value of

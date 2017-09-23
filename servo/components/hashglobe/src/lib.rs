@@ -8,8 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-pub use std::*;
-
 extern crate heapsize;
 
 mod alloc;
@@ -33,6 +31,13 @@ trait Recover<Q: ?Sized> {
 #[derive(Debug)]
 pub struct FailedAllocationError {
     reason: &'static str,
+}
+
+impl FailedAllocationError {
+    #[inline]
+    pub fn new(reason: &'static str) -> Self {
+        Self { reason }
+    }
 }
 
 impl error::Error for FailedAllocationError {

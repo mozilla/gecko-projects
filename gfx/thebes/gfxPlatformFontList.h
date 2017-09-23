@@ -20,6 +20,7 @@
 #include "nsIMemoryReporter.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/RangedArray.h"
 #include "nsLanguageAtomService.h"
 
@@ -484,7 +485,9 @@ protected:
     void GetPrefsAndStartLoader();
 
     // for font list changes that affect all documents
-    void ForceGlobalReflow();
+    void ForceGlobalReflow() {
+        gfxPlatform::ForceGlobalReflow();
+    }
 
     void RebuildLocalFonts();
 
@@ -515,6 +518,9 @@ protected:
     // Platform-specific helper for GetDefaultFont(...).
     virtual gfxFontFamily*
     GetDefaultFontForPlatform(const gfxFontStyle* aStyle) = 0;
+
+    // Protects mFontFamilies.
+    mozilla::Mutex mFontFamiliesMutex;
 
     // canonical family name ==> family entry (unique, one name per family entry)
     FontFamilyTable mFontFamilies;

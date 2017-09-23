@@ -60,6 +60,12 @@ struct CompileArgs : ShareableBase<CompileArgs>
 typedef RefPtr<CompileArgs> MutableCompileArgs;
 typedef RefPtr<const CompileArgs> SharedCompileArgs;
 
+// Return the estimated compiled (machine) code size for the given bytecode size
+// compiled at the given tier.
+
+double
+EstimateCompiledCodeSize(Tier tier, size_t bytecodeSize);
+
 // Compile the given WebAssembly bytecode with the given arguments into a
 // wasm::Module. On success, the Module is returned. On failure, the returned
 // SharedModule pointer is null and either:
@@ -74,31 +80,6 @@ CompileInitialTier(const ShareableBytes& bytecode, const CompileArgs& args, Uniq
 
 bool
 CompileTier2(Module& module, const CompileArgs& args, Atomic<bool>* cancelled);
-
-// Select whether debugging is available based on the available compilers, the
-// configuration options, and the nature of the module.  Note debugging can be
-// unavailable even if selected, if Rabaldr is unavailable or the module is not
-// compilable by Rabaldr.
-
-bool
-GetDebugEnabled(const CompileArgs& args, ModuleKind kind = ModuleKind::Wasm);
-
-// Select the mode for the initial compilation of a module.  The mode is "Tier1"
-// precisely if both compilers are available, we're not debugging, and it is
-// possible to compile in the background, and in that case, we'll compile twice,
-// with the mode set to "Tier2" during the second (background) compilation.
-// Otherwise, the tier is "Once" and we'll compile once, with the appropriate
-// compiler.
-
-CompileMode
-GetInitialCompileMode(const CompileArgs& args, ModuleKind kind = ModuleKind::Wasm);
-
-// Select the tier for a compilation.  The tier is Tier::Baseline if we're
-// debugging, if Baldr is not available, or if both compilers are are available
-// and the compileMode is Tier1; otherwise the tier is Tier::Ion.
-
-Tier
-GetTier(const CompileArgs& args, CompileMode compileMode, ModuleKind kind = ModuleKind::Wasm);
 
 }  // namespace wasm
 }  // namespace js

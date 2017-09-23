@@ -8,6 +8,7 @@
 #define WMFVideoMFTManager_h_
 
 #include "MFTDecoder.h"
+#include "MediaResult.h"
 #include "WMF.h"
 #include "WMFMediaDataDecoder.h"
 #include "mozilla/Atomics.h"
@@ -25,10 +26,11 @@ public:
   WMFVideoMFTManager(const VideoInfo& aConfig,
                      layers::KnowsCompositor* aKnowsCompositor,
                      layers::ImageContainer* aImageContainer,
+                     float aFramerate,
                      bool aDXVAEnabled);
   ~WMFVideoMFTManager();
 
-  bool Init();
+  MediaResult Init();
 
   HRESULT Input(MediaRawData* aSample) override;
 
@@ -63,11 +65,11 @@ public:
   }
 
 private:
-  bool ValidateVideoInfo();
+  MediaResult ValidateVideoInfo();
 
   bool InitializeDXVA();
 
-  bool InitInternal();
+  MediaResult InitInternal();
 
   HRESULT CreateBasicVideoFrame(IMFSample* aSample,
                                 int64_t aStreamOffset,
@@ -79,7 +81,7 @@ private:
 
   HRESULT SetDecoderMediaTypes();
 
-  bool CanUseDXVA(IMFMediaType* aType);
+  bool CanUseDXVA(IMFMediaType* aType, float aFramerate);
 
   already_AddRefed<MFTDecoder> LoadAMDVP9Decoder();
 
@@ -122,6 +124,7 @@ private:
   bool mIMFUsable = false;
   bool mCheckForAMDDecoder = true;
   Atomic<bool> mAMDVP9InUse;
+  const float mFramerate;
 };
 
 } // namespace mozilla

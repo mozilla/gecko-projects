@@ -10,6 +10,7 @@ complexities of worker implementations, scopes, and treeherder annotations.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import time
 from copy import deepcopy
 
 from mozbuild.util import memoize
+from mozbuild import schedules
 from taskgraph.util.attributes import TRUNK_PROJECTS
 from taskgraph.util.hash import hash_path
 from taskgraph.util.treeherder import split_symbol
@@ -54,6 +56,9 @@ task_description_schema = Schema({
 
     # attributes for this task
     Optional('attributes'): {basestring: object},
+
+    # relative path (from config.path) to the file task was defined in
+    Optional('job-from'): basestring,
 
     # dependencies of this task, keyed by name; these are passed through
     # verbatim and subject to the interpretation of the Task's get_dependencies
@@ -142,22 +147,47 @@ task_description_schema = Schema({
     # See the attributes documentation for details.
     Optional('run-on-projects'): [basestring],
 
-    # If the task can be coalesced, this is the name used in the coalesce key
-    # the project, etc. will be added automatically.  Note that try (level 1)
-    # tasks are never coalesced
-    Optional('coalesce-name'): basestring,
+    # Coalescing provides the facility for tasks to be superseded by the same
+    # task in a subsequent commit, if the current task backlog reaches an
+    # explicit threshold. Both age and size thresholds need to be met in order
+    # for coalescing to be triggered.
+    Optional('coalesce'): {
+        # A unique identifier per job (typically a hash of the job label) in
+        # order to partition tasks into appropriate sets for coalescing. This
+        # is combined with the project in order to generate a unique coalescing
+        # key for the coalescing service.
+        'job-identifier': basestring,
 
-    # Optimizations to perform on this task during the optimization phase,
-    # specified in order.  These optimizations are defined in
-    # taskcluster/taskgraph/optimize.py.
-    Optional('optimizations'): [Any(
-        # search the index for the given index namespace, and replace this task if found
-        ['index-search', basestring],
+        # The minimum amount of time in seconds between two pending tasks with
+        # the same coalescing key, before the coalescing service will return
+        # tasks.
+        'age': int,
+
+        # The minimum number of backlogged tasks with the same coalescing key,
+        # before the coalescing service will return tasks.
+        'size': int,
+    },
+
+    # Optimization to perform on this task during the optimization phase.
+    # Optimizations are defined in taskcluster/taskgraph/optimize.py.
+    Required('optimization', default=None): Any(
+        # always run this task (default)
+        None,
+        # search the index for the given index namespaces, and replace this task if found
+        # the search occurs in order, with the first match winning
+        {'index-search': [basestring]},
         # consult SETA and skip this task if it is low-value
-        ['seta'],
+        {'seta': None},
         # skip this task if none of the given file patterns match
-        ['skip-unless-changed', [basestring]],
-    )],
+        {'skip-unless-changed': [basestring]},
+        # skip this task if unless the change files' SCHEDULES contains any of these components
+        {'skip-unless-schedules': list(schedules.ALL_COMPONENTS)},
+        # skip if SETA or skip-unless-schedules says to
+        {'skip-unless-schedules-or-seta': list(schedules.ALL_COMPONENTS)},
+        # only run this task if its dependencies will run (useful for follow-on tasks that
+        # are unnecessary if the parent tasks are not run)
+        {'only-if-dependencies-run': None}
+    ),
 
     # the provisioner-id/worker-type for the task.  The following parameters will
     # be substituted in this string:
@@ -510,9 +540,8 @@ GROUP_NAMES = {
     'pub': 'APK publishing',
     'p': 'Partial generation',
     'ps': 'Partials signing',
-    'pBM': 'Beetmover for partials',
-    'cp-Up': 'Balrog submission of updates, completes and partials',
 }
+
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
 V2_ROUTE_TEMPLATES = [
@@ -547,7 +576,8 @@ TREEHERDER_ROUTE_ROOTS = {
     'staging': 'tc-treeherder-stage',
 }
 
-COALESCE_KEY = 'builds.{project}.{name}'
+COALESCE_KEY = '{project}.{job-identifier}'
+SUPERSEDER_URL = 'https://coalesce.mozilla-releng.net/v1/list/{age}/{size}/{key}'
 
 DEFAULT_BRANCH_PRIORITY = 'low'
 BRANCH_PRIORITIES = {
@@ -604,6 +634,24 @@ def index_builder(name):
         index_builders[name] = func
         return func
     return wrap
+
+
+def coalesce_key(config, task):
+    return COALESCE_KEY.format(**{
+               'project': config.params['project'],
+               'job-identifier': task['coalesce']['job-identifier'],
+           })
+
+
+def superseder_url(config, task):
+    key = coalesce_key(config, task)
+    age = task['coalesce']['age']
+    size = task['coalesce']['size']
+    return SUPERSEDER_URL.format(
+        age=age,
+        size=size,
+        key=key
+    )
 
 
 @payload_builder('docker-worker')
@@ -704,7 +752,17 @@ def build_docker_worker_payload(config, task, task_def):
             }
         payload['artifacts'] = artifacts
 
-    run_task = payload.get('command', [''])[0].endswith('run-task')
+    if isinstance(worker.get('docker-image'), basestring):
+        out_of_tree_image = worker['docker-image']
+    else:
+        out_of_tree_image = None
+
+    run_task = any([
+        payload.get('command', [''])[0].endswith('run-task'),
+        # image_builder is special and doesn't get detected like other tasks.
+        # It uses run-task so it needs our cache manipulations.
+        (out_of_tree_image or '').startswith('taskcluster/image_builder'),
+    ])
 
     if 'caches' in worker:
         caches = {}
@@ -716,9 +774,26 @@ def build_docker_worker_payload(config, task, task_def):
         # So, any time run-task changes, we should get a fresh set of caches.
         # This means run-task can make changes to cache interaction at any time
         # without regards for backwards or future compatibility.
-
+        #
+        # But this mechanism only works for in-tree Docker images that are built
+        # with the current run-task! For out-of-tree Docker images, we have no
+        # way of knowing their content of run-task. So, in addition to varying
+        # cache names by the contents of run-task, we also take the Docker image
+        # name into consideration. This means that different Docker images will
+        # never share the same cache. This is a bit unfortunate. But it is the
+        # safest thing to do. Fortunately, most images are defined in-tree.
+        #
+        # For out-of-tree Docker images, we don't strictly need to incorporate
+        # the run-task content into the cache name. However, doing so preserves
+        # the mechanism whereby changing run-task results in new caches
+        # everywhere.
         if run_task:
             suffix = '-%s' % _run_task_suffix()
+
+            if out_of_tree_image:
+                name_hash = hashlib.sha256(out_of_tree_image).hexdigest()
+                suffix += name_hash[0:12]
+
         else:
             suffix = ''
 
@@ -755,11 +830,8 @@ def build_docker_worker_payload(config, task, task_def):
         payload['capabilities'] = capabilities
 
     # coalesce / superseding
-    if 'coalesce-name' in task and level > 1:
-        key = COALESCE_KEY.format(
-            project=config.params['project'],
-            name=task['coalesce-name'])
-        payload['supersederUrl'] = "https://coalesce.mozilla-releng.net/v1/list/" + key
+    if 'coalesce' in task:
+        payload['supersederUrl'] = superseder_url(config, task)
 
     check_caches_are_volumes(task)
 
@@ -814,6 +886,10 @@ def build_generic_worker_payload(config, task, task_def):
 
     if features:
         task_def['payload']['features'] = features
+
+    # coalesce / superseding
+    if 'coalesce' in task:
+        task_def['payload']['supersederUrl'] = superseder_url(config, task)
 
 
 @payload_builder('scriptworker-signing')
@@ -1099,10 +1175,8 @@ def build_task(config, tasks):
         if 'deadline-after' not in task:
             task['deadline-after'] = '1 day'
 
-        if 'coalesce-name' in task and int(config.params['level']) > 1:
-            key = COALESCE_KEY.format(
-                project=config.params['project'],
-                name=task['coalesce-name'])
+        if 'coalesce' in task:
+            key = coalesce_key(config, task)
             routes.append('coalesce.v1.' + key)
 
         if 'priority' not in task:
@@ -1168,7 +1242,7 @@ def build_task(config, tasks):
             'task': task_def,
             'dependencies': task.get('dependencies', {}),
             'attributes': attributes,
-            'optimizations': task.get('optimizations', []),
+            'optimization': task.get('optimization', None),
         }
 
 

@@ -383,8 +383,8 @@ nsDisplayRemote::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 bool
 nsDisplayRemote::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                         mozilla::wr::IpcResourceUpdateQueue& aResources,
                                          const StackingContextHelper& aSc,
-                                         nsTArray<WebRenderParentCommand>& aParentCommands,
                                          mozilla::layers::WebRenderLayerManager* aManager,
                                          nsDisplayListBuilder* aDisplayListBuilder)
 {
@@ -397,6 +397,7 @@ nsDisplayRemote::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
   visible += mOffset;
 
   aBuilder.PushIFrame(aSc.ToRelativeLayoutRect(visible),
+      !BackfaceIsHidden(),
       mozilla::wr::AsPipelineId(GetRemoteLayersId()));
 
   return true;

@@ -8,6 +8,8 @@ const SELECTORS = {
   creditCardAutofillCheckbox: "#creditCardAutofill checkbox",
   savedAddressesBtn: "#addressAutofill button",
   savedCreditCardsBtn: "#creditCardAutofill button",
+  addressAutofillLearnMore: "#addressAutofillLearnMore",
+  creditCardAutofillLearnMore: "#creditCardAutofillLearnMore",
 };
 
 // Visibility of form autofill group should be hidden when opening
@@ -36,6 +38,10 @@ add_task(async function test_aboutPreferencesPrivacy() {
         "Autofill addresses checkbox should be checked");
       is(content.document.querySelector(selectors.creditCardAutofillCheckbox).checked, true,
         "Autofill credit cards checkbox should be checked");
+      ok(content.document.querySelector(selectors.addressAutofillLearnMore).href.includes("autofill-card-address"),
+        "Autofill addresses learn more link should contain autofill-card-address");
+      ok(content.document.querySelector(selectors.creditCardAutofillLearnMore).href.includes("autofill-card-address"),
+        "Autofill credit cards learn more link should contain autofill-card-address");
     });
   });
 });
@@ -74,6 +80,20 @@ add_task(async function test_autofillDisabledCheckbox() {
         "Checkbox should be unchecked when Autofill Addresses is disabled");
       is(content.document.querySelector(selectors.creditCardAutofillCheckbox).checked, false,
         "Checkbox should be unchecked when Autofill Credit Cards is disabled");
+    });
+  });
+});
+
+add_task(async function test_creditCardNotAvailable() {
+  SpecialPowers.pushPrefEnv({set: [[AUTOFILL_CREDITCARDS_AVAILABLE_PREF, false]]});
+  let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
+  await BrowserTestUtils.withNewTab({gBrowser, url: PAGE_PRIVACY}, async function(browser) {
+    await finalPrefPaneLoaded;
+    await ContentTask.spawn(browser, SELECTORS, (selectors) => {
+      is(content.document.querySelector(selectors.group).hidden, false,
+        "Form Autofill group should be visible");
+      ok(!content.document.querySelector(selectors.creditCardAutofillCheckbox),
+        "Autofill credit cards checkbox should not exist");
     });
   });
 });

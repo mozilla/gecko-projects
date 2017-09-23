@@ -41,15 +41,16 @@ they're nestable.
 */
 
 #[macro_use]
+extern crate bitflags;
+#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
 #[macro_use]
-extern crate bitflags;
-#[macro_use]
 extern crate thread_profiler;
 
 mod border;
+mod clip;
 mod clip_scroll_node;
 mod clip_scroll_tree;
 mod debug_colors;
@@ -68,7 +69,6 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
-mod mask_cache;
 mod prim_store;
 mod print_tree;
 mod profiler;
@@ -91,14 +91,14 @@ mod shader_source {
 pub use record::{ApiRecordingReceiver, BinaryRecorder, WEBRENDER_RECORDING_HEADER};
 
 mod platform {
-    #[cfg(target_os="macos")]
+    #[cfg(target_os = "macos")]
     pub use platform::macos::font;
     #[cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))]
     pub use platform::unix::font;
     #[cfg(target_os = "windows")]
     pub use platform::windows::font;
 
-    #[cfg(target_os="macos")]
+    #[cfg(target_os = "macos")]
     pub mod macos {
         pub mod font;
     }
@@ -112,12 +112,14 @@ mod platform {
     }
 }
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
+extern crate core_foundation;
+#[cfg(target_os = "macos")]
 extern crate core_graphics;
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 extern crate core_text;
 
-#[cfg(all(unix, not(target_os="macos")))]
+#[cfg(all(unix, not(target_os = "macos")))]
 extern crate freetype;
 
 #[cfg(target_os = "windows")]
@@ -125,33 +127,31 @@ extern crate dwrote;
 
 extern crate app_units;
 extern crate bincode;
+extern crate byteorder;
 extern crate euclid;
 extern crate fxhash;
 extern crate gleam;
 extern crate num_traits;
-//extern crate notify;
-extern crate time;
-pub extern crate webrender_api;
-extern crate byteorder;
-extern crate rayon;
 extern crate plane_split;
-#[cfg(feature = "debugger")]
-extern crate ws;
-#[cfg(feature = "debugger")]
-extern crate serde_json;
+extern crate rayon;
 #[cfg(feature = "debugger")]
 #[macro_use]
 extern crate serde_derive;
+#[cfg(feature = "debugger")]
+extern crate serde_json;
+extern crate time;
+#[cfg(feature = "debugger")]
+extern crate ws;
+pub extern crate webrender_api;
 
-#[cfg(any(target_os="macos", target_os="windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 extern crate gamma_lut;
-
-pub use renderer::{ExternalImage, ExternalImageSource, ExternalImageHandler};
-pub use renderer::{GraphicsApi, GraphicsApiInfo, ReadPixelsFormat, Renderer, RendererOptions};
-pub use renderer::{CpuProfile, GpuProfile, DebugFlags, RendererKind};
-pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
-
-pub use webrender_api as api;
 
 #[doc(hidden)]
 pub use device::build_shader_strings;
+pub use renderer::{ALPHA_PRIM_DBG, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
+pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
+pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
+pub use renderer::{GraphicsApi, GraphicsApiInfo, ReadPixelsFormat, Renderer, RendererOptions};
+pub use renderer::MAX_VERTEX_TEXTURE_WIDTH;
+pub use webrender_api as api;

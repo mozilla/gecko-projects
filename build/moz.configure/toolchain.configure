@@ -702,11 +702,17 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                               host_or_target)
 
         # Check that the additional flags we got are enough to not require any
-        # more flags.
-        if info.flags:
-            flags += info.flags
-            info = check_compiler(wrapper + [compiler] + flags, language,
-                                  host_or_target)
+        # more flags. If we get an exception, just ignore it; it's liable to be
+        # invalid command-line flags, which means the compiler we're checking
+        # doesn't support those command-line flags and will fail one or more of
+        # the checks below.
+        try:
+            if info.flags:
+                flags += info.flags
+                info = check_compiler(wrapper + [compiler] + flags, language,
+                                      host_or_target)
+        except FatalCheckError:
+            pass
 
         if not info.target_cpu or info.target_cpu != host_or_target.cpu:
             raise FatalCheckError(
@@ -732,10 +738,6 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                    info.target_endianness or 'unknown', host_or_target_str,
                    host_or_target.endianness))
 
-        if info.flags:
-            raise FatalCheckError(
-                'Unknown compiler or compiler not supported.')
-
         # Compiler version checks
         # ===================================================
         # Check the compiler version here instead of in `compiler_version` so
@@ -747,7 +749,7 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                 % info.version)
 
         # If you want to bump the version check here search for
-        # __cpp_static_assert above, and see the associated comment.
+        # cxx_alignof above, and see the associated comment.
         if info.type == 'clang' and not info.version:
             raise FatalCheckError(
                 'Only clang/llvm 3.6 or newer is supported.')
@@ -761,6 +763,10 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                     'order to build.\n'
                     'See https://developer.mozilla.org/en/'
                     'Windows_Build_Prerequisites' % info.version)
+
+        if info.flags:
+            raise FatalCheckError(
+                'Unknown compiler or compiler not supported.')
 
         return namespace(
             wrapper=wrapper,
@@ -1148,10 +1154,13 @@ imply_option('--enable-linker',
 
 @imports('os')
 @imports('shutil')
-def enable_gnu_linker(enable_gold_option, c_compiler, developer_options, build_env, linker_name):
+def enable_gnu_linker(enable_gold_option, c_compiler, developer_options, build_env,
+                      toolchain_flags, linker_name):
     # Used to check the kind of linker
     version_check = ['-Wl,--version']
     cmd_base = c_compiler.wrapper + [c_compiler.compiler] + c_compiler.flags
+    if toolchain_flags:
+        cmd_base += toolchain_flags
 
     def resolve_gold():
         # Try to force the usage of gold
@@ -1219,12 +1228,14 @@ js_option('--enable-linker', nargs=1,
           help='Select the linker',
           when=build_not_win_mac)
 
-@depends('--enable-linker', c_compiler, developer_options, check_build_environment, when=build_not_win_mac)
+@depends('--enable-linker', c_compiler, developer_options, check_build_environment,
+         extra_toolchain_flags, when=build_not_win_mac)
 @checking('for linker', lambda x: x.KIND)
-def select_linker(linker, c_compiler, developer_options, build_env):
+def select_linker(linker, c_compiler, developer_options, build_env, toolchain_flags):
     linker = linker[0] if linker else 'other'
     if linker in ('gold', 'bfd', 'other'):
-        return enable_gnu_linker(linker == 'gold', c_compiler, developer_options, build_env, linker)
+        return enable_gnu_linker(linker == 'gold', c_compiler, developer_options,
+                                 build_env, toolchain_flags, linker)
     if linker == 'lld':
         version_check = ['-Wl,--version']
         cmd_base = c_compiler.wrapper + [c_compiler.compiler] + c_compiler.flags

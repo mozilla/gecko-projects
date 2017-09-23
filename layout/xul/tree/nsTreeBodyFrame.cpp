@@ -2199,6 +2199,7 @@ nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol, bool aUseContex
                                               mContent,
                                               doc,
                                               mContent->NodePrincipal(),
+                                              0,
                                               doc->GetDocumentURI(),
                                               doc->GetReferrerPolicy(),
                                               imgNotificationObserver,
@@ -2774,9 +2775,9 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
 
 class nsDisplayTreeBody final : public nsDisplayItem {
 public:
-  nsDisplayTreeBody(nsDisplayListBuilder* aBuilder, nsFrame* aFrame) :
-    nsDisplayItem(aBuilder, aFrame),
-    mDisableSubpixelAA(false) {
+  nsDisplayTreeBody(nsDisplayListBuilder* aBuilder, nsFrame* aFrame)
+    : nsDisplayItem(aBuilder, aFrame)
+  {
     MOZ_COUNT_CTOR(nsDisplayTreeBody);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -2792,7 +2793,7 @@ public:
 
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                  const nsDisplayItemGeometry* aGeometry,
-                                 nsRegion *aInvalidRegion) override
+                                 nsRegion *aInvalidRegion) const override
   {
     auto geometry =
       static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
@@ -2821,16 +2822,11 @@ public:
 
   NS_DISPLAY_DECL_NAME("XULTreeBody", TYPE_XUL_TREE_BODY)
 
-  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override
+  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override
   {
     bool snap;
     return GetBounds(aBuilder, &snap);
   }
-  virtual void DisableComponentAlpha() override {
-    mDisableSubpixelAA = true;
-  }
-
-  bool mDisableSubpixelAA;
 };
 
 // Painting routines
@@ -3064,13 +3060,9 @@ nsTreeBodyFrame::PaintRow(int32_t               aRowIndex,
 
   // Save the current font smoothing background color in case we change it.
   Color originalColor(aRenderingContext.GetFontSmoothingBackgroundColor());
+  aRenderingContext.SetFontSmoothingBackgroundColor(
+    ToDeviceColor(rowContext->StyleUserInterface()->mFontSmoothingBackgroundColor));
   if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, appearance)) {
-    nscolor color;
-    if (theme->WidgetProvidesFontSmoothingBackgroundColor(this, appearance,
-                                                          &color)) {
-      // Set the font smoothing background color provided by the widget.
-      aRenderingContext.SetFontSmoothingBackgroundColor(ToDeviceColor(color));
-    }
     nsRect dirty;
     dirty.IntersectRect(rowRect, aDirtyRect);
     theme->DrawWidgetBackground(&aRenderingContext, this, appearance, rowRect,

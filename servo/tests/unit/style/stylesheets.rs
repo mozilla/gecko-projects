@@ -249,6 +249,7 @@ fn test_parse_stylesheet() {
                 })))
             ], &stylesheet.shared_lock),
             source_map_url: RwLock::new(None),
+            source_url: RwLock::new(None),
         },
         media: Arc::new(stylesheet.shared_lock.wrap(MediaList::empty())),
         shared_lock: stylesheet.shared_lock.clone(),
@@ -320,13 +321,13 @@ fn test_report_error_stylesheet() {
     assert_eq!("Unsupported property declaration: 'invalid: true;', \
                 Custom(PropertyDeclaration(UnknownProperty(\"invalid\")))", error.message);
     assert_eq!(9, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     let error = errors.pop().unwrap();
     assert_eq!("Unsupported property declaration: 'display: invalid;', \
                 Custom(PropertyDeclaration(InvalidValue(\"display\", None)))", error.message);
     assert_eq!(8, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     // testing for the url
     assert_eq!(url, error.url);
@@ -374,6 +375,25 @@ fn test_source_map_url() {
                                               None, &CSSErrorReporterTest, QuirksMode::NoQuirks,
                                               0);
         let url_opt = stylesheet.contents.source_map_url.read();
+        assert_eq!(*url_opt, test.1);
+    }
+}
+
+#[test]
+fn test_source_url() {
+    let tests = vec![
+        ("", None),
+        ("/*# sourceURL=something */", Some("something".to_string())),
+    ];
+
+    for test in tests {
+        let url = ServoUrl::parse("about::test").unwrap();
+        let lock = SharedRwLock::new();
+        let media = Arc::new(lock.wrap(MediaList::empty()));
+        let stylesheet = Stylesheet::from_str(test.0, url.clone(), Origin::UserAgent, media, lock,
+                                              None, &CSSErrorReporterTest, QuirksMode::NoQuirks,
+                                              0);
+        let url_opt = stylesheet.contents.source_url.read();
         assert_eq!(*url_opt, test.1);
     }
 }

@@ -6,6 +6,8 @@
 
 use cssparser::{BasicParseError, ParseError as CssParseError, ParserInput};
 use cssparser::{Delimiter, parse_important, Parser, SourceLocation, Token};
+#[cfg(feature = "gecko")]
+use malloc_size_of::{MallocSizeOfOps, MallocUnconditionalShallowSizeOf};
 use parser::ParserContext;
 use properties::{PropertyId, PropertyDeclaration, PropertyParserContext, SourcePropertyDeclaration};
 use selectors::parser::SelectorParseError;
@@ -28,6 +30,16 @@ pub struct SupportsRule {
     pub enabled: bool,
     /// The line and column of the rule's source code.
     pub source_location: SourceLocation,
+}
+
+impl SupportsRule {
+    /// Measure heap usage.
+    #[cfg(feature = "gecko")]
+    pub fn size_of(&self, guard: &SharedRwLockReadGuard, ops: &mut MallocSizeOfOps) -> usize {
+        // Measurement of other fields may be added later.
+        self.rules.unconditional_shallow_size_of(ops) +
+            self.rules.read_with(guard).size_of(guard, ops)
+    }
 }
 
 impl ToCssWithGuard for SupportsRule {
@@ -256,7 +268,7 @@ impl Declaration {
 
             let mut declarations = SourcePropertyDeclaration::new();
             input.parse_until_before(Delimiter::Bang, |input| {
-                PropertyDeclaration::parse_into(&mut declarations, id, &context, input)
+                PropertyDeclaration::parse_into(&mut declarations, id, prop.into(), &context, input)
                     .map_err(|e| StyleParseError::PropertyDeclaration(e).into())
             })?;
             let _ = input.try(parse_important);

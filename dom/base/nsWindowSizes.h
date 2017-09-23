@@ -173,16 +173,16 @@ class nsWindowSizes
   macro(DOM,   mDOMPerformanceUserEntries) \
   macro(DOM,   mDOMPerformanceResourceEntries) \
   macro(DOM,   mDOMOtherSize) \
-  macro(Style, mStyleSheetsSize) \
+  macro(Style, mLayoutStyleSheetsSize) \
   macro(Other, mLayoutPresShellSize) \
   macro(Style, mLayoutGeckoStyleSets) \
   macro(Style, mLayoutServoStyleSetsStylistRuleTree) \
-  macro(Style, mLayoutServoStyleSetsStylistPrecomputedPseudos) \
   macro(Style, mLayoutServoStyleSetsStylistElementAndPseudosMaps) \
   macro(Style, mLayoutServoStyleSetsStylistInvalidationMap) \
   macro(Style, mLayoutServoStyleSetsStylistRevalidationSelectors) \
   macro(Style, mLayoutServoStyleSetsStylistOther) \
   macro(Style, mLayoutServoStyleSetsOther) \
+  macro(Style, mLayoutServoElementDataObjects) \
   macro(Other, mLayoutTextRunsSize) \
   macro(Other, mLayoutPresContextSize) \
   macro(Other, mLayoutFramePropertiesSize) \

@@ -192,11 +192,22 @@ DocumentManager = {
 
   injectExtensionScripts(extension) {
     for (let window of this.enumerateWindows()) {
+      let runAt = {document_start: [], document_end: [], document_idle: []};
+
       for (let script of extension.contentScripts) {
         if (script.matchesWindow(window)) {
-          contentScripts.get(script).injectInto(window);
+          runAt[script.runAt].push(script);
         }
       }
+
+      let inject = matcher => contentScripts.get(matcher).injectInto(window);
+      let injectAll = matchers => Promise.all(matchers.map(inject));
+
+      // Intentionally using `.then` instead of `await`, we only need to
+      // chain injecting other scripts into *this* window, not all windows.
+      injectAll(runAt.document_start)
+        .then(() => injectAll(runAt.document_end))
+        .then(() => injectAll(runAt.document_idle));
     }
   },
 
@@ -213,7 +224,6 @@ DocumentManager = {
    */
   checkParentFrames(window, addonId) {
     while (window.parent !== window) {
-      let {frameElement} = window;
       window = window.parent;
 
       let principal = window.document.nodePrincipal;
@@ -222,14 +232,6 @@ DocumentManager = {
         // The add-on manager is a special case, since it contains extension
         // options pages in same-type <browser> frames.
         if (window.location.href === "about:addons") {
-          return true;
-        }
-
-        // NOTE: Special handling for devtools panels using a chrome iframe here
-        // for the devtools panel, it is needed because a content iframe breaks
-        // switching between docked and undocked mode (see bug 1075490).
-        if (frameElement &&
-            frameElement.mozMatchesSelector("browser[webextension-view-type='devtools_panel']")) {
           return true;
         }
       }

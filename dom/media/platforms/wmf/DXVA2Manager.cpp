@@ -8,6 +8,7 @@
 #include "DXVA2Manager.h"
 #include "D3D9SurfaceImage.h"
 #include "DriverCrashGuard.h"
+#include "GfxDriverInfo.h"
 #include "ImageContainer.h"
 #include "MFTDecoder.h"
 #include "MediaTelemetryConstants.h"
@@ -74,6 +75,39 @@ static const DWORD sAMDPreUVD4[] = {
   0x999c, 0x999d, 0x99a0, 0x99a2, 0x99a4
 };
 
+// List of NVidia Telsa GPU known to have broken NV12 rendering.
+static const DWORD sNVIDIABrokenNV12[] = {
+  0x0191, 0x0193, 0x0194, 0x0197, 0x019d, 0x019e, // G80
+  0x0400, 0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406, 0x0407, 0x0408, 0x0409, // G84
+  0x040a, 0x040b, 0x040c, 0x040d, 0x040e, 0x040f,
+  0x0420, 0x0421, 0x0422, 0x0423, 0x0424, 0x0425, 0x0426, 0x0427, 0x0428, 0x0429, // G86
+  0x042a, 0x042b, 0x042c, 0x042d, 0x042e, 0x042f,
+  0x0410, 0x0600, 0x0601, 0x0602, 0x0603, 0x0604, 0x0605, 0x0606, 0x0607, 0x0608, // G92
+  0x0609, 0x060a, 0x060b, 0x060c, 0x060f, 0x0610, 0x0611, 0x0612, 0x0613, 0x0614,
+  0x0615, 0x0617, 0x0618, 0x0619, 0x061a, 0x061b, 0x061c, 0x061d, 0x061e, 0x061f, // G94
+  0x0621, 0x0622, 0x0623, 0x0625, 0x0626, 0x0627, 0x0628, 0x062a, 0x062b, 0x062c,
+  0x062d, 0x062e, 0x0631, 0x0635, 0x0637, 0x0638, 0x063a,
+  0x0640, 0x0641, 0x0643, 0x0644, 0x0645, 0x0646, 0x0647, 0x0648, 0x0649, 0x064a, // G96
+  0x064b, 0x064c, 0x0651, 0x0652, 0x0653, 0x0654, 0x0655, 0x0656, 0x0658, 0x0659,
+  0x065a, 0x065b, 0x065c, 0x065f,
+  0x06e0, 0x06e1, 0x06e2, 0x06e3, 0x06e4, 0x06e6, 0x06e7, 0x06e8, 0x06e9, 0x06ea, // G98
+  0x06eb, 0x06ec, 0x06ef, 0x06f1, 0x06f8, 0x06f9, 0x06fa, 0x06fb, 0x06fd, 0x06ff,
+  0x05e0, 0x05e1, 0x05e2, 0x05e3, 0x05e6, 0x05e7, 0x05e9, 0x05ea, 0x05eb, 0x05ed, // G200
+  0x05ee, 0x05ef,
+  0x0840, 0x0844, 0x0845, 0x0846, 0x0847, 0x0848, 0x0849, 0x084a, 0x084b, 0x084c, // MCP77
+  0x084d, 0x084f,
+  0x0860, 0x0861, 0x0862, 0x0863, 0x0864, 0x0865, 0x0866, 0x0867, 0x0868, 0x0869, // MCP79
+  0x086a, 0x086c, 0x086d, 0x086e, 0x086f, 0x0870, 0x0871, 0x0872, 0x0873, 0x0874,
+  0x0876, 0x087a, 0x087d, 0x087e, 0x087f,
+  0x0ca0, 0x0ca2, 0x0ca3, 0x0ca2, 0x0ca4, 0x0ca5, 0x0ca7, 0x0ca9, 0x0cac, 0x0caf, // GT215
+  0x0cb0, 0x0cb1, 0x0cbc,
+  0x0a20, 0x0a22, 0x0a23, 0x0a26, 0x0a27, 0x0a28, 0x0a29, 0x0a2a, 0x0a2b, 0x0a2c, // GT216
+  0x0a2d, 0x0a32, 0x0a34, 0x0a35, 0x0a38, 0x0a3c,
+  0x0a60, 0x0a62, 0x0a63, 0x0a64, 0x0a65, 0x0a66, 0x0a67, 0x0a68, 0x0a69, 0x0a6a, // GT218
+  0x0a6c, 0x0a6e, 0x0a6f, 0x0a70, 0x0a71, 0x0a72, 0x0a73, 0x0a74, 0x0a75, 0x0a76,
+  0x0a78, 0x0a7a, 0x0a7c, 0x10c0, 0x10c3, 0x10c5, 0x10d8
+};
+
 // The size we use for our synchronization surface.
 // 16x16 is the size recommended by Microsoft (in the D3D9ExDXGISharedSurf sample) that works
 // best to avoid driver bugs.
@@ -108,9 +142,6 @@ public:
                       Image** aOutImage) override;
 
   bool SupportsConfig(IMFMediaType* aType, float aFramerate) override;
-
-  bool CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
-                          nsACString& aFailureReason) override;
 
 private:
   bool CanCreateDecoder(const DXVA2_VideoDesc& aDesc,
@@ -395,7 +426,8 @@ D3D9DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
     return hr;
   }
 
-  if (adapter.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
+  if ((adapter.VendorId == 0x1022  || adapter.VendorId == 0x1002) &&
+      !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (const auto& model : sAMDPreUVD4) {
       if (adapter.DeviceId == model) {
         mIsAMDPreUVD4 = true;
@@ -509,31 +541,6 @@ DXVA2Manager::CreateD3D9DXVA(layers::KnowsCompositor* aKnowsCompositor,
 }
 
 bool
-D3D9DXVA2Manager::CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
-                                     nsACString& aFailureReason)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  DXVA2_VideoDesc desc;
-  desc.SampleWidth = aVideoInfo.mImage.width;
-  desc.SampleHeight = aVideoInfo.mImage.height;
-  desc.Format = (D3DFORMAT)MAKEFOURCC('N','V','1','2');
-
-  // Assume the current duration is representative for the entire video.
-  float framerate = 1000000.0 / aVideoInfo.mDuration.ToMicroseconds();
-  if (IsUnsupportedResolution(desc.SampleWidth, desc.SampleHeight, framerate)) {
-    return false;
-  }
-
-  mDecoder = CreateDecoder(desc);
-  if (!mDecoder) {
-    aFailureReason =
-      nsPrintfCString("Fail to create video decoder in D3D9DXVA2Manager.");
-    return false;
-  }
-  return true;
-}
-
-bool
 D3D9DXVA2Manager::CanCreateDecoder(const DXVA2_VideoDesc& aDesc,
                                    const float aFramerate) const
 {
@@ -622,9 +629,6 @@ public:
   bool IsD3D11() override { return true; }
 
   bool SupportsConfig(IMFMediaType* aType, float aFramerate) override;
-
-  bool CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
-                          nsACString& aFailureReason) override;
 
 private:
   HRESULT CreateFormatConverter();
@@ -874,7 +878,8 @@ D3D11DXVA2Manager::InitInternal(layers::KnowsCompositor* aKnowsCompositor,
     return hr;
   }
 
-  if (adapterDesc.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
+  if ((adapterDesc.VendorId == 0x1022 || adapterDesc.VendorId == 0x1002) &&
+      !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (const auto& model : sAMDPreUVD4) {
       if (adapterDesc.DeviceId == model) {
         mIsAMDPreUVD4 = true;
@@ -1148,32 +1153,6 @@ D3D11DXVA2Manager::ConfigureForSize(uint32_t aWidth, uint32_t aHeight)
 }
 
 bool
-D3D11DXVA2Manager::CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
-                                      nsACString& aFailureReason)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  D3D11_VIDEO_DECODER_DESC desc;
-  desc.Guid = mDecoderGUID;
-  desc.OutputFormat = DXGI_FORMAT_NV12;
-  desc.SampleWidth = aVideoInfo.mImage.width;
-  desc.SampleHeight = aVideoInfo.mImage.height;
-
-  // Assume the current duration is representative for the entire video.
-  float framerate = 1000000.0 / aVideoInfo.mDuration.ToMicroseconds();
-  if (IsUnsupportedResolution(desc.SampleWidth, desc.SampleHeight, framerate)) {
-    return false;
-  }
-
-  mDecoder = CreateDecoder(desc);
-  if (!mDecoder) {
-    aFailureReason =
-      nsPrintfCString("Fail to create video decoder in D3D11DXVA2Manager.");
-    return false;
-  }
-  return true;
-}
-
-bool
 D3D11DXVA2Manager::CanCreateDecoder(const D3D11_VIDEO_DECODER_DESC& aDesc,
                                     const float aFramerate) const
 {
@@ -1266,6 +1245,37 @@ DXVA2Manager::IsUnsupportedResolution(const uint32_t& aWidth,
   return mIsAMDPreUVD4 &&
          (aWidth >= 1920 || aHeight >= 1088) &&
          aFramerate > 45;
+}
+
+/* static */ bool
+DXVA2Manager::IsNV12Supported(uint32_t aVendorID,
+                              uint32_t aDeviceID,
+                              const nsAString& aDriverVersionString)
+{
+  if (aVendorID == 0x1022 || aVendorID == 0x1002) {
+    // AMD
+    // Block old cards regardless of driver version.
+    for (const auto& model : sAMDPreUVD4) {
+      if (aDeviceID == model) {
+        return false;
+      }
+    }
+    // AMD driver earlier than 21.19.411.0 have bugs in their handling of NV12
+    // surfaces.
+    uint64_t driverVersion;
+    if (widget::ParseDriverVersion(aDriverVersionString, &driverVersion) &&
+        driverVersion < widget::V(21, 19, 411, 0)) {
+      return false;
+    }
+  } else if (aVendorID == 0x10DE) {
+    // NVidia
+    for (const auto& model : sNVIDIABrokenNV12) {
+      if (aDeviceID == model) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace mozilla

@@ -1,4 +1,4 @@
-asserts-if(stylo,0-1) load 43040-1.html # bug 1324691
+load 43040-1.html
 load 90613-1.html
 load 116848-1.html
 load 149320-1.html
@@ -217,9 +217,9 @@ pref(clipboard.autocopy,true) load 1370737.html
 pref(dom.IntersectionObserver.enabled,true) load 1370968.html
 load 1377826.html
 skip-if(stylo&&isDebugBuild&&winWidget) load structured_clone_container_throws.html # Bug 1383845
-HTTP(..) load xhr_abortinprogress.html
 load xhr_empty_datauri.html
 load xhr_html_nullresponse.html
 load 1383478.html
 load 1383780.html
 pref(clipboard.autocopy,true) load 1385272-1.html
+load 1393806.html

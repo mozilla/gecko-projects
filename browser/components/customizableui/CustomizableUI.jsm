@@ -38,8 +38,10 @@ const kPrefCustomizationState        = "browser.uiCustomization.state";
 const kPrefCustomizationAutoAdd      = "browser.uiCustomization.autoAdd";
 const kPrefCustomizationDebug        = "browser.uiCustomization.debug";
 const kPrefDrawInTitlebar            = "browser.tabs.drawInTitlebar";
+const kPrefExtraDragSpace            = "browser.tabs.extraDragSpace";
 const kPrefUIDensity                 = "browser.uidensity";
 const kPrefAutoTouchMode             = "browser.touchmode.auto";
+const kPrefAutoHideDownloadsButton   = "browser.download.autohideButton";
 
 const kExpectedWindowURL = "chrome://browser/content/browser.xul";
 
@@ -57,7 +59,7 @@ const kSubviewEvents = [
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 10;
+var kVersion = 12;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
@@ -152,6 +154,7 @@ var gListeners = new Set();
 var gUIStateBeforeReset = {
   uiCustomizationState: null,
   drawInTitlebar: null,
+  extraDragSpace: null,
   currentTheme: null,
   uiDensity: null,
   autoTouchMode: null,
@@ -177,7 +180,7 @@ var CustomizableUIInternal = {
     this.addListener(this);
     this._defineBuiltInWidgets();
     this.loadSavedState();
-    this._introduceNewBuiltinWidgets();
+    this._updateForNewVersion();
     this._markObsoleteBuiltinButtonsSeen();
 
     this.registerArea(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL, {
@@ -193,7 +196,6 @@ var CustomizableUIInternal = {
       "home-button",
       "spring",
       "urlbar-container",
-      "search-container",
       "spring",
       "downloads-button",
       "library-button",
@@ -263,7 +265,7 @@ var CustomizableUIInternal = {
     }
   },
 
-  _introduceNewBuiltinWidgets() {
+  _updateForNewVersion() {
     // We should still enter even if gSavedState.currentVersion >= kVersion
     // because the per-widget pref facility is independent of versioning.
     if (!gSavedState) {
@@ -309,16 +311,7 @@ var CustomizableUIInternal = {
       }
     }
 
-    if (currentVersion < 2) {
-      // Nuke the old 'loop-call-button' out of orbit.
-      CustomizableUI.removeWidgetFromArea("loop-call-button");
-    }
-
-    if (currentVersion < 4) {
-      CustomizableUI.removeWidgetFromArea("loop-button-throttled");
-    }
-
-    if (currentVersion < 7 && gSavedState && gSavedState.placements &&
+    if (currentVersion < 7 && gSavedState.placements &&
         gSavedState.placements[CustomizableUI.AREA_NAVBAR]) {
       let placements = gSavedState.placements[CustomizableUI.AREA_NAVBAR];
       let newPlacements = ["back-button", "forward-button", "stop-reload-button", "home-button"];
@@ -408,11 +401,54 @@ var CustomizableUIInternal = {
       }
     }
 
-    if (currentVersion < 10 && gSavedState && gSavedState.placements) {
+    if (currentVersion < 10 && gSavedState.placements) {
       for (let placements of Object.values(gSavedState.placements)) {
         if (placements.includes("webcompat-reporter-button")) {
           placements.splice(placements.indexOf("webcompat-reporter-button"), 1);
           break;
+        }
+      }
+    }
+
+    // Move the downloads button to the default position in the navbar if it's
+    // not there already.
+    if (currentVersion < 11 && gSavedState.placements) {
+      let navbarPlacements = gSavedState.placements[CustomizableUI.AREA_NAVBAR];
+      // First remove from wherever it currently lives, if anywhere:
+      for (let placements of Object.values(gSavedState.placements)) {
+        let existingIndex = placements.indexOf("downloads-button");
+        if (existingIndex != -1) {
+          placements.splice(existingIndex, 1);
+          break; // It can only be in 1 place, so no point looking elsewhere.
+        }
+      }
+
+      // Now put the button in the navbar in the correct spot:
+      if (navbarPlacements) {
+        let insertionPoint = navbarPlacements.indexOf("urlbar-container");
+        // Deliberately iterate to 1 past the end of the array to insert at the
+        // end if need be.
+        while (++insertionPoint < navbarPlacements.length) {
+          let widget = navbarPlacements[insertionPoint];
+          // If we find a non-searchbar, non-spacer node, break out of the loop:
+          if (widget != "search-container" && !this.matchingSpecials(widget, "spring")) {
+            break;
+          }
+        }
+        // We either found the right spot, or reached the end of the
+        // placements, so insert here:
+        navbarPlacements.splice(insertionPoint, 0, "downloads-button");
+      }
+    }
+
+    if (currentVersion < 12 && gSavedState.placements) {
+      const removedButtons = ["loop-call-button", "loop-button-throttled", "pocket-button"];
+      for (let placements of Object.values(gSavedState.placements)) {
+        for (let button of removedButtons) {
+          let buttonIndex = placements.indexOf(button);
+          if (buttonIndex != -1) {
+            placements.splice(buttonIndex, 1);
+          }
         }
       }
     }
@@ -532,13 +568,7 @@ var CustomizableUIInternal = {
           props.get(key) != aProperties[key]) {
         throw new Error("An area cannot change the property for '" + key + "'");
       }
-      // XXXgijs for special items, we need to make sure they have an appropriate ID
-      // so we aren't perpetually in a non-default state:
-      if (key == "defaultPlacements" && Array.isArray(aProperties[key])) {
-        props.set(key, aProperties[key].map(x => this.isSpecialWidget(x) ? this.ensureSpecialWidgetId(x) : x ));
-      } else {
-        props.set(key, aProperties[key]);
-      }
+      props.set(key, aProperties[key]);
     }
     // Default to a toolbar:
     if (!props.has("type")) {
@@ -740,8 +770,12 @@ var CustomizableUIInternal = {
           currentNode = currentNode.nextSibling;
         }
 
-        if (currentNode &&
-            (currentNode.id == id || this.matchingSpecials(id, currentNode.id))) {
+        // Fix ids for specials and continue, for correctly placed specials.
+        if (currentNode && (!currentNode.id || CustomizableUI.isSpecialWidget(currentNode)) &&
+            this.matchingSpecials(id, currentNode)) {
+          currentNode.id = id;
+        }
+        if (currentNode && currentNode.id == id) {
           currentNode = currentNode.nextSibling;
           continue;
         }
@@ -801,9 +835,10 @@ var CustomizableUIInternal = {
           // if one exists. If no palette exists, we just remove the node. If the
           // node is not removable, we leave it where it is. However, we can only
           // safely touch elements that have an ID - both because we depend on
-          // IDs, and because such elements are not intended to be widgets
-          // (eg, titlebar-placeholder elements).
-          if (node.id && node.getAttribute("skipintoolbarset") != "true") {
+          // IDs (or are specials), and because such elements are not intended to
+          // be widgets (eg, titlebar-placeholder elements).
+          if ((node.id || this.isSpecialWidget(node)) &&
+              node.getAttribute("skipintoolbarset") != "true") {
             if (this.isWidgetRemovable(node)) {
               if (palette && !this.isSpecialWidget(node.id)) {
                 palette.appendChild(node);
@@ -1204,9 +1239,15 @@ var CustomizableUIInternal = {
 
     while (++nodeIndex < placements.length) {
       let nextNodeId = placements[nodeIndex];
-      let nextNode = container.getElementsByAttribute("id", nextNodeId).item(0);
-
-      if (nextNode) {
+      let nextNode = aNode.ownerDocument.getElementById(nextNodeId);
+      // If the next placed widget exists, and is a direct child of the
+      // container, or wrapped in a customize mode wrapper (toolbarpaletteitem)
+      // inside the container, insert beside it.
+      // We have to check the parent to avoid errors when the placement ids
+      // are for nodes that are no longer customizable.
+      if (nextNode && (nextNode.parentNode == container ||
+                       (nextNode.parentNode.localName == "toolbarpaletteitem" &&
+                        nextNode.parentNode.parentNode == container))) {
         return [container, nextNode];
       }
     }
@@ -1253,7 +1294,21 @@ var CustomizableUIInternal = {
     return !!panels && panels.has(node);
   },
 
+  _getSpecialIdForNode(aNode) {
+    if (typeof aNode == "object" && aNode.localName) {
+      if (aNode.id) {
+        return aNode.id
+      }
+      if (aNode.localName.startsWith("toolbar")) {
+        return aNode.localName.substring(7);
+      }
+      return "";
+    }
+    return aNode;
+  },
+
   isSpecialWidget(aId) {
+    aId = this._getSpecialIdForNode(aId);
     return (aId.startsWith(kSpecialWidgetPfx) ||
             aId.startsWith("separator") ||
             aId.startsWith("spring") ||
@@ -1261,6 +1316,9 @@ var CustomizableUIInternal = {
   },
 
   matchingSpecials(aId1, aId2) {
+    aId1 = this._getSpecialIdForNode(aId1);
+    aId2 = this._getSpecialIdForNode(aId2);
+
     return this.isSpecialWidget(aId1) &&
            this.isSpecialWidget(aId2) &&
            aId1.match(/spring|spacer|separator/)[0] == aId2.match(/spring|spacer|separator/)[0];
@@ -2567,8 +2625,9 @@ var CustomizableUIInternal = {
         gSeenWidgets.add(widgetId);
       }
     }
-    if (gSeenWidgets.size) {
+    if (gSeenWidgets.size || gNewElementCount) {
       gDirty = true;
+      this.saveState();
     }
 
     gResetting = false;
@@ -2577,19 +2636,25 @@ var CustomizableUIInternal = {
   _resetUIState() {
     try {
       gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(kPrefDrawInTitlebar);
+      gUIStateBeforeReset.extraDragSpace = Services.prefs.getBoolPref(kPrefExtraDragSpace);
       gUIStateBeforeReset.uiCustomizationState = Services.prefs.getCharPref(kPrefCustomizationState);
       gUIStateBeforeReset.uiDensity = Services.prefs.getIntPref(kPrefUIDensity);
       gUIStateBeforeReset.autoTouchMode = Services.prefs.getBoolPref(kPrefAutoTouchMode);
       gUIStateBeforeReset.currentTheme = LightweightThemeManager.currentTheme;
+      gUIStateBeforeReset.autoHideDownloadsButton = Services.prefs.getBoolPref(kPrefAutoHideDownloadsButton);
+      gUIStateBeforeReset.newElementCount = gNewElementCount;
     } catch (e) { }
 
     this._resetExtraToolbars();
 
     Services.prefs.clearUserPref(kPrefCustomizationState);
     Services.prefs.clearUserPref(kPrefDrawInTitlebar);
+    Services.prefs.clearUserPref(kPrefExtraDragSpace);
     Services.prefs.clearUserPref(kPrefUIDensity);
     Services.prefs.clearUserPref(kPrefAutoTouchMode);
+    Services.prefs.clearUserPref(kPrefAutoHideDownloadsButton);
     LightweightThemeManager.currentTheme = null;
+    gNewElementCount = 0;
     log.debug("State reset");
 
     // Reset placements to make restoring default placements possible.
@@ -2656,11 +2721,11 @@ var CustomizableUIInternal = {
     }
     gUndoResetting = true;
 
-    let uiCustomizationState = gUIStateBeforeReset.uiCustomizationState;
-    let drawInTitlebar = gUIStateBeforeReset.drawInTitlebar;
-    let currentTheme = gUIStateBeforeReset.currentTheme;
-    let uiDensity = gUIStateBeforeReset.uiDensity;
-    let autoTouchMode = gUIStateBeforeReset.autoTouchMode;
+    const {
+      uiCustomizationState, drawInTitlebar, currentTheme, uiDensity,
+      autoTouchMode, autoHideDownloadsButton, extraDragSpace,
+    } = gUIStateBeforeReset;
+    gNewElementCount = gUIStateBeforeReset.newElementCount;
 
     // Need to clear the previous state before setting the prefs
     // because pref observers may check if there is a previous UI state.
@@ -2668,8 +2733,10 @@ var CustomizableUIInternal = {
 
     Services.prefs.setCharPref(kPrefCustomizationState, uiCustomizationState);
     Services.prefs.setBoolPref(kPrefDrawInTitlebar, drawInTitlebar);
+    Services.prefs.setBoolPref(kPrefExtraDragSpace, extraDragSpace);
     Services.prefs.setIntPref(kPrefUIDensity, uiDensity);
     Services.prefs.setBoolPref(kPrefAutoTouchMode, autoTouchMode);
+    Services.prefs.setBoolPref(kPrefAutoHideDownloadsButton, autoHideDownloadsButton);
     LightweightThemeManager.currentTheme = currentTheme;
     this.loadSavedState();
     // If the user just customizes toolbar/titlebar visibility, gSavedState will be null
@@ -2705,7 +2772,12 @@ var CustomizableUIInternal = {
     if (typeof aWidget == "string") {
       widgetId = aWidget;
     } else {
-      widgetId = aWidget.id;
+      if (!aWidget.id &&
+          !["toolbarspring", "toolbarspacer", "toolbarseparator"].includes(aWidget.nodeName)) {
+        throw new Error("No nodes without ids that aren't special widgets should ever come into contact with CUI");
+      }
+      // Use "spring" / "spacer" / "separator" for special widgets without ids
+      widgetId = aWidget.id || aWidget.nodeName.substring(7 /* "toolbar".length */);
       widgetNode = aWidget;
     }
     let provider = this.getWidgetProvider(widgetId);
@@ -2857,6 +2929,11 @@ var CustomizableUIInternal = {
 
     if (Services.prefs.prefHasUserValue(kPrefDrawInTitlebar)) {
       log.debug(kPrefDrawInTitlebar + " pref is non-default");
+      return false;
+    }
+
+    if (Services.prefs.prefHasUserValue(kPrefExtraDragSpace)) {
+      log.debug(kPrefExtraDragSpace + " pref is non-default");
       return false;
     }
 
@@ -3601,6 +3678,7 @@ this.CustomizableUI = {
   get canUndoReset() {
     return gUIStateBeforeReset.uiCustomizationState != null ||
            gUIStateBeforeReset.drawInTitlebar != null ||
+           gUIStateBeforeReset.extraDragSpace != null ||
            gUIStateBeforeReset.currentTheme != null ||
            gUIStateBeforeReset.autoTouchMode != null ||
            gUIStateBeforeReset.uiDensity != null;
@@ -4156,7 +4234,7 @@ OverflowableToolbar.prototype = {
 
     let chevronId = this._toolbar.getAttribute("overflowbutton");
     this._chevron = doc.getElementById(chevronId);
-    this._chevron.addEventListener("command", this);
+    this._chevron.addEventListener("mousedown", this);
     this._chevron.addEventListener("dragover", this);
     this._chevron.addEventListener("dragend", this);
 
@@ -4205,7 +4283,10 @@ OverflowableToolbar.prototype = {
       case "aftercustomization":
         this._enable();
         break;
-      case "command":
+      case "mousedown":
+        if (aEvent.button != 0) {
+          break;
+        }
         if (aEvent.target == this._chevron) {
           this._onClickChevron(aEvent);
         } else {
@@ -4267,7 +4348,7 @@ OverflowableToolbar.prototype = {
     if (this._chevron.open) {
       this._panel.hidePopup();
       this._chevron.open = false;
-    } else if (this._panel.state != "hiding") {
+    } else if (this._panel.state != "hiding" && !this._chevron.disabled) {
       this.show();
     }
   },
@@ -4326,7 +4407,7 @@ OverflowableToolbar.prototype = {
   _onResize(aEvent) {
     if (!this._lazyResizeHandler) {
       this._lazyResizeHandler = new DeferredTask(this._onLazyResize.bind(this),
-                                                 LAZY_RESIZE_INTERVAL_MS);
+                                                 LAZY_RESIZE_INTERVAL_MS, 0);
     }
     this._lazyResizeHandler.arm();
   },
@@ -4491,20 +4572,36 @@ OverflowableToolbar.prototype = {
     let nodeBeforeNewNodeIsOverflown = false;
 
     let loopIndex = -1;
+    // Loop through placements to find where to insert this item.
+    // As soon as we find an overflown widget, we will only
+    // insert in the overflow panel (this is why we check placements
+    // before the desired location for the new node). Once we pass
+    // the desired location of the widget, we look for placement ids
+    // that actually have DOM equivalents to insert before. If all
+    // else fails, we insert at the end of either the overflow list
+    // or the toolbar target.
     while (++loopIndex < placements.length) {
       let nextNodeId = placements[loopIndex];
       if (loopIndex > nodeIndex) {
-        if (newNodeCanOverflow && this._collapsed.has(nextNodeId)) {
-          let nextNode = this._list.getElementsByAttribute("id", nextNodeId).item(0);
-          if (nextNode) {
-            return [this._list, nextNode];
-          }
+        let nextNode = aNode.ownerDocument.getElementById(nextNodeId);
+        // If the node we're inserting can overflow, and the next node
+        // in the toolbar is overflown, we should insert this node
+        // in the overflow panel before it.
+        if (newNodeCanOverflow && this._collapsed.has(nextNodeId) &&
+            nextNode && nextNode.parentNode == this._list) {
+          return [this._list, nextNode];
         }
-        if (!nodeBeforeNewNodeIsOverflown || !newNodeCanOverflow) {
-          let nextNode = this._target.getElementsByAttribute("id", nextNodeId).item(0);
-          if (nextNode) {
-            return [this._target, nextNode];
-          }
+        // Otherwise (if either we can't overflow, or the previous node
+        // wasn't overflown), and the next node is in the toolbar itself,
+        // insert the node in the toolbar.
+        if ((!nodeBeforeNewNodeIsOverflown || !newNodeCanOverflow) && nextNode &&
+            (nextNode.parentNode == this._target ||
+             // Also check if the next node is in a customization wrapper
+             // (toolbarpaletteitem). We don't need to do this for the
+             // overflow case because overflow is disabled in customize mode.
+             (nextNode.parentNode.localName == "toolbarpaletteitem" &&
+              nextNode.parentNode.parentNode == this._target))) {
+          return [this._target, nextNode];
         }
       } else if (loopIndex < nodeIndex && this._collapsed.has(nextNodeId)) {
         nodeBeforeNewNodeIsOverflown = true;

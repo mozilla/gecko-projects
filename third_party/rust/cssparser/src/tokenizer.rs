@@ -213,6 +213,7 @@ pub struct Tokenizer<'a> {
     current_line_number: u32,
     var_functions: SeenStatus,
     source_map_url: Option<&'a str>,
+    source_url: Option<&'a str>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -238,6 +239,7 @@ impl<'a> Tokenizer<'a> {
             current_line_number: first_line_number,
             var_functions: SeenStatus::DontCare,
             source_map_url: None,
+            source_url: None,
         }
     }
 
@@ -276,13 +278,18 @@ impl<'a> Tokenizer<'a> {
     pub fn current_source_location(&self) -> SourceLocation {
         SourceLocation {
             line: self.current_line_number,
-            column: (self.position - self.current_line_start_position) as u32,
+            column: (self.position - self.current_line_start_position + 1) as u32,
         }
     }
 
     #[inline]
     pub fn current_source_map_url(&self) -> Option<&'a str> {
         self.source_map_url
+    }
+
+    #[inline]
+    pub fn current_source_url(&self) -> Option<&'a str> {
+        self.source_url
     }
 
     #[inline]
@@ -521,8 +528,8 @@ pub struct SourceLocation {
     /// The line number, starting at 0 for the first line, unless `with_first_line_number` was used.
     pub line: u32,
 
-    /// The column number within a line, starting at 0 for first the character of the line.
-    /// Column numbers are in units of UTF-16 characters.
+    /// The column number within a line, starting at 1 for first the character of the line.
+    /// Column numbers are counted in UTF-16 code units.
     pub column: u32,
 }
 
@@ -692,7 +699,8 @@ fn consume_whitespace<'a>(tokenizer: &mut Tokenizer<'a>, newline: bool) -> Token
 }
 
 
-// Check for a sourceMappingURL comment and update the tokenizer appropriately.
+// Check for sourceMappingURL or sourceURL comments and update the
+// tokenizer appropriately.
 fn check_for_source_map<'a>(tokenizer: &mut Tokenizer<'a>, contents: &'a str) {
     let directive = "# sourceMappingURL=";
     let directive_old = "@ sourceMappingURL=";
@@ -701,6 +709,17 @@ fn check_for_source_map<'a>(tokenizer: &mut Tokenizer<'a>, contents: &'a str) {
     if contents.starts_with(directive) || contents.starts_with(directive_old) {
         let contents = &contents[directive.len()..];
         tokenizer.source_map_url = contents.split(|c| {
+            c == ' ' || c == '\t' || c == '\x0C' || c == '\r' || c == '\n'
+        }).next()
+    }
+
+    let directive = "# sourceURL=";
+    let directive_old = "@ sourceURL=";
+
+    // If there is a source map directive, extract the URL.
+    if contents.starts_with(directive) || contents.starts_with(directive_old) {
+        let contents = &contents[directive.len()..];
+        tokenizer.source_url = contents.split(|c| {
             c == ' ' || c == '\t' || c == '\x0C' || c == '\r' || c == '\n'
         }).next()
     }

@@ -11,7 +11,7 @@ use cssparser::{CssStringWriter, Parser, RGBA, Token, BasicParseError};
 use euclid::ScaleFactor;
 use euclid::Size2D;
 use font_metrics::get_metrics_provider_for_product;
-use gecko::values::convert_nscolor_to_rgba;
+use gecko::values::{convert_nscolor_to_rgba, convert_rgba_to_nscolor};
 use gecko_bindings::bindings;
 use gecko_bindings::structs;
 use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, nsCSSUnit};
@@ -23,10 +23,11 @@ use media_queries::MediaType;
 use parser::ParserContext;
 use properties::{ComputedValues, StyleBuilder};
 use properties::longhands::font_size;
-use selectors::parser::SelectorParseError;
+use rule_cache::RuleCacheConditions;
 use servo_arc::Arc;
+use std::cell::RefCell;
 use std::fmt::{self, Write};
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 use str::starts_with_ignore_ascii_case;
 use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
@@ -53,6 +54,11 @@ pub struct Device {
     /// the parent to compute everything else. So it is correct to just use
     /// a relaxed atomic here.
     root_font_size: AtomicIsize,
+    /// The body text color, stored as an `nscolor`, used for the "tables
+    /// inherit from body" quirk.
+    ///
+    /// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    body_text_color: AtomicUsize,
     /// Whether any styles computed in the document relied on the root font-size
     /// by using rem units.
     used_root_font_size: AtomicBool,
@@ -72,7 +78,8 @@ impl Device {
             pres_context: pres_context,
             default_values: ComputedValues::default_values(unsafe { &*pres_context }),
             // FIXME(bz): Seems dubious?
-            root_font_size: AtomicIsize::new(font_size::get_initial_value().value() as isize),
+            root_font_size: AtomicIsize::new(font_size::get_initial_value().0.to_i32_au() as isize),
+            body_text_color: AtomicUsize::new(unsafe { &*pres_context }.mDefaultColor as usize),
             used_root_font_size: AtomicBool::new(false),
             used_viewport_size: AtomicBool::new(false),
         }
@@ -107,6 +114,18 @@ impl Device {
     /// Set the font size of the root element (for rem)
     pub fn set_root_font_size(&self, size: Au) {
         self.root_font_size.store(size.0 as isize, Ordering::Relaxed)
+    }
+
+    /// Sets the body text color for the "inherit color from body" quirk.
+    ///
+    /// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    pub fn set_body_text_color(&self, color: RGBA) {
+        self.body_text_color.store(convert_rgba_to_nscolor(&color) as usize, Ordering::Relaxed)
+    }
+
+    /// Returns the body text color.
+    pub fn body_text_color(&self) -> RGBA {
+        convert_nscolor_to_rgba(self.body_text_color.load(Ordering::Relaxed) as u32)
     }
 
     /// Gets the pres context associated with this document.
@@ -157,11 +176,8 @@ impl Device {
 
     /// Returns the current viewport size in app units.
     pub fn au_viewport_size(&self) -> Size2D<Au> {
-        unsafe {
-            // TODO(emilio): Need to take into account scrollbars.
-            let area = &self.pres_context().mVisibleArea;
-            Size2D::new(Au(area.width), Au(area.height))
-        }
+        let area = &self.pres_context().mVisibleArea;
+        Size2D::new(Au(area.width), Au(area.height))
     }
 
     /// Returns the current viewport size in app units, recording that it's been
@@ -469,6 +485,89 @@ unsafe fn find_in_table<F>(mut current_entry: *const nsCSSProps_KTableEntry,
     }
 }
 
+fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
+                               feature_value_type: nsMediaFeature_ValueType,
+                               context: &ParserContext,
+                               input: &mut Parser<'i, 't>)
+                               -> Result<MediaExpressionValue, ParseError<'i>> {
+    let value = match feature_value_type {
+        nsMediaFeature_ValueType::eLength => {
+           let length = Length::parse_non_negative(context, input)?;
+           // FIXME(canaltinova): See bug 1396057. Gecko doesn't support calc
+           // inside media queries. This check is for temporarily remove it
+           // for parity with gecko. We should remove this check when we want
+           // to support it.
+           if let Length::Calc(_) = length {
+               return Err(StyleParseError::UnspecifiedError.into())
+           }
+           MediaExpressionValue::Length(length)
+        },
+        nsMediaFeature_ValueType::eInteger => {
+           // FIXME(emilio): We should use `Integer::parse` to handle `calc`
+           // properly in integer expressions. Note that calc is still not
+           // supported in media queries per FIXME above.
+           let i = input.expect_integer()?;
+           if i < 0 {
+               return Err(StyleParseError::UnspecifiedError.into())
+           }
+           MediaExpressionValue::Integer(i as u32)
+        }
+        nsMediaFeature_ValueType::eBoolInteger => {
+           let i = input.expect_integer()?;
+           if i < 0 || i > 1 {
+               return Err(StyleParseError::UnspecifiedError.into())
+           }
+           MediaExpressionValue::BoolInteger(i == 1)
+        }
+        nsMediaFeature_ValueType::eFloat => {
+           MediaExpressionValue::Float(input.expect_number()?)
+        }
+        nsMediaFeature_ValueType::eIntRatio => {
+           let a = input.expect_integer()?;
+           if a <= 0 {
+               return Err(StyleParseError::UnspecifiedError.into())
+           }
+
+           input.expect_delim('/')?;
+
+           let b = input.expect_integer()?;
+           if b <= 0 {
+               return Err(StyleParseError::UnspecifiedError.into())
+           }
+           MediaExpressionValue::IntRatio(a as u32, b as u32)
+        }
+        nsMediaFeature_ValueType::eResolution => {
+           MediaExpressionValue::Resolution(Resolution::parse(input)?)
+        }
+        nsMediaFeature_ValueType::eEnumerated => {
+           let keyword = input.expect_ident()?;
+           let keyword = unsafe {
+               bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
+               keyword.len() as u32)
+           };
+
+           let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
+               *feature.mData.mKeywordTable.as_ref()
+           };
+
+           let value =
+               match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
+                   Some((_kw, value)) => {
+                       value
+                   }
+                   None => return Err(StyleParseError::UnspecifiedError.into()),
+               };
+
+           MediaExpressionValue::Enumerated(value)
+        }
+        nsMediaFeature_ValueType::eIdent => {
+           MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
+        }
+    };
+
+    Ok(value)
+}
+
 impl Expression {
     /// Trivially construct a new expression.
     fn new(feature: &'static nsMediaFeature,
@@ -488,13 +587,24 @@ impl Expression {
     /// ```
     pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<Self, ParseError<'i>> {
-        input.expect_parenthesis_block()?;
+        input.expect_parenthesis_block().map_err(|err|
+            match err {
+                BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
+                _ => StyleParseError::UnspecifiedError,
+            }
+        )?;
+
         input.parse_nested_block(|input| {
             // FIXME: remove extra indented block when lifetimes are non-lexical
             let feature;
             let range;
             {
-                let ident = input.expect_ident()?;
+                let ident = input.expect_ident().map_err(|err|
+                    match err {
+                        BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
+                        _ => StyleParseError::UnspecifiedError,
+                    }
+                )?;
 
                 let mut flags = 0;
                 let result = {
@@ -530,17 +640,19 @@ impl Expression {
                     Ok((f, r)) => {
                         feature = f;
                         range = r;
-                    }
-                    Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
+                    },
+                    Err(()) => {
+                        return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into())
+                    },
                 }
 
                 if (feature.mReqFlags & !flags) != 0 {
-                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
                 }
 
                 if range != nsMediaExpression_Range::eEqual &&
-                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                   feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
+                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
                 }
             }
 
@@ -556,80 +668,11 @@ impl Expression {
                 return Ok(Expression::new(feature, None, range));
             }
 
-            let value = match feature.mValueType {
-                nsMediaFeature_ValueType::eLength => {
-                    let length = Length::parse_non_negative(context, input)?;
-                    // FIXME(canaltinova): See bug 1396057. Gecko doesn't support calc
-                    // inside media queries. This check is for temporarily remove it
-                    // for parity with gecko. We should remove this check when we want
-                    // to support it.
-                    if let Length::Calc(_) = length {
-                        return Err(StyleParseError::UnspecifiedError.into())
-                    }
-                    MediaExpressionValue::Length(length)
-                },
-                nsMediaFeature_ValueType::eInteger => {
-                    // FIXME(emilio): We should use `Integer::parse` to handle `calc`
-                    // properly in integer expressions. Note that calc is still not
-                    // supported in media queries per FIXME above.
-                    let i = input.expect_integer()?;
-                    if i < 0 {
-                        return Err(StyleParseError::UnspecifiedError.into())
-                    }
-                    MediaExpressionValue::Integer(i as u32)
-                }
-                nsMediaFeature_ValueType::eBoolInteger => {
-                    let i = input.expect_integer()?;
-                    if i < 0 || i > 1 {
-                        return Err(StyleParseError::UnspecifiedError.into())
-                    }
-                    MediaExpressionValue::BoolInteger(i == 1)
-                }
-                nsMediaFeature_ValueType::eFloat => {
-                    MediaExpressionValue::Float(input.expect_number()?)
-                }
-                nsMediaFeature_ValueType::eIntRatio => {
-                    let a = input.expect_integer()?;
-                    if a <= 0 {
-                        return Err(StyleParseError::UnspecifiedError.into())
-                    }
-
-                    input.expect_delim('/')?;
-
-                    let b = input.expect_integer()?;
-                    if b <= 0 {
-                        return Err(StyleParseError::UnspecifiedError.into())
-                    }
-                    MediaExpressionValue::IntRatio(a as u32, b as u32)
-                }
-                nsMediaFeature_ValueType::eResolution => {
-                    MediaExpressionValue::Resolution(Resolution::parse(input)?)
-                }
-                nsMediaFeature_ValueType::eEnumerated => {
-                    let keyword = input.expect_ident()?;
-                    let keyword = unsafe {
-                        bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
-                                                         keyword.len() as u32)
-                    };
-
-                    let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
-                        *feature.mData.mKeywordTable.as_ref()
-                    };
-
-                    let value =
-                        match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
-                            Some((_kw, value)) => {
-                                value
-                            }
-                            None => return Err(StyleParseError::UnspecifiedError.into()),
-                        };
-
-                    MediaExpressionValue::Enumerated(value)
-                }
-                nsMediaFeature_ValueType::eIdent => {
-                    MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
-                }
-            };
+            let value = parse_feature_value(feature,
+                                            feature.mValueType,
+                                            context, input).map_err(|_|
+                StyleParseError::MediaQueryExpectedFeatureValue
+            )?;
 
             Ok(Expression::new(feature, Some(value), range))
         })
@@ -671,6 +714,7 @@ impl Expression {
 
         // http://dev.w3.org/csswg/mediaqueries3/#units
         // em units are relative to the initial font-size.
+        let mut conditions = RuleCacheConditions::default();
         let context = computed::Context {
             is_root_element: false,
             builder: StyleBuilder::for_derived_style(device, default_values, None, None),
@@ -680,6 +724,8 @@ impl Expression {
             // TODO: pass the correct value here.
             quirks_mode: quirks_mode,
             for_smil_animation: false,
+            for_non_inherited_property: None,
+            rule_cache_conditions: RefCell::new(&mut conditions),
         };
 
         let required_value = match self.value {
@@ -690,7 +736,7 @@ impl Expression {
                 return match *actual_value {
                     BoolInteger(v) => v,
                     Integer(v) => v != 0,
-                    Length(ref l) => l.to_computed_value(&context) != Au(0),
+                    Length(ref l) => l.to_computed_value(&context).px() != 0.,
                     _ => true,
                 }
             }
@@ -699,14 +745,16 @@ impl Expression {
         // FIXME(emilio): Handle the possible floating point errors?
         let cmp = match (required_value, actual_value) {
             (&Length(ref one), &Length(ref other)) => {
-                one.to_computed_value(&context)
-                    .cmp(&other.to_computed_value(&context))
+                one.to_computed_value(&context).to_i32_au()
+                    .cmp(&other.to_computed_value(&context).to_i32_au())
             }
             (&Integer(one), &Integer(ref other)) => one.cmp(other),
             (&BoolInteger(one), &BoolInteger(ref other)) => one.cmp(other),
             (&Float(one), &Float(ref other)) => one.partial_cmp(other).unwrap(),
             (&IntRatio(one_num, one_den), &IntRatio(other_num, other_den)) => {
-                (one_num * other_den).partial_cmp(&(other_num * one_den)).unwrap()
+                // Extend to avoid overflow.
+                (one_num as u64 * other_den as u64).cmp(
+                    &(other_num as u64 * one_den as u64))
             }
             (&Resolution(ref one), &Resolution(ref other)) => {
                 let actual_dpi = unsafe {

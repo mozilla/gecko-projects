@@ -17,6 +17,7 @@
 
 #include "mozilla/Move.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/Telemetry.h"
 
 #include "webrtc/config.h"
 
@@ -229,6 +230,13 @@ JsepSessionImpl::AddRtpExtension(std::vector<SdpExtmapAttributeList::Extmap>& ex
   if (extensions.size() + 1 > UINT16_MAX) {
     JSEP_SET_ERROR("Too many rtp extensions have been added");
     return NS_ERROR_FAILURE;
+  }
+
+  // Avoid adding duplicate entries
+  for (auto ext = extensions.begin(); ext != extensions.end(); ++ext) {
+    if (ext->direction == direction && ext->extensionname == extensionName) {
+      return NS_OK;
+    }
   }
 
   SdpExtmapAttributeList::Extmap extmap =
@@ -641,7 +649,8 @@ JsepSessionImpl::SetupBundle(Sdp* sdp) const
 
   for (size_t i = 0; i < sdp->GetMediaSectionCount(); ++i) {
     auto& attrs = sdp->GetMediaSection(i).GetAttributeList();
-    if (attrs.HasAttribute(SdpAttribute::kMidAttribute)) {
+    if ((sdp->GetMediaSection(i).GetPort() != 0) &&
+        attrs.HasAttribute(SdpAttribute::kMidAttribute)) {
       bool useBundleOnly = false;
       switch (mBundlePolicy) {
         case kBundleMaxCompat:
@@ -1524,6 +1533,11 @@ JsepSessionImpl::MakeNegotiatedTrackPair(const SdpMediaSection& remote,
     // TODO(bug 1095743): verify that the PTs are consistent with mux.
     MOZ_MTLOG(ML_DEBUG, "RTCP-MUX is off");
     trackPairOut->mRtcpTransport = transport;
+  }
+
+  if (local.GetMediaType() != SdpMediaSection::kApplication) {
+    Telemetry::Accumulate(Telemetry::WEBRTC_RTCP_MUX,
+        transport->mComponents == 1);
   }
 
   return NS_OK;

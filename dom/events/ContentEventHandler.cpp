@@ -15,11 +15,11 @@
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsCopySupport.h"
+#include "nsElementTable.h"
 #include "nsFocusManager.h"
 #include "nsFontMetrics.h"
 #include "nsFrameSelection.h"
 #include "nsIContentIterator.h"
-#include "nsIParserService.h"
 #include "nsIPresShell.h"
 #include "nsISelection.h"
 #include "nsIFrame.h"
@@ -515,8 +515,10 @@ ContentEventHandler::GetFocusedContent()
   }
   nsCOMPtr<nsPIDOMWindowOuter> window = doc->GetWindow();
   nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
-  return nsFocusManager::GetFocusedDescendant(window, true,
-                                              getter_AddRefs(focusedWindow));
+  return nsFocusManager::GetFocusedDescendant(
+                           window,
+                           nsFocusManager::eIncludeAllDescendants,
+                           getter_AddRefs(focusedWindow));
 }
 
 bool
@@ -3037,10 +3039,9 @@ ContentEventHandler::GetStartOffset(const RawRange& aRawRange,
   nsINode* startNode = aRawRange.GetStartContainer();
   bool startIsContainer = true;
   if (startNode->IsHTMLElement()) {
-    if (nsIParserService* ps = nsContentUtils::GetParserService()) {
-      nsIAtom* name = startNode->NodeInfo()->NameAtom();
-      ps->IsContainer(ps->HTMLAtomTagToId(name), startIsContainer);
-    }
+    nsIAtom* name = startNode->NodeInfo()->NameAtom();
+    startIsContainer =
+      nsHTMLElement::IsContainer(nsHTMLTags::AtomTagToId(name));
   }
   const NodePosition& startPos =
     startIsContainer ?
@@ -3252,7 +3253,7 @@ ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent)
 
   // Pass the eSetSelection events reason along with the BatchChange-end
   // selection change notifications.
-  mSelection->EndBatchChangesInternal(aEvent->mReason);
+  mSelection->EndBatchChanges(aEvent->mReason);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mSelection->ScrollIntoViewInternal(

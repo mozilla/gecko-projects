@@ -2,22 +2,32 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-var {
-  ExtensionError,
-} = ExtensionCommon;
-
 this.webRequest = class extends ExtensionAPI {
   getAPI(context) {
+    let filters = new WeakSet();
+
+    context.callOnClose({
+      close() {
+        for (let filter of ChromeUtils.nondeterministicGetWeakSetKeys(filters)) {
+          try {
+            filter.disconnect();
+          } catch (e) {
+            // Ignore.
+          }
+        }
+      },
+    });
+
     return {
       webRequest: {
         filterResponseData(requestId) {
-          if (AppConstants.RELEASE_OR_BETA) {
-            throw new ExtensionError("filterResponseData() unsupported in release builds");
-          }
           requestId = parseInt(requestId, 10);
 
-          return context.cloneScope.StreamFilter.create(
+          let streamFilter = context.cloneScope.StreamFilter.create(
             requestId, context.extension.id);
+
+          filters.add(streamFilter);
+          return streamFilter;
         },
       },
     };

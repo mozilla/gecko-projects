@@ -10,7 +10,7 @@
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/WebComponentsBinding.h"
 #include "mozilla/dom/DocGroup.h"
-#include "nsIParserService.h"
+#include "nsHTMLTags.h"
 #include "jsapi.h"
 
 namespace mozilla {
@@ -593,6 +593,9 @@ CustomElementRegistry::Define(const nsAString& aName,
   }
 
   JSContext *cx = jsapi.cx();
+  // Note: No calls that might run JS or trigger CC before this point, or
+  // there's a (vanishingly small) chance of our constructor being nulled
+  // before we access it.
   JS::Rooted<JSObject*> constructor(cx, aFunctionConstructor.CallableOrNull());
 
   /**
@@ -666,14 +669,8 @@ CustomElementRegistry::Define(const nsAString& aName,
       return;
     }
 
-    nsIParserService* ps = nsContentUtils::GetParserService();
-    if (!ps) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return;
-    }
-
     // bgsound and multicol are unknown html element.
-    int32_t tag = ps->HTMLCaseSensitiveAtomTagToId(extendsAtom);
+    int32_t tag = nsHTMLTags::CaseSensitiveAtomTagToId(extendsAtom);
     if (tag == eHTMLTag_userdefined ||
         tag == eHTMLTag_bgsound ||
         tag == eHTMLTag_multicol) {
@@ -884,7 +881,7 @@ CustomElementRegistry::Get(JSContext* aCx, const nsAString& aName,
     return;
   }
 
-  aRetVal.setObjectOrNull(data->mConstructor->CallableOrNull());
+  aRetVal.setObject(*data->mConstructor->Callback(aCx));
 }
 
 already_AddRefed<Promise>
@@ -976,9 +973,9 @@ CustomElementRegistry::Upgrade(Element* aElement,
 
         LifecycleCallbackArgs args = {
           nsDependentAtomString(attrName),
-          NullString(),
-          (attrValue.IsEmpty() ? NullString() : attrValue),
-          (namespaceURI.IsEmpty() ? NullString() : namespaceURI)
+          VoidString(),
+          (attrValue.IsEmpty() ? VoidString() : attrValue),
+          (namespaceURI.IsEmpty() ? VoidString() : namespaceURI)
         };
         EnqueueLifecycleCallback(nsIDocument::eAttributeChanged, aElement,
                                  &args, aDefinition);

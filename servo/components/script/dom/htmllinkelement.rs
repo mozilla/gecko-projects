@@ -242,8 +242,8 @@ impl VirtualMethods for HTMLLinkElement {
             s.unbind_from_tree(context);
         }
 
-        if let Some(ref s) = *self.stylesheet.borrow() {
-            document_from_node(self).remove_stylesheet(self.upcast(), s);
+        if let Some(s) = self.stylesheet.borrow_mut().take() {
+            document_from_node(self).remove_stylesheet(self.upcast(), &s);
         }
     }
 }
@@ -289,7 +289,9 @@ impl HTMLLinkElement {
         let context = CssParserContext::new_for_cssom(&doc_url, Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       document.quirks_mode());
-        let media = parse_media_query_list(&context, &mut css_parser);
+        let window = document.window();
+        let media = parse_media_query_list(&context, &mut css_parser,
+                                           window.css_error_reporter());
 
         let im_attribute = element.get_attribute(&ns!(), &local_name!("integrity"));
         let integrity_val = im_attribute.r().map(|a| a.value());

@@ -12,6 +12,7 @@ const SPLITCONSOLE_HEIGHT_PREF = "devtools.toolbox.splitconsoleHeight";
 const DISABLE_AUTOHIDE_PREF = "ui.popup.disable_autohide";
 const HOST_HISTOGRAM = "DEVTOOLS_TOOLBOX_HOST";
 const SCREENSIZE_HISTOGRAM = "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER";
+const CURRENT_THEME_SCALAR = "devtools.current_theme";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 var {Ci, Cu, Cc} = require("chrome");
@@ -66,6 +67,8 @@ loader.lazyRequireGetter(this, "HUDService",
   "devtools/client/webconsole/hudservice", true);
 loader.lazyRequireGetter(this, "viewSource",
   "devtools/client/shared/view-source");
+loader.lazyRequireGetter(this, "StyleSheetsFront",
+  "devtools/shared/fronts/stylesheets", true);
 
 loader.lazyGetter(this, "domNodeConstants", () => {
   return require("devtools/shared/dom-node-constants");
@@ -103,6 +106,7 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this._initInspector = null;
   this._inspector = null;
+  this._styleSheets = null;
 
   // Map of frames (id => frame-info) and currently selected frame id.
   this.frameMap = new Map();
@@ -113,6 +117,8 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
   this._refreshHostTitle = this._refreshHostTitle.bind(this);
   this._toggleNoAutohide = this._toggleNoAutohide.bind(this);
   this.showFramesMenu = this.showFramesMenu.bind(this);
+  this.handleKeyDownOnFramesButton = this.handleKeyDownOnFramesButton.bind(this);
+  this.showFramesMenuOnKeyDown = this.showFramesMenuOnKeyDown.bind(this);
   this._updateFrames = this._updateFrames.bind(this);
   this._splitConsoleOnKeypress = this._splitConsoleOnKeypress.bind(this);
   this.destroy = this.destroy.bind(this);
@@ -495,7 +501,10 @@ Toolbox.prototype = {
 
       // Start rendering the toolbox toolbar before selecting the tool, as the tools
       // can take a few hundred milliseconds seconds to start up.
-      this.component.setCanRender();
+      // But wait for toolbar buttons to be set before updating this react component.
+      buttonsPromise.then(() => {
+        this.component.setCanRender();
+      });
 
       yield this.selectTool(this._defaultToolId);
 
@@ -594,6 +603,22 @@ Toolbox.prototype = {
                 });
             };
 
+          case "applySourceMap":
+            return (generatedId, url, code, mappings) => {
+              return target.applySourceMap(generatedId, url, code, mappings)
+                .then(result => {
+                  // If a tool has changed or introduced a source map
+                  // (e.g, by pretty-printing a source), tell the
+                  // source map URL service about the change, so that
+                  // subscribers to that service can be updated as
+                  // well.
+                  if (this._sourceMapURLService) {
+                    this._sourceMapURLService.sourceMapChanged(generatedId, url);
+                  }
+                  return result;
+                });
+            };
+
           default:
             return target[name];
         }
@@ -618,18 +643,17 @@ Toolbox.prototype = {
 
   /**
    * Clients wishing to use source maps but that want the toolbox to
-   * track the source actor mapping can use this source map service.
-   * This is a higher-level service than the one returned by
-   * |sourceMapService|, in that it automatically tracks source actor
-   * IDs.
+   * track the source and style sheet actor mapping can use this
+   * source map service.  This is a higher-level service than the one
+   * returned by |sourceMapService|, in that it automatically tracks
+   * source and style sheet actor IDs.
    */
   get sourceMapURLService() {
     if (this._sourceMapURLService) {
       return this._sourceMapURLService;
     }
     let sourceMaps = this._createSourceMapService();
-    this._sourceMapURLService = new SourceMapURLService(this._target, this.threadClient,
-                                                        sourceMaps);
+    this._sourceMapURLService = new SourceMapURLService(this, sourceMaps);
     return this._sourceMapURLService;
   },
 
@@ -650,6 +674,11 @@ Toolbox.prototype = {
     this._telemetry.logOncePerBrowserVersion(SCREENSIZE_HISTOGRAM,
                                              system.getScreenDimensions());
     this._telemetry.log(HOST_HISTOGRAM, this._getTelemetryHostId());
+
+    // Log current theme. The question we want to answer is:
+    // "What proportion of users use which themes?"
+    let currentTheme = Services.prefs.getCharPref("devtools.theme");
+    this._telemetry.logKeyedScalar(CURRENT_THEME_SCALAR, currentTheme, 1);
   },
 
   /**
@@ -687,8 +716,18 @@ Toolbox.prototype = {
    */
   _createButtonState: function (options) {
     let isCheckedValue = false;
-    const { id, className, description, onClick, isInStartContainer, setup, teardown,
-            isTargetSupported, isChecked } = options;
+    const {
+      id,
+      className,
+      description,
+      onClick,
+      isInStartContainer,
+      setup,
+      teardown,
+      isTargetSupported,
+      isChecked,
+      onKeyDown
+    } = options;
     const toolbox = this;
     const button = {
       id,
@@ -697,6 +736,11 @@ Toolbox.prototype = {
       onClick(event) {
         if (typeof onClick == "function") {
           onClick(event, toolbox);
+        }
+      },
+      onKeyDown(event) {
+        if (typeof onKeyDown == "function") {
+          onKeyDown(event, toolbox);
         }
       },
       isTargetSupported,
@@ -1205,7 +1249,8 @@ Toolbox.prototype = {
       onClick: this.showFramesMenu,
       isTargetSupported: target => {
         return target.activeTab && target.activeTab.traits.frames;
-      }
+      },
+      onKeyDown: this.handleKeyDownOnFramesButton
     });
 
     return this.frameButton;
@@ -1518,6 +1563,11 @@ Toolbox.prototype = {
    *        the id of the additional tool to unregister and remove.
    */
   removeAdditionalTool(toolId) {
+    // Early exit if the toolbox is already destroying itself.
+    if (this._destroyer) {
+      return;
+    }
+
     if (!this.hasAdditionalTool(toolId)) {
       throw new Error("Tool definition not registered to this toolbox: " +
                       toolId);
@@ -2054,6 +2104,23 @@ Toolbox.prototype = {
   },
 
   /**
+   * Handle keyDown event on 'frames' button to show available frames
+   */
+  handleKeyDownOnFramesButton: function (event) {
+    this.shortcuts.on(L10N.getStr("toolbox.showFrames.key"),
+      this.showFramesMenuOnKeyDown);
+  },
+
+  /**
+   * Show 'frames' menu on key down
+   */
+  showFramesMenuOnKeyDown: function (name, event) {
+    if (event.target.id == "command-button-frames") {
+      this.showFramesMenu(event);
+    }
+  },
+
+  /**
    * Select a frame by sending 'switchToFrame' packet to the backend.
    */
   onSelectFrame: function (frameId) {
@@ -2540,6 +2607,12 @@ Toolbox.prototype = {
     // Destroy the preference front
     outstanding.push(this.destroyPreference());
 
+    // Destroy the style sheet front.
+    if (this._styleSheets) {
+      this._styleSheets.destroy();
+      this._styleSheets = null;
+    }
+
     // Detach the thread
     detachThread(this._threadClient);
     this._threadClient = null;
@@ -2709,6 +2782,17 @@ Toolbox.prototype = {
     yield this.performance.destroy();
     this._performance = null;
   }),
+
+  /**
+   * Return the style sheets front, creating it if necessary.  If the
+   * style sheets front is not supported by the target, returns null.
+   */
+  initStyleSheetsFront: function () {
+    if (!this._styleSheets && this.target.hasActor("styleSheets")) {
+      this._styleSheets = StyleSheetsFront(this.target.client, this.target.form);
+    }
+    return this._styleSheets;
+  },
 
   /**
    * Destroy the preferences actor when the toolbox is unloaded.

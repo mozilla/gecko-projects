@@ -158,6 +158,7 @@ enum ServoKeywordSize {
 struct ServoFontComputationData {
   ServoKeywordSize mKeyword;
   float/*32_t*/ mRatio;
+  int32_t mAbsolute;
 
   static_assert(sizeof(float) == 4, "float should be 32 bit");
 };
@@ -189,7 +190,7 @@ struct ServoRawOffsetArc {
 };
 
 struct ServoComputedValueFlags {
-  uint8_t mFlags;
+  uint16_t mFlags;
 };
 
 #define STYLE_STRUCT(name_, checkdata_cb_) struct Gecko##name_;
@@ -198,24 +199,24 @@ struct ServoComputedValueFlags {
 #undef STYLE_STRUCT
 #undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
 
+// These measurements are obtained for both the UA cache and the Stylist, but
+// not all the fields are used in both cases.
 class ServoStyleSetSizes
 {
 public:
-  size_t mStylistRuleTree;
-  size_t mStylistPrecomputedPseudos;
-  size_t mStylistElementAndPseudosMaps;
-  size_t mStylistInvalidationMap;
-  size_t mStylistRevalidationSelectors;
-  size_t mStylistOther;
-  size_t mOther;
+  size_t mRuleTree;                // Stylist-only
+  size_t mPrecomputedPseudos;      // UA cache-only
+  size_t mElementAndPseudosMaps;   // Used for both
+  size_t mInvalidationMap;         // Used for both
+  size_t mRevalidationSelectors;   // Used for both
+  size_t mOther;                   // Used for both
 
   ServoStyleSetSizes()
-    : mStylistRuleTree(0)
-    , mStylistPrecomputedPseudos(0)
-    , mStylistElementAndPseudosMaps(0)
-    , mStylistInvalidationMap(0)
-    , mStylistRevalidationSelectors(0)
-    , mStylistOther(0)
+    : mRuleTree(0)
+    , mPrecomputedPseudos(0)
+    , mElementAndPseudosMaps(0)
+    , mInvalidationMap(0)
+    , mRevalidationSelectors(0)
     , mOther(0)
   {}
 };

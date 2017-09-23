@@ -38,16 +38,6 @@ const MessageState = Immutable.Record({
   // Map of the form {messageId : tableData}, which represent the data passed
   // as an argument in console.table calls.
   messagesTableDataById: Immutable.Map(),
-  // Map of the form {messageId : {[actor]: properties}}, where `properties` is
-  // a RDP packet containing the properties of the ${actor} grip.
-  // This map is consumed by the ObjectInspector so we only load properties once,
-  // when needed (when an ObjectInspector node is expanded), and then caches them.
-  messagesObjectPropertiesById: Immutable.Map(),
-  // Map of the form {messageId : {[actor]: entries}}, where `entries` is
-  // a RDP packet containing the entries of the ${actor} grip.
-  // This map is consumed by the ObjectInspector so we only load entries once,
-  // when needed (when an ObjectInspector node is expanded), and then caches them.
-  messagesObjectEntriesById: Immutable.Map(),
   // Map of the form {groupMessageId : groupArray},
   // where groupArray is the list of of all the parent groups' ids of the groupMessageId.
   groupsById: Immutable.Map(),
@@ -64,14 +54,10 @@ const MessageState = Immutable.Record({
   networkMessagesUpdateById: {},
 });
 
-function messages(state = new MessageState(), action, filtersState, prefsState) {
+function addMessage(state, filtersState, prefsState, newMessage) {
   const {
     messagesById,
     messagesUiById,
-    messagesTableDataById,
-    messagesObjectPropertiesById,
-    messagesObjectEntriesById,
-    networkMessagesUpdateById,
     groupsById,
     currentGroup,
     repeatById,
@@ -79,82 +65,120 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
     filteredMessagesCount,
   } = state;
 
+  if (newMessage.type === constants.MESSAGE_TYPE.NULL_MESSAGE) {
+    // When the message has a NULL type, we don't add it.
+    return state;
+  }
+
+  if (newMessage.type === constants.MESSAGE_TYPE.END_GROUP) {
+    // Compute the new current group.
+    return state.set("currentGroup", getNewCurrentGroup(currentGroup, groupsById));
+  }
+
+  if (newMessage.allowRepeating && messagesById.size > 0) {
+    let lastMessage = messagesById.last();
+    if (
+      lastMessage.repeatId === newMessage.repeatId
+      && lastMessage.groupId === currentGroup
+    ) {
+      return state.set(
+        "repeatById",
+        Object.assign({}, repeatById, {
+          [lastMessage.id]: (repeatById[lastMessage.id] || 1) + 1
+        })
+      );
+    }
+  }
+
+  return state.withMutations(function (record) {
+    // Add the new message with a reference to the parent group.
+    let parentGroups = getParentGroups(currentGroup, groupsById);
+    newMessage.groupId = currentGroup;
+    newMessage.indent = parentGroups.length;
+
+    const addedMessage = Object.freeze(newMessage);
+    record.set(
+      "messagesById",
+      messagesById.set(newMessage.id, addedMessage)
+    );
+
+    if (newMessage.type === "trace") {
+      // We want the stacktrace to be open by default.
+      record.set("messagesUiById", messagesUiById.push(newMessage.id));
+    } else if (isGroupType(newMessage.type)) {
+      record.set("currentGroup", newMessage.id);
+      record.set("groupsById", groupsById.set(newMessage.id, parentGroups));
+
+      if (newMessage.type === constants.MESSAGE_TYPE.START_GROUP) {
+        // We want the group to be open by default.
+        record.set("messagesUiById", messagesUiById.push(newMessage.id));
+      }
+    }
+
+    const {
+      visible,
+      cause
+    } = getMessageVisibility(addedMessage, record, filtersState);
+
+    if (visible) {
+      record.set("visibleMessages", [...visibleMessages, newMessage.id]);
+    } else if (DEFAULT_FILTERS.includes(cause)) {
+      record.set("filteredMessagesCount", Object.assign({}, filteredMessagesCount, {
+        global: filteredMessagesCount.global + 1,
+        [cause]: filteredMessagesCount[cause] + 1
+      }));
+    }
+  });
+}
+
+function messages(state = new MessageState(), action, filtersState, prefsState) {
+  const {
+    messagesById,
+    messagesUiById,
+    messagesTableDataById,
+    networkMessagesUpdateById,
+    groupsById,
+    visibleMessages,
+  } = state;
+
   const {logLimit} = prefsState;
 
+  let newState;
   switch (action.type) {
-    case constants.MESSAGE_ADD:
-      let newMessage = action.message;
+    case constants.MESSAGES_ADD:
+      newState = state;
 
-      if (newMessage.type === constants.MESSAGE_TYPE.NULL_MESSAGE) {
-        // When the message has a NULL type, we don't add it.
-        return state;
-      }
-
-      if (newMessage.type === constants.MESSAGE_TYPE.END_GROUP) {
-        // Compute the new current group.
-        return state.set("currentGroup", getNewCurrentGroup(currentGroup, groupsById));
-      }
-
-      if (newMessage.allowRepeating && messagesById.size > 0) {
-        let lastMessage = messagesById.last();
-        if (
-          lastMessage.repeatId === newMessage.repeatId
-          && lastMessage.groupId === currentGroup
-        ) {
-          return state.set(
-            "repeatById",
-            Object.assign({}, repeatById, {
-              [lastMessage.id]: (repeatById[lastMessage.id] || 1) + 1
-            })
-          );
-        }
-      }
-
-      return state.withMutations(function (record) {
-        // Add the new message with a reference to the parent group.
-        let parentGroups = getParentGroups(currentGroup, groupsById);
-        newMessage.groupId = currentGroup;
-        newMessage.indent = parentGroups.length;
-
-        const addedMessage = Object.freeze(newMessage);
-        record.set(
-          "messagesById",
-          messagesById.set(newMessage.id, addedMessage)
-        );
-
-        if (newMessage.type === "trace") {
-          // We want the stacktrace to be open by default.
-          record.set("messagesUiById", messagesUiById.push(newMessage.id));
-        } else if (isGroupType(newMessage.type)) {
-          record.set("currentGroup", newMessage.id);
-          record.set("groupsById", groupsById.set(newMessage.id, parentGroups));
-
-          if (newMessage.type === constants.MESSAGE_TYPE.START_GROUP) {
-            // We want the group to be open by default.
-            record.set("messagesUiById", messagesUiById.push(newMessage.id));
+      // Preemptively remove messages that will never be rendered
+      let list = [];
+      let prunableCount = 0;
+      let lastMessageRepeatId = -1;
+      for (let i = action.messages.length - 1; i >= 0; i--) {
+        let message = action.messages[i];
+        if (!message.groupId && !isGroupType(message.type) &&
+            message.type !== MESSAGE_TYPE.END_GROUP) {
+          prunableCount++;
+          // Once we've added the max number of messages that can be added, stop.
+          // Except for repeated messages, where we keep adding over the limit.
+          if (prunableCount <= logLimit || message.repeatId == lastMessageRepeatId) {
+            list.unshift(action.messages[i]);
+          } else {
+            break;
           }
+        } else {
+          list.unshift(message);
         }
+        lastMessageRepeatId = message.repeatId;
+      }
 
-        const {
-          visible,
-          cause
-        } = getMessageVisibility(addedMessage, record, filtersState);
-
-        if (visible) {
-          record.set("visibleMessages", [...visibleMessages, newMessage.id]);
-        } else if (DEFAULT_FILTERS.includes(cause)) {
-          record.set("filteredMessagesCount", Object.assign({}, filteredMessagesCount, {
-            global: filteredMessagesCount.global + 1,
-            [cause]: filteredMessagesCount[cause] + 1
-          }));
-        }
-
-        // Remove top level message if the total count of top level messages
-        // exceeds the current limit.
-        if (record.messagesById.size > logLimit) {
-          limitTopLevelMessageCount(state, record, logLimit);
-        }
+      list.forEach(message => {
+        newState = addMessage(newState, filtersState, prefsState, message);
       });
+
+      return limitTopLevelMessageCount(newState, logLimit);
+
+    case constants.MESSAGE_ADD:
+      newState = addMessage(state, filtersState, prefsState, action.message);
+      return limitTopLevelMessageCount(newState, logLimit);
 
     case constants.MESSAGES_CLEAR:
       return new MessageState({
@@ -242,27 +266,6 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
       const {id, data} = action;
       return state.set("messagesTableDataById", messagesTableDataById.set(id, data));
 
-    case constants.MESSAGE_OBJECT_PROPERTIES_RECEIVE:
-      return state.set(
-        "messagesObjectPropertiesById",
-        messagesObjectPropertiesById.set(
-          action.id,
-          Object.assign({
-            [action.actor]: action.properties
-          }, messagesObjectPropertiesById.get(action.id))
-        )
-      );
-    case constants.MESSAGE_OBJECT_ENTRIES_RECEIVE:
-      return state.set(
-        "messagesObjectEntriesById",
-        messagesObjectEntriesById.set(
-          action.id,
-          Object.assign({
-            [action.actor]: action.entries
-          }, messagesObjectEntriesById.get(action.id))
-        )
-      );
-
     case constants.NETWORK_MESSAGE_UPDATE:
       return state.set(
         "networkMessagesUpdateById",
@@ -299,7 +302,7 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
         }
       }
 
-      let newState = state.set(
+      newState = state.set(
         "networkMessagesUpdateById",
         Object.assign({}, networkMessagesUpdateById, {
           [action.id]: Object.assign({}, request, values)
@@ -374,113 +377,103 @@ function getParentGroups(currentGroup, groupsById) {
  * Also populate an array of all backend actors associated with these
  * messages so they can be released.
  */
-function limitTopLevelMessageCount(state, record, logLimit) {
-  let topLevelCount = record.groupsById.size === 0
-    ? record.messagesById.size
-    : getToplevelMessageCount(record);
+function limitTopLevelMessageCount(state, logLimit) {
+  return state.withMutations(function (record) {
+    let topLevelCount = record.groupsById.size === 0
+      ? record.messagesById.size
+      : getToplevelMessageCount(record);
 
-  if (topLevelCount <= logLimit) {
-    return record;
-  }
-
-  const removedMessagesId = [];
-  const removedActors = [];
-  let visibleMessages = [...record.visibleMessages];
-
-  let cleaningGroup = false;
-  record.messagesById.forEach((message, id) => {
-    // If we were cleaning a group and the current message does not have
-    // a groupId, we're done cleaning.
-    if (cleaningGroup === true && !message.groupId) {
-      cleaningGroup = false;
+    if (topLevelCount <= logLimit) {
+      return;
     }
 
-    // If we're not cleaning a group and the message count is below the logLimit,
-    // we exit the forEach iteration.
-    if (cleaningGroup === false && topLevelCount <= logLimit) {
-      return false;
-    }
+    const removedMessagesId = [];
+    const removedActors = [];
+    let visibleMessages = [...record.visibleMessages];
 
-    // If we're not currently cleaning a group, and the current message is identified
-    // as a group, set the cleaning flag to true.
-    if (cleaningGroup === false && record.groupsById.has(id)) {
-      cleaningGroup = true;
-    }
-
-    if (!message.groupId) {
-      topLevelCount--;
-    }
-
-    removedMessagesId.push(id);
-    removedActors.push(...getAllActorsInMessage(message, record));
-
-    const index = visibleMessages.indexOf(id);
-    if (index > -1) {
-      visibleMessages.splice(index, 1);
-    }
-
-    return true;
-  });
-
-  if (removedActors.length > 0) {
-    record.set("removedActors", record.removedActors.concat(removedActors));
-  }
-
-  if (record.visibleMessages.length > visibleMessages.length) {
-    record.set("visibleMessages", visibleMessages);
-  }
-
-  const isInRemovedId = id => removedMessagesId.includes(id);
-  const mapHasRemovedIdKey = map => map.findKey((value, id) => isInRemovedId(id));
-  const objectHasRemovedIdKey = obj => Object.keys(obj).findIndex(isInRemovedId) !== -1;
-  const cleanUpCollection = map => removedMessagesId.forEach(id => map.remove(id));
-  const cleanUpList = list => list.filter(id => {
-    return isInRemovedId(id) === false;
-  });
-  const cleanUpObject = object => [...Object.entries(object)]
-    .reduce((res, [id, value]) => {
-      if (!isInRemovedId(id)) {
-        res[id] = value;
+    let cleaningGroup = false;
+    record.messagesById.forEach((message, id) => {
+      // If we were cleaning a group and the current message does not have
+      // a groupId, we're done cleaning.
+      if (cleaningGroup === true && !message.groupId) {
+        cleaningGroup = false;
       }
-      return res;
-    }, {});
 
-  record.set("messagesById", record.messagesById.withMutations(cleanUpCollection));
+      // If we're not cleaning a group and the message count is below the logLimit,
+      // we exit the forEach iteration.
+      if (cleaningGroup === false && topLevelCount <= logLimit) {
+        return false;
+      }
 
-  if (record.messagesUiById.find(isInRemovedId)) {
-    record.set("messagesUiById", cleanUpList(record.messagesUiById));
-  }
-  if (mapHasRemovedIdKey(record.messagesTableDataById)) {
-    record.set("messagesTableDataById",
-      record.messagesTableDataById.withMutations(cleanUpCollection));
-  }
-  if (mapHasRemovedIdKey(record.groupsById)) {
-    record.set("groupsById", record.groupsById.withMutations(cleanUpCollection));
-  }
-  if (mapHasRemovedIdKey(record.messagesObjectPropertiesById)) {
-    record.set("messagesObjectPropertiesById",
-      record.messagesObjectPropertiesById.withMutations(cleanUpCollection));
-  }
-  if (mapHasRemovedIdKey(record.messagesObjectEntriesById)) {
-    record.set("messagesObjectEntriesById",
-      record.messagesObjectEntriesById.withMutations(cleanUpCollection));
-  }
-  if (objectHasRemovedIdKey(record.repeatById)) {
-    record.set("repeatById", cleanUpObject(record.repeatById));
-  }
+      // If we're not currently cleaning a group, and the current message is identified
+      // as a group, set the cleaning flag to true.
+      if (cleaningGroup === false && record.groupsById.has(id)) {
+        cleaningGroup = true;
+      }
 
-  if (objectHasRemovedIdKey(record.networkMessagesUpdateById)) {
-    record.set("networkMessagesUpdateById",
-      cleanUpObject(record.networkMessagesUpdateById));
-  }
+      if (!message.groupId) {
+        topLevelCount--;
+      }
 
-  return record;
+      removedMessagesId.push(id);
+      removedActors.push(...getAllActorsInMessage(message, record));
+
+      const index = visibleMessages.indexOf(id);
+      if (index > -1) {
+        visibleMessages.splice(index, 1);
+      }
+
+      return true;
+    });
+
+    if (removedActors.length > 0) {
+      record.set("removedActors", record.removedActors.concat(removedActors));
+    }
+
+    if (record.visibleMessages.length > visibleMessages.length) {
+      record.set("visibleMessages", visibleMessages);
+    }
+
+    const isInRemovedId = id => removedMessagesId.includes(id);
+    const mapHasRemovedIdKey = map => map.findKey((value, id) => isInRemovedId(id));
+    const objectHasRemovedIdKey = obj => Object.keys(obj).findIndex(isInRemovedId) !== -1;
+    const cleanUpCollection = map => removedMessagesId.forEach(id => map.remove(id));
+    const cleanUpList = list => list.filter(id => {
+      return isInRemovedId(id) === false;
+    });
+    const cleanUpObject = object => [...Object.entries(object)]
+      .reduce((res, [id, value]) => {
+        if (!isInRemovedId(id)) {
+          res[id] = value;
+        }
+        return res;
+      }, {});
+
+    record.set("messagesById", record.messagesById.withMutations(cleanUpCollection));
+
+    if (record.messagesUiById.find(isInRemovedId)) {
+      record.set("messagesUiById", cleanUpList(record.messagesUiById));
+    }
+    if (mapHasRemovedIdKey(record.messagesTableDataById)) {
+      record.set("messagesTableDataById",
+        record.messagesTableDataById.withMutations(cleanUpCollection));
+    }
+    if (mapHasRemovedIdKey(record.groupsById)) {
+      record.set("groupsById", record.groupsById.withMutations(cleanUpCollection));
+    }
+    if (objectHasRemovedIdKey(record.repeatById)) {
+      record.set("repeatById", cleanUpObject(record.repeatById));
+    }
+
+    if (objectHasRemovedIdKey(record.networkMessagesUpdateById)) {
+      record.set("networkMessagesUpdateById",
+        cleanUpObject(record.networkMessagesUpdateById));
+    }
+  });
 }
 
 /**
  * Get an array of all the actors logged in a specific message.
- * This could be directly the actors representing the arguments of a console.log call
- * as well as all the properties that where expanded using the object inspector.
  *
  * @param {Message} message: The message to get actors from.
  * @param {Record} state: The redux state.
@@ -498,16 +491,6 @@ function getAllActorsInMessage(message, state) {
     }
     return res;
   }, [])];
-
-  const loadedProperties = state.messagesObjectPropertiesById.get(message.id);
-  if (loadedProperties) {
-    actors.push(...Object.keys(loadedProperties));
-  }
-
-  const loadedEntries = state.messagesObjectEntriesById.get(message.id);
-  if (loadedEntries) {
-    actors.push(...Object.keys(loadedEntries));
-  }
 
   return actors;
 }

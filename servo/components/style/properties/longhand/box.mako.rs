@@ -14,7 +14,6 @@
 // We allow "display" to apply to placeholders because we need to make the
 // placeholder pseudo-element an inline-block in the UA stylesheet in Gecko.
 <%helpers:longhand name="display"
-                   need_clone="True"
                    animation_value_type="discrete"
                    custom_cascade="${product == 'servo'}"
                    flags="APPLIES_TO_PLACEHOLDER"
@@ -34,7 +33,6 @@
                 -moz-grid-group -moz-grid-line -moz-stack -moz-inline-stack -moz-deck
                 -moz-popup -moz-groupbox""".split()
     %>
-    use values::computed::ComputedValueAsSpecified;
     use style_traits::ToCss;
 
     pub mod computed_value {
@@ -137,7 +135,8 @@
     }
 
     #[allow(non_camel_case_types)]
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ToComputedValue)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
     pub enum SpecifiedValue {
         % for value in values:
@@ -180,14 +179,11 @@
         }
     }
 
-    impl ComputedValueAsSpecified for SpecifiedValue {}
-
     % if product == "servo":
         fn cascade_property_custom(_declaration: &PropertyDeclaration,
                                    context: &mut computed::Context) {
             longhands::_servo_display_for_hypothetical_box::derive_from_display(context);
             longhands::_servo_text_decorations_in_effect::derive_from_display(context);
-            longhands::_servo_under_display_none::derive_from_display(context);
         }
     % endif
 
@@ -199,7 +195,7 @@
 
 ${helpers.single_keyword("-moz-top-layer", "none top",
                          gecko_constant_prefix="NS_STYLE_TOP_LAYER",
-                         gecko_ffi_name="mTopLayer", need_clone=True,
+                         gecko_ffi_name="mTopLayer",
                          products="gecko", animation_value_type="none", internal=True,
                          spec="Internal (not web-exposed)")}
 
@@ -228,10 +224,24 @@ ${helpers.single_keyword("position", "static absolute relative fixed sticky",
             let ltr = context.style().writing_mode.is_bidi_ltr();
             // https://drafts.csswg.org/css-logical-props/#float-clear
             match *self {
-                SpecifiedValue::inline_start if ltr => computed_value::T::left,
-                SpecifiedValue::inline_start => computed_value::T::right,
-                SpecifiedValue::inline_end if ltr => computed_value::T::right,
-                SpecifiedValue::inline_end => computed_value::T::left,
+                SpecifiedValue::inline_start => {
+                    context.rule_cache_conditions.borrow_mut()
+                        .set_writing_mode_dependency(context.builder.writing_mode);
+                    if ltr {
+                        computed_value::T::left
+                    } else {
+                        computed_value::T::right
+                    }
+                }
+                SpecifiedValue::inline_end => {
+                    context.rule_cache_conditions.borrow_mut()
+                        .set_writing_mode_dependency(context.builder.writing_mode);
+                    if ltr {
+                        computed_value::T::right
+                    } else {
+                        computed_value::T::left
+                    }
+                }
                 % for value in "none left right".split():
                     SpecifiedValue::${value} => computed_value::T::${value},
                 % endfor
@@ -266,10 +276,24 @@ ${helpers.single_keyword("position", "static absolute relative fixed sticky",
             let ltr = context.style().writing_mode.is_bidi_ltr();
             // https://drafts.csswg.org/css-logical-props/#float-clear
             match *self {
-                SpecifiedValue::inline_start if ltr => computed_value::T::left,
-                SpecifiedValue::inline_start => computed_value::T::right,
-                SpecifiedValue::inline_end if ltr => computed_value::T::right,
-                SpecifiedValue::inline_end => computed_value::T::left,
+                SpecifiedValue::inline_start => {
+                    context.rule_cache_conditions.borrow_mut()
+                        .set_writing_mode_dependency(context.builder.writing_mode);
+                    if ltr {
+                        computed_value::T::left
+                    } else {
+                        computed_value::T::right
+                    }
+                }
+                SpecifiedValue::inline_end => {
+                    context.rule_cache_conditions.borrow_mut()
+                        .set_writing_mode_dependency(context.builder.writing_mode);
+                    if ltr {
+                        computed_value::T::right
+                    } else {
+                        computed_value::T::left
+                    }
+                }
                 % for value in "none left right both".split():
                     SpecifiedValue::${value} => computed_value::T::${value},
                 % endfor
@@ -335,7 +359,7 @@ ${helpers.single_keyword("overflow-clip-box", "padding-box content-box",
 
 // FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
 ${helpers.single_keyword("overflow-x", "visible hidden scroll auto",
-                         need_clone=True, animation_value_type="discrete",
+                         animation_value_type="discrete",
                          extra_gecko_values="-moz-hidden-unscrollable",
                          custom_consts=overflow_custom_consts,
                          gecko_constant_prefix="NS_STYLE_OVERFLOW",
@@ -343,7 +367,7 @@ ${helpers.single_keyword("overflow-x", "visible hidden scroll auto",
                          spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-x")}
 
 // FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
-<%helpers:longhand name="overflow-y" need_clone="True" animation_value_type="discrete"
+<%helpers:longhand name="overflow-y" animation_value_type="discrete"
                    flags="APPLIES_TO_PLACEHOLDER",
                    spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-y">
     pub use super::overflow_x::{SpecifiedValue, parse, get_initial_value, computed_value};
@@ -403,14 +427,14 @@ ${helpers.predefined_type("transition-delay",
     use Atom;
     use std::fmt;
     use style_traits::ToCss;
-    use values::computed::ComputedValueAsSpecified;
     use values::KeyframesName;
 
     pub mod computed_value {
         pub use super::SpecifiedValue as T;
     }
 
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Debug, Eq, Hash, PartialEq, ToComputedValue)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue(pub Option<KeyframesName>);
 
@@ -448,8 +472,10 @@ ${helpers.predefined_type("transition-delay",
     }
 
     impl Parse for SpecifiedValue {
-        fn parse<'i, 't>(context: &ParserContext, input: &mut ::cssparser::Parser<'i, 't>)
-                         -> Result<Self, ParseError<'i>> {
+        fn parse<'i, 't>(
+            context: &ParserContext,
+            input: &mut ::cssparser::Parser<'i, 't>
+        ) -> Result<Self, ParseError<'i>> {
             if let Ok(name) = input.try(|input| KeyframesName::parse(context, input)) {
                 Ok(SpecifiedValue(Some(name)))
             } else {
@@ -458,12 +484,13 @@ ${helpers.predefined_type("transition-delay",
         }
     }
 
-    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<SpecifiedValue,ParseError<'i>> {
+    pub fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<SpecifiedValue,ParseError<'i>> {
         SpecifiedValue::parse(context, input)
     }
 
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 </%helpers:vector_longhand>
 
 ${helpers.predefined_type("animation-duration",
@@ -496,15 +523,14 @@ ${helpers.predefined_type("animation-timing-function",
                           extra_prefixes="moz webkit"
                           spec="https://drafts.csswg.org/css-animations/#propdef-animation-iteration-count",
                           allowed_in_keyframe_block="False">
-    use values::computed::ComputedValueAsSpecified;
-
     pub mod computed_value {
         pub use super::SpecifiedValue as T;
     }
 
     // https://drafts.csswg.org/css-animations/#animation-iteration-count
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Clone, Debug, PartialEq, ToCss)]
+    #[derive(Clone, Debug, PartialEq, ToCss, ToComputedValue)]
     pub enum SpecifiedValue {
         Number(f32),
         Infinite,
@@ -538,12 +564,12 @@ ${helpers.predefined_type("animation-timing-function",
     }
 
     #[inline]
-    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<SpecifiedValue, ParseError<'i>> {
+    pub fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<SpecifiedValue, ParseError<'i>> {
         SpecifiedValue::parse(context, input)
     }
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 </%helpers:vector_longhand>
 
 <% animation_direction_custom_consts = { "alternate-reverse": "Alternate_reverse" } %>
@@ -560,7 +586,6 @@ ${helpers.single_keyword("animation-direction",
 
 ${helpers.single_keyword("animation-play-state",
                          "running paused",
-                         need_clone=True,
                          need_index=True,
                          animation_value_type="none",
                          vector=True,
@@ -623,7 +648,6 @@ ${helpers.predefined_type(
                    animation_value_type="ComputedValue"
                    flags="CREATES_STACKING_CONTEXT FIXPOS_CB"
                    spec="https://drafts.csswg.org/css-transforms/#propdef-transform">
-    use app_units::Au;
     use values::computed::{LengthOrPercentageOrNumber as ComputedLoPoNumber, LengthOrNumber as ComputedLoN};
     use values::computed::{LengthOrPercentage as ComputedLoP, Length as ComputedLength};
     use values::generics::transform::Matrix;
@@ -634,12 +658,12 @@ ${helpers.predefined_type(
     use std::fmt;
 
     pub mod computed_value {
-        use app_units::Au;
         use values::CSSFloat;
         use values::computed;
         use values::computed::{Length, LengthOrPercentage};
 
         #[derive(Clone, Copy, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct ComputedMatrix {
             pub m11: CSSFloat, pub m12: CSSFloat, pub m13: CSSFloat, pub m14: CSSFloat,
@@ -649,6 +673,7 @@ ${helpers.predefined_type(
         }
 
         #[derive(Clone, Copy, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct ComputedMatrixWithPercents {
             pub m11: CSSFloat, pub m12: CSSFloat, pub m13: CSSFloat, pub m14: CSSFloat,
@@ -676,12 +701,13 @@ ${helpers.predefined_type(
                     m21: 0.0, m22: 1.0, m23: 0.0, m24: 0.0,
                     m31: 0.0, m32: 0.0, m33: 1.0, m34: 0.0,
                     m41: LengthOrPercentage::zero(), m42: LengthOrPercentage::zero(),
-                    m43: Au(0), m44: 1.0
+                    m43: Length::new(0.), m44: 1.0
                 }
             }
         }
 
         #[derive(Clone, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum ComputedOperation {
             Matrix(ComputedMatrix),
@@ -715,6 +741,7 @@ ${helpers.predefined_type(
         }
 
         #[derive(Clone, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct T(pub Option<Vec<ComputedOperation>>);
     }
@@ -726,6 +753,7 @@ ${helpers.predefined_type(
     ///
     /// Some transformations can be expressed by other more general functions.
     #[derive(Clone, Debug, PartialEq)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum SpecifiedOperation {
         /// Represents a 2D 2x3 matrix.
@@ -916,6 +944,7 @@ ${helpers.predefined_type(
     }
 
     #[derive(Clone, Debug, PartialEq)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue(Vec<SpecifiedOperation>);
 
@@ -1255,7 +1284,7 @@ ${helpers.predefined_type(
                         result.push(computed_value::ComputedOperation::Translate(
                             tx,
                             computed::length::LengthOrPercentage::zero(),
-                            computed::length::Length::new(0)));
+                            computed::length::Length::new(0.)));
                     }
                     SpecifiedOperation::Translate(ref tx, Some(ref ty)) => {
                         let tx = tx.to_computed_value(context);
@@ -1263,21 +1292,21 @@ ${helpers.predefined_type(
                         result.push(computed_value::ComputedOperation::Translate(
                             tx,
                             ty,
-                            computed::length::Length::new(0)));
+                            computed::length::Length::new(0.)));
                     }
                     SpecifiedOperation::TranslateX(ref tx) => {
                         let tx = tx.to_computed_value(context);
                         result.push(computed_value::ComputedOperation::Translate(
                             tx,
                             computed::length::LengthOrPercentage::zero(),
-                            computed::length::Length::new(0)));
+                            computed::length::Length::new(0.)));
                     }
                     SpecifiedOperation::TranslateY(ref ty) => {
                         let ty = ty.to_computed_value(context);
                         result.push(computed_value::ComputedOperation::Translate(
                             computed::length::LengthOrPercentage::zero(),
                             ty,
-                            computed::length::Length::new(0)));
+                            computed::length::Length::new(0.)));
                     }
                     SpecifiedOperation::TranslateZ(ref tz) => {
                         let tz = tz.to_computed_value(context);
@@ -1485,10 +1514,10 @@ ${helpers.predefined_type(
     }
 
     // Converts computed LengthOrPercentageOrNumber into computed
-    // LengthOrPercentage. Number maps into Length
+    // LengthOrPercentage. Number maps into Length (pixel unit)
     fn lopon_to_lop(value: &ComputedLoPoNumber) -> ComputedLoP {
         match *value {
-            Either::First(number) => ComputedLoP::Length(Au::from_f32_px(number)),
+            Either::First(number) => ComputedLoP::Length(ComputedLength::new(number)),
             Either::Second(length_or_percentage) => length_or_percentage,
         }
     }
@@ -1498,7 +1527,7 @@ ${helpers.predefined_type(
     fn lon_to_length(value: &ComputedLoN) -> ComputedLength {
         match *value {
             Either::First(length) => length,
-            Either::Second(number) => Au::from_f32_px(number),
+            Either::Second(number) => ComputedLength::new(number),
         }
     }
 </%helpers:longhand>
@@ -1621,20 +1650,19 @@ ${helpers.predefined_type("transform-origin",
 // FIXME: `size` and `content` values are not implemented and `strict` is implemented
 // like `content`(layout style paint) in gecko. We should implement `size` and `content`,
 // also update the glue once they are implemented in gecko.
-<%helpers:longhand name="contain" animation_value_type="discrete" products="gecko" need_clone="True"
+<%helpers:longhand name="contain" animation_value_type="discrete" products="gecko"
                    flags="FIXPOS_CB"
                    spec="https://drafts.csswg.org/css-contain/#contain-property">
     use std::fmt;
     use style_traits::ToCss;
-    use values::computed::ComputedValueAsSpecified;
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 
     pub mod computed_value {
         pub type T = super::SpecifiedValue;
     }
 
     bitflags! {
+        #[derive(ToComputedValue)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub flags SpecifiedValue: u8 {
             const LAYOUT = 0x01,
@@ -1762,7 +1790,6 @@ ${helpers.single_keyword("-moz-orient",
                           gecko_ffi_name="mOrient",
                           gecko_enum_prefix="StyleOrient",
                           spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-orient)",
-                          gecko_inexhaustive="True",
                           animation_value_type="discrete")}
 
 <%helpers:longhand name="will-change" products="gecko" animation_value_type="discrete"
@@ -1770,15 +1797,13 @@ ${helpers.single_keyword("-moz-orient",
     use std::fmt;
     use style_traits::ToCss;
     use values::CustomIdent;
-    use values::computed::ComputedValueAsSpecified;
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 
     pub mod computed_value {
         pub use super::SpecifiedValue as T;
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, ToComputedValue)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum SpecifiedValue {
         Auto,
@@ -1831,7 +1856,7 @@ ${helpers.predefined_type(
     "generics::basic_shape::ShapeSource::None",
     products="gecko",
     boxed=True,
-    animation_value_type="discrete",
+    animation_value_type="ComputedValue",
     flags="APPLIES_TO_FIRST_LETTER",
     spec="https://drafts.csswg.org/css-shapes/#shape-outside-property",
 )}
@@ -1843,9 +1868,6 @@ ${helpers.predefined_type(
     use gecko_bindings::structs;
     use std::fmt;
     use style_traits::ToCss;
-    use values::computed::ComputedValueAsSpecified;
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 
     pub mod computed_value {
         pub use super::SpecifiedValue as T;
@@ -1853,6 +1875,8 @@ ${helpers.predefined_type(
 
     bitflags! {
         /// These constants match Gecko's `NS_STYLE_TOUCH_ACTION_*` constants.
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
+        #[derive(ToComputedValue)]
         pub flags SpecifiedValue: u8 {
             const TOUCH_ACTION_NONE = structs::NS_STYLE_TOUCH_ACTION_NONE as u8,
             const TOUCH_ACTION_AUTO = structs::NS_STYLE_TOUCH_ACTION_AUTO as u8,

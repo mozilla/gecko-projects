@@ -201,6 +201,9 @@ TypeUtils::ToCacheResponseWithoutBody(CacheResponse& aOut,
   } else {
     aOut.principalInfo() = void_t();
   }
+
+  aOut.paddingInfo() = aIn.GetPaddingInfo();
+  aOut.paddingSize() = aIn.GetPaddingSize();
 }
 
 void
@@ -304,6 +307,8 @@ TypeUtils::ToResponse(const CacheResponse& aIn)
   }
   MOZ_DIAGNOSTIC_ASSERT(ir);
 
+  ir->SetPaddingSize(aIn.paddingSize());
+
   RefPtr<Response> ref = new Response(GetGlobalObject(), ir, nullptr);
   return ref.forget();
 }
@@ -338,7 +343,7 @@ TypeUtils::ToInternalRequest(const CacheRequest& aIn)
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aIn.body());
 
-  internalRequest->SetBody(stream);
+  internalRequest->SetBody(stream, -1);
 
   return internalRequest.forget();
 }

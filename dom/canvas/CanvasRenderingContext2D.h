@@ -27,7 +27,7 @@
 #include "nsLayoutUtils.h"
 #include "mozilla/EnumeratedArray.h"
 #include "FilterSupport.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "Layers.h"
 #include "nsBidi.h"
 
@@ -1168,6 +1168,8 @@ protected:
   friend struct CanvasBidiProcessor;
   friend class CanvasDrawObserver;
 };
+
+size_t BindingJSObjectMallocBytes(CanvasRenderingContext2D* aContext);
 
 } // namespace dom
 } // namespace mozilla

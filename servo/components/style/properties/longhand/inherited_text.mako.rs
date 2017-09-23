@@ -25,7 +25,6 @@ ${helpers.single_keyword("text-transform",
 
 ${helpers.single_keyword("hyphens", "manual none auto",
                          gecko_enum_prefix="StyleHyphens",
-                         gecko_inexhaustive=True,
                          products="gecko", animation_value_type="discrete", extra_prefixes="moz",
                          spec="https://drafts.csswg.org/css-text/#propdef-hyphens")}
 
@@ -39,7 +38,7 @@ ${helpers.single_keyword("-moz-text-size-adjust", "auto none",
 
 ${helpers.predefined_type("text-indent",
                           "LengthOrPercentage",
-                          "computed::LengthOrPercentage::Length(Au(0))",
+                          "computed::LengthOrPercentage::Length(computed::Length::new(0.))",
                           animation_value_type="ComputedValue",
                           spec="https://drafts.csswg.org/css-text/#propdef-text-indent",
                           allow_quirks=True)}
@@ -66,7 +65,6 @@ ${helpers.single_keyword("word-break",
                                   extra_gecko_values="inter-character"
                                   extra_specified="${'distribute' if product == 'gecko' else ''}"
                                   gecko_enum_prefix="StyleTextJustify"
-                                  gecko_inexhaustive="True"
                                   animation_value_type="discrete"
                                   flags="APPLIES_TO_PLACEHOLDER",
                                   spec="https://drafts.csswg.org/css-text/#propdef-text-justify">
@@ -175,6 +173,7 @@ ${helpers.single_keyword("text-align-last",
         use std::fmt;
         use style_traits::ToCss;
 
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub enum SpecifiedValue {
             Keyword(computed_value::T),
@@ -255,9 +254,8 @@ ${helpers.single_keyword("text-align-last",
             }
         }
     % else:
-        use values::computed::ComputedValueAsSpecified;
-        impl ComputedValueAsSpecified for SpecifiedValue {}
         pub use self::computed_value::T as SpecifiedValue;
+        add_impls_for_keyword_enum!(SpecifiedValue);
         pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                              -> Result<SpecifiedValue, ParseError<'i>> {
             computed_value::T::parse(input)
@@ -281,23 +279,22 @@ ${helpers.predefined_type("word-spacing",
 
 <%helpers:longhand name="-servo-text-decorations-in-effect"
                    derived_from="display text-decoration"
-                   need_clone="True" products="servo"
+                   products="servo"
                    animation_value_type="none"
                    spec="Nonstandard (Internal property used by Servo)">
-    use cssparser::RGBA;
     use std::fmt;
     use style_traits::ToCss;
-    use values::computed::ComputedValueAsSpecified;
 
-    impl ComputedValueAsSpecified for SpecifiedValue {}
-
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct SpecifiedValue {
-        pub underline: Option<RGBA>,
-        pub overline: Option<RGBA>,
-        pub line_through: Option<RGBA>,
+        pub underline: bool,
+        pub overline: bool,
+        pub line_through: bool,
     }
+
+    trivial_to_computed_value!(SpecifiedValue);
 
     pub mod computed_value {
         pub type T = super::SpecifiedValue;
@@ -312,19 +309,7 @@ ${helpers.predefined_type("word-spacing",
 
     #[inline]
     pub fn get_initial_value() -> computed_value::T {
-        SpecifiedValue {
-            underline: None,
-            overline: None,
-            line_through: None,
-        }
-    }
-
-    fn maybe(flag: bool, context: &Context) -> Option<RGBA> {
-        if flag {
-            Some(context.style().get_color().clone_color())
-        } else {
-            None
-        }
+        SpecifiedValue::default()
     }
 
     fn derive(context: &Context) -> computed_value::T {
@@ -332,20 +317,13 @@ ${helpers.predefined_type("word-spacing",
         // declarations in effect and add in the text decorations that this block specifies.
         let mut result = match context.style().get_box().clone_display() {
             super::display::computed_value::T::inline_block |
-            super::display::computed_value::T::inline_table => SpecifiedValue {
-                underline: None,
-                overline: None,
-                line_through: None,
-            },
+            super::display::computed_value::T::inline_table => get_initial_value(),
             _ => context.builder.get_parent_inheritedtext().clone__servo_text_decorations_in_effect()
         };
 
-        result.underline = maybe(context.style().get_text().has_underline()
-                                 || result.underline.is_some(), context);
-        result.overline = maybe(context.style().get_text().has_overline()
-                                || result.overline.is_some(), context);
-        result.line_through = maybe(context.style().get_text().has_line_through()
-                                    || result.line_through.is_some(), context);
+        result.underline |= context.style().get_text().has_underline();
+        result.overline |= context.style().get_text().has_overline();
+        result.line_through |= context.style().get_text().has_line_through();
 
         result
     }
@@ -368,15 +346,12 @@ ${helpers.predefined_type("word-spacing",
                                   extra_gecko_values="-moz-pre-space"
                                   gecko_enum_prefix="StyleWhiteSpace"
                                   needs_conversion="True"
-                                  gecko_inexhaustive="True"
                                   animation_value_type="discrete"
                                   // Only allowed for UA sheets, which set it
                                   // !important.
                                   flags="APPLIES_TO_PLACEHOLDER"
                                   spec="https://drafts.csswg.org/css-text/#propdef-white-space">
-    use values::computed::ComputedValueAsSpecified;
-    impl ComputedValueAsSpecified for SpecifiedValue {}
-
+    trivial_to_computed_value!(SpecifiedValue);
     % if product != "gecko":
     impl SpecifiedValue {
         pub fn allow_wrap(&self) -> bool {
@@ -433,8 +408,9 @@ ${helpers.predefined_type(
 
 
     pub mod computed_value {
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         #[derive(Clone, Debug, PartialEq, ToCss)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
+        #[cfg_attr(feature = "servo", derive(HeapSizeOf, ToComputedValue))]
         pub enum T {
             Keyword(KeywordValue),
             None,
@@ -442,6 +418,7 @@ ${helpers.predefined_type(
         }
 
         #[derive(Clone, Debug, PartialEq)]
+        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub struct KeywordValue {
             pub fill: bool,
@@ -449,8 +426,9 @@ ${helpers.predefined_type(
         }
     }
 
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     #[derive(Clone, Debug, PartialEq, ToCss)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
+    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum SpecifiedValue {
         Keyword(KeywordValue),
         None,
@@ -458,6 +436,7 @@ ${helpers.predefined_type(
     }
 
     #[derive(Clone, Debug, PartialEq)]
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum KeywordValue {
         Fill(bool),
@@ -614,25 +593,25 @@ ${helpers.predefined_type(
 
 <%helpers:longhand name="text-emphasis-position" animation_value_type="discrete" products="gecko"
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-position">
-    use values::computed::ComputedValueAsSpecified;
     use style_traits::ToCss;
 
     define_css_keyword_enum!(HorizontalWritingModeValue:
                              "over" => Over,
                              "under" => Under);
+    add_impls_for_keyword_enum!(VerticalWritingModeValue);
     define_css_keyword_enum!(VerticalWritingModeValue:
                              "right" => Right,
                              "left" => Left);
+    add_impls_for_keyword_enum!(HorizontalWritingModeValue);
 
+    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Clone, Debug, PartialEq, ToCss)]
+    #[derive(Clone, Debug, PartialEq, ToComputedValue, ToCss)]
     pub struct SpecifiedValue(pub HorizontalWritingModeValue, pub VerticalWritingModeValue);
 
     pub mod computed_value {
         pub type T = super::SpecifiedValue;
     }
-
-    impl ComputedValueAsSpecified for SpecifiedValue {}
 
     pub fn get_initial_value() -> computed_value::T {
         SpecifiedValue(HorizontalWritingModeValue::Over, VerticalWritingModeValue::Right)
@@ -706,7 +685,6 @@ ${helpers.predefined_type(
     initial_specified_value="specified::Color::currentcolor()",
     products="gecko",
     animation_value_type="AnimatedColor",
-    need_clone=True,
     ignored_when_colors_disabled=True,
     spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-color",
 )}
@@ -726,7 +704,6 @@ ${helpers.predefined_type(
     "computed_value::T::currentcolor()",
     products="gecko",
     animation_value_type="AnimatedColor",
-    need_clone=True,
     ignored_when_colors_disabled=True,
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-fill-color",
@@ -739,16 +716,16 @@ ${helpers.predefined_type(
     initial_specified_value="specified::Color::currentcolor()",
     products="gecko",
     animation_value_type="AnimatedColor",
-    need_clone=True, ignored_when_colors_disabled=True,
+    ignored_when_colors_disabled=True,
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-color",
 )}
 
 ${helpers.predefined_type("-webkit-text-stroke-width",
                           "BorderSideWidth",
-                          "::values::computed::NonNegativeAu::from_px(0)",
+                          "::values::computed::NonNegativeLength::new(0.)",
                           initial_specified_value="specified::BorderSideWidth::Length(specified::Length::zero())",
-                          computed_type="::values::computed::NonNegativeAu",
+                          computed_type="::values::computed::NonNegativeLength",
                           products="gecko",
                           flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                           spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-width",

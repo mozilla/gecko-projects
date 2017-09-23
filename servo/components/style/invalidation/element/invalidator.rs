@@ -209,7 +209,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             // We can't just return here because there may also be attribute
             // changes as well that imply additional hints.
             let data = self.data.as_mut().unwrap();
-            data.restyle.hint.insert(RestyleHint::restyle_subtree());
+            data.hint.insert(RestyleHint::restyle_subtree());
         }
 
         let mut classes_removed = SmallVec::<[Atom; 8]>::new();
@@ -287,7 +287,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if invalidated_self {
             if let Some(ref mut data) = self.data {
-                data.restyle.hint.insert(RESTYLE_SELF);
+                data.hint.insert(RESTYLE_SELF);
             }
         }
 
@@ -499,7 +499,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             Some(ref data) => {
                 // FIXME(emilio): Only needs to check RESTYLE_DESCENDANTS,
                 // really.
-                if data.restyle.hint.contains_subtree() {
+                if data.hint.contains_subtree() {
                     return false;
                 }
             }
@@ -507,7 +507,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if let Some(checker) = self.stack_limit_checker {
             if checker.limit_exceeded() {
-                self.data.as_mut().unwrap().restyle.hint.insert(RESTYLE_DESCENDANTS);
+                self.data.as_mut().unwrap().hint.insert(RESTYLE_DESCENDANTS);
                 return true;
             }
         }
@@ -633,9 +633,11 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
         debug!("TreeStyleInvalidator::process_invalidation({:?}, {:?}, {:?})",
                self.element, invalidation, invalidation_kind);
 
+        // FIXME(bholley): Consider passing an nth-index cache here.
         let mut context =
             MatchingContext::new_for_visited(
                 MatchingMode::Normal,
+                None,
                 None,
                 VisitedHandlingMode::AllLinksVisitedAndUnvisited,
                 self.shared_context.quirks_mode(),
@@ -799,7 +801,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
 
         if invalidated_self {
             if let Some(ref mut data) = self.data {
-                data.restyle.hint.insert(RESTYLE_SELF);
+                data.hint.insert(RESTYLE_SELF);
             }
         }
 
@@ -946,12 +948,14 @@ impl<'a, 'b: 'a, E> InvalidationCollector<'a, 'b, E>
         // whether any parent had a snapshot, and whether those snapshots were
         // taken due to an element class/id change, but it's not clear it'd be
         // worth it.
+        //
+        // FIXME(bholley): Consider passing an nth-index cache here.
         let mut now_context =
-            MatchingContext::new_for_visited(MatchingMode::Normal, None,
+            MatchingContext::new_for_visited(MatchingMode::Normal, None, None,
                                              VisitedHandlingMode::AllLinksUnvisited,
                                              self.shared_context.quirks_mode());
         let mut then_context =
-            MatchingContext::new_for_visited(MatchingMode::Normal, None,
+            MatchingContext::new_for_visited(MatchingMode::Normal, None, None,
                                              VisitedHandlingMode::AllLinksUnvisited,
                                              self.shared_context.quirks_mode());
 

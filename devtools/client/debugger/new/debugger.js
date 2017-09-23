@@ -116,7 +116,8 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
       var threadClient = _ref.threadClient,
           tabTarget = _ref.tabTarget,
           debuggerClient = _ref.debuggerClient,
-          sourceMaps = _ref.sourceMaps;
+          sourceMaps = _ref.sourceMaps,
+          toolboxActions = _ref.toolboxActions;
 
       return (0, _client.onConnect)({
         tab: { clientType: "firefox" },
@@ -126,7 +127,8 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
           debuggerClient
         }
       }, {
-        sourceMaps
+        services: { sourceMaps },
+        toolboxActions
       });
     },
     destroy: () => {
@@ -574,10 +576,16 @@ function createParentMap(tree) {
   return map;
 }
 
-function getRelativePath(path) {
-  var re = /(http(?:s?):\/\/(?:www\.)?[a-z0-9\-.]+)\/(.*)/i;
-  var matches = path.match(re);
-  return matches ? matches[2] : "";
+function getRelativePath(url) {
+  var _parse2 = (0, _url.parse)(url),
+      pathname = _parse2.pathname;
+
+  if (!pathname) {
+    return url;
+  }
+  var path = pathname.split("/");
+  path.shift();
+  return path.join("/");
 }
 
 /***/ }),
@@ -1344,7 +1352,6 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.InitialState = InitialState;
 exports.getTextSearchResults = getTextSearchResults;
-exports.getTextSearchResult = getTextSearchResult;
 exports.getTextSearchQuery = getTextSearchQuery;
 
 var _immutable = __webpack_require__(146);
@@ -1369,7 +1376,7 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
  */
 
 function InitialState() {
-  return (0, _makeRecord2.default)({ query: "", results: I.Map() })();
+  return (0, _makeRecord2.default)({ query: "", results: I.List() })();
 }
 
 function update() {
@@ -1384,17 +1391,19 @@ function update() {
       return state.remove("query");
 
     case "ADD_SEARCH_RESULT":
-      return state.updateIn(["results", action.result.sourceId], value => action.result);
+      var _results = state.get("results");
+      return state.merge({ results: _results.push(action.result) });
+
+    case "CLEAR_SEARCH_RESULTS":
+      return state.merge({
+        results: state.get("results").clear()
+      });
   }
   return state;
 }
 
 function getTextSearchResults(state) {
   return state.projectTextSearch.get("results");
-}
-
-function getTextSearchResult(state, id) {
-  return state.projectTextSearch.getIn(["results", id]);
 }
 
 function getTextSearchQuery(state) {
@@ -1827,12 +1836,15 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.addSearchQuery = addSearchQuery;
 exports.clearSearchQuery = clearSearchQuery;
+exports.clearSearchResults = clearSearchResults;
 exports.searchSources = searchSources;
 exports.searchSource = searchSource;
 
 var _search = __webpack_require__(1115);
 
 var _selectors = __webpack_require__(242);
+
+var _source = __webpack_require__(233);
 
 var _sources = __webpack_require__(254);
 
@@ -1865,36 +1877,52 @@ function clearSearchQuery() {
   };
 }
 
+function clearSearchResults() {
+  return (_ref3) => {
+    var dispatch = _ref3.dispatch,
+        getState = _ref3.getState;
+
+    dispatch({ type: "CLEAR_SEARCH_RESULTS" });
+  };
+}
+
 function searchSources(query) {
   return (() => {
-    var _ref3 = _asyncToGenerator(function* (_ref4) {
-      var dispatch = _ref4.dispatch,
-          getState = _ref4.getState;
+    var _ref4 = _asyncToGenerator(function* (_ref5) {
+      var dispatch = _ref5.dispatch,
+          getState = _ref5.getState;
 
+      yield dispatch(clearSearchResults());
       yield dispatch(addSearchQuery(query));
       yield dispatch((0, _sources.loadAllSources)());
       var sources = (0, _selectors.getSources)(getState());
       var validSources = sources.valueSeq().filter(function (source) {
-        return source.has("text");
+        return (0, _source.isLoaded)(source.toJS()) && !(0, _source.isThirdParty)(source.toJS());
       }).toJS();
 
       for (var source of validSources) {
-        yield dispatch(searchSource(source, query));
+        yield dispatch(searchSource(source.id, query));
       }
     });
 
     return function (_x) {
-      return _ref3.apply(this, arguments);
+      return _ref4.apply(this, arguments);
     };
   })();
 }
 
-function searchSource(source, query) {
+function searchSource(sourceId, query) {
   return (() => {
-    var _ref5 = _asyncToGenerator(function* (_ref6) {
-      var dispatch = _ref6.dispatch,
-          getState = _ref6.getState;
+    var _ref6 = _asyncToGenerator(function* (_ref7) {
+      var dispatch = _ref7.dispatch,
+          getState = _ref7.getState;
 
+      var sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
+      if (!sourceRecord) {
+        return;
+      }
+
+      var source = sourceRecord.toJS();
       var matches = yield (0, _search.findSourceMatches)(source, query);
       dispatch({
         type: "ADD_SEARCH_RESULT",
@@ -1907,7 +1935,7 @@ function searchSource(source, query) {
     });
 
     return function (_x2) {
-      return _ref5.apply(this, arguments);
+      return _ref6.apply(this, arguments);
     };
   })();
 }
@@ -5906,7 +5934,7 @@ var _require6 = __webpack_require__(1130),
     showMenu = _require6.showMenu,
     buildMenu = _require6.buildMenu;
 
-setConfig({"environment":"firefox-panel","logging":false,"clientLogging":false,"firefox":{"mcPath":"./firefox"},"workers":{"parserURL":"resource://devtools/client/debugger/new/parser-worker.js","prettyPrintURL":"resource://devtools/client/debugger/new/pretty-print-worker.js","searchURL":"resource://devtools/client/debugger/new/search-worker.js"},"features":{"blackbox":{"enabled":true},"chromeScopes":{"enabled":false},"eventListeners":{"enabled":false},"codeCoverage":{"enabled":false},"codeFolding":{"enabled":false},"searchNav":{"enabled":true},"collapseFrame":{"enabled":true},"outline":{"enabled":true},"wasm":{"enabled":true}}});
+setConfig({"environment":"firefox-panel","logging":false,"clientLogging":false,"firefox":{"mcPath":"./firefox"},"workers":{"parserURL":"resource://devtools/client/debugger/new/parser-worker.js","prettyPrintURL":"resource://devtools/client/debugger/new/pretty-print-worker.js","searchURL":"resource://devtools/client/debugger/new/search-worker.js"},"features":{"blackbox":{"enabled":true},"chromeScopes":{"enabled":false},"eventListeners":{"enabled":false},"codeCoverage":{"enabled":false},"codeFolding":{"enabled":false},"searchNav":{"enabled":true},"collapseFrame":{"enabled":true},"outline":{"enabled":true}}});
 
 // Set various flags before requiring app code.
 if (getValue("logging.client")) {
@@ -5961,15 +5989,15 @@ function renderRoot(_React, _ReactDOM, component, _store) {
   var root = Root("launchpad-root theme-body");
   mount.appendChild(root);
 
+  if (isDevelopment()) {
+    updateConfig();
+    updateTheme();
+  }
+
   if (component.props || component.propTypes) {
     _ReactDOM.render(createElement(Provider, { store: _store }, createElement(component)), root);
   } else {
     root.appendChild(component);
-  }
-
-  if (isDevelopment()) {
-    updateConfig();
-    updateTheme();
   }
 }
 
@@ -7190,7 +7218,7 @@ module.exports = {
       var array = this._array;
       var maxIndex = array.length - 1;
       var ii = 0;
-      return new Iterator(function() 
+      return new Iterator(function()
         {return ii > maxIndex ?
           iteratorDone() :
           iteratorValue(type, ii, array[reverse ? maxIndex - ii++ : ii++])}
@@ -7661,7 +7689,7 @@ module.exports = {
 
     Repeat.prototype.__iterator = function(type, reverse) {var this$0 = this;
       var ii = 0;
-      return new Iterator(function() 
+      return new Iterator(function()
         {return ii < this$0.size ? iteratorValue(type, ii++, this$0._value) : iteratorDone()}
       );
     };
@@ -9859,7 +9887,7 @@ module.exports = {
         return flipSequence;
       };
     }
-    reversedSequence.get = function(key, notSetValue) 
+    reversedSequence.get = function(key, notSetValue)
       {return iterable.get(useKeys ? key : -1 - key, notSetValue)};
     reversedSequence.has = function(key )
       {return iterable.has(useKeys ? key : -1 - key)};
@@ -10058,7 +10086,7 @@ module.exports = {
         return this.cacheResult().__iterate(fn, reverse);
       }
       var iterations = 0;
-      iterable.__iterate(function(v, k, c) 
+      iterable.__iterate(function(v, k, c)
         {return predicate.call(context, v, k, c) && ++iterations && fn(v, k, this$0)}
       );
       return iterations;
@@ -10249,7 +10277,7 @@ module.exports = {
     interposedSequence.size = iterable.size && iterable.size * 2 -1;
     interposedSequence.__iterateUncached = function(fn, reverse) {var this$0 = this;
       var iterations = 0;
-      iterable.__iterate(function(v, k) 
+      iterable.__iterate(function(v, k)
         {return (!iterations || fn(separator, iterations++, this$0) !== false) &&
         fn(v, iterations++, this$0) !== false},
         reverse
@@ -14715,7 +14743,7 @@ module.exports = function() {
  * LICENSE file in the root directory of this source tree. An additional grant
  * of patent rights can be found in the PATENTS file in the same directory.
  *
- * 
+ *
  */
 
 function makeEmptyFunction(arg) {
@@ -15542,21 +15570,15 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.promise = exports.PROMISE = undefined;
 
-var _defer = __webpack_require__(194);
-
-var _defer2 = _interopRequireDefault(_defer);
-
 var _lodash = __webpack_require__(2);
 
 var _DevToolsUtils = __webpack_require__(222);
 
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-var seqIdVal = 1;
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+var seqIdVal = 1;
 
 function seqIdGen() {
   return seqIdVal++;
@@ -15586,25 +15608,25 @@ function promiseMiddleware(_ref) {
 
     // Return the promise so action creators can still compose if they
     // want to.
-    var deferred = (0, _defer2.default)();
-    promiseInst.then(value => {
-      (0, _DevToolsUtils.executeSoon)(() => {
-        dispatch(Object.assign({}, action, {
-          status: "done",
-          value: value
-        }));
-        deferred.resolve(value);
-      });
-    }, error => {
-      (0, _DevToolsUtils.executeSoon)(() => {
-        dispatch(Object.assign({}, action, {
-          status: "error",
-          error: error.message || error
-        }));
-        deferred.reject(error);
+    return new Promise((resolve, reject) => {
+      promiseInst.then(value => {
+        (0, _DevToolsUtils.executeSoon)(() => {
+          dispatch(Object.assign({}, action, {
+            status: "done",
+            value: value
+          }));
+          resolve(value);
+        });
+      }, error => {
+        (0, _DevToolsUtils.executeSoon)(() => {
+          dispatch(Object.assign({}, action, {
+            status: "error",
+            error: error.message || error
+          }));
+          reject(error);
+        });
       });
     });
-    return deferred.promise;
   };
 }
 
@@ -15612,31 +15634,7 @@ var PROMISE = exports.PROMISE = "@@dispatch/promise";
 exports.promise = promiseMiddleware;
 
 /***/ }),
-/* 194 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.default = defer;
-function defer() {
-  var resolve = void 0; // eslint-disable-line no-unused-vars
-  var reject = void 0; // eslint-disable-line no-unused-vars
-  var promise = new Promise(function (innerResolve, innerReject) {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-  return {
-    resolve,
-    reject,
-    promise
-  };
-}
-
-/***/ }),
+/* 194 */,
 /* 195 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -15935,7 +15933,7 @@ Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
 const { isDevelopment } = __webpack_require__(828);
 const { Services, PrefsHelper } = __webpack_require__(830);
 
-const prefsSchemaVersion = "1.0.2";
+const prefsSchemaVersion = "1.0.3";
 
 const pref = Services.pref;
 
@@ -15957,7 +15955,8 @@ if (isDevelopment()) {
   pref("devtools.debugger.file-search-regex-match", false);
   pref("devtools.debugger.prefs-schema-version", "1.0.1");
   pref("devtools.debugger.project-text-search-enabled", true);
-  pref("devtools.debugger.features.async-stepping", false);
+  pref("devtools.debugger.features.async-stepping", true);
+  pref("devtools.debugger.features.wasm", true);
 }
 
 const prefs = new PrefsHelper("devtools", {
@@ -15976,23 +15975,18 @@ const prefs = new PrefsHelper("devtools", {
   fileSearchCaseSensitive: ["Bool", "debugger.file-search-case-sensitive"],
   fileSearchWholeWord: ["Bool", "debugger.file-search-whole-word"],
   fileSearchRegexMatch: ["Bool", "debugger.file-search-regex-match"],
-  debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"],
-  projectTextSearchEnabled: [
-    "Bool",
-    "debugger.project-text-search-enabled",
-    false
-  ]
+  debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"]
 });
 /* harmony export (immutable) */ __webpack_exports__["prefs"] = prefs;
 
 
 const features = new PrefsHelper("devtools.debugger.features", {
-  asyncStepping: ["Bool", "async-stepping", false]
+  asyncStepping: ["Bool", "async-stepping", false],
+  projectTextSearch: ["Bool", "project-text-search-enabled", true],
+  wasm: ["Bool", "wasm", true]
 });
 /* harmony export (immutable) */ __webpack_exports__["features"] = features;
 
-
-debugger;
 
 if (prefs.debuggerPrefsSchemaVersion !== prefsSchemaVersion) {
   // clear pending Breakpoints
@@ -16655,7 +16649,7 @@ exports.default = update;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.isLoaded = exports.getMode = exports.getSourceLineCount = exports.getSourcePath = exports.getFilenameFromURL = exports.getFilename = exports.getRawSourceURL = exports.getPrettySourceURL = exports.shouldPrettyPrint = exports.isPretty = exports.isJavaScript = undefined;
+exports.isLoaded = exports.getMode = exports.getSourceLineCount = exports.getSourcePath = exports.getFilenameFromURL = exports.getFilename = exports.getRawSourceURL = exports.getPrettySourceURL = exports.shouldPrettyPrint = exports.isThirdParty = exports.isPretty = exports.isJavaScript = undefined;
 
 var _devtoolsSourceMap = __webpack_require__(898);
 
@@ -16727,6 +16721,14 @@ function isJavaScript(url) {
  */
 function isPretty(source) {
   return source.url ? /formatted$/.test(source.url) : false;
+}
+
+function isThirdParty(source) {
+  if (!source || !source.url) {
+    return false;
+  }
+
+  return !!source.url.match(/(node_modules|bower_components)/);
 }
 
 /**
@@ -16828,11 +16830,18 @@ function getSourceLineCount(source) {
 function getMode(source) {
   var contentType = source.contentType,
       text = source.text,
-      isWasm = source.isWasm;
+      isWasm = source.isWasm,
+      url = source.url;
 
 
   if (!text || isWasm) {
     return { name: "text" };
+  }
+
+  // if the url ends with .marko we set the name to Javascript so
+  // syntax highlighting works for marko too
+  if (url && url.match(/\.marko$/i)) {
+    return { name: "javascript" };
   }
 
   // Use HTML mode for files in which the first non whitespace
@@ -16871,6 +16880,7 @@ function isLoaded(source) {
 
 exports.isJavaScript = isJavaScript;
 exports.isPretty = isPretty;
+exports.isThirdParty = isThirdParty;
 exports.shouldPrettyPrint = shouldPrettyPrint;
 exports.getPrettySourceURL = getPrettySourceURL;
 exports.getRawSourceURL = getRawSourceURL;
@@ -17051,7 +17061,7 @@ var _makeRecord2 = _interopRequireDefault(_makeRecord);
 
 var _devtoolsSourceMap = __webpack_require__(898);
 
-var _breakpoint2 = __webpack_require__(1057);
+var _breakpoint = __webpack_require__(1057);
 
 var _reselect = __webpack_require__(993);
 
@@ -17078,7 +17088,7 @@ function update() {
 
     case "SYNC_BREAKPOINT":
       {
-        return addBreakpoint(state, action);
+        return syncBreakpoint(state, action);
       }
 
     case "ENABLE_BREAKPOINT":
@@ -17111,47 +17121,50 @@ function update() {
 }
 
 function addBreakpoint(state, action) {
-  if (action.status === "start") {
+  if (action.status === "start" && action.breakpoint) {
     var breakpoint = action.breakpoint;
 
-    var locationId = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+    var locationId = (0, _breakpoint.makeLocationId)(breakpoint.location);
     return state.setIn(["breakpoints", locationId], breakpoint);
   }
 
   // when the action completes, we can commit the breakpoint
   if (action.status === "done") {
-    var _action$value = action.value,
-        _breakpoint = _action$value.breakpoint,
-        previousLocation = _action$value.previousLocation;
-
-    var _locationId = (0, _breakpoint2.makeLocationId)(_breakpoint.location);
-
-    if (previousLocation) {
-      return state.deleteIn(["breakpoints", (0, _breakpoint2.makeLocationId)(previousLocation)]).setIn(["breakpoints", _locationId], _breakpoint);
-    }
-
-    return state.setIn(["breakpoints", _locationId], _breakpoint);
+    return syncBreakpoint(state, action.value);
   }
 
   // Remove the optimistic update
-  if (action.status === "error") {
-    var _locationId2 = (0, _breakpoint2.makeLocationId)(action.breakpoint.location);
-    return state.deleteIn(["breakpoints", _locationId2]);
+  if (action.status === "error" && action.breakpoint) {
+    var _locationId = (0, _breakpoint.makeLocationId)(action.breakpoint.location);
+    return state.deleteIn(["breakpoints", _locationId]);
   }
 
   return state;
 }
 
+function syncBreakpoint(state, data) {
+  var breakpoint = data.breakpoint,
+      previousLocation = data.previousLocation;
+
+  var locationId = (0, _breakpoint.makeLocationId)(breakpoint.location);
+
+  if (previousLocation) {
+    return state.deleteIn(["breakpoints", (0, _breakpoint.makeLocationId)(previousLocation)]).setIn(["breakpoints", locationId], breakpoint);
+  }
+
+  return state.setIn(["breakpoints", locationId], breakpoint);
+}
+
 function updateBreakpoint(state, action) {
   var breakpoint = action.breakpoint;
 
-  var locationId = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+  var locationId = (0, _breakpoint.makeLocationId)(breakpoint.location);
   return state.setIn(["breakpoints", locationId], breakpoint);
 }
 
 function remapBreakpoints(state, action) {
   var breakpoints = action.breakpoints.reduce((updatedBreakpoints, breakpoint) => {
-    var locationId = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+    var locationId = (0, _breakpoint.makeLocationId)(breakpoint.location);
     return _extends({}, updatedBreakpoints, { [locationId]: breakpoint });
   }, {});
 
@@ -17161,7 +17174,7 @@ function remapBreakpoints(state, action) {
 function removeBreakpoint(state, action) {
   var breakpoint = action.breakpoint;
 
-  var id = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+  var id = (0, _breakpoint.makeLocationId)(breakpoint.location);
   return state.deleteIn(["breakpoints", id]);
 }
 
@@ -17174,7 +17187,7 @@ function getBreakpoints(state) {
 
 function getBreakpoint(state, location) {
   var breakpoints = getBreakpoints(state);
-  return breakpoints.get((0, _breakpoint2.makeLocationId)(location));
+  return breakpoints.get((0, _breakpoint.makeLocationId)(location));
 }
 
 function getBreakpointsDisabled(state) {
@@ -17525,6 +17538,9 @@ function update() {
 
     case "CLEAR_COMMAND":
       return _extends({}, state, { command: "" });
+
+    case "NAVIGATE":
+      return _extends({}, state, { debuggeeUrl: action.url });
   }
 
   return state;
@@ -17613,7 +17629,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.State = undefined;
-exports.getActiveSearchState = getActiveSearchState;
+exports.getActiveSearch = getActiveSearch;
 exports.getFileSearchQueryState = getFileSearchQueryState;
 exports.getFileSearchModifierState = getFileSearchModifierState;
 exports.getSearchResults = getSearchResults;
@@ -17622,6 +17638,7 @@ exports.getSymbolSearchType = getSymbolSearchType;
 exports.getShownSource = getShownSource;
 exports.getPaneCollapse = getPaneCollapse;
 exports.getHighlightedLineRange = getHighlightedLineRange;
+exports.getConditionalBreakpointPanel = getConditionalBreakpointPanel;
 
 var _makeRecord = __webpack_require__(230);
 
@@ -17655,7 +17672,8 @@ var State = exports.State = (0, _makeRecord2.default)({
   startPanelCollapsed: _prefs.prefs.startPanelCollapsed,
   endPanelCollapsed: _prefs.prefs.endPanelCollapsed,
   frameworkGroupingOn: _prefs.prefs.frameworkGroupingOn,
-  highlightedLineRange: undefined
+  highlightedLineRange: undefined,
+  conditionalBreakpointPanel: null
 });
 
 function update() {
@@ -17741,6 +17759,9 @@ function update() {
     case "CLEAR_HIGHLIGHT_LINES":
       return state.set("highlightedLineRange", {});
 
+    case "TOGGLE_CONDITIONAL_BREAKPOINT_PANEL":
+      return state.set("conditionalBreakpointPanel", action.line);
+
     default:
       {
         return state;
@@ -17750,7 +17771,7 @@ function update() {
 
 // NOTE: we'd like to have the app state fully typed
 // https://github.com/devtools-html/debugger.html/blob/master/src/reducers/sources.js#L179-L185
-function getActiveSearchState(state) {
+function getActiveSearch(state) {
   return state.ui.get("activeSearch");
 }
 
@@ -17788,6 +17809,10 @@ function getPaneCollapse(state, position) {
 
 function getHighlightedLineRange(state) {
   return state.ui.get("highlightedLineRange");
+}
+
+function getConditionalBreakpointPanel(state) {
+  return state.ui.get("conditionalBreakpointPanel");
 }
 
 exports.default = update;
@@ -18029,8 +18054,10 @@ class App extends _react.Component {
 
     this.getChildContext = this.getChildContext.bind(this);
     this.onLayoutChange = this.onLayoutChange.bind(this);
+    this.toggleSymbolModal = this.toggleSymbolModal.bind(this);
     this.renderEditorPane = this.renderEditorPane.bind(this);
     this.renderVerticalLayout = this.renderVerticalLayout.bind(this);
+    this.onEscape = this.onEscape.bind(this);
   }
 
   getChildContext() {
@@ -18039,10 +18066,48 @@ class App extends _react.Component {
 
   componentDidMount() {
     verticalLayoutBreakpoint.addListener(this.onLayoutChange);
+    shortcuts.on(L10N.getStr("symbolSearch.search.key2"), this.toggleSymbolModal);
+    shortcuts.on("Escape", this.onEscape);
   }
 
   componentWillUnmount() {
     verticalLayoutBreakpoint.removeListener(this.onLayoutChange);
+    shortcuts.off(L10N.getStr("symbolSearch.search.key2"), this.toggleSymbolModal);
+    shortcuts.off("Escape", this.onEscape);
+  }
+
+  onEscape(_, e) {
+    var _props = this.props,
+        activeSearch = _props.activeSearch,
+        closeActiveSearch = _props.closeActiveSearch;
+
+
+    if (activeSearch) {
+      e.preventDefault();
+      closeActiveSearch();
+    }
+  }
+
+  toggleSymbolModal(_, e) {
+    var _props2 = this.props,
+        selectedSource = _props2.selectedSource,
+        activeSearch = _props2.activeSearch,
+        closeActiveSearch = _props2.closeActiveSearch,
+        setActiveSearch = _props2.setActiveSearch;
+
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!selectedSource) {
+      return;
+    }
+
+    if (activeSearch == "symbol") {
+      return closeActiveSearch();
+    }
+
+    setActiveSearch("symbol");
   }
 
   onLayoutChange() {
@@ -18052,9 +18117,9 @@ class App extends _react.Component {
   }
 
   renderEditorPane() {
-    var _props = this.props,
-        startPanelCollapsed = _props.startPanelCollapsed,
-        endPanelCollapsed = _props.endPanelCollapsed;
+    var _props3 = this.props,
+        startPanelCollapsed = _props3.startPanelCollapsed,
+        endPanelCollapsed = _props3.endPanelCollapsed;
     var _state = this.state,
         horizontal = _state.horizontal,
         endPanelSize = _state.endPanelSize,
@@ -18086,9 +18151,9 @@ class App extends _react.Component {
   }
 
   renderHorizontalLayout() {
-    var _props2 = this.props,
-        startPanelCollapsed = _props2.startPanelCollapsed,
-        endPanelCollapsed = _props2.endPanelCollapsed;
+    var _props4 = this.props,
+        startPanelCollapsed = _props4.startPanelCollapsed,
+        endPanelCollapsed = _props4.endPanelCollapsed;
     var horizontal = this.state.horizontal;
 
 
@@ -18120,9 +18185,9 @@ class App extends _react.Component {
   }
 
   renderVerticalLayout() {
-    var _props3 = this.props,
-        startPanelCollapsed = _props3.startPanelCollapsed,
-        endPanelCollapsed = _props3.endPanelCollapsed;
+    var _props5 = this.props,
+        startPanelCollapsed = _props5.startPanelCollapsed,
+        endPanelCollapsed = _props5.endPanelCollapsed;
     var horizontal = this.state.horizontal;
 
 
@@ -18148,20 +18213,29 @@ class App extends _react.Component {
     });
   }
 
+  renderSymbolModal() {
+    var _props6 = this.props,
+        selectSource = _props6.selectSource,
+        selectedSource = _props6.selectedSource,
+        activeSearch = _props6.activeSearch;
+
+
+    if (activeSearch !== "symbol") {
+      return;
+    }
+
+    return _react2.default.createElement(_SymbolModal2.default, {
+      selectSource: selectSource,
+      selectedSource: selectedSource
+    });
+  }
+
   render() {
-    var _props4 = this.props,
-        selectSource = _props4.selectSource,
-        selectedSource = _props4.selectedSource;
-
-
     return _react2.default.createElement(
       "div",
       { className: "debugger" },
       this.state.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout(),
-      _react2.default.createElement(_SymbolModal2.default, {
-        selectSource: selectSource,
-        selectedSource: selectedSource
-      })
+      this.renderSymbolModal()
     );
   }
 }
@@ -18173,7 +18247,8 @@ App.childContextTypes = { shortcuts: _react.PropTypes.object };
 exports.default = (0, _reactRedux.connect)(state => ({
   selectedSource: (0, _selectors.getSelectedSource)(state),
   startPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "start"),
-  endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end")
+  endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end"),
+  activeSearch: (0, _selectors.getActiveSearch)(state)
 }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(App);
 
 /***/ }),
@@ -18227,13 +18302,17 @@ var _projectTextSearch = __webpack_require__(37);
 
 var projectTextSearch = _interopRequireWildcard(_projectTextSearch);
 
-var _sourceSearch = __webpack_require__(1143);
+var _sourceSearch = __webpack_require__(1144);
 
 var sourceSearch = _interopRequireWildcard(_sourceSearch);
 
+var _loadSourceText = __webpack_require__(1143);
+
+var loadSourceText = _interopRequireWildcard(_loadSourceText);
+
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
-exports.default = Object.assign({}, navigation, breakpoints, expressions, eventListeners, sources, pause, ui, ast, coverage, projectTextSearch, sourceSearch);
+exports.default = Object.assign({}, navigation, breakpoints, expressions, eventListeners, sources, pause, ui, ast, coverage, projectTextSearch, sourceSearch, loadSourceText);
 
 /***/ }),
 /* 245 */
@@ -18249,17 +18328,6 @@ Object.defineProperty(exports, "__esModule", {
 var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/**
- * Redux actions for breakpoints
- * @module actions/breakpoints
- */
-
-// this will need to be changed so that addCLientBreakpoint is removed
-
 
 exports.syncBreakpoint = syncBreakpoint;
 exports.addBreakpoint = addBreakpoint;
@@ -18296,6 +18364,17 @@ var _syncBreakpoint = __webpack_require__(1137);
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/**
+ * Redux actions for breakpoints
+ * @module actions/breakpoints
+ */
+
+// this will need to be changed so that addCLientBreakpoint is removed
+
 
 /**
  * Syncing a breakpoint add breakpoint information that is stored, and
@@ -18306,30 +18385,29 @@ function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, a
  * @param {String} $1.sourceId String  value
  * @param {PendingBreakpoint} $1.location PendingBreakpoint  value
  */
-function syncBreakpoint(source, pendingBreakpoint) {
-  return (_ref) => {
-    var dispatch = _ref.dispatch,
-        getState = _ref.getState,
-        client = _ref.client,
-        sourceMaps = _ref.sourceMaps;
+function syncBreakpoint(sourceId, pendingBreakpoint) {
+  return (() => {
+    var _ref = _asyncToGenerator(function* (_ref2) {
+      var dispatch = _ref2.dispatch,
+          getState = _ref2.getState,
+          client = _ref2.client,
+          sourceMaps = _ref2.sourceMaps;
 
-    var sourceId = source.id;
-    var _pendingBreakpoint$lo = pendingBreakpoint.location,
-        line = _pendingBreakpoint$lo.line,
-        sourceUrl = _pendingBreakpoint$lo.sourceUrl,
-        column = _pendingBreakpoint$lo.column;
+      var _ref3 = yield (0, _syncBreakpoint.syncClientBreakpoint)(getState, client, sourceMaps, sourceId, pendingBreakpoint),
+          breakpoint = _ref3.breakpoint,
+          previousLocation = _ref3.previousLocation;
 
-    var location = { sourceId, sourceUrl, line, column };
-    var breakpoint = (0, _breakpoint.createBreakpoint)(location, pendingBreakpoint);
-
-    var syncPromise = (0, _syncBreakpoint.syncClientBreakpoint)(getState, client, sourceMaps, source, pendingBreakpoint);
-
-    return dispatch({
-      type: "SYNC_BREAKPOINT",
-      breakpoint,
-      [_promise.PROMISE]: syncPromise
+      return dispatch({
+        type: "SYNC_BREAKPOINT",
+        breakpoint,
+        previousLocation
+      });
     });
-  };
+
+    return function (_x) {
+      return _ref.apply(this, arguments);
+    };
+  })();
 }
 
 /**
@@ -18343,11 +18421,11 @@ function syncBreakpoint(source, pendingBreakpoint) {
 
 function addBreakpoint(location, condition, hidden) {
   var breakpoint = (0, _breakpoint.createBreakpoint)(location, { condition, hidden });
-  return (_ref2) => {
-    var dispatch = _ref2.dispatch,
-        getState = _ref2.getState,
-        sourceMaps = _ref2.sourceMaps,
-        client = _ref2.client;
+  return (_ref4) => {
+    var dispatch = _ref4.dispatch,
+        getState = _ref4.getState,
+        sourceMaps = _ref4.sourceMaps,
+        client = _ref4.client;
 
     var action = { type: "ADD_BREAKPOINT", breakpoint };
     var promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
@@ -18363,8 +18441,8 @@ function addBreakpoint(location, condition, hidden) {
  * @return {function(ThunkArgs)}
  */
 function addHiddenBreakpoint(location) {
-  return (_ref3) => {
-    var dispatch = _ref3.dispatch;
+  return (_ref5) => {
+    var dispatch = _ref5.dispatch;
 
     return dispatch(addBreakpoint(location, "", true));
   };
@@ -18377,20 +18455,14 @@ function addHiddenBreakpoint(location) {
  * @static
  */
 function removeBreakpoint(location) {
-  return (_ref4) => {
-    var dispatch = _ref4.dispatch,
-        getState = _ref4.getState,
-        client = _ref4.client;
+  return (_ref6) => {
+    var dispatch = _ref6.dispatch,
+        getState = _ref6.getState,
+        client = _ref6.client;
 
     var bp = (0, _selectors.getBreakpoint)(getState(), location);
-    if (!bp) {
-      throw new Error("attempt to remove breakpoint that does not exist");
-    }
-
-    if (bp.loading) {
-      // TODO(jwl): make this wait until the breakpoint is saved if it
-      // is still loading
-      throw new Error("attempt to remove unsaved breakpoint");
+    if (!bp || bp.loading) {
+      return;
     }
 
     // If the breakpoint is already disabled, we don't need to communicate
@@ -18422,15 +18494,15 @@ function removeBreakpoint(location) {
  */
 function enableBreakpoint(location) {
   return (() => {
-    var _ref5 = _asyncToGenerator(function* (_ref6) {
-      var dispatch = _ref6.dispatch,
-          getState = _ref6.getState,
-          client = _ref6.client,
-          sourceMaps = _ref6.sourceMaps;
+    var _ref7 = _asyncToGenerator(function* (_ref8) {
+      var dispatch = _ref8.dispatch,
+          getState = _ref8.getState,
+          client = _ref8.client,
+          sourceMaps = _ref8.sourceMaps;
 
       var breakpoint = (0, _selectors.getBreakpoint)(getState(), location);
-      if (!breakpoint) {
-        throw new Error("attempted to enable a breakpoint that does not exist");
+      if (!breakpoint || breakpoint.loading) {
+        return;
       }
 
       var action = { type: "ENABLE_BREAKPOINT", breakpoint };
@@ -18442,8 +18514,8 @@ function enableBreakpoint(location) {
       });
     });
 
-    return function (_x) {
-      return _ref5.apply(this, arguments);
+    return function (_x2) {
+      return _ref7.apply(this, arguments);
     };
   })();
 }
@@ -18456,21 +18528,15 @@ function enableBreakpoint(location) {
  */
 function disableBreakpoint(location) {
   return (() => {
-    var _ref7 = _asyncToGenerator(function* (_ref8) {
-      var dispatch = _ref8.dispatch,
-          getState = _ref8.getState,
-          client = _ref8.client;
+    var _ref9 = _asyncToGenerator(function* (_ref10) {
+      var dispatch = _ref10.dispatch,
+          getState = _ref10.getState,
+          client = _ref10.client;
 
       var bp = (0, _selectors.getBreakpoint)(getState(), location);
 
-      if (!bp) {
-        throw new Error("attempt to disable a breakpoint that does not exist");
-      }
-
-      if (bp.loading) {
-        // TODO(jwl): make this wait until the breakpoint is saved if it
-        // is still loading
-        throw new Error("attempt to disable unsaved breakpoint");
+      if (!bp || bp.loading) {
+        return;
       }
 
       yield client.removeBreakpoint(bp.generatedLocation);
@@ -18482,8 +18548,8 @@ function disableBreakpoint(location) {
       });
     });
 
-    return function (_x2) {
-      return _ref7.apply(this, arguments);
+    return function (_x3) {
+      return _ref9.apply(this, arguments);
     };
   })();
 }
@@ -18496,15 +18562,15 @@ function disableBreakpoint(location) {
  */
 function toggleAllBreakpoints(shouldDisableBreakpoints) {
   return (() => {
-    var _ref9 = _asyncToGenerator(function* (_ref10) {
-      var dispatch = _ref10.dispatch,
-          getState = _ref10.getState;
+    var _ref11 = _asyncToGenerator(function* (_ref12) {
+      var dispatch = _ref12.dispatch,
+          getState = _ref12.getState;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
-      for (var _ref11 of breakpoints) {
-        var _ref12 = _slicedToArray(_ref11, 2);
+      for (var _ref13 of breakpoints) {
+        var _ref14 = _slicedToArray(_ref13, 2);
 
-        var breakpoint = _ref12[1];
+        var breakpoint = _ref14[1];
 
         if (shouldDisableBreakpoints) {
           yield dispatch(disableBreakpoint(breakpoint.location));
@@ -18514,8 +18580,8 @@ function toggleAllBreakpoints(shouldDisableBreakpoints) {
       }
     });
 
-    return function (_x3) {
-      return _ref9.apply(this, arguments);
+    return function (_x4) {
+      return _ref11.apply(this, arguments);
     };
   })();
 }
@@ -18528,13 +18594,13 @@ function toggleAllBreakpoints(shouldDisableBreakpoints) {
  */
 function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
   return (() => {
-    var _ref13 = _asyncToGenerator(function* (_ref14) {
-      var dispatch = _ref14.dispatch;
+    var _ref15 = _asyncToGenerator(function* (_ref16) {
+      var dispatch = _ref16.dispatch;
 
-      for (var _ref15 of breakpoints) {
-        var _ref16 = _slicedToArray(_ref15, 2);
+      for (var _ref17 of breakpoints) {
+        var _ref18 = _slicedToArray(_ref17, 2);
 
-        var breakpoint = _ref16[1];
+        var breakpoint = _ref18[1];
 
         if (shouldDisableBreakpoints) {
           yield dispatch(disableBreakpoint(breakpoint.location));
@@ -18544,8 +18610,8 @@ function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
       }
     });
 
-    return function (_x4) {
-      return _ref13.apply(this, arguments);
+    return function (_x5) {
+      return _ref15.apply(this, arguments);
     };
   })();
 }
@@ -18558,22 +18624,22 @@ function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
  */
 function removeAllBreakpoints() {
   return (() => {
-    var _ref17 = _asyncToGenerator(function* (_ref18) {
-      var dispatch = _ref18.dispatch,
-          getState = _ref18.getState;
+    var _ref19 = _asyncToGenerator(function* (_ref20) {
+      var dispatch = _ref20.dispatch,
+          getState = _ref20.getState;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
-      for (var _ref19 of breakpoints) {
-        var _ref20 = _slicedToArray(_ref19, 2);
+      for (var _ref21 of breakpoints) {
+        var _ref22 = _slicedToArray(_ref21, 2);
 
-        var breakpoint = _ref20[1];
+        var breakpoint = _ref22[1];
 
         yield dispatch(removeBreakpoint(breakpoint.location));
       }
     });
 
-    return function (_x5) {
-      return _ref17.apply(this, arguments);
+    return function (_x6) {
+      return _ref19.apply(this, arguments);
     };
   })();
 }
@@ -18586,30 +18652,30 @@ function removeAllBreakpoints() {
  */
 function removeBreakpoints(breakpoints) {
   return (() => {
-    var _ref21 = _asyncToGenerator(function* (_ref22) {
-      var dispatch = _ref22.dispatch;
+    var _ref23 = _asyncToGenerator(function* (_ref24) {
+      var dispatch = _ref24.dispatch;
 
-      for (var _ref23 of breakpoints) {
-        var _ref24 = _slicedToArray(_ref23, 2);
+      for (var _ref25 of breakpoints) {
+        var _ref26 = _slicedToArray(_ref25, 2);
 
-        var breakpoint = _ref24[1];
+        var breakpoint = _ref26[1];
 
         yield dispatch(removeBreakpoint(breakpoint.location));
       }
     });
 
-    return function (_x6) {
-      return _ref21.apply(this, arguments);
+    return function (_x7) {
+      return _ref23.apply(this, arguments);
     };
   })();
 }
 
 function remapBreakpoints(sourceId) {
   return (() => {
-    var _ref25 = _asyncToGenerator(function* (_ref26) {
-      var dispatch = _ref26.dispatch,
-          getState = _ref26.getState,
-          sourceMaps = _ref26.sourceMaps;
+    var _ref27 = _asyncToGenerator(function* (_ref28) {
+      var dispatch = _ref28.dispatch,
+          getState = _ref28.getState,
+          sourceMaps = _ref28.sourceMaps;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
       var newBreakpoints = yield (0, _remapLocations2.default)(breakpoints, sourceId, sourceMaps);
@@ -18620,8 +18686,8 @@ function remapBreakpoints(sourceId) {
       });
     });
 
-    return function (_x7) {
-      return _ref25.apply(this, arguments);
+    return function (_x8) {
+      return _ref27.apply(this, arguments);
     };
   })();
 }
@@ -18639,15 +18705,15 @@ function remapBreakpoints(sourceId) {
  * @param {Boolean} $1.disabled Disable value for breakpoint value
  */
 function setBreakpointCondition(location) {
-  var _ref27 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-      condition = _ref27.condition;
+  var _ref29 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+      condition = _ref29.condition;
 
   return (() => {
-    var _ref28 = _asyncToGenerator(function* (_ref29) {
-      var dispatch = _ref29.dispatch,
-          getState = _ref29.getState,
-          client = _ref29.client,
-          sourceMaps = _ref29.sourceMaps;
+    var _ref30 = _asyncToGenerator(function* (_ref31) {
+      var dispatch = _ref31.dispatch,
+          getState = _ref31.getState,
+          client = _ref31.client,
+          sourceMaps = _ref31.sourceMaps;
 
       var bp = (0, _selectors.getBreakpoint)(getState(), location);
       if (!bp) {
@@ -18655,9 +18721,7 @@ function setBreakpointCondition(location) {
       }
 
       if (bp.loading) {
-        // TODO(jwl): when this function is called, make sure the action
-        // creator waits for the breakpoint to exist
-        throw new Error("breakpoint must be saved");
+        return;
       }
 
       if (bp.disabled) {
@@ -18677,18 +18741,18 @@ function setBreakpointCondition(location) {
       });
     });
 
-    return function (_x9) {
-      return _ref28.apply(this, arguments);
+    return function (_x10) {
+      return _ref30.apply(this, arguments);
     };
   })();
 }
 
 function toggleBreakpoint(line, column) {
-  return (_ref30) => {
-    var dispatch = _ref30.dispatch,
-        getState = _ref30.getState,
-        client = _ref30.client,
-        sourceMaps = _ref30.sourceMaps;
+  return (_ref32) => {
+    var dispatch = _ref32.dispatch,
+        getState = _ref32.getState,
+        client = _ref32.client,
+        sourceMaps = _ref32.sourceMaps;
 
     var selectedSource = (0, _selectors.getSelectedSource)(getState());
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
@@ -18717,11 +18781,11 @@ function toggleBreakpoint(line, column) {
 }
 
 function addOrToggleDisabledBreakpoint(line, column) {
-  return (_ref31) => {
-    var dispatch = _ref31.dispatch,
-        getState = _ref31.getState,
-        client = _ref31.client,
-        sourceMaps = _ref31.sourceMaps;
+  return (_ref33) => {
+    var dispatch = _ref33.dispatch,
+        getState = _ref33.getState,
+        client = _ref33.client,
+        sourceMaps = _ref33.sourceMaps;
 
     var selectedSource = (0, _selectors.getSelectedSource)(getState());
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
@@ -18745,19 +18809,15 @@ function addOrToggleDisabledBreakpoint(line, column) {
 }
 
 function toggleDisabledBreakpoint(line, column) {
-  return (_ref32) => {
-    var dispatch = _ref32.dispatch,
-        getState = _ref32.getState,
-        client = _ref32.client,
-        sourceMaps = _ref32.sourceMaps;
+  return (_ref34) => {
+    var dispatch = _ref34.dispatch,
+        getState = _ref34.getState,
+        client = _ref34.client,
+        sourceMaps = _ref34.sourceMaps;
 
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
-    if (bp && bp.loading) {
+    if (!bp || bp.loading) {
       return;
-    }
-
-    if (!bp) {
-      throw new Error("attempt to disable breakpoint that does not exist");
     }
 
     if (!bp.disabled) {
@@ -19251,13 +19311,30 @@ function evaluateExpression(expression, frameId) {
       return;
     }
 
+	const input = wrapExpression(expression.input);
     return dispatch({
       type: "EVALUATE_EXPRESSION",
       input: expression.input,
-      [_promise.PROMISE]: client.evaluate(expression.input, { frameId })
+      [_promise.PROMISE]: client.evaluate(input, { frameId })
     });
   };
 }
+
+function sanitizeInput(input) {
+  return input.replace(/\\/g, "\\\\").replace(/"/g, "\\$&");
+}
+
+function wrapExpression(input) {
+  return `eval(\`
+    try {
+      ${sanitizeInput(input)}
+    } catch (e) {
+      e.name + ": " + e.message
+    }
+  \`)`.trim();
+}
+
+
 
 /***/ }),
 /* 253 */
@@ -19499,7 +19576,7 @@ var checkPendingBreakpoint = (() => {
     var sameSource = sourceUrl && sourceUrl === source.url;
 
     if (sameSource) {
-      yield dispatch((0, _breakpoints.syncBreakpoint)(source, pendingBreakpoint));
+      yield dispatch((0, _breakpoints.syncBreakpoint)(source.id, pendingBreakpoint));
     }
   });
 
@@ -19510,11 +19587,13 @@ var checkPendingBreakpoint = (() => {
 
 var checkPendingBreakpoints = (() => {
   var _ref3 = _asyncToGenerator(function* (state, dispatch, source) {
-    var pendingBreakpoints = (0, _selectors.getPendingBreakpoints)(state);
-    if (!pendingBreakpoints) {
+    var pendingBreakpoints = (0, _selectors.getPendingBreakpointsForSource)(state, source.url);
+    if (!pendingBreakpoints.size) {
       return;
     }
 
+    // load the source text if there is a pending breakpoint for it
+    yield dispatch((0, _loadSourceText.loadSourceText)(source));
     var pendingBreakpointsArray = pendingBreakpoints.valueSeq().toJS();
     for (var pendingBreakpoint of pendingBreakpointsArray) {
       yield checkPendingBreakpoint(state, dispatch, pendingBreakpoint, source);
@@ -19536,6 +19615,7 @@ var checkPendingBreakpoints = (() => {
 exports.newSource = newSource;
 exports.newSources = newSources;
 exports.selectSourceURL = selectSourceURL;
+exports.openLink = openLink;
 exports.selectSource = selectSource;
 exports.jumpToMappedLocation = jumpToMappedLocation;
 exports.addTab = addTab;
@@ -19544,7 +19624,6 @@ exports.closeTab = closeTab;
 exports.closeTabs = closeTabs;
 exports.togglePrettyPrint = togglePrettyPrint;
 exports.toggleBlackBox = toggleBlackBox;
-exports.loadSourceText = loadSourceText;
 exports.loadAllSources = loadAllSources;
 
 var _promise = __webpack_require__(193);
@@ -19559,13 +19638,19 @@ var _ast = __webpack_require__(1059);
 
 var _projectTextSearch = __webpack_require__(37);
 
-var _source = __webpack_require__(233);
+var _ui = __webpack_require__(321);
+
+var _source2 = __webpack_require__(233);
 
 var _createPrettySource = __webpack_require__(195);
+
+var _loadSourceText = __webpack_require__(1143);
 
 var _prefs = __webpack_require__(226);
 
 var _editor = __webpack_require__(257);
+
+var _sourceMaps = __webpack_require__(797);
 
 var _selectors = __webpack_require__(242);
 
@@ -19587,6 +19672,11 @@ function newSource(source) {
     var _ref4 = _asyncToGenerator(function* (_ref5) {
       var dispatch = _ref5.dispatch,
           getState = _ref5.getState;
+
+      var _source = (0, _selectors.getSource)(getState(), source.id);
+      if (_source) {
+        return;
+      }
 
       dispatch({ type: "ADD_SOURCE", source });
 
@@ -19647,7 +19737,10 @@ function loadSourceMap(generatedSource) {
         return {
           url: originalUrl,
           id: sourceMaps.generatedToOriginalId(generatedSource.id, originalUrl),
-          isPrettyPrinted: false
+          isPrettyPrinted: false,
+          isWasm: false,
+          isBlackBoxed: false,
+          loadedState: "unloaded"
         };
       });
 
@@ -19663,6 +19756,12 @@ function loadSourceMap(generatedSource) {
       return _ref8.apply(this, arguments);
     };
   })();
+}
+
+function openLink(url) {
+  return async function({ openLink }) {
+    openLink(url);
+  };
 }
 
 /**
@@ -19725,9 +19824,9 @@ function selectSource(id) {
       return dispatch({ type: "CLEAR_SELECTED_SOURCE" });
     }
 
-    var activeSearch = (0, _selectors.getActiveSearchState)(getState());
+    var activeSearch = (0, _selectors.getActiveSearch)(getState());
     if (activeSearch !== "file") {
-      dispatch({ type: "TOGGLE_ACTIVE_SEARCH", value: null });
+      dispatch((0, _ui.closeActiveSearch)());
     }
 
     dispatch(addTab(source.toJS(), 0));
@@ -19738,7 +19837,7 @@ function selectSource(id) {
       tabIndex: options.tabIndex,
       line: options.line,
       [_promise.PROMISE]: _asyncToGenerator(function* () {
-        yield dispatch(loadSourceText(source.toJS()));
+        yield dispatch((0, _loadSourceText.loadSourceText)(source.toJS()));
         yield dispatch((0, _ast.setOutOfScopeLocations)());
       })()
     });
@@ -19764,7 +19863,7 @@ function jumpToMappedLocation(sourceLocation) {
       var source = (0, _selectors.getSource)(getState(), sourceLocation.sourceId);
       var pairedLocation = void 0;
       if (sourceMaps.isOriginalId(sourceLocation.sourceId)) {
-        pairedLocation = yield sourceMaps.getGeneratedLocation(sourceLocation, source.toJS());
+        pairedLocation = yield (0, _sourceMaps.getGeneratedLocation)(getState(), source.toJS(), sourceLocation, sourceMaps);
       } else {
         pairedLocation = yield sourceMaps.getOriginalLocation(sourceLocation, source.toJS());
       }
@@ -19860,7 +19959,7 @@ function togglePrettyPrint(sourceId) {
 
       var source = (0, _selectors.getSource)(getState(), sourceId).toJS();
 
-      if (source && !(0, _source.isLoaded)(source)) {
+      if (source && !(0, _source2.isLoaded)(source)) {
         return {};
       }
 
@@ -19869,7 +19968,7 @@ function togglePrettyPrint(sourceId) {
       var selectedLocation = (0, _selectors.getSelectedLocation)(getState());
       var selectedOriginalLocation = selectedLocation ? yield sourceMaps.getOriginalLocation(selectedLocation) : {};
 
-      var url = (0, _source.getPrettySourceURL)(source.url);
+      var url = (0, _source2.getPrettySourceURL)(source.url);
       var prettySource = (0, _selectors.getSourceByURL)(getState(), url);
 
       if (prettySource) {
@@ -19920,80 +20019,39 @@ function toggleBlackBox(source) {
 }
 
 /**
- * @memberof actions/sources
- * @static
- */
-function loadSourceText(source) {
-  return (() => {
-    var _ref23 = _asyncToGenerator(function* (_ref24) {
-      var dispatch = _ref24.dispatch,
-          getState = _ref24.getState,
-          client = _ref24.client,
-          sourceMaps = _ref24.sourceMaps;
-
-      // Fetch the source text only once.
-      if (source.text) {
-        return Promise.resolve(source);
-      }
-
-      yield dispatch({
-        type: "LOAD_SOURCE_TEXT",
-        source: source,
-        [_promise.PROMISE]: _asyncToGenerator(function* () {
-          if (sourceMaps.isOriginalId(source.id)) {
-            return yield sourceMaps.getOriginalSourceText(source);
-          }
-
-          var response = yield client.sourceContents(source.id);
-
-          return {
-            id: source.id,
-            text: response.source,
-            contentType: response.contentType || "text/javascript"
-          };
-        })()
-      });
-
-      yield dispatch((0, _ast.setSymbols)(source.id));
-      yield dispatch((0, _ast.setEmptyLines)(source.id));
-    });
-
-    return function (_x20) {
-      return _ref23.apply(this, arguments);
-    };
-  })();
-}
-
-/**
   Load the text for all the avaliable sources
  * @memberof actions/sources
  * @static
  */
 function loadAllSources() {
   return (() => {
-    var _ref26 = _asyncToGenerator(function* (_ref27) {
-      var dispatch = _ref27.dispatch,
-          getState = _ref27.getState;
+    var _ref23 = _asyncToGenerator(function* (_ref24) {
+      var dispatch = _ref24.dispatch,
+          getState = _ref24.getState;
 
       var sources = (0, _selectors.getSources)(getState());
       var query = (0, _selectors.getTextSearchQuery)(getState());
-      for (var _ref28 of sources) {
-        var _ref29 = _slicedToArray(_ref28, 2);
+      for (var _ref25 of sources) {
+        var _ref26 = _slicedToArray(_ref25, 2);
 
-        var src = _ref29[1];
+        var src = _ref26[1];
 
         var source = src.toJS();
-        yield dispatch(loadSourceText(source));
+        if ((0, _source2.isThirdParty)(source)) {
+          continue;
+        }
+
+        yield dispatch((0, _loadSourceText.loadSourceText)(source));
         // If there is a current search query we search
         // each of the source texts as they get loaded
         if (query) {
-          yield dispatch((0, _projectTextSearch.searchSource)(source, query));
+          yield dispatch((0, _projectTextSearch.searchSource)(source.id, query));
         }
       }
     });
 
-    return function (_x21) {
-      return _ref26.apply(this, arguments);
+    return function (_x20) {
+      return _ref23.apply(this, arguments);
     };
   })();
 }
@@ -20466,41 +20524,29 @@ function isWhitespace(query) {
  */
 function searchOverlay(query, modifiers) {
   var regexQuery = (0, _buildQuery2.default)(query, modifiers, {
-    ignoreSpaces: true
+    ignoreSpaces: true,
+    // regex must be global for the overlay
+    isGlobal: true
   });
 
-  var matchLength = null;
-
   return {
-    token: function (stream) {
-      if (stream.column() === 0) {
-        matchLength = null;
-      }
-      if (matchLength !== null) {
-        if (matchLength > 2) {
-          for (var i = 0; i < matchLength - 2; ++i) {
-            stream.next();
-          }
-          matchLength = 1;
-          return "highlight";
-        }
-        stream.next();
-        matchLength = null;
-        return "highlight highlight-end";
-      }
-
-      var match = stream.match(regexQuery, false);
-      if (match) {
-        stream.next();
-        var len = match[0].length;
-        if (len === 1) {
-          return "highlight highlight-full";
-        }
-        matchLength = len;
-        return "highlight highlight-start";
-      }
-      while (!stream.match(regexQuery, false) && stream.peek()) {
-        stream.next();
+    token: function (stream, state) {
+      // set the last index to be the current stream position
+      // this acts as an offset
+      regexQuery.lastIndex = stream.pos;
+      var match = regexQuery.exec(stream.string);
+      if (match && match.index === stream.pos) {
+        // if we have a match at the current stream position
+        // set the class for a match
+        stream.pos += match[0].length || 1;
+        return "highlight highlight-full";
+      } else if (match) {
+        // if we have a match somewhere in the line, go to that point in the
+        // stream
+        stream.pos = match.index;
+      } else {
+        // if we have no matches in this line, skip to the end of the line
+        stream.skipToEnd();
       }
     }
   };
@@ -20560,6 +20606,7 @@ function doSearch(ctx, rev, query, keepSelection, modifiers) {
 
   return cm.operation(function () {
     if (!query || isWhitespace(query)) {
+      clearSearch(cm, query, modifiers);
       return;
     }
 
@@ -21286,6 +21333,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.resumed = resumed;
+exports.continueToHere = continueToHere;
 exports.paused = paused;
 exports.pauseOnExceptions = pauseOnExceptions;
 exports.command = command;
@@ -21350,6 +21398,30 @@ function resumed() {
   };
 }
 
+function continueToHere(line) {
+  return (() => {
+    var _ref2 = _asyncToGenerator(function* (_ref3) {
+      var dispatch = _ref3.dispatch,
+          getState = _ref3.getState,
+          client = _ref3.client,
+          sourceMaps = _ref3.sourceMaps;
+
+      var source = (0, _selectors.getSelectedSource)(getState()).toJS();
+
+      yield dispatch((0, _breakpoints.addHiddenBreakpoint)({
+        line,
+        column: undefined,
+        sourceId: source.id
+      }));
+      dispatch(command("resume"));
+    });
+
+    return function (_x) {
+      return _ref2.apply(this, arguments);
+    };
+  })();
+}
+
 /**
  * Debugger has just paused
  *
@@ -21359,11 +21431,11 @@ function resumed() {
  */
 function paused(pauseInfo) {
   return (() => {
-    var _ref2 = _asyncToGenerator(function* (_ref3) {
-      var dispatch = _ref3.dispatch,
-          getState = _ref3.getState,
-          client = _ref3.client,
-          sourceMaps = _ref3.sourceMaps;
+    var _ref4 = _asyncToGenerator(function* (_ref5) {
+      var dispatch = _ref5.dispatch,
+          getState = _ref5.getState,
+          client = _ref5.client,
+          sourceMaps = _ref5.sourceMaps;
       var frames = pauseInfo.frames,
           why = pauseInfo.why,
           loadedObjects = pauseInfo.loadedObjects;
@@ -21383,13 +21455,18 @@ function paused(pauseInfo) {
         loadedObjects: loadedObjects || []
       });
 
+      var hiddenBreakpointLocation = (0, _breakpoints2.getHiddenBreakpointLocation)(getState());
+      if (hiddenBreakpointLocation) {
+        dispatch((0, _breakpoints.removeBreakpoint)(hiddenBreakpointLocation));
+      }
+
       dispatch((0, _expressions.evaluateExpressions)(frame.id));
 
       dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
     });
 
-    return function (_x) {
-      return _ref2.apply(this, arguments);
+    return function (_x2) {
+      return _ref4.apply(this, arguments);
     };
   })();
 }
@@ -21400,9 +21477,9 @@ function paused(pauseInfo) {
  * @static
  */
 function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  return (_ref4) => {
-    var dispatch = _ref4.dispatch,
-        client = _ref4.client;
+  return (_ref6) => {
+    var dispatch = _ref6.dispatch,
+        client = _ref6.client;
 
     dispatch({
       type: "PAUSE_ON_EXCEPTIONS",
@@ -21420,21 +21497,24 @@ function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions
  * @memberof actions/pause
  * @static
  */
-function command(_ref5) {
-  var type = _ref5.type;
+function command(type) {
+  return (() => {
+    var _ref7 = _asyncToGenerator(function* (_ref8) {
+      var dispatch = _ref8.dispatch,
+          client = _ref8.client;
 
-  return (_ref6) => {
-    var dispatch = _ref6.dispatch,
-        client = _ref6.client;
+      // execute debugger thread command e.g. stepIn, stepOver
+      dispatch({ type: "COMMAND", value: { type } });
 
-    // execute debugger thread command e.g. stepIn, stepOver
-    client[type]().then(() => dispatch({ type: "CLEAR_COMMAND" }));
+      yield client[type]();
 
-    return dispatch({
-      type: "COMMAND",
-      value: { type }
+      dispatch({ type: "CLEAR_COMMAND" });
     });
-  };
+
+    return function (_x3) {
+      return _ref7.apply(this, arguments);
+    };
+  })();
 }
 
 /**
@@ -21444,12 +21524,12 @@ function command(_ref5) {
  * @returns {Function} {@link command}
  */
 function stepIn() {
-  return (_ref7) => {
-    var dispatch = _ref7.dispatch,
-        getState = _ref7.getState;
+  return (_ref9) => {
+    var dispatch = _ref9.dispatch,
+        getState = _ref9.getState;
 
     if ((0, _selectors.getPause)(getState())) {
-      return dispatch(astCommand("stepIn"));
+      return dispatch(command("stepIn"));
     }
   };
 }
@@ -21461,9 +21541,9 @@ function stepIn() {
  * @returns {Function} {@link command}
  */
 function stepOver() {
-  return (_ref8) => {
-    var dispatch = _ref8.dispatch,
-        getState = _ref8.getState;
+  return (_ref10) => {
+    var dispatch = _ref10.dispatch,
+        getState = _ref10.getState;
 
     if ((0, _selectors.getPause)(getState())) {
       return dispatch(astCommand("stepOver"));
@@ -21478,12 +21558,12 @@ function stepOver() {
  * @returns {Function} {@link command}
  */
 function stepOut() {
-  return (_ref9) => {
-    var dispatch = _ref9.dispatch,
-        getState = _ref9.getState;
+  return (_ref11) => {
+    var dispatch = _ref11.dispatch,
+        getState = _ref11.getState;
 
     if ((0, _selectors.getPause)(getState())) {
-      return dispatch(astCommand("stepOut"));
+      return dispatch(command("stepOut"));
     }
   };
 }
@@ -21495,12 +21575,12 @@ function stepOut() {
  * @returns {Function} {@link command}
  */
 function resume() {
-  return (_ref10) => {
-    var dispatch = _ref10.dispatch,
-        getState = _ref10.getState;
+  return (_ref12) => {
+    var dispatch = _ref12.dispatch,
+        getState = _ref12.getState;
 
     if ((0, _selectors.getPause)(getState())) {
-      return dispatch(command({ type: "resume" }));
+      return dispatch(command("resume"));
     }
   };
 }
@@ -21514,9 +21594,9 @@ function resume() {
  * @static
  */
 function breakOnNext() {
-  return (_ref11) => {
-    var dispatch = _ref11.dispatch,
-        client = _ref11.client;
+  return (_ref13) => {
+    var dispatch = _ref13.dispatch,
+        client = _ref13.client;
 
     client.breakOnNext();
 
@@ -21533,9 +21613,9 @@ function breakOnNext() {
  */
 function selectFrame(frame) {
   return (() => {
-    var _ref12 = _asyncToGenerator(function* (_ref13) {
-      var dispatch = _ref13.dispatch,
-          client = _ref13.client;
+    var _ref14 = _asyncToGenerator(function* (_ref15) {
+      var dispatch = _ref15.dispatch,
+          client = _ref15.client;
 
       dispatch((0, _expressions.evaluateExpressions)(frame.id));
       dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
@@ -21549,8 +21629,8 @@ function selectFrame(frame) {
       });
     });
 
-    return function (_x2) {
-      return _ref12.apply(this, arguments);
+    return function (_x4) {
+      return _ref14.apply(this, arguments);
     };
   })();
 }
@@ -21560,10 +21640,10 @@ function selectFrame(frame) {
  * @static
  */
 function loadObjectProperties(object) {
-  return (_ref14) => {
-    var dispatch = _ref14.dispatch,
-        client = _ref14.client,
-        getState = _ref14.getState;
+  return (_ref16) => {
+    var dispatch = _ref16.dispatch,
+        client = _ref16.client,
+        getState = _ref16.getState;
 
     var objectId = object.actor || object.objectId;
 
@@ -21587,35 +21667,33 @@ function loadObjectProperties(object) {
  */
 function astCommand(stepType) {
   return (() => {
-    var _ref15 = _asyncToGenerator(function* (_ref16) {
-      var dispatch = _ref16.dispatch,
-          getState = _ref16.getState,
-          sourceMaps = _ref16.sourceMaps;
+    var _ref17 = _asyncToGenerator(function* (_ref18) {
+      var dispatch = _ref18.dispatch,
+          getState = _ref18.getState,
+          sourceMaps = _ref18.sourceMaps;
 
       if (!_prefs.features.asyncStepping) {
-        return dispatch(command({ type: stepType }));
+        return dispatch(command(stepType));
       }
 
       var pauseInfo = (0, _selectors.getPause)(getState());
       var source = (0, _selectors.getSelectedSource)(getState()).toJS();
-      var currentHiddenBreakpointLocation = (0, _breakpoints2.getHiddenBreakpointLocation)(getState());
-      if (currentHiddenBreakpointLocation) {
-        dispatch((0, _breakpoints.removeBreakpoint)(currentHiddenBreakpointLocation));
-      }
+
       var pausedPosition = yield (0, _pause.getPausedPosition)(pauseInfo, sourceMaps);
 
-      var _ref17 = yield parser.getNextStep(source, stepType, pausedPosition),
-          nextStepType = _ref17.nextStepType,
-          nextHiddenBreakpointLocation = _ref17.nextHiddenBreakpointLocation;
-
-      if (nextHiddenBreakpointLocation) {
-        yield dispatch((0, _breakpoints.addHiddenBreakpoint)(nextHiddenBreakpointLocation));
+      if (stepType == "stepOver") {
+        var nextLocation = yield parser.getNextStep(source, pausedPosition);
+        if (nextLocation) {
+          yield dispatch((0, _breakpoints.addHiddenBreakpoint)(nextLocation));
+          return dispatch(command("resume"));
+        }
       }
-      return dispatch(command({ type: nextStepType }));
+
+      return dispatch(command(stepType));
     });
 
-    return function (_x3) {
-      return _ref15.apply(this, arguments);
+    return function (_x5) {
+      return _ref17.apply(this, arguments);
     };
   })();
 }
@@ -21670,6 +21748,8 @@ function willNavigate(_, event) {
       (0, _wasm.clearWasmStates)();
       (0, _editor.clearDocuments)();
       (0, _parser.clearSymbols)();
+      (0, _parser.clearASTs)();
+      (0, _parser.clearSources)();
 
       dispatch(navigate(event.url));
     });
@@ -21739,21 +21819,36 @@ exports.showSource = showSource;
 exports.togglePaneCollapse = togglePaneCollapse;
 exports.highlightLineRange = highlightLineRange;
 exports.clearHighlightLineRange = clearHighlightLineRange;
+exports.toggleConditionalBreakpointPanel = toggleConditionalBreakpointPanel;
 
 var _selectors = __webpack_require__(242);
 
+var _sourceSearch = __webpack_require__(1144);
+
 function closeActiveSearch() {
-  return {
-    type: "TOGGLE_ACTIVE_SEARCH",
-    value: null
+  return (_ref) => {
+    var getState = _ref.getState,
+        dispatch = _ref.dispatch;
+
+    var activeSearch = (0, _selectors.getActiveSearch)(getState());
+
+    if (activeSearch == "source") {
+      dispatch((0, _sourceSearch.clearSourceSearchQuery)());
+    }
+
+    dispatch({
+      type: "TOGGLE_ACTIVE_SEARCH",
+      value: null
+    });
   };
 }
-function setActiveSearch(activeSearch) {
-  return (_ref) => {
-    var dispatch = _ref.dispatch,
-        getState = _ref.getState;
 
-    var activeSearchState = (0, _selectors.getActiveSearchState)(getState());
+function setActiveSearch(activeSearch) {
+  return (_ref2) => {
+    var dispatch = _ref2.dispatch,
+        getState = _ref2.getState;
+
+    var activeSearchState = (0, _selectors.getActiveSearch)(getState());
     if (activeSearchState === activeSearch) {
       return;
     }
@@ -21766,9 +21861,9 @@ function setActiveSearch(activeSearch) {
 }
 
 function toggleFrameworkGrouping(toggleValue) {
-  return (_ref2) => {
-    var dispatch = _ref2.dispatch,
-        getState = _ref2.getState;
+  return (_ref3) => {
+    var dispatch = _ref3.dispatch,
+        getState = _ref3.getState;
 
     dispatch({
       type: "TOGGLE_FRAMEWORK_GROUPING",
@@ -21778,9 +21873,9 @@ function toggleFrameworkGrouping(toggleValue) {
 }
 
 function setSelectedSymbolType(symbolType) {
-  return (_ref3) => {
-    var dispatch = _ref3.dispatch,
-        getState = _ref3.getState;
+  return (_ref4) => {
+    var dispatch = _ref4.dispatch,
+        getState = _ref4.getState;
 
     dispatch({
       type: "SET_SYMBOL_SEARCH_TYPE",
@@ -21808,9 +21903,9 @@ function toggleFileSearchModifier(modifier) {
 }
 
 function showSource(sourceId) {
-  return (_ref4) => {
-    var dispatch = _ref4.dispatch,
-        getState = _ref4.getState;
+  return (_ref5) => {
+    var dispatch = _ref5.dispatch,
+        getState = _ref5.getState;
 
     var source = (0, _selectors.getSource)(getState(), sourceId);
 
@@ -21852,6 +21947,13 @@ function highlightLineRange(location) {
 function clearHighlightLineRange() {
   return {
     type: "CLEAR_HIGHLIGHT_LINES"
+  };
+}
+
+function toggleConditionalBreakpointPanel(line) {
+  return {
+    type: "TOGGLE_CONDITIONAL_BREAKPOINT_PANEL",
+    line
   };
 }
 
@@ -24371,9 +24473,9 @@ var isMacOS = appinfo.OS === "Darwin";
  */
 function formatKeyShortcut(shortcut) {
   if (isMacOS) {
-    return shortcut.replace(/Shift\+/g, "\u21E7+").replace(/Command\+|Cmd\+/g, "\u2318+").replace(/CommandOrControl\+|CmdOrCtrl\+/g, "\u2318+").replace(/Alt\+/g, "\u2325+");
+    return shortcut.replace(/Shift\+/g, "\u21E7 ").replace(/Command\+|Cmd\+/g, "\u2318 ").replace(/CommandOrControl\+|CmdOrCtrl\+/g, "\u2318 ").replace(/Alt\+/g, "\u2325 ");
   }
-  return shortcut.replace(/CommandOrControl\+|CmdOrCtrl\+/g, `${L10N.getStr("ctrl")}+`);
+  return shortcut.replace(/CommandOrControl\+|CmdOrCtrl\+/g, `${L10N.getStr("ctrl")} `).replace(/Shift\+/g, "Shift ");
 }
 
 exports.formatKeyShortcut = formatKeyShortcut;
@@ -24457,6 +24559,10 @@ class ManagedTree extends _react.Component {
     if (highlightItems && highlightItems != this.props.highlightItems && highlightItems.length) {
       this.highlightItem(highlightItems);
     }
+
+    if (nextProps.focused && nextProps.focused !== this.props.focused) {
+      this.focusItem(nextProps.focused);
+    }
   }
 
   setExpanded(item, isExpanded) {
@@ -24480,7 +24586,7 @@ class ManagedTree extends _react.Component {
     var expanded = this.state.expanded;
     listItems.forEach(item => expanded.add(this.props.getPath(item)));
     this.focusItem(listItems[0]);
-    this.setState({ expanded: expanded });
+    this.setState({ expanded });
   }
 
   highlightItem(highlightItems) {
@@ -24629,6 +24735,8 @@ var _devtoolsLaunchpad = __webpack_require__(131);
 
 var _source = __webpack_require__(233);
 
+var _function = __webpack_require__(1169);
+
 var _ast = __webpack_require__(1058);
 
 var _selectors = __webpack_require__(242);
@@ -24669,7 +24777,7 @@ var _DebugLine = __webpack_require__(313);
 
 var _DebugLine2 = _interopRequireDefault(_DebugLine);
 
-var _EmptyLines = __webpack_require__(1144);
+var _EmptyLines = __webpack_require__(1146);
 
 var _EmptyLines2 = _interopRequireDefault(_EmptyLines);
 
@@ -24688,7 +24796,6 @@ var cssVars = {
   secondSearchbarHeight: "var(--editor-second-searchbar-height)",
   footerHeight: "var(--editor-footer-height)"
 };
-
 
 class Editor extends _react.PureComponent {
 
@@ -24860,6 +24967,10 @@ class Editor extends _react.PureComponent {
     if (selectedSource && selectedSource.has("text")) {
       this.highlightLine();
     }
+
+    if (this.props.conditionalBreakpointPanel !== null && this.cbPanel == null) {
+      this.toggleConditionalPanel(this.props.conditionalBreakpointPanel);
+    }
   }
 
   onToggleBreakpoint(key, e) {
@@ -24947,7 +25058,8 @@ class Editor extends _react.PureComponent {
         showSource = _props5.showSource,
         jumpToMappedLocation = _props5.jumpToMappedLocation,
         addExpression = _props5.addExpression,
-        toggleBlackBox = _props5.toggleBlackBox;
+        toggleBlackBox = _props5.toggleBlackBox,
+        getFunctionText = _props5.getFunctionText;
 
 
     return (0, _EditorMenu2.default)({
@@ -24959,6 +25071,7 @@ class Editor extends _react.PureComponent {
       jumpToMappedLocation,
       addExpression,
       toggleBlackBox,
+      getFunctionText,
       onGutterContextMenu: this.onGutterContextMenu
     });
   }
@@ -25003,7 +25116,9 @@ class Editor extends _react.PureComponent {
         breakpoints = _props7.breakpoints,
         toggleBreakpoint = _props7.toggleBreakpoint,
         toggleDisabledBreakpoint = _props7.toggleDisabledBreakpoint,
-        isEmptyLine = _props7.isEmptyLine;
+        isEmptyLine = _props7.isEmptyLine,
+        pauseData = _props7.pauseData,
+        continueToHere = _props7.continueToHere;
 
 
     if (selectedSource && selectedSource.get("isBlackBoxed")) {
@@ -25025,6 +25140,8 @@ class Editor extends _react.PureComponent {
       breakpoint,
       toggleBreakpoint,
       toggleDisabledBreakpoint,
+      pauseData,
+      continueToHere,
 
       showConditionalPanel: this.toggleConditionalPanel,
       isCbPanelOpen: this.isCbPanelOpen(),
@@ -25063,6 +25180,7 @@ class Editor extends _react.PureComponent {
   }
 
   closeConditionalPanel() {
+    this.props.toggleConditionalBreakpointPanel(null);
     this.cbPanel.clear();
     this.cbPanel = null;
   }
@@ -25332,7 +25450,11 @@ Editor.propTypes = {
   toggleBreakpoint: _react.PropTypes.func.isRequired,
   addOrToggleDisabledBreakpoint: _react.PropTypes.func.isRequired,
   toggleDisabledBreakpoint: _react.PropTypes.func.isRequired,
-  isEmptyLine: _react.PropTypes.func
+  conditionalBreakpointPanel: _react.PropTypes.number,
+  toggleConditionalBreakpointPanel: _react.PropTypes.func.isRequired,
+  isEmptyLine: _react.PropTypes.func,
+  continueToHere: _react.PropTypes.func,
+  getFunctionText: _react.PropTypes.func
 };
 
 Editor.contextTypes = {
@@ -25348,7 +25470,7 @@ exports.default = (0, _reactRedux.connect)(state => {
     selectedLocation,
     selectedSource,
     highlightedLineRange: (0, _selectors.getHighlightedLineRange)(state),
-    searchOn: (0, _selectors.getActiveSearchState)(state) === "file",
+    searchOn: (0, _selectors.getActiveSearch)(state) === "file",
     loadedObjects: (0, _selectors.getLoadedObjects)(state),
     breakpoints: (0, _selectors.getVisibleBreakpoints)(state),
     hitCount: (0, _selectors.getHitCountForSource)(state, sourceId),
@@ -25358,7 +25480,9 @@ exports.default = (0, _reactRedux.connect)(state => {
     query: (0, _selectors.getFileSearchQueryState)(state),
     searchModifiers: (0, _selectors.getFileSearchModifierState)(state),
     linesInScope: (0, _selectors.getInScopeLines)(state),
-    isEmptyLine: line => (0, _ast.isEmptyLineInSource)(state, line, selectedSource.toJS())
+    getFunctionText: line => (0, _function.findFunctionText)(line, selectedSource.toJS(), (0, _selectors.getSymbols)(state, selectedSource.toJS())),
+    isEmptyLine: line => (0, _ast.isEmptyLineInSource)(state, line, selectedSource.toJS()),
+    conditionalBreakpointPanel: (0, _selectors.getConditionalBreakpointPanel)(state)
   };
 }, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Editor);
 
@@ -25501,9 +25625,9 @@ class SourceFooter extends _react.PureComponent {
       "button",
       {
         className: "coverage action",
-        title: "Code Coverage",
+        title: L10N.getStr("sourceFooter.codeCoverage"),
         onClick: () => recordCoverage(),
-        "aria-label": "Code Coverage"
+        "aria-label": L10N.getStr("sourceFooter.codeCoverage")
       },
       "C"
     );
@@ -25675,8 +25799,6 @@ var _editor = __webpack_require__(257);
 
 var _search = __webpack_require__(1115);
 
-var _source = __webpack_require__(233);
-
 var _resultList = __webpack_require__(343);
 
 var _classnames = __webpack_require__(175);
@@ -25772,12 +25894,6 @@ class SearchBar extends _react.Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    var _props = this.props,
-        selectedSource = _props.selectedSource,
-        query = _props.query,
-        modifiers = _props.modifiers,
-        searchOn = _props.searchOn;
-
     var searchInput = this.searchInput();
 
     if (searchInput) {
@@ -25787,17 +25903,6 @@ class SearchBar extends _react.Component {
     if (this.refs.resultList && this.refs.resultList.refs) {
       (0, _resultList.scrollList)(this.refs.resultList.refs, this.state.selectedResultIndex);
     }
-
-    var hasLoaded = selectedSource && (0, _source.isLoaded)(selectedSource.toJS());
-    var wasLoading = prevProps.selectedSource && (0, _source.isLoaded)(prevProps.selectedSource.toJS());
-
-    var doneLoading = wasLoading && hasLoaded;
-    var changedFiles = selectedSource != prevProps.selectedSource && hasLoaded;
-    var modifiersUpdated = modifiers && !modifiers.equals(prevProps.modifiers);
-
-    if (searchOn && (doneLoading || changedFiles || modifiersUpdated)) {
-      this.doSearch(query);
-    }
   }
 
   onEscape(e) {
@@ -25805,10 +25910,10 @@ class SearchBar extends _react.Component {
   }
 
   clearSearch() {
-    var _props2 = this.props,
-        ed = _props2.editor,
-        query = _props2.query,
-        modifiers = _props2.modifiers;
+    var _props = this.props,
+        ed = _props.editor,
+        query = _props.query,
+        modifiers = _props.modifiers;
 
     if (ed && modifiers) {
       var ctx = { ed, cm: ed.codeMirror };
@@ -25817,10 +25922,10 @@ class SearchBar extends _react.Component {
   }
 
   closeSearch(e) {
-    var _props3 = this.props,
-        editor = _props3.editor,
-        setFileSearchQuery = _props3.setFileSearchQuery,
-        searchOn = _props3.searchOn;
+    var _props2 = this.props,
+        editor = _props2.editor,
+        setFileSearchQuery = _props2.setFileSearchQuery,
+        searchOn = _props2.searchOn;
 
 
     if (editor && searchOn) {
@@ -25882,9 +25987,9 @@ class SearchBar extends _react.Component {
   }
 
   doSearch(query) {
-    var _props4 = this.props,
-        selectedSource = _props4.selectedSource,
-        setFileSearchQuery = _props4.setFileSearchQuery;
+    var _props3 = this.props,
+        selectedSource = _props3.selectedSource,
+        setFileSearchQuery = _props3.setFileSearchQuery;
 
     if (!selectedSource || !selectedSource.get("text")) {
       return;
@@ -25909,10 +26014,10 @@ class SearchBar extends _react.Component {
     var _this = this;
 
     return _asyncToGenerator(function* () {
-      var _props5 = _this.props,
-          selectedSource = _props5.selectedSource,
-          modifiers = _props5.modifiers,
-          ed = _props5.editor;
+      var _props4 = _this.props,
+          selectedSource = _props4.selectedSource,
+          modifiers = _props4.modifiers,
+          ed = _props4.editor;
 
 
       if (!query || !ed || !selectedSource || !selectedSource.get("text") || !modifiers) {
@@ -25943,10 +26048,10 @@ class SearchBar extends _react.Component {
 
     var ctx = { ed, cm: ed.codeMirror };
 
-    var _props6 = this.props,
-        query = _props6.query,
-        modifiers = _props6.modifiers,
-        matches = _props6.searchResults.matches;
+    var _props5 = this.props,
+        query = _props5.query,
+        modifiers = _props5.modifiers,
+        matches = _props5.searchResults.matches;
 
 
     if (query === "") {
@@ -25980,12 +26085,12 @@ class SearchBar extends _react.Component {
   }
   // Renderers
   buildSummaryMsg() {
-    var _props7 = this.props,
-        _props7$searchResults = _props7.searchResults,
-        matchIndex = _props7$searchResults.matchIndex,
-        count = _props7$searchResults.count,
-        index = _props7$searchResults.index,
-        query = _props7.query;
+    var _props6 = this.props,
+        _props6$searchResults = _props6.searchResults,
+        matchIndex = _props6$searchResults.matchIndex,
+        count = _props6$searchResults.count,
+        index = _props6$searchResults.index,
+        query = _props6.query;
 
 
     if (query.trim() == "") {
@@ -26004,9 +26109,9 @@ class SearchBar extends _react.Component {
   }
 
   renderSearchModifiers() {
-    var _props8 = this.props,
-        modifiers = _props8.modifiers,
-        toggleFileSearchModifier = _props8.toggleFileSearchModifier;
+    var _props7 = this.props,
+        modifiers = _props7.modifiers,
+        toggleFileSearchModifier = _props7.toggleFileSearchModifier;
 
 
     function SearchModBtn(_ref2) {
@@ -26074,10 +26179,10 @@ class SearchBar extends _react.Component {
   }
 
   render() {
-    var _props9 = this.props,
-        count = _props9.searchResults.count,
-        query = _props9.query,
-        searchOn = _props9.searchOn;
+    var _props8 = this.props,
+        count = _props8.searchResults.count,
+        query = _props8.query,
+        searchOn = _props8.searchOn;
 
 
     if (!searchOn) {
@@ -26115,7 +26220,7 @@ SearchBar.contextTypes = {
 
 exports.default = (0, _reactRedux.connect)(state => {
   return {
-    searchOn: (0, _selectors.getActiveSearchState)(state) === "file",
+    searchOn: (0, _selectors.getActiveSearch)(state) === "file",
     query: (0, _selectors.getFileSearchQueryState)(state),
     modifiers: (0, _selectors.getFileSearchModifierState)(state),
     searchResults: (0, _selectors.getSearchResults)(state)
@@ -26574,6 +26679,9 @@ module.exports = now;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
 exports.default = GutterMenu;
 
 var _devtoolsLaunchpad = __webpack_require__(131);
@@ -26582,11 +26690,13 @@ function GutterMenu(_ref) {
   var breakpoint = _ref.breakpoint,
       line = _ref.line,
       event = _ref.event,
+      pauseData = _ref.pauseData,
       toggleBreakpoint = _ref.toggleBreakpoint,
       showConditionalPanel = _ref.showConditionalPanel,
       toggleDisabledBreakpoint = _ref.toggleDisabledBreakpoint,
       isCbPanelOpen = _ref.isCbPanelOpen,
-      closeConditionalPanel = _ref.closeConditionalPanel;
+      closeConditionalPanel = _ref.closeConditionalPanel,
+      continueToHere = _ref.continueToHere;
 
   event.stopPropagation();
   event.preventDefault();
@@ -26615,6 +26725,10 @@ function GutterMenu(_ref) {
     disableBreakpoint: {
       id: "node-menu-disable-breakpoint",
       label: L10N.getStr("editor.disableBreakpoint")
+    },
+    continueToHere: {
+      id: "node-menu-continue-to-here",
+      label: L10N.getStr("editor.continueToHere.label")
     }
   };
 
@@ -26636,6 +26750,15 @@ function GutterMenu(_ref) {
   }, breakpoint && breakpoint.condition ? gutterItems.editConditional : gutterItems.addConditional);
 
   var items = [toggleBreakpointItem, conditionalBreakpoint];
+
+  if (pauseData) {
+    var continueToHereItem = _extends({
+      accesskey: L10N.getStr("editor.continueToHere.accesskey"),
+      disabled: false,
+      click: () => continueToHere(line)
+    }, gutterItems.continueToHere);
+    items.push(continueToHereItem);
+  }
 
   if (breakpoint) {
     var disableBreakpoint = Object.assign({
@@ -26697,10 +26820,13 @@ function getMenuItems(event, _ref) {
       onGutterContextMenu = _ref.onGutterContextMenu,
       jumpToMappedLocation = _ref.jumpToMappedLocation,
       toggleBlackBox = _ref.toggleBlackBox,
-      addExpression = _ref.addExpression;
+      addExpression = _ref.addExpression,
+      getFunctionText = _ref.getFunctionText;
 
   var copySourceLabel = L10N.getStr("copySource");
   var copySourceKey = L10N.getStr("copySource.accesskey");
+  var copyFunctionLabel = L10N.getStr("copyFunction.label");
+  var copyFunctionKey = L10N.getStr("copyFunction.accesskey");
   var copySourceUrlLabel = L10N.getStr("copySourceUrl");
   var copySourceUrlKey = L10N.getStr("copySourceUrl.accesskey");
   var revealInTreeLabel = L10N.getStr("sourceTabs.revealInTree");
@@ -26718,12 +26844,13 @@ function getMenuItems(event, _ref) {
     click: () => (0, _clipboard.copyToTheClipboard)(selectedSource.get("url"))
   };
 
+  var selectionText = codeMirror.getSelection().trim();
   var copySource = {
     id: "node-menu-copy-source",
     label: copySourceLabel,
     accesskey: copySourceKey,
-    disabled: false,
-    click: () => (0, _clipboard.copyToTheClipboard)(codeMirror.getSelection())
+    disabled: selectionText.length === 0,
+    click: () => (0, _clipboard.copyToTheClipboard)(selectionText)
   };
 
   var _codeMirror$coordsCha = codeMirror.coordsChar({
@@ -26773,11 +26900,16 @@ function getMenuItems(event, _ref) {
     click: () => showSource(selectedSource.get("id"))
   };
 
-  if (selectedSource && selectedSource.get("isBlackBoxed")) {
-    return [blackBoxMenuItem];
-  }
+  var functionText = getFunctionText(line + 1);
+  var copyFunction = {
+    id: "node-menu-copy-function",
+    label: copyFunctionLabel,
+    accesskey: copyFunctionKey,
+    disabled: !functionText,
+    click: () => (0, _clipboard.copyToTheClipboard)(functionText)
+  };
 
-  var menuItems = [copySource, copySourceUrl, jumpLabel, showSourceMenuItem, blackBoxMenuItem];
+  var menuItems = [copySourceUrl, jumpLabel, showSourceMenuItem, blackBoxMenuItem, copySource, copyFunction];
 
   if (textSelected) {
     menuItems.push(watchExpressionLabel);
@@ -27411,7 +27543,7 @@ var _EventListeners = __webpack_require__(736);
 
 var _EventListeners2 = _interopRequireDefault(_EventListeners);
 
-var _Workers = __webpack_require__(1147);
+var _Workers = __webpack_require__(1149);
 
 var _Workers2 = _interopRequireDefault(_Workers);
 
@@ -27779,7 +27911,8 @@ class Expressions extends _react.PureComponent {
   renderExpression(expression) {
     var _props3 = this.props,
         loadObjectProperties = _props3.loadObjectProperties,
-        loadedObjects = _props3.loadedObjects;
+        loadedObjects = _props3.loadedObjects,
+        openLink = _props3.openLink;
     var editing = this.state.editing;
     var input = expression.input,
         updating = expression.updating;
@@ -27823,7 +27956,8 @@ class Expressions extends _react.PureComponent {
           loadObjectProperties: loadObjectProperties
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {}
+          loadObjectEntries: grip => {},
+          openLink: openLink
         }),
         _react2.default.createElement(
           "div",
@@ -28009,6 +28143,8 @@ class Breakpoints extends _react.PureComponent {
         toggleBreakpoints = _props.toggleBreakpoints,
         toggleAllBreakpoints = _props.toggleAllBreakpoints,
         toggleDisabledBreakpoint = _props.toggleDisabledBreakpoint,
+        setBreakpointCondition = _props.setBreakpointCondition,
+        toggleConditionalBreakpointPanel = _props.toggleConditionalBreakpointPanel,
         breakpoints = _props.breakpoints;
 
 
@@ -28023,6 +28159,8 @@ class Breakpoints extends _react.PureComponent {
     var disableSelfLabel = L10N.getStr("breakpointMenuItem.disableSelf");
     var disableAllLabel = L10N.getStr("breakpointMenuItem.disableAll");
     var disableOthersLabel = L10N.getStr("breakpointMenuItem.disableOthers");
+    var removeConditionLabel = L10N.getStr("breakpointMenuItem.removeCondition.label");
+    var editConditionLabel = L10N.getStr("breakpointMenuItem.editCondition.label");
 
     var deleteSelfKey = L10N.getStr("breakpointMenuItem.deleteSelf.accesskey");
     var deleteAllKey = L10N.getStr("breakpointMenuItem.deleteAll.accesskey");
@@ -28033,6 +28171,8 @@ class Breakpoints extends _react.PureComponent {
     var disableSelfKey = L10N.getStr("breakpointMenuItem.disableSelf.accesskey");
     var disableAllKey = L10N.getStr("breakpointMenuItem.disableAll.accesskey");
     var disableOthersKey = L10N.getStr("breakpointMenuItem.disableOthers.accesskey");
+    var removeConditionKey = L10N.getStr("breakpointMenuItem.removeCondition.accesskey");
+    var editConditionKey = L10N.getStr("breakpointMenuItem.editCondition.accesskey");
 
     var otherBreakpoints = breakpoints.filter(b => b !== breakpoint);
     var enabledBreakpoints = breakpoints.filter(b => !b.disabled);
@@ -28111,6 +28251,21 @@ class Breakpoints extends _react.PureComponent {
       click: () => toggleBreakpoints(true, otherEnabledBreakpoints)
     };
 
+    var removeCondition = {
+      id: "node-menu-remove-condition",
+      label: removeConditionLabel,
+      accesskey: removeConditionKey,
+      disabled: false,
+      click: () => setBreakpointCondition(breakpoint.location)
+    };
+
+    var editCondition = {
+      id: "node-menu-edit-condition",
+      label: editConditionLabel,
+      accesskey: editConditionKey,
+      click: () => toggleConditionalBreakpointPanel(breakpoint.location.line)
+    };
+
     var items = [{ item: enableSelf, hidden: () => !breakpoint.disabled }, { item: disableSelf, hidden: () => breakpoint.disabled }, { item: deleteSelf }, { item: deleteAll }, { item: deleteOthers, hidden: () => breakpoints.size === 1 }, {
       item: enableAll,
       hidden: () => disabledBreakpoints.size === 0
@@ -28123,6 +28278,12 @@ class Breakpoints extends _react.PureComponent {
     }, {
       item: disableOthers,
       hidden: () => otherEnabledBreakpoints.size === 0
+    }, {
+      item: removeCondition,
+      hidden: () => !breakpoint.condition
+    }, {
+      item: editCondition,
+      hidden: () => !breakpoint.condition
     }];
 
     (0, _devtoolsLaunchpad.showMenu)(e, (0, _devtoolsLaunchpad.buildMenu)(items));
@@ -28137,6 +28298,10 @@ class Breakpoints extends _react.PureComponent {
   removeBreakpoint(event, breakpoint) {
     event.stopPropagation();
     this.props.removeBreakpoint(breakpoint.location);
+  }
+
+  toggleConditionalBreakpointPanel(line) {
+    this.props.toggleConditionalBreakpointPanel(line);
   }
 
   renderBreakpoint(breakpoint) {
@@ -28247,6 +28412,8 @@ Object.defineProperty(exports, "__esModule", {
 
 var _react = __webpack_require__(0);
 
+var _react2 = _interopRequireDefault(_react);
+
 var _reactImmutableProptypes = __webpack_require__(150);
 
 var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes);
@@ -28341,7 +28508,7 @@ class Scopes extends _react.Component {
     var notEnumberable = false;
     var objectValue = "";
 
-    return React.createElement(
+    return _react2.default.createElement(
       "div",
       {
         className: (0, _classnames2.default)("node object-node", {
@@ -28355,24 +28522,24 @@ class Scopes extends _react.Component {
           setExpanded(item, !expanded);
         }
       },
-      React.createElement(_Svg2.default, {
+      _react2.default.createElement(_Svg2.default, {
         name: "arrow",
         className: (0, _classnames2.default)({
           expanded,
           hidden: nodeIsPrimitive(item)
         })
       }),
-      React.createElement(
+      _react2.default.createElement(
         "span",
         { className: "object-label" },
         item.name
       ),
-      React.createElement(
+      _react2.default.createElement(
         "span",
         { className: "object-delimiter" },
         objectValue ? ": " : ""
       ),
-      React.createElement(
+      _react2.default.createElement(
         "span",
         { className: "object-value" },
         objectValue || ""
@@ -28442,10 +28609,10 @@ class Scopes extends _react.Component {
 
 
     if (!pauseInfo) {
-      return React.createElement(
+      return _react2.default.createElement(
         "div",
         { className: (0, _classnames2.default)("pane", "scopes-list") },
-        React.createElement(
+        _react2.default.createElement(
           "div",
           { className: "pane-info" },
           L10N.getStr("scopes.notPaused")
@@ -28455,10 +28622,10 @@ class Scopes extends _react.Component {
 
     var roots = this.getRoots();
 
-    return React.createElement(
+    return _react2.default.createElement(
       "div",
       { className: (0, _classnames2.default)("pane", "scopes-list") },
-      React.createElement(_ManagedTree2.default, {
+      _react2.default.createElement(_ManagedTree2.default, {
         itemHeight: 20,
         getParent: item => null,
         getChildren: this.getChildren,
@@ -28562,7 +28729,8 @@ class Scopes extends _react.PureComponent {
     var _props2 = this.props,
         pauseInfo = _props2.pauseInfo,
         loadObjectProperties = _props2.loadObjectProperties,
-        loadedObjects = _props2.loadedObjects;
+        loadedObjects = _props2.loadedObjects,
+        openLink = _props2.openLink;
     var scopes = this.state.scopes;
 
 
@@ -28580,7 +28748,8 @@ class Scopes extends _react.PureComponent {
           dimTopLevelWindow: true
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {}
+          loadObjectEntries: grip => {},
+          openLink: openLink
         })
       );
     }
@@ -29091,7 +29260,8 @@ function getKey(action) {
 }
 
 function getKeyForOS(os, action) {
-  return KEYS[os][action];
+  var osActions = KEYS[os] || KEYS.Linux;
+  return osActions[action];
 }
 
 function formatKey(action) {
@@ -29272,9 +29442,6 @@ __webpack_require__(922);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-var _require = __webpack_require__(828),
-    isEnabled = _require.isEnabled;
-
 class WelcomeBox extends _react.Component {
 
   renderToggleButton() {
@@ -29296,34 +29463,14 @@ class WelcomeBox extends _react.Component {
   }
 
   render() {
-    var keyCombinationOne = (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"));
+    var searchSourcesShortcut = (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"));
 
-    var keyCombinationTwo = (0, _text.formatKeyShortcut)(L10N.getStr("projectTextSearch.key"));
+    var searchProjectShortcut = (0, _text.formatKeyShortcut)(L10N.getStr("projectTextSearch.key"));
 
     var searchSourcesLabel = L10N.getStr("welcome.search").substring(2);
     var searchProjectLabel = L10N.getStr("welcome.findInFiles").substring(2);
+    var setActiveSearch = this.props.setActiveSearch;
 
-    var searchProjectLabelComp = _react2.default.createElement(
-      "div",
-      null,
-      _react2.default.createElement(
-        "b",
-        null,
-        keyCombinationTwo
-      ),
-      searchProjectLabel
-    );
-
-    var searchSourcesLabelComp = _react2.default.createElement(
-      "div",
-      null,
-      _react2.default.createElement(
-        "b",
-        null,
-        keyCombinationOne
-      ),
-      searchSourcesLabel
-    );
 
     return _react2.default.createElement(
       "div",
@@ -29331,8 +29478,34 @@ class WelcomeBox extends _react.Component {
       _react2.default.createElement(
         "div",
         { className: "alignlabel" },
-        searchSourcesLabelComp,
-        isEnabled("searchNav") ? searchProjectLabelComp : null,
+        _react2.default.createElement(
+          "div",
+          { className: "shortcutKeys" },
+          _react2.default.createElement(
+            "p",
+            { onClick: setActiveSearch.bind(null, "source") },
+            searchSourcesShortcut
+          ),
+          _react2.default.createElement(
+            "p",
+            { onClick: setActiveSearch.bind(null, "project") },
+            searchProjectShortcut
+          )
+        ),
+        _react2.default.createElement(
+          "div",
+          { className: "shortcutFunction" },
+          _react2.default.createElement(
+            "p",
+            { onClick: setActiveSearch.bind(null, "source") },
+            searchSourcesLabel
+          ),
+          _react2.default.createElement(
+            "p",
+            { onClick: setActiveSearch.bind(null, "project") },
+            searchProjectLabel
+          )
+        ),
         this.renderToggleButton()
       )
     );
@@ -29644,14 +29817,11 @@ class SourceTabs extends _react.PureComponent {
   }
 
   renderDropdownSource(source) {
-    var moveTab = this.props.moveTab;
+    var selectSource = this.props.selectSource;
 
     var filename = (0, _source.getFilename)(source.toJS());
 
-    var onClick = () => {
-      var tabIndex = 0;
-      moveTab(source.get("url"), tabIndex);
-    };
+    var onClick = () => selectSource(source.get("id"));
     return _react2.default.createElement(
       "li",
       { key: source.get("id"), onClick: onClick },
@@ -29854,8 +30024,8 @@ exports.default = (0, _reactRedux.connect)(state => {
     selectedSource: (0, _selectors.getSelectedSource)(state),
     searchTabs: (0, _selectors.getSearchTabs)(state),
     sourceTabs: (0, _selectors.getSourcesForTabs)(state),
-    activeSearch: (0, _selectors.getActiveSearchState)(state),
-    searchOn: (0, _selectors.getActiveSearchState)(state) === "source"
+    activeSearch: (0, _selectors.getActiveSearch)(state),
+    searchOn: (0, _selectors.getActiveSearch)(state) === "source"
   };
 }, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourceTabs);
 
@@ -30114,18 +30284,25 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.getGeneratedLocation = undefined;
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
 var getGeneratedLocation = exports.getGeneratedLocation = (() => {
   var _ref = _asyncToGenerator(function* (state, source, location, sourceMaps) {
     if (!sourceMaps.isOriginalId(location.sourceId)) {
       return location;
     }
 
-    var generatedLocation = yield sourceMaps.getGeneratedLocation(location, source);
-    var generatedSource = (0, _selectors.getSource)(state, generatedLocation.sourceId);
+    var _ref2 = yield sourceMaps.getGeneratedLocation(location, source),
+        line = _ref2.line,
+        sourceId = _ref2.sourceId,
+        column = _ref2.column;
+
+    var generatedSource = (0, _selectors.getSource)(state, sourceId);
     var sourceUrl = generatedSource.get("url");
-    return _extends({}, generatedLocation, { sourceUrl });
+    return {
+      line,
+      sourceId,
+      column: column === 0 ? undefined : column,
+      sourceUrl
+    };
   });
 
   return function getGeneratedLocation(_x, _x2, _x3, _x4) {
@@ -30237,13 +30414,17 @@ exports.findScopeByName = exports.getASTLocation = undefined;
 var getASTLocation = exports.getASTLocation = (() => {
   var _ref = _asyncToGenerator(function* (source, location) {
     var symbols = yield (0, _parser.getSymbols)(source);
-    var functions = [].concat(_toConsumableArray(symbols.functions), _toConsumableArray(symbols.memberExpressions));
+    var functions = [].concat(_toConsumableArray(symbols.functions));
 
     var scope = findClosestScope(functions, location);
     if (scope) {
+      // we only record the line, but at some point we may
+      // also do column offsets
       var line = location.line - scope.location.start.line;
-      var column = location.column;
-      return { name: scope.name, offset: { line, column } };
+      return {
+        name: scope.name,
+        offset: { line }
+      };
     }
     return { name: undefined, offset: location };
   });
@@ -30268,6 +30449,8 @@ var findScopeByName = exports.findScopeByName = (() => {
   };
 })();
 
+exports.findClosestScope = findClosestScope;
+
 var _parser = __webpack_require__(827);
 
 var _contains = __webpack_require__(1127);
@@ -30286,7 +30469,10 @@ function findClosestScope(functions, location) {
       return currNode;
     }
 
-    if (found.location.start.line > currNode.location.start.line || found.location.start.column > currNode.location.start.column) {
+    if (found.location.start.line > currNode.location.start.line) {
+      return found;
+    }
+    if (found.location.start.line === currNode.location.start.line && found.location.start.column > currNode.location.start.column) {
       return found;
     }
 
@@ -30576,17 +30762,19 @@ class Popup extends _react.Component {
   }
 
   renderSimplePreview(value) {
+    var openLink = this.props.openLink;
     return _react2.default.createElement(
       "div",
       { className: "preview-popup" },
-      Rep({ object: value, mode: MODE.LONG })
+      Rep({ object: value, mode: MODE.LONG, openLink: openLink })
     );
   }
 
   renderObjectInspector(root) {
     var _props2 = this.props,
         loadObjectProperties = _props2.loadObjectProperties,
-        loadedObjects = _props2.loadedObjects;
+        loadedObjects = _props2.loadedObjects,
+        openLink = _props2.openLink;
 
 
     var getObjectProperties = id => loadedObjects[id];
@@ -30605,7 +30793,8 @@ class Popup extends _react.Component {
       loadObjectProperties: loadObjectProperties
       // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
       , getObjectEntries: actor => {},
-      loadObjectEntries: grip => {}
+      loadObjectEntries: grip => {},
+      openLink: openLink
     });
   }
 
@@ -30722,7 +30911,7 @@ exports.default = (0, _reactRedux.connect)(state => ({
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getEmptyLines = exports.getNextStep = exports.clearSymbols = exports.getOutOfScopeLocations = exports.getVariablesInScope = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
+exports.clearSources = exports.setSource = exports.hasSource = exports.getEmptyLines = exports.getNextStep = exports.clearASTs = exports.clearSymbols = exports.getOutOfScopeLocations = exports.getVariablesInScope = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
 
 var _devtoolsUtils = __webpack_require__(900);
 
@@ -30738,8 +30927,12 @@ var getSymbols = exports.getSymbols = dispatcher.task("getSymbols");
 var getVariablesInScope = exports.getVariablesInScope = dispatcher.task("getVariablesInScope");
 var getOutOfScopeLocations = exports.getOutOfScopeLocations = dispatcher.task("getOutOfScopeLocations");
 var clearSymbols = exports.clearSymbols = dispatcher.task("clearSymbols");
+var clearASTs = exports.clearASTs = dispatcher.task("clearASTs");
 var getNextStep = exports.getNextStep = dispatcher.task("getNextStep");
 var getEmptyLines = exports.getEmptyLines = dispatcher.task("getEmptyLines");
+var hasSource = exports.hasSource = dispatcher.task("hasSource");
+var setSource = exports.setSource = dispatcher.task("setSource");
+var clearSources = exports.clearSources = dispatcher.task("clearSources");
 
 /***/ }),
 /* 828 */
@@ -31970,22 +32163,27 @@ Object.defineProperty(exports, "__esModule", {
 exports.onConnect = undefined;
 
 var onConnect = (() => {
-  var _ref = _asyncToGenerator(function* (connection, services) {
+  var _ref = _asyncToGenerator(function* (connection, options) {
     // NOTE: the landing page does not connect to a JS process
     if (!connection) {
       return;
     }
 
+	var services = options.services;
+	var toolboxActions = options.toolboxActions;
     var client = getClient(connection);
     var commands = client.clientCommands;
 
-    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, services),
+    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, options),
         store = _bootstrapStore.store,
         actions = _bootstrapStore.actions,
         selectors = _bootstrapStore.selectors;
 
     (0, _bootstrap.bootstrapWorkers)();
-    yield client.onConnect(connection, actions);
+
+    var _ref2 = yield client.onConnect(connection, actions),
+        bpClients = _ref2.bpClients;
+
     yield loadFromPrefs(actions);
 
     window.getGlobalsForTesting = function () {
@@ -31996,7 +32194,9 @@ var onConnect = (() => {
         client: client.clientCommands,
         prefs: _prefs.prefs,
         features: _prefs.features,
-        connection
+        connection,
+        bpClients,
+        services
       };
     };
 
@@ -32075,17 +32275,18 @@ var onConnect = exports.onConnect = (() => {
 
 
     if (!tabTarget || !threadClient || !debuggerClient) {
-      return;
+      return { bpClients: {} };
     }
 
-    var supportsWasm = (0, _devtoolsConfig.isEnabled)("wasm") && !!debuggerClient.mainRoot.traits.wasmBinarySource;
+    var supportsWasm = _prefs.features.wasm && !!debuggerClient.mainRoot.traits.wasmBinarySource;
 
-    (0, _commands.setupCommands)({
+    var _setupCommands = (0, _commands.setupCommands)({
       threadClient,
       tabTarget,
       debuggerClient,
       supportsWasm
-    });
+    }),
+        bpClients = _setupCommands.bpClients;
 
     if (actions) {
       (0, _events.setupEvents)({ threadClient, actions, supportsWasm });
@@ -32115,6 +32316,8 @@ var onConnect = exports.onConnect = (() => {
     if (pausedPacket) {
       _events.clientEvents.paused("paused", pausedPacket);
     }
+
+    return { bpClients };
   });
 
   return function onConnect(_x, _x2) {
@@ -32126,7 +32329,7 @@ var _commands = __webpack_require__(890);
 
 var _events = __webpack_require__(892);
 
-var _devtoolsConfig = __webpack_require__(828);
+var _prefs = __webpack_require__(226);
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
@@ -32211,6 +32414,8 @@ function setupCommands(dependencies) {
   debuggerClient = dependencies.debuggerClient;
   supportsWasm = dependencies.supportsWasm;
   bpClients = {};
+
+  return { bpClients };
 }
 
 function resume() {
@@ -32634,6 +32839,7 @@ var onConnect = exports.onConnect = (() => {
 
     (0, _commands.setupCommands)({ Debugger, Runtime, Page });
     (0, _events.setupEvents)({ actions, Page, type, Runtime });
+    return {};
   });
 
   return function onConnect(_x, _x2) {
@@ -33047,12 +33253,14 @@ var _prefs = __webpack_require__(226);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function bootstrapStore(client, services) {
+function bootstrapStore(client, options) {
+    var services = options.services;
+    var toolboxActions = options.toolboxActions;
   var createStore = (0, _createStore2.default)({
     log: (0, _devtoolsConfig.getValue)("logging.actions"),
     timing: (0, _devtoolsConfig.getValue)("performance.actions"),
     makeThunkArgs: (args, state) => {
-      return Object.assign({}, args, { client }, services);
+      return Object.assign({}, args, { client }, services, toolboxActions);
     }
   });
 
@@ -33123,7 +33331,7 @@ const {
   isOriginalId
 } = __webpack_require__(899);
 
-const { workerUtils: { WorkerDispatcher } } = __webpack_require__(900);
+const { workerUtils: { WorkerDispatcher } } = __webpack_require__(1165);
 
 const dispatcher = new WorkerDispatcher();
 
@@ -33309,6 +33517,10 @@ WorkerDispatcher.prototype = {
             return;
           }
 
+          if (!this.worker) {
+            reject("Oops, The worker has shutdown!");
+            return;
+          }
           this.worker.removeEventListener("message", listener);
           if (result.error) {
             reject(result.error);
@@ -33513,7 +33725,7 @@ function updatePreview(target, editor, _ref) {
     }
   }
 
-  var invalidToken = tokenText === "" || tokenText.match(/[(){},.;\s]/);
+  var invalidToken = tokenText === "" || tokenText.match(/[(){}\|&%,.;=<>\+-/\*\s]/);
   var invalidTarget = target.parentElement && !target.parentElement.closest(".CodeMirror-line") || cursorPos.top == 0;
   var isUpdating = preview && preview.updating;
   var inScope = linesInScope && linesInScope.includes(location.line);
@@ -38178,7 +38390,7 @@ module.exports = {
 /* 960 */
 /***/ (function(module, exports) {
 
-module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySource): This is the text that appears in the\n# context menu to copy the selected source of file open.\ncopySource=Copy\ncopySource.accesskey=y\n\n# LOCALIZATION NOTE (copySourceUrl): This is the text that appears in the\n# context menu to copy the source URL of file open.\ncopySourceUrl=Copy Source Url\ncopySourceUrl.accesskey=u\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy Stack Trace\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step Over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step In %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step Out %S\n\n# LOCALIZATION NOTE (workersHeader): The text to display in the events\n# header.\nworkersHeader=Workers\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event Listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (projectTextSearch.key): A key shortcut to open the\n# full project text search for searching all the files the debugger has seen.\nprojectTextSearch.key=CmdOrCtrl+Shift+F\n\n# LOCALIZATION NOTE (projectTextSearch.placeholder): A placeholder shown\n# when searching across all of the files in a project.\nprojectTextSearch.placeholder=Find in files…\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.enableSelf.accesskey=E\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.disableSelf.accesskey=D\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.deleteSelf.accesskey=R\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.enableOthers.accesskey=o\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.disableOthers.accesskey=s\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.deleteOthers.accesskey=h\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.enableAll.accesskey=b\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.disableAll.accesskey=k\nbreakpointMenuItem.deleteAll=Remove all breakpoints\nbreakpointMenuItem.deleteAll.accesskey=a\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove Breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call Stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not Paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse Rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand Rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=no results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next Result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous Result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add Breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable Breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable Breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove Breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit Breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add Conditional Breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable Framework Grouping\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable Framework Grouping\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add Watch Expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close tab\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close others\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close tabs to the right\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close all tabs\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in Tree\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy Link Address\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty Print Source\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox Source\nsourceFooter.blackbox.accesskey=B\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox Source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed Source\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes Unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not Paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch Expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (welcome.findInFiles): The center pane welcome panel's\n# search prompt. e.g. cmd+f to search for files. On windows, it's ctrl+shift+f, on\n# a mac we use the unicode character.\nwelcome.findInFiles=%S to find in files\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search Sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults2=No results found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText2): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText2=Error loading this URL: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.modifiersLabel): A label\n# preceding the group of modifiers\nsymbolSearch.searchModifier.modifiersLabel=Modifiers:\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous Sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n"
+module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySource): This is the text that appears in the\n# context menu to copy the selected source of file open.\ncopySource=Copy\ncopySource.accesskey=y\n\n# LOCALIZATION NOTE (copySourceUrl): This is the text that appears in the\n# context menu to copy the source URL of file open.\ncopySourceUrl=Copy Source URL\ncopySourceUrl.accesskey=u\n\n# LOCALIZATION NOTE (copyFunction): This is the text that appears in the\n# context menu to copy the function the user selected\ncopyFunction.label=Copy Function\ncopyFunction.accesskey=F\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy Stack Trace\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step Over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step In %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step Out %S\n\n# LOCALIZATION NOTE (workersHeader): The text to display in the events\n# header.\nworkersHeader=Workers\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event Listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (projectTextSearch.key): A key shortcut to open the\n# full project text search for searching all the files the debugger has seen.\nprojectTextSearch.key=CmdOrCtrl+Shift+F\n\n# LOCALIZATION NOTE (functionSearch.key): A key shortcut to open the\n# modal for searching functions in a file.\nfunctionSearch.key=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE (projectTextSearch.placeholder): A placeholder shown\n# when searching across all of the files in a project.\nprojectTextSearch.placeholder=Find in files…\n\n# LOCALIZATION NOTE (projectTextSearch.noResults): The center pane Text Search\n# message when the query did not match any text of all files in a project.\nprojectTextSearch.noResults=No results found\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.enableSelf.accesskey=E\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.disableSelf.accesskey=D\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.deleteSelf.accesskey=R\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.enableOthers.accesskey=o\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.disableOthers.accesskey=s\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.deleteOthers.accesskey=h\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.enableAll.accesskey=b\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.disableAll.accesskey=k\nbreakpointMenuItem.deleteAll=Remove all breakpoints\nbreakpointMenuItem.deleteAll.accesskey=a\nbreakpointMenuItem.removeCondition.label=Remove breakpoint condition\nbreakpointMenuItem.removeCondition.accesskey=c\nbreakpointMenuItem.editCondition.label=Edit breakpoint condition\nbreakpointMenuItem.editCondition.accesskey=n\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove Breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call Stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not Paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse Rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand Rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=no results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next Result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous Result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.continueToHere.label): Editor gutter context\n# menu item for jumping to a new paused location\neditor.continueToHere.label=Continue To Here\neditor.continueToHere.accesskey=H\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add Breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable Breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable Breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove Breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit Breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add Conditional Breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S Location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable Framework Grouping\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable Framework Grouping\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=Generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=Original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add Watch Expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close Tab\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close Other Tabs\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close Tabs to the Right\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close All Tabs\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in Tree\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy Link Address\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty Print Source\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox Source\nsourceFooter.blackbox.accesskey=B\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox Source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed Source\n\n# LOCALIZATION NOTE (sourceFooter.codeCoverage): Text associated\n# with a code coverage button\nsourceFooter.codeCoverage=Code Coverage\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes Unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not Paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (outline.header): Outline left sidebar header\noutline.header=Outline\n\n# LOCALIZATION NOTE (outline.noFunctions): Outline text when there are no functions to display\noutline.noFunctions=No functions\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch Expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (welcome.findInFiles): The center pane welcome panel's\n# search prompt. e.g. cmd+f to search for files. On windows, it's ctrl+shift+f, on\n# a mac we use the unicode character.\nwelcome.findInFiles=%S to find in files\n\n# LOCALIZATION NOTE (welcome.searchFunction): Label displayed in the welcome\n# panel. %S is replaced by the keyboard shortcut to search for functions.\nwelcome.searchFunction=%S to search for functions in file\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults2=No results found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText2): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText2=Error loading this URL: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.modifiersLabel): A label\n# preceding the group of modifiers\nsymbolSearch.searchModifier.modifiersLabel=Modifiers:\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous Sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n"
 
 /***/ }),
 /* 961 */,
@@ -41658,7 +41870,7 @@ module.exports = "<svg viewBox=\"0 0 14 5\" version=\"1.1\" xmlns=\"http://www.w
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.findScopeByName = exports.getASTLocation = undefined;
+exports.getClosestFunction = exports.findScopeByName = exports.getASTLocation = undefined;
 
 var _astBreakpointLocation = __webpack_require__(804);
 
@@ -41672,6 +41884,12 @@ Object.defineProperty(exports, "findScopeByName", {
   enumerable: true,
   get: function () {
     return _astBreakpointLocation.findScopeByName;
+  }
+});
+Object.defineProperty(exports, "getClosestFunction", {
+  enumerable: true,
+  get: function () {
+    return _astBreakpointLocation.getClosestFunction;
   }
 });
 exports.firstString = firstString;
@@ -41797,12 +42015,15 @@ function createBreakpoint(location) {
   var condition = overrides.condition,
       disabled = overrides.disabled,
       hidden = overrides.hidden,
-      generatedLocation = overrides.generatedLocation;
+      generatedLocation = overrides.generatedLocation,
+      astLocation = overrides.astLocation;
+
 
   var properties = {
     condition: condition || null,
     disabled: disabled || false,
     hidden: hidden || false,
+    astLocation: astLocation || { offset: location },
     generatedLocation: generatedLocation || location,
     location
   };
@@ -41828,6 +42049,7 @@ function createPendingBreakpoint(bp) {
     condition: bp.condition,
     disabled: bp.disabled,
     location: pendingLocation,
+    astLocation: bp.astLocation,
     generatedLocation: pendingGeneratedLocation
   };
 }
@@ -42185,7 +42407,7 @@ function setPreview(token, tokenPos, cursorPos) {
           }),
               result = _ref11.result;
 
-          if (!result) {
+          if (result === undefined) {
             return;
           }
 
@@ -42229,8 +42451,6 @@ var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
 
-var _lodash = __webpack_require__(2);
-
 var _Svg = __webpack_require__(344);
 
 var _Svg2 = _interopRequireDefault(_Svg);
@@ -42249,8 +42469,6 @@ var _sourcesTree = __webpack_require__(39);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
-
 class TextSearch extends _react.Component {
   constructor(props) {
     super(props);
@@ -42258,37 +42476,61 @@ class TextSearch extends _react.Component {
       inputValue: this.props.query || ""
     };
 
-    this.focused = null;
+    this.focusedItem = null;
+    this.inputFocused = false;
 
     this.inputOnChange = this.inputOnChange.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onEnterPress = this.onEnterPress.bind(this);
-    this.close = this.close.bind(this);
     this.selectMatchItem = this.selectMatchItem.bind(this);
   }
 
-  close() {
-    this.props.closeActiveSearch();
+  componentDidMount() {
+    var shortcuts = this.context.shortcuts;
+    shortcuts.on("Enter", this.onEnterPress);
+  }
+
+  componentWillUnmount() {
+    var shortcuts = this.context.shortcuts;
+    shortcuts.off("Enter", this.onEnterPress);
+  }
+
+  selectMatchItem(matchItem) {
+    this.props.selectSource(matchItem.sourceId, { line: matchItem.line });
+  }
+
+  getResults() {
+    var results = this.props.results;
+
+    return results.filter(result => result.filepath && result.matches.length > 0);
+  }
+
+  getResultCount() {
+    var results = this.getResults();
+    return results.reduce((count, file) => count + (file.matches ? file.matches.length : 0), 0);
   }
 
   onKeyDown(e) {
-    var _this = this;
+    if (e.key === "Escape") {
+      return;
+    }
 
-    return _asyncToGenerator(function* () {
-      if (e.key !== "Enter") {
-        return;
-      }
-      _this.props.searchSources(_this.state.inputValue);
-    })();
+    e.stopPropagation();
+
+    if (e.key !== "Enter") {
+      return;
+    }
+    this.focusedItem = null;
+    this.props.searchSources(this.state.inputValue);
   }
 
   onEnterPress() {
-    if (this.focused) {
-      var _focused = this.focused,
-          setExpanded = _focused.setExpanded,
-          file = _focused.file,
-          expanded = _focused.expanded,
-          match = _focused.match;
+    if (this.focusedItem && !this.inputFocused) {
+      var _focusedItem = this.focusedItem,
+          setExpanded = _focusedItem.setExpanded,
+          file = _focusedItem.file,
+          expanded = _focusedItem.expanded,
+          match = _focusedItem.match;
 
       if (setExpanded) {
         setExpanded(file, !expanded);
@@ -42298,31 +42540,18 @@ class TextSearch extends _react.Component {
     }
   }
 
-  componentWillUnmount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.off("Enter", this.onEnterPress);
-  }
-
-  componentDidMount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.on("Enter", this.onEnterPress);
-  }
-
   inputOnChange(e) {
     var inputValue = e.target.value;
     this.setState({ inputValue });
   }
 
-  selectMatchItem(matchItem) {
-    this.props.selectSource(matchItem.sourceId, { line: matchItem.line });
-  }
-
   renderFile(file, focused, expanded, setExpanded) {
     if (focused) {
-      this.focused = { setExpanded, file, expanded };
+      this.focusedItem = { setExpanded, file, expanded };
     }
 
-    var matches = ` (${file.matches.length} match${file.matches.length > 1 ? "es" : ""})`;
+    var matchesLength = file.matches.length;
+    var matches = ` (${matchesLength} match${matchesLength > 1 ? "es" : ""})`;
 
     return _react2.default.createElement(
       "div",
@@ -42348,7 +42577,7 @@ class TextSearch extends _react.Component {
 
   renderMatch(match, focused) {
     if (focused) {
-      this.focused = { match };
+      this.focusedItem = { match };
     }
     return _react2.default.createElement(
       "div",
@@ -42361,69 +42590,43 @@ class TextSearch extends _react.Component {
         { className: "line-number", key: match.line },
         match.line
       ),
-      this.renderMatchValue(match.value)
+      this.renderMatchValue(match)
     );
   }
 
-  renderMatchValue(value) {
-    var inputValue = this.state.inputValue;
+  renderMatchValue(lineMatch) {
+    var value = lineMatch.value,
+        column = lineMatch.column,
+        match = lineMatch.match;
 
-    var match = void 0;
-    var len = inputValue.length;
-    var matchIndexes = [];
-    var matches = [];
-    var re = new RegExp((0, _lodash.escapeRegExp)(inputValue), "g");
-    while ((match = re.exec(value)) !== null) {
-      matchIndexes.push(match.index);
-    }
-
-    matchIndexes.forEach((matchIndex, index) => {
-      if (matchIndex > 0 && index === 0) {
-        matches.push(_react2.default.createElement(
-          "span",
-          { className: "line-match", key: `case1-${index}` },
-          value.slice(0, matchIndex)
-        ));
-      }
-      if (matchIndex > matchIndexes[index - 1] + len) {
-        matches.push(_react2.default.createElement(
-          "span",
-          { className: "line-match", key: `case2-${index}` },
-          value.slice(matchIndexes[index - 1] + len, matchIndex)
-        ));
-      }
-      matches.push(_react2.default.createElement(
-        "span",
-        { className: "query-match", key: index },
-        value.substr(matchIndex, len)
-      ));
-      if (index === matchIndexes.length - 1) {
-        matches.push(_react2.default.createElement(
-          "span",
-          { className: "line-match", key: `case3-${index}` },
-          value.slice(matchIndex + len, value.length)
-        ));
-      }
-    });
+    var len = match.length;
 
     return _react2.default.createElement(
       "span",
       { className: "line-value" },
-      matches
+      _react2.default.createElement(
+        "span",
+        { className: "line-match", key: 0 },
+        value.slice(0, column)
+      ),
+      _react2.default.createElement(
+        "span",
+        { className: "query-match", key: 1 },
+        value.substr(column, len)
+      ),
+      _react2.default.createElement(
+        "span",
+        { className: "line-match", key: 2 },
+        value.slice(column + len, value.length)
+      )
     );
-  }
-
-  getResults() {
-    var results = this.props.results;
-
-    return results.filter(result => result.filepath && result.matches.length > 0);
   }
 
   renderResults() {
     var results = this.getResults();
     results = results.filter(result => result.matches.length > 0);
-    function getFilePath(item) {
-      return item.filepath ? `${item.sourceId}` : `${item.sourceId}-${item.line}-${item.column}`;
+    function getFilePath(item, index) {
+      return item.filepath ? `${item.sourceId}-${index}` : `${item.sourceId}-${item.line}-${item.column}-${index}`;
     }
 
     var renderItem = (item, depth, focused, _, expanded, _ref) => {
@@ -42432,26 +42635,28 @@ class TextSearch extends _react.Component {
       return item.filepath ? this.renderFile(item, focused, expanded, setExpanded) : this.renderMatch(item, focused);
     };
 
-    return _react2.default.createElement(_ManagedTree2.default, {
-      getRoots: () => results,
-      getChildren: file => file.matches || [],
-      itemHeight: 24,
-      autoExpand: 1,
-      autoExpandDepth: 1,
-      focused: results[0],
-      getParent: item => null,
-      getPath: getFilePath,
-      renderItem: renderItem
-    });
-  }
-
-  resultCount() {
-    var results = this.getResults();
-    return results.reduce((count, file) => count + (file.matches ? file.matches.length : 0), 0);
+    if (results.length) {
+      return _react2.default.createElement(_ManagedTree2.default, {
+        getRoots: () => results,
+        getChildren: file => file.matches || [],
+        itemHeight: 24,
+        autoExpand: 1,
+        autoExpandDepth: 1,
+        getParent: item => null,
+        getPath: getFilePath,
+        renderItem: renderItem
+      });
+    } else if (this.props.query && !results.length) {
+      return _react2.default.createElement(
+        "div",
+        { className: "no-result-msg absolute-center" },
+        L10N.getStr("projectTextSearch.noResults")
+      );
+    }
   }
 
   renderInput() {
-    var resultCount = this.resultCount();
+    var resultCount = this.getResultCount();
     var summaryMsg = L10N.getFormatStr("sourceSearch.resultsSummary1", resultCount);
 
     return _react2.default.createElement(_SearchInput2.default, {
@@ -42461,10 +42666,10 @@ class TextSearch extends _react.Component {
       size: "big",
       summaryMsg: summaryMsg,
       onChange: e => this.inputOnChange(e),
-      onFocus: () => this.setState({ focused: true }),
-      onBlur: () => this.setState({ focused: false }),
+      onFocus: () => this.inputFocused = true,
+      onBlur: () => this.inputFocused = false,
       onKeyDown: e => this.onKeyDown(e),
-      handleClose: this.close,
+      handleClose: this.props.closeActiveSearch,
       ref: "searchInput"
     });
   }
@@ -42761,6 +42966,7 @@ function containsPosition(a, b) {
 
   return startsBefore && endsAfter;
 }
+
 function containsLocation(a, b) {
   return containsPosition(a, b.start) && containsPosition(a, b.end);
 }
@@ -43001,6 +43207,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.initialState = initialState;
 exports.getPendingBreakpoints = getPendingBreakpoints;
+exports.getPendingBreakpointsForSource = getPendingBreakpointsForSource;
 
 var _immutable = __webpack_require__(146);
 
@@ -43045,7 +43252,7 @@ function update() {
 
     case "SYNC_BREAKPOINT":
       {
-        return addBreakpoint(state, action);
+        return syncBreakpoint(state, action);
       }
 
     case "ENABLE_BREAKPOINT":
@@ -43086,6 +43293,20 @@ function addBreakpoint(state, action) {
   return state.setIn(["pendingBreakpoints", locationId], pendingBreakpoint);
 }
 
+function syncBreakpoint(state, action) {
+  var breakpoint = action.breakpoint,
+      previousLocation = action.previousLocation;
+
+  var locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
+  var pendingBreakpoint = (0, _breakpoint.createPendingBreakpoint)(breakpoint);
+
+  if (previousLocation) {
+    return state.deleteIn(["pendingBreakpoints", (0, _breakpoint.makePendingLocationId)(previousLocation)]).setIn(["pendingBreakpoints", locationId], pendingBreakpoint);
+  }
+
+  return state.setIn(["pendingBreakpoints", locationId], pendingBreakpoint);
+}
+
 function updateBreakpoint(state, action) {
   var breakpoint = action.breakpoint;
 
@@ -43098,7 +43319,13 @@ function updateBreakpoint(state, action) {
 function removeBreakpoint(state, action) {
   var breakpoint = action.breakpoint;
 
+
   var locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
+  var pendingBp = state.getIn(["pendingBreakpoints", locationId]);
+
+  if (!pendingBp && action.status == "start") {
+    return state.set("pendingBreakpoints", I.Map());
+  }
 
   return state.deleteIn(["pendingBreakpoints", locationId]);
 }
@@ -43108,6 +43335,11 @@ function removeBreakpoint(state, action) {
 
 function getPendingBreakpoints(state) {
   return state.pendingBreakpoints.pendingBreakpoints;
+}
+
+function getPendingBreakpointsForSource(state, sourceUrl) {
+  var pendingBreakpoints = state.pendingBreakpoints.pendingBreakpoints || [];
+  return pendingBreakpoints.filter(pendingBreakpoint => pendingBreakpoint.location.sourceUrl === sourceUrl);
 }
 
 function restorePendingBreakpoints() {
@@ -43282,8 +43514,9 @@ exports.default = (() => {
     var state = getState();
 
     var source = (0, _selectors.getSource)(state, breakpoint.location.sourceId);
+    var sourceRecord = source.toJS();
     var location = _extends({}, breakpoint.location, { sourceUrl: source.get("url") });
-    var generatedLocation = yield (0, _sourceMaps.getGeneratedLocation)(state, source.toJS(), location, sourceMaps);
+    var generatedLocation = yield (0, _sourceMaps.getGeneratedLocation)(state, sourceRecord, location, sourceMaps);
 
     (0, _breakpoint.assertLocation)(location);
     (0, _breakpoint.assertLocation)(generatedLocation);
@@ -43302,6 +43535,8 @@ exports.default = (() => {
     var newGeneratedLocation = actualLocation || generatedLocation;
     var newLocation = yield sourceMaps.getOriginalLocation(newGeneratedLocation);
 
+    var astLocation = yield (0, _breakpoint.getASTLocation)(sourceRecord, location);
+
     var newBreakpoint = {
       id,
       disabled: false,
@@ -43309,6 +43544,7 @@ exports.default = (() => {
       loading: false,
       condition: breakpoint.condition,
       location: newLocation,
+      astLocation,
       hitCount,
       generatedLocation: newGeneratedLocation
     };
@@ -43344,12 +43580,46 @@ exports.syncClientBreakpoint = undefined;
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
+var makeScopedLocation = (() => {
+  var _ref = _asyncToGenerator(function* (_ref2, location, source) {
+    var name = _ref2.name,
+        offset = _ref2.offset;
+
+    var scope = yield (0, _breakpoint.findScopeByName)(source, name);
+    // fallback onto the location line, if the scope is not found
+    // note: we may at some point want to delete the breakpoint if the scope
+    // disappears
+    var line = scope ? scope.location.start.line + offset.line : location.line;
+    return {
+      line,
+      column: location.column,
+      sourceUrl: source.url,
+      sourceId: source.id
+    };
+  });
+
+  return function makeScopedLocation(_x, _x2, _x3) {
+    return _ref.apply(this, arguments);
+  };
+})();
+
 // we have three forms of syncing: disabled syncing, existing server syncing
 // and adding a new breakpoint
 var syncClientBreakpoint = exports.syncClientBreakpoint = (() => {
-  var _ref = _asyncToGenerator(function* (getState, client, sourceMaps, source, pendingBreakpoint) {
-    var sourceId = source.id;
+  var _ref3 = _asyncToGenerator(function* (getState, client, sourceMaps, sourceId, pendingBreakpoint) {
+    (0, _breakpoint.assertPendingBreakpoint)(pendingBreakpoint);
+
+    var source = (0, _selectors.getSource)(getState(), sourceId).toJS();
     var generatedSourceId = sourceMaps.isOriginalId(sourceId) ? (0, _devtoolsSourceMap.originalToGeneratedId)(sourceId) : sourceId;
+
+    var location = pendingBreakpoint.location,
+        astLocation = pendingBreakpoint.astLocation;
+
+    var previousLocation = _extends({}, location, { sourceId });
+
+    var scopedLocation = yield makeScopedLocation(astLocation, previousLocation, source);
+
+    var scopedGeneratedLocation = yield (0, _sourceMaps.getGeneratedLocation)(getState(), source, scopedLocation, sourceMaps);
 
     // this is the generatedLocation of the pending breakpoint, with
     // the source id updated to reflect the new connection
@@ -43357,83 +43627,59 @@ var syncClientBreakpoint = exports.syncClientBreakpoint = (() => {
       sourceId: generatedSourceId
     });
 
-    var location = _extends({}, pendingBreakpoint.location, {
-      sourceId
-    });
+    var isSameLocation = !(0, _breakpoint.locationMoved)(generatedLocation, scopedGeneratedLocation);
 
-    (0, _breakpoint3.assertPendingBreakpoint)(pendingBreakpoint);
-
-    /** ******* CASE 1: Disabled ***********/
-    // early return if breakpoint is disabled, send overrides to update
-    // the id as expected
-    if (pendingBreakpoint.disabled) {
-      var _newLocation = yield sourceMaps.getOriginalLocation(generatedLocation);
-
-      var _breakpoint = _extends({}, pendingBreakpoint, {
-        id: (0, _breakpoint3.makeLocationId)(_newLocation),
-        generatedLocation,
-        location: _newLocation
-      });
-
-      var previousLocation = (0, _breakpoint3.locationMoved)(location, _newLocation) ? location : null;
-
-      (0, _breakpoint3.assertBreakpoint)(_breakpoint);
-      return { breakpoint: _breakpoint, previousLocation };
-    }
-
-    /** ******* CASE 2: Merge Server Breakpoint ***********/
-    // early return if breakpoint exists on the server, send overrides
-    // to update the id as expected
     var existingClient = client.getBreakpointByLocation(generatedLocation);
 
-    if (existingClient) {
-      var _newGeneratedLocation = yield (0, _sourceMaps.getGeneratedLocation)(getState(), source, location, sourceMaps);
-
-      if ((0, _breakpoint3.locationMoved)(generatedLocation, _newGeneratedLocation)) {
-        yield client.removeBreakpoint(generatedLocation);
-        yield client.setBreakpoint(_newGeneratedLocation, pendingBreakpoint.condition, sourceMaps.isOriginalId(sourceId));
-      }
-
-      var _breakpoint2 = _extends({}, pendingBreakpoint, {
-        id: (0, _breakpoint3.makeLocationId)(location),
-        generatedLocation: _newGeneratedLocation,
-        location: location
-      });
-
-      (0, _breakpoint3.assertBreakpoint)(_breakpoint2);
-      return { breakpoint: _breakpoint2, previousLocation: location };
+    /** ******* CASE 1: No server change ***********/
+    // early return if breakpoint is disabled or we are in the sameLocation
+    // send update only to redux
+    if (pendingBreakpoint.disabled || existingClient && isSameLocation) {
+      return createSyncData(pendingBreakpoint, scopedLocation, scopedGeneratedLocation);
     }
 
-    /** ******* CASE 3: Add New Breakpoint ***********/
+    // clear server breakpoints if they exist and we have moved
+    if (existingClient) {
+      yield client.removeBreakpoint(generatedLocation);
+    }
+
+    /** ******* Case 2: Add New Breakpoint ***********/
     // If we are not disabled, set the breakpoint on the server and get
     // that info so we can set it on our breakpoints.
-    var clientBreakpoint = yield client.setBreakpoint(generatedLocation, pendingBreakpoint.condition, sourceMaps.isOriginalId(sourceId));
+    var clientBreakpoint = yield client.setBreakpoint(scopedGeneratedLocation, pendingBreakpoint.condition, sourceMaps.isOriginalId(sourceId));
 
+    // the breakpoint might have slid server side, so we want to get the location
+    // based on the server's return value
     var newGeneratedLocation = clientBreakpoint.actualLocation;
     var newLocation = yield sourceMaps.getOriginalLocation(newGeneratedLocation);
 
-    var breakpoint = _extends({}, pendingBreakpoint, {
-      id: (0, _breakpoint3.makeLocationId)(newGeneratedLocation),
-      generatedLocation: newGeneratedLocation,
-      location: newLocation
-    });
-
-    (0, _breakpoint3.assertBreakpoint)(breakpoint);
-    return { breakpoint, previousLocation: location };
+    return createSyncData(pendingBreakpoint, newLocation, newGeneratedLocation, previousLocation);
   });
 
-  return function syncClientBreakpoint(_x, _x2, _x3, _x4, _x5) {
-    return _ref.apply(this, arguments);
+  return function syncClientBreakpoint(_x5, _x6, _x7, _x8, _x9) {
+    return _ref3.apply(this, arguments);
   };
 })();
 
-var _breakpoint3 = __webpack_require__(1057);
+var _breakpoint = __webpack_require__(1057);
 
 var _sourceMaps = __webpack_require__(797);
 
 var _devtoolsSourceMap = __webpack_require__(898);
 
+var _selectors = __webpack_require__(242);
+
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+function createSyncData(pendingBreakpoint, location, generatedLocation) {
+  var previousLocation = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
+
+  var overrides = _extends({}, pendingBreakpoint, { generatedLocation });
+  var breakpoint = (0, _breakpoint.createBreakpoint)(location, overrides);
+
+  (0, _breakpoint.assertBreakpoint)(breakpoint);
+  return { breakpoint, previousLocation };
+}
 
 /***/ }),
 /* 1138 */
@@ -43466,7 +43712,7 @@ function ignoreWhiteSpace(str) {
 
 
 function wholeMatch(query, wholeWord) {
-  if (query == "" || !wholeWord) {
+  if (query === "" || !wholeWord) {
     return query;
   }
 
@@ -43499,7 +43745,7 @@ function buildQuery(originalQuery, modifiers, _ref) {
       wholeWord = modifiers.wholeWord;
 
 
-  if (originalQuery == "") {
+  if (originalQuery === "") {
     return new RegExp(originalQuery);
   }
 
@@ -43589,7 +43835,6 @@ class ProjectSearch extends _react.Component {
 
     var searchKeys = [L10N.getStr("sources.search.key2"), L10N.getStr("sources.search.alt.key")];
     searchKeys.forEach(key => shortcuts.off(key, this.toggleSourceSearch));
-    shortcuts.off("Escape", this.onEscape);
   }
 
   toggleProjectTextSearch(key, e) {
@@ -43601,7 +43846,7 @@ class ProjectSearch extends _react.Component {
       e.preventDefault();
     }
 
-    if (!_prefs.prefs.projectTextSearchEnabled) {
+    if (!_prefs.features.projectTextSearch) {
       return;
     }
 
@@ -43666,7 +43911,7 @@ class ProjectSearch extends _react.Component {
 
     return _react2.default.createElement(_TextSearch2.default, {
       sources: sources,
-      results: results.valueSeq().toJS(),
+      results: results.toJS(),
       searchSources: searchSources,
       closeActiveSearch: closeActiveSearch,
       selectSource: selectSource,
@@ -43710,7 +43955,7 @@ ProjectSearch.displayName = "ProjectSearch";
 
 exports.default = (0, _reactRedux.connect)(state => ({
   sources: (0, _selectors.getSources)(state),
-  activeSearch: (0, _selectors.getActiveSearchState)(state),
+  activeSearch: (0, _selectors.getActiveSearch)(state),
   results: (0, _selectors.getTextSearchResults)(state),
   textSearchQuery: (0, _selectors.getTextSearchQuery)(state),
   sourceSearchQuery: (0, _selectors.getSourceSearchQuery)(state)
@@ -43744,41 +43989,13 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 class SourceSearch extends _react.Component {
 
-  constructor(props) {
-    super(props);
-
-    this.close = this.close.bind(this);
-  }
-
-  componentWillUnmount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.off("Escape", this.onEscape);
-  }
-
-  componentDidMount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.on("Escape", this.onEscape);
-  }
-
-  onEscape(shortcut, e) {
-    if (this.isProjectSearchEnabled()) {
-      e.preventDefault();
-      this.close();
-    }
-  }
-
-  searchResults(sourceMap) {
-    return sourceMap.valueSeq().toJS().filter(source => !(0, _source.isPretty)(source)).map(source => ({
+  searchResults(sources) {
+    return sources.valueSeq().toJS().filter(source => !(0, _source.isPretty)(source) && !(0, _source.isThirdParty)(source)).map(source => ({
       value: (0, _source.getSourcePath)(source),
       title: (0, _source.getSourcePath)(source).split("/").pop(),
       subtitle: (0, _utils.endTruncateStr)((0, _source.getSourcePath)(source), 100),
       id: source.id
     }));
-  }
-
-  close() {
-    this.props.clearQuery();
-    this.props.closeActiveSearch();
   }
 
   render() {
@@ -43792,11 +44009,8 @@ class SourceSearch extends _react.Component {
     return _react2.default.createElement(
       _Autocomplete2.default,
       {
-        selectItem: (e, result) => {
-          selectSource(result.id);
-          this.close();
-        },
-        close: this.close,
+        selectItem: (e, result) => selectSource(result.id),
+        close: this.props.closeActiveSearch,
         items: this.searchResults(sources),
         inputValue: query,
         placeholder: L10N.getStr("sourceSearch.search"),
@@ -43880,6 +44094,10 @@ class PrimaryPanes extends _react.Component {
       return;
     }
 
+    var sources = (0, _text.formatKeyShortcut)(L10N.getStr("sources.header"));
+
+    var outline = (0, _text.formatKeyShortcut)(L10N.getStr("outline.header"));
+
     return [_react2.default.createElement(
       "div",
       {
@@ -43889,7 +44107,7 @@ class PrimaryPanes extends _react.Component {
         onClick: () => this.showPane("sources"),
         key: "sources-tab"
       },
-      "Sources View"
+      sources
     ), _react2.default.createElement(
       "div",
       {
@@ -43899,7 +44117,7 @@ class PrimaryPanes extends _react.Component {
         onClick: () => this.showPane("outline"),
         key: "outline-tab"
       },
-      "Outline View"
+      outline
     )];
   }
 
@@ -43942,6 +44160,11 @@ class PrimaryPanes extends _react.Component {
         selectSource = _props.selectSource;
 
 
+    var outlineComp = (0, _devtoolsConfig.isEnabled)("outline") ? _react2.default.createElement(_Outline2.default, {
+      selectSource: selectSource,
+      isHidden: selectedPane === "sources"
+    }) : null;
+
     return _react2.default.createElement(
       "div",
       { className: "sources-panel" },
@@ -43951,10 +44174,7 @@ class PrimaryPanes extends _react.Component {
         selectSource: selectSource,
         isHidden: selectedPane === "outline"
       }),
-      _react2.default.createElement(_Outline2.default, {
-        selectSource: selectSource,
-        isHidden: selectedPane === "sources"
-      }),
+      outlineComp,
       this.renderFooter()
     );
   }
@@ -43964,11 +44184,76 @@ PrimaryPanes.displayName = "PrimaryPanes";
 
 exports.default = (0, _reactRedux.connect)(state => ({
   sources: (0, _selectors.getSources)(state),
-  sourceSearchOn: (0, _selectors.getActiveSearchState)(state) === "source"
+  sourceSearchOn: (0, _selectors.getActiveSearch)(state) === "source"
 }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(PrimaryPanes);
 
 /***/ }),
 /* 1143 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.loadSourceText = loadSourceText;
+
+var _promise = __webpack_require__(193);
+
+var _ast = __webpack_require__(1059);
+
+var _source = __webpack_require__(233);
+
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+/**
+ * @memberof actions/sources
+ * @static
+ */
+function loadSourceText(source) {
+  return (() => {
+    var _ref = _asyncToGenerator(function* (_ref2) {
+      var dispatch = _ref2.dispatch,
+          getState = _ref2.getState,
+          client = _ref2.client,
+          sourceMaps = _ref2.sourceMaps;
+
+      // Fetch the source text only once.
+      if ((0, _source.isLoaded)(source)) {
+        return Promise.resolve(source);
+      }
+
+      yield dispatch({
+        type: "LOAD_SOURCE_TEXT",
+        source: source,
+        [_promise.PROMISE]: _asyncToGenerator(function* () {
+          if (sourceMaps.isOriginalId(source.id)) {
+            return yield sourceMaps.getOriginalSourceText(source);
+          }
+
+          var response = yield client.sourceContents(source.id);
+
+          return {
+            id: source.id,
+            text: response.source,
+            contentType: response.contentType || "text/javascript"
+          };
+        })()
+      });
+
+      yield dispatch((0, _ast.setSymbols)(source.id));
+      yield dispatch((0, _ast.setEmptyLines)(source.id));
+    });
+
+    return function (_x) {
+      return _ref.apply(this, arguments);
+    };
+  })();
+}
+
+/***/ }),
+/* 1144 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -44003,7 +44288,120 @@ function clearSourceSearchQuery() {
 }
 
 /***/ }),
-/* 1144 */
+/* 1145 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.Outline = undefined;
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _redux = __webpack_require__(3);
+
+var _reactRedux = __webpack_require__(151);
+
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
+
+var _actions = __webpack_require__(244);
+
+var _actions2 = _interopRequireDefault(_actions);
+
+var _selectors = __webpack_require__(242);
+
+__webpack_require__(871);
+
+var _PreviewFunction = __webpack_require__(798);
+
+var _PreviewFunction2 = _interopRequireDefault(_PreviewFunction);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+class Outline extends _react.Component {
+
+  selectItem(location) {
+    var _props = this.props,
+        selectedSource = _props.selectedSource,
+        selectSource = _props.selectSource;
+
+    if (!selectedSource) {
+      return;
+    }
+    var selectedSourceId = selectedSource.get("id");
+    var startLine = location.start.line;
+    selectSource(selectedSourceId, { line: startLine });
+  }
+
+  renderPlaceholder() {
+    return _react2.default.createElement(
+      "div",
+      { className: "outline-pane-info" },
+      L10N.getStr("outline.noFunctions")
+    );
+  }
+
+  renderFunction(func) {
+    var name = func.name,
+        location = func.location,
+        parameterNames = func.parameterNames;
+
+
+    return _react2.default.createElement(
+      "li",
+      {
+        key: `${name}:${location.start.line}:${location.start.column}`,
+        className: "outline-list__element",
+        onClick: () => this.selectItem(location)
+      },
+      _react2.default.createElement(_PreviewFunction2.default, { func: { name, parameterNames } })
+    );
+  }
+
+  renderFunctions(symbols) {
+    return _react2.default.createElement(
+      "ul",
+      { className: "outline-list" },
+      symbols.map(func => this.renderFunction(func))
+    );
+  }
+
+  render() {
+    var _props2 = this.props,
+        isHidden = _props2.isHidden,
+        symbols = _props2.symbols;
+
+
+    var symbolsToDisplay = symbols.functions.filter(func => func.name != "anonymous");
+
+    return _react2.default.createElement(
+      "div",
+      { className: (0, _classnames2.default)("outline", { hidden: isHidden }) },
+      symbolsToDisplay.length > 0 ? this.renderFunctions(symbolsToDisplay) : this.renderPlaceholder()
+    );
+  }
+}
+
+exports.Outline = Outline;
+Outline.displayName = "Outline";
+
+exports.default = (0, _reactRedux.connect)(state => {
+  var selectedSource = (0, _selectors.getSelectedSource)(state);
+  return {
+    symbols: (0, _selectors.getSymbols)(state, selectedSource && selectedSource.toJS()),
+    selectedSource
+  };
+}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Outline);
+
+/***/ }),
+/* 1146 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -44025,7 +44423,7 @@ var _actions2 = _interopRequireDefault(_actions);
 
 var _selectors = __webpack_require__(242);
 
-__webpack_require__(1146);
+__webpack_require__(1161);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -44083,181 +44481,7 @@ exports.default = (0, _reactRedux.connect)(state => {
 }, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(EmptyLines);
 
 /***/ }),
-/* 1145 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.Outline = undefined;
-
-var _react = __webpack_require__(0);
-
-var _react2 = _interopRequireDefault(_react);
-
-var _redux = __webpack_require__(3);
-
-var _reactRedux = __webpack_require__(151);
-
-var _classnames = __webpack_require__(175);
-
-var _classnames2 = _interopRequireDefault(_classnames);
-
-var _actions = __webpack_require__(244);
-
-var _actions2 = _interopRequireDefault(_actions);
-
-var _selectors = __webpack_require__(242);
-
-var _devtoolsConfig = __webpack_require__(828);
-
-__webpack_require__(871);
-
-var _PreviewFunction = __webpack_require__(798);
-
-var _PreviewFunction2 = _interopRequireDefault(_PreviewFunction);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-class Outline extends _react.Component {
-
-  selectItem(location) {
-    var _props = this.props,
-        selectedSource = _props.selectedSource,
-        selectSource = _props.selectSource;
-
-    if (!selectedSource) {
-      return;
-    }
-    var selectedSourceId = selectedSource.get("id");
-    var startLine = location.start.line;
-    selectSource(selectedSourceId, { line: startLine });
-  }
-
-  renderFunction(func) {
-    var name = func.name,
-        location = func.location;
-
-
-    return _react2.default.createElement(
-      "li",
-      {
-        key: `${name}:${location.start.line}:${location.start.column}`,
-        className: "outline-list__element",
-        onClick: () => this.selectItem(location)
-      },
-      _react2.default.createElement(_PreviewFunction2.default, { func: { name } })
-    );
-  }
-
-  renderFunctions() {
-    var symbols = this.props.symbols;
-
-
-    return symbols.functions.filter(func => func.name != "anonymous").map(func => this.renderFunction(func));
-  }
-
-  render() {
-    var isHidden = this.props.isHidden;
-
-    if (!(0, _devtoolsConfig.isEnabled)("outline")) {
-      return null;
-    }
-
-    return _react2.default.createElement(
-      "div",
-      { className: (0, _classnames2.default)("outline", { hidden: isHidden }) },
-      _react2.default.createElement(
-        "ul",
-        { className: "outline-list" },
-        this.renderFunctions()
-      )
-    );
-  }
-}
-
-exports.Outline = Outline;
-Outline.displayName = "Outline";
-
-exports.default = (0, _reactRedux.connect)(state => {
-  var selectedSource = (0, _selectors.getSelectedSource)(state);
-  return {
-    symbols: (0, _selectors.getSymbols)(state, selectedSource && selectedSource.toJS()),
-    selectedSource
-  };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Outline);
-
-/***/ }),
-/* 1146 */
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-/* 1147 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.Workers = undefined;
-
-var _react = __webpack_require__(0);
-
-var _react2 = _interopRequireDefault(_react);
-
-__webpack_require__(1149);
-
-var _reactRedux = __webpack_require__(151);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-class Workers extends _react.PureComponent {
-  renderWorkers(workers) {
-    return workers.map(w => _react2.default.createElement(
-      "div",
-      null,
-      w
-    ));
-  }
-
-  renderNoWorkersPlaceholder() {
-    return L10N.getStr("noWorkersText");
-  }
-
-  render() {
-    var workers = this.props.workers;
-
-    return _react2.default.createElement(
-      "div",
-      { className: "pane" },
-      _react2.default.createElement(
-        "div",
-        { className: "pane-info" },
-        workers && workers.length > 0 ? this.renderWorkers(workers) : this.renderNoWorkersPlaceholder()
-      )
-    );
-  }
-}
-
-exports.Workers = Workers;
-Workers.displayName = "Workers";
-Workers.propTypes = {
-  workers: _react.PropTypes.array.isRequired
-};
-
-function mapStateToProps(state) {
-  return { workers: [] };
-}
-exports.default = (0, _reactRedux.connect)(mapStateToProps)(Workers);
-
-/***/ }),
+/* 1147 */,
 /* 1148 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -44571,9 +44795,64 @@ exports.default = (0, _reactRedux.connect)(state => {
 
 /***/ }),
 /* 1149 */
-/***/ (function(module, exports) {
+/***/ (function(module, exports, __webpack_require__) {
 
-// removed by extract-text-webpack-plugin
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.Workers = undefined;
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+__webpack_require__(1162);
+
+var _reactRedux = __webpack_require__(151);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+class Workers extends _react.PureComponent {
+  renderWorkers(workers) {
+    return workers.map(w => _react2.default.createElement(
+      "div",
+      null,
+      w
+    ));
+  }
+
+  renderNoWorkersPlaceholder() {
+    return L10N.getStr("noWorkersText");
+  }
+
+  render() {
+    var workers = this.props.workers;
+
+    return _react2.default.createElement(
+      "div",
+      { className: "pane" },
+      _react2.default.createElement(
+        "div",
+        { className: "pane-info" },
+        workers && workers.length > 0 ? this.renderWorkers(workers) : this.renderNoWorkersPlaceholder()
+      )
+    );
+  }
+}
+
+exports.Workers = Workers;
+Workers.displayName = "Workers";
+Workers.propTypes = {
+  workers: _react.PropTypes.array.isRequired
+};
+
+function mapStateToProps(state) {
+  return { workers: [] };
+}
+exports.default = (0, _reactRedux.connect)(mapStateToProps)(Workers);
 
 /***/ }),
 /* 1150 */,
@@ -45837,12 +46116,57 @@ exports.default = (0, _reactRedux.connect)(state => {
 
 /***/ }),
 /* 1160 */,
-/* 1161 */,
-/* 1162 */,
+/* 1161 */
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+/* 1162 */
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
 /* 1163 */,
 /* 1164 */,
-/* 1165 */,
-/* 1166 */,
+/* 1165 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+const networkRequest = __webpack_require__(1166);
+const workerUtils = __webpack_require__(1168);
+
+module.exports = {
+  networkRequest,
+  workerUtils
+};
+
+/***/ }),
+/* 1166 */
+/***/ (function(module, exports) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+function networkRequest(url, opts) {
+  return fetch(url, {
+    cache: opts.loadFromCache ? "default" : "no-cache"
+  }).then(res => {
+    if (res.status >= 200 && res.status < 300) {
+      return res.text().then(text => ({ content: text }));
+    }
+    return Promise.reject(`request failed with status ${res.status}`);
+  });
+}
+
+module.exports = networkRequest;
+
+/***/ }),
 /* 1167 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -45949,8 +46273,190 @@ exports.default = CallSite;
 CallSite.displayName = "CallSite";
 
 /***/ }),
-/* 1168 */,
-/* 1169 */,
+/* 1168 */
+/***/ (function(module, exports) {
+
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+function WorkerDispatcher() {
+  this.msgId = 1;
+  this.worker = null;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+WorkerDispatcher.prototype = {
+  start(url) {
+    this.worker = new Worker(url);
+    this.worker.onerror = () => {
+      console.error(`Error in worker ${url}`);
+    };
+  },
+
+  stop() {
+    if (!this.worker) {
+      return;
+    }
+
+    this.worker.terminate();
+    this.worker = null;
+  },
+
+  task(method) {
+    return (...args) => {
+      return new Promise((resolve, reject) => {
+        const id = this.msgId++;
+        this.worker.postMessage({ id, method, args });
+
+        const listener = ({ data: result }) => {
+          if (result.id !== id) {
+            return;
+          }
+
+          this.worker.removeEventListener("message", listener);
+          if (result.error) {
+            reject(result.error);
+          } else {
+            resolve(result.response);
+          }
+        };
+
+        this.worker.addEventListener("message", listener);
+      });
+    };
+  }
+};
+
+function workerHandler(publicInterface) {
+  return function (msg) {
+    const { id, method, args } = msg.data;
+    try {
+      const response = publicInterface[method].apply(undefined, args);
+      if (response instanceof Promise) {
+        response.then(val => self.postMessage({ id, response: val }),
+        // Error can't be sent via postMessage, so be sure to
+        // convert to string.
+        err => self.postMessage({ id, error: err.toString() }));
+      } else {
+        self.postMessage({ id, response });
+      }
+    } catch (error) {
+      // Error can't be sent via postMessage, so be sure to convert to
+      // string.
+      self.postMessage({ id, error: error.toString() });
+    }
+  };
+}
+
+function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker = self) {
+  let streamingWorker = (() => {
+    var _ref = _asyncToGenerator(function* (id, tasks) {
+      let isWorking = true;
+
+      const intervalId = setTimeout(function () {
+        isWorking = false;
+      }, timeout);
+
+      const results = [];
+      while (tasks.length !== 0 && isWorking) {
+        const { callback, context, args } = tasks.shift();
+        const result = yield callback.call(context, args);
+        results.push(result);
+      }
+      worker.postMessage({ id, status: "pending", data: results });
+      clearInterval(intervalId);
+
+      if (tasks.length !== 0) {
+        yield streamingWorker(id, tasks);
+      }
+    });
+
+    return function streamingWorker(_x, _x2) {
+      return _ref.apply(this, arguments);
+    };
+  })();
+
+  return (() => {
+    var _ref2 = _asyncToGenerator(function* (msg) {
+      const { id, method, args } = msg.data;
+      const workerMethod = publicInterface[method];
+      if (!workerMethod) {
+        console.error(`Could not find ${method} defined in worker.`);
+      }
+      worker.postMessage({ id, status: "start" });
+
+      try {
+        const tasks = workerMethod(args);
+        yield streamingWorker(id, tasks);
+        worker.postMessage({ id, status: "done" });
+      } catch (error) {
+        worker.postMessage({ id, status: "error", error });
+      }
+    });
+
+    return function (_x3) {
+      return _ref2.apply(this, arguments);
+    };
+  })();
+}
+
+module.exports = {
+  WorkerDispatcher,
+  workerHandler,
+  streamingWorkerHandler
+};
+
+/***/ }),
+/* 1169 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.findFunctionText = findFunctionText;
+
+var _astBreakpointLocation = __webpack_require__(804);
+
+function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+function getIndentation(lines) {
+  var firstLine = lines[0];
+  var secondLine = lines[1];
+  var lastLine = lines[lines.length - 1];
+
+  var _getIndentation = line => line && line.match(/^\s*/)[0].length;
+
+  var indentations = [_getIndentation(firstLine), _getIndentation(secondLine), _getIndentation(lastLine)];
+
+  return Math.max.apply(Math, indentations.concat([0]));
+}
+
+function findFunctionText(line, source, symbols) {
+  var func = (0, _astBreakpointLocation.findClosestScope)(symbols.functions, { line, column: Infinity });
+  if (!func) {
+    return null;
+  }
+
+  var _func$location = func.location,
+      start = _func$location.start,
+      end = _func$location.end;
+
+  var lines = source.text.split("\n");
+  var firstLine = lines[start.line - 1].slice(start.column);
+  var lastLine = lines[end.line - 1].slice(0, end.column);
+  var middle = lines.slice(start.line, end.line - 1);
+  var functionLines = [firstLine].concat(_toConsumableArray(middle), [lastLine]);
+
+  var indentation = getIndentation(functionLines);
+  var formattedLines = functionLines.map(_line => _line.replace(new RegExp(`^\\s{0,${indentation - 1}}`), ""));
+
+  return formattedLines.join("\n").trim();
+}
+
+/***/ }),
 /* 1170 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -46022,19 +46528,9 @@ class SymbolModal extends _react.Component {
     self.buildSummaryMsg = this.buildSummaryMsg.bind(this);
     self.buildPlaceHolder = this.buildPlaceHolder.bind(this);
     self.selectResultItem = this.selectResultItem.bind(this);
-    self.openSymbolModal = this.openSymbolModal.bind(this);
-  }
-
-  componentWillUnmount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.off(L10N.getStr("symbolSearch.search.key2"));
-    shortcuts.off("Escape");
   }
 
   componentDidMount() {
-    var shortcuts = this.context.shortcuts;
-    shortcuts.on(L10N.getStr("symbolSearch.search.key2"), this.openSymbolModal);
-    shortcuts.on("Escape", this.closeModal);
     this.updateResults(this.state.query);
   }
 
@@ -46046,12 +46542,6 @@ class SymbolModal extends _react.Component {
     if (!prevProps.enabled && this.props.enabled) {
       this.updateResults(this.state.query);
     }
-  }
-
-  openSymbolModal(_, e) {
-    e.preventDefault();
-    e.stopPropagation();
-    this.props.setActiveSearch("symbol");
   }
 
   onClick(e) {
@@ -46072,7 +46562,6 @@ class SymbolModal extends _react.Component {
   closeModal() {
     this.props.closeActiveSearch();
     this.props.clearHighlightLineRange();
-    this.setState({ query: "" });
   }
 
   selectResultItem(e, item) {
@@ -46276,7 +46765,7 @@ function _getFormattedSymbols(state, source) {
 exports.default = (0, _reactRedux.connect)(state => {
   var source = (0, _selectors.getSelectedSource)(state);
   return {
-    enabled: Boolean((0, _selectors.getActiveSearchState)(state) === "symbol" && source),
+    enabled: Boolean((0, _selectors.getActiveSearch)(state) === "symbol" && source),
     symbolType: (0, _selectors.getSymbolSearchType)(state),
     symbols: _getFormattedSymbols(state, source)
   };

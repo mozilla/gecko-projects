@@ -29,6 +29,7 @@ describe("TelemetryFeed", () => {
     getMostRecentAbsMarkStartByName() { return 1234; }
     mark() {}
     absNow() { return 123; }
+    get timeOrigin() { return 123456; }
   }
   const perfService = new PerfService();
   const {
@@ -99,17 +100,52 @@ describe("TelemetryFeed", () => {
       assert.calledOnce(global.gUUIDGenerator.generateUUID);
       assert.equal(session.session_id, global.gUUIDGenerator.generateUUID.firstCall.returnValue);
     });
-    it("should set the page", () => {
+    it("should set the page if a url parameter is given", () => {
+      const session = instance.addSession("foo", "about:monkeys");
+
+      assert.propertyVal(session, "page", "about:monkeys");
+    });
+    it("should set the page prop to 'unknown' if no URL parameter given", () => {
       const session = instance.addSession("foo");
 
-      assert.equal(session.page, "about:newtab"); // This is hardcoded for now.
+      assert.propertyVal(session, "page", "unknown");
     });
     it("should set the perf type when lacking timestamp", () => {
       const session = instance.addSession("foo");
 
       assert.propertyVal(session.perf, "load_trigger_type", "unexpected");
     });
+    it("should set load_trigger_type to first_window_opened on the first about:home seen", () => {
+      const session = instance.addSession("foo", "about:home");
+
+      assert.propertyVal(session.perf, "load_trigger_type",
+        "first_window_opened");
+    });
+    it("should not set load_trigger_type to first_window_opened on the second about:home seen", () => {
+      instance.addSession("foo", "about:home");
+
+      const session2 = instance.addSession("foo", "about:home");
+
+      assert.propertyNotVal(session2.perf, "load_trigger_type",
+        "first_window_opened");
+    });
+    it("should set load_trigger_ts to the value of perfService.timeOrigin", () => {
+      const session = instance.addSession("foo", "about:home");
+
+      assert.propertyVal(session.perf, "load_trigger_ts",
+        123456);
+    });
+    it("should a valid session ping on the first about:home seen", () => {
+      // Add a session
+      const portID = "foo";
+      const session = instance.addSession(portID, "about:home");
+
+      // Create a ping referencing the session
+      const ping = instance.createSessionEndEvent(session);
+      assert.validate(ping, SessionPing);
+    });
   });
+
   describe("#browserOpenNewtabStart", () => {
     it("should call perfService.mark with browser-open-newtab-start", () => {
       sandbox.stub(perfService, "mark");
@@ -178,11 +214,12 @@ describe("TelemetryFeed", () => {
         const ping = await instance.createPing();
         assert.validate(ping, BasePing);
         assert.notProperty(ping, "session_id");
+        assert.notProperty(ping, "page");
       });
       it("should create a valid base ping with session info if a portID is supplied", async () => {
         // Add a session
         const portID = "foo";
-        instance.addSession(portID);
+        instance.addSession(portID, "about:home");
         const sessionID = instance.sessions.get(portID).session_id;
 
         // Create a ping referencing the session
@@ -191,13 +228,13 @@ describe("TelemetryFeed", () => {
 
         // Make sure we added the right session-related stuff to the ping
         assert.propertyVal(ping, "session_id", sessionID);
-        assert.propertyVal(ping, "page", "about:newtab");
+        assert.propertyVal(ping, "page", "about:home");
       });
       it("should create an unexpected base ping if no session yet portID is supplied", async () => {
         const ping = await instance.createPing("foo");
 
         assert.validate(ping, BasePing);
-        assert.propertyVal(ping, "page", "about:newtab");
+        assert.propertyVal(ping, "page", "unknown");
         assert.propertyVal(instance.sessions.get("foo").perf, "load_trigger_type", "unexpected");
       });
       it("should create a base ping with user_prefs", async () => {
@@ -412,6 +449,16 @@ describe("TelemetryFeed", () => {
 
       assert.notCalled(instance.setLoadTriggerInfo);
     });
+
+    it("should not call setLoadTriggerInfo when url is about:home", () => {
+      sandbox.stub(instance, "setLoadTriggerInfo");
+      instance.addSession("port123", "about:home");
+      const data = {visibility_event_rcvd_ts: 444455};
+
+      instance.saveSessionPerfData("port123", data);
+
+      assert.notCalled(instance.setLoadTriggerInfo);
+    });
   });
 
   describe("#uninit", () => {
@@ -490,11 +537,11 @@ describe("TelemetryFeed", () => {
 
       instance.onAction(ac.SendToMain({
         type: at.NEW_TAB_INIT,
-        data: {}
+        data: {url: "about:monkeys"}
       }, "port123"));
 
       assert.calledOnce(stub);
-      assert.calledWith(stub, "port123");
+      assert.calledWith(stub, "port123", "about:monkeys");
     });
     it("should call .endSession() on a NEW_TAB_UNLOAD action", () => {
       const stub = sandbox.stub(instance, "endSession");

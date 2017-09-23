@@ -8,23 +8,24 @@
 
 use Atom;
 use cssparser::serialize_identifier;
-use custom_properties::SpecifiedValue;
+use custom_properties;
 use std::fmt;
 use style_traits::ToCss;
-use values::computed::ComputedValueAsSpecified;
 
 /// An [image].
 ///
 /// [image]: https://drafts.csswg.org/css-images/#image-values
-#[derive(Clone, PartialEq, ToComputedValue)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, PartialEq, ToComputedValue)]
 pub enum Image<Gradient, MozImageRect, ImageUrl> {
     /// A `<url()>` image.
     Url(ImageUrl),
-    /// A `<gradient>` image.
-    Gradient(Gradient),
-    /// A `-moz-image-rect` image
-    Rect(MozImageRect),
+    /// A `<gradient>` image.  Gradients are rather large, and not nearly as
+    /// common as urls, so we box them here to keep the size of this enum sane.
+    Gradient(Box<Gradient>),
+    /// A `-moz-image-rect` image.  Also fairly large and rare.
+    Rect(Box<MozImageRect>),
     /// A `-moz-element(# <element-id>)`
     Element(Atom),
     /// A paint worklet image.
@@ -35,6 +36,7 @@ pub enum Image<Gradient, MozImageRect, ImageUrl> {
 
 /// A CSS gradient.
 /// https://drafts.csswg.org/css-images/#gradients
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, PartialEq, ToComputedValue)]
 pub struct Gradient<LineDirection, Length, LengthOrPercentage, Position, Color, Angle> {
@@ -51,6 +53,7 @@ pub struct Gradient<LineDirection, Length, LengthOrPercentage, Position, Color, 
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 /// Whether we used the modern notation or the compatibility `-webkit`, `-moz` prefixes.
 pub enum CompatMode {
@@ -63,6 +66,7 @@ pub enum CompatMode {
 }
 
 /// A gradient kind.
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue)]
 pub enum GradientKind<LineDirection, Length, LengthOrPercentage, Position, Angle> {
@@ -74,6 +78,7 @@ pub enum GradientKind<LineDirection, Length, LengthOrPercentage, Position, Angle
 
 /// A radial gradient's ending shape.
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum EndingShape<Length, LengthOrPercentage> {
     /// A circular gradient.
@@ -84,6 +89,7 @@ pub enum EndingShape<Length, LengthOrPercentage> {
 
 /// A circle shape.
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum Circle<Length> {
     /// A circle radius.
@@ -94,6 +100,7 @@ pub enum Circle<Length> {
 
 /// An ellipse shape.
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub enum Ellipse<LengthOrPercentage> {
     /// An ellipse pair of radii.
@@ -111,10 +118,11 @@ define_css_keyword_enum!(ShapeExtent:
     "contain" => Contain,
     "cover" => Cover
 );
-impl ComputedValueAsSpecified for ShapeExtent {}
+add_impls_for_keyword_enum!(ShapeExtent);
 
 /// A gradient item.
 /// https://drafts.csswg.org/css-images-4/#color-stop-syntax
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
 pub enum GradientItem<Color, LengthOrPercentage> {
@@ -127,6 +135,7 @@ pub enum GradientItem<Color, LengthOrPercentage> {
 /// A color stop.
 /// https://drafts.csswg.org/css-images/#typedef-color-stop-list
 #[derive(Clone, Copy, PartialEq, ToComputedValue, ToCss)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct ColorStop<Color, LengthOrPercentage> {
     /// The color of this stop.
@@ -144,10 +153,10 @@ pub struct PaintWorklet {
     pub name: Atom,
     /// The arguments for the worklet.
     /// TODO: store a parsed representation of the arguments.
-    pub arguments: Vec<SpecifiedValue>,
+    pub arguments: Vec<custom_properties::SpecifiedValue>,
 }
 
-impl ComputedValueAsSpecified for PaintWorklet {}
+trivial_to_computed_value!(PaintWorklet);
 
 impl ToCss for PaintWorklet {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
@@ -165,6 +174,7 @@ impl ToCss for PaintWorklet {
 ///
 /// `-moz-image-rect(<uri>, top, right, bottom, left);`
 #[allow(missing_docs)]
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[css(comma, function)]
 #[derive(Clone, Debug, PartialEq, ToComputedValue, ToCss)]

@@ -59,6 +59,7 @@ use js::jsapi::{JS_GC, JS_GetRuntime};
 use js::jsval::UndefinedValue;
 use js::rust::Runtime;
 use layout_image::fetch_image_for_layout;
+use microtask::MicrotaskQueue;
 use msg::constellation_msg::{FrameType, PipelineId};
 use net_traits::{ResourceThreads, ReferrerPolicy};
 use net_traits::image_cache::{ImageCache, ImageResponder, ImageResponse};
@@ -75,8 +76,8 @@ use script_layout_interface::rpc::{ContentBoxResponse, ContentBoxesResponse, Lay
 use script_layout_interface::rpc::{MarginStyleResponse, NodeScrollRootIdResponse};
 use script_layout_interface::rpc::{ResolvedStyleResponse, TextIndexResponse};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, ScriptThreadEventCategory};
-use script_thread::{ImageCacheMsg, MainThreadScriptChan, MainThreadScriptMsg, Runnable};
-use script_thread::{RunnableWrapper, ScriptThread, SendableMainThreadScriptChan};
+use script_thread::{ImageCacheMsg, MainThreadScriptChan, MainThreadScriptMsg};
+use script_thread::{ScriptThread, SendableMainThreadScriptChan};
 use script_traits::{ConstellationControlMsg, DocumentState, LoadData, MozBrowserEvent};
 use script_traits::{ScriptToConstellationChan, ScriptMsg, ScrollState, TimerEvent, TimerEventId};
 use script_traits::{TimerSchedulerMsg, UntrustedNodeAddress, WindowSizeData, WindowSizeType};
@@ -110,6 +111,7 @@ use style::selector_parser::PseudoElement;
 use style::str::HTML_SPACE_CHARACTERS;
 use style::stylesheets::CssRuleType;
 use style_traits::PARSING_MODE_DEFAULT;
+use task::TaskCanceller;
 use task_source::dom_manipulation::DOMManipulationTaskSource;
 use task_source::file_reading::FileReadingTaskSource;
 use task_source::history_traversal::HistoryTraversalTaskSource;
@@ -181,6 +183,7 @@ pub struct Window {
     image_cache_chan: Sender<ImageCacheMsg>,
     window_proxy: MutNullableJS<WindowProxy>,
     document: MutNullableJS<Document>,
+    location: MutNullableJS<Location>,
     history: MutNullableJS<History>,
     custom_element_registry: MutNullableJS<CustomElementRegistry>,
     performance: MutNullableJS<Performance>,
@@ -566,7 +569,7 @@ impl WindowMethods for Window {
 
     // https://html.spec.whatwg.org/multipage/#dom-location
     fn Location(&self) -> Root<Location> {
-        self.Document().GetLocation().unwrap()
+        self.location.or_init(|| Location::new(self))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-sessionstorage
@@ -1012,7 +1015,8 @@ impl WindowMethods for Window {
         let context = CssParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
                                                       PARSING_MODE_DEFAULT,
                                                       quirks_mode);
-        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser);
+        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser,
+                                                                     self.css_error_reporter());
         let document = self.Document();
         let mql = MediaQueryList::new(&document, media_query_list);
         self.media_query_lists.push(&*mql);
@@ -1036,8 +1040,8 @@ impl WindowMethods for Window {
 }
 
 impl Window {
-    pub fn get_runnable_wrapper(&self) -> RunnableWrapper {
-        RunnableWrapper {
+    pub fn task_canceller(&self) -> TaskCanceller {
+        TaskCanceller {
             cancelled: Some(self.ignore_further_async_events.borrow().clone()),
         }
     }
@@ -1788,66 +1792,70 @@ impl Window {
 
 impl Window {
     #[allow(unsafe_code)]
-    pub fn new(runtime: Rc<Runtime>,
-               script_chan: MainThreadScriptChan,
-               dom_task_source: DOMManipulationTaskSource,
-               user_task_source: UserInteractionTaskSource,
-               network_task_source: NetworkingTaskSource,
-               history_task_source: HistoryTraversalTaskSource,
-               file_task_source: FileReadingTaskSource,
-               performance_timeline_task_source: PerformanceTimelineTaskSource,
-               image_cache_chan: Sender<ImageCacheMsg>,
-               image_cache: Arc<ImageCache>,
-               resource_threads: ResourceThreads,
-               bluetooth_thread: IpcSender<BluetoothRequest>,
-               mem_profiler_chan: MemProfilerChan,
-               time_profiler_chan: TimeProfilerChan,
-               devtools_chan: Option<IpcSender<ScriptToDevtoolsControlMsg>>,
-               constellation_chan: ScriptToConstellationChan,
-               control_chan: IpcSender<ConstellationControlMsg>,
-               scheduler_chan: IpcSender<TimerSchedulerMsg>,
-               timer_event_chan: IpcSender<TimerEvent>,
-               layout_chan: Sender<Msg>,
-               id: PipelineId,
-               parent_info: Option<(PipelineId, FrameType)>,
-               window_size: Option<WindowSizeData>,
-               origin: MutableOrigin,
-               navigation_start: u64,
-               navigation_start_precise: f64,
-               webgl_chan: WebGLChan,
-               webvr_chan: Option<IpcSender<WebVRMsg>>)
-               -> Root<Window> {
+    pub fn new(
+        runtime: Rc<Runtime>,
+        script_chan: MainThreadScriptChan,
+        dom_manipulation_task_source: DOMManipulationTaskSource,
+        user_interaction_task_source: UserInteractionTaskSource,
+        networking_task_source: NetworkingTaskSource,
+        history_traversal_task_source: HistoryTraversalTaskSource,
+        file_reading_task_source: FileReadingTaskSource,
+        performance_timeline_task_source: PerformanceTimelineTaskSource,
+        image_cache_chan: Sender<ImageCacheMsg>,
+        image_cache: Arc<ImageCache>,
+        resource_threads: ResourceThreads,
+        bluetooth_thread: IpcSender<BluetoothRequest>,
+        mem_profiler_chan: MemProfilerChan,
+        time_profiler_chan: TimeProfilerChan,
+        devtools_chan: Option<IpcSender<ScriptToDevtoolsControlMsg>>,
+        constellation_chan: ScriptToConstellationChan,
+        control_chan: IpcSender<ConstellationControlMsg>,
+        scheduler_chan: IpcSender<TimerSchedulerMsg>,
+        timer_event_chan: IpcSender<TimerEvent>,
+        layout_chan: Sender<Msg>,
+        pipelineid: PipelineId,
+        parent_info: Option<(PipelineId, FrameType)>,
+        window_size: Option<WindowSizeData>,
+        origin: MutableOrigin,
+        navigation_start: u64,
+        navigation_start_precise: f64,
+        webgl_chan: WebGLChan,
+        webvr_chan: Option<IpcSender<WebVRMsg>>,
+        microtask_queue: Rc<MicrotaskQueue>,
+    ) -> Root<Self> {
         let layout_rpc: Box<LayoutRPC + Send> = {
             let (rpc_send, rpc_recv) = channel();
             layout_chan.send(Msg::GetRPC(rpc_send)).unwrap();
             rpc_recv.recv().unwrap()
         };
         let error_reporter = CSSErrorReporter {
-            pipelineid: id,
+            pipelineid,
             script_chan: Arc::new(Mutex::new(control_chan)),
         };
-        let win = box Window {
-            globalscope:
-                GlobalScope::new_inherited(
-                    id,
-                    devtools_chan,
-                    mem_profiler_chan,
-                    time_profiler_chan,
-                    constellation_chan,
-                    scheduler_chan,
-                    resource_threads,
-                    timer_event_chan,
-                    origin),
-            script_chan: script_chan,
-            dom_manipulation_task_source: dom_task_source,
-            user_interaction_task_source: user_task_source,
-            networking_task_source: network_task_source,
-            history_traversal_task_source: history_task_source,
-            file_reading_task_source: file_task_source,
+        let win = box Self {
+            globalscope: GlobalScope::new_inherited(
+                pipelineid,
+                devtools_chan,
+                mem_profiler_chan,
+                time_profiler_chan,
+                constellation_chan,
+                scheduler_chan,
+                resource_threads,
+                timer_event_chan,
+                origin,
+                microtask_queue,
+            ),
+            script_chan,
+            dom_manipulation_task_source,
+            user_interaction_task_source,
+            networking_task_source,
+            history_traversal_task_source,
+            file_reading_task_source,
             performance_timeline_task_source,
-            image_cache_chan: image_cache_chan,
-            image_cache: image_cache.clone(),
+            image_cache_chan,
+            image_cache,
             navigator: Default::default(),
+            location: Default::default(),
             history: Default::default(),
             custom_element_registry: Default::default(),
             window_proxy: Default::default(),
@@ -1859,34 +1867,33 @@ impl Window {
             session_storage: Default::default(),
             local_storage: Default::default(),
             status: DOMRefCell::new(DOMString::new()),
-            parent_info: parent_info,
+            parent_info,
             dom_static: GlobalStaticData::new(),
             js_runtime: DOMRefCell::new(Some(runtime.clone())),
-            bluetooth_thread: bluetooth_thread,
+            bluetooth_thread,
             bluetooth_extra_permission_data: BluetoothExtraPermissionData::new(),
             page_clip_rect: Cell::new(max_rect()),
-            resize_event: Cell::new(None),
-            layout_chan: layout_chan,
-            layout_rpc: layout_rpc,
+            resize_event: Default::default(),
+            layout_chan,
+            layout_rpc,
             window_size: Cell::new(window_size),
             current_viewport: Cell::new(Rect::zero()),
             suppress_reflow: Cell::new(true),
-            pending_reflow_count: Cell::new(0),
+            pending_reflow_count: Default::default(),
             current_state: Cell::new(WindowState::Alive),
-
-            devtools_marker_sender: DOMRefCell::new(None),
-            devtools_markers: DOMRefCell::new(HashSet::new()),
-            webdriver_script_chan: DOMRefCell::new(None),
+            devtools_marker_sender: Default::default(),
+            devtools_markers: Default::default(),
+            webdriver_script_chan: Default::default(),
             ignore_further_async_events: Default::default(),
-            error_reporter: error_reporter,
-            scroll_offsets: DOMRefCell::new(HashMap::new()),
+            error_reporter,
+            scroll_offsets: Default::default(),
             media_query_lists: WeakMediaQueryListVec::new(),
             test_runner: Default::default(),
-            webgl_chan: webgl_chan,
-            webvr_chan: webvr_chan,
-            permission_state_invocation_results: DOMRefCell::new(HashMap::new()),
-            pending_layout_images: DOMRefCell::new(HashMap::new()),
-            unminified_js_dir: DOMRefCell::new(None),
+            webgl_chan,
+            webvr_chan,
+            permission_state_invocation_results: Default::default(),
+            pending_layout_images: Default::default(),
+            unminified_js_dir: Default::default(),
             test_worklet: Default::default(),
             paint_worklet: Default::default(),
         };
@@ -1964,59 +1971,50 @@ fn debug_reflow_events(id: PipelineId, goal: &ReflowGoal, query_type: &ReflowQue
     println!("{}", debug_msg);
 }
 
-struct PostMessageHandler {
-    destination: Trusted<Window>,
-    origin: Option<ImmutableOrigin>,
-    message: StructuredCloneData,
-}
-
-impl PostMessageHandler {
-    fn new(window: &Window,
-           origin: Option<ImmutableOrigin>,
-           message: StructuredCloneData) -> PostMessageHandler {
-        PostMessageHandler {
-            destination: Trusted::new(window),
-            origin: origin,
-            message: message,
-        }
-    }
-}
-
-impl Runnable for PostMessageHandler {
-    // https://html.spec.whatwg.org/multipage/#dom-window-postmessage steps 10-12.
-    fn handler(self: Box<PostMessageHandler>) {
-        let this = *self;
-        let window = this.destination.root();
-
-        // Step 10.
-        let doc = window.Document();
-        if let Some(source) = this.origin {
-            if !source.same_origin(doc.origin()) {
-                return;
-            }
-        }
-
-        let cx = window.get_cx();
-        let globalhandle = window.reflector().get_jsobject();
-        let _ac = JSAutoCompartment::new(cx, globalhandle.get());
-
-        rooted!(in(cx) let mut message = UndefinedValue());
-        this.message.read(window.upcast(), message.handle_mut());
-
-        // Step 11-12.
-        // TODO(#12719): set the other attributes.
-        MessageEvent::dispatch_jsval(window.upcast(),
-                                     window.upcast(),
-                                     message.handle());
-    }
-}
-
 impl Window {
-    pub fn post_message(&self, origin: Option<ImmutableOrigin>, data: StructuredCloneData) {
-        let runnable = PostMessageHandler::new(self, origin, data);
-        let runnable = self.get_runnable_wrapper().wrap_runnable(box runnable);
-        let msg = CommonScriptMsg::RunnableMsg(ScriptThreadEventCategory::DomEvent, runnable);
+    // https://html.spec.whatwg.org/multipage/#dom-window-postmessage step 7.
+    pub fn post_message(
+        &self,
+        target_origin: Option<ImmutableOrigin>,
+        serialize_with_transfer_result: StructuredCloneData,
+    ) {
+        let this = Trusted::new(self);
+        let task = task!(post_serialised_message: move || {
+            let this = this.root();
+
+            // Step 7.1.
+            if let Some(target_origin) = target_origin {
+                if !target_origin.same_origin(this.Document().origin()) {
+                    return;
+                }
+            }
+
+            // Steps 7.2.-7.5.
+            let cx = this.get_cx();
+            let obj = this.reflector().get_jsobject();
+            let _ac = JSAutoCompartment::new(cx, obj.get());
+            rooted!(in(cx) let mut message_clone = UndefinedValue());
+            serialize_with_transfer_result.read(
+                this.upcast(),
+                message_clone.handle_mut(),
+            );
+
+            // Step 7.6.
+            // TODO: MessagePort array.
+
+            // Step 7.7.
+            // TODO(#12719): Set the other attributes.
+            MessageEvent::dispatch_jsval(
+                this.upcast(),
+                this.upcast(),
+                message_clone.handle(),
+            );
+        });
+        // FIXME(nox): Why are errors silenced here?
         // TODO(#12718): Use the "posted message task source".
-        let _ = self.script_chan.send(msg);
+        let _ = self.script_chan.send(CommonScriptMsg::Task(
+            ScriptThreadEventCategory::DomEvent,
+            box self.task_canceller().wrap_task(task),
+        ));
     }
 }

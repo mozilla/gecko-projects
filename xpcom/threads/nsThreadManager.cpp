@@ -10,6 +10,9 @@
 #include "nsIClassInfoImpl.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
+#include "nsXULAppAPI.h"
+#include "LabeledEventQueue.h"
+#include "MainThreadQueue.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/EventQueue.h"
 #include "mozilla/Preferences.h"
@@ -30,6 +33,12 @@ using namespace mozilla;
 
 static MOZ_THREAD_LOCAL(bool) sTLSIsMainThread;
 static MOZ_THREAD_LOCAL(PRThread*) gTlsCurrentVirtualThread;
+
+bool
+NS_IsMainThreadTLSInitialized()
+{
+  return sTLSIsMainThread.initialized();
+}
 
 bool
 NS_IsMainThread()
@@ -96,6 +105,13 @@ NS_IMPL_CI_INTERFACE_GETTER(nsThreadManager, nsIThreadManager)
 
 //-----------------------------------------------------------------------------
 
+/*static*/ nsThreadManager&
+nsThreadManager::get()
+{
+  static nsThreadManager sInstance;
+  return sInstance;
+}
+
 nsresult
 nsThreadManager::Init()
 {
@@ -134,27 +150,11 @@ nsThreadManager::Init()
     mMainThread = Scheduler::Init(idlePeriod);
     startScheduler = true;
   } else {
-    using MainThreadQueueT = PrioritizedEventQueue<EventQueue>;
-
-    auto prioritized = MakeUnique<MainThreadQueueT>(MakeUnique<EventQueue>(),
-                                                    MakeUnique<EventQueue>(),
-                                                    MakeUnique<EventQueue>(),
-                                                    MakeUnique<EventQueue>(),
-                                                    idlePeriod.forget());
-
-    // Save a copy temporarily so we can set some state on it.
-    MainThreadQueueT* prioritizedRef = prioritized.get();
-    RefPtr<ThreadEventQueue<MainThreadQueueT>> queue =
-      new ThreadEventQueue<MainThreadQueueT>(Move(prioritized));
-
-    prioritizedRef->SetMutexRef(queue->MutexRef());
-
-    // Setup "main" thread
-    mMainThread = new nsThread(WrapNotNull(queue), nsThread::MAIN_THREAD, 0);
-
-#ifndef RELEASE_OR_BETA
-    prioritizedRef->SetNextIdleDeadlineRef(mMainThread->NextIdleDeadlineRef());
-#endif
+    if (XRE_IsContentProcess() && Scheduler::UseMultipleQueues()) {
+      mMainThread = CreateMainThread<ThreadEventQueue<PrioritizedEventQueue<LabeledEventQueue>>, LabeledEventQueue>(idlePeriod);
+    } else {
+      mMainThread = CreateMainThread<ThreadEventQueue<PrioritizedEventQueue<EventQueue>>, EventQueue>(idlePeriod);
+    }
   }
 
   nsresult rv = mMainThread->InitCurrentThread();

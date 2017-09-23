@@ -788,15 +788,20 @@ PK11PasswordPromptRunnable::RunOnTargetThread()
     return;
   }
 
-  NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(mSlot));
-  const char16_t* formatStrings[] = {
-    tokenName.get(),
-  };
   nsAutoString promptString;
-  rv = nssComponent->PIPBundleFormatStringFromName("CertPassPrompt",
-                                                   formatStrings,
-                                                   ArrayLength(formatStrings),
-                                                   promptString);
+  if (PK11_IsInternal(mSlot)) {
+    rv = nssComponent->GetPIPNSSBundleString("CertPassPromptDefault",
+                                             promptString);
+  } else {
+    NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(mSlot));
+    const char16_t* formatStrings[] = {
+      tokenName.get(),
+    };
+    rv = nssComponent->PIPBundleFormatStringFromName("CertPassPrompt",
+                                                     formatStrings,
+                                                     ArrayLength(formatStrings),
+                                                     promptString);
+  }
   if (NS_FAILED(rv)) {
     return;
   }
@@ -851,6 +856,9 @@ getKeaGroupName(uint32_t aKeaGroup)
       break;
     case ssl_grp_none:
       groupName = NS_LITERAL_CSTRING("none");
+      break;
+    case ssl_grp_ffdhe_custom:
+      groupName = NS_LITERAL_CSTRING("custom");
       break;
     // All other groups are not enabled in Firefox. See namedGroups in
     // nsNSSIOLayer.cpp.
@@ -1182,13 +1190,6 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     return;
   }
 
-  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
-  MOZ_ASSERT(peerCertChain,
-             "SSL_PeerCertificateChain failed in TLS handshake callback?");
-  if (!peerCertChain) {
-    return;
-  }
-
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   MOZ_ASSERT(certVerifier,
              "Certificate verifier uninitialized in TLS handshake callback?");
@@ -1230,7 +1231,6 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     infoObject,
     infoObject->GetHostName(),
     unusedBuiltChain,
-    &peerCertChain,
     saveIntermediates,
     flags,
     infoObject->GetOriginAttributes(),

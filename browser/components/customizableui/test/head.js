@@ -27,6 +27,8 @@ var {synthesizeDragStart, synthesizeDrop} = EventUtils;
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const kTabEventFailureTimeoutInMs = 20000;
 
+const kForceOverflowWidthPx = 300;
+
 function createDummyXULButton(id, label, win = window) {
   let btn = document.createElementNS(kNSXUL, "toolbarbutton");
   btn.id = id;
@@ -188,10 +190,8 @@ function endCustomizing(aWindow = window) {
   if (aWindow.document.documentElement.getAttribute("customizing") != "true") {
     return true;
   }
-  Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", true);
   return new Promise(resolve => {
     function onCustomizationEnds() {
-      Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", false);
       aWindow.gNavToolbox.removeEventListener("aftercustomization", onCustomizationEnds);
       resolve();
     }
@@ -205,11 +205,9 @@ function startCustomizing(aWindow = window) {
   if (aWindow.document.documentElement.getAttribute("customizing") == "true") {
     return null;
   }
-  Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", true);
   return new Promise(resolve => {
     function onCustomizing() {
       aWindow.gNavToolbox.removeEventListener("customizationready", onCustomizing);
-      Services.prefs.setBoolPref("browser.uiCustomization.disableAnimation", false);
       resolve();
     }
     aWindow.gNavToolbox.addEventListener("customizationready", onCustomizing);

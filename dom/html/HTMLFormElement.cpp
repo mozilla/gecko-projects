@@ -149,18 +149,12 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFormElement,
   tmp->mExpandoAndGeneration.OwnerUnlinked();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_ADDREF_INHERITED(HTMLFormElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
-
-
-// QueryInterface implementation for HTMLFormElement
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLFormElement)
-  NS_INTERFACE_TABLE_INHERITED(HTMLFormElement,
-                               nsIDOMHTMLFormElement,
-                               nsIForm,
-                               nsIWebProgressListener,
-                               nsIRadioGroupContainer)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLFormElement,
+                                             nsGenericHTMLElement,
+                                             nsIDOMHTMLFormElement,
+                                             nsIForm,
+                                             nsIWebProgressListener,
+                                             nsIRadioGroupContainer)
 
 // EventTarget
 void
@@ -802,14 +796,17 @@ HTMLFormElement::SubmitSubmission(HTMLFormSubmission* aFormSubmission)
                                        nullptr, doc);
 
     nsCOMPtr<nsIInputStream> postDataStream;
+    int64_t postDataStreamLength = -1;
     rv = aFormSubmission->GetEncodedSubmission(actionURI,
-                                               getter_AddRefs(postDataStream));
+                                               getter_AddRefs(postDataStream),
+                                               &postDataStreamLength);
     NS_ENSURE_SUBMIT_SUCCESS(rv);
 
     rv = linkHandler->OnLinkClickSync(this, actionURI,
                                       target.get(),
-                                      NullString(),
-                                      postDataStream, nullptr, false,
+                                      VoidString(),
+                                      postDataStream, postDataStreamLength,
+                                      nullptr, false,
                                       getter_AddRefs(docShell),
                                       getter_AddRefs(mSubmittingRequest));
     NS_ENSURE_SUBMIT_SUCCESS(rv);

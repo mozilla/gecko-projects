@@ -3,7 +3,6 @@ py3:
     description: Python 3 compatibility check
     include: ['.']
     exclude:
-        - addon-sdk/source
         - browser/app
         - browser/components
         - browser/extensions
@@ -36,7 +35,6 @@ py3:
         - testing/mochitest
         - testing/mozbase
         - testing/mozharness
-        - testing/talos
         - testing/tools/iceserver
         - testing/tps
         - testing/xpcshell

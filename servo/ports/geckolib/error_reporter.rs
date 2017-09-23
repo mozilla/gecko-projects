@@ -122,7 +122,8 @@ fn extract_error_param<'a>(err: ParseError<'a>) -> Option<ErrorString<'a>> {
 
 fn extract_value_error_param<'a>(err: ValueParseError<'a>) -> ErrorString<'a> {
     match err {
-        ValueParseError::InvalidColor(t) => ErrorString::UnexpectedToken(t),
+        ValueParseError::InvalidColor(t) |
+        ValueParseError::InvalidFilter(t) => ErrorString::UnexpectedToken(t),
     }
 }
 
@@ -139,6 +140,14 @@ fn extract_error_params<'a>(err: ParseError<'a>) -> Option<ErrorParams<'a>> {
             StyleParseError::PropertyDeclaration(
                 PropertyDeclarationParseError::InvalidValue(property, Some(e))))) =>
             (Some(ErrorString::Snippet(property.into())), Some(extract_value_error_param(e))),
+
+        CssParseError::Custom(SelectorParseError::Custom(
+            StyleParseError::MediaQueryExpectedFeatureName(ident))) =>
+            (Some(ErrorString::Ident(ident)), None),
+
+        CssParseError::Custom(SelectorParseError::Custom(
+            StyleParseError::ExpectedIdentifier(token))) =>
+            (Some(ErrorString::UnexpectedToken(token)), None),
 
         CssParseError::Custom(SelectorParseError::UnexpectedTokenInAttributeSelector(t)) |
         CssParseError::Custom(SelectorParseError::BadValueInAttr(t)) |
@@ -188,7 +197,8 @@ impl<'a> ErrorHelpers<'a> for ContextualParseError<'a> {
             ContextualParseError::InvalidRule(s, err) |
             ContextualParseError::UnsupportedRule(s, err) |
             ContextualParseError::UnsupportedViewportDescriptorDeclaration(s, err) |
-            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) =>
+            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) |
+            ContextualParseError::InvalidMediaRule(s, err) =>
                 (s.into(), err),
             ContextualParseError::InvalidCounterStyleWithoutSymbols(s) |
             ContextualParseError::InvalidCounterStyleNotEnoughSymbols(s) =>
@@ -221,6 +231,7 @@ impl<'a> ErrorHelpers<'a> for ContextualParseError<'a> {
                         PropertyDeclarationParseError::InvalidValue(_, ref err))))) => {
                 let prefix = match *err {
                     Some(ValueParseError::InvalidColor(_)) => Some(&b"PEColorNotColor\0"[..]),
+                    Some(ValueParseError::InvalidFilter(_)) => Some(&b"PEExpectedNoneOrURLOrFilterFunction\0"[..]),
                     _ => None,
                 };
                 return (prefix, b"PEValueParsingError\0", Action::Drop);
@@ -278,6 +289,30 @@ impl<'a> ErrorHelpers<'a> for ContextualParseError<'a> {
                     _ => None,
                 };
                 return (prefix, b"PEBadSelectorRSIgnored\0", Action::Nothing);
+            }
+            ContextualParseError::InvalidMediaRule(_, ref err) => {
+                let err: &[u8] = match *err {
+                    CssParseError::Custom(SelectorParseError::Custom(
+                            StyleParseError::ExpectedIdentifier(..))) => {
+                        b"PEGatherMediaNotIdent\0"
+                    },
+                    CssParseError::Custom(SelectorParseError::Custom(
+                            StyleParseError::MediaQueryExpectedFeatureName(..))) => {
+                        b"PEMQExpectedFeatureName\0"
+                    },
+                    CssParseError::Custom(SelectorParseError::Custom(
+                            StyleParseError::MediaQueryExpectedFeatureValue)) => {
+                        b"PEMQExpectedFeatureValue\0"
+                    },
+                    CssParseError::Custom(SelectorParseError::Custom(
+                            StyleParseError::RangedExpressionWithNoValue)) => {
+                        b"PEMQNoMinMaxWithoutValue\0"
+                    },
+                    _ => {
+                        b"PEDeclDropped\0"
+                    },
+                };
+                (err, Action::Nothing)
             }
             ContextualParseError::UnsupportedRule(..) =>
                 (b"PEDeclDropped\0", Action::Nothing),

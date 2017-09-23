@@ -52,7 +52,6 @@ var {
   defineLazyGetter,
   promiseDocumentLoaded,
   promiseEvent,
-  promiseFileContents,
   promiseObserved,
 } = ExtensionUtils;
 
@@ -416,10 +415,10 @@ class ProxyContextParent extends BaseContext {
     return this.sandbox;
   }
 
-  runSafe(...args) {
+  applySafe(callback, args) {
     // There's no need to clone when calling listeners for a proxied
     // context.
-    return this.runSafeWithoutClone(...args);
+    return this.applySafeWithoutClone(callback, args);
   }
 
   get xulBrowser() {
@@ -485,8 +484,7 @@ class ExtensionPageContextParent extends ProxyContextParent {
   // The window that contains this context. This may change due to moving tabs.
   get xulWindow() {
     let win = this.xulBrowser.ownerGlobal;
-    return win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDocShell)
-              .QueryInterface(Ci.nsIDocShellTreeItem).rootTreeItem
+    return win.document.docShell.rootTreeItem
               .QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
   }
 
@@ -1226,8 +1224,10 @@ function extensionNameFromURI(uri) {
 // Manages icon details for toolbar buttons in the |pageAction| and
 // |browserAction| APIs.
 let IconDetails = {
-  // WeakMap<Extension -> Map<url-string -> object>>
-  iconCache: new DefaultWeakMap(() => new DefaultMap(() => new Map())),
+  // WeakMap<Extension -> Map<url-string -> Map<iconType-string -> object>>>
+  iconCache: new DefaultWeakMap(() => {
+    return new DefaultMap(() => new DefaultMap(() => new Map()));
+  }),
 
   // Normalizes the various acceptable input formats into an object
   // with icon size as key and icon URL as value.
@@ -1248,7 +1248,8 @@ let IconDetails = {
       }
 
       let icons = this.iconCache.get(extension)
-                      .get(context && context.uri.spec);
+                      .get(context && context.uri.spec)
+                      .get(details.iconType);
 
       let icon = icons.get(key);
       if (!icon) {
@@ -1435,9 +1436,9 @@ StartupCache = {
   async _readData() {
     let result = new Map();
     try {
-      let data = await promiseFileContents(this.file);
+      let {buffer} = await OS.File.read(this.file);
 
-      result = aomStartup.decodeBlob(data);
+      result = aomStartup.decodeBlob(buffer);
     } catch (e) {
       if (!e.becauseNoSuchFile) {
         Cu.reportError(e);

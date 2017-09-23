@@ -25,13 +25,13 @@ function WebRequestEventManager(context, eventName) {
 
       // Check hosts permissions for both the resource being requested,
       const hosts = context.extension.whiteListedHosts;
-      if (!hosts.matches(Services.io.newURI(data.url))) {
+      if (!hosts.matches(data.URI)) {
         return;
       }
       // and the origin that is loading the resource.
       const origin = data.documentUrl;
       const own = origin && origin.startsWith(context.extension.getURL());
-      if (origin && !own && !hosts.matches(Services.io.newURI(origin))) {
+      if (origin && !own && !hosts.matches(data.documentURI)) {
         return;
       }
 
@@ -46,37 +46,10 @@ function WebRequestEventManager(context, eventName) {
         return;
       }
 
-      let data2 = {
-        requestId: data.requestId,
-        url: data.url,
-        originUrl: data.originUrl,
-        documentUrl: data.documentUrl,
-        method: data.method,
-        tabId: browserData.tabId,
-        type: data.type,
-        timeStamp: Date.now(),
-        frameId: data.windowId,
-        parentFrameId: data.parentWindowId,
-      };
+      let event = data.serialize(eventName);
+      event.tabId = browserData.tabId;
 
-      const maybeCached = ["onResponseStarted", "onBeforeRedirect", "onCompleted", "onErrorOccurred"];
-      if (maybeCached.includes(eventName)) {
-        data2.fromCache = !!data.fromCache;
-      }
-
-      if ("ip" in data) {
-        data2.ip = data.ip;
-      }
-
-      let optional = ["requestHeaders", "responseHeaders", "statusCode", "statusLine", "error", "redirectUrl",
-                      "requestBody", "scheme", "realm", "isProxy", "challenger", "proxyInfo"];
-      for (let opt of optional) {
-        if (opt in data) {
-          data2[opt] = data[opt];
-        }
-      }
-
-      return fire.sync(data2);
+      return fire.sync(event);
     };
 
     let filter2 = {};

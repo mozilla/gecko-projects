@@ -19,6 +19,7 @@ class CompositorWidget;
 namespace wr {
 class DisplayListBuilder;
 class ResourceUpdateQueue;
+class IpcResourceUpdateQueue;
 }
 
 namespace layers {
@@ -65,9 +66,11 @@ public:
   void AddWebRenderParentCommand(const WebRenderParentCommand& aCmd);
   void AddWebRenderParentCommands(const nsTArray<WebRenderParentCommand>& aCommands);
 
-  void UpdateResources(wr::ResourceUpdateQueue& aResources);
+  void UpdateResources(wr::IpcResourceUpdateQueue& aResources);
   bool BeginTransaction(const  gfx::IntSize& aSize);
-  void EndTransaction(wr::DisplayListBuilder &aBuilder, const gfx::IntSize& aSize,
+  void EndTransaction(wr::DisplayListBuilder &aBuilder,
+                      wr::IpcResourceUpdateQueue& aResources,
+                      const gfx::IntSize& aSize,
                       bool aIsSync, uint64_t aTransactionId,
                       const WebRenderScrollData& aScrollData,
                       const mozilla::TimeStamp& aTxnStartTime);
@@ -113,7 +116,8 @@ public:
   void PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<gfx::Glyph>& aGlyphs,
                   gfx::ScaledFont* aFont, const gfx::Color& aColor,
                   const StackingContextHelper& aSc,
-                  const LayerRect& aBounds, const LayerRect& aClip);
+                  const LayerRect& aBounds, const LayerRect& aClip,
+                  bool aBackfaceVisible);
 
   wr::FontInstanceKey GetFontKeyForScaledFont(gfx::ScaledFont* aScaledFont);
 
@@ -122,6 +126,8 @@ public:
 
   void BeginClearCachedResources();
   void EndClearCachedResources();
+
+  ipc::IShmemAllocator* GetShmemAllocator();
 
 private:
   friend class CompositorBridgeChild;

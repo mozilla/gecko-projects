@@ -7,7 +7,6 @@ obj*/**
 # We ignore all these directories by default, until we get them enabled.
 # If you are enabling a directory, please add directory specific exclusions
 # below.
-addon-sdk/**
 chrome/**
 config/**
 docshell/**
@@ -98,7 +97,6 @@ devtools/client/performance/components/test/test_jit_optimizations_01.html
 devtools/client/projecteditor/**
 devtools/client/responsive.html/test/browser/touch.html
 devtools/client/responsivedesign/**
-!devtools/client/responsivedesign/responsivedesign.jsm
 devtools/client/scratchpad/**
 devtools/client/shadereditor/**
 devtools/client/shared/*.jsm

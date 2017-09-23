@@ -19,6 +19,7 @@ const CONTAINER_PREF_INSTALL_DEFAULTS = {
   "privacy.userContext.longPressBehavior": 2,
   "privacy.userContext.ui.enabled": true,
   "privacy.usercontext.about_newtab_segregation.enabled": true,
+  "privacy.userContext.extension": undefined,
 };
 
 const CONTAINERS_ENABLED_SETTING_NAME = "privacy.containers";
@@ -76,6 +77,12 @@ const convertIdentity = identity => {
   return result;
 };
 
+const checkAPIEnabled = () => {
+  if (!containersEnabled) {
+    throw new ExtensionError("Contextual identities are currently disabled");
+  }
+};
+
 const convertIdentityFromObserver = wrappedIdentity => {
   let identity = wrappedIdentity.wrappedJSObject;
   let iconUrl, colorCode;
@@ -102,8 +109,10 @@ ExtensionPreferencesManager.addSetting(CONTAINERS_ENABLED_SETTING_NAME, {
   prefNames: Object.keys(CONTAINER_PREF_INSTALL_DEFAULTS),
 
   setCallback(value) {
-    if (value === true) {
-      return CONTAINER_PREF_INSTALL_DEFAULTS;
+    if (value !== true) {
+      return Object.assign(CONTAINER_PREF_INSTALL_DEFAULTS, {
+        "privacy.userContext.extension": value,
+      });
     }
 
     let prefs = {};
@@ -119,7 +128,7 @@ this.contextualIdentities = class extends ExtensionAPI {
     let {extension} = this;
 
     if (extension.hasPermission("contextualIdentities")) {
-      ExtensionPreferencesManager.setSetting(extension, CONTAINERS_ENABLED_SETTING_NAME, true);
+      ExtensionPreferencesManager.setSetting(extension, CONTAINERS_ENABLED_SETTING_NAME, extension.id);
     }
   }
 
@@ -127,11 +136,10 @@ this.contextualIdentities = class extends ExtensionAPI {
     let self = {
       contextualIdentities: {
         async get(cookieStoreId) {
+          checkAPIEnabled();
           let containerId = getContainerForCookieStoreId(cookieStoreId);
           if (!containerId) {
-            return Promise.reject({
-              message: `Invalid contextual identitiy: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Invalid contextual identitiy: ${cookieStoreId}`);
           }
 
           let identity = ContextualIdentityService.getPublicIdentityFromId(containerId);
@@ -139,6 +147,7 @@ this.contextualIdentities = class extends ExtensionAPI {
         },
 
         async query(details) {
+          checkAPIEnabled();
           let identities = [];
           ContextualIdentityService.getPublicIdentities().forEach(identity => {
             if (details.name &&
@@ -163,19 +172,16 @@ this.contextualIdentities = class extends ExtensionAPI {
           return convertIdentity(identity);
         },
 
-        update(cookieStoreId, details) {
+        async update(cookieStoreId, details) {
+          checkAPIEnabled();
           let containerId = getContainerForCookieStoreId(cookieStoreId);
           if (!containerId) {
-            return Promise.reject({
-              message: `Invalid contextual identitiy: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Invalid contextual identitiy: ${cookieStoreId}`);
           }
 
           let identity = ContextualIdentityService.getPublicIdentityFromId(containerId);
           if (!identity) {
-            return Promise.reject({
-              message: `Invalid contextual identitiy: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Invalid contextual identitiy: ${cookieStoreId}`);
           }
 
           if (details.name !== null) {
@@ -193,36 +199,29 @@ this.contextualIdentities = class extends ExtensionAPI {
           if (!ContextualIdentityService.update(identity.userContextId,
                                                 identity.name, identity.icon,
                                                 identity.color)) {
-            return Promise.reject({
-              message: `Contextual identitiy failed to update: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Contextual identitiy failed to update: ${cookieStoreId}`);
           }
 
           return convertIdentity(identity);
         },
 
         async remove(cookieStoreId) {
+          checkAPIEnabled();
           let containerId = getContainerForCookieStoreId(cookieStoreId);
           if (!containerId) {
-            return Promise.reject({
-              message: `Invalid contextual identitiy: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Invalid contextual identitiy: ${cookieStoreId}`);
           }
 
           let identity = ContextualIdentityService.getPublicIdentityFromId(containerId);
           if (!identity) {
-            return Promise.reject({
-              message: `Invalid contextual identitiy: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Invalid contextual identitiy: ${cookieStoreId}`);
           }
 
           // We have to create the identity object before removing it.
           let convertedIdentity = convertIdentity(identity);
 
           if (!ContextualIdentityService.remove(identity.userContextId)) {
-            return Promise.reject({
-              message: `Contextual identitiy failed to remove: ${cookieStoreId}`,
-            });
+            throw new ExtensionError(`Contextual identitiy failed to remove: ${cookieStoreId}`);
           }
 
           return convertedIdentity;

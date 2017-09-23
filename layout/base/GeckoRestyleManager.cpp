@@ -28,7 +28,7 @@
 #include "nsStyleSet.h"
 #include "nsStyleUtil.h"
 #include "nsCSSFrameConstructor.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
 #include "nsAnimationManager.h"
@@ -224,8 +224,7 @@ GeckoRestyleManager::RestyleElement(Element*               aElement,
   if (aMinHint & nsChangeHint_ReconstructFrame) {
     FrameConstructor()->RecreateFramesForContent(
       aElement,
-      nsCSSFrameConstructor::InsertionKind::Sync,
-      nsCSSFrameConstructor::REMOVE_FOR_RECONSTRUCTION);
+      nsCSSFrameConstructor::InsertionKind::Sync);
   } else if (aPrimaryFrame) {
     ComputeAndProcessStyleChange(aPrimaryFrame, aMinHint, aRestyleTracker,
                                  aRestyleHint, aRestyleHintData);
@@ -302,7 +301,7 @@ GeckoRestyleManager::ContentStateChanged(nsIContent* aContent,
     pseudoType = primaryFrame->StyleContext()->GetPseudoType();
   }
 
-  StyleSetHandle styleSet = PresContext()->StyleSet();
+  nsStyleSet* styleSet = PresContext()->StyleSet()->AsGecko();
   MOZ_ASSERT(styleSet);
 
   nsRestyleHint restyleHint;

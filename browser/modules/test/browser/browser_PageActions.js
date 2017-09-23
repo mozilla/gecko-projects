@@ -26,7 +26,7 @@ add_task(async function init() {
 // thoroughly checks most of the action's properties, methods, and DOM nodes, so
 // it's not necessary to do that in general in other test tasks.
 add_task(async function simple() {
-  let iconURL = "chrome://browser/skin/email-link.svg";
+  let iconURL = "chrome://browser/skin/mail.svg";
   let id = "test-simple";
   let nodeAttributes = {
     "test-attr": "test attr value",
@@ -109,6 +109,9 @@ add_task(async function simple() {
   Assert.deepEqual(PageActions.actionForID(action.id), action,
                    "actionForID should be action");
 
+  Assert.ok(PageActions._persistedActions.ids.includes(action.id),
+            "PageActions should record action in its list of seen actions");
+
   // The action's panel button should have been created.
   let panelButtonNode = document.getElementById(panelButtonID);
   Assert.notEqual(panelButtonNode, null, "panelButtonNode");
@@ -159,6 +162,16 @@ add_task(async function simple() {
                  action.nodeAttributes[name],
                  "Equal attribute: " + name);
   }
+
+  // The button should have been inserted before the bookmark star.
+  Assert.notEqual(urlbarButtonNode.nextSibling, null, "Should be a next node");
+  Assert.equal(
+    urlbarButtonNode.nextSibling.id,
+    PageActions.actionForID(PageActions.ACTION_ID_BOOKMARK).urlbarIDOverride,
+    "Next node should be the bookmark star"
+  );
+
+  // Click the urlbar button.
   onCommandExpectedButtonID = urlbarButtonID;
   EventUtils.synthesizeMouseAtCenter(urlbarButtonNode, {});
   Assert.equal(onCommandCallCount, 2, "onCommandCallCount should be inc'ed");
@@ -168,6 +181,29 @@ add_task(async function simple() {
   action.title = newTitle;
   Assert.equal(action.title, newTitle, "New title");
   Assert.equal(panelButtonNode.getAttribute("label"), action.title, "New label");
+
+  // Now that shownInUrlbar has been toggled, make sure that it sticks across
+  // app restarts.  Simulate that by "unregistering" the action (not by removing
+  // it, which is more permanent) and then registering it again.
+
+  // unregister
+  PageActions._actionsByID.delete(action.id);
+  let index = PageActions._nonBuiltInActions.findIndex(a => a.id == action.id);
+  Assert.ok(index >= 0, "Action should be in _nonBuiltInActions to begin with");
+  PageActions._nonBuiltInActions.splice(index, 1);
+
+  // register again
+  PageActions._registerAction(action);
+
+  // check relevant properties
+  Assert.ok(PageActions._persistedActions.ids.includes(action.id),
+            "PageActions should have 'seen' the action");
+  Assert.ok(PageActions._persistedActions.idsInUrlbar.includes(action.id),
+            "idsInUrlbar should still include the action");
+  Assert.ok(action.shownInUrlbar,
+            "shownInUrlbar should still be true");
+  Assert.ok(action._shownInUrlbar,
+            "_shownInUrlbar should still be true, for good measure");
 
   // Remove the action.
   action.remove();
@@ -180,6 +216,9 @@ add_task(async function simple() {
                    "Actions should go back to initial");
   Assert.equal(PageActions.actionForID(action.id), null,
                "actionForID should be null");
+
+  Assert.ok(!PageActions._persistedActions.ids.includes(action.id),
+            "PageActions should remove action from its list of seen actions");
 
   // The separator between the built-in actions and non-built-in actions should
   // be gone now, too.
@@ -255,7 +294,7 @@ add_task(async function withSubview() {
   };
 
   let action = PageActions.addAction(new PageActions.Action({
-    iconURL: "chrome://browser/skin/email-link.svg",
+    iconURL: "chrome://browser/skin/mail.svg",
     id,
     shownInUrlbar: true,
     subview,
@@ -316,6 +355,14 @@ add_task(async function withSubview() {
   // The action's urlbar button should have been created.
   let urlbarButtonNode = document.getElementById(urlbarButtonID);
   Assert.notEqual(urlbarButtonNode, null, "urlbarButtonNode");
+
+  // The button should have been inserted before the bookmark star.
+  Assert.notEqual(urlbarButtonNode.nextSibling, null, "Should be a next node");
+  Assert.equal(
+    urlbarButtonNode.nextSibling.id,
+    PageActions.actionForID(PageActions.ACTION_ID_BOOKMARK).urlbarIDOverride,
+    "Next node should be the bookmark star"
+  );
 
   // Open the panel, click the action's button, click the subview's first
   // button.
@@ -390,7 +437,7 @@ add_task(async function withIframe() {
   let urlbarButtonID = BrowserPageActions._urlbarButtonNodeIDForActionID(id);
 
   let action = PageActions.addAction(new PageActions.Action({
-    iconURL: "chrome://browser/skin/email-link.svg",
+    iconURL: "chrome://browser/skin/mail.svg",
     id,
     shownInUrlbar: true,
     title: "Test iframe",
@@ -437,6 +484,14 @@ add_task(async function withIframe() {
   // The action's urlbar button should have been created.
   let urlbarButtonNode = document.getElementById(urlbarButtonID);
   Assert.notEqual(urlbarButtonNode, null, "urlbarButtonNode");
+
+  // The button should have been inserted before the bookmark star.
+  Assert.notEqual(urlbarButtonNode.nextSibling, null, "Should be a next node");
+  Assert.equal(
+    urlbarButtonNode.nextSibling.id,
+    PageActions.actionForID(PageActions.ACTION_ID_BOOKMARK).urlbarIDOverride,
+    "Next node should be the bookmark star"
+  );
 
   // Open the panel, click the action's button.
   await promisePageActionPanelOpen();
@@ -654,6 +709,7 @@ add_task(async function multipleNonBuiltInOrdering() {
   );
 });
 
+
 // Makes sure the panel is correctly updated when a non-built-in action is
 // added before the built-in actions; and when all built-in actions are removed
 // and added back.
@@ -773,20 +829,21 @@ add_task(async function urlbarOrderNewWindow() {
     }));
   });
 
-  // Make sure PageActions knows they're appended to the urlbar actions.
+  // Make sure PageActions knows they're inserted before the bookmark action in
+  // the urlbar.
   Assert.deepEqual(
     PageActions._persistedActions.idsInUrlbar.slice(
-      PageActions._persistedActions.idsInUrlbar.length - actions.length
+      PageActions._persistedActions.idsInUrlbar.length - (actions.length + 1)
     ),
-    actions.map(a => a.id),
-    "PageActions._persistedActions.idsInUrlbar has new actions appended"
+    actions.map(a => a.id).concat([PageActions.ACTION_ID_BOOKMARK]),
+    "PageActions._persistedActions.idsInUrlbar has new actions inserted"
   );
   Assert.deepEqual(
     PageActions.actionsInUrlbar.slice(
-      PageActions.actionsInUrlbar.length - actions.length
+      PageActions.actionsInUrlbar.length - (actions.length + 1)
     ).map(a => a.id),
-    actions.map(a => a.id),
-    "PageActions.actionsInUrlbar has new actions appended"
+    actions.map(a => a.id).concat([PageActions.ACTION_ID_BOOKMARK]),
+    "PageActions.actionsInUrlbar has new actions inserted"
   );
 
   // Reach into _persistedActions to move the new actions to the front of the
@@ -794,7 +851,7 @@ add_task(async function urlbarOrderNewWindow() {
   // before IDs are correctly non-null when the urlbar nodes are inserted in the
   // new window below.
   PageActions._persistedActions.idsInUrlbar.splice(
-    PageActions._persistedActions.idsInUrlbar.length - actions.length,
+    PageActions._persistedActions.idsInUrlbar.length - (actions.length + 1),
     actions.length
   );
   for (let i = 0; i < actions.length; i++) {
@@ -836,6 +893,85 @@ add_task(async function urlbarOrderNewWindow() {
   for (let action of actions) {
     action.remove();
   }
+});
+
+
+// Stores version-0 (unversioned actually) persisted actions and makes sure that
+// migrating to version 1 works.
+add_task(async function migrate1() {
+  // Add the bookmark action first to make sure it ends up last after migration.
+  // Also include a non-default action (copyURL) to make sure we're not
+  // accidentally testing default behavior.
+  let ids = [
+    PageActions.ACTION_ID_BOOKMARK,
+    "pocket",
+    "copyURL",
+  ];
+  let persisted = ids.reduce((memo, id) => {
+    memo.ids[id] = true;
+    memo.idsInUrlbar.push(id);
+    return memo;
+  }, { ids: {}, idsInUrlbar: [] });
+
+  Services.prefs.setStringPref(
+    PageActions.PREF_PERSISTED_ACTIONS,
+    JSON.stringify(persisted)
+  );
+
+  // Migrate.
+  PageActions._loadPersistedActions();
+
+  Assert.equal(PageActions._persistedActions.version, 1, "Correct version");
+
+  // Need to set copyURL's _shownInUrlbar.  It won't be set since it's false by
+  // default and we reached directly into persisted storage above.
+  PageActions.actionForID("copyURL")._shownInUrlbar = true;
+
+  // expected order
+  let orderedIDs = [
+    "pocket",
+    "copyURL",
+    PageActions.ACTION_ID_BOOKMARK,
+  ];
+
+  // Check the ordering.
+  Assert.deepEqual(
+    PageActions._persistedActions.idsInUrlbar,
+    orderedIDs,
+    "PageActions._persistedActions.idsInUrlbar has right order"
+  );
+  Assert.deepEqual(
+    PageActions.actionsInUrlbar.map(a => a.id),
+    orderedIDs,
+    "PageActions.actionsInUrlbar has right order"
+  );
+
+  // Open a new window.
+  let win = await BrowserTestUtils.openNewBrowserWindow();
+  await BrowserTestUtils.openNewForegroundTab({
+    gBrowser: win.gBrowser,
+    url: "http://example.com/",
+  });
+
+  // Collect its urlbar nodes.
+  let actualUrlbarNodeIDs = [];
+  for (let node = win.BrowserPageActions.mainButtonNode.nextSibling;
+       node;
+       node = node.nextSibling) {
+    actualUrlbarNodeIDs.push(node.id);
+  }
+
+  // Now check that they're in the right order.
+  Assert.deepEqual(
+    actualUrlbarNodeIDs,
+    orderedIDs.map(id => win.BrowserPageActions._urlbarButtonNodeIDForActionID(id)),
+    "Expected actions in new window's urlbar"
+  );
+
+  // Done, clean up.
+  await BrowserTestUtils.closeWindow(win);
+  Services.prefs.clearUserPref(PageActions.PREF_PERSISTED_ACTIONS);
+  PageActions.actionForID("copyURL")._shownInUrlbar = false;
 });
 
 
@@ -889,12 +1025,24 @@ function promisePanelEvent(panelIDOrNode, eventType) {
 }
 
 function promisePageActionViewShown() {
-  return new Promise(resolve => {
-    BrowserPageActions.panelNode.addEventListener("ViewShown", (event) => {
-      let target = event.originalTarget;
-      window.setTimeout(() => {
-        resolve(target);
-      }, 5000);
-    }, { once: true });
+  let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                  .getInterface(Ci.nsIDOMWindowUtils);
+  info("promisePageActionViewShown waiting for ViewShown");
+  return BrowserTestUtils.waitForEvent(BrowserPageActions.panelNode, "ViewShown").then(async event => {
+    let panelViewNode = event.originalTarget;
+    // Wait for the subview to be really truly shown by making sure there's at
+    // least one child with non-zero bounds.
+    info("promisePageActionViewShown waiting for a child node to be visible");
+    await BrowserTestUtils.waitForCondition(() => {
+      let bodyNode = panelViewNode.firstChild;
+      for (let childNode of bodyNode.childNodes) {
+        let bounds = dwu.getBoundsWithoutFlushing(childNode);
+        if (bounds.width > 0 && bounds.height > 0) {
+          return true;
+        }
+      }
+      return false;
+    });
+    return panelViewNode;
   });
 }

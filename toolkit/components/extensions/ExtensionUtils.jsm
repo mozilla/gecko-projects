@@ -6,10 +6,7 @@
 
 this.EXPORTED_SYMBOLS = ["ExtensionUtils"];
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cu = Components.utils;
-const Cr = Components.results;
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -31,15 +28,10 @@ XPCOMUtils.defineLazyGetter(this, "console", getConsole);
 const appinfo = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
 
 let nextId = 0;
-XPCOMUtils.defineLazyGetter(this, "uniqueProcessID", () => appinfo.uniqueProcessID);
+const uniqueProcessID = String(appinfo.uniqueProcessID);
 
 function getUniqueId() {
   return `${nextId++}-${uniqueProcessID}`;
-}
-
-async function promiseFileContents(path) {
-  let res = await OS.File.read(path);
-  return res.buffer;
 }
 
 
@@ -63,55 +55,11 @@ function runSafeSyncWithoutClone(f, ...args) {
   }
 }
 
-// Run a function and report exceptions.
-function runSafeWithoutClone(f, ...args) {
-  if (typeof(f) != "function") {
-    dump(`Extension error: expected function\n${filterStack(Error())}`);
-    return;
-  }
-
-  Promise.resolve().then(() => {
-    runSafeSyncWithoutClone(f, ...args);
-  });
-}
-
-// Run a function, cloning arguments into context.cloneScope, and
-// report exceptions. |f| is expected to be in context.cloneScope.
-function runSafeSync(context, f, ...args) {
-  if (context.unloaded) {
-    Cu.reportError("runSafeSync called after context unloaded");
-    return;
-  }
-
-  try {
-    args = Cu.cloneInto(args, context.cloneScope);
-  } catch (e) {
-    Cu.reportError(e);
-    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${filterStack(Error())}`);
-  }
-  return runSafeSyncWithoutClone(f, ...args);
-}
-
-// Run a function, cloning arguments into context.cloneScope, and
-// report exceptions. |f| is expected to be in context.cloneScope.
-function runSafe(context, f, ...args) {
-  try {
-    args = Cu.cloneInto(args, context.cloneScope);
-  } catch (e) {
-    Cu.reportError(e);
-    dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${filterStack(Error())}`);
-  }
-  if (context.unloaded) {
-    dump(`runSafe failure: context is already unloaded ${filterStack(new Error())}\n`);
-    return undefined;
-  }
-  return runSafeWithoutClone(f, ...args);
-}
-
 // Return true if the given value is an instance of the given
 // native type.
 function instanceOf(value, type) {
-  return {}.toString.call(value) == `[object ${type}]`;
+  return (value && typeof value === "object" &&
+          ChromeUtils.getClassName(value) === type);
 }
 
 /**
@@ -119,30 +67,38 @@ function instanceOf(value, type) {
  * constructor if one is not present.
  */
 class DefaultWeakMap extends WeakMap {
-  constructor(defaultConstructor, init) {
+  constructor(defaultConstructor = undefined, init = undefined) {
     super(init);
-    this.defaultConstructor = defaultConstructor;
+    if (defaultConstructor) {
+      this.defaultConstructor = defaultConstructor;
+    }
   }
 
   get(key) {
-    if (!this.has(key)) {
-      this.set(key, this.defaultConstructor(key));
+    let value = super.get(key);
+    if (value === undefined && !this.has(key)) {
+      value = this.defaultConstructor(key);
+      this.set(key, value);
     }
-    return super.get(key);
+    return value;
   }
 }
 
 class DefaultMap extends Map {
-  constructor(defaultConstructor, init) {
+  constructor(defaultConstructor = undefined, init = undefined) {
     super(init);
-    this.defaultConstructor = defaultConstructor;
+    if (defaultConstructor) {
+      this.defaultConstructor = defaultConstructor;
+    }
   }
 
   get(key) {
-    if (!this.has(key)) {
-      this.set(key, this.defaultConstructor(key));
+    let value = super.get(key);
+    if (value === undefined && !this.has(key)) {
+      value = this.defaultConstructor(key);
+      this.set(key, value);
     }
-    return super.get(key);
+    return value;
   }
 }
 
@@ -187,11 +143,13 @@ class EventEmitter {
    *        The listener to call when events are emitted.
    */
   on(event, listener) {
-    if (!this[LISTENERS].has(event)) {
-      this[LISTENERS].set(event, new Set());
+    let listeners = this[LISTENERS].get(event);
+    if (!listeners) {
+      listeners = new Set();
+      this[LISTENERS].set(event, listeners);
     }
 
-    this[LISTENERS].get(event).add(listener);
+    listeners.add(listener);
   }
 
   /**
@@ -203,9 +161,8 @@ class EventEmitter {
    *        The listener function to remove.
    */
   off(event, listener) {
-    if (this[LISTENERS].has(event)) {
-      let set = this[LISTENERS].get(event);
-
+    let set = this[LISTENERS].get(event);
+    if (set) {
       set.delete(listener);
       set.delete(this[ONCE_MAP].get(listener));
       if (!set.size) {
@@ -304,7 +261,7 @@ class LimitedSet extends Set {
   }
 
   add(item) {
-    if (!this.has(item) && this.size >= this.limit + this.slop) {
+    if (this.size >= this.limit + this.slop && !this.has(item)) {
       this.truncate(this.limit - 1);
     }
     super.add(item);
@@ -346,9 +303,7 @@ function promiseDocumentLoaded(doc) {
   }
 
   return new Promise(resolve => {
-    doc.defaultView.addEventListener("load", function(event) {
-      resolve(doc);
-    }, {once: true});
+    doc.defaultView.addEventListener("load", () => resolve(doc), {once: true});
   });
 }
 
@@ -489,11 +444,7 @@ class MessageManagerProxy {
     this.listeners = new DefaultMap(() => new Map());
 
     if (target instanceof Ci.nsIMessageSender) {
-      Object.defineProperty(this, "messageManager", {
-        value: target,
-        configurable: true,
-        writable: true,
-      });
+      this.messageManager = target;
     } else {
       this.addListeners(target);
     }
@@ -511,9 +462,8 @@ class MessageManagerProxy {
     if (this.eventTarget) {
       this.removeListeners(this.eventTarget);
       this.eventTarget = null;
-    } else {
-      this.messageManager = null;
     }
+    this.messageManager = null;
   }
 
   /**
@@ -541,9 +491,6 @@ class MessageManagerProxy {
    *        may change during the life of the proxy object, so should
    *        not be stored elsewhere.
    */
-  get messageManager() {
-    return this.eventTarget && this.eventTarget.messageManager;
-  }
 
   /**
    * Sends a message on the proxied message manager.
@@ -622,11 +569,12 @@ class MessageManagerProxy {
   addListeners(target) {
     target.addEventListener("SwapDocShells", this);
 
-    for (let {message, listener, listenWhenClosed} of this.iterListeners()) {
-      target.addMessageListener(message, listener, listenWhenClosed);
-    }
-
     this.eventTarget = target;
+    this.messageManager = target.messageManager;
+
+    for (let {message, listener, listenWhenClosed} of this.iterListeners()) {
+      this.messageManager.addMessageListener(message, listener, listenWhenClosed);
+    }
   }
 
   /**
@@ -640,7 +588,7 @@ class MessageManagerProxy {
     target.removeEventListener("SwapDocShells", this);
 
     for (let {message, listener} of this.iterListeners()) {
-      target.removeMessageListener(message, listener);
+      this.messageManager.removeMessageListener(message, listener);
     }
   }
 
@@ -691,12 +639,8 @@ this.ExtensionUtils = {
   promiseDocumentLoaded,
   promiseDocumentReady,
   promiseEvent,
-  promiseFileContents,
   promiseObserved,
-  runSafe,
-  runSafeSync,
   runSafeSyncWithoutClone,
-  runSafeWithoutClone,
   withHandlingUserInput,
   DefaultMap,
   DefaultWeakMap,

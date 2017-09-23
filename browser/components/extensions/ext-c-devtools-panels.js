@@ -60,12 +60,6 @@ class ChildDevToolsPanel extends ExtensionUtils.EventEmitter {
   }
 
   receiveMessage({name, data}) {
-    // Filter out any message received while the panel context do not yet
-    // exist.
-    if (!this.panelContext || !this.panelContext.contentWindow) {
-      return;
-    }
-
     // Filter out any message that is not related to the id of this
     // toolbox panel.
     if (!data || data.toolboxPanelId !== this.id) {
@@ -74,6 +68,11 @@ class ChildDevToolsPanel extends ExtensionUtils.EventEmitter {
 
     switch (name) {
       case "Extension:DevToolsPanelShown":
+        // Filter out *Shown message received while the panel context do not yet
+        // exist.
+        if (!this.panelContext || !this.panelContext.contentWindow) {
+          return;
+        }
         this.onParentPanelShown();
         break;
       case "Extension:DevToolsPanelHidden":
@@ -220,6 +219,15 @@ class ChildDevToolsInspectorSidebar extends ExtensionUtils.EventEmitter {
           return context.childManager.callParentAsyncFunction(
             "devtools.panels.elements.Sidebar.setObject",
             [id, jsonObject, rootTitle]
+          );
+        });
+      },
+
+      setExpression(evalExpression, rootTitle) {
+        return context.cloneScope.Promise.resolve().then(() => {
+          return context.childManager.callParentAsyncFunction(
+            "devtools.panels.elements.Sidebar.setExpression",
+            [id, evalExpression, rootTitle]
           );
         });
       },

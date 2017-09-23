@@ -47,6 +47,7 @@ import java.net.URISyntaxException;
     private String[] pageDomainTextReference = new String[] { "" };
 
     public BottomSheetContextMenu(final Context context,
+                                  final View anchor,
                                   final ActivityStreamTelemetry.Extras.Builder telemetryExtraBuilder,
                                   final MenuMode mode,
                                   final WebpageModel item,
@@ -56,6 +57,7 @@ import java.net.URISyntaxException;
                                   final int tilesWidth, final int tilesHeight) {
 
         super(context,
+                anchor,
                 telemetryExtraBuilder,
                 mode,
                 item,
@@ -231,7 +233,7 @@ import java.net.URISyntaxException;
 
         private UpdatePageDomainAsyncTask(final Context context, final TextView pageDomainView, final URI uri,
                 final String[] pageDomainTextReference) {
-            super(context, uri, true, 0); // baseDomain.
+            super(context, uri, true, 1); // subdomain.domain.tld.
             this.pageDomainViewWeakReference = new WeakReference<>(pageDomainView);
             this.pageDomainTextReference = pageDomainTextReference;
         }

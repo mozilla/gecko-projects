@@ -94,7 +94,7 @@ var BrowserPageActions = {
    *         The action to place.
    */
   placeActionInPanel(action) {
-    let insertBeforeID = PageActions.nextActionID(action, PageActions.actions);
+    let insertBeforeID = PageActions.nextActionIDInPanel(action);
     let id = this._panelButtonNodeIDForActionID(action.id);
     let node = document.getElementById(id);
     if (!node) {
@@ -113,7 +113,6 @@ var BrowserPageActions = {
         action.subview.onPlaced(panelViewNode);
       }
     }
-    return node;
   },
 
   _makePanelButtonNodeForAction(action) {
@@ -242,6 +241,7 @@ var BrowserPageActions = {
       if (iframeNode) {
         action.onIframeHiding(iframeNode, panelNode);
       }
+      anchorNode.removeAttribute("open");
     }, { once: true });
 
     if (panelViewNode) {
@@ -253,6 +253,7 @@ var BrowserPageActions = {
     // panel.
     this.panelNode.hidePopup();
     panelNode.openPopup(anchorNode, "bottomcenter topright");
+    anchorNode.setAttribute("open", "true");
 
     if (iframeNode) {
       action.onIframeShown(iframeNode, panelNode);
@@ -300,8 +301,7 @@ var BrowserPageActions = {
    *         The action to place.
    */
   placeActionInUrlbar(action) {
-    let insertBeforeID =
-      PageActions.nextActionID(action, PageActions.actionsInUrlbar);
+    let insertBeforeID = PageActions.nextActionIDInUrlbar(action);
     let id = this._urlbarButtonNodeIDForActionID(action.id);
     let node = document.getElementById(id);
 
@@ -313,7 +313,7 @@ var BrowserPageActions = {
           node.remove();
         }
       }
-      return null;
+      return;
     }
 
     let newlyPlaced = false;
@@ -349,8 +349,6 @@ var BrowserPageActions = {
         }
       }
     }
-
-    return node;
   },
 
   _makeUrlbarButtonNode(action) {
@@ -561,7 +559,7 @@ var BrowserPageActions = {
    */
   mainButtonClicked(event) {
     event.stopPropagation();
-    if ((event.type == "click" && event.button != 0) ||
+    if ((event.type == "mousedown" && event.button != 0) ||
         (event.type == "keypress" && event.charCode != KeyEvent.DOM_VK_SPACE &&
          event.keyCode != KeyEvent.DOM_VK_RETURN)) {
       return;
@@ -597,6 +595,10 @@ var BrowserPageActions = {
     }
 
     this.panelNode.hidden = false;
+    this.panelNode.addEventListener("popuphiding", () => {
+      this.mainButtonNode.removeAttribute("open");
+    }, {once: true});
+    this.mainButtonNode.setAttribute("open", "true");
     this.panelNode.openPopup(this.mainButtonNode, {
       position: "bottomcenter topright",
       triggerEvent: event,

@@ -20,7 +20,6 @@
 #include "nsIDocument.h"
 #include "nsIDOMCustomEvent.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMHTMLObjectElement.h"
 #include "nsIExternalProtocolHandler.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIObjectFrame.h"
@@ -892,14 +891,14 @@ nsObjectLoadingContent::GetNestedParams(nsTArray<MozPluginParameter>& aParams)
       continue;
 
     nsCOMPtr<nsIContent> parent = element->GetParent();
-    nsCOMPtr<nsIDOMHTMLObjectElement> domObject;
-    while (!domObject && parent) {
-      domObject = do_QueryInterface(parent);
+    RefPtr<HTMLObjectElement> objectElement;
+    while (!objectElement && parent) {
+      objectElement = HTMLObjectElement::FromContent(parent);
       parent = parent->GetParent();
     }
 
-    if (domObject) {
-      parent = do_QueryInterface(domObject);
+    if (objectElement) {
+      parent = objectElement;
     } else {
       continue;
     }
@@ -1385,7 +1384,8 @@ nsObjectLoadingContent::MaybeRewriteYoutubeEmbed(nsIURI* aURI, nsIURI* aBaseURI,
   }
 
   // See if URL is referencing youtube
-  if (!currentBaseDomain.EqualsLiteral("youtube.com")) {
+  if (!currentBaseDomain.EqualsLiteral("youtube.com") &&
+      !currentBaseDomain.EqualsLiteral("youtube-nocookie.com")) {
     return;
   }
 
@@ -1401,10 +1401,6 @@ nsObjectLoadingContent::MaybeRewriteYoutubeEmbed(nsIURI* aURI, nsIURI* aBaseURI,
   nsAutoCString uri;
   nsresult rv = aURI->GetSpec(uri);
   if (NS_FAILED(rv)) {
-    return;
-  }
-
-  if (uri.Find("enablejsapi=1", true, 0, -1) != kNotFound) {
     return;
   }
 

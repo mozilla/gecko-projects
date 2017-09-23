@@ -13,6 +13,7 @@
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/PBrowserOrId.h"
 #include "mozilla/dom/PContentChild.h"
+#include "mozilla/StaticPtr.h"
 #include "nsAutoPtr.h"
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
@@ -601,7 +602,8 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
                                 const StructuredCloneData& aInitialData,
-                                nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) override;
+                                nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache,
+                                nsTArray<FontFamilyListEntry>&& aFontFamilyList) override;
 
   virtual mozilla::ipc::IPCResult
   RecvProvideAnonymousTemporaryFile(const uint64_t& aID, const FileDescOrError& aFD) override;
@@ -766,11 +768,14 @@ private:
   AppInfo mAppInfo;
 
   bool mIsForBrowser;
-  nsString mRemoteType = NullString();
+  nsString mRemoteType = VoidString();
   bool mIsAlive;
   nsString mProcessName;
 
   static ContentChild* sSingleton;
+
+  class ShutdownCanary;
+  static StaticAutoPtr<ShutdownCanary> sShutdownCanary;
 
   nsCOMPtr<nsIDomainPolicy> mPolicy;
   nsCOMPtr<nsITimer> mForceKillTimer;

@@ -6,6 +6,11 @@
 /* import-globals-from ../../../../toolkit/mozapps/preferences/fontbuilder.js */
 /* import-globals-from ../../../base/content/aboutDialog-appUpdater.js */
 
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionPreferencesManager",
+                                  "resource://gre/modules/ExtensionPreferencesManager.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
+                                  "resource://gre/modules/AddonManager.jsm");
+
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/Downloads.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
@@ -28,6 +33,9 @@ const PREF_PDFJS_DISABLED = "pdfjs.disabled";
 const TOPIC_PDFJS_HANDLER_CHANGED = "pdfjs:handlerChanged";
 
 const PREF_DISABLED_PLUGIN_TYPES = "plugin.disable_full_page_plugin_for_types";
+
+// Pref for when containers is being controlled
+const PREF_CONTAINERS_EXTENSION = "privacy.userContext.extension";
 
 // Preferences that affect which entries to show in the list.
 const PREF_SHOW_PLUGINS_IN_LIST = "browser.download.show_plugins_in_list";
@@ -98,6 +106,10 @@ if (AppConstants.MOZ_DEV_EDITION) {
   XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
     "resource://gre/modules/FxAccounts.jsm");
 }
+
+// A promise that resolves when the list of application handlers is loaded.
+// We store this in a global so tests can await it.
+var promiseLoadHandlersList;
 
 var gMainPane = {
   // The set of types the app knows how to handle.  A hash of HandlerInfoWrapper
@@ -236,6 +248,10 @@ var gMainPane = {
       gMainPane.setHomePageToBookmark);
     setEventListener("restoreDefaultHomePage", "command",
       gMainPane.restoreDefaultHomePage);
+    setEventListener("disableHomePageExtension", "command",
+                     gMainPane.makeDisableControllingExtension("homepage_override"));
+    setEventListener("disableContainersExtension", "command",
+                     gMainPane.makeDisableControllingExtension("privacy.containers"));
     setEventListener("chooseLanguage", "command",
       gMainPane.showLanguages);
     setEventListener("translationAttributionImage", "click",
@@ -429,19 +445,21 @@ var gMainPane = {
     }
 
     // Load the data and build the list of handlers.
-    // By doing this in a timeout, we let the preferences dialog resize itself
-    // to an appropriate size before we add a bunch of items to the list.
-    // Otherwise, if there are many items, and the Applications prefpane
-    // is the one that gets displayed when the user first opens the dialog,
-    // the dialog might stretch too much in an attempt to fit them all in.
-    // XXX Shouldn't we perhaps just set a max-height on the richlistbox?
-    var _delayedPaneLoad = function(self) {
-      self._loadData();
-      self._rebuildVisibleTypes();
-      self._sortVisibleTypes();
-      self._rebuildView();
-    }
-    setTimeout(_delayedPaneLoad, 0, this);
+    // By doing this after pageshow, we ensure it doesn't delay painting
+    // of the preferences page.
+    promiseLoadHandlersList = new Promise((resolve, reject) => {
+      window.addEventListener("pageshow", async () => {
+        try {
+          this._loadData();
+          await this._rebuildVisibleTypes();
+          this._sortVisibleTypes();
+          this._rebuildView();
+          resolve();
+        } catch (ex) {
+          reject(ex);
+        }
+      }, {once: true});
+    });
 
     let browserBundle = document.getElementById("browserBundle");
     appendSearchKeywords("browserContainersSettings", [
@@ -457,6 +475,32 @@ var gMainPane = {
       .notifyObservers(window, "main-pane-loaded");
   },
 
+  // CONTAINERS
+
+  /*
+   * preferences:
+   *
+   * privacy.userContext.enabled
+   * - true if containers is enabled
+   */
+
+  /**
+   * Enables/disables the Settings button used to configure containers
+   */
+  readBrowserContainersCheckbox() {
+    const pref = document.getElementById("privacy.userContext.enabled");
+    const settings = document.getElementById("browserContainersSettings");
+
+    settings.disabled = !pref.value;
+    const containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
+    const containersCheckbox = document.getElementById("browserContainersCheckbox");
+    containersCheckbox.checked = containersEnabled;
+    handleControllingExtension("privacy.containers")
+      .then((isControlled) => {
+        containersCheckbox.disabled = isControlled;
+      });
+  },
+
   /**
    * Show the Containers UI depending on the privacy.userContext.ui.enabled pref.
    */
@@ -468,14 +512,13 @@ var gMainPane = {
       document.getElementById("browserContainersbox").setAttribute("data-hidden-from-search", "true");
       return;
     }
+    this._prefSvc.addObserver(PREF_CONTAINERS_EXTENSION, this);
 
-    let link = document.getElementById("browserContainersLearnMore");
+    const link = document.getElementById("browserContainersLearnMore");
     link.href = Services.urlFormatter.formatURLPref("app.support.baseURL") + "containers";
 
     document.getElementById("browserContainersbox").hidden = false;
-
-    document.getElementById("browserContainersCheckbox").checked =
-      Services.prefs.getBoolPref("privacy.userContext.enabled");
+    this.readBrowserContainersCheckbox();
   },
 
   isE10SEnabled() {
@@ -620,6 +663,19 @@ var gMainPane = {
   syncFromHomePref() {
     let homePref = document.getElementById("browser.startup.homepage");
 
+    // Set the "Use Current Page(s)" button's text and enabled state.
+    this._updateUseCurrentButton();
+
+    // This is an async task.
+    handleControllingExtension("homepage_override")
+      .then((isControlled) => {
+        // Disable or enable the inputs based on if this is controlled by an extension.
+        document.querySelectorAll("#browserHomePage, .homepage-button")
+          .forEach((button) => {
+            button.disabled = isControlled;
+          });
+      });
+
     // If the pref is set to about:home or about:newtab, set the value to ""
     // to show the placeholder text (about:home title) rather than
     // exposing those URLs to users.
@@ -695,16 +751,20 @@ var gMainPane = {
    * Switches the "Use Current Page" button between its singular and plural
    * forms.
    */
-  _updateUseCurrentButton() {
+  async _updateUseCurrentButton() {
     let useCurrent = document.getElementById("useCurrent");
-
-
     let tabs = this._getTabsForHomePage();
 
     if (tabs.length > 1)
       useCurrent.label = useCurrent.getAttribute("label2");
     else
       useCurrent.label = useCurrent.getAttribute("label1");
+
+    // If the homepage is controlled by an extension then you can't use this.
+    if (await getControllingExtensionId("homepage_override")) {
+      useCurrent.disabled = true;
+      return;
+    }
 
     // In this case, the button's disabled state is set by preferences.xml.
     let prefName = "pref.browser.homepage.disable_button.current_page";
@@ -747,6 +807,14 @@ var gMainPane = {
   restoreDefaultHomePage() {
     var homePage = document.getElementById("browser.startup.homepage");
     homePage.value = homePage.defaultValue;
+  },
+
+  makeDisableControllingExtension(pref) {
+    return async function disableExtension() {
+      let id = await getControllingExtensionId(pref);
+      let addon = await AddonManager.getAddonByID(id);
+      addon.userDisabled = true;
+    };
   },
 
   /**
@@ -997,8 +1065,7 @@ var gMainPane = {
     // Force flush:
     preferences.clientHeight;
     var langGroupPref = document.getElementById("font.language.group");
-    this._selectDefaultLanguageGroup(langGroupPref.value,
-      this._readDefaultFontTypeForLanguage(langGroupPref.value) == "serif");
+    this._safelySelectDefaultLanguageGroup(langGroupPref.value);
   },
 
   /**
@@ -1020,7 +1087,18 @@ var gMainPane = {
     return preference.value;
   },
 
-  _selectDefaultLanguageGroup(aLanguageGroup, aIsSerif) {
+  _selectDefaultLanguageGroupPromise: Promise.resolve(),
+
+  async _selectDefaultLanguageGroup(aLanguageGroup, aIsSerif) {
+    // Avoid overlapping language group selections by awaiting the resolution
+    // of the previous one.  We do this because this function is re-entrant,
+    // as inserting <preference> elements into the DOM sometimes triggers a call
+    // back into this function.  And since this function is also asynchronous,
+    // that call can enter this function before the previous run has completed,
+    // which would corrupt the font menulists.  Awaiting the previous call's
+    // resolution avoids that fate.
+    await this._selectDefaultLanguageGroupPromise;
+
     const kFontNameFmtSerif = "font.name.serif.%LANG%";
     const kFontNameFmtSansSerif = "font.name.sans-serif.%LANG%";
     const kFontNameListFmtSerif = "font.name-list.serif.%LANG%";
@@ -1065,11 +1143,18 @@ var gMainPane = {
         element.setAttribute("preference", preference.id);
 
         if (prefs[i].fonttype)
-          FontBuilder.buildFontList(aLanguageGroup, prefs[i].fonttype, element);
+          await FontBuilder.buildFontList(aLanguageGroup, prefs[i].fonttype, element);
 
         preference.setElementValue(element);
       }
     }
+  },
+
+  _safelySelectDefaultLanguageGroup(aLanguageGroup) {
+    var isSerif = this._readDefaultFontTypeForLanguage(aLanguageGroup) == "serif";
+    this._selectDefaultLanguageGroupPromise =
+      this._selectDefaultLanguageGroup(aLanguageGroup, isSerif)
+        .catch(Components.utils.reportError);
   },
 
   /**
@@ -1298,6 +1383,8 @@ var gMainPane = {
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
+
+    this._prefSvc.removeObserver(PREF_CONTAINERS_EXTENSION, this);
   },
 
 
@@ -1315,8 +1402,12 @@ var gMainPane = {
 
   // nsIObserver
 
-  observe(aSubject, aTopic, aData) {
+  async observe(aSubject, aTopic, aData) {
     if (aTopic == "nsPref:changed") {
+      if (aData == PREF_CONTAINERS_EXTENSION) {
+        this.readBrowserContainersCheckbox();
+        return;
+      }
       // Rebuild the list when there are changes to preferences that influence
       // whether or not to show certain entries in the list.
       if (!this._storingAction) {
@@ -1324,7 +1415,7 @@ var gMainPane = {
         // that list when they change.
         if (aData == PREF_SHOW_PLUGINS_IN_LIST ||
           aData == PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS) {
-          this._rebuildVisibleTypes();
+          await this._rebuildVisibleTypes();
           this._sortVisibleTypes();
         }
 
@@ -1444,7 +1535,7 @@ var gMainPane = {
 
   // View Construction
 
-  _rebuildVisibleTypes() {
+  async _rebuildVisibleTypes() {
     // Reset the list of visible types and the visible type description counts.
     this._visibleTypes = [];
     this._visibleTypeDescriptionCount = {};
@@ -1455,6 +1546,11 @@ var gMainPane = {
       this._prefSvc.getBoolPref(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS);
 
     for (let type in this._handledTypes) {
+      // Yield before processing each handler info object to avoid monopolizing
+      // the main thread, as the objects are retrieved lazily, and retrieval
+      // can be expensive on Windows.
+      await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+
       let handlerInfo = this._handledTypes[type];
 
       // Hide plugins without associated extensions if so prefed so we don't
@@ -2552,6 +2648,67 @@ function getLocalHandlerApp(aFile) {
   localHandlerApp.executable = aFile;
 
   return localHandlerApp;
+}
+
+let extensionControlledContentIds = {
+  "privacy.containers": "browserContainersExtensionContent",
+  "homepage_override": "browserHomePageExtensionContent",
+};
+
+/**
+  * Check if a pref is being managed by an extension.
+  */
+function getControllingExtensionId(settingName) {
+  return ExtensionPreferencesManager.getControllingExtensionId(settingName);
+}
+
+function getControllingExtensionEl(settingName) {
+  return document.getElementById(extensionControlledContentIds[settingName]);
+}
+
+async function handleControllingExtension(prefName) {
+  let controllingExtensionId = await getControllingExtensionId(prefName);
+
+  if (controllingExtensionId) {
+    showControllingExtension(prefName, controllingExtensionId);
+  } else {
+    hideControllingExtension(prefName);
+  }
+
+  return !!controllingExtensionId;
+}
+
+async function showControllingExtension(settingName, extensionId) {
+  let extensionControlledContent = getControllingExtensionEl(settingName);
+  // Tell the user what extension is controlling the setting.
+  let addon = await AddonManager.getAddonByID(extensionId);
+  const defaultIcon = "chrome://mozapps/skin/extensions/extensionGeneric.svg";
+  let stringParts = document
+    .getElementById("bundlePreferences")
+    .getString(`extensionControlled.${settingName}`)
+    .split("%S");
+  let description = extensionControlledContent.querySelector("description");
+
+  // Remove the old content from the description.
+  while (description.firstChild) {
+    description.firstChild.remove();
+  }
+
+  // Populate the description.
+  description.appendChild(document.createTextNode(stringParts[0]));
+  let image = document.createElement("image");
+  image.setAttribute("src", addon.iconURL || defaultIcon);
+  image.classList.add("extension-controlled-icon");
+  description.appendChild(image);
+  description.appendChild(document.createTextNode(` ${addon.name}`));
+  description.appendChild(document.createTextNode(stringParts[1]));
+
+  // Show the controlling extension row and hide the old label.
+  extensionControlledContent.hidden = false;
+}
+
+function hideControllingExtension(settingName) {
+  getControllingExtensionEl(settingName).hidden = true;
 }
 
 /**

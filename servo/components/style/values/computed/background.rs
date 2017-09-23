@@ -13,6 +13,16 @@ use values::generics::background::BackgroundSize as GenericBackgroundSize;
 /// A computed value for the `background-size` property.
 pub type BackgroundSize = GenericBackgroundSize<LengthOrPercentageOrAuto>;
 
+impl BackgroundSize {
+    /// Returns `auto auto`.
+    pub fn auto() -> Self {
+        GenericBackgroundSize::Explicit {
+            width: LengthOrPercentageOrAuto::Auto,
+            height: LengthOrPercentageOrAuto::Auto,
+        }
+    }
+}
+
 impl RepeatableListAnimatable for BackgroundSize {}
 
 impl ToAnimatedZero for BackgroundSize {
@@ -30,12 +40,11 @@ impl ToAnimatedValue for BackgroundSize {
 
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        use app_units::Au;
-        use values::computed::Percentage;
+        use values::computed::{Length, Percentage};
         let clamp_animated_value = |value: LengthOrPercentageOrAuto| -> LengthOrPercentageOrAuto {
             match value {
                 LengthOrPercentageOrAuto::Length(len) => {
-                    LengthOrPercentageOrAuto::Length(Au(::std::cmp::max(len.0, 0)))
+                    LengthOrPercentageOrAuto::Length(Length::new(len.px().max(0.)))
                 },
                 LengthOrPercentageOrAuto::Percentage(percent) => {
                     LengthOrPercentageOrAuto::Percentage(Percentage(percent.0.max(0.)))

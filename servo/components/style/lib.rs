@@ -40,13 +40,13 @@
 extern crate app_units;
 extern crate arrayvec;
 extern crate atomic_refcell;
-extern crate bit_vec;
 #[macro_use]
 extern crate bitflags;
 #[allow(unused_extern_crates)] extern crate byteorder;
 #[cfg(feature = "gecko")] #[macro_use] #[no_link] extern crate cfg_if;
 #[macro_use] extern crate cssparser;
 extern crate euclid;
+extern crate fallible;
 extern crate fnv;
 #[cfg(feature = "gecko")] #[macro_use] pub mod gecko_string_cache;
 extern crate hashglobe;
@@ -59,6 +59,9 @@ extern crate itoa;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+extern crate lru_cache;
+#[cfg(feature = "gecko")] #[macro_use] extern crate malloc_size_of;
+#[cfg(feature = "gecko")] #[macro_use] extern crate malloc_size_of_derive;
 #[allow(unused_extern_crates)]
 #[macro_use]
 extern crate matches;
@@ -80,6 +83,7 @@ pub extern crate servo_arc;
 #[cfg(feature = "servo")] #[macro_use] extern crate servo_atoms;
 #[cfg(feature = "servo")] extern crate servo_config;
 #[cfg(feature = "servo")] extern crate servo_url;
+extern crate smallbitvec;
 extern crate smallvec;
 #[macro_use]
 extern crate style_derive;
@@ -99,7 +103,6 @@ pub mod applicable_declarations;
 #[cfg(feature = "servo")] pub mod attr;
 pub mod bezier;
 pub mod bloom;
-pub mod cache;
 pub mod context;
 pub mod counter_style;
 pub mod custom_properties;
@@ -121,6 +124,7 @@ pub mod matching;
 pub mod media_queries;
 pub mod parallel;
 pub mod parser;
+pub mod rule_cache;
 pub mod rule_tree;
 pub mod scoped_tls;
 pub mod selector_map;

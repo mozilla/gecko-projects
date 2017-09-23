@@ -12,13 +12,13 @@ use gecko_bindings::structs::{StyleSheetInfo, ServoStyleSheetInner};
 use gecko_bindings::structs::nsIDocument;
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasBoxFFI, HasFFI, HasSimpleFFI};
 use invalidation::media_queries::{MediaListKey, ToMediaListKey};
+use malloc_size_of::MallocSizeOfOps;
 use media_queries::{Device, MediaList};
 use properties::ComputedValues;
 use servo_arc::Arc;
 use shared_lock::{Locked, StylesheetGuards, SharedRwLockReadGuard};
-use stylesheets::{MallocEnclosingSizeOfFn, MallocSizeOfFn, PerOrigin, StylesheetContents};
-use stylesheets::StylesheetInDocument;
-use stylist::{ExtraStyleData, Stylist};
+use stylesheets::{StylesheetContents, StylesheetInDocument};
+use stylist::Stylist;
 
 /// Little wrapper to a Gecko style sheet.
 #[derive(Debug, Eq, PartialEq)]
@@ -113,9 +113,6 @@ impl StylesheetInDocument for GeckoStyleSheet {
 pub struct PerDocumentStyleDataImpl {
     /// Rule processor.
     pub stylist: Stylist,
-
-    /// List of effective @font-face and @counter-style rules.
-    pub extra_style_data: PerOrigin<ExtraStyleData>,
 }
 
 /// The data itself is an `AtomicRefCell`, which guarantees the proper semantics
@@ -132,7 +129,6 @@ impl PerDocumentStyleData {
 
         PerDocumentStyleData(AtomicRefCell::new(PerDocumentStyleDataImpl {
             stylist: Stylist::new(device, quirks_mode.into()),
-            extra_style_data: Default::default(),
         }))
     }
 
@@ -159,8 +155,6 @@ impl PerDocumentStyleDataImpl {
     {
         self.stylist.flush(
             &StylesheetGuards::same(guard),
-            /* ua_sheets = */ None,
-            &mut self.extra_style_data,
             document_element,
         )
     }
@@ -186,19 +180,9 @@ impl PerDocumentStyleDataImpl {
         self.visited_links_enabled() && !self.is_private_browsing_enabled()
     }
 
-    /// Measures heap usage.
-    pub fn malloc_add_size_of_children(&self, malloc_size_of: MallocSizeOfFn,
-                                       malloc_enclosing_size_of: MallocEnclosingSizeOfFn,
-                                       sizes: &mut ServoStyleSetSizes) {
-        self.stylist.malloc_add_size_of_children(malloc_size_of, malloc_enclosing_size_of, sizes);
-
-        let data = &self.extra_style_data;
-        sizes.mStylistOther +=
-            data.user_agent.malloc_size_of_children(malloc_size_of, malloc_enclosing_size_of);
-        sizes.mStylistOther +=
-            data.user.malloc_size_of_children(malloc_size_of, malloc_enclosing_size_of);
-        sizes.mStylistOther +=
-            data.author.malloc_size_of_children(malloc_size_of, malloc_enclosing_size_of);
+    /// Measure heap usage.
+    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.stylist.add_size_of_children(ops, sizes);
     }
 }
 

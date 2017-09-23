@@ -19,7 +19,15 @@ const ALTERNATIVE_COUNTRY_NAMES = {
 const ADDRESSES_COLLECTION_NAME = "addresses";
 const CREDITCARDS_COLLECTION_NAME = "creditCards";
 const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabled";
+const AUTOFILL_CREDITCARDS_AVAILABLE_PREF = "extensions.formautofill.creditCards.available";
 const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
+const MANAGE_ADDRESSES_KEYWORDS = ["manageAddressesTitle", "addNewAddressTitle"];
+const EDIT_ADDRESS_KEYWORDS = [
+  "givenName", "additionalName", "familyName", "organization", "streetAddress",
+  "state", "province", "city", "country", "zip", "postalCode", "email", "tel",
+];
+const MANAGE_CREDITCARDS_KEYWORDS = ["manageCreditCardsTitle", "addNewCreditCardTitle", "showCreditCards"];
+const EDIT_CREDITCARD_KEYWORDS = ["cardNumber", "nameOnCard", "cardExpires"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -27,11 +35,16 @@ Cu.import("resource://gre/modules/Services.jsm");
 this.FormAutofillUtils = {
   get AUTOFILL_FIELDS_THRESHOLD() { return 3; },
   get isAutofillEnabled() { return this.isAutofillAddressesEnabled || this.isAutofillCreditCardsEnabled; },
+  get isAutofillCreditCardsEnabled() { return this.isAutofillCreditCardsAvailable && this._isAutofillCreditCardsEnabled; },
 
   ADDRESSES_COLLECTION_NAME,
   CREDITCARDS_COLLECTION_NAME,
   ENABLED_AUTOFILL_ADDRESSES_PREF,
   ENABLED_AUTOFILL_CREDITCARDS_PREF,
+  MANAGE_ADDRESSES_KEYWORDS,
+  EDIT_ADDRESS_KEYWORDS,
+  MANAGE_CREDITCARDS_KEYWORDS,
+  EDIT_CREDITCARD_KEYWORDS,
 
   _fieldNameInfo: {
     "name": "name",
@@ -118,6 +131,32 @@ this.FormAutofillUtils = {
       .join(this.getAddressSeparator());
   },
 
+  /**
+   * In-place concatenate tel-related components into a single "tel" field and
+   * delete unnecessary fields.
+   * @param {object} address An address record.
+   */
+  compressTel(address) {
+    let telCountryCode = address["tel-country-code"] || "";
+    let telAreaCode = address["tel-area-code"] || "";
+
+    if (!address.tel) {
+      if (address["tel-national"]) {
+        address.tel = telCountryCode + address["tel-national"];
+      } else if (address["tel-local"]) {
+        address.tel = telCountryCode + telAreaCode + address["tel-local"];
+      } else if (address["tel-local-prefix"] && address["tel-local-suffix"]) {
+        address.tel = telCountryCode + telAreaCode + address["tel-local-prefix"] + address["tel-local-suffix"];
+      }
+    }
+
+    for (let field in address) {
+      if (field != "tel" && this.getCategoryFromFieldName(field) == "tel") {
+        delete address[field];
+      }
+    }
+  },
+
   fmtMaskedCreditCardLabel(maskedCCNum = "") {
     return {
       affix: "****",
@@ -141,10 +180,6 @@ this.FormAutofillUtils = {
 
   ALLOWED_TYPES: ["text", "email", "tel", "number"],
   isFieldEligibleForAutofill(element) {
-    if (element.autocomplete == "off") {
-      return false;
-    }
-
     let tagName = element.tagName;
     if (tagName == "INPUT") {
       // `element.type` can be recognized as `text`, if it's missing or invalid.
@@ -504,4 +539,6 @@ XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
                                       "isAutofillAddressesEnabled", ENABLED_AUTOFILL_ADDRESSES_PREF);
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
-                                      "isAutofillCreditCardsEnabled", ENABLED_AUTOFILL_CREDITCARDS_PREF);
+                                      "isAutofillCreditCardsAvailable", AUTOFILL_CREDITCARDS_AVAILABLE_PREF);
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "_isAutofillCreditCardsEnabled", ENABLED_AUTOFILL_CREDITCARDS_PREF);

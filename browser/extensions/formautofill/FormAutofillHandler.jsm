@@ -121,6 +121,11 @@ FormAutofillHandler.prototype = {
   },
 
   /**
+   * Time in milliseconds since epoch when a user started filling in the form.
+   */
+  timeStartedFillingMS: null,
+
+  /**
    * Set fieldDetails from the form about fields that can be autofilled.
    *
    * @param {boolean} allowDuplicates
@@ -153,19 +158,34 @@ FormAutofillHandler.prototype = {
       log.debug("Ignoring credit card related fields since it's without credit card number field");
       this.creditCard.fieldDetails = [];
     }
+    let validDetails = Array.of(...(this.address.fieldDetails),
+                                ...(this.creditCard.fieldDetails));
+    for (let detail of validDetails) {
+      let input = detail.elementWeakRef.get();
+      if (!input) {
+        continue;
+      }
+      input.addEventListener("input", this);
+    }
 
-    return Array.of(...(this.address.fieldDetails),
-                    ...(this.creditCard.fieldDetails));
+    return validDetails;
   },
 
   getFieldDetailByName(fieldName) {
     return this.fieldDetails.find(detail => detail.fieldName == fieldName);
   },
 
-  getFieldDetailsByElement(element) {
-    let fieldDetail = this.fieldDetails.find(
+  getFieldDetailByElement(element) {
+    return this.fieldDetails.find(
       detail => detail.elementWeakRef.get() == element
     );
+  },
+
+  getFieldDetailsByElement(element) {
+    let fieldDetail = this.getFieldDetailByElement(element);
+    if (!fieldDetail) {
+      return [];
+    }
     if (FormAutofillUtils.isAddressField(fieldDetail.fieldName)) {
       return this.address.fieldDetails;
     }
@@ -559,6 +579,8 @@ FormAutofillHandler.prototype = {
       });
     });
 
+    this._normalizeAddress(data.address);
+
     if (data.address &&
         Object.values(data.address.record).filter(v => v).length <
         FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
@@ -574,7 +596,56 @@ FormAutofillHandler.prototype = {
       delete data.creditCard;
     }
 
+    // If both address and credit card exists, skip this metrics because it not a
+    // general case and each specific histogram might contains insufficient data set.
+    if (data.address && data.creditCard) {
+      this.timeStartedFillingMS = null;
+    }
+
     return data;
+  },
+
+  _normalizeAddress(address) {
+    if (!address) {
+      return;
+    }
+
+    // Normalize Country
+    if (address.record.country) {
+      let detail = this.getFieldDetailByName("country");
+      // Try identifying country field aggressively if it doesn't come from
+      // @autocomplete.
+      if (detail._reason != "autocomplete") {
+        let countryCode = FormAutofillUtils.identifyCountryCode(address.record.country);
+        if (countryCode) {
+          address.record.country = countryCode;
+        }
+      }
+    }
+
+    // Normalize Tel
+    FormAutofillUtils.compressTel(address.record);
+    if (address.record.tel) {
+      let allTelComponentsAreUntouched = Object.keys(address.record)
+        .filter(field => FormAutofillUtils.getCategoryFromFieldName(field) == "tel")
+        .every(field => address.untouchedFields.includes(field));
+      if (allTelComponentsAreUntouched) {
+        // No need to verify it if none of related fields are modified after autofilling.
+        if (!address.untouchedFields.includes("tel")) {
+          address.untouchedFields.push("tel");
+        }
+      } else {
+        let strippedNumber = address.record.tel.replace(/[\s\(\)-]/g, "");
+
+        // Remove "tel" if it contains invalid characters or the length of its
+        // number part isn't between 5 and 15.
+        // (The maximum length of a valid number in E.164 format is 15 digits
+        //  according to https://en.wikipedia.org/wiki/E.164 )
+        if (!/^(\+?)[\da-zA-Z]{5,15}$/.test(strippedNumber)) {
+          address.record.tel = "";
+        }
+      }
+    }
   },
 
   async _decrypt(cipherText, reauth) {
@@ -586,5 +657,24 @@ FormAutofillHandler.prototype = {
 
       Services.cpmm.sendAsyncMessage("FormAutofill:GetDecryptedString", {cipherText, reauth});
     });
+  },
+
+  handleEvent(event) {
+    switch (event.type) {
+      case "input":
+        if (!event.isTrusted) {
+          return;
+        }
+
+        for (let detail of this.fieldDetails) {
+          let input = detail.elementWeakRef.get();
+          if (!input) {
+            continue;
+          }
+          input.removeEventListener("input", this);
+        }
+        this.timeStartedFillingMS = Date.now();
+        break;
+    }
   },
 };

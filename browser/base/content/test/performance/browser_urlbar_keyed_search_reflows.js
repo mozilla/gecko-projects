@@ -19,6 +19,17 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
   // Bug 1357054
   {
     stack: [
+      "_handleOverflow@chrome://global/content/bindings/autocomplete.xml",
+      "handleOverUnderflow@chrome://global/content/bindings/autocomplete.xml",
+      "_onChanged@chrome://global/content/bindings/autocomplete.xml",
+      "_appendCurrentResult/<@chrome://global/content/bindings/autocomplete.xml",
+    ],
+    times: 18, // This number should only ever go down - never up.
+    minTimes: 12,
+  },
+
+  {
+    stack: [
       "_rebuild@chrome://browser/content/search/search.xml",
       "set_popup@chrome://browser/content/search/search.xml",
       "enableOneOffSearches@chrome://browser/content/urlbarBindings.xml",
@@ -55,7 +66,7 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
       "adjustHeight@chrome://global/content/bindings/autocomplete.xml",
       "_invalidate/this._adjustHeightTimeout<@chrome://global/content/bindings/autocomplete.xml",
     ],
-    times: 36, // This number should only ever go down - never up.
+    times: 51, // This number should only ever go down - never up.
   },
 
   {
@@ -67,17 +78,7 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
       "_invalidate@chrome://global/content/bindings/autocomplete.xml",
       "invalidate@chrome://global/content/bindings/autocomplete.xml"
     ],
-    times: 1344, // This number should only ever go down - never up.
-  },
-
-  {
-    stack: [
-      "_handleOverflow@chrome://global/content/bindings/autocomplete.xml",
-      "handleOverUnderflow@chrome://global/content/bindings/autocomplete.xml",
-      "_onChanged@chrome://global/content/bindings/autocomplete.xml",
-      "_appendCurrentResult/<@chrome://global/content/bindings/autocomplete.xml",
-    ],
-    times: 6,
+    times: 60, // This number should only ever go down - never up.
   },
 
   {

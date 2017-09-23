@@ -3,8 +3,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 from __future__ import absolute_import, print_function, unicode_literals
-import json
-import os
 
 import requests
 import redo
@@ -22,6 +20,9 @@ PLATFORM_RENAMES = {
 
 BALROG_PLATFORM_MAP = {
     "linux": [
+        "Linux_x86-gcc3"
+    ],
+    "linux32": [
         "Linux_x86-gcc3"
     ],
     "linux64": [
@@ -75,7 +76,8 @@ def get_partials_artifacts(release_history, platform, locale):
 
 def get_partials_artifact_map(release_history, platform, locale):
     platform = _sanitize_platform(platform)
-    return {k: release_history[platform][locale][k]['buildid'] for k in release_history.get(platform, {}).get(locale, {})}
+    return {k: release_history[platform][locale][k]['buildid']
+            for k in release_history.get(platform, {}).get(locale, {})}
 
 
 def _retry_on_http_errors(url, verify, params, errors):
@@ -87,7 +89,7 @@ def _retry_on_http_errors(url, verify, params, errors):
     logger.info("Connecting to %s?%s", url, params_str)
     for _ in redo.retrier(sleeptime=5, max_sleeptime=30, attempts=10):
         try:
-            req = requests.get(url, verify=verify, params=params)
+            req = requests.get(url, verify=verify, params=params, timeout=4)
             req.raise_for_status()
             return req
         except requests.HTTPError as e:
@@ -153,7 +155,7 @@ def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
                         'buildid3': mar_url,
                     },
                     'locale2': {
-                        'target.partial-1.mar': ('buildid1': 'mar_url'),
+                        'target.partial-1.mar': {'buildid1': 'mar_url'},
                     }
                 },
                 'platform2': {
@@ -168,7 +170,8 @@ def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
     for release in last_releases[:maxsearch]:
         # maxbuilds in all categories, don't make any more queries
         full = len(builds) > 0 and all(
-            len(builds[platform][locale]) >= maxbuilds for platform in builds for locale in builds[platform])
+            len(builds[platform][locale]) >= maxbuilds
+            for platform in builds for locale in builds[platform])
         if full:
             break
         history = get_release_builds(release)

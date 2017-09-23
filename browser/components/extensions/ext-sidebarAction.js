@@ -134,11 +134,10 @@ this.sidebarAction = class extends ExtensionAPI {
                        (evt, tab) => { this.updateWindow(tab.ownerGlobal); });
 
     let install = this.extension.startupReason === "ADDON_INSTALL";
-    let upgrade = ["ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(this.extension.startupReason);
     for (let window of windowTracker.browserWindows()) {
       this.updateWindow(window);
       let {SidebarUI} = window;
-      if (install || (upgrade && SidebarUI.lastOpenedId == this.id)) {
+      if (install || SidebarUI.lastOpenedId == this.id) {
         SidebarUI.show(this.id);
       }
     }
@@ -183,7 +182,7 @@ this.sidebarAction = class extends ExtensionAPI {
 
     // oncommand gets attached to menuitem, so we use the observes attribute to
     // get the command id we pass to SidebarUI.
-    broadcaster.setAttribute("oncommand", "SidebarUI.show(this.getAttribute('observes'))");
+    broadcaster.setAttribute("oncommand", "SidebarUI.toggle(this.getAttribute('observes'))");
 
     let header = document.getElementById("sidebar-switcher-target");
     header.addEventListener("SidebarShown", this.updateHeader);
@@ -417,6 +416,9 @@ this.sidebarAction = class extends ExtensionAPI {
             url = null;
           } else if (details.panel !== "") {
             url = context.uri.resolve(details.panel);
+            if (!context.checkLoadURL(url)) {
+              return Promise.reject({message: `Access denied for URL ${url}`});
+            }
           } else {
             throw new ExtensionError("Invalid url for sidebar panel.");
           }

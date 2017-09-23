@@ -945,14 +945,6 @@ SyncEngine.prototype = {
     Svc.Prefs.set(this.name + ".lastSyncLocal", value.toString());
   },
 
-  get maxRecordPayloadBytes() {
-    let serverConfiguration = this.service.serverConfiguration;
-    if (serverConfiguration && serverConfiguration.max_record_payload_bytes) {
-      return serverConfiguration.max_record_payload_bytes;
-    }
-    return DEFAULT_MAX_RECORD_PAYLOAD_BYTES;
-  },
-
   /*
    * Returns a changeset for this sync. Engine implementations can override this
    * method to bypass the tracker for certain or all changed items.
@@ -1047,6 +1039,7 @@ SyncEngine.prototype = {
     // Clear the tracker now. If the sync fails we'll add the ones we failed
     // to upload back.
     this._tracker.clearChangedIDs();
+    this._tracker.resetScore();
 
     this._log.info(this._modified.count() +
                    " outgoing items pre-reconciliation");
@@ -1678,13 +1671,6 @@ SyncEngine.prototype = {
             this._log.trace("Outgoing: " + out);
 
           out.encrypt(this.service.collectionKeys.keyForCollection(this.name));
-          let payloadLength = JSON.stringify(out.payload).length;
-          if (payloadLength > this.maxRecordPayloadBytes) {
-            if (this.allowSkippedRecord) {
-              this._modified.delete(id); // Do not attempt to sync that record again
-            }
-            throw new Error(`Payload too big: ${payloadLength} bytes`);
-          }
           ok = true;
         } catch (ex) {
           this._log.warn("Error creating record", ex);
@@ -1703,6 +1689,7 @@ SyncEngine.prototype = {
             ++counts.failed;
             if (!this.allowSkippedRecord) {
               Observers.notify("weave:engine:sync:uploaded", counts, this.name);
+              this._log.warn(`Failed to enqueue record "${id}" (aborting)`, error);
               throw error;
             }
             this._modified.delete(id);
@@ -1729,7 +1716,6 @@ SyncEngine.prototype = {
   // Save the current snapshot so as to calculate changes at next sync
   async _syncFinish() {
     this._log.trace("Finishing up sync");
-    this._tracker.resetScore();
 
     let doDelete = async (key, val) => {
       let coll = new Collection(this.engineURL, this._recordObj, this.service);

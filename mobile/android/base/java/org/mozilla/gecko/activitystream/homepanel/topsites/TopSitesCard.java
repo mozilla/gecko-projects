@@ -13,6 +13,7 @@ import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
@@ -20,6 +21,7 @@ import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.activitystream.ActivityStreamTelemetry;
 import org.mozilla.gecko.activitystream.homepanel.menu.ActivityStreamContextMenu;
 import org.mozilla.gecko.activitystream.homepanel.model.TopSite;
+import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.icons.IconCallback;
 import org.mozilla.gecko.icons.IconResponse;
@@ -41,6 +43,7 @@ import java.util.concurrent.Future;
     private final FaviconView faviconView;
 
     private final TextView title;
+    private final ImageView pinIconView;
     private Future<IconResponse> ongoingIconLoad;
 
     private TopSite topSite;
@@ -53,8 +56,8 @@ import java.util.concurrent.Future;
         super(card);
 
         faviconView = (FaviconView) card.findViewById(R.id.favicon);
-
         title = (TextView) card.findViewById(R.id.title);
+        pinIconView = (ImageView) card.findViewById(R.id.pin_icon);
 
         this.onUrlOpenListener = onUrlOpenListener;
         this.onUrlOpenInBackgroundListener = onUrlOpenInBackgroundListener;
@@ -96,50 +99,68 @@ import java.util.concurrent.Future;
             ongoingIconLoad.cancel(true);
         }
 
-        ongoingIconLoad = Icons.with(itemView.getContext())
-                .pageUrl(topSite.getUrl())
-                .skipNetwork()
-                .build()
-                .execute(this);
-
-        final Drawable pinDrawable;
-        if (topSite.isPinned()) {
-            pinDrawable = DrawableUtil.tintDrawable(itemView.getContext(), R.drawable.as_pin, Color.WHITE);
+        if (TextUtils.isEmpty(topSite.getUrl())) {
+            // Sometimes we get top sites without or with an empty URL - even though we do not allow
+            // this anywhere in our UI. However with 'sync' we are not in full control of the data.
+            // Whenever the URL is empty or null we just clear a potentially previously set icon.
+            faviconView.clearImage();
         } else {
-            pinDrawable = null;
+            ongoingIconLoad = Icons.with(itemView.getContext())
+                    .pageUrl(topSite.getUrl())
+                    .skipNetwork()
+                    .forActivityStream()
+                    .build()
+                    .execute(this);
         }
-        TextViewCompat.setCompoundDrawablesRelativeWithIntrinsicBounds(title, pinDrawable, null, null, null);
+
+        pinIconView.setVisibility(topSite.isPinned() ? View.VISIBLE : View.GONE);
 
         setTopSiteTitle(topSite);
     }
 
     private void setTopSiteTitle(final TopSite topSite) {
         URI topSiteURI = null; // not final so we can use in the Exception case.
-        boolean wasException = false;
+        boolean isInvalidURI = false;
         try {
             topSiteURI = new URI(topSite.getUrl());
         } catch (final URISyntaxException e) {
-            wasException = true;
+            isInvalidURI = true;
         }
 
-        // At a high level, the logic is: if the path empty, use "subdomain.domain", otherwise use the
-        // page title. From a UX perspective, people refer to domains by their name ("it's on wikipedia")
-        // and it's a clean look. However, if a url has a path, it will not fit on the screen with the domain
-        // so we need an alternative: the page title is an easy win (though not always perfect, e.g. when SEO
-        // keywords are added). If we ever want better titles, we could create a heuristic to pull the title
-        // from parts of the URL, page title, etc.
-        if (wasException || !URIUtils.isPathEmpty(topSiteURI)) {
-            // See comment below regarding setCenteredText.
-            final String pageTitle = topSite.getTitle();
-            final String updateText = !TextUtils.isEmpty(pageTitle) ? pageTitle : topSite.getUrl();
-            setTopSiteTitleHelper(title, updateText);
+        final boolean isSiteSuggestedFromDistribution = BrowserDB.from(itemView.getContext()).getSuggestedSites()
+                .containsSiteAndSiteIsFromDistribution(topSite.getUrl());
 
-        } else {
+        // Some already installed distributions are unlikely to be updated (OTA, system) and their suggested
+        // site titles were written for the old top sites, where we had more room to display titles: we want
+        // to provide them with more lines. However, it's complex to distinguish a distribution intended for
+        // the old top sites and the new one so for code simplicity, we allow all distributions more lines for titles.
+        title.setMaxLines(isSiteSuggestedFromDistribution ? 2 : 1);
+
+        // We use page titles with distributions because that's what the creators of those distributions expect to
+        // be shown. Also, we need a valid URI for our preferred case so we stop here if we don't have one.
+        final String pageTitle = topSite.getTitle();
+        if (isInvalidURI || isSiteSuggestedFromDistribution) {
+            final String updateText = !TextUtils.isEmpty(pageTitle) ? pageTitle : topSite.getUrl();
+            setTopSiteTitleHelper(title, updateText); // See comment below regarding setCenteredText.
+
+        // This is our preferred case: we display "subdomain.domain". People refer to sites by their domain ("it's
+        // on wikipedia!") and it's a clean look so we display the domain if we can.
+        //
+        // If the path is non-empty, we'd normally go to the case below (see that comment). However, if there's no
+        // title, we'd prefer to fallback on "subdomain.domain" rather than a url, which is really ugly.
+        } else if (URIUtils.isPathEmpty(topSiteURI) ||
+                (!URIUtils.isPathEmpty(topSiteURI) && TextUtils.isEmpty(pageTitle))) {
             // Our AsyncTask calls setCenteredText(), which needs to have all drawable's in place to correctly
             // layout the text, so we need to wait with requesting the title until we've set our pin icon.
             final UpdateCardTitleAsyncTask titleAsyncTask = new UpdateCardTitleAsyncTask(itemView.getContext(),
                     topSiteURI, title);
             titleAsyncTask.execute();
+
+        // We have a site with a path that has a non-empty title. It'd be impossible to distinguish multiple sites
+        // with "subdomain.domain" so if there's a path, we have to use something else: "domain/path" would overflow
+        // before it's useful so we use the page title.
+        } else {
+            setTopSiteTitleHelper(title, pageTitle); // See comment above regarding setCenteredText.
         }
     }
 
