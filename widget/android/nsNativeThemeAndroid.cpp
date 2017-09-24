@@ -38,6 +38,8 @@ PaintCheckboxControl(nsIFrame* aFrame,
     MakePathForRoundedRect(*aDrawTarget, shadowGfxRect, innerRadii);
   aDrawTarget->Stroke(roundedRect,
     ColorPattern(ToDeviceColor(mozilla::widget::sAndroidBorderColor)));
+  aDrawTarget->Fill(roundedRect,
+    ColorPattern(ToDeviceColor(mozilla::widget::sAndroidBackgroundColor)));
 
   if (aState.HasState(NS_EVENT_STATE_DISABLED)) {
     aDrawTarget->Fill(roundedRect,
@@ -45,9 +47,9 @@ PaintCheckboxControl(nsIFrame* aFrame,
     return;
   }
 
-  if (aState.HasState(NS_EVENT_STATE_HOVER)) {
+  if (aState.HasState(NS_EVENT_STATE_ACTIVE)) {
     aDrawTarget->Fill(roundedRect,
-      ColorPattern(ToDeviceColor(mozilla::widget::sAndroidHoverColor)));
+      ColorPattern(ToDeviceColor(mozilla::widget::sAndroidActiveColor)));
   }
 }
 
@@ -125,6 +127,8 @@ PaintRadioControl(nsIFrame* aFrame,
   RefPtr<Path> ellipse = builder->Finish();
   aDrawTarget->Stroke(ellipse,
     ColorPattern(ToDeviceColor(mozilla::widget::sAndroidBorderColor)));
+  aDrawTarget->Fill(ellipse,
+    ColorPattern(ToDeviceColor(mozilla::widget::sAndroidBackgroundColor)));
 
   if (aState.HasState(NS_EVENT_STATE_DISABLED)) {
     aDrawTarget->Fill(ellipse,
@@ -132,9 +136,9 @@ PaintRadioControl(nsIFrame* aFrame,
     return;
   }
 
-  if (aState.HasState(NS_EVENT_STATE_HOVER)) {
+  if (aState.HasState(NS_EVENT_STATE_ACTIVE)) {
     aDrawTarget->Fill(ellipse,
-      ColorPattern(ToDeviceColor(mozilla::widget::sAndroidHoverColor)));
+      ColorPattern(ToDeviceColor(mozilla::widget::sAndroidActiveColor)));
   }
 }
 

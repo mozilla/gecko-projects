@@ -48,7 +48,7 @@ dnl ========================================================
 MOZJPEG=62
 MOZPNG=10631
 NSPR_VERSION=4
-NSPR_MINVER=4.16
+NSPR_MINVER=4.17
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -3697,6 +3697,12 @@ then
     if test "x$ac_cv_sqlite_dbstat_vtab" = "xno"; then
         AC_MSG_ERROR([System SQLite library is not compiled with SQLITE_ENABLE_DBSTAT_VTAB.])
     fi
+else
+    dnl ==============================
+    dnl === SQLite fdatasync check ===
+    dnl ==============================
+    dnl Check to see if fdatasync is available
+    AC_CHECK_FUNC(fdatasync)
 fi
 
 if test -n "$MOZ_SYSTEM_SQLITE"; then
@@ -5044,16 +5050,6 @@ else
 fi
 
 AC_SUBST(PREPROCESS_OPTION)
-
-dnl ========================================================
-dnl mask as shorthand property
-dnl ========================================================
-
-# The control structure code will be removed as soon as the feature is stable
-# Refer to bug 1281101 for more details.
-MOZ_ENABLE_MASK_AS_SHORTHAND=1
-AC_DEFINE(MOZ_ENABLE_MASK_AS_SHORTHAND)
-AC_SUBST(MOZ_ENABLE_MASK_AS_SHORTHAND)
 
 # Avoid using obsolete NSPR features
 AC_DEFINE(NO_NSPR_10_SUPPORT)

@@ -27,7 +27,7 @@ WebRenderTextLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
         return;
     }
 
-    ScrollingLayersHelper scroller(this, aBuilder, aSc);
+    ScrollingLayersHelper scroller(this, aBuilder, aResources, aSc);
 
     LayerRect rect = LayerRect::FromUnknownRect(
         // I am not 100% sure this is correct, but it probably is. Because:
@@ -43,7 +43,7 @@ WebRenderTextLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
 
     for (GlyphArray& glyphs : mGlyphs) {
         WrBridge()->PushGlyphs(aBuilder, glyphs.glyphs(), mFont,
-                               glyphs.color().value(), aSc, rect, rect);
+                               glyphs.color().value(), aSc, rect, rect, true);
     }
 }
 

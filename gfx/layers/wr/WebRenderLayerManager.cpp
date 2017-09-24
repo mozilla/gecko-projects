@@ -102,6 +102,7 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
 
   if (WrBridge()) {
     // Just clear ImageKeys, they are deleted during WebRenderAPI destruction.
+    mImageKeysToDeleteLater.Clear();
     mImageKeysToDelete.Clear();
     // CompositorAnimations are cleared by WebRenderBridgeParent.
     mDiscardedCompositorAnimationsIds.Clear();
@@ -109,6 +110,7 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
   }
 
   mLastCanvasDatas.Clear();
+  RemoveUnusedAndResetWebRenderUserData();
 
   if (mTransactionIdAllocator) {
     // Make sure to notify the refresh driver just in case it's waiting on a
@@ -255,10 +257,6 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
       continue;
     }
 
-    if (item->BackfaceIsHidden() && aSc.IsBackfaceVisible()) {
-      continue;
-    }
-
     savedItems.AppendToTop(item);
 
     bool forceNewLayerData = false;
@@ -338,7 +336,7 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
 
       // Note: this call to CreateWebRenderCommands can recurse back into
       // this function if the |item| is a wrapper for a sublist.
-      if (!item->CreateWebRenderCommands(aBuilder, aResources, aSc, mParentCommands, this,
+      if (!item->CreateWebRenderCommands(aBuilder, aResources, aSc, this,
                                          aDisplayListBuilder)) {
         PushItemAsImage(item, aBuilder, aResources, aSc, aDisplayListBuilder);
       }
@@ -376,7 +374,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
 {
   MOZ_ASSERT(aDisplayList && aDisplayListBuilder);
   mEndTransactionWithoutLayers = true;
-  DiscardImages();
   WrBridge()->RemoveExpiredFontKeys();
   EndTransactionInternal(nullptr,
                          nullptr,
@@ -389,6 +386,7 @@ Maybe<wr::ImageKey>
 WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
                                       ImageContainer* aContainer,
                                       mozilla::wr::DisplayListBuilder& aBuilder,
+                                      mozilla::wr::IpcResourceUpdateQueue& aResources,
                                       const StackingContextHelper& aSc,
                                       gfx::IntSize& aSize)
 {
@@ -407,6 +405,9 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
     if (!aContainer->GetScaleHint().IsEmpty()) {
       scaleToSize = Some(aContainer->GetScaleHint());
     }
+    // TODO!
+    // We appear to be using the image bridge for a lot (most/all?) of
+    // layers-free image handling and that breaks frame consistency.
     imageData->CreateAsyncImageWebRenderCommands(aBuilder,
                                                  aContainer,
                                                  aSc,
@@ -415,7 +416,8 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
                                                  gfx::Matrix4x4(),
                                                  scaleToSize,
                                                  wr::ImageRendering::Auto,
-                                                 wr::MixBlendMode::Normal);
+                                                 wr::MixBlendMode::Normal,
+                                                 !aItem->BackfaceIsHidden());
     return Nothing();
   }
 
@@ -426,18 +428,21 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
   mozilla::layers::Image* image = autoLock.GetImage();
   aSize = image->GetSize();
 
-  return imageData->UpdateImageKey(aContainer);
+  return imageData->UpdateImageKey(aContainer, aResources);
 }
 
 bool
 WebRenderLayerManager::PushImage(nsDisplayItem* aItem,
                                  ImageContainer* aContainer,
                                  mozilla::wr::DisplayListBuilder& aBuilder,
+                                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                                  const StackingContextHelper& aSc,
                                  const LayerRect& aRect)
 {
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = CreateImageKey(aItem, aContainer, aBuilder, aSc, size);
+  Maybe<wr::ImageKey> key = CreateImageKey(aItem, aContainer,
+                                          aBuilder, aResources,
+                                          aSc, size);
   if (aContainer->IsAsync()) {
     // Async ImageContainer does not create ImageKey, instead it uses Pipeline.
     MOZ_ASSERT(key.isNothing());
@@ -449,7 +454,7 @@ WebRenderLayerManager::PushImage(nsDisplayItem* aItem,
 
   auto r = aSc.ToRelativeLayoutRect(aRect);
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
-  aBuilder.PushImage(r, r, wr::ToImageRendering(sampleFilter), key.value());
+  aBuilder.PushImage(r, r, !aItem->BackfaceIsHidden(), wr::ToImageRendering(sampleFilter), key.value());
 
   return true;
 }
@@ -613,7 +618,7 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
       // Force update the key in fallback data since we repaint the image in this path.
       // If not force update, fallbackData may reuse the original key because it
       // doesn't know UpdateImageHelper already updated the image container.
-      if (!fallbackData->UpdateImageKey(imageContainer, true)) {
+      if (!fallbackData->UpdateImageKey(imageContainer, aResources, true)) {
         return nullptr;
       }
     }
@@ -675,6 +680,7 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
   aBuilder.PushImage(dest,
                      dest,
+                     !aItem->BackfaceIsHidden(),
                      wr::ToImageRendering(sampleFilter),
                      fallbackData->GetKey().value());
   return true;
@@ -686,7 +692,6 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       EndTransactionFlags aFlags)
 {
   mEndTransactionWithoutLayers = false;
-  DiscardImages();
   WrBridge()->RemoveExpiredFontKeys();
   EndTransactionInternal(aCallback, aCallbackData, aFlags);
 }
@@ -764,6 +769,10 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
       }
       mLayerScrollData.clear();
       mClipIdCache.clear();
+
+      // Remove the user data those are not displayed on the screen and
+      // also reset the data to unused for next transaction.
+      RemoveUnusedAndResetWebRenderUserData();
     } else {
       for (auto iter = mLastCanvasDatas.Iter(); !iter.Done(); iter.Next()) {
         RefPtr<WebRenderCanvasData> canvasData = iter.Get()->GetKey();
@@ -816,6 +825,12 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
   bool sync = mTarget != nullptr;
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
+
+  for (const auto& key : mImageKeysToDelete) {
+    resourceUpdates.DeleteImage(key);
+  }
+  mImageKeysToDelete.Clear();
+  mImageKeysToDelete.SwapElements(mImageKeysToDeleteLater);
 
   // Skip the synchronization for buffer since we also skip the painting during
   // device-reset status.
@@ -922,16 +937,20 @@ WebRenderLayerManager::MakeSnapshotIfRequired(LayoutDeviceIntSize aSize)
 void
 WebRenderLayerManager::AddImageKeyForDiscard(wr::ImageKey key)
 {
-  mImageKeysToDelete.AppendElement(key);
+  mImageKeysToDeleteLater.AppendElement(key);
 }
 
 void
 WebRenderLayerManager::DiscardImages()
 {
   wr::IpcResourceUpdateQueue resources(WrBridge()->GetShmemAllocator());
+  for (const auto& key : mImageKeysToDeleteLater) {
+    resources.DeleteImage(key);
+  }
   for (const auto& key : mImageKeysToDelete) {
     resources.DeleteImage(key);
   }
+  mImageKeysToDeleteLater.Clear();
   mImageKeysToDelete.Clear();
   WrBridge()->UpdateResources(resources);
 }
@@ -943,9 +962,16 @@ WebRenderLayerManager::AddCompositorAnimationsIdForDiscard(uint64_t aId)
 }
 
 void
+WebRenderLayerManager::KeepCompositorAnimationsIdAlive(uint64_t aId)
+{
+  mDiscardedCompositorAnimationsIds.RemoveElement(aId);
+}
+
+void
 WebRenderLayerManager::DiscardCompositorAnimations()
 {
-  if (WrBridge()->IPCOpen() && !mDiscardedCompositorAnimationsIds.IsEmpty()) {
+  if (WrBridge()->IPCOpen() &&
+      !mDiscardedCompositorAnimationsIds.IsEmpty()) {
     WrBridge()->
       SendDeleteCompositorAnimations(mDiscardedCompositorAnimationsIds);
   }
@@ -958,6 +984,7 @@ WebRenderLayerManager::DiscardLocalImages()
   // Removes images but doesn't tell the parent side about them
   // This is useful in empty / failed transactions where we created
   // image keys but didn't tell the parent about them yet.
+  mImageKeysToDeleteLater.Clear();
   mImageKeysToDelete.Clear();
 }
 

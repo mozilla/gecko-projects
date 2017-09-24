@@ -2481,7 +2481,7 @@
   },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "enumerated",
     "n_values": 3,
     "description": "Sending TLS early data was possible: 0 - not possible, 1 - possible but not used, 2 - possible and used.",
@@ -2490,7 +2490,7 @@
   },
   "TLS_EARLY_DATA_ACCEPTED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "boolean",
     "description": "TLS early data was used and it was accepted (true) or rejected (false) by the remote host.",
     "alert_emails": ["necko@mozilla.com"],
@@ -2498,7 +2498,7 @@
   },
   "TLS_EARLY_DATA_BYTES_WRITTEN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "58",
+    "expires_in_version": "62",
     "kind": "exponential",
     "high": 60000,
     "n_buckets": 100,
@@ -9220,6 +9220,14 @@
     "kind": "boolean",
     "description": "Was DataChannels negotiated"
   },
+  "WEBRTC_RTCP_MUX": {
+    "record_in_processes": ["main", "content"],
+    "bug_numbers": [1402221],
+    "alert_emails": ["webrtc-telemetry-alerts@mozilla.com", "nohlmeier@mozilla.com"],
+    "expires_in_version": "62",
+    "kind": "boolean",
+    "description": "Was RTCP-MUX negotiated for a track"
+  },
   "WEBRTC_CALL_TYPE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["webrtc-telemetry-alerts@mozilla.com"],
@@ -12962,24 +12970,6 @@
     "n_buckets": 10,
     "bug_numbers": [1331804],
     "description": "The time a given main thread runnable took to run (in milliseconds). The key comes from the runnables nsINamed::name value."
-  },
-  "MOZ_BLOB_IN_XHR": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "boolean",
-    "bug_numbers": [1335365],
-    "releaseChannelCollection": "opt-out",
-    "description": "XMLHttpRequest.responseType set to moz-blob"
-  },
-  "MOZ_CHUNKED_TEXT_IN_XHR": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "expires_in_version": "58",
-    "kind": "boolean",
-    "bug_numbers": [1335365],
-    "releaseChannelCollection": "opt-out",
-    "description": "XMLHttpRequest.responseType set to moz-chunked-text"
   },
   "MOZ_CHUNKED_ARRAYBUFFER_IN_XHR": {
     "record_in_processes": ["main", "content"],

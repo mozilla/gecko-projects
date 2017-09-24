@@ -379,25 +379,6 @@
   </menupopup>
 </panel>
 
-<panel id="customization-tipPanel"
-       type="arrow"
-       flip="none"
-       side="left"
-       position="leftcenter topright"
-       noautohide="true"
-       hidden="true">
-  <hbox class="customization-tipPanel-wrapper">
-    <vbox class="customization-tipPanel-infoBox"/>
-    <vbox class="customization-tipPanel-content" flex="1">
-      <description class="customization-tipPanel-contentMessage"/>
-      <image class="customization-tipPanel-contentImage"/>
-    </vbox>
-    <vbox pack="start" align="end" class="customization-tipPanel-closeBox">
-      <toolbarbutton oncommand="gCustomizeMode.hideTip()" class="close-icon"/>
-    </vbox>
-  </hbox>
-</panel>
-
 <panel id="panic-button-success-notification"
        type="arrow"
        position="bottomcenter topright"
@@ -440,9 +421,8 @@
                      buttonhighlight="true"
                      hidden="true">
     <popupnotificationcontent id="update-available-notification-content" orient="vertical">
-      <description id="update-available-description">&updateAvailable.message;
-        <label id="update-available-whats-new" class="text-link" value="&updateAvailable.whatsnew.label;" />
-      </description>
+      <description id="update-available-description">&updateAvailable.message;</description>
+      <label id="update-available-whats-new" class="text-link" value="&updateAvailable.whatsnew.label;" />
     </popupnotificationcontent>
   </popupnotification>
 
@@ -459,9 +439,8 @@
                      buttonhighlight="true"
                      hidden="true">
     <popupnotificationcontent id="update-manual-notification-content" orient="vertical">
-      <description id="update-manual-description">&updateManual.message;
-        <label id="update-manual-whats-new" class="text-link" value="&updateManual.whatsnew.label;" />
-      </description>
+      <description id="update-manual-description">&updateManual.message;</description>
+      <label id="update-manual-whats-new" class="text-link" value="&updateManual.whatsnew.label;" />
     </popupnotificationcontent>
   </popupnotification>
 
@@ -561,28 +540,27 @@
                        class="subviewbutton subviewbutton-iconic"
                        command="Browser:RestoreLastSession"/>
         <toolbarseparator/>
-        <toolbaritem id="appMenu-zoom-controls" class="toolbaritem-combined-buttons">
+        <toolbaritem id="appMenu-zoom-controls" class="toolbaritem-combined-buttons" closemenu="none">
           <label value="&fullZoom.label;"/>
           <toolbarbutton id="appMenu-zoomReduce-button"
                          class="subviewbutton subviewbutton-iconic"
                          command="cmd_fullZoomReduce"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarbutton id="appMenu-zoomReset-button"
                          class="subviewbutton"
                          command="cmd_fullZoomReset"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarbutton id="appMenu-zoomEnlarge-button"
                          class="subviewbutton subviewbutton-iconic"
                          command="cmd_fullZoomEnlarge"
-                         closemenu="none"
                          tooltip="dynamic-shortcut-tooltip"/>
           <toolbarseparator orient="vertical"/>
           <toolbarbutton id="appMenu-fullscreen-button"
                          class="subviewbutton subviewbutton-iconic"
                          observes="View:FullScreen"
                          type="checkbox"
+                         closemenu="auto"
+                         onclick="if (event.button == 0) this.closest('panel').hidePopup();"
                          tooltip="dynamic-shortcut-tooltip"/>
         </toolbaritem>
         <toolbarseparator/>
@@ -646,8 +624,12 @@
         <toolbarbutton id="appMenu-print-button"
                        class="subviewbutton subviewbutton-iconic"
                        label="&printCmd.label;"
+#ifdef XP_MACOSX
                        key="printKb"
                        command="cmd_print"
+#else
+                       command="cmd_printPreview"
+#endif
                        />
         <toolbarseparator/>
         <toolbarbutton id="appMenu-find-button"
@@ -722,6 +704,16 @@
                        label="&appMenuRemoteTabs.label;"
                        closemenu="none"
                        oncommand="PanelUI.showSubView('PanelUI-remotetabs', this)"/>
+        <toolbarseparator/>
+        <label value="&appMenuRecentHighlights.label;"
+               class="subview-subheader"/>
+        <toolbaritem id="appMenu-library-recentHighlights"
+                     orient="vertical"
+                     smoothscroll="false"
+                     flatList="true"
+                     tooltip="bhTooltip">
+          <!-- Recent Highlights will go here -->
+        </toolbaritem>
       </vbox>
     </panelview>
 

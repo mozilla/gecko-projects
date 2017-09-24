@@ -187,8 +187,11 @@ nsTableWrapperFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   BuildDisplayListForChild(aBuilder, mCaptionFrames.FirstChild(), captionSet);
 
   // Now we have to sort everything by content order, since the caption
-  // may be somewhere inside the table
-  set.BlockBorderBackgrounds()->SortByContentOrder(GetContent());
+  // may be somewhere inside the table.
+  // We don't sort BlockBorderBackgrounds and BorderBackgrounds because the
+  // display items in those lists should stay out of content order in order to
+  // follow the rules in https://www.w3.org/TR/CSS21/zindex.html#painting-order
+  // and paint the caption background after all of the rest.
   set.Floats()->SortByContentOrder(GetContent());
   set.Content()->SortByContentOrder(GetContent());
   set.PositionedDescendants()->SortByContentOrder(GetContent());
@@ -858,10 +861,10 @@ nsTableWrapperFrame::Reflow(nsPresContext*           aPresContext,
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsTableWrapperFrame");
   DISPLAY_REFLOW(aPresContext, this, aOuterRI, aDesiredSize, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
 
   // Initialize out parameters
   aDesiredSize.ClearSize();
-  aStatus.Reset();
 
   if (!HasAnyStateBits(NS_FRAME_FIRST_REFLOW)) {
     // Set up our kids.  They're already present, on an overflow list,

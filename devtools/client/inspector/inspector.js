@@ -32,7 +32,6 @@ loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
 loader.lazyRequireGetter(this, "ExtensionSidebar", "devtools/client/inspector/extensions/extension-sidebar");
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
-loader.lazyRequireGetter(this, "ViewHelpers", "devtools/client/shared/widgets/view-helpers", true);
 loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 
 const {LocalizationHelper, localizeMarkup} = require("devtools/shared/l10n");
@@ -119,7 +118,6 @@ function Inspector(toolbox) {
   this.onMarkupLoaded = this.onMarkupLoaded.bind(this);
   this.onNewSelection = this.onNewSelection.bind(this);
   this.onNewRoot = this.onNewRoot.bind(this);
-  this.onPaneToggleButtonClicked = this.onPaneToggleButtonClicked.bind(this);
   this.onPanelWindowResize = this.onPanelWindowResize.bind(this);
   this.onShowBoxModelHighlighterForNode =
     this.onShowBoxModelHighlighterForNode.bind(this);
@@ -278,6 +276,16 @@ Inspector.prototype = {
     this.isReady = false;
 
     this.setupSearchBox();
+
+    // Setup the splitter before the sidebar is displayed so,
+    // we don't miss any events.
+    this.setupSplitter();
+
+    // We can display right panel with: tab bar, markup view and breadbrumb. Right after
+    // the splitter set the right and left panel sizes, in order to avoid resizing it
+    // during load of the inspector.
+    this.panelDoc.getElementById("inspector-main-content").style.visibility = "visible";
+
     this.setupSidebar();
     this.setupExtensionSidebars();
 
@@ -477,10 +485,11 @@ Inspector.prototype = {
     let SplitBox = this.React.createFactory(this.browserRequire(
       "devtools/client/shared/components/splitter/split-box"));
 
+    let { width, height } = this.getSidebarSize();
     let splitter = SplitBox({
       className: "inspector-sidebar-splitter",
-      initialWidth: INITIAL_SIDEBAR_SIZE,
-      initialHeight: INITIAL_SIDEBAR_SIZE,
+      initialWidth: width,
+      initialHeight: height,
       splitterSize: 1,
       endPanelControl: true,
       startPanel: this.InspectorTabPanel({
@@ -496,11 +505,6 @@ Inspector.prototype = {
       this.panelDoc.getElementById("inspector-splitter-box"));
 
     this.panelWin.addEventListener("resize", this.onPanelWindowResize, true);
-
-    // Persist splitter state in preferences.
-    this.sidebar.on("show", this.onSidebarShown);
-    this.sidebar.on("hide", this.onSidebarHidden);
-    this.sidebar.on("destroy", this.onSidebarHidden);
   },
 
   /**
@@ -524,7 +528,7 @@ Inspector.prototype = {
     });
   },
 
-  onSidebarShown: function () {
+  getSidebarSize: function () {
     let width;
     let height;
 
@@ -540,8 +544,11 @@ Inspector.prototype = {
       width = INITIAL_SIDEBAR_SIZE;
       height = INITIAL_SIDEBAR_SIZE;
     }
+    return { width, height };
+  },
 
-    this._splitter.setState({width, height});
+  onSidebarShown: function () {
+    this._splitter.setState(this.getSidebarSize());
   },
 
   onSidebarHidden: function () {
@@ -666,9 +673,10 @@ Inspector.prototype = {
       this.sidebar.toggleTab(true, "fontinspector");
     }
 
-    // Setup the splitter before the sidebar is displayed so,
-    // we don't miss any events.
-    this.setupSplitter();
+    // Persist splitter state in preferences.
+    this.sidebar.on("show", this.onSidebarShown);
+    this.sidebar.on("hide", this.onSidebarHidden);
+    this.sidebar.on("destroy", this.onSidebarHidden);
 
     this.sidebar.show(defaultTab);
   },
@@ -784,20 +792,6 @@ Inspector.prototype = {
   setupToolbar: Task.async(function* () {
     this.teardownToolbar();
 
-    // Setup the sidebar toggle button.
-    let SidebarToggle = this.React.createFactory(this.browserRequire(
-      "devtools/client/shared/components/sidebar-toggle"));
-
-    let sidebarToggle = SidebarToggle({
-      onClick: this.onPaneToggleButtonClicked,
-      collapsed: false,
-      expandPaneTitle: INSPECTOR_L10N.getStr("inspector.expandPane"),
-      collapsePaneTitle: INSPECTOR_L10N.getStr("inspector.collapsePane"),
-    });
-
-    let parentBox = this.panelDoc.getElementById("inspector-sidebar-toggle-box");
-    this._sidebarToggle = this.ReactDOM.render(sidebarToggle, parentBox);
-
     // Setup the add-node button.
     this.addNode = this.addNode.bind(this);
     this.addNodeButton = this.panelDoc.getElementById("inspector-element-add-button");
@@ -828,8 +822,6 @@ Inspector.prototype = {
   }),
 
   teardownToolbar: function () {
-    this._sidebarToggle = null;
-
     if (this.addNodeButton) {
       this.addNodeButton.removeEventListener("click", this.addNode);
       this.addNodeButton = null;
@@ -1518,7 +1510,7 @@ Inspector.prototype = {
     this._markupFrame.setAttribute("tooltip", "aHTMLTooltip");
     this._markupFrame.addEventListener("contextmenu", this._onContextMenu);
 
-    this._markupBox.setAttribute("collapsed", true);
+    this._markupBox.style.visibility = "hidden";
     this._markupBox.appendChild(this._markupFrame);
 
     this._markupFrame.addEventListener("load", this._onMarkupFrameLoad, true);
@@ -1532,10 +1524,9 @@ Inspector.prototype = {
 
     this._markupFrame.contentWindow.focus();
 
-    this._markupBox.removeAttribute("collapsed");
-
     this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
 
+    this._markupBox.style.visibility = "visible";
     this.emit("markuploaded");
   },
 
@@ -1562,43 +1553,6 @@ Inspector.prototype = {
     this._markupBox = null;
 
     return destroyPromise;
-  },
-
-  /**
-   * When the pane toggle button is clicked or pressed, toggle the pane, change the button
-   * state and tooltip.
-   */
-  onPaneToggleButtonClicked: function (e) {
-    let sidePaneContainer = this.panelDoc.querySelector(
-      "#inspector-splitter-box .controlled");
-    let isVisible = !this._sidebarToggle.state.collapsed;
-
-    // Make sure the sidebar has width and height attributes before collapsing
-    // because ViewHelpers needs it.
-    if (isVisible) {
-      let rect = sidePaneContainer.getBoundingClientRect();
-      if (!sidePaneContainer.hasAttribute("width")) {
-        sidePaneContainer.setAttribute("width", rect.width);
-      }
-      // always refresh the height attribute before collapsing, it could have
-      // been modified by resizing the container.
-      sidePaneContainer.setAttribute("height", rect.height);
-    }
-
-    let onAnimationDone = () => {
-      if (isVisible) {
-        this._sidebarToggle.setState({collapsed: true});
-      } else {
-        this._sidebarToggle.setState({collapsed: false});
-      }
-    };
-
-    ViewHelpers.togglePane({
-      visible: !isVisible,
-      animated: true,
-      delayed: true,
-      callback: onAnimationDone
-    }, sidePaneContainer);
   },
 
   onEyeDropperButtonClicked: function () {

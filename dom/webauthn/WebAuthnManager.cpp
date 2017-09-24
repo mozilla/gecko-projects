@@ -56,8 +56,6 @@ static nsresult
 GetAlgorithmName(const OOS& aAlgorithm,
                  /* out */ nsString& aName)
 {
-  MOZ_ASSERT(aAlgorithm.IsString()); // TODO: remove assertion when we coerce.
-
   if (aAlgorithm.IsString()) {
     // If string, then treat as algorithm name
     aName.Assign(aAlgorithm.GetAsString());
@@ -90,7 +88,7 @@ AssembleClientData(const nsAString& aOrigin, const CryptoBuffer& aChallenge,
   CollectedClientData clientDataObject;
   clientDataObject.mChallenge.Assign(challengeBase64);
   clientDataObject.mOrigin.Assign(aOrigin);
-  clientDataObject.mHashAlg.Assign(NS_LITERAL_STRING("SHA-256"));
+  clientDataObject.mHashAlg.AssignLiteral(u"SHA-256");
 
   nsAutoString temp;
   if (NS_WARN_IF(!clientDataObject.ToJSON(temp))) {

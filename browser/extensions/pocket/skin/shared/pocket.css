@@ -64,7 +64,7 @@
   margin-inline-start: 2px;
 }
 
-:root[uidensity=touch] #star-button-box[animationsenabled] > #star-button[starred][animate] + #star-button-animatable-box {
+:root[uidensity=touch] #pocket-button-box[animate="true"] > #pocket-animatable-box {
   /* .urlbar-icon has width 30px in this case */
   margin-inline-start: 5px;
 }
@@ -207,16 +207,12 @@
   list-style-image: url("chrome://pocket-shared/skin/pocket.svg");
 }
 
-#panelMenu_pocket,
-#menu_pocket,
-#BMB_pocket {
+#panelMenu_pocket {
   list-style-image: url("chrome://pocket/content/panels/img/pocketmenuitem16.png");
 }
 
 @media (min-resolution: 2dppx) {
-  #panelMenu_pocket,
-  #menu_pocket,
-  #BMB_pocket {
+  #panelMenu_pocket {
     list-style-image: url("chrome://pocket/content/panels/img/pocketmenuitem16@2x.png");
   }
 

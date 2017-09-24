@@ -6,6 +6,7 @@ use CompositionPipeline;
 use SendableFrameTree;
 use compositor_thread::{CompositorProxy, CompositorReceiver};
 use compositor_thread::{InitialCompositorState, Msg, RenderListener};
+use core::nonzero::NonZero;
 use euclid::{Point2D, TypedPoint2D, TypedVector2D, ScaleFactor};
 use gfx_traits::Epoch;
 use gleam::gl;
@@ -61,7 +62,7 @@ impl ConvertPipelineIdFromWebRender for webrender_api::PipelineId {
     fn from_webrender(&self) -> PipelineId {
         PipelineId {
             namespace_id: PipelineNamespaceId(self.0),
-            index: PipelineIndex(self.1),
+            index: PipelineIndex(NonZero::new(self.1).expect("Webrender pipeline zero?")),
         }
     }
 }
@@ -633,7 +634,10 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     fn send_window_size(&self, size_type: WindowSizeType) {
         let dppx = self.page_zoom * self.hidpi_factor();
 
-        self.webrender_api.set_window_parameters(self.webrender_document, self.frame_size, self.window_rect);
+        self.webrender_api.set_window_parameters(self.webrender_document,
+                                                 self.frame_size,
+                                                 self.window_rect,
+                                                 self.hidpi_factor().get());
 
         let initial_viewport = self.window_rect.size.to_f32() / dppx;
 

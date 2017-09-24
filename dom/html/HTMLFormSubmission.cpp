@@ -112,7 +112,8 @@ public:
   AddNameDirectoryPair(const nsAString& aName, Directory* aDirectory) override;
 
   virtual nsresult
-  GetEncodedSubmission(nsIURI* aURI, nsIInputStream** aPostDataStream) override;
+  GetEncodedSubmission(nsIURI* aURI, nsIInputStream** aPostDataStream,
+                       int64_t* aPostDataStreamLength) override;
 
 protected:
 
@@ -266,11 +267,13 @@ HandleMailtoSubject(nsCString& aPath)
 
 nsresult
 FSURLEncoded::GetEncodedSubmission(nsIURI* aURI,
-                                   nsIInputStream** aPostDataStream)
+                                   nsIInputStream** aPostDataStream,
+                                   int64_t* aPostDataStreamLength)
 {
   nsresult rv = NS_OK;
 
   *aPostDataStream = nullptr;
+  *aPostDataStreamLength = -1;
 
   if (mMethod == NS_FORM_METHOD_POST) {
 
@@ -313,6 +316,8 @@ FSURLEncoded::GetEncodedSubmission(nsIURI* aURI,
 
       *aPostDataStream = mimeStream;
       NS_ADDREF(*aPostDataStream);
+
+      *aPostDataStreamLength = mQueryString.Length();
     }
 
   } else {
@@ -394,8 +399,13 @@ FSMultipartFormData::FSMultipartFormData(NotNull<const Encoding*> aEncoding,
                                          nsIContent* aOriginatingElement)
   : EncodingFormSubmission(aEncoding, aOriginatingElement)
 {
-  mPostDataStream =
+  mPostData =
     do_CreateInstance("@mozilla.org/io/multiplex-input-stream;1");
+
+  nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(mPostData);
+  MOZ_ASSERT(SameCOMIdentity(mPostData, inputStream));
+  mPostDataStream = inputStream;
+
   mTotalLength = 0;
 
   mBoundary.AssignLiteral("---------------------------");
@@ -600,7 +610,7 @@ FSMultipartFormData::AddDataChunk(const nsACString& aName,
     // here, since we're about to add the file input stream
     AddPostDataStream();
 
-    mPostDataStream->AppendStream(aInputStream);
+    mPostData->AppendStream(aInputStream);
     mTotalLength += aInputStreamSize;
   }
 
@@ -610,7 +620,8 @@ FSMultipartFormData::AddDataChunk(const nsACString& aName,
 
 nsresult
 FSMultipartFormData::GetEncodedSubmission(nsIURI* aURI,
-                                          nsIInputStream** aPostDataStream)
+                                          nsIInputStream** aPostDataStream,
+                                          int64_t* aPostDataStreamLength)
 {
   nsresult rv;
 
@@ -622,8 +633,10 @@ FSMultipartFormData::GetEncodedSubmission(nsIURI* aURI,
   nsAutoCString contentType;
   GetContentType(contentType);
   mimeStream->AddHeader("Content-Type", contentType.get());
-  uint64_t unused;
-  mimeStream->SetData(GetSubmissionBody(&unused));
+
+  uint64_t bodySize;
+  mimeStream->SetData(GetSubmissionBody(&bodySize));
+  *aPostDataStreamLength = bodySize;
 
   mimeStream.forget(aPostDataStream);
 
@@ -640,7 +653,7 @@ FSMultipartFormData::AddPostDataStream()
                                 mPostDataChunk);
   NS_ASSERTION(postDataChunkStream, "Could not open a stream for POST!");
   if (postDataChunkStream) {
-    mPostDataStream->AppendStream(postDataChunkStream);
+    mPostData->AppendStream(postDataChunkStream);
     mTotalLength += mPostDataChunk.Length();
   }
 
@@ -672,7 +685,8 @@ public:
   AddNameDirectoryPair(const nsAString& aName, Directory* aDirectory) override;
 
   virtual nsresult
-  GetEncodedSubmission(nsIURI* aURI, nsIInputStream** aPostDataStream) override;
+  GetEncodedSubmission(nsIURI* aURI, nsIInputStream** aPostDataStream,
+                       int64_t* aPostDataStreaLength) override;
 
 private:
   nsString mBody;
@@ -711,9 +725,13 @@ FSTextPlain::AddNameDirectoryPair(const nsAString& aName,
 
 nsresult
 FSTextPlain::GetEncodedSubmission(nsIURI* aURI,
-                                  nsIInputStream** aPostDataStream)
+                                  nsIInputStream** aPostDataStream,
+                                  int64_t* aPostDataStreamLength)
 {
   nsresult rv = NS_OK;
+
+  *aPostDataStream = nullptr;
+  *aPostDataStreamLength = -1;
 
   // XXX HACK We are using the standard URL mechanism to give the body to the
   // mailer instead of passing the post data stream to it, since that sounds
@@ -765,6 +783,8 @@ FSTextPlain::GetEncodedSubmission(nsIURI* aURI,
     mimeStream->AddHeader("Content-Type", "text/plain");
     mimeStream->SetData(bodyStream);
     CallQueryInterface(mimeStream, aPostDataStream);
+
+    *aPostDataStreamLength = cbody.Length();
   }
 
   return rv;

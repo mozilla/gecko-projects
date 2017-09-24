@@ -796,14 +796,17 @@ HTMLFormElement::SubmitSubmission(HTMLFormSubmission* aFormSubmission)
                                        nullptr, doc);
 
     nsCOMPtr<nsIInputStream> postDataStream;
+    int64_t postDataStreamLength = -1;
     rv = aFormSubmission->GetEncodedSubmission(actionURI,
-                                               getter_AddRefs(postDataStream));
+                                               getter_AddRefs(postDataStream),
+                                               &postDataStreamLength);
     NS_ENSURE_SUBMIT_SUCCESS(rv);
 
     rv = linkHandler->OnLinkClickSync(this, actionURI,
                                       target.get(),
-                                      NullString(),
-                                      postDataStream, nullptr, false,
+                                      VoidString(),
+                                      postDataStream, postDataStreamLength,
+                                      nullptr, false,
                                       getter_AddRefs(docShell),
                                       getter_AddRefs(mSubmittingRequest));
     NS_ENSURE_SUBMIT_SUCCESS(rv);

@@ -34,6 +34,9 @@ const TOPIC_PDFJS_HANDLER_CHANGED = "pdfjs:handlerChanged";
 
 const PREF_DISABLED_PLUGIN_TYPES = "plugin.disable_full_page_plugin_for_types";
 
+// Pref for when containers is being controlled
+const PREF_CONTAINERS_EXTENSION = "privacy.userContext.extension";
+
 // Preferences that affect which entries to show in the list.
 const PREF_SHOW_PLUGINS_IN_LIST = "browser.download.show_plugins_in_list";
 const PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS =
@@ -103,6 +106,10 @@ if (AppConstants.MOZ_DEV_EDITION) {
   XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
     "resource://gre/modules/FxAccounts.jsm");
 }
+
+// A promise that resolves when the list of application handlers is loaded.
+// We store this in a global so tests can await it.
+var promiseLoadHandlersList;
 
 var gMainPane = {
   // The set of types the app knows how to handle.  A hash of HandlerInfoWrapper
@@ -243,6 +250,8 @@ var gMainPane = {
       gMainPane.restoreDefaultHomePage);
     setEventListener("disableHomePageExtension", "command",
                      gMainPane.makeDisableControllingExtension("homepage_override"));
+    setEventListener("disableContainersExtension", "command",
+                     gMainPane.makeDisableControllingExtension("privacy.containers"));
     setEventListener("chooseLanguage", "command",
       gMainPane.showLanguages);
     setEventListener("translationAttributionImage", "click",
@@ -436,19 +445,21 @@ var gMainPane = {
     }
 
     // Load the data and build the list of handlers.
-    // By doing this in a timeout, we let the preferences dialog resize itself
-    // to an appropriate size before we add a bunch of items to the list.
-    // Otherwise, if there are many items, and the Applications prefpane
-    // is the one that gets displayed when the user first opens the dialog,
-    // the dialog might stretch too much in an attempt to fit them all in.
-    // XXX Shouldn't we perhaps just set a max-height on the richlistbox?
-    var _delayedPaneLoad = function(self) {
-      self._loadData();
-      self._rebuildVisibleTypes();
-      self._sortVisibleTypes();
-      self._rebuildView();
-    }
-    setTimeout(_delayedPaneLoad, 0, this);
+    // By doing this after pageshow, we ensure it doesn't delay painting
+    // of the preferences page.
+    promiseLoadHandlersList = new Promise((resolve, reject) => {
+      window.addEventListener("pageshow", async () => {
+        try {
+          this._loadData();
+          await this._rebuildVisibleTypes();
+          this._sortVisibleTypes();
+          this._rebuildView();
+          resolve();
+        } catch (ex) {
+          reject(ex);
+        }
+      }, {once: true});
+    });
 
     let browserBundle = document.getElementById("browserBundle");
     appendSearchKeywords("browserContainersSettings", [
@@ -464,6 +475,32 @@ var gMainPane = {
       .notifyObservers(window, "main-pane-loaded");
   },
 
+  // CONTAINERS
+
+  /*
+   * preferences:
+   *
+   * privacy.userContext.enabled
+   * - true if containers is enabled
+   */
+
+  /**
+   * Enables/disables the Settings button used to configure containers
+   */
+  readBrowserContainersCheckbox() {
+    const pref = document.getElementById("privacy.userContext.enabled");
+    const settings = document.getElementById("browserContainersSettings");
+
+    settings.disabled = !pref.value;
+    const containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
+    const containersCheckbox = document.getElementById("browserContainersCheckbox");
+    containersCheckbox.checked = containersEnabled;
+    handleControllingExtension("privacy.containers")
+      .then((isControlled) => {
+        containersCheckbox.disabled = isControlled;
+      });
+  },
+
   /**
    * Show the Containers UI depending on the privacy.userContext.ui.enabled pref.
    */
@@ -475,14 +512,13 @@ var gMainPane = {
       document.getElementById("browserContainersbox").setAttribute("data-hidden-from-search", "true");
       return;
     }
+    this._prefSvc.addObserver(PREF_CONTAINERS_EXTENSION, this);
 
-    let link = document.getElementById("browserContainersLearnMore");
+    const link = document.getElementById("browserContainersLearnMore");
     link.href = Services.urlFormatter.formatURLPref("app.support.baseURL") + "containers";
 
     document.getElementById("browserContainersbox").hidden = false;
-
-    document.getElementById("browserContainersCheckbox").checked =
-      Services.prefs.getBoolPref("privacy.userContext.enabled");
+    this.readBrowserContainersCheckbox();
   },
 
   isE10SEnabled() {
@@ -1347,6 +1383,8 @@ var gMainPane = {
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
     this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
+
+    this._prefSvc.removeObserver(PREF_CONTAINERS_EXTENSION, this);
   },
 
 
@@ -1364,8 +1402,12 @@ var gMainPane = {
 
   // nsIObserver
 
-  observe(aSubject, aTopic, aData) {
+  async observe(aSubject, aTopic, aData) {
     if (aTopic == "nsPref:changed") {
+      if (aData == PREF_CONTAINERS_EXTENSION) {
+        this.readBrowserContainersCheckbox();
+        return;
+      }
       // Rebuild the list when there are changes to preferences that influence
       // whether or not to show certain entries in the list.
       if (!this._storingAction) {
@@ -1373,7 +1415,7 @@ var gMainPane = {
         // that list when they change.
         if (aData == PREF_SHOW_PLUGINS_IN_LIST ||
           aData == PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS) {
-          this._rebuildVisibleTypes();
+          await this._rebuildVisibleTypes();
           this._sortVisibleTypes();
         }
 
@@ -1493,7 +1535,7 @@ var gMainPane = {
 
   // View Construction
 
-  _rebuildVisibleTypes() {
+  async _rebuildVisibleTypes() {
     // Reset the list of visible types and the visible type description counts.
     this._visibleTypes = [];
     this._visibleTypeDescriptionCount = {};
@@ -1504,6 +1546,11 @@ var gMainPane = {
       this._prefSvc.getBoolPref(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS);
 
     for (let type in this._handledTypes) {
+      // Yield before processing each handler info object to avoid monopolizing
+      // the main thread, as the objects are retrieved lazily, and retrieval
+      // can be expensive on Windows.
+      await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+
       let handlerInfo = this._handledTypes[type];
 
       // Hide plugins without associated extensions if so prefed so we don't
@@ -2604,6 +2651,7 @@ function getLocalHandlerApp(aFile) {
 }
 
 let extensionControlledContentIds = {
+  "privacy.containers": "browserContainersExtensionContent",
   "homepage_override": "browserHomePageExtensionContent",
 };
 
@@ -2632,7 +2680,7 @@ async function handleControllingExtension(prefName) {
 
 async function showControllingExtension(settingName, extensionId) {
   let extensionControlledContent = getControllingExtensionEl(settingName);
-  // Tell the user what extension is controlling the homepage.
+  // Tell the user what extension is controlling the setting.
   let addon = await AddonManager.getAddonByID(extensionId);
   const defaultIcon = "chrome://mozapps/skin/extensions/extensionGeneric.svg";
   let stringParts = document

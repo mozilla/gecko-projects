@@ -82,6 +82,21 @@ enum NSWindowOcclusionState {
 
 #endif
 
+#if !defined(MAC_OS_X_VERSION_10_10) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_10
+
+enum NSWindowTitleVisibility {
+  NSWindowTitleVisible = 0,
+  NSWindowTitleHidden  = 1
+};
+
+@interface NSWindow(TitleVisibility)
+- (void)setTitleVisibility:(NSWindowTitleVisibility)visibility;
+- (void)setTitlebarAppearsTransparent:(BOOL)isTitlebarTransparent;
+@end
+
+#endif
+
 #if !defined(MAC_OS_X_VERSION_10_12) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12
 
@@ -471,6 +486,15 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect &aRect,
   // Create the window
   mWindow = [[windowClass alloc] initWithContentRect:contentRect styleMask:features 
                                  backing:NSBackingStoreBuffered defer:YES];
+
+  if ([mWindow respondsToSelector:@selector(setTitleVisibility:)]) {
+    // By default, hide window titles.
+    [mWindow setTitleVisibility:NSWindowTitleHidden];
+  }
+  if ([mWindow respondsToSelector:@selector(setTitlebarAppearsTransparent:)]) {
+    // By default, hide window titlebars.
+    [mWindow setTitlebarAppearsTransparent:YES];
+  }
 
   // setup our notification delegate. Note that setDelegate: does NOT retain.
   mDelegate = [[WindowDelegate alloc] initWithGeckoWindow:this];
@@ -1830,15 +1854,16 @@ nsCocoaWindow::SetTitle(const nsAString& aTitle)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  if (!mWindow)
+  if (!mWindow) {
     return NS_OK;
+  }
 
   const nsString& strTitle = PromiseFlatString(aTitle);
-  NSString* title = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(strTitle.get())
+  const unichar* uniTitle = reinterpret_cast<const unichar*>(strTitle.get());
+  NSString* title = [NSString stringWithCharacters:uniTitle
                                             length:strTitle.Length()];
-
   if ([mWindow drawsContentsIntoWindowFrame] && ![mWindow wantsTitleDrawn]) {
-    // Don't cause invalidations.
+    // Don't cause invalidations when the title isn't displayed.
     [mWindow disableSetNeedsDisplay];
     [mWindow setTitle:title];
     [mWindow enableSetNeedsDisplay];
@@ -3140,6 +3165,13 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
   if (changed) {
     [self updateContentViewSize];
     [self reflowTitlebarElements];
+    if ([self respondsToSelector:@selector(setTitleVisibility:)]) {
+      [self setTitleVisibility:mDrawsIntoWindowFrame ? NSWindowTitleHidden :
+                                                       NSWindowTitleVisible];
+    }
+    if ([self respondsToSelector:@selector(setTitlebarAppearsTransparent:)]) {
+      [self setTitlebarAppearsTransparent:mDrawsIntoWindowFrame];
+    }
   }
 }
 

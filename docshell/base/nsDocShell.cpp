@@ -1609,8 +1609,9 @@ nsDocShell::LoadURI(nsIURI* aURI,
                       flags,
                       target,
                       nullptr,      // No type hint
-                      NullString(), // No forced download
+                      VoidString(), // No forced download
                       postStream,
+                      -1, // XXXbaku
                       headersStream,
                       loadType,
                       nullptr, // No SHEntry
@@ -4969,6 +4970,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
   NS_ENSURE_TRUE(prompter, NS_ERROR_FAILURE);
 
   const char* error = nullptr;
+  // The key used to select the appropriate error message from the properties file.
+  const char* errorDescriptionID = nullptr;
   const uint32_t kMaxFormatStrArgs = 3;
   nsAutoString formatStrs[kMaxFormatStrArgs];
   uint32_t formatStrCount = 0;
@@ -5016,6 +5019,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     innermostURI->GetHost(host);
     CopyUTF8toUTF16(host, formatStrs[0]);
     formatStrCount = 1;
+    errorDescriptionID = "dnsNotFound2";
     error = "dnsNotFound";
   } else if (NS_ERROR_CONNECTION_REFUSED == aError) {
     NS_ENSURE_ARG_POINTER(aURI);
@@ -5214,6 +5218,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       case NS_ERROR_MALFORMED_URI:
         // URI is malformed
         error = "malformedURI";
+        errorDescriptionID = "malformedURI2";
         break;
       case NS_ERROR_REDIRECT_LOOP:
         // Doc failed to load because the server generated too many redirects
@@ -5288,6 +5293,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     return NS_OK;
   }
 
+  if (!errorDescriptionID) {
+    errorDescriptionID = error;
+  }
+
   // Test if the error needs to be formatted
   if (!messageStr.IsEmpty()) {
     // already obtained message
@@ -5336,7 +5345,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       strs[i] = formatStrs[i].get();
     }
     nsAutoString str;
-    rv = stringBundle->FormatStringFromName(error, strs, formatStrCount, str);
+    rv = stringBundle->FormatStringFromName(errorDescriptionID, strs, formatStrCount, str);
     NS_ENSURE_SUCCESS(rv, rv);
     messageStr.Assign(str.get());
   }
@@ -5480,9 +5489,9 @@ nsDocShell::LoadErrorPage(nsIURI* aURI, const char16_t* aURL,
                       mozilla::net::RP_Unset,
                       nsContentUtils::GetSystemPrincipal(), nullptr,
                       INTERNAL_LOAD_FLAGS_NONE, EmptyString(),
-                      nullptr, NullString(), nullptr, nullptr, LOAD_ERROR_PAGE,
-                      nullptr, true, NullString(), this, nullptr, false,
-                      nullptr, nullptr);
+                      nullptr, VoidString(), nullptr, -1, nullptr,
+                      LOAD_ERROR_PAGE, nullptr, true, VoidString(), this,
+                      nullptr, false, nullptr, nullptr);
 }
 
 NS_IMETHODIMP
@@ -5581,8 +5590,9 @@ nsDocShell::Reload(uint32_t aReloadFlags)
                       flags,
                       EmptyString(),   // No window target
                       NS_LossyConvertUTF16toASCII(contentTypeHint).get(),
-                      NullString(),    // No forced download
+                      VoidString(),    // No forced download
                       nullptr,         // No post data
+                      -1,              // No post data length
                       nullptr,         // No headers data
                       loadType,        // Load type
                       nullptr,         // No SHEntry
@@ -9701,6 +9711,7 @@ public:
                     uint32_t aFlags,
                     const char* aTypeHint,
                     nsIInputStream* aPostData,
+                    int64_t aPostDataLength,
                     nsIInputStream* aHeadersData,
                     uint32_t aLoadType,
                     nsISHEntry* aSHEntry,
@@ -9721,6 +9732,7 @@ public:
     , mTriggeringPrincipal(aTriggeringPrincipal)
     , mPrincipalToInherit(aPrincipalToInherit)
     , mPostData(aPostData)
+    , mPostDataLength(aPostDataLength)
     , mHeadersData(aHeadersData)
     , mSHEntry(aSHEntry)
     , mFlags(aFlags)
@@ -9749,10 +9761,11 @@ public:
                                    mFlags, EmptyString(),
                                    mTypeHint.IsVoid() ? nullptr
                                                       : mTypeHint.get(),
-                                   NullString(), mPostData, mHeadersData,
-                                   mLoadType, mSHEntry, mFirstParty,
-                                   mSrcdoc, mSourceDocShell, mBaseURI,
-                                   mCheckForPrerender, nullptr, nullptr);
+                                   VoidString(), mPostData, mPostDataLength,
+                                   mHeadersData, mLoadType, mSHEntry,
+                                   mFirstParty, mSrcdoc, mSourceDocShell,
+                                   mBaseURI, mCheckForPrerender, nullptr,
+                                   nullptr);
   }
 
 private:
@@ -9769,6 +9782,7 @@ private:
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
   nsCOMPtr<nsIPrincipal> mPrincipalToInherit;
   nsCOMPtr<nsIInputStream> mPostData;
+  int64_t mPostDataLength;
   nsCOMPtr<nsIInputStream> mHeadersData;
   nsCOMPtr<nsISHEntry> mSHEntry;
   uint32_t mFlags;
@@ -9820,6 +9834,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                          const char* aTypeHint,
                          const nsAString& aFileName,
                          nsIInputStream* aPostData,
+                         int64_t aPostDataLength,
                          nsIInputStream* aHeadersData,
                          uint32_t aLoadType,
                          nsISHEntry* aSHEntry,
@@ -10218,8 +10233,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                                         aFlags,
                                         EmptyString(),   // No window target
                                         aTypeHint,
-                                        NullString(),    // No forced download
+                                        VoidString(),    // No forced download
                                         aPostData,
+                                        aPostDataLength,
                                         aHeadersData,
                                         aLoadType,
                                         aSHEntry,
@@ -10311,9 +10327,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
         new InternalLoadEvent(this, aURI, aOriginalURI, aResultPrincipalURI,
                               aLoadReplace, aReferrer, aReferrerPolicy,
                               aTriggeringPrincipal, principalToInherit,
-                              aFlags, aTypeHint, aPostData, aHeadersData,
-                              aLoadType, aSHEntry, aFirstParty, aSrcdoc,
-                              aSourceDocShell, aBaseURI, false);
+                              aFlags, aTypeHint, aPostData, aPostDataLength,
+                              aHeadersData, aLoadType, aSHEntry, aFirstParty,
+                              aSrcdoc, aSourceDocShell, aBaseURI, false);
       return DispatchToTabGroup(TaskCategory::Other, ev.forget());
     }
 
@@ -10697,9 +10713,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       new InternalLoadEvent(this, aURI, aOriginalURI, aResultPrincipalURI,
                             aLoadReplace, aReferrer, aReferrerPolicy,
                             aTriggeringPrincipal, principalToInherit,
-                            aFlags, aTypeHint, aPostData, aHeadersData,
-                            aLoadType, aSHEntry, aFirstParty, aSrcdoc,
-                            aSourceDocShell, aBaseURI, false);
+                            aFlags, aTypeHint, aPostData, aPostDataLength,
+                            aHeadersData, aLoadType, aSHEntry, aFirstParty,
+                            aSrcdoc, aSourceDocShell, aBaseURI, false);
     // We don't need any success handler since in that case
     // OnPartialSHistoryDeactive would be called, and it would ensure
     // docshell loads about:blank.
@@ -10829,7 +10845,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   if (aFlags & INTERNAL_LOAD_FLAGS_IS_SRCDOC) {
     srcdoc = aSrcdoc;
   } else {
-    srcdoc = NullString();
+    srcdoc = VoidString();
   }
 
   bool isTopLevelDoc = mItemType == typeContent &&
@@ -10850,7 +10866,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                  !(aFlags & INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER),
                  aReferrerPolicy,
                  aTriggeringPrincipal, principalToInherit, aTypeHint,
-                 aFileName, aPostData, aHeadersData,
+                 aFileName, aPostData, aPostDataLength, aHeadersData,
                  aFirstParty, aDocShell, getter_AddRefs(req),
                  (aFlags & INTERNAL_LOAD_FLAGS_FIRST_LOAD) != 0,
                  (aFlags & INTERNAL_LOAD_FLAGS_BYPASS_CLASSIFIER) != 0,
@@ -10992,6 +11008,7 @@ nsDocShell::DoURILoad(nsIURI* aURI,
                       const char* aTypeHint,
                       const nsAString& aFileName,
                       nsIInputStream* aPostData,
+                      int64_t aPostDataLength,
                       nsIInputStream* aHeadersData,
                       bool aFirstParty,
                       nsIDocShell** aDocShell,
@@ -11418,7 +11435,7 @@ nsDocShell::DoURILoad(nsIURI* aURI,
       }
 
       // we really need to have a content type associated with this stream!!
-      postChannel->SetUploadStream(aPostData, EmptyCString(), -1);
+      postChannel->SetUploadStream(aPostData, EmptyCString(), aPostDataLength);
     }
 
     /* If there is a valid postdata *and* it is a History Load,
@@ -12852,7 +12869,7 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
     aEntry->GetBaseURI(getter_AddRefs(baseURI));
     flags |= INTERNAL_LOAD_FLAGS_IS_SRCDOC;
   } else {
-    srcdoc = NullString();
+    srcdoc = VoidString();
   }
 
   if (!triggeringPrincipal) {
@@ -12876,8 +12893,9 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
                     flags,
                     EmptyString(),      // No window target
                     contentType.get(),  // Type hint
-                    NullString(),       // No forced file download
+                    VoidString(),       // No forced file download
                     postData,           // Post data stream
+                    -1,                 // Post data stream length
                     nullptr,            // No headers stream
                     aLoadType,          // Load type
                     aEntry,             // SHEntry
@@ -14167,6 +14185,7 @@ public:
                    const char16_t* aTargetSpec,
                    const nsAString& aFileName,
                    nsIInputStream* aPostDataStream,
+                   int64_t aPostDataStreamLength,
                    nsIInputStream* aHeadersDataStream,
                    bool aNoOpenerImplied,
                    bool aIsTrusted,
@@ -14185,8 +14204,8 @@ public:
     if (mIsTrusted || jsapi.Init(mContent->OwnerDoc()->GetScopeObject())) {
       mHandler->OnLinkClickSync(mContent, mURI,
                                 mTargetSpec.get(), mFileName,
-                                mPostDataStream, mHeadersDataStream,
-                                mNoOpenerImplied,
+                                mPostDataStream, mPostDataStreamLength,
+                                mHeadersDataStream, mNoOpenerImplied,
                                 nullptr, nullptr, mTriggeringPrincipal);
     }
     return NS_OK;
@@ -14198,6 +14217,7 @@ private:
   nsString mTargetSpec;
   nsString mFileName;
   nsCOMPtr<nsIInputStream> mPostDataStream;
+  int64_t mPostDataStreamLength;
   nsCOMPtr<nsIInputStream> mHeadersDataStream;
   nsCOMPtr<nsIContent> mContent;
   PopupControlState mPopupState;
@@ -14212,6 +14232,7 @@ OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
                                    const char16_t* aTargetSpec,
                                    const nsAString& aFileName,
                                    nsIInputStream* aPostDataStream,
+                                   int64_t aPostDataStreamLength,
                                    nsIInputStream* aHeadersDataStream,
                                    bool aNoOpenerImplied,
                                    bool aIsTrusted,
@@ -14222,6 +14243,7 @@ OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
   , mTargetSpec(aTargetSpec)
   , mFileName(aFileName)
   , mPostDataStream(aPostDataStream)
+  , mPostDataStreamLength(aPostDataStreamLength)
   , mHeadersDataStream(aHeadersDataStream)
   , mContent(aContent)
   , mPopupState(mHandler->mScriptGlobal->GetPopupControlState())
@@ -14237,6 +14259,7 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
                         const char16_t* aTargetSpec,
                         const nsAString& aFileName,
                         nsIInputStream* aPostDataStream,
+                        int64_t aPostDataStreamLength,
                         nsIInputStream* aHeadersDataStream,
                         bool aIsTrusted,
                         nsIPrincipal* aTriggeringPrincipal)
@@ -14282,7 +14305,8 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
 
   nsCOMPtr<nsIRunnable> ev =
     new OnLinkClickEvent(this, aContent, aURI, target.get(), aFileName,
-                         aPostDataStream, aHeadersDataStream, noOpenerImplied,
+                         aPostDataStream, aPostDataStreamLength,
+                         aHeadersDataStream, noOpenerImplied,
                          aIsTrusted, aTriggeringPrincipal);
   return DispatchToTabGroup(TaskCategory::UI, ev.forget());
 }
@@ -14293,6 +14317,7 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
                             const char16_t* aTargetSpec,
                             const nsAString& aFileName,
                             nsIInputStream* aPostDataStream,
+                            int64_t aPostDataStreamLength,
                             nsIInputStream* aHeadersDataStream,
                             bool aNoOpenerImplied,
                             nsIDocShell** aDocShell,
@@ -14442,11 +14467,12 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
                              NS_LossyConvertUTF16toASCII(typeHint).get(),
                              aFileName,                 // Download as file
                              aPostDataStream,           // Post data stream
+                             aPostDataStreamLength,     // Post data stream length
                              aHeadersDataStream,        // Headers stream
                              LOAD_LINK,                 // Load type
                              nullptr,                   // No SHEntry
                              true,                      // first party site
-                             NullString(),              // No srcdoc
+                             VoidString(),              // No srcdoc
                              this,                      // We are the source
                              nullptr,                   // baseURI not needed
                              true,                      // Check for prerendered doc
@@ -14977,55 +15003,56 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceReques
     return NS_OK;
   }
 
+  uint32_t cookieBehavior = nsContentUtils::CookiesBehavior();
+  if (cookieBehavior == nsICookieService::BEHAVIOR_REJECT) {
+    // If cookies are disabled, don't intercept.
+    return NS_OK;
+  }
+
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
     return NS_OK;
   }
 
-  nsresult result;
-  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
-    do_GetService(THIRDPARTYUTIL_CONTRACTID, &result);
-  NS_ENSURE_SUCCESS(result, result);
+  if (!aIsNonSubresourceRequest) {
+    nsCOMPtr<nsIDocument> doc = GetDocument();
+    if (!doc) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
 
-  if (mCurrentURI &&
-      nsContentUtils::CookiesBehavior() == nsICookieService::BEHAVIOR_REJECT_FOREIGN) {
-    nsAutoCString uriSpec;
-    if (!(mCurrentURI->GetSpecOrDefault().EqualsLiteral("about:blank"))) {
-      // Reject the interception of third-party iframes if the cookie behaviour
-      // is set to reject all third-party cookies (1). In case that this pref
-      // is not set or can't be read, we default to allow all cookies (0) as
-      // this is the default value in all.js.
+    ErrorResult rv;
+    *aShouldIntercept = swm->IsControlled(doc, rv);
+    if (NS_WARN_IF(rv.Failed())) {
+      return rv.StealNSResult();
+    }
+
+    return NS_OK;
+  }
+
+  // If the user has set a cookie policy that restricts cookies, then
+  // avoid intercepting 3rd party iframes.
+  if (cookieBehavior != nsICookieService::BEHAVIOR_ACCEPT) {
+    nsCOMPtr<nsIDocShellTreeItem> parent;
+    GetSameTypeParent(getter_AddRefs(parent));
+    nsCOMPtr<nsPIDOMWindowOuter> parentWindow = parent ? parent->GetWindow()
+                                                       : nullptr;
+    if (parentWindow) {
+      nsresult rv = NS_OK;
+      nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
+        do_GetService(THIRDPARTYUTIL_CONTRACTID, &rv);
+      NS_ENSURE_SUCCESS(rv, rv);
+
       bool isThirdPartyURI = true;
-      result = thirdPartyUtil->IsThirdPartyURI(mCurrentURI, aURI,
-                                               &isThirdPartyURI);
-      if (NS_FAILED(result)) {
-          return result;
-      }
-
-      if (isThirdPartyURI) {
+      rv = thirdPartyUtil->IsThirdPartyWindow(parentWindow, aURI, &isThirdPartyURI);
+      if (NS_SUCCEEDED(rv) && isThirdPartyURI) {
         return NS_OK;
       }
     }
   }
 
-  if (aIsNonSubresourceRequest) {
-    nsCOMPtr<nsIPrincipal> principal =
-      BasePrincipal::CreateCodebasePrincipal(aURI, mOriginAttributes);
-    *aShouldIntercept = swm->IsAvailable(principal, aURI);
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDocument> doc = GetDocument();
-  if (!doc) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  ErrorResult rv;
-  *aShouldIntercept = swm->IsControlled(doc, rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
-
+  nsCOMPtr<nsIPrincipal> principal =
+    BasePrincipal::CreateCodebasePrincipal(aURI, mOriginAttributes);
+  *aShouldIntercept = swm->IsAvailable(principal, aURI);
   return NS_OK;
 }
 

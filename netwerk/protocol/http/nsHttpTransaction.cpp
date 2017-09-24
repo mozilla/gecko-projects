@@ -382,7 +382,8 @@ nsHttpTransaction::Init(uint32_t caps,
         // wrap the multiplexed input stream with a buffered input stream, so
         // that we write data in the largest chunks possible.  this is actually
         // necessary to workaround some common server bugs (see bug 137155).
-        rv = NS_NewBufferedInputStream(getter_AddRefs(mRequestStream), multi,
+        nsCOMPtr<nsIInputStream> stream(do_QueryInterface(multi));
+        rv = NS_NewBufferedInputStream(getter_AddRefs(mRequestStream), stream,
                                        nsIOService::gDefaultSegmentSize);
         if (NS_FAILED(rv)) return rv;
     } else {
@@ -1948,7 +1949,7 @@ nsHttpTransaction::CheckForStickyAuthSchemeAt(nsHttpAtom const& header)
       ToLowerCase(schema);
 
       nsAutoCString contractid;
-      contractid.Assign(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
+      contractid.AssignLiteral(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
       contractid.Append(schema);
 
       // using a new instance because of thread safety of auth modules refcnt

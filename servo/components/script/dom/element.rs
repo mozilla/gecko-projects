@@ -82,12 +82,12 @@ use html5ever::serialize;
 use html5ever::serialize::SerializeOpts;
 use html5ever::serialize::TraversalScope;
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
-use js::jsapi::{HandleValue, Heap, JSAutoCompartment};
+use js::jsapi::Heap;
 use js::jsval::JSVal;
 use net_traits::request::CorsSettings;
 use ref_filter_map::ref_filter_map;
 use script_layout_interface::message::ReflowQueryType;
-use script_thread::{Runnable, ScriptThread};
+use script_thread::ScriptThread;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint, CaseSensitivity};
 use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext, MatchingMode};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
@@ -119,6 +119,7 @@ use style::thread_state;
 use style::values::{CSSFloat, Either};
 use style::values::{specified, computed};
 use stylesheet_loader::StylesheetOwner;
+use task::TaskOnce;
 
 // TODO: Update focus state when the top-level browsing context gains or loses system focus,
 // and when the element enters or leaves a browsing context container.
@@ -2187,7 +2188,8 @@ impl ElementMethods for Element {
             Err(_) => Err(Error::Syntax),
             Ok(selectors) => {
                 let quirks_mode = document_from_node(self).quirks_mode();
-                let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+                // FIXME(bholley): Consider an nth-index cache here.
+                let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
                                                    quirks_mode);
                 Ok(matches_selector_list(&selectors, &Root::from_ref(self), &mut ctx))
             }
@@ -2208,7 +2210,8 @@ impl ElementMethods for Element {
                 for element in root.inclusive_ancestors() {
                     if let Some(element) = Root::downcast::<Element>(element) {
                         let quirks_mode = document_from_node(self).quirks_mode();
-                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+                        // FIXME(bholley): Consider an nth-index cache here.
+                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
                                                            quirks_mode);
                         if matches_selector_list(&selectors, &element, &mut ctx) {
                             return Ok(Some(element));
@@ -2496,6 +2499,10 @@ impl VirtualMethods for Element {
 
 impl<'a> ::selectors::Element for Root<Element> {
     type Impl = SelectorImpl;
+
+    fn opaque(&self) -> ::selectors::OpaqueElement {
+        ::selectors::OpaqueElement::new(self.reflector().get_jsobject().get())
+    }
 
     fn parent_element(&self) -> Option<Root<Element>> {
         self.upcast::<Node>().GetParentElement()
@@ -3046,21 +3053,17 @@ impl ElementPerformFullscreenEnter {
     }
 }
 
-impl Runnable for ElementPerformFullscreenEnter {
+impl TaskOnce for ElementPerformFullscreenEnter {
     #[allow(unrooted_must_root)]
-    fn handler(self: Box<ElementPerformFullscreenEnter>) {
+    fn run_once(self) {
         let element = self.element.root();
+        let promise = self.promise.root();
         let document = document_from_node(element.r());
 
         // Step 7.1
         if self.error || !element.fullscreen_element_ready_check() {
-            // JSAutoCompartment needs to be manually made.
-            // Otherwise, Servo will crash.
-            let promise = self.promise.root();
-            let promise_cx = promise.global().get_cx();
-            let _ac = JSAutoCompartment::new(promise_cx, promise.reflector().get_jsobject().get());
             document.upcast::<EventTarget>().fire_event(atom!("fullscreenerror"));
-            promise.reject_error(promise.global().get_cx(), Error::Type(String::from("fullscreen is not connected")));
+            promise.reject_error(Error::Type(String::from("fullscreen is not connected")));
             return
         }
 
@@ -3076,12 +3079,7 @@ impl Runnable for ElementPerformFullscreenEnter {
         document.upcast::<EventTarget>().fire_event(atom!("fullscreenchange"));
 
         // Step 7.7
-        // JSAutoCompartment needs to be manually made.
-        // Otherwise, Servo will crash.
-        let promise = self.promise.root();
-        let promise_cx = promise.global().get_cx();
-        let _ac = JSAutoCompartment::new(promise_cx, promise.reflector().get_jsobject().get());
-        promise.resolve(promise.global().get_cx(), HandleValue::undefined());
+        promise.resolve_native(&());
     }
 }
 
@@ -3099,9 +3097,9 @@ impl ElementPerformFullscreenExit {
     }
 }
 
-impl Runnable for ElementPerformFullscreenExit {
+impl TaskOnce for ElementPerformFullscreenExit {
     #[allow(unrooted_must_root)]
-    fn handler(self: Box<ElementPerformFullscreenExit>) {
+    fn run_once(self) {
         let element = self.element.root();
         let document = document_from_node(element.r());
         // TODO Step 9.1-5
@@ -3118,12 +3116,7 @@ impl Runnable for ElementPerformFullscreenExit {
         document.upcast::<EventTarget>().fire_event(atom!("fullscreenchange"));
 
         // Step 9.10
-        let promise = self.promise.root();
-        // JSAutoCompartment needs to be manually made.
-        // Otherwise, Servo will crash.
-        let promise_cx = promise.global().get_cx();
-        let _ac = JSAutoCompartment::new(promise_cx, promise.reflector().get_jsobject().get());
-        promise.resolve(promise.global().get_cx(), HandleValue::undefined());
+        self.promise.root().resolve_native(&());
     }
 }
 

@@ -1898,19 +1898,6 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     DeleteProperty(nsGkAtoms::animationsProperty);
   }
 
-  // Computed style data isn't useful for detached nodes, and we'll need to
-  // recompute it anyway if we ever insert the nodes back into a document.
-  if (IsStyledByServo()) {
-    if (document) {
-      ClearServoData(document);
-    } else {
-      MOZ_ASSERT(!HasServoData());
-      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
-    }
-  } else {
-    MOZ_ASSERT(!HasServoData());
-  }
-
   // Editable descendant count only counts descendants that
   // are in the uncomposed document.
   ResetEditableDescendantCount();
@@ -2003,6 +1990,19 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     }
 
     shadowRoot->SetIsComposedDocParticipant(false);
+  }
+
+  // Computed style data isn't useful for detached nodes, and we'll need to
+  // recompute it anyway if we ever insert the nodes back into a document.
+  if (IsStyledByServo()) {
+    if (document) {
+      ClearServoData(document);
+    } else {
+      MOZ_ASSERT(!HasServoData());
+      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
+    }
+  } else {
+    MOZ_ASSERT(!HasServoData());
   }
 }
 
@@ -2642,9 +2642,9 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           aModType == nsIDOMMutationEvent::ADDITION ?
-            NullString() : nsDependentAtomString(oldValueAtom),
+            VoidString() : nsDependentAtomString(oldValueAtom),
           nsDependentAtomString(newValueAtom),
-          (ns.IsEmpty() ? NullString() : ns)
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
@@ -2938,8 +2938,8 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           nsDependentAtomString(oldValueAtom),
-          NullString(),
-          (ns.IsEmpty() ? NullString() : ns)
+          VoidString(),
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
@@ -4194,10 +4194,7 @@ Element::ClearServoData(nsIDocument* aDoc) {
   // is necessary for correctness, since we invoke ClearServoData in various
   // places where an element's flattened tree parent changes, and such a change
   // may also make an element invalid to be used as a restyle root.
-  //
-  // Note that we need to null-check aDoc, which may be null in some situations
-  // when invoked from UnbindFromTree.
-  if (aDoc && aDoc->GetServoRestyleRoot() == this) {
+  if (aDoc->GetServoRestyleRoot() == this) {
     aDoc->ClearServoRestyleRoot();
   }
 #else

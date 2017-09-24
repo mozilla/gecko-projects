@@ -809,25 +809,6 @@ var gPrivacyPane = {
     settingsButton.disabled = !sanitizeOnShutdownPref.value;
   },
 
-  // CONTAINERS
-
-  /*
-   * preferences:
-   *
-   * privacy.userContext.enabled
-   * - true if containers is enabled
-   */
-
-  /**
-   * Enables/disables the Settings button used to configure containers
-   */
-  readBrowserContainersCheckbox() {
-    var pref = document.getElementById("privacy.userContext.enabled");
-    var settings = document.getElementById("browserContainersSettings");
-
-    settings.disabled = !pref.value;
-  },
-
   toggleDoNotDisturbNotifications(event) {
     AlertsServiceDND.manualDoNotDisturb = event.target.checked;
   },
@@ -1089,6 +1070,10 @@ var gPrivacyPane = {
 
     let blockUnwantedPref = document.getElementById("browser.safebrowsing.downloads.remote.block_potentially_unwanted");
     let blockUncommonPref = document.getElementById("browser.safebrowsing.downloads.remote.block_uncommon");
+
+    let learnMoreLink = document.getElementById("enableSafeBrowsingLearnMore");
+    let phishingUrl = "https://support.mozilla.org/kb/how-does-phishing-and-malware-protection-work";
+    learnMoreLink.setAttribute("href", phishingUrl);
 
     enableSafeBrowsing.addEventListener("command", function() {
       safeBrowsingPhishingPref.value = enableSafeBrowsing.checked;
@@ -1656,13 +1641,19 @@ var gPrivacyPane = {
 
   _initA11yString() {
     let a11yLearnMoreLink =
-      Services.urlFormatter.formatURLPref("app.support.baseURL") +
-      "accessibility";
+      Services.urlFormatter.formatURLPref("accessibility.support.url");
     document.getElementById("a11yLearnMoreLink")
       .setAttribute("href", a11yLearnMoreLink);
   },
 
   updateA11yPrefs(checked) {
-    Services.prefs.setIntPref("accessibility.force_disabled", checked ? 1 : 0);
+    let buttonIndex = confirmRestartPrompt(checked, 0, true, false);
+    if (buttonIndex == CONFIRM_RESTART_PROMPT_RESTART_NOW) {
+      Services.prefs.setIntPref("accessibility.force_disabled", checked ? 1 : 0);
+      Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
+    }
+
+    // Revert the checkbox in case we didn't quit
+    document.getElementById("a11yPrivacyCheckbox").checked = !checked;
   }
 };

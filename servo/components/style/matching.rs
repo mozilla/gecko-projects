@@ -81,30 +81,6 @@ impl ChildCascadeRequirement {
     }
 }
 
-bitflags! {
-    /// Flags that represent the result of replace_rules.
-    pub flags RulesChanged: u8 {
-        /// Normal rules are changed.
-        const NORMAL_RULES_CHANGED = 0x01,
-        /// Important rules are changed.
-        const IMPORTANT_RULES_CHANGED = 0x02,
-    }
-}
-
-impl RulesChanged {
-    /// Return true if there are any normal rules changed.
-    #[inline]
-    pub fn normal_rules_changed(&self) -> bool {
-        self.contains(NORMAL_RULES_CHANGED)
-    }
-
-    /// Return true if there are any important rules changed.
-    #[inline]
-    pub fn important_rules_changed(&self) -> bool {
-        self.contains(IMPORTANT_RULES_CHANGED)
-    }
-}
-
 /// Determines which styles are being cascaded currently.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CascadeVisitedMode {
@@ -535,7 +511,6 @@ pub trait MatchMethods : TElement {
         mut new_styles: ResolvedElementStyles,
         important_rules_changed: bool,
     ) -> ChildCascadeRequirement {
-        use app_units::Au;
         use dom::TNode;
         use std::cmp;
 
@@ -577,7 +552,7 @@ pub trait MatchMethods : TElement {
 
             if old_styles.primary.as_ref().map_or(true, |s| s.get_font().clone_font_size() != new_font_size) {
                 debug_assert!(self.owner_doc_matches_for_testing(device));
-                device.set_root_font_size(Au::from(new_font_size));
+                device.set_root_font_size(new_font_size.size());
                 // If the root font-size changed since last time, and something
                 // in the document did use rem units, ensure we recascade the
                 // entire tree.

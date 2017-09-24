@@ -5843,7 +5843,7 @@ QuotaManager::ShutdownTimerCallback(nsITimer* aTimer, void* aClosure)
 
   // Abort all operations.
   for (RefPtr<Client>& client : quotaManager->mClients) {
-    client->AbortOperations(NullCString());
+    client->AbortOperations(VoidCString());
   }
 }
 
@@ -8237,7 +8237,7 @@ OriginParser::Parse(nsACString& aSpec, OriginAttributes* aAttrs) -> ResultType
     }
 
     if (!mHandledTokens.IsEmpty()) {
-      mHandledTokens.Append(NS_LITERAL_CSTRING(", "));
+      mHandledTokens.AppendLiteral(", ");
     }
     mHandledTokens.Append('\'');
     mHandledTokens.Append(token);

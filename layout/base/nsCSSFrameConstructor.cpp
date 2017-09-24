@@ -8615,7 +8615,15 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
   nsPresContext* presContext = mPresShell->GetPresContext();
   MOZ_ASSERT(presContext, "Our presShell should have a valid presContext");
 
-  if (aChild == presContext->GetViewportScrollbarStylesOverrideElement()) {
+  // We want to detect when the viewport override element stored in the
+  // prescontext is in the subtree being removed.  Except in fullscreen cases
+  // (which are handled in Element::UnbindFromTree and do not get stored on the
+  // prescontext), the override element is always either the root element or a
+  // <body> child of the root element.  So we can only be removing the stored
+  // override element if the thing being removed is either the override element
+  // itself or the root element (which can be a parent of the override element).
+  if (aChild == presContext->GetViewportScrollbarStylesOverrideElement() ||
+      (!aContainer && aChild->IsElement())) {
     // We might be removing the element that we propagated viewport scrollbar
     // styles from.  Recompute those. (This clause covers two of the three
     // possible scrollbar-propagation sources: the <body> [as aChild or a
@@ -8628,13 +8636,21 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
     Element* newOverrideElement =
       presContext->UpdateViewportScrollbarStylesOverride();
 
-    // Now if newOverrideElement is not the root and isn't aChild (which it
-    // could be if all we're doing here is reframing the current override
-    // element), it needs reframing.  In particular, it used to have a
-    // scrollframe (because its overflow was not "visible"), but now it will
+    // If aChild is the root (i.e. aContainer is null), then we don't
+    // need to do any reframing of newOverrideElement, because we're
+    // about to tear down the whole frame tree anyway.  And we need to
+    // make sure we don't do any such reframing, because reframing the
+    // <body> can trigger a reframe of the <html> and then reenter
+    // here.
+    //
+    // But if aChild is not the root, and if newOverrideElement is not
+    // the root and isn't aChild (which it could be if all we're doing
+    // here is reframing the current override element), it needs
+    // reframing.  In particular, it used to have a scrollframe
+    // (because its overflow was not "visible"), but now it will
     // propagate its overflow to the viewport, so it should not need a
     // scrollframe anymore.
-    if (newOverrideElement && newOverrideElement->GetParent() &&
+    if (aContainer && newOverrideElement && newOverrideElement->GetParent() &&
         newOverrideElement != aChild) {
       LAYOUT_PHASE_TEMP_EXIT();
       RecreateFramesForContent(newOverrideElement, InsertionKind::Async);

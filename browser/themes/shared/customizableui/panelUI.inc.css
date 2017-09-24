@@ -777,7 +777,7 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 #appMenu-mainView > .panel-subview-body > .panel-banner-item {
   border-bottom: 1px solid var(--panel-separator-color);
   margin-bottom: 3px;
-  padding-inline-start: 10px;
+  padding-inline-start: 12px;
 }
 
 .panel-banner-item > .toolbarbutton-text {
@@ -1306,6 +1306,24 @@ panelview .toolbarbutton-1,
   margin-inline-start: 10px;
 }
 
+.subviewbutton[type="highlight-bookmark"]::after {
+  content: url("chrome://browser/skin/bookmark-hollow.svg");
+}
+
+.subviewbutton[type="highlight-history"]::after {
+  content: url("chrome://browser/skin/history.svg");
+}
+
+.subviewbutton[type="highlight-bookmark"]::after,
+.subviewbutton[type="highlight-history"]::after {
+  -moz-context-properties: fill;
+  fill: GrayText;
+  float: right;
+  opacity: .5;
+  /* Centers the icon and resizes it to 12px square. */
+  transform: translateY(2px) scaleX(.75);
+}
+
 /* This is a <label> but it should fit in with the menu font- and colorwise. */
 #PanelUI-characterEncodingView-autodetect-label {
   font: menu;
@@ -1351,6 +1369,16 @@ photonpanelmultiview .PanelUI-subView .toolbaritem-combined-buttons > .subviewbu
   margin-inline-start: 10px;
 }
 
+/* An em-based minimum height works better for a text-only button. */
+#appMenu-zoomReset-button {
+  min-height: 2em;
+}
+
+#appMenu-zoomReset-button > .toolbarbutton-text {
+  min-width: 3em;
+  text-align: center;
+}
+
 .toolbaritem-combined-buttons > toolbarseparator[orient="vertical"] + .subviewbutton,
 #appMenu-zoom-controls > toolbarseparator[orient="vertical"] + .subviewbutton {
   margin-inline-start: 0;
@@ -1378,7 +1406,7 @@ photonpanelmultiview .toolbaritem-combined-buttons > .subviewbutton:not(.subview
 }
 
 photonpanelmultiview .panel-banner-item::after {
-  margin-inline-end: 14px;
+  margin-inline-end: 12px;
   margin-inline-start: 10px;
 }
 
@@ -1594,8 +1622,8 @@ toolbarpaletteitem[place="palette"] > .toolbarbutton-1 > .toolbarbutton-menubutt
 }
 
 #search-container[cui-areatype="menu-panel"] {
-  margin-top: 6px;
-  margin-bottom: 6px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 toolbarpaletteitem[place="palette"] > #search-container {

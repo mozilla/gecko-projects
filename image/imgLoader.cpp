@@ -254,19 +254,19 @@ private:
                         ? "/raster/"
                         : "/vector/");
     pathPrefix.Append(aCounter.IsUsed() ? "used/" : "unused/");
-    pathPrefix.Append("image(");
+    pathPrefix.AppendLiteral("image(");
     pathPrefix.AppendInt(aCounter.IntrinsicSize().width);
-    pathPrefix.Append("x");
+    pathPrefix.AppendLiteral("x");
     pathPrefix.AppendInt(aCounter.IntrinsicSize().height);
-    pathPrefix.Append(", ");
+    pathPrefix.AppendLiteral(", ");
 
     if (aCounter.URI().IsEmpty()) {
-      pathPrefix.Append("<unknown URI>");
+      pathPrefix.AppendLiteral("<unknown URI>");
     } else {
       pathPrefix.Append(aCounter.URI());
     }
 
-    pathPrefix.Append(")/");
+    pathPrefix.AppendLiteral(")/");
 
     ReportSurfaces(aHandleReport, aData, pathPrefix, aCounter);
 
@@ -280,20 +280,24 @@ private:
   {
     for (const SurfaceMemoryCounter& counter : aCounter.Surfaces()) {
       nsAutoCString surfacePathPrefix(aPathPrefix);
-      surfacePathPrefix.Append(counter.IsLocked() ? "locked/" : "unlocked/");
+      if (counter.IsLocked()) {
+        surfacePathPrefix.AppendLiteral("locked/");
+      } else {
+        surfacePathPrefix.AppendLiteral("unlocked/");
+      }
       if (counter.IsFactor2()) {
-        surfacePathPrefix.Append("factor2/");
+        surfacePathPrefix.AppendLiteral("factor2/");
       }
       if (counter.CannotSubstitute()) {
-        surfacePathPrefix.Append("cannot_substitute/");
+        surfacePathPrefix.AppendLiteral("cannot_substitute/");
       }
-      surfacePathPrefix.Append("surface(");
+      surfacePathPrefix.AppendLiteral("surface(");
       surfacePathPrefix.AppendInt(counter.Key().Size().width);
-      surfacePathPrefix.Append("x");
+      surfacePathPrefix.AppendLiteral("x");
       surfacePathPrefix.AppendInt(counter.Key().Size().height);
 
       if (counter.Values().SharedHandles() > 0) {
-        surfacePathPrefix.Append(", shared:");
+        surfacePathPrefix.AppendLiteral(", shared:");
         surfacePathPrefix.AppendInt(uint32_t(counter.Values().SharedHandles()));
       }
 
@@ -304,19 +308,19 @@ private:
                                  : "");
 
         if (counter.Key().Flags() != DefaultSurfaceFlags()) {
-          surfacePathPrefix.Append(", flags:");
+          surfacePathPrefix.AppendLiteral(", flags:");
           surfacePathPrefix.AppendInt(uint32_t(counter.Key().Flags()),
                                       /* aRadix = */ 16);
         }
       } else if (counter.Type() == SurfaceMemoryCounterType::COMPOSITING) {
-        surfacePathPrefix.Append(", compositing frame");
+        surfacePathPrefix.AppendLiteral(", compositing frame");
       } else if (counter.Type() == SurfaceMemoryCounterType::COMPOSITING_PREV) {
-        surfacePathPrefix.Append(", compositing prev frame");
+        surfacePathPrefix.AppendLiteral(", compositing prev frame");
       } else {
         MOZ_ASSERT_UNREACHABLE("Unknown counter type");
       }
 
-      surfacePathPrefix.Append(")/");
+      surfacePathPrefix.AppendLiteral(")/");
 
       ReportValues(aHandleReport, aData, surfacePathPrefix, counter.Values());
     }
@@ -331,28 +335,28 @@ private:
   {
     nsAutoCString pathPrefix;
     if (aExplicit) {
-      pathPrefix.Append("explicit/");
+      pathPrefix.AppendLiteral("explicit/");
     }
     pathPrefix.Append(aPathPrefix);
 
     nsAutoCString rasterUsedPrefix(pathPrefix);
-    rasterUsedPrefix.Append("/raster/used/");
+    rasterUsedPrefix.AppendLiteral("/raster/used/");
     rasterUsedPrefix.Append(aPathInfix);
     ReportValues(aHandleReport, aData, rasterUsedPrefix, aTotal.UsedRaster());
 
     nsAutoCString rasterUnusedPrefix(pathPrefix);
-    rasterUnusedPrefix.Append("/raster/unused/");
+    rasterUnusedPrefix.AppendLiteral("/raster/unused/");
     rasterUnusedPrefix.Append(aPathInfix);
     ReportValues(aHandleReport, aData, rasterUnusedPrefix,
                  aTotal.UnusedRaster());
 
     nsAutoCString vectorUsedPrefix(pathPrefix);
-    vectorUsedPrefix.Append("/vector/used/");
+    vectorUsedPrefix.AppendLiteral("/vector/used/");
     vectorUsedPrefix.Append(aPathInfix);
     ReportValues(aHandleReport, aData, vectorUsedPrefix, aTotal.UsedVector());
 
     nsAutoCString vectorUnusedPrefix(pathPrefix);
-    vectorUnusedPrefix.Append("/vector/unused/");
+    vectorUnusedPrefix.AppendLiteral("/vector/unused/");
     vectorUnusedPrefix.Append(aPathInfix);
     ReportValues(aHandleReport, aData, vectorUnusedPrefix,
                  aTotal.UnusedVector());
@@ -2126,6 +2130,7 @@ imgLoader::LoadImageXPCOM(nsIURI* aURI,
                             aReferrerURI,
                             refpol,
                             aLoadingPrincipal,
+                            0,
                             aLoadGroup,
                             aObserver,
                             node,
@@ -2146,6 +2151,7 @@ imgLoader::LoadImage(nsIURI* aURI,
                      nsIURI* aReferrerURI,
                      ReferrerPolicy aReferrerPolicy,
                      nsIPrincipal* aLoadingPrincipal,
+                     uint64_t aRequestContextID,
                      nsILoadGroup* aLoadGroup,
                      imgINotificationObserver* aObserver,
                      nsINode *aContext,
@@ -2300,8 +2306,20 @@ imgLoader::LoadImage(nsIURI* aURI,
             " [request=%p]\n", this, request.get()));
 
     nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(newChannel));
-    if (cos && aUseUrgentStartForChannel) {
-      cos->AddClassFlags(nsIClassOfService::UrgentStart);
+    if (cos) {
+      if (aUseUrgentStartForChannel) {
+        cos->AddClassFlags(nsIClassOfService::UrgentStart);
+      }
+
+      if (nsContentUtils::IsTailingEnabled() &&
+          aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON) {
+        cos->AddClassFlags(nsIClassOfService::Throttleable |
+                           nsIClassOfService::Tail);
+        nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(newChannel));
+        if (httpChannel) {
+          Unused << httpChannel->SetRequestContextID(aRequestContextID);
+        }
+      }
     }
 
     nsCOMPtr<nsILoadGroup> channelLoadGroup;

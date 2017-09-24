@@ -315,10 +315,5 @@ android-x86-tests:
     - mochitest-chrome
     - xpcshell
 
-windows8-tests:
-    - mochitest-browser-chrome
-    - reftest-no-accel
-    - mochitest-webgl
-
 devtools-tests:
     - mochitest-devtools-chrome

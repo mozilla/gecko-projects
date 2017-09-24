@@ -576,6 +576,12 @@ impl AnimationValue {
             % for prop in data.longhands:
             % if prop.animatable:
             PropertyDeclaration::${prop.camel_case}(ref val) => {
+                context.for_non_inherited_property =
+                    % if prop.style_struct.inherited:
+                        None;
+                    % else:
+                        Some(LonghandId::${prop.camel_case});
+                    % endif
             % if prop.ident in SYSTEM_FONT_LONGHANDS and product == "gecko":
                 if let Some(sf) = val.get_system() {
                     longhands::system_font::resolve_system_font(sf, context);
@@ -1453,11 +1459,10 @@ impl Animate for ComputedMatrix {
                 (Ok(this), Ok(other)) => {
                     Ok(ComputedMatrix::from(this.animate(&other, procedure)?))
                 },
-                _ => {
-                    let (this_weight, other_weight) = procedure.weights();
-                    let result = if this_weight > other_weight { *self } else { *other };
-                    Ok(result)
-                },
+                // Matrices can be undecomposable due to couple reasons, e.g.,
+                // non-invertible matrices. In this case, we should report Err
+                // here, and let the caller do the fallback procedure.
+                _ => Err(())
             }
         } else {
             let this = MatrixDecomposed2D::from(*self);
@@ -1477,11 +1482,10 @@ impl Animate for ComputedMatrix {
             (Ok(from), Ok(to)) => {
                 Ok(ComputedMatrix::from(from.animate(&to, procedure)?))
             },
-            _ => {
-                let (this_weight, other_weight) = procedure.weights();
-                let result = if this_weight > other_weight { *self } else { *other };
-                Ok(result)
-            },
+            // Matrices can be undecomposable due to couple reasons, e.g.,
+            // non-invertible matrices. In this case, we should report Err here,
+            // and let the caller do the fallback procedure.
+            _ => Err(())
         }
     }
 }

@@ -37,8 +37,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
   Feeds: "resource:///modules/Feeds.jsm",
   FileUtils: "resource://gre/modules/FileUtils.jsm",
+  FileSource: "resource://gre/modules/L10nRegistry.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
   Integration: "resource://gre/modules/Integration.jsm",
+  L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
   LoginHelper: "resource://gre/modules/LoginHelper.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
@@ -613,7 +615,7 @@ BrowserGlue.prototype = {
         name: gBrowserBundle.GetStringFromName("lightTheme.name"),
         description: gBrowserBundle.GetStringFromName("lightTheme.description"),
         headerURL: "resource:///chrome/browser/content/browser/defaultthemes/compact.header.png",
-        iconURL: "resource:///chrome/browser/content/browser/defaultthemes/compactlight.icon.svg",
+        iconURL: "resource:///chrome/browser/content/browser/defaultthemes/light.icon.svg",
         textcolor: "black",
         accentcolor: "white",
         author: vendorShortName,
@@ -623,12 +625,20 @@ BrowserGlue.prototype = {
         name: gBrowserBundle.GetStringFromName("darkTheme.name"),
         description: gBrowserBundle.GetStringFromName("darkTheme.description"),
         headerURL: "resource:///chrome/browser/content/browser/defaultthemes/compact.header.png",
-        iconURL: "resource:///chrome/browser/content/browser/defaultthemes/compactdark.icon.svg",
+        iconURL: "resource:///chrome/browser/content/browser/defaultthemes/dark.icon.svg",
         textcolor: "white",
         accentcolor: "black",
         author: vendorShortName,
       });
     }
+
+
+    // Initialize the default l10n resource sources for L10nRegistry.
+    const locales = [AppConstants.INSTALL_LOCALE];
+    const toolkitSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(toolkitSource);
+    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
+    L10nRegistry.registerSource(appSource);
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
   },
@@ -1687,7 +1697,7 @@ BrowserGlue.prototype = {
 
   // eslint-disable-next-line complexity
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 54;
+    const UI_VERSION = 56;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -2017,14 +2027,6 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 48) {
-      // Bug 1372954 - the checked value was persisted but the attribute removal wouldn't
-      // be persisted (Bug 15232). Turns out we can just not persist the value in this case.
-      // The situation was only happening for a few nightlies in 56, so this migration can
-      // be removed in version 58.
-      xulStore.removeValue(BROWSER_DOCURL, "sidebar-box", "checked");
-    }
-
     if (currentUIVersion < 49) {
       // Annotate that a user haven't seen any onboarding tour
       Services.prefs.setIntPref("browser.onboarding.seen-tourset-version", 0);
@@ -2084,6 +2086,21 @@ BrowserGlue.prototype = {
         let state = Services.prefs.getBoolPref("browser.onboarding.hidden") ? "watermark" : "default";
         Services.prefs.setStringPref("browser.onboarding.state", state);
         Services.prefs.clearUserPref("browser.onboarding.hidden");
+      }
+    }
+
+    if (currentUIVersion < 55) {
+      Services.prefs.clearUserPref("browser.customizemode.tip0.shown");
+    }
+
+    if (currentUIVersion < 56) {
+      // Prior to the end of the Firefox 57 cycle, the sidebarcommand being present
+      // or not was the only thing that distinguished whether the sidebar was open.
+      // Now, the sidebarcommand always indicates the last opened sidebar, and we
+      // correctly persist the checked attribute to indicate whether or not the
+      // sidebar was open. We should set the checked attribute in case it wasn't:
+      if (xulStore.getValue(BROWSER_DOCURL, "sidebar-box", "sidebarcommand")) {
+        xulStore.setValue(BROWSER_DOCURL, "sidebar-box", "checked", "true");
       }
     }
 

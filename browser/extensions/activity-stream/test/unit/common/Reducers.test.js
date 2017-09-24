@@ -1,4 +1,4 @@
-const {reducers, INITIAL_STATE, insertPinned, TOP_SITES_SHOWMORE_LENGTH} = require("common/Reducers.jsm");
+const {reducers, INITIAL_STATE, insertPinned} = require("common/Reducers.jsm");
 const {TopSites, App, Snippets, Prefs, Dialog, Sections} = reducers;
 
 const {actionTypes: at} = require("common/Actions.jsm");
@@ -55,6 +55,19 @@ describe("Reducers", () => {
     it("should not update state for empty action.data on TOP_SITES_UPDATED", () => {
       const nextState = TopSites(undefined, {type: at.TOP_SITES_UPDATED});
       assert.equal(nextState, INITIAL_STATE.TopSites);
+    });
+    it("should set editForm.visible to true on TOP_SITES_EDIT", () => {
+      const nextState = TopSites(undefined, {type: at.TOP_SITES_EDIT});
+      assert.isTrue(nextState.editForm.visible);
+    });
+    it("should set editForm.site to action.data on TOP_SITES_EDIT", () => {
+      const data = {url: "foo", label: "label"};
+      const nextState = TopSites(undefined, {type: at.TOP_SITES_EDIT, data});
+      assert.equal(nextState.editForm.site, data);
+    });
+    it("should set editForm.visible to false on TOP_SITES_CANCEL_EDIT", () => {
+      const nextState = TopSites(undefined, {type: at.TOP_SITES_CANCEL_EDIT});
+      assert.isFalse(nextState.editForm.visible);
     });
     it("should add screenshots for SCREENSHOT_UPDATED", () => {
       const oldState = {rows: [{url: "foo.com"}, {url: "bar.com"}]};
@@ -127,22 +140,6 @@ describe("Reducers", () => {
         const nextState = TopSites(oldState, action);
         assert.deepEqual(nextState.rows, [{url: "foo.com"}]);
       });
-    });
-    it("should insert pinned links on PINNED_SITES_UPDATED", () => {
-      const oldState = {rows: [{url: "foo.com"}, {url: "bar.com"}]};
-      const action = {type: at.PINNED_SITES_UPDATED, data: [{url: "baz.com", title: "baz"}]};
-      const nextState = TopSites(oldState, action);
-      assert.deepEqual(nextState.rows, [{url: "baz.com", title: "baz", isPinned: true, pinIndex: 0}, {url: "foo.com"}, {url: "bar.com"}]);
-    });
-    it("should return at most TOP_SITES_SHOWMORE_LENGTH sites on PINNED_SITES_UPDATED", () => {
-      const oldState = {rows: [{url: "foo.com"}, {url: "bar.com"}]};
-      const data = new Array(20).fill(null).map((s, i) => ({
-        url: "foo.com",
-        pinIndex: i
-      }));
-      const action = {type: at.PINNED_SITES_UPDATED, data};
-      const nextState = TopSites(oldState, action);
-      assert.lengthOf(nextState.rows, TOP_SITES_SHOWMORE_LENGTH);
     });
   });
   describe("Prefs", () => {
@@ -490,6 +487,13 @@ describe("Reducers", () => {
       const pinned = [links[7]];
       const result = insertPinned(links, pinned);
       assert.equal(links.length, result.length);
+    });
+    it("should not modify the original data", () => {
+      const pinned = [{url: "http://example.com"}];
+
+      insertPinned(links, pinned);
+
+      assert.equal(typeof pinned[0].isPinned, "undefined");
     });
   });
   describe("Snippets", () => {

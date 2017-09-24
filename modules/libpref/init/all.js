@@ -3091,6 +3091,9 @@ pref("layout.css.column-span.enabled", false);
 // Is effect of xml:base disabled for style attribute?
 pref("layout.css.style-attr-with-xml-base.disabled", true);
 
+// Are inter-character ruby annotations enabled?
+pref("layout.css.ruby.intercharacter.enabled", false);
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -5255,7 +5258,7 @@ pref("network.activity.blipIntervalMilliseconds", 0);
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
 // for the scripts to interfere with each other.  A restart is required for this
 // to take effect.
-pref("jsloader.shareGlobal", false);
+pref("jsloader.shareGlobal", true);
 
 // When we're asked to take a screenshot, don't wait more than 2000ms for the
 // event loop to become idle before actually taking the screenshot.

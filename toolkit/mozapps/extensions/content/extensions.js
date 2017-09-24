@@ -163,13 +163,6 @@ function initialize(event) {
     gDragDrop.onDrop(event);
   });
   addonPage.addEventListener("keypress", function(event) {
-    // If there is an embedded preferences <browser> running in a remote
-    // process, we will see the event here first before it gets a chance
-    // to bubble up through the embedded page.  To avoid stealing focus,
-    // we just ignore events when focus is in an options browser.
-    if (event.target.classList.contains("inline-options-browser")) {
-      return;
-    }
     gHeader.onKeyPress(event);
   });
 
@@ -1887,7 +1880,8 @@ var gCategories = {
 
     this.node.addEventListener("click", (aEvent) => {
       var selectedItem = this.node.selectedItem;
-      if (aEvent.target.closest("richlistitem") == selectedItem) {
+      if (aEvent.target.localName == "richlistitem" &&
+          aEvent.target == selectedItem) {
         var viewId = selectedItem.value;
 
         if (gViewController.parseViewId(viewId).type == "search") {
@@ -1913,19 +1907,9 @@ var gCategories = {
     category.setAttribute("value", aView);
     category.setAttribute("class", "category");
     category.setAttribute("name", aName);
+    category.setAttribute("tooltiptext", aName);
     category.setAttribute("priority", aPriority);
     category.setAttribute("hidden", aStartHidden);
-    category.setAttribute("align", "center");
-
-    var icon = document.createElement("image");
-    icon.setAttribute("class", "category-icon");
-    category.appendChild(icon);
-
-    var label = document.createElement("label");
-    label.setAttribute("class", "category-name");
-    label.setAttribute("flex", "1");
-    label.textContent = aName;
-    category.appendChild(label);
 
     var node;
     for (node of this.node.children) {
@@ -2857,7 +2841,7 @@ var gLegacyView = {
       this._categoryItem.disabled = false;
       let name = gStrings.ext.GetStringFromName(`type.${haveUnsigned ? "unsupported" : "legacy"}.name`);
       this._categoryItem.setAttribute("name", name);
-      this._categoryItem.querySelector("label").textContent = name;
+      this._categoryItem.tooltiptext = name;
     } else {
       this._categoryItem.disabled = true;
     }
@@ -3172,7 +3156,7 @@ var gDetailView = {
         legacy = !(aAddon.isWebExtension || aAddon.id.endsWith("@personas.mozilla.org"));
       }
 
-      if (legacy && aAddon.signedStatus == AddonManager.SIGNEDSTATE_PRIVILEGED) {
+      if (legacy && aAddon.signedState == AddonManager.SIGNEDSTATE_PRIVILEGED) {
         legacy = false;
       }
 
@@ -3770,6 +3754,13 @@ var gDetailView = {
     browser.setAttribute("class", "inline-options-browser");
     browser.setAttribute("forcemessagemanager", "true");
     browser.setAttribute("selectmenulist", "ContentSelectDropdown");
+
+    // The outer about:addons document listens for key presses to focus
+    // the search box when / is pressed.  But if we're focused inside an
+    // options page, don't let those keypresses steal focus.
+    browser.addEventListener("keypress", event => {
+      event.stopPropagation();
+    });
 
     let {optionsURL} = this._addon;
     let remote = !E10SUtils.canLoadURIInProcess(optionsURL, Services.appinfo.PROCESS_TYPE_DEFAULT);

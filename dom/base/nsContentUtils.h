@@ -800,6 +800,7 @@ public:
                             nsINode* aContext,
                             nsIDocument* aLoadingDocument,
                             nsIPrincipal* aLoadingPrincipal,
+                            uint64_t aRequestContextID,
                             nsIURI* aReferrer,
                             mozilla::net::ReferrerPolicy aReferrerPolicy,
                             imgINotificationObserver* aObserver,
@@ -2926,6 +2927,17 @@ public:
   static StorageAccess StorageAllowedForWindow(nsPIDOMWindowInner* aWindow);
 
   /*
+   * Checks if storage for the given document is permitted by a combination of
+   * the user's preferences, and whether the document's window is a third-party
+   * iframe.
+   *
+   * Note, this may be used on documents during the loading process where
+   * the window's extant document has not been set yet.  The code in
+   * StorageAllowedForWindow(), however, will not work in these cases.
+   */
+  static StorageAccess StorageAllowedForDocument(nsIDocument* aDoc);
+
+  /*
    * Checks if storage for the given principal is permitted by the user's
    * preferences. The caller is assumed to not be a third-party iframe.
    * (if that is possible, the caller should use StorageAllowedForWindow)
@@ -3027,7 +3039,8 @@ public:
   static void
   GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
                                         nsIPrincipal** aLoadingPrincipal,
-                                        nsContentPolicyType& aContentPolicyType);
+                                        nsContentPolicyType& aContentPolicyType,
+                                        uint64_t* aRequestContextID);
 
   static nsresult
   CreateJSValueFromSequenceOfObject(JSContext* aCx,

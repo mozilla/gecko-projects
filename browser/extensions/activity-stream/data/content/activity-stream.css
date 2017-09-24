@@ -166,6 +166,9 @@ a {
       color: #FFF;
       margin-inline-start: auto; }
 
+#snippets-container {
+  z-index: 1; }
+
 .outer-wrapper {
   display: flex;
   padding: 40px 32px 32px;
@@ -191,6 +194,10 @@ main {
     margin-bottom: 40px;
     position: relative; }
 
+.section-top-bar {
+  height: 16px;
+  margin-bottom: 12px; }
+
 .section-title {
   font-size: 13px;
   font-weight: bold;
@@ -199,6 +206,12 @@ main {
     color: #737373;
     fill: #737373;
     vertical-align: middle; }
+
+.body-wrapper {
+  opacity: 0;
+  transition: opacity 75ms ease-in-out 125ms; }
+  .body-wrapper.on {
+    opacity: 1; }
 
 .top-sites-list {
   list-style: none;
@@ -278,8 +291,7 @@ main {
       transform: scale(0.25);
       opacity: 0;
       transition-property: transform, opacity;
-      transition-duration: 200ms;
-      z-index: 399; }
+      transition-duration: 200ms; }
       .top-sites-list .top-site-outer .context-menu-button:focus, .top-sites-list .top-site-outer .context-menu-button:active {
         transform: scale(1);
         opacity: 1; }
@@ -335,7 +347,6 @@ main {
       width: 100%;
       background-size: 96px; }
     .top-sites-list .top-site-outer .default-icon {
-      z-index: 1;
       bottom: -6px;
       height: 42px;
       offset-inline-end: -6px;
@@ -450,6 +461,9 @@ main {
   .topsite-form .form-wrapper .field {
     margin-inline-start: 205px;
     position: relative; }
+  .topsite-form .form-wrapper .url input:not(:placeholder-shown):dir(rtl) {
+    direction: ltr;
+    text-align: right; }
   .topsite-form .form-wrapper .section-title {
     margin-bottom: 5px;
     margin-inline-start: 205px; }
@@ -505,9 +519,7 @@ main {
     transform: translateY(0); } }
 
 .sections-list .section-top-bar {
-  position: relative;
-  height: 16px;
-  margin-bottom: 18px; }
+  position: relative; }
   .sections-list .section-top-bar .section-info-option {
     offset-inline-end: 0;
     position: absolute;
@@ -963,8 +975,7 @@ main {
     transform: scale(0.25);
     opacity: 0;
     transition-property: transform, opacity;
-    transition-duration: 200ms;
-    z-index: 399; }
+    transition-duration: 200ms; }
     .card-outer .context-menu-button:focus, .card-outer .context-menu-button:active {
       transform: scale(1);
       opacity: 1; }

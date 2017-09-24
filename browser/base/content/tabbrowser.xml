@@ -975,6 +975,7 @@
         <parameter name="aTab"/>
         <parameter name="aURI"/>
         <parameter name="aLoadingPrincipal"/>
+        <parameter name="aRequestContextID"/>
         <body>
           <![CDATA[
             let browser = this.getBrowserForTab(aTab);
@@ -982,12 +983,13 @@
             let loadingPrincipal = aLoadingPrincipal
               ? aLoadingPrincipal
               : Services.scriptSecurityManager.getSystemPrincipal();
+            let requestContextID = aRequestContextID || 0;
 
             if (aURI) {
               if (!(aURI instanceof Ci.nsIURI)) {
                 aURI = makeURI(aURI);
               }
-              PlacesUIUtils.loadFavicon(browser, loadingPrincipal, aURI);
+              PlacesUIUtils.loadFavicon(browser, loadingPrincipal, aURI, requestContextID);
             }
 
             let sizedIconUrl = browser.mIconURL || "";
@@ -997,6 +999,7 @@
                     !browser.mIconLoadingPrincipal.equals(loadingPrincipal)) {
                   aTab.setAttribute("iconLoadingPrincipal",
                     this.serializationHelper.serializeToString(loadingPrincipal));
+                  aTab.setAttribute("requestcontextid", requestContextID);
                   browser.mIconLoadingPrincipal = loadingPrincipal;
                 }
                 aTab.setAttribute("image", sizedIconUrl);
@@ -1074,7 +1077,7 @@
               if (!this.isFailedIcon(url))
                 icon = url;
             }
-            this.setIcon(aTab, icon, browser.contentPrincipal);
+            this.setIcon(aTab, icon, browser.contentPrincipal, browser.contentRequestContextID);
           ]]>
         </body>
       </method>
@@ -1852,12 +1855,8 @@
               this.moveTabTo(tab, ++tabNum);
           }
 
-          if (!aLoadInBackground) {
-            if (firstTabAdded) {
-              // .selectedTab setter focuses the content area
-              this.selectedTab = firstTabAdded;
-            } else
-              this.selectedBrowser.focus();
+          if (firstTabAdded && !aLoadInBackground) {
+            this.selectedTab = firstTabAdded;
           }
         ]]></body>
       </method>
@@ -3503,7 +3502,7 @@
               // Workarounds for bug 458697
               // Icon might have been set on DOMLinkAdded, don't override that.
               if (!ourBrowser.mIconURL && otherBrowser.mIconURL)
-                this.setIcon(aOurTab, otherBrowser.mIconURL, otherBrowser.contentPrincipal);
+                this.setIcon(aOurTab, otherBrowser.mIconURL, otherBrowser.contentPrincipal, otherBrowser.contentRequestContextID);
               var isBusy = aOtherTab.hasAttribute("busy");
               if (isBusy) {
                 aOurTab.setAttribute("busy", "true");
@@ -4373,13 +4372,6 @@
             init() {
               this.log("START");
 
-              XPCOMUtils.defineLazyPreferenceGetter(this, "WARMING_ENABLED",
-                                                    "browser.tabs.remote.warmup.enabled", false);
-              XPCOMUtils.defineLazyPreferenceGetter(this, "MAX_WARMING_TABS",
-                                                    "browser.tabs.remote.warmup.maxTabs", 3);
-              XPCOMUtils.defineLazyPreferenceGetter(this, "WARMING_UNLOAD_DELAY" /* ms */,
-                                                    "browser.tabs.remote.warmup.unloadDelayMs", 2000);
-
               // If we minimized the window before the switcher was activated,
               // we might have set  the preserveLayers flag for the current
               // browser. Let's clear it.
@@ -4717,8 +4709,8 @@
 
               this.maybeFinishTabSwitch();
 
-              if (numWarming > this.MAX_WARMING_TABS) {
-                this.logState("Hit MAX_WARMING_TABS");
+              if (numWarming > this.tabbrowser.tabWarmingMax) {
+                this.logState("Hit tabWarmingMax");
                 if (this.unloadTimer) {
                   this.clearTimer(this.unloadTimer);
                 }
@@ -4937,7 +4929,7 @@
             },
 
             canWarmTab(tab) {
-              if (!this.WARMING_ENABLED) {
+              if (!this.tabbrowser.tabWarmingEnabled) {
                 return false;
               }
 
@@ -4977,7 +4969,8 @@
 
               this.warmingTabs.add(tab);
               this.setTabState(tab, this.STATE_LOADING);
-              this.suppressDisplayPortAndQueueUnload(tab, this.WARMING_UNLOAD_DELAY);
+              this.suppressDisplayPortAndQueueUnload(tab,
+                this.tabbrowser.tabWarmingUnloadDelay);
             },
 
             // Called when the user asks to switch to a given tab.
@@ -4986,7 +4979,7 @@
                 return;
               }
 
-              if (this.WARMING_ENABLED) {
+              if (this.tabbrowser.tabWarmingEnabled) {
                 let warmingState = "disqualified";
 
                 if (this.warmingTabs.has(tab)) {
@@ -5881,6 +5874,12 @@
 
           XPCOMUtils.defineLazyPreferenceGetter(this, "animationsEnabled",
                                                 "toolkit.cosmeticAnimations.enabled", true);
+          XPCOMUtils.defineLazyPreferenceGetter(this, "tabWarmingEnabled",
+                                                "browser.tabs.remote.warmup.enabled", false);
+          XPCOMUtils.defineLazyPreferenceGetter(this, "tabWarmingMax",
+                                                "browser.tabs.remote.warmup.maxTabs", 3);
+          XPCOMUtils.defineLazyPreferenceGetter(this, "tabWarmingUnloadDelay" /* ms */,
+                                                "browser.tabs.remote.warmup.unloadDelayMs", 2000);
         ]]>
       </constructor>
 
@@ -6084,7 +6083,7 @@
           }
 
           tab.removeAttribute("soundplaying");
-          this.setIcon(tab, icon, browser.contentPrincipal);
+          this.setIcon(tab, icon, browser.contentPrincipal, browser.contentRequestContextID);
         ]]>
       </handler>
       <handler event="DOMAudioPlaybackStarted">
@@ -7663,7 +7662,7 @@
                     anonid="tab-throbber"
                     class="tab-throbber"
                     layer="true"/>
-          <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
+          <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,requestcontextid,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
                      anonid="tab-icon-image"
                      class="tab-icon-image"
                      validate="never"

@@ -86,6 +86,7 @@ class VCSHelper(object):
                 try_task_config['templates'] = templates
 
             json.dump(try_task_config, fh, indent=2, separators=(',', ':'))
+            fh.write('\n')
         return config
 
     def check_working_directory(self, push=True):
@@ -96,7 +97,9 @@ class VCSHelper(object):
             print(UNCOMMITTED_CHANGES)
             sys.exit(1)
 
-    def push_to_try(self, msg, labels=None, templates=None, push=True):
+    def push_to_try(self, method, msg, labels=None, templates=None, push=True):
+        commit_message = '%s\n\nPushed via `mach try %s`' % (msg, method)
+
         self.check_working_directory(push)
 
         config = None
@@ -105,15 +108,15 @@ class VCSHelper(object):
 
         try:
             if not push:
-                print("Calculated try selector:")
+                print("Commit message:")
+                print(commit_message)
                 if config:
+                    print("Calculated try_task_config.json:")
                     with open(config) as fh:
                         print(fh.read())
-                else:
-                    print(msg)
                 return
 
-            self._push_to_try(msg, config)
+            self._push_to_try(commit_message, config)
         finally:
             if config and os.path.isfile(config):
                 os.remove(config)

@@ -271,7 +271,9 @@ private:
     void SetVariantRange();
     void SetRegionRange();
 
-    bool AddLikelySubtags(); // returns false if nothing changed
+    // returns false if nothing changed
+    bool AddLikelySubtags();
+    bool AddLikelySubtagsWithoutRegion();
 
     const nsCString& AsString() const {
       return mLocaleStr;
@@ -291,6 +293,8 @@ private:
     nsCString mScript;
     nsCString mRegion;
     nsCString mVariant;
+
+    bool AddLikelySubtagsForLocale(const nsACString& aLocale);
   };
 
   void FilterMatches(const nsTArray<nsCString>& aRequested,
@@ -302,6 +306,7 @@ private:
 
   virtual ~LocaleService();
 
+  nsAutoCStringN<16>  mDefaultLocale;
   nsTArray<nsCString> mAppLocales;
   nsTArray<nsCString> mRequestedLocales;
   nsTArray<nsCString> mAvailableLocales;

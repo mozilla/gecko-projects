@@ -393,25 +393,7 @@
 #include browser-context.inc
     </menupopup>
 
-    <menupopup id="placesContext">
-      <menuseparator id="placesContext_recentlyBookmarkedSeparator"
-                     ignoreitem="true"
-                     hidden="true"/>
-      <menuitem id="placesContext_hideRecentlyBookmarked"
-                label="&hideRecentlyBookmarked.label;"
-                accesskey="&hideRecentlyBookmarked.accesskey;"
-                oncommand="RecentBookmarksMenuUI.visible = false;"
-                closemenu="single"
-                ignoreitem="true"
-                hidden="true"/>
-      <menuitem id="placesContext_showRecentlyBookmarked"
-                label="&showRecentlyBookmarked.label;"
-                accesskey="&showRecentlyBookmarked.accesskey;"
-                oncommand="RecentBookmarksMenuUI.visible = true;"
-                closemenu="single"
-                ignoreitem="true"
-                hidden="true"/>
-    </menupopup>
+    <menupopup id="placesContext"/>
 
     <panel id="ctrlTab-panel" hidden="true" norestorefocus="true" level="top">
       <hbox>
@@ -591,9 +573,8 @@
     <spacer id="titlebar-spacer" flex="1"/>
     <hbox id="titlebar-buttonbox-container">
 #ifdef XP_WIN
-      <hbox id="private-browsing-indicator-titlebar">
-        <hbox class="private-browsing-indicator"/>
-      </hbox>
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;" aria-live="polite"/>
+      <hbox class="private-browsing-indicator"/>
 #endif
       <hbox id="titlebar-buttonbox">
         <toolbarbutton class="titlebar-button" id="titlebar-min" oncommand="window.minimize();"/>
@@ -605,6 +586,7 @@
     <!-- OS X does not natively support RTL for its titlebar items, so we prevent this secondary
          buttonbox from reversing order in RTL by forcing an LTR direction. -->
     <hbox id="titlebar-secondary-buttonbox" dir="ltr">
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;" aria-live="polite"/>
       <hbox class="private-browsing-indicator"/>
       <hbox id="titlebar-fullscreen-button"/>
     </hbox>
@@ -651,8 +633,12 @@
              collapsed="true">
 
 #if defined(MOZ_WIDGET_GTK)
-      <hbox id="private-browsing-indicator"
+      <hbox class="private-browsing-indicator"
             skipintoolbarset="true"/>
+      <button class="accessibility-indicator"
+              tooltiptext="&accessibilityIndicator.tooltip;"
+              aria-live="polite"
+              skipintoolbarset="true"/>
 #endif
 
       <tabs id="tabbrowser-tabs"
@@ -700,6 +686,8 @@
       </toolbarbutton>
 
 #if !defined(MOZ_WIDGET_GTK)
+      <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;"
+              aria-live="polite" skipintoolbarset="true"/>
       <hbox class="private-browsing-indicator" skipintoolbarset="true"/>
 #endif
 #ifdef CAN_DRAW_IN_TITLEBAR
@@ -1114,11 +1102,6 @@
                     label="&showAllBookmarks2.label;"
                     command="Browser:ShowAllBookmarks"
                     key="manBookmarkKb"/>
-          <menuseparator/>
-          <menuitem label="&recentBookmarks.label;"
-                    id="BMB_recentBookmarks"
-                    disabled="true"
-                    class="menuitem-iconic subviewbutton"/>
           <menuseparator/>
           <menu id="BMB_bookmarksToolbar"
                 class="menu-iconic bookmark-item subviewbutton"

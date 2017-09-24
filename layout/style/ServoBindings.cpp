@@ -1256,34 +1256,6 @@ Gecko_EnsureMozBorderColors(nsStyleBorder* aBorder)
   aBorder->EnsureBorderColors();
 }
 
-void Gecko_ClearMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide)
-{
-  aBorder->ClearBorderColors(aSide);
-}
-
-void
-Gecko_AppendMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide,
-                            nscolor aColor)
-{
-  aBorder->AppendBorderColor(aSide, aColor);
-}
-
-void
-Gecko_CopyMozBorderColors(nsStyleBorder* aDest, const nsStyleBorder* aSrc,
-                          mozilla::Side aSide)
-{
-  if (aSrc->mBorderColors) {
-    aDest->CopyBorderColorsFrom(aSrc->mBorderColors[aSide], aSide);
-  }
-}
-
-const nsBorderColors*
-Gecko_GetMozBorderColors(const nsStyleBorder* aBorder, mozilla::Side aSide)
-{
-  MOZ_ASSERT(aBorder);
-  return aBorder->mBorderColors ? aBorder->mBorderColors[aSide] : nullptr;
-}
-
 void
 Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
   aList->Clear();
@@ -2442,11 +2414,16 @@ Gecko_XBLBinding_InheritsStyle(RawGeckoXBLBindingBorrowed aXBLBinding)
   return aXBLBinding->InheritsStyle();
 }
 
+static StaticRefPtr<UACacheReporter> gUACacheReporter;
+
 void
 InitializeServo()
 {
   URLExtraData::InitDummy();
   Servo_Initialize(URLExtraData::Dummy());
+
+  gUACacheReporter = new UACacheReporter();
+  RegisterWeakMemoryReporter(gUACacheReporter);
 
   sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
   sServoWidgetLock = new Mutex("Servo::WidgetLock");
@@ -2459,6 +2436,9 @@ ShutdownServo()
   MOZ_ASSERT(sServoFontMetricsLock);
   MOZ_ASSERT(sServoWidgetLock);
   MOZ_ASSERT(sServoLangFontPrefsLock);
+
+  UnregisterWeakMemoryReporter(gUACacheReporter);
+  gUACacheReporter = nullptr;
 
   delete sServoFontMetricsLock;
   delete sServoWidgetLock;
@@ -2647,6 +2627,7 @@ Gecko_RegisterNamespace(nsIAtom* aNamespace)
 bool
 Gecko_ShouldCreateStyleThreadPool()
 {
+  MOZ_ASSERT(NS_IsMainThread());
   return !mozilla::BrowserTabsRemoteAutostart() || XRE_IsContentProcess();
 }
 

@@ -15,7 +15,7 @@
 #include "nsLayoutUtils.h"
 #include "nsRegion.h"
 #include "nsSVGContainerFrame.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "mozilla/dom/SVGForeignObjectElement.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGOuterSVGFrame.h"
@@ -124,6 +124,7 @@ nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
                                 const ReflowInput& aReflowInput,
                                 nsReflowStatus&          aStatus)
 {
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
   MOZ_ASSERT(!(GetStateBits() & NS_FRAME_IS_NONDISPLAY),
              "Should not have been called");
 
@@ -151,7 +152,6 @@ nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
                         aReflowInput.ComputedBSize());
   aDesiredSize.SetSize(wm, finalSize);
   aDesiredSize.SetOverflowAreasToDesiredBounds();
-  aStatus.Reset();
 }
 
 void
@@ -360,7 +360,7 @@ nsSVGForeignObjectFrame::ReflowSVG()
     // Make sure we have our filter property (if any) before calling
     // FinishAndStoreOverflow (subsequent filter changes are handled off
     // nsChangeHint_UpdateEffects):
-    nsSVGEffects::UpdateEffects(this);
+    SVGObserverUtils::UpdateEffects(this);
   }
 
   // If we have a filter, we need to invalidate ourselves because filter
@@ -376,8 +376,8 @@ nsSVGForeignObjectFrame::ReflowSVG()
   FinishAndStoreOverflow(overflowAreas, mRect.Size());
 
   // Now unset the various reflow bits:
-  mState &= ~(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY |
-              NS_FRAME_HAS_DIRTY_CHILDREN);
+  RemoveStateBits(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY |
+                  NS_FRAME_HAS_DIRTY_CHILDREN);
 }
 
 void

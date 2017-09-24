@@ -116,7 +116,8 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
       var threadClient = _ref.threadClient,
           tabTarget = _ref.tabTarget,
           debuggerClient = _ref.debuggerClient,
-          sourceMaps = _ref.sourceMaps;
+          sourceMaps = _ref.sourceMaps,
+          toolboxActions = _ref.toolboxActions;
 
       return (0, _client.onConnect)({
         tab: { clientType: "firefox" },
@@ -126,7 +127,8 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
           debuggerClient
         }
       }, {
-        sourceMaps
+        services: { sourceMaps },
+        toolboxActions
       });
     },
     destroy: () => {
@@ -7216,7 +7218,7 @@ module.exports = {
       var array = this._array;
       var maxIndex = array.length - 1;
       var ii = 0;
-      return new Iterator(function() 
+      return new Iterator(function()
         {return ii > maxIndex ?
           iteratorDone() :
           iteratorValue(type, ii, array[reverse ? maxIndex - ii++ : ii++])}
@@ -7687,7 +7689,7 @@ module.exports = {
 
     Repeat.prototype.__iterator = function(type, reverse) {var this$0 = this;
       var ii = 0;
-      return new Iterator(function() 
+      return new Iterator(function()
         {return ii < this$0.size ? iteratorValue(type, ii++, this$0._value) : iteratorDone()}
       );
     };
@@ -9885,7 +9887,7 @@ module.exports = {
         return flipSequence;
       };
     }
-    reversedSequence.get = function(key, notSetValue) 
+    reversedSequence.get = function(key, notSetValue)
       {return iterable.get(useKeys ? key : -1 - key, notSetValue)};
     reversedSequence.has = function(key )
       {return iterable.has(useKeys ? key : -1 - key)};
@@ -10084,7 +10086,7 @@ module.exports = {
         return this.cacheResult().__iterate(fn, reverse);
       }
       var iterations = 0;
-      iterable.__iterate(function(v, k, c) 
+      iterable.__iterate(function(v, k, c)
         {return predicate.call(context, v, k, c) && ++iterations && fn(v, k, this$0)}
       );
       return iterations;
@@ -10275,7 +10277,7 @@ module.exports = {
     interposedSequence.size = iterable.size && iterable.size * 2 -1;
     interposedSequence.__iterateUncached = function(fn, reverse) {var this$0 = this;
       var iterations = 0;
-      iterable.__iterate(function(v, k) 
+      iterable.__iterate(function(v, k)
         {return (!iterations || fn(separator, iterations++, this$0) !== false) &&
         fn(v, iterations++, this$0) !== false},
         reverse
@@ -14741,7 +14743,7 @@ module.exports = function() {
  * LICENSE file in the root directory of this source tree. An additional grant
  * of patent rights can be found in the PATENTS file in the same directory.
  *
- * 
+ *
  */
 
 function makeEmptyFunction(arg) {
@@ -15980,7 +15982,8 @@ const prefs = new PrefsHelper("devtools", {
 
 const features = new PrefsHelper("devtools.debugger.features", {
   asyncStepping: ["Bool", "async-stepping", false],
-  projectTextSearch: ["Bool", "debugger.project-text-search-enabled", true]
+  projectTextSearch: ["Bool", "project-text-search-enabled", true],
+  wasm: ["Bool", "wasm", true]
 });
 /* harmony export (immutable) */ __webpack_exports__["features"] = features;
 
@@ -19308,13 +19311,30 @@ function evaluateExpression(expression, frameId) {
       return;
     }
 
+	const input = wrapExpression(expression.input);
     return dispatch({
       type: "EVALUATE_EXPRESSION",
       input: expression.input,
-      [_promise.PROMISE]: client.evaluate(expression.input, { frameId })
+      [_promise.PROMISE]: client.evaluate(input, { frameId })
     });
   };
 }
+
+function sanitizeInput(input) {
+  return input.replace(/\\/g, "\\\\").replace(/"/g, "\\$&");
+}
+
+function wrapExpression(input) {
+  return `eval(\`
+    try {
+      ${sanitizeInput(input)}
+    } catch (e) {
+      e.name + ": " + e.message
+    }
+  \`)`.trim();
+}
+
+
 
 /***/ }),
 /* 253 */
@@ -19595,6 +19615,7 @@ var checkPendingBreakpoints = (() => {
 exports.newSource = newSource;
 exports.newSources = newSources;
 exports.selectSourceURL = selectSourceURL;
+exports.openLink = openLink;
 exports.selectSource = selectSource;
 exports.jumpToMappedLocation = jumpToMappedLocation;
 exports.addTab = addTab;
@@ -19735,6 +19756,12 @@ function loadSourceMap(generatedSource) {
       return _ref8.apply(this, arguments);
     };
   })();
+}
+
+function openLink(url) {
+  return async function({ openLink }) {
+    openLink(url);
+  };
 }
 
 /**
@@ -21620,7 +21647,7 @@ function loadObjectProperties(object) {
 
     var objectId = object.actor || object.objectId;
 
-    if (!(0, _selectors.getPause)(getState()) || (0, _selectors.getLoadedObject)(getState(), objectId)) {
+    if ((0, _selectors.getLoadedObject)(getState(), objectId)) {
       return;
     }
 
@@ -27884,7 +27911,8 @@ class Expressions extends _react.PureComponent {
   renderExpression(expression) {
     var _props3 = this.props,
         loadObjectProperties = _props3.loadObjectProperties,
-        loadedObjects = _props3.loadedObjects;
+        loadedObjects = _props3.loadedObjects,
+        openLink = _props3.openLink;
     var editing = this.state.editing;
     var input = expression.input,
         updating = expression.updating;
@@ -27928,7 +27956,8 @@ class Expressions extends _react.PureComponent {
           loadObjectProperties: loadObjectProperties
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {}
+          loadObjectEntries: grip => {},
+          openLink: openLink
         }),
         _react2.default.createElement(
           "div",
@@ -28700,7 +28729,8 @@ class Scopes extends _react.PureComponent {
     var _props2 = this.props,
         pauseInfo = _props2.pauseInfo,
         loadObjectProperties = _props2.loadObjectProperties,
-        loadedObjects = _props2.loadedObjects;
+        loadedObjects = _props2.loadedObjects,
+        openLink = _props2.openLink;
     var scopes = this.state.scopes;
 
 
@@ -28718,7 +28748,8 @@ class Scopes extends _react.PureComponent {
           dimTopLevelWindow: true
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {}
+          loadObjectEntries: grip => {},
+          openLink: openLink
         })
       );
     }
@@ -29229,7 +29260,8 @@ function getKey(action) {
 }
 
 function getKeyForOS(os, action) {
-  return KEYS[os][action];
+  var osActions = KEYS[os] || KEYS.Linux;
+  return osActions[action];
 }
 
 function formatKey(action) {
@@ -30730,17 +30762,19 @@ class Popup extends _react.Component {
   }
 
   renderSimplePreview(value) {
+    var openLink = this.props.openLink;
     return _react2.default.createElement(
       "div",
       { className: "preview-popup" },
-      Rep({ object: value, mode: MODE.LONG })
+      Rep({ object: value, mode: MODE.LONG, openLink: openLink })
     );
   }
 
   renderObjectInspector(root) {
     var _props2 = this.props,
         loadObjectProperties = _props2.loadObjectProperties,
-        loadedObjects = _props2.loadedObjects;
+        loadedObjects = _props2.loadedObjects,
+        openLink = _props2.openLink;
 
 
     var getObjectProperties = id => loadedObjects[id];
@@ -30759,7 +30793,8 @@ class Popup extends _react.Component {
       loadObjectProperties: loadObjectProperties
       // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
       , getObjectEntries: actor => {},
-      loadObjectEntries: grip => {}
+      loadObjectEntries: grip => {},
+      openLink: openLink
     });
   }
 
@@ -32128,16 +32163,18 @@ Object.defineProperty(exports, "__esModule", {
 exports.onConnect = undefined;
 
 var onConnect = (() => {
-  var _ref = _asyncToGenerator(function* (connection, services) {
+  var _ref = _asyncToGenerator(function* (connection, options) {
     // NOTE: the landing page does not connect to a JS process
     if (!connection) {
       return;
     }
 
+	var services = options.services;
+	var toolboxActions = options.toolboxActions;
     var client = getClient(connection);
     var commands = client.clientCommands;
 
-    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, services),
+    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, options),
         store = _bootstrapStore.store,
         actions = _bootstrapStore.actions,
         selectors = _bootstrapStore.selectors;
@@ -33216,12 +33253,14 @@ var _prefs = __webpack_require__(226);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function bootstrapStore(client, services) {
+function bootstrapStore(client, options) {
+    var services = options.services;
+    var toolboxActions = options.toolboxActions;
   var createStore = (0, _createStore2.default)({
     log: (0, _devtoolsConfig.getValue)("logging.actions"),
     timing: (0, _devtoolsConfig.getValue)("performance.actions"),
     makeThunkArgs: (args, state) => {
-      return Object.assign({}, args, { client }, services);
+      return Object.assign({}, args, { client }, services, toolboxActions);
     }
   });
 

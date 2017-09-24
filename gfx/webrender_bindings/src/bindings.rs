@@ -89,11 +89,22 @@ impl WrVecU8 {
 
     // Equivalent to `to_vec` but clears self instead of consuming the value.
     fn flush_into_vec(&mut self) -> Vec<u8> {
-        let vec = unsafe { Vec::from_raw_parts(self.data, self.length, self.capacity) };
+        self.convert_into_vec::<u8>()
+    }
+
+    // Like flush_into_vec, but also does an unsafe conversion to the desired type.
+    fn convert_into_vec<T>(&mut self) -> Vec<T> {
+        let vec = unsafe {
+            Vec::from_raw_parts(
+                self.data as *mut T,
+                self.length / mem::size_of::<T>(),
+                self.capacity / mem::size_of::<T>(),
+            )
+        };
         self.data = ptr::null_mut();
         self.length = 0;
         self.capacity = 0;
-        return vec;
+        vec
     }
 
     fn from_vec(mut v: Vec<u8>) -> WrVecU8 {
@@ -160,6 +171,22 @@ impl MutByteSlice {
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         make_slice_mut(self.buffer, self.len)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct WrFontInstanceOptions {
+    pub render_mode: FontRenderMode,
+    pub synthetic_italics: bool,
+}
+
+impl Into<FontInstanceOptions> for WrFontInstanceOptions {
+    fn into(self) -> FontInstanceOptions {
+        FontInstanceOptions {
+            render_mode: Some(self.render_mode),
+            synthetic_italics: self.synthetic_italics,
+        }
     }
 }
 
@@ -820,7 +847,8 @@ pub extern "C" fn wr_api_set_window_parameters(dh: &mut DocumentHandle,
     let size = DeviceUintSize::new(width as u32, height as u32);
     dh.api.set_window_parameters(dh.document_id,
                                  size,
-                                 DeviceUintRect::new(DeviceUintPoint::new(0, 0), size));
+                                 DeviceUintRect::new(DeviceUintPoint::new(0, 0), size),
+                                 1.0);
 }
 
 #[no_mangle]
@@ -961,15 +989,20 @@ pub extern "C" fn wr_resource_updates_add_font_instance(
     key: WrFontInstanceKey,
     font_key: WrFontKey,
     glyph_size: f32,
-    options: *const FontInstanceOptions,
-    platform_options: *const FontInstancePlatformOptions
+    options: *const WrFontInstanceOptions,
+    platform_options: *const FontInstancePlatformOptions,
+    variations: &mut WrVecU8,
 ) {
+    let instance_options: Option<FontInstanceOptions> = unsafe {
+        options.as_ref().map(|opts|{ (*opts).into() })
+    };
     resources.add_font_instance(
         key,
         font_key,
         Au::from_f32_px(glyph_size),
-        unsafe { options.as_ref().cloned() },
-        unsafe { platform_options.as_ref().cloned() }
+        instance_options,
+        unsafe { platform_options.as_ref().cloned() },
+        variations.convert_into_vec::<FontVariation>(),
     );
 }
 
@@ -1080,17 +1113,12 @@ pub extern "C" fn wr_state_delete(state: *mut WrState) {
 pub extern "C" fn wr_dp_begin(state: &mut WrState,
                               width: u32,
                               height: u32) {
-    assert!(unsafe { !is_in_render_thread() });
+    debug_assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.data.clear();
 
     let bounds = LayoutRect::new(LayoutPoint::new(0.0, 0.0),
                                  LayoutSize::new(width as f32, height as f32));
-
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: None,
-        is_backface_visible: true,
-    };
+    let prim_info = LayoutPrimitiveInfo::new(bounds);
 
     state.frame_builder
          .dl_builder
@@ -1105,7 +1133,7 @@ pub extern "C" fn wr_dp_begin(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_end(state: &mut WrState) {
-    assert!(unsafe { !is_in_render_thread() });
+    debug_assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_stacking_context();
 }
 
@@ -1119,8 +1147,9 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               perspective: *const LayoutTransform,
                                               mix_blend_mode: MixBlendMode,
                                               filters: *const WrFilterOp,
-                                              filter_count: usize) {
-    assert!(unsafe { !is_in_render_thread() });
+                                              filter_count: usize,
+                                              is_backface_visible: bool) {
+    debug_assert!(unsafe { !is_in_render_thread() });
 
     let c_filters = make_slice(filters, filter_count);
     let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
@@ -1161,11 +1190,8 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
         None => None,
     };
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: None,
-        is_backface_visible: true,
-    };
+    let mut prim_info = LayoutPrimitiveInfo::new(bounds);
+    prim_info.is_backface_visible = is_backface_visible;
 
     state.frame_builder
          .dl_builder
@@ -1180,7 +1206,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
-    assert!(unsafe { !is_in_render_thread() });
+    debug_assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_stacking_context();
 }
 
@@ -1191,7 +1217,7 @@ pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
                                     complex_count: usize,
                                     mask: *const WrImageMask)
                                     -> u64 {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     let complex_slice = make_slice(complex, complex_count);
     let complex_iter = complex_slice.iter().map(|x| x.into());
     let mask : Option<ImageMask> = unsafe { mask.as_ref() }.map(|x| x.into());
@@ -1211,14 +1237,39 @@ pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
 #[no_mangle]
 pub extern "C" fn wr_dp_push_clip(state: &mut WrState,
                                   clip_id: u64) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     state.frame_builder.dl_builder.push_clip_id(ClipId::Clip(clip_id, 0, state.pipeline_id));
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_clip(state: &mut WrState) {
-    assert!(unsafe { !is_in_render_thread() });
+    debug_assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_clip_id();
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_define_sticky_frame(state: &mut WrState,
+                                            content_rect: LayoutRect,
+                                            top_range: *const StickySideConstraint,
+                                            right_range: *const StickySideConstraint,
+                                            bottom_range: *const StickySideConstraint,
+                                            left_range: *const StickySideConstraint)
+                                            -> u64 {
+    assert!(unsafe { is_in_main_thread() });
+    let clip_id = state.frame_builder.dl_builder.define_sticky_frame(
+        None, content_rect, StickyFrameInfo::new(
+            unsafe { top_range.as_ref() }.cloned(),
+            unsafe { right_range.as_ref() }.cloned(),
+            unsafe { bottom_range.as_ref() }.cloned(),
+            unsafe { left_range.as_ref() }.cloned()));
+    match clip_id {
+        ClipId::Clip(id, nesting_index, pipeline_id) => {
+            assert!(pipeline_id == state.pipeline_id);
+            assert!(nesting_index == 0);
+            id
+        },
+        _ => panic!("Got unexpected clip id type"),
+    }
 }
 
 #[no_mangle]
@@ -1236,14 +1287,14 @@ pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
 #[no_mangle]
 pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
                                           scroll_id: u64) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     let clip_id = ClipId::new(scroll_id, state.pipeline_id);
     state.frame_builder.dl_builder.push_clip_id(clip_id);
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_scroll_layer(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     state.frame_builder.dl_builder.pop_clip_id();
 }
 
@@ -1261,7 +1312,7 @@ pub extern "C" fn wr_scroll_layer_with_id(dh: &mut DocumentHandle,
 pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
                                                   scroll_id: u64,
                                                   clip_id: *const u64) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     let scroll_id = ClipId::new(scroll_id, state.pipeline_id);
     let info = if let Some(&id) = unsafe { clip_id.as_ref() } {
         ClipAndScrollInfo::new(
@@ -1275,22 +1326,19 @@ pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_clip_and_scroll_info(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     state.frame_builder.dl_builder.pop_clip_id();
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
                                     rect: LayoutRect,
+                                    is_backface_visible: bool,
                                     pipeline_id: WrPipelineId) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: None,
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::new(rect);
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder.dl_builder.push_iframe(&prim_info, pipeline_id);
 }
 
@@ -1298,15 +1346,12 @@ pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
 pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
                                   rect: LayoutRect,
                                   clip: LayoutRect,
+                                  is_backface_visible: bool,
                                   color: ColorF) {
-    assert!(unsafe { !is_in_render_thread() });
+    debug_assert!(unsafe { !is_in_render_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder.dl_builder.push_rect(&prim_info,
                                              color);
 }
@@ -1315,18 +1360,15 @@ pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
 pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    bounds: LayoutRect,
                                    clip: LayoutRect,
+                                   is_backface_visible: bool,
                                    stretch_size: LayoutSize,
                                    tile_spacing: LayoutSize,
                                    image_rendering: ImageRendering,
                                    key: WrImageKey) {
-    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
+    debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_image(&prim_info,
@@ -1341,19 +1383,16 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
 pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
                                               bounds: LayoutRect,
                                               clip: LayoutRect,
+                                              is_backface_visible: bool,
                                               image_key_0: WrImageKey,
                                               image_key_1: WrImageKey,
                                               image_key_2: WrImageKey,
                                               color_space: WrYuvColorSpace,
                                               image_rendering: ImageRendering) {
-    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
+    debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_yuv_image(&prim_info,
@@ -1367,18 +1406,15 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
 pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
                                             bounds: LayoutRect,
                                             clip: LayoutRect,
+                                            is_backface_visible: bool,
                                             image_key_0: WrImageKey,
                                             image_key_1: WrImageKey,
                                             color_space: WrYuvColorSpace,
                                             image_rendering: ImageRendering) {
-    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
+    debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_yuv_image(&prim_info,
@@ -1392,17 +1428,14 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
 pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
                                                    bounds: LayoutRect,
                                                    clip: LayoutRect,
+                                                   is_backface_visible: bool,
                                                    image_key_0: WrImageKey,
                                                    color_space: WrYuvColorSpace,
                                                    image_rendering: ImageRendering) {
-    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
+    debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_yuv_image(&prim_info,
@@ -1415,21 +1448,18 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
 pub extern "C" fn wr_dp_push_text(state: &mut WrState,
                                   bounds: LayoutRect,
                                   clip: LayoutRect,
+                                  is_backface_visible: bool,
                                   color: ColorF,
                                   font_key: WrFontInstanceKey,
                                   glyphs: *const GlyphInstance,
                                   glyph_count: u32,
                                   glyph_options: *const GlyphOptions) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let glyph_slice = make_slice(glyphs, glyph_count as usize);
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_text(&prim_info,
@@ -1443,21 +1473,18 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
 pub extern "C" fn wr_dp_push_text_shadow(state: &mut WrState,
                                          bounds: LayoutRect,
                                          clip: LayoutRect,
+                                         is_backface_visible: bool,
                                          shadow: TextShadow) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: bounds,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder.dl_builder.push_text_shadow(&prim_info, shadow.into());
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_text_shadow(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     state.frame_builder.dl_builder.pop_text_shadow();
 }
@@ -1465,6 +1492,7 @@ pub extern "C" fn wr_dp_pop_text_shadow(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_push_line(state: &mut WrState,
                                   clip: LayoutRect,
+                                  is_backface_visible: bool,
                                   baseline: f32,
                                   start: f32,
                                   end: f32,
@@ -1472,14 +1500,10 @@ pub extern "C" fn wr_dp_push_line(state: &mut WrState,
                                   width: f32,
                                   color: ColorF,
                                   style: LineStyle) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: LayoutRect::zero(),
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(LayoutRect::zero(), clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_line(&prim_info,
@@ -1497,13 +1521,14 @@ pub extern "C" fn wr_dp_push_line(state: &mut WrState,
 pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                                     rect: LayoutRect,
                                     clip: LayoutRect,
+                                    is_backface_visible: bool,
                                     widths: BorderWidths,
                                     top: BorderSide,
                                     right: BorderSide,
                                     bottom: BorderSide,
                                     left: BorderSide,
                                     radius: BorderRadius) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let border_details = BorderDetails::Normal(NormalBorder {
                                                    left: left.into(),
@@ -1512,12 +1537,8 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                                                    bottom: bottom.into(),
                                                    radius: radius.into(),
                                                });
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_border(&prim_info,
@@ -1529,13 +1550,14 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
 pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                           rect: LayoutRect,
                                           clip: LayoutRect,
+                                          is_backface_visible: bool,
                                           widths: BorderWidths,
                                           image: WrImageKey,
                                           patch: NinePatchDescriptor,
                                           outset: SideOffsets2D<f32>,
                                           repeat_horizontal: RepeatMode,
                                           repeat_vertical: RepeatMode) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
     let border_details =
         BorderDetails::Image(ImageBorder {
                                  image_key: image,
@@ -1545,12 +1567,8 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                  repeat_horizontal: repeat_horizontal.into(),
                                  repeat_vertical: repeat_vertical.into(),
                              });
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_border(&prim_info,
@@ -1562,6 +1580,7 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
 pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              rect: LayoutRect,
                                              clip: LayoutRect,
+                                             is_backface_visible: bool,
                                              widths: BorderWidths,
                                              start_point: LayoutPoint,
                                              end_point: LayoutPoint,
@@ -1569,7 +1588,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              stops_count: usize,
                                              extend_mode: ExtendMode,
                                              outset: SideOffsets2D<f32>) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let stops_slice = make_slice(stops, stops_count);
     let stops_vector = stops_slice.to_owned();
@@ -1584,12 +1603,8 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                                                                extend_mode.into()),
                                                      outset: outset.into(),
                                                  });
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_border(&prim_info,
@@ -1601,6 +1616,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
 pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     rect: LayoutRect,
                                                     clip: LayoutRect,
+                                                    is_backface_visible: bool,
                                                     widths: BorderWidths,
                                                     center: LayoutPoint,
                                                     radius: LayoutSize,
@@ -1608,7 +1624,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     stops_count: usize,
                                                     extend_mode: ExtendMode,
                                                     outset: SideOffsets2D<f32>) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let stops_slice = make_slice(stops, stops_count);
     let stops_vector = stops_slice.to_owned();
@@ -1624,12 +1640,8 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                                            extend_mode.into()),
                                           outset: outset.into(),
                                       });
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_border(&prim_info,
@@ -1641,6 +1653,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
 pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
                                              rect: LayoutRect,
                                              clip: LayoutRect,
+                                             is_backface_visible: bool,
                                              start_point: LayoutPoint,
                                              end_point: LayoutPoint,
                                              stops: *const GradientStop,
@@ -1648,7 +1661,7 @@ pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
                                              extend_mode: ExtendMode,
                                              tile_size: LayoutSize,
                                              tile_spacing: LayoutSize) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let stops_slice = make_slice(stops, stops_count);
     let stops_vector = stops_slice.to_owned();
@@ -1659,12 +1672,8 @@ pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
                                          end_point.into(),
                                          stops_vector,
                                          extend_mode.into());
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_gradient(&prim_info,
@@ -1677,6 +1686,7 @@ pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
 pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                              rect: LayoutRect,
                                              clip: LayoutRect,
+                                             is_backface_visible: bool,
                                              center: LayoutPoint,
                                              radius: LayoutSize,
                                              stops: *const GradientStop,
@@ -1684,7 +1694,7 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                              extend_mode: ExtendMode,
                                              tile_size: LayoutSize,
                                              tile_spacing: LayoutSize) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
     let stops_slice = make_slice(stops, stops_count);
     let stops_vector = stops_slice.to_owned();
@@ -1695,12 +1705,8 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                                 radius.into(),
                                                 stops_vector,
                                                 extend_mode.into());
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_radial_gradient(&prim_info,
@@ -1713,6 +1719,7 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
 pub extern "C" fn wr_dp_push_box_shadow(state: &mut WrState,
                                         rect: LayoutRect,
                                         clip: LayoutRect,
+                                        is_backface_visible: bool,
                                         box_bounds: LayoutRect,
                                         offset: LayoutVector2D,
                                         color: ColorF,
@@ -1720,14 +1727,10 @@ pub extern "C" fn wr_dp_push_box_shadow(state: &mut WrState,
                                         spread_radius: f32,
                                         border_radius: f32,
                                         clip_mode: BoxShadowClipMode) {
-    assert!(unsafe { is_in_main_thread() });
+    debug_assert!(unsafe { is_in_main_thread() });
 
-    let prim_info = LayoutPrimitiveInfo {
-        rect: rect,
-        local_clip: Some(LocalClip::Rect(clip.into())),
-        is_backface_visible: true,
-    };
-
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
+    prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_box_shadow(&prim_info,

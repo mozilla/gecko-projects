@@ -195,6 +195,7 @@ where
 
         if may_reuse {
             let cached = self.context.thread_local.sharing_cache.lookup_by_rules(
+                self.context.shared,
                 parent_style.unwrap(),
                 inputs.rules.as_ref().unwrap(),
                 inputs.visited_rules.as_ref(),
@@ -412,10 +413,12 @@ where
 
         let map = &mut self.context.thread_local.selector_flags;
         let bloom_filter = self.context.thread_local.bloom_filter.filter();
+        let nth_index_cache = &mut self.context.thread_local.nth_index_cache;
         let mut matching_context =
             MatchingContext::new_for_visited(
                 MatchingMode::Normal,
                 Some(bloom_filter),
+                Some(nth_index_cache),
                 visited_handling,
                 self.context.shared.quirks_mode(),
             );
@@ -485,11 +488,13 @@ where
         }
 
         let bloom_filter = self.context.thread_local.bloom_filter.filter();
+        let nth_index_cache = &mut self.context.thread_local.nth_index_cache;
 
         let mut matching_context =
             MatchingContext::new_for_visited(
                 MatchingMode::ForStatelessPseudoElement,
                 Some(bloom_filter),
+                Some(nth_index_cache),
                 visited_handling,
                 self.context.shared.quirks_mode(),
             );

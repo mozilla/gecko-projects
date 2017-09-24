@@ -94,7 +94,7 @@ const globalImportContext = typeof Window === "undefined" ? BACKGROUND_PROCESS :
 //   UNINIT: "UNINIT"
 // }
 const actionTypes = {};
-for (const type of ["BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_HISTORY_URL", "DELETE_HISTORY_URL_CONFIRM", "DIALOG_CANCEL", "DIALOG_OPEN", "INIT", "LOCALE_UPDATED", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PINNED_SITES_UPDATED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_CHANGED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SEARCH_BOX_FOCUSED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SET_PREF", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_DATA", "SNIPPETS_RESET", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_ADD", "TOP_SITES_PIN", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "UNINIT"]) {
+for (const type of ["BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_HISTORY_URL", "DELETE_HISTORY_URL_CONFIRM", "DIALOG_CANCEL", "DIALOG_OPEN", "INIT", "LOCALE_UPDATED", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_CHANGED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SET_PREF", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_DATA", "SNIPPETS_RESET", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_ADD", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_PIN", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "UNINIT"]) {
   actionTypes[type] = type;
 }
 
@@ -333,7 +333,7 @@ module.exports = g;
 
 module.exports = {
   TOP_SITES_SOURCE: "TOP_SITES",
-  TOP_SITES_CONTEXT_MENU_OPTIONS: ["CheckPinTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"],
+  TOP_SITES_CONTEXT_MENU_OPTIONS: ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"],
   // minimum size necessary to show a rich icon instead of a screenshot
   MIN_RICH_FAVICON_SIZE: 96,
   // minimum size necessary to show any icon in the top left corner with a screenshot
@@ -376,7 +376,13 @@ const INITIAL_STATE = {
     // Have we received real data from history yet?
     initialized: false,
     // The history (and possibly default) links
-    rows: []
+    rows: [],
+    // Used in content only to dispatch action from
+    // context menu to TopSitesEdit.
+    editForm: {
+      visible: false,
+      site: null
+    }
   },
   Prefs: {
     initialized: false,
@@ -448,13 +454,16 @@ function insertPinned(links, pinned) {
 function TopSites(prevState = INITIAL_STATE.TopSites, action) {
   let hasMatch;
   let newRows;
-  let pinned;
   switch (action.type) {
     case at.TOP_SITES_UPDATED:
       if (!action.data) {
         return prevState;
       }
       return Object.assign({}, prevState, { initialized: true, rows: action.data });
+    case at.TOP_SITES_EDIT:
+      return Object.assign({}, prevState, { editForm: { visible: true, site: action.data } });
+    case at.TOP_SITES_CANCEL_EDIT:
+      return Object.assign({}, prevState, { editForm: { visible: false } });
     case at.SCREENSHOT_UPDATED:
       newRows = prevState.rows.map(row => {
         if (row && row.url === action.data.url) {
@@ -497,10 +506,6 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       // events and removing the site that was blocked/deleted with an empty slot.
       // Once refresh() finishes, we update the UI again with a new site
       newRows = prevState.rows.filter(val => val && val.url !== action.data.url);
-      return Object.assign({}, prevState, { rows: newRows });
-    case at.PINNED_SITES_UPDATED:
-      pinned = action.data;
-      newRows = insertPinned(prevState.rows, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
       return Object.assign({}, prevState, { rows: newRows });
     default:
       return prevState;
@@ -736,6 +741,14 @@ _PerfService.prototype = {
    * Used to ensure that timestamps from the add-on code and the content code
    * are comparable.
    *
+   * @note If this is called from a context without a window
+   * (eg a JSM in chrome), it will return the timeOrigin of the XUL hidden
+   * window, which appears to be the first created window (and thus
+   * timeOrigin) in the browser.  Note also, however, there is also a private
+   * hidden window, presumably for private browsing, which appears to be
+   * created dynamically later.  Exactly how/when that shows up needs to be
+   * investigated.
+   *
    * @return {Number} A double of milliseconds with a precision of 0.5us.
    */
   get timeOrigin() {
@@ -744,7 +757,8 @@ _PerfService.prototype = {
 
   /**
    * Returns the "absolute" version of performance.now(), i.e. one that
-   * based on the timeOrigin of the XUL hiddenwindow.
+   * should ([bug 1401406](https://bugzilla.mozilla.org/show_bug.cgi?id=1401406)
+   * be comparable across both chrome and content.
    *
    * @return {Number}
    */
@@ -1037,7 +1051,7 @@ class LinkMenu extends React.PureComponent {
               action_position: index
             }));
           }
-          if (impression) {
+          if (impression && props.shouldSendImpressionStats) {
             props.dispatch(impression);
           }
         };
@@ -1200,9 +1214,13 @@ class Base extends React.PureComponent {
           "main",
           null,
           prefs.showSearch && React.createElement(Search, null),
-          !prefs.migrationExpired && React.createElement(ManualMigration, null),
-          prefs.showTopSites && React.createElement(TopSites, null),
-          React.createElement(Sections, null),
+          React.createElement(
+            "div",
+            { className: `body-wrapper${initialized ? " on" : ""}` },
+            !prefs.migrationExpired && React.createElement(ManualMigration, null),
+            prefs.showTopSites && React.createElement(TopSites, null),
+            React.createElement(Sections, null)
+          ),
           React.createElement(ConfirmDialog, null)
         ),
         initialized && React.createElement(PreferencesPane, null)
@@ -1236,10 +1254,14 @@ const TopSites = props => {
       "section",
       { className: "top-sites" },
       React.createElement(
-        "h3",
-        { className: "section-title" },
-        React.createElement("span", { className: `icon icon-small-spacer icon-topsites` }),
-        React.createElement(FormattedMessage, { id: "header_top_sites" })
+        "div",
+        { className: "section-top-bar" },
+        React.createElement(
+          "h3",
+          { className: "section-title" },
+          React.createElement("span", { className: `icon icon-small-spacer icon-topsites` }),
+          React.createElement(FormattedMessage, { id: "header_top_sites" })
+        )
       ),
       React.createElement(
         "ul",
@@ -1423,6 +1445,7 @@ class TopSitesEdit extends React.PureComponent {
       source: TOP_SITES_SOURCE,
       event: "TOP_SITES_EDIT_CLOSE"
     }));
+    this.props.dispatch({ type: at.TOP_SITES_CANCEL_EDIT });
   }
   onShowMoreLessClick() {
     const prefIsSetToDefault = this.props.TopSitesCount === TOP_SITES_DEFAULT_LENGTH;
@@ -1444,6 +1467,7 @@ class TopSitesEdit extends React.PureComponent {
   }
   onFormClose() {
     this.setState({ showAddForm: false, showEditForm: false });
+    this.props.dispatch({ type: at.TOP_SITES_CANCEL_EDIT });
   }
   onEdit(index) {
     this.setState({ showEditForm: true, editIndex: index });
@@ -1455,6 +1479,12 @@ class TopSitesEdit extends React.PureComponent {
   render() {
     const realTopSites = this.props.TopSites.rows.slice(0, this.props.TopSitesCount);
     const placeholderCount = this.props.TopSitesCount - realTopSites.length;
+    const showEditForm = this.props.TopSites.editForm && this.props.TopSites.editForm.visible || this.state.showEditModal && this.state.showEditForm;
+    let editIndex = this.state.editIndex;
+    if (showEditForm && this.props.TopSites.editForm.visible) {
+      const targetURL = this.props.TopSites.editForm.site.url;
+      editIndex = this.props.TopSites.rows.findIndex(s => s.url === targetURL);
+    }
     return React.createElement(
       "div",
       { className: "edit-topsites-wrapper" },
@@ -1531,7 +1561,7 @@ class TopSitesEdit extends React.PureComponent {
           React.createElement(TopSiteForm, { onClose: this.onFormClose, dispatch: this.props.dispatch, intl: this.props.intl })
         )
       ),
-      this.state.showEditModal && this.state.showEditForm && React.createElement(
+      showEditForm && React.createElement(
         "div",
         { className: "edit-topsites" },
         React.createElement("div", { className: "modal-overlay", onClick: this.onModalOverlayClick }),
@@ -1539,11 +1569,10 @@ class TopSitesEdit extends React.PureComponent {
           "div",
           { className: "modal" },
           React.createElement(TopSiteForm, {
-            label: this.props.TopSites.rows[this.state.editIndex].label || this.props.TopSites.rows[this.state.editIndex].hostname,
-            url: this.props.TopSites.rows[this.state.editIndex].url,
-            index: this.state.editIndex,
+            label: this.props.TopSites.rows[editIndex].label || this.props.TopSites.rows[editIndex].hostname,
+            url: this.props.TopSites.rows[editIndex].url,
+            index: editIndex,
             editMode: true,
-            link: this.props.TopSites.rows[this.state.editIndex],
             onClose: this.onFormClose,
             dispatch: this.props.dispatch,
             intl: this.props.intl })
@@ -1617,13 +1646,6 @@ class TopSiteForm extends React.PureComponent {
       let site = { url: this.cleanUrl() };
       if (this.state.label !== "") {
         site.label = this.state.label;
-      }
-      // Unpin links if the URL changed.
-      if (this.props.link.isPinned && this.props.link.url !== site.url) {
-        this.props.dispatch(ac.SendToMain({
-          type: at.TOP_SITES_UNPIN,
-          data: { site: { url: this.props.link.url } }
-        }));
       }
       this.props.dispatch(ac.SendToMain({
         type: at.TOP_SITES_PIN,
@@ -1941,6 +1963,14 @@ module.exports = {
       tiles: [{ id: site.guid, pos: index }]
     }),
     userEvent: "SAVE_TO_POCKET"
+  }),
+  EditTopSite: site => ({
+    id: "edit_topsites_button_text",
+    icon: "edit",
+    action: {
+      type: at.TOP_SITES_EDIT,
+      data: { url: site.url, label: site.label }
+    }
   })
 };
 
@@ -1958,7 +1988,7 @@ module.exports.CheckPinTopSite = (site, index) => site.isPinned ? module.exports
 const React = __webpack_require__(1);
 const { connect } = __webpack_require__(3);
 const { FormattedMessage, injectIntl } = __webpack_require__(2);
-const { actionCreators: ac, actionTypes: at } = __webpack_require__(0);
+const { actionCreators: ac } = __webpack_require__(0);
 const { IS_NEWTAB } = __webpack_require__(20);
 
 class Search extends React.PureComponent {
@@ -2005,9 +2035,6 @@ class Search extends React.PureComponent {
       // Focus the search box if we are on about:home
       if (!IS_NEWTAB) {
         input.focus();
-        // Tell the addon side that search box is focused in case the browser
-        // needs to be focused too.
-        this.props.dispatch(ac.SendToMain({ type: at.SEARCH_BOX_FOCUSED }));
       }
     } else {
       window.gContentSearchController = null;
@@ -2451,11 +2478,16 @@ class Section extends React.PureComponent {
   _dispatchImpressionStats() {
     const { props } = this;
     const maxCards = 3 * props.maxRows;
-    props.dispatch(ac.ImpressionStats({
-      source: props.eventSource,
-      tiles: props.rows.slice(0, maxCards).map(link => ({ id: link.guid })),
-      incognito: props.options && props.options.personalized
-    }));
+    const cards = props.rows.slice(0, maxCards);
+
+    if (this.needsImpressionStats(cards)) {
+      props.dispatch(ac.ImpressionStats({
+        source: props.eventSource,
+        tiles: cards.map(link => ({ id: link.guid })),
+        incognito: props.options && props.options.personalized
+      }));
+      this.impressionCardGuids = cards.map(link => link.guid);
+    }
   }
 
   // This sends an event when a user sees a set of new content. If content
@@ -2464,7 +2496,7 @@ class Section extends React.PureComponent {
   sendImpressionStatsOrAddListener() {
     const { props } = this;
 
-    if (!props.dispatch) {
+    if (!props.shouldSendImpressionStats || !props.dispatch) {
       return;
     }
 
@@ -2503,6 +2535,20 @@ class Section extends React.PureComponent {
     props.rows !== prevProps.rows) {
       this.sendImpressionStatsOrAddListener();
     }
+  }
+
+  needsImpressionStats(cards) {
+    if (!this.impressionCardGuids || this.impressionCardGuids.length !== cards.length) {
+      return true;
+    }
+
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i].guid !== this.impressionCardGuids[i]) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   numberOfPlaceholders(items) {
@@ -2589,7 +2635,8 @@ class Section extends React.PureComponent {
       !shouldShowEmptyState && React.createElement(
         "ul",
         { className: "section-list", style: { padding: 0 } },
-        realRows.map((link, index) => link && React.createElement(Card, { key: index, index: index, dispatch: dispatch, link: link, contextMenuOptions: contextMenuOptions, eventSource: eventSource })),
+        realRows.map((link, index) => link && React.createElement(Card, { key: index, index: index, dispatch: dispatch, link: link, contextMenuOptions: contextMenuOptions,
+          eventSource: eventSource, shouldSendImpressionStats: this.props.shouldSendImpressionStats })),
         placeholders > 0 && [...new Array(placeholders)].map((_, i) => React.createElement(PlaceholderCard, { key: i }))
       ),
       shouldShowEmptyState && React.createElement(
@@ -2683,18 +2730,20 @@ class Card extends React.PureComponent {
       source: this.props.eventSource,
       action_position: this.props.index
     }));
-    this.props.dispatch(ac.ImpressionStats({
-      source: this.props.eventSource,
-      click: 0,
-      incognito: true,
-      tiles: [{ id: this.props.link.guid, pos: this.props.index }]
-    }));
+    if (this.props.shouldSendImpressionStats) {
+      this.props.dispatch(ac.ImpressionStats({
+        source: this.props.eventSource,
+        click: 0,
+        incognito: true,
+        tiles: [{ id: this.props.link.guid, pos: this.props.index }]
+      }));
+    }
   }
   onMenuUpdate(showContextMenu) {
     this.setState({ showContextMenu });
   }
   render() {
-    const { index, link, dispatch, contextMenuOptions, eventSource } = this.props;
+    const { index, link, dispatch, contextMenuOptions, eventSource, shouldSendImpressionStats } = this.props;
     const { props } = this;
     const isContextMenuOpen = this.state.showContextMenu && this.state.activeCard === index;
     // Display "now" as "trending" until we have new strings #3402
@@ -2774,7 +2823,8 @@ class Card extends React.PureComponent {
         onUpdate: this.onMenuUpdate,
         options: link.contextMenuOptions || contextMenuOptions,
         site: link,
-        visible: isContextMenuOpen })
+        visible: isContextMenuOpen,
+        shouldSendImpressionStats: shouldSendImpressionStats })
     );
   }
 }

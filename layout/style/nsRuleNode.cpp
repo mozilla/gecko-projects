@@ -7748,13 +7748,10 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
     case eCSSUnit_Inherit: {
       conditions.SetUncacheable();
       border->ClearBorderColors(side);
-      if (parentContext) {
-        nsBorderColors *parentColors;
-        parentBorder->GetCompositeColors(side, &parentColors);
-        if (parentColors) {
-          border->EnsureBorderColors();
-          border->mBorderColors[side] = parentColors->Clone();
-        }
+      if (parentBorder->mBorderColors) {
+        border->EnsureBorderColors();
+        border->mBorderColors->mColors[side] =
+          parentBorder->mBorderColors->mColors[side];
       }
       break;
     }
@@ -7769,7 +7766,7 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
       while (list) {
         if (SetColor(list->mValue, unused, mPresContext,
                      aContext, borderColor, conditions))
-          border->AppendBorderColor(side, borderColor);
+          border->mBorderColors->mColors[side].AppendElement(borderColor);
         else {
           NS_NOTREACHED("unexpected item in -moz-border-*-colors list");
         }
@@ -10149,7 +10146,6 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
            parentSVGReset->mMaskType,
            NS_STYLE_MASK_TYPE_LUMINANCE);
 
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
   uint32_t maxItemCount = 1;
   bool rebuild = false;
 
@@ -10249,21 +10245,6 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
   if (rebuild) {
     FillAllBackgroundLists(svgReset->mMask, maxItemCount);
   }
-#else
-  // mask: none | <url>
-  const nsCSSValue* maskValue = aRuleData->ValueForMask();
-  if (eCSSUnit_URL == maskValue->GetUnit()) {
-    svgReset->mMask.mLayers[0].mSourceURI = maskValue->GetURLStructValue();
-  } else if (eCSSUnit_None == maskValue->GetUnit() ||
-             eCSSUnit_Initial == maskValue->GetUnit() ||
-             eCSSUnit_Unset == maskValue->GetUnit()) {
-    svgReset->mMask.mLayers[0].mSourceURI = nullptr;
-  } else if (eCSSUnit_Inherit == maskValue->GetUnit()) {
-    conditions.SetUncacheable();
-    svgReset->mMask.mLayers[0].mSourceURI =
-      parentSVGReset->mMask.mLayers[0].mSourceURI;
-  }
-#endif
 
   COMPUTE_END_RESET(SVGReset, svgReset)
 }

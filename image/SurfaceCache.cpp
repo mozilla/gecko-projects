@@ -279,18 +279,7 @@ public:
 
     RefPtr<CachedSurface> surface;
     mSurfaces.Remove(aSurface->GetSurfaceKey(), getter_AddRefs(surface));
-
-    if (IsEmpty() && mFactor2Mode) {
-      // The last surface for this cache was removed. This can happen if the
-      // surface was stored in a volatile buffer and got purged, or the surface
-      // expired from the cache. If the cache itself lingers for some reason
-      // (e.g. in the process of performing a lookup, the cache itself is
-      // locked), then we need to reset the factor of 2 state because it
-      // requires at least one surface present to get the native size
-      // information from the image.
-      mFactor2Mode = mFactor2Pruned = false;
-    }
-
+    AfterMaybeRemove();
     return surface.forget();
   }
 
@@ -537,6 +526,11 @@ public:
     if (!hasNotFactorSize) {
       mFactor2Pruned = true;
     }
+
+    // We should never leave factor of 2 mode due to pruning in of itself, but
+    // if we discarded surfaces due to the volatile buffers getting released,
+    // it is possible.
+    AfterMaybeRemove();
   }
 
   IntSize SuggestedSize(const IntSize& aSize) const
@@ -548,7 +542,10 @@ public:
 
     // We cannot enter factor of 2 mode unless we have a minimum number of
     // surfaces, and we should have left it if the cache was emptied.
-    MOZ_ASSERT(!IsEmpty());
+    if (MOZ_UNLIKELY(IsEmpty())) {
+      MOZ_ASSERT_UNREACHABLE("Should not be empty and in factor of 2 mode!");
+      return aSize;
+    }
 
     // This bit of awkwardness gets the largest native size of the image.
     auto iter = ConstIter();
@@ -614,12 +611,29 @@ public:
     return false;
   }
 
+  template<typename Function>
   void CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
-                             MallocSizeOf                    aMallocSizeOf)
+                             MallocSizeOf                    aMallocSizeOf,
+                             Function&&                      aRemoveCallback)
   {
     CachedSurface::SurfaceMemoryReport report(aCounters, aMallocSizeOf);
-    for (auto iter = ConstIter(); !iter.Done(); iter.Next()) {
+    for (auto iter = mSurfaces.Iter(); !iter.Done(); iter.Next()) {
       NotNull<CachedSurface*> surface = WrapNotNull(iter.UserData());
+
+      // We don't need the drawable surface for ourselves, but adding a surface
+      // to the report will trigger this indirectly. If the surface was
+      // discarded by the OS because it was in volatile memory, we should remove
+      // it from the cache immediately rather than include it in the report.
+      DrawableSurface drawableSurface;
+      if (!surface->IsPlaceholder()) {
+        drawableSurface = surface->GetDrawableSurface();
+        if (!drawableSurface) {
+          aRemoveCallback(surface);
+          iter.Remove();
+          continue;
+        }
+      }
+
       const IntSize& size = surface->GetSurfaceKey().Size();
       bool factor2Size = false;
       if (mFactor2Mode) {
@@ -627,6 +641,8 @@ public:
       }
       report.Add(surface, factor2Size);
     }
+
+    AfterMaybeRemove();
   }
 
   SurfaceTable::Iterator ConstIter() const
@@ -638,6 +654,20 @@ public:
   bool IsLocked() const { return mLocked; }
 
 private:
+  void AfterMaybeRemove()
+  {
+    if (IsEmpty() && mFactor2Mode) {
+      // The last surface for this cache was removed. This can happen if the
+      // surface was stored in a volatile buffer and got purged, or the surface
+      // expired from the cache. If the cache itself lingers for some reason
+      // (e.g. in the process of performing a lookup, the cache itself is
+      // locked), then we need to reset the factor of 2 state because it
+      // requires at least one surface present to get the native size
+      // information from the image.
+      mFactor2Mode = mFactor2Pruned = false;
+    }
+  }
+
   SurfaceTable      mSurfaces;
 
   bool              mLocked;
@@ -799,13 +829,7 @@ public:
     // Individual surfaces must be freed outside the lock.
     mCachedSurfacesDiscard.AppendElement(cache->Remove(aSurface));
 
-    // Remove the per-image cache if it's unneeded now. Keep it if the image is
-    // locked, since the per-image cache is where we store that state. Note that
-    // we don't push it into mImageCachesDiscard because all of its surfaces
-    // have been removed, so it is safe to free while holding the lock.
-    if (cache->IsEmpty() && !cache->IsLocked()) {
-      mImageCaches.Remove(imageKey);
-    }
+    MaybeRemoveEmptyCache(imageKey, cache);
   }
 
   bool StartTracking(NotNull<CachedSurface*> aSurface,
@@ -1073,7 +1097,11 @@ public:
 
     cache->Prune([this, &aAutoLock](NotNull<CachedSurface*> aSurface) -> void {
       StopTracking(aSurface, /* aIsTracked */ true, aAutoLock);
+      // Individual surfaces must be freed outside the lock.
+      mCachedSurfacesDiscard.AppendElement(aSurface);
     });
+
+    MaybeRemoveEmptyCache(aImageKey, cache);
   }
 
   void DiscardAll(const StaticMutexAutoLock& aAutoLock)
@@ -1165,7 +1193,8 @@ public:
 
   void CollectSizeOfSurfaces(const ImageKey                  aImageKey,
                              nsTArray<SurfaceMemoryCounter>& aCounters,
-                             MallocSizeOf                    aMallocSizeOf)
+                             MallocSizeOf                    aMallocSizeOf,
+                             const StaticMutexAutoLock&      aAutoLock)
   {
     RefPtr<ImageSurfaceCache> cache = GetImageCache(aImageKey);
     if (!cache) {
@@ -1173,7 +1202,14 @@ public:
     }
 
     // Report all surfaces in the per-image cache.
-    cache->CollectSizeOfSurfaces(aCounters, aMallocSizeOf);
+    cache->CollectSizeOfSurfaces(aCounters, aMallocSizeOf,
+      [this, &aAutoLock](NotNull<CachedSurface*> aSurface) -> void {
+      StopTracking(aSurface, /* aIsTracked */ true, aAutoLock);
+      // Individual surfaces must be freed outside the lock.
+      mCachedSurfacesDiscard.AppendElement(aSurface);
+    });
+
+    MaybeRemoveEmptyCache(aImageKey, cache);
   }
 
 private:
@@ -1182,6 +1218,18 @@ private:
     RefPtr<ImageSurfaceCache> imageCache;
     mImageCaches.Get(aImageKey, getter_AddRefs(imageCache));
     return imageCache.forget();
+  }
+
+  void MaybeRemoveEmptyCache(const ImageKey aImageKey,
+                             ImageSurfaceCache* aCache)
+  {
+    // Remove the per-image cache if it's unneeded now. Keep it if the image is
+    // locked, since the per-image cache is where we store that state. Note that
+    // we don't push it into mImageCachesDiscard because all of its surfaces
+    // have been removed, so it is safe to free while holding the lock.
+    if (aCache->IsEmpty() && !aCache->IsLocked()) {
+      mImageCaches.Remove(aImageKey);
+    }
   }
 
   // This is similar to CanHold() except that it takes into account the costs of
@@ -1544,9 +1592,13 @@ SurfaceCache::RemoveImage(const ImageKey aImageKey)
 /* static */ void
 SurfaceCache::PruneImage(const ImageKey aImageKey)
 {
-  StaticMutexAutoLock lock(sInstanceMutex);
-  if (sInstance) {
-    sInstance->PruneImage(aImageKey, lock);
+  nsTArray<RefPtr<CachedSurface>> discard;
+  {
+    StaticMutexAutoLock lock(sInstanceMutex);
+    if (sInstance) {
+      sInstance->PruneImage(aImageKey, lock);
+      sInstance->TakeDiscard(discard, lock);
+    }
   }
 }
 
@@ -1568,12 +1620,16 @@ SurfaceCache::CollectSizeOfSurfaces(const ImageKey                  aImageKey,
                                     nsTArray<SurfaceMemoryCounter>& aCounters,
                                     MallocSizeOf                    aMallocSizeOf)
 {
-  StaticMutexAutoLock lock(sInstanceMutex);
-  if (!sInstance) {
-    return;
-  }
+  nsTArray<RefPtr<CachedSurface>> discard;
+  {
+    StaticMutexAutoLock lock(sInstanceMutex);
+    if (!sInstance) {
+      return;
+    }
 
-  return sInstance->CollectSizeOfSurfaces(aImageKey, aCounters, aMallocSizeOf);
+    sInstance->CollectSizeOfSurfaces(aImageKey, aCounters, aMallocSizeOf, lock);
+    sInstance->TakeDiscard(discard, lock);
+  }
 }
 
 /* static */ size_t

@@ -1852,6 +1852,16 @@ Http2Session::RecvPushPromise(Http2Session *self)
   }
   if (NS_SUCCEEDED(rv)) {
     rv = pushedOrigin->GetPort(&pushedPort);
+    if (NS_SUCCEEDED(rv) && pushedPort == -1) {
+      // Need to get the right default port, so TestJoinConnection below can
+      // check things correctly. See bug 1397621.
+      bool isHttp = false;
+      if (NS_SUCCEEDED(pushedOrigin->SchemeIs("http", &isHttp)) && isHttp) {
+        pushedPort = NS_HTTP_DEFAULT_PORT;
+      } else {
+        pushedPort = NS_HTTPS_DEFAULT_PORT;
+      }
+    }
   }
   if (NS_FAILED(rv) ||
       !self->TestJoinConnection(pushedHostName, pushedPort)) {
@@ -2759,6 +2769,9 @@ Http2Session::ReadSegmentsAgain(nsAHttpSegmentReader *reader,
             this, stream, stream->StreamID()));
       FlushOutputQueue();
       SetWriteCallbacks();
+      if (!mCannotDo0RTTStreams.Contains(stream)) {
+        mCannotDo0RTTStreams.AppendElement(stream);
+      }
       // We can still send our preamble
       *countRead = mOutputQueueUsed - mOutputQueueSent;
       return *countRead ? NS_OK : NS_BASE_STREAM_WOULD_BLOCK;
@@ -3383,15 +3396,27 @@ Http2Session::Finish0RTT(bool aRestart, bool aAlpnChanged)
       // This is the easy case - early data failed, but we're speaking h2, so
       // we just need to rewind to the beginning of the preamble and try again.
       mOutputQueueSent = 0;
+
+      for (size_t i = 0; i < mCannotDo0RTTStreams.Length(); ++i) {
+        if (mCannotDo0RTTStreams[i] && VerifyStream(mCannotDo0RTTStreams[i])) {
+          TransactionHasDataToWrite(mCannotDo0RTTStreams[i]);
+        }
+      }
     }
   } else {
     // 0RTT succeeded
+    for (size_t i = 0; i < mCannotDo0RTTStreams.Length(); ++i) {
+      if (mCannotDo0RTTStreams[i] && VerifyStream(mCannotDo0RTTStreams[i])) {
+        TransactionHasDataToWrite(mCannotDo0RTTStreams[i]);
+      }
+    }
     // Make sure we look for any incoming data in repsonse to our early data.
     Unused << ResumeRecv();
   }
 
   mAttemptingEarlyData = false;
   m0RTTStreams.Clear();
+  mCannotDo0RTTStreams.Clear();
   RealignOutputQueue();
 
   return NS_OK;

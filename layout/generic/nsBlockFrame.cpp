@@ -252,7 +252,7 @@ nsBlockFrame::LineReflowStatusToString(LineReflowStatus aLineReflowStatus) const
 
 #ifdef REFLOW_STATUS_COVERAGE
 static void
-RecordReflowStatus(bool aChildIsBlock, nsReflowStatus aFrameReflowStatus)
+RecordReflowStatus(bool aChildIsBlock, const nsReflowStatus& aFrameReflowStatus)
 {
   static uint32_t record[2];
 
@@ -1088,6 +1088,8 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsBlockFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
+
 #ifdef DEBUG
   if (gNoisyReflow) {
     IndentBy(stdout, gNoiseIndent);
@@ -1227,7 +1229,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
 
   LazyMarkLinesDirty();
 
-  mState &= ~NS_FRAME_FIRST_REFLOW;
+  RemoveStateBits(NS_FRAME_FIRST_REFLOW);
 
   // Now reflow...
   ReflowDirtyLines(state);
@@ -4353,10 +4355,10 @@ nsBlockFrame::CreateContinuationFor(BlockReflowInput& aState,
   return !!newFrame;
 }
 
-nsresult
+void
 nsBlockFrame::SplitFloat(BlockReflowInput& aState,
-                         nsIFrame*           aFloat,
-                         nsReflowStatus      aFloatStatus)
+                         nsIFrame* aFloat,
+                         const nsReflowStatus& aFloatStatus)
 {
   MOZ_ASSERT(!aFloatStatus.IsFullyComplete(),
              "why split the frame if it's fully complete?");
@@ -4392,7 +4394,6 @@ nsBlockFrame::SplitFloat(BlockReflowInput& aState,
 
   aState.AppendPushedFloatChain(nextInFlow);
   aState.mReflowStatus.SetOverflowIncomplete();
-  return NS_OK;
 }
 
 static nsFloatCache*
@@ -5266,6 +5267,14 @@ nsBlockFrame::AppendFrames(ChildListID  aListID,
   }
   printf("\n");
 #endif
+
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
+    MOZ_ASSERT(GetParent()->IsSVGTextFrame(),
+               "unexpected block frame in SVG text");
+    // Workaround for bug 1399425 in case this bit has been removed from the
+    // SVGTextFrame just before the parser adds more descendant nodes.
+    GetParent()->AddStateBits(NS_STATE_SVG_TEXT_CORRESPONDENCE_DIRTY);
+  }
 
   AddFrames(aFrameList, lastKid);
   if (aListID != kNoReflowPrincipalList) {
@@ -7246,7 +7255,7 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // nsBlockReflowContext::ReflowBlock and nsLineLayout::ReflowFrame?
   ReflowInput reflowInput(aState.mPresContext, ri,
                                 aBulletFrame, availSize);
-  nsReflowStatus  status;
+  nsReflowStatus status;
   aBulletFrame->Reflow(aState.mPresContext, aMetrics, reflowInput, status);
 
   // Get the float available space using our saved state from before we

@@ -115,9 +115,11 @@ public:
   {
     ~Listener() {}
   public:
-    Listener(ChannelMediaResource* aResource, int64_t aOffset)
-      : mResource(aResource)
+    Listener(ChannelMediaResource* aResource, int64_t aOffset, uint32_t aLoadID)
+      : mMutex("Listener.mMutex")
+      , mResource(aResource)
       , mOffset(aOffset)
+      , mLoadID(aLoadID)
     {}
 
     NS_DECL_ISUPPORTS
@@ -127,11 +129,16 @@ public:
     NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
-    void Revoke() { mResource = nullptr; }
+    void Revoke();
 
   private:
+    Mutex mMutex;
+    // mResource should only be modified on the main thread with the lock.
+    // So it can be read without lock on the main thread or on other threads
+    // with the lock.
     RefPtr<ChannelMediaResource> mResource;
     const int64_t mOffset;
+    const uint32_t mLoadID;
   };
   friend class Listener;
 
@@ -142,7 +149,7 @@ protected:
   // These are called on the main thread by Listener.
   nsresult OnStartRequest(nsIRequest* aRequest, int64_t aRequestOffset);
   nsresult OnStopRequest(nsIRequest* aRequest, nsresult aStatus);
-  nsresult OnDataAvailable(nsIRequest* aRequest,
+  nsresult OnDataAvailable(uint32_t aLoadID,
                            nsIInputStream* aStream,
                            uint32_t aCount);
   nsresult OnChannelRedirect(nsIChannel* aOld,
@@ -171,19 +178,23 @@ protected:
                                    int64_t& aRangeEnd,
                                    int64_t& aRangeTotal);
 
+  struct Closure
+  {
+    uint32_t mLoadID;
+    ChannelMediaResource* mResource;
+  };
+
   static nsresult CopySegmentToCache(nsIInputStream* aInStream,
-                                     void* aResource,
+                                     void* aClosure,
                                      const char* aFromSegment,
                                      uint32_t aToOffset,
                                      uint32_t aCount,
                                      uint32_t* aWriteCount);
 
-  nsresult CopySegmentToCache(const char* aFromSegment,
-                              uint32_t aCount,
-                              uint32_t* aWriteCount);
-
   // Main thread access only
   RefPtr<Listener> mListener;
+  // A mono-increasing integer to uniquely identify the channel we are loading.
+  uint32_t mLoadID = 0;
   // When this flag is set, if we get a network error we should silently
   // reopen the stream.
   bool               mReopenOnError;

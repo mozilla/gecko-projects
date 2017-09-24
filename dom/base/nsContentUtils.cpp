@@ -1635,7 +1635,7 @@ nsContentUtils::SandboxFlagsToString(uint32_t aFlags, nsAString& aString)
 #define SANDBOX_KEYWORD(string, atom, flags)                \
   if (!(aFlags & (flags))) {                                \
     if (!aString.IsEmpty()) {                               \
-      aString.Append(NS_LITERAL_STRING(" "));               \
+      aString.AppendLiteral(u" ");                          \
     }                                                       \
     aString.Append(nsDependentAtomString(nsGkAtoms::atom)); \
   }
@@ -3714,7 +3714,9 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
 nsresult
 nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                           nsIDocument* aLoadingDocument,
-                          nsIPrincipal* aLoadingPrincipal, nsIURI* aReferrer,
+                          nsIPrincipal* aLoadingPrincipal,
+                          uint64_t aRequestContextID,
+                          nsIURI* aReferrer,
                           net::ReferrerPolicy aReferrerPolicy,
                           imgINotificationObserver* aObserver, int32_t aLoadFlags,
                           const nsAString& initiatorType,
@@ -3751,6 +3753,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                               aReferrer,            /* referrer */
                               aReferrerPolicy,      /* referrer policy */
                               aLoadingPrincipal,    /* loading principal */
+                              aRequestContextID,    /* request context ID */
                               loadGroup,            /* loadgroup */
                               aObserver,            /* imgINotificationObserver */
                               aContext,             /* loading context */
@@ -5547,7 +5550,8 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
 
     handler->OnLinkClick(aContent, aLinkURI,
                          fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
-                         fileName, nullptr, nullptr, aIsTrusted, aContent->NodePrincipal());
+                         fileName, nullptr, -1, nullptr, aIsTrusted,
+                         aContent->NodePrincipal());
   }
 }
 
@@ -7189,7 +7193,7 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
 
   // The pattern has to match the entire value.
-  aPattern.Insert(NS_LITERAL_STRING("^(?:"), 0);
+  aPattern.InsertLiteral(u"^(?:", 0);
   aPattern.AppendLiteral(")$");
 
   JS::Rooted<JSObject*> re(cx,
@@ -9062,6 +9066,20 @@ nsContentUtils::StorageAllowedForWindow(nsPIDOMWindowInner* aWindow)
 
 // static, public
 nsContentUtils::StorageAccess
+nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
+{
+  MOZ_ASSERT(aDoc);
+
+  if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
+    nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
+    return InternalStorageAllowedForPrincipal(principal, inner);
+  }
+
+  return StorageAccess::eDeny;
+}
+
+// static, public
+nsContentUtils::StorageAccess
 nsContentUtils::StorageAllowedForPrincipal(nsIPrincipal* aPrincipal)
 {
   return InternalStorageAllowedForPrincipal(aPrincipal, nullptr);
@@ -9139,7 +9157,7 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   if (aWindow) {
     // If the document is sandboxed, then it is not permitted to use storage
     nsIDocument* document = aWindow->GetExtantDoc();
-    if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
+    if (document && document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
       return StorageAccess::eDeny;
     }
 
@@ -10407,8 +10425,11 @@ nsContentUtils::AppendNativeAnonymousChildren(
 /* static */ void
 nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
                                                       nsIPrincipal** aLoadingPrincipal,
-                                                      nsContentPolicyType& aContentPolicyType)
+                                                      nsContentPolicyType& aContentPolicyType,
+                                                      uint64_t* aRequestContextID)
 {
+  MOZ_ASSERT(aRequestContextID);
+
   // Use the serialized loadingPrincipal from the image element. Fall back
   // to mContent's principal (SystemPrincipal) if not available.
   aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
@@ -10426,6 +10447,15 @@ nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
       // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
       // indicating it's a favicon loading.
       aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
+
+      nsAutoString requestContextID;
+      aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::requestcontextid,
+                            requestContextID);
+      nsresult rv;
+      int64_t val  = requestContextID.ToInteger64(&rv);
+      *aRequestContextID = NS_SUCCEEDED(rv)
+        ? val
+        : 0;
     } else {
       // Fallback if the deserialization is failed.
       loadingPrincipal = aLoadingNode->NodePrincipal();

@@ -36,7 +36,6 @@ use ipc_channel::ipc::{self, IpcSender};
 use js::jsapi::JSContext;
 use script_runtime::CommonScriptMsg;
 use script_runtime::ScriptThreadEventCategory::WebVREvent;
-use script_thread::Runnable;
 use std::cell::Cell;
 use std::mem;
 use std::rc::Rc;
@@ -285,7 +284,7 @@ impl VRDisplayMethods for VRDisplay {
         // WebVR spec: If canPresent is false the promise MUST be rejected
         if !self.display.borrow().capabilities.can_present {
             let msg = "VRDisplay canPresent is false".to_string();
-            promise.reject_native(promise.global().get_cx(), &msg);
+            promise.reject_native(&msg);
             return promise;
         }
 
@@ -295,7 +294,7 @@ impl VRDisplayMethods for VRDisplay {
         // That functionality is not allowed by this revision of the spec.
         if layers.len() != 1 {
             let msg = "The number of layers must be 1".to_string();
-            promise.reject_native(promise.global().get_cx(), &msg);
+            promise.reject_native(&msg);
             return promise;
         }
 
@@ -312,7 +311,7 @@ impl VRDisplayMethods for VRDisplay {
             },
             Err(msg) => {
                 let msg = msg.to_string();
-                promise.reject_native(promise.global().get_cx(), &msg);
+                promise.reject_native(&msg);
                 return promise;
             }
         };
@@ -321,7 +320,7 @@ impl VRDisplayMethods for VRDisplay {
         if self.presenting.get() {
             *self.layer.borrow_mut() = layer_bounds;
             self.layer_ctx.set(Some(&layer_ctx));
-            promise.resolve_native(promise.global().get_cx(), &());
+            promise.resolve_native(&());
             return promise;
         }
 
@@ -336,10 +335,10 @@ impl VRDisplayMethods for VRDisplay {
                 *self.layer.borrow_mut() = layer_bounds;
                 self.layer_ctx.set(Some(&layer_ctx));
                 self.init_present();
-                promise.resolve_native(promise.global().get_cx(), &());
+                promise.resolve_native(&());
             },
             Err(e) => {
-                promise.reject_native(promise.global().get_cx(), &e);
+                promise.reject_native(&e);
             }
         }
 
@@ -354,7 +353,7 @@ impl VRDisplayMethods for VRDisplay {
         // WebVR spec: If the VRDisplay is not presenting the promise MUST be rejected.
         if !self.presenting.get() {
             let msg = "VRDisplay is not presenting".to_string();
-            promise.reject_native(promise.global().get_cx(), &msg);
+            promise.reject_native(&msg);
             return promise;
         }
 
@@ -367,10 +366,10 @@ impl VRDisplayMethods for VRDisplay {
         match receiver.recv().unwrap() {
             Ok(()) => {
                 self.stop_present();
-                promise.resolve_native(promise.global().get_cx(), &());
+                promise.resolve_native(&());
             },
             Err(e) => {
-                promise.reject_native(promise.global().get_cx(), &e);
+                promise.reject_native(&e);
             }
         }
 
@@ -511,11 +510,12 @@ impl VRDisplay {
             api_sender.send_vr(WebVRCommand::Create(display_id)).unwrap();
             loop {
                 // Run RAF callbacks on JavaScript thread
-                let msg = box NotifyDisplayRAF {
-                    address: address.clone(),
-                    sender: raf_sender.clone()
-                };
-                js_sender.send(CommonScriptMsg::RunnableMsg(WebVREvent, msg)).unwrap();
+                let this = address.clone();
+                let sender = raf_sender.clone();
+                let task = box task!(handle_vrdisplay_raf: move || {
+                    this.root().handle_raf(&sender);
+                });
+                js_sender.send(CommonScriptMsg::Task(WebVREvent, task)).unwrap();
 
                 // Run Sync Poses in parallell on Render thread
                 let msg = WebVRCommand::SyncPoses(display_id, near, far, sync_sender.clone());
@@ -607,19 +607,6 @@ impl VRDisplay {
         }
     }
 }
-
-struct NotifyDisplayRAF {
-    address: Trusted<VRDisplay>,
-    sender: mpsc::Sender<Result<(f64, f64), ()>>
-}
-
-impl Runnable for NotifyDisplayRAF {
-    fn handler(self: Box<Self>) {
-        let display = self.address.root();
-        display.handle_raf(&self.sender);
-    }
-}
-
 
 // WebVR Spec: If the number of values in the leftBounds/rightBounds arrays
 // is not 0 or 4 for any of the passed layers the promise is rejected

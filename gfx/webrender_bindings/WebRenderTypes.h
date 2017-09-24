@@ -28,6 +28,7 @@ typedef wr::WrPipelineId PipelineId;
 typedef wr::WrImageKey ImageKey;
 typedef wr::WrFontKey FontKey;
 typedef wr::WrFontInstanceKey FontInstanceKey;
+typedef wr::WrFontInstanceOptions FontInstanceOptions;
 typedef wr::WrEpoch Epoch;
 typedef wr::WrExternalImageId ExternalImageId;
 typedef wr::WrDebugFlags DebugFlags;
@@ -729,6 +730,16 @@ static inline wr::WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
 // instead of a typedef so that this is a distinct type from FrameMetrics::ViewID
 // and the compiler will catch accidental conversions between the two.
 struct WrClipId {
+  uint64_t id;
+
+  bool operator==(const WrClipId& other) const {
+    return id == other.id;
+  }
+};
+
+// Corresponds to a clip id for a position:sticky clip in webrender. Similar
+// to WrClipId but a separate struct so we don't get them mixed up in C++.
+struct WrStickyId {
   uint64_t id;
 
   bool operator==(const WrClipId& other) const {

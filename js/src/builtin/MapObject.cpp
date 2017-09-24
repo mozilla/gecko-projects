@@ -275,21 +275,21 @@ MapIteratorObject::finalize(FreeOp* fop, JSObject* obj)
     fop->delete_(range);
 }
 
-void
-MapIteratorObject::objectMoved(JSObject* obj, const JSObject* old)
+size_t
+MapIteratorObject::objectMoved(JSObject* obj, JSObject* old)
 {
     if (!IsInsideNursery(old))
-        return;
+        return 0;
 
     MapIteratorObject* iter = &obj->as<MapIteratorObject>();
     ValueMap::Range* range = MapIteratorObjectRange(iter);
     if (!range)
-        return;
+        return 0;
 
     Nursery& nursery = iter->zone()->group()->nursery();
     if (!nursery.isInside(range)) {
         nursery.removeMallocedBuffer(range);
-        return;
+        return 0;
     }
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
@@ -300,6 +300,7 @@ MapIteratorObject::objectMoved(JSObject* obj, const JSObject* old)
     new (newRange) ValueMap::Range(*range);
     range->~Range();
     iter->setReservedSlot(MapIteratorObject::RangeSlot, PrivateValue(newRange));
+    return sizeof(ValueMap::Range);
 }
 
 template <typename Range>
@@ -634,7 +635,7 @@ MapObject::set(JSContext* cx, HandleObject obj, HandleValue k, HandleValue v)
 MapObject*
 MapObject::create(JSContext* cx, HandleObject proto /* = nullptr */)
 {
-    auto map = cx->make_unique<ValueMap>(cx->runtime(),
+    auto map = cx->make_unique<ValueMap>(cx->zone(),
                                          cx->compartment()->randomHashCodeScrambler());
     if (!map || !map->init()) {
         ReportOutOfMemory(cx);
@@ -1124,21 +1125,21 @@ SetIteratorObject::finalize(FreeOp* fop, JSObject* obj)
     fop->delete_(range);
 }
 
-void
-SetIteratorObject::objectMoved(JSObject* obj, const JSObject* old)
+size_t
+SetIteratorObject::objectMoved(JSObject* obj, JSObject* old)
 {
     if (!IsInsideNursery(old))
-        return;
+        return 0;
 
     SetIteratorObject* iter = &obj->as<SetIteratorObject>();
     ValueSet::Range* range = SetIteratorObjectRange(iter);
     if (!range)
-        return;
+        return 0;
 
     Nursery& nursery = iter->zone()->group()->nursery();
     if (!nursery.isInside(range)) {
         nursery.removeMallocedBuffer(range);
-        return;
+        return 0;
     }
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
@@ -1149,6 +1150,7 @@ SetIteratorObject::objectMoved(JSObject* obj, const JSObject* old)
     new (newRange) ValueSet::Range(*range);
     range->~Range();
     iter->setReservedSlot(SetIteratorObject::RangeSlot, PrivateValue(newRange));
+    return sizeof(ValueSet::Range);
 }
 
 bool
@@ -1316,7 +1318,7 @@ SetObject::add(JSContext* cx, HandleObject obj, HandleValue k)
 SetObject*
 SetObject::create(JSContext* cx, HandleObject proto /* = nullptr */)
 {
-    auto set = cx->make_unique<ValueSet>(cx->runtime(),
+    auto set = cx->make_unique<ValueSet>(cx->zone(),
                                          cx->compartment()->randomHashCodeScrambler());
     if (!set || !set->init()) {
         ReportOutOfMemory(cx);

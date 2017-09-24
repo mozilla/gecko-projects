@@ -445,7 +445,7 @@ public abstract class GeckoApp extends GeckoActivity
     }
 
     public MenuPanel getMenuPanel() {
-        if (mMenuPanel == null) {
+        if (mMenuPanel == null || mMenu == null) {
             onCreatePanelMenu(Window.FEATURE_OPTIONS_PANEL, null);
             invalidateOptionsMenu();
         }
@@ -673,7 +673,7 @@ public abstract class GeckoApp extends GeckoActivity
             GeckoAccessibility.updateAccessibilitySettings(this);
 
         } else if ("Accessibility:Event".equals(event)) {
-            GeckoAccessibility.sendAccessibilityEvent(message);
+            GeckoAccessibility.sendAccessibilityEvent(mLayerView, message);
 
         } else if ("Bookmark:Insert".equals(event)) {
             final BrowserDB db = BrowserDB.from(getProfile());
@@ -1939,11 +1939,16 @@ public abstract class GeckoApp extends GeckoActivity
                 @Override
                 public void run() {
                     final String url = intent.getDataString();
+                    final boolean isExternalURL = invokedWithExternalURL(url);
                     int flags = Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_USER_ENTERED | Tabs.LOADURL_EXTERNAL;
                     if (isFirstTab) {
                         flags |= Tabs.LOADURL_FIRST_AFTER_ACTIVITY_UNHIDDEN;
                     }
-                    Tabs.getInstance().loadUrlWithIntentExtras(url, intent, flags);
+                    if (isExternalURL) {
+                        Tabs.getInstance().loadUrlWithIntentExtras(url, intent, flags);
+                    } else {
+                        Tabs.getInstance().addTab();
+                    }
                 }
             });
         } else if (ACTION_HOMESCREEN_SHORTCUT.equals(action)) {

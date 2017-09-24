@@ -29,7 +29,13 @@ const INITIAL_STATE = {
     // Have we received real data from history yet?
     initialized: false,
     // The history (and possibly default) links
-    rows: []
+    rows: [],
+    // Used in content only to dispatch action from
+    // context menu to TopSitesEdit.
+    editForm: {
+      visible: false,
+      site: null
+    }
   },
   Prefs: {
     initialized: false,
@@ -98,13 +104,16 @@ function insertPinned(links, pinned) {
 function TopSites(prevState = INITIAL_STATE.TopSites, action) {
   let hasMatch;
   let newRows;
-  let pinned;
   switch (action.type) {
     case at.TOP_SITES_UPDATED:
       if (!action.data) {
         return prevState;
       }
       return Object.assign({}, prevState, {initialized: true, rows: action.data});
+    case at.TOP_SITES_EDIT:
+      return Object.assign({}, prevState, {editForm: {visible: true, site: action.data}});
+    case at.TOP_SITES_CANCEL_EDIT:
+      return Object.assign({}, prevState, {editForm: {visible: false}});
     case at.SCREENSHOT_UPDATED:
       newRows = prevState.rows.map(row => {
         if (row && row.url === action.data.url) {
@@ -147,10 +156,6 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       // events and removing the site that was blocked/deleted with an empty slot.
       // Once refresh() finishes, we update the UI again with a new site
       newRows = prevState.rows.filter(val => val && val.url !== action.data.url);
-      return Object.assign({}, prevState, {rows: newRows});
-    case at.PINNED_SITES_UPDATED:
-      pinned = action.data;
-      newRows = insertPinned(prevState.rows, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
       return Object.assign({}, prevState, {rows: newRows});
     default:
       return prevState;

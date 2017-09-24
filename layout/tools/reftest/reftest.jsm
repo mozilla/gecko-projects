@@ -143,6 +143,7 @@ var gFailedAssignedLayer = false;
 var gFailedAssignedLayerMessages = [];
 
 var gStartAfter = undefined;
+var gSuiteStarted = false
 
 // The enabled-state of the test-plugins, stored so they can be reset later
 var gTestPluginEnabledStates = null;
@@ -570,8 +571,9 @@ function StartTests()
             tIDs.push(gURLs[i].identifier);
         }
 
-        if (gStartAfter === undefined) {
+        if (gStartAfter === undefined && !gSuiteStarted) {
             logger.suiteStart(tIDs, {"skipped": gURLs.length - tURLs.length});
+            gSuiteStarted = true
         }
 
         if (gTotalChunks > 0 && gThisChunk > 0) {
@@ -810,7 +812,7 @@ function BuildConditionSandbox(aURL) {
 
     // see if we have the test plugin available,
     // and set a sandox prop accordingly
-    sandbox.haveTestPlugin = !!getTestPlugin("Test Plug-in");
+    sandbox.haveTestPlugin = !sandbox.Android && !!getTestPlugin("Test Plug-in");
 
     // Set a flag on sandbox if the windows default theme is active
     sandbox.windowsDefaultTheme = gContainingWindow.matchMedia("(-moz-windows-default-theme)").matches;
@@ -1559,6 +1561,7 @@ function StartCurrentURI(aState)
 function DoneTests()
 {
     logger.suiteEnd({'results': gTestResults});
+    gSuiteStarted = false
     logger.info("Slowest test took " + gSlowestTestTime + "ms (" + gSlowestTestURL + ")");
     logger.info("Total canvas count = " + gRecycledCanvases.length);
     if (gFailedUseWidgetLayers) {
@@ -1956,7 +1959,8 @@ function RecordResult(testRunTime, errorMsg, typeSpecificResults)
                 var failureString = failures.join(", ");
                 logger.testEnd(gURLs[0].identifier, output.s[0], output.s[1], failureString, null, extra);
             } else {
-                var message = "image comparison";
+                var message = "image comparison, max difference: " + maxDifference.value +
+                              ", number of differing pixels: " + differences;
                 if (!test_passed && expected == EXPECTED_PASS ||
                     !test_passed && expected == EXPECTED_FUZZY ||
                     test_passed && expected == EXPECTED_FAIL) {
@@ -1974,8 +1978,6 @@ function RecordResult(testRunTime, errorMsg, typeSpecificResults)
                         ];
                         extra.image1 = image1;
                         extra.image2 = image2;
-                        message += (", max difference: " + extra.max_difference +
-                                    ", number of differing pixels: " + differences);
                     } else {
                         var image1 = gCanvas1.toDataURL();
                         extra.reftest_screenshots = [

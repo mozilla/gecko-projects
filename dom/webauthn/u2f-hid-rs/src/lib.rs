@@ -32,9 +32,10 @@ extern crate log;
 extern crate rand;
 extern crate libc;
 extern crate boxfnonce;
+extern crate runloop;
 
 mod consts;
-mod runloop;
+mod khmatcher;
 mod u2ftypes;
 mod u2fprotocol;
 

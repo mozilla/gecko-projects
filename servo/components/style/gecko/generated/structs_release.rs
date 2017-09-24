@@ -10,7 +10,6 @@ pub type ServoUnsafeCell<T> = ::std::cell::UnsafeCell<T>;
 pub type ServoCell<T> = ::std::cell::Cell<T>;
 pub type ServoNodeData = AtomicRefCell<ElementData>;
 pub type ServoWritingMode = ::logical_geometry::WritingMode;
-pub type ServoFontComputationData = ::properties::FontComputationData;
 pub type ServoCustomPropertiesMap = Option<::servo_arc::Arc<::custom_properties::CustomPropertiesMap>>;
 pub type ServoRuleNode = Option<::rule_tree::StrongRuleNode>;
 pub type ServoVisitedStyle = Option<::servo_arc::RawOffsetArc<::properties::ComputedValues>>;
@@ -440,6 +439,7 @@ pub mod root {
     pub const NS_STYLE_FONT_SIZE_XXXLARGE: ::std::os::raw::c_uint = 7;
     pub const NS_STYLE_FONT_SIZE_LARGER: ::std::os::raw::c_uint = 8;
     pub const NS_STYLE_FONT_SIZE_SMALLER: ::std::os::raw::c_uint = 9;
+    pub const NS_STYLE_FONT_SIZE_NO_KEYWORD: ::std::os::raw::c_uint = 10;
     pub const NS_STYLE_FONT_STRETCH_ULTRA_CONDENSED: ::std::os::raw::c_int =
         -4;
     pub const NS_STYLE_FONT_STRETCH_EXTRA_CONDENSED: ::std::os::raw::c_int =
@@ -4382,19 +4382,6 @@ pub mod root {
             FirstLetterContinuation = 1,
             PlaceholderFrame = 2,
         }
-        #[repr(u32)]
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-        pub enum ServoKeywordSize {
-            Empty = 0,
-            XXSmall = 1,
-            XSmall = 2,
-            Small = 3,
-            Medium = 4,
-            Large = 5,
-            XLarge = 6,
-            XXLarge = 7,
-            XXXLarge = 8,
-        }
         #[repr(C)]
         #[derive(Debug)]
         pub struct ServoStyleContext {
@@ -4406,7 +4393,7 @@ pub mod root {
         }
         #[test]
         fn bindgen_test_layout_ServoStyleContext() {
-            assert_eq!(::std::mem::size_of::<ServoStyleContext>() , 272usize ,
+            assert_eq!(::std::mem::size_of::<ServoStyleContext>() , 256usize ,
                        concat ! (
                        "Size of: " , stringify ! ( ServoStyleContext ) ));
             assert_eq! (::std::mem::align_of::<ServoStyleContext>() , 8usize ,
@@ -4429,14 +4416,14 @@ pub mod root {
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleContext ) ) .
                         mNextInheritingAnonBoxStyle as * const _ as usize } ,
-                        256usize , concat ! (
+                        240usize , concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleContext ) , "::" , stringify ! (
                         mNextInheritingAnonBoxStyle ) ));
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleContext ) ) .
                         mNextLazyPseudoStyle as * const _ as usize } ,
-                        264usize , concat ! (
+                        248usize , concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleContext ) , "::" , stringify ! (
                         mNextLazyPseudoStyle ) ));
@@ -4448,7 +4435,7 @@ pub mod root {
         }
         #[test]
         fn bindgen_test_layout_GeckoFont() {
-            assert_eq!(::std::mem::size_of::<GeckoFont>() , 120usize , concat
+            assert_eq!(::std::mem::size_of::<GeckoFont>() , 128usize , concat
                        ! ( "Size of: " , stringify ! ( GeckoFont ) ));
             assert_eq! (::std::mem::align_of::<GeckoFont>() , 8usize , concat
                         ! ( "Alignment of " , stringify ! ( GeckoFont ) ));
@@ -4867,17 +4854,16 @@ pub mod root {
         #[repr(C)]
         #[derive(Debug, Copy)]
         pub struct ServoStyleSetSizes {
-            pub mStylistRuleTree: usize,
-            pub mStylistPrecomputedPseudos: usize,
-            pub mStylistElementAndPseudosMaps: usize,
-            pub mStylistInvalidationMap: usize,
-            pub mStylistRevalidationSelectors: usize,
-            pub mStylistOther: usize,
+            pub mRuleTree: usize,
+            pub mPrecomputedPseudos: usize,
+            pub mElementAndPseudosMaps: usize,
+            pub mInvalidationMap: usize,
+            pub mRevalidationSelectors: usize,
             pub mOther: usize,
         }
         #[test]
         fn bindgen_test_layout_ServoStyleSetSizes() {
-            assert_eq!(::std::mem::size_of::<ServoStyleSetSizes>() , 56usize ,
+            assert_eq!(::std::mem::size_of::<ServoStyleSetSizes>() , 48usize ,
                        concat ! (
                        "Size of: " , stringify ! ( ServoStyleSetSizes ) ));
             assert_eq! (::std::mem::align_of::<ServoStyleSetSizes>() , 8usize
@@ -4886,49 +4872,42 @@ pub mod root {
                         ));
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistRuleTree as * const _ as usize } , 0usize ,
+                        mRuleTree as * const _ as usize } , 0usize , concat !
+                        (
+                        "Alignment of field: " , stringify ! (
+                        ServoStyleSetSizes ) , "::" , stringify ! ( mRuleTree
+                        ) ));
+            assert_eq! (unsafe {
+                        & ( * ( 0 as * const ServoStyleSetSizes ) ) .
+                        mPrecomputedPseudos as * const _ as usize } , 8usize ,
                         concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistRuleTree ) ));
+                        mPrecomputedPseudos ) ));
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistPrecomputedPseudos as * const _ as usize } ,
-                        8usize , concat ! (
+                        mElementAndPseudosMaps as * const _ as usize } ,
+                        16usize , concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistPrecomputedPseudos ) ));
+                        mElementAndPseudosMaps ) ));
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistElementAndPseudosMaps as * const _ as usize }
-                        , 16usize , concat ! (
-                        "Alignment of field: " , stringify ! (
-                        ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistElementAndPseudosMaps ) ));
-            assert_eq! (unsafe {
-                        & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistInvalidationMap as * const _ as usize } ,
-                        24usize , concat ! (
-                        "Alignment of field: " , stringify ! (
-                        ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistInvalidationMap ) ));
-            assert_eq! (unsafe {
-                        & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistRevalidationSelectors as * const _ as usize }
-                        , 32usize , concat ! (
-                        "Alignment of field: " , stringify ! (
-                        ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistRevalidationSelectors ) ));
-            assert_eq! (unsafe {
-                        & ( * ( 0 as * const ServoStyleSetSizes ) ) .
-                        mStylistOther as * const _ as usize } , 40usize ,
+                        mInvalidationMap as * const _ as usize } , 24usize ,
                         concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleSetSizes ) , "::" , stringify ! (
-                        mStylistOther ) ));
+                        mInvalidationMap ) ));
+            assert_eq! (unsafe {
+                        & ( * ( 0 as * const ServoStyleSetSizes ) ) .
+                        mRevalidationSelectors as * const _ as usize } ,
+                        32usize , concat ! (
+                        "Alignment of field: " , stringify ! (
+                        ServoStyleSetSizes ) , "::" , stringify ! (
+                        mRevalidationSelectors ) ));
             assert_eq! (unsafe {
                         & ( * ( 0 as * const ServoStyleSetSizes ) ) . mOther
-                        as * const _ as usize } , 48usize , concat ! (
+                        as * const _ as usize } , 40usize , concat ! (
                         "Alignment of field: " , stringify ! (
                         ServoStyleSetSizes ) , "::" , stringify ! ( mOther )
                         ));
@@ -12502,6 +12481,9 @@ pub mod root {
     pub struct nsStyleFont {
         pub mFont: root::nsFont,
         pub mSize: root::nscoord,
+        pub mFontSizeFactor: f32,
+        pub mFontSizeOffset: root::nscoord,
+        pub mFontSizeKeyword: u8,
         pub mGenericID: u8,
         pub mScriptLevel: i8,
         pub mMathVariant: u8,
@@ -12517,7 +12499,7 @@ pub mod root {
     pub const nsStyleFont_kHasFinishStyle: bool = false;
     #[test]
     fn bindgen_test_layout_nsStyleFont() {
-        assert_eq!(::std::mem::size_of::<nsStyleFont>() , 120usize , concat !
+        assert_eq!(::std::mem::size_of::<nsStyleFont>() , 128usize , concat !
                    ( "Size of: " , stringify ! ( nsStyleFont ) ));
         assert_eq! (::std::mem::align_of::<nsStyleFont>() , 8usize , concat !
                     ( "Alignment of " , stringify ! ( nsStyleFont ) ));
@@ -12532,60 +12514,75 @@ pub mod root {
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mSize ) ));
         assert_eq! (unsafe {
+                    & ( * ( 0 as * const nsStyleFont ) ) . mFontSizeFactor as
+                    * const _ as usize } , 92usize , concat ! (
+                    "Alignment of field: " , stringify ! ( nsStyleFont ) ,
+                    "::" , stringify ! ( mFontSizeFactor ) ));
+        assert_eq! (unsafe {
+                    & ( * ( 0 as * const nsStyleFont ) ) . mFontSizeOffset as
+                    * const _ as usize } , 96usize , concat ! (
+                    "Alignment of field: " , stringify ! ( nsStyleFont ) ,
+                    "::" , stringify ! ( mFontSizeOffset ) ));
+        assert_eq! (unsafe {
+                    & ( * ( 0 as * const nsStyleFont ) ) . mFontSizeKeyword as
+                    * const _ as usize } , 100usize , concat ! (
+                    "Alignment of field: " , stringify ! ( nsStyleFont ) ,
+                    "::" , stringify ! ( mFontSizeKeyword ) ));
+        assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mGenericID as *
-                    const _ as usize } , 92usize , concat ! (
+                    const _ as usize } , 101usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mGenericID ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mScriptLevel as *
-                    const _ as usize } , 93usize , concat ! (
+                    const _ as usize } , 102usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mScriptLevel ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mMathVariant as *
-                    const _ as usize } , 94usize , concat ! (
+                    const _ as usize } , 103usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mMathVariant ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mMathDisplay as *
-                    const _ as usize } , 95usize , concat ! (
+                    const _ as usize } , 104usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mMathDisplay ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mMinFontSizeRatio
-                    as * const _ as usize } , 96usize , concat ! (
+                    as * const _ as usize } , 105usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mMinFontSizeRatio ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mExplicitLanguage
-                    as * const _ as usize } , 97usize , concat ! (
+                    as * const _ as usize } , 106usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mExplicitLanguage ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mAllowZoom as *
-                    const _ as usize } , 98usize , concat ! (
+                    const _ as usize } , 107usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mAllowZoom ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) .
                     mScriptUnconstrainedSize as * const _ as usize } ,
-                    100usize , concat ! (
+                    108usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mScriptUnconstrainedSize ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mScriptMinSize as *
-                    const _ as usize } , 104usize , concat ! (
+                    const _ as usize } , 112usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mScriptMinSize ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) .
-                    mScriptSizeMultiplier as * const _ as usize } , 108usize ,
+                    mScriptSizeMultiplier as * const _ as usize } , 116usize ,
                     concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mScriptSizeMultiplier ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleFont ) ) . mLanguage as *
-                    const _ as usize } , 112usize , concat ! (
+                    const _ as usize } , 120usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleFont ) ,
                     "::" , stringify ! ( mLanguage ) ));
     }
@@ -14139,7 +14136,7 @@ pub mod root {
     #[repr(C)]
     #[derive(Debug)]
     pub struct nsStyleBorder {
-        pub mBorderColors: *mut *mut root::nsBorderColors,
+        pub mBorderColors: root::mozilla::UniquePtr<root::nsBorderColors>,
         pub mBorderRadius: root::nsStyleCorners,
         pub mBorderImageSource: root::nsStyleImage,
         pub mBorderImageSlice: root::nsStyleSides,
@@ -14664,11 +14661,10 @@ pub mod root {
         /// /// relevant link for this element. A element's "relevant link" is the
         /// /// element being matched if it is a link or the nearest ancestor link.
         pub visited_style: ::gecko_bindings::structs::ServoVisitedStyle,
-        pub font_computation_data: ::gecko_bindings::structs::ServoFontComputationData,
     }
     #[test]
     fn bindgen_test_layout_ServoComputedData() {
-        assert_eq!(::std::mem::size_of::<ServoComputedData>() , 232usize ,
+        assert_eq!(::std::mem::size_of::<ServoComputedData>() , 216usize ,
                    concat ! ( "Size of: " , stringify ! ( ServoComputedData )
                    ));
         assert_eq! (::std::mem::align_of::<ServoComputedData>() , 8usize ,
@@ -14815,12 +14811,6 @@ pub mod root {
                     as * const _ as usize } , 208usize , concat ! (
                     "Alignment of field: " , stringify ! ( ServoComputedData )
                     , "::" , stringify ! ( visited_style ) ));
-        assert_eq! (unsafe {
-                    & ( * ( 0 as * const ServoComputedData ) ) .
-                    font_computation_data as * const _ as usize } , 216usize ,
-                    concat ! (
-                    "Alignment of field: " , stringify ! ( ServoComputedData )
-                    , "::" , stringify ! ( font_computation_data ) ));
     }
     #[repr(u32)]
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -30138,29 +30128,6 @@ pub mod root {
     }
     #[repr(C)]
     #[derive(Debug)]
-    pub struct nsBorderColors {
-        pub mNext: *mut root::nsBorderColors,
-        pub mColor: root::nscolor,
-    }
-    #[test]
-    fn bindgen_test_layout_nsBorderColors() {
-        assert_eq!(::std::mem::size_of::<nsBorderColors>() , 16usize , concat
-                   ! ( "Size of: " , stringify ! ( nsBorderColors ) ));
-        assert_eq! (::std::mem::align_of::<nsBorderColors>() , 8usize , concat
-                    ! ( "Alignment of " , stringify ! ( nsBorderColors ) ));
-        assert_eq! (unsafe {
-                    & ( * ( 0 as * const nsBorderColors ) ) . mNext as * const
-                    _ as usize } , 0usize , concat ! (
-                    "Alignment of field: " , stringify ! ( nsBorderColors ) ,
-                    "::" , stringify ! ( mNext ) ));
-        assert_eq! (unsafe {
-                    & ( * ( 0 as * const nsBorderColors ) ) . mColor as *
-                    const _ as usize } , 8usize , concat ! (
-                    "Alignment of field: " , stringify ! ( nsBorderColors ) ,
-                    "::" , stringify ! ( mColor ) ));
-    }
-    #[repr(C)]
-    #[derive(Debug)]
     pub struct nsCSSShadowItem {
         pub mXOffset: root::nscoord,
         pub mYOffset: root::nscoord,
@@ -30244,6 +30211,23 @@ pub mod root {
                     const _ as usize } , 12usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsCSSShadowArray )
                     , "::" , stringify ! ( mArray ) ));
+    }
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct nsBorderColors {
+        pub mColors: [root::nsTArray<::std::os::raw::c_uint>; 4usize],
+    }
+    #[test]
+    fn bindgen_test_layout_nsBorderColors() {
+        assert_eq!(::std::mem::size_of::<nsBorderColors>() , 32usize , concat
+                   ! ( "Size of: " , stringify ! ( nsBorderColors ) ));
+        assert_eq! (::std::mem::align_of::<nsBorderColors>() , 8usize , concat
+                    ! ( "Alignment of " , stringify ! ( nsBorderColors ) ));
+        assert_eq! (unsafe {
+                    & ( * ( 0 as * const nsBorderColors ) ) . mColors as *
+                    const _ as usize } , 0usize , concat ! (
+                    "Alignment of field: " , stringify ! ( nsBorderColors ) ,
+                    "::" , stringify ! ( mColors ) ));
     }
     /// An object that allows sharing of arrays that store 'quotes' property
     /// values.  This is particularly important for inheritance, where we want
@@ -33113,6 +33097,28 @@ pub mod root {
                    root::RefPtr<root::nsCSSValueSharedList> ) ));
     }
     #[test]
+    fn __bindgen_test_layout_UniquePtr_open0_nsBorderColors_DefaultDelete_open1_nsBorderColors_close1_close0_instantiation() {
+        assert_eq!(::std::mem::size_of::<root::mozilla::UniquePtr<root::nsBorderColors>>()
+                   , 8usize , concat ! (
+                   "Size of template specialization: " , stringify ! (
+                   root::mozilla::UniquePtr<root::nsBorderColors> ) ));
+        assert_eq!(::std::mem::align_of::<root::mozilla::UniquePtr<root::nsBorderColors>>()
+                   , 8usize , concat ! (
+                   "Alignment of template specialization: " , stringify ! (
+                   root::mozilla::UniquePtr<root::nsBorderColors> ) ));
+    }
+    #[test]
+    fn __bindgen_test_layout_DefaultDelete_open0_nsBorderColors_close0_instantiation() {
+        assert_eq!(::std::mem::size_of::<root::mozilla::DefaultDelete>() ,
+                   1usize , concat ! (
+                   "Size of template specialization: " , stringify ! (
+                   root::mozilla::DefaultDelete ) ));
+        assert_eq!(::std::mem::align_of::<root::mozilla::DefaultDelete>() ,
+                   1usize , concat ! (
+                   "Alignment of template specialization: " , stringify ! (
+                   root::mozilla::DefaultDelete ) ));
+    }
+    #[test]
     fn __bindgen_test_layout_nsTArray_open0_nsStyleFilter_close0_instantiation() {
         assert_eq!(::std::mem::size_of::<root::nsTArray<root::nsStyleFilter>>()
                    , 8usize , concat ! (
@@ -33166,6 +33172,17 @@ pub mod root {
                    8usize , concat ! (
                    "Alignment of template specialization: " , stringify ! (
                    root::nsTArray<::nsstring::nsStringRepr> ) ));
+    }
+    #[test]
+    fn __bindgen_test_layout_nsTString_open0_char16_t_close0_instantiation_2() {
+        assert_eq!(::std::mem::size_of::<::nsstring::nsStringRepr>() , 16usize ,
+                   concat ! (
+                   "Size of template specialization: " , stringify ! (
+                   ::nsstring::nsStringRepr ) ));
+        assert_eq!(::std::mem::align_of::<::nsstring::nsStringRepr>() , 8usize ,
+                   concat ! (
+                   "Alignment of template specialization: " , stringify ! (
+                   ::nsstring::nsStringRepr ) ));
     }
     #[test]
     fn __bindgen_test_layout_nsTArray_open0__bindgen_ty_id_200130_close0_instantiation() {
@@ -34398,6 +34415,17 @@ pub mod root {
                    8usize , concat ! (
                    "Alignment of template specialization: " , stringify ! (
                    root::nsTArray<::nsstring::nsStringRepr> ) ));
+    }
+    #[test]
+    fn __bindgen_test_layout_nsTString_open0_char16_t_close0_instantiation_3() {
+        assert_eq!(::std::mem::size_of::<::nsstring::nsStringRepr>() , 16usize ,
+                   concat ! (
+                   "Size of template specialization: " , stringify ! (
+                   ::nsstring::nsStringRepr ) ));
+        assert_eq!(::std::mem::align_of::<::nsstring::nsStringRepr>() , 8usize ,
+                   concat ! (
+                   "Alignment of template specialization: " , stringify ! (
+                   ::nsstring::nsStringRepr ) ));
     }
     #[test]
     fn __bindgen_test_layout_nsTArray_open0__bindgen_ty_id_210857_close0_instantiation() {
@@ -36283,6 +36311,17 @@ pub mod root {
                    "Alignment of template specialization: " , stringify ! (
                    root::nsStyleAutoArray<root::nsStyleImageLayers_Layer> )
                    ));
+    }
+    #[test]
+    fn __bindgen_test_layout_nsTArray_open0_unsigned_int_close0_instantiation_5() {
+        assert_eq!(::std::mem::size_of::<root::nsTArray<::std::os::raw::c_uint>>()
+                   , 8usize , concat ! (
+                   "Size of template specialization: " , stringify ! (
+                   root::nsTArray<::std::os::raw::c_uint> ) ));
+        assert_eq!(::std::mem::align_of::<root::nsTArray<::std::os::raw::c_uint>>()
+                   , 8usize , concat ! (
+                   "Alignment of template specialization: " , stringify ! (
+                   root::nsTArray<::std::os::raw::c_uint> ) ));
     }
     #[test]
     fn __bindgen_test_layout_nsTArray_open0_pair_open1_nsString_nsString_close1_close0_instantiation() {

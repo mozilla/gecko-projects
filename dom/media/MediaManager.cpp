@@ -426,7 +426,7 @@ public:
       if (globalWindow) {
         RefPtr<GetUserMediaRequest> req =
           new GetUserMediaRequest(globalWindow->AsInner(),
-                                  NullString(), NullString());
+                                  VoidString(), VoidString());
         obs->NotifyObservers(req, "recording-device-stopped", nullptr);
       }
       return;
@@ -861,11 +861,11 @@ NS_IMETHODIMP
 MediaDevice::GetMediaSource(nsAString& aMediaSource)
 {
   if (mMediaSource == MediaSourceEnum::Microphone) {
-    aMediaSource.Assign(NS_LITERAL_STRING("microphone"));
+    aMediaSource.AssignLiteral(u"microphone");
   } else if (mMediaSource == MediaSourceEnum::AudioCapture) {
-    aMediaSource.Assign(NS_LITERAL_STRING("audioCapture"));
+    aMediaSource.AssignLiteral(u"audioCapture");
   } else if (mMediaSource == MediaSourceEnum::Window) { // this will go away
-    aMediaSource.Assign(NS_LITERAL_STRING("window"));
+    aMediaSource.AssignLiteral(u"window");
   } else { // all the rest are shared
     aMediaSource.Assign(NS_ConvertUTF8toUTF16(
       dom::MediaSourceEnumValues::strings[uint32_t(mMediaSource)].value));

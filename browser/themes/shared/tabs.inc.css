@@ -8,7 +8,6 @@
 
 :root {
   --tab-toolbar-navbar-overlap: 1px;
-  --tab-line-color: highlight;
   --tab-min-height: 33px;
   --tab-loading-fill: #0A84FF;
 }
@@ -305,6 +304,8 @@ tabbrowser {
 .tab-close-button {
   margin-inline-end: -2px;
   padding: 0;
+  -moz-context-properties: fill, fill-opacity, stroke-opacity;
+  stroke-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 :root[uidensity=touch] .tab-close-button {
@@ -566,7 +567,7 @@ tabbrowser {
   list-style-image: url(chrome://browser/skin/arrow-left.svg);
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
-  fill-opacity: .8;
+  fill-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up:-moz-locale-dir(rtl),

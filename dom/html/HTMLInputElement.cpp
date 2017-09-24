@@ -2636,17 +2636,6 @@ HTMLInputElement::GetRootEditorNode()
 }
 
 NS_IMETHODIMP_(Element*)
-HTMLInputElement::CreatePlaceholderNode()
-{
-  nsTextEditorState* state = GetEditorState();
-  if (state) {
-    NS_ENSURE_SUCCESS(state->CreatePlaceholderNode(), nullptr);
-    return state->GetPlaceholderNode();
-  }
-  return nullptr;
-}
-
-NS_IMETHODIMP_(Element*)
 HTMLInputElement::GetPlaceholderNode()
 {
   nsTextEditorState* state = GetEditorState();
@@ -2674,17 +2663,6 @@ HTMLInputElement::GetPlaceholderVisibility()
   }
 
   return state->GetPlaceholderVisibility();
-}
-
-NS_IMETHODIMP_(Element*)
-HTMLInputElement::CreatePreviewNode()
-{
-  nsTextEditorState* state = GetEditorState();
-  if (state) {
-    NS_ENSURE_SUCCESS(state->CreatePreviewNode(), nullptr);
-    return state->GetPreviewNode();
-  }
-  return nullptr;
 }
 
 NS_IMETHODIMP_(Element*)
@@ -3350,7 +3328,9 @@ HTMLInputElement::SetCheckedInternal(bool aChecked, bool aNotify)
     }
   }
 
-  UpdateAllValidityStates(aNotify);
+  // No need to update element state, since we're about to call
+  // UpdateState anyway.
+  UpdateAllValidityStatesButNotElementState();
 
   // Notify the document that the CSS :checked pseudoclass for this element
   // has changed state.
@@ -5039,8 +5019,9 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify)
 
   UpdateHasRange();
 
-  // Do not notify, it will be done after if needed.
-  UpdateAllValidityStates(false);
+  // Update validity states, but not element state.  We'll update
+  // element state later, as part of this attribute change.
+  UpdateAllValidityStatesButNotElementState();
 
   UpdateApzAwareFlag();
 
@@ -7357,6 +7338,16 @@ void
 HTMLInputElement::UpdateAllValidityStates(bool aNotify)
 {
   bool validBefore = IsValid();
+  UpdateAllValidityStatesButNotElementState();
+
+  if (validBefore != IsValid()) {
+    UpdateState(aNotify);
+  }
+}
+
+void
+HTMLInputElement::UpdateAllValidityStatesButNotElementState()
+{
   UpdateTooLongValidityState();
   UpdateTooShortValidityState();
   UpdateValueMissingValidityState();
@@ -7366,10 +7357,6 @@ HTMLInputElement::UpdateAllValidityStates(bool aNotify)
   UpdateRangeUnderflowValidityState();
   UpdateStepMismatchValidityState();
   UpdateBadInputValidityState();
-
-  if (validBefore != IsValid()) {
-    UpdateState(aNotify);
-  }
 }
 
 void

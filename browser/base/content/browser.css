@@ -300,7 +300,8 @@ toolbarpaletteitem {
 %endif
 
 %if !defined(MOZ_WIDGET_GTK)
-#TabsToolbar > .private-browsing-indicator {
+#TabsToolbar > .private-browsing-indicator,
+#TabsToolbar > .accessibility-indicator {
   -moz-box-ordinal-group: 1000;
 }
 %endif
@@ -493,6 +494,11 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   opacity: 1 !important;
 }
 
+/* Ensure stop-button and reload-button are displayed correctly when in the overflow menu */
+.widget-overflow-list > #stop-reload-button > .toolbarbutton-1 {
+  -moz-box-flex: 1;
+}
+
 #PanelUI-feeds > .feed-toolbarbutton:-moz-locale-dir(rtl) {
   direction: rtl;
 }
@@ -500,6 +506,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 #appMenu_historyMenu > .bookmark-item,
 #appMenu-library-recentlyClosedTabs > .panel-subview-body > .bookmark-item,
 #appMenu-library-recentlyClosedWindows > .panel-subview-body > .bookmark-item,
+#appMenu-library-recentHighlights > .bookmark-item,
 #panelMenu_bookmarksMenu > .bookmark-item {
   max-width: none;
 }

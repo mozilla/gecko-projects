@@ -131,6 +131,7 @@ config = {
                 "--log-raw=%(raw_log_file)s",
                 "--log-errorsummary=%(error_summary_file)s",
                 "--cleanup-crashes",
+                "--marionette-startup-timeout=180",
             ],
             "run_filename": "runreftest.py",
             "testsdir": "reftest"
@@ -256,7 +257,7 @@ config = {
                 os.path.join(os.getcwd(),
                     'mozharness', 'external_tools', 'machine-configuration.json')
             ],
-            'architectures': ['32bit'],
+            'architectures': ['32bit', '64bit'],
             'halt_on_failure': True,
             'enabled': ADJUST_MOUSE_AND_SCREEN
         }

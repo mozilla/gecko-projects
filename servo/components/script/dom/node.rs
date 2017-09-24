@@ -363,7 +363,9 @@ impl<'a> Iterator for QuerySelectorIterator {
         self.iterator.by_ref().filter_map(|node| {
             // TODO(cgaebel): Is it worth it to build a bloom filter here
             // (instead of passing `None`)? Probably.
-            let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+            //
+            // FIXME(bholley): Consider an nth-index cache here.
+            let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
                 node.owner_doc().quirks_mode());
             if let Some(element) = Root::downcast(node) {
                 if matches_selector_list(selectors, &element, &mut ctx) {
@@ -754,7 +756,8 @@ impl Node {
             Err(_) => Err(Error::Syntax),
             // Step 3.
             Ok(selectors) => {
-                let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+                // FIXME(bholley): Consider an nth-index cache here.
+                let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None,
                                                    self.owner_doc().quirks_mode());
                 Ok(self.traverse_preorder().filter_map(Root::downcast).find(|element| {
                     matches_selector_list(&selectors, element, &mut ctx)
@@ -1021,8 +1024,8 @@ pub trait LayoutNodeHelpers {
     fn image_url(&self) -> Option<ServoUrl>;
     fn canvas_data(&self) -> Option<HTMLCanvasData>;
     fn svg_data(&self) -> Option<SVGSVGData>;
-    fn iframe_browsing_context_id(&self) -> BrowsingContextId;
-    fn iframe_pipeline_id(&self) -> PipelineId;
+    fn iframe_browsing_context_id(&self) -> Option<BrowsingContextId>;
+    fn iframe_pipeline_id(&self) -> Option<PipelineId>;
     fn opaque(&self) -> OpaqueNode;
 }
 
@@ -1172,16 +1175,16 @@ impl LayoutNodeHelpers for LayoutJS<Node> {
             .map(|svg| svg.data())
     }
 
-    fn iframe_browsing_context_id(&self) -> BrowsingContextId {
+    fn iframe_browsing_context_id(&self) -> Option<BrowsingContextId> {
         let iframe_element = self.downcast::<HTMLIFrameElement>()
             .expect("not an iframe element!");
-        iframe_element.browsing_context_id().unwrap()
+        iframe_element.browsing_context_id()
     }
 
-    fn iframe_pipeline_id(&self) -> PipelineId {
+    fn iframe_pipeline_id(&self) -> Option<PipelineId> {
         let iframe_element = self.downcast::<HTMLIFrameElement>()
             .expect("not an iframe element!");
-        iframe_element.pipeline_id().unwrap()
+        iframe_element.pipeline_id()
     }
 
     #[allow(unsafe_code)]
