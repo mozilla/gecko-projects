@@ -1,5 +1,5 @@
 {
-    "ach": {
+    "de": {
         "platforms": [
             "linux", 
             "linux64", 
@@ -9,7 +9,7 @@
         ], 
         "revision": "default"
     }, 
-    "af": {
+    "zh-TW": {
         "platforms": [
             "linux", 
             "linux64", 
