@@ -1201,11 +1201,7 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
     i->Destroy(this);
   }
   for (DisplayItemClipChain* c : mClipChainsToDestroy) {
-#ifdef USE_HEAP_ALLOCATED_CLIP_CHAINS
-    delete c;
-#else
      c->DisplayItemClipChain::~DisplayItemClipChain();
-#endif
   }
 
   MOZ_COUNT_DTOR(nsDisplayListBuilder);
@@ -1386,12 +1382,8 @@ nsDisplayListBuilder::FreeClipChains()
 
     if (!clip->mRefCount) {
       it = mClipChainsToDestroy.erase(it);
-#ifdef USE_HEAP_ALLOCATED_CLIP_CHAINS
-      delete clip;
-#else
       clip->DisplayItemClipChain::~DisplayItemClipChain();
       Destroy(DisplayItemType::TYPE_ZERO, clip);
-#endif
     } else {
       ++it;
     }
@@ -1532,12 +1524,8 @@ nsDisplayListBuilder::AllocateDisplayItemClipChain(const DisplayItemClip& aClip,
                                                    const ActiveScrolledRoot* aASR,
                                                    const DisplayItemClipChain* aParent)
 {
-#ifdef USE_HEAP_ALLOCATED_CLIP_CHAINS
-  DisplayItemClipChain* c = new DisplayItemClipChain(aClip, aASR, aParent);
-#else
   void* p = Allocate(sizeof(DisplayItemClipChain), DisplayItemType::TYPE_ZERO);
   DisplayItemClipChain* c = new (KnownNotNull, p) DisplayItemClipChain(aClip, aASR, aParent);
-#endif
   mClipChainsToDestroy.emplace_front(c);
   return c;
 }
