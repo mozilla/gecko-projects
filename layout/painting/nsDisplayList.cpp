@@ -1865,38 +1865,54 @@ nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame)
   borderBox += ToReferenceFrame(aFrame);
   const DisplayItemClipChain* clip = ClipState().GetCurrentCombinedClipChain(this);
   borderBox = ApplyAllClipNonRoundedIntersection(clip, borderBox);
-  if (!borderBox.IsEmpty()) {
-    LayoutDeviceRect devPixelBorderBox =
-      LayoutDevicePixel::FromAppUnits(borderBox, aFrame->PresContext()->AppUnitsPerDevPixel());
-    LayoutDeviceRect transformedDevPixelBorderBox =
-      TransformBy(referenceFrameToRootReferenceFrame, devPixelBorderBox);
-    transformedDevPixelBorderBox.Round();
-    LayoutDeviceIntRect transformedDevPixelBorderBoxInt;
-    if (transformedDevPixelBorderBox.ToIntRect(&transformedDevPixelBorderBoxInt)) {
-      if (styleUI->mWindowDragging == StyleWindowDragging::Drag) {
-        if (IsRetainingDisplayList()) {
-          mWindowDraggingFrames.emplace_back(aFrame);
-        }
-        mWindowDraggingRects.AppendElement(
-          nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
-      } else {
-        if (IsRetainingDisplayList()) {
-          mWindowNoDraggingFrames.emplace_back(aFrame);
-        }
-        mWindowNoDraggingRects.AppendElement(
-          nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
-      }
-    }
+  if (borderBox.IsEmpty()) {
+    return;
+  }
+
+  LayoutDeviceRect devPixelBorderBox =
+    LayoutDevicePixel::FromAppUnits(borderBox, aFrame->PresContext()->AppUnitsPerDevPixel());
+
+  LayoutDeviceRect transformedDevPixelBorderBox =
+    TransformBy(referenceFrameToRootReferenceFrame, devPixelBorderBox);
+  transformedDevPixelBorderBox.Round();
+  LayoutDeviceIntRect transformedDevPixelBorderBoxInt;
+
+  if (!transformedDevPixelBorderBox.ToIntRect(&transformedDevPixelBorderBoxInt)) {
+    return;
+  }
+
+  LayoutDeviceIntRegion& region =
+    styleUI->mWindowDragging == StyleWindowDragging::Drag
+      ? mWindowDraggingRegion : mWindowNoDraggingRegion;
+
+  if (!IsRetainingDisplayList()) {
+    region.OrWith(transformedDevPixelBorderBoxInt);
+    return;
+  }
+
+  if (styleUI->mWindowDragging == StyleWindowDragging::Drag) {
+    mWindowDraggingFrames.emplace_back(aFrame);
+    mWindowDraggingRects.AppendElement(
+      nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
+  } else {
+    mWindowNoDraggingFrames.emplace_back(aFrame);
+    mWindowNoDraggingRects.AppendElement(
+      nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
   }
 }
 
 LayoutDeviceIntRegion
 nsDisplayListBuilder::GetWindowDraggingRegion() const
 {
+  LayoutDeviceIntRegion result;
+  if (!IsRetainingDisplayList()) {
+    result.Sub(mWindowDraggingRegion, mWindowNoDraggingRegion);
+    return result;
+  }
+
   LayoutDeviceIntRegion dragRegion((mozilla::gfx::ArrayView<pixman_box32_t>(mWindowDraggingRects)));
   LayoutDeviceIntRegion noDragRegion((mozilla::gfx::ArrayView<pixman_box32_t>(mWindowNoDraggingRects)));
 
-  LayoutDeviceIntRegion result;
   result.Sub(dragRegion, noDragRegion);
   return result;
 }
