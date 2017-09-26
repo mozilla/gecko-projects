@@ -4919,14 +4919,18 @@ static void
 RemoveFrameFromFrameRects(nsDisplayLayerEventRegions::FrameRects& aFrameRects, nsIFrame* aFrame)
 {
   uint32_t i = 0;
-  while (i < aFrameRects.mFrames.Length()) {
+  uint32_t length = aFrameRects.mFrames.Length();
+  while (i < length) {
     if (aFrameRects.mFrames[i] == aFrame) {
-      aFrameRects.mFrames.RemoveElementAt(i);
-      aFrameRects.mBoxes.RemoveElementAt(i);
+      aFrameRects.mFrames[i] = aFrameRects.mFrames[length - 1];
+      aFrameRects.mBoxes[i] = aFrameRects.mBoxes[length - 1];
+      length--;
     } else {
       i++;
     }
   }
+  aFrameRects.mFrames.SetLength(length);
+  aFrameRects.mBoxes.SetLength(length);
 }
 
 void
