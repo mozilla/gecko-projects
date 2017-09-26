@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
                                 'is specified, find the `pushlog_id using the '
                                 'revision.'),
             },
-            'target_task_method': {
+            'target_tasks_method': {
                 'type': 'string',
                 'title': 'target task method',
                 'description': ('The target task method to use to generate the new '
@@ -74,8 +74,9 @@ logger = logging.getLogger(__name__)
     }
 )
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
-    # build_number, previous_graph_kinds, target_task_method are required
+    # build_number, previous_graph_kinds, target_tasks_method are required
     os.environ['BUILD_NUMBER'] = str(input['build_number'])
+    target_tasks_method = input['target_tasks_method']
     previous_graph_kinds = input['previous_graph_kinds']
     # make parameters read-write
     parameters = dict(parameters)
@@ -95,6 +96,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
         full_task_graph, previous_graph_ids, previous_graph_kinds
     )
+    parameters['target_tasks_method'] = target_tasks_method
     logger.info("Existing tasks:")
     logger.info(pprint.pformat(parameters['existing_tasks']))
 
