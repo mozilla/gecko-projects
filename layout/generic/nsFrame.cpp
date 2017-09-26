@@ -967,7 +967,8 @@ nsIFrame::RemoveDisplayItemDataForDeletion()
 void
 nsIFrame::MarkNeedsDisplayItemRebuild()
 {
-  if (!XRE_IsContentProcess() || IsFrameModified()) {
+  if (!gfxPrefs::LayoutRetainDisplayList() || !XRE_IsContentProcess() ||
+      IsFrameModified()) {
     // Skip non-content processes and frames that are already marked modified.
     return;
   }
