@@ -41,6 +41,7 @@ def filter_upload_symbols(task, parameters):
         task.attributes.get('nightly') or \
         parameters.get('project') in ('mozilla-beta', 'mozilla-release')
 
+
 def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=False):
     if not standard_filter(task, parameters):
         return False
