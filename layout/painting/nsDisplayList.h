@@ -613,11 +613,11 @@ public:
    * @return Returns true if we should include the caret in any display lists
    * that we make.
    */
-  bool IsBuildingCaret() { return mBuildCaret; }
+  bool IsBuildingCaret() const { return mBuildCaret; }
 
-  bool IsRetainingDisplayList() { return mRetainingDisplayList; }
+  bool IsRetainingDisplayList() const { return mRetainingDisplayList; }
 
-  bool IsPartialUpdate() { return mPartialUpdate; }
+  bool IsPartialUpdate() const { return mPartialUpdate; }
   void SetPartialUpdate(bool aPartial) { mPartialUpdate = aPartial; }
 
   bool IsBuilding() const { return mIsBuilding; }
