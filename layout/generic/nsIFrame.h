@@ -619,8 +619,6 @@ public:
     , mState(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)
     , mFrameIsModified(false)
     , mHasOverrideDirtyRegion(false)
-    , mHasAnimatedGeometryRoot(false)
-    , mHasActiveScrolledRoot(false)
     , mBuiltDisplayList(false)
     , mForceDescendIntoIfVisible(false)
     , mMayHaveWillChangeBudget(false)
@@ -642,13 +640,6 @@ public:
 
   bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
   void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
-
-
-  bool HasAnimatedGeometryRoot() { return mHasAnimatedGeometryRoot; }
-  void SetHasAnimatedGeometryRoot(bool aHasAGR) { mHasAnimatedGeometryRoot = aHasAGR; }
-
-  bool HasActiveScrolledRoot() { return mHasActiveScrolledRoot; }
-  void SetHasActiveScrolledRoot(bool aHasASR) { mHasActiveScrolledRoot = aHasASR; }
 
   bool BuiltDisplayList() { return mBuiltDisplayList; }
   void SetBuiltDisplayList(bool aBuilt) { mBuiltDisplayList = aBuilt; }
@@ -4203,8 +4194,6 @@ protected:
   // TODO: Make this a frame state bit.
   bool mFrameIsModified : 1;
   bool mHasOverrideDirtyRegion : 1;
-  bool mHasAnimatedGeometryRoot : 1;
-  bool mHasActiveScrolledRoot : 1;
   bool mBuiltDisplayList : 1;
   bool mForceDescendIntoIfVisible : 1;
   bool mMayHaveWillChangeBudget : 1;

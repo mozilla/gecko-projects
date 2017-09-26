@@ -164,8 +164,11 @@ struct AnimatedGeometryRoot
   CreateAGRForFrame(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync, bool aIsRetained)
   {
     RefPtr<AnimatedGeometryRoot> result;
-    if (aFrame->HasAnimatedGeometryRoot() && aIsRetained) {
+    if (aIsRetained) {
       result = aFrame->GetProperty(AnimatedGeometryRootCache());
+    }
+
+    if (result) {
       result->mParentAGR = aParent;
       result->mIsAsync = aIsAsync;
     } else {
@@ -208,7 +211,6 @@ protected:
   {
     MOZ_ASSERT(mParentAGR || mIsAsync);
     if (mIsRetained) {
-      aFrame->SetHasAnimatedGeometryRoot(true);
       aFrame->SetProperty(AnimatedGeometryRootCache(), this);
     }
   }
@@ -216,7 +218,6 @@ protected:
   ~AnimatedGeometryRoot()
   {
     if (mFrame && mIsRetained) {
-      mFrame->SetHasAnimatedGeometryRoot(false);
       mFrame->DeleteProperty(AnimatedGeometryRootCache());
     }
   }
@@ -249,13 +250,14 @@ struct ActiveScrolledRoot {
     nsIFrame* f = do_QueryFrame(aScrollableFrame);
 
     RefPtr<ActiveScrolledRoot> asr;
-    if (f->HasActiveScrolledRoot() && aIsRetained) {
+    if (aIsRetained) {
       asr = f->GetProperty(ActiveScrolledRootCache());
-    } else {
+    }
+
+    if (!asr) {
       asr = new ActiveScrolledRoot();
 
       if (aIsRetained) {
-        f->SetHasActiveScrolledRoot(true);
         f->SetProperty(ActiveScrolledRootCache(), asr);
       }
     }
@@ -303,7 +305,6 @@ private:
   {
     if (mScrollableFrame && mRetained) {
       nsIFrame* f = do_QueryFrame(mScrollableFrame);
-      f->SetHasActiveScrolledRoot(false);
       f->DeleteProperty(ActiveScrolledRootCache());
     }
   }
