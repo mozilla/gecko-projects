@@ -329,7 +329,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
-        if task in beta_tasks:
+        if task.label in beta_tasks:
             return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
