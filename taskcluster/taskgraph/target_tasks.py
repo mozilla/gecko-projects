@@ -301,7 +301,7 @@ def target_tasks_mozilla_release(full_task_graph, parameters):
 
 
 @_target_task('mozilla_beta_desktop_promotion')
-def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters)
+def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
     """Select the superset of tasks required to promote a beta or release build
     of desktop. This should include all non-android mozilla_beta tasks, plus
     l10n, beetmover, balrog, etc."""
