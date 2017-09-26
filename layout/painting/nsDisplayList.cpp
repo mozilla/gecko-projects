@@ -1874,11 +1874,15 @@ nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame)
     LayoutDeviceIntRect transformedDevPixelBorderBoxInt;
     if (transformedDevPixelBorderBox.ToIntRect(&transformedDevPixelBorderBoxInt)) {
       if (styleUI->mWindowDragging == StyleWindowDragging::Drag) {
-        mWindowDraggingFrames.emplace_back(aFrame);
+        if (IsRetainingDisplayList()) {
+          mWindowDraggingFrames.emplace_back(aFrame);
+        }
         mWindowDraggingRects.AppendElement(
           nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
       } else {
-        mWindowNoDraggingFrames.emplace_back(aFrame);
+        if (IsRetainingDisplayList()) {
+          mWindowNoDraggingFrames.emplace_back(aFrame);
+        }
         mWindowNoDraggingRects.AppendElement(
           nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
       }
@@ -1901,26 +1905,34 @@ void
 nsDisplayListBuilder::RemoveModifiedWindowDraggingRegion()
 {
   uint32_t i = 0;
-  while (i < mWindowDraggingFrames.size()) {
+  uint32_t length = mWindowDraggingFrames.size();
+  while (i < length) {
     if (!mWindowDraggingFrames[i].IsAlive() ||
         mWindowDraggingFrames[i]->IsFrameModified()) {
-      mWindowDraggingFrames.erase(mWindowDraggingFrames.begin() + i);
-      mWindowDraggingRects.RemoveElementAt(i);
+      mWindowDraggingFrames[i] = mWindowDraggingFrames[length - 1];
+      mWindowDraggingRects[i] = mWindowDraggingRects[length - 1];
+      length--;
     } else {
       i++;
     }
   }
+  mWindowDraggingFrames.resize(length);
+  mWindowDraggingRects.SetLength(length);
   
   i = 0;
-  while (i < mWindowNoDraggingFrames.size()) {
+  length = mWindowNoDraggingFrames.size();
+  while (i < length) {
     if (!mWindowNoDraggingFrames[i].IsAlive() ||
         mWindowNoDraggingFrames[i]->IsFrameModified()) {
-      mWindowNoDraggingFrames.erase(mWindowDraggingFrames.begin() + i);
-      mWindowNoDraggingRects.RemoveElementAt(i);
+      mWindowNoDraggingFrames[i] = mWindowNoDraggingFrames[length - 1];
+      mWindowNoDraggingRects[i] = mWindowNoDraggingRects[length - 1];
+      length--;
     } else {
       i++;
     }
   }
+  mWindowNoDraggingFrames.resize(length);
+  mWindowNoDraggingRects.SetLength(length);
 }
 
 void
