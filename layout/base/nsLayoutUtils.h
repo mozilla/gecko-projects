@@ -882,8 +882,7 @@ public:
    */
   static Matrix4x4 GetTransformToAncestor(nsIFrame *aFrame,
                                           const nsIFrame *aAncestor,
-                                          bool aStopAtStackingContextAndDisplayPort = false,
-                                          bool aInCSSUnits = false,
+                                          uint32_t aFlags = 0,
                                           nsIFrame** aOutAncestor = nullptr);
 
   /**

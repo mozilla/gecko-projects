@@ -396,13 +396,13 @@ public:
 
   static inline pixman_box32_t RectToBox(const nsRect &aRect)
   {
-    pixman_box32_t box = { aRect.x, aRect.y, aRect.XMost(), aRect.YMost() };
+    pixman_box32_t box = { aRect.X(), aRect.Y(), aRect.XMost(), aRect.YMost() };
     return box;
   }
 
   static inline pixman_box32_t RectToBox(const mozilla::gfx::IntRect &aRect)
   {
-    pixman_box32_t box = { aRect.x, aRect.y, aRect.XMost(), aRect.YMost() };
+    pixman_box32_t box = { aRect.X(), aRect.Y(), aRect.XMost(), aRect.YMost() };
     return box;
   }
 

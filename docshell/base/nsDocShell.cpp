@@ -6632,16 +6632,14 @@ nsDocShell::GetMainWidget(nsIWidget** aMainWidget)
 }
 
 NS_IMETHODIMP
-nsDocShell::GetTitle(char16_t** aTitle)
+nsDocShell::GetTitle(nsAString& aTitle)
 {
-  NS_ENSURE_ARG_POINTER(aTitle);
-
-  *aTitle = ToNewUnicode(mTitle);
+  aTitle = mTitle;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShell::SetTitle(const char16_t* aTitle)
+nsDocShell::SetTitle(const nsAString& aTitle)
 {
   // Store local title
   mTitle = aTitle;
@@ -8324,16 +8322,11 @@ nsDocShell::CanSavePresentation(uint32_t aLoadType,
     return false;
   }
 
-  // Don't cache the content viewer if we're in a subframe and the subframe
-  // pref is disabled.
-  bool cacheFrames =
-    Preferences::GetBool("browser.sessionhistory.cache_subframes", false);
-  if (!cacheFrames) {
-    nsCOMPtr<nsIDocShellTreeItem> root;
-    GetSameTypeParent(getter_AddRefs(root));
-    if (root && root != this) {
-      return false;  // this is a subframe load
-    }
+  // Don't cache the content viewer if we're in a subframe.
+  nsCOMPtr<nsIDocShellTreeItem> root;
+  GetSameTypeParent(getter_AddRefs(root));
+  if (root && root != this) {
+    return false;  // this is a subframe load
   }
 
   // If the document does not want its presentation cached, then don't.

@@ -1106,6 +1106,11 @@ Element::RemoveFromIdTable()
 already_AddRefed<ShadowRoot>
 Element::CreateShadowRoot(ErrorResult& aError)
 {
+  if (GetShadowRoot()) {
+    aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
   nsAutoScriptBlocker scriptBlocker;
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
@@ -1142,24 +1147,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
 
   shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
 
-  // Replace the old ShadowRoot with the new one and let the old
-  // ShadowRoot know about the younger ShadowRoot because the old
-  // ShadowRoot is projected into the younger ShadowRoot's shadow
-  // insertion point (if it exists).
-  ShadowRoot* olderShadow = GetShadowRoot();
   SetShadowRoot(shadowRoot);
-  if (olderShadow) {
-    olderShadow->SetYoungerShadow(shadowRoot);
-
-    // Unbind children of older shadow root because they
-    // are no longer in the composed tree.
-    for (nsIContent* child = olderShadow->GetFirstChild(); child;
-         child = child->GetNextSibling()) {
-      child->UnbindFromTree(true, false);
-    }
-
-    olderShadow->SetIsComposedDocParticipant(false);
-  }
 
   // xblBinding takes ownership of docInfo.
   RefPtr<nsXBLBinding> xblBinding = new nsXBLBinding(shadowRoot, protoBinding);
@@ -1898,6 +1886,19 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     DeleteProperty(nsGkAtoms::animationsProperty);
   }
 
+  // Computed style data isn't useful for detached nodes, and we'll need to
+  // recompute it anyway if we ever insert the nodes back into a document.
+  if (IsStyledByServo()) {
+    if (document) {
+      ClearServoData(document);
+    } else {
+      MOZ_ASSERT(!HasServoData());
+      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
+    }
+  } else {
+    MOZ_ASSERT(!HasServoData());
+  }
+
   // Editable descendant count only counts descendants that
   // are in the uncomposed document.
   ResetEditableDescendantCount();
@@ -1992,18 +1993,21 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     shadowRoot->SetIsComposedDocParticipant(false);
   }
 
-  // Computed style data isn't useful for detached nodes, and we'll need to
-  // recompute it anyway if we ever insert the nodes back into a document.
-  if (IsStyledByServo()) {
-    if (document) {
-      ClearServoData(document);
-    } else {
-      MOZ_ASSERT(!HasServoData());
-      MOZ_ASSERT(!HasAnyOfFlags(kAllServoDescendantBits | NODE_NEEDS_FRAME));
-    }
-  } else {
-    MOZ_ASSERT(!HasServoData());
-  }
+  // Unbinding of children is the only point in time where we don't enforce the
+  // "child has style data implies parent has it too" invariant.
+  //
+  // As such, the restyle root tracking may incorrectly end up setting dirty
+  // bits on the parent chain when moving from a not yet unbound root with
+  // already unbound parents to a root higher up in the tree, so we clear those
+  // (again, since they're also cleared in ClearServoData) here.
+  //
+  // This can happen when the element changes the state of some ancestor up in
+  // the tree, for example.
+  //
+  // Note that clearing the data itself here would have its own set of problems,
+  // since the invariant we'd be breaking in that case is "HasServoData()
+  // implies InComposedDoc()", which we rely on in various places.
+  UnsetFlags(kAllServoDescendantBits);
 }
 
 nsICSSDeclaration*
@@ -3577,7 +3581,7 @@ Element::GetTransformToAncestor(Element& aAncestor)
     // then the call to GetTransformToAncestor will return the transform
     // all the way up through the parent chain.
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      ancestorFrame, false, true);
+      ancestorFrame, nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -3594,7 +3598,7 @@ Element::GetTransformToParent()
   if (primaryFrame) {
     nsIFrame* parentFrame = primaryFrame->GetParent();
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      parentFrame, false, true);
+      parentFrame, nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -3609,7 +3613,7 @@ Element::GetTransformToViewport()
   Matrix4x4 transform;
   if (primaryFrame) {
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), false, true);
+      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -4208,6 +4212,26 @@ Element::SetCustomElementData(CustomElementData* aData)
   nsExtendedDOMSlots *slots = ExtendedDOMSlots();
   MOZ_ASSERT(!slots->mCustomElementData, "Custom element data may not be changed once set.");
   slots->mCustomElementData = aData;
+}
+
+CustomElementDefinition*
+Element::GetCustomElementDefinition() const
+{
+  CustomElementData* data = GetCustomElementData();
+  if (!data) {
+    return nullptr;
+  }
+
+  return data->GetCustomElementDefinition();
+}
+
+void
+Element::SetCustomElementDefinition(CustomElementDefinition* aDefinition)
+{
+  CustomElementData* data = GetCustomElementData();
+  MOZ_ASSERT(data);
+
+  data->SetCustomElementDefinition(aDefinition);
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)

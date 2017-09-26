@@ -128,6 +128,7 @@
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "prenv.h"
 #include "RetainedDisplayListBuilder.h"
+#include "TextDrawTarget.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -2760,8 +2761,7 @@ nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame, nsIFrame* aScrolledFrame)
 Matrix4x4
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
                                       const nsIFrame *aAncestor,
-                                      bool aStopAtStackingContextAndDisplayPort,
-                                      bool aInCSSUnits,
+                                      uint32_t aFlags,
                                       nsIFrame** aOutAncestor)
 {
   nsIFrame* parent;
@@ -2769,14 +2769,14 @@ nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort, aInCSSUnits);
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aFlags);
   while (parent && parent != aAncestor &&
-    (!aStopAtStackingContextAndDisplayPort ||
+    (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
       (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort, aInCSSUnits);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aFlags);
   }
   if (aOutAncestor) {
     *aOutAncestor = parent;
@@ -3094,7 +3094,11 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aStopAtStackingContextAndDisplayPort, false, aOutAncestor);
+    uint32_t flags = 0;
+    if (aStopAtStackingContextAndDisplayPort) {
+      flags |= nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT;
+    }
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, flags, aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
@@ -6269,6 +6273,29 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
 
     nsPresContext* presCtx = aFrame->PresContext();
     nsContextBoxBlur contextBoxBlur;
+
+    nscolor shadowColor;
+    if (shadowDetails->mHasColor)
+      shadowColor = shadowDetails->mColor;
+    else
+      shadowColor = aForegroundColor;
+
+    // Webrender just needs the shadow details
+    if (auto* textDrawer = aContext->GetTextDrawer()) {
+      wr::TextShadow wrShadow;
+
+      wrShadow.offset = {
+        presCtx->AppUnitsToFloatDevPixels(shadowDetails->mXOffset),
+        presCtx->AppUnitsToFloatDevPixels(shadowDetails->mYOffset)
+      };
+
+      wrShadow.blur_radius = presCtx->AppUnitsToFloatDevPixels(shadowDetails->mRadius);
+      wrShadow.color = wr::ToColorF(ToDeviceColor(shadowColor));
+
+      textDrawer->AppendShadow(wrShadow);
+      return;
+    }
+
     gfxContext* shadowContext = contextBoxBlur.Init(shadowRect, 0, blurRadius,
                                                     presCtx->AppUnitsPerDevPixel(),
                                                     aDestCtx, aDirtyRect, nullptr,
@@ -6276,11 +6303,7 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
     if (!shadowContext)
       continue;
 
-    nscolor shadowColor;
-    if (shadowDetails->mHasColor)
-      shadowColor = shadowDetails->mColor;
-    else
-      shadowColor = aForegroundColor;
+    
 
     aDestCtx->Save();
     aDestCtx->NewPath();

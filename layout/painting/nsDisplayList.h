@@ -37,8 +37,8 @@
 #include "mozilla/gfx/UserData.h"
 #include "mozilla/layers/LayerAttributes.h"
 #include "nsCSSRenderingBorders.h"
-#include "nsAutoLayoutPhase.h"
 #include "nsPresArena.h"
+#include "nsAutoLayoutPhase.h"
 #include "nsDisplayItemTypes.h"
 
 #include <stdint.h>
@@ -1671,7 +1671,6 @@ private:
 
   struct PresShellState {
     nsIPresShell* mPresShell;
-    // TODO: Using a Maybe for this is silly, we always want to instantiate it.
 #ifdef DEBUG
     mozilla::Maybe<nsAutoLayoutPhase> mAutoLayoutPhase;
 #endif

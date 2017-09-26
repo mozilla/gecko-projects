@@ -6,6 +6,7 @@
 #ifndef GFX_WEBRENDERUSERDATA_H
 #define GFX_WEBRENDERUSERDATA_H
 
+#include "BasicLayers.h"                // for BasicLayerManager
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/layers/AnimationInfo.h"
@@ -127,6 +128,7 @@ public:
   void SetInvalid(bool aInvalid) { mInvalid = aInvalid; }
   bool IsInvalid() { return mInvalid; }
 
+  RefPtr<BasicLayerManager> mBasicLayerManager;
 protected:
   nsAutoPtr<nsDisplayItemGeometry> mGeometry;
   nsRect mBounds;
@@ -138,7 +140,7 @@ class WebRenderAnimationData : public WebRenderUserData
 public:
   explicit WebRenderAnimationData(WebRenderLayerManager* aWRManager, nsDisplayItem* aItem,
                                   WebRenderUserDataRefTable* aTable);
-  virtual ~WebRenderAnimationData() {}
+  virtual ~WebRenderAnimationData();
 
   virtual UserDataType GetType() override { return UserDataType::eAnimation; }
   static UserDataType Type() { return UserDataType::eAnimation; }

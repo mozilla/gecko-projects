@@ -279,6 +279,7 @@
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoRestyleManager.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "nsHTMLTags.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -6024,6 +6025,10 @@ nsDocument::CreateElement(const nsAString& aTagName,
     elem->SetPseudoElementType(pseudoType);
   }
 
+  if (is) {
+    elem->SetAttr(kNameSpaceID_None, nsGkAtoms::is, *is, true);
+  }
+
   return elem.forget();
 }
 
@@ -6073,6 +6078,10 @@ nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
                      NOT_FROM_PARSER, is);
   if (rv.Failed()) {
     return nullptr;
+  }
+
+  if (is) {
+    element->SetAttr(kNameSpaceID_None, nsGkAtoms::is, *is, true);
   }
 
   return element.forget();
@@ -6304,7 +6313,8 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
   }
 
   nsCOMPtr<nsIAtom> typeAtom(NS_Atomize(elemName));
-  CustomElementDefinition* definition = registry->mCustomDefinitions.Get(typeAtom);
+  CustomElementDefinition* definition =
+    registry->mCustomDefinitions.GetWeak(typeAtom);
   if (!definition) {
     return true;
   }
@@ -6357,11 +6367,28 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
       return true;
     }
   } else {
-    nsDependentAtomString localName(definition->mLocalName);
-    element =
-      document->CreateElem(localName, nullptr, kNameSpaceID_XHTML,
-                           (definition->mLocalName != typeAtom) ? &elemName
-                                                                : nullptr);
+    RefPtr<mozilla::dom::NodeInfo> nodeInfo =
+      document->NodeInfoManager()->GetNodeInfo(definition->mLocalName, nullptr,
+                                               kNameSpaceID_XHTML,
+                                               nsIDOMNode::ELEMENT_NODE);
+
+    int32_t tag = nsHTMLTags::CaseSensitiveAtomTagToId(definition->mLocalName);
+    if (tag == eHTMLTag_userdefined &&
+        nsContentUtils::IsCustomElementName(definition->mType)) {
+      element = NS_NewHTMLElement(nodeInfo.forget(), NOT_FROM_PARSER);
+    } else {
+      element = ::CreateHTMLElement(tag, nodeInfo.forget(), NOT_FROM_PARSER);
+    }
+
+    element->SetCustomElementData(
+      new CustomElementData(definition->mType,
+                            CustomElementData::State::eCustom));
+
+    element->SetCustomElementDefinition(definition);
+
+    // It'll be removed when we deprecate custom elements v0.
+    nsContentUtils::SyncInvokeReactions(nsIDocument::eCreated, element,
+                                        definition);
     NS_ENSURE_TRUE(element, false);
   }
 
@@ -7341,7 +7368,7 @@ nsDocument::DoNotifyPossibleTitleChange()
     if (container) {
       nsCOMPtr<nsIBaseWindow> docShellWin = do_QueryInterface(container);
       if (docShellWin) {
-        docShellWin->SetTitle(title.get());
+        docShellWin->SetTitle(title);
       }
     }
   }
@@ -8320,7 +8347,7 @@ nsIDocument::CreateEvent(const nsAString& aEventType, CallerType aCallerType,
 }
 
 void
-nsDocument::FlushPendingNotifications(FlushType aType)
+nsDocument::FlushPendingNotifications(FlushType aType, FlushTarget aTarget)
 {
   nsDocumentOnStack dos(this);
 
@@ -8370,11 +8397,13 @@ nsDocument::FlushPendingNotifications(FlushType aType)
     FlushType parentType = aType;
     if (aType >= FlushType::Style)
       parentType = std::max(FlushType::Layout, aType);
-    mParentDocument->FlushPendingNotifications(parentType);
+    mParentDocument->FlushPendingNotifications(parentType, FlushTarget::Normal);
   }
 
-  if (nsIPresShell* shell = GetShell()) {
-    shell->FlushPendingNotifications(aType);
+  if (aTarget == FlushTarget::Normal) {
+    if (nsIPresShell* shell = GetShell()) {
+      shell->FlushPendingNotifications(aType);
+    }
   }
 }
 

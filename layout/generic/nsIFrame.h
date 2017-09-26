@@ -1774,6 +1774,12 @@ public:
   }
 
   /**
+   * Same as IsTransformed, except that it doesn't take SVG transforms
+   * into account.
+   */
+  bool IsCSSTransformed(const nsStyleDisplay* aStyleDisplay, mozilla::EffectSet* aEffectSet = nullptr) const;
+
+  /**
    * True if this frame has any animation of transform in effect.
    *
    * @param aEffectSet: This function may need to look up EffectSet property.
@@ -2838,10 +2844,13 @@ public:
    * @return A Matrix4x4 that converts points in this frame's coordinate space
    *   into points in aOutAncestor's coordinate space.
    */
+  enum {
+    IN_CSS_UNITS = 1 << 0,
+    STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT = 1 << 1
+  };
   Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                nsIFrame **aOutAncestor,
-                               bool aStopAtStackingContextAndDisplayPort = false,
-                               bool aInCSSUnits = false);
+                               uint32_t aFlags = 0);
 
   /**
    * Bit-flags to pass to IsFrameOfType()
@@ -3502,7 +3511,25 @@ public:
    */
   bool IsPseudoStackingContextFromStyle();
 
-  bool IsVisuallyAtomic();
+  /**
+   * Determines if this frame has a container effect that requires
+   * it to paint as a visually atomic unit.
+   */
+  bool IsVisuallyAtomic(mozilla::EffectSet* aEffectSet,
+                        const nsStyleDisplay* aStyleDisplay,
+                        const nsStyleEffects* aStyleEffects);
+
+  /**
+   * Determines if this frame is a stacking context.
+   *
+   * @param aIsPositioned The precomputed result of IsAbsPosContainingBlock
+   * on the StyleDisplay().
+   * @param aIsVisuallyAtomic The precomputed result of IsVisuallyAtomic.
+   */
+  bool IsStackingContext(const nsStyleDisplay* aStyleDisplay,
+                         const nsStylePosition* aStylePosition,
+                         bool aIsPositioned,
+                         bool aIsVisuallyAtomic);
   bool IsStackingContext();
 
   virtual bool HonorPrintBackgroundSettings() { return true; }
