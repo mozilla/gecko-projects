@@ -90,7 +90,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
         previous_graph_ids = [find_decision_task(parameters)]
 
     # Download parameters and full task graph from the first decision task.
-    parameters = get_artifact(previous_graph_ids[0], "parameters.yml")
+    parameters = get_artifact(previous_graph_ids[0], "public/parameters.yml")
     full_task_graph = get_artifact(previous_graph_ids[0], "public/full-task-graph.json")
     _, full_task_graph = TaskGraph.from_json(full_task_graph)
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
