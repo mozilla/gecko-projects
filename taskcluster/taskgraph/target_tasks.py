@@ -323,7 +323,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         platform = task.attributes.get('build_platform')
 
         # Android has its own promotion.
-        if 'android' in platform:
+        if platform and 'android' in platform:
             return False
 
         # Allow for beta_tasks; these will get optimized out to point to
