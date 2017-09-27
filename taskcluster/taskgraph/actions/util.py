@@ -6,13 +6,19 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import logging
 import requests
 import os
 
+from requests.exceptions import HTTPError
+
 from taskgraph import create
+from taskgraph.decision import write_artifact
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.optimize import optimize_task_graph
-from taskgraph.util.taskcluster import get_artifact, get_session, find_task_id
+from taskgraph.util.taskcluster import get_session, find_task_id, get_artifact, list_tasks
+
+logger = logging.getLogger(__name__)
 
 PUSHLOG_TMPL = '{}/json-pushes?version=2&changeset={}&tipsonly=1&full=1'
 
@@ -56,6 +62,30 @@ def find_existing_tasks_from_previous_kinds(full_task_graph, previous_graph_ids,
     return existing_tasks
 
 
+def fetch_graph_and_labels(parameters):
+    decision_task_id = find_decision_task(parameters)
+
+    # First grab the graph and labels generated during the initial decision task
+    full_task_graph = get_artifact(decision_task_id, "public/full-task-graph.json")
+    _, full_task_graph = TaskGraph.from_json(full_task_graph)
+    label_to_taskid = get_artifact(decision_task_id, "public/label-to-taskid.json")
+
+    # Now fetch any modifications made by action tasks and swap out new tasks
+    # for old ones
+    namespace = 'gecko.v2.{}.pushlog-id.{}.actions'.format(
+        parameters['project'],
+        parameters['pushlog_id'])
+    for action in list_tasks(namespace):
+        try:
+            run_label_to_id = get_artifact(action, "public/label-to-taskid.json")
+            label_to_taskid.update(run_label_to_id)
+        except HTTPError as e:
+            logger.info('Skipping {} due to missing artifact! Error: {}'.format(action, e))
+            continue
+
+    return (decision_task_id, full_task_graph, label_to_taskid)
+
+
 def create_task_from_def(task_id, task_def, level):
     """Create a new task from a definition rather than from a label
     that is already in the full-task-graph. The task definition will
@@ -93,4 +123,7 @@ def create_tasks(to_run, full_task_graph, label_to_taskid, params, decision_task
                                                                 params,
                                                                 to_run,
                                                                 label_to_taskid)
+    write_artifact('task-graph.json', optimized_task_graph.to_json())
+    write_artifact('label-to-taskid.json', label_to_taskid)
+    write_artifact('to-run.json', list(to_run))
     create.create_tasks(optimized_task_graph, label_to_taskid, params, decision_task_id)
