@@ -1694,6 +1694,14 @@ TelemetryImpl::SnapshotKeyedScalars(unsigned int aDataset, bool aClearScalars, J
 }
 
 NS_IMETHODIMP
+TelemetryImpl::RegisterScalars(const nsACString& aCategoryName,
+                               JS::Handle<JS::Value> aScalarData,
+                               JSContext* cx)
+{
+  return TelemetryScalar::RegisterScalars(aCategoryName, aScalarData, cx);
+}
+
+NS_IMETHODIMP
 TelemetryImpl::ClearScalars()
 {
   TelemetryScalar::ClearScalars();

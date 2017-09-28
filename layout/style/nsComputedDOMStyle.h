@@ -715,6 +715,10 @@ private:
   void BasicShapeRadiiToString(nsAString& aCssText,
                                const nsStyleCorners& aCorners);
 
+  // Find out if we can safely skip flushing for aDocument (i.e. pending
+  // restyles does not affect mContent).
+  mozilla::FlushTarget GetFlushTarget(nsIDocument* aDocument) const;
+
 
   static nsComputedStyleMap* GetComputedStyleMap();
 
@@ -741,7 +745,7 @@ private:
    * if the pres arena from which it was allocated goes away.
    */
   mozilla::ArenaRefPtr<nsStyleContext> mStyleContext;
-  nsCOMPtr<nsIAtom> mPseudo;
+  RefPtr<nsIAtom> mPseudo;
 
   /*
    * While computing style data, the primary frame for mContent --- named "outer"

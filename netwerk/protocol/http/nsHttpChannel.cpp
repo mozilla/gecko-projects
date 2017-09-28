@@ -344,10 +344,8 @@ nsHttpChannel::nsHttpChannel()
     , mWarningReporter(nullptr)
     , mIsReadingFromCache(false)
     , mFirstResponseSource(RESPONSE_PENDING)
-    , mOnCacheAvailableCalled(false)
     , mRaceCacheWithNetwork(false)
     , mRaceDelay(0)
-    , mCacheAsyncOpenCalled(false)
     , mIgnoreCacheEntry(false)
     , mRCWNLock("nsHttpChannel.mRCWNLock")
     , mDidReval(false)
@@ -1108,7 +1106,7 @@ nsHttpChannel::SetupTransaction()
     // could be added in OnCacheEntryCheck. We cannot send conditional request
     // without having the entry, so we need to remove the headers here and
     // ignore the cache entry in OnCacheEntryAvailable.
-    if (mRaceCacheWithNetwork && !mOnCacheAvailableCalled) {
+    if (mRaceCacheWithNetwork && AwaitingCacheCallbacks()) {
         if (mDidReval) {
             LOG(("  Removing conditional request headers"));
             UntieValidationRequest();
@@ -2242,8 +2240,8 @@ nsHttpChannel::ProcessAltService()
 
     nsAutoCString scheme;
     mURI->GetScheme(scheme);
-    bool isHttp = scheme.Equals(NS_LITERAL_CSTRING("http"));
-    if (!isHttp && !scheme.Equals(NS_LITERAL_CSTRING("https"))) {
+    bool isHttp = scheme.EqualsLiteral("http");
+    if (!isHttp && !scheme.EqualsLiteral("https")) {
         return;
     }
 
@@ -3983,28 +3981,19 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
 
         if (!mCacheOpenDelay) {
             MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
-            mCacheAsyncOpenCalled = true;
             if (mNetworkTriggered) {
                 mRaceCacheWithNetwork = sRCWNEnabled;
             }
             rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, this);
-            if (NS_FAILED(rv)) {
-                // Drop the flag since the cache open failed
-                mCacheAsyncOpenCalled = false;
-            }
         } else {
             // We pass `this` explicitly as a parameter due to the raw pointer
             // to refcounted object in lambda analysis.
             mCacheOpenFunc = [openURI, extension, cacheEntryOpenFlags, cacheStorage] (nsHttpChannel* self) -> void {
                 MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
-                self->mCacheAsyncOpenCalled = true;
                 if (self->mNetworkTriggered) {
                     self->mRaceCacheWithNetwork = true;
                 }
-                nsresult rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
-                if (NS_FAILED(rv)) {
-                    self->mCacheAsyncOpenCalled = false;
-                }
+                cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
             };
 
             mCacheOpenTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -4434,7 +4423,6 @@ nsHttpChannel::OnCacheEntryAvailable(nsICacheEntry *entry,
                                      nsresult status)
 {
     MOZ_ASSERT(NS_IsMainThread());
-    mOnCacheAvailableCalled = true;
 
     nsresult rv;
 
@@ -4988,8 +4976,7 @@ nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry, bool startBufferi
     nsCOMPtr<nsIStreamTransportService> sts(services::GetStreamTransportService());
     rv = sts ? NS_OK : NS_ERROR_NOT_AVAILABLE;
     if (NS_SUCCEEDED(rv)) {
-        rv = sts->CreateInputTransport(stream, int64_t(-1), int64_t(-1),
-                                        true, getter_AddRefs(transport));
+        rv = sts->CreateInputTransport(stream, true, getter_AddRefs(transport));
     }
     if (NS_SUCCEEDED(rv)) {
         rv = transport->OpenInputStream(0, 0, 0, getter_AddRefs(wrapper));
@@ -5128,7 +5115,7 @@ nsHttpChannel::ReadFromCache(bool alreadyMarkedValid)
     nsCOMPtr<nsIInputStream> inputStream = mCacheInputStream.forget();
 
     rv = nsInputStreamPump::Create(getter_AddRefs(mCachePump), inputStream,
-                                   int64_t(-1), int64_t(-1), 0, 0, true);
+                                   0, 0, true);
     if (NS_FAILED(rv)) {
         inputStream->Close();
         return rv;
@@ -6401,8 +6388,8 @@ nsHttpChannel::BeginConnect()
     RefPtr<AltSvcMapping> mapping;
     if (!mConnectionInfo && mAllowAltSvc && // per channel
         !(mLoadFlags & LOAD_FRESH_CONNECTION) &&
-        (scheme.Equals(NS_LITERAL_CSTRING("http")) ||
-         scheme.Equals(NS_LITERAL_CSTRING("https"))) &&
+        (scheme.EqualsLiteral("http") ||
+         scheme.EqualsLiteral("https")) &&
         (!proxyInfo || proxyInfo->IsDirect()) &&
         (mapping = gHttpHandler->GetAltServiceMapping(scheme,
                                                       host, port,
@@ -6429,15 +6416,15 @@ nsHttpChannel::BeginConnect()
         if (consoleService) {
             nsAutoString message(NS_LITERAL_STRING("Alternate Service Mapping found: "));
             AppendASCIItoUTF16(scheme.get(), message);
-            message.Append(NS_LITERAL_STRING("://"));
+            message.AppendLiteral(u"://");
             AppendASCIItoUTF16(host.get(), message);
-            message.Append(NS_LITERAL_STRING(":"));
+            message.AppendLiteral(u":");
             message.AppendInt(port);
-            message.Append(NS_LITERAL_STRING(" to "));
+            message.AppendLiteral(u" to ");
             AppendASCIItoUTF16(scheme.get(), message);
-            message.Append(NS_LITERAL_STRING("://"));
+            message.AppendLiteral(u"://");
             AppendASCIItoUTF16(mapping->AlternateHost().get(), message);
-            message.Append(NS_LITERAL_STRING(":"));
+            message.AppendLiteral(u":");
             message.AppendInt(mapping->AlternatePort());
             consoleService->LogStringMessage(message.get());
         }
@@ -9035,9 +9022,32 @@ nsHttpChannel::ResumeInternal()
                                ToMilliseconds();
 
         if (mCallOnResume) {
-            nsresult rv = AsyncCall(mCallOnResume);
+            // Resume the interrupted procedure first, then resume
+            // the pump to continue process the input stream.
+            RefPtr<nsRunnableMethod<nsHttpChannel>> callOnResume=
+                NewRunnableMethod("CallOnResume", this, mCallOnResume);
+            // Should not resume pump that created after resumption.
+            RefPtr<nsInputStreamPump> transactionPump = mTransactionPump;
+            RefPtr<nsInputStreamPump> cachePump = mCachePump;
+
+            nsresult rv =
+                NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+                    "nsHttpChannel::CallOnResume",
+                    [callOnResume, transactionPump, cachePump]() {
+                        callOnResume->Run();
+
+                        if (transactionPump) {
+                            transactionPump->Resume();
+                        }
+
+                        if (cachePump) {
+                            cachePump->Resume();
+                        }
+                    })
+                );
             mCallOnResume = nullptr;
             NS_ENSURE_SUCCESS(rv, rv);
+            return rv;
         }
     }
 
@@ -9404,7 +9414,7 @@ nsHttpChannel::TriggerNetwork()
         return NS_OK;
     }
 
-    if (mCacheAsyncOpenCalled && !mOnCacheAvailableCalled) {
+    if (AwaitingCacheCallbacks()) {
         mRaceCacheWithNetwork = sRCWNEnabled;
     }
 

@@ -135,7 +135,6 @@
 #include "nsStreamUtils.h"
 #include "nsIController.h"
 #include "nsPICommandUpdater.h"
-#include "nsIDOMHTMLAnchorElement.h"
 #include "nsIWebBrowserChrome3.h"
 #include "nsITabChild.h"
 #include "nsISiteSecurityService.h"
@@ -363,7 +362,7 @@ ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback, void* aClosure)
     return;
   }
 
-  nsCOMPtr<nsIAtom> pingAtom = NS_Atomize("ping");
+  RefPtr<nsIAtom> pingAtom = NS_Atomize("ping");
   if (!pingAtom) {
     return;
   }
@@ -1389,8 +1388,16 @@ nsDocShell::LoadURI(nsIURI* aURI,
       }
 
       // Make some decisions on the child frame's loadType based on the
-      // parent's loadType.
-      if (!mCurrentURI) {
+      // parent's loadType, if the subframe hasn't loaded anything into it.
+      //
+      // In some cases privileged scripts may try to get the DOMWindow
+      // reference of this docshell before the loading starts, causing the
+      // initial about:blank content viewer being created and mCurrentURI being
+      // set. To handle this case we check if mCurrentURI is about:blank and
+      // currentSHEntry is null.
+      nsCOMPtr<nsISHEntry> currentChildEntry;
+      GetCurrentSHEntry(getter_AddRefs(currentChildEntry), &oshe);
+      if (!mCurrentURI || (NS_IsAboutBlank(mCurrentURI) && !currentChildEntry)) {
         // This is a newly created frame. Check for exception cases first.
         // By default the subframe will inherit the parent's loadType.
         if (shEntry && (parentLoadType == LOAD_NORMAL ||
@@ -1437,12 +1444,16 @@ nsDocShell::LoadURI(nsIURI* aURI,
           loadType = parentLoadType;
         }
       } else {
-        // This is a pre-existing subframe. If the load was not originally
-        // initiated by session history, (if (!shEntry) condition succeeded) and
-        // mCurrentURI is not null, it is possible that a parent's onLoadHandler
-        // or even self's onLoadHandler is loading a new page in this child.
-        // Check parent's and self's busy flag  and if it is set, we don't want
-        // this onLoadHandler load to get in to session history.
+        // This is a pre-existing subframe. If
+        // 1. The load of this frame was not originally initiated by session
+        //    history directly (i.e. (!shEntry) condition succeeded, but it can
+        //    still be a history load on parent which causes this frame being
+        //    loaded), and
+        // 2. mCurrentURI is not null, nor the initial about:blank,
+        // it is possible that a parent's onLoadHandler or even self's
+        // onLoadHandler is loading a new page in this child. Check parent's and
+        // self's busy flag and if it is set, we don't want this onLoadHandler
+        // load to get in to session history.
         uint32_t parentBusy = BUSY_FLAGS_NONE;
         uint32_t selfBusy = BUSY_FLAGS_NONE;
         parentDS->GetBusyFlags(&parentBusy);
@@ -6632,16 +6643,14 @@ nsDocShell::GetMainWidget(nsIWidget** aMainWidget)
 }
 
 NS_IMETHODIMP
-nsDocShell::GetTitle(char16_t** aTitle)
+nsDocShell::GetTitle(nsAString& aTitle)
 {
-  NS_ENSURE_ARG_POINTER(aTitle);
-
-  *aTitle = ToNewUnicode(mTitle);
+  aTitle = mTitle;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShell::SetTitle(const char16_t* aTitle)
+nsDocShell::SetTitle(const nsAString& aTitle)
 {
   // Store local title
   mTitle = aTitle;
@@ -8324,16 +8333,11 @@ nsDocShell::CanSavePresentation(uint32_t aLoadType,
     return false;
   }
 
-  // Don't cache the content viewer if we're in a subframe and the subframe
-  // pref is disabled.
-  bool cacheFrames =
-    Preferences::GetBool("browser.sessionhistory.cache_subframes", false);
-  if (!cacheFrames) {
-    nsCOMPtr<nsIDocShellTreeItem> root;
-    GetSameTypeParent(getter_AddRefs(root));
-    if (root && root != this) {
-      return false;  // this is a subframe load
-    }
+  // Don't cache the content viewer if we're in a subframe.
+  nsCOMPtr<nsIDocShellTreeItem> root;
+  GetSameTypeParent(getter_AddRefs(root));
+  if (root && root != this) {
+    return false;  // this is a subframe load
   }
 
   // If the document does not want its presentation cached, then don't.
@@ -10979,7 +10983,7 @@ IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
   rv = resultURI->GetSpec(tmpResultSpec);
   NS_ENSURE_SUCCESS(rv, false);
   // replace http with https
-  tmpResultSpec.Replace(0, 4, "https");
+  tmpResultSpec.ReplaceLiteral(0, 4, "https");
 
   nsCOMPtr<nsIURI> tmpResultURI;
   rv = NS_NewURI(getter_AddRefs(tmpResultURI), tmpResultSpec);
@@ -14430,7 +14434,7 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
 
   // If this is an anchor element, grab its type property to use as a hint
   nsAutoString typeHint;
-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor(do_QueryInterface(aContent));
+  RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromContent(aContent);
   if (anchor) {
     anchor->GetType(typeHint);
     NS_ConvertUTF16toUTF8 utf8Hint(typeHint);

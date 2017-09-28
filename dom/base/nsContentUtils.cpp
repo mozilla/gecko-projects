@@ -50,7 +50,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLContentElement.h"
-#include "mozilla/dom/HTMLShadowElement.h"
+#include "mozilla/dom/IDTracker.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -193,7 +193,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsPresContext.h"
 #include "nsPrintfCString.h"
-#include "nsReferencedElement.h"
 #include "nsSandboxFlags.h"
 #include "nsScriptSecurityManager.h"
 #include "nsSerializationHelper.h"
@@ -256,9 +255,9 @@ nsNameSpaceManager *nsContentUtils::sNameSpaceManager;
 nsIIOService *nsContentUtils::sIOService;
 nsIUUIDGenerator *nsContentUtils::sUUIDGenerator;
 nsIConsoleService *nsContentUtils::sConsoleService;
-nsDataHashtable<nsISupportsHashKey, EventNameMapping>* nsContentUtils::sAtomEventTable = nullptr;
+nsDataHashtable<nsRefPtrHashKey<nsIAtom>, EventNameMapping>* nsContentUtils::sAtomEventTable = nullptr;
 nsDataHashtable<nsStringHashKey, EventNameMapping>* nsContentUtils::sStringEventTable = nullptr;
-nsCOMArray<nsIAtom>* nsContentUtils::sUserDefinedEvents = nullptr;
+nsTArray<RefPtr<nsIAtom>>* nsContentUtils::sUserDefinedEvents = nullptr;
 nsIStringBundleService *nsContentUtils::sStringBundleService;
 nsIStringBundle *nsContentUtils::sStringBundles[PropertiesFile_COUNT];
 nsIContentPolicy *nsContentUtils::sContentPolicyService;
@@ -954,11 +953,11 @@ nsContentUtils::InitializeEventTable() {
     { nullptr }
   };
 
-  sAtomEventTable = new nsDataHashtable<nsISupportsHashKey, EventNameMapping>(
+  sAtomEventTable = new nsDataHashtable<nsRefPtrHashKey<nsIAtom>, EventNameMapping>(
       ArrayLength(eventArray));
   sStringEventTable = new nsDataHashtable<nsStringHashKey, EventNameMapping>(
       ArrayLength(eventArray));
-  sUserDefinedEvents = new nsCOMArray<nsIAtom>(64);
+  sUserDefinedEvents = new nsTArray<RefPtr<nsIAtom>>(64);
 
   // Subtract one from the length because of the trailing null
   for (uint32_t i = 0; i < ArrayLength(eventArray) - 1; ++i) {
@@ -1635,7 +1634,7 @@ nsContentUtils::SandboxFlagsToString(uint32_t aFlags, nsAString& aString)
 #define SANDBOX_KEYWORD(string, atom, flags)                \
   if (!(aFlags & (flags))) {                                \
     if (!aString.IsEmpty()) {                               \
-      aString.Append(NS_LITERAL_STRING(" "));               \
+      aString.AppendLiteral(u" ");                          \
     }                                                       \
     aString.Append(nsDependentAtomString(nsGkAtoms::atom)); \
   }
@@ -3417,7 +3416,7 @@ nsContentUtils::GetNodeInfoFromQName(const nsAString& aNamespaceURI,
     const char16_t* end;
     qName.EndReading(end);
 
-    nsCOMPtr<nsIAtom> prefix =
+    RefPtr<nsIAtom> prefix =
       NS_AtomizeMainThread(Substring(qName.get(), colon));
 
     rv = aNodeInfoManager->GetNodeInfo(Substring(colon + 1, end), prefix,
@@ -4387,18 +4386,18 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
   }
 
   // If we have cached lots of user defined event names, clear some of them.
-  if (sUserDefinedEvents->Count() > 127) {
-    while (sUserDefinedEvents->Count() > 64) {
-      nsIAtom* first = sUserDefinedEvents->ObjectAt(0);
+  if (sUserDefinedEvents->Length() > 127) {
+    while (sUserDefinedEvents->Length() > 64) {
+      nsIAtom* first = sUserDefinedEvents->ElementAt(0);
       sStringEventTable->Remove(Substring(nsDependentAtomString(first), 2));
-      sUserDefinedEvents->RemoveObjectAt(0);
+      sUserDefinedEvents->RemoveElementAt(0);
     }
   }
 
   *aEventMessage = eUnidentifiedEvent;
-  nsCOMPtr<nsIAtom> atom =
+  RefPtr<nsIAtom> atom =
     NS_AtomizeMainThread(NS_LITERAL_STRING("on") + aName);
-  sUserDefinedEvents->AppendObject(atom);
+  sUserDefinedEvents->AppendElement(atom);
   mapping.mAtom = atom;
   mapping.mMessage = eUnidentifiedEvent;
   mapping.mType = EventNameType_None;
@@ -4425,7 +4424,7 @@ nsContentUtils::GetEventMessageAndAtomForListener(const nsAString& aName,
   // lookups, start from it.
   EventNameMapping mapping;
   EventMessage msg = eUnidentifiedEvent;
-  nsCOMPtr<nsIAtom> atom;
+  RefPtr<nsIAtom> atom;
   if (sStringEventTable->Get(aName, &mapping)) {
     if (mapping.mMaybeSpecialSVGorSMILEvent) {
       // Try the atom version so that we should get the right message for
@@ -4631,7 +4630,7 @@ nsContentUtils::MatchElementId(nsIContent *aContent, const nsAString& aId)
   NS_PRECONDITION(!aId.IsEmpty(), "Will match random elements");
 
   // ID attrs are generally stored as atoms, so just atomize this up front
-  nsCOMPtr<nsIAtom> id(NS_Atomize(aId));
+  RefPtr<nsIAtom> id(NS_Atomize(aId));
   if (!id) {
     // OOM, so just bail
     return nullptr;
@@ -5440,7 +5439,8 @@ nsContentUtils::NotifyInstalledMenuKeyboardListener(bool aInstalling)
   IMEStateManager::OnInstalledMenuKeyboardListener(aInstalling);
 }
 
-static bool SchemeIs(nsIURI* aURI, const char* aScheme)
+/* static */ bool
+nsContentUtils::SchemeIs(nsIURI* aURI, const char* aScheme)
 {
   nsCOMPtr<nsIURI> baseURI = NS_GetInnermostURI(aURI);
   NS_ENSURE_TRUE(baseURI, false);
@@ -5825,7 +5825,7 @@ static void ProcessViewportToken(nsIDocument *aDocument,
 
   /* Check for known keys. If we find a match, insert the appropriate
    * information into the document header. */
-  nsCOMPtr<nsIAtom> key_atom = NS_Atomize(key);
+  RefPtr<nsIAtom> key_atom = NS_Atomize(key);
   if (key_atom == nsGkAtoms::height)
     aDocument->SetHeaderData(nsGkAtoms::viewport_height, value);
   else if (key_atom == nsGkAtoms::width)
@@ -7193,7 +7193,7 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
 
   // The pattern has to match the entire value.
-  aPattern.Insert(NS_LITERAL_STRING("^(?:"), 0);
+  aPattern.InsertLiteral(u"^(?:", 0);
   aPattern.AppendLiteral(")$");
 
   JS::Rooted<JSObject*> re(cx,
@@ -7565,20 +7565,6 @@ nsContentUtils::HasDistributedChildren(nsIContent* aContent)
     // Children of a shadow root host are distributed
     // to content insertion points in the shadow root.
     return true;
-  }
-
-  ShadowRoot* shadow = ShadowRoot::FromNode(aContent);
-  if (shadow) {
-    // Children of a shadow root are distributed to
-    // the shadow insertion point of the younger shadow root.
-    return shadow->GetYoungerShadowRoot();
-  }
-
-  HTMLShadowElement* shadowEl = HTMLShadowElement::FromContent(aContent);
-  if (shadowEl && shadowEl->IsInsertionPoint()) {
-    // Children of a shadow insertion points are distributed
-    // to the insertion points in the older shadow root.
-    return shadowEl->GetOlderShadowRoot();
   }
 
   HTMLContentElement* contentEl = HTMLContentElement::FromContent(aContent);
@@ -10137,13 +10123,8 @@ nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
                                                     nsIAtom* aExtensionType,
                                                     nsIAtom* aAttrName)
 {
-  nsString extType = nsDependentAtomString(aExtensionType);
-  NodeInfo *ni = aCustomElement->NodeInfo();
-
   CustomElementDefinition* definition =
-    LookupCustomElementDefinition(aCustomElement->OwnerDoc(), ni->LocalName(),
-                                  ni->NamespaceID(),
-                                  extType.IsEmpty() ? nullptr : &extType);
+    aCustomElement->GetCustomElementDefinition();
 
   // Custom element not defined yet or attribute is not in the observed
   // attribute list.
@@ -10155,19 +10136,14 @@ nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
 }
 
 /* static */ void
-nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
-                                         nsIDocument::ElementCallbackType aType,
-                                         Element* aCustomElement,
-                                         LifecycleCallbackArgs* aArgs,
-                                         CustomElementDefinition* aDefinition)
+nsContentUtils::SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
+                                    Element* aElement,
+                                    CustomElementDefinition* aDefinition)
 {
-  MOZ_ASSERT(aDoc);
+  MOZ_ASSERT(aElement);
 
-  if (!aDoc->GetDocShell()) {
-    return;
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> window(aDoc->GetInnerWindow());
+  nsIDocument* doc = aElement->OwnerDoc();
+  nsPIDOMWindowInner* window(doc->GetInnerWindow());
   if (!window) {
     return;
   }
@@ -10177,7 +10153,40 @@ nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
     return;
   }
 
-  registry->EnqueueLifecycleCallback(aType, aCustomElement, aArgs, aDefinition);
+  registry->SyncInvokeReactions(aType, aElement, aDefinition);
+}
+
+/* static */ void
+nsContentUtils::EnqueueUpgradeReaction(Element* aElement,
+                                       CustomElementDefinition* aDefinition)
+{
+  MOZ_ASSERT(aElement);
+
+  nsIDocument* doc = aElement->OwnerDoc();
+
+  // No DocGroup means no custom element reactions stack.
+  if (!doc->GetDocGroup()) {
+    return;
+  }
+
+  CustomElementReactionsStack* stack =
+    doc->GetDocGroup()->CustomElementReactionsStack();
+  stack->EnqueueUpgradeReaction(aElement, aDefinition);
+}
+
+/* static */ void
+nsContentUtils::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
+                                         Element* aCustomElement,
+                                         LifecycleCallbackArgs* aArgs,
+                                         CustomElementDefinition* aDefinition)
+{
+  // No DocGroup means no custom element reactions stack.
+  if (!aCustomElement->OwnerDoc()->GetDocGroup()) {
+    return;
+  }
+
+  CustomElementRegistry::EnqueueLifecycleCallback(aType, aCustomElement, aArgs,
+                                                  aDefinition);
 }
 
 /* static */ void
@@ -10421,6 +10430,44 @@ nsContentUtils::AppendNativeAnonymousChildren(
   }
 }
 
+/* static */ bool
+nsContentUtils::GetLoadingPrincipalForXULNode(nsIContent* aLoadingNode,
+                                              nsIPrincipal** aLoadingPrincipal)
+{
+  MOZ_ASSERT(aLoadingNode);
+  MOZ_ASSERT(aLoadingPrincipal);
+
+  bool result = false;
+  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingNode->NodePrincipal();
+  nsAutoString loadingStr;
+  aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::loadingprincipal,
+                        loadingStr);
+  if (loadingStr.IsEmpty()) {
+    // Fall back to mContent's principal (SystemPrincipal) if 'loadingprincipal'
+    // isn't specified.
+    loadingPrincipal.forget(aLoadingPrincipal);
+    return result;
+  }
+
+  nsCOMPtr<nsISupports> serializedPrincipal;
+  NS_DeserializeObject(NS_ConvertUTF16toUTF8(loadingStr),
+                       getter_AddRefs(serializedPrincipal));
+  loadingPrincipal = do_QueryInterface(serializedPrincipal);
+  if (loadingPrincipal) {
+    // We only allow specifying loadingprincipal attribute on a node loaded by
+    // SystemPrincipal.
+    MOZ_ASSERT(nsContentUtils::IsSystemPrincipal(aLoadingNode->NodePrincipal()),
+               "aLoadingNode Should be loaded with SystemPrincipal");
+
+    result = true;
+  } else {
+    // Fallback if the deserialization is failed.
+    loadingPrincipal = aLoadingNode->NodePrincipal();
+  }
+
+  loadingPrincipal.forget(aLoadingPrincipal);
+  return result;
+}
 
 /* static */ void
 nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
@@ -10430,38 +10477,23 @@ nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
 {
   MOZ_ASSERT(aRequestContextID);
 
-  // Use the serialized loadingPrincipal from the image element. Fall back
-  // to mContent's principal (SystemPrincipal) if not available.
-  aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingNode->NodePrincipal();
-  nsAutoString imageLoadingPrincipal;
-  aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::loadingprincipal,
-                        imageLoadingPrincipal);
-  if (!imageLoadingPrincipal.IsEmpty()) {
-    nsCOMPtr<nsISupports> serializedPrincipal;
-    NS_DeserializeObject(NS_ConvertUTF16toUTF8(imageLoadingPrincipal),
-                         getter_AddRefs(serializedPrincipal));
-    loadingPrincipal = do_QueryInterface(serializedPrincipal);
+  bool result = GetLoadingPrincipalForXULNode(aLoadingNode, aLoadingPrincipal);
+  if (result) {
+    // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
+    // indicating it's a favicon loading.
+    aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
 
-    if (loadingPrincipal) {
-      // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
-      // indicating it's a favicon loading.
-      aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
-
-      nsAutoString requestContextID;
-      aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::requestcontextid,
-                            requestContextID);
-      nsresult rv;
-      int64_t val  = requestContextID.ToInteger64(&rv);
-      *aRequestContextID = NS_SUCCEEDED(rv)
-        ? val
-        : 0;
-    } else {
-      // Fallback if the deserialization is failed.
-      loadingPrincipal = aLoadingNode->NodePrincipal();
-    }
+    nsAutoString requestContextID;
+    aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::requestcontextid,
+                          requestContextID);
+    nsresult rv;
+    int64_t val  = requestContextID.ToInteger64(&rv);
+    *aRequestContextID = NS_SUCCEEDED(rv)
+      ? val
+      : 0;
+  } else {
+    aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
   }
-  loadingPrincipal.forget(aLoadingPrincipal);
 }
 
 /* static */ nsresult

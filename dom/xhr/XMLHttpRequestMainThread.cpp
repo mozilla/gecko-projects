@@ -984,9 +984,18 @@ XMLHttpRequestMainThread::GetStatusText(nsACString& aStatusText,
 }
 
 void
+XMLHttpRequestMainThread::TerminateOngoingFetch() {
+  if ((mState == State::opened && mFlagSend) ||
+      mState == State::headers_received || mState == State::loading) {
+    CloseRequest();
+  }
+}
+
+void
 XMLHttpRequestMainThread::CloseRequest()
 {
   mWaitingForOnStopRequest = false;
+  mErrorLoad = ErrorType::eTerminated;
   if (mChannel) {
     mChannel->Cancel(NS_BINDING_ABORTED);
   }
@@ -1087,7 +1096,7 @@ XMLHttpRequestMainThread::Abort(ErrorResult& aRv)
   mFlagAborted = true;
 
   // Step 1
-  CloseRequest();
+  TerminateOngoingFetch();
 
   // Step 2
   if ((mState == State::opened && mFlagSend) ||
@@ -1329,6 +1338,7 @@ XMLHttpRequestMainThread::GetLoadGroup() const
 nsresult
 XMLHttpRequestMainThread::FireReadystatechangeEvent()
 {
+  MOZ_ASSERT(mState != State::unsent);
   RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
   event->InitEvent(kLiteralString_readystatechange, false, false);
   // We assume anyone who managed to call CreateReadystatechangeEvent is trusted
@@ -1584,7 +1594,7 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod,
   }
 
   // Step 10
-  CloseRequest();
+  TerminateOngoingFetch();
 
   // Step 11
   // timeouts are handled without a flag
@@ -1881,7 +1891,7 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Fire the first progress event/loading state change
-  if (mState != State::loading) {
+  if (mState == State::headers_received) {
     ChangeState(State::loading);
     if (!mFlagSynchronous) {
       DispatchProgressEvent(this, ProgressEventType::progress,
@@ -1971,7 +1981,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
   // Fallback to 'application/octet-stream'
   nsAutoCString type;
   channel->GetContentType(type);
-  if (type.Equals(UNKNOWN_CONTENT_TYPE)) {
+  if (type.EqualsLiteral(UNKNOWN_CONTENT_TYPE)) {
     channel->SetContentType(NS_LITERAL_CSTRING(APPLICATION_OCTET_STREAM));
   }
 
@@ -2713,7 +2723,7 @@ XMLHttpRequestMainThread::InitiateFetch(nsIInputStream* aUploadStream,
   nsAutoCString contentType;
   if (NS_FAILED(mChannel->GetContentType(contentType)) ||
       contentType.IsEmpty() ||
-      contentType.Equals(UNKNOWN_CONTENT_TYPE)) {
+      contentType.EqualsLiteral(UNKNOWN_CONTENT_TYPE)) {
     mChannel->SetContentType(NS_LITERAL_CSTRING("text/xml"));
   }
 

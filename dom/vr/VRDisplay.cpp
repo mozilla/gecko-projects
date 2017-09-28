@@ -541,7 +541,8 @@ VRDisplay::RequestPresent(const nsTArray<VRLayer>& aLayers,
   if (!EventStateManager::IsHandlingUserInput() &&
       !isChromePresentation &&
       !IsHandlingVRNavigationEvent() &&
-      gfxPrefs::VRRequireGesture()) {
+      gfxPrefs::VRRequireGesture() &&
+      !IsPresenting()) {
     // The WebVR API states that if called outside of a user gesture, the
     // promise must be rejected.  We allow VR presentations to start within
     // trusted events such as vrdisplayactivate, which triggers in response to
@@ -560,7 +561,11 @@ VRDisplay::RequestPresent(const nsTArray<VRLayer>& aLayers,
     // use cases.
     promise->MaybeRejectWithUndefined();
   } else {
-    mPresentation = mClient->BeginPresentation(aLayers, presentationGroup);
+    if (mPresentation) {
+      mPresentation->UpdateLayers(aLayers);
+    } else {
+      mPresentation = mClient->BeginPresentation(aLayers, presentationGroup);
+    }
     mFrameInfo.Clear();
     promise->MaybeResolve(JS::UndefinedHandleValue);
   }
@@ -977,7 +982,7 @@ VRSubmitFrameResult::WrapObject(JSContext* aCx,
 }
 
 void
-VRSubmitFrameResult::Update(uint32_t aFrameNum, const nsACString& aBase64Image)
+VRSubmitFrameResult::Update(uint64_t aFrameNum, const nsACString& aBase64Image)
 {
   mFrameNum = aFrameNum;
   mBase64Image = NS_ConvertASCIItoUTF16(aBase64Image);

@@ -67,7 +67,7 @@ impl Device {
             viewport_size,
             device_pixel_ratio,
             // FIXME(bz): Seems dubious?
-            root_font_size: AtomicIsize::new(font_size::get_initial_value().0.to_i32_au() as isize),
+            root_font_size: AtomicIsize::new(font_size::get_initial_value().size().0 as isize),
             used_root_font_size: AtomicBool::new(false),
             used_viewport_units: AtomicBool::new(false),
         }
@@ -265,7 +265,7 @@ impl Range<specified::Length> {
             font_metrics_provider: &ServoMetricsProvider,
             in_media_query: true,
             cached_system_font: None,
-            quirks_mode: quirks_mode,
+            quirks_mode,
             for_smil_animation: false,
             for_non_inherited_property: None,
             rule_cache_conditions: RefCell::new(&mut conditions),

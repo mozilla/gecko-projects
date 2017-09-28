@@ -1370,7 +1370,7 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
 
             JS_DefineProperty(cx, glob, "__LOCATION__",
                               GetLocationProperty, nullptr,
-                              JSPROP_SHARED);
+                              0);
 
             {
                 // We are almost certainly going to run script here, so we need an
@@ -1431,10 +1431,11 @@ XPCShellDirProvider::SetGREDirs(nsIFile* greDir)
 {
     mGREDir = greDir;
     mGREDir->Clone(getter_AddRefs(mGREBinDir));
+
 #ifdef XP_MACOSX
     nsAutoCString leafName;
     mGREDir->GetNativeLeafName(leafName);
-    if (leafName.Equals("Resources")) {
+    if (leafName.EqualsLiteral("Resources")) {
         mGREBinDir->SetNativeLeafName(NS_LITERAL_CSTRING("MacOS"));
     }
 #endif

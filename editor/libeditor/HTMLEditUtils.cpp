@@ -18,11 +18,11 @@
 #include "nsGkAtoms.h"                  // for nsGkAtoms, nsGkAtoms::a, etc.
 #include "nsHTMLTags.h"
 #include "nsIAtom.h"                    // for nsIAtom
-#include "nsIDOMHTMLAnchorElement.h"    // for nsIDOMHTMLAnchorElement
 #include "nsIDOMNode.h"                 // for nsIDOMNode
 #include "nsNameSpaceManager.h"        // for kNameSpaceID_None
 #include "nsLiteralString.h"            // for NS_LITERAL_STRING
 #include "nsString.h"                   // for nsAutoString
+#include "mozilla/dom/HTMLAnchorElement.h"
 
 namespace mozilla {
 
@@ -88,7 +88,7 @@ bool
 HTMLEditUtils::IsNodeThatCanOutdent(nsIDOMNode* aNode)
 {
   MOZ_ASSERT(aNode);
-  nsCOMPtr<nsIAtom> nodeAtom = EditorBase::GetTag(aNode);
+  RefPtr<nsIAtom> nodeAtom = EditorBase::GetTag(aNode);
   return (nodeAtom == nsGkAtoms::ul)
       || (nodeAtom == nsGkAtoms::ol)
       || (nodeAtom == nsGkAtoms::dl)
@@ -336,14 +336,18 @@ HTMLEditUtils::IsLink(nsINode* aNode)
 {
   MOZ_ASSERT(aNode);
 
-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor = do_QueryInterface(aNode);
-  if (anchor) {
-    nsAutoString tmpText;
-    if (NS_SUCCEEDED(anchor->GetHref(tmpText)) && !tmpText.IsEmpty()) {
-      return true;
-    }
+  if (!aNode->IsContent()) {
+    return false;
   }
-  return false;
+
+  RefPtr<HTMLAnchorElement> anchor = HTMLAnchorElement::FromContentOrNull(aNode->AsContent());
+  if (!anchor) {
+    return false;
+  }
+
+  nsAutoString tmpText;
+  anchor->GetHref(tmpText);
+  return !tmpText.IsEmpty();
 }
 
 bool
@@ -720,7 +724,6 @@ static const ElementInfo kElements[eHTMLTag_userdefined] = {
        GROUP_LEAF),
   ELEM(section, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(select, true, false, GROUP_FORMCONTROL, GROUP_SELECT_CONTENT),
-  ELEM(shadow, true, false, GROUP_NONE, GROUP_INLINE_ELEMENT),
   ELEM(small, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
   ELEM(source, false, false, GROUP_PICTURE_CONTENT, GROUP_NONE),
   ELEM(span, true, true, GROUP_SPECIAL, GROUP_INLINE_ELEMENT),

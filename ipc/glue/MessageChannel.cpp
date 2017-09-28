@@ -673,13 +673,17 @@ MessageChannel::CanSend() const
 void
 MessageChannel::WillDestroyCurrentMessageLoop()
 {
-#if !defined(ANDROID)
+#if defined(DEBUG)
 #if defined(MOZ_CRASHREPORTER)
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ProtocolName"),
                                        nsDependentCString(mName));
 #endif
     MOZ_CRASH("MessageLoop destroyed before MessageChannel that's bound to it");
 #endif
+
+    // Clear mWorkerThread to avoid posting to it in the future.
+    MonitorAutoLock lock(*mMonitor);
+    mWorkerLoop = nullptr;
 }
 
 void
@@ -1014,7 +1018,7 @@ MessageChannel::SendBuildID()
     MonitorAutoLock lock(*mMonitor);
     if (!Connected()) {
         ReportConnectionError("MessageChannel", msg);
-        MOZ_CRASH();
+        return;
     }
     mLink->SendMessage(msg.forget());
 }
@@ -1894,7 +1898,7 @@ MessageChannel::RunMessage(MessageTask& aTask)
 NS_IMPL_ISUPPORTS_INHERITED(MessageChannel::MessageTask, CancelableRunnable, nsIRunnablePriority)
 
 MessageChannel::MessageTask::MessageTask(MessageChannel* aChannel, Message&& aMessage)
-  : CancelableRunnable(StringFromIPCMessageType(aMessage.type()))
+  : CancelableRunnable(aMessage.name())
   , mChannel(aChannel)
   , mMessage(Move(aMessage))
   , mScheduled(false)
@@ -1964,7 +1968,7 @@ MessageChannel::MessageTask::Post()
 
     if (eventTarget) {
         eventTarget->Dispatch(self.forget(), NS_DISPATCH_NORMAL);
-    } else {
+    } else if (mChannel->mWorkerLoop) {
         mChannel->mWorkerLoop->PostTask(self.forget());
     }
 }
@@ -1998,7 +2002,7 @@ MessageChannel::MessageTask::GetPriority(uint32_t* aPriority)
 }
 
 bool
-MessageChannel::MessageTask::GetAffectedSchedulerGroups(nsTArray<RefPtr<SchedulerGroup>>& aGroups)
+MessageChannel::MessageTask::GetAffectedSchedulerGroups(SchedulerGroupSet& aGroups)
 {
     if (!mChannel) {
         return false;
@@ -2406,7 +2410,9 @@ MessageChannel::OnChannelConnected(int32_t peer_id)
     mPeerPidSet = true;
     mPeerPid = peer_id;
     RefPtr<CancelableRunnable> task = mOnChannelConnectedTask;
-    mWorkerLoop->PostTask(task.forget());
+    if (mWorkerLoop) {
+        mWorkerLoop->PostTask(task.forget());
+    }
 }
 
 void
@@ -2499,7 +2505,7 @@ MessageChannel::MaybeHandleError(Result code, const Message& aMsg, const char* c
     }
 
     char reason[512];
-    const char* msgname = StringFromIPCMessageType(aMsg.type());
+    const char* msgname = aMsg.name();
     if (msgname[0] == '?') {
         SprintfLiteral(reason,"(msgtype=0x%X) %s", aMsg.type(), errorMsg);
     } else {
@@ -2599,7 +2605,9 @@ MessageChannel::OnNotifyMaybeChannelError()
         &MessageChannel::OnNotifyMaybeChannelError);
       RefPtr<Runnable> task = mChannelErrorTask;
       // 10 ms delay is completely arbitrary
-      mWorkerLoop->PostDelayedTask(task.forget(), 10);
+      if (mWorkerLoop) {
+          mWorkerLoop->PostDelayedTask(task.forget(), 10);
+      }
       return;
     }
 
@@ -2611,7 +2619,7 @@ MessageChannel::PostErrorNotifyTask()
 {
     mMonitor->AssertCurrentThreadOwns();
 
-    if (mChannelErrorTask)
+    if (mChannelErrorTask || !mWorkerLoop)
         return;
 
     // This must be the last code that runs on this thread!

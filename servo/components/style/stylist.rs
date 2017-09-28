@@ -11,7 +11,7 @@ use dom::TElement;
 use element_state::ElementState;
 use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")]
-use gecko_bindings::structs::{nsIAtom, ServoStyleSetSizes, StyleRuleInclusion};
+use gecko_bindings::structs::{ServoStyleSetSizes, StyleRuleInclusion};
 use hashglobe::FailedAllocationError;
 use invalidation::element::invalidation_map::InvalidationMap;
 use invalidation::media_queries::{EffectiveMediaQueryResults, ToMediaListKey};
@@ -174,7 +174,7 @@ struct UserAgentCascadeData {
 impl UserAgentCascadeData {
     #[cfg(feature = "gecko")]
     fn add_size_of(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
-        self.cascade_data.add_size_of_children(ops, sizes);
+        self.cascade_data.add_size_of(ops, sizes);
         sizes.mPrecomputedPseudos += self.precomputed_pseudo_element_decls.size_of(ops);
     }
 }
@@ -329,9 +329,9 @@ impl DocumentCascadeData {
 
     /// Measures heap usage.
     #[cfg(feature = "gecko")]
-    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
-        self.user.add_size_of_children(ops, sizes);
-        self.author.add_size_of_children(ops, sizes);
+    pub fn add_size_of(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.user.add_size_of(ops, sizes);
+        self.author.add_size_of(ops, sizes);
     }
 }
 
@@ -499,8 +499,6 @@ impl Stylist {
 
     /// Flush the list of stylesheets if they changed, ensuring the stylist is
     /// up-to-date.
-    ///
-    /// FIXME(emilio): Move the `ua_sheets` to the Stylist too?
     pub fn flush<E>(
         &mut self,
         guards: &StylesheetGuards,
@@ -966,12 +964,6 @@ impl Stylist {
         )
     }
 
-    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
-        self.cascade_data
-            .iter_origins()
-            .any(|(d, _)| d.has_rules_for_pseudo(pseudo))
-    }
-
     /// Computes the cascade inputs for a lazily-cascaded pseudo-element.
     ///
     /// See the documentation on lazy pseudo-elements in
@@ -989,10 +981,6 @@ impl Stylist {
     {
         let pseudo = pseudo.canonical();
         debug_assert!(pseudo.is_lazy());
-
-        if !self.has_rules_for_pseudo(&pseudo) {
-            return CascadeInputs::default()
-        }
 
         // Apply the selector flags. We should be in sequential mode
         // already, so we can directly apply the parent flags.
@@ -1027,10 +1015,12 @@ impl Stylist {
         let mut inputs = CascadeInputs::default();
         let mut declarations = ApplicableDeclarationList::new();
         let mut matching_context =
-            MatchingContext::new(MatchingMode::ForStatelessPseudoElement,
-                                 None,
-                                 None,
-                                 self.quirks_mode);
+            MatchingContext::new(
+                MatchingMode::ForStatelessPseudoElement,
+                None,
+                None,
+                self.quirks_mode,
+            );
 
         self.push_applicable_declarations(
             element,
@@ -1193,39 +1183,6 @@ impl Stylist {
         self.quirks_mode = quirks_mode;
     }
 
-    /// Returns the applicable CSS declarations for the given element by
-    /// treating us as an XBL stylesheet-only stylist.
-    pub fn push_applicable_declarations_as_xbl_only_stylist<E, V>(
-        &self,
-        element: &E,
-        pseudo_element: Option<&PseudoElement>,
-        applicable_declarations: &mut V
-    )
-    where
-        E: TElement,
-        V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock>,
-    {
-        let mut matching_context =
-            MatchingContext::new(MatchingMode::Normal, None, None, self.quirks_mode);
-        let mut dummy_flag_setter = |_: &E, _: ElementSelectorFlags| {};
-
-        let rule_hash_target = element.rule_hash_target();
-
-        // nsXBLPrototypeResources::LoadResources() loads Chrome XBL style
-        // sheets under eAuthorSheetFeatures level.
-        if let Some(map) = self.cascade_data.author.borrow_for_pseudo(pseudo_element) {
-            map.get_all_matching_rules(
-                element,
-                &rule_hash_target,
-                applicable_declarations,
-                &mut matching_context,
-                self.quirks_mode,
-                &mut dummy_flag_setter,
-                CascadeLevel::XBL,
-            );
-        }
-    }
-
     /// Returns the applicable CSS declarations for the given element.
     ///
     /// This corresponds to `ElementRuleCollector` in WebKit.
@@ -1315,11 +1272,21 @@ impl Stylist {
         }
 
         // Step 3b: XBL rules.
-        let cut_off_inheritance =
-            element.get_declarations_from_xbl_bindings(
-                pseudo_element,
-                applicable_declarations,
-            );
+        let cut_off_inheritance = element.each_xbl_stylist(|stylist| {
+            // ServoStyleSet::CreateXBLServoStyleSet() loads XBL style sheets
+            // under eAuthorSheetFeatures level.
+            if let Some(map) = stylist.cascade_data.author.borrow_for_pseudo(pseudo_element) {
+                map.get_all_matching_rules(
+                    element,
+                    &rule_hash_target,
+                    applicable_declarations,
+                    context,
+                    self.quirks_mode,
+                    flags_setter,
+                    CascadeLevel::XBL,
+                );
+            }
+        });
 
         if rule_hash_target.matches_user_and_author_rules() && !only_default_rules {
             // Gecko skips author normal rules if cutting off inheritance.
@@ -1530,8 +1497,8 @@ impl Stylist {
 
     /// Measures heap usage.
     #[cfg(feature = "gecko")]
-    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
-        self.cascade_data.add_size_of_children(ops, sizes);
+    pub fn add_size_of(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+        self.cascade_data.add_size_of(ops, sizes);
         sizes.mRuleTree += self.rule_tree.size_of(ops);
 
         // We may measure other fields in the future if DMD says it's worth it.
@@ -1590,7 +1557,7 @@ impl ExtraStyleData {
         guard: &SharedRwLockReadGuard,
         rule: &Arc<Locked<CounterStyleRule>>,
     ) {
-        let name = rule.read_with(guard).mName.raw::<nsIAtom>().into();
+        let name = rule.read_with(guard).mName.mRawPtr.into();
         self.counter_styles.insert(name, rule.clone());
     }
 
@@ -2197,10 +2164,6 @@ impl CascadeData {
         }
     }
 
-    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
-        self.pseudos_map.get(pseudo).is_some()
-    }
-
     /// Clears the cascade data, but not the invalidation data.
     fn clear_cascade_data(&mut self) {
         self.element_map.clear();
@@ -2225,7 +2188,7 @@ impl CascadeData {
 
     /// Measures heap usage.
     #[cfg(feature = "gecko")]
-    pub fn add_size_of_children(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
+    pub fn add_size_of(&self, ops: &mut MallocSizeOfOps, sizes: &mut ServoStyleSetSizes) {
         sizes.mElementAndPseudosMaps += self.element_map.size_of(ops);
 
         for elem in self.pseudos_map.iter() {

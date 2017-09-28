@@ -1730,7 +1730,7 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
             // Insert the add-on id as "add-ons/@id@/" after "explicit/" to
             // aggregate add-on compartments.
             static const size_t explicitLength = strlen("explicit/");
-            addonId.Insert(NS_LITERAL_CSTRING("add-ons/"), 0);
+            addonId.InsertLiteral("add-ons/", 0);
             addonId += "/";
             cJSPathPrefix.Insert(addonId, explicitLength);
             cDOMPathPrefix.Insert(addonId, explicitLength);
@@ -2050,7 +2050,8 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
     // We don't want to report decommitted memory in "explicit", so we just
     // change the leading "explicit/" to "decommitted/".
     nsCString rtPath2(rtPath);
-    rtPath2.Replace(0, strlen("explicit"), NS_LITERAL_CSTRING("decommitted"));
+    rtPath2.ReplaceLiteral(0, strlen("explicit"), "decommitted");
+
     REPORT_GC_BYTES(rtPath2 + NS_LITERAL_CSTRING("gc-heap/decommitted-arenas"),
         rtStats.gcHeapDecommittedArenas,
         "GC arenas in non-empty chunks that is decommitted, i.e. it takes up "
@@ -2911,7 +2912,6 @@ XPCJSRuntime::Initialize(JSContext* cx)
     JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
     JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
     js::SetWindowProxyClass(cx, &OuterWindowProxyClass);
-    js::SetXrayJitInfo(&gXrayJitInfo);
     JS::SetProcessLargeAllocationFailureCallback(OnLargeAllocationFailureCallback);
 
     // The JS engine needs to keep the source code around in order to implement

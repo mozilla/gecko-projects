@@ -178,7 +178,8 @@ CookieServiceChild::RecvAddCookie(const CookieStruct     &aCookie,
                                              aCookie.isSession(),
                                              aCookie.isSecure(),
                                              false,
-                                             aAttrs);
+                                             aAttrs,
+                                             aCookie.sameSite());
   RecordDocumentCookie(cookie, aAttrs);
   return IPC_OK();
 }
@@ -210,7 +211,8 @@ CookieServiceChild::RecvTrackCookiesLoad(nsTArray<CookieStruct>&& aCookiesList,
                                                aCookiesList[i].isSession(),
                                                aCookiesList[i].isSecure(),
                                                false,
-                                               aAttrs);
+                                               aAttrs,
+                                               aCookiesList[i].sameSite());
     RecordDocumentCookie(cookie, aAttrs);
   }
 
@@ -305,11 +307,11 @@ CookieServiceChild::GetCookieStringFromCookieHashTable(nsIURI                 *a
 
     if (!cookie->Name().IsEmpty() || !cookie->Value().IsEmpty()) {
       if (!aCookieString.IsEmpty()) {
-        aCookieString.Append("; ");
+        aCookieString.AppendLiteral("; ");
       }
       if (!cookie->Name().IsEmpty()) {
         aCookieString.Append(cookie->Name().get());
-        aCookieString.Append("=");
+        aCookieString.AppendLiteral("=");
         aCookieString.Append(cookie->Value().get());
       } else {
         aCookieString.Append(cookie->Value().get());
@@ -365,7 +367,8 @@ CookieServiceChild::SetCookieInternal(nsCookieAttributes              &aCookieAt
                      aCookieAttributes.isSession,
                      aCookieAttributes.isSecure,
                      aCookieAttributes.isHttpOnly,
-                     aAttrs);
+                     aAttrs,
+                     aCookieAttributes.sameSite);
 
   RecordDocumentCookie(cookie, aAttrs);
 }
@@ -616,4 +619,3 @@ CookieServiceChild::RunInTransaction(nsICookieTransactionCallback* aCallback)
 
 } // namespace net
 } // namespace mozilla
-

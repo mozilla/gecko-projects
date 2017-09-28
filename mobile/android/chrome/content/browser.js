@@ -2735,7 +2735,7 @@ var NativeWindow = {
      */
     _getContextType: function(element) {
       // For anchor nodes, we try to use the scheme to pick a string
-      if (element instanceof Ci.nsIDOMHTMLAnchorElement) {
+      if (ChromeUtils.getClassName(element) === "HTMLAnchorElement") {
         let uri = this.makeURI(this._getLinkURL(element));
         try {
           return Strings.browser.GetStringFromName("browser.menu.context." + uri.scheme);
@@ -2820,8 +2820,8 @@ var NativeWindow = {
 
     // Returns a url associated with a node
     _getUrl: function(node) {
-      if ((node instanceof Ci.nsIDOMHTMLAnchorElement && node.href) ||
-          (node instanceof Ci.nsIDOMHTMLAreaElement && node.href)) {
+      if ((ChromeUtils.getClassName(node) === "HTMLAnchorElement" && node.href) ||
+          (ChromeUtils.getClassName(node) === "HTMLAreaElement" && node.href)) {
         return this._getLinkURL(node);
       } else if (node instanceof Ci.nsIImageLoadingContent && node.currentURI) {
         // The image is blocked by Tap-to-load Images
@@ -3051,10 +3051,10 @@ var NativeWindow = {
 
     _getLink: function(aElement) {
       if (aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
-          ((aElement instanceof Ci.nsIDOMHTMLAnchorElement && aElement.href) ||
-          (aElement instanceof Ci.nsIDOMHTMLAreaElement && aElement.href) ||
-          aElement instanceof Ci.nsIDOMHTMLLinkElement ||
-          aElement.getAttributeNS(kXLinkNamespace, "type") == "simple")) {
+          ((ChromeUtils.getClassName(aElement) === "HTMLAnchorElement" && aElement.href) ||
+           (ChromeUtils.getClassName(aElement) === "HTMLAreaElement" && aElement.href) ||
+           aElement instanceof Ci.nsIDOMHTMLLinkElement ||
+           aElement.getAttributeNS(kXLinkNamespace, "type") == "simple")) {
         try {
           let url = this._getLinkURL(aElement);
           return Services.io.newURI(url);
@@ -3201,7 +3201,7 @@ var LightWeightThemeWebInstaller = {
 
     let allowButtonText = Strings.browser.GetStringFromName("lwthemeInstallRequest.allowButton");
     let IDNService = Cc["@mozilla.org/network/idn-service;1"].getService(Ci.nsIIDNService);
-    let hostname = IDNService.convertToDisplayIDN(node.ownerDocument.location.hostname);
+    let hostname = IDNService.convertToDisplayIDN(node.ownerDocument.location.hostname, {});
     let message = Strings.browser.formatStringFromName("lwthemeInstallRequest.message", [hostname], 1);
     let buttons = [{
       label: allowButtonText,
@@ -4775,8 +4775,8 @@ var BrowserEventHandler = {
 
   _getLinkURI: function(aElement) {
     if (aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
-        ((aElement instanceof Ci.nsIDOMHTMLAnchorElement && aElement.href) ||
-        (aElement instanceof Ci.nsIDOMHTMLAreaElement && aElement.href))) {
+        ((ChromeUtils.getClassName(aElement) === "HTMLAnchorElement" && aElement.href) ||
+         (ChromeUtils.getClassName(aElement) === "HTMLAreaElement" && aElement.href))) {
       try {
         return Services.io.newURI(aElement.href);
       } catch (e) {}

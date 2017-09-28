@@ -391,7 +391,8 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCssText, void,
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
                    RawServoDeclarationBlockBorrowed declarations,
                    nsCSSPropertyID property, nsAString* buffer,
-                   ServoStyleContextBorrowedOrNull computed_values)
+                   ServoStyleContextBorrowedOrNull computed_values,
+                   RawServoDeclarationBlockBorrowedOrNull custom_properties)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Count, uint32_t,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetNthProperty, bool,
@@ -666,11 +667,11 @@ SERVO_BINDING_FUNC(Servo_HasPendingRestyleAncestor, bool,
                    RawGeckoElementBorrowed element)
 
 SERVO_BINDING_FUNC(Servo_GetArcStringData, void,
-                   RustString*, uint8_t** chars, uint32_t* len);
+                   const RustString*, uint8_t const** chars, uint32_t* len);
 SERVO_BINDING_FUNC(Servo_ReleaseArcStringData, void,
-                   mozilla::ServoRawOffsetArc<RustString>* string);
+                   const mozilla::ServoRawOffsetArc<RustString>* string);
 SERVO_BINDING_FUNC(Servo_CloneArcStringData, mozilla::ServoRawOffsetArc<RustString>,
-                   mozilla::ServoRawOffsetArc<RustString>* string);
+                   const mozilla::ServoRawOffsetArc<RustString>* string);
 
 // AddRef / Release functions
 #define SERVO_ARC_TYPE(name_, type_)                                \

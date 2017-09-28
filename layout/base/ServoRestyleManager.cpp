@@ -208,15 +208,15 @@ ServoRestyleState::ProcessMaybeNestedWrapperRestyle(nsIFrame* aParent,
              (parent->StyleContext()->IsInheritingAnonBox() &&
               parent->GetContent() == aParent->GetContent()));
 
-  // Now "this" is a ServoRestyleState for aParent, so if parent is not a prev
+  // Now "this" is a ServoRestyleState for aParent, so if parent is not a next
   // continuation (possibly across ib splits) of aParent we need a new
   // ServoRestyleState for the kid.
   Maybe<ServoRestyleState> parentRestyleState;
-  nsIFrame* parentForRestyle = aParent;
-  if (nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent) != aParent) {
-    parentRestyleState.emplace(*parent, *this, nsChangeHint_Empty,
+  nsIFrame* parentForRestyle =
+    nsLayoutUtils::FirstContinuationOrIBSplitSibling(parent);
+  if (parentForRestyle != aParent) {
+    parentRestyleState.emplace(*parentForRestyle, *this, nsChangeHint_Empty,
                                Type::InFlow);
-    parentForRestyle = parent;
   }
   ServoRestyleState& curRestyleState =
     parentRestyleState ? *parentRestyleState : *this;
@@ -1046,19 +1046,7 @@ ServoRestyleManager::SnapshotFor(Element* aElement)
   aElement->SetFlags(ELEMENT_HAS_SNAPSHOT);
 
   // Now that we have a snapshot, make sure a restyle is triggered.
-  //
-  // If we have any later siblings, we need to flag the restyle on the parent,
-  // so that a traversal from the restyle root is guaranteed to reach those
-  // siblings (since the snapshot may generate hints for later siblings).
-  if (aElement->GetNextElementSibling()) {
-    Element* parent = aElement->GetFlattenedTreeParentElementForStyle();
-    MOZ_ASSERT(parent);
-    parent->NoteDirtyForServo();
-    parent->SetHasDirtyDescendantsForServo();
-  } else {
-    aElement->NoteDirtyForServo();
-  }
-
+  aElement->NoteDirtyForServo();
   return *snapshot;
 }
 
@@ -1196,10 +1184,15 @@ ServoRestyleManager::ProcessPendingRestyles()
 void
 ServoRestyleManager::ProcessAllPendingAttributeAndStateInvalidations()
 {
-  AutoTimelineMarker marker(mPresContext->GetDocShell(),
-                            "ProcessAllPendingAttributeAndStateInvalidations");
+  if (mSnapshots.IsEmpty()) {
+    return;
+  }
   for (auto iter = mSnapshots.Iter(); !iter.Done(); iter.Next()) {
-    Servo_ProcessInvalidations(StyleSet()->RawSet(), iter.Key(), &mSnapshots);
+    // Servo data for the element might have been dropped. (e.g. by removing
+    // from its document)
+    if (iter.Key()->HasFlag(ELEMENT_HAS_SNAPSHOT)) {
+      Servo_ProcessInvalidations(StyleSet()->RawSet(), iter.Key(), &mSnapshots);
+    }
   }
   ClearSnapshots();
 }

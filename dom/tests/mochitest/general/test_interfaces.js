@@ -514,8 +514,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSelectElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "HTMLShadowElement", stylo: false},
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSourceElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSpanElement",
@@ -735,6 +733,8 @@ var interfaceNamesInGlobalScope =
     "PerformanceMeasure",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "PerformanceNavigation",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "PerformanceNavigationTiming",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "PerformanceObserver",
 // IMPORTANT: Do not change this list without review from a DOM peer!

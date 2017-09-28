@@ -47,7 +47,13 @@ public:
     TX_DECL_TXINSTRUCTION
 };
 
-class txApplyImports : public txInstruction
+class txApplyImportsEnd : public txInstruction
+{
+public:
+    TX_DECL_TXINSTRUCTION
+};
+
+class txApplyImportsStart : public txInstruction
 {
 public:
     TX_DECL_TXINSTRUCTION
@@ -191,9 +197,9 @@ public:
     TX_DECL_TXINSTRUCTION
 
     int32_t mNamespaceID;
-    nsCOMPtr<nsIAtom> mLocalName;
-    nsCOMPtr<nsIAtom> mLowercaseLocalName;
-    nsCOMPtr<nsIAtom> mPrefix;
+    RefPtr<nsIAtom> mLocalName;
+    RefPtr<nsIAtom> mLowercaseLocalName;
+    RefPtr<nsIAtom> mPrefix;
     nsAutoPtr<Expr> mValue;
 };
 
@@ -358,9 +364,9 @@ public:
     TX_DECL_TXINSTRUCTION
 
     int32_t mNamespaceID;
-    nsCOMPtr<nsIAtom> mLocalName;
-    nsCOMPtr<nsIAtom> mLowercaseLocalName;
-    nsCOMPtr<nsIAtom> mPrefix;
+    RefPtr<nsIAtom> mLocalName;
+    RefPtr<nsIAtom> mLowercaseLocalName;
+    RefPtr<nsIAtom> mPrefix;
 };
 
 class txText : public txInstruction

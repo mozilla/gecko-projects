@@ -69,6 +69,7 @@ use style::gecko_bindings::bindings::RawServoAnimationValueBorrowed;
 use style::gecko_bindings::bindings::RawServoAnimationValueMapBorrowedMut;
 use style::gecko_bindings::bindings::RawServoAnimationValueStrong;
 use style::gecko_bindings::bindings::RawServoAnimationValueTableBorrowed;
+use style::gecko_bindings::bindings::RawServoDeclarationBlockBorrowedOrNull;
 use style::gecko_bindings::bindings::RawServoStyleRuleBorrowed;
 use style::gecko_bindings::bindings::RawServoStyleSet;
 use style::gecko_bindings::bindings::ServoStyleContextBorrowedOrNull;
@@ -235,16 +236,19 @@ fn traverse_subtree(element: GeckoElement,
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
-    let shared_style_context = create_shared_context(&global_style_data,
-                                                     &guard,
-                                                     &per_doc_data,
-                                                     traversal_flags,
-                                                     snapshots);
+    let shared_style_context = create_shared_context(
+        &global_style_data,
+        &guard,
+        &per_doc_data,
+        traversal_flags,
+        snapshots,
+    );
 
+    let token = RecalcStyleOnly::pre_traverse(
+        element,
+        &shared_style_context,
+    );
 
-    let token = RecalcStyleOnly::pre_traverse(element,
-                                              &shared_style_context,
-                                              traversal_flags);
     if !token.should_traverse() {
         return;
     }
@@ -259,13 +263,13 @@ fn traverse_subtree(element: GeckoElement,
     };
 
     let traversal = RecalcStyleOnly::new(shared_style_context);
-    driver::traverse_dom(&traversal, element, token, thread_pool);
+    driver::traverse_dom(&traversal, token, thread_pool);
 }
 
 /// Traverses the subtree rooted at `root` for restyling.
 ///
-/// Returns whether a Gecko post-traversal (to perform lazy frame construction,
-/// or consume any RestyleData, or drop any ElementData) is required.
+/// Returns whether the root was restyled. Whether anything else was restyled or
+/// not can be inferred from the dirty bits in the rest of the tree.
 #[no_mangle]
 pub extern "C" fn Servo_TraverseSubtree(
     root: RawGeckoElementBorrowed,
@@ -309,7 +313,9 @@ pub extern "C" fn Servo_TraverseSubtree(
            element.needs_frame(),
            element.borrow_data().unwrap());
 
-    element.needs_post_traversal()
+    let element_was_restyled =
+        element.borrow_data().unwrap().contains_restyle_data();
+    element_was_restyled
 }
 
 /// Checks whether the rule tree has crossed its threshold for unused nodes, and
@@ -588,7 +594,7 @@ pub extern "C" fn Servo_AnimationValue_Serialize(value: RawServoAnimationValueBo
     let mut string = String::new();
     let rv = PropertyDeclarationBlock::with_one(uncomputed_value, Importance::Normal)
         .single_value_to_css(&get_property_id_from_nscsspropertyid!(property, ()), &mut string,
-                             None);
+                             None, None /* No extra custom properties */);
     debug_assert!(rv.is_ok());
 
     let buffer = unsafe { buffer.as_mut().unwrap() };
@@ -2281,17 +2287,25 @@ pub extern "C" fn Servo_DeclarationBlock_GetCssText(declarations: RawServoDeclar
 pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
     declarations: RawServoDeclarationBlockBorrowed,
     property_id: nsCSSPropertyID, buffer: *mut nsAString,
-    computed_values: ServoStyleContextBorrowedOrNull)
+    computed_values: ServoStyleContextBorrowedOrNull,
+    custom_properties: RawServoDeclarationBlockBorrowedOrNull)
 {
     let property_id = get_property_id_from_nscsspropertyid!(property_id, ());
-    read_locked_arc(declarations, |decls: &PropertyDeclarationBlock| {
-        let mut string = String::new();
-        let rv = decls.single_value_to_css(&property_id, &mut string, computed_values);
-        debug_assert!(rv.is_ok());
 
-        let buffer = unsafe { buffer.as_mut().unwrap() };
-        buffer.assign_utf8(&string);
-    })
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    let decls = Locked::<PropertyDeclarationBlock>::as_arc(&declarations).read_with(&guard);
+
+    let mut string = String::new();
+
+    let custom_properties = Locked::<PropertyDeclarationBlock>::arc_from_borrowed(&custom_properties);
+    let custom_properties = custom_properties.map(|block| block.read_with(&guard));
+    let rv = decls.single_value_to_css(
+        &property_id, &mut string, computed_values, custom_properties);
+    debug_assert!(rv.is_ok());
+
+    let buffer = unsafe { buffer.as_mut().unwrap() };
+    buffer.assign_utf8(&string);
 }
 
 #[no_mangle]
@@ -3337,7 +3351,23 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
     let guard = global_style_data.shared_lock.read();
     let default_values = data.default_computed_values();
 
+    let mut raw_custom_properties_block; // To make the raw block alive in the scope.
     for (index, keyframe) in keyframes.iter().enumerate() {
+        let mut custom_properties = None;
+        for property in keyframe.mPropertyValues.iter() {
+            // Find the block for custom properties first.
+            if property.mProperty == nsCSSPropertyID::eCSSPropertyExtra_variable {
+                raw_custom_properties_block = unsafe {
+                    &*property.mServoDeclarationBlock.mRawPtr.clone()
+                };
+                let guard = Locked::<PropertyDeclarationBlock>::as_arc(
+                    &raw_custom_properties_block).read_with(&guard);
+                custom_properties = guard.cascade_custom_properties_with_context(&context);
+                // There should be one PropertyDeclarationBlock for custom properties.
+                break;
+            }
+        }
+
         let ref mut animation_values = computed_keyframes[index];
 
         let mut seen = LonghandIdSet::new();
@@ -3388,8 +3418,13 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
             let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
             let guard = declarations.read_with(&guard);
+            let iter = guard.to_animation_value_iter(
+                &mut context,
+                &default_values,
+                &custom_properties,
+            );
 
-            for anim in guard.to_animation_value_iter(&mut context, &default_values) {
+            for anim in iter {
                 maybe_append_animation_value(anim.0, Some(anim.1));
             }
         }
@@ -3428,7 +3463,13 @@ pub extern "C" fn Servo_GetAnimationValues(declarations: RawServoDeclarationBloc
 
     let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
     let guard = declarations.read_with(&guard);
-    for (index, anim) in guard.to_animation_value_iter(&mut context, &default_values).enumerate() {
+    let no_extra_custom_properties = None; // SMIL has no extra custom properties.
+    let iter = guard.to_animation_value_iter(
+        &mut context,
+        &default_values,
+        &no_extra_custom_properties,
+    );
+    for (index, anim) in iter.enumerate() {
         unsafe { animation_values.set_len((index + 1) as u32) };
         animation_values[index].set_arc_leaky(Arc::new(anim.1));
     }
@@ -3467,7 +3508,13 @@ pub extern "C" fn Servo_AnimationValue_Compute(element: RawGeckoElementBorrowed,
     // We only compute the first element in declarations.
     match declarations.read_with(&guard).declaration_importance_iter().next() {
         Some((decl, imp)) if imp == Importance::Normal => {
-            let animation = AnimationValue::from_declaration(decl, &mut context, default_values);
+            let no_extra_custom_properties = None; // No extra custom properties for devtools.
+            let animation = AnimationValue::from_declaration(
+                decl,
+                &mut context,
+                &no_extra_custom_properties,
+                default_values,
+            );
             animation.map_or(RawServoAnimationValueStrong::null(), |value| {
                 Arc::new(value).into_strong()
             })
@@ -3547,6 +3594,8 @@ pub extern "C" fn Servo_StyleSet_GetKeyframesForName(raw_data: RawServoStyleSetB
                                                      name: *const nsACString,
                                                      inherited_timing_function: nsTimingFunctionBorrowed,
                                                      keyframes: RawGeckoKeyframeListBorrowedMut) -> bool {
+    use smallvec::SmallVec;
+
     debug_assert!(keyframes.len() == 0,
                   "keyframes should be initially empty");
 
@@ -3617,6 +3666,25 @@ pub extern "C" fn Servo_StyleSet_GetKeyframesForName(raw_data: RawServoStyleSetB
                 let animatable =
                     guard.normal_declaration_iter()
                          .filter(|declaration| declaration.is_animatable());
+
+                let custom_properties: SmallVec<[&PropertyDeclaration; 1]> =
+                    guard.normal_declaration_iter()
+                         .filter(|declaration| declaration.is_custom())
+                         .collect();
+
+                if custom_properties.len() > 0 {
+                    let mut pdb = PropertyDeclarationBlock::new();
+                    for custom in custom_properties.iter() {
+                        pdb.push((*custom).clone(), Importance::Normal);
+                    }
+                    unsafe {
+                        let pair =
+                            Gecko_AppendPropertyValuePair(&mut (*keyframe).mPropertyValues,
+                                                          nsCSSPropertyID::eCSSPropertyExtra_variable);
+                        (*pair).mServoDeclarationBlock.set_arc_leaky(
+                            Arc::new(global_style_data.shared_lock.wrap(pdb)));
+                    }
+                }
 
                 for declaration in animatable {
                     let property = AnimatableLonghand::from_declaration(declaration).unwrap();
@@ -3781,7 +3849,7 @@ pub extern "C" fn Servo_StyleSet_AddSizeOfExcludingThis(
                                        malloc_enclosing_size_of.unwrap(),
                                        None);
     let sizes = unsafe { sizes.as_mut() }.unwrap();
-    data.add_size_of_children(&mut ops, sizes);
+    data.add_size_of(&mut ops, sizes);
 }
 
 #[no_mangle]

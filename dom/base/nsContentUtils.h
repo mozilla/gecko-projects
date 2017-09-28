@@ -1702,6 +1702,14 @@ public:
   static void NotifyInstalledMenuKeyboardListener(bool aInstalling);
 
   /**
+   * Check whether the nsIURI uses the given scheme.
+   *
+   * Note that this will check the innermost URI rather than that of
+   * the nsIURI itself.
+   */
+  static bool SchemeIs(nsIURI* aURI, const char* aScheme);
+
+  /**
    * Returns true if aPrincipal is the system principal.
    */
   static bool IsSystemPrincipal(nsIPrincipal* aPrincipal);
@@ -2998,8 +3006,14 @@ public:
                                       nsIAtom* aExtensionType,
                                       nsIAtom* aAttrName);
 
-  static void EnqueueLifecycleCallback(nsIDocument* aDoc,
-                                       nsIDocument::ElementCallbackType aType,
+  static void SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
+                                  Element* aCustomElement,
+                                  mozilla::dom::CustomElementDefinition* aDefinition);
+
+  static void EnqueueUpgradeReaction(Element* aElement,
+                                     mozilla::dom::CustomElementDefinition* aDefinition);
+
+  static void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
                                        Element* aCustomElement,
                                        mozilla::dom::LifecycleCallbackArgs* aArgs = nullptr,
                                        mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
@@ -3030,6 +3044,19 @@ public:
   static void AppendNativeAnonymousChildren(const nsIContent* aContent,
                                             nsTArray<nsIContent*>& aKids,
                                             uint32_t aFlags);
+
+  /**
+   * Query loadingPrincipal if it is specified as 'loadingprincipal' attribute on
+   * aLoadingNode, otherwise the NodePrincipal of aLoadingNode is returned
+   * (which is System Principal).
+   *
+   * Return true if aLoadingPrincipal has 'loadingprincipal' attributes, and
+   * the value 'loadingprincipal' is also successfully deserialized, otherwise
+   * return false.
+   */
+  static bool
+  GetLoadingPrincipalForXULNode(nsIContent* aLoadingNode,
+                                nsIPrincipal** aLoadingPrincipal);
 
   /**
    * Returns the content policy type that should be used for loading images
@@ -3271,9 +3298,9 @@ private:
 
   static nsIConsoleService* sConsoleService;
 
-  static nsDataHashtable<nsISupportsHashKey, EventNameMapping>* sAtomEventTable;
+  static nsDataHashtable<nsRefPtrHashKey<nsIAtom>, EventNameMapping>* sAtomEventTable;
   static nsDataHashtable<nsStringHashKey, EventNameMapping>* sStringEventTable;
-  static nsCOMArray<nsIAtom>* sUserDefinedEvents;
+  static nsTArray<RefPtr<nsIAtom>>* sUserDefinedEvents;
 
   static nsIStringBundleService* sStringBundleService;
   static nsIStringBundle* sStringBundles[PropertiesFile_COUNT];

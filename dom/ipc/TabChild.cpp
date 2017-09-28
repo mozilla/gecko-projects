@@ -88,8 +88,10 @@
 #include "nsIXULRuntime.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
+#include "nsPointerHashKeys.h"
 #include "nsLayoutUtils.h"
 #include "nsPrintfCString.h"
+#include "nsTHashtable.h"
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "nsViewManager.h"
@@ -164,7 +166,7 @@ NS_IMPL_ISUPPORTS(TabChildSHistoryListener,
 
 static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
 
-nsTArray<TabChild*>* TabChild::sActiveTabs;
+nsTHashtable<nsPtrHashKey<TabChild>>* TabChild::sActiveTabs;
 
 typedef nsDataHashtable<nsUint64HashKey, TabChild*> TabChildMap;
 static TabChildMap* sTabChildren;
@@ -414,7 +416,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mActiveSuppressDisplayport(0)
   , mLayersId(0)
   , mBeforeUnloadListeners(0)
-  , mLayersConnected(true)
+  , mLayersConnected(false)
   , mDidFakeShow(false)
   , mNotified(false)
   , mTriedBrowserInit(false)
@@ -941,7 +943,7 @@ TabChild::SetVisibility(bool aVisibility)
 }
 
 NS_IMETHODIMP
-TabChild::GetTitle(char16_t** aTitle)
+TabChild::GetTitle(nsAString& aTitle)
 {
   NS_WARNING("TabChild::GetTitle not supported in TabChild");
 
@@ -949,7 +951,7 @@ TabChild::GetTitle(char16_t** aTitle)
 }
 
 NS_IMETHODIMP
-TabChild::SetTitle(const char16_t* aTitle)
+TabChild::SetTitle(const nsAString& aTitle)
 {
   // JavaScript sends the "DOMTitleChanged" event to the parent
   // via the message manager.
@@ -1120,7 +1122,7 @@ TabChild::ActorDestroy(ActorDestroyReason why)
 TabChild::~TabChild()
 {
   if (sActiveTabs) {
-    sActiveTabs->RemoveElement(this);
+    sActiveTabs->RemoveEntry(this);
     if (sActiveTabs->IsEmpty()) {
       delete sActiveTabs;
       sActiveTabs = nullptr;
@@ -1174,6 +1176,7 @@ TabChild::DoFakeShow(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                      const CompositorOptions& aCompositorOptions,
                      PRenderFrameChild* aRenderFrame, const ShowInfo& aShowInfo)
 {
+  mLayersConnected = aRenderFrame ? true : false;
   InitRenderingState(aTextureFactoryIdentifier, aLayersId, aCompositorOptions, aRenderFrame);
   RecvShow(ScreenIntSize(0, 0), aShowInfo, mParentIsActive, nsSizeMode_Normal);
   mDidFakeShow = true;
@@ -2588,12 +2591,12 @@ TabChild::InternalSetDocShellIsActive(bool aIsActive, bool aPreserveLayers)
 
   if (aIsActive) {
     if (!sActiveTabs) {
-      sActiveTabs = new nsTArray<TabChild*>();
+      sActiveTabs = new nsTHashtable<nsPtrHashKey<TabChild>>();
     }
-    sActiveTabs->AppendElement(this);
+    sActiveTabs->PutEntry(this);
   } else {
     if (sActiveTabs) {
-      sActiveTabs->RemoveElement(this);
+      sActiveTabs->RemoveEntry(this);
       // We don't delete sActiveTabs here when it's empty since that
       // could cause a lot of churn. Instead, we wait until ~TabChild.
     }
@@ -2797,11 +2800,6 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       mLayersId = aLayersId;
     }
 
-    ShadowLayerForwarder* lf =
-        mPuppetWidget->GetLayerManager(
-            nullptr, mTextureFactoryIdentifier.mParentBackend)
-                ->AsShadowForwarder();
-
     LayerManager* lm = mPuppetWidget->GetLayerManager();
     if (lm->AsWebRenderLayerManager()) {
       lm->AsWebRenderLayerManager()->Initialize(compositorChild,
@@ -2812,6 +2810,10 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       InitAPZState();
     }
 
+    ShadowLayerForwarder* lf =
+        mPuppetWidget->GetLayerManager(
+            nullptr, mTextureFactoryIdentifier.mParentBackend)
+                ->AsShadowForwarder();
     if (lf) {
       nsTArray<LayersBackend> backends;
       backends.AppendElement(mTextureFactoryIdentifier.mParentBackend);
@@ -3167,6 +3169,7 @@ TabChild::ReinitRendering()
     return;
   }
 
+  mLayersConnected = true;
   ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
   gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
 

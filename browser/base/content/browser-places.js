@@ -302,21 +302,13 @@ var StarUI = {
 
     this.beginBatch();
 
-    if (aAnchorElement) {
-      // Set the open=true attribute if the anchor is a
-      // descendent of a toolbarbutton.
-      let parent = aAnchorElement.parentNode;
-      while (parent) {
-        if (parent.localName == "toolbarbutton") {
-          break;
-        }
-        parent = parent.parentNode;
-      }
-      if (parent) {
-        this._anchorToolbarButton = parent;
-        parent.setAttribute("open", "true");
-      }
+    if (aAnchorElement && aAnchorElement.closest("#urlbar")) {
+      this._anchorToolbarButton = aAnchorElement;
+      aAnchorElement.setAttribute("open", "true");
+    } else {
+      this._anchorToolbarButton = null;
     }
+
     let onPanelReady = fn => {
       let target = this.panel;
       if (target.parentNode) {
@@ -334,13 +326,6 @@ var StarUI = {
                                  hiddenRows: ["description", "location",
                                               "loadInSidebar", "keyword"],
                                  focusedElement: "preferred"});
-
-    if (aAnchorElement && aAnchorElement.id == BookmarkingUI.STAR_BOX_ID) {
-      aAnchorElement.setAttribute("open", "true");
-      this.panel.addEventListener("popuphiding", () => {
-        aAnchorElement.removeAttribute("open");
-      });
-    }
     this.panel.openPopup(aAnchorElement, aPosition);
   },
 
@@ -1327,6 +1312,8 @@ var LibraryUI = {
       }
     }
     animatableBox.addEventListener("animationend", this._libraryButtonAnimationEndListeners[animation]);
+
+    window.addEventListener("resize", this._onWindowResize)
   },
 
   _libraryButtonAnimationEndListeners: {},
@@ -1338,10 +1325,42 @@ var LibraryUI = {
       animatableBox.removeEventListener("animationend", LibraryUI._libraryButtonAnimationEndListeners[animation]);
       animatableBox.removeAttribute("animate");
       animatableBox.removeAttribute("fade");
+      window.removeEventListener("resize", this._onWindowResize);
       let libraryButton = document.getElementById("library-button");
       // Put the 'fill' back in the normal icon.
       libraryButton.removeAttribute("animate");
     }
+  },
+
+  _windowResizeRunning: false,
+  _onWindowResize(aEvent) {
+    if (LibraryUI._windowResizeRunning) {
+      return;
+    }
+    LibraryUI._windowResizeRunning = true;
+
+    requestAnimationFrame(() => {
+      let libraryButton = document.getElementById("library-button");
+      // Only update the position if the library button remains in the
+      // navbar (not moved to the palette or elsewhere).
+      if (!libraryButton ||
+          libraryButton.getAttribute("cui-areatype") == "menu-panel" ||
+          libraryButton.getAttribute("overflowedItem") == "true" ||
+          !libraryButton.closest("#nav-bar")) {
+        return;
+      }
+
+      let animatableBox = document.getElementById("library-animatable-box");
+      let libraryIcon = document.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
+      let dwu = window.getInterface(Ci.nsIDOMWindowUtils);
+      let iconBounds = dwu.getBoundsWithoutFlushing(libraryIcon);
+
+      // Resizing the window will only have the ability to change the X offset of the
+      // library button.
+      animatableBox.style.setProperty("--library-icon-x", iconBounds.x + "px");
+
+      LibraryUI._windowResizeRunning = false;
+    });
   },
 };
 
@@ -1371,18 +1390,8 @@ var BookmarkingUI = {
   },
 
   get anchor() {
-    // Try to anchor the panel to:
-    // 1. The bookmarks star box (using the star itself is trickier because it
-    //    can be hidden while the star animation is visible)
-    // 2. The identity icon
-    if (this.starBox && isVisible(this.starBox)) {
-      return this.starBox;
-    }
-    let identityIcon = document.getElementById("identity-icon");
-    if (identityIcon && isVisible(identityIcon)) {
-      return identityIcon;
-    }
-    return null;
+    let action = PageActions.actionForID(PageActions.ACTION_ID_BOOKMARK);
+    return BrowserPageActions.panelAnchorNodeForAction(action);
   },
 
   get notifier() {

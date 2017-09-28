@@ -75,9 +75,6 @@ class SVGContextPaint;
 namespace gfx {
 class GlyphRenderingOptions;
 } // namespace gfx
-namespace layout {
-class TextDrawTarget;
-} // namespace layout
 } // namespace mozilla
 
 struct gfxFontStyle {
@@ -188,7 +185,7 @@ struct gfxFontStyle {
     PLDHashNumber Hash() const {
         return ((style + (systemFont << 7) +
             (weight << 8)) + uint32_t(size*1000) + uint32_t(sizeAdjust*1000)) ^
-            nsISupportsHashKey::HashKey(language);
+            nsRefPtrHashKey<nsIAtom>::HashKey(language);
     }
 
     int8_t ComputeWeight() const;
@@ -2313,7 +2310,6 @@ struct MOZ_STACK_CLASS FontDrawParams {
 
 struct MOZ_STACK_CLASS EmphasisMarkDrawParams {
     gfxContext* context;
-    mozilla::layout::TextDrawTarget* textDrawer = nullptr;
     gfxFont::Spacing* spacing;
     gfxTextRun* mark;
     gfxFloat advance;

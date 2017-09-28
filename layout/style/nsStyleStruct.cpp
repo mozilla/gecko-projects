@@ -111,6 +111,9 @@ static bool AreShadowArraysEqual(nsCSSShadowArray* lhs, nsCSSShadowArray* rhs);
 nsStyleFont::nsStyleFont(const nsFont& aFont, const nsPresContext* aContext)
   : mFont(aFont)
   , mSize(nsStyleFont::ZoomText(aContext, mFont.size))
+  , mFontSizeFactor(1.0)
+  , mFontSizeOffset(0)
+  , mFontSizeKeyword(NS_STYLE_FONT_SIZE_MEDIUM)
   , mGenericID(kGenericFont_NONE)
   , mScriptLevel(0)
   , mMathVariant(NS_MATHML_MATHVARIANT_NONE)
@@ -131,6 +134,9 @@ nsStyleFont::nsStyleFont(const nsFont& aFont, const nsPresContext* aContext)
 nsStyleFont::nsStyleFont(const nsStyleFont& aSrc)
   : mFont(aSrc.mFont)
   , mSize(aSrc.mSize)
+  , mFontSizeFactor(aSrc.mFontSizeFactor)
+  , mFontSizeOffset(aSrc.mFontSizeOffset)
+  , mFontSizeKeyword(aSrc.mFontSizeKeyword)
   , mGenericID(aSrc.mGenericID)
   , mScriptLevel(aSrc.mScriptLevel)
   , mMathVariant(aSrc.mMathVariant)
@@ -2321,7 +2327,7 @@ nsStyleImage::SetElementId(already_AddRefed<nsIAtom> aElementId)
     SetNull();
   }
 
-  if (nsCOMPtr<nsIAtom> atom = aElementId) {
+  if (RefPtr<nsIAtom> atom = aElementId) {
     mElementId = atom.forget().take();
     mType = eStyleImageType_Element;
   }
@@ -3295,7 +3301,7 @@ StyleTransition::SetUnknownProperty(nsCSSPropertyID aProperty,
                                         CSSEnabledState::eForAllContent) ==
                aProperty,
              "property and property string should match");
-  nsCOMPtr<nsIAtom> temp = NS_Atomize(aPropertyString);
+  RefPtr<nsIAtom> temp = NS_Atomize(aPropertyString);
   SetUnknownProperty(aProperty, temp);
 }
 
@@ -4093,7 +4099,7 @@ nsStyleText::nsStyleText(const nsPresContext* aContext)
   , mTextShadow(nullptr)
 {
   MOZ_COUNT_CTOR(nsStyleText);
-  nsCOMPtr<nsIAtom> language = aContext->GetContentLanguage();
+  RefPtr<nsIAtom> language = aContext->GetContentLanguage();
   mTextEmphasisPosition = language &&
     nsStyleUtil::MatchesLanguagePrefix(language, u"zh") ?
     NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT_ZH :

@@ -25,7 +25,7 @@ tinyfiledialogs = "2.5.9"
 
 [dependencies]
 app_units = "0.5"
-audio-video-metadata = "0.1.2"
+audio-video-metadata = "0.1.4"
 base64 = "0.5.2"
 bitflags = "0.7"
 bluetooth_traits = {path = "../bluetooth_traits"}
@@ -48,7 +48,7 @@ heapsize_derive = "0.1"
 html5ever = {version = "0.19", features = ["heap_size"]}
 hyper = "0.10"
 hyper_serde = "0.7"
-image = "0.12"
+image = "0.14"
 ipc-channel = "0.8"
 js = {git = "https://github.com/servo/rust-mozjs", features = ["promises"]}
 jstraceable_derive = {path = "../jstraceable_derive"}

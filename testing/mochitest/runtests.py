@@ -2066,6 +2066,9 @@ toolbar#nav-bar {
         # copy env so we don't munge the caller's environment
         env = env.copy()
 
+        # Used to defer a possible IOError exception from Marionette
+        marionette_exception = None
+
         # make sure we clean up after ourselves.
         try:
             # set process log environment variable
@@ -2150,25 +2153,34 @@ toolbar#nav-bar {
             self.log.process_start(gecko_id)
             self.message_logger.gecko_id = gecko_id
 
-            # start marionette and kick off the tests
-            marionette_args = marionette_args or {}
-            self.marionette = Marionette(**marionette_args)
-            self.marionette.start_session()
+            try:
+                # start marionette and kick off the tests
+                marionette_args = marionette_args or {}
+                self.marionette = Marionette(**marionette_args)
+                self.marionette.start_session()
 
-            # install specialpowers and mochikit addons
-            addons = Addons(self.marionette)
+                # install specialpowers and mochikit addons
+                addons = Addons(self.marionette)
 
-            addons.install(create_zip(
-                os.path.join(here, 'extensions', 'specialpowers')
-            ))
-            addons.install(create_zip(self.mochijar))
+                addons.install(create_zip(
+                    os.path.join(here, 'extensions', 'specialpowers')
+                ))
+                addons.install(create_zip(self.mochijar))
 
-            self.execute_start_script()
+                self.execute_start_script()
 
-            # an open marionette session interacts badly with mochitest,
-            # delete it until we figure out why.
-            self.marionette.delete_session()
-            del self.marionette
+                # an open marionette session interacts badly with mochitest,
+                # delete it until we figure out why.
+                self.marionette.delete_session()
+                del self.marionette
+
+            except IOError:
+                # Any IOError as thrown by Marionette means that something is
+                # wrong with the process, like a crash or the socket is no
+                # longer open. We defer raising this specific error so that
+                # post-test checks for leaks and crashes are performed and
+                # reported first.
+                marionette_exception = sys.exc_info()
 
             # wait until app is finished
             # XXX copy functionality from
@@ -2217,6 +2229,10 @@ toolbar#nav-bar {
             if os.path.exists(processLog):
                 os.remove(processLog)
             self.urlOpts = []
+
+        if marionette_exception is not None:
+            exc, value, tb = marionette_exception
+            raise exc, value, tb
 
         return status, self.lastTestSeen
 
@@ -2326,9 +2342,9 @@ toolbar#nav-bar {
         """
 
         # Number of times to repeat test(s) when running with --repeat
-        VERIFY_REPEAT = 20
+        VERIFY_REPEAT = 10
         # Number of times to repeat test(s) when running test in
-        VERIFY_REPEAT_SINGLE_BROWSER = 10
+        VERIFY_REPEAT_SINGLE_BROWSER = 5
 
         def step1():
             stepOptions = copy.deepcopy(options)
@@ -2352,12 +2368,41 @@ toolbar#nav-bar {
                     break
             return result
 
+        def step3():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = VERIFY_REPEAT
+            stepOptions.keep_open = False
+            stepOptions.environment.append("MOZ_CHAOSMODE=3")
+            result = self.runTests(stepOptions)
+            result = result or (-2 if self.countfail > 0 else 0)
+            self.message_logger.finish()
+            return result
+
+        def step4():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = 0
+            stepOptions.keep_open = False
+            stepOptions.environment.append("MOZ_CHAOSMODE=3")
+            for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                result = self.runTests(stepOptions)
+                result = result or (-2 if self.countfail > 0 else 0)
+                self.message_logger.finish()
+                if result != 0:
+                    break
+            return result
+
         steps = [
             ("1. Run each test %d times in one browser." % VERIFY_REPEAT,
              step1),
             ("2. Run each test %d times in a new browser each time." %
              VERIFY_REPEAT_SINGLE_BROWSER,
              step2),
+            ("3. Run each test %d times in one browser, in chaos mode." %
+             VERIFY_REPEAT,
+             step3),
+            ("4. Run each test %d times in a new browser each time, "
+             "in chaos mode." % VERIFY_REPEAT_SINGLE_BROWSER,
+             step4),
         ]
 
         stepResults = {}

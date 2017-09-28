@@ -329,7 +329,7 @@ nsDOMWindowUtils::GetDocumentMetadata(const nsAString& aName,
 {
   nsIDocument* doc = GetDocument();
   if (doc) {
-    nsCOMPtr<nsIAtom> name = NS_Atomize(aName);
+    RefPtr<nsIAtom> name = NS_Atomize(aName);
     doc->GetHeaderData(name, aValue);
     return NS_OK;
   }
@@ -2971,7 +2971,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
+  RefPtr<nsIAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
   RefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element,
                                                          pseudo, shell);
@@ -3037,37 +3037,6 @@ nsDOMWindowUtils::RenderDocument(const nsRect& aRect,
 
     // Render Document
     return presShell->RenderDocument(aRect, aFlags, aBackgroundColor, aThebesContext);
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::GetCursorType(int16_t *aCursor)
-{
-  NS_ENSURE_ARG_POINTER(aCursor);
-
-  nsIDocument* doc = GetDocument();
-  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
-
-  bool isSameDoc = false;
-  do {
-    if (EventStateManager::sMouseOverDocument == doc) {
-      isSameDoc = true;
-      break;
-    }
-  } while ((doc = doc->GetParentDocument()));
-
-  if (!isSameDoc) {
-    *aCursor = eCursor_none;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget)
-    return NS_ERROR_FAILURE;
-
-  // fetch cursor value from window's widget
-  *aCursor = widget->GetCursor();
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP

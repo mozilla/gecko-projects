@@ -2025,7 +2025,7 @@ js::NativeHasProperty(JSContext* cx, HandleNativeObject obj, HandleId id, bool* 
         // What they all have in common is we do not want to keep walking
         // the prototype chain, and always claim that the property
         // doesn't exist.
-        RootedObject proto(cx, done ? nullptr : pobj->staticPrototype());
+        JSObject* proto = done ? nullptr : pobj->staticPrototype();
 
         // Step 8.
         if (!proto) {
@@ -2038,8 +2038,10 @@ js::NativeHasProperty(JSContext* cx, HandleNativeObject obj, HandleId id, bool* 
         // plumbing of HasProperty; the top of the loop is where
         // we're going to end up anyway. But if pobj is non-native,
         // that optimization would be incorrect.
-        if (!proto->isNative())
-            return HasProperty(cx, proto, id, foundp);
+        if (!proto->isNative()) {
+            RootedObject protoRoot(cx, proto);
+            return HasProperty(cx, protoRoot, id, foundp);
+        }
 
         pobj = &proto->as<NativeObject>();
     }
@@ -2062,8 +2064,6 @@ js::NativeGetOwnPropertyDescriptor(JSContext* cx, HandleNativeObject obj, Handle
 
     desc.setAttributes(GetPropertyAttributes(obj, prop));
     if (desc.isAccessorDescriptor()) {
-        MOZ_ASSERT(desc.isShared());
-
         // The result of GetOwnPropertyDescriptor() must be either undefined or
         // a complete property descriptor (per ES6 draft rev 32 (2015 Feb 2)
         // 6.1.7.3, Invariants of the Essential Internal Methods).
@@ -2093,7 +2093,6 @@ js::NativeGetOwnPropertyDescriptor(JSContext* cx, HandleNativeObject obj, Handle
         // desc.getter/setter, and mask away the SHARED bit.
         desc.setGetter(nullptr);
         desc.setSetter(nullptr);
-        desc.attributesRef() &= ~JSPROP_SHARED;
 
         if (prop.isDenseOrTypedArrayElement()) {
             desc.value().set(obj->getDenseOrTypedArrayElement(JSID_TO_INT(id)));
@@ -2137,15 +2136,20 @@ GetExistingProperty(JSContext* cx,
                     typename MaybeRooted<Value, allowGC>::MutableHandleType vp)
 {
     if (shape->hasSlot()) {
+        MOZ_ASSERT(shape->hasDefaultGetter());
+
         vp.set(obj->getSlot(shape->slot()));
+
         MOZ_ASSERT_IF(!vp.isMagic(JS_UNINITIALIZED_LEXICAL) &&
                       !obj->isSingleton() &&
                       !obj->template is<EnvironmentObject>() &&
                       shape->hasDefaultGetter(),
                       ObjectGroupHasProperty(cx, obj->group(), shape->propid(), vp));
-    } else {
-        vp.setUndefined();
+        return true;
     }
+
+    vp.setUndefined();
+
     if (shape->hasDefaultGetter())
         return true;
 
@@ -2168,22 +2172,11 @@ GetExistingProperty(JSContext* cx,
     if (!allowGC)
         return false;
 
-    if (!CallGetter(cx,
-                    MaybeRooted<JSObject*, allowGC>::toHandle(obj),
-                    MaybeRooted<Value, allowGC>::toHandle(receiver),
-                    MaybeRooted<Shape*, allowGC>::toHandle(shape),
-                    MaybeRooted<Value, allowGC>::toMutableHandle(vp)))
-    {
-        return false;
-    }
-
-    // Ancient nonstandard extension: via the JSAPI it's possible to create a
-    // data property that has both a slot and a getter. In that case, copy the
-    // value returned by the getter back into the slot.
-    if (shape->hasSlot() && obj->contains(cx, shape))
-        obj->setSlot(shape->slot(), vp);
-
-    return true;
+    return CallGetter(cx,
+                      MaybeRooted<JSObject*, allowGC>::toHandle(obj),
+                      MaybeRooted<Value, allowGC>::toHandle(receiver),
+                      MaybeRooted<Shape*, allowGC>::toHandle(shape),
+                      MaybeRooted<Value, allowGC>::toMutableHandle(vp));
 }
 
 bool
@@ -2510,22 +2503,8 @@ NativeSetExistingDataProperty(JSContext* cx, HandleNativeObject obj, HandleShape
 
     MOZ_ASSERT(!obj->is<WithEnvironmentObject>());  // See bug 1128681.
 
-    uint32_t sample = cx->propertyRemovals;
     RootedId id(cx, shape->propid());
-    RootedValue value(cx, v);
-    if (!CallJSSetterOp(cx, shape->setterOp(), obj, id, &value, result))
-        return false;
-
-    // Update any slot for the shape with the value produced by the setter,
-    // unless the setter deleted the shape.
-    if (shape->hasSlot() &&
-        (MOZ_LIKELY(cx->propertyRemovals == sample) ||
-         obj->contains(cx, shape)))
-    {
-        obj->setSlot(shape->slot(), value);
-    }
-
-    return true;  // result is populated by CallJSSetterOp above.
+    return CallJSSetterOp(cx, shape->setterOp(), obj, id, v, result);
 }
 
 /*
@@ -2736,8 +2715,7 @@ SetExistingProperty(JSContext* cx, HandleNativeObject obj, HandleId id, HandleVa
             if (shape->hasDefaultSetter())
                 return result.succeed();
 
-            RootedValue valCopy(cx, v);
-            return CallJSSetterOp(cx, shape->setterOp(), obj, id, &valCopy, result);
+            return CallJSSetterOp(cx, shape->setterOp(), obj, id, v, result);
         }
 
         // Shadow pobj[id] by defining a new data property receiver[id].

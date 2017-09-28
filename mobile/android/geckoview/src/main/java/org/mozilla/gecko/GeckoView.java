@@ -496,6 +496,9 @@ public class GeckoView extends LayerView {
         } else {
             mSettings = settings;
         }
+        mSettings.setString(GeckoViewSettings.DEBUGGER_SOCKET_DIR,
+                            context.getApplicationInfo().dataDir);
+
     }
 
     @Override
@@ -681,6 +684,18 @@ public class GeckoView extends LayerView {
     */
     public void goForward() {
         mEventDispatcher.dispatch("GeckoView:GoForward", null);
+    }
+
+    /**
+    * Set this GeckoView as active or inactive. Setting a GeckoView to inactive will
+    * significantly reduce its memory footprint, but should only be done if the
+    * GeckoView is not currently visible.
+    * @param active A boolean determining whether the GeckoView is active
+    */
+    public void setActive(boolean active) {
+        final GeckoBundle msg = new GeckoBundle();
+        msg.putBoolean("active", active);
+        mEventDispatcher.dispatch("GeckoView:SetActive", msg);
     }
 
     public GeckoViewSettings getSettings() {

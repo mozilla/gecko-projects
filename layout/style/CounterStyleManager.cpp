@@ -492,7 +492,7 @@ EthiopicToText(CounterValue aOrdinal, nsAString& aResult)
   // If we didn't add the leading "0", decrement asciiStringLength so
   // it will be equivalent to a zero-based index in both cases.
   if (asciiStringLength & 1) {
-    asciiNumberString.Insert(NS_LITERAL_STRING("0"), 0);
+    asciiNumberString.InsertLiteral(u"0", 0);
   } else {
     asciiStringLength--;
   }
@@ -1138,7 +1138,7 @@ private:
   CounterStyle* GetExtends();
   CounterStyle* GetExtendsRoot();
 
-  nsCOMPtr<nsIAtom> mName;
+  RefPtr<nsIAtom> mName;
 
   // CounterStyleManager should always overlive any CounterStyle as it
   // is owned by nsPresContext, and will be released after all nodes and

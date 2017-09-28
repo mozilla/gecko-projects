@@ -357,10 +357,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStart.mParent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStart.mRef)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEnd.mParent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEnd.mRef)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStart)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEnd)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelection)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -1048,11 +1046,18 @@ nsRange::SetSelection(mozilla::dom::Selection* aSelection)
   if (mSelection == aSelection) {
     return;
   }
+
   // At least one of aSelection and mSelection must be null
   // aSelection will be null when we are removing from a selection
   // and a range can't be in more than one selection at a time,
   // thus mSelection must be null too.
   MOZ_ASSERT(!aSelection || !mSelection);
+
+  // Extra step in case our parent failed to ensure the above
+  // invariant.
+  if (aSelection && mSelection) {
+    mSelection->RemoveRange(this);
+  }
 
   mSelection = aSelection;
   if (mSelection) {

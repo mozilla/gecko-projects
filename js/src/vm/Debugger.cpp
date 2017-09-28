@@ -2298,10 +2298,7 @@ Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame
     }
 
     if (allocationsLog.length() > maxAllocationsLogLength) {
-        if (!allocationsLog.popFront()) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
+        allocationsLog.popFront();
         MOZ_ASSERT(allocationsLog.length() == maxAllocationsLogLength);
         allocationsLogOverflowed = true;
     }
@@ -8484,7 +8481,7 @@ DebuggerArguments::create(JSContext* cx, HandleObject proto, HandleDebuggerFrame
         if (!getobj ||
             !NativeDefineAccessorProperty(cx, obj, id,
                                           JS_DATA_TO_FUNC_PTR(GetterOp, getobj.get()), nullptr,
-                                          JSPROP_ENUMERATE | JSPROP_SHARED | JSPROP_GETTER))
+                                          JSPROP_ENUMERATE | JSPROP_GETTER))
         {
             return nullptr;
         }

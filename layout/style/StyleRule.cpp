@@ -873,7 +873,7 @@ nsCSSSelector::AppendToStringWithoutCombinatorsOrNegations
 
         if (list->mValueCaseSensitivity ==
               nsAttrSelector::ValueCaseSensitivity::CaseInsensitive) {
-          aString.Append(NS_LITERAL_STRING(" i"));
+          aString.AppendLiteral(u" i");
         }
       }
 
@@ -1343,11 +1343,11 @@ StyleRule::List(FILE* out, int32_t aIndent) const
     if (sheet) {
       nsIURI* uri = sheet->GetSheetURI();
       if (uri) {
-        str.Append(" /* ");
+        str.AppendLiteral(" /* ");
         str.Append(uri->GetSpecOrDefault());
         str.Append(':');
         str.AppendInt(mLineNumber);
-        str.Append(" */");
+        str.AppendLiteral(" */");
       }
     }
   }
@@ -1489,7 +1489,7 @@ StyleRule::SelectorMatchesElement(Element* aElement,
   if (!aPseudo.IsEmpty()) {
     // We need to make sure that the requested pseudo element type
     // matches the selector pseudo element type before proceeding.
-    nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
+    RefPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
     if (sel->mSelectors->PseudoType() != nsCSSPseudoElements::
           GetPseudoType(pseudoElt, CSSEnabledState::eIgnoreEnabledState)) {
       *aMatches = false;
