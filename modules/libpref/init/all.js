@@ -3122,6 +3122,9 @@ pref("layout.display-list.retain", false);
 pref("layout.display-list.retain", true);
 #endif
 
+// Toggle display list performance measurements
+pref("layout.display-list.build-twice", false);
+
 // pref to control whether layout warnings that are hit quite often are enabled
 pref("layout.spammy_warnings.enabled", false);
 
