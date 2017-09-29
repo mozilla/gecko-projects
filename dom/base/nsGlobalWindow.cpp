@@ -1012,8 +1012,7 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mLargeAllocStatus(LargeAllocStatus::NONE),
   mHasTriedToCacheTopInnerWindow(false),
   mNumOfIndexedDBDatabases(0),
-  mNumOfOpenWebSockets(0),
-  mNumOfActiveUserMedia(0)
+  mNumOfOpenWebSockets(0)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -4387,7 +4386,6 @@ nsGlobalWindow::UpdateTopInnerWindow()
   }
 
   mTopInnerWindow->UpdateWebSocketCount(-(int32_t)mNumOfOpenWebSockets);
-  mTopInnerWindow->UpdateUserMediaCount(-(int32_t)mNumOfActiveUserMedia);
 }
 
 void
@@ -4546,32 +4544,6 @@ nsPIDOMWindowInner::HasOpenWebSockets() const
 
   return mNumOfOpenWebSockets ||
          (mTopInnerWindow && mTopInnerWindow->mNumOfOpenWebSockets);
-}
-
-void
-nsPIDOMWindowInner::UpdateUserMediaCount(int32_t aDelta)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (aDelta == 0) {
-    return;
-  }
-
-  if (mTopInnerWindow && !IsTopInnerWindow()) {
-    mTopInnerWindow->UpdateUserMediaCount(aDelta);
-  }
-
-  MOZ_DIAGNOSTIC_ASSERT(
-    aDelta > 0 || ((aDelta + mNumOfActiveUserMedia) < mNumOfActiveUserMedia));
-
-  mNumOfActiveUserMedia += aDelta;
-}
-
-bool
-nsPIDOMWindowInner::HasActiveUserMedia() const
-{
-  return (mTopInnerWindow ? mTopInnerWindow->mNumOfActiveUserMedia
-                          : mNumOfActiveUserMedia) > 0;
 }
 
 void
@@ -6274,7 +6246,7 @@ nsGlobalWindow::GetMozInnerScreenY(CallerType aCallerType, ErrorResult& aError)
   FORWARD_TO_OUTER_OR_THROW(GetMozInnerScreenYOuter, (aCallerType), aError, 0);
 }
 
-float
+double
 nsGlobalWindow::GetDevicePixelRatioOuter(CallerType aCallerType)
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
@@ -6299,11 +6271,11 @@ nsGlobalWindow::GetDevicePixelRatioOuter(CallerType aCallerType)
     return overrideDPPX;
   }
 
-  return float(nsPresContext::AppUnitsPerCSSPixel())/
-      presContext->AppUnitsPerDevPixel();
+  return double(nsPresContext::AppUnitsPerCSSPixel()) /
+         double(presContext->AppUnitsPerDevPixel());
 }
 
-float
+double
 nsGlobalWindow::GetDevicePixelRatio(CallerType aCallerType, ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetDevicePixelRatioOuter, (aCallerType), aError, 0.0);

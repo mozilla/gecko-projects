@@ -13,7 +13,7 @@
 #include "IDBRequest.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/dom/DOMError.h"
+#include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "nsAutoPtr.h"
@@ -239,6 +239,11 @@ IDBTransaction::Create(JSContext* aCx, IDBDatabase* aDatabase,
     nsAutoPtr<WorkerHolder> workerHolder(
       new WorkerHolder(workerPrivate, transaction));
     if (NS_WARN_IF(!workerHolder->HoldWorker(workerPrivate, Canceling))) {
+      // Silence the destructor assertion if we never made this object live.
+#ifdef DEBUG
+      MOZ_ASSERT(!transaction->mSentCommitOrAbort);
+      transaction->mSentCommitOrAbort = true;
+#endif
       return nullptr;
     }
 
@@ -668,13 +673,13 @@ IDBTransaction::RenameIndex(IDBObjectStore* aObjectStore,
 
 void
 IDBTransaction::AbortInternal(nsresult aAbortCode,
-                              already_AddRefed<DOMError> aError)
+                              already_AddRefed<DOMException> aError)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(NS_FAILED(aAbortCode));
   MOZ_ASSERT(!IsCommittingOrDone());
 
-  RefPtr<DOMError> error = aError;
+  RefPtr<DOMException> error = aError;
 
   const bool isVersionChange = mMode == VERSION_CHANGE;
   const bool isInvalidated = mDatabase->IsInvalidated();
@@ -772,7 +777,7 @@ IDBTransaction::Abort(IDBRequest* aRequest)
   }
 
   ErrorResult rv;
-  RefPtr<DOMError> error = aRequest->GetError(rv);
+  RefPtr<DOMException> error = aRequest->GetError(rv);
 
   AbortInternal(aRequest->GetErrorCode(), error.forget());
 }
@@ -788,7 +793,7 @@ IDBTransaction::Abort(nsresult aErrorCode)
     return;
   }
 
-  RefPtr<DOMError> error = new DOMError(GetOwner(), aErrorCode);
+  RefPtr<DOMException> error = DOMException::Create(aErrorCode);
   AbortInternal(aErrorCode, error.forget());
 }
 
@@ -836,7 +841,7 @@ IDBTransaction::FireCompleteOrAbortEvents(nsresult aResult)
     }
 
     if (!mError && !mAbortedByScript) {
-      mError = new DOMError(GetOwner(), aResult);
+      mError = DOMException::Create(aResult);
     }
 
     event = CreateGenericEvent(this,
@@ -930,7 +935,7 @@ IDBTransaction::GetMode(ErrorResult& aRv) const
   }
 }
 
-DOMError*
+DOMException*
 IDBTransaction::GetError() const
 {
   AssertIsOnOwningThread();
