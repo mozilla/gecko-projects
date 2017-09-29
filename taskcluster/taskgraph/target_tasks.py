@@ -45,15 +45,16 @@ def filter_upload_symbols(task, parameters):
 def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=False):
     if not standard_filter(task, parameters):
         return False
-    ignore_kinds = ignore_kinds or [
-        'balrog',
-        'beetmover', 'beetmover-checksums', 'beetmover-l10n',
-        'beetmover-repackage', 'beetmover-repackage-signing',
-        'checksums-signing',
-        'nightly-l10n', 'nightly-l10n-signing',
-        'push-apk', 'push-apk-breakpoint',
-        'repackage-l10n',
-    ]
+    if ignore_kinds is None:
+        ignore_kinds = [
+            'balrog',
+            'beetmover', 'beetmover-checksums', 'beetmover-l10n',
+            'beetmover-repackage', 'beetmover-repackage-signing',
+            'checksums-signing',
+            'nightly-l10n', 'nightly-l10n-signing',
+            'push-apk', 'push-apk-breakpoint',
+            'repackage-l10n',
+        ]
     platform = task.attributes.get('build_platform')
     if platform in (
             # On beta, Nightly builds are already PGOs
@@ -307,23 +308,23 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
     of desktop. This should include all non-android mozilla_beta tasks, plus
     l10n, beetmover, balrog, etc."""
 
-    ignore_kinds = [
-        'balrog',
-        'beetmover', 'beetmover-checksums', 'beetmover-l10n',
-        'beetmover-repackage', 'beetmover-repackage-signing',
-        'checksums-signing',
-        'push-apk', 'push-apk-breakpoint',
-    ]
     beta_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
                   filter_beta_release_tasks(t, parameters,
-                                            ignore_kinds=ignore_kinds,
+                                            ignore_kinds=[],
                                             allow_l10n=True)]
+    allow_kinds = [
+        'build', 'build-signing', 'repackage', 'repackage-signing',
+        'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+    ]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
 
         # Android has its own promotion.
         if platform and 'android' in platform:
+            return False
+
+        if task.kind not in allow_kinds:
             return False
 
         # Allow for beta_tasks; these will get optimized out to point to
