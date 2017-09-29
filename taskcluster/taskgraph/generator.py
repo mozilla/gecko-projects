@@ -263,7 +263,7 @@ class TaskGraphGenerator(object):
 
         logger.info("Generating optimized task graph")
         existing_tasks = self.parameters.get('existing_tasks')
-        do_not_optimize = set()
+        do_not_optimize = set(self.parameters.get('do_not_optimize', []))
         if not self.parameters.get('optimize_target_tasks', True):
             do_not_optimize = target_task_set.graph.nodes
         optimized_task_graph, label_to_taskid = optimize_task_graph(target_task_graph,

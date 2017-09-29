@@ -26,6 +26,11 @@ Push Information
    The repository from which to do an initial clone, utilizing any available
    caching.
 
+``do_not_optimize``
+   Specify tasks to not optimize out of the graph. This is a list of labels.
+   Any tasks in the graph matching one of the labels will not be optimized out
+   of the graph.
+
 ``existing_tasks``
    Specify tasks to optimize out of the graph. This is a dictionary of label to taskId.
    Any tasks in the graph matching one of the labels will use the previously-run

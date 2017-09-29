@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
                 'description': ('The release build number. Starts at 1 per '
                                 'release version, and increments on rebuild.'),
             },
+            'do_not_optimize': {
+                'type': 'array',
+                'description': ('An list of labels to avoid optimizing out '
+                                'of the graph (to force a rerun of, say, '
+                                'funsize docker-image tasks).'),
+                'items': {
+                    'type': 'string',
+                },
+            }
             'revision': {
                 'type': 'string',
                 'title': 'Optional: revision to promote',
@@ -78,6 +87,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     os.environ['BUILD_NUMBER'] = str(input['build_number'])
     target_tasks_method = input['target_tasks_method']
     previous_graph_kinds = input['previous_graph_kinds']
+    do_not_optimize = input.get('do_not_optimize', [])
     # make parameters read-write
     parameters = dict(parameters)
     # Build previous_graph_ids from ``previous_graph_ids``, ``pushlog_id``,
@@ -96,6 +106,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
         full_task_graph, previous_graph_ids, previous_graph_kinds
     )
+    parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
     logger.info("Existing tasks:")
     logger.info(pprint.pformat(parameters['existing_tasks']))

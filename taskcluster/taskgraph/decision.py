@@ -172,6 +172,7 @@ def get_decision_parameters(options):
         'target_tasks_method',
     ]
     parameters['existing_tasks'] = {}
+    parameters['do_not_optimize'] = []
 
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
     # case, fake it
