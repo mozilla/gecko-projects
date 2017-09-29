@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
                 'items': {
                     'type': 'string',
                 },
-            }
+            },
             'revision': {
                 'type': 'string',
                 'title': 'Optional: revision to promote',
