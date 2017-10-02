@@ -19,6 +19,8 @@ class ParameterMismatch(Exception):
 PARAMETER_NAMES = set([
     'base_repository',
     'build_date',
+    'do_not_optimize',
+    'existing_tasks',
     'filters',
     'head_ref',
     'head_repository',

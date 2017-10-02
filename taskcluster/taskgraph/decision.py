@@ -98,7 +98,7 @@ PER_PROJECT_PARAMETERS = {
 }
 
 
-def taskgraph_decision(options):
+def taskgraph_decision(options, parameters=None):
     """
     Run the decision task.  This function implements `mach taskgraph decision`,
     and is responsible for
@@ -110,7 +110,7 @@ def taskgraph_decision(options):
      * calling TaskCluster APIs to create the graph
     """
 
-    parameters = get_decision_parameters(options)
+    parameters = parameters or get_decision_parameters(options)
 
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
@@ -171,6 +171,8 @@ def get_decision_parameters(options):
         'check_servo',
         'target_tasks_method',
     ]
+    parameters['existing_tasks'] = {}
+    parameters['do_not_optimize'] = []
 
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
     # case, fake it
