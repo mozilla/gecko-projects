@@ -45,6 +45,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
+        'maple',
     ])
 ]]
 
@@ -79,6 +80,7 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
+        'maple',
     ])
 ]]
 
@@ -140,6 +142,7 @@ BALROG_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'beta', set([
         'mozilla-beta',
+        'maple',
     ])
 ], [
     'release', set([
@@ -212,6 +215,7 @@ PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'beta', set([
         'mozilla-beta',
+        'maple',
     ])
 ], [
     'release', set([
@@ -237,6 +241,7 @@ PUSH_APK_GOOGLE_PLAY_TRACT = {
 
 PUSH_APK_BREAKPOINT_WORKER_TYPE = {
     'central': 'aws-provisioner-v1/taskcluster-generic',
+    'maple': 'null-provisioner/human-breakpoint',
     'beta': 'null-provisioner/human-breakpoint',
     'release': 'null-provisioner/human-breakpoint',
     'default': 'invalid/invalid',
@@ -244,7 +249,7 @@ PUSH_APK_BREAKPOINT_WORKER_TYPE = {
 
 PUSH_APK_DRY_RUN_OPTION = {
     'central': False,
-    'beta': False,
+    'beta': True,
     'release': False,
     'default': True,
 }
