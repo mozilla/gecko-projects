@@ -113,5 +113,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
 
     # make parameters read-only
     parameters = Parameters(parameters)
+    # hardcode until we have a better way of passing this down.
+    options = {'root': 'taskcluster/ci'}
 
     taskgraph_decision(options, parameters=parameters)
