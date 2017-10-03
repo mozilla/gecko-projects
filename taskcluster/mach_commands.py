@@ -30,7 +30,7 @@ class ShowTaskGraphSubCommand(SubCommand):
     def __call__(self, func):
         after = SubCommand.__call__(self, func)
         args = [
-            CommandArgument('--root', '-r', default='taskcluster/ci',
+            CommandArgument('--root', '-r',
                             help="root of the taskgraph definition relative to topsrcdir"),
             CommandArgument('--quiet', '-q', action="store_true",
                             help="suppress all logging output"),
@@ -104,7 +104,6 @@ class MachCommands(MachCommandBase):
     @SubCommand('taskgraph', 'decision',
                 description="Run the decision task")
     @CommandArgument('--root', '-r',
-                     default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
     @CommandArgument('--base-repository',
                      required=True,
@@ -159,7 +158,6 @@ class MachCommands(MachCommandBase):
     @SubCommand('taskgraph', 'action-task',
                 description="Run the add-tasks task. DEPRECATED! Use 'add-tasks' instead.")
     @CommandArgument('--root', '-r',
-                     default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
     @CommandArgument('--decision-id',
                      required=True,
@@ -184,7 +182,6 @@ class MachCommands(MachCommandBase):
     @SubCommand('taskgraph', 'add-tasks',
                 description="Run the add-tasks task")
     @CommandArgument('--root', '-r',
-                     default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
     @CommandArgument('--decision-id',
                      required=True,
@@ -209,7 +206,6 @@ class MachCommands(MachCommandBase):
     @SubCommand('taskgraph', 'backfill',
                 description="Run the backfill task")
     @CommandArgument('--root', '-r',
-                     default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
     @CommandArgument('--project',
                      required=True,
@@ -270,7 +266,6 @@ class MachCommands(MachCommandBase):
     @SubCommand('taskgraph', 'add-talos',
                 description="Run the add-talos task")
     @CommandArgument('--root', '-r',
-                     default='taskcluster/ci',
                      help="root of the taskgraph definition relative to topsrcdir")
     @CommandArgument('--decision-task-id',
                      required=True,

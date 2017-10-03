@@ -65,7 +65,7 @@ PER_PROJECT_PARAMETERS = {
         'include_nightly': False,
     },
 
-    'date': {
+    'maple': {
         'target_tasks_method': 'mozilla_beta_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
@@ -114,7 +114,7 @@ def taskgraph_decision(options, parameters=None):
 
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
-        root_dir=options['root'],
+        root_dir=options.get('root', 'taskcluster/ci'),
         parameters=parameters)
 
     # write out the parameters used to generate this graph
