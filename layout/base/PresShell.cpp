@@ -3703,7 +3703,7 @@ PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
   RestyleManager* restyleManager = mPresContext->RestyleManager();
   uint32_t hoverGenerationBefore =
     restyleManager->GetHoverGeneration();
-  nsEventStatus status;
+  nsEventStatus status = nsEventStatus_eIgnore;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
   if (!targetView)
     return;
@@ -4354,8 +4354,7 @@ RealContainer(nsIDocument* aDocument, nsIContent* aContainer, nsIContent* aConte
 void
 PresShell::ContentAppended(nsIDocument *aDocument,
                            nsIContent* aContainer,
-                           nsIContent* aFirstNewContent,
-                           int32_t     aNewIndexInContainer)
+                           nsIContent* aFirstNewContent)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentAppended");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
@@ -4387,8 +4386,7 @@ PresShell::ContentAppended(nsIDocument *aDocument,
 void
 PresShell::ContentInserted(nsIDocument* aDocument,
                            nsIContent*  aMaybeContainer,
-                           nsIContent*  aChild,
-                           int32_t      aIndexInContainer)
+                           nsIContent*  aChild)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentInserted");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
@@ -4423,7 +4421,6 @@ void
 PresShell::ContentRemoved(nsIDocument *aDocument,
                           nsIContent* aMaybeContainer,
                           nsIContent* aChild,
-                          int32_t     aIndexInContainer,
                           nsIContent* aPreviousSibling)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentRemoved");
@@ -4446,7 +4443,9 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  nsIContent* oldNextSibling = container->GetChildAt(aIndexInContainer);
+  nsIContent* oldNextSibling = nullptr;
+  oldNextSibling = aPreviousSibling ?
+    aPreviousSibling->GetNextSibling() : container->GetFirstChild();
 
   mPresContext->RestyleManager()->ContentRemoved(container, aChild, oldNextSibling);
 
@@ -6359,7 +6358,10 @@ PresShell::Paint(nsView*         aViewToPaint,
                                 (layerManager->GetBackendType() == LayersBackend::LAYERS_BASIC);
 
       UniquePtr<LayerProperties> props;
-      if (computeInvalidRect) {
+      // For WR, the layermanager has no root layer. We want to avoid
+      // calling ComputeDifferences in that case because it assumes non-null
+      // and crashes.
+      if (computeInvalidRect && layerManager->GetRoot()) {
         props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
       }
 
