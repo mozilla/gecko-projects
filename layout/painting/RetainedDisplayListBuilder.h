@@ -8,12 +8,13 @@
 #include "nsDisplayList.h"
 
 struct DisplayListStatistics {
-  uint32_t modifiedFrames = 0;
+  uint32_t reusedItems = 0;
+  uint32_t totalItems = 0;
+
   bool triedPartial = false;
   bool merged = false;
 
-  bool hadCanvas = false;
-  bool hadViewport = false;
+  nsTArray<nsIFrame*> frames;
 };
 
 struct RetainedDisplayListBuilder {
@@ -40,7 +41,8 @@ private:
 
   void MergeDisplayLists(nsDisplayList* aNewList,
                          nsDisplayList* aOldList,
-                         nsDisplayList* aOutList);
+                         nsDisplayList* aOutList,
+                         DisplayListStatistics& aStats);
 
   bool ComputeRebuildRegion(std::vector<WeakFrame>& aModifiedFrames,
                             nsRect* aOutDirty,

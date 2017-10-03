@@ -338,13 +338,21 @@ RetainedDisplayListBuilder::IncrementSubDocPresShellPaintCount(nsDisplayItem* aI
 void
 RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
                                               nsDisplayList* aOldList,
-                                              nsDisplayList* aOutList)
+                                              nsDisplayList* aOutList,
+                                              DisplayListStatistics& aStats)
 {
   nsDisplayList merged;
   nsDisplayItem* old;
 
-  const auto ReuseItem = [&](nsDisplayItem* aItem) {
+  const auto UseItem = [&](nsDisplayItem* aItem) {
     merged.AppendToTop(aItem);
+    aStats.totalItems++;
+  };
+
+  const auto ReuseItem = [&](nsDisplayItem* aItem) {
+    UseItem(aItem);
+    aStats.reusedItems++;
+
     aItem->SetReused(true);
 
     if (aItem->GetType() == DisplayItemType::TYPE_SUBDOCUMENT) {
@@ -387,7 +395,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
 
         if (oldItem->GetChildren()) {
           MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren());
+          MergeDisplayLists(i->GetChildren(), oldItem->GetChildren(),
+                            oldItem->GetChildren(), aStats);
           oldItem->UpdateBounds(&mBuilder);
         }
         if (oldItem->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
@@ -422,18 +431,19 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
           if (!IsAnyAncestorModified(old->FrameForInvalidation()) &&
               old->GetChildren()) {
             MOZ_ASSERT(i->GetChildren());
-            MergeDisplayLists(i->GetChildren(), old->GetChildren(), i->GetChildren());
+            MergeDisplayLists(i->GetChildren(), old->GetChildren(),
+                              i->GetChildren(), aStats);
             i->UpdateBounds(&mBuilder);
           }
 
           old->Destroy(&mBuilder);
-          merged.AppendToTop(i);
+          UseItem(i);
         }
       }
     } else {
       // If there was no matching item in the old list, then we only need to
       // add the new item to the merged list.
-      merged.AppendToTop(i);
+      UseItem(i);
     }
   }
 
@@ -449,7 +459,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
         // loop above and jumps back here.
         nsDisplayList empty;
 
-        MergeDisplayLists(&empty, old->GetChildren(), old->GetChildren());
+        MergeDisplayLists(&empty, old->GetChildren(),
+                          old->GetChildren(), aStats);
         old->UpdateBounds(&mBuilder);
       }
       if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
@@ -692,22 +703,29 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
   mBuilder.EnterPresShell(mBuilder.RootReferenceFrame());
 
-  std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(mBuilder.RootReferenceFrame());
+  std::vector<WeakFrame> modifiedFrames =
+    GetModifiedFrames(mBuilder.RootReferenceFrame());
 
-  aStats.modifiedFrames = modifiedFrames.size();
+  // A simple early exit heuristic to avoid slow partial display list rebuilds.
+  bool shouldBuildPartial = true;
   for (WeakFrame& frame : modifiedFrames) {
     if (!frame) {
       continue;
     }
 
-    LayoutFrameType type = frame->Type();
-    if (type == LayoutFrameType::Viewport ||
-        type == LayoutFrameType::PageContent) {
-      aStats.hadViewport = true;
-    }
+    aStats.frames.AppendElement(frame.GetFrame());
 
-    if (type == LayoutFrameType::Canvas) {
-      aStats.hadCanvas = true;
+    LayoutFrameType type = frame->Type();
+
+    // If we have any modified frames of the following types, it is likely that
+    // doing a partial rebuild of the display list will be slower than doing a
+    // full rebuild.
+    // TODO: Optimize these cases.
+    if (type == LayoutFrameType::Viewport ||
+        type == LayoutFrameType::PageContent ||
+        type == LayoutFrameType::Canvas ||
+        type == LayoutFrameType::Scrollbar) {
+      shouldBuildPartial = false;
     }
   }
 
@@ -727,7 +745,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
   AnimatedGeometryRoot* modifiedAGR = nullptr;
   nsTArray<nsIFrame*> framesWithProps;
   bool merged = false;
-  if (!mList.IsEmpty() &&
+  if (shouldBuildPartial && !mList.IsEmpty() &&
       ComputeRebuildRegion(modifiedFrames, &modifiedDirty, &modifiedAGR, &framesWithProps)) {
     modifiedDirty.IntersectRect(modifiedDirty, mBuilder.RootReferenceFrame()->GetVisualOverflowRectRelativeToSelf());
 
@@ -760,7 +778,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
     // are not visible anymore) from the old list.
     // TODO: Optimization opportunity. In this case, MergeDisplayLists()
     // unnecessarily creates a hashtable of the old items.
-    MergeDisplayLists(&modifiedDL, &mList, &mList);
+    MergeDisplayLists(&modifiedDL, &mList, &mList, aStats);
 
     //printf_stderr("Painting --- Merged list:\n");
     //nsFrame::PrintDisplayList(&builder, list);

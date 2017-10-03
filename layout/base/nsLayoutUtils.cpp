@@ -3887,11 +3887,25 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     }
 
     if (stats.triedPartial && gfxPrefs::LayoutDisplayListBuildTwice()) {
-      printf(R"({ "retained": %.3f, "full": %.3f, "modifiedFrames": %d, )"
-             R"("listSize": %d, "hadCanvas": %d, "hadViewPort": %d, )"
-             R"("merged": %d },)" "\n",
-        retainedBuildTime, fullBuildTime, stats.modifiedFrames, list.Count(),
-        stats.hadCanvas, stats.hadViewport, stats.merged);
+      const float reused =
+        static_cast<float>(stats.reusedItems) / stats.totalItems;
+
+      printf(R"({ "retained": %.3f, "full": %.3f, "modifiedFrames": %lu, )"
+             R"("listSize": %u, "merged": %d, )"
+             R"("items": "[%u, %u, %.3f]" },)" "\n",
+        retainedBuildTime, fullBuildTime, stats.frames.Length(), list.Count(),
+        stats.merged, stats.reusedItems, stats.totalItems, reused);
+
+#if 0
+      printf("Modified frames:\n");
+      for (nsIFrame* frame : stats.frames) {
+        nsString str;
+        #ifdef DEBUG_FRAME_DUMP
+        frame->GetFrameName(str);
+        #endif
+        printf("\t %p (%s)\n", frame, NS_ConvertUTF16toUTF8(str).get());
+      }
+#endif
     }
   }
 
