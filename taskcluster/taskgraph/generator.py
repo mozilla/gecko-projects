@@ -87,6 +87,8 @@ class TaskGraphGenerator(object):
         @param parameters: parameters for this task-graph generation
         @type parameters: dict
         """
+        if root_dir is None:
+            root_dir = 'taskcluster/ci'
         self.root_dir = root_dir
         self.parameters = parameters
 

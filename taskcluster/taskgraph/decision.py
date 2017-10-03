@@ -114,7 +114,7 @@ def taskgraph_decision(options, parameters=None):
 
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
-        root_dir=options.get('root', 'taskcluster/ci'),
+        root_dir=options['root'],
         parameters=parameters)
 
     # write out the parameters used to generate this graph
