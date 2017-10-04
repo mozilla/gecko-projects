@@ -108,8 +108,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
-    logger.info("Existing tasks:")
-    logger.info(pprint.pformat(parameters['existing_tasks']))
+    logger.info("Parameters:")
+    logger.info(pprint.pformat(parameters))
 
     # make parameters read-only
     parameters = Parameters(parameters)
