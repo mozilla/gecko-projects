@@ -372,6 +372,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
     if (!aNewList->IsEmpty()) {
       oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
     }
+
+    aStats.oldItems++;
   }
 
 #ifdef DEBUG
@@ -387,6 +389,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
 #endif
 
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
+    aStats.newItems++;
+
     if (nsDisplayItem* oldItem = oldListLookup.Get({ i->Frame(), i->GetPerFrameKey() })) {
       if (oldItem->IsReused()) {
         // If there's a matching item in the old list, but we've already put it into the

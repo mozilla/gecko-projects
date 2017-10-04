@@ -10,6 +10,8 @@
 struct DisplayListStatistics {
   uint32_t reusedItems = 0;
   uint32_t totalItems = 0;
+  uint32_t newItems = 0;
+  uint32_t oldItems = 0;
 
   bool triedPartial = false;
   bool merged = false;
