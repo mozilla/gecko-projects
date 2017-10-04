@@ -49,13 +49,13 @@ public:
 
   bool Contains(const nsAString& elem) const
   {
-    nsCOMPtr<nsIAtom> atom = NS_AtomizeMainThread(elem);
+    RefPtr<nsIAtom> atom = NS_AtomizeMainThread(elem);
     return Contains(atom);
   }
 
   bool Contains(const nsACString& aElem) const
   {
-    nsCOMPtr<nsIAtom> atom = NS_Atomize(aElem);
+    RefPtr<nsIAtom> atom = NS_Atomize(aElem);
     return Contains(atom);
   }
 
@@ -72,13 +72,13 @@ public:
 
   void Add(const nsAString& aElem)
   {
-    nsCOMPtr<nsIAtom> atom = NS_AtomizeMainThread(aElem);
+    RefPtr<nsIAtom> atom = NS_AtomizeMainThread(aElem);
     return Add(atom);
   }
 
   void Remove(const nsAString& aElem)
   {
-    nsCOMPtr<nsIAtom> atom = NS_AtomizeMainThread(aElem);
+    RefPtr<nsIAtom> atom = NS_AtomizeMainThread(aElem);
     return Remove(atom);
   }
 
@@ -130,13 +130,21 @@ private:
 // A helper class to lazily retrieve, transcode, and atomize certain URI
 // properties the first time they're used, and cache the results, so that they
 // can be used across multiple match operations.
-class MOZ_STACK_CLASS URLInfo final
+class URLInfo final
 {
 public:
   MOZ_IMPLICIT URLInfo(nsIURI* aURI)
     : mURI(aURI)
   {
     mHost.SetIsVoid(true);
+  }
+
+  URLInfo(nsIURI* aURI, bool aNoRef)
+    : URLInfo(aURI)
+  {
+    if (aNoRef) {
+      mURINoRef = mURI;
+    }
   }
 
   URLInfo(const URLInfo& aOther)
@@ -150,6 +158,7 @@ public:
   const nsString& Path() const;
   const nsString& FilePath() const;
   const nsString& Spec() const;
+  const nsCString& CSpec() const;
 
   bool InheritsPrincipal() const;
 
@@ -159,12 +168,13 @@ private:
   nsCOMPtr<nsIURI> mURI;
   mutable nsCOMPtr<nsIURI> mURINoRef;
 
-  mutable nsCOMPtr<nsIAtom> mScheme;
+  mutable RefPtr<nsIAtom> mScheme;
   mutable nsCString mHost;
 
-  mutable nsAutoString mPath;
-  mutable nsAutoString mFilePath;
-  mutable nsAutoString mSpec;
+  mutable nsString mPath;
+  mutable nsString mFilePath;
+  mutable nsString mSpec;
+  mutable nsCString mCSpec;
 
   mutable Maybe<bool> mInheritsPrincipal;
 };

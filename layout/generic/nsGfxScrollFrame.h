@@ -416,7 +416,7 @@ public:
   bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                              nsRect* aVisibleRect,
                              nsRect* aDirtyRect,
-                             bool aAllowCreateDisplayPort,
+                             bool aSetBase,
                              bool* aUsingDisplayPortDirtyRect = nullptr);
   void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort);
   bool GetDisplayPortAtLastApproximateFrameVisibilityUpdate(nsRect* aDisplayPort);
@@ -962,8 +962,8 @@ public:
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                                      nsRect* aVisibleRect,
                                      nsRect* aDirtyRect,
-                                     bool aAllowCreateDisplayPort) override {
-    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aAllowCreateDisplayPort);
+                                     bool aSetBase) override {
+    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aSetBase);
   }
   virtual void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort) override {
     mHelper.NotifyApproximateFrameVisibilityUpdate(aIgnoreDisplayPort);
@@ -1478,8 +1478,8 @@ public:
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                                      nsRect* aVisibleRect,
                                      nsRect* aDirtyRect,
-                                     bool aAllowCreateDisplayPort) override {
-    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aAllowCreateDisplayPort);
+                                     bool aSetBase) override {
+    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aSetBase);
   }
   virtual void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort) override {
     mHelper.NotifyApproximateFrameVisibilityUpdate(aIgnoreDisplayPort);

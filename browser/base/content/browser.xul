@@ -634,7 +634,7 @@
 
 #ifdef CAN_DRAW_IN_TITLEBAR
       <hbox class="titlebar-placeholder" type="pre-tabs"
-              skipintoolbarset="true"/>
+            skipintoolbarset="true"/>
 #endif
 
       <tabs id="tabbrowser-tabs"
@@ -680,6 +680,12 @@
           <menuseparator id="alltabs-popup-separator-2"/>
         </menupopup>
       </toolbarbutton>
+
+#ifdef CAN_DRAW_IN_TITLEBAR
+      <hbox class="titlebar-placeholder" type="post-tabs"
+            ordinal="1000"
+            skipintoolbarset="true"/>
+#endif
 
       <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;"
               ordinal="1000"
@@ -894,7 +900,7 @@
                       class="urlbar-icon-wrapper urlbar-page-action"
                       context="pageActionPanelContextMenu"
                       oncontextmenu="BrowserPageActions.onContextMenu(event);"
-                      onclick="BrowserPageActions.bookmark.onUrlbarNodeClicked(event);">
+                      onclick="BrowserPageActions.doCommandForAction(PageActions.actionForID('bookmark'), event, this);">
                   <image id="star-button"
                          class="urlbar-icon"
                          role="button"
@@ -928,7 +934,7 @@
                        hidden="true"
                        tooltip="dynamic-shortcut-tooltip"/>
 
-        <toolbarbutton id="library-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+        <toolbarbutton id="library-button" class="toolbarbutton-1 chromeclass-toolbar-additional subviewbutton-nav"
                        removable="true"
                        onmousedown="PanelUI.showSubView('appMenu-libraryView', this, null, event);"
                        closemenu="none"
@@ -1062,7 +1068,7 @@
                      tooltip="dynamic-shortcut-tooltip"/>
 
       <toolbarbutton id="bookmarks-menu-button"
-                     class="toolbarbutton-1 chromeclass-toolbar-additional"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional subviewbutton-nav"
                      type="menu"
                      label="&bookmarksMenuButton2.label;"
                      tooltip="dynamic-shortcut-tooltip"

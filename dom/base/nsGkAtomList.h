@@ -1664,6 +1664,7 @@ GK_ATOM(shape_rendering, "shape-rendering")
 GK_ATOM(skewX, "skewX")
 GK_ATOM(skewY, "skewY")
 GK_ATOM(slope, "slope")
+GK_ATOM(slot, "slot")
 GK_ATOM(softLight, "soft-light")
 GK_ATOM(spacing, "spacing")
 GK_ATOM(spacingAndGlyphs, "spacingAndGlyphs")
@@ -2077,6 +2078,7 @@ GK_ATOM(tabs, "tabs")
 GK_ATOM(webRequestBlocking, "webRequestBlocking")
 GK_ATOM(http, "http")
 GK_ATOM(https, "https")
+GK_ATOM(proxy, "proxy")
 
 //---------------------------------------------------------------------------
 // Special atoms

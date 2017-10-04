@@ -39,11 +39,19 @@ class ABIArgGenerator
     }
 };
 
+// These registers may be volatile or nonvolatile.
 static constexpr Register ABINonArgReg0 = t0;
 static constexpr Register ABINonArgReg1 = t1;
 static constexpr Register ABINonArgReg2 = t2;
+
+// These registers may be volatile or nonvolatile.
+// Note: these three registers are all guaranteed to be different
 static constexpr Register ABINonArgReturnReg0 = t0;
 static constexpr Register ABINonArgReturnReg1 = t1;
+
+// This register is guaranteed to be clobberable during the prologue of an ABI
+// call which must preserve both ABI argument and non-volatile registers.
+static constexpr Register NativeABIPrologueClobberable = t0;
 
 // TLS pointer argument register for WebAssembly functions. This must not alias
 // any other register used for passing function arguments or return values.
@@ -148,6 +156,8 @@ class Assembler : public AssemblerMIPSShared
 
     void bind(RepatchLabel* label);
     static void Bind(uint8_t* rawCode, CodeOffset label, CodeOffset target);
+
+    void processCodeLabels(uint8_t* rawCode);
 
     static void TraceJumpRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader);
     static void TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader);

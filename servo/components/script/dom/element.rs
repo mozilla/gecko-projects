@@ -85,7 +85,7 @@ use js::jsapi::Heap;
 use js::jsval::JSVal;
 use net_traits::request::CorsSettings;
 use ref_filter_map::ref_filter_map;
-use script_layout_interface::message::ReflowQueryType;
+use script_layout_interface::message::ReflowGoal;
 use script_thread::ScriptThread;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint, CaseSensitivity};
 use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext, MatchingMode};
@@ -105,7 +105,7 @@ use std::rc::Rc;
 use style::CaseSensitivityExt;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
-use style::context::{QuirksMode, ReflowGoal};
+use style::context::QuirksMode;
 use style::element_state::*;
 use style::invalidation::element::restyle_hints::RESTYLE_SELF;
 use style::properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock, parse_style_attribute};
@@ -554,9 +554,10 @@ impl LayoutElementHelpers for LayoutDom<Element> {
             hints.push(from_declaration(
                 shared_lock,
                 PropertyDeclaration::FontFamily(
-                        font_family::SpecifiedValue::Values(vec![
+                    font_family::SpecifiedValue::Values(
+                        font_family::computed_value::FontFamilyList::new(vec![
                             font_family::computed_value::FontFamily::from_atom(
-                                font_family)]))));
+                                font_family)])))));
         }
 
         let font_size = self.downcast::<HTMLFontElement>().and_then(|this| this.get_size());
@@ -3070,9 +3071,7 @@ impl TaskOnce for ElementPerformFullscreenEnter {
         // Step 7.5
         element.set_fullscreen_state(true);
         document.set_fullscreen_element(Some(&element));
-        document.window().reflow(ReflowGoal::ForDisplay,
-                                 ReflowQueryType::NoQuery,
-                                 ReflowReason::ElementStateChanged);
+        document.window().reflow(ReflowGoal::Full, ReflowReason::ElementStateChanged);
 
         // Step 7.6
         document.upcast::<EventTarget>().fire_event(atom!("fullscreenchange"));
@@ -3105,9 +3104,7 @@ impl TaskOnce for ElementPerformFullscreenExit {
         // Step 9.6
         element.set_fullscreen_state(false);
 
-        document.window().reflow(ReflowGoal::ForDisplay,
-                                 ReflowQueryType::NoQuery,
-                                 ReflowReason::ElementStateChanged);
+        document.window().reflow(ReflowGoal::Full, ReflowReason::ElementStateChanged);
 
         document.set_fullscreen_element(None);
 

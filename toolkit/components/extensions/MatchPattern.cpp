@@ -158,14 +158,20 @@ URLInfo::Path() const
   return mPath;
 }
 
+const nsCString&
+URLInfo::CSpec() const
+{
+  if (mCSpec.IsEmpty()) {
+    Unused << URINoRef()->GetSpec(mCSpec);
+  }
+  return mCSpec;
+}
+
 const nsString&
 URLInfo::Spec() const
 {
   if (mSpec.IsEmpty()) {
-    nsCString spec;
-    if (NS_SUCCEEDED(URINoRef()->GetSpec(spec))) {
-      AppendUTF8toUTF16(spec, mSpec);
-    }
+    AppendUTF8toUTF16(CSpec(), mSpec);
   }
   return mSpec;
 }
@@ -292,7 +298,7 @@ MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath, 
     return;
   }
 
-  nsCOMPtr<nsIAtom> scheme = NS_AtomizeMainThread(StringHead(aPattern, index));
+  RefPtr<nsIAtom> scheme = NS_AtomizeMainThread(StringHead(aPattern, index));
   if (scheme == nsGkAtoms::_asterisk) {
     mSchemes = AtomSet::Get<WILDCARD_SCHEMES>();
   } else if (permittedSchemes->Contains(scheme) || scheme == nsGkAtoms::moz_extension) {

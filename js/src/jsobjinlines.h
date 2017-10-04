@@ -40,8 +40,6 @@ MaybeConvertUnboxedObjectToNative(JSContext* cx, JSObject* obj)
 {
     if (obj->is<UnboxedPlainObject>())
         return UnboxedPlainObject::convertToNative(cx, obj);
-    if (obj->is<UnboxedArrayObject>())
-        return UnboxedArrayObject::convertToNative(cx, obj);
     return true;
 }
 
@@ -560,10 +558,21 @@ HasNativeMethodPure(JSObject* obj, PropertyName* name, JSNative native, JSContex
 static MOZ_ALWAYS_INLINE bool
 HasNoToPrimitiveMethodPure(JSObject* obj, JSContext* cx)
 {
-    jsid id = SYMBOL_TO_JSID(cx->wellKnownSymbols().toPrimitive);
+    Symbol* toPrimitive = cx->wellKnownSymbols().toPrimitive;
+    JSObject* holder;
+    if (!MaybeHasInterestingSymbolProperty(cx, obj, toPrimitive, &holder)) {
+#ifdef DEBUG
+        JSObject* pobj;
+        PropertyResult prop;
+        MOZ_ASSERT(LookupPropertyPure(cx, obj, SYMBOL_TO_JSID(toPrimitive), &pobj, &prop));
+        MOZ_ASSERT(!prop);
+#endif
+        return true;
+    }
+
     JSObject* pobj;
     PropertyResult prop;
-    if (!LookupPropertyPure(cx, obj, id, &pobj, &prop))
+    if (!LookupPropertyPure(cx, holder, SYMBOL_TO_JSID(toPrimitive), &pobj, &prop))
         return false;
 
     return !prop;

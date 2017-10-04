@@ -104,11 +104,9 @@ var _bootstrap = __webpack_require__(897);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-//
-// if (process.env.NODE_ENV !== "production") {
-//   const Perf = require("react-addons-perf");
-//   window.Perf = Perf;
-// }
+if (false) {
+  window.Perf = require("react-addons-perf");
+}
 
 if ((0, _devtoolsConfig.isFirefoxPanel)()) {
   module.exports = {
@@ -143,7 +141,8 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
 
   (0, _devtoolsLaunchpad.bootstrap)(_react2.default, _reactDom2.default).then(connection => {
     (0, _client.onConnect)(connection, {
-      sourceMaps: __webpack_require__(898)
+      services: { sourceMaps: __webpack_require__(898) },
+      toolboxActions: {}
     });
   });
 }
@@ -197,74 +196,7 @@ if (false) {
 module.exports = __WEBPACK_EXTERNAL_MODULE_4__;
 
 /***/ }),
-/* 5 */
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseGetTag = __webpack_require__(6),
-    getPrototype = __webpack_require__(12),
-    isObjectLike = __webpack_require__(14);
-
-/** `Object#toString` result references. */
-var objectTag = '[object Object]';
-
-/** Used for built-in method references. */
-var funcProto = Function.prototype,
-    objectProto = Object.prototype;
-
-/** Used to resolve the decompiled source of functions. */
-var funcToString = funcProto.toString;
-
-/** Used to check objects for own properties. */
-var hasOwnProperty = objectProto.hasOwnProperty;
-
-/** Used to infer the `Object` constructor. */
-var objectCtorString = funcToString.call(Object);
-
-/**
- * Checks if `value` is a plain object, that is, an object created by the
- * `Object` constructor or one with a `[[Prototype]]` of `null`.
- *
- * @static
- * @memberOf _
- * @since 0.8.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is a plain object, else `false`.
- * @example
- *
- * function Foo() {
- *   this.a = 1;
- * }
- *
- * _.isPlainObject(new Foo);
- * // => false
- *
- * _.isPlainObject([1, 2, 3]);
- * // => false
- *
- * _.isPlainObject({ 'x': 0, 'y': 0 });
- * // => true
- *
- * _.isPlainObject(Object.create(null));
- * // => true
- */
-function isPlainObject(value) {
-  if (!isObjectLike(value) || baseGetTag(value) != objectTag) {
-    return false;
-  }
-  var proto = getPrototype(value);
-  if (proto === null) {
-    return true;
-  }
-  var Ctor = hasOwnProperty.call(proto, 'constructor') && proto.constructor;
-  return typeof Ctor == 'function' && Ctor instanceof Ctor &&
-    funcToString.call(Ctor) == objectCtorString;
-}
-
-module.exports = isPlainObject;
-
-
-/***/ }),
+/* 5 */,
 /* 6 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -417,39 +349,8 @@ module.exports = objectToString;
 
 
 /***/ }),
-/* 12 */
-/***/ (function(module, exports, __webpack_require__) {
-
-var overArg = __webpack_require__(13);
-
-/** Built-in value references. */
-var getPrototype = overArg(Object.getPrototypeOf, Object);
-
-module.exports = getPrototype;
-
-
-/***/ }),
-/* 13 */
-/***/ (function(module, exports) {
-
-/**
- * Creates a unary function that invokes `func` with its argument transformed.
- *
- * @private
- * @param {Function} func The function to wrap.
- * @param {Function} transform The argument transform.
- * @returns {Function} Returns the new function.
- */
-function overArg(func, transform) {
-  return function(arg) {
-    return func(transform(arg));
-  };
-}
-
-module.exports = overArg;
-
-
-/***/ }),
+/* 12 */,
+/* 13 */,
 /* 14 */
 /***/ (function(module, exports) {
 
@@ -506,6 +407,7 @@ Object.defineProperty(exports, "__esModule", {
 exports.nodeHasChildren = nodeHasChildren;
 exports.isExactUrlMatch = isExactUrlMatch;
 exports.isDirectory = isDirectory;
+exports.isNotJavaScript = isNotJavaScript;
 exports.isInvalidUrl = isInvalidUrl;
 exports.partIsFile = partIsFile;
 exports.createNode = createNode;
@@ -541,8 +443,18 @@ function isDirectory(url) {
   return parts.length === 0 || url.path.slice(-1) === "/" || nodeHasChildren(url);
 }
 
+function isNotJavaScript(source) {
+  var parsedUrl = (0, _url.parse)(source.url).pathname;
+  if (!parsedUrl) {
+    return false;
+  }
+  var parsedExtension = parsedUrl.split(".").pop();
+
+  return ["css", "svg", "png"].includes(parsedExtension);
+}
+
 function isInvalidUrl(url, source) {
-  return IGNORED_URLS.indexOf(url) != -1 || !source.get("url") || source.get("loadedState") === "loading" || !url.group || (0, _source.isPretty)(source.toJS());
+  return IGNORED_URLS.indexOf(url) != -1 || !source.get("url") || source.get("loadedState") === "loading" || !url.group || (0, _source.isPretty)(source.toJS()) || isNotJavaScript(source.toJS());
 }
 
 function partIsFile(index, parts, url) {
@@ -589,70 +501,15 @@ function getRelativePath(url) {
 }
 
 /***/ }),
-/* 19 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports.compose = exports.applyMiddleware = exports.bindActionCreators = exports.combineReducers = exports.createStore = undefined;
-
-var _createStore = __webpack_require__(25);
-
-var _createStore2 = _interopRequireDefault(_createStore);
-
-var _combineReducers = __webpack_require__(49);
-
-var _combineReducers2 = _interopRequireDefault(_combineReducers);
-
-var _bindActionCreators = __webpack_require__(50);
-
-var _bindActionCreators2 = _interopRequireDefault(_bindActionCreators);
-
-var _applyMiddleware = __webpack_require__(51);
-
-var _applyMiddleware2 = _interopRequireDefault(_applyMiddleware);
-
-var _compose = __webpack_require__(27);
-
-var _compose2 = _interopRequireDefault(_compose);
-
-var _warning = __webpack_require__(26);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-/*
-* This is a dummy function to check if the function name has been altered by minification.
-* If the function has been minified and NODE_ENV !== 'production', warn the user.
-*/
-function isCrushed() {}
-
-if (false) {
-  (0, _warning2["default"])('You are currently using minified code outside of NODE_ENV === \'production\'. ' + 'This means that you are running a slower development build of Redux. ' + 'You can use loose-envify (https://github.com/zertosh/loose-envify) for browserify ' + 'or DefinePlugin for webpack (http://stackoverflow.com/questions/30030031) ' + 'to ensure you have the correct code for your production build.');
-}
-
-exports.createStore = _createStore2["default"];
-exports.combineReducers = _combineReducers2["default"];
-exports.bindActionCreators = _bindActionCreators2["default"];
-exports.applyMiddleware = _applyMiddleware2["default"];
-exports.compose = _compose2["default"];
-
-/***/ }),
+/* 19 */,
 /* 20 */
 /***/ (function(module, exports, __webpack_require__) {
 
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
 
 if (false) {
@@ -858,6 +715,8 @@ function getFilenameFromPath(pathname) {
 }
 
 function getURL(sourceUrl) {
+  var debuggeeUrl = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "";
+
   var url = sourceUrl;
   var def = { path: "", group: "", filename: "" };
   if (!url) {
@@ -870,12 +729,21 @@ function getURL(sourceUrl) {
       host = _parse.host,
       path = _parse.path;
 
+  var defaultDomain = (0, _url.parse)(debuggeeUrl).host;
   var filename = getFilenameFromPath(pathname);
 
   switch (protocol) {
     case "javascript:":
       // Ignore `javascript:` URLs for now
       return def;
+
+    case "webpack:":
+      // A Webpack source is a special case
+      return (0, _lodash.merge)(def, {
+        path: path,
+        group: "Webpack",
+        filename: filename
+      });
 
     case "about:":
       // An about page is a special case
@@ -899,7 +767,7 @@ function getURL(sourceUrl) {
         // with a weird URL. Just group them all under an anonymous group.
         return (0, _lodash.merge)(def, {
           path: url,
-          group: "(no domain)",
+          group: defaultDomain,
           filename: filename
         });
       }
@@ -922,425 +790,12 @@ function getURL(sourceUrl) {
 }
 
 /***/ }),
-/* 25 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports.ActionTypes = undefined;
-exports["default"] = createStore;
-
-var _isPlainObject = __webpack_require__(5);
-
-var _isPlainObject2 = _interopRequireDefault(_isPlainObject);
-
-var _symbolObservable = __webpack_require__(47);
-
-var _symbolObservable2 = _interopRequireDefault(_symbolObservable);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-/**
- * These are private action types reserved by Redux.
- * For any unknown actions, you must return the current state.
- * If the current state is undefined, you must return the initial state.
- * Do not reference these action types directly in your code.
- */
-var ActionTypes = exports.ActionTypes = {
-  INIT: '@@redux/INIT'
-};
-
-/**
- * Creates a Redux store that holds the state tree.
- * The only way to change the data in the store is to call `dispatch()` on it.
- *
- * There should only be a single store in your app. To specify how different
- * parts of the state tree respond to actions, you may combine several reducers
- * into a single reducer function by using `combineReducers`.
- *
- * @param {Function} reducer A function that returns the next state tree, given
- * the current state tree and the action to handle.
- *
- * @param {any} [initialState] The initial state. You may optionally specify it
- * to hydrate the state from the server in universal apps, or to restore a
- * previously serialized user session.
- * If you use `combineReducers` to produce the root reducer function, this must be
- * an object with the same shape as `combineReducers` keys.
- *
- * @param {Function} enhancer The store enhancer. You may optionally specify it
- * to enhance the store with third-party capabilities such as middleware,
- * time travel, persistence, etc. The only store enhancer that ships with Redux
- * is `applyMiddleware()`.
- *
- * @returns {Store} A Redux store that lets you read the state, dispatch actions
- * and subscribe to changes.
- */
-function createStore(reducer, initialState, enhancer) {
-  var _ref2;
-
-  if (typeof initialState === 'function' && typeof enhancer === 'undefined') {
-    enhancer = initialState;
-    initialState = undefined;
-  }
-
-  if (typeof enhancer !== 'undefined') {
-    if (typeof enhancer !== 'function') {
-      throw new Error('Expected the enhancer to be a function.');
-    }
-
-    return enhancer(createStore)(reducer, initialState);
-  }
-
-  if (typeof reducer !== 'function') {
-    throw new Error('Expected the reducer to be a function.');
-  }
-
-  var currentReducer = reducer;
-  var currentState = initialState;
-  var currentListeners = [];
-  var nextListeners = currentListeners;
-  var isDispatching = false;
-
-  function ensureCanMutateNextListeners() {
-    if (nextListeners === currentListeners) {
-      nextListeners = currentListeners.slice();
-    }
-  }
-
-  /**
-   * Reads the state tree managed by the store.
-   *
-   * @returns {any} The current state tree of your application.
-   */
-  function getState() {
-    return currentState;
-  }
-
-  /**
-   * Adds a change listener. It will be called any time an action is dispatched,
-   * and some part of the state tree may potentially have changed. You may then
-   * call `getState()` to read the current state tree inside the callback.
-   *
-   * You may call `dispatch()` from a change listener, with the following
-   * caveats:
-   *
-   * 1. The subscriptions are snapshotted just before every `dispatch()` call.
-   * If you subscribe or unsubscribe while the listeners are being invoked, this
-   * will not have any effect on the `dispatch()` that is currently in progress.
-   * However, the next `dispatch()` call, whether nested or not, will use a more
-   * recent snapshot of the subscription list.
-   *
-   * 2. The listener should not expect to see all state changes, as the state
-   * might have been updated multiple times during a nested `dispatch()` before
-   * the listener is called. It is, however, guaranteed that all subscribers
-   * registered before the `dispatch()` started will be called with the latest
-   * state by the time it exits.
-   *
-   * @param {Function} listener A callback to be invoked on every dispatch.
-   * @returns {Function} A function to remove this change listener.
-   */
-  function subscribe(listener) {
-    if (typeof listener !== 'function') {
-      throw new Error('Expected listener to be a function.');
-    }
-
-    var isSubscribed = true;
-
-    ensureCanMutateNextListeners();
-    nextListeners.push(listener);
-
-    return function unsubscribe() {
-      if (!isSubscribed) {
-        return;
-      }
-
-      isSubscribed = false;
-
-      ensureCanMutateNextListeners();
-      var index = nextListeners.indexOf(listener);
-      nextListeners.splice(index, 1);
-    };
-  }
-
-  /**
-   * Dispatches an action. It is the only way to trigger a state change.
-   *
-   * The `reducer` function, used to create the store, will be called with the
-   * current state tree and the given `action`. Its return value will
-   * be considered the **next** state of the tree, and the change listeners
-   * will be notified.
-   *
-   * The base implementation only supports plain object actions. If you want to
-   * dispatch a Promise, an Observable, a thunk, or something else, you need to
-   * wrap your store creating function into the corresponding middleware. For
-   * example, see the documentation for the `redux-thunk` package. Even the
-   * middleware will eventually dispatch plain object actions using this method.
-   *
-   * @param {Object} action A plain object representing “what changed”. It is
-   * a good idea to keep actions serializable so you can record and replay user
-   * sessions, or use the time travelling `redux-devtools`. An action must have
-   * a `type` property which may not be `undefined`. It is a good idea to use
-   * string constants for action types.
-   *
-   * @returns {Object} For convenience, the same action object you dispatched.
-   *
-   * Note that, if you use a custom middleware, it may wrap `dispatch()` to
-   * return something else (for example, a Promise you can await).
-   */
-  function dispatch(action) {
-    if (!(0, _isPlainObject2["default"])(action)) {
-      throw new Error('Actions must be plain objects. ' + 'Use custom middleware for async actions.');
-    }
-
-    if (typeof action.type === 'undefined') {
-      throw new Error('Actions may not have an undefined "type" property. ' + 'Have you misspelled a constant?');
-    }
-
-    if (isDispatching) {
-      throw new Error('Reducers may not dispatch actions.');
-    }
-
-    try {
-      isDispatching = true;
-      currentState = currentReducer(currentState, action);
-    } finally {
-      isDispatching = false;
-    }
-
-    var listeners = currentListeners = nextListeners;
-    for (var i = 0; i < listeners.length; i++) {
-      listeners[i]();
-    }
-
-    return action;
-  }
-
-  /**
-   * Replaces the reducer currently used by the store to calculate the state.
-   *
-   * You might need this if your app implements code splitting and you want to
-   * load some of the reducers dynamically. You might also need this if you
-   * implement a hot reloading mechanism for Redux.
-   *
-   * @param {Function} nextReducer The reducer for the store to use instead.
-   * @returns {void}
-   */
-  function replaceReducer(nextReducer) {
-    if (typeof nextReducer !== 'function') {
-      throw new Error('Expected the nextReducer to be a function.');
-    }
-
-    currentReducer = nextReducer;
-    dispatch({ type: ActionTypes.INIT });
-  }
-
-  /**
-   * Interoperability point for observable/reactive libraries.
-   * @returns {observable} A minimal observable of state changes.
-   * For more information, see the observable proposal:
-   * https://github.com/zenparsing/es-observable
-   */
-  function observable() {
-    var _ref;
-
-    var outerSubscribe = subscribe;
-    return _ref = {
-      /**
-       * The minimal observable subscription method.
-       * @param {Object} observer Any object that can be used as an observer.
-       * The observer object should have a `next` method.
-       * @returns {subscription} An object with an `unsubscribe` method that can
-       * be used to unsubscribe the observable from the store, and prevent further
-       * emission of values from the observable.
-       */
-
-      subscribe: function subscribe(observer) {
-        if (typeof observer !== 'object') {
-          throw new TypeError('Expected the observer to be an object.');
-        }
-
-        function observeState() {
-          if (observer.next) {
-            observer.next(getState());
-          }
-        }
-
-        observeState();
-        var unsubscribe = outerSubscribe(observeState);
-        return { unsubscribe: unsubscribe };
-      }
-    }, _ref[_symbolObservable2["default"]] = function () {
-      return this;
-    }, _ref;
-  }
-
-  // When a store is created, an "INIT" action is dispatched so that every
-  // reducer returns their initial state. This effectively populates
-  // the initial state tree.
-  dispatch({ type: ActionTypes.INIT });
-
-  return _ref2 = {
-    dispatch: dispatch,
-    subscribe: subscribe,
-    getState: getState,
-    replaceReducer: replaceReducer
-  }, _ref2[_symbolObservable2["default"]] = observable, _ref2;
-}
-
-/***/ }),
-/* 26 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = warning;
-/**
- * Prints a warning in the console if it exists.
- *
- * @param {String} message The warning message.
- * @returns {void}
- */
-function warning(message) {
-  /* eslint-disable no-console */
-  if (typeof console !== 'undefined' && typeof console.error === 'function') {
-    console.error(message);
-  }
-  /* eslint-enable no-console */
-  try {
-    // This error was thrown as a convenience so that if you enable
-    // "break on all exceptions" in your console,
-    // it would pause the execution at this line.
-    throw new Error(message);
-    /* eslint-disable no-empty */
-  } catch (e) {}
-  /* eslint-enable no-empty */
-}
-
-/***/ }),
-/* 27 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = compose;
-/**
- * Composes single-argument functions from right to left. The rightmost
- * function can take multiple arguments as it provides the signature for
- * the resulting composite function.
- *
- * @param {...Function} funcs The functions to compose.
- * @returns {Function} A function obtained by composing the argument functions
- * from right to left. For example, compose(f, g, h) is identical to doing
- * (...args) => f(g(h(...args))).
- */
-
-function compose() {
-  for (var _len = arguments.length, funcs = Array(_len), _key = 0; _key < _len; _key++) {
-    funcs[_key] = arguments[_key];
-  }
-
-  if (funcs.length === 0) {
-    return function (arg) {
-      return arg;
-    };
-  } else {
-    var _ret = function () {
-      var last = funcs[funcs.length - 1];
-      var rest = funcs.slice(0, -1);
-      return {
-        v: function v() {
-          return rest.reduceRight(function (composed, f) {
-            return f(composed);
-          }, last.apply(undefined, arguments));
-        }
-      };
-    }();
-
-    if (typeof _ret === "object") return _ret.v;
-  }
-}
-
-/***/ }),
-/* 28 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports.connect = exports.Provider = undefined;
-
-var _Provider = __webpack_require__(53);
-
-var _Provider2 = _interopRequireDefault(_Provider);
-
-var _connect = __webpack_require__(54);
-
-var _connect2 = _interopRequireDefault(_connect);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-exports.Provider = _Provider2["default"];
-exports.connect = _connect2["default"];
-
-/***/ }),
-/* 29 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-
-var _react = __webpack_require__(0);
-
-exports["default"] = _react.PropTypes.shape({
-  subscribe: _react.PropTypes.func.isRequired,
-  dispatch: _react.PropTypes.func.isRequired,
-  getState: _react.PropTypes.func.isRequired
-});
-
-/***/ }),
-/* 30 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = warning;
-/**
- * Prints a warning in the console if it exists.
- *
- * @param {String} message The warning message.
- * @returns {void}
- */
-function warning(message) {
-  /* eslint-disable no-console */
-  if (typeof console !== 'undefined' && typeof console.error === 'function') {
-    console.error(message);
-  }
-  /* eslint-enable no-console */
-  try {
-    // This error was thrown as a convenience so that you can use this stack
-    // to find the callsite that caused this warning to fire.
-    throw new Error(message);
-    /* eslint-disable no-empty */
-  } catch (e) {}
-  /* eslint-enable no-empty */
-}
-
-/***/ }),
+/* 25 */,
+/* 26 */,
+/* 27 */,
+/* 28 */,
+/* 29 */,
+/* 30 */,
 /* 31 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -2065,6 +1520,12 @@ Object.defineProperty(exports, "getRelativePath", {
     return _utils.getRelativePath;
   }
 });
+Object.defineProperty(exports, "isNotJavaScript", {
+  enumerable: true,
+  get: function () {
+    return _utils.isNotJavaScript;
+  }
+});
 
 /***/ }),
 /* 40 */
@@ -2168,7 +1629,7 @@ function addSourceToNode(node, url, source) {
  * @static
  */
 function addToTree(tree, source, debuggeeUrl) {
-  var url = (0, _getURL.getURL)(source.get("url"));
+  var url = (0, _getURL.getURL)(source.get("url"), debuggeeUrl);
 
   if ((0, _utils.isInvalidUrl)(url, source)) {
     return;
@@ -2309,883 +1770,21 @@ module.exports = __webpack_require__(1);
 
 
 /***/ }),
-/* 47 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* global window */
-
-
-module.exports = __webpack_require__(48)(global || window || undefined);
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(792)))
-
-/***/ }),
-/* 48 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-module.exports = function symbolObservablePonyfill(root) {
-	var result;
-	var Symbol = root.Symbol;
-
-	if (typeof Symbol === 'function') {
-		if (Symbol.observable) {
-			result = Symbol.observable;
-		} else {
-			result = Symbol('observable');
-			Symbol.observable = result;
-		}
-	} else {
-		result = '@@observable';
-	}
-
-	return result;
-};
-
-/***/ }),
-/* 49 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = combineReducers;
-
-var _createStore = __webpack_require__(25);
-
-var _isPlainObject = __webpack_require__(5);
-
-var _isPlainObject2 = _interopRequireDefault(_isPlainObject);
-
-var _warning = __webpack_require__(26);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-function getUndefinedStateErrorMessage(key, action) {
-  var actionType = action && action.type;
-  var actionName = actionType && '"' + actionType.toString() + '"' || 'an action';
-
-  return 'Given action ' + actionName + ', reducer "' + key + '" returned undefined. ' + 'To ignore an action, you must explicitly return the previous state.';
-}
-
-function getUnexpectedStateShapeWarningMessage(inputState, reducers, action) {
-  var reducerKeys = Object.keys(reducers);
-  var argumentName = action && action.type === _createStore.ActionTypes.INIT ? 'initialState argument passed to createStore' : 'previous state received by the reducer';
-
-  if (reducerKeys.length === 0) {
-    return 'Store does not have a valid reducer. Make sure the argument passed ' + 'to combineReducers is an object whose values are reducers.';
-  }
-
-  if (!(0, _isPlainObject2["default"])(inputState)) {
-    return 'The ' + argumentName + ' has unexpected type of "' + {}.toString.call(inputState).match(/\s([a-z|A-Z]+)/)[1] + '". Expected argument to be an object with the following ' + ('keys: "' + reducerKeys.join('", "') + '"');
-  }
-
-  var unexpectedKeys = Object.keys(inputState).filter(function (key) {
-    return !reducers.hasOwnProperty(key);
-  });
-
-  if (unexpectedKeys.length > 0) {
-    return 'Unexpected ' + (unexpectedKeys.length > 1 ? 'keys' : 'key') + ' ' + ('"' + unexpectedKeys.join('", "') + '" found in ' + argumentName + '. ') + 'Expected to find one of the known reducer keys instead: ' + ('"' + reducerKeys.join('", "') + '". Unexpected keys will be ignored.');
-  }
-}
-
-function assertReducerSanity(reducers) {
-  Object.keys(reducers).forEach(function (key) {
-    var reducer = reducers[key];
-    var initialState = reducer(undefined, { type: _createStore.ActionTypes.INIT });
-
-    if (typeof initialState === 'undefined') {
-      throw new Error('Reducer "' + key + '" returned undefined during initialization. ' + 'If the state passed to the reducer is undefined, you must ' + 'explicitly return the initial state. The initial state may ' + 'not be undefined.');
-    }
-
-    var type = '@@redux/PROBE_UNKNOWN_ACTION_' + Math.random().toString(36).substring(7).split('').join('.');
-    if (typeof reducer(undefined, { type: type }) === 'undefined') {
-      throw new Error('Reducer "' + key + '" returned undefined when probed with a random type. ' + ('Don\'t try to handle ' + _createStore.ActionTypes.INIT + ' or other actions in "redux/*" ') + 'namespace. They are considered private. Instead, you must return the ' + 'current state for any unknown actions, unless it is undefined, ' + 'in which case you must return the initial state, regardless of the ' + 'action type. The initial state may not be undefined.');
-    }
-  });
-}
-
-/**
- * Turns an object whose values are different reducer functions, into a single
- * reducer function. It will call every child reducer, and gather their results
- * into a single state object, whose keys correspond to the keys of the passed
- * reducer functions.
- *
- * @param {Object} reducers An object whose values correspond to different
- * reducer functions that need to be combined into one. One handy way to obtain
- * it is to use ES6 `import * as reducers` syntax. The reducers may never return
- * undefined for any action. Instead, they should return their initial state
- * if the state passed to them was undefined, and the current state for any
- * unrecognized action.
- *
- * @returns {Function} A reducer function that invokes every reducer inside the
- * passed object, and builds a state object with the same shape.
- */
-function combineReducers(reducers) {
-  var reducerKeys = Object.keys(reducers);
-  var finalReducers = {};
-  for (var i = 0; i < reducerKeys.length; i++) {
-    var key = reducerKeys[i];
-    if (typeof reducers[key] === 'function') {
-      finalReducers[key] = reducers[key];
-    }
-  }
-  var finalReducerKeys = Object.keys(finalReducers);
-
-  var sanityError;
-  try {
-    assertReducerSanity(finalReducers);
-  } catch (e) {
-    sanityError = e;
-  }
-
-  return function combination() {
-    var state = arguments.length <= 0 || arguments[0] === undefined ? {} : arguments[0];
-    var action = arguments[1];
-
-    if (sanityError) {
-      throw sanityError;
-    }
-
-    if (false) {
-      var warningMessage = getUnexpectedStateShapeWarningMessage(state, finalReducers, action);
-      if (warningMessage) {
-        (0, _warning2["default"])(warningMessage);
-      }
-    }
-
-    var hasChanged = false;
-    var nextState = {};
-    for (var i = 0; i < finalReducerKeys.length; i++) {
-      var key = finalReducerKeys[i];
-      var reducer = finalReducers[key];
-      var previousStateForKey = state[key];
-      var nextStateForKey = reducer(previousStateForKey, action);
-      if (typeof nextStateForKey === 'undefined') {
-        var errorMessage = getUndefinedStateErrorMessage(key, action);
-        throw new Error(errorMessage);
-      }
-      nextState[key] = nextStateForKey;
-      hasChanged = hasChanged || nextStateForKey !== previousStateForKey;
-    }
-    return hasChanged ? nextState : state;
-  };
-}
-
-/***/ }),
-/* 50 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = bindActionCreators;
-function bindActionCreator(actionCreator, dispatch) {
-  return function () {
-    return dispatch(actionCreator.apply(undefined, arguments));
-  };
-}
-
-/**
- * Turns an object whose values are action creators, into an object with the
- * same keys, but with every function wrapped into a `dispatch` call so they
- * may be invoked directly. This is just a convenience method, as you can call
- * `store.dispatch(MyActionCreators.doSomething())` yourself just fine.
- *
- * For convenience, you can also pass a single function as the first argument,
- * and get a function in return.
- *
- * @param {Function|Object} actionCreators An object whose values are action
- * creator functions. One handy way to obtain it is to use ES6 `import * as`
- * syntax. You may also pass a single function.
- *
- * @param {Function} dispatch The `dispatch` function available on your Redux
- * store.
- *
- * @returns {Function|Object} The object mimicking the original object, but with
- * every action creator wrapped into the `dispatch` call. If you passed a
- * function as `actionCreators`, the return value will also be a single
- * function.
- */
-function bindActionCreators(actionCreators, dispatch) {
-  if (typeof actionCreators === 'function') {
-    return bindActionCreator(actionCreators, dispatch);
-  }
-
-  if (typeof actionCreators !== 'object' || actionCreators === null) {
-    throw new Error('bindActionCreators expected an object or a function, instead received ' + (actionCreators === null ? 'null' : typeof actionCreators) + '. ' + 'Did you write "import ActionCreators from" instead of "import * as ActionCreators from"?');
-  }
-
-  var keys = Object.keys(actionCreators);
-  var boundActionCreators = {};
-  for (var i = 0; i < keys.length; i++) {
-    var key = keys[i];
-    var actionCreator = actionCreators[key];
-    if (typeof actionCreator === 'function') {
-      boundActionCreators[key] = bindActionCreator(actionCreator, dispatch);
-    }
-  }
-  return boundActionCreators;
-}
-
-/***/ }),
-/* 51 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-
-var _extends = Object.assign || function (target) {
-  for (var i = 1; i < arguments.length; i++) {
-    var source = arguments[i];for (var key in source) {
-      if (Object.prototype.hasOwnProperty.call(source, key)) {
-        target[key] = source[key];
-      }
-    }
-  }return target;
-};
-
-exports["default"] = applyMiddleware;
-
-var _compose = __webpack_require__(27);
-
-var _compose2 = _interopRequireDefault(_compose);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-/**
- * Creates a store enhancer that applies middleware to the dispatch method
- * of the Redux store. This is handy for a variety of tasks, such as expressing
- * asynchronous actions in a concise manner, or logging every action payload.
- *
- * See `redux-thunk` package as an example of the Redux middleware.
- *
- * Because middleware is potentially asynchronous, this should be the first
- * store enhancer in the composition chain.
- *
- * Note that each middleware will be given the `dispatch` and `getState` functions
- * as named arguments.
- *
- * @param {...Function} middlewares The middleware chain to be applied.
- * @returns {Function} A store enhancer applying the middleware.
- */
-function applyMiddleware() {
-  for (var _len = arguments.length, middlewares = Array(_len), _key = 0; _key < _len; _key++) {
-    middlewares[_key] = arguments[_key];
-  }
-
-  return function (createStore) {
-    return function (reducer, initialState, enhancer) {
-      var store = createStore(reducer, initialState, enhancer);
-      var _dispatch = store.dispatch;
-      var chain = [];
-
-      var middlewareAPI = {
-        getState: store.getState,
-        dispatch: function dispatch(action) {
-          return _dispatch(action);
-        }
-      };
-      chain = middlewares.map(function (middleware) {
-        return middleware(middlewareAPI);
-      });
-      _dispatch = _compose2["default"].apply(undefined, chain)(store.dispatch);
-
-      return _extends({}, store, {
-        dispatch: _dispatch
-      });
-    };
-  };
-}
-
-/***/ }),
+/* 47 */,
+/* 48 */,
+/* 49 */,
+/* 50 */,
+/* 51 */,
 /* 52 */
 /***/ (function(module, exports) {
 
 module.exports = __WEBPACK_EXTERNAL_MODULE_52__;
 
 /***/ }),
-/* 53 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = undefined;
-
-var _react = __webpack_require__(0);
-
-var _storeShape = __webpack_require__(29);
-
-var _storeShape2 = _interopRequireDefault(_storeShape);
-
-var _warning = __webpack_require__(30);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-function _classCallCheck(instance, Constructor) {
-  if (!(instance instanceof Constructor)) {
-    throw new TypeError("Cannot call a class as a function");
-  }
-}
-
-function _possibleConstructorReturn(self, call) {
-  if (!self) {
-    throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
-  }return call && (typeof call === "object" || typeof call === "function") ? call : self;
-}
-
-function _inherits(subClass, superClass) {
-  if (typeof superClass !== "function" && superClass !== null) {
-    throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
-  }subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } });if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
-}
-
-var didWarnAboutReceivingStore = false;
-function warnAboutReceivingStore() {
-  if (didWarnAboutReceivingStore) {
-    return;
-  }
-  didWarnAboutReceivingStore = true;
-
-  (0, _warning2["default"])('<Provider> does not support changing `store` on the fly. ' + 'It is most likely that you see this error because you updated to ' + 'Redux 2.x and React Redux 2.x which no longer hot reload reducers ' + 'automatically. See https://github.com/reactjs/react-redux/releases/' + 'tag/v2.0.0 for the migration instructions.');
-}
-
-var Provider = function (_Component) {
-  _inherits(Provider, _Component);
-
-  Provider.prototype.getChildContext = function getChildContext() {
-    return { store: this.store };
-  };
-
-  function Provider(props, context) {
-    _classCallCheck(this, Provider);
-
-    var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
-
-    _this.store = props.store;
-    return _this;
-  }
-
-  Provider.prototype.render = function render() {
-    var children = this.props.children;
-
-    return _react.Children.only(children);
-  };
-
-  return Provider;
-}(_react.Component);
-
-exports["default"] = Provider;
-
-if (false) {
-  Provider.prototype.componentWillReceiveProps = function (nextProps) {
-    var store = this.store;
-    var nextStore = nextProps.store;
-
-    if (store !== nextStore) {
-      warnAboutReceivingStore();
-    }
-  };
-}
-
-Provider.propTypes = {
-  store: _storeShape2["default"].isRequired,
-  children: _react.PropTypes.element.isRequired
-};
-Provider.childContextTypes = {
-  store: _storeShape2["default"].isRequired
-};
-
-/***/ }),
-/* 54 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _extends = Object.assign || function (target) {
-  for (var i = 1; i < arguments.length; i++) {
-    var source = arguments[i];for (var key in source) {
-      if (Object.prototype.hasOwnProperty.call(source, key)) {
-        target[key] = source[key];
-      }
-    }
-  }return target;
-};
-
-exports.__esModule = true;
-exports["default"] = connect;
-
-var _react = __webpack_require__(0);
-
-var _storeShape = __webpack_require__(29);
-
-var _storeShape2 = _interopRequireDefault(_storeShape);
-
-var _shallowEqual = __webpack_require__(55);
-
-var _shallowEqual2 = _interopRequireDefault(_shallowEqual);
-
-var _wrapActionCreators = __webpack_require__(56);
-
-var _wrapActionCreators2 = _interopRequireDefault(_wrapActionCreators);
-
-var _warning = __webpack_require__(30);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-var _isPlainObject = __webpack_require__(5);
-
-var _isPlainObject2 = _interopRequireDefault(_isPlainObject);
-
-var _hoistNonReactStatics = __webpack_require__(158);
-
-var _hoistNonReactStatics2 = _interopRequireDefault(_hoistNonReactStatics);
-
-var _invariant = __webpack_require__(159);
-
-var _invariant2 = _interopRequireDefault(_invariant);
-
-function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { "default": obj };
-}
-
-function _classCallCheck(instance, Constructor) {
-  if (!(instance instanceof Constructor)) {
-    throw new TypeError("Cannot call a class as a function");
-  }
-}
-
-function _possibleConstructorReturn(self, call) {
-  if (!self) {
-    throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
-  }return call && (typeof call === "object" || typeof call === "function") ? call : self;
-}
-
-function _inherits(subClass, superClass) {
-  if (typeof superClass !== "function" && superClass !== null) {
-    throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
-  }subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } });if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
-}
-
-var defaultMapStateToProps = function defaultMapStateToProps(state) {
-  return {};
-}; // eslint-disable-line no-unused-vars
-var defaultMapDispatchToProps = function defaultMapDispatchToProps(dispatch) {
-  return { dispatch: dispatch };
-};
-var defaultMergeProps = function defaultMergeProps(stateProps, dispatchProps, parentProps) {
-  return _extends({}, parentProps, stateProps, dispatchProps);
-};
-
-function getDisplayName(WrappedComponent) {
-  return WrappedComponent.displayName || WrappedComponent.name || 'Component';
-}
-
-var errorObject = { value: null };
-function tryCatch(fn, ctx) {
-  try {
-    return fn.apply(ctx);
-  } catch (e) {
-    errorObject.value = e;
-    return errorObject;
-  }
-}
-
-// Helps track hot reloading.
-var nextVersion = 0;
-
-function connect(mapStateToProps, mapDispatchToProps, mergeProps) {
-  var options = arguments.length <= 3 || arguments[3] === undefined ? {} : arguments[3];
-
-  var shouldSubscribe = Boolean(mapStateToProps);
-  var mapState = mapStateToProps || defaultMapStateToProps;
-
-  var mapDispatch = undefined;
-  if (typeof mapDispatchToProps === 'function') {
-    mapDispatch = mapDispatchToProps;
-  } else if (!mapDispatchToProps) {
-    mapDispatch = defaultMapDispatchToProps;
-  } else {
-    mapDispatch = (0, _wrapActionCreators2["default"])(mapDispatchToProps);
-  }
-
-  var finalMergeProps = mergeProps || defaultMergeProps;
-  var _options$pure = options.pure;
-  var pure = _options$pure === undefined ? true : _options$pure;
-  var _options$withRef = options.withRef;
-  var withRef = _options$withRef === undefined ? false : _options$withRef;
-
-  var checkMergedEquals = pure && finalMergeProps !== defaultMergeProps;
-
-  // Helps track hot reloading.
-  var version = nextVersion++;
-
-  return function wrapWithConnect(WrappedComponent) {
-    var connectDisplayName = 'Connect(' + getDisplayName(WrappedComponent) + ')';
-
-    function checkStateShape(props, methodName) {
-      if (!(0, _isPlainObject2["default"])(props)) {
-        (0, _warning2["default"])(methodName + '() in ' + connectDisplayName + ' must return a plain object. ' + ('Instead received ' + props + '.'));
-      }
-    }
-
-    function computeMergedProps(stateProps, dispatchProps, parentProps) {
-      var mergedProps = finalMergeProps(stateProps, dispatchProps, parentProps);
-      if (false) {
-        checkStateShape(mergedProps, 'mergeProps');
-      }
-      return mergedProps;
-    }
-
-    var Connect = function (_Component) {
-      _inherits(Connect, _Component);
-
-      Connect.prototype.shouldComponentUpdate = function shouldComponentUpdate() {
-        return !pure || this.haveOwnPropsChanged || this.hasStoreStateChanged;
-      };
-
-      function Connect(props, context) {
-        _classCallCheck(this, Connect);
-
-        var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
-
-        _this.version = version;
-        _this.store = props.store || context.store;
-
-        (0, _invariant2["default"])(_this.store, 'Could not find "store" in either the context or ' + ('props of "' + connectDisplayName + '". ') + 'Either wrap the root component in a <Provider>, ' + ('or explicitly pass "store" as a prop to "' + connectDisplayName + '".'));
-
-        var storeState = _this.store.getState();
-        _this.state = { storeState: storeState };
-        _this.clearCache();
-        return _this;
-      }
-
-      Connect.prototype.computeStateProps = function computeStateProps(store, props) {
-        if (!this.finalMapStateToProps) {
-          return this.configureFinalMapState(store, props);
-        }
-
-        var state = store.getState();
-        var stateProps = this.doStatePropsDependOnOwnProps ? this.finalMapStateToProps(state, props) : this.finalMapStateToProps(state);
-
-        if (false) {
-          checkStateShape(stateProps, 'mapStateToProps');
-        }
-        return stateProps;
-      };
-
-      Connect.prototype.configureFinalMapState = function configureFinalMapState(store, props) {
-        var mappedState = mapState(store.getState(), props);
-        var isFactory = typeof mappedState === 'function';
-
-        this.finalMapStateToProps = isFactory ? mappedState : mapState;
-        this.doStatePropsDependOnOwnProps = this.finalMapStateToProps.length !== 1;
-
-        if (isFactory) {
-          return this.computeStateProps(store, props);
-        }
-
-        if (false) {
-          checkStateShape(mappedState, 'mapStateToProps');
-        }
-        return mappedState;
-      };
-
-      Connect.prototype.computeDispatchProps = function computeDispatchProps(store, props) {
-        if (!this.finalMapDispatchToProps) {
-          return this.configureFinalMapDispatch(store, props);
-        }
-
-        var dispatch = store.dispatch;
-
-        var dispatchProps = this.doDispatchPropsDependOnOwnProps ? this.finalMapDispatchToProps(dispatch, props) : this.finalMapDispatchToProps(dispatch);
-
-        if (false) {
-          checkStateShape(dispatchProps, 'mapDispatchToProps');
-        }
-        return dispatchProps;
-      };
-
-      Connect.prototype.configureFinalMapDispatch = function configureFinalMapDispatch(store, props) {
-        var mappedDispatch = mapDispatch(store.dispatch, props);
-        var isFactory = typeof mappedDispatch === 'function';
-
-        this.finalMapDispatchToProps = isFactory ? mappedDispatch : mapDispatch;
-        this.doDispatchPropsDependOnOwnProps = this.finalMapDispatchToProps.length !== 1;
-
-        if (isFactory) {
-          return this.computeDispatchProps(store, props);
-        }
-
-        if (false) {
-          checkStateShape(mappedDispatch, 'mapDispatchToProps');
-        }
-        return mappedDispatch;
-      };
-
-      Connect.prototype.updateStatePropsIfNeeded = function updateStatePropsIfNeeded() {
-        var nextStateProps = this.computeStateProps(this.store, this.props);
-        if (this.stateProps && (0, _shallowEqual2["default"])(nextStateProps, this.stateProps)) {
-          return false;
-        }
-
-        this.stateProps = nextStateProps;
-        return true;
-      };
-
-      Connect.prototype.updateDispatchPropsIfNeeded = function updateDispatchPropsIfNeeded() {
-        var nextDispatchProps = this.computeDispatchProps(this.store, this.props);
-        if (this.dispatchProps && (0, _shallowEqual2["default"])(nextDispatchProps, this.dispatchProps)) {
-          return false;
-        }
-
-        this.dispatchProps = nextDispatchProps;
-        return true;
-      };
-
-      Connect.prototype.updateMergedPropsIfNeeded = function updateMergedPropsIfNeeded() {
-        var nextMergedProps = computeMergedProps(this.stateProps, this.dispatchProps, this.props);
-        if (this.mergedProps && checkMergedEquals && (0, _shallowEqual2["default"])(nextMergedProps, this.mergedProps)) {
-          return false;
-        }
-
-        this.mergedProps = nextMergedProps;
-        return true;
-      };
-
-      Connect.prototype.isSubscribed = function isSubscribed() {
-        return typeof this.unsubscribe === 'function';
-      };
-
-      Connect.prototype.trySubscribe = function trySubscribe() {
-        if (shouldSubscribe && !this.unsubscribe) {
-          this.unsubscribe = this.store.subscribe(this.handleChange.bind(this));
-          this.handleChange();
-        }
-      };
-
-      Connect.prototype.tryUnsubscribe = function tryUnsubscribe() {
-        if (this.unsubscribe) {
-          this.unsubscribe();
-          this.unsubscribe = null;
-        }
-      };
-
-      Connect.prototype.componentDidMount = function componentDidMount() {
-        this.trySubscribe();
-      };
-
-      Connect.prototype.componentWillReceiveProps = function componentWillReceiveProps(nextProps) {
-        if (!pure || !(0, _shallowEqual2["default"])(nextProps, this.props)) {
-          this.haveOwnPropsChanged = true;
-        }
-      };
-
-      Connect.prototype.componentWillUnmount = function componentWillUnmount() {
-        this.tryUnsubscribe();
-        this.clearCache();
-      };
-
-      Connect.prototype.clearCache = function clearCache() {
-        this.dispatchProps = null;
-        this.stateProps = null;
-        this.mergedProps = null;
-        this.haveOwnPropsChanged = true;
-        this.hasStoreStateChanged = true;
-        this.haveStatePropsBeenPrecalculated = false;
-        this.statePropsPrecalculationError = null;
-        this.renderedElement = null;
-        this.finalMapDispatchToProps = null;
-        this.finalMapStateToProps = null;
-      };
-
-      Connect.prototype.handleChange = function handleChange() {
-        if (!this.unsubscribe) {
-          return;
-        }
-
-        var storeState = this.store.getState();
-        var prevStoreState = this.state.storeState;
-        if (pure && prevStoreState === storeState) {
-          return;
-        }
-
-        if (pure && !this.doStatePropsDependOnOwnProps) {
-          var haveStatePropsChanged = tryCatch(this.updateStatePropsIfNeeded, this);
-          if (!haveStatePropsChanged) {
-            return;
-          }
-          if (haveStatePropsChanged === errorObject) {
-            this.statePropsPrecalculationError = errorObject.value;
-          }
-          this.haveStatePropsBeenPrecalculated = true;
-        }
-
-        this.hasStoreStateChanged = true;
-        this.setState({ storeState: storeState });
-      };
-
-      Connect.prototype.getWrappedInstance = function getWrappedInstance() {
-        (0, _invariant2["default"])(withRef, 'To access the wrapped instance, you need to specify ' + '{ withRef: true } as the fourth argument of the connect() call.');
-
-        return this.refs.wrappedInstance;
-      };
-
-      Connect.prototype.render = function render() {
-        var haveOwnPropsChanged = this.haveOwnPropsChanged;
-        var hasStoreStateChanged = this.hasStoreStateChanged;
-        var haveStatePropsBeenPrecalculated = this.haveStatePropsBeenPrecalculated;
-        var statePropsPrecalculationError = this.statePropsPrecalculationError;
-        var renderedElement = this.renderedElement;
-
-        this.haveOwnPropsChanged = false;
-        this.hasStoreStateChanged = false;
-        this.haveStatePropsBeenPrecalculated = false;
-        this.statePropsPrecalculationError = null;
-
-        if (statePropsPrecalculationError) {
-          throw statePropsPrecalculationError;
-        }
-
-        var shouldUpdateStateProps = true;
-        var shouldUpdateDispatchProps = true;
-        if (pure && renderedElement) {
-          shouldUpdateStateProps = hasStoreStateChanged || haveOwnPropsChanged && this.doStatePropsDependOnOwnProps;
-          shouldUpdateDispatchProps = haveOwnPropsChanged && this.doDispatchPropsDependOnOwnProps;
-        }
-
-        var haveStatePropsChanged = false;
-        var haveDispatchPropsChanged = false;
-        if (haveStatePropsBeenPrecalculated) {
-          haveStatePropsChanged = true;
-        } else if (shouldUpdateStateProps) {
-          haveStatePropsChanged = this.updateStatePropsIfNeeded();
-        }
-        if (shouldUpdateDispatchProps) {
-          haveDispatchPropsChanged = this.updateDispatchPropsIfNeeded();
-        }
-
-        var haveMergedPropsChanged = true;
-        if (haveStatePropsChanged || haveDispatchPropsChanged || haveOwnPropsChanged) {
-          haveMergedPropsChanged = this.updateMergedPropsIfNeeded();
-        } else {
-          haveMergedPropsChanged = false;
-        }
-
-        if (!haveMergedPropsChanged && renderedElement) {
-          return renderedElement;
-        }
-
-        if (withRef) {
-          this.renderedElement = (0, _react.createElement)(WrappedComponent, _extends({}, this.mergedProps, {
-            ref: 'wrappedInstance'
-          }));
-        } else {
-          this.renderedElement = (0, _react.createElement)(WrappedComponent, this.mergedProps);
-        }
-
-        return this.renderedElement;
-      };
-
-      return Connect;
-    }(_react.Component);
-
-    Connect.displayName = connectDisplayName;
-    Connect.WrappedComponent = WrappedComponent;
-    Connect.contextTypes = {
-      store: _storeShape2["default"]
-    };
-    Connect.propTypes = {
-      store: _storeShape2["default"]
-    };
-
-    if (false) {
-      Connect.prototype.componentWillUpdate = function componentWillUpdate() {
-        if (this.version === version) {
-          return;
-        }
-
-        // We are hot reloading!
-        this.version = version;
-        this.trySubscribe();
-        this.clearCache();
-      };
-    }
-
-    return (0, _hoistNonReactStatics2["default"])(Connect, WrappedComponent);
-  };
-}
-
-/***/ }),
-/* 55 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = shallowEqual;
-function shallowEqual(objA, objB) {
-  if (objA === objB) {
-    return true;
-  }
-
-  var keysA = Object.keys(objA);
-  var keysB = Object.keys(objB);
-
-  if (keysA.length !== keysB.length) {
-    return false;
-  }
-
-  // Test for A's keys different from B.
-  var hasOwn = Object.prototype.hasOwnProperty;
-  for (var i = 0; i < keysA.length; i++) {
-    if (!hasOwn.call(objB, keysA[i]) || objA[keysA[i]] !== objB[keysA[i]]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/***/ }),
-/* 56 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = wrapActionCreators;
-
-var _redux = __webpack_require__(19);
-
-function wrapActionCreators(actionCreators) {
-  return function (dispatch) {
-    return (0, _redux.bindActionCreators)(actionCreators, dispatch);
-  };
-}
-
-/***/ }),
+/* 53 */,
+/* 54 */,
+/* 55 */,
+/* 56 */,
 /* 57 */,
 /* 58 */,
 /* 59 */,
@@ -5910,11 +4509,11 @@ function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, a
 
 /* global window, document, DebuggerConfig */
 
-var _require = __webpack_require__(19),
+var _require = __webpack_require__(3),
     bindActionCreators = _require.bindActionCreators,
     combineReducers = _require.combineReducers;
 
-var _require2 = __webpack_require__(28),
+var _require2 = __webpack_require__(1189),
     Provider = _require2.Provider;
 
 var _require3 = __webpack_require__(137),
@@ -6048,7 +4647,7 @@ module.exports = {
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* global window */
 
-var _require = __webpack_require__(19),
+var _require = __webpack_require__(3),
     createStore = _require.createStore,
     applyMiddleware = _require.applyMiddleware;
 
@@ -7218,7 +5817,7 @@ module.exports = {
       var array = this._array;
       var maxIndex = array.length - 1;
       var ii = 0;
-      return new Iterator(function()
+      return new Iterator(function() 
         {return ii > maxIndex ?
           iteratorDone() :
           iteratorValue(type, ii, array[reverse ? maxIndex - ii++ : ii++])}
@@ -7689,7 +6288,7 @@ module.exports = {
 
     Repeat.prototype.__iterator = function(type, reverse) {var this$0 = this;
       var ii = 0;
-      return new Iterator(function()
+      return new Iterator(function() 
         {return ii < this$0.size ? iteratorValue(type, ii++, this$0._value) : iteratorDone()}
       );
     };
@@ -9887,7 +8486,7 @@ module.exports = {
         return flipSequence;
       };
     }
-    reversedSequence.get = function(key, notSetValue)
+    reversedSequence.get = function(key, notSetValue) 
       {return iterable.get(useKeys ? key : -1 - key, notSetValue)};
     reversedSequence.has = function(key )
       {return iterable.has(useKeys ? key : -1 - key)};
@@ -10086,7 +8685,7 @@ module.exports = {
         return this.cacheResult().__iterate(fn, reverse);
       }
       var iterations = 0;
-      iterable.__iterate(function(v, k, c)
+      iterable.__iterate(function(v, k, c) 
         {return predicate.call(context, v, k, c) && ++iterations && fn(v, k, this$0)}
       );
       return iterations;
@@ -10277,7 +8876,7 @@ module.exports = {
     interposedSequence.size = iterable.size && iterable.size * 2 -1;
     interposedSequence.__iterateUncached = function(fn, reverse) {var this$0 = this;
       var iterations = 0;
-      iterable.__iterate(function(v, k)
+      iterable.__iterate(function(v, k) 
         {return (!iterations || fn(separator, iterations++, this$0) !== false) &&
         fn(v, iterations++, this$0) !== false},
         reverse
@@ -11916,10 +10515,10 @@ var PropTypes = React.PropTypes;
 
 var ImPropTypes = __webpack_require__(150);
 
-var _require = __webpack_require__(28),
+var _require = __webpack_require__(1189),
     connect = _require.connect;
 
-var _require2 = __webpack_require__(19),
+var _require2 = __webpack_require__(3),
     bindActionCreators = _require2.bindActionCreators;
 
 var _require3 = __webpack_require__(160),
@@ -12240,677 +10839,14 @@ function createMapContainsChecker(shapeTypes) {
 module.exports = ImmutablePropTypes;
 
 /***/ }),
-/* 151 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports.connect = exports.Provider = undefined;
-
-var _Provider = __webpack_require__(152);
-
-var _Provider2 = _interopRequireDefault(_Provider);
-
-var _connect = __webpack_require__(155);
-
-var _connect2 = _interopRequireDefault(_connect);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-exports.Provider = _Provider2["default"];
-exports.connect = _connect2["default"];
-
-/***/ }),
-/* 152 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = undefined;
-
-var _react = __webpack_require__(0);
-
-var _propTypes = __webpack_require__(20);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
-
-var _storeShape = __webpack_require__(153);
-
-var _storeShape2 = _interopRequireDefault(_storeShape);
-
-var _warning = __webpack_require__(154);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
-
-var didWarnAboutReceivingStore = false;
-function warnAboutReceivingStore() {
-  if (didWarnAboutReceivingStore) {
-    return;
-  }
-  didWarnAboutReceivingStore = true;
-
-  (0, _warning2["default"])('<Provider> does not support changing `store` on the fly. ' + 'It is most likely that you see this error because you updated to ' + 'Redux 2.x and React Redux 2.x which no longer hot reload reducers ' + 'automatically. See https://github.com/reactjs/react-redux/releases/' + 'tag/v2.0.0 for the migration instructions.');
-}
-
-var Provider = function (_Component) {
-  _inherits(Provider, _Component);
-
-  Provider.prototype.getChildContext = function getChildContext() {
-    return { store: this.store };
-  };
-
-  function Provider(props, context) {
-    _classCallCheck(this, Provider);
-
-    var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
-
-    _this.store = props.store;
-    return _this;
-  }
-
-  Provider.prototype.render = function render() {
-    return _react.Children.only(this.props.children);
-  };
-
-  return Provider;
-}(_react.Component);
-
-exports["default"] = Provider;
-
-
-if (false) {
-  Provider.prototype.componentWillReceiveProps = function (nextProps) {
-    var store = this.store;
-    var nextStore = nextProps.store;
-
-
-    if (store !== nextStore) {
-      warnAboutReceivingStore();
-    }
-  };
-}
-
-Provider.propTypes = {
-  store: _storeShape2["default"].isRequired,
-  children: _propTypes2["default"].element.isRequired
-};
-Provider.childContextTypes = {
-  store: _storeShape2["default"].isRequired
-};
-
-/***/ }),
-/* 153 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-
-var _propTypes = __webpack_require__(20);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-exports["default"] = _propTypes2["default"].shape({
-  subscribe: _propTypes2["default"].func.isRequired,
-  dispatch: _propTypes2["default"].func.isRequired,
-  getState: _propTypes2["default"].func.isRequired
-});
-
-/***/ }),
-/* 154 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = warning;
-/**
- * Prints a warning in the console if it exists.
- *
- * @param {String} message The warning message.
- * @returns {void}
- */
-function warning(message) {
-  /* eslint-disable no-console */
-  if (typeof console !== 'undefined' && typeof console.error === 'function') {
-    console.error(message);
-  }
-  /* eslint-enable no-console */
-  try {
-    // This error was thrown as a convenience so that if you enable
-    // "break on all exceptions" in your console,
-    // it would pause the execution at this line.
-    throw new Error(message);
-    /* eslint-disable no-empty */
-  } catch (e) {}
-  /* eslint-enable no-empty */
-}
-
-/***/ }),
-/* 155 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
-exports["default"] = connect;
-
-var _react = __webpack_require__(0);
-
-var _storeShape = __webpack_require__(153);
-
-var _storeShape2 = _interopRequireDefault(_storeShape);
-
-var _shallowEqual = __webpack_require__(156);
-
-var _shallowEqual2 = _interopRequireDefault(_shallowEqual);
-
-var _wrapActionCreators = __webpack_require__(157);
-
-var _wrapActionCreators2 = _interopRequireDefault(_wrapActionCreators);
-
-var _warning = __webpack_require__(154);
-
-var _warning2 = _interopRequireDefault(_warning);
-
-var _isPlainObject = __webpack_require__(5);
-
-var _isPlainObject2 = _interopRequireDefault(_isPlainObject);
-
-var _hoistNonReactStatics = __webpack_require__(158);
-
-var _hoistNonReactStatics2 = _interopRequireDefault(_hoistNonReactStatics);
-
-var _invariant = __webpack_require__(159);
-
-var _invariant2 = _interopRequireDefault(_invariant);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
-
-var defaultMapStateToProps = function defaultMapStateToProps(state) {
-  return {};
-}; // eslint-disable-line no-unused-vars
-var defaultMapDispatchToProps = function defaultMapDispatchToProps(dispatch) {
-  return { dispatch: dispatch };
-};
-var defaultMergeProps = function defaultMergeProps(stateProps, dispatchProps, parentProps) {
-  return _extends({}, parentProps, stateProps, dispatchProps);
-};
-
-function getDisplayName(WrappedComponent) {
-  return WrappedComponent.displayName || WrappedComponent.name || 'Component';
-}
-
-var errorObject = { value: null };
-function tryCatch(fn, ctx) {
-  try {
-    return fn.apply(ctx);
-  } catch (e) {
-    errorObject.value = e;
-    return errorObject;
-  }
-}
-
-// Helps track hot reloading.
-var nextVersion = 0;
-
-function connect(mapStateToProps, mapDispatchToProps, mergeProps) {
-  var options = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
-
-  var shouldSubscribe = Boolean(mapStateToProps);
-  var mapState = mapStateToProps || defaultMapStateToProps;
-
-  var mapDispatch = void 0;
-  if (typeof mapDispatchToProps === 'function') {
-    mapDispatch = mapDispatchToProps;
-  } else if (!mapDispatchToProps) {
-    mapDispatch = defaultMapDispatchToProps;
-  } else {
-    mapDispatch = (0, _wrapActionCreators2["default"])(mapDispatchToProps);
-  }
-
-  var finalMergeProps = mergeProps || defaultMergeProps;
-  var _options$pure = options.pure,
-      pure = _options$pure === undefined ? true : _options$pure,
-      _options$withRef = options.withRef,
-      withRef = _options$withRef === undefined ? false : _options$withRef;
-
-  var checkMergedEquals = pure && finalMergeProps !== defaultMergeProps;
-
-  // Helps track hot reloading.
-  var version = nextVersion++;
-
-  return function wrapWithConnect(WrappedComponent) {
-    var connectDisplayName = 'Connect(' + getDisplayName(WrappedComponent) + ')';
-
-    function checkStateShape(props, methodName) {
-      if (!(0, _isPlainObject2["default"])(props)) {
-        (0, _warning2["default"])(methodName + '() in ' + connectDisplayName + ' must return a plain object. ' + ('Instead received ' + props + '.'));
-      }
-    }
-
-    function computeMergedProps(stateProps, dispatchProps, parentProps) {
-      var mergedProps = finalMergeProps(stateProps, dispatchProps, parentProps);
-      if (false) {
-        checkStateShape(mergedProps, 'mergeProps');
-      }
-      return mergedProps;
-    }
-
-    var Connect = function (_Component) {
-      _inherits(Connect, _Component);
-
-      Connect.prototype.shouldComponentUpdate = function shouldComponentUpdate() {
-        return !pure || this.haveOwnPropsChanged || this.hasStoreStateChanged;
-      };
-
-      function Connect(props, context) {
-        _classCallCheck(this, Connect);
-
-        var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
-
-        _this.version = version;
-        _this.store = props.store || context.store;
-
-        (0, _invariant2["default"])(_this.store, 'Could not find "store" in either the context or ' + ('props of "' + connectDisplayName + '". ') + 'Either wrap the root component in a <Provider>, ' + ('or explicitly pass "store" as a prop to "' + connectDisplayName + '".'));
-
-        var storeState = _this.store.getState();
-        _this.state = { storeState: storeState };
-        _this.clearCache();
-        return _this;
-      }
-
-      Connect.prototype.computeStateProps = function computeStateProps(store, props) {
-        if (!this.finalMapStateToProps) {
-          return this.configureFinalMapState(store, props);
-        }
-
-        var state = store.getState();
-        var stateProps = this.doStatePropsDependOnOwnProps ? this.finalMapStateToProps(state, props) : this.finalMapStateToProps(state);
-
-        if (false) {
-          checkStateShape(stateProps, 'mapStateToProps');
-        }
-        return stateProps;
-      };
-
-      Connect.prototype.configureFinalMapState = function configureFinalMapState(store, props) {
-        var mappedState = mapState(store.getState(), props);
-        var isFactory = typeof mappedState === 'function';
-
-        this.finalMapStateToProps = isFactory ? mappedState : mapState;
-        this.doStatePropsDependOnOwnProps = this.finalMapStateToProps.length !== 1;
-
-        if (isFactory) {
-          return this.computeStateProps(store, props);
-        }
-
-        if (false) {
-          checkStateShape(mappedState, 'mapStateToProps');
-        }
-        return mappedState;
-      };
-
-      Connect.prototype.computeDispatchProps = function computeDispatchProps(store, props) {
-        if (!this.finalMapDispatchToProps) {
-          return this.configureFinalMapDispatch(store, props);
-        }
-
-        var dispatch = store.dispatch;
-
-        var dispatchProps = this.doDispatchPropsDependOnOwnProps ? this.finalMapDispatchToProps(dispatch, props) : this.finalMapDispatchToProps(dispatch);
-
-        if (false) {
-          checkStateShape(dispatchProps, 'mapDispatchToProps');
-        }
-        return dispatchProps;
-      };
-
-      Connect.prototype.configureFinalMapDispatch = function configureFinalMapDispatch(store, props) {
-        var mappedDispatch = mapDispatch(store.dispatch, props);
-        var isFactory = typeof mappedDispatch === 'function';
-
-        this.finalMapDispatchToProps = isFactory ? mappedDispatch : mapDispatch;
-        this.doDispatchPropsDependOnOwnProps = this.finalMapDispatchToProps.length !== 1;
-
-        if (isFactory) {
-          return this.computeDispatchProps(store, props);
-        }
-
-        if (false) {
-          checkStateShape(mappedDispatch, 'mapDispatchToProps');
-        }
-        return mappedDispatch;
-      };
-
-      Connect.prototype.updateStatePropsIfNeeded = function updateStatePropsIfNeeded() {
-        var nextStateProps = this.computeStateProps(this.store, this.props);
-        if (this.stateProps && (0, _shallowEqual2["default"])(nextStateProps, this.stateProps)) {
-          return false;
-        }
-
-        this.stateProps = nextStateProps;
-        return true;
-      };
-
-      Connect.prototype.updateDispatchPropsIfNeeded = function updateDispatchPropsIfNeeded() {
-        var nextDispatchProps = this.computeDispatchProps(this.store, this.props);
-        if (this.dispatchProps && (0, _shallowEqual2["default"])(nextDispatchProps, this.dispatchProps)) {
-          return false;
-        }
-
-        this.dispatchProps = nextDispatchProps;
-        return true;
-      };
-
-      Connect.prototype.updateMergedPropsIfNeeded = function updateMergedPropsIfNeeded() {
-        var nextMergedProps = computeMergedProps(this.stateProps, this.dispatchProps, this.props);
-        if (this.mergedProps && checkMergedEquals && (0, _shallowEqual2["default"])(nextMergedProps, this.mergedProps)) {
-          return false;
-        }
-
-        this.mergedProps = nextMergedProps;
-        return true;
-      };
-
-      Connect.prototype.isSubscribed = function isSubscribed() {
-        return typeof this.unsubscribe === 'function';
-      };
-
-      Connect.prototype.trySubscribe = function trySubscribe() {
-        if (shouldSubscribe && !this.unsubscribe) {
-          this.unsubscribe = this.store.subscribe(this.handleChange.bind(this));
-          this.handleChange();
-        }
-      };
-
-      Connect.prototype.tryUnsubscribe = function tryUnsubscribe() {
-        if (this.unsubscribe) {
-          this.unsubscribe();
-          this.unsubscribe = null;
-        }
-      };
-
-      Connect.prototype.componentDidMount = function componentDidMount() {
-        this.trySubscribe();
-      };
-
-      Connect.prototype.componentWillReceiveProps = function componentWillReceiveProps(nextProps) {
-        if (!pure || !(0, _shallowEqual2["default"])(nextProps, this.props)) {
-          this.haveOwnPropsChanged = true;
-        }
-      };
-
-      Connect.prototype.componentWillUnmount = function componentWillUnmount() {
-        this.tryUnsubscribe();
-        this.clearCache();
-      };
-
-      Connect.prototype.clearCache = function clearCache() {
-        this.dispatchProps = null;
-        this.stateProps = null;
-        this.mergedProps = null;
-        this.haveOwnPropsChanged = true;
-        this.hasStoreStateChanged = true;
-        this.haveStatePropsBeenPrecalculated = false;
-        this.statePropsPrecalculationError = null;
-        this.renderedElement = null;
-        this.finalMapDispatchToProps = null;
-        this.finalMapStateToProps = null;
-      };
-
-      Connect.prototype.handleChange = function handleChange() {
-        if (!this.unsubscribe) {
-          return;
-        }
-
-        var storeState = this.store.getState();
-        var prevStoreState = this.state.storeState;
-        if (pure && prevStoreState === storeState) {
-          return;
-        }
-
-        if (pure && !this.doStatePropsDependOnOwnProps) {
-          var haveStatePropsChanged = tryCatch(this.updateStatePropsIfNeeded, this);
-          if (!haveStatePropsChanged) {
-            return;
-          }
-          if (haveStatePropsChanged === errorObject) {
-            this.statePropsPrecalculationError = errorObject.value;
-          }
-          this.haveStatePropsBeenPrecalculated = true;
-        }
-
-        this.hasStoreStateChanged = true;
-        this.setState({ storeState: storeState });
-      };
-
-      Connect.prototype.getWrappedInstance = function getWrappedInstance() {
-        (0, _invariant2["default"])(withRef, 'To access the wrapped instance, you need to specify ' + '{ withRef: true } as the fourth argument of the connect() call.');
-
-        return this.refs.wrappedInstance;
-      };
-
-      Connect.prototype.render = function render() {
-        var haveOwnPropsChanged = this.haveOwnPropsChanged,
-            hasStoreStateChanged = this.hasStoreStateChanged,
-            haveStatePropsBeenPrecalculated = this.haveStatePropsBeenPrecalculated,
-            statePropsPrecalculationError = this.statePropsPrecalculationError,
-            renderedElement = this.renderedElement;
-
-
-        this.haveOwnPropsChanged = false;
-        this.hasStoreStateChanged = false;
-        this.haveStatePropsBeenPrecalculated = false;
-        this.statePropsPrecalculationError = null;
-
-        if (statePropsPrecalculationError) {
-          throw statePropsPrecalculationError;
-        }
-
-        var shouldUpdateStateProps = true;
-        var shouldUpdateDispatchProps = true;
-        if (pure && renderedElement) {
-          shouldUpdateStateProps = hasStoreStateChanged || haveOwnPropsChanged && this.doStatePropsDependOnOwnProps;
-          shouldUpdateDispatchProps = haveOwnPropsChanged && this.doDispatchPropsDependOnOwnProps;
-        }
-
-        var haveStatePropsChanged = false;
-        var haveDispatchPropsChanged = false;
-        if (haveStatePropsBeenPrecalculated) {
-          haveStatePropsChanged = true;
-        } else if (shouldUpdateStateProps) {
-          haveStatePropsChanged = this.updateStatePropsIfNeeded();
-        }
-        if (shouldUpdateDispatchProps) {
-          haveDispatchPropsChanged = this.updateDispatchPropsIfNeeded();
-        }
-
-        var haveMergedPropsChanged = true;
-        if (haveStatePropsChanged || haveDispatchPropsChanged || haveOwnPropsChanged) {
-          haveMergedPropsChanged = this.updateMergedPropsIfNeeded();
-        } else {
-          haveMergedPropsChanged = false;
-        }
-
-        if (!haveMergedPropsChanged && renderedElement) {
-          return renderedElement;
-        }
-
-        if (withRef) {
-          this.renderedElement = (0, _react.createElement)(WrappedComponent, _extends({}, this.mergedProps, {
-            ref: 'wrappedInstance'
-          }));
-        } else {
-          this.renderedElement = (0, _react.createElement)(WrappedComponent, this.mergedProps);
-        }
-
-        return this.renderedElement;
-      };
-
-      return Connect;
-    }(_react.Component);
-
-    Connect.displayName = connectDisplayName;
-    Connect.WrappedComponent = WrappedComponent;
-    Connect.contextTypes = {
-      store: _storeShape2["default"]
-    };
-    Connect.propTypes = {
-      store: _storeShape2["default"]
-    };
-
-    if (false) {
-      Connect.prototype.componentWillUpdate = function componentWillUpdate() {
-        if (this.version === version) {
-          return;
-        }
-
-        // We are hot reloading!
-        this.version = version;
-        this.trySubscribe();
-        this.clearCache();
-      };
-    }
-
-    return (0, _hoistNonReactStatics2["default"])(Connect, WrappedComponent);
-  };
-}
-
-/***/ }),
-/* 156 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = shallowEqual;
-function shallowEqual(objA, objB) {
-  if (objA === objB) {
-    return true;
-  }
-
-  var keysA = Object.keys(objA);
-  var keysB = Object.keys(objB);
-
-  if (keysA.length !== keysB.length) {
-    return false;
-  }
-
-  // Test for A's keys different from B.
-  var hasOwn = Object.prototype.hasOwnProperty;
-  for (var i = 0; i < keysA.length; i++) {
-    if (!hasOwn.call(objB, keysA[i]) || objA[keysA[i]] !== objB[keysA[i]]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/***/ }),
-/* 157 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-exports.__esModule = true;
-exports["default"] = wrapActionCreators;
-
-var _redux = __webpack_require__(3);
-
-function wrapActionCreators(actionCreators) {
-  return function (dispatch) {
-    return (0, _redux.bindActionCreators)(actionCreators, dispatch);
-  };
-}
-
-/***/ }),
-/* 158 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/**
- * Copyright 2015, Yahoo! Inc.
- * Copyrights licensed under the New BSD License. See the accompanying LICENSE file for terms.
- */
-
-
-var REACT_STATICS = {
-    childContextTypes: true,
-    contextTypes: true,
-    defaultProps: true,
-    displayName: true,
-    getDefaultProps: true,
-    mixins: true,
-    propTypes: true,
-    type: true
-};
-
-var KNOWN_STATICS = {
-    name: true,
-    length: true,
-    prototype: true,
-    caller: true,
-    arguments: true,
-    arity: true
-};
-
-var isGetOwnPropertySymbolsAvailable = typeof Object.getOwnPropertySymbols === 'function';
-
-module.exports = function hoistNonReactStatics(targetComponent, sourceComponent, customStatics) {
-    if (typeof sourceComponent !== 'string') { // don't hoist over string (html) components
-        var keys = Object.getOwnPropertyNames(sourceComponent);
-
-        /* istanbul ignore else */
-        if (isGetOwnPropertySymbolsAvailable) {
-            keys = keys.concat(Object.getOwnPropertySymbols(sourceComponent));
-        }
-
-        for (var i = 0; i < keys.length; ++i) {
-            if (!REACT_STATICS[keys[i]] && !KNOWN_STATICS[keys[i]] && (!customStatics || !customStatics[keys[i]])) {
-                try {
-                    targetComponent[keys[i]] = sourceComponent[keys[i]];
-                } catch (error) {
-
-                }
-            }
-        }
-    }
-
-    return targetComponent;
-};
-
-
-/***/ }),
+/* 151 */,
+/* 152 */,
+/* 153 */,
+/* 154 */,
+/* 155 */,
+/* 156 */,
+/* 157 */,
+/* 158 */,
 /* 159 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -14601,9 +12537,11 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var React = __webpack_require__(0);
+var createElement = React.createElement;
 
 __webpack_require__(853);
 var rocketSvg = __webpack_require__(1126);
+var InlineSVG = __webpack_require__(1205);
 
 var dom = React.DOM;
 
@@ -14621,9 +12559,9 @@ var Sidebar = React.createClass({
   },
 
   renderTitle(title) {
-    return dom.div({ className: "title-wrapper" }, dom.h1({}, title), dom.div({ className: "launchpad-container" }, dom.div({
+    return dom.div({ className: "title-wrapper" }, dom.h1({}, title), dom.div({ className: "launchpad-container" }, createElement(InlineSVG, {
       className: "launchpad-container-icon",
-      dangerouslySetInnerHTML: { __html: rocketSvg }
+      src: rocketSvg
     }), dom.h2({ className: "launchpad-container-title" }, "Launchpad")));
   },
 
@@ -14658,7 +12596,8 @@ var Sidebar = React.createClass({
     return dom.aside({
       className: "sidebar"
     }, this.renderTitle(this.props.title), dom.ul({}, connections.map(title => this.renderItem(title)), this.renderItem("Settings")));
-  } });
+  }
+});
 
 module.exports = Sidebar;
 
@@ -14668,12 +12607,10 @@ module.exports = Sidebar;
 
 "use strict";
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
 
 
@@ -14718,7 +12655,8 @@ module.exports = function() {
     objectOf: getShim,
     oneOf: getShim,
     oneOfType: getShim,
-    shape: getShim
+    shape: getShim,
+    exact: getShim
   };
 
   ReactPropTypes.checkPropTypes = emptyFunction;
@@ -14737,13 +12675,11 @@ module.exports = function() {
 
 /**
  * Copyright (c) 2013-present, Facebook, Inc.
- * All rights reserved.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
- *
+ * 
  */
 
 function makeEmptyFunction(arg) {
@@ -14904,11 +12840,9 @@ module.exports = Settings;
 "use strict";
 /**
  * Copyright (c) 2013-present, Facebook, Inc.
- * All rights reserved.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  */
 
@@ -15282,12 +13216,10 @@ module.exports = function (className) {
 
 "use strict";
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
 
 
@@ -15548,12 +13480,12 @@ var history = exports.history = function () {
     var dispatch = _ref.dispatch,
         getState = _ref.getState;
 
-    if ((0, _devtoolsConfig.isDevelopment)()) {
-      console.warn("Using history middleware stores all actions in state for " + "testing and devtools is not currently running in test " + "mode. Be sure this is intentional.");
-    }
     return next => action => {
-      log.push(action);
-      next(action);
+      if ((0, _devtoolsConfig.isDevelopment)()) {
+        log.push(action);
+      }
+
+      return next(action);
     };
   };
 };
@@ -15938,7 +13870,7 @@ const prefsSchemaVersion = "1.0.3";
 const pref = Services.pref;
 
 if (isDevelopment()) {
-  pref("devtools.debugger.client-source-maps-enabled", true);
+  pref("devtools.source-map.client-service.enabled", true);
   pref("devtools.debugger.pause-on-exceptions", false);
   pref("devtools.debugger.ignore-caught-exceptions", false);
   pref("devtools.debugger.call-stack-visible", false);
@@ -15954,13 +13886,14 @@ if (isDevelopment()) {
   pref("devtools.debugger.file-search-whole-word", false);
   pref("devtools.debugger.file-search-regex-match", false);
   pref("devtools.debugger.prefs-schema-version", "1.0.1");
-  pref("devtools.debugger.project-text-search-enabled", true);
+  pref("devtools.debugger.features.project-text-search", true);
   pref("devtools.debugger.features.async-stepping", true);
   pref("devtools.debugger.features.wasm", true);
+  pref("devtools.debugger.features.shortcuts", true);
 }
 
 const prefs = new PrefsHelper("devtools", {
-  clientSourceMapsEnabled: ["Bool", "debugger.client-source-maps-enabled"],
+  clientSourceMapsEnabled: ["Bool", "source-map.client-service.enabled"],
   pauseOnExceptions: ["Bool", "debugger.pause-on-exceptions"],
   ignoreCaughtExceptions: ["Bool", "debugger.ignore-caught-exceptions"],
   callStackVisible: ["Bool", "debugger.call-stack-visible"],
@@ -15982,8 +13915,9 @@ const prefs = new PrefsHelper("devtools", {
 
 const features = new PrefsHelper("devtools.debugger.features", {
   asyncStepping: ["Bool", "async-stepping", false],
-  projectTextSearch: ["Bool", "project-text-search-enabled", true],
-  wasm: ["Bool", "wasm", true]
+  projectTextSearch: ["Bool", "project-text-search", true],
+  wasm: ["Bool", "wasm", true],
+  shortcuts: ["Bool", "shortcuts", false]
 });
 /* harmony export (immutable) */ __webpack_exports__["features"] = features;
 
@@ -16054,6 +13988,14 @@ var _sourceSearch = __webpack_require__(1132);
 
 var _sourceSearch2 = _interopRequireDefault(_sourceSearch);
 
+var _sourceTree = __webpack_require__(1176);
+
+var _sourceTree2 = _interopRequireDefault(_sourceTree);
+
+var _debuggee = __webpack_require__(1175);
+
+var _debuggee2 = _interopRequireDefault(_debuggee);
+
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -16072,7 +14014,9 @@ exports.default = {
   ast: _ast2.default,
   coverage: _coverage2.default,
   projectTextSearch: _projectTextSearch2.default,
-  sourceSearch: _sourceSearch2.default
+  sourceSearch: _sourceSearch2.default,
+  sourceTree: _sourceTree2.default,
+  debuggee: _debuggee2.default
 };
 
 /***/ }),
@@ -16125,14 +14069,11 @@ function update() {
         updating: true
       });
     case "EVALUATE_EXPRESSION":
-      if (action.status === "done") {
-        return updateItemInList(state, ["expressions"], action.input, {
-          input: action.input,
-          value: action.value,
-          updating: false
-        });
-      }
-      break;
+      return updateItemInList(state, ["expressions"], action.input, {
+        input: action.input,
+        value: action.value,
+        updating: false
+      });
     case "DELETE_EXPRESSION":
       return deleteExpression(state, action.input);
   }
@@ -16688,7 +14629,7 @@ function shouldPrettyPrint(source) {
   }
 
   var _isPretty = isPretty(source);
-  var _isJavaScript = isJavaScript(source.url);
+  var _isJavaScript = isJavaScript(source);
   var isOriginal = (0, _devtoolsSourceMap.isOriginalId)(source.id);
   var hasSourceMap = source.sourceMapURL;
 
@@ -16709,10 +14650,8 @@ function shouldPrettyPrint(source) {
  * @memberof utils/source
  * @static
  */
-function isJavaScript(url) {
-  var contentType = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "";
-
-  return url && /\.(jsm|js)?$/.test(trimUrlQuery(url)) || contentType.includes("javascript");
+function isJavaScript(source) {
+  return source.url && /\.(jsm|js)?$/.test(trimUrlQuery(source.url)) || !!(source.contentType && source.contentType.includes("javascript"));
 }
 
 /**
@@ -17390,7 +15329,7 @@ exports.default = update;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getSelectedFrame = exports.getLoadedObjects = exports.getPause = exports.State = undefined;
+exports.getSelectedFrame = exports.getSelectedFrameId = exports.getLoadedObjects = exports.getPause = exports.State = undefined;
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -17398,6 +15337,8 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 exports.isStepping = isStepping;
+exports.isPaused = isPaused;
+exports.isEvaluatingExpression = isEvaluatingExpression;
 exports.getLoadedObject = getLoadedObject;
 exports.getObjectProperties = getObjectProperties;
 exports.getIsWaitingOnBreak = getIsWaitingOnBreak;
@@ -17539,6 +15480,11 @@ function update() {
     case "CLEAR_COMMAND":
       return _extends({}, state, { command: "" });
 
+    case "EVALUATE_EXPRESSION":
+      return _extends({}, state, {
+        command: action.status === "start" ? "expression" : ""
+      });
+
     case "NAVIGATE":
       return _extends({}, state, { debuggeeUrl: action.url });
   }
@@ -17565,6 +15511,14 @@ var getLoadedObjects = exports.getLoadedObjects = (0, _reselect.createSelector)(
 
 function isStepping(state) {
   return ["stepIn", "stepOver", "stepOut"].includes(state.pause.command);
+}
+
+function isPaused(state) {
+  return !!getPause(state);
+}
+
+function isEvaluatingExpression(state) {
+  return state.pause.command === "expression";
 }
 
 function getLoadedObject(state, objectId) {
@@ -17595,7 +15549,7 @@ function getFrameScopes(state, frameId) {
   return state.pause.frameScopes[frameId];
 }
 
-var getSelectedFrameId = (0, _reselect.createSelector)(getPauseState, pauseWrapper => {
+var getSelectedFrameId = exports.getSelectedFrameId = (0, _reselect.createSelector)(getPauseState, pauseWrapper => {
   return pauseWrapper.selectedFrameId;
 });
 
@@ -17904,6 +15858,10 @@ var _pause = __webpack_require__(239);
 
 var pause = _interopRequireWildcard(_pause);
 
+var _debuggee = __webpack_require__(1175);
+
+var debuggee = _interopRequireWildcard(_debuggee);
+
 var _breakpoints = __webpack_require__(236);
 
 var breakpoints = _interopRequireWildcard(_breakpoints);
@@ -17936,6 +15894,10 @@ var _sourceSearch = __webpack_require__(1132);
 
 var sourceSearch = _interopRequireWildcard(_sourceSearch);
 
+var _sourceTree = __webpack_require__(1176);
+
+var sourceTree = _interopRequireWildcard(_sourceTree);
+
 var _breakpointAtLocation = __webpack_require__(1134);
 
 var _breakpointAtLocation2 = _interopRequireDefault(_breakpointAtLocation);
@@ -17960,7 +15922,7 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
  * @param object - location
  */
 
-module.exports = Object.assign({}, expressions, sources, pause, breakpoints, pendingBreakpoints, eventListeners, ui, ast, coverage, projectTextSearch, sourceSearch, {
+module.exports = Object.assign({}, expressions, sources, pause, debuggee, breakpoints, pendingBreakpoints, eventListeners, ui, ast, coverage, projectTextSearch, sourceSearch, sourceTree, {
   getBreakpointAtLocation: _breakpointAtLocation2.default,
   getInScopeLines: _linesInScope2.default,
   getVisibleBreakpoints: _visibleBreakpoints2.default,
@@ -17982,13 +15944,17 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
+
+var _prefs = __webpack_require__(226);
 
 var _actions = __webpack_require__(244);
 
 var _actions2 = _interopRequireDefault(_actions);
+
+var _ShortcutsModal = __webpack_require__(1181);
 
 var _selectors = __webpack_require__(242);
 
@@ -18040,6 +16006,11 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 var shortcuts = new _devtoolsModules.KeyShortcuts({ window });
 
+var appinfo = _devtoolsModules.Services.appinfo;
+
+
+var isMacOS = appinfo.OS === "Darwin";
+
 var verticalLayoutBreakpoint = window.matchMedia("(min-width: 800px)");
 
 class App extends _react.Component {
@@ -18047,6 +16018,7 @@ class App extends _react.Component {
   constructor(props) {
     super(props);
     this.state = {
+      shortcutsModalEnabled: false,
       horizontal: verticalLayoutBreakpoint.matches,
       startPanelSize: 0,
       endPanelSize: 0
@@ -18150,6 +16122,12 @@ class App extends _react.Component {
     );
   }
 
+  toggleShortcutsModal() {
+    this.setState({
+      shortcutsModalEnabled: !this.state.shortcutsModalEnabled
+    });
+  }
+
   renderHorizontalLayout() {
     var _props4 = this.props,
         startPanelCollapsed = _props4.startPanelCollapsed,
@@ -18177,7 +16155,10 @@ class App extends _react.Component {
         onResizeEnd: size => this.setState({ endPanelSize: size }),
         endPanelControl: true,
         startPanel: this.renderEditorPane(),
-        endPanel: _react2.default.createElement(_SecondaryPanes2.default, { horizontal: horizontal }),
+        endPanel: _react2.default.createElement(_SecondaryPanes2.default, {
+          horizontal: horizontal,
+          toggleShortcutsModal: () => this.toggleShortcutsModal()
+        }),
         endPanelCollapsed: endPanelCollapsed,
         vert: horizontal
       })
@@ -18230,17 +16211,30 @@ class App extends _react.Component {
     });
   }
 
+  renderShortcutsModal() {
+    var additionalClass = isMacOS ? "mac" : "";
+
+    if (!_prefs.features.shortcuts) {
+      return;
+    }
+
+    return _react2.default.createElement(_ShortcutsModal.ShortcutsModal, {
+      additionalClass: additionalClass,
+      enabled: this.state.shortcutsModalEnabled,
+      handleClose: () => this.toggleShortcutsModal()
+    });
+  }
+
   render() {
     return _react2.default.createElement(
       "div",
       { className: "debugger" },
       this.state.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout(),
-      this.renderSymbolModal()
+      this.renderSymbolModal(),
+      this.renderShortcutsModal()
     );
   }
 }
-
-App.displayName = "App";
 
 App.childContextTypes = { shortcuts: _react.PropTypes.object };
 
@@ -18306,13 +16300,25 @@ var _sourceSearch = __webpack_require__(1144);
 
 var sourceSearch = _interopRequireWildcard(_sourceSearch);
 
+var _sourceTree = __webpack_require__(1178);
+
+var sourceTree = _interopRequireWildcard(_sourceTree);
+
 var _loadSourceText = __webpack_require__(1143);
 
 var loadSourceText = _interopRequireWildcard(_loadSourceText);
 
+var _debuggee = __webpack_require__(1179);
+
+var debuggee = _interopRequireWildcard(_debuggee);
+
+var _toolbox = __webpack_require__(1180);
+
+var toolbox = _interopRequireWildcard(_toolbox);
+
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
-exports.default = Object.assign({}, navigation, breakpoints, expressions, eventListeners, sources, pause, ui, ast, coverage, projectTextSearch, sourceSearch, loadSourceText);
+exports.default = Object.assign({}, navigation, breakpoints, expressions, eventListeners, sources, pause, ui, ast, coverage, projectTextSearch, sourceSearch, sourceTree, loadSourceText, debuggee, toolbox);
 
 /***/ }),
 /* 245 */
@@ -18419,13 +16425,17 @@ function syncBreakpoint(sourceId, pendingBreakpoint) {
  * @param {Boolean} $1.disabled Disable value for breakpoint value
  */
 
-function addBreakpoint(location, condition, hidden) {
+function addBreakpoint(location) {
+  var _ref4 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+      condition = _ref4.condition,
+      hidden = _ref4.hidden;
+
   var breakpoint = (0, _breakpoint.createBreakpoint)(location, { condition, hidden });
-  return (_ref4) => {
-    var dispatch = _ref4.dispatch,
-        getState = _ref4.getState,
-        sourceMaps = _ref4.sourceMaps,
-        client = _ref4.client;
+  return (_ref5) => {
+    var dispatch = _ref5.dispatch,
+        getState = _ref5.getState,
+        sourceMaps = _ref5.sourceMaps,
+        client = _ref5.client;
 
     var action = { type: "ADD_BREAKPOINT", breakpoint };
     var promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
@@ -18441,10 +16451,10 @@ function addBreakpoint(location, condition, hidden) {
  * @return {function(ThunkArgs)}
  */
 function addHiddenBreakpoint(location) {
-  return (_ref5) => {
-    var dispatch = _ref5.dispatch;
+  return (_ref6) => {
+    var dispatch = _ref6.dispatch;
 
-    return dispatch(addBreakpoint(location, "", true));
+    return dispatch(addBreakpoint(location, { hidden: true }));
   };
 }
 
@@ -18455,10 +16465,10 @@ function addHiddenBreakpoint(location) {
  * @static
  */
 function removeBreakpoint(location) {
-  return (_ref6) => {
-    var dispatch = _ref6.dispatch,
-        getState = _ref6.getState,
-        client = _ref6.client;
+  return (_ref7) => {
+    var dispatch = _ref7.dispatch,
+        getState = _ref7.getState,
+        client = _ref7.client;
 
     var bp = (0, _selectors.getBreakpoint)(getState(), location);
     if (!bp || bp.loading) {
@@ -18494,11 +16504,11 @@ function removeBreakpoint(location) {
  */
 function enableBreakpoint(location) {
   return (() => {
-    var _ref7 = _asyncToGenerator(function* (_ref8) {
-      var dispatch = _ref8.dispatch,
-          getState = _ref8.getState,
-          client = _ref8.client,
-          sourceMaps = _ref8.sourceMaps;
+    var _ref8 = _asyncToGenerator(function* (_ref9) {
+      var dispatch = _ref9.dispatch,
+          getState = _ref9.getState,
+          client = _ref9.client,
+          sourceMaps = _ref9.sourceMaps;
 
       var breakpoint = (0, _selectors.getBreakpoint)(getState(), location);
       if (!breakpoint || breakpoint.loading) {
@@ -18514,8 +16524,8 @@ function enableBreakpoint(location) {
       });
     });
 
-    return function (_x2) {
-      return _ref7.apply(this, arguments);
+    return function (_x3) {
+      return _ref8.apply(this, arguments);
     };
   })();
 }
@@ -18528,10 +16538,10 @@ function enableBreakpoint(location) {
  */
 function disableBreakpoint(location) {
   return (() => {
-    var _ref9 = _asyncToGenerator(function* (_ref10) {
-      var dispatch = _ref10.dispatch,
-          getState = _ref10.getState,
-          client = _ref10.client;
+    var _ref10 = _asyncToGenerator(function* (_ref11) {
+      var dispatch = _ref11.dispatch,
+          getState = _ref11.getState,
+          client = _ref11.client;
 
       var bp = (0, _selectors.getBreakpoint)(getState(), location);
 
@@ -18548,8 +16558,8 @@ function disableBreakpoint(location) {
       });
     });
 
-    return function (_x3) {
-      return _ref9.apply(this, arguments);
+    return function (_x4) {
+      return _ref10.apply(this, arguments);
     };
   })();
 }
@@ -18562,15 +16572,15 @@ function disableBreakpoint(location) {
  */
 function toggleAllBreakpoints(shouldDisableBreakpoints) {
   return (() => {
-    var _ref11 = _asyncToGenerator(function* (_ref12) {
-      var dispatch = _ref12.dispatch,
-          getState = _ref12.getState;
+    var _ref12 = _asyncToGenerator(function* (_ref13) {
+      var dispatch = _ref13.dispatch,
+          getState = _ref13.getState;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
-      for (var _ref13 of breakpoints) {
-        var _ref14 = _slicedToArray(_ref13, 2);
+      for (var _ref14 of breakpoints) {
+        var _ref15 = _slicedToArray(_ref14, 2);
 
-        var breakpoint = _ref14[1];
+        var breakpoint = _ref15[1];
 
         if (shouldDisableBreakpoints) {
           yield dispatch(disableBreakpoint(breakpoint.location));
@@ -18580,8 +16590,8 @@ function toggleAllBreakpoints(shouldDisableBreakpoints) {
       }
     });
 
-    return function (_x4) {
-      return _ref11.apply(this, arguments);
+    return function (_x5) {
+      return _ref12.apply(this, arguments);
     };
   })();
 }
@@ -18594,13 +16604,13 @@ function toggleAllBreakpoints(shouldDisableBreakpoints) {
  */
 function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
   return (() => {
-    var _ref15 = _asyncToGenerator(function* (_ref16) {
-      var dispatch = _ref16.dispatch;
+    var _ref16 = _asyncToGenerator(function* (_ref17) {
+      var dispatch = _ref17.dispatch;
 
-      for (var _ref17 of breakpoints) {
-        var _ref18 = _slicedToArray(_ref17, 2);
+      for (var _ref18 of breakpoints) {
+        var _ref19 = _slicedToArray(_ref18, 2);
 
-        var breakpoint = _ref18[1];
+        var breakpoint = _ref19[1];
 
         if (shouldDisableBreakpoints) {
           yield dispatch(disableBreakpoint(breakpoint.location));
@@ -18610,8 +16620,8 @@ function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
       }
     });
 
-    return function (_x5) {
-      return _ref15.apply(this, arguments);
+    return function (_x6) {
+      return _ref16.apply(this, arguments);
     };
   })();
 }
@@ -18624,22 +16634,22 @@ function toggleBreakpoints(shouldDisableBreakpoints, breakpoints) {
  */
 function removeAllBreakpoints() {
   return (() => {
-    var _ref19 = _asyncToGenerator(function* (_ref20) {
-      var dispatch = _ref20.dispatch,
-          getState = _ref20.getState;
+    var _ref20 = _asyncToGenerator(function* (_ref21) {
+      var dispatch = _ref21.dispatch,
+          getState = _ref21.getState;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
-      for (var _ref21 of breakpoints) {
-        var _ref22 = _slicedToArray(_ref21, 2);
+      for (var _ref22 of breakpoints) {
+        var _ref23 = _slicedToArray(_ref22, 2);
 
-        var breakpoint = _ref22[1];
+        var breakpoint = _ref23[1];
 
         yield dispatch(removeBreakpoint(breakpoint.location));
       }
     });
 
-    return function (_x6) {
-      return _ref19.apply(this, arguments);
+    return function (_x7) {
+      return _ref20.apply(this, arguments);
     };
   })();
 }
@@ -18652,30 +16662,30 @@ function removeAllBreakpoints() {
  */
 function removeBreakpoints(breakpoints) {
   return (() => {
-    var _ref23 = _asyncToGenerator(function* (_ref24) {
-      var dispatch = _ref24.dispatch;
+    var _ref24 = _asyncToGenerator(function* (_ref25) {
+      var dispatch = _ref25.dispatch;
 
-      for (var _ref25 of breakpoints) {
-        var _ref26 = _slicedToArray(_ref25, 2);
+      for (var _ref26 of breakpoints) {
+        var _ref27 = _slicedToArray(_ref26, 2);
 
-        var breakpoint = _ref26[1];
+        var breakpoint = _ref27[1];
 
         yield dispatch(removeBreakpoint(breakpoint.location));
       }
     });
 
-    return function (_x7) {
-      return _ref23.apply(this, arguments);
+    return function (_x8) {
+      return _ref24.apply(this, arguments);
     };
   })();
 }
 
 function remapBreakpoints(sourceId) {
   return (() => {
-    var _ref27 = _asyncToGenerator(function* (_ref28) {
-      var dispatch = _ref28.dispatch,
-          getState = _ref28.getState,
-          sourceMaps = _ref28.sourceMaps;
+    var _ref28 = _asyncToGenerator(function* (_ref29) {
+      var dispatch = _ref29.dispatch,
+          getState = _ref29.getState,
+          sourceMaps = _ref29.sourceMaps;
 
       var breakpoints = (0, _selectors.getBreakpoints)(getState());
       var newBreakpoints = yield (0, _remapLocations2.default)(breakpoints, sourceId, sourceMaps);
@@ -18686,8 +16696,8 @@ function remapBreakpoints(sourceId) {
       });
     });
 
-    return function (_x8) {
-      return _ref27.apply(this, arguments);
+    return function (_x9) {
+      return _ref28.apply(this, arguments);
     };
   })();
 }
@@ -18705,19 +16715,19 @@ function remapBreakpoints(sourceId) {
  * @param {Boolean} $1.disabled Disable value for breakpoint value
  */
 function setBreakpointCondition(location) {
-  var _ref29 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-      condition = _ref29.condition;
+  var _ref30 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+      condition = _ref30.condition;
 
   return (() => {
-    var _ref30 = _asyncToGenerator(function* (_ref31) {
-      var dispatch = _ref31.dispatch,
-          getState = _ref31.getState,
-          client = _ref31.client,
-          sourceMaps = _ref31.sourceMaps;
+    var _ref31 = _asyncToGenerator(function* (_ref32) {
+      var dispatch = _ref32.dispatch,
+          getState = _ref32.getState,
+          client = _ref32.client,
+          sourceMaps = _ref32.sourceMaps;
 
       var bp = (0, _selectors.getBreakpoint)(getState(), location);
       if (!bp) {
-        return dispatch(addBreakpoint(location, condition));
+        return dispatch(addBreakpoint(location, { condition }));
       }
 
       if (bp.loading) {
@@ -18741,18 +16751,18 @@ function setBreakpointCondition(location) {
       });
     });
 
-    return function (_x10) {
-      return _ref30.apply(this, arguments);
+    return function (_x11) {
+      return _ref31.apply(this, arguments);
     };
   })();
 }
 
 function toggleBreakpoint(line, column) {
-  return (_ref32) => {
-    var dispatch = _ref32.dispatch,
-        getState = _ref32.getState,
-        client = _ref32.client,
-        sourceMaps = _ref32.sourceMaps;
+  return (_ref33) => {
+    var dispatch = _ref33.dispatch,
+        getState = _ref33.getState,
+        client = _ref33.client,
+        sourceMaps = _ref33.sourceMaps;
 
     var selectedSource = (0, _selectors.getSelectedSource)(getState());
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
@@ -18781,11 +16791,11 @@ function toggleBreakpoint(line, column) {
 }
 
 function addOrToggleDisabledBreakpoint(line, column) {
-  return (_ref33) => {
-    var dispatch = _ref33.dispatch,
-        getState = _ref33.getState,
-        client = _ref33.client,
-        sourceMaps = _ref33.sourceMaps;
+  return (_ref34) => {
+    var dispatch = _ref34.dispatch,
+        getState = _ref34.getState,
+        client = _ref34.client,
+        sourceMaps = _ref34.sourceMaps;
 
     var selectedSource = (0, _selectors.getSelectedSource)(getState());
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
@@ -18809,11 +16819,11 @@ function addOrToggleDisabledBreakpoint(line, column) {
 }
 
 function toggleDisabledBreakpoint(line, column) {
-  return (_ref34) => {
-    var dispatch = _ref34.dispatch,
-        getState = _ref34.getState,
-        client = _ref34.client,
-        sourceMaps = _ref34.sourceMaps;
+  return (_ref35) => {
+    var dispatch = _ref35.dispatch,
+        getState = _ref35.getState,
+        client = _ref35.client,
+        sourceMaps = _ref35.sourceMaps;
 
     var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
     if (!bp || bp.loading) {
@@ -19183,9 +17193,15 @@ exports.updateExpression = updateExpression;
 exports.deleteExpression = deleteExpression;
 exports.evaluateExpressions = evaluateExpressions;
 
-var _promise = __webpack_require__(193);
-
 var _selectors = __webpack_require__(242);
+
+var _expressions = __webpack_require__(1177);
+
+var _parser = __webpack_require__(827);
+
+var parser = _interopRequireWildcard(_parser);
+
+function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
@@ -19209,11 +17225,7 @@ function addExpression(input) {
 
       var expression = (0, _selectors.getExpression)(getState(), input);
       if (expression) {
-        return dispatch({
-          type: "UPDATE_EXPRESSION",
-          expression,
-          input
-        });
+        return dispatch(evaluateExpression(expression));
       }
 
       dispatch({
@@ -19221,9 +17233,8 @@ function addExpression(input) {
         input
       });
 
-      var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
-      var selectedFrameId = selectedFrame ? selectedFrame.id : null;
-      dispatch(evaluateExpression({ input }, selectedFrameId));
+      var newExpression = (0, _selectors.getExpression)(getState(), input);
+      dispatch(evaluateExpression(newExpression));
     });
 
     return function (_x) {
@@ -19247,9 +17258,7 @@ function updateExpression(input, expression) {
       input: input
     });
 
-    var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
-    var selectedFrameId = selectedFrame ? selectedFrame.id : null;
-    dispatch(evaluateExpressions(selectedFrameId));
+    dispatch(evaluateExpressions());
   };
 }
 
@@ -19277,7 +17286,7 @@ function deleteExpression(expression) {
  * @param {number} selectedFrameId
  * @static
  */
-function evaluateExpressions(frameId) {
+function evaluateExpressions() {
   return (() => {
     var _ref5 = _asyncToGenerator(function* (_ref6) {
       var dispatch = _ref6.dispatch,
@@ -19285,12 +17294,8 @@ function evaluateExpressions(frameId) {
           client = _ref6.client;
 
       var expressions = (0, _selectors.getExpressions)(getState()).toJS();
-      if (!frameId) {
-        var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
-        frameId = selectedFrame ? selectedFrame.id : null;
-      }
       for (var expression of expressions) {
-        yield dispatch(evaluateExpression(expression, frameId));
+        yield dispatch(evaluateExpression(expression));
       }
     });
 
@@ -19300,41 +17305,34 @@ function evaluateExpressions(frameId) {
   })();
 }
 
-function evaluateExpression(expression, frameId) {
-  return function (_ref7) {
-    var dispatch = _ref7.dispatch,
-        getState = _ref7.getState,
-        client = _ref7.client;
+function evaluateExpression(expression) {
+  return (() => {
+    var _ref7 = _asyncToGenerator(function* (_ref8) {
+      var dispatch = _ref8.dispatch,
+          getState = _ref8.getState,
+          client = _ref8.client;
 
-    if (!expression.input) {
-      console.warn("Expressions should not be empty");
-      return;
-    }
+      if (!expression.input) {
+        console.warn("Expressions should not be empty");
+        return;
+      }
 
-	const input = wrapExpression(expression.input);
-    return dispatch({
-      type: "EVALUATE_EXPRESSION",
-      input: expression.input,
-      [_promise.PROMISE]: client.evaluate(input, { frameId })
+      var error = yield parser.hasSyntaxError(expression.input);
+      var frameId = (0, _selectors.getSelectedFrameId)(getState());
+      var value = error ? { input: expression.input, result: error } : yield client.evaluate((0, _expressions.wrapExpression)(expression.input), { frameId });
+
+      return dispatch({
+        type: "EVALUATE_EXPRESSION",
+        input: expression.input,
+        value
+      });
     });
-  };
+
+    return function (_x3) {
+      return _ref7.apply(this, arguments);
+    };
+  })();
 }
-
-function sanitizeInput(input) {
-  return input.replace(/\\/g, "\\\\").replace(/"/g, "\\$&");
-}
-
-function wrapExpression(input) {
-  return `eval(\`
-    try {
-      ${sanitizeInput(input)}
-    } catch (e) {
-      e.name + ": " + e.message
-    }
-  \`)`.trim();
-}
-
-
 
 /***/ }),
 /* 253 */
@@ -19527,7 +17525,7 @@ function formatListeners(state, listeners) {
 function updateEventBreakpoints(eventNames) {
   return dispatch => {
     setNamedTimeout("event-breakpoints-update", 0, () => {
-      gThreadClient.pauseOnDOMEvents(eventNames, function () {
+      gThreadClient.pauseOnDOMEvents(eventNames, () => {
         // Notify that event breakpoints were added/removed on the server.
         window.emit(EVENTS.EVENT_BREAKPOINTS_UPDATED);
 
@@ -19615,7 +17613,6 @@ var checkPendingBreakpoints = (() => {
 exports.newSource = newSource;
 exports.newSources = newSources;
 exports.selectSourceURL = selectSourceURL;
-exports.openLink = openLink;
 exports.selectSource = selectSource;
 exports.jumpToMappedLocation = jumpToMappedLocation;
 exports.addTab = addTab;
@@ -19625,6 +17622,7 @@ exports.closeTabs = closeTabs;
 exports.togglePrettyPrint = togglePrettyPrint;
 exports.toggleBlackBox = toggleBlackBox;
 exports.loadAllSources = loadAllSources;
+exports.ensureParserHasSourceText = ensureParserHasSourceText;
 
 var _promise = __webpack_require__(193);
 
@@ -19652,7 +17650,13 @@ var _editor = __webpack_require__(257);
 
 var _sourceMaps = __webpack_require__(797);
 
+var _parser = __webpack_require__(827);
+
+var parser = _interopRequireWildcard(_parser);
+
 var _selectors = __webpack_require__(242);
+
+function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -19756,12 +17760,6 @@ function loadSourceMap(generatedSource) {
       return _ref8.apply(this, arguments);
     };
   })();
-}
-
-function openLink(url) {
-  return async function({ openLink }) {
-    openLink(url);
-  };
 }
 
 /**
@@ -19959,7 +17957,7 @@ function togglePrettyPrint(sourceId) {
 
       var source = (0, _selectors.getSource)(getState(), sourceId).toJS();
 
-      if (source && !(0, _source2.isLoaded)(source)) {
+      if (!source || !(0, _source2.isLoaded)(source)) {
         return {};
       }
 
@@ -20019,7 +18017,7 @@ function toggleBlackBox(source) {
 }
 
 /**
-  Load the text for all the avaliable sources
+  Load the text for all the available sources
  * @memberof actions/sources
  * @static
  */
@@ -20056,6 +18054,30 @@ function loadAllSources() {
   })();
 }
 
+/**
+ * Ensures parser has source text
+ *
+ * @memberof actions/sources
+ * @static
+ */
+function ensureParserHasSourceText(sourceId) {
+  return (() => {
+    var _ref27 = _asyncToGenerator(function* (_ref28) {
+      var dispatch = _ref28.dispatch,
+          getState = _ref28.getState;
+
+      if (!(yield parser.hasSource(sourceId))) {
+        yield dispatch((0, _loadSourceText.loadSourceText)((0, _selectors.getSource)(getState(), sourceId).toJS()));
+        yield parser.setSource((0, _selectors.getSource)(getState(), sourceId).toJS());
+      }
+    });
+
+    return function (_x21) {
+      return _ref27.apply(this, arguments);
+    };
+  })();
+}
+
 /***/ }),
 /* 255 */
 /***/ (function(module, exports, __webpack_require__) {
@@ -20066,10 +18088,31 @@ function loadAllSources() {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getPausedPosition = undefined;
+exports.getPausedPosition = exports.updateScopeBindings = undefined;
+
+var updateScopeBindings = exports.updateScopeBindings = (() => {
+  var _ref = _asyncToGenerator(function* (scope, location, sourceMaps) {
+    var astScopes = yield (0, _parser.getScopes)(location);
+    var generatedScopes = yield sourceMaps.getLocationScopes(location, astScopes);
+    if (!generatedScopes) {
+      return scope;
+    }
+    return extendScope(scope, generatedScopes, 0);
+  });
+
+  return function updateScopeBindings(_x, _x2, _x3) {
+    return _ref.apply(this, arguments);
+  };
+})();
+
+// Map protocol pause "why" reason to a valid L10N key
+// These are the known unhandled reasons:
+// "breakpointConditionThrown", "clientEvaluated"
+// "interrupted", "attached"
+
 
 var getPausedPosition = exports.getPausedPosition = (() => {
-  var _ref = _asyncToGenerator(function* (pauseInfo, sourceMaps) {
+  var _ref2 = _asyncToGenerator(function* (pauseInfo, sourceMaps) {
     var frames = pauseInfo.frames;
 
     frames = yield updateFrameLocations(frames, sourceMaps);
@@ -20079,8 +18122,8 @@ var getPausedPosition = exports.getPausedPosition = (() => {
     return location;
   });
 
-  return function getPausedPosition(_x, _x2) {
-    return _ref.apply(this, arguments);
+  return function getPausedPosition(_x4, _x5) {
+    return _ref2.apply(this, arguments);
   };
 })();
 
@@ -20088,6 +18131,8 @@ exports.updateFrameLocations = updateFrameLocations;
 exports.getPauseReason = getPauseReason;
 
 var _lodash = __webpack_require__(2);
+
+var _parser = __webpack_require__(827);
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
@@ -20099,16 +18144,26 @@ function updateFrameLocations(frames, sourceMaps) {
   return Promise.all(frames.map(frame => {
     return sourceMaps.getOriginalLocation(frame.location).then(loc => {
       return Object.assign({}, frame, {
-        location: loc
+        location: loc,
+        generatedLocation: frame.location
       });
     });
   }));
 }
 
-// Map protocol pause "why" reason to a valid L10N key
-// These are the known unhandled reasons:
-// "breakpointConditionThrown", "clientEvaluated"
-// "interrupted", "attached"
+function extendScope(scope, generatedScopes, index) {
+  if (!scope) {
+    return undefined;
+  }
+  if (index >= generatedScopes.length) {
+    return scope;
+  }
+  return Object.assign({}, scope, {
+    parent: extendScope(scope.parent, generatedScopes, index + 1),
+    sourceBindings: generatedScopes[index].bindings
+  });
+}
+
 var reasons = {
   debuggerStatement: "whyPaused.debuggerStatement",
   breakpoint: "whyPaused.breakpoint",
@@ -20280,6 +18335,21 @@ function lineAtHeight(editor, sourceId, event) {
   return toSourceLine(sourceId, editorLine);
 }
 
+function getSourceLocationFromMouseEvent(editor, selectedLocation, e) {
+  var _editor$codeMirror$co = editor.codeMirror.coordsChar({
+    left: e.clientX,
+    top: e.clientY
+  }),
+      line = _editor$codeMirror$co.line,
+      ch = _editor$codeMirror$co.ch;
+
+  return {
+    sourceId: selectedLocation.sourceId,
+    line: line + 1,
+    column: ch + 1
+  };
+}
+
 module.exports = Object.assign({}, expressionUtils, sourceDocumentUtils, sourceSearchUtils, _devtoolsSourceEditor.SourceEditorUtils, {
   createEditor,
   isWasm: _wasm.isWasm,
@@ -20292,7 +18362,8 @@ module.exports = Object.assign({}, expressionUtils, sourceDocumentUtils, sourceS
   shouldShowFooter,
   traverseResults,
   markText,
-  lineAtHeight
+  lineAtHeight,
+  getSourceLocationFromMouseEvent
 });
 
 /***/ }),
@@ -20949,8 +19020,6 @@ ToggleSearch.propTypes = {
   toggle: _react.PropTypes.func.isRequired
 };
 
-ToggleSearch.displayName = "ToggleSearch";
-
 /***/ }),
 /* 285 */,
 /* 286 */,
@@ -21313,9 +19382,7 @@ class DebugLine extends _react.Component {
     return null;
   }
 }
-
 exports.default = DebugLine;
-DebugLine.displayName = "DebugLine";
 
 /***/ }),
 /* 314 */,
@@ -21332,6 +19399,37 @@ DebugLine.displayName = "DebugLine";
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+
+var _getScopeBindings = (() => {
+  var _ref = _asyncToGenerator(function* (_ref2, generatedLocation, scopes) {
+    var dispatch = _ref2.dispatch,
+        getState = _ref2.getState,
+        sourceMaps = _ref2.sourceMaps;
+    var sourceId = generatedLocation.sourceId;
+
+    yield dispatch((0, _sources.ensureParserHasSourceText)(sourceId));
+
+    return yield (0, _pause.updateScopeBindings)(scopes, generatedLocation, sourceMaps);
+  });
+
+  return function _getScopeBindings(_x, _x2, _x3) {
+    return _ref.apply(this, arguments);
+  };
+})();
+
+/**
+ * Redux actions for the pause state
+ * @module actions/pause
+ */
+
+/**
+ * Debugger has just resumed
+ *
+ * @memberof actions/pause
+ * @static
+ */
+
+
 exports.resumed = resumed;
 exports.continueToHere = continueToHere;
 exports.paused = paused;
@@ -21366,26 +19464,21 @@ var parser = _interopRequireWildcard(_parser);
 
 var _prefs = __webpack_require__(226);
 
+var _devtoolsSourceMap = __webpack_require__(898);
+
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
-/**
- * Redux actions for the pause state
- * @module actions/pause
- */
-
-/**
- * Debugger has just resumed
- *
- * @memberof actions/pause
- * @static
- */
 function resumed() {
-  return (_ref) => {
-    var dispatch = _ref.dispatch,
-        client = _ref.client,
-        getState = _ref.getState;
+  return (_ref3) => {
+    var dispatch = _ref3.dispatch,
+        client = _ref3.client,
+        getState = _ref3.getState;
+
+    if (!(0, _selectors.isPaused)(getState())) {
+      return;
+    }
 
     dispatch({
       type: "RESUME",
@@ -21393,18 +19486,18 @@ function resumed() {
     });
 
     if (!(0, _selectors.isStepping)(getState())) {
-      dispatch((0, _expressions.evaluateExpressions)(null));
+      dispatch((0, _expressions.evaluateExpressions)());
     }
   };
 }
 
 function continueToHere(line) {
   return (() => {
-    var _ref2 = _asyncToGenerator(function* (_ref3) {
-      var dispatch = _ref3.dispatch,
-          getState = _ref3.getState,
-          client = _ref3.client,
-          sourceMaps = _ref3.sourceMaps;
+    var _ref4 = _asyncToGenerator(function* (_ref5) {
+      var dispatch = _ref5.dispatch,
+          getState = _ref5.getState,
+          client = _ref5.client,
+          sourceMaps = _ref5.sourceMaps;
 
       var source = (0, _selectors.getSelectedSource)(getState()).toJS();
 
@@ -21413,11 +19506,12 @@ function continueToHere(line) {
         column: undefined,
         sourceId: source.id
       }));
+
       dispatch(command("resume"));
     });
 
-    return function (_x) {
-      return _ref2.apply(this, arguments);
+    return function (_x4) {
+      return _ref4.apply(this, arguments);
     };
   })();
 }
@@ -21431,11 +19525,11 @@ function continueToHere(line) {
  */
 function paused(pauseInfo) {
   return (() => {
-    var _ref4 = _asyncToGenerator(function* (_ref5) {
-      var dispatch = _ref5.dispatch,
-          getState = _ref5.getState,
-          client = _ref5.client,
-          sourceMaps = _ref5.sourceMaps;
+    var _ref6 = _asyncToGenerator(function* (_ref7) {
+      var dispatch = _ref7.dispatch,
+          getState = _ref7.getState,
+          client = _ref7.client,
+          sourceMaps = _ref7.sourceMaps;
       var frames = pauseInfo.frames,
           why = pauseInfo.why,
           loadedObjects = pauseInfo.loadedObjects;
@@ -21444,7 +19538,8 @@ function paused(pauseInfo) {
       frames = yield (0, _pause.updateFrameLocations)(frames, sourceMaps);
       var frame = frames[0];
 
-      var scopes = yield client.getFrameScopes(frame);
+      var frameScopes = yield client.getFrameScopes(frame);
+      var scopes = !(0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId) ? yield _getScopeBindings({ dispatch, getState, sourceMaps }, frame.generatedLocation, frameScopes) : frameScopes;
 
       dispatch({
         type: "PAUSED",
@@ -21459,14 +19554,12 @@ function paused(pauseInfo) {
       if (hiddenBreakpointLocation) {
         dispatch((0, _breakpoints.removeBreakpoint)(hiddenBreakpointLocation));
       }
-
-      dispatch((0, _expressions.evaluateExpressions)(frame.id));
-
+      dispatch((0, _expressions.evaluateExpressions)());
       dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
     });
 
-    return function (_x2) {
-      return _ref4.apply(this, arguments);
+    return function (_x5) {
+      return _ref6.apply(this, arguments);
     };
   })();
 }
@@ -21477,9 +19570,9 @@ function paused(pauseInfo) {
  * @static
  */
 function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  return (_ref6) => {
-    var dispatch = _ref6.dispatch,
-        client = _ref6.client;
+  return (_ref8) => {
+    var dispatch = _ref8.dispatch,
+        client = _ref8.client;
 
     dispatch({
       type: "PAUSE_ON_EXCEPTIONS",
@@ -21499,9 +19592,9 @@ function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions
  */
 function command(type) {
   return (() => {
-    var _ref7 = _asyncToGenerator(function* (_ref8) {
-      var dispatch = _ref8.dispatch,
-          client = _ref8.client;
+    var _ref9 = _asyncToGenerator(function* (_ref10) {
+      var dispatch = _ref10.dispatch,
+          client = _ref10.client;
 
       // execute debugger thread command e.g. stepIn, stepOver
       dispatch({ type: "COMMAND", value: { type } });
@@ -21511,8 +19604,8 @@ function command(type) {
       dispatch({ type: "CLEAR_COMMAND" });
     });
 
-    return function (_x3) {
-      return _ref7.apply(this, arguments);
+    return function (_x6) {
+      return _ref9.apply(this, arguments);
     };
   })();
 }
@@ -21524,9 +19617,9 @@ function command(type) {
  * @returns {Function} {@link command}
  */
 function stepIn() {
-  return (_ref9) => {
-    var dispatch = _ref9.dispatch,
-        getState = _ref9.getState;
+  return (_ref11) => {
+    var dispatch = _ref11.dispatch,
+        getState = _ref11.getState;
 
     if ((0, _selectors.getPause)(getState())) {
       return dispatch(command("stepIn"));
@@ -21541,9 +19634,9 @@ function stepIn() {
  * @returns {Function} {@link command}
  */
 function stepOver() {
-  return (_ref10) => {
-    var dispatch = _ref10.dispatch,
-        getState = _ref10.getState;
+  return (_ref12) => {
+    var dispatch = _ref12.dispatch,
+        getState = _ref12.getState;
 
     if ((0, _selectors.getPause)(getState())) {
       return dispatch(astCommand("stepOver"));
@@ -21558,9 +19651,9 @@ function stepOver() {
  * @returns {Function} {@link command}
  */
 function stepOut() {
-  return (_ref11) => {
-    var dispatch = _ref11.dispatch,
-        getState = _ref11.getState;
+  return (_ref13) => {
+    var dispatch = _ref13.dispatch,
+        getState = _ref13.getState;
 
     if ((0, _selectors.getPause)(getState())) {
       return dispatch(command("stepOut"));
@@ -21575,9 +19668,9 @@ function stepOut() {
  * @returns {Function} {@link command}
  */
 function resume() {
-  return (_ref12) => {
-    var dispatch = _ref12.dispatch,
-        getState = _ref12.getState;
+  return (_ref14) => {
+    var dispatch = _ref14.dispatch,
+        getState = _ref14.getState;
 
     if ((0, _selectors.getPause)(getState())) {
       return dispatch(command("resume"));
@@ -21594,9 +19687,9 @@ function resume() {
  * @static
  */
 function breakOnNext() {
-  return (_ref13) => {
-    var dispatch = _ref13.dispatch,
-        client = _ref13.client;
+  return (_ref15) => {
+    var dispatch = _ref15.dispatch,
+        client = _ref15.client;
 
     client.breakOnNext();
 
@@ -21613,24 +19706,28 @@ function breakOnNext() {
  */
 function selectFrame(frame) {
   return (() => {
-    var _ref14 = _asyncToGenerator(function* (_ref15) {
-      var dispatch = _ref15.dispatch,
-          client = _ref15.client;
+    var _ref16 = _asyncToGenerator(function* (_ref17) {
+      var dispatch = _ref17.dispatch,
+          client = _ref17.client,
+          getState = _ref17.getState,
+          sourceMaps = _ref17.sourceMaps;
 
-      dispatch((0, _expressions.evaluateExpressions)(frame.id));
-      dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
-
-      var scopes = yield client.getFrameScopes(frame);
+      var frameScopes = yield client.getFrameScopes(frame);
+      var scopes = !(0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId) ? yield _getScopeBindings({ dispatch, getState, sourceMaps }, frame.generatedLocation, frameScopes) : frameScopes;
 
       dispatch({
         type: "SELECT_FRAME",
         frame,
         scopes
       });
+
+      dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
+
+      dispatch((0, _expressions.evaluateExpressions)());
     });
 
-    return function (_x4) {
-      return _ref14.apply(this, arguments);
+    return function (_x7) {
+      return _ref16.apply(this, arguments);
     };
   })();
 }
@@ -21640,10 +19737,10 @@ function selectFrame(frame) {
  * @static
  */
 function loadObjectProperties(object) {
-  return (_ref16) => {
-    var dispatch = _ref16.dispatch,
-        client = _ref16.client,
-        getState = _ref16.getState;
+  return (_ref18) => {
+    var dispatch = _ref18.dispatch,
+        client = _ref18.client,
+        getState = _ref18.getState;
 
     var objectId = object.actor || object.objectId;
 
@@ -21667,10 +19764,10 @@ function loadObjectProperties(object) {
  */
 function astCommand(stepType) {
   return (() => {
-    var _ref17 = _asyncToGenerator(function* (_ref18) {
-      var dispatch = _ref18.dispatch,
-          getState = _ref18.getState,
-          sourceMaps = _ref18.sourceMaps;
+    var _ref19 = _asyncToGenerator(function* (_ref20) {
+      var dispatch = _ref20.dispatch,
+          getState = _ref20.getState,
+          sourceMaps = _ref20.sourceMaps;
 
       if (!_prefs.features.asyncStepping) {
         return dispatch(command(stepType));
@@ -21692,8 +19789,8 @@ function astCommand(stepType) {
       return dispatch(command(stepType));
     });
 
-    return function (_x5) {
-      return _ref17.apply(this, arguments);
+    return function (_x8) {
+      return _ref19.apply(this, arguments);
     };
   })();
 }
@@ -21749,6 +19846,7 @@ function willNavigate(_, event) {
       (0, _editor.clearDocuments)();
       (0, _parser.clearSymbols)();
       (0, _parser.clearASTs)();
+      (0, _parser.clearScopes)();
       (0, _parser.clearSources)();
 
       dispatch(navigate(event.url));
@@ -21953,7 +20051,7 @@ function clearHighlightLineRange() {
 function toggleConditionalBreakpointPanel(line) {
   return {
     type: "TOGGLE_CONDITIONAL_BREAKPOINT_PANEL",
-    line
+    line: line
   };
 }
 
@@ -22052,7 +20150,10 @@ class Modal extends _react.Component {
       { className: "modal-wrapper", onClick: this.props.handleClose },
       _react2.default.createElement(
         "div",
-        { className: (0, _classnames2.default)("modal", status), onClick: this.onClick },
+        {
+          className: (0, _classnames2.default)("modal", this.props.additionalClass, status),
+          onClick: this.onClick
+        },
         this.props.children
       )
     );
@@ -22060,7 +20161,6 @@ class Modal extends _react.Component {
 }
 
 exports.Modal = Modal;
-Modal.displayName = "Modal";
 Modal.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
@@ -22068,6 +20168,7 @@ Modal.contextTypes = {
 function Slide(_ref) {
   var inProp = _ref.in,
       children = _ref.children,
+      additionalClass = _ref.additionalClass,
       handleClose = _ref.handleClose;
 
   return _react2.default.createElement(
@@ -22075,13 +20176,15 @@ function Slide(_ref) {
     { "in": inProp, timeout: 175, appear: true },
     status => _react2.default.createElement(
       Modal,
-      { status: status, handleClose: handleClose },
+      {
+        status: status,
+        additionalClass: additionalClass,
+        handleClose: handleClose
+      },
       children
     )
   );
 }
-
-Slide.displayName = "Slide";
 
 /***/ }),
 /* 333 */
@@ -22147,7 +20250,7 @@ var EXITING = exports.EXITING = 'exiting';
  * }
  *
  * const transitionStyles = {
- *   entering: { opacity: 1 },
+ *   entering: { opacity: 0 },
  *   entered:  { opacity: 1 },
  * };
  *
@@ -22248,8 +20351,8 @@ var Transition = function (_React$Component) {
   };
 
   Transition.prototype.componentWillReceiveProps = function componentWillReceiveProps(nextProps) {
-    var status = this.state.status;
-
+    var _ref = this.pendingState || this.state,
+        status = _ref.status;
 
     if (nextProps.in) {
       if (status === UNMOUNTED) {
@@ -22293,19 +20396,19 @@ var Transition = function (_React$Component) {
   Transition.prototype.updateStatus = function updateStatus() {
     var mounting = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
 
+    var nextStatus = this.nextStatus;
 
-    if (this.nextStatus !== null) {
+    if (nextStatus !== null) {
+      this.nextStatus = null;
       // nextStatus will always be ENTERING or EXITING.
       this.cancelNextCallback();
       var node = _reactDom2.default.findDOMNode(this);
 
-      if (this.nextStatus === ENTERING) {
+      if (nextStatus === ENTERING) {
         this.performEnter(node, mounting);
       } else {
         this.performExit(node);
       }
-
-      this.nextStatus = null;
     } else if (this.props.unmountOnExit && this.state.status === EXITED) {
       this.setState({ status: UNMOUNTED });
     }
@@ -22378,21 +20481,32 @@ var Transition = function (_React$Component) {
   };
 
   Transition.prototype.safeSetState = function safeSetState(nextState, callback) {
+    var _this4 = this;
+
+    // We need to track pending updates for instances where a cWRP fires quickly
+    // after cDM and before the state flushes, which would double trigger a
+    // transition
+    this.pendingState = nextState;
+
     // This shouldn't be necessary, but there are weird race conditions with
     // setState callbacks and unmounting in testing, so always make sure that
     // we can cancel any pending setState callbacks after we unmount.
-    this.setState(nextState, this.setNextCallback(callback));
+    callback = this.setNextCallback(callback);
+    this.setState(nextState, function () {
+      _this4.pendingState = null;
+      callback();
+    });
   };
 
   Transition.prototype.setNextCallback = function setNextCallback(callback) {
-    var _this4 = this;
+    var _this5 = this;
 
     var active = true;
 
     this.nextCallback = function (event) {
       if (active) {
         active = false;
-        _this4.nextCallback = null;
+        _this5.nextCallback = null;
 
         callback(event);
       }
@@ -22503,11 +20617,11 @@ Transition.propTypes =  false ? {
   unmountOnExit: PropTypes.bool,
 
   /**
-   * Normally a component is not transitioned if it shown when the `<Transition>` component mounts.
+   * Normally a component is not transitioned if it is shown when the `<Transition>` component mounts.
    * If you want to transition on the first mount set `appear` to `true`, and the
    * component will transition in as soon as the `<Transition>` mounts.
    *
-   * > Note: there are no specific "appear" states. `apprear` only an additional `enter` transition.
+   * > Note: there are no specific "appear" states. `appear` only adds an additional `enter` transition.
    */
   appear: PropTypes.bool,
 
@@ -22522,7 +20636,7 @@ Transition.propTypes =  false ? {
   exit: PropTypes.bool,
 
   /**
-   * The duration for the transition, in milliseconds.
+   * The duration of the transition, in milliseconds.
    * Required unless `addEventListener` is provided
    *
    * You may specify a single timeout for all transitions like: `timeout={500}`,
@@ -22563,7 +20677,7 @@ Transition.propTypes =  false ? {
 
   /**
    * Callback fired before the "entering" status is applied. An extra parameter
-   * `isAppearing` is supplied to indicate if the enter stage is occuring on the initial mount
+   * `isAppearing` is supplied to indicate if the enter stage is occurring on the initial mount
    *
    * @type Function(node: HtmlElement, isAppearing: bool) -> void
    */
@@ -22571,15 +20685,15 @@ Transition.propTypes =  false ? {
 
   /**
    * Callback fired after the "entering" status is applied. An extra parameter
-   * `isAppearing` is supplied to indicate if the enter stage is occuring on the initial mount
+   * `isAppearing` is supplied to indicate if the enter stage is occurring on the initial mount
    *
    * @type Function(node: HtmlElement, isAppearing: bool)
    */
   onEntering: PropTypes.func,
 
   /**
-   * Callback fired after the "enter" status is applied. An extra parameter
-   * `isAppearing` is supplied to indicate if the enter stage is occuring on the initial mount
+   * Callback fired after the "entered" status is applied. An extra parameter
+   * `isAppearing` is supplied to indicate if the enter stage is occurring on the initial mount
    *
    * @type Function(node: HtmlElement, isAppearing: bool) -> void
    */
@@ -23617,7 +21731,6 @@ exports.default = Autocomplete;
 Autocomplete.defaultProps = {
   size: ""
 };
-Autocomplete.displayName = "Autocomplete";
 
 /***/ }),
 /* 343 */
@@ -23784,7 +21897,8 @@ var svg = {
   pug: __webpack_require__(1004),
   extjs: __webpack_require__(1043),
   showSources: __webpack_require__(1044),
-  showOutline: __webpack_require__(1045)
+  showOutline: __webpack_require__(1045),
+  shortcut: __webpack_require__(1183)
 };
 
 function Svg(_ref) {
@@ -23807,12 +21921,14 @@ function Svg(_ref) {
   if (name === "subSettings") {
     className = "";
   }
+
   var props = {
     className,
     onClick,
     ["aria-label"]: ariaLabel,
     src: svg[name]
   };
+
   return React.createElement(InlineSVG, props);
 }
 
@@ -24192,8 +22308,6 @@ var arrowBtn = (onClick, type, className, tooltip) => {
   );
 };
 
-arrowBtn.displayName = "ArrowButton";
-
 class SearchInput extends _react.Component {
 
   componentDidMount() {
@@ -24337,13 +22451,6 @@ function CloseButton(_ref) {
     _react2.default.createElement(_Svg2.default, { name: "close" })
   );
 }
-
-
-CloseButton.displayName = "CloseButton";
-CloseButton.propTypes = {
-  handleClick: _react.PropTypes.func.isRequired
-};
-
 exports.default = CloseButton;
 
 /***/ }),
@@ -24536,11 +22643,11 @@ var Tree = (0, _react.createFactory)(_devtoolsComponents.Tree);
 
 class ManagedTree extends _react.Component {
 
-  constructor() {
+  constructor(props) {
     super();
 
     this.state = {
-      expanded: new Set(),
+      expanded: props.expanded || new Set(),
       focusedItem: null
     };
 
@@ -24576,9 +22683,9 @@ class ManagedTree extends _react.Component {
     this.setState({ expanded });
 
     if (isExpanded && this.props.onExpand) {
-      this.props.onExpand(item);
-    } else if (!expanded && this.props.onCollapse) {
-      this.props.onCollapse(item);
+      this.props.onExpand(item, expanded);
+    } else if (!isExpanded && this.props.onCollapse) {
+      this.props.onCollapse(item, expanded);
     }
   }
 
@@ -24650,8 +22757,6 @@ class ManagedTree extends _react.Component {
   }
 }
 
-ManagedTree.displayName = "ManagedTree";
-
 ManagedTree.propTypes = Object.assign({}, Tree.propTypes);
 
 exports.default = ManagedTree;
@@ -24713,7 +22818,7 @@ var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes)
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _classnames = __webpack_require__(175);
 
@@ -24822,40 +22927,20 @@ class Editor extends _react.PureComponent {
   }
 
   componentWillReceiveProps(nextProps) {
-    // This lifecycle method is responsible for updating the editor
-    // text.
-    var selectedSource = nextProps.selectedSource;
-
-
-    if (nextProps.startPanelSize !== this.props.startPanelSize || nextProps.endPanelSize !== this.props.endPanelSize) {
-      this.state.editor.codeMirror.setSize();
+    if (!this.state.editor) {
+      return;
     }
 
-    if (!selectedSource) {
-      if (this.props.selectedSource) {
-        this.showMessage("");
-      }
-    } else if (!(0, _source.isLoaded)(selectedSource.toJS())) {
-      this.showMessage(L10N.getStr("loadingText"));
-    } else if (selectedSource.get("error")) {
-      this.showMessage(selectedSource.get("error"));
-    } else if (this.props.selectedSource !== selectedSource) {
-      (0, _editor.showSourceText)(this.state.editor, selectedSource.toJS());
-    }
-
-    if (this.state.editor && this.props.linesInScope !== nextProps.linesInScope) {
-      this.state.editor.codeMirror.operation(() => {
-        (0, _editor.clearLineClass)(this.state.editor.codeMirror, "in-scope");
-      });
-
-      (0, _editor.resizeBreakpointGutter)(this.state.editor.codeMirror);
-    }
+    this.setSize(nextProps);
+    this.setText(nextProps);
+    (0, _editor.resizeBreakpointGutter)(this.state.editor.codeMirror);
   }
 
   setupEditor() {
     var editor = (0, _editor.createEditor)();
 
     // disables the default search shortcuts
+
     editor._initShortcuts = () => {};
 
     var node = _reactDom2.default.findDOMNode(this);
@@ -24875,6 +22960,7 @@ class Editor extends _react.PureComponent {
     // Set code editor wrapper to be focusable
     codeMirrorWrapper.tabIndex = 0;
     codeMirrorWrapper.addEventListener("keydown", e => this.onKeyDown(e));
+    codeMirrorWrapper.addEventListener("click", e => this.onClick(e));
 
     var toggleFoldMarkerVisibility = e => {
       if (node instanceof HTMLElement) {
@@ -24891,9 +22977,9 @@ class Editor extends _react.PureComponent {
     if (!(0, _devtoolsConfig.isFirefox)()) {
       codeMirror.on("gutterContextMenu", (cm, line, eventName, event) => this.onGutterContextMenu(event));
 
-      codeMirror.on("contextmenu", (cm, event) => this.openMenu(event, cm));
+      codeMirror.on("contextmenu", (cm, event) => this.openMenu(event, editor));
     } else {
-      codeMirrorWrapper.addEventListener("contextmenu", event => this.openMenu(event, codeMirror));
+      codeMirrorWrapper.addEventListener("contextmenu", event => this.openMenu(event, editor));
     }
 
     this.setState({ editor });
@@ -24913,8 +22999,8 @@ class Editor extends _react.PureComponent {
     var searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
     var searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
 
-    shortcuts.on("CmdOrCtrl+B", this.onToggleBreakpoint);
-    shortcuts.on("CmdOrCtrl+Shift+B", this.onToggleBreakpoint);
+    shortcuts.on(L10N.getStr("toggleBreakpoint.key"), this.onToggleBreakpoint);
+    shortcuts.on(L10N.getStr("toggleCondPanel.key"), this.onToggleBreakpoint);
     shortcuts.on("Esc", this.onEscape);
     shortcuts.on(searchAgainPrevKey, this.onSearchAgain);
     shortcuts.on(searchAgainKey, this.onSearchAgain);
@@ -24934,8 +23020,8 @@ class Editor extends _react.PureComponent {
     var searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
     var searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
     var shortcuts = this.context.shortcuts;
-    shortcuts.off("CmdOrCtrl+B");
-    shortcuts.off("CmdOrCtrl+Shift+B");
+    shortcuts.off(L10N.getStr("toggleBreakpoint.key"));
+    shortcuts.off(L10N.getStr("toggleCondPanel.key"));
     shortcuts.off(searchAgainPrevKey);
     shortcuts.off(searchAgainKey);
   }
@@ -25051,7 +23137,7 @@ class Editor extends _react.PureComponent {
     return selectedFrame && selectedLocation && selectedFrame.location.sourceId == selectedLocation.sourceId;
   }
 
-  openMenu(event, codeMirror) {
+  openMenu(event, editor) {
     var _props5 = this.props,
         selectedSource = _props5.selectedSource,
         selectedLocation = _props5.selectedLocation,
@@ -25063,7 +23149,7 @@ class Editor extends _react.PureComponent {
 
 
     return (0, _EditorMenu2.default)({
-      codeMirror,
+      editor,
       event,
       selectedLocation,
       selectedSource,
@@ -25081,7 +23167,8 @@ class Editor extends _react.PureComponent {
         selectedSource = _props6.selectedSource,
         toggleBreakpoint = _props6.toggleBreakpoint,
         addOrToggleDisabledBreakpoint = _props6.addOrToggleDisabledBreakpoint,
-        isEmptyLine = _props6.isEmptyLine;
+        isEmptyLine = _props6.isEmptyLine,
+        continueToHere = _props6.continueToHere;
 
     // ignore right clicks in the gutter
 
@@ -25102,7 +23189,9 @@ class Editor extends _react.PureComponent {
     }
 
     if (gutter !== "CodeMirror-foldgutter") {
-      if (ev.shiftKey) {
+      if (ev.altKey) {
+        continueToHere((0, _editor.toSourceLine)(selectedSource.get("id"), line));
+      } else if (ev.shiftKey) {
         addOrToggleDisabledBreakpoint((0, _editor.toSourceLine)(selectedSource.get("id"), line));
       } else {
         toggleBreakpoint((0, _editor.toSourceLine)(selectedSource.get("id"), line));
@@ -25149,15 +23238,27 @@ class Editor extends _react.PureComponent {
     });
   }
 
+  onClick(e) {
+    var _props8 = this.props,
+        selectedLocation = _props8.selectedLocation,
+        jumpToMappedLocation = _props8.jumpToMappedLocation;
+
+
+    if (e.metaKey && e.altKey) {
+      var sourceLocation = (0, _editor.getSourceLocationFromMouseEvent)(this.state.editor, selectedLocation, e);
+      jumpToMappedLocation(sourceLocation);
+    }
+  }
+
   toggleConditionalPanel(line) {
     if (this.isCbPanelOpen()) {
       return this.closeConditionalPanel();
     }
 
-    var _props8 = this.props,
-        selectedLocation = _props8.selectedLocation,
-        setBreakpointCondition = _props8.setBreakpointCondition,
-        breakpoints = _props8.breakpoints;
+    var _props9 = this.props,
+        selectedLocation = _props9.selectedLocation,
+        setBreakpointCondition = _props9.setBreakpointCondition,
+        breakpoints = _props9.breakpoints;
 
     var sourceId = selectedLocation ? selectedLocation.sourceId : "";
 
@@ -25223,7 +23324,47 @@ class Editor extends _react.PureComponent {
     this.pendingJumpLocation = null;
   }
 
+  setSize(nextProps) {
+    if (!this.state.editor) {
+      return;
+    }
+
+    if (nextProps.startPanelSize !== this.props.startPanelSize || nextProps.endPanelSize !== this.props.endPanelSize) {
+      this.state.editor.codeMirror.setSize();
+    }
+  }
+
+  setText(nextProps) {
+    if (!this.state.editor) {
+      return;
+    }
+
+    if (!nextProps.selectedSource) {
+      if (this.props.selectedSource) {
+        return this.showMessage("");
+      }
+
+      return;
+    }
+
+    if (!(0, _source.isLoaded)(nextProps.selectedSource.toJS())) {
+      return this.showMessage(L10N.getStr("loadingText"));
+    }
+
+    if (nextProps.selectedSource.get("error")) {
+      return this.showMessage(nextProps.selectedSource.get("error"));
+    }
+
+    if (nextProps.selectedSource !== this.props.selectedSource) {
+      return (0, _editor.showSourceText)(this.state.editor, nextProps.selectedSource.toJS());
+    }
+  }
+
   showMessage(msg) {
+    if (!this.state.editor) {
+      return;
+    }
+
     this.state.editor.replaceDocument(this.state.editor.createDocument());
     this.state.editor.setText(msg);
     this.state.editor.setMode({ name: "text" });
@@ -25231,10 +23372,10 @@ class Editor extends _react.PureComponent {
   }
 
   getInlineEditorStyles() {
-    var _props9 = this.props,
-        selectedSource = _props9.selectedSource,
-        horizontal = _props9.horizontal,
-        searchOn = _props9.searchOn;
+    var _props10 = this.props,
+        selectedSource = _props10.selectedSource,
+        horizontal = _props10.horizontal,
+        searchOn = _props10.searchOn;
 
 
     var subtractions = [];
@@ -25268,9 +23409,9 @@ class Editor extends _react.PureComponent {
   }
 
   renderHitCounts() {
-    var _props10 = this.props,
-        hitCount = _props10.hitCount,
-        selectedSource = _props10.selectedSource;
+    var _props11 = this.props,
+        hitCount = _props11.hitCount,
+        selectedSource = _props11.selectedSource;
 
 
     if (!selectedSource || !(0, _source.isLoaded)(selectedSource.toJS()) || !hitCount || !this.state.editor) {
@@ -25294,20 +23435,6 @@ class Editor extends _react.PureComponent {
     return _react2.default.createElement(_Preview2.default, { editor: this.state.editor });
   }
 
-  renderInScopeLines() {
-    var linesInScope = this.props.linesInScope;
-
-    if (!this.state.editor || !(0, _devtoolsConfig.isEnabled)("highlightScopeLines") || !linesInScope || !this.inSelectedFrameSource()) {
-      return;
-    }
-
-    this.state.editor.codeMirror.operation(() => {
-      linesInScope.forEach(line => {
-        this.state.editor.codeMirror.addLineClass(line - 1, "line", "in-scope");
-      });
-    });
-  }
-
   renderCallSites() {
     var editor = this.state.editor;
 
@@ -25318,11 +23445,11 @@ class Editor extends _react.PureComponent {
   }
 
   renderSearchBar() {
-    var _props11 = this.props,
-        selectSource = _props11.selectSource,
-        selectedSource = _props11.selectedSource,
-        highlightLineRange = _props11.highlightLineRange,
-        clearHighlightLineRange = _props11.clearHighlightLineRange;
+    var _props12 = this.props,
+        selectSource = _props12.selectSource,
+        selectedSource = _props12.selectedSource,
+        highlightLineRange = _props12.highlightLineRange,
+        clearHighlightLineRange = _props12.clearHighlightLineRange;
 
 
     if (!this.state.editor) {
@@ -25366,9 +23493,9 @@ class Editor extends _react.PureComponent {
 
   renderDebugLine() {
     var editor = this.state.editor;
-    var _props12 = this.props,
-        selectedLocation = _props12.selectedLocation,
-        selectedFrame = _props12.selectedFrame;
+    var _props13 = this.props,
+        selectedLocation = _props13.selectedLocation,
+        selectedFrame = _props13.selectedFrame;
 
     if (!editor || !selectedLocation || !selectedFrame || !selectedLocation.line || selectedFrame.location.sourceId !== selectedLocation.sourceId) {
       return null;
@@ -25382,9 +23509,9 @@ class Editor extends _react.PureComponent {
   }
 
   render() {
-    var _props13 = this.props,
-        coverageOn = _props13.coverageOn,
-        pauseData = _props13.pauseData;
+    var _props14 = this.props,
+        coverageOn = _props14.coverageOn,
+        pauseData = _props14.pauseData;
 
 
     return _react2.default.createElement(
@@ -25401,7 +23528,6 @@ class Editor extends _react.PureComponent {
         style: this.getInlineEditorStyles()
       }),
       this.renderHighlightLines(),
-      this.renderInScopeLines(),
       this.renderHitCounts(),
       this.renderFooter(),
       this.renderPreview(),
@@ -25412,8 +23538,6 @@ class Editor extends _react.PureComponent {
     );
   }
 }
-
-Editor.displayName = "Editor";
 
 Editor.propTypes = {
   breakpoints: _reactImmutableProptypes2.default.map,
@@ -25501,7 +23625,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -25572,11 +23696,11 @@ class SourceFooter extends _react.PureComponent {
 
     var sourceLoaded = selectedSource && (0, _source.isLoaded)(selectedSource.toJS());
 
-    var blackboxed = selectedSource.get("isBlackBoxed");
-
-    if (!(0, _devtoolsConfig.isEnabled)("blackbox")) {
+    if (!(0, _devtoolsConfig.isEnabled)("blackbox") || !sourceLoaded) {
       return;
     }
+
+    var blackboxed = selectedSource.get("isBlackBoxed");
 
     var tooltip = L10N.getStr("sourceFooter.blackbox");
     var type = "black-box";
@@ -25600,9 +23724,8 @@ class SourceFooter extends _react.PureComponent {
   blackBoxSummary() {
     var selectedSource = this.props.selectedSource;
 
-    var blackboxed = selectedSource.get("isBlackBoxed");
 
-    if (!blackboxed) {
+    if (!selectedSource || !selectedSource.get("isBlackBoxed")) {
       return;
     }
 
@@ -25647,12 +23770,6 @@ class SourceFooter extends _react.PureComponent {
   }
 
   renderCommands() {
-    var selectedSource = this.props.selectedSource;
-
-    if (!(0, _editor.shouldShowPrettyPrint)(selectedSource)) {
-      return null;
-    }
-
     return _react2.default.createElement(
       "div",
       { className: "commands" },
@@ -25681,8 +23798,6 @@ class SourceFooter extends _react.PureComponent {
     );
   }
 }
-
-SourceFooter.displayName = "SourceFooter";
 
 exports.default = (0, _reactRedux.connect)(state => {
   var selectedSource = (0, _selectors.getSelectedSource)(state);
@@ -25742,7 +23857,7 @@ class PaneToggleButton extends _react.Component {
     var title = !collapsed ? L10N.getStr("expandPanes") : L10N.getStr("collapsePanes");
 
     return _react2.default.createElement(
-      "div",
+      "button",
       {
         className: (0, _classnames2.default)(`toggle-button-${position}`, {
           collapsed,
@@ -25755,8 +23870,6 @@ class PaneToggleButton extends _react.Component {
     );
   }
 }
-
-PaneToggleButton.displayName = "PaneToggleButton";
 
 exports.default = PaneToggleButton;
 
@@ -25781,7 +23894,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _reactDom = __webpack_require__(4);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -26213,7 +24326,6 @@ class SearchBar extends _react.Component {
   }
 }
 
-SearchBar.displayName = "SearchBar";
 SearchBar.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
@@ -26810,10 +24922,12 @@ var _devtoolsSourceMap = __webpack_require__(898);
 
 var _clipboard = __webpack_require__(423);
 
+var _editor = __webpack_require__(257);
+
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 function getMenuItems(event, _ref) {
-  var codeMirror = _ref.codeMirror,
+  var editor = _ref.editor,
       selectedLocation = _ref.selectedLocation,
       selectedSource = _ref.selectedSource,
       showSource = _ref.showSource,
@@ -26827,8 +24941,8 @@ function getMenuItems(event, _ref) {
   var copySourceKey = L10N.getStr("copySource.accesskey");
   var copyFunctionLabel = L10N.getStr("copyFunction.label");
   var copyFunctionKey = L10N.getStr("copyFunction.accesskey");
-  var copySourceUrlLabel = L10N.getStr("copySourceUrl");
-  var copySourceUrlKey = L10N.getStr("copySourceUrl.accesskey");
+  var copySourceUri2Label = L10N.getStr("copySourceUri2");
+  var copySourceUri2Key = L10N.getStr("copySourceUri2.accesskey");
   var revealInTreeLabel = L10N.getStr("sourceTabs.revealInTree");
   var revealInTreeKey = L10N.getStr("sourceTabs.revealInTree.accesskey");
   var blackboxLabel = L10N.getStr("sourceFooter.blackbox");
@@ -26836,15 +24950,15 @@ function getMenuItems(event, _ref) {
   var blackboxKey = L10N.getStr("sourceFooter.blackbox.accesskey");
   var toggleBlackBoxLabel = selectedSource.get("isBlackBoxed") ? unblackboxLabel : blackboxLabel;
 
-  var copySourceUrl = {
+  var copySourceUri2 = {
     id: "node-menu-copy-source-url",
-    label: copySourceUrlLabel,
-    accesskey: copySourceUrlKey,
+    label: copySourceUri2Label,
+    accesskey: copySourceUri2Key,
     disabled: false,
     click: () => (0, _clipboard.copyToTheClipboard)(selectedSource.get("url"))
   };
 
-  var selectionText = codeMirror.getSelection().trim();
+  var selectionText = editor.codeMirror.getSelection().trim();
   var copySource = {
     id: "node-menu-copy-source",
     label: copySourceLabel,
@@ -26853,18 +24967,12 @@ function getMenuItems(event, _ref) {
     click: () => (0, _clipboard.copyToTheClipboard)(selectionText)
   };
 
-  var _codeMirror$coordsCha = codeMirror.coordsChar({
-    left: event.clientX,
-    top: event.clientY
+  var _editor$codeMirror$co = editor.codeMirror.coordsChar({
+    left: event.clientX
   }),
-      line = _codeMirror$coordsCha.line,
-      ch = _codeMirror$coordsCha.ch;
+      line = _editor$codeMirror$co.line;
 
-  var sourceLocation = {
-    sourceId: selectedLocation.sourceId,
-    line: line + 1,
-    column: ch + 1
-  };
+  var sourceLocation = (0, _editor.getSourceLocationFromMouseEvent)(editor, selectedLocation, event);
 
   var pairedType = (0, _devtoolsSourceMap.isOriginalId)(selectedLocation.sourceId) ? L10N.getStr("generated") : L10N.getStr("original");
 
@@ -26878,7 +24986,7 @@ function getMenuItems(event, _ref) {
   var watchExpressionLabel = {
     accesskey: "E",
     label: L10N.getStr("expressions.placeholder"),
-    click: () => addExpression(codeMirror.getSelection())
+    click: () => addExpression(editor.codeMirror.getSelection())
   };
 
   var blackBoxMenuItem = {
@@ -26890,7 +24998,7 @@ function getMenuItems(event, _ref) {
   };
 
   // TODO: Find a new way to only add this for mapped sources?
-  var textSelected = codeMirror.somethingSelected();
+  var textSelected = editor.codeMirror.somethingSelected();
 
   var showSourceMenuItem = {
     id: "node-menu-show-source",
@@ -26909,7 +25017,7 @@ function getMenuItems(event, _ref) {
     click: () => (0, _clipboard.copyToTheClipboard)(functionText)
   };
 
-  var menuItems = [copySourceUrl, jumpLabel, showSourceMenuItem, blackBoxMenuItem, copySource, copyFunction];
+  var menuItems = [copySource, copySourceUri2, copyFunction, { type: "separator" }, jumpLabel, showSourceMenuItem, blackBoxMenuItem];
 
   if (textSelected) {
     menuItems.push(watchExpressionLabel);
@@ -27176,8 +25284,6 @@ Popover.defaultProps = {
   type: "popover"
 };
 
-Popover.displayName = "Popover";
-
 exports.default = Popover;
 
 /***/ }),
@@ -27418,8 +25524,6 @@ class Breakpoint extends _react.Component {
   }
 }
 
-Breakpoint.displayName = "Breakpoint";
-
 exports.default = Breakpoint;
 
 /***/ }),
@@ -27480,8 +25584,6 @@ class HitMarker extends _react.Component {
   }
 }
 
-HitMarker.displayName = "HitMarker";
-
 exports.default = HitMarker;
 
 /***/ }),
@@ -27501,9 +25603,11 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
+
+var _prefs = __webpack_require__(226);
 
 var _reactImmutableProptypes = __webpack_require__(150);
 
@@ -27520,8 +25624,6 @@ var _devtoolsConfig = __webpack_require__(828);
 var _Svg = __webpack_require__(344);
 
 var _Svg2 = _interopRequireDefault(_Svg);
-
-var _prefs = __webpack_require__(226);
 
 var _Breakpoints = __webpack_require__(725);
 
@@ -27555,6 +25657,10 @@ var _CommandBar = __webpack_require__(742);
 
 var _CommandBar2 = _interopRequireDefault(_CommandBar);
 
+var _UtilsBar = __webpack_require__(1185);
+
+var _UtilsBar2 = _interopRequireDefault(_UtilsBar);
+
 var _ChromeScopes = __webpack_require__(728);
 
 var _ChromeScopes2 = _interopRequireDefault(_ChromeScopes);
@@ -27583,7 +25689,6 @@ function debugBtn(onClick, type, className, tooltip) {
     _react2.default.createElement(_Svg2.default, { name: type, title: tooltip, "aria-label": tooltip })
   );
 }
-debugBtn.displayName = "DebugButton";
 
 class SecondaryPanes extends _react.Component {
   renderBreakpointsToggle() {
@@ -27716,7 +25821,6 @@ class SecondaryPanes extends _react.Component {
 
   renderVerticalLayout() {
     return _react2.default.createElement(_devtoolsSplitter2.default, {
-      style: { width: "100vw" },
       initialSize: "300px",
       minSize: 10,
       maxSize: "50%",
@@ -27726,12 +25830,24 @@ class SecondaryPanes extends _react.Component {
     });
   }
 
+  renderUtilsBar() {
+    if (!_prefs.features.shortcuts) {
+      return;
+    }
+
+    return _react2.default.createElement(_UtilsBar2.default, {
+      horizontal: this.props.horizontal,
+      toggleShortcutsModal: this.props.toggleShortcutsModal
+    });
+  }
+
   render() {
     return _react2.default.createElement(
       "div",
       { className: "secondary-panes secondary-panes--sticky-commandbar" },
       _react2.default.createElement(_CommandBar2.default, { horizontal: this.props.horizontal }),
-      this.props.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout()
+      this.props.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout(),
+      this.renderUtilsBar()
     );
   }
 }
@@ -27743,14 +25859,13 @@ SecondaryPanes.propTypes = {
   breakpoints: _reactImmutableProptypes2.default.map.isRequired,
   breakpointsDisabled: _react.PropTypes.bool,
   breakpointsLoading: _react.PropTypes.bool,
-  toggleAllBreakpoints: _react.PropTypes.func.isRequired
+  toggleAllBreakpoints: _react.PropTypes.func.isRequired,
+  toggleShortcutsModal: _react.PropTypes.func
 };
 
 SecondaryPanes.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
-
-SecondaryPanes.displayName = "SecondaryPanes";
 
 exports.default = (0, _reactRedux.connect)(state => ({
   pauseData: (0, _selectors.getPause)(state),
@@ -27774,7 +25889,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -27783,6 +25898,8 @@ var _actions = __webpack_require__(244);
 var _actions2 = _interopRequireDefault(_actions);
 
 var _selectors = __webpack_require__(242);
+
+var _expressions = __webpack_require__(1177);
 
 var _Close = __webpack_require__(378);
 
@@ -27793,42 +25910,6 @@ var _devtoolsReps = __webpack_require__(924);
 __webpack_require__(908);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function getValue(expression) {
-  var value = expression.value;
-  if (!value) {
-    return {
-      path: expression.from,
-      value: "<not available>"
-    };
-  }
-
-  if (value.exception) {
-    return {
-      path: value.from,
-      value: value.exception
-    };
-  }
-
-  if (value.error) {
-    return {
-      path: value.from,
-      value: value.error
-    };
-  }
-
-  if (typeof value.result == "object") {
-    return {
-      path: value.result.actor,
-      value: value.result
-    };
-  }
-
-  return {
-    path: value.input,
-    value: value.result
-  };
-}
 
 class Expressions extends _react.PureComponent {
 
@@ -27926,23 +26007,18 @@ class Expressions extends _react.PureComponent {
       return;
     }
 
-    var _getValue = getValue(expression),
-        value = _getValue.value,
-        path = _getValue.path;
-
-    if (value.class == "Error") {
-      value = { unavailable: true };
-    }
+    var _getValue = (0, _expressions.getValue)(expression),
+        value = _getValue.value;
 
     var root = {
       name: expression.input,
-      path,
+      path: input,
       contents: { value }
     };
 
     return _react2.default.createElement(
       "li",
-      { className: "expression-container", key: `${path}/${input}` },
+      { className: "expression-container", key: input },
       _react2.default.createElement(
         "div",
         { className: "expression-content" },
@@ -27952,12 +26028,12 @@ class Expressions extends _react.PureComponent {
           disableWrap: true,
           disabledFocus: true,
           onDoubleClick: (items, options) => this.editExpression(expression, options),
+          openLink: openLink,
           getObjectProperties: id => loadedObjects[id],
           loadObjectProperties: loadObjectProperties
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {},
-          openLink: openLink
+          loadObjectEntries: grip => {}
         }),
         _react2.default.createElement(
           "div",
@@ -28016,9 +26092,6 @@ class Expressions extends _react.PureComponent {
     );
   }
 }
-
-Expressions.displayName = "Expressions";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   pauseInfo: (0, _selectors.getPause)(state),
   expressions: (0, _selectors.getExpressions)(state),
@@ -28049,7 +26122,7 @@ var _immutable = __webpack_require__(146);
 
 var I = _interopRequireWildcard(_immutable);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _reselect = __webpack_require__(993);
 
@@ -28113,7 +26186,6 @@ function renderSourceLocation(source, line, column) {
     `${(0, _utils.endTruncateStr)(filename, 30)}: ${bpLocation}`
   );
 }
-renderSourceLocation.displayName = "SourceLocation";
 
 class Breakpoints extends _react.PureComponent {
 
@@ -28150,29 +26222,31 @@ class Breakpoints extends _react.PureComponent {
 
     e.preventDefault();
 
-    var deleteSelfLabel = L10N.getStr("breakpointMenuItem.deleteSelf");
-    var deleteAllLabel = L10N.getStr("breakpointMenuItem.deleteAll");
-    var deleteOthersLabel = L10N.getStr("breakpointMenuItem.deleteOthers");
-    var enableSelfLabel = L10N.getStr("breakpointMenuItem.enableSelf");
-    var enableAllLabel = L10N.getStr("breakpointMenuItem.enableAll");
-    var enableOthersLabel = L10N.getStr("breakpointMenuItem.enableOthers");
-    var disableSelfLabel = L10N.getStr("breakpointMenuItem.disableSelf");
-    var disableAllLabel = L10N.getStr("breakpointMenuItem.disableAll");
-    var disableOthersLabel = L10N.getStr("breakpointMenuItem.disableOthers");
-    var removeConditionLabel = L10N.getStr("breakpointMenuItem.removeCondition.label");
-    var editConditionLabel = L10N.getStr("breakpointMenuItem.editCondition.label");
+    var deleteSelfLabel = L10N.getStr("breakpointMenuItem.deleteSelf2.label");
+    var deleteAllLabel = L10N.getStr("breakpointMenuItem.deleteAll2.label");
+    var deleteOthersLabel = L10N.getStr("breakpointMenuItem.deleteOthers2.label");
+    var enableSelfLabel = L10N.getStr("breakpointMenuItem.enableSelf2.label");
+    var enableAllLabel = L10N.getStr("breakpointMenuItem.enableAll2.label");
+    var enableOthersLabel = L10N.getStr("breakpointMenuItem.enableOthers2.label");
+    var disableSelfLabel = L10N.getStr("breakpointMenuItem.disableSelf2.label");
+    var disableAllLabel = L10N.getStr("breakpointMenuItem.disableAll2.label");
+    var disableOthersLabel = L10N.getStr("breakpointMenuItem.disableOthers2.label");
+    var removeConditionLabel = L10N.getStr("breakpointMenuItem.removeCondition2.label");
+    var addConditionLabel = L10N.getStr("breakpointMenuItem.addCondition2.label");
+    var editConditionLabel = L10N.getStr("breakpointMenuItem.editCondition2.label");
 
-    var deleteSelfKey = L10N.getStr("breakpointMenuItem.deleteSelf.accesskey");
-    var deleteAllKey = L10N.getStr("breakpointMenuItem.deleteAll.accesskey");
-    var deleteOthersKey = L10N.getStr("breakpointMenuItem.deleteOthers.accesskey");
-    var enableSelfKey = L10N.getStr("breakpointMenuItem.enableSelf.accesskey");
-    var enableAllKey = L10N.getStr("breakpointMenuItem.enableAll.accesskey");
-    var enableOthersKey = L10N.getStr("breakpointMenuItem.enableOthers.accesskey");
-    var disableSelfKey = L10N.getStr("breakpointMenuItem.disableSelf.accesskey");
-    var disableAllKey = L10N.getStr("breakpointMenuItem.disableAll.accesskey");
-    var disableOthersKey = L10N.getStr("breakpointMenuItem.disableOthers.accesskey");
-    var removeConditionKey = L10N.getStr("breakpointMenuItem.removeCondition.accesskey");
-    var editConditionKey = L10N.getStr("breakpointMenuItem.editCondition.accesskey");
+    var deleteSelfKey = L10N.getStr("breakpointMenuItem.deleteSelf2.accesskey");
+    var deleteAllKey = L10N.getStr("breakpointMenuItem.deleteAll2.accesskey");
+    var deleteOthersKey = L10N.getStr("breakpointMenuItem.deleteOthers2.accesskey");
+    var enableSelfKey = L10N.getStr("breakpointMenuItem.enableSelf2.accesskey");
+    var enableAllKey = L10N.getStr("breakpointMenuItem.enableAll2.accesskey");
+    var enableOthersKey = L10N.getStr("breakpointMenuItem.enableOthers2.accesskey");
+    var disableSelfKey = L10N.getStr("breakpointMenuItem.disableSelf2.accesskey");
+    var disableAllKey = L10N.getStr("breakpointMenuItem.disableAll2.accesskey");
+    var disableOthersKey = L10N.getStr("breakpointMenuItem.disableOthers2.accesskey");
+    var removeConditionKey = L10N.getStr("breakpointMenuItem.removeCondition2.accesskey");
+    var editConditionKey = L10N.getStr("breakpointMenuItem.editCondition2.accesskey");
+    var addConditionKey = L10N.getStr("breakpointMenuItem.addCondition2.accesskey");
 
     var otherBreakpoints = breakpoints.filter(b => b !== breakpoint);
     var enabledBreakpoints = breakpoints.filter(b => !b.disabled);
@@ -28259,30 +26333,49 @@ class Breakpoints extends _react.PureComponent {
       click: () => setBreakpointCondition(breakpoint.location)
     };
 
+    var addCondition = {
+      id: "node-menu-add-condition",
+      label: addConditionLabel,
+      accesskey: addConditionKey,
+      click: () => {
+        this.selectBreakpoint(breakpoint);
+        toggleConditionalBreakpointPanel(breakpoint.location.line);
+      }
+    };
+
     var editCondition = {
       id: "node-menu-edit-condition",
       label: editConditionLabel,
       accesskey: editConditionKey,
-      click: () => toggleConditionalBreakpointPanel(breakpoint.location.line)
+      click: () => {
+        this.selectBreakpoint(breakpoint);
+        toggleConditionalBreakpointPanel(breakpoint.location.line);
+      }
     };
 
-    var items = [{ item: enableSelf, hidden: () => !breakpoint.disabled }, { item: disableSelf, hidden: () => breakpoint.disabled }, { item: deleteSelf }, { item: deleteAll }, { item: deleteOthers, hidden: () => breakpoints.size === 1 }, {
-      item: enableAll,
-      hidden: () => disabledBreakpoints.size === 0
+    var hideEnableSelf = !breakpoint.disabled;
+    var hideEnableAll = disabledBreakpoints.size === 0;
+    var hideEnableOthers = otherDisabledBreakpoints.size === 0;
+    var hideDisableAll = enabledBreakpoints.size === 0;
+    var hideDisableOthers = otherEnabledBreakpoints.size === 0;
+    var hideDisableSelf = breakpoint.disabled;
+
+    var items = [{ item: enableSelf, hidden: () => hideEnableSelf }, { item: enableAll, hidden: () => hideEnableAll }, { item: enableOthers, hidden: () => hideEnableOthers }, {
+      item: { type: "separator" },
+      hidden: () => hideEnableSelf && hideEnableAll && hideEnableOthers
+    }, { item: deleteSelf }, { item: deleteAll }, { item: deleteOthers, hidden: () => breakpoints.size === 1 }, {
+      item: { type: "separator" },
+      hidden: () => hideDisableSelf && hideDisableAll && hideDisableOthers
+    }, { item: disableSelf, hidden: () => hideDisableSelf }, { item: disableAll, hidden: () => hideDisableAll }, { item: disableOthers, hidden: () => hideDisableOthers }, {
+      item: { type: "separator" }
     }, {
-      item: disableAll,
-      hidden: () => enabledBreakpoints.size === 0
-    }, {
-      item: enableOthers,
-      hidden: () => otherDisabledBreakpoints.size === 0
-    }, {
-      item: disableOthers,
-      hidden: () => otherEnabledBreakpoints.size === 0
-    }, {
-      item: removeCondition,
-      hidden: () => !breakpoint.condition
+      item: addCondition,
+      hidden: () => breakpoint.condition
     }, {
       item: editCondition,
+      hidden: () => !breakpoint.condition
+    }, {
+      item: removeCondition,
       hidden: () => !breakpoint.condition
     }];
 
@@ -28331,21 +26424,17 @@ class Breakpoints extends _react.PureComponent {
         onClick: () => this.selectBreakpoint(breakpoint),
         onContextMenu: e => this.showContextMenu(e, breakpoint)
       },
-      _react2.default.createElement("input", {
-        type: "checkbox",
-        className: "breakpoint-checkbox",
-        checked: !isDisabled,
-        onChange: () => this.handleCheckbox(breakpoint),
-        onClick: ev => ev.stopPropagation()
-      }),
       _react2.default.createElement(
-        "div",
+        "label",
         { className: "breakpoint-label", title: breakpoint.text },
-        _react2.default.createElement(
-          "div",
-          null,
-          renderSourceLocation(breakpoint.location.source, line, column)
-        )
+        _react2.default.createElement("input", {
+          type: "checkbox",
+          className: "breakpoint-checkbox",
+          checked: !isDisabled,
+          onChange: () => this.handleCheckbox(breakpoint),
+          onClick: ev => ev.stopPropagation()
+        }),
+        renderSourceLocation(breakpoint.location.source, line, column)
       ),
       _react2.default.createElement(
         "div",
@@ -28375,8 +26464,6 @@ class Breakpoints extends _react.PureComponent {
     );
   }
 }
-
-Breakpoints.displayName = "Breakpoints";
 
 function updateLocation(sources, pause, bp) {
   var source = (0, _selectors.getSourceInSources)(sources, bp.location.sourceId);
@@ -28414,13 +26501,9 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactImmutableProptypes = __webpack_require__(150);
-
-var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes);
-
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _classnames = __webpack_require__(175);
 
@@ -28448,6 +26531,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 function nodeHasProperties(item) {
   return !nodeHasChildren(item) && item.contents.value.type === "object";
 }
+
 
 function nodeIsPrimitive(item) {}
 
@@ -28484,13 +26568,10 @@ class Scopes extends _react.Component {
         prototype = objProps.prototype;
 
 
-    var nodes = Object.keys(ownProperties).sort().filter(name => {
-      // Ignore non-concrete values like getters and setters
-      // for now by making sure we have a value.
-      return "value" in ownProperties[name];
-    }).map(name => {
-      return createNode(name, `${parentPath}/${name}`, ownProperties[name]);
-    });
+    var nodes = Object.keys(ownProperties).sort()
+    // Ignore non-concrete values like getters and setters
+    // for now by making sure we have a value.
+    .filter(name => "value" in ownProperties[name]).map(name => createNode(name, `${parentPath}/${name}`, ownProperties[name]));
 
     // Add the prototype if it exists and is not null
     if (prototype && prototype.type !== "null") {
@@ -28642,15 +26723,6 @@ class Scopes extends _react.Component {
   }
 }
 
-Scopes.propTypes = {
-  scopes: _react.PropTypes.array,
-  loadedObjects: _reactImmutableProptypes2.default.map,
-  loadObjectProperties: _react.PropTypes.func,
-  pauseInfo: _react.PropTypes.object
-};
-
-Scopes.displayName = "Scopes";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   pauseInfo: (0, _selectors.getPause)(state),
   loadedObjects: (0, _selectors.getLoadedObjects)(state),
@@ -28676,7 +26748,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _actions = __webpack_require__(244);
 
@@ -28729,8 +26801,7 @@ class Scopes extends _react.PureComponent {
     var _props2 = this.props,
         pauseInfo = _props2.pauseInfo,
         loadObjectProperties = _props2.loadObjectProperties,
-        loadedObjects = _props2.loadedObjects,
-        openLink = _props2.openLink;
+        loadedObjects = _props2.loadedObjects;
     var scopes = this.state.scopes;
 
 
@@ -28748,8 +26819,7 @@ class Scopes extends _react.PureComponent {
           dimTopLevelWindow: true
           // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
           , getObjectEntries: actor => {},
-          loadObjectEntries: grip => {},
-          openLink: openLink
+          loadObjectEntries: grip => {}
         })
       );
     }
@@ -28764,16 +26834,6 @@ class Scopes extends _react.PureComponent {
     );
   }
 }
-
-Scopes.propTypes = {
-  pauseInfo: _react.PropTypes.object,
-  loadedObjects: _react.PropTypes.object,
-  loadObjectProperties: _react.PropTypes.func,
-  selectedFrame: _react.PropTypes.object,
-  frameScopes: _react.PropTypes.object
-};
-
-Scopes.displayName = "Scopes";
 
 exports.default = (0, _reactRedux.connect)(state => {
   var selectedFrame = (0, _selectors.getSelectedFrame)(state);
@@ -28801,6 +26861,8 @@ exports.getScopes = getScopes;
 
 var _lodash = __webpack_require__(2);
 
+var _frame = __webpack_require__(1014);
+
 // Create the tree nodes representing all the variables and arguments
 // for the bindings from a scope.
 function getBindingVariables(bindings, parentName) {
@@ -28812,6 +26874,35 @@ function getBindingVariables(bindings, parentName) {
     path: `${parentName}/${binding[0]}`,
     contents: binding[1]
   }));
+}
+
+function getSourceBindingVariables(bindings, sourceBindings, parentName) {
+  var result = getBindingVariables(bindings, parentName);
+  var index = Object.create(null);
+  result.forEach(entry => {
+    index[entry.name] = { used: false, entry };
+  });
+  // Find and replace variables that is present in sourceBindings.
+  var bound = Object.keys(sourceBindings).map(name => {
+    var generatedName = sourceBindings[name];
+    var foundMap = index[generatedName];
+    var contents = void 0;
+    if (foundMap) {
+      foundMap.used = true;
+      contents = foundMap.entry.contents;
+    } else {
+      contents = { value: { type: "undefined" } };
+    }
+    return {
+      name,
+      generatedName,
+      path: `${parentName}/${generatedName}`,
+      contents
+    };
+  });
+  // Use rest of them (not found in the sourceBindings) as is.
+  var unused = result.filter(entry => !index[entry.name].used);
+  return bound.concat(unused);
 }
 
 function getSpecialVariables(pauseInfo, path) {
@@ -28884,14 +26975,15 @@ function getScopes(pauseInfo, selectedFrame, selectedScope) {
     var key = `${actor}-${scopeIndex}`;
     if (type === "function" || type === "block") {
       var bindings = scope.bindings;
+      var sourceBindings = scope.sourceBindings;
       var title = void 0;
       if (type === "function") {
-        title = scope.function.displayName || "(anonymous)";
+        title = scope.function.displayName ? (0, _frame.simplifyDisplayName)(scope.function.displayName) : L10N.getStr("anonymous");
       } else {
         title = L10N.getStr("scopes.block");
       }
 
-      var vars = getBindingVariables(bindings, key);
+      var vars = sourceBindings ? getSourceBindingVariables(bindings, sourceBindings, key) : getBindingVariables(bindings, key);
 
       // show exception, return, and this variables in innermost scope
       if (scope.actor === pausedScopeActor) {
@@ -28953,7 +27045,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _actions = __webpack_require__(244);
 
@@ -29047,10 +27139,6 @@ class EventListeners extends _react.Component {
     );
   }
 }
-
-
-EventListeners.displayName = "EventListeners";
-
 exports.default = (0, _reactRedux.connect)(state => {
   var listeners = (0, _selectors.getEventListeners)(state).map(l => Object.assign({}, l, {
     breakpoint: (0, _selectors.getBreakpoint)(state, {
@@ -29174,8 +27262,6 @@ class Accordion extends _react.Component {
   }
 }
 
-Accordion.displayName = "Accordion";
-
 exports.default = Accordion;
 
 /***/ }),
@@ -29197,7 +27283,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -29291,8 +27377,6 @@ function debugBtn(onClick, type, className, tooltip) {
     _react2.default.createElement(_Svg2.default, { name: type })
   );
 }
-
-debugBtn.displayName = "CommandBarButton";
 
 class CommandBar extends _react.Component {
 
@@ -29392,8 +27476,6 @@ CommandBar.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
 
-CommandBar.displayName = "CommandBar";
-
 exports.default = (0, _reactRedux.connect)(state => {
   return {
     pause: (0, _selectors.getPause)(state),
@@ -29422,7 +27504,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -29512,8 +27594,6 @@ class WelcomeBox extends _react.Component {
   }
 }
 
-WelcomeBox.displayName = "WelcomeBox";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end")
 }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(WelcomeBox);
@@ -29535,7 +27615,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -29758,7 +27838,7 @@ class SourceTabs extends _react.PureComponent {
       click: () => showSource(tab)
     };
 
-    var copySourceUrl = {
+    var copySourceUri2 = {
       id: "node-menu-copy-source-url",
       label: copyLinkLabel,
       accesskey: copyLinkKey,
@@ -29777,7 +27857,7 @@ class SourceTabs extends _react.PureComponent {
     var items = [{ item: closeTabMenuItem }, { item: closeOtherTabsMenuItem, hidden: () => tabs.size === 1 }, {
       item: closeTabsToEndMenuItem,
       hidden: () => tabs.some((t, i) => t === tab && tabs.size - 1 === i)
-    }, { item: closeAllTabsMenuItem }, { item: { type: "separator" } }, { item: copySourceUrl }];
+    }, { item: closeAllTabsMenuItem }, { item: { type: "separator" } }, { item: copySourceUri2 }];
 
     if (!isPrettySource) {
       items.push({ item: showSourceMenuItem });
@@ -30017,8 +28097,6 @@ class SourceTabs extends _react.PureComponent {
   }
 }
 
-SourceTabs.displayName = "SourceTabs";
-
 exports.default = (0, _reactRedux.connect)(state => {
   return {
     selectedSource: (0, _selectors.getSelectedSource)(state),
@@ -30106,8 +28184,6 @@ class Dropdown extends _react.Component {
     );
   }
 }
-
-Dropdown.displayName = "Dropdown";
 
 exports.default = Dropdown;
 
@@ -30390,9 +28466,7 @@ class PreviewFunction extends _react.Component {
     );
   }
 }
-
 exports.default = PreviewFunction;
-PreviewFunction.displayName = "PreviewFunction";
 
 /***/ }),
 /* 799 */,
@@ -30532,7 +28606,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _debounce = __webpack_require__(651);
 
@@ -30634,8 +28708,6 @@ class Preview extends _react.PureComponent {
   }
 }
 
-Preview.displayName = "Preview";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   preview: (0, _selectors.getPreview)(state),
   selectedSource: (0, _selectors.getSelectedSource)(state),
@@ -30659,7 +28731,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -30763,10 +28835,15 @@ class Popup extends _react.Component {
 
   renderSimplePreview(value) {
     var openLink = this.props.openLink;
+
     return _react2.default.createElement(
       "div",
       { className: "preview-popup" },
-      Rep({ object: value, mode: MODE.LONG, openLink: openLink })
+      Rep({
+        object: value,
+        mode: MODE.LONG,
+        openLink
+      })
     );
   }
 
@@ -30789,12 +28866,12 @@ class Popup extends _react.Component {
       autoExpandDepth: 0,
       disableWrap: true,
       disabledFocus: true,
+      openLink: openLink,
       getObjectProperties: getObjectProperties,
       loadObjectProperties: loadObjectProperties
       // TODO: See https://github.com/devtools-html/debugger.html/issues/3555.
       , getObjectEntries: actor => {},
-      loadObjectEntries: grip => {},
-      openLink: openLink
+      loadObjectEntries: grip => {}
     });
   }
 
@@ -30853,7 +28930,7 @@ class Popup extends _react.Component {
   }
 
   getPreviewType(value) {
-    if (typeof value == "boolean" || value.type == "null" || value.type == "undefined" || value.class === "Function") {
+    if (typeof value == "number" || typeof value == "boolean" || value.type == "null" || value.type == "undefined" || value.class === "Function") {
       return "tooltip";
     }
 
@@ -30879,8 +28956,6 @@ class Popup extends _react.Component {
 }
 
 exports.Popup = Popup;
-Popup.displayName = "Popup";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   loadedObjects: (0, _selectors.getLoadedObjects)(state)
 }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Popup);
@@ -30911,7 +28986,7 @@ exports.default = (0, _reactRedux.connect)(state => ({
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.clearSources = exports.setSource = exports.hasSource = exports.getEmptyLines = exports.getNextStep = exports.clearASTs = exports.clearSymbols = exports.getOutOfScopeLocations = exports.getVariablesInScope = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
+exports.hasSyntaxError = exports.clearSources = exports.setSource = exports.hasSource = exports.getEmptyLines = exports.getNextStep = exports.clearASTs = exports.clearScopes = exports.clearSymbols = exports.getOutOfScopeLocations = exports.getVariablesInScope = exports.getScopes = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
 
 var _devtoolsUtils = __webpack_require__(900);
 
@@ -30924,15 +28999,18 @@ var stopParserWorker = exports.stopParserWorker = dispatcher.stop.bind(dispatche
 
 var getClosestExpression = exports.getClosestExpression = dispatcher.task("getClosestExpression");
 var getSymbols = exports.getSymbols = dispatcher.task("getSymbols");
+var getScopes = exports.getScopes = dispatcher.task("getScopes");
 var getVariablesInScope = exports.getVariablesInScope = dispatcher.task("getVariablesInScope");
 var getOutOfScopeLocations = exports.getOutOfScopeLocations = dispatcher.task("getOutOfScopeLocations");
 var clearSymbols = exports.clearSymbols = dispatcher.task("clearSymbols");
+var clearScopes = exports.clearScopes = dispatcher.task("clearScopes");
 var clearASTs = exports.clearASTs = dispatcher.task("clearASTs");
 var getNextStep = exports.getNextStep = dispatcher.task("getNextStep");
 var getEmptyLines = exports.getEmptyLines = dispatcher.task("getEmptyLines");
 var hasSource = exports.hasSource = dispatcher.task("hasSource");
 var setSource = exports.setSource = dispatcher.task("setSource");
 var clearSources = exports.clearSources = dispatcher.task("clearSources");
+var hasSyntaxError = exports.hasSyntaxError = dispatcher.task("hasSyntaxError");
 
 /***/ }),
 /* 828 */
@@ -31880,11 +29958,12 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
 
 var connectClient = (() => {
   var _ref = _asyncToGenerator(function* () {
-    var useProxy = !getValue("firefox.webSocketConnection");
-    var firefoxHost = getValue(useProxy ? "firefox.proxyHost" : "firefox.webSocketHost");
+    var useWebSocket = getValue("firefox.webSocketConnection");
+    var firefoxHost = useWebSocket ? getValue("firefox.host") : "localhost";
+    var firefoxPort = getValue("firefox.webSocketPort");
 
-    var socket = new WebSocket(`ws://${firefoxHost}`);
-    var transport = useProxy ? new DebuggerTransport(socket) : new WebsocketTransport(socket);
+    var socket = new WebSocket(`ws://${firefoxHost}:${firefoxPort}`);
+    var transport = useWebSocket ? new WebsocketTransport(socket) : new DebuggerTransport(socket);
 
     debuggerClient = new DebuggerClient(transport);
     if (!debuggerClient) {
@@ -31893,8 +29972,7 @@ var connectClient = (() => {
 
     try {
       yield debuggerClient.connect();
-      var tabs = yield getTabs();
-      return tabs;
+      return yield getTabs();
     } catch (err) {
       console.log(err);
       return [];
@@ -32163,26 +30241,30 @@ Object.defineProperty(exports, "__esModule", {
 exports.onConnect = undefined;
 
 var onConnect = (() => {
-  var _ref = _asyncToGenerator(function* (connection, options) {
+  var _ref = _asyncToGenerator(function* (connection, _ref2) {
+    var services = _ref2.services,
+        toolboxActions = _ref2.toolboxActions;
+
     // NOTE: the landing page does not connect to a JS process
     if (!connection) {
       return;
     }
 
-	var services = options.services;
-	var toolboxActions = options.toolboxActions;
     var client = getClient(connection);
     var commands = client.clientCommands;
 
-    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, options),
+    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, {
+      services,
+      toolboxActions
+    }),
         store = _bootstrapStore.store,
         actions = _bootstrapStore.actions,
         selectors = _bootstrapStore.selectors;
 
     (0, _bootstrap.bootstrapWorkers)();
 
-    var _ref2 = yield client.onConnect(connection, actions),
-        bpClients = _ref2.bpClients;
+    var _ref3 = yield client.onConnect(connection, actions),
+        bpClients = _ref3.bpClients;
 
     yield loadFromPrefs(actions);
 
@@ -32298,6 +30380,10 @@ var onConnect = exports.onConnect = (() => {
     yield threadClient.reconfigure({
       observeAsmJS: true,
       wasmBinarySource: supportsWasm
+    });
+
+    threadClient._parent.listWorkers().then(function (workers) {
+      return actions.setWorkers(workers);
     });
 
     // In Firefox, we need to initially request all of the sources. This
@@ -32507,7 +30593,7 @@ function removeBreakpoint(generatedLocation) {
     var bpClient = bpClients[id];
     if (!bpClient) {
       console.warn("No breakpoint to delete on server");
-      return;
+      return Promise.resolve();
     }
     delete bpClients[id];
     return bpClient.remove();
@@ -32658,19 +30744,20 @@ function createFrame(frame) {
   var title = void 0;
   if (frame.type == "call") {
     var c = frame.callee;
-    title = c.name || c.userDisplayName || c.displayName || "(anonymous)";
+    title = c.name || c.userDisplayName || c.displayName || L10N.getStr("anonymous");
   } else {
     title = `(${frame.type})`;
   }
-
+  var location = {
+    sourceId: frame.where.source.actor,
+    line: frame.where.line,
+    column: frame.where.column
+  };
   return {
     id: frame.actor,
     displayName: title,
-    location: {
-      sourceId: frame.where.source.actor,
-      line: frame.where.line,
-      column: frame.where.column
-    },
+    location,
+    generatedLocation: location,
     this: frame.this,
     scope: frame.environment
   };
@@ -33036,6 +31123,7 @@ function createFrame(frame) {
     id: frame.callFrameId,
     displayName: frame.functionName,
     scopeChain: frame.scopeChain,
+    generatedLocation: frame.location,
     location: fromServerLocation(frame.location)
   };
 }
@@ -33253,9 +31341,10 @@ var _prefs = __webpack_require__(226);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function bootstrapStore(client, options) {
-    var services = options.services;
-    var toolboxActions = options.toolboxActions;
+function bootstrapStore(client, _ref) {
+  var services = _ref.services,
+      toolboxActions = _ref.toolboxActions;
+
   var createStore = (0, _createStore2.default)({
     log: (0, _devtoolsConfig.getValue)("logging.actions"),
     timing: (0, _devtoolsConfig.getValue)("performance.actions"),
@@ -33272,9 +31361,9 @@ function bootstrapStore(client, options) {
   return { store, actions, selectors: _selectors2.default };
 }
 
-function bootstrapApp(connection, _ref) {
-  var store = _ref.store,
-      actions = _ref.actions;
+function bootstrapApp(connection, _ref2) {
+  var store = _ref2.store,
+      actions = _ref2.actions;
 
   window.appStore = store;
 
@@ -33329,7 +31418,7 @@ const {
   generatedToOriginalId,
   isGeneratedId,
   isOriginalId
-} = __webpack_require__(899);
+} = __webpack_require__(1172);
 
 const { workerUtils: { WorkerDispatcher } } = __webpack_require__(1165);
 
@@ -33338,6 +31427,7 @@ const dispatcher = new WorkerDispatcher();
 const getOriginalURLs = dispatcher.task("getOriginalURLs");
 const getGeneratedLocation = dispatcher.task("getGeneratedLocation");
 const getOriginalLocation = dispatcher.task("getOriginalLocation");
+const getLocationScopes = dispatcher.task("getLocationScopes");
 const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
 const applySourceMap = dispatcher.task("applySourceMap");
 const clearSourceMaps = dispatcher.task("clearSourceMaps");
@@ -33352,6 +31442,7 @@ module.exports = {
   getOriginalURLs,
   getGeneratedLocation,
   getOriginalLocation,
+  getLocationScopes,
   getOriginalSourceText,
   applySourceMap,
   clearSourceMaps,
@@ -33360,86 +31451,7 @@ module.exports = {
 };
 
 /***/ }),
-/* 899 */
-/***/ (function(module, exports, __webpack_require__) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const md5 = __webpack_require__(248);
-
-function originalToGeneratedId(originalId) {
-  const match = originalId.match(/(.*)\/originalSource/);
-  return match ? match[1] : "";
-}
-
-function generatedToOriginalId(generatedId, url) {
-  return `${generatedId}/originalSource-${md5(url)}`;
-}
-
-function isOriginalId(id) {
-  return !!id.match(/\/originalSource/);
-}
-
-function isGeneratedId(id) {
-  return !isOriginalId(id);
-}
-
-/**
- * Trims the query part or reference identifier of a URL string, if necessary.
- */
-function trimUrlQuery(url) {
-  let length = url.length;
-  let q1 = url.indexOf("?");
-  let q2 = url.indexOf("&");
-  let q3 = url.indexOf("#");
-  let q = Math.min(q1 != -1 ? q1 : length, q2 != -1 ? q2 : length, q3 != -1 ? q3 : length);
-
-  return url.slice(0, q);
-}
-
-// Map suffix to content type.
-const contentMap = {
-  "js": "text/javascript",
-  "jsm": "text/javascript",
-  "ts": "text/typescript",
-  "tsx": "text/typescript-jsx",
-  "jsx": "text/jsx",
-  "coffee": "text/coffeescript",
-  "elm": "text/elm",
-  "cljs": "text/x-clojure"
-};
-
-/**
- * Returns the content type for the specified URL.  If no specific
- * content type can be determined, "text/plain" is returned.
- *
- * @return String
- *         The content type.
- */
-function getContentType(url) {
-  url = trimUrlQuery(url);
-  let dot = url.lastIndexOf(".");
-  if (dot >= 0) {
-    let name = url.substring(dot + 1);
-    if (name in contentMap) {
-      return contentMap[name];
-    }
-  }
-  return "text/plain";
-}
-
-module.exports = {
-  originalToGeneratedId,
-  generatedToOriginalId,
-  isOriginalId,
-  isGeneratedId,
-  getContentType,
-  contentMapForTesting: contentMap
-};
-
-/***/ }),
+/* 899 */,
 /* 900 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -33631,10 +31643,9 @@ var prettyPrint = exports.prettyPrint = (() => {
     var source = _ref2.source,
         url = _ref2.url;
 
-    var contentType = source.contentType;
     var indent = 2;
 
-    (0, _assert2.default)((0, _source.isJavaScript)(source.url, contentType), "Can't prettify non-javascript files.");
+    (0, _assert2.default)((0, _source.isJavaScript)(source), "Can't prettify non-javascript files.");
 
     return yield _prettyPrint({
       url,
@@ -38390,7 +36401,7 @@ module.exports = {
 /* 960 */
 /***/ (function(module, exports) {
 
-module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySource): This is the text that appears in the\n# context menu to copy the selected source of file open.\ncopySource=Copy\ncopySource.accesskey=y\n\n# LOCALIZATION NOTE (copySourceUrl): This is the text that appears in the\n# context menu to copy the source URL of file open.\ncopySourceUrl=Copy Source URL\ncopySourceUrl.accesskey=u\n\n# LOCALIZATION NOTE (copyFunction): This is the text that appears in the\n# context menu to copy the function the user selected\ncopyFunction.label=Copy Function\ncopyFunction.accesskey=F\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy Stack Trace\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step Over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step In %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step Out %S\n\n# LOCALIZATION NOTE (workersHeader): The text to display in the events\n# header.\nworkersHeader=Workers\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event Listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (projectTextSearch.key): A key shortcut to open the\n# full project text search for searching all the files the debugger has seen.\nprojectTextSearch.key=CmdOrCtrl+Shift+F\n\n# LOCALIZATION NOTE (functionSearch.key): A key shortcut to open the\n# modal for searching functions in a file.\nfunctionSearch.key=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE (projectTextSearch.placeholder): A placeholder shown\n# when searching across all of the files in a project.\nprojectTextSearch.placeholder=Find in files…\n\n# LOCALIZATION NOTE (projectTextSearch.noResults): The center pane Text Search\n# message when the query did not match any text of all files in a project.\nprojectTextSearch.noResults=No results found\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.enableSelf.accesskey=E\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.disableSelf.accesskey=D\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.deleteSelf.accesskey=R\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.enableOthers.accesskey=o\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.disableOthers.accesskey=s\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.deleteOthers.accesskey=h\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.enableAll.accesskey=b\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.disableAll.accesskey=k\nbreakpointMenuItem.deleteAll=Remove all breakpoints\nbreakpointMenuItem.deleteAll.accesskey=a\nbreakpointMenuItem.removeCondition.label=Remove breakpoint condition\nbreakpointMenuItem.removeCondition.accesskey=c\nbreakpointMenuItem.editCondition.label=Edit breakpoint condition\nbreakpointMenuItem.editCondition.accesskey=n\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove Breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call Stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not Paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse Rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand Rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=no results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next Result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous Result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.continueToHere.label): Editor gutter context\n# menu item for jumping to a new paused location\neditor.continueToHere.label=Continue To Here\neditor.continueToHere.accesskey=H\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add Breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable Breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable Breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove Breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit Breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add Conditional Breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S Location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable Framework Grouping\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable Framework Grouping\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=Generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=Original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add Watch Expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close Tab\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close Other Tabs\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close Tabs to the Right\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close All Tabs\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in Tree\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy Link Address\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty Print Source\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox Source\nsourceFooter.blackbox.accesskey=B\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox Source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed Source\n\n# LOCALIZATION NOTE (sourceFooter.codeCoverage): Text associated\n# with a code coverage button\nsourceFooter.codeCoverage=Code Coverage\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes Unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not Paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (outline.header): Outline left sidebar header\noutline.header=Outline\n\n# LOCALIZATION NOTE (outline.noFunctions): Outline text when there are no functions to display\noutline.noFunctions=No functions\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch Expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (welcome.findInFiles): The center pane welcome panel's\n# search prompt. e.g. cmd+f to search for files. On windows, it's ctrl+shift+f, on\n# a mac we use the unicode character.\nwelcome.findInFiles=%S to find in files\n\n# LOCALIZATION NOTE (welcome.searchFunction): Label displayed in the welcome\n# panel. %S is replaced by the keyboard shortcut to search for functions.\nwelcome.searchFunction=%S to search for functions in file\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults2=No results found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText2): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText2=Error loading this URL: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.modifiersLabel): A label\n# preceding the group of modifiers\nsymbolSearch.searchModifier.modifiersLabel=Modifiers:\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous Sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n"
+module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySource): This is the text that appears in the\n# context menu to copy the selected source of file open.\ncopySource=Copy\ncopySource.accesskey=y\n\n# LOCALIZATION NOTE (copySourceUri2): This is the text that appears in the\n# context menu to copy the source URI of file open.\ncopySourceUri2=Copy source URI\ncopySourceUri2.accesskey=u\n\n# LOCALIZATION NOTE (copyFunction): This is the text that appears in the\n# context menu to copy the function the user selected\ncopyFunction.label=Copy function\ncopyFunction.accesskey=F\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy stack trace\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step in %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step out %S\n\n# LOCALIZATION NOTE (workersHeader): The text to display in the events\n# header.\nworkersHeader=Workers\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display.\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (projectTextSearch.key): A key shortcut to open the\n# full project text search for searching all the files the debugger has seen.\nprojectTextSearch.key=CmdOrCtrl+Shift+F\n\n# LOCALIZATION NOTE (functionSearch.key): A key shortcut to open the\n# modal for searching functions in a file.\nfunctionSearch.key=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE (toggleBreakpoint.key): A key shortcut to toggle\n# breakpoints.\ntoggleBreakpoint.key=CmdOrCtrl+B\n\n# LOCALIZATION NOTE (toggleCondPanel.key): A key shortcut to toggle\n# the conditional breakpoint panel.\ntoggleCondPanel.key=CmdOrCtrl+Shift+B\n\n# LOCALIZATION NOTE (stepOut.key): A key shortcut to\n# step out.\nstepOut.key=Shift+F11\n\n# LOCALIZATION NOTE (shortcuts.header.editor): Sections header in\n# the shortcuts modal for keyboard shortcuts related to editing.\nshortcuts.header.editor=Editor\n\n# LOCALIZATION NOTE (shortcuts.header.stepping): Sections header in\n# the shortcuts modal for keyboard shortcuts related to stepping.\nshortcuts.header.stepping=Stepping\n\n# LOCALIZATION NOTE (shortcuts.header.search): Sections header in\n# the shortcuts modal for keyboard shortcuts related to search.\nshortcuts.header.search=Search\n\n# LOCALIZATION NOTE (projectTextSearch.placeholder): A placeholder shown\n# when searching across all of the files in a project.\nprojectTextSearch.placeholder=Find in files…\n\n# LOCALIZATION NOTE (projectTextSearch.noResults): The center pane Text Search\n# message when the query did not match any text of all files in a project.\nprojectTextSearch.noResults=No results found\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf2.label=Enable\nbreakpointMenuItem.enableSelf2.accesskey=E\nbreakpointMenuItem.disableSelf2.label=Disable\nbreakpointMenuItem.disableSelf2.accesskey=D\nbreakpointMenuItem.deleteSelf2.label=Remove\nbreakpointMenuItem.deleteSelf2.accesskey=R\nbreakpointMenuItem.enableOthers2.label=Enable others\nbreakpointMenuItem.enableOthers2.accesskey=o\nbreakpointMenuItem.disableOthers2.label=Disable others\nbreakpointMenuItem.disableOthers2.accesskey=s\nbreakpointMenuItem.deleteOthers2.label=Remove others\nbreakpointMenuItem.deleteOthers2.accesskey=h\nbreakpointMenuItem.enableAll2.label=Enable all\nbreakpointMenuItem.enableAll2.accesskey=b\nbreakpointMenuItem.disableAll2.label=Disable all\nbreakpointMenuItem.disableAll2.accesskey=k\nbreakpointMenuItem.deleteAll2.label=Remove all\nbreakpointMenuItem.deleteAll2.accesskey=a\nbreakpointMenuItem.removeCondition2.label=Remove condition\nbreakpointMenuItem.removeCondition2.accesskey=c\nbreakpointMenuItem.addCondition2.label=Add condition\nbreakpointMenuItem.addCondition2.accesskey=A\nbreakpointMenuItem.editCondition2.label=Edit condition\nbreakpointMenuItem.editCondition2.accesskey=n\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.enableSelf.accesskey=E\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.disableSelf.accesskey=D\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.deleteSelf.accesskey=R\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.enableOthers.accesskey=o\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.disableOthers.accesskey=s\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.deleteOthers.accesskey=h\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.enableAll.accesskey=b\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.disableAll.accesskey=k\nbreakpointMenuItem.deleteAll=Remove all breakpoints\nbreakpointMenuItem.deleteAll.accesskey=a\nbreakpointMenuItem.removeCondition.label=Remove breakpoint condition\nbreakpointMenuItem.removeCondition.accesskey=c\nbreakpointMenuItem.editCondition.label=Edit breakpoint condition\nbreakpointMenuItem.editCondition.accesskey=n\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=No results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.continueToHere.label): Editor gutter context\n# menu item for jumping to a new paused location\neditor.continueToHere.label=Continue to here\neditor.continueToHere.accesskey=H\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add conditional breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable framework grouping\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable framework grouping\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=Generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add watch expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close tab\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close other tabs\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close tabs to the right\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close all tabs\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in tree\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy link address\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty print source\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox source\nsourceFooter.blackbox.accesskey=B\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed source\n\n# LOCALIZATION NOTE (sourceFooter.codeCoverage): Text associated\n# with a code coverage button\nsourceFooter.codeCoverage=Code coverage\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (outline.header): Outline left sidebar header\noutline.header=Outline\n\n# LOCALIZATION NOTE (outline.noFunctions): Outline text when there are no functions to display\noutline.noFunctions=No functions\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (welcome.findInFiles): The center pane welcome panel's\n# search prompt. e.g. cmd+f to search for files. On windows, it's ctrl+shift+f, on\n# a mac we use the unicode character.\nwelcome.findInFiles=%S to find in files\n\n# LOCALIZATION NOTE (welcome.searchFunction): Label displayed in the welcome\n# panel. %S is replaced by the keyboard shortcut to search for functions.\nwelcome.searchFunction=%S to search for functions in file\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults2=No results found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText3): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText3=Error loading this URI: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.modifiersLabel): A label\n# preceding the group of modifiers\nsymbolSearch.searchModifier.modifiersLabel=Modifiers:\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n\n# LOCALIZATION NOTE (anonymous): The text that is displayed when the\n# display name is null.\nanonymous=(anonymous)\n\n# LOCALIZATION NOTE (shortcuts.toggleBreakpoint): text describing\n# keyboard shortcut action for toggling breakpoint\nshortcuts.toggleBreakpoint=Toggle Breakpoint\n\n# LOCALIZATION NOTE (shortcuts.toggleCondPanel): text describing\n# keyboard shortcut action for toggling conditional panel keyboard\nshortcuts.toggleCondPanel=Toggle Conditional Panel\n\n# LOCALIZATION NOTE (shortcuts.pauseOrResume): text describing\n# keyboard shortcut action for pause of resume\nshortcuts.pauseOrResume=Pause/Resume\n\n# LOCALIZATION NOTE (shortcuts.stepOver): text describing\n# keyboard shortcut action for stepping over\nshortcuts.stepOver=Step Over\n\n# LOCALIZATION NOTE (shortcuts.stepIn): text describing\n# keyboard shortcut action for stepping in\nshortcuts.stepIn=Step In\n\n# LOCALIZATION NOTE (shortcuts.stepOut): text describing\n# keyboard shortcut action for stepping out\nshortcuts.stepOut=Step Out\n\n# LOCALIZATION NOTE (shortcuts.fileSearch): text describing\n# keyboard shortcut action for source file search\nshortcuts.fileSearch=Source File Search\n\n# LOCALIZATION NOTE (shortcuts.searchAgain): text describing\n# keyboard shortcut action for searching again\nshortcuts.searchAgain=Search Again\n\n# LOCALIZATION NOTE (shortcuts.projectSearch): text describing\n# keyboard shortcut action for full project search\nshortcuts.projectSearch=Full Project Search\n\n# LOCALIZATION NOTE (shortcuts.functionSearch): text describing\n# keyboard shortcut action for function search\nshortcuts.functionSearch=Function Search\n"
 
 /***/ }),
 /* 961 */,
@@ -40757,7 +38768,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _reselect = __webpack_require__(993);
 
@@ -40945,8 +38956,6 @@ Frames.propTypes = {
   pause: _react.PropTypes.object
 };
 
-Frames.displayName = "Frames";
-
 function getSourceForFrame(sources, frame) {
   return (0, _selectors.getSourceInSources)(sources, frame.location.sourceId);
 }
@@ -41020,8 +39029,6 @@ function FrameTitle(_ref) {
     displayName
   );
 }
-
-FrameTitle.displayName = "FrameTitle";
 
 function FrameLocation(_ref2) {
   var frame = _ref2.frame;
@@ -41690,10 +39697,6 @@ class HighlightLines extends _react.Component {
     return null;
   }
 }
-
-
-HighlightLines.displayName = "HighlightLines";
-
 exports.default = HighlightLines;
 
 /***/ }),
@@ -41733,8 +39736,6 @@ var BracketArrow = (_ref) => {
     style: { left, top, bottom }
   });
 };
-
-BracketArrow.displayName = "BracketArrow";
 
 exports.default = BracketArrow;
 
@@ -41778,7 +39779,7 @@ function formatMenuElement(labelString, click) {
 }
 
 function copySourceElement(url) {
-  return formatMenuElement("copySourceUrl", () => (0, _clipboard.copyToTheClipboard)(url));
+  return formatMenuElement("copySourceUri2", () => (0, _clipboard.copyToTheClipboard)(url));
 }
 
 function copyStackTraceElement(copyStackTrace) {
@@ -41809,8 +39810,8 @@ function FrameMenu(frame, frameworkGroupingOn, callbacks, event) {
   menuOptions.push(toggleFrameworkElement);
 
   if (source) {
-    var copySourceUrl = copySourceElement(source.url);
-    menuOptions.push(copySourceUrl);
+    var copySourceUri2 = copySourceElement(source.url);
+    menuOptions.push(copySourceUri2);
     menuOptions.push(blackBoxSource(source, callbacks.toggleBlackBox));
   }
 
@@ -41870,7 +39871,7 @@ module.exports = "<svg viewBox=\"0 0 14 5\" version=\"1.1\" xmlns=\"http://www.w
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getClosestFunction = exports.findScopeByName = exports.getASTLocation = undefined;
+exports.findScopeByName = exports.getASTLocation = undefined;
 
 var _astBreakpointLocation = __webpack_require__(804);
 
@@ -41884,12 +39885,6 @@ Object.defineProperty(exports, "findScopeByName", {
   enumerable: true,
   get: function () {
     return _astBreakpointLocation.findScopeByName;
-  }
-});
-Object.defineProperty(exports, "getClosestFunction", {
-  enumerable: true,
-  get: function () {
-    return _astBreakpointLocation.getClosestFunction;
   }
 });
 exports.firstString = firstString;
@@ -42221,6 +40216,33 @@ exports.default = update;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/**
+ * Gets information about original variable names from the source map
+ * and replaces all posible generated names.
+ */
+var getSourcemapedExpression = (() => {
+  var _ref = _asyncToGenerator(function* (_ref2, generatedLocation, expression) {
+    var sourceMaps = _ref2.sourceMaps;
+
+    var astScopes = yield (0, _parser.getScopes)(generatedLocation);
+
+    var generatedScopes = yield sourceMaps.getLocationScopes(generatedLocation, astScopes);
+
+    if (!generatedScopes) {
+      return expression;
+    }
+
+    return (0, _utils.replaceOriginalVariableName)(expression, generatedScopes);
+  });
+
+  return function getSourcemapedExpression(_x, _x2, _x3) {
+    return _ref.apply(this, arguments);
+  };
+})();
+
 exports.setSymbols = setSymbols;
 exports.setEmptyLines = setEmptyLines;
 exports.setOutOfScopeLocations = setOutOfScopeLocations;
@@ -42229,48 +40251,19 @@ exports.setPreview = setPreview;
 
 var _selectors = __webpack_require__(242);
 
+var _sources = __webpack_require__(254);
+
 var _promise = __webpack_require__(193);
 
 var _parser = __webpack_require__(827);
 
-var parser = _interopRequireWildcard(_parser);
+var _devtoolsSourceMap = __webpack_require__(898);
 
-function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
+var _utils = __webpack_require__(1206);
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 function setSymbols(sourceId) {
-  return (() => {
-    var _ref = _asyncToGenerator(function* (_ref2) {
-      var dispatch = _ref2.dispatch,
-          getState = _ref2.getState;
-
-      var sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
-      if (!sourceRecord) {
-        return;
-      }
-
-      var source = sourceRecord.toJS();
-      if (!source.text || (0, _selectors.hasSymbols)(getState(), source)) {
-        return;
-      }
-
-      var symbols = yield parser.getSymbols(source);
-
-      dispatch({
-        type: "SET_SYMBOLS",
-        source,
-        symbols
-      });
-    });
-
-    return function (_x) {
-      return _ref.apply(this, arguments);
-    };
-  })();
-}
-
-function setEmptyLines(sourceId) {
   return (() => {
     var _ref3 = _asyncToGenerator(function* (_ref4) {
       var dispatch = _ref4.dispatch,
@@ -42282,11 +40275,42 @@ function setEmptyLines(sourceId) {
       }
 
       var source = sourceRecord.toJS();
+      if (!source.text || (0, _selectors.hasSymbols)(getState(), source)) {
+        return;
+      }
+
+      var symbols = yield (0, _parser.getSymbols)(source);
+
+      dispatch({
+        type: "SET_SYMBOLS",
+        source,
+        symbols
+      });
+    });
+
+    return function (_x4) {
+      return _ref3.apply(this, arguments);
+    };
+  })();
+}
+
+function setEmptyLines(sourceId) {
+  return (() => {
+    var _ref5 = _asyncToGenerator(function* (_ref6) {
+      var dispatch = _ref6.dispatch,
+          getState = _ref6.getState;
+
+      var sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
+      if (!sourceRecord) {
+        return;
+      }
+
+      var source = sourceRecord.toJS();
       if (!source.text) {
         return;
       }
 
-      var emptyLines = yield parser.getEmptyLines(source);
+      var emptyLines = yield (0, _parser.getEmptyLines)(source);
 
       dispatch({
         type: "SET_EMPTY_LINES",
@@ -42295,17 +40319,17 @@ function setEmptyLines(sourceId) {
       });
     });
 
-    return function (_x2) {
-      return _ref3.apply(this, arguments);
+    return function (_x5) {
+      return _ref5.apply(this, arguments);
     };
   })();
 }
 
 function setOutOfScopeLocations() {
   return (() => {
-    var _ref5 = _asyncToGenerator(function* (_ref6) {
-      var dispatch = _ref6.dispatch,
-          getState = _ref6.getState;
+    var _ref7 = _asyncToGenerator(function* (_ref8) {
+      var dispatch = _ref8.dispatch,
+          getState = _ref8.getState;
 
       var location = (0, _selectors.getSelectedLocation)(getState());
       if (!location) {
@@ -42321,7 +40345,7 @@ function setOutOfScopeLocations() {
         });
       }
 
-      var locations = yield parser.getOutOfScopeLocations(source.toJS(), location);
+      var locations = yield (0, _parser.getOutOfScopeLocations)(source.toJS(), location);
 
       return dispatch({
         type: "OUT_OF_SCOPE_LOCATIONS",
@@ -42329,17 +40353,17 @@ function setOutOfScopeLocations() {
       });
     });
 
-    return function (_x3) {
-      return _ref5.apply(this, arguments);
+    return function (_x6) {
+      return _ref7.apply(this, arguments);
     };
   })();
 }
 
 function clearPreview() {
-  return (_ref7) => {
-    var dispatch = _ref7.dispatch,
-        getState = _ref7.getState,
-        client = _ref7.client;
+  return (_ref9) => {
+    var dispatch = _ref9.dispatch,
+        getState = _ref9.getState,
+        client = _ref9.client;
 
     var currentSelection = (0, _selectors.getPreview)(getState());
     if (!currentSelection) {
@@ -42371,10 +40395,11 @@ function findBestMatch(symbols, tokenPos, token) {
 
 function setPreview(token, tokenPos, cursorPos) {
   return (() => {
-    var _ref8 = _asyncToGenerator(function* (_ref9) {
-      var dispatch = _ref9.dispatch,
-          getState = _ref9.getState,
-          client = _ref9.client;
+    var _ref10 = _asyncToGenerator(function* (_ref11) {
+      var dispatch = _ref11.dispatch,
+          getState = _ref11.getState,
+          client = _ref11.client,
+          sourceMaps = _ref11.sourceMaps;
 
       var currentSelection = (0, _selectors.getPreview)(getState());
       if (currentSelection && currentSelection.updating) {
@@ -42385,7 +40410,7 @@ function setPreview(token, tokenPos, cursorPos) {
         type: "SET_PREVIEW",
         [_promise.PROMISE]: _asyncToGenerator(function* () {
           var source = (0, _selectors.getSelectedSource)(getState());
-          var _symbols = yield parser.getSymbols(source.toJS());
+          var _symbols = yield (0, _parser.getSymbols)(source.toJS());
 
           var found = findBestMatch(_symbols, tokenPos, token);
           if (!found) {
@@ -42400,12 +40425,22 @@ function setPreview(token, tokenPos, cursorPos) {
             return;
           }
 
+          var sourceId = source.get("id");
+          if (location && !(0, _devtoolsSourceMap.isGeneratedId)(sourceId)) {
+            var generatedLocation = yield sourceMaps.getGeneratedLocation(_extends({}, location.start, { sourceId }), source.toJS());
+
+            var generatedSourceId = generatedLocation.sourceId;
+            yield dispatch((0, _sources.ensureParserHasSourceText)(generatedSourceId));
+
+            expression = yield getSourcemapedExpression({ dispatch, sourceMaps }, generatedLocation, expression);
+          }
+
           var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
 
-          var _ref11 = yield client.evaluate(expression, {
+          var _ref13 = yield client.evaluate(expression, {
             frameId: selectedFrame.id
           }),
-              result = _ref11.result;
+              result = _ref13.result;
 
           if (result === undefined) {
             return;
@@ -42422,8 +40457,8 @@ function setPreview(token, tokenPos, cursorPos) {
       });
     });
 
-    return function (_x4) {
-      return _ref8.apply(this, arguments);
+    return function (_x7) {
+      return _ref10.apply(this, arguments);
     };
   })();
 }
@@ -42466,6 +40501,8 @@ var _SearchInput2 = _interopRequireDefault(_SearchInput);
 __webpack_require__(866);
 
 var _sourcesTree = __webpack_require__(39);
+
+var _highlight = __webpack_require__(1184);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -42595,31 +40632,7 @@ class TextSearch extends _react.Component {
   }
 
   renderMatchValue(lineMatch) {
-    var value = lineMatch.value,
-        column = lineMatch.column,
-        match = lineMatch.match;
-
-    var len = match.length;
-
-    return _react2.default.createElement(
-      "span",
-      { className: "line-value" },
-      _react2.default.createElement(
-        "span",
-        { className: "line-match", key: 0 },
-        value.slice(0, column)
-      ),
-      _react2.default.createElement(
-        "span",
-        { className: "query-match", key: 1 },
-        value.substr(column, len)
-      ),
-      _react2.default.createElement(
-        "span",
-        { className: "line-match", key: 2 },
-        value.slice(column + len, value.length)
-      )
-    );
+    return (0, _highlight.highlightMatches)(lineMatch);
   }
 
   renderResults() {
@@ -42705,8 +40718,6 @@ TextSearch.propTypes = {
 TextSearch.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
-
-TextSearch.displayName = "TextSearch";
 
 /***/ }),
 /* 1065 */,
@@ -42863,7 +40874,6 @@ function renderMessage(pauseInfo) {
 
   return null;
 }
-renderMessage.displayName = "whyMessage";
 
 function renderWhyPaused(_ref) {
   var pause = _ref.pause;
@@ -43247,6 +41257,9 @@ function update() {
   switch (action.type) {
     case "ADD_BREAKPOINT":
       {
+        if (action.breakpoint.hidden) {
+          return state;
+        }
         return addBreakpoint(state, action);
       }
 
@@ -43272,6 +41285,9 @@ function update() {
 
     case "REMOVE_BREAKPOINT":
       {
+        if (action.breakpoint.hidden) {
+          return state;
+        }
         return removeBreakpoint(state, action);
       }
   }
@@ -43783,7 +41799,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -43951,8 +41967,6 @@ ProjectSearch.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
 
-ProjectSearch.displayName = "ProjectSearch";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   sources: (0, _selectors.getSources)(state),
   activeSearch: (0, _selectors.getActiveSearch)(state),
@@ -44027,8 +42041,6 @@ SourceSearch.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
 
-SourceSearch.displayName = "SourceSearch";
-
 /***/ }),
 /* 1142 */
 /***/ (function(module, exports, __webpack_require__) {
@@ -44046,7 +42058,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _text = __webpack_require__(389);
 
@@ -44082,7 +42094,7 @@ class PrimaryPanes extends _react.Component {
 
     this.renderShortcut = this.renderShortcut.bind(this);
     this.showPane = this.showPane.bind(this);
-    this.renderFooter = this.renderFooter.bind(this);
+    this.renderTabs = this.renderTabs.bind(this);
   }
 
   showPane(selectedPane) {
@@ -44121,10 +42133,10 @@ class PrimaryPanes extends _react.Component {
     )];
   }
 
-  renderFooter() {
+  renderTabs() {
     return _react2.default.createElement(
       "div",
-      { className: "source-footer" },
+      { className: "source-outline-tabs" },
       this.renderOutlineTabs()
     );
   }
@@ -44145,42 +42157,35 @@ class PrimaryPanes extends _react.Component {
     }
   }
 
-  renderHeader() {
-    return _react2.default.createElement(
-      "div",
-      { className: "sources-header" },
-      this.renderShortcut()
-    );
+  renderOutline() {
+    var selectSource = this.props.selectSource;
+
+
+    var outlineComp = (0, _devtoolsConfig.isEnabled)("outline") ? _react2.default.createElement(_Outline2.default, { selectSource: selectSource }) : null;
+
+    return outlineComp;
   }
 
-  render() {
-    var selectedPane = this.state.selectedPane;
+  renderSources() {
     var _props = this.props,
         sources = _props.sources,
         selectSource = _props.selectSource;
 
+    return _react2.default.createElement(_SourcesTree2.default, { sources: sources, selectSource: selectSource });
+  }
 
-    var outlineComp = (0, _devtoolsConfig.isEnabled)("outline") ? _react2.default.createElement(_Outline2.default, {
-      selectSource: selectSource,
-      isHidden: selectedPane === "sources"
-    }) : null;
+  render() {
+    var selectedPane = this.state.selectedPane;
+
 
     return _react2.default.createElement(
       "div",
       { className: "sources-panel" },
-      this.renderHeader(),
-      _react2.default.createElement(_SourcesTree2.default, {
-        sources: sources,
-        selectSource: selectSource,
-        isHidden: selectedPane === "outline"
-      }),
-      outlineComp,
-      this.renderFooter()
+      this.renderTabs(),
+      selectedPane === "sources" ? this.renderSources() : this.renderOutline()
     );
   }
 }
-
-PrimaryPanes.displayName = "PrimaryPanes";
 
 exports.default = (0, _reactRedux.connect)(state => ({
   sources: (0, _selectors.getSources)(state),
@@ -44203,8 +42208,6 @@ var _promise = __webpack_require__(193);
 
 var _ast = __webpack_require__(1059);
 
-var _source = __webpack_require__(233);
-
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 /**
@@ -44220,7 +42223,7 @@ function loadSourceText(source) {
           sourceMaps = _ref2.sourceMaps;
 
       // Fetch the source text only once.
-      if ((0, _source.isLoaded)(source)) {
+      if (source.text) {
         return Promise.resolve(source);
       }
 
@@ -44305,11 +42308,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
-
-var _classnames = __webpack_require__(175);
-
-var _classnames2 = _interopRequireDefault(_classnames);
+var _reactRedux = __webpack_require__(1189);
 
 var _actions = __webpack_require__(244);
 
@@ -44374,24 +42373,20 @@ class Outline extends _react.Component {
   }
 
   render() {
-    var _props2 = this.props,
-        isHidden = _props2.isHidden,
-        symbols = _props2.symbols;
+    var symbols = this.props.symbols;
 
 
     var symbolsToDisplay = symbols.functions.filter(func => func.name != "anonymous");
 
     return _react2.default.createElement(
       "div",
-      { className: (0, _classnames2.default)("outline", { hidden: isHidden }) },
+      { className: "outline" },
       symbolsToDisplay.length > 0 ? this.renderFunctions(symbolsToDisplay) : this.renderPlaceholder()
     );
   }
 }
 
 exports.Outline = Outline;
-Outline.displayName = "Outline";
-
 exports.default = (0, _reactRedux.connect)(state => {
   var selectedSource = (0, _selectors.getSelectedSource)(state);
   return {
@@ -44411,7 +42406,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -44470,8 +42465,6 @@ class EmptyLines extends _react.Component {
   }
 }
 
-EmptyLines.displayName = "EmptyLines";
-
 exports.default = (0, _reactRedux.connect)(state => {
   var selectedSource = (0, _selectors.getSelectedSource)(state);
   return {
@@ -44494,7 +42487,7 @@ Object.defineProperty(exports, "__esModule", {
 
 var _redux = __webpack_require__(3);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _react = __webpack_require__(0);
 
@@ -44539,7 +42532,6 @@ class SourcesTree extends _react.Component {
   constructor(props) {
     super(props);
     this.state = (0, _sourcesTree.createTree)(this.props.sources, this.props.debuggeeUrl);
-
     this.focusItem = this.focusItem.bind(this);
     this.selectItem = this.selectItem.bind(this);
     this.getIcon = this.getIcon.bind(this);
@@ -44641,6 +42633,10 @@ class SourcesTree extends _react.Component {
   }
 
   getIcon(item, depth) {
+    if (item.path === "/webpack://") {
+      return _react2.default.createElement(_Svg2.default, { name: "webpack" });
+    }
+
     if (depth === 0) {
       return _react2.default.createElement(_Svg2.default, { name: "domain" });
     }
@@ -44653,8 +42649,8 @@ class SourcesTree extends _react.Component {
   }
 
   onContextMenu(event, item) {
-    var copySourceUrlLabel = L10N.getStr("copySourceUrl");
-    var copySourceUrlKey = L10N.getStr("copySourceUrl.accesskey");
+    var copySourceUri2Label = L10N.getStr("copySourceUri2");
+    var copySourceUri2Key = L10N.getStr("copySourceUri2.accesskey");
 
     event.stopPropagation();
     event.preventDefault();
@@ -44663,15 +42659,15 @@ class SourcesTree extends _react.Component {
 
     if (!(0, _sourcesTree.isDirectory)(item)) {
       var source = item.contents.get("url");
-      var copySourceUrl = {
+      var copySourceUri2 = {
         id: "node-menu-copy-source",
-        label: copySourceUrlLabel,
-        accesskey: copySourceUrlKey,
+        label: copySourceUri2Label,
+        accesskey: copySourceUri2Key,
         disabled: false,
         click: () => (0, _clipboard.copyToTheClipboard)(source)
       };
 
-      menuOptions.push(copySourceUrl);
+      menuOptions.push(copySourceUri2);
     }
 
     (0, _devtoolsLaunchpad.showMenu)(event, menuOptions);
@@ -44710,18 +42706,22 @@ class SourcesTree extends _react.Component {
         },
         onContextMenu: e => this.onContextMenu(e, item)
       },
+      arrow,
+      icon,
       _react2.default.createElement(
-        "div",
-        null,
-        arrow,
-        icon,
-        item.name
+        "span",
+        { className: "label" },
+        " ",
+        item.name,
+        " "
       )
     );
   }
 
   render() {
-    var isHidden = this.props.isHidden;
+    var _props = this.props,
+        setExpandedState = _props.setExpandedState,
+        expanded = _props.expanded;
     var _state = this.state,
         focusedItem = _state.focusedItem,
         sourceTree = _state.sourceTree,
@@ -44731,7 +42731,6 @@ class SourcesTree extends _react.Component {
 
 
     var isEmpty = sourceTree.contents.length === 0;
-
     var treeProps = {
       key: isEmpty ? "empty" : "full",
       getParent: item => parentMap.get(item),
@@ -44739,11 +42738,14 @@ class SourcesTree extends _react.Component {
       getRoots: () => sourceTree.contents,
       getPath: item => `${item.path}/${item.name}`,
       itemHeight: 21,
-      autoExpandDepth: 1,
+      autoExpandDepth: expanded ? 0 : 1,
       autoExpandAll: false,
       onFocus: this.focusItem,
       listItems,
       highlightItems,
+      expanded,
+      onExpand: (item, expandedState) => setExpandedState(expandedState),
+      onCollapse: (item, expandedState) => setExpandedState(expandedState),
       renderItem: this.renderItem
     };
 
@@ -44765,31 +42767,28 @@ class SourcesTree extends _react.Component {
 
     return _react2.default.createElement(
       "div",
-      {
-        className: (0, _classnames2.default)("sources-list", { hidden: isHidden }),
-        onKeyDown: onKeyDown
-      },
+      { className: "sources-list", onKeyDown: onKeyDown },
       tree
     );
   }
 }
 
 SourcesTree.propTypes = {
-  isHidden: _react.PropTypes.bool,
   sources: _reactImmutableProptypes2.default.map.isRequired,
   selectSource: _react.PropTypes.func.isRequired,
   shownSource: _react.PropTypes.string,
   selectedSource: _reactImmutableProptypes2.default.map,
-  debuggeeUrl: _react.PropTypes.string.isRequired
+  debuggeeUrl: _react.PropTypes.string.isRequired,
+  setExpandedState: _react.PropTypes.func,
+  expanded: _react.PropTypes.any
 };
-
-SourcesTree.displayName = "SourcesTree";
 
 exports.default = (0, _reactRedux.connect)(state => {
   return {
     shownSource: (0, _selectors.getShownSource)(state),
     selectedSource: (0, _selectors.getSelectedSource)(state),
-    debuggeeUrl: (0, _selectors.getDebuggeeUrl)(state)
+    debuggeeUrl: (0, _selectors.getDebuggeeUrl)(state),
+    expanded: (0, _selectors.getExpandedState)(state)
   };
 }, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourcesTree);
 
@@ -44811,21 +42810,28 @@ var _react2 = _interopRequireDefault(_react);
 
 __webpack_require__(1162);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
+
+var _selectors = __webpack_require__(242);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 class Workers extends _react.PureComponent {
+
   renderWorkers(workers) {
     return workers.map(w => _react2.default.createElement(
       "div",
-      null,
-      w
+      { className: "worker", key: w.url },
+      w.url
     ));
   }
 
   renderNoWorkersPlaceholder() {
-    return L10N.getStr("noWorkersText");
+    return _react2.default.createElement(
+      "div",
+      { className: "pane-info" },
+      L10N.getStr("noWorkersText")
+    );
   }
 
   render() {
@@ -44833,24 +42839,15 @@ class Workers extends _react.PureComponent {
 
     return _react2.default.createElement(
       "div",
-      { className: "pane" },
-      _react2.default.createElement(
-        "div",
-        { className: "pane-info" },
-        workers && workers.length > 0 ? this.renderWorkers(workers) : this.renderNoWorkersPlaceholder()
-      )
+      { className: "pane workers-list" },
+      workers && workers.size > 0 ? this.renderWorkers(workers) : this.renderNoWorkersPlaceholder()
     );
   }
 }
 
 exports.Workers = Workers;
-Workers.displayName = "Workers";
-Workers.propTypes = {
-  workers: _react.PropTypes.array.isRequired
-};
-
 function mapStateToProps(state) {
-  return { workers: [] };
+  return { workers: (0, _selectors.getWorkers)(state) };
 }
 exports.default = (0, _reactRedux.connect)(mapStateToProps)(Workers);
 
@@ -45795,7 +43792,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -45858,9 +43855,6 @@ class Breakpoints extends _react.Component {
     );
   }
 }
-
-Breakpoints.displayName = "Breakpoints";
-
 exports.default = (0, _reactRedux.connect)(state => ({
   breakpoints: (0, _visibleBreakpoints2.default)(state),
   selectedSource: (0, _selectors.getSelectedSource)(state)
@@ -45883,7 +43877,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -46054,7 +44048,6 @@ class CallSites extends _react.Component {
   }
 }
 
-CallSites.displayName = "CallSites";
 function getCallSites(symbols, breakpoints) {
   if (!symbols || !symbols.callExpressions) {
     return;
@@ -46268,9 +44261,7 @@ class CallSite extends _react.Component {
     return null;
   }
 }
-
 exports.default = CallSite;
-CallSite.displayName = "CallSite";
 
 /***/ }),
 /* 1168 */
@@ -46471,7 +44462,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactRedux = __webpack_require__(151);
+var _reactRedux = __webpack_require__(1189);
 
 var _redux = __webpack_require__(3);
 
@@ -46742,7 +44733,6 @@ class SymbolModal extends _react.Component {
   }
 }
 
-SymbolModal.displayName = "SymbolModal";
 SymbolModal.contextTypes = {
   shortcuts: _react.PropTypes.object
 };
@@ -46773,12 +44763,1991 @@ exports.default = (0, _reactRedux.connect)(state => {
 
 /***/ }),
 /* 1171 */,
-/* 1172 */,
+/* 1172 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+const md5 = __webpack_require__(248);
+
+function originalToGeneratedId(originalId) {
+  const match = originalId.match(/(.*)\/originalSource/);
+  return match ? match[1] : "";
+}
+
+function generatedToOriginalId(generatedId, url) {
+  return `${generatedId}/originalSource-${md5(url)}`;
+}
+
+function isOriginalId(id) {
+  return !!id.match(/\/originalSource/);
+}
+
+function isGeneratedId(id) {
+  return !isOriginalId(id);
+}
+
+/**
+ * Trims the query part or reference identifier of a URL string, if necessary.
+ */
+function trimUrlQuery(url) {
+  let length = url.length;
+  let q1 = url.indexOf("?");
+  let q2 = url.indexOf("&");
+  let q3 = url.indexOf("#");
+  let q = Math.min(q1 != -1 ? q1 : length, q2 != -1 ? q2 : length, q3 != -1 ? q3 : length);
+
+  return url.slice(0, q);
+}
+
+// Map suffix to content type.
+const contentMap = {
+  "js": "text/javascript",
+  "jsm": "text/javascript",
+  "ts": "text/typescript",
+  "tsx": "text/typescript-jsx",
+  "jsx": "text/jsx",
+  "coffee": "text/coffeescript",
+  "elm": "text/elm",
+  "cljs": "text/x-clojure"
+};
+
+/**
+ * Returns the content type for the specified URL.  If no specific
+ * content type can be determined, "text/plain" is returned.
+ *
+ * @return String
+ *         The content type.
+ */
+function getContentType(url) {
+  url = trimUrlQuery(url);
+  let dot = url.lastIndexOf(".");
+  if (dot >= 0) {
+    let name = url.substring(dot + 1);
+    if (name in contentMap) {
+      return contentMap[name];
+    }
+  }
+  return "text/plain";
+}
+
+module.exports = {
+  originalToGeneratedId,
+  generatedToOriginalId,
+  isOriginalId,
+  isGeneratedId,
+  getContentType,
+  contentMapForTesting: contentMap
+};
+
+/***/ }),
 /* 1173 */,
 /* 1174 */
 /***/ (function(module, exports) {
 
 module.exports = "<svg xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:cc=\"http://creativecommons.org/ns#\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:svg=\"http://www.w3.org/2000/svg\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 400\" xml:space=\"preserve\" id=\"svg2\" version=\"1.1\"><metadata id=\"metadata8\"><rdf:RDF><cc:Work rdf:about><dc:format>image/svg+xml</dc:format><dc:type rdf:resource=\"http://purl.org/dc/dcmitype/StillImage\"></dc></cc:Work></rdf:RDF></metadata><defs id=\"defs6\"></defs><g transform=\"matrix(1.3333333,0,0,-1.3333333,0,400)\" id=\"g10\"><g transform=\"translate(178.0626,235.0086)\" id=\"g12\"><path id=\"path14\" style=\"fill:#41b883;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 h -75.491 L -22.669,-170.017 75.491,0 Z\"></path></g><g transform=\"translate(178.0626,235.0086)\" id=\"g16\"><path id=\"path18\" style=\"fill:#34495e;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 H -81.565 L -22.669,-102.01 36.227,0 Z\"></path></g></g></svg>"
+
+/***/ }),
+/* 1175 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.getWorkers = exports.State = undefined;
+exports.default = debuggee;
+
+var _reselect = __webpack_require__(993);
+
+var _immutable = __webpack_require__(146);
+
+var _makeRecord = __webpack_require__(230);
+
+var _makeRecord2 = _interopRequireDefault(_makeRecord);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+var State = exports.State = (0, _makeRecord2.default)({
+  workers: (0, _immutable.List)()
+});
+
+function debuggee() {
+  var state = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : State();
+  var action = arguments[1];
+
+  switch (action.type) {
+    case "SET_WORKERS":
+      return state.set("workers", (0, _immutable.List)(action.workers.workers));
+    default:
+      return state;
+  }
+}
+
+var getDebuggeeWrapper = state => state.debuggee;
+
+var getWorkers = exports.getWorkers = (0, _reselect.createSelector)(getDebuggeeWrapper, debuggeeState => debuggeeState.get("workers"));
+
+/***/ }),
+/* 1176 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.InitialState = InitialState;
+exports.default = update;
+exports.getExpandedState = getExpandedState;
+
+var _makeRecord = __webpack_require__(230);
+
+var _makeRecord2 = _interopRequireDefault(_makeRecord);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function InitialState() {
+  return (0, _makeRecord2.default)({
+    expanded: null
+  })();
+}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/**
+ * Source tree reducer
+ * @module reducers/source-tree
+ */
+function update() {
+  var state = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : InitialState();
+  var action = arguments[1];
+
+  switch (action.type) {
+    case "SET_EXPANDED_STATE":
+      return state.set("expanded", action.expanded);
+  }
+  return state;
+}
+
+function getExpandedState(state) {
+  return state.sourceTree.get("expanded");
+}
+
+/***/ }),
+/* 1177 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.sanitizeInput = sanitizeInput;
+exports.wrapExpression = wrapExpression;
+exports.getValue = getValue;
+
+
+// replace quotes and slashes that could interfere with the evaluation.
+function sanitizeInput(input) {
+  return input.replace(/\\/g, "\\\\").replace(/"/g, "\\$&");
+}
+
+/*
+ * wrap the expression input in a try/catch so that it can be safely
+ * evaluated.
+ *
+ * NOTE: we add line after the expression to protect against comments.
+*/
+
+
+function wrapExpression(input) {
+  return `eval(\`
+    try {
+      ${sanitizeInput(input)}
+    } catch (e) {
+      e
+    }
+  \`)`.trim();
+}
+
+function getValue(expression) {
+  var value = expression.value;
+  if (!value) {
+    return {
+      path: expression.from,
+      value: { unavailable: true }
+    };
+  }
+
+  if (value.exception) {
+    return {
+      path: value.from,
+      value: value.exception
+    };
+  }
+
+  if (value.error) {
+    return {
+      path: value.from,
+      value: value.error
+    };
+  }
+
+  if (value.result && value.result.class == "Error") {
+    var _value$result$preview = value.result.preview,
+        name = _value$result$preview.name,
+        message = _value$result$preview.message;
+
+    var newValue = name === "ReferenceError" ? { unavailable: true } : `${name}: ${message}`;
+
+    return { path: value.input, value: newValue };
+  }
+
+  if (typeof value.result == "object") {
+    return {
+      path: value.result.actor,
+      value: value.result
+    };
+  }
+
+  return {
+    path: value.input,
+    value: value.result
+  };
+}
+
+/***/ }),
+/* 1178 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.setExpandedState = setExpandedState;
+function setExpandedState(expanded) {
+  return (_ref) => {
+    var dispatch = _ref.dispatch,
+        getState = _ref.getState;
+
+    dispatch({
+      type: "SET_EXPANDED_STATE",
+      expanded
+    });
+  };
+}
+
+/***/ }),
+/* 1179 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.setWorkers = setWorkers;
+function setWorkers(workers) {
+  return {
+    type: "SET_WORKERS",
+    workers
+  };
+}
+
+/***/ }),
+/* 1180 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.openLink = openLink;
+
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+var _require = __webpack_require__(828),
+    isDevelopment = _require.isDevelopment;
+
+/**
+ * @memberof actions/toolbox
+ * @static
+ */
+function openLink(url) {
+  return (() => {
+    var _ref = _asyncToGenerator(function* (_ref2) {
+      var openLinkCommand = _ref2.openLink;
+
+      if (isDevelopment()) {
+        var win = window.open(url, "_blank");
+        win.focus();
+      } else {
+        openLinkCommand(url);
+      }
+    });
+
+    return function (_x) {
+      return _ref.apply(this, arguments);
+    };
+  })();
+}
+
+/***/ }),
+/* 1181 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.ShortcutsModal = undefined;
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _Modal = __webpack_require__(332);
+
+var _Modal2 = _interopRequireDefault(_Modal);
+
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
+
+var _text = __webpack_require__(389);
+
+__webpack_require__(1182);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+class ShortcutsModal extends _react.Component {
+
+  renderPrettyCombos(combo) {
+    return combo.split(" ").map(c => _react2.default.createElement(
+      "span",
+      { key: c, className: "keystroke" },
+      c
+    )).reduce((prev, curr) => [prev, " + ", curr]);
+  }
+
+  renderShorcutItem(title, combo) {
+    return _react2.default.createElement(
+      "li",
+      null,
+      _react2.default.createElement(
+        "span",
+        null,
+        title
+      ),
+      _react2.default.createElement(
+        "span",
+        null,
+        this.renderPrettyCombos(combo)
+      )
+    );
+  }
+
+  renderEditorShortcuts() {
+    return _react2.default.createElement(
+      "ul",
+      { className: "shortcuts-list" },
+      this.renderShorcutItem(L10N.getStr("shortcuts.toggleBreakpoint"), (0, _text.formatKeyShortcut)(L10N.getStr("toggleBreakpoint.key"))),
+      this.renderShorcutItem(L10N.getStr("shortcuts.toggleCondPanel"), (0, _text.formatKeyShortcut)(L10N.getStr("toggleCondPanel.key")))
+    );
+  }
+
+  renderSteppingShortcuts() {
+    return _react2.default.createElement(
+      "ul",
+      { className: "shortcuts-list" },
+      this.renderShorcutItem(L10N.getStr("shortcuts.pauseOrResume"), "F8"),
+      this.renderShorcutItem(L10N.getStr("shortcuts.stepOver"), "F10"),
+      this.renderShorcutItem(L10N.getStr("shortcuts.stepIn"), "F11"),
+      this.renderShorcutItem(L10N.getStr("shortcuts.stepOut"), (0, _text.formatKeyShortcut)(L10N.getStr("stepOut.key")))
+    );
+  }
+
+  renderSearchShortcuts() {
+    return _react2.default.createElement(
+      "ul",
+      { className: "shortcuts-list" },
+      this.renderShorcutItem(L10N.getStr("shortcuts.fileSearch"), (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"))),
+      this.renderShorcutItem(L10N.getStr("shortcuts.searchAgain"), (0, _text.formatKeyShortcut)(L10N.getStr("sourceSearch.search.again.key2"))),
+      this.renderShorcutItem(L10N.getStr("shortcuts.projectSearch"), (0, _text.formatKeyShortcut)(L10N.getStr("projectTextSearch.key"))),
+      this.renderShorcutItem(L10N.getStr("shortcuts.functionSearch"), (0, _text.formatKeyShortcut)(L10N.getStr("functionSearch.key")))
+    );
+  }
+
+  renderShortcutsContent() {
+    return _react2.default.createElement(
+      "div",
+      {
+        className: (0, _classnames2.default)("shortcuts-content", this.props.additionalClass)
+      },
+      _react2.default.createElement(
+        "div",
+        { className: "shortcuts-section" },
+        _react2.default.createElement(
+          "h2",
+          null,
+          L10N.getStr("shortcuts.header.editor")
+        ),
+        this.renderEditorShortcuts()
+      ),
+      _react2.default.createElement(
+        "div",
+        { className: "shortcuts-section" },
+        _react2.default.createElement(
+          "h2",
+          null,
+          L10N.getStr("shortcuts.header.stepping")
+        ),
+        this.renderSteppingShortcuts()
+      ),
+      _react2.default.createElement(
+        "div",
+        { className: "shortcuts-section" },
+        _react2.default.createElement(
+          "h2",
+          null,
+          L10N.getStr("shortcuts.header.search")
+        ),
+        this.renderSearchShortcuts()
+      )
+    );
+  }
+
+  render() {
+    var enabled = this.props.enabled;
+
+
+    if (!enabled) {
+      return null;
+    }
+
+    return _react2.default.createElement(
+      _Modal2.default,
+      {
+        "in": enabled,
+        additionalClass: "shortcuts-modal",
+        handleClose: this.props.handleClose
+      },
+      this.renderShortcutsContent()
+    );
+  }
+}
+
+exports.ShortcutsModal = ShortcutsModal;
+ShortcutsModal.displayName = "ShortcutsModal";
+
+/***/ }),
+/* 1182 */
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+/* 1183 */
+/***/ (function(module, exports) {
+
+module.exports = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 18.200781 11.335548\" id=\"svg2\" version=\"1.1\" inkscape:version=\"0.91 r13725\" sodipodi:docname=\"shortcut.svg\" style=\"fill:#000000\"><path d=\"m -0.90376632,-5.8726701 24.00000032,0 0,24.0000001 -24.00000032,0 z\" id=\"path6\" inkscape:connector-curvature=\"0\" style=\"fill:none\"></path><path id=\"path4160\" style=\"font-style:normal;font-weight:normal;font-size:40px;line-height:125%;font-family:sans-serif;letter-spacing:-1.55000007px;word-spacing:0px;fill:#241f1c;fill-opacity:1;stroke:#241f1c;stroke-width:0;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1\" d=\"m 0.2,0.2 0,10.935547 1.4785157,0 0,-5.2675782 5.2519531,5.2675782 1.9472656,0 L 3.0632813,5.2976562 8.4910157,0.2 6.5867188,0.2 1.6785157,4.8210938 1.6785157,0.2 Z m 12.490235,0.8840675 0,4.078125 -4.0800787,0 0,1.2460938 4.0800787,0 0,4.0800777 1.230468,0 0,-4.0800777 4.080078,0 0,-1.2460938 -4.080078,0 0,-4.078125 z\" inkscape:connector-curvature=\"0\" sodipodi:nodetypes=\"ccccccccccccccccccccccccc\"></path></svg>"
+
+/***/ }),
+/* 1184 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.highlightMatches = highlightMatches;
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function highlightMatches(lineMatch) {
+  var value = lineMatch.value,
+      column = lineMatch.column,
+      match = lineMatch.match;
+
+  var len = match.length;
+
+  return _react2.default.createElement(
+    "span",
+    { className: "line-value" },
+    _react2.default.createElement(
+      "span",
+      { className: "line-match", key: 0 },
+      value.slice(0, column)
+    ),
+    _react2.default.createElement(
+      "span",
+      { className: "query-match", key: 1 },
+      value.substr(column, len)
+    ),
+    _react2.default.createElement(
+      "span",
+      { className: "line-match", key: 2 },
+      value.slice(column + len, value.length)
+    )
+  );
+} // Maybe reuse file search's functions?
+
+/***/ }),
+/* 1185 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
+
+var _Svg = __webpack_require__(344);
+
+var _Svg2 = _interopRequireDefault(_Svg);
+
+__webpack_require__(918);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function debugBtn(onClick, type, className, tooltip) {
+  var disabled = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
+
+  var props = {
+    onClick,
+    key: type,
+    "aria-label": tooltip,
+    title: tooltip,
+    disabled
+  };
+
+  return _react2.default.createElement(
+    "button",
+    _extends({ className: (0, _classnames2.default)(type, className) }, props),
+    _react2.default.createElement(_Svg2.default, { name: type })
+  );
+}
+
+class UtilsBar extends _react.Component {
+
+  renderUtilButtons() {
+    return [debugBtn(this.props.toggleShortcutsModal, "shortcut", "active", "shortcuts", false)];
+  }
+
+  render() {
+    return _react2.default.createElement(
+      "div",
+      {
+        className: (0, _classnames2.default)("command-bar bottom", {
+          vertical: !this.props.horizontal
+        })
+      },
+      this.renderUtilButtons()
+    );
+  }
+}
+
+exports.default = UtilsBar;
+
+/***/ }),
+/* 1186 */,
+/* 1187 */,
+/* 1188 */,
+/* 1189 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__components_Provider__ = __webpack_require__(1195);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__components_connectAdvanced__ = __webpack_require__(1192);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__connect_connect__ = __webpack_require__(1198);
+/* harmony reexport (binding) */ __webpack_require__.d(__webpack_exports__, "Provider", function() { return __WEBPACK_IMPORTED_MODULE_0__components_Provider__["b"]; });
+/* harmony reexport (binding) */ __webpack_require__.d(__webpack_exports__, "createProvider", function() { return __WEBPACK_IMPORTED_MODULE_0__components_Provider__["a"]; });
+/* harmony reexport (binding) */ __webpack_require__.d(__webpack_exports__, "connectAdvanced", function() { return __WEBPACK_IMPORTED_MODULE_1__components_connectAdvanced__["a"]; });
+/* harmony reexport (binding) */ __webpack_require__.d(__webpack_exports__, "connect", function() { return __WEBPACK_IMPORTED_MODULE_2__connect_connect__["a"]; });
+
+
+
+
+
+
+/***/ }),
+/* 1190 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (immutable) */ __webpack_exports__["a"] = warning;
+/**
+ * Prints a warning in the console if it exists.
+ *
+ * @param {String} message The warning message.
+ * @returns {void}
+ */
+function warning(message) {
+  /* eslint-disable no-console */
+  if (typeof console !== 'undefined' && typeof console.error === 'function') {
+    console.error(message);
+  }
+  /* eslint-enable no-console */
+  try {
+    // This error was thrown as a convenience so that if you enable
+    // "break on all exceptions" in your console,
+    // it would pause the execution at this line.
+    throw new Error(message);
+    /* eslint-disable no-empty */
+  } catch (e) {}
+  /* eslint-enable no-empty */
+}
+
+/***/ }),
+/* 1191 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "b", function() { return subscriptionShape; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "a", function() { return storeShape; });
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_prop_types__ = __webpack_require__(20);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_prop_types___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_prop_types__);
+
+
+var subscriptionShape = __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.shape({
+  trySubscribe: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired,
+  tryUnsubscribe: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired,
+  notifyNestedSubs: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired,
+  isSubscribed: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired
+});
+
+var storeShape = __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.shape({
+  subscribe: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired,
+  dispatch: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired,
+  getState: __WEBPACK_IMPORTED_MODULE_0_prop_types___default.a.func.isRequired
+});
+
+/***/ }),
+/* 1192 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (immutable) */ __webpack_exports__["a"] = connectAdvanced;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_hoist_non_react_statics__ = __webpack_require__(1196);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_hoist_non_react_statics___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_hoist_non_react_statics__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_invariant__ = __webpack_require__(159);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_invariant___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_invariant__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3__utils_Subscription__ = __webpack_require__(1197);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4__utils_PropTypes__ = __webpack_require__(1191);
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
+
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
+
+function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
+
+
+
+
+
+
+
+
+var hotReloadingVersion = 0;
+var dummyState = {};
+function noop() {}
+function makeSelectorStateful(sourceSelector, store) {
+  // wrap the selector in an object that tracks its results between runs.
+  var selector = {
+    run: function runComponentSelector(props) {
+      try {
+        var nextProps = sourceSelector(store.getState(), props);
+        if (nextProps !== selector.props || selector.error) {
+          selector.shouldComponentUpdate = true;
+          selector.props = nextProps;
+          selector.error = null;
+        }
+      } catch (error) {
+        selector.shouldComponentUpdate = true;
+        selector.error = error;
+      }
+    }
+  };
+
+  return selector;
+}
+
+function connectAdvanced(
+/*
+  selectorFactory is a func that is responsible for returning the selector function used to
+  compute new props from state, props, and dispatch. For example:
+     export default connectAdvanced((dispatch, options) => (state, props) => ({
+      thing: state.things[props.thingId],
+      saveThing: fields => dispatch(actionCreators.saveThing(props.thingId, fields)),
+    }))(YourComponent)
+   Access to dispatch is provided to the factory so selectorFactories can bind actionCreators
+  outside of their selector as an optimization. Options passed to connectAdvanced are passed to
+  the selectorFactory, along with displayName and WrappedComponent, as the second argument.
+   Note that selectorFactory is responsible for all caching/memoization of inbound and outbound
+  props. Do not use connectAdvanced directly without memoizing results between calls to your
+  selector, otherwise the Connect component will re-render on every state or props change.
+*/
+selectorFactory) {
+  var _contextTypes, _childContextTypes;
+
+  var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+      _ref$getDisplayName = _ref.getDisplayName,
+      getDisplayName = _ref$getDisplayName === undefined ? function (name) {
+    return 'ConnectAdvanced(' + name + ')';
+  } : _ref$getDisplayName,
+      _ref$methodName = _ref.methodName,
+      methodName = _ref$methodName === undefined ? 'connectAdvanced' : _ref$methodName,
+      _ref$renderCountProp = _ref.renderCountProp,
+      renderCountProp = _ref$renderCountProp === undefined ? undefined : _ref$renderCountProp,
+      _ref$shouldHandleStat = _ref.shouldHandleStateChanges,
+      shouldHandleStateChanges = _ref$shouldHandleStat === undefined ? true : _ref$shouldHandleStat,
+      _ref$storeKey = _ref.storeKey,
+      storeKey = _ref$storeKey === undefined ? 'store' : _ref$storeKey,
+      _ref$withRef = _ref.withRef,
+      withRef = _ref$withRef === undefined ? false : _ref$withRef,
+      connectOptions = _objectWithoutProperties(_ref, ['getDisplayName', 'methodName', 'renderCountProp', 'shouldHandleStateChanges', 'storeKey', 'withRef']);
+
+  var subscriptionKey = storeKey + 'Subscription';
+  var version = hotReloadingVersion++;
+
+  var contextTypes = (_contextTypes = {}, _contextTypes[storeKey] = __WEBPACK_IMPORTED_MODULE_4__utils_PropTypes__["a" /* storeShape */], _contextTypes[subscriptionKey] = __WEBPACK_IMPORTED_MODULE_4__utils_PropTypes__["b" /* subscriptionShape */], _contextTypes);
+  var childContextTypes = (_childContextTypes = {}, _childContextTypes[subscriptionKey] = __WEBPACK_IMPORTED_MODULE_4__utils_PropTypes__["b" /* subscriptionShape */], _childContextTypes);
+
+  return function wrapWithConnect(WrappedComponent) {
+    __WEBPACK_IMPORTED_MODULE_1_invariant___default()(typeof WrappedComponent == 'function', 'You must pass a component to the function returned by ' + ('connect. Instead received ' + JSON.stringify(WrappedComponent)));
+
+    var wrappedComponentName = WrappedComponent.displayName || WrappedComponent.name || 'Component';
+
+    var displayName = getDisplayName(wrappedComponentName);
+
+    var selectorFactoryOptions = _extends({}, connectOptions, {
+      getDisplayName: getDisplayName,
+      methodName: methodName,
+      renderCountProp: renderCountProp,
+      shouldHandleStateChanges: shouldHandleStateChanges,
+      storeKey: storeKey,
+      withRef: withRef,
+      displayName: displayName,
+      wrappedComponentName: wrappedComponentName,
+      WrappedComponent: WrappedComponent
+    });
+
+    var Connect = function (_Component) {
+      _inherits(Connect, _Component);
+
+      function Connect(props, context) {
+        _classCallCheck(this, Connect);
+
+        var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
+
+        _this.version = version;
+        _this.state = {};
+        _this.renderCount = 0;
+        _this.store = props[storeKey] || context[storeKey];
+        _this.propsMode = Boolean(props[storeKey]);
+        _this.setWrappedInstance = _this.setWrappedInstance.bind(_this);
+
+        __WEBPACK_IMPORTED_MODULE_1_invariant___default()(_this.store, 'Could not find "' + storeKey + '" in either the context or props of ' + ('"' + displayName + '". Either wrap the root component in a <Provider>, ') + ('or explicitly pass "' + storeKey + '" as a prop to "' + displayName + '".'));
+
+        _this.initSelector();
+        _this.initSubscription();
+        return _this;
+      }
+
+      Connect.prototype.getChildContext = function getChildContext() {
+        var _ref2;
+
+        // If this component received store from props, its subscription should be transparent
+        // to any descendants receiving store+subscription from context; it passes along
+        // subscription passed to it. Otherwise, it shadows the parent subscription, which allows
+        // Connect to control ordering of notifications to flow top-down.
+        var subscription = this.propsMode ? null : this.subscription;
+        return _ref2 = {}, _ref2[subscriptionKey] = subscription || this.context[subscriptionKey], _ref2;
+      };
+
+      Connect.prototype.componentDidMount = function componentDidMount() {
+        if (!shouldHandleStateChanges) return;
+
+        // componentWillMount fires during server side rendering, but componentDidMount and
+        // componentWillUnmount do not. Because of this, trySubscribe happens during ...didMount.
+        // Otherwise, unsubscription would never take place during SSR, causing a memory leak.
+        // To handle the case where a child component may have triggered a state change by
+        // dispatching an action in its componentWillMount, we have to re-run the select and maybe
+        // re-render.
+        this.subscription.trySubscribe();
+        this.selector.run(this.props);
+        if (this.selector.shouldComponentUpdate) this.forceUpdate();
+      };
+
+      Connect.prototype.componentWillReceiveProps = function componentWillReceiveProps(nextProps) {
+        this.selector.run(nextProps);
+      };
+
+      Connect.prototype.shouldComponentUpdate = function shouldComponentUpdate() {
+        return this.selector.shouldComponentUpdate;
+      };
+
+      Connect.prototype.componentWillUnmount = function componentWillUnmount() {
+        if (this.subscription) this.subscription.tryUnsubscribe();
+        this.subscription = null;
+        this.notifyNestedSubs = noop;
+        this.store = null;
+        this.selector.run = noop;
+        this.selector.shouldComponentUpdate = false;
+      };
+
+      Connect.prototype.getWrappedInstance = function getWrappedInstance() {
+        __WEBPACK_IMPORTED_MODULE_1_invariant___default()(withRef, 'To access the wrapped instance, you need to specify ' + ('{ withRef: true } in the options argument of the ' + methodName + '() call.'));
+        return this.wrappedInstance;
+      };
+
+      Connect.prototype.setWrappedInstance = function setWrappedInstance(ref) {
+        this.wrappedInstance = ref;
+      };
+
+      Connect.prototype.initSelector = function initSelector() {
+        var sourceSelector = selectorFactory(this.store.dispatch, selectorFactoryOptions);
+        this.selector = makeSelectorStateful(sourceSelector, this.store);
+        this.selector.run(this.props);
+      };
+
+      Connect.prototype.initSubscription = function initSubscription() {
+        if (!shouldHandleStateChanges) return;
+
+        // parentSub's source should match where store came from: props vs. context. A component
+        // connected to the store via props shouldn't use subscription from context, or vice versa.
+        var parentSub = (this.propsMode ? this.props : this.context)[subscriptionKey];
+        this.subscription = new __WEBPACK_IMPORTED_MODULE_3__utils_Subscription__["a" /* default */](this.store, parentSub, this.onStateChange.bind(this));
+
+        // `notifyNestedSubs` is duplicated to handle the case where the component is  unmounted in
+        // the middle of the notification loop, where `this.subscription` will then be null. An
+        // extra null check every change can be avoided by copying the method onto `this` and then
+        // replacing it with a no-op on unmount. This can probably be avoided if Subscription's
+        // listeners logic is changed to not call listeners that have been unsubscribed in the
+        // middle of the notification loop.
+        this.notifyNestedSubs = this.subscription.notifyNestedSubs.bind(this.subscription);
+      };
+
+      Connect.prototype.onStateChange = function onStateChange() {
+        this.selector.run(this.props);
+
+        if (!this.selector.shouldComponentUpdate) {
+          this.notifyNestedSubs();
+        } else {
+          this.componentDidUpdate = this.notifyNestedSubsOnComponentDidUpdate;
+          this.setState(dummyState);
+        }
+      };
+
+      Connect.prototype.notifyNestedSubsOnComponentDidUpdate = function notifyNestedSubsOnComponentDidUpdate() {
+        // `componentDidUpdate` is conditionally implemented when `onStateChange` determines it
+        // needs to notify nested subs. Once called, it unimplements itself until further state
+        // changes occur. Doing it this way vs having a permanent `componentDidUpdate` that does
+        // a boolean check every time avoids an extra method call most of the time, resulting
+        // in some perf boost.
+        this.componentDidUpdate = undefined;
+        this.notifyNestedSubs();
+      };
+
+      Connect.prototype.isSubscribed = function isSubscribed() {
+        return Boolean(this.subscription) && this.subscription.isSubscribed();
+      };
+
+      Connect.prototype.addExtraProps = function addExtraProps(props) {
+        if (!withRef && !renderCountProp && !(this.propsMode && this.subscription)) return props;
+        // make a shallow copy so that fields added don't leak to the original selector.
+        // this is especially important for 'ref' since that's a reference back to the component
+        // instance. a singleton memoized selector would then be holding a reference to the
+        // instance, preventing the instance from being garbage collected, and that would be bad
+        var withExtras = _extends({}, props);
+        if (withRef) withExtras.ref = this.setWrappedInstance;
+        if (renderCountProp) withExtras[renderCountProp] = this.renderCount++;
+        if (this.propsMode && this.subscription) withExtras[subscriptionKey] = this.subscription;
+        return withExtras;
+      };
+
+      Connect.prototype.render = function render() {
+        var selector = this.selector;
+        selector.shouldComponentUpdate = false;
+
+        if (selector.error) {
+          throw selector.error;
+        } else {
+          return Object(__WEBPACK_IMPORTED_MODULE_2_react__["createElement"])(WrappedComponent, this.addExtraProps(selector.props));
+        }
+      };
+
+      return Connect;
+    }(__WEBPACK_IMPORTED_MODULE_2_react__["Component"]);
+
+    Connect.WrappedComponent = WrappedComponent;
+    Connect.displayName = displayName;
+    Connect.childContextTypes = childContextTypes;
+    Connect.contextTypes = contextTypes;
+    Connect.propTypes = contextTypes;
+
+    if (false) {
+      Connect.prototype.componentWillUpdate = function componentWillUpdate() {
+        var _this2 = this;
+
+        // We are hot reloading!
+        if (this.version !== version) {
+          this.version = version;
+          this.initSelector();
+
+          // If any connected descendants don't hot reload (and resubscribe in the process), their
+          // listeners will be lost when we unsubscribe. Unfortunately, by copying over all
+          // listeners, this does mean that the old versions of connected descendants will still be
+          // notified of state changes; however, their onStateChange function is a no-op so this
+          // isn't a huge deal.
+          var oldListeners = [];
+
+          if (this.subscription) {
+            oldListeners = this.subscription.listeners.get();
+            this.subscription.tryUnsubscribe();
+          }
+          this.initSubscription();
+          if (shouldHandleStateChanges) {
+            this.subscription.trySubscribe();
+            oldListeners.forEach(function (listener) {
+              return _this2.subscription.listeners.subscribe(listener);
+            });
+          }
+        }
+      };
+    }
+
+    return __WEBPACK_IMPORTED_MODULE_0_hoist_non_react_statics___default()(Connect, WrappedComponent);
+  };
+}
+
+/***/ }),
+/* 1193 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (immutable) */ __webpack_exports__["a"] = wrapMapToPropsConstant;
+/* unused harmony export getDependsOnOwnProps */
+/* harmony export (immutable) */ __webpack_exports__["b"] = wrapMapToPropsFunc;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__utils_verifyPlainObject__ = __webpack_require__(1194);
+
+
+function wrapMapToPropsConstant(getConstant) {
+  return function initConstantSelector(dispatch, options) {
+    var constant = getConstant(dispatch, options);
+
+    function constantSelector() {
+      return constant;
+    }
+    constantSelector.dependsOnOwnProps = false;
+    return constantSelector;
+  };
+}
+
+// dependsOnOwnProps is used by createMapToPropsProxy to determine whether to pass props as args
+// to the mapToProps function being wrapped. It is also used by makePurePropsSelector to determine
+// whether mapToProps needs to be invoked when props have changed.
+// 
+// A length of one signals that mapToProps does not depend on props from the parent component.
+// A length of zero is assumed to mean mapToProps is getting args via arguments or ...args and
+// therefore not reporting its length accurately..
+function getDependsOnOwnProps(mapToProps) {
+  return mapToProps.dependsOnOwnProps !== null && mapToProps.dependsOnOwnProps !== undefined ? Boolean(mapToProps.dependsOnOwnProps) : mapToProps.length !== 1;
+}
+
+// Used by whenMapStateToPropsIsFunction and whenMapDispatchToPropsIsFunction,
+// this function wraps mapToProps in a proxy function which does several things:
+// 
+//  * Detects whether the mapToProps function being called depends on props, which
+//    is used by selectorFactory to decide if it should reinvoke on props changes.
+//    
+//  * On first call, handles mapToProps if returns another function, and treats that
+//    new function as the true mapToProps for subsequent calls.
+//    
+//  * On first call, verifies the first result is a plain object, in order to warn
+//    the developer that their mapToProps function is not returning a valid result.
+//    
+function wrapMapToPropsFunc(mapToProps, methodName) {
+  return function initProxySelector(dispatch, _ref) {
+    var displayName = _ref.displayName;
+
+    var proxy = function mapToPropsProxy(stateOrDispatch, ownProps) {
+      return proxy.dependsOnOwnProps ? proxy.mapToProps(stateOrDispatch, ownProps) : proxy.mapToProps(stateOrDispatch);
+    };
+
+    // allow detectFactoryAndVerify to get ownProps
+    proxy.dependsOnOwnProps = true;
+
+    proxy.mapToProps = function detectFactoryAndVerify(stateOrDispatch, ownProps) {
+      proxy.mapToProps = mapToProps;
+      proxy.dependsOnOwnProps = getDependsOnOwnProps(mapToProps);
+      var props = proxy(stateOrDispatch, ownProps);
+
+      if (typeof props === 'function') {
+        proxy.mapToProps = props;
+        proxy.dependsOnOwnProps = getDependsOnOwnProps(props);
+        props = proxy(stateOrDispatch, ownProps);
+      }
+
+      if (false) verifyPlainObject(props, displayName, methodName);
+
+      return props;
+    };
+
+    return proxy;
+  };
+}
+
+/***/ }),
+/* 1194 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export default */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_lodash_es_isPlainObject__ = __webpack_require__(33);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__warning__ = __webpack_require__(1190);
+
+
+
+function verifyPlainObject(value, displayName, methodName) {
+  if (!Object(__WEBPACK_IMPORTED_MODULE_0_lodash_es_isPlainObject__["a" /* default */])(value)) {
+    Object(__WEBPACK_IMPORTED_MODULE_1__warning__["a" /* default */])(methodName + '() in ' + displayName + ' must return a plain object. Instead received ' + value + '.');
+  }
+}
+
+/***/ }),
+/* 1195 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (immutable) */ __webpack_exports__["a"] = createProvider;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_prop_types__ = __webpack_require__(20);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_prop_types___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_prop_types__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__utils_PropTypes__ = __webpack_require__(1191);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3__utils_warning__ = __webpack_require__(1190);
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
+
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
+
+
+
+
+
+
+var didWarnAboutReceivingStore = false;
+function warnAboutReceivingStore() {
+  if (didWarnAboutReceivingStore) {
+    return;
+  }
+  didWarnAboutReceivingStore = true;
+
+  Object(__WEBPACK_IMPORTED_MODULE_3__utils_warning__["a" /* default */])('<Provider> does not support changing `store` on the fly. ' + 'It is most likely that you see this error because you updated to ' + 'Redux 2.x and React Redux 2.x which no longer hot reload reducers ' + 'automatically. See https://github.com/reactjs/react-redux/releases/' + 'tag/v2.0.0 for the migration instructions.');
+}
+
+function createProvider() {
+  var _Provider$childContex;
+
+  var storeKey = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 'store';
+  var subKey = arguments[1];
+
+  var subscriptionKey = subKey || storeKey + 'Subscription';
+
+  var Provider = function (_Component) {
+    _inherits(Provider, _Component);
+
+    Provider.prototype.getChildContext = function getChildContext() {
+      var _ref;
+
+      return _ref = {}, _ref[storeKey] = this[storeKey], _ref[subscriptionKey] = null, _ref;
+    };
+
+    function Provider(props, context) {
+      _classCallCheck(this, Provider);
+
+      var _this = _possibleConstructorReturn(this, _Component.call(this, props, context));
+
+      _this[storeKey] = props.store;
+      return _this;
+    }
+
+    Provider.prototype.render = function render() {
+      return __WEBPACK_IMPORTED_MODULE_0_react__["Children"].only(this.props.children);
+    };
+
+    return Provider;
+  }(__WEBPACK_IMPORTED_MODULE_0_react__["Component"]);
+
+  if (false) {
+    Provider.prototype.componentWillReceiveProps = function (nextProps) {
+      if (this[storeKey] !== nextProps.store) {
+        warnAboutReceivingStore();
+      }
+    };
+  }
+
+  Provider.propTypes = {
+    store: __WEBPACK_IMPORTED_MODULE_2__utils_PropTypes__["a" /* storeShape */].isRequired,
+    children: __WEBPACK_IMPORTED_MODULE_1_prop_types___default.a.element.isRequired
+  };
+  Provider.childContextTypes = (_Provider$childContex = {}, _Provider$childContex[storeKey] = __WEBPACK_IMPORTED_MODULE_2__utils_PropTypes__["a" /* storeShape */].isRequired, _Provider$childContex[subscriptionKey] = __WEBPACK_IMPORTED_MODULE_2__utils_PropTypes__["b" /* subscriptionShape */], _Provider$childContex);
+
+  return Provider;
+}
+
+/* harmony default export */ __webpack_exports__["b"] = (createProvider());
+
+/***/ }),
+/* 1196 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/**
+ * Copyright 2015, Yahoo! Inc.
+ * Copyrights licensed under the New BSD License. See the accompanying LICENSE file for terms.
+ */
+
+
+var REACT_STATICS = {
+    childContextTypes: true,
+    contextTypes: true,
+    defaultProps: true,
+    displayName: true,
+    getDefaultProps: true,
+    mixins: true,
+    propTypes: true,
+    type: true
+};
+
+var KNOWN_STATICS = {
+  name: true,
+  length: true,
+  prototype: true,
+  caller: true,
+  callee: true,
+  arguments: true,
+  arity: true
+};
+
+var defineProperty = Object.defineProperty;
+var getOwnPropertyNames = Object.getOwnPropertyNames;
+var getOwnPropertySymbols = Object.getOwnPropertySymbols;
+var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+var getPrototypeOf = Object.getPrototypeOf;
+var objectPrototype = getPrototypeOf && getPrototypeOf(Object);
+
+module.exports = function hoistNonReactStatics(targetComponent, sourceComponent, blacklist) {
+    if (typeof sourceComponent !== 'string') { // don't hoist over string (html) components
+
+        if (objectPrototype) {
+            var inheritedComponent = getPrototypeOf(sourceComponent);
+            if (inheritedComponent && inheritedComponent !== objectPrototype) {
+                hoistNonReactStatics(targetComponent, inheritedComponent, blacklist);
+            }
+        }
+
+        var keys = getOwnPropertyNames(sourceComponent);
+
+        if (getOwnPropertySymbols) {
+            keys = keys.concat(getOwnPropertySymbols(sourceComponent));
+        }
+
+        for (var i = 0; i < keys.length; ++i) {
+            var key = keys[i];
+            if (!REACT_STATICS[key] && !KNOWN_STATICS[key] && (!blacklist || !blacklist[key])) {
+                var descriptor = getOwnPropertyDescriptor(sourceComponent, key);
+                try { // Avoid failures from read-only properties
+                    defineProperty(targetComponent, key, descriptor);
+                } catch (e) {}
+            }
+        }
+
+        return targetComponent;
+    }
+
+    return targetComponent;
+};
+
+
+/***/ }),
+/* 1197 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "a", function() { return Subscription; });
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+// encapsulates the subscription logic for connecting a component to the redux store, as
+// well as nesting subscriptions of descendant components, so that we can ensure the
+// ancestor components re-render before descendants
+
+var CLEARED = null;
+var nullListeners = {
+  notify: function notify() {}
+};
+
+function createListenerCollection() {
+  // the current/next pattern is copied from redux's createStore code.
+  // TODO: refactor+expose that code to be reusable here?
+  var current = [];
+  var next = [];
+
+  return {
+    clear: function clear() {
+      next = CLEARED;
+      current = CLEARED;
+    },
+    notify: function notify() {
+      var listeners = current = next;
+      for (var i = 0; i < listeners.length; i++) {
+        listeners[i]();
+      }
+    },
+    get: function get() {
+      return next;
+    },
+    subscribe: function subscribe(listener) {
+      var isSubscribed = true;
+      if (next === current) next = current.slice();
+      next.push(listener);
+
+      return function unsubscribe() {
+        if (!isSubscribed || current === CLEARED) return;
+        isSubscribed = false;
+
+        if (next === current) next = current.slice();
+        next.splice(next.indexOf(listener), 1);
+      };
+    }
+  };
+}
+
+var Subscription = function () {
+  function Subscription(store, parentSub, onStateChange) {
+    _classCallCheck(this, Subscription);
+
+    this.store = store;
+    this.parentSub = parentSub;
+    this.onStateChange = onStateChange;
+    this.unsubscribe = null;
+    this.listeners = nullListeners;
+  }
+
+  Subscription.prototype.addNestedSub = function addNestedSub(listener) {
+    this.trySubscribe();
+    return this.listeners.subscribe(listener);
+  };
+
+  Subscription.prototype.notifyNestedSubs = function notifyNestedSubs() {
+    this.listeners.notify();
+  };
+
+  Subscription.prototype.isSubscribed = function isSubscribed() {
+    return Boolean(this.unsubscribe);
+  };
+
+  Subscription.prototype.trySubscribe = function trySubscribe() {
+    if (!this.unsubscribe) {
+      this.unsubscribe = this.parentSub ? this.parentSub.addNestedSub(this.onStateChange) : this.store.subscribe(this.onStateChange);
+
+      this.listeners = createListenerCollection();
+    }
+  };
+
+  Subscription.prototype.tryUnsubscribe = function tryUnsubscribe() {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+      this.listeners.clear();
+      this.listeners = nullListeners;
+    }
+  };
+
+  return Subscription;
+}();
+
+
+
+/***/ }),
+/* 1198 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export createConnect */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__components_connectAdvanced__ = __webpack_require__(1192);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__utils_shallowEqual__ = __webpack_require__(1199);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__mapDispatchToProps__ = __webpack_require__(1200);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3__mapStateToProps__ = __webpack_require__(1201);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4__mergeProps__ = __webpack_require__(1202);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5__selectorFactory__ = __webpack_require__(1203);
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
+
+
+
+
+
+
+
+
+/*
+  connect is a facade over connectAdvanced. It turns its args into a compatible
+  selectorFactory, which has the signature:
+
+    (dispatch, options) => (nextState, nextOwnProps) => nextFinalProps
+  
+  connect passes its args to connectAdvanced as options, which will in turn pass them to
+  selectorFactory each time a Connect component instance is instantiated or hot reloaded.
+
+  selectorFactory returns a final props selector from its mapStateToProps,
+  mapStateToPropsFactories, mapDispatchToProps, mapDispatchToPropsFactories, mergeProps,
+  mergePropsFactories, and pure args.
+
+  The resulting final props selector is called by the Connect component instance whenever
+  it receives new props or store state.
+ */
+
+function match(arg, factories, name) {
+  for (var i = factories.length - 1; i >= 0; i--) {
+    var result = factories[i](arg);
+    if (result) return result;
+  }
+
+  return function (dispatch, options) {
+    throw new Error('Invalid value of type ' + typeof arg + ' for ' + name + ' argument when connecting component ' + options.wrappedComponentName + '.');
+  };
+}
+
+function strictEqual(a, b) {
+  return a === b;
+}
+
+// createConnect with default args builds the 'official' connect behavior. Calling it with
+// different options opens up some testing and extensibility scenarios
+function createConnect() {
+  var _ref = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {},
+      _ref$connectHOC = _ref.connectHOC,
+      connectHOC = _ref$connectHOC === undefined ? __WEBPACK_IMPORTED_MODULE_0__components_connectAdvanced__["a" /* default */] : _ref$connectHOC,
+      _ref$mapStateToPropsF = _ref.mapStateToPropsFactories,
+      mapStateToPropsFactories = _ref$mapStateToPropsF === undefined ? __WEBPACK_IMPORTED_MODULE_3__mapStateToProps__["a" /* default */] : _ref$mapStateToPropsF,
+      _ref$mapDispatchToPro = _ref.mapDispatchToPropsFactories,
+      mapDispatchToPropsFactories = _ref$mapDispatchToPro === undefined ? __WEBPACK_IMPORTED_MODULE_2__mapDispatchToProps__["a" /* default */] : _ref$mapDispatchToPro,
+      _ref$mergePropsFactor = _ref.mergePropsFactories,
+      mergePropsFactories = _ref$mergePropsFactor === undefined ? __WEBPACK_IMPORTED_MODULE_4__mergeProps__["a" /* default */] : _ref$mergePropsFactor,
+      _ref$selectorFactory = _ref.selectorFactory,
+      selectorFactory = _ref$selectorFactory === undefined ? __WEBPACK_IMPORTED_MODULE_5__selectorFactory__["a" /* default */] : _ref$selectorFactory;
+
+  return function connect(mapStateToProps, mapDispatchToProps, mergeProps) {
+    var _ref2 = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {},
+        _ref2$pure = _ref2.pure,
+        pure = _ref2$pure === undefined ? true : _ref2$pure,
+        _ref2$areStatesEqual = _ref2.areStatesEqual,
+        areStatesEqual = _ref2$areStatesEqual === undefined ? strictEqual : _ref2$areStatesEqual,
+        _ref2$areOwnPropsEqua = _ref2.areOwnPropsEqual,
+        areOwnPropsEqual = _ref2$areOwnPropsEqua === undefined ? __WEBPACK_IMPORTED_MODULE_1__utils_shallowEqual__["a" /* default */] : _ref2$areOwnPropsEqua,
+        _ref2$areStatePropsEq = _ref2.areStatePropsEqual,
+        areStatePropsEqual = _ref2$areStatePropsEq === undefined ? __WEBPACK_IMPORTED_MODULE_1__utils_shallowEqual__["a" /* default */] : _ref2$areStatePropsEq,
+        _ref2$areMergedPropsE = _ref2.areMergedPropsEqual,
+        areMergedPropsEqual = _ref2$areMergedPropsE === undefined ? __WEBPACK_IMPORTED_MODULE_1__utils_shallowEqual__["a" /* default */] : _ref2$areMergedPropsE,
+        extraOptions = _objectWithoutProperties(_ref2, ['pure', 'areStatesEqual', 'areOwnPropsEqual', 'areStatePropsEqual', 'areMergedPropsEqual']);
+
+    var initMapStateToProps = match(mapStateToProps, mapStateToPropsFactories, 'mapStateToProps');
+    var initMapDispatchToProps = match(mapDispatchToProps, mapDispatchToPropsFactories, 'mapDispatchToProps');
+    var initMergeProps = match(mergeProps, mergePropsFactories, 'mergeProps');
+
+    return connectHOC(selectorFactory, _extends({
+      // used in error messages
+      methodName: 'connect',
+
+      // used to compute Connect's displayName from the wrapped component's displayName.
+      getDisplayName: function getDisplayName(name) {
+        return 'Connect(' + name + ')';
+      },
+
+      // if mapStateToProps is falsy, the Connect component doesn't subscribe to store state changes
+      shouldHandleStateChanges: Boolean(mapStateToProps),
+
+      // passed through to selectorFactory
+      initMapStateToProps: initMapStateToProps,
+      initMapDispatchToProps: initMapDispatchToProps,
+      initMergeProps: initMergeProps,
+      pure: pure,
+      areStatesEqual: areStatesEqual,
+      areOwnPropsEqual: areOwnPropsEqual,
+      areStatePropsEqual: areStatePropsEqual,
+      areMergedPropsEqual: areMergedPropsEqual
+
+    }, extraOptions));
+  };
+}
+
+/* harmony default export */ __webpack_exports__["a"] = (createConnect());
+
+/***/ }),
+/* 1199 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony export (immutable) */ __webpack_exports__["a"] = shallowEqual;
+var hasOwn = Object.prototype.hasOwnProperty;
+
+function is(x, y) {
+  if (x === y) {
+    return x !== 0 || y !== 0 || 1 / x === 1 / y;
+  } else {
+    return x !== x && y !== y;
+  }
+}
+
+function shallowEqual(objA, objB) {
+  if (is(objA, objB)) return true;
+
+  if (typeof objA !== 'object' || objA === null || typeof objB !== 'object' || objB === null) {
+    return false;
+  }
+
+  var keysA = Object.keys(objA);
+  var keysB = Object.keys(objB);
+
+  if (keysA.length !== keysB.length) return false;
+
+  for (var i = 0; i < keysA.length; i++) {
+    if (!hasOwn.call(objB, keysA[i]) || !is(objA[keysA[i]], objB[keysA[i]])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/***/ }),
+/* 1200 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export whenMapDispatchToPropsIsFunction */
+/* unused harmony export whenMapDispatchToPropsIsMissing */
+/* unused harmony export whenMapDispatchToPropsIsObject */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_redux__ = __webpack_require__(3);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__wrapMapToProps__ = __webpack_require__(1193);
+
+
+
+function whenMapDispatchToPropsIsFunction(mapDispatchToProps) {
+  return typeof mapDispatchToProps === 'function' ? Object(__WEBPACK_IMPORTED_MODULE_1__wrapMapToProps__["b" /* wrapMapToPropsFunc */])(mapDispatchToProps, 'mapDispatchToProps') : undefined;
+}
+
+function whenMapDispatchToPropsIsMissing(mapDispatchToProps) {
+  return !mapDispatchToProps ? Object(__WEBPACK_IMPORTED_MODULE_1__wrapMapToProps__["a" /* wrapMapToPropsConstant */])(function (dispatch) {
+    return { dispatch: dispatch };
+  }) : undefined;
+}
+
+function whenMapDispatchToPropsIsObject(mapDispatchToProps) {
+  return mapDispatchToProps && typeof mapDispatchToProps === 'object' ? Object(__WEBPACK_IMPORTED_MODULE_1__wrapMapToProps__["a" /* wrapMapToPropsConstant */])(function (dispatch) {
+    return Object(__WEBPACK_IMPORTED_MODULE_0_redux__["bindActionCreators"])(mapDispatchToProps, dispatch);
+  }) : undefined;
+}
+
+/* harmony default export */ __webpack_exports__["a"] = ([whenMapDispatchToPropsIsFunction, whenMapDispatchToPropsIsMissing, whenMapDispatchToPropsIsObject]);
+
+/***/ }),
+/* 1201 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export whenMapStateToPropsIsFunction */
+/* unused harmony export whenMapStateToPropsIsMissing */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__wrapMapToProps__ = __webpack_require__(1193);
+
+
+function whenMapStateToPropsIsFunction(mapStateToProps) {
+  return typeof mapStateToProps === 'function' ? Object(__WEBPACK_IMPORTED_MODULE_0__wrapMapToProps__["b" /* wrapMapToPropsFunc */])(mapStateToProps, 'mapStateToProps') : undefined;
+}
+
+function whenMapStateToPropsIsMissing(mapStateToProps) {
+  return !mapStateToProps ? Object(__WEBPACK_IMPORTED_MODULE_0__wrapMapToProps__["a" /* wrapMapToPropsConstant */])(function () {
+    return {};
+  }) : undefined;
+}
+
+/* harmony default export */ __webpack_exports__["a"] = ([whenMapStateToPropsIsFunction, whenMapStateToPropsIsMissing]);
+
+/***/ }),
+/* 1202 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export defaultMergeProps */
+/* unused harmony export wrapMergePropsFunc */
+/* unused harmony export whenMergePropsIsFunction */
+/* unused harmony export whenMergePropsIsOmitted */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__utils_verifyPlainObject__ = __webpack_require__(1194);
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+
+
+function defaultMergeProps(stateProps, dispatchProps, ownProps) {
+  return _extends({}, ownProps, stateProps, dispatchProps);
+}
+
+function wrapMergePropsFunc(mergeProps) {
+  return function initMergePropsProxy(dispatch, _ref) {
+    var displayName = _ref.displayName,
+        pure = _ref.pure,
+        areMergedPropsEqual = _ref.areMergedPropsEqual;
+
+    var hasRunOnce = false;
+    var mergedProps = void 0;
+
+    return function mergePropsProxy(stateProps, dispatchProps, ownProps) {
+      var nextMergedProps = mergeProps(stateProps, dispatchProps, ownProps);
+
+      if (hasRunOnce) {
+        if (!pure || !areMergedPropsEqual(nextMergedProps, mergedProps)) mergedProps = nextMergedProps;
+      } else {
+        hasRunOnce = true;
+        mergedProps = nextMergedProps;
+
+        if (false) verifyPlainObject(mergedProps, displayName, 'mergeProps');
+      }
+
+      return mergedProps;
+    };
+  };
+}
+
+function whenMergePropsIsFunction(mergeProps) {
+  return typeof mergeProps === 'function' ? wrapMergePropsFunc(mergeProps) : undefined;
+}
+
+function whenMergePropsIsOmitted(mergeProps) {
+  return !mergeProps ? function () {
+    return defaultMergeProps;
+  } : undefined;
+}
+
+/* harmony default export */ __webpack_exports__["a"] = ([whenMergePropsIsFunction, whenMergePropsIsOmitted]);
+
+/***/ }),
+/* 1203 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export impureFinalPropsSelectorFactory */
+/* unused harmony export pureFinalPropsSelectorFactory */
+/* harmony export (immutable) */ __webpack_exports__["a"] = finalPropsSelectorFactory;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__verifySubselectors__ = __webpack_require__(1204);
+function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
+
+
+
+function impureFinalPropsSelectorFactory(mapStateToProps, mapDispatchToProps, mergeProps, dispatch) {
+  return function impureFinalPropsSelector(state, ownProps) {
+    return mergeProps(mapStateToProps(state, ownProps), mapDispatchToProps(dispatch, ownProps), ownProps);
+  };
+}
+
+function pureFinalPropsSelectorFactory(mapStateToProps, mapDispatchToProps, mergeProps, dispatch, _ref) {
+  var areStatesEqual = _ref.areStatesEqual,
+      areOwnPropsEqual = _ref.areOwnPropsEqual,
+      areStatePropsEqual = _ref.areStatePropsEqual;
+
+  var hasRunAtLeastOnce = false;
+  var state = void 0;
+  var ownProps = void 0;
+  var stateProps = void 0;
+  var dispatchProps = void 0;
+  var mergedProps = void 0;
+
+  function handleFirstCall(firstState, firstOwnProps) {
+    state = firstState;
+    ownProps = firstOwnProps;
+    stateProps = mapStateToProps(state, ownProps);
+    dispatchProps = mapDispatchToProps(dispatch, ownProps);
+    mergedProps = mergeProps(stateProps, dispatchProps, ownProps);
+    hasRunAtLeastOnce = true;
+    return mergedProps;
+  }
+
+  function handleNewPropsAndNewState() {
+    stateProps = mapStateToProps(state, ownProps);
+
+    if (mapDispatchToProps.dependsOnOwnProps) dispatchProps = mapDispatchToProps(dispatch, ownProps);
+
+    mergedProps = mergeProps(stateProps, dispatchProps, ownProps);
+    return mergedProps;
+  }
+
+  function handleNewProps() {
+    if (mapStateToProps.dependsOnOwnProps) stateProps = mapStateToProps(state, ownProps);
+
+    if (mapDispatchToProps.dependsOnOwnProps) dispatchProps = mapDispatchToProps(dispatch, ownProps);
+
+    mergedProps = mergeProps(stateProps, dispatchProps, ownProps);
+    return mergedProps;
+  }
+
+  function handleNewState() {
+    var nextStateProps = mapStateToProps(state, ownProps);
+    var statePropsChanged = !areStatePropsEqual(nextStateProps, stateProps);
+    stateProps = nextStateProps;
+
+    if (statePropsChanged) mergedProps = mergeProps(stateProps, dispatchProps, ownProps);
+
+    return mergedProps;
+  }
+
+  function handleSubsequentCalls(nextState, nextOwnProps) {
+    var propsChanged = !areOwnPropsEqual(nextOwnProps, ownProps);
+    var stateChanged = !areStatesEqual(nextState, state);
+    state = nextState;
+    ownProps = nextOwnProps;
+
+    if (propsChanged && stateChanged) return handleNewPropsAndNewState();
+    if (propsChanged) return handleNewProps();
+    if (stateChanged) return handleNewState();
+    return mergedProps;
+  }
+
+  return function pureFinalPropsSelector(nextState, nextOwnProps) {
+    return hasRunAtLeastOnce ? handleSubsequentCalls(nextState, nextOwnProps) : handleFirstCall(nextState, nextOwnProps);
+  };
+}
+
+// TODO: Add more comments
+
+// If pure is true, the selector returned by selectorFactory will memoize its results,
+// allowing connectAdvanced's shouldComponentUpdate to return false if final
+// props have not changed. If false, the selector will always return a new
+// object and shouldComponentUpdate will always return true.
+
+function finalPropsSelectorFactory(dispatch, _ref2) {
+  var initMapStateToProps = _ref2.initMapStateToProps,
+      initMapDispatchToProps = _ref2.initMapDispatchToProps,
+      initMergeProps = _ref2.initMergeProps,
+      options = _objectWithoutProperties(_ref2, ['initMapStateToProps', 'initMapDispatchToProps', 'initMergeProps']);
+
+  var mapStateToProps = initMapStateToProps(dispatch, options);
+  var mapDispatchToProps = initMapDispatchToProps(dispatch, options);
+  var mergeProps = initMergeProps(dispatch, options);
+
+  if (false) {
+    verifySubselectors(mapStateToProps, mapDispatchToProps, mergeProps, options.displayName);
+  }
+
+  var selectorFactory = options.pure ? pureFinalPropsSelectorFactory : impureFinalPropsSelectorFactory;
+
+  return selectorFactory(mapStateToProps, mapDispatchToProps, mergeProps, dispatch, options);
+}
+
+/***/ }),
+/* 1204 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* unused harmony export default */
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__utils_warning__ = __webpack_require__(1190);
+
+
+function verify(selector, methodName, displayName) {
+  if (!selector) {
+    throw new Error('Unexpected value for ' + methodName + ' in ' + displayName + '.');
+  } else if (methodName === 'mapStateToProps' || methodName === 'mapDispatchToProps') {
+    if (!selector.hasOwnProperty('dependsOnOwnProps')) {
+      Object(__WEBPACK_IMPORTED_MODULE_0__utils_warning__["a" /* default */])('The selector for ' + methodName + ' of ' + displayName + ' did not specify a value for dependsOnOwnProps.');
+    }
+  }
+}
+
+function verifySubselectors(mapStateToProps, mapDispatchToProps, mergeProps, displayName) {
+  verify(mapStateToProps, 'mapStateToProps', displayName);
+  verify(mapDispatchToProps, 'mapDispatchToProps', displayName);
+  verify(mergeProps, 'mergeProps', displayName);
+}
+
+/***/ }),
+/* 1205 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, '__esModule', {
+    value: true
+});
+
+var _extends = Object.assign || function (target) {
+    for (var i = 1; i < arguments.length; i++) {
+        var source = arguments[i];for (var key in source) {
+            if (Object.prototype.hasOwnProperty.call(source, key)) {
+                target[key] = source[key];
+            }
+        }
+    }return target;
+};
+
+var _createClass = function () {
+    function defineProperties(target, props) {
+        for (var i = 0; i < props.length; i++) {
+            var descriptor = props[i];descriptor.enumerable = descriptor.enumerable || false;descriptor.configurable = true;if ('value' in descriptor) descriptor.writable = true;Object.defineProperty(target, descriptor.key, descriptor);
+        }
+    }return function (Constructor, protoProps, staticProps) {
+        if (protoProps) defineProperties(Constructor.prototype, protoProps);if (staticProps) defineProperties(Constructor, staticProps);return Constructor;
+    };
+}();
+
+var _get = function get(_x, _x2, _x3) {
+    var _again = true;_function: while (_again) {
+        var object = _x,
+            property = _x2,
+            receiver = _x3;_again = false;if (object === null) object = Function.prototype;var desc = Object.getOwnPropertyDescriptor(object, property);if (desc === undefined) {
+            var parent = Object.getPrototypeOf(object);if (parent === null) {
+                return undefined;
+            } else {
+                _x = parent;_x2 = property;_x3 = receiver;_again = true;desc = parent = undefined;continue _function;
+            }
+        } else if ('value' in desc) {
+            return desc.value;
+        } else {
+            var getter = desc.get;if (getter === undefined) {
+                return undefined;
+            }return getter.call(receiver);
+        }
+    }
+};
+
+function _interopRequireDefault(obj) {
+    return obj && obj.__esModule ? obj : { 'default': obj };
+}
+
+function _objectWithoutProperties(obj, keys) {
+    var target = {};for (var i in obj) {
+        if (keys.indexOf(i) >= 0) continue;if (!Object.prototype.hasOwnProperty.call(obj, i)) continue;target[i] = obj[i];
+    }return target;
+}
+
+function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+        throw new TypeError('Cannot call a class as a function');
+    }
+}
+
+function _inherits(subClass, superClass) {
+    if (typeof superClass !== 'function' && superClass !== null) {
+        throw new TypeError('Super expression must either be null or a function, not ' + typeof superClass);
+    }subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } });if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+}
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var DOMParser = typeof window !== 'undefined' && window.DOMParser;
+var process = process || {};
+process.env = process.env || {};
+var parserAvailable = typeof DOMParser !== 'undefined' && DOMParser.prototype != null && DOMParser.prototype.parseFromString != null;
+
+if ("production" !== process.env.NODE_ENV && !parserAvailable) {
+    console.info('<InlineSVG />: `raw` prop works only when `window.DOMParser` exists.');
+}
+
+function isParsable(src) {
+    // kinda naive but meh, ain't gonna use full-blown parser for this
+    return parserAvailable && typeof src === 'string' && src.trim().substr(0, 4) === '<svg';
+}
+
+// parse SVG string using `DOMParser`
+function parseFromSVGString(src) {
+    var parser = new DOMParser();
+    return parser.parseFromString(src, "image/svg+xml");
+}
+
+// Transform DOM prop/attr names applicable to `<svg>` element but react-limited
+function switchSVGAttrToReactProp(propName) {
+    switch (propName) {
+        case 'class':
+            return 'className';
+        default:
+            return propName;
+    }
+}
+
+var InlineSVG = function (_React$Component) {
+    _inherits(InlineSVG, _React$Component);
+
+    _createClass(InlineSVG, null, [{
+        key: 'defaultProps',
+        value: {
+            element: 'i',
+            raw: false,
+            src: ''
+        },
+        enumerable: true
+    }, {
+        key: 'propTypes',
+        value: {
+            src: _react2['default'].PropTypes.string.isRequired,
+            element: _react2['default'].PropTypes.string,
+            raw: _react2['default'].PropTypes.bool
+        },
+        enumerable: true
+    }]);
+
+    function InlineSVG(props) {
+        _classCallCheck(this, InlineSVG);
+
+        _get(Object.getPrototypeOf(InlineSVG.prototype), 'constructor', this).call(this, props);
+        this._extractSVGProps = this._extractSVGProps.bind(this);
+    }
+
+    // Serialize `Attr` objects in `NamedNodeMap`
+
+    _createClass(InlineSVG, [{
+        key: '_serializeAttrs',
+        value: function _serializeAttrs(map) {
+            var ret = {};
+            var prop = undefined;
+            for (var i = 0; i < map.length; i++) {
+                prop = switchSVGAttrToReactProp(map[i].name);
+                ret[prop] = map[i].value;
+            }
+            return ret;
+        }
+
+        // get <svg /> element props
+    }, {
+        key: '_extractSVGProps',
+        value: function _extractSVGProps(src) {
+            var map = parseFromSVGString(src).documentElement.attributes;
+            return map.length > 0 ? this._serializeAttrs(map) : null;
+        }
+
+        // get content inside <svg> element.
+    }, {
+        key: '_stripSVG',
+        value: function _stripSVG(src) {
+            return parseFromSVGString(src).documentElement.innerHTML;
+        }
+    }, {
+        key: 'componentWillReceiveProps',
+        value: function componentWillReceiveProps(_ref) {
+            var children = _ref.children;
+
+            if ("production" !== process.env.NODE_ENV && children != null) {
+                console.info('<InlineSVG />: `children` prop will be ignored.');
+            }
+        }
+    }, {
+        key: 'render',
+        value: function render() {
+            var Element = undefined,
+                __html = undefined,
+                svgProps = undefined;
+            var _props = this.props;
+            var element = _props.element;
+            var raw = _props.raw;
+            var src = _props.src;
+
+            var otherProps = _objectWithoutProperties(_props, ['element', 'raw', 'src']);
+
+            if (raw === true && isParsable(src)) {
+                Element = 'svg';
+                svgProps = this._extractSVGProps(src);
+                __html = this._stripSVG(src);
+            }
+            __html = __html || src;
+            Element = Element || element;
+            svgProps = svgProps || {};
+
+            return _react2['default'].createElement(Element, _extends({}, svgProps, otherProps, { src: null, children: null,
+                dangerouslySetInnerHTML: { __html: __html } }));
+        }
+    }]);
+
+    return InlineSVG;
+}(_react2['default'].Component);
+
+exports['default'] = InlineSVG;
+module.exports = exports['default'];
+
+/***/ }),
+/* 1206 */
+/***/ (function(module, exports) {
+
+
+
+function replaceOriginalVariableName(expression, generatedScopes) {
+  // JavaScript indetifier is a complex thing: it can contain '$', '\', ZWJ, any
+  // unicode letter or number. Simplifing that to latin character set for now.
+  // For simplicity, search only first characters of the expression to find an
+  // identifier/variable name.
+  const possibleVarNameRegex = /^([$\w]+)/;
+  const matchedVarName = possibleVarNameRegex.exec(expression);
+  if (!matchedVarName) {
+    return expression;
+  }
+
+  const originalName = matchedVarName[1];
+  // The generatedScopes sorted in inner-to-outer scope order, finding first.
+  const foundScope = generatedScopes.find(({ bindings }) => originalName in bindings);
+  if (!foundScope) {
+    return expression;
+  }
+
+  // Replace original name (which will be at the beginning of the expression)
+  // with found generated name.
+  const generatedName = foundScope.bindings[originalName];
+  const expressionWoOriginalName = expression.substring(originalName.length);
+  return `${generatedName}${expressionWoOriginalName}`;
+}
+
+module.exports = { replaceOriginalVariableName };
 
 /***/ })
 /******/ ]);

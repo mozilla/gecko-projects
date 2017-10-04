@@ -190,10 +190,10 @@ def register_callback_action(name, title, symbol, description, order=10000,
             return {
                 'created': {'$fromNow': ''},
                 'deadline': {'$fromNow': '12 hours'},
-                'expires': {'$fromNow': '14 days'},
+                'expires': {'$fromNow': '1 year'},
                 'metadata': {
                     'owner': 'mozilla-taskcluster-maintenance@mozilla.com',
-                    'source': '{}raw-file/{}/{}'.format(
+                    'source': '{}/raw-file/{}/{}'.format(
                         parameters['head_repository'], parameters['head_rev'], source_path,
                     ),
                     'name': 'Action: {}'.format(title),
@@ -215,6 +215,8 @@ def register_callback_action(name, title, symbol, description, order=10000,
                         parameters['project'], parameters['head_rev'], parameters['pushlog_id']),
                     'tc-treeherder-stage.v2.{}.{}.{}'.format(
                         parameters['project'], parameters['head_rev'], parameters['pushlog_id']),
+                    'index.gecko.v2.{}.pushlog-id.{}.actions.${{ownTaskId}}'.format(
+                        parameters['project'], parameters['pushlog_id'])
                 ],
                 'payload': {
                     'env': {
@@ -229,6 +231,13 @@ def register_callback_action(name, title, symbol, description, order=10000,
                         'ACTION_INPUT': {'$json': {'$eval': 'input'}},
                         'ACTION_CALLBACK': cb.__name__,
                         'ACTION_PARAMETERS': {'$json': {'$eval': 'parameters'}},
+                    },
+                    'artifacts': {
+                        'public': {
+                            'type': 'directory',
+                            'path': '/builds/worker/artifacts',
+                            'expires': {'$fromNow': '1 year'},
+                        },
                     },
                     'cache': {
                         'level-{}-checkouts'.format(parameters['level']):
@@ -255,6 +264,16 @@ ln -s /builds/worker/artifacts artifacts &&
                         'groupName': 'action-callback',
                         'groupSymbol': 'AC',
                         'symbol': symbol,
+                    },
+                    'parent': task_group_id,
+                    'action': {
+                        'name': name,
+                        'context': {
+                            'taskGroupId': task_group_id,
+                            'taskId': {'$eval': 'taskId'},
+                            'input': {'$eval': 'input'},
+                            'parameters': {'$eval': 'parameters'},
+                        },
                     },
                 },
             }

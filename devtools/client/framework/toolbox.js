@@ -453,13 +453,12 @@ Toolbox.prototype = {
         if (e.originalTarget.closest("input[type=text]") ||
             e.originalTarget.closest("input[type=search]") ||
             e.originalTarget.closest("input:not([type])") ||
-            e.originalTarget.closest("textarea")
-        ) {
+            e.originalTarget.closest("textarea")) {
           e.stopPropagation();
           e.preventDefault();
           this.openTextBoxContextMenu(e.screenX, e.screenY);
         }
-      }, true);
+      });
 
       this.shortcuts = new KeyShortcuts({
         window: this.doc.defaultView
@@ -1023,7 +1022,7 @@ Toolbox.prototype = {
     if (!this._notificationBox) {
       let { NotificationBox, PriorityLevels } =
         this.browserRequire(
-          "devtools/client/shared/components/notification-box");
+          "devtools/client/shared/components/NotificationBox");
 
       NotificationBox = this.React.createFactory(NotificationBox);
 

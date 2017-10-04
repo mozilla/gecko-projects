@@ -17,6 +17,7 @@ use element_state::ElementState;
 use font_metrics::FontMetricsProvider;
 use media_queries::Device;
 use properties::{AnimationRules, ComputedValues, PropertyDeclarationBlock};
+#[cfg(feature = "gecko")] use properties::LonghandId;
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValue;
 #[cfg(feature = "gecko")] use properties::animated_properties::TransitionProperty;
 use rule_tree::CascadeLevel;
@@ -26,9 +27,8 @@ use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
 use selectors::sink::Push;
 use servo_arc::{Arc, ArcBorrow};
 use shared_lock::Locked;
-use smallvec::VecLike;
 use std::fmt;
-#[cfg(feature = "gecko")] use hash::HashMap;
+#[cfg(feature = "gecko")] use hash::FnvHashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -648,28 +648,10 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
         false
     }
 
-    /// Gets declarations from XBL bindings from the element.
-    fn get_declarations_from_xbl_bindings<V>(
-        &self,
-        pseudo_element: Option<&PseudoElement>,
-        applicable_declarations: &mut V
-    ) -> bool
-    where
-        V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock>
-    {
-        self.each_xbl_stylist(|stylist| {
-            stylist.push_applicable_declarations_as_xbl_only_stylist(
-                self,
-                pseudo_element,
-                applicable_declarations
-            );
-        })
-    }
-
-    /// Gets the current existing CSS transitions, by |property, end value| pairs in a HashMap.
+    /// Gets the current existing CSS transitions, by |property, end value| pairs in a FnvHashMap.
     #[cfg(feature = "gecko")]
     fn get_css_transitions_info(&self)
-                                -> HashMap<TransitionProperty, Arc<AnimationValue>>;
+                                -> FnvHashMap<TransitionProperty, Arc<AnimationValue>>;
 
     /// Does a rough (and cheap) check for whether or not transitions might need to be updated that
     /// will quickly return false for the common case of no transitions specified or running. If
@@ -698,11 +680,11 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     #[cfg(feature = "gecko")]
     fn needs_transitions_update_per_property(
         &self,
-        property: &TransitionProperty,
+        property: &LonghandId,
         combined_duration: f32,
         before_change_style: &ComputedValues,
         after_change_style: &ComputedValues,
-        existing_transitions: &HashMap<TransitionProperty, Arc<AnimationValue>>
+        existing_transitions: &FnvHashMap<TransitionProperty, Arc<AnimationValue>>
     ) -> bool;
 
     /// Returns the value of the `xml:lang=""` attribute (or, if appropriate,

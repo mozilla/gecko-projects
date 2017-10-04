@@ -501,6 +501,33 @@ var basicShapeUnbalancedValues = [
   "inset(1px 2px 3px 4px round 5px / 6px",
 ];
 
+
+// Gradient values that are incorrectly accepted in Gecko, but are correctly
+// rejected with Servo's style-system backend (stylo):
+let gradientsNewlyRejectedInStylo = [
+  "radial-gradient(circle red, blue)",
+];
+
+// Gradient values that are consistently serialized in Stylo but not
+// in Gecko. Gecko drops the prefix during roundtrip.
+let gradientsValidInStyloBrokenInGecko = [
+  "-webkit-linear-gradient(top, red, blue)",
+  "-moz-linear-gradient(top, red, blue)",
+  "-moz-linear-gradient(center 0%, red, blue)",
+  "-moz-linear-gradient(50% top, red, blue)",
+  "-moz-linear-gradient(50% 0%, red, blue)",
+];
+
+if (SpecialPowers.DOMWindowUtils.isStyledByServo) {
+  invalidGradientAndElementValues.push(...gradientsNewlyRejectedInStylo);
+  validGradientAndElementValues.push(...gradientsValidInStyloBrokenInGecko);
+} else {
+  // NOTE: These are technically invalid, but Gecko's CSS parser thinks they're
+  // valid. So, if we're using Gecko's style system, we add them to the
+  // "valid" list, so we can at least detect if the behavior changes.
+  validGradientAndElementValues.push(...gradientsNewlyRejectedInStylo);
+}
+
 if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
   // Extend gradient lists with valid/invalid webkit-prefixed expressions:
   validGradientAndElementValues.push(

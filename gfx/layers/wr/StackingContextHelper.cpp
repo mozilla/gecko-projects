@@ -5,7 +5,6 @@
 
 #include "mozilla/layers/StackingContextHelper.h"
 
-#include "mozilla/layers/WebRenderLayer.h"
 #include "UnitTransforms.h"
 #include "nsDisplayList.h"
 
@@ -14,56 +13,9 @@ namespace layers {
 
 StackingContextHelper::StackingContextHelper()
   : mBuilder(nullptr)
+  , mScale(1.0f, 1.0f)
 {
   // mOrigin remains at 0,0
-}
-
-StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParentSC,
-                                             wr::DisplayListBuilder& aBuilder,
-                                             WebRenderLayer* aLayer,
-                                             const Maybe<gfx::Matrix4x4>& aTransform,
-                                             const nsTArray<wr::WrFilterOp>& aFilters)
-  : mBuilder(&aBuilder)
-{
-  wr::LayoutRect scBounds = aParentSC.ToRelativeLayoutRect(aLayer->BoundsForStackingContext());
-  Layer* layer = aLayer->GetLayer();
-  mTransform = aTransform.valueOr(layer->GetTransform());
-
-  float opacity = 1.0f;
-  mBuilder->PushStackingContext(scBounds, 0, &opacity,
-                                mTransform.IsIdentity() ? nullptr : &mTransform,
-                                wr::TransformStyle::Flat,
-                                nullptr,
-                                wr::ToMixBlendMode(layer->GetMixBlendMode()),
-                                aFilters,
-                                true);
-  mOrigin = aLayer->Bounds().TopLeft();
-}
-
-StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParentSC,
-                                             wr::DisplayListBuilder& aBuilder,
-                                             WebRenderLayer* aLayer,
-                                             uint64_t aAnimationsId,
-                                             float* aOpacityPtr,
-                                             gfx::Matrix4x4* aTransformPtr,
-                                             const nsTArray<wr::WrFilterOp>& aFilters)
-  : mBuilder(&aBuilder)
-{
-  wr::LayoutRect scBounds = aParentSC.ToRelativeLayoutRect(aLayer->BoundsForStackingContext());
-  if (aTransformPtr) {
-    mTransform = *aTransformPtr;
-  }
-
-  mBuilder->PushStackingContext(scBounds,
-                                aAnimationsId,
-                                aOpacityPtr,
-                                aTransformPtr,
-                                wr::TransformStyle::Flat,
-                                nullptr,
-                                wr::ToMixBlendMode(aLayer->GetLayer()->GetMixBlendMode()),
-                                aFilters,
-                                true);
-  mOrigin = aLayer->Bounds().TopLeft();
 }
 
 StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParentSC,
@@ -71,7 +23,7 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              nsDisplayListBuilder* aDisplayListBuilder,
                                              nsDisplayItem* aItem,
                                              nsDisplayList* aDisplayList,
-                                             gfx::Matrix4x4Typed<LayerPixel, LayerPixel>* aBoundTransform,
+                                             const gfx::Matrix4x4* aBoundTransform,
                                              uint64_t aAnimationsId,
                                              float* aOpacityPtr,
                                              gfx::Matrix4x4* aTransformPtr,
@@ -80,10 +32,17 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              const gfx::CompositionOp& aMixBlendMode,
                                              bool aBackfaceVisible)
   : mBuilder(&aBuilder)
+  , mScale(1.0f, 1.0f)
 {
   bool is2d = !aTransformPtr || (aTransformPtr->Is2D() && !aPerspectivePtr);
   if (aTransformPtr) {
     mTransform = *aTransformPtr;
+  }
+
+  // Compute scale for fallback rendering.
+  gfx::Matrix transform2d;
+  if (aBoundTransform && aBoundTransform->CanDraw2D(&transform2d)) {
+    mScale = transform2d.ScaleFactors(true) * aParentSC.mScale;
   }
 
   mBuilder->PushStackingContext(wr::LayoutRect(),

@@ -41,6 +41,7 @@ import org.mozilla.gecko.fxa.login.StateFactory;
 import org.mozilla.gecko.fxa.sync.FxAccountProfileService;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.NonObjectJSONException;
+import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.setup.Constants;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -147,6 +148,7 @@ public class AndroidFxAccount {
 
   protected final Context context;
   private final AccountManager accountManager;
+  private final long neverSynced = -1;
 
   // This is really, really meant to be final. Only changed when account name changes.
   // See Bug 1368147.
@@ -587,10 +589,26 @@ public class AndroidFxAccount {
       accountManager.setUserData(account, key, userdata.getString(key));
     }
 
-    AndroidFxAccount fxAccount = new AndroidFxAccount(context, account);
+    final AndroidFxAccount fxAccount = new AndroidFxAccount(context, account);
 
     if (!fromPickle) {
       fxAccount.clearSyncPrefs();
+
+      // We can nearly eliminate various pickle races by pickling the account right after creation.
+      // These races are an unfortunate by-product of Bug 1368147. The long-term solution is to stop
+      // pickling entirely, but for now we just ensure we'll have a pickle file as soon as possible.
+      // Pickle in a background thread to avoid strict mode warnings.
+      ThreadPool.run(new Runnable() {
+        @Override
+        public void run() {
+          try {
+            AccountPickler.pickle(fxAccount, FxAccountConstants.ACCOUNT_PICKLE_FILENAME);
+          } catch (Exception e) {
+            // Should never happen, but we really don't want to die in a background thread.
+            Logger.warn(LOG_TAG, "Got exception pickling current account details; ignoring.", e);
+          }
+        }
+      });
     }
 
     fxAccount.setAuthoritiesToSyncAutomaticallyMap(authoritiesToSyncAutomaticallyMap);
@@ -647,7 +665,7 @@ public class AndroidFxAccount {
    *
    * @param stagesToSync stage names to sync; can be null to sync <b>all</b> known stages.
    * @param stagesToSkip stage names to skip; can be null to skip <b>no</b> known stages.
-   * @param ignoreSettings whether we should check preferences for syncing over metered connections.
+   * @param ignoreSettings whether we should check if syncing is allowed via in-app or system settings.
    */
   public void requestImmediateSync(String[] stagesToSync, String[] stagesToSkip, boolean ignoreSettings) {
     FirefoxAccounts.requestImmediateSync(getAndroidAccount(), stagesToSync, stagesToSkip, ignoreSettings);
@@ -799,12 +817,20 @@ public class AndroidFxAccount {
   }
 
   public long getLastSyncedTimestamp() {
-    final long neverSynced = -1L;
     try {
       return getSyncPrefs().getLong(PREF_KEY_LAST_SYNCED_TIMESTAMP, neverSynced);
     } catch (Exception e) {
       Logger.warn(LOG_TAG, "Got exception getting last synced time; ignoring.", e);
       return neverSynced;
+    }
+  }
+
+  public boolean neverSynced() {
+    try {
+      return getSyncPrefs().getLong(PREF_KEY_LAST_SYNCED_TIMESTAMP, neverSynced) == -1;
+    } catch (Exception e) {
+      Logger.warn(LOG_TAG, "Got exception getting last synced time; ignoring.", e);
+      return false;
     }
   }
 

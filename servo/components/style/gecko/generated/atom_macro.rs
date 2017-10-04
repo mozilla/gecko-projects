@@ -3280,6 +3280,8 @@ cfg_if! {
             pub static nsGkAtoms_skewY: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms5slopeE"]
             pub static nsGkAtoms_slope: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms4slotE"]
+            pub static nsGkAtoms_slot: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms9softLightE"]
             pub static nsGkAtoms_softLight: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms7spacingE"]
@@ -4074,6 +4076,8 @@ cfg_if! {
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms5httpsE"]
             pub static nsGkAtoms_https: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms5proxyE"]
+            pub static nsGkAtoms_proxy: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms12cdataTagNameE"]
             pub static nsGkAtoms_cdataTagName: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms14commentTagNameE"]
@@ -8445,6 +8449,8 @@ cfg_if! {
             pub static nsGkAtoms_skewY: *mut nsIAtom;
             #[link_name = "?slope@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_slope: *mut nsIAtom;
+            #[link_name = "?slot@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_slot: *mut nsIAtom;
             #[link_name = "?softLight@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_softLight: *mut nsIAtom;
             #[link_name = "?spacing@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -9239,6 +9245,8 @@ cfg_if! {
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "?https@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_https: *mut nsIAtom;
+            #[link_name = "?proxy@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_proxy: *mut nsIAtom;
             #[link_name = "?cdataTagName@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_cdataTagName: *mut nsIAtom;
             #[link_name = "?commentTagName@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -13610,6 +13618,8 @@ cfg_if! {
             pub static nsGkAtoms_skewY: *mut nsIAtom;
             #[link_name = "\x01?slope@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_slope: *mut nsIAtom;
+            #[link_name = "\x01?slot@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_slot: *mut nsIAtom;
             #[link_name = "\x01?softLight@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_softLight: *mut nsIAtom;
             #[link_name = "\x01?spacing@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -14404,6 +14414,8 @@ cfg_if! {
             pub static nsGkAtoms_http: *mut nsIAtom;
             #[link_name = "\x01?https@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_https: *mut nsIAtom;
+            #[link_name = "\x01?proxy@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_proxy: *mut nsIAtom;
             #[link_name = "\x01?cdataTagName@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_cdataTagName: *mut nsIAtom;
             #[link_name = "\x01?commentTagName@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -18778,6 +18790,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_skewY as *mut _) } };
 ("slope") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_slope as *mut _) } };
+("slot") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_slot as *mut _) } };
 ("soft-light") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_softLight as *mut _) } };
 ("spacing") =>
@@ -19572,6 +19586,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_http as *mut _) } };
 ("https") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_https as *mut _) } };
+("proxy") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_proxy as *mut _) } };
 ("#cdata-section") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_cdataTagName as *mut _) } };
 ("#comment") =>

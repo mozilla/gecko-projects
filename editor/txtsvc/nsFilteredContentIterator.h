@@ -34,6 +34,8 @@ public:
   virtual nsresult Init(nsIDOMRange* aRange) override;
   virtual nsresult Init(nsINode* aStartContainer, uint32_t aStartOffset,
                         nsINode* aEndContainer, uint32_t aEndOffset) override;
+  virtual nsresult Init(const mozilla::RawRangeBoundary& aStart,
+                        const mozilla::RawRangeBoundary& aEnd) override;
   virtual void First() override;
   virtual void Last() override;
   virtual void Next() override;
@@ -66,11 +68,11 @@ protected:
   nsCOMPtr<nsIContentIterator> mIterator;
   nsCOMPtr<nsIContentIterator> mPreIterator;
 
-  nsCOMPtr<nsIAtom> mBlockQuoteAtom;
-  nsCOMPtr<nsIAtom> mScriptAtom;
-  nsCOMPtr<nsIAtom> mTextAreaAtom;
-  nsCOMPtr<nsIAtom> mSelectAreaAtom;
-  nsCOMPtr<nsIAtom> mMapAtom;
+  RefPtr<nsIAtom> mBlockQuoteAtom;
+  RefPtr<nsIAtom> mScriptAtom;
+  RefPtr<nsIAtom> mTextAreaAtom;
+  RefPtr<nsIAtom> mSelectAreaAtom;
+  RefPtr<nsIAtom> mMapAtom;
 
   nsCOMPtr<nsITextServicesFilter> mFilter;
   RefPtr<nsRange>               mRange;

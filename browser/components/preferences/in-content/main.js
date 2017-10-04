@@ -134,11 +134,25 @@ var gMainPane = {
 
   // Convenience & Performance Shortcuts
 
-  // These get defined by init().
-  _brandShortName: null,
-  _prefsBundle: null,
-  _list: null,
-  _filter: null,
+  get _brandShortName() {
+    delete this._brandShortName;
+    return this._brandShortName = document.getElementById("bundleBrand").getString("brandShortName");
+  },
+
+  get _prefsBundle() {
+    delete this._prefsBundle;
+    return this._prefsBundle = document.getElementById("bundlePreferences");
+  },
+
+  get _list() {
+    delete this._list;
+    return this._list = document.getElementById("handlersView")
+  },
+
+  get _filter() {
+    delete this._filter;
+    return this._filter = document.getElementById("filter")
+  },
 
   _prefSvc: Cc["@mozilla.org/preferences-service;1"].
     getService(Ci.nsIPrefBranch),
@@ -405,12 +419,6 @@ var gMainPane = {
     }
 
     // Initilize Application section.
-    // Initialize shortcuts to some commonly accessed elements & values.
-    this._brandShortName =
-      document.getElementById("bundleBrand").getString("brandShortName");
-    this._prefsBundle = document.getElementById("bundlePreferences");
-    this._list = document.getElementById("handlersView");
-    this._filter = document.getElementById("filter");
 
     // Observe preferences that influence what we display so we can rebuild
     // the view when they change.
@@ -457,23 +465,6 @@ var gMainPane = {
       this._sortColumn = document.getElementById("typeColumn");
     }
 
-    // Load the data and build the list of handlers.
-    // By doing this after pageshow, we ensure it doesn't delay painting
-    // of the preferences page.
-    promiseLoadHandlersList = new Promise((resolve, reject) => {
-      window.addEventListener("pageshow", async () => {
-        try {
-          this._loadData();
-          await this._rebuildVisibleTypes();
-          this._sortVisibleTypes();
-          this._rebuildView();
-          resolve();
-        } catch (ex) {
-          reject(ex);
-        }
-      }, {once: true});
-    });
-
     let browserBundle = document.getElementById("browserBundle");
     appendSearchKeywords("browserContainersSettings", [
       browserBundle.getString("userContextPersonal.label"),
@@ -486,6 +477,25 @@ var gMainPane = {
     Components.classes["@mozilla.org/observer-service;1"]
       .getService(Components.interfaces.nsIObserverService)
       .notifyObservers(window, "main-pane-loaded");
+  },
+
+  preInit() {
+    promiseLoadHandlersList = new Promise((resolve, reject) => {
+      // Load the data and build the list of handlers for applications pane.
+      // By doing this after pageshow, we ensure it doesn't delay painting
+      // of the preferences page.
+      window.addEventListener("pageshow", async () => {
+        try {
+          this._loadData();
+          await this._rebuildVisibleTypes();
+          this._sortVisibleTypes();
+          this._rebuildView();
+          resolve();
+        } catch (ex) {
+          reject(ex);
+        }
+      }, { once: true });
+    });
   },
 
   // CONTAINERS
@@ -1078,7 +1088,8 @@ var gMainPane = {
     // Force flush:
     preferences.clientHeight;
     var langGroupPref = document.getElementById("font.language.group");
-    this._safelySelectDefaultLanguageGroup(langGroupPref.value);
+    var isSerif = this._readDefaultFontTypeForLanguage(langGroupPref.value) == "serif";
+    this._selectDefaultLanguageGroup(langGroupPref.value, isSerif);
   },
 
   /**
@@ -1102,72 +1113,68 @@ var gMainPane = {
 
   _selectDefaultLanguageGroupPromise: Promise.resolve(),
 
-  async _selectDefaultLanguageGroup(aLanguageGroup, aIsSerif) {
-    // Avoid overlapping language group selections by awaiting the resolution
-    // of the previous one.  We do this because this function is re-entrant,
-    // as inserting <preference> elements into the DOM sometimes triggers a call
-    // back into this function.  And since this function is also asynchronous,
-    // that call can enter this function before the previous run has completed,
-    // which would corrupt the font menulists.  Awaiting the previous call's
-    // resolution avoids that fate.
-    await this._selectDefaultLanguageGroupPromise;
+  _selectDefaultLanguageGroup(aLanguageGroup, aIsSerif) {
+    this._selectDefaultLanguageGroupPromise = (async () => {
+      // Avoid overlapping language group selections by awaiting the resolution
+      // of the previous one.  We do this because this function is re-entrant,
+      // as inserting <preference> elements into the DOM sometimes triggers a call
+      // back into this function.  And since this function is also asynchronous,
+      // that call can enter this function before the previous run has completed,
+      // which would corrupt the font menulists.  Awaiting the previous call's
+      // resolution avoids that fate.
+      await this._selectDefaultLanguageGroupPromise;
 
-    const kFontNameFmtSerif = "font.name.serif.%LANG%";
-    const kFontNameFmtSansSerif = "font.name.sans-serif.%LANG%";
-    const kFontNameListFmtSerif = "font.name-list.serif.%LANG%";
-    const kFontNameListFmtSansSerif = "font.name-list.sans-serif.%LANG%";
-    const kFontSizeFmtVariable = "font.size.variable.%LANG%";
+      const kFontNameFmtSerif = "font.name.serif.%LANG%";
+      const kFontNameFmtSansSerif = "font.name.sans-serif.%LANG%";
+      const kFontNameListFmtSerif = "font.name-list.serif.%LANG%";
+      const kFontNameListFmtSansSerif = "font.name-list.sans-serif.%LANG%";
+      const kFontSizeFmtVariable = "font.size.variable.%LANG%";
 
-    var preferences = document.getElementById("mainPreferences");
-    var prefs = [{
-      format: aIsSerif ? kFontNameFmtSerif : kFontNameFmtSansSerif,
-      type: "fontname",
-      element: "defaultFont",
-      fonttype: aIsSerif ? "serif" : "sans-serif"
-    },
-    {
-      format: aIsSerif ? kFontNameListFmtSerif : kFontNameListFmtSansSerif,
-      type: "unichar",
-      element: null,
-      fonttype: aIsSerif ? "serif" : "sans-serif"
-    },
-    {
-      format: kFontSizeFmtVariable,
-      type: "int",
-      element: "defaultFontSize",
-      fonttype: null
-    }];
-    for (var i = 0; i < prefs.length; ++i) {
-      var preference = document.getElementById(prefs[i].format.replace(/%LANG%/, aLanguageGroup));
-      if (!preference) {
-        preference = document.createElement("preference");
-        var name = prefs[i].format.replace(/%LANG%/, aLanguageGroup);
-        preference.id = name;
-        preference.setAttribute("name", name);
-        preference.setAttribute("type", prefs[i].type);
-        preferences.appendChild(preference);
+      var preferences = document.getElementById("mainPreferences");
+      var prefs = [{
+        format: aIsSerif ? kFontNameFmtSerif : kFontNameFmtSansSerif,
+        type: "fontname",
+        element: "defaultFont",
+        fonttype: aIsSerif ? "serif" : "sans-serif"
+      },
+      {
+        format: aIsSerif ? kFontNameListFmtSerif : kFontNameListFmtSansSerif,
+        type: "unichar",
+        element: null,
+        fonttype: aIsSerif ? "serif" : "sans-serif"
+      },
+      {
+        format: kFontSizeFmtVariable,
+        type: "int",
+        element: "defaultFontSize",
+        fonttype: null
+      }];
+      for (var i = 0; i < prefs.length; ++i) {
+        var preference = document.getElementById(prefs[i].format.replace(/%LANG%/, aLanguageGroup));
+        if (!preference) {
+          preference = document.createElement("preference");
+          var name = prefs[i].format.replace(/%LANG%/, aLanguageGroup);
+          preference.id = name;
+          preference.setAttribute("name", name);
+          preference.setAttribute("type", prefs[i].type);
+          preferences.appendChild(preference);
+        }
+
+        if (!prefs[i].element)
+          continue;
+
+        var element = document.getElementById(prefs[i].element);
+        if (element) {
+          element.setAttribute("preference", preference.id);
+
+          if (prefs[i].fonttype)
+            await FontBuilder.buildFontList(aLanguageGroup, prefs[i].fonttype, element);
+
+          preference.setElementValue(element);
+        }
       }
-
-      if (!prefs[i].element)
-        continue;
-
-      var element = document.getElementById(prefs[i].element);
-      if (element) {
-        element.setAttribute("preference", preference.id);
-
-        if (prefs[i].fonttype)
-          await FontBuilder.buildFontList(aLanguageGroup, prefs[i].fonttype, element);
-
-        preference.setElementValue(element);
-      }
-    }
-  },
-
-  _safelySelectDefaultLanguageGroup(aLanguageGroup) {
-    var isSerif = this._readDefaultFontTypeForLanguage(aLanguageGroup) == "serif";
-    this._selectDefaultLanguageGroupPromise =
-      this._selectDefaultLanguageGroup(aLanguageGroup, isSerif)
-        .catch(Components.utils.reportError);
+    })()
+      .catch(Components.utils.reportError);
   },
 
   /**

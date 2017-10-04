@@ -138,8 +138,7 @@ nsSVGRenderingObserver::AttributeChanged(nsIDocument* aDocument,
 void
 nsSVGRenderingObserver::ContentAppended(nsIDocument* aDocument,
                                         nsIContent* aContainer,
-                                        nsIContent* aFirstNewContent,
-                                        int32_t /* unused */)
+                                        nsIContent* aFirstNewContent)
 {
   DoUpdate();
 }
@@ -147,8 +146,7 @@ nsSVGRenderingObserver::ContentAppended(nsIDocument* aDocument,
 void
 nsSVGRenderingObserver::ContentInserted(nsIDocument* aDocument,
                                         nsIContent* aContainer,
-                                        nsIContent* aChild,
-                                        int32_t /* unused */)
+                                        nsIContent* aChild)
 {
   DoUpdate();
 }
@@ -157,7 +155,6 @@ void
 nsSVGRenderingObserver::ContentRemoved(nsIDocument* aDocument,
                                        nsIContent* aContainer,
                                        nsIContent* aChild,
-                                       int32_t aIndexInContainer,
                                        nsIContent* aPreviousSibling)
 {
   DoUpdate();
@@ -631,10 +628,6 @@ SVGObserverUtils::GetPaintServer(nsIFrame* aTargetFrame,
                                  nsStyleSVGPaint nsStyleSVG::* aPaint,
                                  PaintingPropertyDescriptor aType)
 {
-  const nsStyleSVG* svgStyle = aTargetFrame->StyleSVG();
-  if ((svgStyle->*aPaint).Type() != eStyleSVGPaintType_Server)
-    return nullptr;
-
   // If we're looking at a frame within SVG text, then we need to look up
   // to find the right frame to get the painting property off.  We should at
   // least look up past a text frame, and if the text frame's parent is the
@@ -647,6 +640,10 @@ SVGObserverUtils::GetPaintServer(nsIFrame* aTargetFrame,
       frame = grandparent;
     }
   }
+
+  const nsStyleSVG* svgStyle = frame->StyleSVG();
+  if ((svgStyle->*aPaint).Type() != eStyleSVGPaintType_Server)
+    return nullptr;
 
   nsCOMPtr<nsIURI> paintServerURL =
     SVGObserverUtils::GetPaintURI(frame, aPaint);

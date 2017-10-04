@@ -3324,8 +3324,6 @@ nsTreeBodyFrame::PaintCell(int32_t               aRowIndex,
       twistyContext->StyleMargin()->GetMargin(twistyMargin);
       twistyRect.Inflate(twistyMargin);
 
-      aRenderingContext.Save();
-
       const nsStyleBorder* borderStyle = lineContext->StyleBorder();
       // Resolve currentcolor values against the treeline context
       nscolor color = lineContext->StyleColor()->
@@ -3389,8 +3387,6 @@ nsTreeBodyFrame::PaintCell(int32_t               aRowIndex,
         currentParent = parent;
         srcX -= mIndentation;
       }
-
-      aRenderingContext.Restore();
     }
 
     // Always leave space for the twisty.

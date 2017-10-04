@@ -34,7 +34,6 @@ class DrawTarget;
 namespace layers {
 class ImageContainer;
 class StackingContextHelper;
-class WebRenderDisplayItemLayer;
 class WebRenderParentCommand;
 class LayerManager;
 } // namespace layers
@@ -512,7 +511,6 @@ struct nsCSSRendering {
                                                                  mozilla::wr::DisplayListBuilder& aBuilder,
                                                                  mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                                  const mozilla::layers::StackingContextHelper& aSc,
-                                                                 mozilla::layers::WebRenderDisplayItemLayer* aLayer,
                                                                  mozilla::layers::WebRenderLayerManager* aManager,
                                                                  nsDisplayItem* aItem);
 
@@ -520,7 +518,6 @@ struct nsCSSRendering {
                                                                        mozilla::wr::DisplayListBuilder& aBuilder,
                                                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                                        const mozilla::layers::StackingContextHelper& aSc,
-                                                                       mozilla::layers::WebRenderDisplayItemLayer* aLayer,
                                                                        mozilla::layers::WebRenderLayerManager* aManager,
                                                                        nsDisplayItem* aItem,
                                                                        nsStyleContext *mBackgroundSC,

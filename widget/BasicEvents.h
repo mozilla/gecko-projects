@@ -574,7 +574,7 @@ public:
   // If JS creates an event with unknown event type or known event type but
   // for different event interface, the event type is stored to this.
   // NOTE: This is always used if the instance is a WidgetCommandEvent instance.
-  nsCOMPtr<nsIAtom> mSpecifiedEventType;
+  RefPtr<nsIAtom> mSpecifiedEventType;
 
   // nsIAtom isn't available on non-main thread due to unsafe.  Therefore,
   // mSpecifiedEventTypeString is used instead of mSpecifiedEventType if
@@ -613,13 +613,9 @@ public:
    */
   void StopPropagation() { mFlags.StopPropagation(); }
   void StopImmediatePropagation() { mFlags.StopImmediatePropagation(); }
-  void PreventDefault(bool aCalledByDefaultHandler = true)
-  {
-    // Legacy mouse events shouldn't be prevented on ePointerDown by default
-    // handlers.
-    MOZ_RELEASE_ASSERT(!aCalledByDefaultHandler || mMessage != ePointerDown);
-    mFlags.PreventDefault(aCalledByDefaultHandler);
-  }
+  void PreventDefault(bool aCalledByDefaultHandler = true,
+                      nsIPrincipal* aPrincipal = nullptr);
+
   void PreventDefaultBeforeDispatch() { mFlags.PreventDefaultBeforeDispatch(); }
   bool DefaultPrevented() const { return mFlags.DefaultPrevented(); }
   bool DefaultPreventedByContent() const

@@ -189,6 +189,7 @@ public:
     eUnreachable,
     eChannelOpen,
     eRedirect,
+    eTerminated,
     ENUM_MAX
   };
 
@@ -307,6 +308,7 @@ public:
 private:
   virtual ~XMLHttpRequestMainThread();
 
+  nsresult MaybeSilentSendFailure(nsresult aRv);
   nsresult SendInternal(const BodyExtractorBase* aBody);
 
   bool IsCrossSiteCORSRequest() const;
@@ -518,7 +520,8 @@ protected:
   };
 
   nsresult DetectCharset();
-  nsresult AppendToResponseText(const char * aBuffer, uint32_t aBufferLen);
+  nsresult AppendToResponseText(const char* aBuffer, uint32_t aBufferLen,
+                                bool aLast = false);
   static nsresult StreamReaderFunc(nsIInputStream* in,
                                    void* closure,
                                    const char* fromRawSegment,
@@ -763,6 +766,8 @@ protected:
    * Close the XMLHttpRequest's channels.
    */
   void CloseRequest();
+
+  void TerminateOngoingFetch();
 
   /**
    * Close the XMLHttpRequest's channels and dispatch appropriate progress

@@ -166,7 +166,7 @@ class sessionrestore(TsBase):
     3. Measure the delta between firstPaint and sessionRestored.
     """
     extensions = \
-        '${talos}/startup_test/sessionrestore/addon/sessionrestore-signed.xpi'
+        '${talos}/startup_test/sessionrestore/addon'
     cycles = 10
     timeout = 900
     gecko_profile_startup = True
@@ -210,7 +210,7 @@ class tresize(TsBase):
     """
     This test does some resize thing.
     """
-    extensions = '${talos}/startup_test/tresize/addon/tresize-signed.xpi'
+    extensions = '${talos}/startup_test/tresize/addon'
     cycles = 20
     url = 'startup_test/tresize/addon/content/tresize-test.html'
     timeout = 150
@@ -282,12 +282,36 @@ class tpaint(PageloaderTest):
 
 
 @register_test()
+class cpstartup(PageloaderTest):
+    """
+    Tests the amount of time it takes to start up a new content process and
+    initialize it to the point where it can start processing incoming URLs
+    to load.
+    """
+    extensions = '${talos}/tests/cpstartup'
+    tpmanifest = '${talos}/tests/cpstartup/cpstartup.manifest'
+    tppagecycles = 20
+    gecko_profile_entries = 1000000
+    tploadnocache = True
+    unit = 'ms'
+    preferences = {
+        # By default, Talos is configured to open links from
+        # content in new windows. We're overriding them so that
+        # they open in new tabs instead.
+        # See http://kb.mozillazine.org/Browser.link.open_newwindow
+        # and http://kb.mozillazine.org/Browser.link.open_newwindow.restriction
+        'browser.link.open_newwindow': 3,
+        'browser.link.open_newwindow.restriction': 2,
+    }
+
+
+@register_test()
 class tabpaint(PageloaderTest):
     """
     Tests the amount of time it takes to open new tabs, triggered from
     both the parent process and the content process.
     """
-    extensions = '${talos}/tests/tabpaint/tabpaint-signed.xpi'
+    extensions = '${talos}/tests/tabpaint'
     tpmanifest = '${talos}/tests/tabpaint/tabpaint.manifest'
     tppagecycles = 20
     gecko_profile_entries = 1000000
@@ -309,7 +333,7 @@ class tps(PageloaderTest):
     """
     Tests the amount of time it takes to switch between tabs
     """
-    extensions = '${talos}/tests/tabswitch/tabswitch-signed.xpi'
+    extensions = '${talos}/tests/tabswitch'
     tpmanifest = '${talos}/tests/tabswitch/tps.manifest'
     tppagecycles = 5
     gecko_profile_entries = 5000000
@@ -348,7 +372,7 @@ class tart(PageloaderTest):
       - all: average interval over all recorded intervals.
     """
     tpmanifest = '${talos}/tests/tart/tart.manifest'
-    extensions = '${talos}/tests/tart/addon/tart-signed.xpi'
+    extensions = '${talos}/tests/tart/addon'
     tpcycles = 1
     tppagecycles = 25
     tploadnocache = True
@@ -385,7 +409,7 @@ class cart(PageloaderTest):
     3-customize-enter-css - only the CSS animation part of entering customize
     """
     tpmanifest = '${talos}/tests/tart/cart.manifest'
-    extensions = '${talos}/tests/tart/addon/tart-signed.xpi'
+    extensions = '${talos}/tests/tart/addon'
     tpcycles = 1
     tppagecycles = 25
     tploadnocache = True
@@ -411,7 +435,7 @@ class damp(PageloaderTest):
     for each tool, across a very simple and very complicated page.
     """
     tpmanifest = '${talos}/tests/devtools/damp.manifest'
-    extensions = '${talos}/tests/devtools/addon/devtools-signed.xpi'
+    extensions = '${talos}/tests/devtools/addon'
     cycles = 5
     tpcycles = 1
     tppagecycles = 5
@@ -815,6 +839,7 @@ class perf_reftest(PageloaderTest):
     tpmanifest = '${talos}/tests/perf-reftest/perf_reftest.manifest'
     tpcycles = 1
     tppagecycles = 10
+    tptimeout = 30000
     gecko_profile_interval = 1
     gecko_profile_entries = 2000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()

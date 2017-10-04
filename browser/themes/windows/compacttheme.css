@@ -20,25 +20,28 @@
   }
 }
 
-@media (-moz-windows-compositor) {
-  #main-window {
-    background: transparent !important;
-  }
-}
-
 #toolbar-menubar {
   text-shadow: none !important;
 }
 
-@media (-moz-windows-glass) {
-  /* Always show light toolbar elements on aero glass surface. */
-  #TabsToolbar {
-    color: hsl(240,9%,98%);
-  }
+@media (-moz-os-version: windows-win7) {
+  @media (-moz-windows-default-theme) {
+    /* Always show light toolbar elements on aero surface. */
+    #TabsToolbar {
+      color: hsl(240,9%,98%);
+    }
 
-  /* Keep showing the correct color inside the tabs. */
-  .tabbrowser-tab {
-    color: var(--chrome-color) !important;
+    /* Keep showing the correct color inside the tabs. */
+    .tabbrowser-tab {
+      color: var(--chrome-color) !important;
+    }
+  }
+}
+
+@media (-moz-windows-glass) {
+  /* Set to full fill-opacity to improve visibility of toolbar buttons on aero glass. */
+  #TabsToolbar {
+    --toolbarbutton-icon-fill-opacity: 1;
   }
 
   /* Make the menubar text readable on aero glass (copied from browser-aero.css). */
@@ -55,6 +58,12 @@
 
 @media (-moz-os-version: windows-win7),
        (-moz-os-version: windows-win8) {
+  @media (-moz-windows-compositor) {
+    #main-window {
+      background: transparent !important;
+    }
+  }
+
   /* Always show full-height tab separators on tabs with borders. */
   .tabbrowser-tab::before {
     border-image: none !important;
@@ -109,11 +118,6 @@
    * the native background color at all, and these are !important for the same reason as above. */
   border-left: none !important;
   border-right: none !important;
-}
-
-/* Disable dragging like in the default theme: */
-#main-window[tabsintitlebar] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):-moz-lwtheme {
-  -moz-window-dragging: no-drag;
 }
 
 @media (-moz-os-version: windows-win10) {

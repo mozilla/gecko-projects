@@ -45,7 +45,8 @@ const INITIAL_STATE = {
     visible: false,
     data: {}
   },
-  Sections: []
+  Sections: [],
+  PreferencesPane: {visible: false}
 };
 
 function App(prevState = INITIAL_STATE.App, action) {
@@ -288,7 +289,9 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
           return item;
         })
       }));
-    case at.PLACES_LINK_DELETED:
+    case at.PLACES_LINKS_DELETED:
+      return prevState.map(section => Object.assign({}, section,
+        {rows: section.rows.filter(site => !action.data.includes(site.url))}));
     case at.PLACES_LINK_BLOCKED:
       return prevState.map(section =>
         Object.assign({}, section, {rows: section.rows.filter(site => site.url !== action.data.url)}));
@@ -308,11 +311,22 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
   }
 }
 
+function PreferencesPane(prevState = INITIAL_STATE.PreferencesPane, action) {
+  switch (action.type) {
+    case at.SETTINGS_OPEN:
+      return Object.assign({}, prevState, {visible: true});
+    case at.SETTINGS_CLOSE:
+      return Object.assign({}, prevState, {visible: false});
+    default:
+      return prevState;
+  }
+}
+
 this.INITIAL_STATE = INITIAL_STATE;
 this.TOP_SITES_DEFAULT_LENGTH = TOP_SITES_DEFAULT_LENGTH;
 this.TOP_SITES_SHOWMORE_LENGTH = TOP_SITES_SHOWMORE_LENGTH;
 
-this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections};
+this.reducers = {TopSites, App, Snippets, Prefs, Dialog, Sections, PreferencesPane};
 this.insertPinned = insertPinned;
 
 this.EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_DEFAULT_LENGTH", "TOP_SITES_SHOWMORE_LENGTH"];

@@ -637,18 +637,6 @@ DisplayListBuilder::~DisplayListBuilder()
 }
 
 void
-DisplayListBuilder::Begin(const LayerIntSize& aSize)
-{
-  wr_dp_begin(mWrState, aSize.width, aSize.height);
-}
-
-void
-DisplayListBuilder::End()
-{
-  wr_dp_end(mWrState);
-}
-
-void
 DisplayListBuilder::Finalize(wr::LayoutSize& aOutContentSize,
                              BuiltDisplayList& aOutDisplayList)
 {
@@ -695,7 +683,7 @@ DisplayListBuilder::PopStackingContext()
 
 wr::WrClipId
 DisplayListBuilder::DefineClip(const wr::LayoutRect& aClipRect,
-                               const nsTArray<wr::WrComplexClipRegion>* aComplex,
+                               const nsTArray<wr::ComplexClipRegion>* aComplex,
                                const wr::WrImageMask* aMask)
 {
   uint64_t clip_id = wr_dp_define_clip(mWrState, aClipRect,

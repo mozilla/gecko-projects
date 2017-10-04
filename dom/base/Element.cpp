@@ -154,6 +154,7 @@
 #include "DOMIntersectionObserver.h"
 
 #include "nsISpeculativeConnect.h"
+#include "nsIIOService.h"
 
 #include "DOMMatrix.h"
 
@@ -728,19 +729,23 @@ Element::GetScrollFrame(nsIFrame **aStyledFrame, FlushType aFlushType)
 }
 
 void
-Element::ScrollIntoView()
+Element::ScrollIntoView(const BooleanOrScrollIntoViewOptions& aObject)
 {
-  ScrollIntoView(ScrollIntoViewOptions());
-}
-
-void
-Element::ScrollIntoView(bool aTop)
-{
-  ScrollIntoViewOptions options;
-  if (!aTop) {
-    options.mBlock = ScrollLogicalPosition::End;
+  if (aObject.IsScrollIntoViewOptions()) {
+    return ScrollIntoView(aObject.GetAsScrollIntoViewOptions());
   }
-  ScrollIntoView(options);
+
+  MOZ_DIAGNOSTIC_ASSERT(aObject.IsBoolean());
+
+  ScrollIntoViewOptions options;
+  if (aObject.GetAsBoolean()) {
+    options.mBlock = ScrollLogicalPosition::Start;
+    options.mInline = ScrollLogicalPosition::Nearest;
+  } else {
+    options.mBlock = ScrollLogicalPosition::End;
+    options.mInline = ScrollLogicalPosition::Nearest;
+  }
+  return ScrollIntoView(options);
 }
 
 void
@@ -757,9 +762,41 @@ Element::ScrollIntoView(const ScrollIntoViewOptions &aOptions)
     return;
   }
 
-  int16_t vpercent = (aOptions.mBlock == ScrollLogicalPosition::Start)
-                       ? nsIPresShell::SCROLL_TOP
-                       : nsIPresShell::SCROLL_BOTTOM;
+  int16_t vpercent = nsIPresShell::SCROLL_CENTER;
+  switch (aOptions.mBlock) {
+    case ScrollLogicalPosition::Start:
+      vpercent = nsIPresShell::SCROLL_TOP;
+      break;
+    case ScrollLogicalPosition::Center:
+      vpercent = nsIPresShell::SCROLL_CENTER;
+      break;
+    case ScrollLogicalPosition::End:
+      vpercent = nsIPresShell::SCROLL_BOTTOM;
+      break;
+    case ScrollLogicalPosition::Nearest:
+      vpercent = nsIPresShell::SCROLL_MINIMUM;
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected ScrollLogicalPosition value");
+  }
+
+  int16_t hpercent = nsIPresShell::SCROLL_CENTER;
+  switch (aOptions.mInline) {
+    case ScrollLogicalPosition::Start:
+      hpercent = nsIPresShell::SCROLL_LEFT;
+      break;
+    case ScrollLogicalPosition::Center:
+      hpercent = nsIPresShell::SCROLL_CENTER;
+      break;
+    case ScrollLogicalPosition::End:
+      hpercent = nsIPresShell::SCROLL_RIGHT;
+      break;
+    case ScrollLogicalPosition::Nearest:
+      hpercent = nsIPresShell::SCROLL_MINIMUM;
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected ScrollLogicalPosition value");
+  }
 
   uint32_t flags = nsIPresShell::SCROLL_OVERFLOW_HIDDEN;
   if (aOptions.mBehavior == ScrollBehavior::Smooth) {
@@ -772,7 +809,9 @@ Element::ScrollIntoView(const ScrollIntoViewOptions &aOptions)
                                    nsIPresShell::ScrollAxis(
                                      vpercent,
                                      nsIPresShell::SCROLL_ALWAYS),
-                                   nsIPresShell::ScrollAxis(),
+                                   nsIPresShell::ScrollAxis(
+                                     hpercent,
+                                     nsIPresShell::SCROLL_ALWAYS),
                                    flags);
 }
 
@@ -1268,7 +1307,7 @@ Element::SetAttribute(const nsAString& aName,
   nsAutoString nameToUse;
   const nsAttrName* name = InternalGetAttrNameFromQName(aName, &nameToUse);
   if (!name) {
-    nsCOMPtr<nsIAtom> nameAtom = NS_AtomizeMainThread(nameToUse);
+    RefPtr<nsIAtom> nameAtom = NS_AtomizeMainThread(nameToUse);
     if (!nameAtom) {
       aError.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -1349,7 +1388,7 @@ Element::GetAttributeNS(const nsAString& aNamespaceURI,
     return;
   }
 
-  nsCOMPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
   bool hasAttr = GetAttr(nsid, name, aReturn);
   if (!hasAttr) {
     SetDOMStringToNull(aReturn);
@@ -1381,7 +1420,7 @@ Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
                            const nsAString& aLocalName,
                            ErrorResult& aError)
 {
-  nsCOMPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
   int32_t nsid =
     nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI,
                                                        nsContentUtils::IsChromeDoc(OwnerDoc()));
@@ -1454,7 +1493,7 @@ Element::HasAttributeNS(const nsAString& aNamespaceURI,
     return false;
   }
 
-  nsCOMPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
   return HasAttr(nsid, name);
 }
 
@@ -1620,14 +1659,11 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     SetSubtreeRootPointer(aParent->SubtreeRoot());
   }
 
-  nsIDocument* composedDoc = GetComposedDoc();
-  if (composedDoc) {
-    // Attached callback must be enqueued whenever custom element is inserted into a
-    // document and this document has a browsing context.
-    if (GetCustomElementData() && composedDoc->GetDocShell()) {
-      // Enqueue an attached callback for the custom element.
-      nsContentUtils::EnqueueLifecycleCallback(
-        composedDoc, nsIDocument::eAttached, this);
+  if (CustomElementRegistry::IsCustomElementEnabled() && IsInComposedDoc()) {
+    // Connected callback must be enqueued whenever a custom element becomes
+    // connected.
+    if (GetCustomElementData()) {
+      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eConnected, this);
     }
   }
 
@@ -1951,12 +1987,12 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 
     document->ClearBoxObjectFor(this);
 
-    // Detached must be enqueued whenever custom element is removed from
-    // the document and this document has a browsing context.
-    if (GetCustomElementData() && document->GetDocShell()) {
-      // Enqueue a detached callback for the custom element.
-      nsContentUtils::EnqueueLifecycleCallback(
-        document, nsIDocument::eDetached, this);
+     // Disconnected must be enqueued whenever a connected custom element becomes
+     // disconnected.
+    if (CustomElementRegistry::IsCustomElementEnabled() &&
+        GetCustomElementData()) {
+      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eDisconnected,
+                                               this);
     }
   }
 
@@ -2008,6 +2044,9 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   // since the invariant we'd be breaking in that case is "HasServoData()
   // implies InComposedDoc()", which we rely on in various places.
   UnsetFlags(kAllServoDescendantBits);
+  if (document && document->GetServoRestyleRoot() == this) {
+    document->ClearServoRestyleRoot();
+  }
 }
 
 nsICSSDeclaration*
@@ -2625,13 +2664,13 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     }
   }
 
-  if (nsContentUtils::IsWebComponentsEnabled()) {
+  if (CustomElementRegistry::IsCustomElementEnabled()) {
     if (CustomElementData* data = GetCustomElementData()) {
       if (CustomElementDefinition* definition =
             nsContentUtils::GetElementDefinitionIfObservingAttr(this,
                                                                 data->mType,
                                                                 aName)) {
-        nsCOMPtr<nsIAtom> oldValueAtom;
+        RefPtr<nsIAtom> oldValueAtom;
         if (oldValue) {
           oldValueAtom = oldValue->GetAsAtom();
         } else {
@@ -2639,7 +2678,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
           // attribute that was swapped with aParsedValue.
           oldValueAtom = aParsedValue.GetAsAtom();
         }
-        nsCOMPtr<nsIAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
+        RefPtr<nsIAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
         nsAutoString ns;
         nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
 
@@ -2651,8 +2690,8 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
           (ns.IsEmpty() ? VoidString() : ns)
         };
 
-        nsContentUtils::EnqueueLifecycleCallback(
-          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+        nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
+          this, &args, nullptr, definition);
       }
     }
   }
@@ -2929,7 +2968,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     }
   }
 
-  if (nsContentUtils::IsWebComponentsEnabled()) {
+  if (CustomElementRegistry::IsCustomElementEnabled()) {
     if (CustomElementData* data = GetCustomElementData()) {
       if (CustomElementDefinition* definition =
             nsContentUtils::GetElementDefinitionIfObservingAttr(this,
@@ -2938,7 +2977,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         nsAutoString ns;
         nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
 
-        nsCOMPtr<nsIAtom> oldValueAtom = oldValue.GetAsAtom();
+        RefPtr<nsIAtom> oldValueAtom = oldValue.GetAsAtom();
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           nsDependentAtomString(oldValueAtom),
@@ -2946,8 +2985,8 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
           (ns.IsEmpty() ? VoidString() : ns)
         };
 
-        nsContentUtils::EnqueueLifecycleCallback(
-          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+        nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
+          this, &args, nullptr, definition);
       }
     }
   }
@@ -3457,21 +3496,31 @@ Element::Closest(const nsAString& aSelector, ErrorResult& aResult)
 bool
 Element::Matches(const nsAString& aSelector, ErrorResult& aError)
 {
-  nsCSSSelectorList* selectorList = ParseSelectorList(aSelector, aError);
-  if (!selectorList) {
-    // Either we failed (and aError already has the exception), or this
-    // is a pseudo-element-only selector that matches nothing.
-    return false;
-  }
-
-  TreeMatchContext matchingContext(false,
-                                   nsRuleWalker::eRelevantLinkUnvisited,
-                                   OwnerDoc(),
-                                   TreeMatchContext::eNeverMatchVisited);
-  matchingContext.SetHasSpecifiedScope();
-  matchingContext.AddScopeElement(this);
-  return nsCSSRuleProcessor::SelectorListMatches(this, matchingContext,
-                                                 selectorList);
+  return WithSelectorList<bool>(
+    aSelector,
+    aError,
+    [&](const RawServoSelectorList* aList) {
+      if (!aList) {
+        return false;
+      }
+      return Servo_SelectorList_Matches(this, aList);
+    },
+    [&](nsCSSSelectorList* aList) {
+      if (!aList) {
+        // Either we failed (and aError already has the exception), or this
+        // is a pseudo-element-only selector that matches nothing.
+        return false;
+      }
+      TreeMatchContext matchingContext(false,
+                                       nsRuleWalker::eRelevantLinkUnvisited,
+                                       OwnerDoc(),
+                                       TreeMatchContext::eNeverMatchVisited);
+      matchingContext.SetHasSpecifiedScope();
+      matchingContext.AddScopeElement(this);
+      return nsCSSRuleProcessor::SelectorListMatches(this, matchingContext,
+                                                     aList);
+    }
+  );
 }
 
 static const nsAttrValue::EnumTable kCORSAttributeTable[] = {
@@ -4294,6 +4343,7 @@ BitsArePropagated(const Element* aElement, uint32_t aBits, nsINode* aRestyleRoot
     nsINode* parentNode = curr->GetParentNode();
     curr = curr->GetFlattenedTreeParentElementForStyle();
     MOZ_ASSERT_IF(!curr,
+                  !parentNode || // can only happen mid-unbind.
                   parentNode == aElement->OwnerDoc() ||
                   parentNode == parentNode->OwnerDoc()->GetRootElement());
   }
@@ -4385,7 +4435,6 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     // Similarly, if our parent already has the bit we're propagating, we can
     // assume everything is already set up.
     if (parent->HasAllFlags(aBits)) {
-      MOZ_ASSERT(aElement->GetComposedDoc()->GetServoRestyleRoot());
       return;
     }
 
@@ -4456,7 +4505,10 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     }
   }
 
+  // See the comment in nsIDocument::SetServoRestyleRoot about the !IsElement()
+  // check there. Same justification here.
   MOZ_ASSERT(aElement == doc->GetServoRestyleRoot() ||
+             !doc->GetServoRestyleRoot()->IsElement() ||
              nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
                aElement, doc->GetServoRestyleRoot()));
   MOZ_ASSERT(aElement == doc->GetServoRestyleRoot() ||

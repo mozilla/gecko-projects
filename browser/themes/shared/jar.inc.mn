@@ -91,6 +91,7 @@
   skin/classic/browser/panel-icon-magnifier.svg                (../shared/panel-icon-magnifier.svg)
 #endif
   skin/classic/browser/panel-icon-retry.svg                    (../shared/panel-icon-retry.svg)
+  skin/classic/browser/preferences/in-content/critters-postcard.png       (../shared/incontentprefs/critters-postcard.png)
   skin/classic/browser/preferences/in-content/face-sad.svg     (../shared/incontentprefs/face-sad.svg)
   skin/classic/browser/preferences/in-content/face-smile.svg   (../shared/incontentprefs/face-smile.svg)
   skin/classic/browser/preferences/in-content/fxa-avatar.svg   (../shared/incontentprefs/fxa-avatar.svg)
@@ -137,7 +138,6 @@
   skin/classic/browser/edit-cut.svg                   (../shared/icons/edit-cut.svg)
   skin/classic/browser/edit-paste.svg                 (../shared/icons/edit-paste.svg)
   skin/classic/browser/feed.svg                       (../shared/icons/feed.svg)
-  skin/classic/browser/find.svg                       (../shared/icons/find.svg)
   skin/classic/browser/folder.svg                     (../shared/icons/folder.svg)
   skin/classic/browser/forget.svg                     (../shared/icons/forget.svg)
   skin/classic/browser/forward.svg                    (../shared/icons/forward.svg)
@@ -163,6 +163,7 @@
   skin/classic/browser/reload.svg                     (../shared/icons/reload.svg)
   skin/classic/browser/reload-to-stop.svg             (../shared/icons/reload-to-stop.svg)
   skin/classic/browser/save.svg                       (../shared/icons/save.svg)
+  skin/classic/browser/search-glass.svg               (../shared/icons/search-glass.svg)
   skin/classic/browser/settings.svg                   (../shared/icons/settings.svg)
   skin/classic/browser/sidebars.svg                   (../shared/icons/sidebars.svg)
   skin/classic/browser/sidebars-right.svg             (../shared/icons/sidebars-right.svg)

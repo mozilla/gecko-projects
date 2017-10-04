@@ -27,7 +27,7 @@ loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel
 // Other dependencies
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
 loader.lazyRequireGetter(this, "CommandState", "devtools/shared/gcli/command-state", true);
-loader.lazyRequireGetter(this, "ResponsiveUIManager", "devtools/client/responsivedesign/responsivedesign");
+loader.lazyRequireGetter(this, "ResponsiveUIManager", "devtools/client/responsive.html/manager", true);
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 
 const {MultiLocalizationHelper} = require("devtools/shared/l10n");
@@ -78,7 +78,7 @@ Tools.inspector = {
   },
   inMenu: true,
   commands: [
-    "devtools/client/responsivedesign/resize-commands",
+    "devtools/client/responsive.html/commands",
     "devtools/client/inspector/inspector-commands"
   ],
 
@@ -100,7 +100,7 @@ Tools.webConsole = {
   accesskey: l10n("webConsoleCmd.accesskey"),
   ordinal: 2,
   oldWebConsoleURL: "chrome://devtools/content/webconsole/webconsole.xul",
-  newWebConsoleURL: "chrome://devtools/content/webconsole/webconsole.xhtml",
+  newWebConsoleURL: "chrome://devtools/content/webconsole/webconsole.html",
   icon: "chrome://devtools/skin/images/tool-webconsole.svg",
   invertIconForDarkTheme: true,
   label: l10n("ToolboxTabWebconsole.label"),

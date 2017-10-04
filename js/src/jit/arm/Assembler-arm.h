@@ -109,11 +109,19 @@ class ABIArgGenerator
 
 bool IsUnaligned(const wasm::MemoryAccessDesc& access);
 
+// These registers may be volatile or nonvolatile.
 static constexpr Register ABINonArgReg0 = r4;
 static constexpr Register ABINonArgReg1 = r5;
 static constexpr Register ABINonArgReg2 = r6;
+
+// These registers may be volatile or nonvolatile.
+// Note: these three registers are all guaranteed to be different
 static constexpr Register ABINonArgReturnReg0 = r4;
 static constexpr Register ABINonArgReturnReg1 = r5;
+
+// This register is guaranteed to be clobberable during the prologue of an ABI
+// call which must preserve both ABI argument and non-volatile registers.
+static constexpr Register NativeABIPrologueClobberable = ScratchRegister;
 
 // TLS pointer argument register for WebAssembly functions. This must not alias
 // any other register used for passing function arguments or return values.
@@ -1560,22 +1568,31 @@ class Assembler : public AssemblerShared
     // Load a 32 bit floating point immediate from a pool into a register.
     BufferOffset as_FImm32Pool(VFPRegister dest, float value, Condition c = Always);
 
-    // Atomic instructions: ldrex, ldrexh, ldrexb, strex, strexh, strexb.
+    // Atomic instructions: ldrexd, ldrex, ldrexh, ldrexb, strexd, strex, strexh, strexb.
     //
-    // The halfword and byte versions are available from ARMv6K forward.
+    // The doubleword, halfword, and byte versions are available from ARMv6K forward.
     //
     // The word versions are available from ARMv6 forward and can be used to
     // implement the halfword and byte versions on older systems.
+
+    // LDREXD rt, rt2, [rn].  Constraint: rt even register, rt2=rt+1.
+    BufferOffset as_ldrexd(Register rt, Register rt2, Register rn, Condition c = Always);
 
     // LDREX rt, [rn]
     BufferOffset as_ldrex(Register rt, Register rn, Condition c = Always);
     BufferOffset as_ldrexh(Register rt, Register rn, Condition c = Always);
     BufferOffset as_ldrexb(Register rt, Register rn, Condition c = Always);
 
+    // STREXD rd, rt, rt2, [rn].  Constraint: rt even register, rt2=rt+1.
+    BufferOffset as_strexd(Register rd, Register rt, Register rt2, Register rn, Condition c = Always);
+
     // STREX rd, rt, [rn].  Constraint: rd != rn, rd != rt.
     BufferOffset as_strex(Register rd, Register rt, Register rn, Condition c = Always);
     BufferOffset as_strexh(Register rd, Register rt, Register rn, Condition c = Always);
     BufferOffset as_strexb(Register rd, Register rt, Register rn, Condition c = Always);
+
+    // CLREX
+    BufferOffset as_clrex();
 
     // Memory synchronization.
     // These are available from ARMv7 forward.

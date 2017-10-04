@@ -334,7 +334,7 @@ bool
 WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
                                         wr::ResourceUpdateQueue& aResources)
 {
-  Range<const wr::ImageKey> keys(&aKey, 1);
+  Range<wr::ImageKey> keys(&aKey, 1);
   // Check if key is obsoleted.
   if (keys[0].mNamespace != mIdNamespace) {
     return true;
@@ -354,7 +354,8 @@ WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey
     }
     WebRenderTextureHost* wrTexture = texture->AsWebRenderTextureHost();
     if (wrTexture) {
-      wrTexture->AddWRImage(aResources, keys, wrTexture->GetExternalImageKey());
+      wrTexture->PushResourceUpdates(aResources, TextureHost::ADD_IMAGE, keys,
+                                     wrTexture->GetExternalImageKey());
       return true;
     }
   }
@@ -448,7 +449,7 @@ WebRenderBridgeParent::GetRootCompositorBridgeParent() const
 }
 
 void
-WebRenderBridgeParent::UpdateAPZ()
+WebRenderBridgeParent::UpdateAPZ(bool aUpdateHitTestingTree)
 {
   CompositorBridgeParent* cbp = GetRootCompositorBridgeParent();
   if (!cbp) {
@@ -462,9 +463,11 @@ WebRenderBridgeParent::UpdateAPZ()
   if (RefPtr<APZCTreeManager> apzc = cbp->GetAPZCTreeManager()) {
     apzc->UpdateFocusState(rootLayersId, GetLayersId(),
                            mScrollData.GetFocusTarget());
-    apzc->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
-        mScrollData.IsFirstPaint(), GetLayersId(),
-        mScrollData.GetPaintSequenceNumber());
+    if (aUpdateHitTestingTree) {
+      apzc->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
+          mScrollData.IsFirstPaint(), GetLayersId(),
+          mScrollData.GetPaintSequenceNumber());
+    }
   }
 }
 
@@ -550,8 +553,8 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
       LayoutDeviceIntSize size = mWidget->GetClientSize();
       mApi->SetWindowParameters(size);
     }
-    gfx::Color color = mWidget ? gfx::Color(0.3f, 0.f, 0.f, 1.f) : gfx::Color(0.f, 0.f, 0.f, 0.f);
-    mApi->SetDisplayList(color, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
+    gfx::Color clearColor(0.f, 0.f, 0.f, 0.f);
+    mApi->SetDisplayList(clearColor, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
                         mPipelineId, aContentSize,
                         dlDesc, dl.mData, dl.mLength,
                         resources);
@@ -566,7 +569,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   HoldPendingTransactionId(wrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
 
   mScrollData = aScrollData;
-  UpdateAPZ();
+  UpdateAPZ(true);
 
   if (mIdNamespace != aIdNamespace) {
     // Pretend we composited since someone is wating for this event,
@@ -602,6 +605,14 @@ WebRenderBridgeParent::RecvSetDisplayListSync(const gfx::IntSize &aSize,
                             aContentSize, dl, dlDesc, aScrollData,
                             Move(aResourceUpdates), Move(aSmallShmems), Move(aLargeShmems),
                             aIdNamespace, aTxnStartTime, aFwdTime);
+}
+
+mozilla::ipc::IPCResult
+WebRenderBridgeParent::RecvSetFocusTarget(const FocusTarget& aFocusTarget)
+{
+  mScrollData.SetFocusTarget(aFocusTarget);
+  UpdateAPZ(false);
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult

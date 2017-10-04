@@ -954,10 +954,18 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return rv;
     }
 
+    OptionalURIParams uriToLoad;
+    if (aURI) {
+      SerializeURI(aURI, uriToLoad);
+    } else {
+      uriToLoad = mozilla::void_t();
+    }
+
     windowCreated =
       SendCreateWindow(aTabOpener, newChild, renderFrame,
                        aChromeFlags, aCalledFromJS, aPositionSpecified,
                        aSizeSpecified,
+                       uriToLoad,
                        features,
                        baseURIString,
                        fullZoom,
@@ -2243,6 +2251,11 @@ ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
     static_cast<nsChromeRegistryContent*>(registrySvc.get());
   chromeRegistry->RegisterRemoteChrome(packages, resources, overrides,
                                        locale, reset);
+  static bool preloadDone = false;
+  if (!preloadDone) {
+    preloadDone = true;
+    nsContentUtils::AsyncPrecreateStringBundles();
+  }
   return IPC_OK();
 }
 

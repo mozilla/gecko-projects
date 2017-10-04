@@ -235,8 +235,6 @@ public:
    */
   void NotifyRemoved();
 
-  void NotifyDirectListeners(MediaStreamGraph* aGraph, bool aHasListeners);
-
   bool Activated() const
   {
     return mActivated;
@@ -2935,11 +2933,6 @@ MediaManager::AddWindowID(uint64_t aWindowId,
     return;
   }
 
-  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowId);
-  if (window) {
-    window->AsInner()->UpdateUserMediaCount(1);
-  }
-
   GetActiveWindows()->Put(aWindowId, aListener);
 }
 
@@ -2954,8 +2947,6 @@ MediaManager::RemoveWindowID(uint64_t aWindowId)
     LOG(("No inner window for %" PRIu64, aWindowId));
     return;
   }
-
-  window->AsInner()->UpdateUserMediaCount(-1);
 
   nsPIDOMWindowOuter* outer = window->AsInner()->GetOuterWindow();
   if (!outer) {
@@ -3824,12 +3815,6 @@ SourceListener::NotifyEvent(MediaStreamGraph* aGraph,
                                          &SourceListener::NotifyRemoved),
                        NS_DISPATCH_NORMAL);
       break;
-    case MediaStreamGraphEvent::EVENT_HAS_DIRECT_LISTENERS:
-      NotifyDirectListeners(aGraph, true);
-      break;
-    case MediaStreamGraphEvent::EVENT_HAS_NO_DIRECT_LISTENERS:
-      NotifyDirectListeners(aGraph, false);
-      break;
     default:
       break;
   }
@@ -3863,21 +3848,6 @@ SourceListener::NotifyRemoved()
   }
 
   mWindowListener = nullptr;
-}
-
-void
-SourceListener::NotifyDirectListeners(MediaStreamGraph* aGraph,
-                                      bool aHasListeners)
-{
-  if (!mVideoDevice) {
-    return;
-  }
-
-  auto& videoDevice = mVideoDevice;
-  MediaManager::PostTask(NewTaskFrom([videoDevice, aHasListeners]() {
-    videoDevice->GetSource()->SetDirectListeners(aHasListeners);
-    return NS_OK;
-  }));
 }
 
 bool
@@ -4067,14 +4037,14 @@ GetUserMediaWindowListener::StopRawID(const nsString& removedDeviceID)
       nsString id;
       source->GetAudioDevice()->GetRawId(id);
       if (removedDeviceID.Equals(id)) {
-        source->Stop();
+        source->StopTrack(kAudioTrack);
       }
     }
     if (source->GetVideoDevice()) {
       nsString id;
       source->GetVideoDevice()->GetRawId(id);
       if (removedDeviceID.Equals(id)) {
-        source->Stop();
+        source->StopTrack(kVideoTrack);
       }
     }
   }

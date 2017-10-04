@@ -129,6 +129,13 @@ SERVO_BINDING_FUNC(Servo_StyleSet_ResolveForDeclarations,
                    RawServoStyleSetBorrowed set,
                    ServoStyleContextBorrowedOrNull parent_style,
                    RawServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_SelectorList_Drop, void,
+                   RawServoSelectorList* selector_list)
+SERVO_BINDING_FUNC(Servo_SelectorList_Parse,
+                   RawServoSelectorList*,
+                   const nsACString* selector_list)
+SERVO_BINDING_FUNC(Servo_SelectorList_Matches, bool,
+                   RawGeckoElementBorrowed, RawServoSelectorListBorrowed)
 SERVO_BINDING_FUNC(Servo_StyleSet_AddSizeOfExcludingThis, void,
                    mozilla::MallocSizeOf malloc_size_of,
                    mozilla::MallocSizeOf malloc_enclosing_size_of,
@@ -391,7 +398,8 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCssText, void,
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
                    RawServoDeclarationBlockBorrowed declarations,
                    nsCSSPropertyID property, nsAString* buffer,
-                   ServoStyleContextBorrowedOrNull computed_values)
+                   ServoStyleContextBorrowedOrNull computed_values,
+                   RawServoDeclarationBlockBorrowedOrNull custom_properties)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Count, uint32_t,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetNthProperty, bool,

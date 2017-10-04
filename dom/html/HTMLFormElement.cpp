@@ -66,13 +66,13 @@
 
 #include "nsIConstraintValidation.h"
 
-#include "nsIDOMHTMLButtonElement.h"
 #include "nsSandboxFlags.h"
 
 #include "nsIContentSecurityPolicy.h"
 
 // images
 #include "mozilla/dom/HTMLImageElement.h"
+#include "mozilla/dom/HTMLButtonElement.h"
 
 // construction, destruction
 NS_IMPL_NS_NEW_HTML_ELEMENT(Form)
@@ -189,21 +189,18 @@ HTMLFormElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
 {
   if (aNamespaceID == kNameSpaceID_None) {
     if (aName == nsGkAtoms::action || aName == nsGkAtoms::target) {
-      // This check is mostly to preserve previous behavior.
-      if (aValue) {
-        if (mPendingSubmission) {
-          // aha, there is a pending submission that means we're in
-          // the script and we need to flush it. let's tell it
-          // that the event was ignored to force the flush.
-          // the second argument is not playing a role at all.
-          FlushPendingSubmission();
-        }
-        // Don't forget we've notified the password manager already if the
-        // page sets the action/target in the during submit. (bug 343182)
-        bool notifiedObservers = mNotifiedObservers;
-        ForgetCurrentSubmission();
-        mNotifiedObservers = notifiedObservers;
+      if (mPendingSubmission) {
+        // aha, there is a pending submission that means we're in
+        // the script and we need to flush it. let's tell it
+        // that the event was ignored to force the flush.
+        // the second argument is not playing a role at all.
+        FlushPendingSubmission();
       }
+      // Don't forget we've notified the password manager already if the
+      // page sets the action/target in the during submit. (bug 343182)
+      bool notifiedObservers = mNotifiedObservers;
+      ForgetCurrentSubmission();
+      mNotifiedObservers = notifiedObservers;
     }
   }
 
@@ -1649,7 +1646,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     if (inputElement) {
       inputElement->GetFormAction(action);
     } else {
-      nsCOMPtr<nsIDOMHTMLButtonElement> buttonElement = do_QueryInterface(aOriginatingElement);
+      auto buttonElement = HTMLButtonElement::FromContent(aOriginatingElement);
       if (buttonElement) {
         buttonElement->GetFormAction(action);
       } else {
@@ -1831,12 +1828,25 @@ HTMLFormElement::ImplicitSubmissionIsDisabled() const
   uint32_t numDisablingControlsFound = 0;
   uint32_t length = mControls->mElements.Length();
   for (uint32_t i = 0; i < length && numDisablingControlsFound < 2; ++i) {
-    if (mControls->mElements[i]->IsSingleLineTextControl(false) ||
-        mControls->mElements[i]->ControlType() == NS_FORM_INPUT_NUMBER) {
+    if (mControls->mElements[i]->IsSingleLineTextOrNumberControl(false)) {
       numDisablingControlsFound++;
     }
   }
   return numDisablingControlsFound != 1;
+}
+
+bool
+HTMLFormElement::IsLastActiveElement(const nsIFormControl* aControl) const
+{
+  NS_PRECONDITION(aControl, "Unexpected call");
+
+  for (auto* element : Reversed(mControls->mElements)) {
+    if (element->IsSingleLineTextOrNumberControl(false) &&
+        !element->IsDisabled()) {
+      return element == aControl;
+    }
+  }
+  return false;
 }
 
 NS_IMETHODIMP

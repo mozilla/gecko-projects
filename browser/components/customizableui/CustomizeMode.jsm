@@ -31,6 +31,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
+Cu.importGlobalProperties(["CSS"]);
+
 XPCOMUtils.defineLazyModuleGetter(this, "DragPositionManager",
                                   "resource:///modules/DragPositionManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
@@ -328,7 +330,7 @@ CustomizeMode.prototype = {
       await this._wrapToolbarItems();
       this.populatePalette();
 
-      this._addDragHandlers(this.visiblePalette);
+      this._setupPaletteDragging();
 
       window.gNavToolbox.addEventListener("toolbarvisibilitychange", this);
 
@@ -438,8 +440,7 @@ CustomizeMode.prototype = {
 
       window.gNavToolbox.removeEventListener("toolbarvisibilitychange", this);
 
-      DragPositionManager.stop();
-      this._removeDragHandlers(this.visiblePalette);
+      this._teardownPaletteDragging();
 
       await this._unwrapToolbarItems();
 
@@ -583,7 +584,12 @@ CustomizeMode.prototype = {
       aNode = aNode.firstChild;
     }
 
-    CustomizableUI.addWidgetToArea(aNode.id, CustomizableUI.AREA_NAVBAR);
+    let widgetToAdd = aNode.id;
+    if (CustomizableUI.isSpecialWidget(widgetToAdd) && aNode.closest("#customization-palette")) {
+      widgetToAdd = widgetToAdd.match(/^customizableui-special-(spring|spacer|separator)/)[1];
+    }
+
+    CustomizableUI.addWidgetToArea(widgetToAdd, CustomizableUI.AREA_NAVBAR);
     if (!this._customizing) {
       CustomizableUI.dispatchToolboxEvent("customizationchange");
     }
@@ -1311,7 +1317,9 @@ CustomizeMode.prototype = {
 
   onLWThemesMenuShowing(aEvent) {
     const DEFAULT_THEME_ID = "{972ce4c6-7e08-4474-a285-3208198ce6fd}";
-    const RECENT_LWT_COUNT = 5;
+    const LIGHT_THEME_ID = "firefox-compact-light@mozilla.org";
+    const DARK_THEME_ID = "firefox-compact-dark@mozilla.org";
+    const MAX_THEME_COUNT = 6;
 
     this._clearLWThemesMenu(aEvent.target);
 
@@ -1366,19 +1374,27 @@ CustomizeMode.prototype = {
       let themes = [aDefaultTheme];
       let lwts = LightweightThemeManager.usedThemes;
       let currentLwt = LightweightThemeManager.currentTheme;
-      let currentLwtIndex = lwts.indexOf(currentLwt);
-      if (currentLwtIndex > -1) {
-        // Make sure that the current lightweight theme
-        // is at the beginning of the array to avoid truncation
-        // in the next step.
-        lwts = lwts.splice(currentLwtIndex, 1).concat(lwts);
-      }
-      if (lwts.length > RECENT_LWT_COUNT)
-        lwts.length = RECENT_LWT_COUNT;
+      // The lwts besides the builtin themes don't have an isActive property:
       for (let lwt of lwts) {
-        lwt.isActive = !!currentLwt && (lwt.id == currentLwt.id);
-        themes.push(lwt);
+        if (!lwt.hasOwnProperty("isActive")) {
+          lwt.isActive = !!currentLwt && (lwt.id == currentLwt.id);
+        }
       }
+
+      // Move the current theme (if any) and the light/dark themes to the start:
+      let importantThemes = [LIGHT_THEME_ID, DARK_THEME_ID];
+      if (currentLwt && !importantThemes.includes(currentLwt.id)) {
+        importantThemes.push(currentLwt.id);
+      }
+      for (let importantTheme of importantThemes) {
+        let themeIndex = lwts.findIndex(theme => theme.id == importantTheme);
+        if (themeIndex > -1) {
+          themes.push(...lwts.splice(themeIndex, 1));
+        }
+      }
+      themes = themes.concat(lwts);
+      if (themes.length > MAX_THEME_COUNT)
+        themes.length = MAX_THEME_COUNT;
 
       let footer = doc.getElementById("customization-lwtheme-menu-footer");
       let panel = footer.parentNode;
@@ -1400,8 +1416,15 @@ CustomizeMode.prototype = {
       recommendedThemes = JSON.parse(recommendedThemes);
       let sb = Services.strings.createBundle("chrome://browser/locale/lightweightThemes.properties");
       for (let theme of recommendedThemes) {
-        theme.name = sb.GetStringFromName("lightweightThemes." + theme.id + ".name");
-        theme.description = sb.GetStringFromName("lightweightThemes." + theme.id + ".description");
+        try {
+          theme.name = sb.GetStringFromName("lightweightThemes." + theme.id + ".name");
+          theme.description = sb.GetStringFromName("lightweightThemes." + theme.id + ".description");
+        } catch (ex) {
+          // If finding strings for this failed, just don't build it. This can
+          // happen for users with 'older' recommended themes lists, some of which
+          // have since been removed from Firefox.
+          continue;
+        }
         let button = buildToolbarButton(theme);
         button.addEventListener("command", () => {
           LightweightThemeManager.setLocalTheme(button.theme);
@@ -1491,6 +1514,42 @@ CustomizeMode.prototype = {
         this.uninit();
         break;
     }
+  },
+
+  /**
+   * We handle dragover/drop on the outer palette separately
+   * to avoid overlap with other drag/drop handlers.
+   */
+  _setupPaletteDragging() {
+    this._addDragHandlers(this.visiblePalette);
+
+    this.paletteDragHandler = (aEvent) => {
+      let originalTarget = aEvent.originalTarget;
+      if (this._isUnwantedDragDrop(aEvent) ||
+          this.visiblePalette.contains(originalTarget) ||
+          this.document.getElementById("customization-panelHolder").contains(originalTarget)) {
+        return;
+      }
+      // We have a dragover/drop on the palette.
+      if (aEvent.type == "dragover") {
+        this._onDragOver(aEvent, this.visiblePalette);
+      } else {
+        this._onDragDrop(aEvent, this.visiblePalette);
+      }
+    };
+    let contentContainer = this.document.getElementById("customization-content-container");
+    contentContainer.addEventListener("dragover", this.paletteDragHandler, true);
+    contentContainer.addEventListener("drop", this.paletteDragHandler, true);
+  },
+
+  _teardownPaletteDragging() {
+    DragPositionManager.stop();
+    this._removeDragHandlers(this.visiblePalette);
+
+    let contentContainer = this.document.getElementById("customization-content-container");
+    contentContainer.removeEventListener("dragover", this.paletteDragHandler, true);
+    contentContainer.removeEventListener("drop", this.paletteDragHandler, true);
+    delete this.paletteDragHandler;
   },
 
   observe(aSubject, aTopic, aData) {
@@ -1589,7 +1648,8 @@ CustomizeMode.prototype = {
     __dumpDragData(aEvent);
     let item = aEvent.target;
     while (item && item.localName != "toolbarpaletteitem") {
-      if (item.localName == "toolbar") {
+      if (item.localName == "toolbar" || item.id == kPaletteId ||
+          item.id == "customization-panelHolder") {
         return;
       }
       item = item.parentNode;
@@ -1610,6 +1670,12 @@ CustomizeMode.prototype = {
     this._dragOffset = {x: aEvent.clientX - itemCenter.x,
                         y: aEvent.clientY - itemCenter.y};
 
+    let toolbarParent = draggedItem.closest("toolbar");
+    if (toolbarParent) {
+      let toolbarRect = this._dwu.getBoundsWithoutFlushing(toolbarParent);
+      toolbarParent.style.minHeight = toolbarRect.height + "px";
+    }
+
     gDraggingInToolbars = new Set();
 
     // Hack needed so that the dragimage will still show the
@@ -1629,6 +1695,8 @@ CustomizeMode.prototype = {
           this._setDragActive(item.previousSibling, "after", draggedItem.id, placeForItem);
           this._dragOverItem = item.previousSibling;
         }
+        let currentArea = this._getCustomizableParent(item);
+        currentArea.setAttribute("draggingover", "true");
       }
       this._initializeDragAfterMove = null;
       this.window.clearTimeout(this._dragInitializeTimeout);
@@ -1636,7 +1704,7 @@ CustomizeMode.prototype = {
     this._dragInitializeTimeout = this.window.setTimeout(this._initializeDragAfterMove, 0);
   },
 
-  _onDragOver(aEvent) {
+  _onDragOver(aEvent, aOverrideTarget) {
     if (this._isUnwantedDragDrop(aEvent)) {
       return;
     }
@@ -1655,7 +1723,7 @@ CustomizeMode.prototype = {
     let draggedItemId =
       aEvent.dataTransfer.mozGetDataAt(kDragDataTypePrefix + documentId, 0);
     let draggedWrapper = document.getElementById("wrapper-" + draggedItemId);
-    let targetArea = this._getCustomizableParent(aEvent.currentTarget);
+    let targetArea = this._getCustomizableParent(aOverrideTarget || aEvent.currentTarget);
     let originArea = this._getCustomizableParent(draggedWrapper);
 
     // Do nothing if the target or origin are not customizable.
@@ -1737,13 +1805,14 @@ CustomizeMode.prototype = {
         this._setDragActive(dragOverItem, dragValue, draggedItemId, targetAreaType);
       }
       this._dragOverItem = dragOverItem;
+      targetArea.setAttribute("draggingover", "true");
     }
 
     aEvent.preventDefault();
     aEvent.stopPropagation();
   },
 
-  _onDragDrop(aEvent) {
+  _onDragDrop(aEvent, aOverrideTarget) {
     if (this._isUnwantedDragDrop(aEvent)) {
       return;
     }
@@ -1752,7 +1821,7 @@ CustomizeMode.prototype = {
     this._initializeDragAfterMove = null;
     this.window.clearTimeout(this._dragInitializeTimeout);
 
-    let targetArea = this._getCustomizableParent(aEvent.currentTarget);
+    let targetArea = this._getCustomizableParent(aOverrideTarget || aEvent.currentTarget);
     let document = aEvent.target.ownerDocument;
     let documentId = document.documentElement.id;
     let draggedItemId =
@@ -1800,6 +1869,11 @@ CustomizeMode.prototype = {
     let draggedItem = document.getElementById(aDraggedItemId);
     draggedItem.hidden = false;
     draggedItem.removeAttribute("mousedown");
+
+    let toolbarParent = draggedItem.closest("toolbar");
+    if (toolbarParent) {
+      toolbarParent.style.removeProperty("min-height");
+    }
 
     // Do nothing if the target was dropped onto itself (ie, no change in area
     // or position).
@@ -1976,6 +2050,11 @@ CustomizeMode.prototype = {
     if (draggedWrapper) {
       draggedWrapper.hidden = false;
       draggedWrapper.removeAttribute("mousedown");
+
+      let toolbarParent = draggedWrapper.closest("toolbar");
+      if (toolbarParent) {
+        toolbarParent.style.removeProperty("min-height");
+      }
     }
 
     if (this._dragOverItem) {
@@ -2060,6 +2139,10 @@ CustomizeMode.prototype = {
     if (!currentArea) {
       return;
     }
+    let nextArea = aNextItem ? this._getCustomizableParent(aNextItem) : null;
+    if (currentArea != nextArea) {
+      currentArea.removeAttribute("draggingover");
+    }
     let areaType = CustomizableUI.getAreaType(currentArea.id);
     if (areaType) {
       if (aNoTransition) {
@@ -2080,7 +2163,6 @@ CustomizeMode.prototype = {
     } else {
       aItem.removeAttribute("dragover");
       if (aNextItem) {
-        let nextArea = this._getCustomizableParent(aNextItem);
         if (nextArea == currentArea) {
           // No need to do anything if we're still dragging in this area:
           return;
@@ -2165,27 +2247,23 @@ CustomizeMode.prototype = {
 
   _getCustomizableParent(aElement) {
     if (aElement) {
-      // Deal with drag/drop on the padding of the panel in photon.
+      // Deal with drag/drop on the padding of the panel.
       let containingPanelHolder = aElement.closest("#customization-panelHolder");
       if (containingPanelHolder) {
-        return containingPanelHolder.firstChild;
+        return containingPanelHolder.querySelector("#widget-overflow-fixed-list");
       }
     }
 
     let areas = CustomizableUI.areas;
     areas.push(kPaletteId);
-    while (aElement) {
-      if (areas.indexOf(aElement.id) != -1) {
-        return aElement;
-      }
-      aElement = aElement.parentNode;
-    }
-
-    return null;
+    return aElement.closest(areas.map(a => "#" + CSS.escape(a)).join(","));
   },
 
   _getDragOverNode(aEvent, aAreaElement, aAreaType, aDraggedItemId) {
     let expectedParent = aAreaElement.customizationTarget || aAreaElement;
+    if (!expectedParent.contains(aEvent.target)) {
+      return expectedParent;
+    }
     // Our tests are stupid. Cope:
     if (!aEvent.clientX && !aEvent.clientY) {
       return aEvent.target;
@@ -2197,14 +2275,7 @@ CustomizeMode.prototype = {
 
     // Ensure this is within the container
     let boundsContainer = expectedParent;
-    // NB: because the panel UI itself is inside a scrolling container, we need
-    // to use the parent bounds (otherwise, if the panel UI is scrolled down,
-    // the numbers we get are in window coordinates which leads to various kinds
-    // of weirdness)
-    if (boundsContainer == this.panelUIContents) {
-      boundsContainer = boundsContainer.parentNode;
-    }
-    let bounds = boundsContainer.getBoundingClientRect();
+    let bounds = this._dwu.getBoundsWithoutFlushing(boundsContainer);
     dragX = Math.min(bounds.right, Math.max(dragX, bounds.left));
     dragY = Math.min(bounds.bottom, Math.max(dragY, bounds.top));
 
@@ -2218,14 +2289,7 @@ CustomizeMode.prototype = {
       let positionManager = DragPositionManager.getManagerForArea(aAreaElement);
       // Make it relative to the container:
       dragX -= bounds.left;
-      // NB: but if we're in the panel UI, we need to use the actual panel
-      // contents instead of the scrolling container to determine our origin
-      // offset against:
-      if (expectedParent == this.panelUIContents) {
-        dragY -= this.panelUIContents.getBoundingClientRect().top;
-      } else {
-        dragY -= bounds.top;
-      }
+      dragY -= bounds.top;
       // Find the closest node:
       targetNode = positionManager.find(aAreaElement, dragX, dragY, aDraggedItemId);
     }

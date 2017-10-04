@@ -40,6 +40,12 @@ struct LifecycleCallbackArgs
   nsString namespaceURI;
 };
 
+struct LifecycleAdoptedCallbackArgs
+{
+  nsCOMPtr<nsIDocument> mOldDocument;
+  nsCOMPtr<nsIDocument> mNewDocument;
+};
+
 class CustomElementCallback
 {
 public:
@@ -56,6 +62,13 @@ public:
     mArgs = aArgs;
   }
 
+  void SetAdoptedCallbackArgs(LifecycleAdoptedCallbackArgs& aAdoptedCallbackArgs)
+  {
+    MOZ_ASSERT(mType == nsIDocument::eAdopted,
+      "Arguments are only used by adopted callback.");
+    mAdoptedCallbackArgs = aAdoptedCallbackArgs;
+  }
+
 private:
   // The this value to use for invocation of the callback.
   RefPtr<Element> mThisObject;
@@ -65,6 +78,7 @@ private:
   // Arguments to be passed to the callback,
   // used by the attribute changed callback.
   LifecycleCallbackArgs mArgs;
+  LifecycleAdoptedCallbackArgs mAdoptedCallbackArgs;
   // CustomElementData that contains this callback in the
   // callback queue.
   CustomElementData* mOwnerData;
@@ -102,7 +116,7 @@ struct CustomElementData
   CustomElementData(nsIAtom* aType, State aState);
   // Custom element type, for <button is="x-button"> or <x-button>
   // this would be x-button.
-  nsCOMPtr<nsIAtom> mType;
+  RefPtr<nsIAtom> mType;
   // Element is being created flag as described in the custom elements spec.
   bool mElementIsBeingCreated;
   // Flag to determine if the created callback has been invoked, thus it
@@ -150,22 +164,22 @@ struct CustomElementDefinition
   CustomElementDefinition(nsIAtom* aType,
                           nsIAtom* aLocalName,
                           Function* aConstructor,
-                          nsCOMArray<nsIAtom>&& aObservedAttributes,
+                          nsTArray<RefPtr<nsIAtom>>&& aObservedAttributes,
                           JSObject* aPrototype,
                           mozilla::dom::LifecycleCallbacks* aCallbacks,
                           uint32_t aDocOrder);
 
   // The type (name) for this custom element.
-  nsCOMPtr<nsIAtom> mType;
+  RefPtr<nsIAtom> mType;
 
   // The localname to (e.g. <button is=type> -- this would be button).
-  nsCOMPtr<nsIAtom> mLocalName;
+  RefPtr<nsIAtom> mLocalName;
 
   // The custom element constructor.
   RefPtr<CustomElementConstructor> mConstructor;
 
   // The list of attributes that this custom element observes.
-  nsCOMArray<nsIAtom> mObservedAttributes;
+  nsTArray<RefPtr<nsIAtom>> mObservedAttributes;
 
   // The prototype to use for new custom elements of this type.
   JS::Heap<JSObject *> mPrototype;
@@ -200,10 +214,8 @@ private:
 class CustomElementReaction
 {
 public:
-  explicit CustomElementReaction(CustomElementRegistry* aRegistry,
-                                 CustomElementDefinition* aDefinition)
-    : mRegistry(aRegistry)
-    , mDefinition(aDefinition)
+  explicit CustomElementReaction(CustomElementDefinition* aDefinition)
+    : mDefinition(aDefinition)
   {
   }
 
@@ -214,16 +226,14 @@ public:
   }
 
 protected:
-  CustomElementRegistry* mRegistry;
   CustomElementDefinition* mDefinition;
 };
 
 class CustomElementUpgradeReaction final : public CustomElementReaction
 {
 public:
-  explicit CustomElementUpgradeReaction(CustomElementRegistry* aRegistry,
-                                        CustomElementDefinition* aDefinition)
-    : CustomElementReaction(aRegistry, aDefinition)
+  explicit CustomElementUpgradeReaction(CustomElementDefinition* aDefinition)
+    : CustomElementReaction(aDefinition)
   {
   }
 
@@ -234,10 +244,9 @@ private:
 class CustomElementCallbackReaction final : public CustomElementReaction
 {
   public:
-    CustomElementCallbackReaction(CustomElementRegistry* aRegistry,
-                                  CustomElementDefinition* aDefinition,
+    CustomElementCallbackReaction(CustomElementDefinition* aDefinition,
                                   UniquePtr<CustomElementCallback> aCustomElementCallback)
-      : CustomElementReaction(aRegistry, aDefinition)
+      : CustomElementReaction(aDefinition)
       , mCustomElementCallback(Move(aCustomElementCallback))
     {
     }
@@ -263,26 +272,25 @@ public:
   {
   }
 
-  // nsWeakPtr is a weak pointer of Element
+  // Hold a strong reference of Element so that it does not get cycle collected
+  // before the reactions in its reaction queue are invoked.
   // The element reaction queues are stored in CustomElementData.
   // We need to lookup ElementReactionQueueMap again to get relevant reaction queue.
   // The choice of 1 for the auto size here is based on gut feeling.
-  typedef AutoTArray<nsWeakPtr, 1> ElementQueue;
+  typedef AutoTArray<RefPtr<Element>, 1> ElementQueue;
 
   /**
    * Enqueue a custom element upgrade reaction
    * https://html.spec.whatwg.org/multipage/scripting.html#enqueue-a-custom-element-upgrade-reaction
    */
-  void EnqueueUpgradeReaction(CustomElementRegistry* aRegistry,
-                              Element* aElement,
+  void EnqueueUpgradeReaction(Element* aElement,
                               CustomElementDefinition* aDefinition);
 
   /**
    * Enqueue a custom element callback reaction
    * https://html.spec.whatwg.org/multipage/scripting.html#enqueue-a-custom-element-callback-reaction
    */
-  void EnqueueCallbackReaction(CustomElementRegistry* aRegistry,
-                               Element* aElement,
+  void EnqueueCallbackReaction(Element* aElement,
                                CustomElementDefinition* aDefinition,
                                UniquePtr<CustomElementCallback> aCustomElementCallback);
 
@@ -377,10 +385,11 @@ public:
    */
   void SetupCustomElement(Element* aElement, const nsAString* aTypeExtension);
 
-  void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
-                                Element* aCustomElement,
-                                LifecycleCallbackArgs* aArgs,
-                                CustomElementDefinition* aDefinition);
+  static void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
+                                       Element* aCustomElement,
+                                       LifecycleCallbackArgs* aArgs,
+                                       LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
+                                       CustomElementDefinition* aDefinition);
 
   void GetCustomPrototype(nsIAtom* aAtom,
                           JS::MutableHandle<JSObject*> aPrototype);
@@ -398,9 +407,11 @@ public:
 private:
   ~CustomElementRegistry();
 
-  UniquePtr<CustomElementCallback> CreateCustomElementCallback(
+  static UniquePtr<CustomElementCallback> CreateCustomElementCallback(
     nsIDocument::ElementCallbackType aType, Element* aCustomElement,
-    LifecycleCallbackArgs* aArgs, CustomElementDefinition* aDefinition);
+    LifecycleCallbackArgs* aArgs,
+    LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
+    CustomElementDefinition* aDefinition);
 
   /**
    * Registers an unresolved custom element that is a candidate for
@@ -417,12 +428,12 @@ private:
                          CustomElementDefinition* aDefinition,
                          ErrorResult& aRv);
 
-  typedef nsRefPtrHashtable<nsISupportsHashKey, CustomElementDefinition>
+  typedef nsRefPtrHashtable<nsRefPtrHashKey<nsIAtom>, CustomElementDefinition>
     DefinitionMap;
-  typedef nsClassHashtable<nsISupportsHashKey, nsTArray<nsWeakPtr>>
+  typedef nsClassHashtable<nsRefPtrHashKey<nsIAtom>, nsTArray<nsWeakPtr>>
     CandidateMap;
   typedef JS::GCHashMap<JS::Heap<JSObject*>,
-                        nsCOMPtr<nsIAtom>,
+                        RefPtr<nsIAtom>,
                         js::MovableCellHasher<JS::Heap<JSObject*>>,
                         js::SystemAllocPolicy> ConstructorMap;
 
@@ -436,7 +447,7 @@ private:
   // mCustomDefinitions again to get definitions.
   ConstructorMap mConstructors;
 
-  typedef nsRefPtrHashtable<nsISupportsHashKey, Promise>
+  typedef nsRefPtrHashtable<nsRefPtrHashKey<nsIAtom>, Promise>
     WhenDefinedPromiseMap;
   WhenDefinedPromiseMap mWhenDefinedPromiseMap;
 

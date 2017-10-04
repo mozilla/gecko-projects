@@ -521,15 +521,25 @@ XMLHttpRequestMainThread::DetectCharset()
   }
 
   mResponseCharset = encoding;
-  mDecoder = encoding->NewDecoderWithBOMRemoval();
+
+  // Only sniff the BOM for non-JSON responseTypes
+  if (mResponseType == XMLHttpRequestResponseType::Json) {
+    mDecoder = encoding->NewDecoderWithBOMRemoval();
+  } else {
+    mDecoder = encoding->NewDecoder();
+  }
 
   return NS_OK;
 }
 
 nsresult
 XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
-                                               uint32_t aSrcBufferLen)
+                                               uint32_t aSrcBufferLen,
+                                               bool aLast)
 {
+  // Call this with an empty buffer to send the decoder the signal
+  // that we have hit the end of the stream.
+
   NS_ENSURE_STATE(mDecoder);
 
   CheckedInt<size_t> destBufferLen =
@@ -550,7 +560,6 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  // XXX there's no handling for incomplete byte sequences on EOF!
   uint32_t result;
   size_t read;
   size_t written;
@@ -558,7 +567,7 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
   Tie(result, read, written, hadErrors) = mDecoder->DecodeToUTF16(
     AsBytes(MakeSpan(aSrcBuffer, aSrcBufferLen)),
     MakeSpan(helper.EndOfExistingData(), destBufferLen.value()),
-    false);
+    aLast);
   MOZ_ASSERT(result == kInputEmpty);
   MOZ_ASSERT(read == aSrcBufferLen);
   MOZ_ASSERT(written <= destBufferLen.value());
@@ -984,9 +993,18 @@ XMLHttpRequestMainThread::GetStatusText(nsACString& aStatusText,
 }
 
 void
+XMLHttpRequestMainThread::TerminateOngoingFetch() {
+  if ((mState == State::opened && mFlagSend) ||
+      mState == State::headers_received || mState == State::loading) {
+    CloseRequest();
+  }
+}
+
+void
 XMLHttpRequestMainThread::CloseRequest()
 {
   mWaitingForOnStopRequest = false;
+  mErrorLoad = ErrorType::eTerminated;
   if (mChannel) {
     mChannel->Cancel(NS_BINDING_ABORTED);
   }
@@ -1087,7 +1105,7 @@ XMLHttpRequestMainThread::Abort(ErrorResult& aRv)
   mFlagAborted = true;
 
   // Step 1
-  CloseRequest();
+  TerminateOngoingFetch();
 
   // Step 2
   if ((mState == State::opened && mFlagSend) ||
@@ -1329,6 +1347,7 @@ XMLHttpRequestMainThread::GetLoadGroup() const
 nsresult
 XMLHttpRequestMainThread::FireReadystatechangeEvent()
 {
+  MOZ_ASSERT(mState != State::unsent);
   RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
   event->InitEvent(kLiteralString_readystatechange, false, false);
   // We assume anyone who managed to call CreateReadystatechangeEvent is trusted
@@ -1584,7 +1603,7 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod,
   }
 
   // Step 10
-  CloseRequest();
+  TerminateOngoingFetch();
 
   // Step 11
   // timeouts are handled without a flag
@@ -1881,7 +1900,7 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Fire the first progress event/loading state change
-  if (mState != State::loading) {
+  if (mState == State::headers_received) {
     ChangeState(State::loading);
     if (!mFlagSynchronous) {
       DispatchProgressEvent(this, ProgressEventType::progress,
@@ -2179,6 +2198,12 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest *request, nsISupports *ctxt, 
     return NS_OK;
   }
 
+  // send the decoder the signal that we've hit the end of the stream,
+  // but only when parsing text (not XML, which does this already).
+  if (mDecoder && !mFlagParseBody) {
+    AppendToResponseText(nullptr, 0, true);
+  }
+
   mWaitingForOnStopRequest = false;
 
   if (mRequestObserver) {
@@ -2354,7 +2379,7 @@ XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument()
     mResponseCharset = mResponseXML->GetDocumentCharacterSet();
     TruncateResponseText();
     mResponseBodyDecodedPos = 0;
-    mDecoder = mResponseCharset->NewDecoderWithBOMRemoval();
+    mDecoder = mResponseCharset->NewDecoder();
   }
 }
 
@@ -2923,6 +2948,26 @@ XMLHttpRequestMainThread::Send(JSContext* aCx,
 }
 
 nsresult
+XMLHttpRequestMainThread::MaybeSilentSendFailure(nsresult aRv)
+{
+  // Per spec, silently fail on async request failures; throw for sync.
+  if (mFlagSynchronous) {
+    mState = State::done;
+    return NS_ERROR_DOM_NETWORK_ERR;
+  }
+
+  // Defer the actual sending of async events just in case listeners
+  // are attached after the send() method is called.
+  Unused << NS_WARN_IF(NS_FAILED(
+    DispatchToMainThread(NewRunnableMethod<ProgressEventType>(
+      "dom::XMLHttpRequestMainThread::CloseRequestWithError",
+      this,
+      &XMLHttpRequestMainThread::CloseRequestWithError,
+      ProgressEventType::error))));
+  return NS_OK;
+}
+
+nsresult
 XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2948,7 +2993,8 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
   // as per spec. We really should create the channel here in send(), but
   // we have internal code relying on the channel being created in open().
   if (!mChannel) {
-    return NS_ERROR_DOM_NETWORK_ERR;
+    mFlagSend = true; // so CloseRequestWithError sets us to DONE.
+    return MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
   }
 
   PopulateNetworkInterfaceId();
@@ -3101,19 +3147,7 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
   }
 
   if (!mChannel) {
-    // Per spec, silently fail on async request failures; throw for sync.
-    if (mFlagSynchronous) {
-      mState = State::done;
-      return NS_ERROR_DOM_NETWORK_ERR;
-    } else {
-      // Defer the actual sending of async events just in case listeners
-      // are attached after the send() method is called.
-      return DispatchToMainThread(NewRunnableMethod<ProgressEventType>(
-        "dom::XMLHttpRequestMainThread::CloseRequestWithError",
-        this,
-        &XMLHttpRequestMainThread::CloseRequestWithError,
-        ProgressEventType::error));
-    }
+    return MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
   }
 
   return rv;

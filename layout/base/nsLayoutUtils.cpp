@@ -129,6 +129,7 @@
 #include "prenv.h"
 #include "RetainedDisplayListBuilder.h"
 #include "TextDrawTarget.h"
+#include "nsDeckFrame.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -3464,7 +3465,8 @@ nsLayoutUtils::CalculateAndSetDisplayPortMargins(nsIScrollableFrame* aScrollFram
 bool
 nsLayoutUtils::MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
                                       nsIFrame* aScrollFrame,
-                                      RepaintMode aRepaintMode) {
+                                      RepaintMode aRepaintMode)
+{
   nsIContent* content = aScrollFrame->GetContent();
   nsIScrollableFrame* scrollableFrame = do_QueryFrame(aScrollFrame);
   if (!content || !scrollableFrame) {
@@ -3532,6 +3534,50 @@ nsLayoutUtils::SetZeroMarginDisplayPortOnAsyncScrollableAncestors(nsIFrame* aFra
         aRepaintMode);
     }
   }
+}
+
+bool
+nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
+  nsIFrame* aFrame, nsDisplayListBuilder& aBuilder)
+{
+  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
+  if (sf) {
+    if (MaybeCreateDisplayPort(aBuilder, aFrame, RepaintMode::Repaint)) {
+      return true;
+    }
+  }
+  if (aFrame->IsPlaceholderFrame()) {
+    nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(aFrame);
+    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(
+          placeholder->GetOutOfFlowFrame(), aBuilder)) {
+      return true;
+    }
+  }
+  if (aFrame->IsSubDocumentFrame()) {
+    nsIPresShell* presShell =
+      static_cast<nsSubDocumentFrame*>(aFrame)->GetSubdocumentPresShellForPainting(0);
+    nsIFrame* root = presShell ? presShell->GetRootFrame() : nullptr;
+    if (root) {
+      if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(root, aBuilder)) {
+        return true;
+      }
+    }
+  }
+  if (aFrame->IsDeckFrame()) {
+    // only descend the visible card of a decks
+    nsIFrame* child = static_cast<nsDeckFrame*>(aFrame)->GetSelectedBox();
+    if (child) {
+      return MaybeCreateDisplayPortInFirstScrollFrameEncountered(child, aBuilder);
+    }
+  }
+
+  for (nsIFrame* child : aFrame->PrincipalChildList()) {
+    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(child, aBuilder)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void
@@ -3731,7 +3777,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     nsRect displayPortBase = aFrame->GetVisualOverflowRectRelativeToSelf();
     nsRect temp = displayPortBase;
     Unused << rootScrollableFrame->DecideScrollableLayer(&builder, &displayPortBase, &temp,
-                /* aAllowCreateDisplayPort = */ true);
+                /* aSetBase = */ true);
   }
 
   nsRegion visibleRegion;
@@ -8413,7 +8459,7 @@ nsLayoutUtils::FontSizeInflationInner(const nsIFrame *aFrame,
         fType != LayoutFrameType::Inline &&
         // ignore width on radios and checkboxes since we enlarge them and
         // they have width/height in ua.css
-        fType != LayoutFrameType::FormControl) {
+        fType != LayoutFrameType::CheckboxRadio) {
       // ruby annotations should have the same inflation as its
       // grandparent, which is the ruby frame contains the annotation.
       if (fType == LayoutFrameType::RubyText) {

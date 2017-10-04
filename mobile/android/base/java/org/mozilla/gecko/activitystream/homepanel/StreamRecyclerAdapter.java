@@ -123,7 +123,8 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
     @Override
     public int getItemViewType(int position) {
         if (position >= recyclerViewModel.size()) {
-            throw new IllegalArgumentException("Requested position does not exist");
+            throw new IllegalArgumentException("Requested position, " + position + ", does not exist. Size is :" +
+                    recyclerViewModel.size());
         }
         return recyclerViewModel.get(position).getRowItemType().getViewType();
     }
@@ -197,7 +198,8 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamViewHolder
             setViewVisible(bookmarksEnabled || visitedEnabled, holder.itemView);
         } else if (type == RowItemType.TOP_STORIES_TITLE.getViewType()) {
             final Context context = holder.itemView.getContext();
-            final boolean pocketEnabled = GeckoSharedPrefs.forProfile(context).getBoolean(ActivityStreamPanel.PREF_POCKET_ENABLED,
+            final boolean pocketEnabled = ActivityStreamConfiguration.isPocketEnabledByLocale(context) &&
+                    GeckoSharedPrefs.forProfile(context).getBoolean(ActivityStreamPanel.PREF_POCKET_ENABLED,
                     context.getResources().getBoolean(R.bool.pref_activitystream_pocket_enabled_default));
             setViewVisible(pocketEnabled, holder.itemView);
         }

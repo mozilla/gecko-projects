@@ -97,3 +97,12 @@ jobs:
           by-project:
               mozilla-central: [{hour: 10, minute: 0}]
               # No default
+
+    - name: periodic-update
+      job:
+          type: decision-task
+          treeherder-symbol: Nfile
+          target-tasks-method: nightly_file_update
+      run-on-projects:
+          - mozilla-central
+      when: []  # don't run for now due to unforeseen issues

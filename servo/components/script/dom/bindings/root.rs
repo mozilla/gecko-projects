@@ -11,6 +11,7 @@
 //!
 //! Here is a brief overview of the important types:
 //!
+//! - `Root<T>`: a stack-based rooted value.
 //! - `DomRoot<T>`: a stack-based reference to a rooted DOM object.
 //! - `Dom<T>`: a reference to a DOM object that can automatically be traced by
 //!   the GC when encountered as a field of a Rust structure.
@@ -35,17 +36,274 @@ use js::jsapi::{JSObject, JSTracer, Heap};
 use js::rust::GCMethods;
 use mitochondria::OnceCell;
 use script_layout_interface::TrustedNodeAddress;
-use script_thread::STACK_ROOTS;
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::default::Default;
 use std::hash::{Hash, Hasher};
 #[cfg(debug_assertions)]
 use std::intrinsics::type_name;
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
 use std::ptr;
 use std::rc::Rc;
 use style::thread_state;
+
+/// A rooted value.
+#[allow(unrooted_must_root)]
+#[allow_unrooted_interior]
+pub struct Root<T: StableTraceObject> {
+    /// The value to root.
+    value: T,
+    /// List that ensures correct dynamic root ordering
+    root_list: *const RootCollection,
+}
+
+impl<T> Root<T>
+where
+    T: StableTraceObject + 'static,
+{
+    /// Create a new stack-bounded root for the provided value.
+    /// It cannot outlive its associated `RootCollection`, and it gives
+    /// out references which cannot outlive this new `Root`.
+    #[allow(unrooted_must_root)]
+    unsafe fn new(value: T) -> Self {
+        debug_assert!(thread_state::get().is_script());
+        STACK_ROOTS.with(|ref root_list| {
+            let root_list = &*root_list.get().unwrap();
+            root_list.root(value.stable_trace_object());
+            Root { value, root_list }
+        })
+    }
+}
+
+/// Represents values that can be rooted through a stable address that will
+/// not change for their whole lifetime.
+pub unsafe trait StableTraceObject {
+    /// Returns a stable trace object which address won't change for the whole
+    /// lifetime of the value.
+    fn stable_trace_object(&self) -> *const JSTraceable;
+}
+
+unsafe impl<T> StableTraceObject for Dom<T>
+where
+    T: DomObject,
+{
+    fn stable_trace_object<'a>(&'a self) -> *const JSTraceable {
+        // The JSTraceable impl for Reflector doesn't actually do anything,
+        // so we need this shenanigan to actually trace the reflector of the
+        // T pointer in Dom<T>.
+        #[allow(unrooted_must_root)]
+        struct ReflectorStackRoot(Reflector);
+        unsafe impl JSTraceable for ReflectorStackRoot {
+            unsafe fn trace(&self, tracer: *mut JSTracer) {
+                trace_reflector(tracer, "on stack", &self.0);
+            }
+        }
+        unsafe {
+            &*(self.reflector() as *const Reflector as *const ReflectorStackRoot)
+        }
+    }
+}
+
+impl<T> Deref for Root<T>
+where
+    T: Deref + StableTraceObject,
+{
+    type Target = <T as Deref>::Target;
+
+    fn deref(&self) -> &Self::Target {
+        debug_assert!(thread_state::get().is_script());
+        &self.value
+    }
+}
+
+impl<T> Drop for Root<T>
+where
+    T: StableTraceObject,
+{
+    fn drop(&mut self) {
+        unsafe {
+            (*self.root_list).unroot(self.value.stable_trace_object());
+        }
+    }
+}
+
+/// A rooted reference to a DOM object.
+pub type DomRoot<T> = Root<Dom<T>>;
+
+impl<T: Castable> DomRoot<T> {
+    /// Cast a DOM object root upwards to one of the interfaces it derives from.
+    pub fn upcast<U>(root: DomRoot<T>) -> DomRoot<U>
+        where U: Castable,
+              T: DerivedFrom<U>
+    {
+        unsafe { mem::transmute(root) }
+    }
+
+    /// Cast a DOM object root downwards to one of the interfaces it might implement.
+    pub fn downcast<U>(root: DomRoot<T>) -> Option<DomRoot<U>>
+        where U: DerivedFrom<T>
+    {
+        if root.is::<U>() {
+            Some(unsafe { mem::transmute(root) })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: DomObject> DomRoot<T> {
+    /// Generate a new root from a reference
+    pub fn from_ref(unrooted: &T) -> DomRoot<T> {
+        unsafe { DomRoot::new(Dom::from_ref(unrooted)) }
+    }
+}
+
+impl<T> HeapSizeOf for DomRoot<T>
+where
+    T: DomObject + HeapSizeOf,
+{
+    fn heap_size_of_children(&self) -> usize {
+        (**self).heap_size_of_children()
+    }
+}
+
+impl<T> PartialEq for DomRoot<T>
+where
+    T: DomObject,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T> Clone for DomRoot<T>
+where
+    T: DomObject,
+{
+    fn clone(&self) -> DomRoot<T> {
+        DomRoot::from_ref(&*self)
+    }
+}
+
+unsafe impl<T> JSTraceable for DomRoot<T>
+where
+    T: DomObject,
+{
+    unsafe fn trace(&self, _: *mut JSTracer) {
+        // Already traced.
+    }
+}
+
+/// A rooting mechanism for reflectors on the stack.
+/// LIFO is not required.
+///
+/// See also [*Exact Stack Rooting - Storing a GCPointer on the CStack*]
+/// (https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey/Internals/GC/Exact_Stack_Rooting).
+pub struct RootCollection {
+    roots: UnsafeCell<Vec<*const JSTraceable>>,
+}
+
+thread_local!(static STACK_ROOTS: Cell<Option<*const RootCollection>> = Cell::new(None));
+
+pub struct ThreadLocalStackRoots<'a>(PhantomData<&'a u32>);
+
+impl<'a> ThreadLocalStackRoots<'a> {
+    pub fn new(roots: &'a RootCollection) -> Self {
+        STACK_ROOTS.with(|ref r| {
+            r.set(Some(roots))
+        });
+        ThreadLocalStackRoots(PhantomData)
+    }
+}
+
+impl<'a> Drop for ThreadLocalStackRoots<'a> {
+    fn drop(&mut self) {
+        STACK_ROOTS.with(|ref r| r.set(None));
+    }
+}
+
+impl RootCollection {
+    /// Create an empty collection of roots
+    pub fn new() -> RootCollection {
+        debug_assert!(thread_state::get().is_script());
+        RootCollection {
+            roots: UnsafeCell::new(vec![]),
+        }
+    }
+
+    /// Starts tracking a trace object.
+    unsafe fn root(&self, object: *const JSTraceable) {
+        debug_assert!(thread_state::get().is_script());
+        (*self.roots.get()).push(object);
+    }
+
+    /// Stops tracking a trace object, asserting if it isn't found.
+    unsafe fn unroot(&self, object: *const JSTraceable) {
+        debug_assert!(thread_state::get().is_script());
+        let roots = &mut *self.roots.get();
+        match roots.iter().rposition(|r| *r == object) {
+            Some(idx) => {
+                roots.remove(idx);
+            },
+            None => panic!("Can't remove a root that was never rooted!"),
+        }
+    }
+}
+
+/// SM Callback that traces the rooted reflectors
+pub unsafe fn trace_roots(tracer: *mut JSTracer) {
+    debug!("tracing stack roots");
+    STACK_ROOTS.with(|ref collection| {
+        let collection = &*(*collection.get().unwrap()).roots.get();
+        for root in collection {
+            (**root).trace(tracer);
+        }
+    });
+}
+
+/// Get a reference out of a rooted value.
+pub trait RootedReference<'root> {
+    /// The type of the reference.
+    type Ref: 'root;
+    /// Obtain a reference out of the rooted value.
+    fn r(&'root self) -> Self::Ref;
+}
+
+impl<'root, T: DomObject + 'root> RootedReference<'root> for DomRoot<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        self
+    }
+}
+
+impl<'root, T: DomObject + 'root> RootedReference<'root> for Dom<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        &self
+    }
+}
+
+impl<'root, T: JSTraceable + DomObject + 'root> RootedReference<'root> for [Dom<T>] {
+    type Ref = &'root [&'root T];
+    fn r(&'root self) -> &'root [&'root T] {
+        unsafe { mem::transmute(self) }
+    }
+}
+
+impl<'root, T: DomObject + 'root> RootedReference<'root> for Rc<T> {
+    type Ref = &'root T;
+    fn r(&'root self) -> &'root T {
+        self
+    }
+}
+
+impl<'root, T: RootedReference<'root> + 'root> RootedReference<'root> for Option<T> {
+    type Ref = Option<T::Ref>;
+    fn r(&'root self) -> Option<T::Ref> {
+        self.as_ref().map(RootedReference::r)
+    }
+}
 
 /// A traced reference to a DOM object
 ///
@@ -85,13 +343,6 @@ impl<T: DomObject> Dom<T> {
         Dom {
             ptr: unsafe { NonZero::new_unchecked(&*obj) },
         }
-    }
-}
-
-impl<'root, T: DomObject + 'root> RootedReference<'root> for Dom<T> {
-    type Ref = &'root T;
-    fn r(&'root self) -> &'root T {
-        &self
     }
 }
 
@@ -404,7 +655,10 @@ pub struct DomOnceCell<T: DomObject> {
     ptr: OnceCell<Dom<T>>,
 }
 
-impl<T: DomObject> DomOnceCell<T> {
+impl<T> DomOnceCell<T>
+where
+    T: DomObject
+{
     /// Retrieve a copy of the current inner value. If it is `None`, it is
     /// initialized with the result of `cb` first.
     #[allow(unrooted_must_root)]
@@ -457,202 +711,6 @@ impl<T: DomObject> LayoutDom<T> {
     pub fn get_for_script(&self) -> &T {
         debug_assert!(thread_state::get().is_script());
         unsafe { &*self.ptr.get() }
-    }
-}
-
-/// Get a reference out of a rooted value.
-pub trait RootedReference<'root> {
-    /// The type of the reference.
-    type Ref: 'root;
-    /// Obtain a reference out of the rooted value.
-    fn r(&'root self) -> Self::Ref;
-}
-
-impl<'root, T: JSTraceable + DomObject + 'root> RootedReference<'root> for [Dom<T>] {
-    type Ref = &'root [&'root T];
-    fn r(&'root self) -> &'root [&'root T] {
-        unsafe { mem::transmute(self) }
-    }
-}
-
-impl<'root, T: DomObject + 'root> RootedReference<'root> for Rc<T> {
-    type Ref = &'root T;
-    fn r(&'root self) -> &'root T {
-        self
-    }
-}
-
-impl<'root, T: RootedReference<'root> + 'root> RootedReference<'root> for Option<T> {
-    type Ref = Option<T::Ref>;
-    fn r(&'root self) -> Option<T::Ref> {
-        self.as_ref().map(RootedReference::r)
-    }
-}
-
-/// A rooting mechanism for reflectors on the stack.
-/// LIFO is not required.
-///
-/// See also [*Exact Stack Rooting - Storing a GCPointer on the CStack*]
-/// (https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey/Internals/GC/Exact_Stack_Rooting).
-pub struct RootCollection {
-    roots: UnsafeCell<Vec<*const Reflector>>,
-}
-
-/// A pointer to a RootCollection, for use in global variables.
-pub struct RootCollectionPtr(pub *const RootCollection);
-
-impl Copy for RootCollectionPtr {}
-impl Clone for RootCollectionPtr {
-    fn clone(&self) -> RootCollectionPtr {
-        *self
-    }
-}
-
-impl RootCollection {
-    /// Create an empty collection of roots
-    pub fn new() -> RootCollection {
-        debug_assert!(thread_state::get().is_script());
-        RootCollection {
-            roots: UnsafeCell::new(vec![]),
-        }
-    }
-
-    /// Start tracking a stack-based root
-    unsafe fn root(&self, untracked_reflector: *const Reflector) {
-        debug_assert!(thread_state::get().is_script());
-        let roots = &mut *self.roots.get();
-        roots.push(untracked_reflector);
-        assert!(!(*untracked_reflector).get_jsobject().is_null())
-    }
-
-    /// Stop tracking a stack-based reflector, asserting if it isn't found.
-    unsafe fn unroot(&self, tracked_reflector: *const Reflector) {
-        assert!(!tracked_reflector.is_null());
-        assert!(!(*tracked_reflector).get_jsobject().is_null());
-        debug_assert!(thread_state::get().is_script());
-        let roots = &mut *self.roots.get();
-        match roots.iter().rposition(|r| *r == tracked_reflector) {
-            Some(idx) => {
-                roots.remove(idx);
-            },
-            None => panic!("Can't remove a root that was never rooted!"),
-        }
-    }
-}
-
-/// SM Callback that traces the rooted reflectors
-pub unsafe fn trace_roots(tracer: *mut JSTracer) {
-    debug!("tracing stack roots");
-    STACK_ROOTS.with(|ref collection| {
-        let RootCollectionPtr(collection) = collection.get().unwrap();
-        let collection = &*(*collection).roots.get();
-        for root in collection {
-            trace_reflector(tracer, "on stack", &**root);
-        }
-    });
-}
-
-/// A rooted reference to a DOM object.
-///
-/// The JS value is pinned for the duration of this object's lifetime; roots
-/// are additive, so this object's destruction will not invalidate other roots
-/// for the same JS value. `Root`s cannot outlive the associated
-/// `RootCollection` object.
-#[allow_unrooted_interior]
-pub struct DomRoot<T: DomObject> {
-    /// Reference to rooted value that must not outlive this container
-    ptr: NonZero<*const T>,
-    /// List that ensures correct dynamic root ordering
-    root_list: *const RootCollection,
-}
-
-impl<T: Castable> DomRoot<T> {
-    /// Cast a DOM object root upwards to one of the interfaces it derives from.
-    pub fn upcast<U>(root: DomRoot<T>) -> DomRoot<U>
-        where U: Castable,
-              T: DerivedFrom<U>
-    {
-        unsafe { mem::transmute(root) }
-    }
-
-    /// Cast a DOM object root downwards to one of the interfaces it might implement.
-    pub fn downcast<U>(root: DomRoot<T>) -> Option<DomRoot<U>>
-        where U: DerivedFrom<T>
-    {
-        if root.is::<U>() {
-            Some(unsafe { mem::transmute(root) })
-        } else {
-            None
-        }
-    }
-}
-
-impl<T: DomObject> DomRoot<T> {
-    /// Create a new stack-bounded root for the provided JS-owned value.
-    /// It cannot outlive its associated `RootCollection`, and it gives
-    /// out references which cannot outlive this new `Root`.
-    pub fn new(unrooted: NonZero<*const T>) -> DomRoot<T> {
-        debug_assert!(thread_state::get().is_script());
-        STACK_ROOTS.with(|ref collection| {
-            let RootCollectionPtr(collection) = collection.get().unwrap();
-            unsafe { (*collection).root(&*(*unrooted.get()).reflector()) }
-            DomRoot {
-                ptr: unrooted,
-                root_list: collection,
-            }
-        })
-    }
-
-    /// Generate a new root from a reference
-    pub fn from_ref(unrooted: &T) -> DomRoot<T> {
-        DomRoot::new(unsafe { NonZero::new_unchecked(unrooted) })
-    }
-}
-
-impl<'root, T: DomObject + 'root> RootedReference<'root> for DomRoot<T> {
-    type Ref = &'root T;
-    fn r(&'root self) -> &'root T {
-        self
-    }
-}
-
-impl<T: DomObject> Deref for DomRoot<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        debug_assert!(thread_state::get().is_script());
-        unsafe { &*self.ptr.get() }
-    }
-}
-
-impl<T: DomObject + HeapSizeOf> HeapSizeOf for DomRoot<T> {
-    fn heap_size_of_children(&self) -> usize {
-        (**self).heap_size_of_children()
-    }
-}
-
-impl<T: DomObject> PartialEq for DomRoot<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr == other.ptr
-    }
-}
-
-impl<T: DomObject> Clone for DomRoot<T> {
-    fn clone(&self) -> DomRoot<T> {
-        DomRoot::from_ref(&*self)
-    }
-}
-
-impl<T: DomObject> Drop for DomRoot<T> {
-    fn drop(&mut self) {
-        unsafe {
-            (*self.root_list).unroot(self.reflector());
-        }
-    }
-}
-
-unsafe impl<T: DomObject> JSTraceable for DomRoot<T> {
-    unsafe fn trace(&self, _: *mut JSTracer) {
-        // Already traced.
     }
 }
 

@@ -1018,7 +1018,7 @@ MessageChannel::SendBuildID()
     MonitorAutoLock lock(*mMonitor);
     if (!Connected()) {
         ReportConnectionError("MessageChannel", msg);
-        MOZ_CRASH();
+        return;
     }
     mLink->SendMessage(msg.forget());
 }
@@ -1898,7 +1898,7 @@ MessageChannel::RunMessage(MessageTask& aTask)
 NS_IMPL_ISUPPORTS_INHERITED(MessageChannel::MessageTask, CancelableRunnable, nsIRunnablePriority)
 
 MessageChannel::MessageTask::MessageTask(MessageChannel* aChannel, Message&& aMessage)
-  : CancelableRunnable(StringFromIPCMessageType(aMessage.type()))
+  : CancelableRunnable(aMessage.name())
   , mChannel(aChannel)
   , mMessage(Move(aMessage))
   , mScheduled(false)
@@ -2002,7 +2002,7 @@ MessageChannel::MessageTask::GetPriority(uint32_t* aPriority)
 }
 
 bool
-MessageChannel::MessageTask::GetAffectedSchedulerGroups(nsTArray<RefPtr<SchedulerGroup>>& aGroups)
+MessageChannel::MessageTask::GetAffectedSchedulerGroups(SchedulerGroupSet& aGroups)
 {
     if (!mChannel) {
         return false;
@@ -2505,7 +2505,7 @@ MessageChannel::MaybeHandleError(Result code, const Message& aMsg, const char* c
     }
 
     char reason[512];
-    const char* msgname = StringFromIPCMessageType(aMsg.type());
+    const char* msgname = aMsg.name();
     if (msgname[0] == '?') {
         SprintfLiteral(reason,"(msgtype=0x%X) %s", aMsg.type(), errorMsg);
     } else {

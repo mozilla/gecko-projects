@@ -26,6 +26,8 @@
 #include "nsISelection.h"
 #include "TextDrawTarget.h"
 
+using mozilla::layout::TextDrawTarget;
+
 namespace mozilla {
 namespace css {
 
@@ -293,8 +295,7 @@ nsDisplayTextOverflowMarker::CreateWebRenderCommands(mozilla::wr::DisplayListBui
                                                      layers::WebRenderLayerManager* aManager,
                                                      nsDisplayListBuilder* aDisplayListBuilder)
 {
-  if (!aManager->IsLayersFreeTransaction() ||
-      !gfxPrefs::LayersAllowTextLayers() ||
+  if (!gfxPrefs::LayersAllowTextLayers() ||
       !CanUseAdvancedLayer(aDisplayListBuilder->GetWidgetLayerManager())) {
       return false;
   }

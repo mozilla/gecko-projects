@@ -17,7 +17,7 @@
 #include "nsTextFragment.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsNameSpaceManager.h"
-#include "nsFormControlFrame.h" //for registering accesskeys
+#include "nsCheckboxRadioFrame.h" //for registering accesskeys
 
 #include "nsIContent.h"
 #include "nsPresContext.h"
@@ -147,7 +147,7 @@ nsTextControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
   NS_ASSERTION(txtCtrl, "Content not a text control element");
   txtCtrl->UnbindFromFrame(this);
 
-  nsFormControlFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
+  nsCheckboxRadioFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
 
   if (mMutationObserver) {
     mRootNode->RemoveMutationObserver(mMutationObserver);
@@ -613,7 +613,7 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
 
   // make sure that the form registers itself on the initial/first reflow
   if (mState & NS_FRAME_FIRST_REFLOW) {
-    nsFormControlFrame::RegUnRegAccessKey(this, true);
+    nsCheckboxRadioFrame::RegUnRegAccessKey(this, true);
   }
 
   // set values of reflow's out parameters
@@ -1477,8 +1477,7 @@ void
 nsTextControlFrame::nsAnonDivObserver::ContentAppended(
   nsIDocument* aDocument,
   nsIContent* aContainer,
-  nsIContent* aFirstNewContent,
-  int32_t /* unused */)
+  nsIContent* aFirstNewContent)
 {
   mFrame.ClearCachedValue();
 }
@@ -1487,8 +1486,7 @@ void
 nsTextControlFrame::nsAnonDivObserver::ContentInserted(
   nsIDocument* aDocument,
   nsIContent* aContainer,
-  nsIContent* aChild,
-  int32_t /* unused */)
+  nsIContent* aChild)
 {
   mFrame.ClearCachedValue();
 }
@@ -1498,7 +1496,6 @@ nsTextControlFrame::nsAnonDivObserver::ContentRemoved(
   nsIDocument* aDocument,
   nsIContent* aContainer,
   nsIContent* aChild,
-  int32_t aIndexInContainer,
   nsIContent* aPreviousSibling)
 {
   mFrame.ClearCachedValue();

@@ -317,7 +317,7 @@ getYesNoAttr(txStylesheetAttr* aAttributes,
              txThreeState& aRes)
 {
     aRes = eNotSet;
-    nsCOMPtr<nsIAtom> atom;
+    RefPtr<nsIAtom> atom;
     nsresult rv = getAtomAttr(aAttributes, aAttrCount, aName, aRequired,
                               aState, getter_AddRefs(atom));
     if (!atom) {
@@ -1014,7 +1014,7 @@ txFnStartStripSpace(int32_t aNamespaceID,
     while (tokenizer.hasMoreTokens()) {
         const nsAString& name = tokenizer.nextToken();
         int32_t ns = kNameSpaceID_None;
-        nsCOMPtr<nsIAtom> prefix, localName;
+        RefPtr<nsIAtom> prefix, localName;
         rv = XMLUtils::splitQName(name, getter_AddRefs(prefix),
                                   getter_AddRefs(localName));
         if (NS_FAILED(rv)) {
@@ -1312,7 +1312,8 @@ txFnText(const nsAString& aStr, txStylesheetCompilerState& aState)
 /*
   xsl:apply-imports
 
-  txApplyImports
+  txApplyImportsStart
+  txApplyImportsEnd
 */
 static nsresult
 txFnStartApplyImports(int32_t aNamespaceID,
@@ -1324,7 +1325,11 @@ txFnStartApplyImports(int32_t aNamespaceID,
 {
     nsresult rv = NS_OK;
 
-    nsAutoPtr<txInstruction> instr(new txApplyImports);
+    nsAutoPtr<txInstruction> instr(new txApplyImportsStart);
+    rv = aState.addInstruction(Move(instr));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    instr = new txApplyImportsEnd;
     rv = aState.addInstruction(Move(instr));
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1960,7 +1965,7 @@ txFnStartNumber(int32_t aNamespaceID,
 {
     nsresult rv = NS_OK;
 
-    nsCOMPtr<nsIAtom> levelAtom;
+    RefPtr<nsIAtom> levelAtom;
     rv = getAtomAttr(aAttributes, aAttrCount, nsGkAtoms::level, false,
                      aState, getter_AddRefs(levelAtom));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2854,7 +2859,7 @@ txHandlerTable::init(const txElementHandler* aHandlers, uint32_t aCount)
 
     uint32_t i;
     for (i = 0; i < aCount; ++i) {
-        nsCOMPtr<nsIAtom> nameAtom = NS_Atomize(aHandlers->mLocalName);
+        RefPtr<nsIAtom> nameAtom = NS_Atomize(aHandlers->mLocalName);
         txExpandedName name(aHandlers->mNamespaceID, nameAtom);
         rv = mHandlers.add(name, aHandlers);
         NS_ENSURE_SUCCESS(rv, rv);

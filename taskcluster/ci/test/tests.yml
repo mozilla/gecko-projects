@@ -779,10 +779,6 @@ mochitest-gpu:
     treeherder-symbol: tc-M(gpu)
     loopback-video: true
     virtualization: virtual-with-gpu
-    worker-type:
-        by-test-platform:
-            windows10-64.*: buildbot-bridge/buildbot-bridge
-            default: null
     e10s:
         by-test-platform:
             windows7-32/debug: both
@@ -911,13 +907,10 @@ mochitest-webgl:
     suite: mochitest/mochitest-gl
     treeherder-symbol: tc-M(gl)
     virtualization: virtual-with-gpu
-    worker-type:
-        by-test-platform:
-            windows10-64.*: buildbot-bridge/buildbot-bridge
-            default: null
     chunks:
         by-test-platform:
             android.*: 10
+            windows.*: 8
             default: 3
     e10s:
         by-test-platform:
@@ -1796,8 +1789,8 @@ talos-tp6-stylo-disabled:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-            macosx.*: ['mozilla-beta', 'autoland', 'try']
+            windows.*: ['mozilla-beta', 'mozilla-central', 'try']
+            macosx.*: ['mozilla-beta', 'mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1919,7 +1912,10 @@ test-verify:
             # do not run on ccov; see also the enable_code_coverage transform
             linux64-ccov/.*: []
             default: built-projects
-    tier: 3
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: 2
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true

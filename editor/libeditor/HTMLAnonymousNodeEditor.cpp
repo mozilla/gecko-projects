@@ -307,11 +307,8 @@ HTMLEditor::DeleteRefToAnonymousNode(ManualNACPtr aContent,
         docObserver->BeginUpdate(document, UPDATE_CONTENT_MODEL);
       }
 
-      // XXX This is wrong (bug 439258).  Once it's fixed, the NS_WARNING
-      // in RestyleManager::RestyleForRemove should be changed back
-      // to an assertion.
       docObserver->ContentRemoved(aContent->GetComposedDoc(),
-                                  parentContent, aContent, -1,
+                                  parentContent, aContent,
                                   aContent->GetPreviousSibling());
       if (document) {
         docObserver->EndUpdate(document, UPDATE_CONTENT_MODEL);
@@ -359,7 +356,7 @@ HTMLEditor::CheckSelectionStateForAnonymousButtons(nsISelection* aSelection)
   rv = focusElement->GetTagName(focusTagName);
   NS_ENSURE_SUCCESS(rv, rv);
   ToLowerCase(focusTagName);
-  nsCOMPtr<nsIAtom> focusTagAtom = NS_Atomize(focusTagName);
+  RefPtr<nsIAtom> focusTagAtom = NS_Atomize(focusTagName);
 
   nsCOMPtr<nsIDOMElement> absPosElement;
   if (mIsAbsolutelyPositioningEnabled) {

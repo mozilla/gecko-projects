@@ -14,6 +14,10 @@ const EventEmitter = require("devtools/shared/old-event-emitter");
 const {executeSoon} = require("devtools/shared/DevToolsUtils");
 const {Task} = require("devtools/shared/task");
 
+// Use privileged promise in panel documents to prevent having them to freeze
+// during toolbox destruction. See bug 1402779.
+const Promise = require("Promise");
+
 // constructor
 const Telemetry = require("devtools/client/shared/telemetry");
 const HighlightersOverlay = require("devtools/client/inspector/shared/highlighters-overlay");
@@ -483,7 +487,7 @@ Inspector.prototype = {
    */
   setupSplitter: function () {
     let SplitBox = this.React.createFactory(this.browserRequire(
-      "devtools/client/shared/components/splitter/split-box"));
+      "devtools/client/shared/components/splitter/SplitBox"));
 
     let { width, height } = this.getSidebarSize();
     let splitter = SplitBox({
@@ -1124,7 +1128,15 @@ Inspector.prototype = {
   },
 
   _onContextMenu: function (e) {
+    if (e.originalTarget.closest("input[type=text]") ||
+        e.originalTarget.closest("input:not([type])") ||
+        e.originalTarget.closest("textarea")) {
+      return;
+    }
+
+    e.stopPropagation();
     e.preventDefault();
+
     this._openMenu({
       screenX: e.screenX,
       screenY: e.screenY,

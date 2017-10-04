@@ -138,9 +138,6 @@
       "enabled": true,
       "icon": "pocket",
       "id": "topstories",
-      "topics": [
-        {}
-      ],
       "initialized": false
     },
     {
@@ -154,5 +151,8 @@
       "icon": "highlights",
       "initialized": false
     }
-  ]
+  ],
+  "PreferencesPane": {
+    "visible": false
+  }
 };

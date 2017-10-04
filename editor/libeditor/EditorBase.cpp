@@ -559,12 +559,18 @@ EditorBase::IsSelectionEditable()
     return anchorNode && IsEditable(anchorNode);
   }
 
+  nsINode* anchorNode = selection->GetAnchorNode();
+  nsINode* focusNode = selection->GetFocusNode();
+  if (!anchorNode || !focusNode) {
+    return false;
+  }
+
   // Per the editing spec as of June 2012: we have to have a selection whose
   // start and end nodes are editable, and which share an ancestor editing
   // host.  (Bug 766387.)
   bool isSelectionEditable = selection->RangeCount() &&
-                             selection->GetAnchorNode()->IsEditable() &&
-                             selection->GetFocusNode()->IsEditable();
+                             anchorNode->IsEditable() &&
+                             focusNode->IsEditable();
   if (!isSelectionEditable) {
     return false;
   }
@@ -1255,7 +1261,7 @@ EditorBase::SetAttribute(nsIDOMElement* aElement,
   }
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
   NS_ENSURE_TRUE(element, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
+  RefPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
 
   return SetAttribute(element, attribute, aValue);
 }
@@ -1300,7 +1306,7 @@ EditorBase::RemoveAttribute(nsIDOMElement* aElement,
   }
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
   NS_ENSURE_TRUE(element, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
+  RefPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
 
   return RemoveAttribute(element, attribute);
 }
@@ -1414,7 +1420,7 @@ EditorBase::CreateNode(const nsAString& aTag,
                        int32_t aPosition,
                        nsIDOMNode** aNewNode)
 {
-  nsCOMPtr<nsIAtom> tag = NS_Atomize(aTag);
+  RefPtr<nsIAtom> tag = NS_Atomize(aTag);
   nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
   NS_ENSURE_STATE(parent);
   *aNewNode = GetAsDOMNode(CreateNode(tag, parent, aPosition).take());
@@ -2284,7 +2290,7 @@ EditorBase::CloneAttribute(const nsAString& aAttribute,
   nsCOMPtr<Element> sourceElement = do_QueryInterface(aSourceNode);
   NS_ENSURE_TRUE(destElement && sourceElement, NS_ERROR_NO_INTERFACE);
 
-  nsCOMPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
+  RefPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
   return CloneAttribute(attribute, destElement, sourceElement);
 }
 
@@ -2424,12 +2430,31 @@ EditorBase::FindBetterInsertionPoint(nsCOMPtr<nsINode>& aNode,
     // In some other cases, aNode is the anonymous DIV, and offset points to the
     // terminating mozBR.  In that case, we'll adjust aInOutNode and
     // aInOutOffset to the preceding text node, if any.
-    if (offset > 0 && node->GetChildAt(offset - 1) &&
-        node->GetChildAt(offset - 1)->IsNodeOfType(nsINode::eTEXT)) {
-      NS_ENSURE_TRUE_VOID(node->Length() <= INT32_MAX);
-      aNode = node->GetChildAt(offset - 1);
-      aOffset = static_cast<int32_t>(aNode->Length());
-      return;
+    if (offset) {
+      if (AsHTMLEditor()) {
+        // Fall back to a slow path that uses GetChildAt() for Thunderbird's
+        // plaintext editor.
+        nsIContent* child = node->GetChildAt(offset - 1);
+        if (child && child->IsNodeOfType(nsINode::eTEXT)) {
+          NS_ENSURE_TRUE_VOID(node->Length() <= INT32_MAX);
+          aNode = child;
+          aOffset = static_cast<int32_t>(aNode->Length());
+          return;
+        }
+      } else {
+        // If we're in a real plaintext editor, use a fast path that avoids
+        // calling GetChildAt() which may perform a linear search.
+        nsIContent* child = node->GetLastChild();
+        while (child) {
+          if (child->IsNodeOfType(nsINode::eTEXT)) {
+            NS_ENSURE_TRUE_VOID(node->Length() <= INT32_MAX);
+            aNode = child;
+            aOffset = static_cast<int32_t>(aNode->Length());
+            return;
+          }
+          child = child->GetPreviousSibling();
+        }
+      }
     }
   }
 
@@ -4736,7 +4761,7 @@ EditorBase::SetAttributeOrEquivalent(nsIDOMElement* aElement,
   if (NS_WARN_IF(!element)) {
     return NS_ERROR_NULL_POINTER;
   }
-  nsCOMPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
+  RefPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
   return SetAttributeOrEquivalent(element, attribute, aValue,
                                   aSuppressTransaction);
 }
@@ -4750,7 +4775,7 @@ EditorBase::RemoveAttributeOrEquivalent(nsIDOMElement* aElement,
   if (NS_WARN_IF(!element)) {
     return NS_ERROR_NULL_POINTER;
   }
-  nsCOMPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
+  RefPtr<nsIAtom> attribute = NS_Atomize(aAttribute);
   return RemoveAttributeOrEquivalent(element, attribute, aSuppressTransaction);
 }
 

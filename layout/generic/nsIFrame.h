@@ -3072,6 +3072,11 @@ public:
   };
   void SchedulePaint(PaintType aType = PAINT_DEFAULT, bool aFrameChanged = true);
 
+  // Similar to SchedulePaint() but without calling
+  // InvalidateRenderingObservers() for SVG.
+  void SchedulePaintWithoutInvalidatingObservers(
+    PaintType aType = PAINT_DEFAULT);
+
   /**
    * Checks if the layer tree includes a dedicated layer for this
    * frame/display item key pair, and invalidates at least aDamageRect

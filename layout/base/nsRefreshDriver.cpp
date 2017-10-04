@@ -1201,6 +1201,7 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mNeedToRecomputeVisibility(false),
     mTestControllingRefreshes(false),
     mViewManagerFlushIsPending(false),
+    mHasScheduleFlush(false),
     mInRefresh(false),
     mWaitingForTransaction(false),
     mSkippedPaints(false),
@@ -1949,7 +1950,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
 
         nsCOMPtr<nsIPresShell> shellKungFuDeathGrip(shell);
         shell->mObservingLayoutFlushes = false;
-        shell->mSuppressInterruptibleReflows = false;
+        shell->mWasLastReflowInterrupted = false;
         FlushType flushType = HasPendingAnimations(shell)
                                ? FlushType::Layout
                                : FlushType::InterruptibleLayout;
@@ -2095,6 +2096,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     }
 
     dispatchRunnablesAfterTick = true;
+    mHasScheduleFlush = false;
   }
 
 #ifndef ANDROID  /* bug 1142079 */
@@ -2368,6 +2370,7 @@ nsRefreshDriver::ScheduleViewManagerFlush()
   NS_ASSERTION(mPresContext->IsRoot(),
                "Should only schedule view manager flush on root prescontexts");
   mViewManagerFlushIsPending = true;
+  mHasScheduleFlush = true;
   EnsureTimerStarted(eNeverAdjustTimer);
 }
 

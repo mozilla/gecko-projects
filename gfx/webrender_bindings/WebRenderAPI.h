@@ -207,9 +207,6 @@ public:
 
   ~DisplayListBuilder();
 
-  void Begin(const mozilla::LayerIntSize& aSize);
-
-  void End();
   void Finalize(wr::LayoutSize& aOutContentSize,
                 wr::BuiltDisplayList& aOutDisplayList);
 
@@ -225,7 +222,7 @@ public:
   void PopStackingContext();
 
   wr::WrClipId DefineClip(const wr::LayoutRect& aClipRect,
-                          const nsTArray<wr::WrComplexClipRegion>* aComplex = nullptr,
+                          const nsTArray<wr::ComplexClipRegion>* aComplex = nullptr,
                           const wr::WrImageMask* aMask = nullptr);
   void PushClip(const wr::WrClipId& aClipId, bool aMask = false);
   void PopClip(bool aMask = false);

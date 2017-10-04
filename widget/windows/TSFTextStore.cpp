@@ -4423,7 +4423,7 @@ TSFTextStore::GetScreenExt(TsViewCookie vcView,
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
       ("0x%p   TSFTextStore::GetScreenExt() returns empty rect "
        "due to already destroyed", this));
-    prc->left = prc->top = prc->right = prc->left = 0;
+    prc->left = prc->top = prc->right = prc->bottom = 0;
     return S_OK;
   }
 
@@ -4735,8 +4735,8 @@ TSFTextStore::RecordCompositionStartAction(ITfCompositionView* aComposition,
 
 HRESULT
 TSFTextStore::RecordCompositionStartAction(ITfCompositionView* aComposition,
-                                           LONG aStart,
-                                           LONG aLength,
+                                           ULONG aStart,
+                                           ULONG aLength,
                                            bool aPreserveSelection)
 {
   MOZ_LOG(sTextStoreLog, LogLevel::Debug,

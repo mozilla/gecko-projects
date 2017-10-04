@@ -8,6 +8,8 @@
 @namespace html url("http://www.w3.org/1999/xhtml");
 
 %include ../shared/browser.inc.css
+%filter substitution
+%define glassShadowColor hsla(209,67%,12%,0.35)
 
 :root {
   --titlebar-text-color: currentColor;
@@ -112,7 +114,7 @@
 @media (-moz-os-version: windows-win7) {
   @media (-moz-windows-default-theme) {
     :root:not(:-moz-lwtheme) {
-      --tabs-border: #4A4A4F;
+      --tabs-border: @glassShadowColor@;
     }
 
     #TabsToolbar:not(:-moz-lwtheme) {
@@ -293,10 +295,6 @@
   #titlebar-buttonbox-container {
     -moz-box-align: start;
   }
-}
-
-.titlebar-placeholder[type="caption-buttons"] {
-  margin-left: 22px; /* space needed for Aero Snap */
 }
 
 /* titlebar command buttons */
@@ -520,9 +518,6 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
 .urlbar-textbox-container {
   -moz-box-align: stretch;
 }
-.urlbar-input-box {
-  margin: 0;
-}
 
 /* ::::: URL Bar Zoom Reset Button ::::: */
 @keyframes urlbar-zoom-reset-pulse {
@@ -680,7 +675,7 @@ html|span.ac-emphasize-text-url {
 
 .ac-type-icon[type=keyword],
 .ac-site-icon[type=searchengine] {
-  list-style-image: url(chrome://global/skin/icons/autocomplete-search.svg);
+  list-style-image: url(chrome://browser/skin/search-glass.svg);
   -moz-context-properties: fill;
   fill: GrayText;
 }

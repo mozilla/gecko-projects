@@ -409,7 +409,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       nsRect copyOfVisible = visible;
       haveDisplayPort = rootScrollableFrame->DecideScrollableLayer(aBuilder,
                           &copyOfVisible, &copyOfDirty,
-                          /* aAllowCreateDisplayPort = */ true);
+                          /* aSetBase = */ true);
 
       if (!gfxPrefs::LayoutUseContainersForRootFrames() ||
           !aBuilder->IsPaintingToWindow()) {

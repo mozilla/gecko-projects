@@ -90,9 +90,7 @@ using namespace mozilla::dom;
 SERVO_ARC_TYPE(StyleContext, ServoStyleContext)
 #undef SERVO_ARC_TYPE
 
-static Mutex* sServoFontMetricsLock = nullptr;
-static Mutex* sServoWidgetLock = nullptr;
-static RWLock* sServoLangFontPrefsLock = nullptr;
+static RWLock* sServoFFILock = nullptr;
 
 static
 const nsFont*
@@ -103,14 +101,14 @@ ThreadSafeGetDefaultFontHelper(const nsPresContext* aPresContext,
   const nsFont* retval;
 
   {
-    AutoReadLock guard(*sServoLangFontPrefsLock);
+    AutoReadLock guard(*sServoFFILock);
     retval = aPresContext->GetDefaultFont(aGenericId, aLanguage, &needsCache);
   }
   if (!needsCache) {
     return retval;
   }
   {
-    AutoWriteLock guard(*sServoLangFontPrefsLock);
+    AutoWriteLock guard(*sServoFFILock);
   retval = aPresContext->GetDefaultFont(aGenericId, aLanguage, nullptr);
   }
   return retval;
@@ -119,7 +117,7 @@ ThreadSafeGetDefaultFontHelper(const nsPresContext* aPresContext,
 void
 AssertIsMainThreadOrServoLangFontPrefsCacheLocked()
 {
-  MOZ_ASSERT(NS_IsMainThread() || sServoLangFontPrefsLock->LockedForWritingByCurrentThread());
+  MOZ_ASSERT(NS_IsMainThread() || sServoFFILock->LockedForWritingByCurrentThread());
 }
 
 bool
@@ -858,7 +856,7 @@ Gecko_GetLookAndFeelSystemColor(int32_t aId,
   bool useStandinsForNativeColors = aPresContext && !aPresContext->IsChrome();
   nscolor result;
   LookAndFeel::ColorID colorId = static_cast<LookAndFeel::ColorID>(aId);
-  MutexAutoLock guard(*sServoWidgetLock);
+  AutoWriteLock guard(*sServoFFILock);
   LookAndFeel::GetColor(colorId, useStandinsForNativeColors, &result);
   return result;
 }
@@ -866,13 +864,12 @@ Gecko_GetLookAndFeelSystemColor(int32_t aId,
 bool
 Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed aElement,
                            CSSPseudoClassType aType,
-                           const char16_t* aIdent,
-                           bool* aSetSlowSelectorFlag)
+                           const char16_t* aIdent)
 {
   EventStates dummyMask; // mask is never read because we pass aDependence=nullptr
   return nsCSSRuleProcessor::StringPseudoMatches(aElement, aType, aIdent,
-                                                 aElement->OwnerDoc(), true,
-                                                 dummyMask, aSetSlowSelectorFlag, nullptr);
+                                                 aElement->OwnerDoc(),
+                                                 dummyMask, nullptr);
 }
 
 bool
@@ -905,7 +902,7 @@ Gecko_GetXMLLangValue(RawGeckoElementBorrowed aElement)
 
   MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
 
-  nsCOMPtr<nsIAtom> atom = attr->GetAtomValue();
+  RefPtr<nsIAtom> atom = attr->GetAtomValue();
   return atom.forget().take();
 }
 
@@ -939,7 +936,7 @@ LangValue(Implementor* aElement)
   }
 
   MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
-  nsCOMPtr<nsIAtom> atom = attr->GetAtomValue();
+  RefPtr<nsIAtom> atom = attr->GetAtomValue();
   return atom.forget().take();
 }
 
@@ -1112,7 +1109,7 @@ ClassOrClassList(Implementor* aElement, nsIAtom** aClass, nsIAtom*** aClassList)
   // At this point we should have an atom array. It is likely, but not
   // guaranteed, that we have two or more elements in the array.
   MOZ_ASSERT(attr->Type() == nsAttrValue::eAtomArray);
-  nsTArray<nsCOMPtr<nsIAtom>>* atomArray = attr->GetAtomArrayValue();
+  nsTArray<RefPtr<nsIAtom>>* atomArray = attr->GetAtomArrayValue();
   uint32_t length = atomArray->Length();
 
   // Special case: zero elements.
@@ -1131,10 +1128,10 @@ ClassOrClassList(Implementor* aElement, nsIAtom** aClass, nsIAtom*** aClassList)
   // Note: We could also expose this array as an array of nsCOMPtrs, since
   // bindgen knows what those look like, and eliminate the reinterpret_cast.
   // But it's not obvious that that would be preferable.
-  static_assert(sizeof(nsCOMPtr<nsIAtom>) == sizeof(nsIAtom*), "Bad simplification");
-  static_assert(alignof(nsCOMPtr<nsIAtom>) == alignof(nsIAtom*), "Bad simplification");
+  static_assert(sizeof(RefPtr<nsIAtom>) == sizeof(nsIAtom*), "Bad simplification");
+  static_assert(alignof(RefPtr<nsIAtom>) == alignof(nsIAtom*), "Bad simplification");
 
-  nsCOMPtr<nsIAtom>* elements = atomArray->Elements();
+  RefPtr<nsIAtom>* elements = atomArray->Elements();
   nsIAtom** rawElements = reinterpret_cast<nsIAtom**>(elements);
   *aClassList = rawElements;
   return atomArray->Length();
@@ -1257,12 +1254,9 @@ Gecko_EnsureMozBorderColors(nsStyleBorder* aBorder)
 }
 
 void
-Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
-  aList->Clear();
-}
-
-void
-Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQuoted)
+Gecko_nsTArray_FontFamilyName_AppendNamed(nsTArray<FontFamilyName>* aNames,
+                                          nsIAtom* aName,
+                                          bool aQuoted)
 {
   FontFamilyName family;
   aName->ToString(family.mName);
@@ -1270,14 +1264,40 @@ Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQu
     family.mType = eFamily_named_quoted;
   }
 
-  aList->Append(family);
+  aNames->AppendElement(family);
 }
 
 void
-Gecko_FontFamilyList_AppendGeneric(FontFamilyList* aList, FontFamilyType aType)
+Gecko_nsTArray_FontFamilyName_AppendGeneric(nsTArray<FontFamilyName>* aNames,
+                                            FontFamilyType aType)
 {
-  aList->Append(FontFamilyName(aType));
+  aNames->AppendElement(FontFamilyName(aType));
 }
+
+SharedFontList*
+Gecko_SharedFontList_Create()
+{
+  RefPtr<SharedFontList> fontlist = new SharedFontList();
+  return fontlist.forget().take();
+}
+
+MOZ_DEFINE_MALLOC_SIZE_OF(GeckoSharedFontListMallocSizeOf)
+
+size_t
+Gecko_SharedFontList_SizeOfIncludingThisIfUnshared(SharedFontList* aFontlist)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return aFontlist->SizeOfIncludingThisIfUnshared(GeckoSharedFontListMallocSizeOf);
+}
+
+size_t
+Gecko_SharedFontList_SizeOfIncludingThis(SharedFontList* aFontlist)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return aFontlist->SizeOfIncludingThis(GeckoSharedFontListMallocSizeOf);
+}
+
+NS_IMPL_THREADSAFE_FFI_REFCOUNTING(mozilla::SharedFontList, SharedFontList);
 
 void
 Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src)
@@ -1303,7 +1323,7 @@ Gecko_nsFont_InitSystem(nsFont* aDest, int32_t aFontId,
   *aDest = *defaultVariableFont;
   LookAndFeel::FontID fontID = static_cast<LookAndFeel::FontID>(aFontId);
 
-  MutexAutoLock lock(*sServoFontMetricsLock);
+  AutoWriteLock guard(*sServoFFILock);
   nsRuleNode::ComputeSystemFont(aDest, fontID, aPresContext, defaultVariableFont);
 }
 
@@ -1399,7 +1419,7 @@ Gecko_SetCounterStyleToName(CounterStylePtr* aPtr, nsIAtom* aName,
   // Try resolving the counter style if possible, and keep it unresolved
   // otherwise.
   CounterStyleManager* manager = aPresContext->CounterStyleManager();
-  nsCOMPtr<nsIAtom> name = already_AddRefed<nsIAtom>(aName);
+  RefPtr<nsIAtom> name = already_AddRefed<nsIAtom>(aName);
   if (CounterStyle* style = manager->GetCounterStyle(name)) {
     *aPtr = style;
   } else {
@@ -1992,11 +2012,12 @@ Gecko_StyleShapeSource_SetURLValue(mozilla::StyleShapeSource* aShape, ServoBundl
   aShape->SetURL(url.get());
 }
 
-mozilla::StyleBasicShape*
-Gecko_NewBasicShape(mozilla::StyleBasicShapeType aType)
+void
+Gecko_NewBasicShape(mozilla::StyleShapeSource* aShape,
+                    mozilla::StyleBasicShapeType aType)
 {
-  RefPtr<StyleBasicShape> ptr = new mozilla::StyleBasicShape(aType);
-  return ptr.forget().take();
+  aShape->SetBasicShape(MakeUnique<mozilla::StyleBasicShape>(aType),
+                        StyleGeometryBox::NoBox);
 }
 
 void
@@ -2351,12 +2372,12 @@ Gecko_nsStyleFont_FixupMinFontSize(nsStyleFont* aFont,
   bool needsCache = false;
 
   {
-    AutoReadLock guard(*sServoLangFontPrefsLock);
+    AutoReadLock guard(*sServoFFILock);
     minFontSize = aPresContext->MinFontSize(aFont->mLanguage, &needsCache);
   }
 
   if (needsCache) {
-    AutoWriteLock guard(*sServoLangFontPrefsLock);
+    AutoWriteLock guard(*sServoFFILock);
     minFontSize = aPresContext->MinFontSize(aFont->mLanguage, nullptr);
   }
 
@@ -2379,7 +2400,7 @@ FontSizePrefs
 Gecko_GetBaseSize(nsIAtom* aLanguage)
 {
   LangGroupFontPrefs prefs;
-  nsCOMPtr<nsIAtom> langGroupAtom = StaticPresData::Get()->GetUncachedLangGroup(aLanguage);
+  RefPtr<nsIAtom> langGroupAtom = StaticPresData::Get()->GetUncachedLangGroup(aLanguage);
 
   prefs.Initialize(langGroupAtom);
   FontSizePrefs sizes;
@@ -2425,24 +2446,18 @@ InitializeServo()
   gUACacheReporter = new UACacheReporter();
   RegisterWeakMemoryReporter(gUACacheReporter);
 
-  sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
-  sServoWidgetLock = new Mutex("Servo::WidgetLock");
-  sServoLangFontPrefsLock = new RWLock("nsPresContext::GetDefaultFont");
+  sServoFFILock = new RWLock("Servo::FFILock");
 }
 
 void
 ShutdownServo()
 {
-  MOZ_ASSERT(sServoFontMetricsLock);
-  MOZ_ASSERT(sServoWidgetLock);
-  MOZ_ASSERT(sServoLangFontPrefsLock);
+  MOZ_ASSERT(sServoFFILock);
 
   UnregisterWeakMemoryReporter(gUACacheReporter);
   gUACacheReporter = nullptr;
 
-  delete sServoFontMetricsLock;
-  delete sServoWidgetLock;
-  delete sServoLangFontPrefsLock;
+  delete sServoFFILock;
   Servo_Shutdown();
 }
 
@@ -2452,8 +2467,8 @@ void
 AssertIsMainThreadOrServoFontMetricsLocked()
 {
   if (!NS_IsMainThread()) {
-    MOZ_ASSERT(sServoFontMetricsLock);
-    sServoFontMetricsLock->AssertCurrentThreadOwns();
+    MOZ_ASSERT(sServoFFILock &&
+               sServoFFILock->LockedForWritingByCurrentThread());
   }
 }
 
@@ -2466,7 +2481,7 @@ Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
                      nscoord aFontSize,
                      bool aUseUserFontSet)
 {
-  MutexAutoLock lock(*sServoFontMetricsLock);
+  AutoWriteLock guard(*sServoFFILock);
   GeckoFontMetrics ret;
 
   // Getting font metrics can require some main thread only work to be
@@ -2482,9 +2497,10 @@ Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
 
   nsPresContext* presContext = const_cast<nsPresContext*>(aPresContext);
   presContext->SetUsesExChUnits(true);
-  RefPtr<nsFontMetrics> fm = nsRuleNode::GetMetricsFor(presContext, aIsVertical,
-                                                       aFont, aFontSize,
-                                                       aUseUserFontSet);
+  RefPtr<nsFontMetrics> fm = nsRuleNode::GetMetricsFor(
+      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet,
+      nsRuleNode::FlushUserFontSet::No);
+
   ret.mXSize = fm->XHeight();
   gfxFloat zeroWidth = fm->GetThebesFontGroup()->GetFirstValidFont()->
                            GetMetrics(fm->Orientation()).zeroOrAveCharWidth;

@@ -142,7 +142,7 @@ LazyLogModule XULDocument::gXULLog("XULDocument");
 
 struct BroadcastListener {
     nsWeakPtr mListener;
-    nsCOMPtr<nsIAtom> mAttribute;
+    RefPtr<nsIAtom> mAttribute;
 };
 
 struct BroadcasterMapEntry : public PLDHashEntryHdr
@@ -654,8 +654,8 @@ struct nsAttrNameInfo
     mNamespaceID(aOther.mNamespaceID), mName(aOther.mName),
     mPrefix(aOther.mPrefix) {}
   int32_t           mNamespaceID;
-  nsCOMPtr<nsIAtom> mName;
-  nsCOMPtr<nsIAtom> mPrefix;
+  RefPtr<nsIAtom> mName;
+  RefPtr<nsIAtom> mPrefix;
 };
 
 void
@@ -710,7 +710,7 @@ XULDocument::SynchronizeBroadcastListener(Element *aBroadcaster,
     }
     else {
         // Find out if the attribute is even present at all.
-        nsCOMPtr<nsIAtom> name = NS_Atomize(aAttr);
+        RefPtr<nsIAtom> name = NS_Atomize(aAttr);
 
         nsAutoString value;
         if (aBroadcaster->GetAttr(kNameSpaceID_None, name, value)) {
@@ -791,7 +791,7 @@ XULDocument::AddBroadcastListenerFor(Element& aBroadcaster, Element& aListener,
     }
 
     // Only add the listener if it's not there already!
-    nsCOMPtr<nsIAtom> attr = NS_Atomize(aAttr);
+    RefPtr<nsIAtom> attr = NS_Atomize(aAttr);
 
     for (size_t i = entry->mListeners.Length() - 1; i != (size_t)-1; --i) {
         BroadcastListener* bl = entry->mListeners[i];
@@ -835,7 +835,7 @@ XULDocument::RemoveBroadcastListenerFor(Element& aBroadcaster,
     auto entry = static_cast<BroadcasterMapEntry*>
                             (mBroadcasterMap->Search(&aBroadcaster));
     if (entry) {
-        nsCOMPtr<nsIAtom> attr = NS_Atomize(aAttr);
+        RefPtr<nsIAtom> attr = NS_Atomize(aAttr);
         for (size_t i = entry->mListeners.Length() - 1; i != (size_t)-1; --i) {
             BroadcastListener* bl = entry->mListeners[i];
             nsCOMPtr<Element> blListener = do_QueryReferent(bl->mListener);
@@ -1049,8 +1049,7 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
 void
 XULDocument::ContentAppended(nsIDocument* aDocument,
                              nsIContent* aContainer,
-                             nsIContent* aFirstNewContent,
-                             int32_t aNewIndexInContainer)
+                             nsIContent* aFirstNewContent)
 {
     NS_ASSERTION(aDocument == this, "unexpected doc");
 
@@ -1068,8 +1067,7 @@ XULDocument::ContentAppended(nsIDocument* aDocument,
 void
 XULDocument::ContentInserted(nsIDocument* aDocument,
                              nsIContent* aContainer,
-                             nsIContent* aChild,
-                             int32_t aIndexInContainer)
+                             nsIContent* aChild)
 {
     NS_ASSERTION(aDocument == this, "unexpected doc");
 
@@ -1083,7 +1081,6 @@ void
 XULDocument::ContentRemoved(nsIDocument* aDocument,
                             nsIContent* aContainer,
                             nsIContent* aChild,
-                            int32_t aIndexInContainer,
                             nsIContent* aPreviousSibling)
 {
     NS_ASSERTION(aDocument == this, "unexpected doc");
@@ -1209,7 +1206,7 @@ already_AddRefed<nsINodeList>
 XULDocument::GetElementsByAttribute(const nsAString& aAttribute,
                                     const nsAString& aValue)
 {
-    nsCOMPtr<nsIAtom> attrAtom(NS_Atomize(aAttribute));
+    RefPtr<nsIAtom> attrAtom(NS_Atomize(aAttribute));
     void* attrValue = new nsString(aValue);
     RefPtr<nsContentList> list = new nsContentList(this,
                                             MatchAttribute,
@@ -1240,7 +1237,7 @@ XULDocument::GetElementsByAttributeNS(const nsAString& aNamespaceURI,
                                       const nsAString& aValue,
                                       ErrorResult& aRv)
 {
-    nsCOMPtr<nsIAtom> attrAtom(NS_Atomize(aAttribute));
+    RefPtr<nsIAtom> attrAtom(NS_Atomize(aAttribute));
     void* attrValue = new nsString(aValue);
 
     int32_t nameSpaceId = kNameSpaceID_Wildcard;
@@ -1277,7 +1274,7 @@ XULDocument::Persist(const nsAString& aID,
     if (!element)
         return NS_OK;
 
-    nsCOMPtr<nsIAtom> tag;
+    RefPtr<nsIAtom> tag;
     int32_t nameSpaceID;
 
     RefPtr<mozilla::dom::NodeInfo> ni = element->GetExistingAttrNameFromQName(aAttr);
@@ -2142,7 +2139,7 @@ XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
             return rv;
         }
 
-        nsCOMPtr<nsIAtom> attr = NS_Atomize(attrstr);
+        RefPtr<nsIAtom> attr = NS_Atomize(attrstr);
         if (NS_WARN_IF(!attr)) {
             return NS_ERROR_OUT_OF_MEMORY;
         }

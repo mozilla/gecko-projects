@@ -339,22 +339,6 @@ impl ExternalImageHandler for WrExternalImageHandler {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct WrComplexClipRegion {
-    rect: LayoutRect,
-    radii: BorderRadius,
-}
-
-impl<'a> Into<ComplexClipRegion> for &'a WrComplexClipRegion {
-    fn into(self) -> ComplexClipRegion {
-        ComplexClipRegion {
-            rect: self.rect.into(),
-            radii: self.radii.into(),
-        }
-    }
-}
-
 #[repr(u32)]
 #[derive(Copy, Clone)]
 pub enum WrFilterOpType {
@@ -643,7 +627,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     }
-    gl.clear_color(0.3, 0.0, 0.0, 1.0);
+    gl.clear_color(0.0, 0.0, 0.0, 1.0);
 
     let version = gl.get_string(gl::VERSION);
 
@@ -1110,34 +1094,6 @@ pub extern "C" fn wr_state_delete(state: *mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_begin(state: &mut WrState,
-                              width: u32,
-                              height: u32) {
-    debug_assert!(unsafe { !is_in_render_thread() });
-    state.frame_builder.dl_builder.data.clear();
-
-    let bounds = LayoutRect::new(LayoutPoint::new(0.0, 0.0),
-                                 LayoutSize::new(width as f32, height as f32));
-    let prim_info = LayoutPrimitiveInfo::new(bounds);
-
-    state.frame_builder
-         .dl_builder
-         .push_stacking_context(&prim_info,
-                                webrender_api::ScrollPolicy::Scrollable,
-                                None,
-                                TransformStyle::Flat,
-                                None,
-                                MixBlendMode::Normal,
-                                Vec::new());
-}
-
-#[no_mangle]
-pub extern "C" fn wr_dp_end(state: &mut WrState) {
-    debug_assert!(unsafe { !is_in_render_thread() });
-    state.frame_builder.dl_builder.pop_stacking_context();
-}
-
-#[no_mangle]
 pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               bounds: LayoutRect,
                                               animation_id: u64,
@@ -1172,7 +1128,9 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
             filters.push(FilterOp::Opacity(PropertyBinding::Value(*opacity)));
         }
     } else {
-        filters.push(FilterOp::Opacity(PropertyBinding::Binding(PropertyBindingKey::new(animation_id))));
+        if animation_id > 0 {
+            filters.push(FilterOp::Opacity(PropertyBinding::Binding(PropertyBindingKey::new(animation_id))));
+        }
     }
 
     let transform = unsafe { transform.as_ref() };
@@ -1213,13 +1171,13 @@ pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
                                     clip_rect: LayoutRect,
-                                    complex: *const WrComplexClipRegion,
+                                    complex: *const ComplexClipRegion,
                                     complex_count: usize,
                                     mask: *const WrImageMask)
                                     -> u64 {
     debug_assert!(unsafe { is_in_main_thread() });
     let complex_slice = make_slice(complex, complex_count);
-    let complex_iter = complex_slice.iter().map(|x| x.into());
+    let complex_iter = complex_slice.iter().cloned();
     let mask : Option<ImageMask> = unsafe { mask.as_ref() }.map(|x| x.into());
 
     let clip_id = state.frame_builder.dl_builder.define_clip(None, clip_rect, complex_iter, mask);

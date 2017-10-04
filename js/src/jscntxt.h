@@ -143,7 +143,6 @@ struct JSContext : public JS::RootingContext,
     void recoverFromOutOfMemory();
 
     inline void updateMallocCounter(size_t nbytes) {
-        // Note: this is racy.
         runtime()->updateMallocCounter(zone(), nbytes);
     }
 
@@ -377,7 +376,11 @@ struct JSContext : public JS::RootingContext,
     }
     static size_t offsetOfProfilingActivation() {
         return offsetof(JSContext, profilingActivation_);
-     }
+    }
+
+    static size_t offsetOfJitActivation() {
+        return offsetof(JSContext, jitActivation);
+    }
 
 #ifdef DEBUG
     static size_t offsetOfInUnsafeCallWithABI() {
@@ -612,13 +615,6 @@ struct JSContext : public JS::RootingContext,
     const js::LifoAlloc& tempLifoAlloc() const { return tempLifoAlloc_.ref(); }
 
     js::ThreadLocalData<uint32_t> debuggerMutations;
-
-    /*
-     * The propertyRemovals counter is incremented for every JSObject::clear,
-     * and for each JSObject::remove method call that frees a slot in the given
-     * object. See js_NativeGet and js_NativeSet in jsobj.cpp.
-     */
-    js::ThreadLocalData<uint32_t> propertyRemovals;
 
     // Cache for jit::GetPcScript().
     js::ThreadLocalData<js::jit::PcScriptCache*> ionPcScriptCache;
