@@ -3896,7 +3896,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     }
 
     if (stats.triedPartial && gfxPrefs::LayoutDisplayListBuildTwice()) {
-      printf(R"({ "retained": %.3f, "full": %.3f, "modifiedFrames": %lu, )"
+      printf(R"({ "retained": %.3f, "full": %.3f, "modifiedFrames": %zu, )"
              R"("merged": %d, "items": { )"
              R"("list": %u, "old": %u, "new": %u, "reused": %u } },)" "\n",
         retainedBuildTime, fullBuildTime, stats.frames.Length(), stats.merged,
