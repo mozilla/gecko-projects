@@ -129,6 +129,13 @@ SERVO_BINDING_FUNC(Servo_StyleSet_ResolveForDeclarations,
                    RawServoStyleSetBorrowed set,
                    ServoStyleContextBorrowedOrNull parent_style,
                    RawServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_SelectorList_Drop, void,
+                   RawServoSelectorList* selector_list)
+SERVO_BINDING_FUNC(Servo_SelectorList_Parse,
+                   RawServoSelectorList*,
+                   const nsACString* selector_list)
+SERVO_BINDING_FUNC(Servo_SelectorList_Matches, bool,
+                   RawGeckoElementBorrowed, RawServoSelectorListBorrowed)
 SERVO_BINDING_FUNC(Servo_StyleSet_AddSizeOfExcludingThis, void,
                    mozilla::MallocSizeOf malloc_size_of,
                    mozilla::MallocSizeOf malloc_enclosing_size_of,
@@ -672,10 +679,6 @@ SERVO_BINDING_FUNC(Servo_ReleaseArcStringData, void,
                    const mozilla::ServoRawOffsetArc<RustString>* string);
 SERVO_BINDING_FUNC(Servo_CloneArcStringData, mozilla::ServoRawOffsetArc<RustString>,
                    const mozilla::ServoRawOffsetArc<RustString>* string);
-
-SERVO_BINDING_FUNC(Servo_CorruptRuleHashAndCrash, void,
-                   RawServoStyleSetBorrowed set,
-                   size_t index);
 
 // AddRef / Release functions
 #define SERVO_ARC_TYPE(name_, type_)                                \
