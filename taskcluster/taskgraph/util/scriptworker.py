@@ -45,7 +45,6 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
-        'maple',
     ])
 ]]
 
@@ -80,7 +79,6 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
-        'maple',
     ])
 ]]
 
@@ -142,7 +140,6 @@ BALROG_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'beta', set([
         'mozilla-beta',
-        'maple',
     ])
 ], [
     'release', set([
@@ -215,7 +212,6 @@ PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'beta', set([
         'mozilla-beta',
-        'maple',
     ])
 ], [
     'release', set([
