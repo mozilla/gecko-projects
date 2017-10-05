@@ -344,11 +344,34 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
     filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters)
 
     def filter(task):
-        if task.kind not in ['balrog']:
+        if task.kind not in ('balrog', 'pushapk', 'pushapk-breakpoint'):
             return task.attributes.get('nightly', False)
+        # TODO: Include fennec mozilla-beta bncr sub
+        # TODO: Include Generate beetmover docker image
 
     return [l for l in filtered_for_project if filter(full_task_graph[l])]
 
+
+@_target_task('publish_fennec')
+def target_tasks_publish_fennec(full_task_graph, parameters):
+    """Select the set of tasks required to publish a candidates build of fennec.
+    Previous build deps will be optimized out via action task."""
+    filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters)
+    filtered_for_candidates = target_tasks_candidates_fennec(full_task_graph, parameters)
+
+    def filter(task):
+        # Include candidates build tasks; these will be optimized out
+        if task.label in filtered_for_candidates:
+            return True
+        # TODO: Include [beetmover] fennec mozilla-beta push to releases
+        # TODO: Include fennec mozilla-beta uptake monitoring
+        # TODO: Include fennec mozilla-beta bouncer aliases
+        # TODO: Include fennec mozilla-beta mark release as shipped
+        # TODO: Include fennec mozilla-beta version bump
+        if task.kind in ('pushapk', 'pushapk-breakpoint'):
+            return True
+
+    return [l for l in filtered_for_project if filter(full_task_graph[l])]
 
 @_target_task('pine_tasks')
 def target_tasks_pine(full_task_graph, parameters):
