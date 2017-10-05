@@ -695,6 +695,46 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(std::vector<WeakFrame>& aModifi
   return true;
 }
 
+/*
+ * A simple early exit heuristic to avoid slow partial display list rebuilds.
+ */
+static bool
+ShouldBuildPartial(const std::vector<WeakFrame>& aModifiedFrames,
+                   DisplayListStatistics& aStats)
+{
+  // TODO: Make this a pref.
+  static const size_t kMaxModifiedFrames = 500;
+
+  if (aModifiedFrames.size() > kMaxModifiedFrames) {
+    return false;
+  }
+
+  bool shouldBuildPartial = true;
+  for (const WeakFrame& frame : aModifiedFrames) {
+    nsIFrame* f = frame.GetFrame();
+
+    if (!f) {
+      continue;
+    }
+
+    aStats.frames.AppendElement(f);
+
+    const LayoutFrameType type = f->Type();
+
+    // If we have any modified frames of the following types, it is likely that
+    // doing a partial rebuild of the display list will be slower than doing a
+    // full rebuild.
+    // TODO: Optimize these cases.
+    if (type == LayoutFrameType::Viewport ||
+        type == LayoutFrameType::PageContent ||
+        type == LayoutFrameType::Canvas ||
+        type == LayoutFrameType::Scrollbar) {
+      shouldBuildPartial = false;
+    }
+  }
+
+  return shouldBuildPartial;
+}
 
 bool
 RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
@@ -710,28 +750,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
   std::vector<WeakFrame> modifiedFrames =
     GetModifiedFrames(mBuilder.RootReferenceFrame());
 
-  // A simple early exit heuristic to avoid slow partial display list rebuilds.
-  bool shouldBuildPartial = true;
-  for (WeakFrame& frame : modifiedFrames) {
-    if (!frame) {
-      continue;
-    }
-
-    aStats.frames.AppendElement(frame.GetFrame());
-
-    LayoutFrameType type = frame->Type();
-
-    // If we have any modified frames of the following types, it is likely that
-    // doing a partial rebuild of the display list will be slower than doing a
-    // full rebuild.
-    // TODO: Optimize these cases.
-    if (type == LayoutFrameType::Viewport ||
-        type == LayoutFrameType::PageContent ||
-        type == LayoutFrameType::Canvas ||
-        type == LayoutFrameType::Scrollbar) {
-      shouldBuildPartial = false;
-    }
-  }
+  const bool shouldBuildPartial = ShouldBuildPartial(modifiedFrames, aStats);
 
   if (mPreviousCaret != mBuilder.GetCaretFrame()) {
     if (mPreviousCaret) {
