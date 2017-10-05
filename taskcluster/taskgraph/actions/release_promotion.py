@@ -6,8 +6,6 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import logging
-import pprint
 import os
 
 from .registry import register_callback_action
@@ -18,8 +16,6 @@ from taskgraph.util.taskcluster import get_artifact
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
-
-logger = logging.getLogger(__name__)
 
 
 @register_callback_action(
@@ -108,12 +104,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
-    logger.info("Parameters:")
-    logger.info(pprint.pformat(parameters))
 
     # make parameters read-only
     parameters = Parameters(**parameters)
-    # hardcode until we have a better way of passing this down.
-    options = {'root': 'taskcluster/ci'}
 
-    taskgraph_decision(options, parameters=parameters)
+    taskgraph_decision({}, parameters=parameters)
