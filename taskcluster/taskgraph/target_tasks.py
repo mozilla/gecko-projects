@@ -344,12 +344,16 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
     filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters)
 
     def filter(task):
-        if task.kind not in ('balrog', 'pushapk', 'pushapk-breakpoint'):
-            return task.attributes.get('nightly', False)
-        # TODO: Include fennec mozilla-beta bncr sub
+        if task.label in filtered_for_project:
+            if task.kind not in ('balrog', 'pushapk', 'pushapk-breakpoint'):
+                if task.attributes.get('nightly'):
+                    return True
+        if task.task['payload'].get('properties', {}).get('product') == 'mobile':
+            if task.kind in ('release-bouncer-sub', ):
+                return True
         # TODO: Include Generate beetmover docker image
 
-    return [l for l in filtered_for_project if filter(full_task_graph[l])]
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(full_task_graph[l])]
 
 
 @_target_task('publish_fennec')

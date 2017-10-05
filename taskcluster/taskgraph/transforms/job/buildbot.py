@@ -11,6 +11,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 import slugid
 
 from taskgraph.util.schema import Schema
+from taskgraph.util.scriptworker import get_release_config
 from voluptuous import Required, Any
 
 from taskgraph.transforms.job import run_job_using
@@ -35,17 +36,28 @@ def mozharness_on_buildbot_bridge(config, job, taskdesc):
     product = run['product']
 
     buildername = run['buildername'].format(branch=branch)
+    revision = config.params['head_rev']
+
+    props = {
+        'product': product,
+        'who': config.params['owner'],
+        'upload_to_task_id': slugid.nice(),
+    }
+    release_config = get_release_config(config)
+    if release_config:
+        props.update({
+            'mozharness_changeset': revision,
+            'revision': revision,
+        })
+        release_config['build_number'] = str(release_config['build_number'])
+        props.update(release_config)
 
     worker.update({
         'buildername': buildername,
         'sourcestamp': {
             'branch': branch,
             'repository': config.params['head_repository'],
-            'revision': config.params['head_rev'],
+            'revision': revision,
         },
-        'properties': {
-            'product': product,
-            'who': config.params['owner'],
-            'upload_to_task_id': slugid.nice(),
-        }
     })
+    worker.setdefault('properties', {}).update(props)
