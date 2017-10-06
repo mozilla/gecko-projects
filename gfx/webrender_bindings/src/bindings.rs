@@ -1062,6 +1062,15 @@ impl WebRenderFrameBuilder {
             dl_builder: webrender_api::DisplayListBuilder::new(root_pipeline_id, content_size),
         }
     }
+    pub fn with_capacity(root_pipeline_id: WrPipelineId,
+               content_size: LayoutSize,
+               capacity: usize) -> WebRenderFrameBuilder {
+        WebRenderFrameBuilder {
+            root_pipeline_id: root_pipeline_id,
+            dl_builder: webrender_api::DisplayListBuilder::with_capacity(root_pipeline_id, content_size, capacity),
+        }
+    }
+
 }
 
 pub struct WrState {
@@ -1071,13 +1080,15 @@ pub struct WrState {
 
 #[no_mangle]
 pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId,
-                               content_size: LayoutSize) -> *mut WrState {
+                               content_size: LayoutSize,
+                               capacity: usize) -> *mut WrState {
     assert!(unsafe { !is_in_render_thread() });
 
     let state = Box::new(WrState {
                              pipeline_id: pipeline_id,
-                             frame_builder: WebRenderFrameBuilder::new(pipeline_id,
-                                                                       content_size),
+                             frame_builder: WebRenderFrameBuilder::with_capacity(pipeline_id,
+                                                                                 content_size,
+                                                                                 capacity),
                          });
 
     Box::into_raw(state)
@@ -1428,23 +1439,23 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_push_text_shadow(state: &mut WrState,
-                                         bounds: LayoutRect,
-                                         clip: LayoutRect,
-                                         is_backface_visible: bool,
-                                         shadow: TextShadow) {
+pub extern "C" fn wr_dp_push_shadow(state: &mut WrState,
+                                    bounds: LayoutRect,
+                                    clip: LayoutRect,
+                                    is_backface_visible: bool,
+                                    shadow: Shadow) {
     debug_assert!(unsafe { is_in_main_thread() });
 
     let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
     prim_info.is_backface_visible = is_backface_visible;
-    state.frame_builder.dl_builder.push_text_shadow(&prim_info, shadow.into());
+    state.frame_builder.dl_builder.push_shadow(&prim_info, shadow.into());
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_pop_text_shadow(state: &mut WrState) {
+pub extern "C" fn wr_dp_pop_shadow(state: &mut WrState) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    state.frame_builder.dl_builder.pop_text_shadow();
+    state.frame_builder.dl_builder.pop_shadow();
 }
 
 #[no_mangle]

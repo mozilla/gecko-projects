@@ -202,7 +202,8 @@ protected:
 class DisplayListBuilder {
 public:
   explicit DisplayListBuilder(wr::PipelineId aId,
-                              const wr::LayoutSize& aContentSize);
+                              const wr::LayoutSize& aContentSize,
+                              size_t aCapacity = 0);
   DisplayListBuilder(DisplayListBuilder&&) = default;
 
   ~DisplayListBuilder();
@@ -366,12 +367,12 @@ public:
                 bool aIsBackfaceVisible,
                 const wr::Line& aLine);
 
-  void PushTextShadow(const wr::LayoutRect& aBounds,
+  void PushShadow(const wr::LayoutRect& aBounds,
                       const wr::LayoutRect& aClip,
                       bool aIsBackfaceVisible,
-                      const wr::TextShadow& aShadow);
+                      const wr::Shadow& aShadow);
 
-  void PopTextShadow();
+  void PopShadow();
 
 
 
