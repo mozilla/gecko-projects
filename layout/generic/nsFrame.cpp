@@ -3120,10 +3120,16 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
   // nsDisplayWrapList around it (with mismatching reference frames), but still
   // makes the perspective frame create one (so we have an atomic entry for z-index
   // sorting).
+
+  /*
+  // TODO: Because of the above, this currently causes an assertion in
+  // nsDisplayList.h, nsDisplayWrapList::GetSameCoordinateSystemChildren
+
   nsIFrame *itemFrame = item->Frame();
   if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
     itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
   }
+  */
 
   return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aContainerASR);
 }
