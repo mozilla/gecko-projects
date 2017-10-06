@@ -3613,43 +3613,6 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
   }
 }
 
-bool
-nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
-  nsIFrame* aFrame, nsDisplayListBuilder& aBuilder)
-{
-  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
-  if (sf) {
-    if (MaybeCreateDisplayPort(aBuilder, aFrame, RepaintMode::Repaint)) {
-      return true;
-    }
-  }
-  if (aFrame->IsPlaceholderFrame()) {
-    nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(aFrame);
-    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(
-          placeholder->GetOutOfFlowFrame(), aBuilder)) {
-      return true;
-    }
-  }
-  if (aFrame->IsSubDocumentFrame()) {
-    nsIPresShell* presShell =
-      static_cast<nsSubDocumentFrame*>(aFrame)->GetSubdocumentPresShellForPainting(0);
-    nsIFrame* root = presShell ? presShell->GetRootFrame() : nullptr;
-    if (root) {
-      if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(root, aBuilder)) {
-        return true;
-      }
-    }
-  }
-
-  for (nsIFrame* child : aFrame->PrincipalChildList()) {
-    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(child, aBuilder)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 void
 nsLayoutUtils::AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
                                        nsDisplayList& aList,
