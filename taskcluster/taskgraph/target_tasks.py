@@ -373,6 +373,7 @@ def target_tasks_publish_fennec(full_task_graph, parameters):
 
     return [l for l in filtered_for_project if filter(full_task_graph[l])]
 
+
 @_target_task('pine_tasks')
 def target_tasks_pine(full_task_graph, parameters):
     """Bug 1339179 - no mobile automation needed on pine"""
