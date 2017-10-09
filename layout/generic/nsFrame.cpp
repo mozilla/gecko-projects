@@ -3115,23 +3115,11 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  // For perspective items we want to treat the 'frame' as being the transform
-  // frame that created it. This stops the transform frame from wrapping another
-  // nsDisplayWrapList around it (with mismatching reference frames), but still
-  // makes the perspective frame create one (so we have an atomic entry for z-index
-  // sorting).
-
-  /*
-  // TODO: Because of the above, this currently causes an assertion in
-  // nsDisplayList.h, nsDisplayWrapList::GetSameCoordinateSystemChildren
-
-  nsIFrame *itemFrame = item->Frame();
-  if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
-    itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
+  if (!aFrame->IsStackingContext()) {
+    return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aContainerASR);
   }
-  */
-
-  return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aContainerASR);
+  aList->RemoveBottom();
+  return item;
 }
 
 /**
