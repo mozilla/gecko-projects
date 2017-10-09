@@ -32,6 +32,7 @@ use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
 use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::viewport::ViewportConstraints;
+use stylesheets::Origin;
 use values::{CSSFloat, CustomIdent, serialize_dimension};
 use values::computed::{self, ToComputedValue};
 use values::specified::Length;
@@ -373,18 +374,8 @@ impl MediaExpressionValue {
                 Some(MediaExpressionValue::BoolInteger(i == 1))
             }
             nsMediaFeature_ValueType::eResolution => {
-                // This is temporarily more complicated to allow Gecko Bug
-                // 1376931 to land. Parts of that bug will supply pixel values
-                // and expect them to be passed through without conversion.
-                // After all parts of that bug have landed, Bug 1404097 will
-                // return this function to once again only allow one type of
-                // value to be accepted: this time, only pixel values.
-                let res = match css_value.mUnit {
-                    nsCSSUnit::eCSSUnit_Pixel => Resolution::Dppx(css_value.float_unchecked()),
-                    nsCSSUnit::eCSSUnit_Inch  => Resolution::Dpi(css_value.float_unchecked()),
-                    _                         => unreachable!(),
-                };
-                Some(MediaExpressionValue::Resolution(res))
+                debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Pixel);
+                Some(MediaExpressionValue::Resolution(Resolution::Dppx(css_value.float_unchecked())))
             }
             nsMediaFeature_ValueType::eEnumerated => {
                 let value = css_value.integer_unchecked() as i16;
@@ -594,8 +585,10 @@ impl Expression {
     /// ```
     /// (media-feature: media-value)
     /// ```
-    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<Self, ParseError<'i>> {
+    pub fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
         input.expect_parenthesis_block().map_err(|err|
             match err {
                 BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
@@ -616,6 +609,12 @@ impl Expression {
                 )?;
 
                 let mut flags = 0;
+
+                if context.in_chrome_stylesheet() ||
+                    context.stylesheet_origin == Origin::UserAgent {
+                    flags |= nsMediaFeature_RequirementFlags::eUserAgentAndChromeOnly as u8;
+                }
+
                 let result = {
                     let mut feature_name = &**ident;
 

@@ -311,6 +311,10 @@ pref("mathml.scale_stretchy_operators.enabled", true);
 
 pref("media.dormant-on-pause-timeout-ms", 5000);
 
+// Used by ChannelMediaResource to run data callbacks from HTTP channel
+// off the main thread.
+pref("media.omt_data_delivery.enabled", false);
+
 // File-backed MediaCache size in kilobytes
 pref("media.cache_size", 512000);
 // When a network connection is suspended, don't resume it until the
@@ -2975,7 +2979,7 @@ pref("layout.css.float-logical-values.enabled", true);
 pref("layout.css.image-orientation.enabled", true);
 
 // Is support for the font-display @font-face descriptor enabled?
-pref("layout.css.font-display.enabled", false);
+pref("layout.css.font-display.enabled", true);
 
 // Is support for variation fonts enabled?
 pref("layout.css.font-variations.enabled", false);
@@ -3096,9 +3100,6 @@ pref("layout.css.control-characters.visible", true);
 // Is support for column-span enabled?
 pref("layout.css.column-span.enabled", false);
 
-// Is effect of xml:base disabled for style attribute?
-pref("layout.css.style-attr-with-xml-base.disabled", true);
-
 // Are inter-character ruby annotations enabled?
 pref("layout.css.ruby.intercharacter.enabled", false);
 
@@ -3125,6 +3126,7 @@ pref("layout.frame_rate", -1);
 // pref to dump the display list to the log. Useful for debugging drawing.
 pref("layout.display-list.dump", false);
 pref("layout.display-list.dump-content", false);
+pref("layout.display-list.dump-parent", false);
 
 // pref to control whether layout warnings that are hit quite often are enabled
 pref("layout.spammy_warnings.enabled", false);

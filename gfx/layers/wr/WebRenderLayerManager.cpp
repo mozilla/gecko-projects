@@ -190,6 +190,9 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   //  canvas->UpdateCompositableClient();
   //}
 
+  if (!(aFlags & EndTransactionFlags::END_NO_COMPOSITE)) {
+    ScheduleComposite();
+  }
   return true;
 }
 
@@ -228,7 +231,7 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   MOZ_ASSERT(aDisplayList && aDisplayListBuilder);
   WrBridge()->RemoveExpiredFontKeys();
 
-  AutoProfilerTracing tracing("Paint", "RenderLayers");
+  AUTO_PROFILER_TRACING("Paint", "RenderLayers");
   mTransactionIncomplete = false;
 
   if (gfxPrefs::LayersDump()) {
@@ -238,12 +241,10 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
 
-  LayoutDeviceIntSize size = mWidget->GetClientSize();
-  if (!WrBridge()->BeginTransaction(size.ToUnknownSize())) {
-    return;
-  }
+  WrBridge()->BeginTransaction();
   DiscardCompositorAnimations();
 
+  LayoutDeviceIntSize size = mWidget->GetClientSize();
   wr::LayoutSize contentSize { (float)size.width, (float)size.height };
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
   wr::IpcResourceUpdateQueue resourceUpdates(WrBridge()->GetShmemAllocator());
@@ -302,8 +303,8 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   mLastDisplayListSize = dl.dl.inner.capacity;
 
   {
-    AutoProfilerTracing
-      tracing("Paint", sync ? "ForwardDPTransactionSync":"ForwardDPTransaction");
+    AUTO_PROFILER_TRACING("Paint", sync ? "ForwardDPTransactionSync"
+                                        : "ForwardDPTransaction");
     WrBridge()->EndTransaction(contentSize, dl, resourceUpdates, size.ToUnknownSize(), sync,
                                mLatestTransactionId, mScrollData, transactionStart);
   }

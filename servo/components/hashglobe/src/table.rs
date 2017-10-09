@@ -182,7 +182,7 @@ pub struct GapThenFull<K, V, M> {
 
 /// A hash that is not zero, since we use a hash of zero to represent empty
 /// buckets.
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub struct SafeHash {
     hash: HashUint,
 }
@@ -777,12 +777,15 @@ impl<K, V> RawTable<K, V> {
 
 
         // FORK NOTE: Uses alloc shim instead of Heap.alloc
-        let buffer = alloc(size, alignment);
+        let buffer: *mut u8 = alloc(size, alignment);
         
         if buffer.is_null() {
             
             return Err(FailedAllocationError { reason: "out of memory when allocating RawTable" });
         }
+
+        // FORK NOTE: poison the entire buffer rather than leaving it uninitialized.
+        ptr::write_bytes(buffer, 0xe7, size);
 
         let hashes = buffer.offset(hash_offset as isize) as *mut HashUint;
 
@@ -811,6 +814,12 @@ impl<K, V> RawTable<K, V> {
                 _marker: marker::PhantomData,
             }
         }
+    }
+
+    /// Returns a raw pointer to the table's buffer.
+    #[inline]
+    pub fn raw_buffer(&self) -> *const u8 {
+        self.hashes.ptr() as *const u8
     }
 
     /// Creates a new raw table from a given capacity. All buckets are

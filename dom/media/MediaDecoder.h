@@ -8,6 +8,7 @@
 #define MediaDecoder_h_
 
 #include "DecoderDoctorDiagnostics.h"
+#include "MediaContainerType.h"
 #include "MediaDecoderOwner.h"
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
@@ -238,9 +239,6 @@ public:
   // Constructs the time ranges representing what segments of the media
   // are buffered and playable.
   virtual media::TimeIntervals GetBuffered();
-
-  // For debugging bug 1402584.
-  bool IsMetadataLoaded() const { return !!mInfo; }
 
   // Returns the size, in bytes, of the heap memory used by the currently
   // queued decoded video and audio data.

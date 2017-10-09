@@ -14,7 +14,6 @@
 #include "prenv.h"
 
 #include "nsDocShell.h"
-#include "nsIDOMHTMLIFrameElement.h"
 #include "nsIDOMMozBrowserFrame.h"
 #include "nsIDOMWindow.h"
 #include "nsIPresShell.h"
@@ -3649,7 +3648,7 @@ nsFrameLoader::ApplySandboxFlags(uint32_t sandboxFlags)
 nsFrameLoader::AttributeChanged(nsIDocument* aDocument,
                                 mozilla::dom::Element* aElement,
                                 int32_t      aNameSpaceID,
-                                nsIAtom*     aAttribute,
+                                nsAtom*     aAttribute,
                                 int32_t      aModType,
                                 const nsAttrValue* aOldValue)
 {

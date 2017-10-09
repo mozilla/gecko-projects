@@ -126,14 +126,6 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
       MOZ_ASSERT(item && itemType == item->GetType());
     }
 
-    nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
-    if (item->ShouldFlattenAway(aDisplayListBuilder)) {
-      MOZ_ASSERT(childItems);
-      CreateWebRenderCommandsFromDisplayList(childItems, aDisplayListBuilder, aSc,
-                                             aBuilder, aResources);
-      continue;
-    }
-
     bool forceNewLayerData = false;
     size_t layerCountBeforeRecursing = mLayerScrollData.size();
     if (apzEnabled) {
@@ -198,7 +190,13 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
       }
     }
 
-    { // scope the ScrollingLayersHelper
+    nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
+    if (item->ShouldFlattenAway(aDisplayListBuilder)) {
+      MOZ_ASSERT(childItems);
+      CreateWebRenderCommandsFromDisplayList(childItems, aDisplayListBuilder, aSc,
+                                             aBuilder, aResources);
+    } else {
+      // ensure the scope of ScrollingLayersHelper is maintained
       ScrollingLayersHelper clip(item, aBuilder, aSc, mClipIdCache, apzEnabled);
 
       // Note: this call to CreateWebRenderCommands can recurse back into
@@ -209,17 +207,30 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
       }
     }
 
-    if (apzEnabled && forceNewLayerData) {
-      // Pop the thing we pushed before the recursion, so the topmost item on
-      // the stack is enclosing display item's ASR (or the stack is empty)
-      mAsrStack.pop_back();
-      const ActiveScrolledRoot* stopAtAsr =
-          mAsrStack.empty() ? nullptr : mAsrStack.back();
+    if (apzEnabled) {
+      if (forceNewLayerData) {
+        // Pop the thing we pushed before the recursion, so the topmost item on
+        // the stack is enclosing display item's ASR (or the stack is empty)
+        mAsrStack.pop_back();
+        const ActiveScrolledRoot* stopAtAsr =
+            mAsrStack.empty() ? nullptr : mAsrStack.back();
 
-      int32_t descendants = mLayerScrollData.size() - layerCountBeforeRecursing;
+        int32_t descendants = mLayerScrollData.size() - layerCountBeforeRecursing;
 
-      mLayerScrollData.emplace_back();
-      mLayerScrollData.back().Initialize(mManager->GetScrollData(), item, descendants, stopAtAsr);
+        mLayerScrollData.emplace_back();
+        mLayerScrollData.back().Initialize(mManager->GetScrollData(), item, descendants, stopAtAsr);
+      } else if (mLayerScrollData.size() != layerCountBeforeRecursing &&
+                 !eventRegions.IsEmpty()) {
+        // We are not forcing a new layer for |item|, but we did create some
+        // layers while recursing. In this case, we need to make sure any
+        // event regions that we were carrying end up on the right layer. So we
+        // do an event region "flush" but retroactively; i.e. the event regions
+        // end up on the layer that was mLayerScrollData.back() prior to the
+        // recursion.
+        MOZ_ASSERT(layerCountBeforeRecursing > 0);
+        mLayerScrollData[layerCountBeforeRecursing - 1].AddEventRegions(eventRegions);
+        eventRegions.SetEmpty();
+      }
     }
   }
 
@@ -407,11 +418,11 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
   }
 
   // nsDisplayItem::Paint() may refer the variables that come from ComputeVisibility().
-  // So we should call ComputeVisibility() before painting. e.g.: nsDisplayBoxShadowInner
+  // So we should call RecomputeVisibility() before painting. e.g.: nsDisplayBoxShadowInner
   // uses mVisibleRegion in Paint() and mVisibleRegion is computed in
   // nsDisplayBoxShadowInner::ComputeVisibility().
   nsRegion visibleRegion(clippedBounds);
-  aItem->ComputeVisibility(aDisplayListBuilder, &visibleRegion);
+  aItem->RecomputeVisibility(aDisplayListBuilder, &visibleRegion);
 
   const int32_t appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   LayerRect bounds = ViewAs<LayerPixel>(
@@ -433,7 +444,8 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
   // nsDisplayFilter is rendered via BasicLayerManager which means the invalidate
   // region is unknown until we traverse the displaylist contained by it.
   if (geometry && !fallbackData->IsInvalid() &&
-      aItem->GetType() != DisplayItemType::TYPE_FILTER) {
+      aItem->GetType() != DisplayItemType::TYPE_FILTER &&
+      scale == fallbackData->GetScale()) {
     nsRect invalid;
     nsRegion invalidRegion;
 
@@ -505,6 +517,7 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
     }
 
     geometry = aItem->AllocateGeometry(aDisplayListBuilder);
+    fallbackData->SetScale(scale);
     fallbackData->SetInvalid(false);
   }
 

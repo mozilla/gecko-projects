@@ -8,10 +8,9 @@
 
 use Atom;
 use cssparser::{Delimiter, Parser, ParserInput, SourcePosition, Token, TokenSerializationType};
-use parser::ParserContext;
 use precomputed_hash::PrecomputedHash;
 use properties::{CSSWideKeyword, DeclaredValue};
-use selector_map::{PrecomputedHashSet, PrecomputedHashMap};
+use selector_map::{PrecomputedHashSet, PrecomputedDiagnosticHashMap};
 use selectors::parser::SelectorParseError;
 use servo_arc::Arc;
 use std::ascii::AsciiExt;
@@ -105,7 +104,7 @@ where
     /// Key index.
     index: Vec<K>,
     /// Key-value map.
-    values: PrecomputedHashMap<K, V>,
+    values: PrecomputedDiagnosticHashMap<K, V>,
 }
 
 impl<K, V> OrderedMap<K, V>
@@ -116,7 +115,7 @@ where
     pub fn new() -> Self {
         OrderedMap {
             index: Vec::new(),
-            values: PrecomputedHashMap::default(),
+            values: PrecomputedDiagnosticHashMap::default(),
         }
     }
 
@@ -125,7 +124,9 @@ where
         if !self.values.contains_key(&key) {
             self.index.push(key.clone());
         }
-        self.values.insert(key, value);
+        self.values.begin_mutation();
+        self.values.try_insert(key, value).unwrap();
+        self.values.end_mutation();
     }
 
     /// Get a value given its key.
@@ -165,7 +166,10 @@ where
             None => return None,
         };
         self.index.remove(index);
-        self.values.remove(key)
+        self.values.begin_mutation();
+        let result = self.values.remove(key);
+        self.values.end_mutation();
+        result
     }
 }
 
@@ -190,14 +194,14 @@ where
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let ref index = self.inner.index;
-        if self.pos >= index.len() {
-            return None;
-        }
+        let key = match self.inner.index.get(self.pos) {
+            Some(k) => k,
+            None => return None,
+        };
 
-        let ref key = index[index.len() - self.pos - 1];
         self.pos += 1;
-        let value = self.inner.values.get(key).unwrap();
+        let value = &self.inner.values.get(key).unwrap();
+
         Some((key, value))
     }
 }
@@ -241,16 +245,18 @@ impl ComputedValue {
 impl SpecifiedValue {
     /// Parse a custom property SpecifiedValue.
     pub fn parse<'i, 't>(
-        _context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Box<Self>, ParseError<'i>> {
-        let mut references = Some(PrecomputedHashSet::default());
-        let (first, css, last) = parse_self_contained_declaration_value(input, &mut references)?;
+        let mut references = PrecomputedHashSet::default();
+
+        let (first_token_type, css, last_token_type) =
+            parse_self_contained_declaration_value(input, Some(&mut references))?;
+
         Ok(Box::new(SpecifiedValue {
             css: css.into_owned(),
-            first_token_type: first,
-            last_token_type: last,
-            references: references.unwrap(),
+            first_token_type,
+            last_token_type,
+            references
         }))
     }
 }
@@ -259,13 +265,13 @@ impl SpecifiedValue {
 pub fn parse_non_custom_with_var<'i, 't>
                                 (input: &mut Parser<'i, 't>)
                                 -> Result<(TokenSerializationType, Cow<'i, str>), ParseError<'i>> {
-    let (first_token_type, css, _) = parse_self_contained_declaration_value(input, &mut None)?;
+    let (first_token_type, css, _) = parse_self_contained_declaration_value(input, None)?;
     Ok((first_token_type, css))
 }
 
 fn parse_self_contained_declaration_value<'i, 't>(
     input: &mut Parser<'i, 't>,
-    references: &mut Option<PrecomputedHashSet<Name>>
+    references: Option<&mut PrecomputedHashSet<Name>>
 ) -> Result<
     (TokenSerializationType, Cow<'i, str>, TokenSerializationType),
     ParseError<'i>
@@ -288,7 +294,7 @@ fn parse_self_contained_declaration_value<'i, 't>(
 /// https://drafts.csswg.org/css-syntax-3/#typedef-declaration-value
 fn parse_declaration_value<'i, 't>(
     input: &mut Parser<'i, 't>,
-    references: &mut Option<PrecomputedHashSet<Name>>,
+    references: Option<&mut PrecomputedHashSet<Name>>,
     missing_closing_characters: &mut String
 ) -> Result<(TokenSerializationType, TokenSerializationType), ParseError<'i>> {
     input.parse_until_before(Delimiter::Bang | Delimiter::Semicolon, |input| {
@@ -305,7 +311,7 @@ fn parse_declaration_value<'i, 't>(
 /// invalid at the top level
 fn parse_declaration_value_block<'i, 't>(
     input: &mut Parser<'i, 't>,
-    references: &mut Option<PrecomputedHashSet<Name>>,
+    mut references: Option<&mut PrecomputedHashSet<Name>>,
     missing_closing_characters: &mut String
 ) -> Result<(TokenSerializationType, TokenSerializationType), ParseError<'i>> {
     let mut token_start = input.position();
@@ -319,7 +325,11 @@ fn parse_declaration_value_block<'i, 't>(
         macro_rules! nested {
             () => {
                 input.parse_nested_block(|input| {
-                    parse_declaration_value_block(input, references, missing_closing_characters)
+                    parse_declaration_value_block(
+                        input,
+                        references.as_mut().map(|r| &mut **r),
+                        missing_closing_characters
+                    )
                 })?
             }
         }
@@ -353,7 +363,10 @@ fn parse_declaration_value_block<'i, 't>(
                 if name.eq_ignore_ascii_case("var") {
                     let args_start = input.state();
                     input.parse_nested_block(|input| {
-                        parse_var_function(input, references)
+                        parse_var_function(
+                            input,
+                            references.as_mut().map(|r| &mut **r),
+                        )
                     })?;
                     input.reset(&args_start);
                 }
@@ -420,7 +433,7 @@ fn parse_declaration_value_block<'i, 't>(
 // If the var function is valid, return Ok((custom_property_name, fallback))
 fn parse_var_function<'i, 't>(
     input: &mut Parser<'i, 't>,
-    references: &mut Option<PrecomputedHashSet<Name>>
+    references: Option<&mut PrecomputedHashSet<Name>>
 ) -> Result<(), ParseError<'i>> {
     let name = input.expect_ident_cloned()?;
     let name: Result<_, ParseError> =
@@ -438,15 +451,65 @@ fn parse_var_function<'i, 't>(
             Ok(())
         })?;
     }
-    if let Some(ref mut refs) = *references {
+    if let Some(refs) = references {
         refs.insert(Atom::from(name));
     }
     Ok(())
 }
 
+/// A struct that takes care of encapsulating the cascade process for custom
+/// properties.
+pub struct CustomPropertiesBuilder<'a> {
+    seen: PrecomputedHashSet<&'a Name>,
+    custom_properties: Option<OrderedMap<&'a Name, BorrowedSpecifiedValue<'a>>>,
+    inherited: Option<&'a Arc<CustomPropertiesMap>>,
+}
+
+impl<'a> CustomPropertiesBuilder<'a> {
+    /// Create a new builder, inheriting from a given custom properties map.
+    pub fn new(inherited: Option<&'a Arc<CustomPropertiesMap>>) -> Self {
+        Self {
+            seen: PrecomputedHashSet::default(),
+            custom_properties: None,
+            inherited,
+        }
+    }
+
+    /// Cascade a given custom property declaration.
+    pub fn cascade(
+        &mut self,
+        name: &'a Name,
+        specified_value: DeclaredValue<'a, Box<SpecifiedValue>>,
+    ) {
+        cascade(
+            &mut self.custom_properties,
+            self.inherited,
+            &mut self.seen,
+            name,
+            specified_value,
+        )
+    }
+
+    /// Returns the final map of applicable custom properties.
+    ///
+    /// If there was any specified property, we've created a new map and now we need
+    /// to remove any potential cycles, and wrap it in an arc.
+    ///
+    /// Otherwise, just use the inherited custom properties map.
+    pub fn build(mut self) -> Option<Arc<CustomPropertiesMap>> {
+        let mut map = match self.custom_properties.take() {
+            Some(map) => map,
+            None => return self.inherited.cloned(),
+        };
+
+        remove_cycles(&mut map);
+        Some(Arc::new(substitute_all(map)))
+    }
+}
+
 /// Add one custom property declaration to a map, unless another with the same
 /// name was already there.
-pub fn cascade<'a>(
+fn cascade<'a>(
     custom_properties: &mut Option<OrderedMap<&'a Name, BorrowedSpecifiedValue<'a>>>,
     inherited: Option<&'a Arc<CustomPropertiesMap>>,
     seen: &mut PrecomputedHashSet<&'a Name>,
@@ -463,8 +526,7 @@ pub fn cascade<'a>(
         None => {
             let mut map = OrderedMap::new();
             if let Some(inherited) = inherited {
-                for name in &inherited.index {
-                    let inherited_value = inherited.get(name).unwrap();
+                for (name, inherited_value) in inherited.iter() {
                     map.insert(name, BorrowedSpecifiedValue {
                         css: &inherited_value.css,
                         first_token_type: inherited_value.first_token_type,
@@ -494,24 +556,6 @@ pub fn cascade<'a>(
             CSSWideKeyword::Unset | // Custom properties are inherited by default.
             CSSWideKeyword::Inherit => {} // The inherited value is what we already have.
         }
-    }
-}
-
-/// Returns the final map of applicable custom properties.
-///
-/// If there was any specified property, we've created a new map and now we need
-/// to remove any potential cycles, and wrap it in an arc.
-///
-/// Otherwise, just use the inherited custom properties map.
-pub fn finish_cascade(
-    specified_values_map: Option<OrderedMap<&Name, BorrowedSpecifiedValue>>,
-    inherited: Option<&Arc<CustomPropertiesMap>>,
-) -> Option<Arc<CustomPropertiesMap>> {
-    if let Some(mut map) = specified_values_map {
-        remove_cycles(&mut map);
-        Some(Arc::new(substitute_all(map)))
-    } else {
-        inherited.cloned()
     }
 }
 
@@ -568,9 +612,7 @@ fn substitute_all(
 ) -> CustomPropertiesMap {
     let mut custom_properties_map = CustomPropertiesMap::new();
     let mut invalid = PrecomputedHashSet::default();
-    for name in &specified_values_map.index {
-        let value = specified_values_map.get(name).unwrap();
-
+    for (name, value) in specified_values_map.iter() {
         // If this value is invalid at computed-time it won’t be inserted in computed_values_map.
         // Nothing else to do.
         let _ = substitute_one(
@@ -603,7 +645,7 @@ fn substitute_one(
     if invalid.contains(name) {
         return Err(());
     }
-    let computed_value = if specified_value.references.map(|set| set.is_empty()) == Some(false) {
+    let computed_value = if specified_value.references.map_or(false, |set| !set.is_empty()) {
         let mut partial_computed_value = ComputedValue::empty();
         let mut input = ParserInput::new(&specified_value.css);
         let mut input = Parser::new(&mut input);
@@ -652,12 +694,15 @@ fn substitute_one(
 ///
 /// Return `Err(())` if `input` is invalid at computed-value time.
 /// or `Ok(last_token_type that was pushed to partial_computed_value)` otherwise.
-fn substitute_block<'i, 't, F>(input: &mut Parser<'i, 't>,
-                               position: &mut (SourcePosition, TokenSerializationType),
-                               partial_computed_value: &mut ComputedValue,
-                               substitute_one: &mut F)
-                               -> Result<TokenSerializationType, ParseError<'i>>
-                       where F: FnMut(&Name, &mut ComputedValue) -> Result<TokenSerializationType, ()> {
+fn substitute_block<'i, 't, F>(
+    input: &mut Parser<'i, 't>,
+    position: &mut (SourcePosition, TokenSerializationType),
+    partial_computed_value: &mut ComputedValue,
+    substitute_one: &mut F
+) -> Result<TokenSerializationType, ParseError<'i>>
+where
+    F: FnMut(&Name, &mut ComputedValue) -> Result<TokenSerializationType, ()>
+{
     let mut last_token_type = TokenSerializationType::nothing();
     let mut set_position_at_next_iteration = false;
     loop {

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.1.23 */
+/* Generated with cbindgen:0.1.25 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -763,6 +763,8 @@ extern void gfx_critical_note(const char *aMsg);
 
 extern bool gfx_use_wrench();
 
+extern const char *gfx_wr_resource_path_override();
+
 extern bool is_glcontext_egl(void *aGlcontextPtr);
 
 extern bool is_in_compositor_thread();
@@ -962,12 +964,6 @@ void wr_dp_push_box_shadow(WrState *aState,
                            float aSpreadRadius,
                            float aBorderRadius,
                            BoxShadowClipMode aClipMode)
-WR_FUNC;
-
-WR_INLINE
-void wr_dp_push_built_display_list(WrState *aState,
-                                   BuiltDisplayListDescriptor aDlDescriptor,
-                                   WrVecU8 *aDlData)
 WR_FUNC;
 
 WR_INLINE

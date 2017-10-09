@@ -67,7 +67,7 @@ public:
   void AddWebRenderParentCommands(const nsTArray<WebRenderParentCommand>& aCommands);
 
   void UpdateResources(wr::IpcResourceUpdateQueue& aResources);
-  bool BeginTransaction(const  gfx::IntSize& aSize);
+  void BeginTransaction();
   void EndTransaction(const wr::LayoutSize& aContentSize,
                       wr::BuiltDisplayList& dl,
                       wr::IpcResourceUpdateQueue& aResources,
@@ -114,10 +114,10 @@ public:
     return wr::WrImageKey{ GetNamespace(), GetNextResourceId() };
   }
 
-  void PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<gfx::Glyph>& aGlyphs,
-                  gfx::ScaledFont* aFont, const gfx::Color& aColor,
+  void PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<wr::GlyphInstance>& aGlyphs,
+                  gfx::ScaledFont* aFont, const wr::ColorF& aColor,
                   const StackingContextHelper& aSc,
-                  const LayerRect& aBounds, const LayerRect& aClip,
+                  const wr::LayerRect& aBounds, const wr::LayerRect& aClip,
                   bool aBackfaceVisible);
 
   wr::FontInstanceKey GetFontKeyForScaledFont(gfx::ScaledFont* aScaledFont);

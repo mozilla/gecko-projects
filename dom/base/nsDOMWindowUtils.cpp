@@ -50,7 +50,6 @@
 
 #include "nsViewManager.h"
 
-#include "nsIDOMHTMLCanvasElement.h"
 #include "nsLayoutUtils.h"
 #include "nsComputedDOMStyle.h"
 #include "nsIPresShell.h"
@@ -106,6 +105,7 @@
 #include "nsNetUtil.h"
 #include "nsDocument.h"
 #include "HTMLImageElement.h"
+#include "HTMLCanvasElement.h"
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/layers/APZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
@@ -329,7 +329,7 @@ nsDOMWindowUtils::GetDocumentMetadata(const nsAString& aName,
 {
   nsIDocument* doc = GetDocument();
   if (doc) {
-    RefPtr<nsIAtom> name = NS_Atomize(aName);
+    RefPtr<nsAtom> name = NS_Atomize(aName);
     doc->GetHeaderData(name, aValue);
     return NS_OK;
   }
@@ -1624,26 +1624,19 @@ nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
 }
 
 static already_AddRefed<DataSourceSurface>
-CanvasToDataSourceSurface(nsIDOMHTMLCanvasElement* aCanvas)
+CanvasToDataSourceSurface(HTMLCanvasElement* aCanvas)
 {
-  nsCOMPtr<nsINode> node = do_QueryInterface(aCanvas);
-  if (!node) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(node->IsElement(),
-             "An nsINode that implements nsIDOMHTMLCanvasElement should "
-             "be an element.");
+  MOZ_ASSERT(aCanvas);
   nsLayoutUtils::SurfaceFromElementResult result =
-    nsLayoutUtils::SurfaceFromElement(node->AsElement());
+    nsLayoutUtils::SurfaceFromElement(aCanvas);
 
   MOZ_ASSERT(result.GetSourceSurface());
   return result.GetSourceSurface()->GetDataSurface();
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::CompareCanvases(nsIDOMHTMLCanvasElement *aCanvas1,
-                                  nsIDOMHTMLCanvasElement *aCanvas2,
+nsDOMWindowUtils::CompareCanvases(nsISupports *aCanvas1,
+                                  nsISupports *aCanvas2,
                                   uint32_t* aMaxDifference,
                                   uint32_t* retVal)
 {
@@ -1652,8 +1645,17 @@ nsDOMWindowUtils::CompareCanvases(nsIDOMHTMLCanvasElement *aCanvas1,
       retVal == nullptr)
     return NS_ERROR_FAILURE;
 
-  RefPtr<DataSourceSurface> img1 = CanvasToDataSourceSurface(aCanvas1);
-  RefPtr<DataSourceSurface> img2 = CanvasToDataSourceSurface(aCanvas2);
+  nsCOMPtr<nsIContent> contentCanvas1 = do_QueryInterface(aCanvas1);
+  nsCOMPtr<nsIContent> contentCanvas2 = do_QueryInterface(aCanvas2);
+  auto canvas1 = HTMLCanvasElement::FromContentOrNull(contentCanvas1);
+  auto canvas2 = HTMLCanvasElement::FromContentOrNull(contentCanvas2);
+
+  if (!canvas1 || !canvas2) {
+    return NS_ERROR_FAILURE;
+  }
+
+  RefPtr<DataSourceSurface> img1 = CanvasToDataSourceSurface(canvas1);
+  RefPtr<DataSourceSurface> img2 = CanvasToDataSourceSurface(canvas2);
 
   DataSourceSurface::ScopedMap map1(img1, DataSourceSurface::READ);
   DataSourceSurface::ScopedMap map2(img2, DataSourceSurface::READ);
@@ -2971,7 +2973,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     return NS_ERROR_FAILURE;
   }
 
-  RefPtr<nsIAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
+  RefPtr<nsAtom> pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
   RefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element,
                                                          pseudo, shell);
@@ -3519,7 +3521,7 @@ PrepareForFullscreenChange(nsIPresShell* aPresShell, const nsSize& aSize,
 NS_IMETHODIMP
 nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
 {
-  profiler_add_marker("Enter fullscreen");
+  PROFILER_ADD_MARKER("Enter fullscreen");
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
@@ -3542,7 +3544,7 @@ nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
 nsresult
 nsDOMWindowUtils::ExitFullscreen()
 {
-  profiler_add_marker("Exit fullscreen");
+  PROFILER_ADD_MARKER("Exit fullscreen");
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
