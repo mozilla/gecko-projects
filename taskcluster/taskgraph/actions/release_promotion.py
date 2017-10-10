@@ -16,8 +16,7 @@ from taskgraph.util.taskcluster import get_artifact
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
-from taskgraph.util.attributes import RELEASE_PROJECTS
-# from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
+from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
 
 RELEASE_PROMOTION_CONFIG = {
     'promote_fennec': {
@@ -36,9 +35,7 @@ RELEASE_PROMOTION_CONFIG = {
 
 
 def is_release_promotion_available(parameters):
-    # Land without maple to test, first
-    # return parameters['project'] in RELEASE_PROMOTION_PROJECTS
-    return parameters['project'] in RELEASE_PROJECTS
+    return parameters['project'] in RELEASE_PROMOTION_PROJECTS
 
 
 @register_callback_action(
