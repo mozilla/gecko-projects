@@ -386,7 +386,7 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
             if task.kind not in ('balrog', 'pushapk', 'pushapk-breakpoint'):
                 if task.attributes.get('nightly'):
                     return True
-        if task.task['payload'].get('properties', {}).get('product') == 'mobile':
+        if task.task['payload'].get('properties', {}).get('product') == 'fennec':
             if task.kind in ('release-bouncer-sub', ):
                 return True
         # TODO: Include Generate beetmover docker image

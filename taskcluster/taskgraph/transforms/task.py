@@ -370,8 +370,11 @@ task_description_schema = Schema({
         Required('properties'): {
             'product': basestring,
             Optional('build_number'): int,
+            Optional('release_promotion'): bool,
             Extra: taskref_or_string,  # additional properties are allowed
         },
+        Optional('scopes'): [basestring],
+        Optional('routes'): [basestring],
     }, {
         Required('implementation'): 'native-engine',
         Required('os'): Any('macosx', 'linux'),
@@ -986,6 +989,8 @@ def build_buildbot_bridge_payload(config, task, task_def):
         'sourcestamp': worker['sourcestamp'],
         'properties': worker['properties'],
     }
+    task_def['scopes'].extend(worker.get('scopes', []))
+    task_def['routes'].extend(worker.get('routes', []))
 
 
 transforms = TransformSequence()

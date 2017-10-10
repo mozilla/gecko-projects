@@ -10,12 +10,16 @@ transforms:
 
 
 jobs:
-   fennec-bouncer-sub:
+   fennec:
       name: fennec_release_bouncer_sub
       description: release bouncer submission job
       worker-type: buildbot-bridge/buildbot-bridge
       run-on-projects: []
       run:
          using: buildbot
-         product: mobile
+         product: fennec
          buildername: release-{branch}-fennec_bncr_sub
+         release-promotion: true
+         routes:
+            - index.releases.v1.{branch}.latest.fennec.latest.bouncer_submitter
+            - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.bouncer_submitter
