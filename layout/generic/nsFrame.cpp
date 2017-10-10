@@ -3115,7 +3115,7 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  if (!aFrame->IsStackingContext()) {
+  if (!aFrame->IsTransformed()) {
     return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aContainerASR);
   }
   aList->RemoveBottom();
