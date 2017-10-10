@@ -398,7 +398,6 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
 def target_tasks_publish_fennec(full_task_graph, parameters):
     """Select the set of tasks required to publish a candidates build of fennec.
     Previous build deps will be optimized out via action task."""
-    filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters)
     filtered_for_candidates = target_tasks_candidates_fennec(full_task_graph, parameters)
 
     def filter(task):
@@ -413,7 +412,7 @@ def target_tasks_publish_fennec(full_task_graph, parameters):
         if task.kind in ('pushapk', 'pushapk-breakpoint'):
             return True
 
-    return [l for l in filtered_for_project if filter(full_task_graph[l])]
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(full_task_graph[l])]
 
 
 @_target_task('pine_tasks')
