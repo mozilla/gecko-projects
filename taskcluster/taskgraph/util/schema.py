@@ -144,6 +144,7 @@ def resolve_keyed_by(item, field, item_name, **extra_values):
 WHITELISTED_SCHEMA_IDENTIFIERS = [
     # upstream-artifacts are handed directly to scriptWorker, which expects interCaps
     lambda path: "[u'upstream-artifacts']" in path,
+    lambda path: "[u'build_number']" in path,
 ]
 
 

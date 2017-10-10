@@ -369,6 +369,7 @@ task_description_schema = Schema({
         },
         Required('properties'): {
             'product': basestring,
+            Optional('build_number'): int,
             Extra: taskref_or_string,  # additional properties are allowed
         },
     }, {

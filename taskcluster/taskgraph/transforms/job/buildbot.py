@@ -49,7 +49,6 @@ def mozharness_on_buildbot_bridge(config, job, taskdesc):
             'mozharness_changeset': revision,
             'revision': revision,
         })
-        release_config['build_number'] = str(release_config['build_number'])
         props.update(release_config)
 
     worker.update({
