@@ -224,7 +224,7 @@ PUSH_APK_SCOPES = {
     'central': 'project:releng:googleplay:aurora',
     'beta': 'project:releng:googleplay:beta',
     'release': 'project:releng:googleplay:release',
-    'default': 'project:releng:googleplay:invalid',
+    'default': 'project:releng:googleplay:dep',
 }
 
 # See https://github.com/mozilla-releng/pushapkscript#aurora-beta-release-vs-alpha-beta-production
@@ -240,7 +240,7 @@ PUSH_APK_BREAKPOINT_WORKER_TYPE = {
     'maple': 'null-provisioner/human-breakpoint',
     'beta': 'null-provisioner/human-breakpoint',
     'release': 'null-provisioner/human-breakpoint',
-    'default': 'invalid/invalid',
+    'default': 'null-provisioner/human-breakpoint',
 }
 
 PUSH_APK_DRY_RUN_OPTION = {

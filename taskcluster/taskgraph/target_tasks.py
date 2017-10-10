@@ -302,6 +302,7 @@ def target_tasks_mozilla_release(full_task_graph, parameters):
             filter_beta_release_tasks(t, parameters)]
 
 
+@_target_task('maple_desktop_promotion')
 @_target_task('mozilla_beta_desktop_promotion')
 def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
     """Select the superset of tasks required to promote a beta or release build
@@ -333,7 +334,44 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         if task.label in beta_tasks:
             return True
 
+        # TODO: partner repacks
+        # TODO: source task
+        # TODO: funsize, all but balrog submission
+        # TODO: bbb update verify
+        # TODO: tc update verify
+        # TODO: beetmover push-to-candidates
+        # TODO: binary transparency
+        # TODO: bouncer sub
+        # TODO: snap
+        # TODO: recompression tasks
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('publish_firefox')
+def target_tasks_publish_firefox(full_task_graph, parameters):
+    """Select the set of tasks required to publish a candidates build of firefox.
+    Previous build deps will be optimized out via action task."""
+    filtered_for_candidates = target_tasks_mozilla_beta_desktop_promotion(
+        full_task_graph, parameters
+    )
+
+    def filter(task):
+        # Include promotion tasks; these will be optimized out
+        if task.label in filtered_for_candidates:
+            return True
+        # TODO: add beetmover push-to-releases
+        # TODO: tagging / version bumping
+        # TODO: publish to balrog
+        # TODO: funsize balrog submission
+        # TODO: recompression push-to-releases + balrog
+        # TODO: final verify
+        # TODO: uptake monitoring
+        # TODO: bouncer aliases
+        # TODO: checksums
+        # TODO: shipit mark as shipped
+
+    return [l for l, t in full_task_graph.iteritems() if filter(t)]
 
 
 @_target_task('candidates_fennec')

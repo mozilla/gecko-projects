@@ -31,6 +31,21 @@ RELEASE_PROMOTION_CONFIG = {
         ],
         'do_not_optimize': [],
     },
+    'promote_firefox': {
+        'target_tasks_method': '%(project)s_desktop_promotion',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+        ],
+        'do_not_optimize': [],
+    },
+    'publish_firefox': {
+        'target_tasks_method': 'publish_firefox',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+        ],
+        'do_not_optimize': [],
+    },
 }
 
 
