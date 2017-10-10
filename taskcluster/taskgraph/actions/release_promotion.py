@@ -16,6 +16,29 @@ from taskgraph.util.taskcluster import get_artifact
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
+from taskgraph.util.attributes import RELEASE_PROJECTS
+# from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
+
+RELEASE_PROMOTION_CONFIG = {
+    'promote_fennec': {
+        'target_tasks_method': 'candidates_fennec',
+        'previous_graph_kinds': [],
+        'do_not_optimize': [],
+    },
+    'publish_fennec': {
+        'target_tasks_method': 'publish_fennec',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+        ],
+        'do_not_optimize': [],
+    },
+}
+
+
+def is_release_promotion_available(parameters):
+    # Land without maple to test, first
+    # return parameters['project'] in RELEASE_PROMOTION_PROJECTS
+    return parameters['project'] in RELEASE_PROJECTS
 
 
 @register_callback_action(
@@ -25,6 +48,7 @@ from taskgraph.parameters import Parameters
     description="Promote a release.",
     order=10000,
     context=[],
+    available=is_release_promotion_available,
     schema={
         'type': 'object',
         'properties': {
@@ -38,7 +62,7 @@ from taskgraph.parameters import Parameters
             },
             'do_not_optimize': {
                 'type': 'array',
-                'description': ('An list of labels to avoid optimizing out '
+                'description': ('Optional: a list of labels to avoid optimizing out '
                                 'of the graph (to force a rerun of, say, '
                                 'funsize docker-image tasks).'),
                 'items': {
@@ -53,37 +77,53 @@ from taskgraph.parameters import Parameters
                                 'is specified, find the `pushlog_id using the '
                                 'revision.'),
             },
+            'release_promotion_flavor': {
+                'type': 'string',
+                'description': 'The flavor of release promotion to perform.',
+                'enum': sorted(RELEASE_PROMOTION_CONFIG.keys()),
+            },
             'target_tasks_method': {
                 'type': 'string',
                 'title': 'target task method',
-                'description': ('The target task method to use to generate the new '
-                                'graph.'),
+                'description': ('Optional: the target task method to use to generate '
+                                'the new graph.'),
             },
             'previous_graph_kinds': {
                 'type': 'array',
-                'description': 'An array of kinds to use from the previous graph(s).',
+                'description': ('Optional: an array of kinds to use from the previous '
+                                'graph(s).'),
                 'items': {
                     'type': 'string',
                 },
             },
             'previous_graph_ids': {
                 'type': 'array',
-                'description': ('An array of taskIds of decision or action tasks '
-                                'from the previous graph(s) to use to populate '
+                'description': ('Optional: an array of taskIds of decision or action '
+                                'tasks from the previous graph(s) to use to populate '
                                 'our `previous_graph_kinds`.'),
                 'items': {
                     'type': 'string',
                 },
             },
-        }
+        },
+        "required": ['release_promotion_flavor', 'build_number'],
     }
 )
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
-    # build_number, previous_graph_kinds, target_tasks_method are required
     os.environ['BUILD_NUMBER'] = str(input['build_number'])
-    target_tasks_method = input['target_tasks_method']
-    previous_graph_kinds = input['previous_graph_kinds']
-    do_not_optimize = input.get('do_not_optimize', [])
+    release_promotion_flavor = input['release_promotion_flavor']
+    promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
+
+    target_tasks_method = input.get(
+        'target_tasks_method', promotion_config['target_tasks_method']
+    )
+    previous_graph_kinds = input.get(
+        'previous_graph_kinds', promotion_config['previous_graph_kinds']
+    )
+    do_not_optimize = input.get(
+        'do_not_optimize', promotion_config['do_not_optimize']
+    )
+
     # make parameters read-write
     parameters = dict(parameters)
     # Build previous_graph_ids from ``previous_graph_ids``, ``pushlog_id``,
