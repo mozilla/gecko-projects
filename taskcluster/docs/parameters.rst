@@ -137,3 +137,16 @@ Optimization
    Specify tasks to optimize out of the graph. This is a dictionary of label to taskId.
    Any tasks in the graph matching one of the labels will use the previously-run
    taskId rather than submitting a new task.
+
+Comm Push Information
+---------------------
+
+These parameters correspond to the repository and revision of the comm-central
+repository to checkout. Their meaning is the same as the corresponding
+parameters for the gecko repository above. They are optional, but if any of
+them are specified, they must all be specified.
+
+``comm_base_repository``
+``comm_head_repository``
+``comm_head_rev``
+``comm_head_ref``

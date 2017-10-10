@@ -1312,8 +1312,8 @@ pref("dom.timeout.foreground_budget_regeneration_rate", 1);
 pref("dom.timeout.foreground_throttling_max_budget", -1);
 // The maximum amount a timeout can be delayed by budget throttling
 pref("dom.timeout.budget_throttling_max_delay", 15000);
-// Turn off budget throttling by default
-pref("dom.timeout.enable_budget_timer_throttling", false);
+// Turn on budget throttling by default
+pref("dom.timeout.enable_budget_timer_throttling", true);
 
 // Don't use new input types
 pref("dom.experimental_forms", false);
@@ -5796,6 +5796,8 @@ pref("media.block-autoplay-until-in-foreground", true);
 // Is Stylo CSS support built and enabled?
 // Only define this pref if Stylo support is actually built in.
 #ifdef MOZ_STYLO
+pref("layout.css.stylo-blocklist.enabled", true);
+pref("layout.css.stylo-blocklist.blocked_domains", "");
 #ifdef MOZ_STYLO_ENABLE
 pref("layout.css.servo.enabled", true);
 #else
