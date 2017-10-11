@@ -47,7 +47,10 @@ Cu.import("chrome://marionette/content/modal.js");
 Cu.import("chrome://marionette/content/proxy.js");
 Cu.import("chrome://marionette/content/reftest.js");
 Cu.import("chrome://marionette/content/session.js");
-const {wait, TimedPromise} = Cu.import("chrome://marionette/content/wait.js", {});
+const {
+  PollPromise,
+  TimedPromise,
+} = Cu.import("chrome://marionette/content/sync.js", {});
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -1488,7 +1491,7 @@ GeckoDriver.prototype.setWindowRect = async function(cmd) {
   // user-requested window size as this may not be achievable on the
   // current system.
   const windowResizeChange = async () => {
-    return wait.until((resolve, reject) => {
+    return new PollPromise((resolve, reject) => {
       let curRect = this.curBrowser.rect;
       if (curRect.width != origRect.width &&
           curRect.height != origRect.height) {
@@ -1501,7 +1504,7 @@ GeckoDriver.prototype.setWindowRect = async function(cmd) {
 
   // Wait for the window position to change.
   async function windowPosition(x, y) {
-    return wait.until((resolve, reject) => {
+    return new PollPromise((resolve, reject) => {
       if ((x == win.screenX && y == win.screenY) ||
           (win.screenX != origRect.x || win.screenY != origRect.y)) {
         resolve();
@@ -2694,14 +2697,12 @@ GeckoDriver.prototype.deleteCookie = function(cmd) {
   assert.noUserPrompt(this.dialog);
 
   let {hostname, pathname} = this.currentURL;
-  let candidateName = assert.string(cmd.parameters.name);
-  for (let toDelete of cookie.iter(hostname, pathname)) {
-    if (toDelete.name === candidateName) {
-      return cookie.remove(toDelete);
+  let name = assert.string(cmd.parameters.name);
+  for (let c of cookie.iter(hostname, pathname)) {
+    if (c.name === name) {
+      cookie.remove(c);
     }
   }
-
-  throw new UnknownError("Unable to find cookie");
 };
 
 /**
@@ -3049,7 +3050,7 @@ GeckoDriver.prototype.maximizeWindow = async function() {
 
   // Wait for the window size to change.
   async function windowSizeChange() {
-    return wait.until((resolve, reject) => {
+    return new PollPromise((resolve, reject) => {
       let curSize = {
         outerWidth: win.outerWidth,
         outerHeight: win.outerHeight,

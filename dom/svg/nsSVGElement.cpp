@@ -301,7 +301,9 @@ nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 nsresult
 nsSVGElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                            const nsAttrValue* aValue,
-                           const nsAttrValue* aOldValue, bool aNotify)
+                           const nsAttrValue* aOldValue,
+                           nsIPrincipal* aSubjectPrincipal,
+                           bool aNotify)
 {
   // We don't currently use nsMappedAttributes within SVG. If this changes, we
   // need to be very careful because some nsAttrValues used by SVG point to
@@ -332,7 +334,7 @@ nsSVGElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
   }
 
   return nsSVGElementBase::AfterSetAttr(aNamespaceID, aName, aValue, aOldValue,
-                                        aNotify);
+                                        aSubjectPrincipal, aNotify);
 }
 
 bool
@@ -1107,7 +1109,20 @@ nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
 SVGSVGElement*
 nsSVGElement::GetOwnerSVGElement()
 {
-  return GetCtx(); // this may return nullptr
+  nsIContent* ancestor = GetFlattenedTreeParent();
+
+  while (ancestor && ancestor->IsSVGElement()) {
+    if (ancestor->IsSVGElement(nsGkAtoms::foreignObject)) {
+      return nullptr;
+    }
+    if (ancestor->IsSVGElement(nsGkAtoms::svg)) {
+      return static_cast<SVGSVGElement*>(ancestor);
+    }
+    ancestor = ancestor->GetFlattenedTreeParent();
+  }
+
+  // we don't have an ancestor <svg> element...
+  return nullptr;
 }
 
 NS_IMETHODIMP
@@ -1495,7 +1510,7 @@ nsSVGElement::DidChangeValue(nsAtom* aName,
   // attribute, but currently SVG elements do not even use the old attribute
   // value in |AfterSetAttr|, so this should be ok.
   SetAttrAndNotify(kNameSpaceID_None, aName, nullptr, &aEmptyOrOldValue,
-                   aNewValue, modType, hasListeners, kNotifyDocumentObservers,
+                   aNewValue, nullptr, modType, hasListeners, kNotifyDocumentObservers,
                    kCallAfterSetAttr, document, updateBatch);
 }
 
@@ -1543,23 +1558,10 @@ nsAtom* nsSVGElement::GetEventNameForAttr(nsAtom* aAttr)
   return aAttr;
 }
 
-SVGSVGElement *
+SVGViewportElement *
 nsSVGElement::GetCtx() const
 {
-  nsIContent* ancestor = GetFlattenedTreeParent();
-
-  while (ancestor && ancestor->IsSVGElement()) {
-    if (ancestor->IsSVGElement(nsGkAtoms::foreignObject)) {
-      return nullptr;
-    }
-    if (ancestor->IsSVGElement(nsGkAtoms::svg)) {
-      return static_cast<SVGSVGElement*>(ancestor);
-    }
-    ancestor = ancestor->GetFlattenedTreeParent();
-  }
-
-  // we don't have an ancestor <svg> element...
-  return nullptr;
+  return SVGContentUtils::GetNearestViewportElement(this);
 }
 
 /* virtual */ gfxMatrix
@@ -1658,7 +1660,7 @@ nsSVGElement::GetAnimatedLengthValues(float *aFirst, ...)
   NS_ASSERTION(info.mLengthCount > 0,
                "GetAnimatedLengthValues on element with no length attribs");
 
-  SVGSVGElement *ctx = nullptr;
+  SVGViewportElement *ctx = nullptr;
 
   float *f = aFirst;
   uint32_t i = 0;

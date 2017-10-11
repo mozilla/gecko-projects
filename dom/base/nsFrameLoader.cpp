@@ -57,6 +57,7 @@
 #include "nsBaseWidget.h"
 #include "GroupedSHistory.h"
 #include "PartialSHistory.h"
+#include "nsQueryObject.h"
 
 #include "nsIURI.h"
 #include "nsIURL.h"
@@ -85,6 +86,7 @@
 #include "mozilla/dom/FrameLoaderBinding.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layout/RenderFrameParent.h"
+#include "nsGenericHTMLFrameElement.h"
 #include "GeckoProfiler.h"
 
 #include "jsapi.h"
@@ -246,6 +248,7 @@ nsFrameLoader::LoadFrame()
   NS_ENSURE_TRUE(mOwnerContent, NS_ERROR_NOT_INITIALIZED);
 
   nsAutoString src;
+  nsCOMPtr<nsIPrincipal> principal;
 
   bool isSrcdoc = mOwnerContent->IsHTMLElement(nsGkAtoms::iframe) &&
                   mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::srcdoc);
@@ -253,7 +256,7 @@ nsFrameLoader::LoadFrame()
     src.AssignLiteral("about:srcdoc");
   }
   else {
-    GetURL(src);
+    GetURL(src, getter_AddRefs(principal));
 
     src.Trim(" \t\n\r");
 
@@ -293,7 +296,7 @@ nsFrameLoader::LoadFrame()
   }
 
   if (NS_SUCCEEDED(rv)) {
-    rv = LoadURI(uri);
+    rv = LoadURI(uri, principal);
   }
 
   if (NS_FAILED(rv)) {
@@ -330,6 +333,12 @@ nsFrameLoader::LoadURI(nsIURI* aURI, ErrorResult& aRv)
 NS_IMETHODIMP
 nsFrameLoader::LoadURI(nsIURI* aURI)
 {
+  return LoadURI(aURI, nullptr);
+}
+
+nsresult
+nsFrameLoader::LoadURI(nsIURI* aURI, nsIPrincipal* aTriggeringPrincipal)
+{
   if (!aURI)
     return NS_ERROR_INVALID_POINTER;
   NS_ENSURE_STATE(!mDestroyCalled && mOwnerContent);
@@ -342,14 +351,16 @@ nsFrameLoader::LoadURI(nsIURI* aURI)
   // that's under our control. We will already have done the security checks for
   // loading the plugin content itself in the object/embed loading code.
   if (!IsForJSPlugin()) {
-    rv = CheckURILoad(aURI);
+    rv = CheckURILoad(aURI, aTriggeringPrincipal);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   mURIToLoad = aURI;
+  mTriggeringPrincipal = aTriggeringPrincipal;
   rv = doc->InitializeFrameLoader(this);
   if (NS_FAILED(rv)) {
     mURIToLoad = nullptr;
+    mTriggeringPrincipal = nullptr;
   }
   return rv;
 }
@@ -904,7 +915,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
                "MaybeCreateDocShell succeeded with a null mDocShell");
 
   // Just to be safe, recheck uri.
-  rv = CheckURILoad(mURIToLoad);
+  rv = CheckURILoad(mURIToLoad, mTriggeringPrincipal);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
@@ -918,7 +929,11 @@ nsFrameLoader::ReallyStartLoadingInternal()
   // We'll use our principal, not that of the document loaded inside us.  This
   // is very important; needed to prevent XSS attacks on documents loaded in
   // subframes!
-  loadInfo->SetTriggeringPrincipal(mOwnerContent->NodePrincipal());
+  if (mTriggeringPrincipal) {
+    loadInfo->SetTriggeringPrincipal(mTriggeringPrincipal);
+  } else {
+    loadInfo->SetTriggeringPrincipal(mOwnerContent->NodePrincipal());
+  }
 
   nsCOMPtr<nsIURI> referrer;
 
@@ -989,7 +1004,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
 }
 
 nsresult
-nsFrameLoader::CheckURILoad(nsIURI* aURI)
+nsFrameLoader::CheckURILoad(nsIURI* aURI, nsIPrincipal* aTriggeringPrincipal)
 {
   // Check for security.  The fun part is trying to figure out what principals
   // to use.  The way I figure it, if we're doing a LoadFrame() accidentally
@@ -1008,7 +1023,9 @@ nsFrameLoader::CheckURILoad(nsIURI* aURI)
   nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
 
   // Get our principal
-  nsIPrincipal* principal = mOwnerContent->NodePrincipal();
+  nsIPrincipal* principal = (aTriggeringPrincipal
+                             ? aTriggeringPrincipal
+                             : mOwnerContent->NodePrincipal());
 
   // Check if we are allowed to load absURL
   nsresult rv =
@@ -2477,7 +2494,11 @@ nsFrameLoader::MaybeCreateDocShell()
 
   MOZ_RELEASE_ASSERT(!doc->IsResourceDoc(), "We shouldn't even exist");
 
-  if (!(doc->IsStaticDocument() || mOwnerContent->IsInComposedDoc())) {
+  // Check if the document still has a window since it is possible for an
+  // iframe to be inserted and cause the creation of the docshell in a
+  // partially unloaded document (see Bug 1305237 comment 127).
+  if (!doc->IsStaticDocument() &&
+      (!doc->GetWindow() || !mOwnerContent->IsInComposedDoc())) {
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -2709,14 +2730,26 @@ nsFrameLoader::MaybeCreateDocShell()
 
   nsDocShell::Cast(mDocShell)->SetOriginAttributes(attrs);
 
+  // Typically there will be a window, however for some cases such as printing
+  // the document is cloned with a docshell that has no window.  We check
+  // that the window exists to ensure we don't try to gather ancestors for
+  // those cases.
+  nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
   if (!mDocShell->GetIsMozBrowser() &&
-      parentType == mDocShell->ItemType()) {
+      parentType == mDocShell->ItemType() &&
+      !doc->IsStaticDocument() && win) {
     // Propagate through the ancestor principals.
     nsTArray<nsCOMPtr<nsIPrincipal>> ancestorPrincipals;
     // Make a copy, so we can modify it.
     ancestorPrincipals = doc->AncestorPrincipals();
     ancestorPrincipals.InsertElementAt(0, doc->NodePrincipal());
     nsDocShell::Cast(mDocShell)->SetAncestorPrincipals(Move(ancestorPrincipals));
+
+    // Repeat for outer window IDs.
+    nsTArray<uint64_t> ancestorOuterWindowIDs;
+    ancestorOuterWindowIDs = doc->AncestorOuterWindowIDs();
+    ancestorOuterWindowIDs.InsertElementAt(0, win->WindowID());
+    nsDocShell::Cast(mDocShell)->SetAncestorOuterWindowIDs(Move(ancestorOuterWindowIDs));
   }
 
   ReallyLoadFrameScripts();
@@ -2732,7 +2765,7 @@ nsFrameLoader::MaybeCreateDocShell()
 }
 
 void
-nsFrameLoader::GetURL(nsString& aURI)
+nsFrameLoader::GetURL(nsString& aURI, nsIPrincipal** aTriggeringPrincipal)
 {
   aURI.Truncate();
 
@@ -2740,6 +2773,10 @@ nsFrameLoader::GetURL(nsString& aURI)
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::data, aURI);
   } else {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::src, aURI);
+    if (RefPtr<nsGenericHTMLFrameElement> frame = do_QueryObject(mOwnerContent)) {
+      nsCOMPtr<nsIPrincipal> prin = frame->GetSrcTriggeringPrincipal();
+      prin.forget(aTriggeringPrincipal);
+    }
   }
 }
 

@@ -44,6 +44,7 @@ class DeclarationBlock;
 
 namespace dom {
 class SVGSVGElement;
+class SVGViewportElement;
 
 static const unsigned short SVG_UNIT_TYPE_UNKNOWN           = 0;
 static const unsigned short SVG_UNIT_TYPE_USERSPACEONUSE    = 1;
@@ -145,7 +146,7 @@ public:
   // Gets the element that establishes the rectangular viewport against which
   // we should resolve percentage lengths (our "coordinate context"). Returns
   // nullptr for outer <svg> or SVG without an <svg> parent (invalid SVG).
-  mozilla::dom::SVGSVGElement* GetCtx() const;
+  mozilla::dom::SVGViewportElement* GetCtx() const;
 
   /**
    * Returns aMatrix pre-multiplied by (explicit or implicit) transforms that
@@ -351,6 +352,7 @@ protected:
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,
+                                nsIPrincipal* aSubjectPrincipal,
                                 bool aNotify) override;
   virtual bool ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
                                 const nsAString& aValue, nsAttrValue& aResult) override;

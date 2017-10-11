@@ -4995,6 +4995,7 @@ nsIDocument::SetContainer(nsDocShell* aContainer)
   }
 
   mAncestorPrincipals = aContainer->AncestorPrincipals();
+  mAncestorOuterWindowIDs = aContainer->AncestorOuterWindowIDs();
 }
 
 nsISupports*
@@ -6246,8 +6247,6 @@ nsDocument::CreateAttribute(const nsAString& aName,
 already_AddRefed<Attr>
 nsIDocument::CreateAttribute(const nsAString& aName, ErrorResult& rv)
 {
-  WarnOnceAbout(eCreateAttribute);
-
   if (!mNodeInfoManager) {
     rv.Throw(NS_ERROR_NOT_INITIALIZED);
     return nullptr;
@@ -6296,8 +6295,6 @@ nsIDocument::CreateAttributeNS(const nsAString& aNamespaceURI,
                                const nsAString& aQualifiedName,
                                ErrorResult& rv)
 {
-  WarnOnceAbout(eCreateAttributeNS);
-
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   rv = nsContentUtils::GetNodeInfoFromQName(aNamespaceURI,
                                             aQualifiedName,

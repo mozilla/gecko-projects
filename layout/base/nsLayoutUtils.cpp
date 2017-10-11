@@ -121,7 +121,7 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
-#include "SVGSVGElement.h"
+#include "SVGViewportElement.h"
 #include "DisplayItemClip.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "prenv.h"
@@ -3286,6 +3286,8 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
     builder.SetDescendIntoSubdocuments(false);
   }
 
+  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
+
   builder.EnterPresShell(aFrame);
 
   builder.SetDirtyRect(aRect);
@@ -3303,7 +3305,6 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
 #endif
 
   nsDisplayItem::HitTestState hitTestState;
-  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
   list.DeleteAll(&builder);
   builder.EndFrame();
@@ -9764,7 +9765,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
     case StyleGeometryBox::ViewBox: {
       nsIContent* content = aFrame->GetContent();
       nsSVGElement* element = static_cast<nsSVGElement*>(content);
-      SVGSVGElement* svgElement = element->GetCtx();
+      SVGViewportElement* svgElement = element->GetCtx();
       MOZ_ASSERT(svgElement);
 
       if (svgElement && svgElement->HasViewBoxRect()) {
