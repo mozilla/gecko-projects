@@ -289,9 +289,10 @@ protected:
   nsAtom& DefaultParagraphSeparator();
   nsresult ReturnInHeader(Selection& aSelection, Element& aHeader,
                           nsINode& aNode, int32_t aOffset);
-  nsresult ReturnInParagraph(Selection* aSelection, nsIDOMNode* aHeader,
-                             nsIDOMNode* aTextNode, int32_t aOffset,
-                             bool* aCancel, bool* aHandled);
+  nsresult ReturnInParagraph(Selection* aSelection, nsINode* aHeader,
+                             nsINode* aTextNode, int32_t aOffset,
+                             nsIContent* aChildAtOffset, bool* aCancel,
+                             bool* aHandled);
   nsresult SplitParagraph(nsIDOMNode* aPara,
                           nsIContent* aBRNode,
                           Selection* aSelection,
@@ -397,10 +398,11 @@ protected:
   void CheckInterlinePosition(Selection& aSelection);
   nsresult AdjustSelection(Selection* aSelection,
                            nsIEditor::EDirection aAction);
-  nsresult FindNearSelectableNode(nsIDOMNode* aSelNode,
+  nsresult FindNearSelectableNode(nsINode* aSelNode,
                                   int32_t aSelOffset,
+                                  nsINode* aChildAtOffset,
                                   nsIEditor::EDirection& aDirection,
-                                  nsCOMPtr<nsIDOMNode>* outSelectableNode);
+                                  nsCOMPtr<nsIContent>* outSelectableNode);
   /**
    * Returns true if aNode1 or aNode2 or both is the descendant of some type of
    * table element, but their nearest table element ancestors differ.  "Table

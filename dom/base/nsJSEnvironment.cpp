@@ -61,6 +61,7 @@
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ErrorEvent.h"
+#include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/SystemGroup.h"
@@ -574,8 +575,6 @@ DumpString(const nsAString &str)
 #endif
 
 #define JS_OPTIONS_DOT_STR "javascript.options."
-
-static const char js_options_dot_str[]   = JS_OPTIONS_DOT_STR;
 
 nsJSContext::nsJSContext(bool aGCOnDestruction,
                          nsIScriptGlobalObject* aGlobalObject)
@@ -2634,6 +2633,15 @@ DispatchToEventLoop(void* closure, JS::Dispatchable* aDispatchable)
   return true;
 }
 
+static bool
+ConsumeStream(JSContext* aCx,
+              JS::HandleObject aObj,
+              JS::MimeType aMimeType,
+              JS::StreamConsumer* aConsumer)
+{
+  return FetchUtil::StreamResponseToJS(aCx, aObj, aMimeType, aConsumer, nullptr);
+}
+
 void
 nsJSContext::EnsureStatics()
 {
@@ -2662,6 +2670,7 @@ nsJSContext::EnsureStatics()
   JS::SetAsmJSCacheOps(jsapi.cx(), &asmJSCacheOps);
 
   JS::InitDispatchToEventLoop(jsapi.cx(), DispatchToEventLoop, nullptr);
+  JS::InitConsumeStreamCallback(jsapi.cx(), ConsumeStream);
 
   // Set these global xpconnect options...
   Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,

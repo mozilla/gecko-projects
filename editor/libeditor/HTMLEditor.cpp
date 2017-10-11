@@ -3118,6 +3118,7 @@ HTMLEditor::DeleteText(nsGenericDOMDataNode& aCharData,
 nsresult
 HTMLEditor::InsertTextImpl(const nsAString& aStringToInsert,
                            nsCOMPtr<nsINode>* aInOutNode,
+                           nsCOMPtr<nsIContent>* aInOutChildAtOffset,
                            int32_t* aInOutOffset,
                            nsIDocument* aDoc)
 {
@@ -3126,8 +3127,9 @@ HTMLEditor::InsertTextImpl(const nsAString& aStringToInsert,
     return NS_ERROR_FAILURE;
   }
 
-  return EditorBase::InsertTextImpl(aStringToInsert, aInOutNode, aInOutOffset,
-                                    aDoc);
+  return EditorBase::InsertTextImpl(aStringToInsert, aInOutNode,
+                                    aInOutChildAtOffset,
+                                    aInOutOffset, aDoc);
 }
 
 void
@@ -3892,6 +3894,7 @@ HTMLEditor::GetPriorHTMLNode(nsIDOMNode* aNode,
 nsIContent*
 HTMLEditor::GetPriorHTMLNode(nsINode* aParent,
                              int32_t aOffset,
+                             nsINode* aChildAtOffset,
                              bool aNoBlockCrossing)
 {
   MOZ_ASSERT(aParent);
@@ -3900,23 +3903,7 @@ HTMLEditor::GetPriorHTMLNode(nsINode* aParent,
     return nullptr;
   }
 
-  return GetPriorNode(aParent, aOffset, true, aNoBlockCrossing);
-}
-
-nsresult
-HTMLEditor::GetPriorHTMLNode(nsIDOMNode* aNode,
-                             int32_t aOffset,
-                             nsCOMPtr<nsIDOMNode>* aResultNode,
-                             bool aNoBlockCrossing)
-{
-  NS_ENSURE_TRUE(aResultNode, NS_ERROR_NULL_POINTER);
-
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
-
-  *aResultNode = do_QueryInterface(GetPriorHTMLNode(node, aOffset,
-                                                    aNoBlockCrossing));
-  return NS_OK;
+  return GetPriorNode(aParent, aOffset, aChildAtOffset, true, aNoBlockCrossing);
 }
 
 /**
@@ -3958,29 +3945,15 @@ HTMLEditor::GetNextHTMLNode(nsIDOMNode* aNode,
 nsIContent*
 HTMLEditor::GetNextHTMLNode(nsINode* aParent,
                             int32_t aOffset,
+                            nsINode* aChildAtOffset,
                             bool aNoBlockCrossing)
 {
-  nsIContent* content = GetNextNode(aParent, aOffset, true, aNoBlockCrossing);
+  nsIContent* content = GetNextNode(aParent, aOffset, aChildAtOffset,
+                                    true, aNoBlockCrossing);
   if (content && !IsDescendantOfEditorRoot(content)) {
     return nullptr;
   }
   return content;
-}
-
-nsresult
-HTMLEditor::GetNextHTMLNode(nsIDOMNode* aNode,
-                            int32_t aOffset,
-                            nsCOMPtr<nsIDOMNode>* aResultNode,
-                            bool aNoBlockCrossing)
-{
-  NS_ENSURE_TRUE(aResultNode, NS_ERROR_NULL_POINTER);
-
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
-
-  *aResultNode = do_QueryInterface(GetNextHTMLNode(node, aOffset,
-                                                   aNoBlockCrossing));
-  return NS_OK;
 }
 
 bool
