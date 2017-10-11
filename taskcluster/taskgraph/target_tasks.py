@@ -383,7 +383,7 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
 
     def filter(task):
         if task.label in filtered_for_project:
-            if task.kind not in ('balrog', 'pushapk', 'pushapk-breakpoint'):
+            if task.kind not in ('balrog', 'push-apk', 'push-apk-breakpoint'):
                 if task.attributes.get('nightly'):
                     return True
         if task.task['payload'].get('properties', {}).get('product') == 'fennec':
@@ -409,7 +409,7 @@ def target_tasks_publish_fennec(full_task_graph, parameters):
         # TODO: Include fennec mozilla-beta bouncer aliases
         # TODO: Include fennec mozilla-beta mark release as shipped
         # TODO: Include fennec mozilla-beta version bump
-        if task.kind in ('pushapk', 'pushapk-breakpoint'):
+        if task.kind in ('push-apk', 'push-apk-breakpoint'):
             return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(full_task_graph[l])]

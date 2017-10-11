@@ -232,6 +232,7 @@ PUSH_APK_GOOGLE_PLAY_TRACT = {
     'central': 'beta',
     'beta': 'rollout',
     'release': 'rollout',
+    'maple': 'rollout',
     'default': 'invalid',
 }
 
@@ -239,12 +240,14 @@ PUSH_APK_BREAKPOINT_WORKER_TYPE = {
     'central': 'aws-provisioner-v1/taskcluster-generic',
     'beta': 'null-provisioner/human-breakpoint',
     'release': 'null-provisioner/human-breakpoint',
+    'maple': 'aws-provisioner-v1/taskcluster-generic',
     'default': 'invalid/invalid',
 }
 
 PUSH_APK_DRY_RUN_OPTION = {
     'central': False,
     'beta': True,
+    'maple': True,
     'release': False,
     'default': True,
 }
@@ -254,6 +257,7 @@ PUSH_APK_ROLLOUT_PERCENTAGE = {
     # supported project
     'release': 10,
     'beta': 10,
+    'maple': 10,
     'default': None,
 }
 
