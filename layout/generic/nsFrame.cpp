@@ -3115,7 +3115,12 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
-  if (!aFrame->IsTransformed()) {
+  nsIFrame *itemFrame = item->Frame();
+  if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
+    itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
+  }
+
+  if (item->GetAbove() || itemFrame != aFrame) {
     return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aContainerASR);
   }
   aList->RemoveBottom();
