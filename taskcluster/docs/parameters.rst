@@ -122,6 +122,9 @@ syntax or reading a project-specific configuration file).
    Suitable contents can be generated with ``mach release-history``,
    which will print to the console by default.
 
+``next_version``
+    Next version we need to bump to.
+
 Optimization
 ------------
 
