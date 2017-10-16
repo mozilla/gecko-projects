@@ -117,12 +117,8 @@ def is_release_promotion_available(parameters):
                     'type': 'string',
                 },
             },
-            'next_version': {
-                'type': 'string',
-                'description': 'Next version.',
-            },
         },
-        "required": ['release_promotion_flavor', 'build_number', 'next_version'],
+        "required": ['release_promotion_flavor', 'build_number'],
     }
 )
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
@@ -160,7 +156,6 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
-    parameters['next_version'] = input['next_version']
 
     # make parameters read-only
     parameters = Parameters(**parameters)

@@ -41,7 +41,6 @@ PARAMETERS = {
     'level': '3',
     'message': '',
     'moz_build_date': lambda: datetime.now().strftime("%Y%m%d%H%M%S"),
-    'next_version': None,
     'optimize_target_tasks': True,
     'owner': 'nobody@mozilla.com',
     'project': 'mozilla-central',

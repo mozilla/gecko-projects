@@ -230,10 +230,6 @@ release-uptake-monitoring
 -------------------------
 Run uptake monitoring for releases.
 
-release-version-bump
---------------------
-Bumps to the next version.
-
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable

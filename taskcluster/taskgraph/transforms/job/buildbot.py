@@ -47,7 +47,6 @@ def bb_release_worker(config, worker, run):
         'repo_path': repo_path,
         'revision': revision,
         'script_repo_revision': revision,
-        'next_version': config.params['next_version'],
     })
     worker['properties'].update(release_props)
     # scopes
