@@ -702,10 +702,9 @@ static bool
 ShouldBuildPartial(const std::vector<WeakFrame>& aModifiedFrames,
                    DisplayListStatistics& aStats)
 {
-  // TODO: Make this a pref.
-  static const size_t kMaxModifiedFrames = 500;
+  aStats.modifiedFrames = aModifiedFrames.size();
 
-  if (aModifiedFrames.size() > kMaxModifiedFrames) {
+  if (aModifiedFrames.size() > gfxPrefs::LayoutRebuildFrameLimit()) {
     return false;
   }
 

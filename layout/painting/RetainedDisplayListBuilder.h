@@ -17,6 +17,7 @@ struct DisplayListStatistics {
   bool merged = false;
 
   nsTArray<nsIFrame*> frames;
+  uint32_t modifiedFrames = 0;
 };
 
 struct RetainedDisplayListBuilder {
