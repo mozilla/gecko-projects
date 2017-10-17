@@ -54,6 +54,7 @@ VERSION_BUMP_FLAVORS = (
     'publish_devedition',
 )
 
+
 def is_release_promotion_available(parameters):
     return parameters['project'] in RELEASE_PROMOTION_PROJECTS
 
@@ -139,7 +140,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
         if next_version == "":
             raise Exception(
                 "`next_version` property needs to be provided for %s "
-                targets." % ', '.join(VERSION_BUMP_FLAVORS)
+                "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
         os.environ['NEXT_VERSION'] = next_version
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
