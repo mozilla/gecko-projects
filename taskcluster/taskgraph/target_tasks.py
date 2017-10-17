@@ -408,7 +408,7 @@ def target_tasks_publish_fennec(full_task_graph, parameters):
                              'release-bouncer-aliases',
                              'release-uptake-monitoring',
                              'release-version-bump',
-                            ):
+                             ):
                 return True
 
         if task.kind in ('push-apk', 'push-apk-breakpoint'):
