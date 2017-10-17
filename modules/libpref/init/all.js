@@ -313,7 +313,7 @@ pref("media.dormant-on-pause-timeout-ms", 5000);
 
 // Used by ChannelMediaResource to run data callbacks from HTTP channel
 // off the main thread.
-pref("media.omt_data_delivery.enabled", false);
+pref("media.omt_data_delivery.enabled", true);
 
 // File-backed MediaCache size in kilobytes
 pref("media.cache_size", 512000);
@@ -471,7 +471,6 @@ pref("media.peerconnection.dtmf.enabled", true);
 
 pref("media.webrtc.debug.trace_mask", 0);
 pref("media.webrtc.debug.multi_log", false);
-pref("media.webrtc.debug.aec_log_dir", "");
 pref("media.webrtc.debug.log_file", "");
 pref("media.webrtc.debug.aec_dump_max_size", 4194304); // 4MB
 
@@ -2112,7 +2111,7 @@ pref("network.dir.format", 2);
 // <link rel="prefetch"> URLs).
 pref("network.prefetch-next", true);
 // enables the preloading (i.e., preloading of <link rel="preload"> URLs).
-pref("network.preload", true);
+pref("network.preload", false);
 
 // enables the predictive service
 pref("network.predictor.enabled", true);
@@ -5790,10 +5789,14 @@ pref("dom.webkitBlink.filesystem.enabled", true);
 pref("media.block-autoplay-until-in-foreground", true);
 
 // Is Stylo CSS support built and enabled?
-// Only define this pref if Stylo support is actually built in.
+// Only define these prefs if Stylo support is actually built in.
 #ifdef MOZ_STYLO
 pref("layout.css.stylo-blocklist.enabled", true);
+#ifdef NIGHTLY_BUILD
+pref("layout.css.stylo-blocklist.blocked_domains", "arewestyloyet.rs");
+#else
 pref("layout.css.stylo-blocklist.blocked_domains", "");
+#endif
 #ifdef MOZ_STYLO_ENABLE
 pref("layout.css.servo.enabled", true);
 #else

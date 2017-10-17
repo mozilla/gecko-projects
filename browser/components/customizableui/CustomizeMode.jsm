@@ -83,7 +83,7 @@ var gTabsProgressListener = {
 
     unregisterGlobalTab();
   },
-}
+};
 
 function unregisterGlobalTab() {
   gTab.removeEventListener("TabClose", unregisterGlobalTab);
@@ -588,7 +588,7 @@ CustomizeMode.prototype = {
       return null;
     }
     let animationNode;
-    if (aNode.parentNode.id.startsWith("wrapper-")) {
+    if (aNode.parentNode && aNode.parentNode.id.startsWith("wrapper-")) {
       animationNode = aNode.parentNode;
     } else {
       animationNode = aNode;
@@ -633,10 +633,10 @@ CustomizeMode.prototype = {
     }
 
     if (widgetAnimationPromise) {
-      if (aNode.parentNode.id.startsWith("wrapper-")) {
+      if (aNode.parentNode && aNode.parentNode.id.startsWith("wrapper-")) {
         aNode.parentNode.classList.remove("animate-out");
       } else {
-        aNode.classList.remove("animate-out")
+        aNode.classList.remove("animate-out");
       }
     }
   },
@@ -666,10 +666,10 @@ CustomizeMode.prototype = {
     }
 
     if (widgetAnimationPromise) {
-      if (aNode.parentNode.id.startsWith("wrapper-")) {
+      if (aNode.parentNode && aNode.parentNode.id.startsWith("wrapper-")) {
         aNode.parentNode.classList.remove("animate-out");
       } else {
-        aNode.classList.remove("animate-out")
+        aNode.classList.remove("animate-out");
       }
     }
     if (gCosmeticAnimationsEnabled) {
@@ -712,10 +712,10 @@ CustomizeMode.prototype = {
       }
     }
     if (widgetAnimationPromise) {
-      if (aNode.parentNode.id.startsWith("wrapper-")) {
+      if (aNode.parentNode && aNode.parentNode.id.startsWith("wrapper-")) {
         aNode.parentNode.classList.remove("animate-out");
       } else {
-        aNode.classList.remove("animate-out")
+        aNode.classList.remove("animate-out");
       }
     }
   },
@@ -911,7 +911,7 @@ CustomizeMode.prototype = {
     if (currentContextMenu &&
         currentContextMenu != contextMenuForPlace) {
       aNode.setAttribute("wrapped-context", currentContextMenu);
-      aNode.setAttribute("wrapped-contextAttrName", contextMenuAttrName)
+      aNode.setAttribute("wrapped-contextAttrName", contextMenuAttrName);
       aNode.removeAttribute(contextMenuAttrName);
     } else if (currentContextMenu == contextMenuForPlace) {
       aNode.removeAttribute(contextMenuAttrName);

@@ -1365,7 +1365,13 @@ nsIFrame::HasOpacityInternal(float aThreshold,
 
   EffectSet* effects =
     aEffectSet ? aEffectSet : EffectSet::GetEffectSet(this);
-  return (IsPrimaryFrame() &&
+  if (!effects) {
+    return false;
+  }
+
+  return ((IsPrimaryFrame() ||
+           nsLayoutUtils::FirstContinuationOrIBSplitSibling(this)->
+             IsPrimaryFrame()) &&
           nsLayoutUtils::HasAnimationOfProperty(effects, eCSSProperty_opacity));
 }
 
@@ -10232,7 +10238,8 @@ nsIFrame::UpdateStyleOfOwnedChildFrame(
   nsChangeHint childHint = aChildFrame->StyleContext()->CalcStyleDifference(
     aNewStyleContext,
     &equalStructs,
-    &samePointerStructs);
+    &samePointerStructs,
+    /* aIgnoreVariables = */ true);
 
   // CalcStyleDifference will handle caching structs on the new style context,
   // but only if we're not on a style worker thread.
@@ -10713,6 +10720,15 @@ nsIFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aSizes) const
     if (!aSizes.mState.HaveSeenPtr(sc)) {
       sc->AddSizeOfIncludingThis(aSizes,
                                  &aSizes.mLayoutComputedValuesNonDom);
+    }
+
+    // And our additional style contexts.
+    int32_t index = 0;
+    while (auto* extra = GetAdditionalStyleContext(index++)) {
+      if (!aSizes.mState.HaveSeenPtr(extra)) {
+        extra->AsServo()->AddSizeOfIncludingThis(aSizes,
+                                                 &aSizes.mLayoutComputedValuesNonDom);
+      }
     }
   }
 

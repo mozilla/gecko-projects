@@ -911,6 +911,10 @@ void wr_dec_ref_arc(const VecU8 *aArc)
 WR_FUNC;
 
 WR_INLINE
+void wr_dp_clear_save(WrState *aState)
+WR_FUNC;
+
+WR_INLINE
 uint64_t wr_dp_define_clip(WrState *aState,
                            LayoutRect aClipRect,
                            const ComplexClipRegion *aComplex,
@@ -935,6 +939,10 @@ uint64_t wr_dp_define_sticky_frame(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+void wr_dp_pop_all_shadows(WrState *aState)
+WR_FUNC;
+
+WR_INLINE
 void wr_dp_pop_clip(WrState *aState)
 WR_FUNC;
 
@@ -944,10 +952,6 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_pop_scroll_layer(WrState *aState)
-WR_FUNC;
-
-WR_INLINE
-void wr_dp_pop_shadow(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
@@ -1173,6 +1177,14 @@ void wr_dp_push_yuv_planar_image(WrState *aState,
                                  WrImageKey aImageKey2,
                                  WrYuvColorSpace aColorSpace,
                                  ImageRendering aImageRendering)
+WR_FUNC;
+
+WR_INLINE
+void wr_dp_restore(WrState *aState)
+WR_FUNC;
+
+WR_INLINE
+void wr_dp_save(WrState *aState)
 WR_FUNC;
 
 extern bool wr_moz2d_render_cb(ByteSlice aBlob,

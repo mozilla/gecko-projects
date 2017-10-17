@@ -1407,7 +1407,8 @@ function insertBookmark(item, parent) {
  * @returns {Boolean} True if the node is a Livemark, false otherwise.
  */
 function isLivemark(node) {
-  return node.annos && node.annos.some(anno => anno.name == PlacesUtils.LMANNO_FEEDURI);
+  return node.type == Bookmarks.TYPE_FOLDER && node.annos &&
+         node.annos.some(anno => anno.name == PlacesUtils.LMANNO_FEEDURI);
 }
 
 function insertBookmarkTree(items, source, parent, urls, lastAddedForParent) {
@@ -1526,7 +1527,7 @@ async function handleBookmarkItemSpecialData(itemId, item) {
   if (item.annos && item.annos.length) {
     // Note: for annotations, we intentionally skip updating the last modified
     // value for the bookmark, to avoid a second update of the added bookmark.
-    PlacesUtils.setAnnotationsForItem(itemId, item.annos, item.source, true)
+    PlacesUtils.setAnnotationsForItem(itemId, item.annos, item.source, true);
   }
   if ("keyword" in item && item.keyword) {
     // POST data could be set in 2 ways:

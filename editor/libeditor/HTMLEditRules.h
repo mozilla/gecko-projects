@@ -380,16 +380,18 @@ protected:
                            nsAtom& aBlockTag);
   nsresult MakeBlockquote(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
   nsresult SplitAsNeeded(nsAtom& aTag, OwningNonNull<nsINode>& inOutParent,
-                         int32_t& inOutOffset);
+                         int32_t& inOutOffset,
+                         nsCOMPtr<nsIContent>* inOutChildAtOffset = nullptr);
   nsresult SplitAsNeeded(nsAtom& aTag, nsCOMPtr<nsINode>& inOutParent,
-                         int32_t& inOutOffset);
+                         int32_t& inOutOffset,
+                         nsCOMPtr<nsIContent>* inOutChildAtOffset = nullptr);
   nsresult AddTerminatingBR(nsIDOMNode *aBlock);
   EditorDOMPoint JoinNodesSmart(nsIContent& aNodeLeft,
                                 nsIContent& aNodeRight);
   Element* GetTopEnclosingMailCite(nsINode& aNode);
   nsresult PopListItem(nsIContent& aListItem, bool* aOutOfList = nullptr);
   nsresult RemoveListStructure(Element& aList);
-  nsresult CacheInlineStyles(nsIDOMNode* aNode);
+  nsresult CacheInlineStyles(nsINode* aNode);
   nsresult ReapplyCachedStyles();
   void ClearCachedStyles();
   void AdjustSpecialBreaks();
@@ -457,7 +459,7 @@ protected:
    * GetInlineStyles() retrieves the style of aNode and modifies each item of
    * aStyleCache.
    */
-  nsresult GetInlineStyles(nsIDOMNode* aNode,
+  nsresult GetInlineStyles(nsINode* aNode,
                            StyleCache aStyleCache[SIZE_STYLE_TABLE]);
 
 protected:

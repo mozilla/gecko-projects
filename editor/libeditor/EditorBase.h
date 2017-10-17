@@ -398,10 +398,12 @@ protected:
   already_AddRefed<CreateElementTransaction>
     CreateTxnForCreateElement(nsAtom& aTag,
                               nsINode& aParent,
-                              int32_t aPosition);
+                              int32_t aPosition,
+                              nsIContent* aChildAtPosition);
 
   already_AddRefed<Element> CreateNode(nsAtom* aTag, nsINode* aParent,
-                                       int32_t aPosition);
+                                       int32_t aPosition,
+                                       nsIContent* aChildAtPosition = nullptr);
 
   /**
    * Create a transaction for inserting aNode as a child of aParent.
@@ -873,7 +875,6 @@ public:
   /**
    * From html rules code - migration in progress.
    */
-  static nsresult GetTagString(nsIDOMNode* aNode, nsAString& outString);
   static nsAtom* GetTag(nsIDOMNode* aNode);
 
   bool NodesSameType(nsIDOMNode* aNode1, nsIDOMNode* aNode2);
@@ -885,7 +886,6 @@ public:
     return aNode->NodeType() == nsIDOMNode::TEXT_NODE;
   }
 
-  static nsCOMPtr<nsIDOMNode> GetChildAt(nsIDOMNode* aParent, int32_t aOffset);
   static nsIContent* GetNodeAtRangeOffsetPoint(nsINode* aParentOrNode,
                                                int32_t aOffset);
 
@@ -952,7 +952,9 @@ public:
                         EmptyContainers aEmptyContainers =
                           EmptyContainers::yes,
                         nsIContent** outLeftNode = nullptr,
-                        nsIContent** outRightNode = nullptr);
+                        nsIContent** outRightNode = nullptr,
+                        nsCOMPtr<nsIContent>* ioChildAtSplitPointOffset =
+                          nullptr);
   EditorDOMPoint JoinNodeDeep(nsIContent& aLeftNode,
                               nsIContent& aRightNode);
 

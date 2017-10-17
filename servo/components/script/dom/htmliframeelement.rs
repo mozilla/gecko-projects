@@ -568,14 +568,10 @@ pub fn Navigate(iframe: &HTMLIFrameElement, direction: TraversalDirection) -> Er
 
 impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
-    fn Src(&self) -> DOMString {
-        self.upcast::<Element>().get_string_attribute(&local_name!("src"))
-    }
+    make_url_getter!(Src, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
-    fn SetSrc(&self, src: DOMString) {
-        self.upcast::<Element>().set_url_attribute(&local_name!("src"), src)
-    }
+    make_setter!(SetSrc, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-sandbox
     fn Sandbox(&self) -> DomRoot<DOMTokenList> {

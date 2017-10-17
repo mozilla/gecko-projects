@@ -869,9 +869,12 @@ impl ShorthandId {
         }
     }
 
-    fn parse_into<'i, 't>(&self, declarations: &mut SourcePropertyDeclaration,
-                          context: &ParserContext, input: &mut Parser<'i, 't>)
-                          -> Result<(), ParseError<'i>> {
+    fn parse_into<'i, 't>(
+        &self,
+        declarations: &mut SourcePropertyDeclaration,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         match *self {
             % for shorthand in data.shorthands_except_all():
                 ShorthandId::${shorthand.camel_case} => {
@@ -1628,10 +1631,13 @@ impl PropertyDeclaration {
     /// This will not actually parse Importance values, and will always set things
     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
     /// we only set them here so that we don't have to reallocate
-    pub fn parse_into<'i, 't>(declarations: &mut SourcePropertyDeclaration,
-                              id: PropertyId, name: CowRcStr<'i>,
-                              context: &ParserContext, input: &mut Parser<'i, 't>)
-                              -> Result<(), ParseError<'i>> {
+    pub fn parse_into<'i, 't>(
+        declarations: &mut SourcePropertyDeclaration,
+        id: PropertyId,
+        name: CowRcStr<'i>,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         assert!(declarations.is_empty());
         let start = input.state();
         match id {
@@ -2211,7 +2217,7 @@ impl ComputedValuesInner {
     pub fn has_moz_binding(&self) -> bool { false }
 
     /// Clone the visited style.  Used for inheriting parent styles in
-    /// StyleBuilder::for_inheritance.
+    /// StyleBuilder::for_derived_style.
     pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
         self.visited_style.clone()
     }
@@ -2842,6 +2848,18 @@ impl<'a> StyleBuilder<'a> {
         parent: &'a ComputedValues,
         pseudo: Option<<&'a PseudoElement>,
     ) -> Self {
+        // Rebuild the visited style from the parent, ensuring that it will also
+        // not have rules.  This matches the unvisited style that will be
+        // produced by this builder.  This assumes that the caller doesn't need
+        // to adjust or process visited style, so we can just build visited
+        // style here for simplicity.
+        let visited_style = parent.visited_style().map(|style| {
+            Self::for_inheritance(
+                device,
+                style,
+                pseudo,
+            ).build()
+        });
         // FIXME(emilio): This Some(parent) here is inconsistent with what we
         // usually do if `parent` is the default computed values, but that's
         // fine, and we want to eventually get rid of it.
@@ -2855,7 +2873,7 @@ impl<'a> StyleBuilder<'a> {
             parent.custom_properties().cloned(),
             parent.writing_mode,
             parent.flags,
-            parent.clone_visited_style()
+            visited_style,
         )
     }
 
