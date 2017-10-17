@@ -47,7 +47,7 @@ private:
                          nsDisplayList* aOutList,
                          DisplayListStatistics& aStats);
 
-  bool ComputeRebuildRegion(std::vector<WeakFrame>& aModifiedFrames,
+  bool ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedFrames,
                             nsRect* aOutDirty,
                             AnimatedGeometryRoot** aOutModifiedAGR,
                             nsTArray<nsIFrame*>* aOutFramesWithProps);

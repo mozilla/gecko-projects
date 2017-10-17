@@ -479,7 +479,7 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
 }
 
 static void
-AddModifiedFramesFromRootFrame(std::vector<WeakFrame>& aFrames,
+AddModifiedFramesFromRootFrame(nsTArray<nsIFrame*>& aFrames,
                                nsIFrame* aRootFrame)
 {
   MOZ_ASSERT(aRootFrame);
@@ -487,13 +487,19 @@ AddModifiedFramesFromRootFrame(std::vector<WeakFrame>& aFrames,
   std::vector<WeakFrame>* frames =
     aRootFrame->GetProperty(nsIFrame::ModifiedFrameList());
 
-  if (frames) {
-    for (WeakFrame& frame : *frames) {
-      aFrames.push_back(Move(frame));
-    }
-
-    frames->clear();
+  if (!frames) {
+    return;
   }
+
+  for (WeakFrame& frame : *frames) {
+    nsIFrame* f = frame.GetFrame();
+
+    if (f) {
+      aFrames.AppendElement(f);
+    }
+  }
+
+  frames->clear();
 }
 
 static bool
@@ -502,8 +508,8 @@ SubDocEnumCb(nsIDocument* aDocument, void* aData)
   MOZ_ASSERT(aDocument);
   MOZ_ASSERT(aData);
 
-  std::vector<WeakFrame>* modifiedFrames =
-    static_cast<std::vector<WeakFrame>*>(aData);
+  nsTArray<nsIFrame*>* modifiedFrames =
+    static_cast<nsTArray<nsIFrame*>*>(aData);
 
   nsIPresShell* presShell = aDocument->GetShell();
   nsIFrame* rootFrame = presShell ? presShell->GetRootFrame() : nullptr;
@@ -516,15 +522,15 @@ SubDocEnumCb(nsIDocument* aDocument, void* aData)
   return true;
 }
 
-static std::vector<WeakFrame>
+static nsTArray<nsIFrame*>
 GetModifiedFrames(nsIFrame* aDisplayRootFrame)
 {
   MOZ_ASSERT(aDisplayRootFrame);
 
-  std::vector<WeakFrame> modifiedFrames;
+  nsTArray<nsIFrame*> modifiedFrames;
   AddModifiedFramesFromRootFrame(modifiedFrames, aDisplayRootFrame);
 
-  nsIDocument *rootdoc = aDisplayRootFrame->PresContext()->Document();
+  nsIDocument* rootdoc = aDisplayRootFrame->PresContext()->Document();
 
   if (rootdoc) {
     rootdoc->EnumerateSubDocuments(SubDocEnumCb, &modifiedFrames);
@@ -568,16 +574,14 @@ GetModifiedFrames(nsIFrame* aDisplayRootFrame)
  * build is required.
  */
 bool
-RetainedDisplayListBuilder::ComputeRebuildRegion(std::vector<WeakFrame>& aModifiedFrames,
+RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedFrames,
                                                  nsRect* aOutDirty,
                                                  AnimatedGeometryRoot** aOutModifiedAGR,
                                                  nsTArray<nsIFrame*>* aOutFramesWithProps)
 {
   CRR_LOG("Computing rebuild regions for %d frames:\n", aModifiedFrames.size());
   for (nsIFrame* f : aModifiedFrames) {
-    if (!f) {
-      continue;
-    }
+    MOZ_ASSERT(f);
 
     if (f->HasOverrideDirtyRegion()) {
       aOutFramesWithProps->AppendElement(f);
@@ -699,22 +703,18 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(std::vector<WeakFrame>& aModifi
  * A simple early exit heuristic to avoid slow partial display list rebuilds.
  */
 static bool
-ShouldBuildPartial(const std::vector<WeakFrame>& aModifiedFrames,
+ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames,
                    DisplayListStatistics& aStats)
 {
-  aStats.modifiedFrames = aModifiedFrames.size();
+  aStats.modifiedFrames = aModifiedFrames.Length();
 
-  if (aModifiedFrames.size() > gfxPrefs::LayoutRebuildFrameLimit()) {
+  if (aModifiedFrames.Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
     return false;
   }
 
   bool shouldBuildPartial = true;
-  for (const WeakFrame& frame : aModifiedFrames) {
-    nsIFrame* f = frame.GetFrame();
-
-    if (!f) {
-      continue;
-    }
+  for (nsIFrame* f : aModifiedFrames) {
+    MOZ_ASSERT(f);
 
     aStats.frames.AppendElement(f);
 
@@ -746,7 +746,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
   mBuilder.EnterPresShell(mBuilder.RootReferenceFrame());
 
-  std::vector<WeakFrame> modifiedFrames =
+  nsTArray<nsIFrame*> modifiedFrames =
     GetModifiedFrames(mBuilder.RootReferenceFrame());
 
   const bool shouldBuildPartial = ShouldBuildPartial(modifiedFrames, aStats);
@@ -817,7 +817,6 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
       f->SetFrameIsModified(false);
     }
   }
-  modifiedFrames.clear();
 
   for (nsIFrame* f: framesWithProps) {
     f->SetHasOverrideDirtyRegion(false);
