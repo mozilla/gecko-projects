@@ -36,9 +36,9 @@ WORKER_TYPES = {
     'null-provisioner/human-breakpoint': ('push-apk-breakpoint', None),
     'null-provisioner/human-breakpoint': ('push-apk-breakpoint', None),
     'releng-hardware/gecko-t-linux-talos': ('native-engine', 'linux'),
-    'scriptworker-prov-v1/balrogworker-v1': ('balrog', None),
-    'scriptworker-prov-v1/beetmoverworker-v1': ('beetmover', None),
-    'scriptworker-prov-v1/pushapk-v1': ('push-apk', None),
+    'scriptworker-prov-v1/balrogworker-dev': ('balrog', None),
+    'scriptworker-prov-v1/beetmoverworker-dev': ('beetmover', None),
+    'scriptworker-prov-v1/pushapk-invalid': ('push-apk', None),
     "scriptworker-prov-v1/signing-linux-v1": ('scriptworker-signing', None),
     'releng-hardware/gecko-t-osx-1010': ('generic-worker', 'macosx'),
 }

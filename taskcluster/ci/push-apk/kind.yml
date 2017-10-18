@@ -18,7 +18,7 @@ jobs:
         attributes:
             build_platform: android-nightly
             nightly: true
-        worker-type: scriptworker-prov-v1/pushapk-v1
+        worker-type: scriptworker-prov-v1/pushapk-invalid
         worker:
             upstream-artifacts: # see transforms
             google-play-track: # see transforms
