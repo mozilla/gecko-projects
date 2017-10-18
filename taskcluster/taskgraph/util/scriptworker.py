@@ -210,6 +210,10 @@ PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-central',
     ])
 ], [
+    'maple', set([
+        'maple',
+    ])
+], [
     'beta', set([
         'mozilla-beta',
     ])
@@ -224,6 +228,7 @@ PUSH_APK_SCOPES = {
     'central': 'project:releng:googleplay:aurora',
     'beta': 'project:releng:googleplay:beta',
     'release': 'project:releng:googleplay:release',
+    'maple': 'project:releng:googleplay:dep',
     'default': 'project:releng:googleplay:dep',
 }
 
