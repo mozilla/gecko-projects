@@ -21,7 +21,12 @@ from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
 RELEASE_PROMOTION_CONFIG = {
     'promote_fennec': {
         'target_tasks_method': 'candidates_fennec',
-        'previous_graph_kinds': [],
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            "beetmover", "beetmover-checksums", "checksums-signing",
+            "nightly-l10n", "nightly-l10n-signing", "release-bouncer-sub",
+            "upload-generated-sources", "upload-symbols",
+        ],
         'do_not_optimize': [],
     },
     'publish_fennec': {
