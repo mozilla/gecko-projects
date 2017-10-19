@@ -380,6 +380,8 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
     filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters)
 
     def filter(task):
+        if task.attributes.get('locale', '') != '':
+            return False
         if task.label in filtered_for_project:
             if task.kind not in ('balrog', 'push-apk', 'push-apk-breakpoint'):
                 if task.attributes.get('nightly'):
@@ -387,7 +389,6 @@ def target_tasks_candidates_fennec(full_task_graph, parameters):
         if task.task['payload'].get('properties', {}).get('product') == 'fennec':
             if task.kind in ('release-bouncer-sub', ):
                 return True
-        # TODO: Include Generate beetmover docker image
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(full_task_graph[l])]
 
