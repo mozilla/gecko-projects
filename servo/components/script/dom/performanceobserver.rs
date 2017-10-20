@@ -32,7 +32,7 @@ const VALID_ENTRY_TYPES: &'static [&'static str] = &[
 #[dom_struct]
 pub struct PerformanceObserver {
     reflector_: Reflector,
-    #[ignore_heap_size_of = "can't measure Rc values"]
+    #[ignore_malloc_size_of = "can't measure Rc values"]
     callback: Rc<PerformanceObserverCallback>,
     entries: DomRefCell<DOMPerformanceEntryList>,
 }
@@ -54,7 +54,7 @@ impl PerformanceObserver {
                entries: DOMPerformanceEntryList)
         -> DomRoot<PerformanceObserver> {
         let observer = PerformanceObserver::new_inherited(callback, DomRefCell::new(entries));
-        reflect_dom_object(box observer, global, PerformanceObserverBinding::Wrap)
+        reflect_dom_object(Box::new(observer), global, PerformanceObserverBinding::Wrap)
     }
 
     pub fn Constructor(global: &GlobalScope, callback: Rc<PerformanceObserverCallback>)

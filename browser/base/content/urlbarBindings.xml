@@ -29,9 +29,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <xul:hbox anonid="textbox-container"
                 class="autocomplete-textbox-container urlbar-textbox-container"
                 flex="1" xbl:inherits="focused">
-        <children includes="image|deck|stack|box">
-          <xul:image class="autocomplete-icon" allowevents="true"/>
-        </children>
+        <children includes="image|deck|stack|box"/>
         <xul:hbox anonid="textbox-input-box"
                   class="textbox-input-box urlbar-input-box"
                   flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
@@ -2885,6 +2883,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             this._primaryButton.setAttribute("default", "true");
           } else if (button2.default) {
             this._secondaryButton.setAttribute("default", "true");
+          }
+
+          if (this._primaryButton.hidden) {
+            this._secondaryButton.setAttribute("alone", "true");
+          } else if (this._secondaryButton.hidden) {
+            this._primaryButton.setAttribute("alone", "true");
           }
         ]]></body>
       </method>

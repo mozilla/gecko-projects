@@ -37,7 +37,7 @@ impl HTMLFontElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLFontElement> {
-        Node::reflect_node(box HTMLFontElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLFontElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLFontElementBinding::Wrap)
     }
@@ -130,7 +130,7 @@ impl HTMLFontElementLayoutHelpers for LayoutDom<HTMLFontElement> {
     }
 }
 
-/// https://html.spec.whatwg.org/multipage/#rules-for-parsing-a-legacy-font-size
+/// <https://html.spec.whatwg.org/multipage/#rules-for-parsing-a-legacy-font-size>
 fn parse_size(mut input: &str) -> AttrValue {
     let original_input = input;
     // Steps 1 & 2 are not relevant

@@ -225,7 +225,9 @@ struct RangePaintInfo {
   nsPoint mRootOffset;
 
   RangePaintInfo(nsRange* aRange, nsIFrame* aFrame)
-    : mRange(aRange), mBuilder(aFrame, nsDisplayListBuilderMode::PAINTING, false)
+    : mRange(aRange)
+    , mBuilder(aFrame, nsDisplayListBuilderMode::PAINTING, false)
+    , mList(&mBuilder)
   {
     MOZ_COUNT_CTOR(RangePaintInfo);
     mBuilder.BeginFrame();
@@ -1822,7 +1824,7 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     // Don't suppress painting if the document isn't loading.
     nsIDocument::ReadyState readyState = mDocument->GetReadyStateEnum();
     if (readyState != nsIDocument::READYSTATE_COMPLETE) {
-      mPaintSuppressionTimer = do_CreateInstance("@mozilla.org/timer;1");
+      mPaintSuppressionTimer = NS_NewTimer();
     }
     if (!mPaintSuppressionTimer) {
       mPaintingSuppressed = false;
@@ -1978,7 +1980,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord a
       !mAsyncResizeTimerIsActive) {
     if (mInResize) {
       if (!mAsyncResizeEventTimer) {
-        mAsyncResizeEventTimer = do_CreateInstance("@mozilla.org/timer;1");
+        mAsyncResizeEventTimer = NS_NewTimer();
       }
       if (mAsyncResizeEventTimer) {
         mAsyncResizeTimerIsActive = true;
@@ -3665,14 +3667,13 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
           self->ScheduleViewManagerFlush();
       };
 
-      mDelayedPaintTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-      mDelayedPaintTimer->SetTarget(
-          mDocument->EventTargetFor(TaskCategory::Other));
-      mDelayedPaintTimer->InitWithNamedFuncCallback(PaintTimerCallBack,
-                                                    this,
-                                                    kPaintDelayPeriod,
-                                                    nsITimer::TYPE_ONE_SHOT,
-                                                    "PaintTimerCallBack");
+      NS_NewTimerWithFuncCallback(getter_AddRefs(mDelayedPaintTimer),
+                                  PaintTimerCallBack,
+                                  this,
+                                  kPaintDelayPeriod,
+                                  nsITimer::TYPE_ONE_SHOT,
+                                  "PaintTimerCallBack",
+                                  mDocument->EventTargetFor(TaskCategory::Other));
     }
     return;
   }
@@ -4723,7 +4724,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
   // part of the selection. Then, append the wrapper to the top of the list.
   // Otherwise, just delete the item and don't append it.
   nsRect surfaceRect;
-  nsDisplayList tmpList;
+  nsDisplayList tmpList(aBuilder);
 
   nsDisplayItem* i;
   while ((i = aList->RemoveBottom())) {
@@ -8814,16 +8815,13 @@ PresShell::ScheduleReflowOffTimer()
   ASSERT_REFLOW_SCHEDULED_STATE();
 
   if (!mReflowContinueTimer) {
-    mReflowContinueTimer = do_CreateInstance("@mozilla.org/timer;1");
-    mReflowContinueTimer->SetTarget(
+    nsresult rv = NS_NewTimerWithFuncCallback(
+        getter_AddRefs(mReflowContinueTimer),
+        sReflowContinueCallback, this, 30,
+        nsITimer::TYPE_ONE_SHOT,
+        "sReflowContinueCallback",
         mDocument->EventTargetFor(TaskCategory::Other));
-    if (!mReflowContinueTimer ||
-        NS_FAILED(mReflowContinueTimer->
-                    InitWithNamedFuncCallback(sReflowContinueCallback, this, 30,
-                                              nsITimer::TYPE_ONE_SHOT,
-                                              "sReflowContinueCallback"))) {
-      return false;
-    }
+    return NS_SUCCEEDED(rv);
   }
   return true;
 }

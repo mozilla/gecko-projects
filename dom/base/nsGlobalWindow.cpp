@@ -7098,10 +7098,10 @@ FullscreenTransitionTask::Run()
     // powerful, layout could take a long time, in which case, staying
     // in black screen for that long could hurt user experience even
     // more than exposing an intermediate state.
-    mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
     uint32_t timeout =
       Preferences::GetUint("full-screen-api.transition.timeout", 1000);
-    mTimer->Init(observer, timeout, nsITimer::TYPE_ONE_SHOT);
+    NS_NewTimerWithObserver(getter_AddRefs(mTimer),
+                            observer, timeout, nsITimer::TYPE_ONE_SHOT);
   } else if (stage == eAfterToggle) {
     Telemetry::AccumulateTimeDelta(Telemetry::FULLSCREEN_TRANSITION_BLACK_MS,
                                    mFullscreenChangeStartTime);
@@ -7306,6 +7306,16 @@ nsGlobalWindow::SetWidgetFullscreen(FullscreenReason aReason, bool aIsFullscreen
     aWidget->MakeFullScreenWithNativeTransition(aIsFullscreen, aScreen) :
     aWidget->MakeFullScreen(aIsFullscreen, aScreen);
   return NS_SUCCEEDED(rv);
+}
+
+/* virtual */ void
+nsGlobalWindow::FullscreenWillChange(bool aIsFullscreen)
+{
+  if (aIsFullscreen) {
+    DispatchCustomEvent(NS_LITERAL_STRING("willenterfullscreen"));
+  } else {
+    DispatchCustomEvent(NS_LITERAL_STRING("willexitfullscreen"));
+  }
 }
 
 /* virtual */ void
@@ -12017,8 +12027,8 @@ nsGlobalWindow::RegisterIdleObserver(nsIIdleObserver* aIdleObserver)
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!mIdleTimer) {
-      mIdleTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
-      NS_ENSURE_SUCCESS(rv, rv);
+      mIdleTimer = NS_NewTimer();
+      NS_ENSURE_TRUE(mIdleTimer, NS_ERROR_OUT_OF_MEMORY);
     } else {
       mIdleTimer->Cancel();
     }

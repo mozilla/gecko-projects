@@ -1043,18 +1043,40 @@ nsContentUtils::Atob(const nsAString& aAsciiBase64String,
   }
 
   const char16_t* start = aAsciiBase64String.BeginReading();
+  const char16_t* cur = start;
   const char16_t* end = aAsciiBase64String.EndReading();
-  nsString trimmedString;
-  if (!trimmedString.SetCapacity(aAsciiBase64String.Length(), fallible)) {
-    return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
-  }
-  while (start < end) {
-    if (!nsContentUtils::IsHTMLWhitespace(*start)) {
-      trimmedString.Append(*start);
+  bool hasWhitespace = false;
+
+  while (cur < end) {
+    if (nsContentUtils::IsHTMLWhitespace(*cur)) {
+      hasWhitespace = true;
+      break;
     }
-    start++;
+    cur++;
   }
-  nsresult rv = Base64Decode(trimmedString, aBinaryData);
+
+  nsresult rv;
+
+  if (hasWhitespace) {
+    nsString trimmedString;
+
+    if (!trimmedString.SetCapacity(aAsciiBase64String.Length(), fallible)) {
+      return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
+    }
+
+    trimmedString.Append(start, cur - start);
+
+    while (cur < end) {
+      if (!nsContentUtils::IsHTMLWhitespace(*cur)) {
+        trimmedString.Append(*cur);
+      }
+      cur++;
+    }
+    rv = Base64Decode(trimmedString, aBinaryData);
+  } else {
+    rv = Base64Decode(aAsciiBase64String, aBinaryData);
+  }
+
   if (NS_FAILED(rv) && rv == NS_ERROR_INVALID_ARG) {
     return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
   }
@@ -6922,9 +6944,10 @@ nsContentUtils::FlushLayoutForTree(nsPIDOMWindowOuter* aWindow)
     docShell->GetChildCount(&i_end);
     for (; i < i_end; ++i) {
       nsCOMPtr<nsIDocShellTreeItem> item;
-      docShell->GetChildAt(i, getter_AddRefs(item));
-      if (nsCOMPtr<nsPIDOMWindowOuter> win = item->GetWindow()) {
-        FlushLayoutForTree(win);
+      if (docShell->GetChildAt(i, getter_AddRefs(item)) == NS_OK && item) {
+        if (nsCOMPtr<nsPIDOMWindowOuter> win = item->GetWindow()) {
+          FlushLayoutForTree(win);
+        }
       }
     }
   }

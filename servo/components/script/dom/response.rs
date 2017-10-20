@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use body::{BodyOperations, BodyType, consume_body, consume_body_with_promise};
-use core::cell::Cell;
 use dom::bindings::cell::DomRefCell;
 use dom::bindings::codegen::Bindings::HeadersBinding::{HeadersInit, HeadersMethods};
 use dom::bindings::codegen::Bindings::ResponseBinding;
@@ -24,7 +23,7 @@ use hyper::status::StatusCode;
 use hyper_serde::Serde;
 use net_traits::response::{ResponseBody as NetTraitsResponseBody};
 use servo_url::ServoUrl;
-use std::cell::Ref;
+use std::cell::{Cell, Ref};
 use std::mem;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -37,7 +36,7 @@ pub struct Response {
     mime_type: DomRefCell<Vec<u8>>,
     body_used: Cell<bool>,
     /// `None` can be considered a StatusCode of `0`.
-    #[ignore_heap_size_of = "Defined in hyper"]
+    #[ignore_malloc_size_of = "Defined in hyper"]
     status: DomRefCell<Option<StatusCode>>,
     raw_status: DomRefCell<Option<(u16, Vec<u8>)>>,
     response_type: DomRefCell<DOMResponseType>,
@@ -45,7 +44,7 @@ pub struct Response {
     url_list: DomRefCell<Vec<ServoUrl>>,
     // For now use the existing NetTraitsResponseBody enum
     body: DomRefCell<NetTraitsResponseBody>,
-    #[ignore_heap_size_of = "Rc"]
+    #[ignore_malloc_size_of = "Rc"]
     body_promise: DomRefCell<Option<(Rc<Promise>, BodyType)>>,
 }
 
@@ -68,7 +67,7 @@ impl Response {
 
     // https://fetch.spec.whatwg.org/#dom-response
     pub fn new(global: &GlobalScope) -> DomRoot<Response> {
-        reflect_dom_object(box Response::new_inherited(), global, ResponseBinding::Wrap)
+        reflect_dom_object(Box::new(Response::new_inherited()), global, ResponseBinding::Wrap)
     }
 
     pub fn Constructor(global: &GlobalScope, body: Option<BodyInit>, init: &ResponseBinding::ResponseInit)

@@ -23,7 +23,7 @@ pub struct TreeWalker {
     root_node: Dom<Node>,
     current_node: MutDom<Node>,
     what_to_show: u32,
-    #[ignore_heap_size_of = "function pointers and Rc<T> are hard"]
+    #[ignore_malloc_size_of = "function pointers and Rc<T> are hard"]
     filter: Filter
 }
 
@@ -44,7 +44,7 @@ impl TreeWalker {
                            root_node: &Node,
                            what_to_show: u32,
                            filter: Filter) -> DomRoot<TreeWalker> {
-        reflect_dom_object(box TreeWalker::new_inherited(root_node, what_to_show, filter),
+        reflect_dom_object(Box::new(TreeWalker::new_inherited(root_node, what_to_show, filter)),
                            document.window(),
                            TreeWalkerBinding::Wrap)
     }

@@ -474,6 +474,12 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Do not print test log lines unless a failure occurs.",
           }],
+        [["--headless"],
+         {"action": "store_true",
+          "dest": "headless",
+          "default": False,
+          "help": "Run tests in headless mode.",
+          }],
         [["--pidfile"],
          {"dest": "pidFile",
           "default": "",
@@ -825,7 +831,7 @@ class MochitestArguments(ArgumentContainer):
 
         options.leakThresholds = {
             "default": options.defaultLeakThreshold,
-            "tab": 10000,  # See dependencies of bug 1051230.
+            "tab": 3000,  # See dependencies of bug 1401764.
             # GMP rarely gets a log, but when it does, it leaks a little.
             "geckomediaplugin": 20000,
         }
@@ -1011,8 +1017,7 @@ class AndroidArguments(ArgumentContainer):
                 if build_obj.substs.get('MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE'):
                     options.robocopApk = os.path.join(build_obj.topobjdir, 'gradle', 'build',
                                                       'mobile', 'android', 'app', 'outputs', 'apk',
-                                                      'app-official-photon-debug-androidTest-'
-                                                      'unaligned.apk')
+                                                      'app-official-photon-debug-androidTest.apk')
                 else:
                     options.robocopApk = os.path.join(build_obj.topobjdir, 'mobile', 'android',
                                                       'tests', 'browser',

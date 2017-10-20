@@ -82,7 +82,7 @@ macro_rules! with_all_bounds {
         ///
         /// NB: We need Clone so that we can derive(Clone) on struct with that
         /// are parameterized on SelectorImpl. See
-        /// https://github.com/rust-lang/rust/issues/26925
+        /// <https://github.com/rust-lang/rust/issues/26925>
         pub trait SelectorImpl: Clone + Sized + 'static {
             type AttrValue: $($InSelector)*;
             type Identifier: $($InSelector)* + PrecomputedHash;
@@ -177,7 +177,7 @@ pub struct SelectorList<Impl: SelectorImpl>(pub SmallVec<[Selector<Impl>; 1]>);
 
 impl<Impl: SelectorImpl> SelectorList<Impl> {
     /// Parse a comma-separated list of Selectors.
-    /// https://drafts.csswg.org/selectors/#grouping
+    /// <https://drafts.csswg.org/selectors/#grouping>
     ///
     /// Return the Selectors or Err if there is an invalid selector.
     pub fn parse<'i, 't, P>(parser: &P, input: &mut CssParser<'i, 't>)
@@ -440,12 +440,11 @@ impl<Impl: SelectorImpl> Selector<Impl> {
         }
     }
 
-    /// Returns the combinator at index `index` (one-indexed from the right),
+    /// Returns the combinator at index `index` (zero-indexed from the right),
     /// or panics if the component is not a combinator.
-    ///
-    /// FIXME(bholley): Use more intuitive indexing.
-    pub fn combinator_at(&self, index: usize) -> Combinator {
-        match self.0.slice[index - 1] {
+    #[inline]
+    pub fn combinator_at_match_order(&self, index: usize) -> Combinator {
+        match self.0.slice[index] {
             Component::Combinator(c) => c,
             ref other => {
                 panic!("Not a combinator: {:?}, {:?}, index: {}",
@@ -460,16 +459,24 @@ impl<Impl: SelectorImpl> Selector<Impl> {
         self.0.slice.iter()
     }
 
+    /// Returns the combinator at index `index` (zero-indexed from the left),
+    /// or panics if the component is not a combinator.
+    #[inline]
+    pub fn combinator_at_parse_order(&self, index: usize) -> Combinator {
+        match self.0.slice[self.len() - index - 1] {
+            Component::Combinator(c) => c,
+            ref other => {
+                panic!("Not a combinator: {:?}, {:?}, index: {}",
+                       other, self, index)
+            }
+        }
+    }
+
     /// Returns an iterator over the sequence of simple selectors and
-    /// combinators, in parse order (from left to right), _starting_
-    /// 'offset_from_right' entries from the past-the-end sentinel on
-    /// the right. So "0" panics,. "1" iterates nothing, and "len"
-    /// iterates the entire sequence.
-    ///
-    /// FIXME(bholley): This API is rather unintuive, and should really
-    /// be changed to accept an offset from the left. Same for combinator_at.
-    pub fn iter_raw_parse_order_from(&self, offset_from_right: usize) -> Rev<slice::Iter<Component<Impl>>> {
-        self.0.slice[..offset_from_right].iter().rev()
+    /// combinators, in parse order (from left to right), starting from
+    /// `offset`.
+    pub fn iter_raw_parse_order_from(&self, offset: usize) -> Rev<slice::Iter<Component<Impl>>> {
+        self.0.slice[..self.len() - offset].iter().rev()
     }
 
     /// Creates a Selector from a vec of Components, specified in parse order. Used in tests.
@@ -891,7 +898,7 @@ impl<Impl: SelectorImpl> ToCss for Component<Impl> {
         use self::Component::*;
 
         /// Serialize <an+b> values (part of the CSS Syntax spec, but currently only used here).
-        /// https://drafts.csswg.org/css-syntax-3/#serialize-an-anb-value
+        /// <https://drafts.csswg.org/css-syntax-3/#serialize-an-anb-value>
         fn write_affine<W>(dest: &mut W, a: i32, b: i32) -> fmt::Result where W: fmt::Write {
             match (a, b) {
                 (0, 0) => dest.write_char('0'),

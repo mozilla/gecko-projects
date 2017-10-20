@@ -60,7 +60,33 @@ class OwningArrayBufferViewOrArrayBuffer;
 struct MakePublicKeyCredentialOptions;
 class Promise;
 class WebAuthnTransactionChild;
-class WebAuthnTransactionInfo;
+
+class WebAuthnTransaction
+{
+public:
+  WebAuthnTransaction(nsPIDOMWindowInner* aParent,
+                      const RefPtr<Promise>& aPromise,
+                      const WebAuthnTransactionInfo&& aInfo,
+                      const nsAutoCString&& aClientData)
+    : mParent(aParent)
+    , mPromise(aPromise)
+    , mInfo(aInfo)
+    , mClientData(aClientData)
+  { }
+
+  // Parent of the context we're running the transaction in.
+  nsCOMPtr<nsPIDOMWindowInner> mParent;
+
+  // JS Promise representing the transaction status.
+  RefPtr<Promise> mPromise;
+
+  // Holds the parameters of the current transaction, as we need them both
+  // before the transaction request is sent, and on successful return.
+  WebAuthnTransactionInfo mInfo;
+
+  // Client data used to assemble reply objects.
+  nsCString mClientData;
+};
 
 class WebAuthnManager final : public nsIIPCBackgroundChildCreateCallback,
                               public nsIDOMEventListener
@@ -68,18 +94,10 @@ class WebAuthnManager final : public nsIIPCBackgroundChildCreateCallback,
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
+  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
+
   static WebAuthnManager* GetOrCreate();
   static WebAuthnManager* Get();
-
-  void
-  FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer);
-
-  void
-  FinishGetAssertion(nsTArray<uint8_t>& aCredentialId,
-                     nsTArray<uint8_t>& aSigBuffer);
-
-  void
-  Cancel(const nsresult& aError);
 
   already_AddRefed<Promise>
   MakeCredential(nsPIDOMWindowInner* aParent,
@@ -89,40 +107,42 @@ public:
   GetAssertion(nsPIDOMWindowInner* aParent,
                const PublicKeyCredentialRequestOptions& aOptions);
 
-  void StartRegister();
-  void StartSign();
-  void StartCancel();
+  already_AddRefed<Promise>
+  Store(nsPIDOMWindowInner* aParent, const Credential& aCredential);
 
-  // nsIIPCbackgroundChildCreateCallback methods
-  void ActorCreated(PBackgroundChild* aActor) override;
-  void ActorFailed() override;
+  void
+  FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer);
+
+  void
+  FinishGetAssertion(nsTArray<uint8_t>& aCredentialId,
+                     nsTArray<uint8_t>& aSigBuffer);
+
+  void
+  RequestAborted(const nsresult& aError);
+
   void ActorDestroyed();
+
 private:
   WebAuthnManager();
   virtual ~WebAuthnManager();
 
-  void MaybeClearTransaction();
+  // Clears all information we have about the current transaction.
+  void ClearTransaction();
+  // Rejects the current transaction and calls ClearTransaction().
+  void RejectTransaction(const nsresult& aError);
+  // Cancels the current transaction (by sending a Cancel message to the
+  // parent) and rejects it by calling RejectTransaction().
+  void CancelTransaction(const nsresult& aError);
 
   typedef MozPromise<nsresult, nsresult, false> BackgroundActorPromise;
 
   RefPtr<BackgroundActorPromise> GetOrCreateBackgroundActor();
 
-  // JS Promise representing transaction status.
-  RefPtr<Promise> mTransactionPromise;
-
   // IPC Channel for the current transaction.
   RefPtr<WebAuthnTransactionChild> mChild;
 
-  // Parent of the context we're currently running the transaction in.
-  nsCOMPtr<nsPIDOMWindowInner> mCurrentParent;
-
-  // Client data, stored on successful transaction creation, so that it can be
-  // used to assemble reply objects.
-  Maybe<nsCString> mClientData;
-
-  // Holds the parameters of the current transaction, as we need them both
-  // before the transaction request is sent, and on successful return.
-  Maybe<WebAuthnTransactionInfo> mInfo;
+  // The current transaction, if any.
+  Maybe<WebAuthnTransaction> mTransaction;
 
   // Promise for dealing with PBackground Actor creation.
   MozPromiseHolder<BackgroundActorPromise> mPBackgroundCreationPromise;

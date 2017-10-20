@@ -36,12 +36,13 @@ pub type TrustedWorkerAddress = Trusted<Worker>;
 #[dom_struct]
 pub struct Worker {
     eventtarget: EventTarget,
-    #[ignore_heap_size_of = "Defined in std"]
+    #[ignore_malloc_size_of = "Defined in std"]
     /// Sender to the Receiver associated with the DedicatedWorkerGlobalScope
     /// this Worker created.
     sender: Sender<(TrustedWorkerAddress, WorkerScriptMsg)>,
+    #[ignore_malloc_size_of = "Arc"]
     closing: Arc<AtomicBool>,
-    #[ignore_heap_size_of = "Defined in rust-mozjs"]
+    #[ignore_malloc_size_of = "Defined in rust-mozjs"]
     runtime: Arc<Mutex<Option<SharedRt>>>,
     terminated: Cell<bool>,
 }
@@ -61,7 +62,7 @@ impl Worker {
     pub fn new(global: &GlobalScope,
                sender: Sender<(TrustedWorkerAddress, WorkerScriptMsg)>,
                closing: Arc<AtomicBool>) -> DomRoot<Worker> {
-        reflect_dom_object(box Worker::new_inherited(sender, closing),
+        reflect_dom_object(Box::new(Worker::new_inherited(sender, closing)),
                            global,
                            WorkerBinding::Wrap)
     }

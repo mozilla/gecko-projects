@@ -43,12 +43,12 @@ impl HTMLBodyElement {
     #[allow(unrooted_must_root)]
     pub fn new(local_name: LocalName, prefix: Option<Prefix>, document: &Document)
                -> DomRoot<HTMLBodyElement> {
-        Node::reflect_node(box HTMLBodyElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLBodyElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLBodyElementBinding::Wrap)
     }
 
-    /// https://drafts.csswg.org/cssom-view/#the-html-body-element
+    /// <https://drafts.csswg.org/cssom-view/#the-html-body-element>
     pub fn is_the_html_body_element(&self) -> bool {
         let self_node = self.upcast::<Node>();
         let root_elem = self.upcast::<Element>().root_element();

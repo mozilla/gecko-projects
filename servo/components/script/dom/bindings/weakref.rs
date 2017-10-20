@@ -11,14 +11,14 @@
 //! slot. When all associated `WeakRef` values are dropped, the
 //! `WeakBox` itself is dropped too.
 
-use core::nonzero::NonZero;
 use dom::bindings::reflector::DomObject;
 use dom::bindings::root::DomRoot;
 use dom::bindings::trace::JSTraceable;
-use heapsize::HeapSizeOf;
 use js::jsapi::{JSTracer, JS_GetReservedSlot, JS_SetReservedSlot};
 use js::jsval::PrivateValue;
 use libc::c_void;
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
+use nonzero::NonZero;
 use std::cell::{Cell, UnsafeCell};
 use std::mem;
 use std::ops::{Deref, DerefMut, Drop};
@@ -56,10 +56,10 @@ pub trait WeakReferenceable: DomObject + Sized {
                               .to_private() as *mut WeakBox<Self>;
             if ptr.is_null() {
                 trace!("Creating new WeakBox holder for {:p}.", self);
-                ptr = Box::into_raw(box WeakBox {
+                ptr = Box::into_raw(Box::new(WeakBox {
                     count: Cell::new(1),
                     value: Cell::new(Some(NonZero::new_unchecked(self))),
-                });
+                }));
                 JS_SetReservedSlot(object, DOM_WEAK_SLOT, PrivateValue(ptr as *const c_void));
             }
             let box_ = &*ptr;
@@ -110,8 +110,8 @@ impl<T: WeakReferenceable> Clone for WeakRef<T> {
     }
 }
 
-impl<T: WeakReferenceable> HeapSizeOf for WeakRef<T> {
-    fn heap_size_of_children(&self) -> usize {
+impl<T: WeakReferenceable> MallocSizeOf for WeakRef<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
         0
     }
 }
@@ -188,8 +188,8 @@ impl<T: WeakReferenceable> MutableWeakRef<T> {
     }
 }
 
-impl<T: WeakReferenceable> HeapSizeOf for MutableWeakRef<T> {
-    fn heap_size_of_children(&self) -> usize {
+impl<T: WeakReferenceable> MallocSizeOf for MutableWeakRef<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
         0
     }
 }
@@ -210,7 +210,7 @@ unsafe impl<T: WeakReferenceable> JSTraceable for MutableWeakRef<T> {
 /// A vector of weak references. On tracing, the vector retains
 /// only references which still point to live objects.
 #[allow_unrooted_interior]
-#[derive(HeapSizeOf)]
+#[derive(MallocSizeOf)]
 pub struct WeakRefVec<T: WeakReferenceable> {
     vec: Vec<WeakRef<T>>,
 }

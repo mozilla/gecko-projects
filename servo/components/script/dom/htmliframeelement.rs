@@ -56,7 +56,7 @@ use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use task_source::TaskSource;
 
 bitflags! {
-    #[derive(HeapSizeOf, JSTraceable)]
+    #[derive(JSTraceable, MallocSizeOf)]
     flags SandboxAllowance: u8 {
         const ALLOW_NOTHING = 0x00,
         const ALLOW_SAME_ORIGIN = 0x01,
@@ -223,7 +223,7 @@ impl HTMLIFrameElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes
+    /// <https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes>
     fn process_the_iframe_attributes(&self, mode: ProcessingMode) {
         // TODO: srcdoc
 
@@ -335,7 +335,7 @@ impl HTMLIFrameElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLIFrameElement> {
-        Node::reflect_node(box HTMLIFrameElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLIFrameElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLIFrameElementBinding::Wrap)
     }

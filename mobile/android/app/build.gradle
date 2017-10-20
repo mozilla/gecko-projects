@@ -355,6 +355,10 @@ android.applicationVariants.all { variant ->
     }
 }
 
+android.applicationVariants.all { variant ->
+    configureVariantWithJNIWrappers(variant, "Fennec")
+}
+
 apply plugin: 'spoon'
 
 spoon {
@@ -482,7 +486,7 @@ android.applicationVariants.all { variant ->
 
         reports {
             html.enabled = true // HTML reports for humans.
-            html.destination = "$project.buildDir/outputs/findbugs/findbugs-${variant.name}-output.html"
+            html.destination = "$project.buildDir/reports/findbugs/findbugs-${variant.name}-output.html"
             xml.enabled = false
         }
     }
@@ -506,7 +510,7 @@ android.applicationVariants.all { variant ->
 
         reports {
             xml.enabled = true // XML reports for machines.
-            xml.destination = "$project.buildDir/outputs/findbugs/findbugs-${variant.name}-output.xml"
+            xml.destination = "$project.buildDir/reports/findbugs/findbugs-${variant.name}-output.xml"
             html.enabled = false
         }
     }

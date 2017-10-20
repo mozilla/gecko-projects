@@ -6436,45 +6436,6 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
   return true;
 }
 
-bool
-nsDocument::IsWebComponentsEnabled(JSContext* aCx, JSObject* aObject)
-{
-  if (!nsContentUtils::IsWebComponentsEnabled()) {
-    return false;
-  }
-
-  JS::Rooted<JSObject*> obj(aCx, aObject);
-
-  JSAutoCompartment ac(aCx, obj);
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, obj));
-  nsCOMPtr<nsPIDOMWindowInner> window =
-    do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(global));
-
-  nsIDocument* doc = window ? window->GetExtantDoc() : nullptr;
-  if (doc && doc->IsStyledByServo()) {
-    NS_WARNING("stylo: Web Components not supported yet");
-    return false;
-  }
-
-  return true;
-}
-
-bool
-nsDocument::IsWebComponentsEnabled(dom::NodeInfo* aNodeInfo)
-{
-  if (!nsContentUtils::IsWebComponentsEnabled()) {
-    return false;
-  }
-
-  nsIDocument* doc = aNodeInfo->GetDocument();
-  if (doc->IsStyledByServo()) {
-    NS_WARNING("stylo: Web Components not supported yet");
-    return false;
-  }
-
-  return true;
-}
-
 void
 nsDocument::ScheduleSVGForPresAttrEvaluation(nsSVGElement* aSVG)
 {
@@ -13692,10 +13653,8 @@ nsIDocument::UpdateStyleBackendType()
     // able to use XUL by default, and the back door to enable XUL is
     // mostly just for testing, which means they don't matter, and we
     // shouldn't respect them at the same time.
-    // Note that, since tests can have XUL support, we still need to
-    // explicitly exclude XUL documents here.
     if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()) &&
-        !IsXULDocument() && !ShouldUseGeckoBackend(mDocumentURI) &&
+        !ShouldUseGeckoBackend(mDocumentURI) &&
         !nsLayoutUtils::IsInStyloBlocklist(NodePrincipal())) {
       mStyleBackendType = StyleBackendType::Servo;
     }

@@ -8,8 +8,8 @@
 
 #include "mozIStorageConnection.h"
 #include "mozIStorageService.h"
-#include "nsIBinaryInputStream.h"
-#include "nsIBinaryOutputStream.h"
+#include "nsIObjectInputStream.h"
+#include "nsIObjectOutputStream.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
 #include "nsIObserverService.h"
@@ -124,11 +124,30 @@ namespace {
 
 const uint32_t kSQLitePageSizeOverride = 512;
 
+
+const uint32_t kHackyDowngradeMajorStorageVersion = 2;
+const uint32_t kHackyDowngradeMinorStorageVersion = 1;
+
+// Important version history:
+// - Bug 1290481 bumped our schema from major.minor 2.0 to 3.0 in Firefox 57
+//   which caused Firefox 57 release concerns because the major schema upgrade
+//   means anyone downgrading to Firefox 56 will experience a non-operational
+//   QuotaManager and all of its clients.
+// - Bug 1404344 got very concerned about that and so we decided to effectively
+//   rename 3.0 to 2.1, effective in Firefox 57.  This works because post
+//   storage.sqlite v1.0, QuotaManager doesn't care about minor storage version
+//   increases.  It also works because all the upgrade did was give the DOM
+//   Cache API QuotaClient an opportunity to create its newly added .padding
+//   files during initialization/upgrade, which isn't functionally necessary as
+//   that can be done on demand.
+
 // Major storage version. Bump for backwards-incompatible changes.
-const uint32_t kMajorStorageVersion = 3;
+// (The next major version should be 4 to distinguish from the Bug 1290481
+// downgrade snafu.)
+const uint32_t kMajorStorageVersion = 2;
 
 // Minor storage version. Bump for backwards-compatible changes.
-const uint32_t kMinorStorageVersion = 0;
+const uint32_t kMinorStorageVersion = 1;
 
 // The storage version we store in the SQLite database is a (signed) 32-bit
 // integer. The major version is left-shifted 16 bits so the max value is
@@ -140,6 +159,10 @@ static_assert(kMinorStorageVersion <= 0xFFFF,
 
 const int32_t kStorageVersion =
   int32_t((kMajorStorageVersion << 16) + kMinorStorageVersion);
+
+// See comments above about why these are a thing.
+const int32_t kHackyPreDowngradeStorageVersion = int32_t((3 << 16) + 0);
+const int32_t kHackyPostDowngradeStorageVersion = int32_t((2 << 16) + 1);
 
 static_assert(
   static_cast<uint32_t>(StorageType::Persistent) ==
@@ -1817,11 +1840,11 @@ private:
 // XXXtt: The following class is duplicated from
 // UpgradeStorageFrom1_0To2_0Helper and it should be extracted out in
 // bug 1395102.
-class UpgradeStorageFrom2_0To3_0Helper final
+class UpgradeStorageFrom2_0To2_1Helper final
   : public StorageDirectoryHelper
 {
 public:
-  UpgradeStorageFrom2_0To3_0Helper(nsIFile* aDirectory,
+  UpgradeStorageFrom2_0To2_1Helper(nsIFile* aDirectory,
                                    bool aPersistent)
     : StorageDirectoryHelper(aDirectory, aPersistent)
   { }
@@ -2140,18 +2163,14 @@ GetBinaryOutputStream(nsIFile* aFile,
     return rv;
   }
 
-  nsCOMPtr<nsIBinaryOutputStream> binaryStream =
-    do_CreateInstance("@mozilla.org/binaryoutputstream;1");
-  if (NS_WARN_IF(!binaryStream)) {
-    return NS_ERROR_FAILURE;
+  if (NS_WARN_IF(!outputStream)) {
+    return NS_ERROR_UNEXPECTED;
   }
 
-  rv = binaryStream->SetOutputStream(outputStream);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  nsCOMPtr<nsIObjectOutputStream> objectOutputStream =
+    NS_NewObjectOutputStream(outputStream);
 
-  binaryStream.forget(aStream);
+  objectOutputStream.forget(aStream);
   return NS_OK;
 }
 
@@ -2435,7 +2454,8 @@ GetBinaryInputStream(nsIFile* aDirectory,
   }
 
   nsCOMPtr<nsIInputStream> bufferedStream;
-  rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream), stream, 512);
+  rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream),
+                                 stream.forget(), 512);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -3623,7 +3643,7 @@ QuotaManager::Init(const nsAString& aBasePath)
 
   // Make a timer here to avoid potential failures later. We don't actually
   // initialize the timer until shutdown.
-  mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+  mShutdownTimer = NS_NewTimer();
   if (NS_WARN_IF(!mShutdownTimer)) {
     return NS_ERROR_FAILURE;
   }
@@ -4817,7 +4837,7 @@ QuotaManager::UpgradeStorageFrom1_0To2_0(mozIStorageConnection* aConnection)
 }
 
 nsresult
-QuotaManager::UpgradeStorageFrom2_0To3_0(mozIStorageConnection* aConnection)
+QuotaManager::UpgradeStorageFrom2_0To2_1(mozIStorageConnection* aConnection)
 {
   AssertIsOnIOThread();
   MOZ_ASSERT(aConnection);
@@ -4850,8 +4870,8 @@ QuotaManager::UpgradeStorageFrom2_0To3_0(mozIStorageConnection* aConnection)
     }
 
     bool persistent = persistenceType == PERSISTENCE_TYPE_PERSISTENT;
-    RefPtr<UpgradeStorageFrom2_0To3_0Helper> helper =
-      new UpgradeStorageFrom2_0To3_0Helper(directory, persistent);
+    RefPtr<UpgradeStorageFrom2_0To2_1Helper> helper =
+      new UpgradeStorageFrom2_0To2_1Helper(directory, persistent);
 
     rv = helper->DoUpgrade();
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4871,7 +4891,7 @@ QuotaManager::UpgradeStorageFrom2_0To3_0(mozIStorageConnection* aConnection)
   }
 #endif
 
-  rv = aConnection->SetSchemaVersion(MakeStorageVersion(3, 0));
+  rv = aConnection->SetSchemaVersion(MakeStorageVersion(2, 1));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -4954,6 +4974,17 @@ QuotaManager::EnsureStorageIsInitialized()
     return rv;
   }
 
+  // Hacky downgrade logic!
+  // If we see major.minor of 3.0, downgrade it to be 2.1.
+  if (storageVersion == kHackyPreDowngradeStorageVersion) {
+    storageVersion = kHackyPostDowngradeStorageVersion;
+    rv = connection->SetSchemaVersion(storageVersion);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      MOZ_ASSERT(false, "Downgrade didn't take.");
+      return rv;
+    }
+  }
+
   if (GetMajorStorageVersion(storageVersion) > kMajorStorageVersion) {
     NS_WARNING("Unable to initialize storage, version is too high!");
     return NS_ERROR_FAILURE;
@@ -5027,7 +5058,7 @@ QuotaManager::EnsureStorageIsInitialized()
       MOZ_ASSERT(storageVersion == kStorageVersion);
     } else {
       // This logic needs to change next time we change the storage!
-      static_assert(kStorageVersion == int32_t((3 << 16) + 0),
+      static_assert(kStorageVersion == int32_t((2 << 16) + 1),
                     "Upgrade function needed due to storage version increase.");
 
       while (storageVersion != kStorageVersion) {
@@ -5036,7 +5067,7 @@ QuotaManager::EnsureStorageIsInitialized()
         } else if (storageVersion == MakeStorageVersion(1, 0)) {
           rv = UpgradeStorageFrom1_0To2_0(connection);
         } else if (storageVersion == MakeStorageVersion(2, 0)) {
-          rv = UpgradeStorageFrom2_0To3_0(connection);
+          rv = UpgradeStorageFrom2_0To2_1(connection);
         } else {
           NS_WARNING("Unable to initialize storage, no upgrade path is "
                      "available!");
@@ -5205,46 +5236,11 @@ QuotaManager::EnsureOriginIsInitializedInternal(
       *aCreated = false;
       return NS_OK;
     }
-  } else if (!mTemporaryStorageInitialized) {
-    rv = InitializeRepository(aPersistenceType);
+  } else {
+    rv = EnsureTemporaryStorageIsInitialized();
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      // We have to cleanup partially initialized quota.
-      RemoveQuota();
-
       return rv;
     }
-
-    rv = InitializeRepository(ComplementaryPersistenceType(aPersistenceType));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      // We have to cleanup partially initialized quota.
-      RemoveQuota();
-
-      return rv;
-    }
-
-    if (gFixedLimitKB >= 0) {
-      mTemporaryStorageLimit = static_cast<uint64_t>(gFixedLimitKB) * 1024;
-    }
-    else {
-      nsCOMPtr<nsIFile> storageDir =
-        do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-
-      rv = storageDir->InitWithPath(GetStoragePath());
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-
-      rv = GetTemporaryStorageLimit(storageDir, mTemporaryStorageUsage,
-                                    &mTemporaryStorageLimit);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-
-    mTemporaryStorageInitialized = true;
-
-    CheckTemporaryStorageLimits();
   }
 
   bool created;
@@ -5305,6 +5301,60 @@ QuotaManager::EnsureOriginIsInitializedInternal(
   directory.forget(aDirectory);
   *aCreated = created;
   return NS_OK;
+}
+
+nsresult
+QuotaManager::EnsureTemporaryStorageIsInitialized()
+{
+  AssertIsOnIOThread();
+  MOZ_ASSERT(mStorageInitialized);
+
+  if (mTemporaryStorageInitialized) {
+    return NS_OK;
+  }
+
+  nsresult rv = InitializeRepository(PERSISTENCE_TYPE_DEFAULT);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // We have to cleanup partially initialized quota.
+    RemoveQuota();
+
+    return rv;
+  }
+
+  rv = InitializeRepository(PERSISTENCE_TYPE_TEMPORARY);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // We have to cleanup partially initialized quota.
+    RemoveQuota();
+
+    return rv;
+  }
+
+  if (gFixedLimitKB >= 0) {
+    mTemporaryStorageLimit = static_cast<uint64_t>(gFixedLimitKB) * 1024;
+  } else {
+    nsCOMPtr<nsIFile> storageDir =
+      do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    rv = storageDir->InitWithPath(GetStoragePath());
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    rv = GetTemporaryStorageLimit(storageDir, mTemporaryStorageUsage,
+                                  &mTemporaryStorageLimit);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  mTemporaryStorageInitialized = true;
+
+  CheckTemporaryStorageLimits();
+
+  return rv;
 }
 
 void
@@ -7117,14 +7167,16 @@ GetOriginUsageOp::DoDirectoryWork(QuotaManager* aQuotaManager)
   nsresult rv;
 
   if (mGetGroupUsage) {
-    nsCOMPtr<nsIFile> directory;
+    // Ensure temporary storage is initialized first. It will initialize all
+    // origins for temporary storage including origins belonging to our group by
+    // traversing the repositories. EnsureStorageIsInitialized is needed before
+    // EnsureTemporaryStorageIsInitialized.
+    rv = aQuotaManager->EnsureStorageIsInitialized();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
 
-    // Ensure origin is initialized first. It will initialize all origins for
-    // temporary storage including origins belonging to our group.
-    rv = aQuotaManager->EnsureOriginIsInitialized(PERSISTENCE_TYPE_TEMPORARY,
-                                                  mSuffix, mGroup,
-                                                  mOriginScope.GetOrigin(),
-                                                  getter_AddRefs(directory));
+    rv = aQuotaManager->EnsureTemporaryStorageIsInitialized();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -9400,7 +9452,7 @@ UpgradeStorageFrom1_0To2_0Helper::ProcessOriginDirectory(
 }
 
 nsresult
-UpgradeStorageFrom2_0To3_0Helper::DoUpgrade()
+UpgradeStorageFrom2_0To2_1Helper::DoUpgrade()
 {
   AssertIsOnIOThread();
 
@@ -9503,7 +9555,7 @@ UpgradeStorageFrom2_0To3_0Helper::DoUpgrade()
 }
 
 nsresult
-UpgradeStorageFrom2_0To3_0Helper::MaybeUpgradeClients(
+UpgradeStorageFrom2_0To2_1Helper::MaybeUpgradeClients(
                                                 const OriginProps& aOriginProps)
 {
   AssertIsOnIOThread();
@@ -9563,7 +9615,7 @@ UpgradeStorageFrom2_0To3_0Helper::MaybeUpgradeClients(
     Client* client = quotaManager->GetClient(clientType);
     MOZ_ASSERT(client);
 
-    rv = client->UpgradeStorageFrom2_0To3_0(file);
+    rv = client->UpgradeStorageFrom2_0To2_1(file);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -9576,7 +9628,7 @@ UpgradeStorageFrom2_0To3_0Helper::MaybeUpgradeClients(
 }
 
 nsresult
-UpgradeStorageFrom2_0To3_0Helper::ProcessOriginDirectory(
+UpgradeStorageFrom2_0To2_1Helper::ProcessOriginDirectory(
                                                 const OriginProps& aOriginProps)
 {
   AssertIsOnIOThread();

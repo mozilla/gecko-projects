@@ -89,7 +89,7 @@ use script_layout_interface::message::ReflowGoal;
 use script_thread::ScriptThread;
 use selectors::Element as SelectorsElement;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint, CaseSensitivity};
-use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode, RelevantLinkStatus};
+use selectors::matching::{ElementSelectorFlags, MatchingContext, RelevantLinkStatus};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
 use selectors::sink::Push;
 use servo_arc::Arc;
@@ -120,6 +120,11 @@ use style::values::{CSSFloat, Either};
 use style::values::{specified, computed};
 use stylesheet_loader::StylesheetOwner;
 use task::TaskOnce;
+use xml5ever::serialize as xmlSerialize;
+use xml5ever::serialize::SerializeOpts as XmlSerializeOpts;
+use xml5ever::serialize::TraversalScope as XmlTraversalScope;
+use xml5ever::serialize::TraversalScope::ChildrenOnly as XmlChildrenOnly;
+use xml5ever::serialize::TraversalScope::IncludeNode as XmlIncludeNode;
 
 // TODO: Update focus state when the top-level browsing context gains or loses system focus,
 // and when the element enters or leaves a browsing context container.
@@ -135,7 +140,7 @@ pub struct Element {
     attrs: DomRefCell<Vec<Dom<Attr>>>,
     id_attribute: DomRefCell<Option<Atom>>,
     is: DomRefCell<Option<LocalName>>,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     style_attribute: DomRefCell<Option<Arc<Locked<PropertyDeclarationBlock>>>>,
     attr_list: MutNullableDom<NamedNodeMap>,
     class_list: MutNullableDom<DOMTokenList>,
@@ -144,14 +149,14 @@ pub struct Element {
     /// operations may require restyling this element or its descendants. The
     /// flags are not atomic, so the style system takes care of only set them
     /// when it has exclusive access to the element.
-    #[ignore_heap_size_of = "bitflags defined in rust-selectors"]
+    #[ignore_malloc_size_of = "bitflags defined in rust-selectors"]
     selector_flags: Cell<ElementSelectorFlags>,
-    /// https://html.spec.whatwg.org/multipage/#custom-element-reaction-queue
+    /// <https://html.spec.whatwg.org/multipage/#custom-element-reaction-queue>
     custom_element_reaction_queue: DomRefCell<Vec<CustomElementReaction>>,
-    /// https://dom.spec.whatwg.org/#concept-element-custom-element-definition
-    #[ignore_heap_size_of = "Rc"]
+    /// <https://dom.spec.whatwg.org/#concept-element-custom-element-definition>
+    #[ignore_malloc_size_of = "Rc"]
     custom_element_definition: DomRefCell<Option<Rc<CustomElementDefinition>>>,
-    /// https://dom.spec.whatwg.org/#concept-element-custom-element-state
+    /// <https://dom.spec.whatwg.org/#concept-element-custom-element-state>
     custom_element_state: Cell<CustomElementState>,
 }
 
@@ -171,7 +176,7 @@ impl fmt::Debug for DomRoot<Element> {
     }
 }
 
-#[derive(HeapSizeOf, PartialEq)]
+#[derive(MallocSizeOf, PartialEq)]
 pub enum ElementCreator {
     ParserCreated(u64),
     ScriptCreated,
@@ -182,8 +187,8 @@ pub enum CustomElementCreationMode {
     Asynchronous,
 }
 
-/// https://dom.spec.whatwg.org/#concept-element-custom-element-state
-#[derive(Clone, Copy, Eq, HeapSizeOf, JSTraceable, PartialEq)]
+/// <https://dom.spec.whatwg.org/#concept-element-custom-element-state>
+#[derive(Clone, Copy, Eq, JSTraceable, MallocSizeOf, PartialEq)]
 pub enum CustomElementState {
     Undefined,
     Failed,
@@ -276,7 +281,7 @@ impl Element {
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<Element> {
         Node::reflect_node(
-            box Element::new_inherited(local_name, namespace, prefix, document),
+            Box::new(Element::new_inherited(local_name, namespace, prefix, document)),
             document,
             ElementBinding::Wrap)
     }
@@ -999,6 +1004,19 @@ impl Element {
                             ..Default::default()
                         }) {
             // FIXME(ajeffrey): Directly convert UTF8 to DOMString
+            Ok(()) => Ok(DOMString::from(String::from_utf8(writer).unwrap())),
+            Err(_) => panic!("Cannot serialize element"),
+        }
+    }
+
+    pub fn xmlSerialize(&self, traversal_scope: XmlTraversalScope) -> Fallible<DOMString> {
+        let mut writer = vec![];
+        match xmlSerialize::serialize(&mut writer,
+                        &self.upcast::<Node>(),
+                        XmlSerializeOpts {
+                            traversal_scope: traversal_scope,
+                            ..Default::default()
+                        }) {
             Ok(()) => Ok(DOMString::from(String::from_utf8(writer).unwrap())),
             Err(_) => panic!("Cannot serialize element"),
         }
@@ -2045,16 +2063,19 @@ impl ElementMethods for Element {
         self.upcast::<Node>().client_rect().size.height
     }
 
-    /// https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML
+    /// <https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML>
     fn GetInnerHTML(&self) -> Fallible<DOMString> {
-        // XXX TODO: XML case
         let qname = QualName::new(self.prefix().clone(),
                                   self.namespace().clone(),
                                   self.local_name().clone());
-        self.serialize(ChildrenOnly(Some(qname)))
+        if document_from_node(self).is_html_document() {
+            return self.serialize(ChildrenOnly(Some(qname)));
+        } else {
+            return self.xmlSerialize(XmlChildrenOnly(Some(qname)));
+        }
     }
 
-    /// https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML
+    /// <https://w3c.github.io/DOM-Parsing/#widl-Element-innerHTML>
     fn SetInnerHTML(&self, value: DOMString) -> ErrorResult {
         // Step 1.
         let frag = self.parse_fragment(value)?;
@@ -2071,7 +2092,11 @@ impl ElementMethods for Element {
 
     // https://dvcs.w3.org/hg/innerhtml/raw-file/tip/index.html#widl-Element-outerHTML
     fn GetOuterHTML(&self) -> Fallible<DOMString> {
-        self.serialize(IncludeNode)
+        if document_from_node(self).is_html_document() {
+            return self.serialize(IncludeNode);
+        } else {
+            return self.xmlSerialize(XmlIncludeNode);
+        }
     }
 
     // https://w3c.github.io/DOM-Parsing/#dom-element-outerhtml
@@ -2754,7 +2779,7 @@ impl Element {
 
     /// Please call this method *only* for real click events
     ///
-    /// https://html.spec.whatwg.org/multipage/#run-authentic-click-activation-steps
+    /// <https://html.spec.whatwg.org/multipage/#run-authentic-click-activation-steps>
     ///
     /// Use an element's synthetic click activation (or handle_event) for any script-triggered clicks.
     /// If the spec says otherwise, check with Manishearth first
@@ -2834,7 +2859,7 @@ impl Element {
         self.state.get().contains(IN_ACTIVE_STATE)
     }
 
-    /// https://html.spec.whatwg.org/multipage/#concept-selector-active
+    /// <https://html.spec.whatwg.org/multipage/#concept-selector-active>
     pub fn set_active_state(&self, value: bool) {
         self.set_state(IN_ACTIVE_STATE, value);
 
@@ -2911,7 +2936,7 @@ impl Element {
         self.set_state(IN_FULLSCREEN_STATE, value)
     }
 
-    /// https://dom.spec.whatwg.org/#connected
+    /// <https://dom.spec.whatwg.org/#connected>
     pub fn is_connected(&self) -> bool {
         let node = self.upcast::<Node>();
         let root = node.GetRootNode();
@@ -2973,11 +2998,11 @@ impl Element {
 #[derive(Clone, Copy)]
 pub enum AttributeMutation<'a> {
     /// The attribute is set, keep track of old value.
-    /// https://dom.spec.whatwg.org/#attribute-is-set
+    /// <https://dom.spec.whatwg.org/#attribute-is-set>
     Set(Option<&'a AttrValue>),
 
     /// The attribute is removed.
-    /// https://dom.spec.whatwg.org/#attribute-is-removed
+    /// <https://dom.spec.whatwg.org/#attribute-is-removed>
     Removed,
 }
 
@@ -3000,7 +3025,7 @@ impl<'a> AttributeMutation<'a> {
 /// A holder for an element's "tag name", which will be lazily
 /// resolved and cached. Should be reset when the document
 /// owner changes.
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 struct TagName {
     ptr: DomRefCell<Option<LocalName>>,
 }
@@ -3040,11 +3065,11 @@ pub struct ElementPerformFullscreenEnter {
 
 impl ElementPerformFullscreenEnter {
     pub fn new(element: Trusted<Element>, promise: TrustedPromise, error: bool) -> Box<ElementPerformFullscreenEnter> {
-        box ElementPerformFullscreenEnter {
+        Box::new(ElementPerformFullscreenEnter {
             element: element,
             promise: promise,
             error: error,
-        }
+        })
     }
 }
 
@@ -3083,10 +3108,10 @@ pub struct ElementPerformFullscreenExit {
 
 impl ElementPerformFullscreenExit {
     pub fn new(element: Trusted<Element>, promise: TrustedPromise) -> Box<ElementPerformFullscreenExit> {
-        box ElementPerformFullscreenExit {
+        Box::new(ElementPerformFullscreenExit {
             element: element,
             promise: promise,
-        }
+        })
     }
 }
 

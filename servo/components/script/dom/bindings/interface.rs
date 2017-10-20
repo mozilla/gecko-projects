@@ -134,8 +134,8 @@ impl NonCallbackInterfaceObjectClass {
                 name: b"Function\0" as *const _ as *const libc::c_char,
                 flags: 0,
                 cOps: &constructor_behavior.0,
-                spec: ptr::null(),
-                ext: ptr::null(),
+                spec: 0 as *const _,
+                ext: 0 as *const _,
                 oOps: &OBJECT_OPS,
             },
             proto_id: proto_id,
@@ -226,7 +226,7 @@ pub unsafe fn create_global_object(
     // avoid getting trace hooks called on a partially initialized object.
     JS_SetReservedSlot(rval.get(), DOM_OBJECT_SLOT, PrivateValue(private));
     let proto_array: Box<ProtoOrIfaceArray> =
-        box [0 as *mut JSObject; PrototypeList::PROTO_OR_IFACE_LENGTH];
+        Box::new([0 as *mut JSObject; PrototypeList::PROTO_OR_IFACE_LENGTH]);
     JS_SetReservedSlot(rval.get(),
                        DOM_PROTOTYPE_SLOT,
                        PrivateValue(Box::into_raw(proto_array) as *const libc::c_void));
@@ -548,7 +548,7 @@ unsafe extern "C" fn has_instance_hook(cx: *mut JSContext,
 }
 
 /// Return whether a value is an instance of a given prototype.
-/// http://heycam.github.io/webidl/#es-interface-hasinstance
+/// <http://heycam.github.io/webidl/#es-interface-hasinstance>
 unsafe fn has_instance(
         cx: *mut JSContext,
         interface_object: HandleObject,

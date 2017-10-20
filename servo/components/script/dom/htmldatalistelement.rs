@@ -34,7 +34,7 @@ impl HTMLDataListElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLDataListElement> {
-        Node::reflect_node(box HTMLDataListElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLDataListElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLDataListElementBinding::Wrap)
     }
@@ -43,14 +43,14 @@ impl HTMLDataListElement {
 impl HTMLDataListElementMethods for HTMLDataListElement {
     // https://html.spec.whatwg.org/multipage/#dom-datalist-options
     fn Options(&self) -> DomRoot<HTMLCollection> {
-        #[derive(HeapSizeOf, JSTraceable)]
+        #[derive(JSTraceable, MallocSizeOf)]
         struct HTMLDataListOptionsFilter;
         impl CollectionFilter for HTMLDataListOptionsFilter {
             fn filter(&self, elem: &Element, _root: &Node) -> bool {
                 elem.is::<HTMLOptionElement>()
             }
         }
-        let filter = box HTMLDataListOptionsFilter;
+        let filter = Box::new(HTMLDataListOptionsFilter);
         let window = window_from_node(self);
         HTMLCollection::create(&window, self.upcast(), filter)
     }

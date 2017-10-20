@@ -33,12 +33,12 @@ impl HTMLBaseElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLBaseElement> {
-        Node::reflect_node(box HTMLBaseElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLBaseElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLBaseElementBinding::Wrap)
     }
 
-    /// https://html.spec.whatwg.org/multipage/#frozen-base-url
+    /// <https://html.spec.whatwg.org/multipage/#frozen-base-url>
     pub fn frozen_base_url(&self) -> ServoUrl {
         let href = self.upcast::<Element>().get_attribute(&ns!(), &local_name!("href"))
             .expect("The frozen base url is only defined for base elements \

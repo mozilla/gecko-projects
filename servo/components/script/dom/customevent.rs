@@ -22,7 +22,7 @@ use servo_atoms::Atom;
 #[dom_struct]
 pub struct CustomEvent {
     event: Event,
-    #[ignore_heap_size_of = "Defined in rust-mozjs"]
+    #[ignore_malloc_size_of = "Defined in rust-mozjs"]
     detail: Heap<JSVal>,
 }
 
@@ -35,7 +35,7 @@ impl CustomEvent {
     }
 
     pub fn new_uninitialized(global: &GlobalScope) -> DomRoot<CustomEvent> {
-        reflect_dom_object(box CustomEvent::new_inherited(),
+        reflect_dom_object(Box::new(CustomEvent::new_inherited()),
                            global,
                            CustomEventBinding::Wrap)
     }

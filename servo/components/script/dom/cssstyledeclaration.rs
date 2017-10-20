@@ -33,12 +33,12 @@ pub struct CSSStyleDeclaration {
     pseudo: Option<PseudoElement>,
 }
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 #[must_root]
 pub enum CSSStyleOwner {
     Element(Dom<Element>),
     CSSRule(Dom<CSSRule>,
-            #[ignore_heap_size_of = "Arc"]
+            #[ignore_malloc_size_of = "Arc"]
             Arc<Locked<PropertyDeclarationBlock>>),
 }
 
@@ -154,7 +154,7 @@ impl CSSStyleOwner {
     }
 }
 
-#[derive(HeapSizeOf, PartialEq)]
+#[derive(MallocSizeOf, PartialEq)]
 pub enum CSSModificationAccess {
     ReadWrite,
     Readonly,
@@ -193,11 +193,11 @@ impl CSSStyleDeclaration {
                pseudo: Option<PseudoElement>,
                modification_access: CSSModificationAccess)
                -> DomRoot<CSSStyleDeclaration> {
-        reflect_dom_object(box CSSStyleDeclaration::new_inherited(owner,
-                                                                  pseudo,
-                                                                  modification_access),
-                           global,
-                           CSSStyleDeclarationBinding::Wrap)
+        reflect_dom_object(
+            Box::new(CSSStyleDeclaration::new_inherited(owner, pseudo, modification_access)),
+            global,
+            CSSStyleDeclarationBinding::Wrap
+        )
     }
 
     fn get_computed_style(&self, property: PropertyId) -> DOMString {

@@ -5,12 +5,11 @@
 //! The struct that takes care of encapsulating all the logic on where and how
 //! element styles need to be invalidated.
 
-use context::{SharedStyleContext, StackLimitChecker};
-use data::ElementData;
+use context::StackLimitChecker;
 use dom::{TElement, TNode};
 use selector_parser::SelectorImpl;
 use selectors::NthIndexCache;
-use selectors::matching::{MatchingContext, MatchingMode, VisitedHandlingMode};
+use selectors::matching::{MatchingContext, MatchingMode, QuirksMode, VisitedHandlingMode};
 use selectors::matching::CompoundSelectorMatchingResult;
 use selectors::matching::matches_compound_selector;
 use selectors::parser::{Combinator, Component, Selector};
@@ -18,9 +17,6 @@ use smallvec::SmallVec;
 use std::fmt;
 
 /// A trait to abstract the collection of invalidations for a given pass.
-///
-/// The `data` argument is a mutable reference to the element's style data, if
-/// any.
 pub trait InvalidationProcessor<E>
 where
     E: TElement,
@@ -36,64 +32,36 @@ where
     fn collect_invalidations(
         &mut self,
         element: E,
-        data: Option<&mut ElementData>,
         nth_index_cache: Option<&mut NthIndexCache>,
-        shared_context: &SharedStyleContext,
+        quirks_mode: QuirksMode,
         descendant_invalidations: &mut InvalidationVector,
         sibling_invalidations: &mut InvalidationVector,
     ) -> bool;
 
     /// Returns whether the invalidation process should process the descendants
     /// of the given element.
-    fn should_process_descendants(
-        &mut self,
-        element: E,
-        data: Option<&mut ElementData>,
-    ) -> bool;
+    fn should_process_descendants(&mut self, element: E) -> bool;
 
     /// Executes an arbitrary action when the recursion limit is exceded (if
     /// any).
-    fn recursion_limit_exceeded(
-        &mut self,
-        element: E,
-        data: Option<&mut ElementData>,
-    );
+    fn recursion_limit_exceeded(&mut self, element: E);
 
     /// Executes an action when `Self` is invalidated.
-    fn invalidated_self(
-        &mut self,
-        element: E,
-        data: Option<&mut ElementData>,
-    );
+    fn invalidated_self(&mut self, element: E);
 
     /// Executes an action when any descendant of `Self` is invalidated.
-    fn invalidated_descendants(
-        &mut self,
-        element: E,
-        data: Option<&mut ElementData>,
-        child: E,
-    );
+    fn invalidated_descendants(&mut self, element: E, child: E);
 }
 
 /// The struct that takes care of encapsulating all the logic on where and how
 /// element styles need to be invalidated.
-pub struct TreeStyleInvalidator<'a, 'b: 'a, E, P: 'a>
+pub struct TreeStyleInvalidator<'a, E, P: 'a>
 where
     E: TElement,
     P: InvalidationProcessor<E>
 {
     element: E,
-    // TODO(emilio): It's tempting enough to just avoid running invalidation for
-    // elements without data.
-    //
-    // But that's be wrong for sibling invalidations when a new element has been
-    // inserted in the tree and still has no data (though I _think_ the slow
-    // selector bits save us, it'd be nice not to depend on them).
-    //
-    // Seems like we could at least avoid running invalidation for the
-    // descendants if an element has no data, though.
-    data: Option<&'a mut ElementData>,
-    shared_context: &'a SharedStyleContext<'b>,
+    quirks_mode: QuirksMode,
     stack_limit_checker: Option<&'a StackLimitChecker>,
     nth_index_cache: Option<&'a mut NthIndexCache>,
     processor: &'a mut P,
@@ -114,14 +82,13 @@ enum InvalidationKind {
 
 /// An `Invalidation` is a complex selector that describes which elements,
 /// relative to a current element we are processing, must be restyled.
-///
-/// When `offset` points to the right-most compound selector in `selector`,
-/// then the Invalidation `represents` the fact that the current element
-/// must be restyled if the compound selector matches.  Otherwise, if
-/// describes which descendants (or later siblings) must be restyled.
 #[derive(Clone)]
 pub struct Invalidation {
     selector: Selector<SelectorImpl>,
+    /// The offset of the selector pointing to a compound selector.
+    ///
+    /// This order is a "parse order" offset, that is, zero is the leftmost part
+    /// of the selector written as parsed / serialized.
     offset: usize,
     /// Whether the invalidation was already matched by any previous sibling or
     /// ancestor.
@@ -149,7 +116,7 @@ impl Invalidation {
         // for the weird pseudos in <input type="number">.
         //
         // We should be able to do better here!
-        match self.selector.combinator_at(self.offset) {
+        match self.selector.combinator_at_parse_order(self.offset - 1) {
             Combinator::NextSibling |
             Combinator::Child => false,
             _ => true,
@@ -157,7 +124,7 @@ impl Invalidation {
     }
 
     fn kind(&self) -> InvalidationKind {
-        if self.selector.combinator_at(self.offset).is_ancestor() {
+        if self.selector.combinator_at_parse_order(self.offset - 1).is_ancestor() {
             InvalidationKind::Descendant
         } else {
             InvalidationKind::Sibling
@@ -170,7 +137,7 @@ impl fmt::Debug for Invalidation {
         use cssparser::ToCss;
 
         f.write_str("Invalidation(")?;
-        for component in self.selector.iter_raw_parse_order_from(self.offset - 1) {
+        for component in self.selector.iter_raw_parse_order_from(self.offset) {
             if matches!(*component, Component::Combinator(..)) {
                 break;
             }
@@ -225,7 +192,7 @@ impl InvalidationResult {
     }
 }
 
-impl<'a, 'b: 'a, E, P: 'a> TreeStyleInvalidator<'a, 'b, E, P>
+impl<'a, E, P: 'a> TreeStyleInvalidator<'a, E, P>
 where
     E: TElement,
     P: InvalidationProcessor<E>,
@@ -233,16 +200,14 @@ where
     /// Trivially constructs a new `TreeStyleInvalidator`.
     pub fn new(
         element: E,
-        data: Option<&'a mut ElementData>,
-        shared_context: &'a SharedStyleContext<'b>,
+        quirks_mode: QuirksMode,
         stack_limit_checker: Option<&'a StackLimitChecker>,
         nth_index_cache: Option<&'a mut NthIndexCache>,
         processor: &'a mut P,
     ) -> Self {
         Self {
             element,
-            data,
-            shared_context,
+            quirks_mode,
             stack_limit_checker,
             nth_index_cache,
             processor,
@@ -258,9 +223,8 @@ where
 
         let invalidated_self = self.processor.collect_invalidations(
             self.element,
-            self.data.as_mut().map(|d| &mut **d),
             self.nth_index_cache.as_mut().map(|c| &mut **c),
-            self.shared_context,
+            self.quirks_mode,
             &mut descendant_invalidations,
             &mut sibling_invalidations,
         );
@@ -292,12 +256,9 @@ where
         let mut any_invalidated = false;
 
         while let Some(sibling) = current {
-            let mut sibling_data = sibling.mutate_data();
-
             let mut sibling_invalidator = TreeStyleInvalidator::new(
                 sibling,
-                sibling_data.as_mut().map(|d| &mut **d),
-                self.shared_context,
+                self.quirks_mode,
                 self.stack_limit_checker,
                 self.nth_index_cache.as_mut().map(|c| &mut **c),
                 self.processor,
@@ -360,12 +321,9 @@ where
 
         let mut invalidated_child = false;
         let invalidated_descendants = {
-            let mut child_data = child.mutate_data();
-
             let mut child_invalidator = TreeStyleInvalidator::new(
                 child,
-                child_data.as_mut().map(|d| &mut **d),
-                self.shared_context,
+                self.quirks_mode,
                 self.stack_limit_checker,
                 self.nth_index_cache.as_mut().map(|c| &mut **c),
                 self.processor,
@@ -393,11 +351,7 @@ where
         // Since we keep the traversal flags in terms of the flattened tree,
         // we need to propagate it as appropriate.
         if invalidated_child || invalidated_descendants {
-            self.processor.invalidated_descendants(
-                self.element,
-                self.data.as_mut().map(|d| &mut **d),
-                child,
-            );
+            self.processor.invalidated_descendants(self.element, child);
         }
 
         invalidated_child || invalidated_descendants
@@ -428,7 +382,7 @@ where
         let mut any_descendant = false;
 
         let mut sibling_invalidations = InvalidationVector::new();
-        for child in parent.children() {
+        for child in parent.dom_children() {
             // TODO(emilio): We handle <xbl:children> fine, because they appear
             // in selector-matching (note bug 1374247, though).
             //
@@ -468,10 +422,7 @@ where
         debug!(" > {:?}", invalidations);
 
         let should_process =
-            self.processor.should_process_descendants(
-                self.element,
-                self.data.as_mut().map(|d| &mut **d),
-            );
+            self.processor.should_process_descendants(self.element);
 
         if !should_process {
             return false;
@@ -479,10 +430,7 @@ where
 
         if let Some(checker) = self.stack_limit_checker {
             if checker.limit_exceeded() {
-                self.processor.recursion_limit_exceeded(
-                    self.element,
-                    self.data.as_mut().map(|d| &mut **d)
-                );
+                self.processor.recursion_limit_exceeded(self.element);
                 return true;
             }
         }
@@ -610,7 +558,7 @@ where
                 None,
                 self.nth_index_cache.as_mut().map(|c| &mut **c),
                 VisitedHandlingMode::AllLinksVisitedAndUnvisited,
-                self.shared_context.quirks_mode(),
+                self.quirks_mode,
             );
 
             matches_compound_selector(
@@ -624,14 +572,14 @@ where
         let mut invalidated_self = false;
         let mut matched = false;
         match matching_result {
-            CompoundSelectorMatchingResult::Matched { next_combinator_offset: 0 } => {
+            CompoundSelectorMatchingResult::FullyMatched => {
                 debug!(" > Invalidation matched completely");
                 matched = true;
                 invalidated_self = true;
             }
             CompoundSelectorMatchingResult::Matched { next_combinator_offset } => {
                 let next_combinator =
-                    invalidation.selector.combinator_at(next_combinator_offset);
+                    invalidation.selector.combinator_at_parse_order(next_combinator_offset);
                 matched = true;
 
                 if matches!(next_combinator, Combinator::PseudoElement) {
@@ -640,7 +588,7 @@ where
                     // around, so there could also be state pseudo-classes.
                     let pseudo_selector =
                         invalidation.selector
-                            .iter_raw_parse_order_from(next_combinator_offset - 1)
+                            .iter_raw_parse_order_from(next_combinator_offset + 1)
                             .skip_while(|c| matches!(**c, Component::NonTSPseudoClass(..)))
                             .next()
                             .unwrap();
@@ -681,7 +629,7 @@ where
 
                 let next_invalidation = Invalidation {
                     selector: invalidation.selector.clone(),
-                    offset: next_combinator_offset,
+                    offset: next_combinator_offset + 1,
                     matched_by_any_previous: false,
                 };
 
@@ -772,10 +720,7 @@ where
         }
 
         if invalidated_self {
-            self.processor.invalidated_self(
-                self.element,
-                self.data.as_mut().map(|d| &mut **d),
-            );
+            self.processor.invalidated_self(self.element);
         }
 
         SingleInvalidationResult { invalidated_self, matched, }

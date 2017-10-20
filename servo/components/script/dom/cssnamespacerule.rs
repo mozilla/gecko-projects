@@ -18,7 +18,7 @@ use style::stylesheets::NamespaceRule;
 #[dom_struct]
 pub struct CSSNamespaceRule {
     cssrule: CSSRule,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     namespacerule: Arc<Locked<NamespaceRule>>,
 }
 
@@ -34,7 +34,7 @@ impl CSSNamespaceRule {
     #[allow(unrooted_must_root)]
     pub fn new(window: &Window, parent_stylesheet: &CSSStyleSheet,
                namespacerule: Arc<Locked<NamespaceRule>>) -> DomRoot<CSSNamespaceRule> {
-        reflect_dom_object(box CSSNamespaceRule::new_inherited(parent_stylesheet, namespacerule),
+        reflect_dom_object(Box::new(CSSNamespaceRule::new_inherited(parent_stylesheet, namespacerule)),
                            window,
                            CSSNamespaceRuleBinding::Wrap)
     }

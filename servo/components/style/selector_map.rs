@@ -12,7 +12,6 @@ use dom::TElement;
 use fallible::FallibleVec;
 use hash::{HashMap, HashSet, DiagnosticHashMap};
 use hashglobe::FailedAllocationError;
-use pdqsort::sort_by;
 use precomputed_hash::PrecomputedHash;
 use rule_tree::CascadeLevel;
 use selector_parser::SelectorImpl;
@@ -95,9 +94,7 @@ pub trait SelectorMapEntry : Sized + Clone {
 /// * https://bugzilla.mozilla.org/show_bug.cgi?id=681755
 ///
 /// TODO: Tune the initial capacity of the HashMap
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub struct SelectorMap<T: 'static> {
     /// A hash from an ID to rules which contain that ID selector.
     pub id_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
@@ -109,11 +106,6 @@ pub struct SelectorMap<T: 'static> {
     pub other: SmallVec<[T; 1]>,
     /// The number of entries in this map.
     pub count: usize,
-}
-
-#[inline]
-fn sort_by_key<T, F: Fn(&T) -> K, K: Ord>(v: &mut [T], f: F) {
-    sort_by(v, |a, b| f(a).cmp(&f(b)))
 }
 
 // FIXME(Manishearth) the 'static bound can be removed when
@@ -227,8 +219,7 @@ impl SelectorMap<Rule> {
                                         cascade_level);
 
         // Sort only the rules we just added.
-        sort_by_key(&mut matching_rules_list[init_len..],
-                    |block| (block.specificity, block.source_order()));
+        matching_rules_list[init_len..].sort_unstable_by_key(|block| (block.specificity, block.source_order()));
     }
 
     /// Adds rules in `rules` that match `element` to the `matching_rules` list.
@@ -472,9 +463,7 @@ fn find_bucket<'a>(mut iter: SelectorIter<'a, SelectorImpl>) -> Bucket<'a> {
 }
 
 /// Wrapper for PrecomputedHashMap that does ASCII-case-insensitive lookup in quirks mode.
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V: 'static>(PrecomputedDiagnosticHashMap<K, V>);
 
 // FIXME(Manishearth) the 'static bound can be removed when
@@ -523,4 +512,3 @@ impl<V: 'static> MaybeCaseInsensitiveHashMap<Atom, V> {
         self.0.end_mutation();
     }
 }
-

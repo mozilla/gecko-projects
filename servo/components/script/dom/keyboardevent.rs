@@ -61,7 +61,7 @@ impl KeyboardEvent {
     }
 
     pub fn new_uninitialized(window: &Window) -> DomRoot<KeyboardEvent> {
-        reflect_dom_object(box KeyboardEvent::new_inherited(),
+        reflect_dom_object(Box::new(KeyboardEvent::new_inherited()),
                            window,
                            KeyboardEventBinding::Wrap)
     }
@@ -742,7 +742,7 @@ fn key_keycode(key: Key) -> u32 {
     }
 }
 
-#[derive(HeapSizeOf)]
+#[derive(MallocSizeOf)]
 pub struct KeyEventProperties {
     pub key_string: Cow<'static, str>,
     pub code: &'static str,

@@ -27,7 +27,7 @@ pub struct WebGLProgram {
     linked: Cell<bool>,
     fragment_shader: MutNullableDom<WebGLShader>,
     vertex_shader: MutNullableDom<WebGLShader>,
-    #[ignore_heap_size_of = "Defined in ipc-channel"]
+    #[ignore_malloc_size_of = "Defined in ipc-channel"]
     renderer: WebGLMsgSender,
 }
 
@@ -60,7 +60,7 @@ impl WebGLProgram {
                renderer: WebGLMsgSender,
                id: WebGLProgramId)
                -> DomRoot<WebGLProgram> {
-        reflect_dom_object(box WebGLProgram::new_inherited(renderer, id),
+        reflect_dom_object(Box::new(WebGLProgram::new_inherited(renderer, id)),
                            window,
                            WebGLProgramBinding::Wrap)
     }

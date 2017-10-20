@@ -388,7 +388,7 @@ IndexedDatabaseManager::Init()
       obs->AddObserver(this, DISKSPACEWATCHER_OBSERVER_TOPIC, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    mDeleteTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+    mDeleteTimer = NS_NewTimer();
     NS_ENSURE_STATE(mDeleteTimer);
 
     if (QuotaManager* quotaManager = QuotaManager::Get()) {
@@ -836,7 +836,8 @@ IndexedDatabaseManager::ClearBackgroundActor()
 void
 IndexedDatabaseManager::NoteLiveQuotaManager(QuotaManager* aQuotaManager)
 {
-  MOZ_ASSERT(IsMainProcess());
+  // This can be called during Init, so we can't use IsMainProcess() yet.
+  MOZ_ASSERT(sIsMainProcess);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aQuotaManager);
 

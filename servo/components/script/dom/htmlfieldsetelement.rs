@@ -43,7 +43,7 @@ impl HTMLFieldSetElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLFieldSetElement> {
-        Node::reflect_node(box HTMLFieldSetElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLFieldSetElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLFieldSetElementBinding::Wrap)
     }
@@ -52,7 +52,7 @@ impl HTMLFieldSetElement {
 impl HTMLFieldSetElementMethods for HTMLFieldSetElement {
     // https://html.spec.whatwg.org/multipage/#dom-fieldset-elements
     fn Elements(&self) -> DomRoot<HTMLCollection> {
-        #[derive(HeapSizeOf, JSTraceable)]
+        #[derive(JSTraceable, MallocSizeOf)]
         struct ElementsFilter;
         impl CollectionFilter for ElementsFilter {
             fn filter<'a>(&self, elem: &'a Element, _root: &'a Node) -> bool {
@@ -60,7 +60,7 @@ impl HTMLFieldSetElementMethods for HTMLFieldSetElement {
                     .map_or(false, HTMLElement::is_listed_element)
             }
         }
-        let filter = box ElementsFilter;
+        let filter = Box::new(ElementsFilter);
         let window = window_from_node(self);
         HTMLCollection::create(&window, self.upcast(), filter)
     }

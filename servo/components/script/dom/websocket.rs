@@ -41,7 +41,7 @@ use task::{TaskOnce, TaskCanceller};
 use task_source::TaskSource;
 use task_source::networking::NetworkingTaskSource;
 
-#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
 enum WebSocketRequestState {
     Connecting = 0,
     Open = 1,
@@ -104,7 +104,7 @@ pub struct WebSocket {
     ready_state: Cell<WebSocketRequestState>,
     buffered_amount: Cell<u64>,
     clearing_buffer: Cell<bool>, //Flag to tell if there is a running thread to clear buffered_amount
-    #[ignore_heap_size_of = "Defined in std"]
+    #[ignore_malloc_size_of = "Defined in std"]
     sender: DomRefCell<Option<IpcSender<WebSocketDomAction>>>,
     binary_type: Cell<BinaryType>,
     protocol: DomRefCell<String>, //Subprotocol selected by server
@@ -125,11 +125,11 @@ impl WebSocket {
     }
 
     fn new(global: &GlobalScope, url: ServoUrl) -> DomRoot<WebSocket> {
-        reflect_dom_object(box WebSocket::new_inherited(url),
+        reflect_dom_object(Box::new(WebSocket::new_inherited(url)),
                            global, WebSocketBinding::Wrap)
     }
 
-    /// https://html.spec.whatwg.org/multipage/#dom-websocket
+    /// <https://html.spec.whatwg.org/multipage/#dom-websocket>
     pub fn Constructor(global: &GlobalScope,
                        url: DOMString,
                        protocols: Option<StringOrStringSequence>)
@@ -259,9 +259,9 @@ impl WebSocket {
         if !self.clearing_buffer.get() && self.ready_state.get() == WebSocketRequestState::Open {
             self.clearing_buffer.set(true);
 
-            let task = box BufferedAmountTask {
+            let task = Box::new(BufferedAmountTask {
                 address: address,
-            };
+            });
 
             self.global()
                 .script_chan()
@@ -391,14 +391,14 @@ impl WebSocketMethods for WebSocket {
 
 
 /// Task queued when *the WebSocket connection is established*.
-/// https://html.spec.whatwg.org/multipage/#feedback-from-the-protocol:concept-websocket-established
+/// <https://html.spec.whatwg.org/multipage/#feedback-from-the-protocol:concept-websocket-established>
 struct ConnectionEstablishedTask {
     address: Trusted<WebSocket>,
     protocol_in_use: Option<String>,
 }
 
 impl TaskOnce for ConnectionEstablishedTask {
-    /// https://html.spec.whatwg.org/multipage/#feedback-from-the-protocol:concept-websocket-established
+    /// <https://html.spec.whatwg.org/multipage/#feedback-from-the-protocol:concept-websocket-established>
     fn run_once(self) {
         let ws = self.address.root();
 

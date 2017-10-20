@@ -7,7 +7,6 @@ use bluetooth_traits::{BluetoothResponse, BluetoothResponseResult};
 use bluetooth_traits::blocklist::{Blocklist, uuid_is_blocklisted};
 use bluetooth_traits::scanfilter::{BluetoothScanfilter, BluetoothScanfilterSequence};
 use bluetooth_traits::scanfilter::{RequestDeviceoptions, ServiceUUIDSequence};
-use core::clone::Clone;
 use dom::bindings::cell::DomRefCell;
 use dom::bindings::codegen::Bindings::BluetoothBinding::{self, BluetoothDataFilterInit, BluetoothLEScanFilterInit};
 use dom::bindings::codegen::Bindings::BluetoothBinding::{BluetoothMethods, RequestDeviceOptions};
@@ -57,13 +56,13 @@ const OPTIONS_ERROR: &'static str = "Fields of 'options' conflict with each othe
  Either 'acceptAllDevices' member must be true, or 'filters' member must be set to a value.";
 const BT_DESC_CONVERSION_ERROR: &'static str = "Can't convert to an IDL value of type BluetoothPermissionDescriptor";
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub struct AllowedBluetoothDevice {
     pub deviceId: DOMString,
     pub mayUseGATT: bool,
 }
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub struct BluetoothExtraPermissionData {
     allowed_devices: DomRefCell<Vec<AllowedBluetoothDevice>>,
 }
@@ -132,7 +131,7 @@ impl Bluetooth {
     }
 
     pub fn new(global: &GlobalScope) -> DomRoot<Bluetooth> {
-        reflect_dom_object(box Bluetooth::new_inherited(),
+        reflect_dom_object(Box::new(Bluetooth::new_inherited()),
                            global,
                            BluetoothBinding::Wrap)
     }
@@ -224,7 +223,7 @@ pub fn response_async<T: AsyncBluetoothListener + DomObject + 'static>(
         promise: Some(TrustedPromise::new(promise.clone())),
         receiver: Trusted::new(receiver),
     }));
-    ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
+    ROUTER.add_route(action_receiver.to_opaque(), Box::new(move |message| {
         struct ListenerTask<T: AsyncBluetoothListener + DomObject> {
             context: Arc<Mutex<BluetoothContext<T>>>,
             action: BluetoothResponseResult,
@@ -249,7 +248,7 @@ pub fn response_async<T: AsyncBluetoothListener + DomObject + 'static>(
         if let Err(err) = result {
             warn!("failed to deliver network data: {:?}", err);
         }
-    });
+    }));
     action_sender
 }
 

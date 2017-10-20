@@ -37,7 +37,7 @@ impl From<RulesMutateError> for Error {
 pub struct CSSRuleList {
     reflector_: Reflector,
     parent_stylesheet: Dom<CSSStyleSheet>,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     rules: RulesSource,
     dom_rules: DomRefCell<Vec<MutNullableDom<CSSRule>>>
 }
@@ -71,7 +71,7 @@ impl CSSRuleList {
     #[allow(unrooted_must_root)]
     pub fn new(window: &Window, parent_stylesheet: &CSSStyleSheet,
                rules: RulesSource) -> DomRoot<CSSRuleList> {
-        reflect_dom_object(box CSSRuleList::new_inherited(parent_stylesheet, rules),
+        reflect_dom_object(Box::new(CSSRuleList::new_inherited(parent_stylesheet, rules)),
                            window,
                            CSSRuleListBinding::Wrap)
     }

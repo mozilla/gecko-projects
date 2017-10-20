@@ -55,8 +55,14 @@ var gEditItemOverlay = {
         throw new Error("Cannot use an incomplete node to initialize the edit bookmark panel");
       }
       let parent = node.parent;
-      isParentReadOnly = !PlacesUtils.nodeIsFolder(parent) ||
-                          PlacesUIUtils.isContentsReadOnly(parent);
+      isParentReadOnly = !PlacesUtils.nodeIsFolder(parent);
+      if (!isParentReadOnly) {
+        let folderId = PlacesUtils.getConcreteItemId(parent);
+        isParentReadOnly = folderId == PlacesUtils.placesRootId ||
+                           (!("get" in Object.getOwnPropertyDescriptor(PlacesUIUtils, "leftPaneFolderId")) &&
+                            (folderId == PlacesUIUtils.leftPaneFolderId ||
+                             folderId == PlacesUIUtils.allBookmarksFolderId));
+      }
       parentId = parent.itemId;
       parentGuid = parent.bookmarkGuid;
     }
@@ -614,9 +620,7 @@ var gEditItemOverlay = {
     this._firstEditedField = aNewField;
 
     // set the pref
-    var prefs = Cc["@mozilla.org/preferences-service;1"].
-                getService(Ci.nsIPrefBranch);
-    prefs.setCharPref("browser.bookmarks.editDialog.firstEditField", aNewField);
+    Services.prefs.setCharPref("browser.bookmarks.editDialog.firstEditField", aNewField);
   },
 
   async onNamePickerChange() {

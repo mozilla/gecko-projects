@@ -647,6 +647,14 @@ SERVO_BINDING_FUNC(Servo_StyleSet_GetBaseComputedValuesForElement,
                    ServoStyleContextBorrowed existing_style,
                    const mozilla::ServoElementSnapshotTable* snapshots,
                    mozilla::CSSPseudoElementType pseudo_type)
+// Returns computed values for the given element by adding an animation value.
+SERVO_BINDING_FUNC(Servo_StyleSet_GetComputedValuesByAddingAnimation,
+                   ServoStyleContextStrong,
+                   RawServoStyleSetBorrowed set,
+                   RawGeckoElementBorrowed element,
+                   ServoStyleContextBorrowed existing_style,
+                   const mozilla::ServoElementSnapshotTable* snapshots,
+                   RawServoAnimationValueBorrowed animation)
 
 // For canvas font.
 SERVO_BINDING_FUNC(Servo_SerializeFontValueForCanvas, void,
@@ -681,6 +689,17 @@ SERVO_BINDING_FUNC(Servo_ReleaseArcStringData, void,
                    const mozilla::ServoRawOffsetArc<RustString>* string);
 SERVO_BINDING_FUNC(Servo_CloneArcStringData, mozilla::ServoRawOffsetArc<RustString>,
                    const mozilla::ServoRawOffsetArc<RustString>* string);
+
+// CSS parsing utility functions.
+SERVO_BINDING_FUNC(Servo_IsValidCSSColor, bool, const nsAString* value);
+SERVO_BINDING_FUNC(Servo_ComputeColor, bool,
+                   RawServoStyleSetBorrowedOrNull set,
+                   nscolor current_color,
+                   const nsAString* value,
+                   nscolor* result_color);
+SERVO_BINDING_FUNC(Servo_ParseIntersectionObserverRootMargin, bool,
+                   const nsAString* value,
+                   nsCSSRect* result);
 
 // AddRef / Release functions
 #define SERVO_ARC_TYPE(name_, type_)                                \

@@ -7,7 +7,6 @@
 #![deny(missing_docs)]
 
 use cssparser::{Parser as CssParser, ParserInput};
-use selectors::Element;
 use selectors::parser::SelectorList;
 use std::fmt::{self, Debug};
 use style_traits::ParseError;
@@ -36,7 +35,7 @@ pub use servo::restyle_damage::ServoRestyleDamage as RestyleDamage;
 pub use gecko::restyle_damage::GeckoRestyleDamage as RestyleDamage;
 
 /// Servo's selector parser.
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct SelectorParser<'a> {
     /// The origin of the stylesheet we're parsing.
     pub stylesheet_origin: Origin,
@@ -103,17 +102,8 @@ pub enum PseudoElementCascadeType {
     Precomputed,
 }
 
-/// An extension to rust-selector's `Element` trait.
-pub trait ElementExt: Element<Impl=SelectorImpl> + Debug {
-    /// Whether this element should match user and author rules.
-    ///
-    /// We use this for Native Anonymous Content in Gecko.
-    fn matches_user_and_author_rules(&self) -> bool;
-}
-
 /// A per-functional-pseudo map, from a given pseudo to a `T`.
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(MallocSizeOf)]
 pub struct PerPseudoElementMap<T> {
     entries: [Option<T>; SIMPLE_PSEUDO_COUNT],
 }

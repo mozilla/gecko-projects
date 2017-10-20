@@ -6,34 +6,35 @@
 //!
 //! | IDL type                | Argument type   | Return type    |
 //! |-------------------------|-----------------|----------------|
-//! | any                     | `JSVal`                          |
-//! | boolean                 | `bool`                           |
-//! | byte                    | `i8`                             |
-//! | octet                   | `u8`                             |
-//! | short                   | `i16`                            |
-//! | unsigned short          | `u16`                            |
-//! | long                    | `i32`                            |
-//! | unsigned long           | `u32`                            |
-//! | long long               | `i64`                            |
-//! | unsigned long long      | `u64`                            |
-//! | unrestricted float      | `f32`                            |
-//! | float                   | `Finite<f32>`                    |
-//! | unrestricted double     | `f64`                            |
-//! | double                  | `Finite<f64>`                    |
-//! | DOMString               | `DOMString`                      |
-//! | USVString               | `USVString`                      |
-//! | ByteString              | `ByteString`                     |
-//! | object                  | `*mut JSObject`                  |
+//! | any                     | `JSVal`         |                |
+//! | boolean                 | `bool`          |                |
+//! | byte                    | `i8`            |                |
+//! | octet                   | `u8`            |                |
+//! | short                   | `i16`           |                |
+//! | unsigned short          | `u16`           |                |
+//! | long                    | `i32`           |                |
+//! | unsigned long           | `u32`           |                |
+//! | long long               | `i64`           |                |
+//! | unsigned long long      | `u64`           |                |
+//! | unrestricted float      | `f32`           |                |
+//! | float                   | `Finite<f32>`   |                |
+//! | unrestricted double     | `f64`           |                |
+//! | double                  | `Finite<f64>`   |                |
+//! | DOMString               | `DOMString`     |                |
+//! | USVString               | `USVString`     |                |
+//! | ByteString              | `ByteString`    |                |
+//! | object                  | `*mut JSObject` |                |
 //! | interface types         | `&T`            | `DomRoot<T>`   |
 //! | dictionary types        | `&T`            | *unsupported*  |
-//! | enumeration types       | `T`                              |
-//! | callback function types | `Rc<T>`                          |
-//! | nullable types          | `Option<T>`                      |
-//! | sequences               | `Vec<T>`                         |
-//! | union types             | `T`                              |
+//! | enumeration types       | `T`             |                |
+//! | callback function types | `Rc<T>`         |                |
+//! | nullable types          | `Option<T>`     |                |
+//! | sequences               | `Vec<T>`        |                |
+//! | union types             | `T`             |                |
 
 use dom::bindings::error::{Error, Fallible};
 use dom::bindings::inheritance::Castable;
+use dom::bindings::nonnull::NonNullJSObjectPtr;
 use dom::bindings::num::Finite;
 use dom::bindings::reflector::{DomObject, Reflector};
 use dom::bindings::root::DomRoot;
@@ -53,7 +54,7 @@ use js::jsapi::{JS_GetLatin1StringCharsAndLength, JS_GetProperty, JS_GetReserved
 use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_IsArrayObject, JS_IsExceptionPending};
 use js::jsapi::{JS_NewStringCopyN, JS_StringHasLatin1Chars, MutableHandleValue};
 use js::jsval::{ObjectValue, StringValue, UndefinedValue};
-use js::rust::{ToString, get_object_class, is_dom_class, is_dom_object, maybe_wrap_value};
+use js::rust::{ToString, get_object_class, is_dom_class, is_dom_object, maybe_wrap_value, maybe_wrap_object_value};
 use libc;
 use num_traits::Float;
 use servo_config::opts;
@@ -66,8 +67,18 @@ pub trait IDLInterface {
 }
 
 /// A trait to mark an IDL interface as deriving from another one.
-#[rustc_on_unimplemented = "The IDL interface `{Self}` is not derived from `{T}`."]
+#[cfg_attr(feature = "unstable",
+           rustc_on_unimplemented = "The IDL interface `{Self}` is not derived from `{T}`.")]
 pub trait DerivedFrom<T: Castable>: Castable {}
+
+// https://heycam.github.io/webidl/#es-object
+impl ToJSValConvertible for NonNullJSObjectPtr {
+    #[inline]
+    unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
+        rval.set(ObjectValue(self.get()));
+        maybe_wrap_object_value(cx, rval);
+    }
+}
 
 impl<T: Float + ToJSValConvertible> ToJSValConvertible for Finite<T> {
     #[inline]

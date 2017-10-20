@@ -14,6 +14,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/MediaEncryptedEvent.h"
 #include "mozilla/EMEUtils.h"
+#include "mozilla/Sprintf.h"
 
 #include "base/basictypes.h"
 #include "nsIDOMHTMLMediaElement.h"
@@ -2279,7 +2280,7 @@ void HTMLMediaElement::NotifyMediaStreamTracksAvailable(DOMMediaStream* aStream)
     NotifyOwnerDocumentActivityChanged();
   }
 
-  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
+  UpdateReadyStateInternal();
 }
 
 void HTMLMediaElement::DealWithFailedElement(nsIContent* aSourceElement)
@@ -3971,13 +3972,11 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   : nsGenericHTMLElement(aNodeInfo),
     mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other)),
     mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other)),
-    mWatchManager(this, mAbstractMainThread),
     mSrcStreamTracksAvailable(false),
     mSrcStreamPausedCurrentTime(-1),
     mShutdownObserver(new ShutdownObserver),
     mSourcePointer(nullptr),
     mNetworkState(nsIDOMHTMLMediaElement::NETWORK_EMPTY),
-    mReadyState(nsIDOMHTMLMediaElement::HAVE_NOTHING, "HTMLMediaElement::mReadyState"),
     mCurrentLoadID(0),
     mLoadWaitStatus(NOT_WAITING),
     mVolume(1.0),
@@ -4020,7 +4019,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mCORSMode(CORS_NONE),
     mIsEncrypted(false),
     mWaitingForKey(NOT_WAITING_FOR_KEY),
-    mDownloadSuspendedByCache(false, "HTMLMediaElement::mDownloadSuspendedByCache"),
     mDisableVideo(false),
     mHasUserInteraction(false),
     mFirstFrameLoaded(false),
@@ -4041,12 +4039,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
 
   RegisterActivityObserver();
   NotifyOwnerDocumentActivityChanged();
-
-  MOZ_ASSERT(NS_IsMainThread());
-  mWatchManager.Watch(mDownloadSuspendedByCache, &HTMLMediaElement::UpdateReadyStateInternal);
-  // Paradoxically, there is a self-edge whereby UpdateReadyStateInternal refuses
-  // to run until mReadyState reaches at least HAVE_METADATA by some other means.
-  mWatchManager.Watch(mReadyState, &HTMLMediaElement::UpdateReadyStateInternal);
 
   mShutdownObserver->Subscribe(this);
   nsIDocShell* docShell = OwnerDoc()->GetDocShell();
@@ -4579,12 +4571,11 @@ void HTMLMediaElement::HiddenVideoStart()
     // Already started, just keep it running.
     return;
   }
-  mVideoDecodeSuspendTimer = do_CreateInstance("@mozilla.org/timer;1");
-  mVideoDecodeSuspendTimer->SetTarget(mMainThreadEventTarget);
-  mVideoDecodeSuspendTimer->InitWithNamedFuncCallback(
-    VideoDecodeSuspendTimerCallback, this,
-    MediaPrefs::MDSMSuspendBackgroundVideoDelay(), nsITimer::TYPE_ONE_SHOT,
-    "HTMLMediaElement::VideoDecodeSuspendTimerCallback");
+  NS_NewTimerWithFuncCallback(getter_AddRefs(mVideoDecodeSuspendTimer),
+                              VideoDecodeSuspendTimerCallback, this,
+                              MediaPrefs::MDSMSuspendBackgroundVideoDelay(), nsITimer::TYPE_ONE_SHOT,
+                              "HTMLMediaElement::VideoDecodeSuspendTimerCallback",
+                              mMainThreadEventTarget);
 }
 
 void HTMLMediaElement::HiddenVideoStop()
@@ -4885,7 +4876,7 @@ HTMLMediaElement::AssertReadyStateIsNothing()
                    "mSourceLoadCandidate=%d "
                    "mIsLoadingFromSourceChildren=%d mPreloadAction=%d "
                    "mSuspendedForPreloadNone=%d error=%d",
-                   int(mReadyState.Ref()),
+                   int(mReadyState),
                    int(mNetworkState),
                    int(mLoadWaitStatus),
                    !!mSourceLoadCandidate,
@@ -5011,7 +5002,7 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
 #endif
 
   RefPtr<ChannelMediaDecoder> decoder =
-    DecoderTraits::CreateDecoder(decoderInit, &diagnostics);
+    ChannelMediaDecoder::Create(decoderInit, &diagnostics);
   if (!decoder) {
     reportCanPlay(false);
     return NS_ERROR_FAILURE;
@@ -5090,12 +5081,10 @@ HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder)
   return rv;
 }
 
-class HTMLMediaElement::StreamListener : public MediaStreamListener,
-                                         public WatchTarget
+class HTMLMediaElement::StreamListener : public MediaStreamListener
 {
 public:
   StreamListener(HTMLMediaElement* aElement, const char* aName) :
-    WatchTarget(aName),
     mElement(aElement),
     mHaveCurrentData(false),
     mFinished(false),
@@ -5104,8 +5093,11 @@ public:
   {}
   void Forget()
   {
-    mElement = nullptr;
-    NotifyWatchers();
+    if (mElement) {
+      HTMLMediaElement* element = mElement;
+      mElement = nullptr;
+      element->UpdateReadyStateInternal();
+    }
   }
 
   // Main thread
@@ -5135,8 +5127,8 @@ public:
     if (mElement) {
       RefPtr<HTMLMediaElement> kungFuDeathGrip = mElement;
       kungFuDeathGrip->FirstFrameLoaded();
+      kungFuDeathGrip->UpdateReadyStateInternal();
     }
-    NotifyWatchers();
     DoNotifyOutput();
   }
 
@@ -5259,9 +5251,6 @@ void HTMLMediaElement::UpdateSrcMediaStreamPlaying(uint32_t aFlags)
         "HTMLMediaElement::mMediaStreamListener");
     stream->AddListener(mMediaStreamListener);
 
-    mWatchManager.Watch(*mMediaStreamListener,
-        &HTMLMediaElement::UpdateReadyStateInternal);
-
     stream->AddAudioOutput(this);
     SetVolumeInternal();
 
@@ -5290,9 +5279,6 @@ void HTMLMediaElement::UpdateSrcMediaStreamPlaying(uint32_t aFlags)
     }
     // If stream is null, then DOMMediaStream::Destroy must have been
     // called and that will remove all listeners/outputs.
-
-    mWatchManager.Unwatch(*mMediaStreamListener,
-        &HTMLMediaElement::UpdateReadyStateInternal);
 
     mMediaStreamListener->Forget();
     mMediaStreamListener = nullptr;
@@ -5430,7 +5416,7 @@ HTMLMediaElement::NotifyMediaStreamTrackAdded(const RefPtr<MediaStreamTrack>& aT
     }
   }
 
-  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
+  UpdateReadyStateInternal();
 }
 
 void
@@ -5514,8 +5500,6 @@ HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
     mPendingEncryptedInitData.Reset();
   }
 
-  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
-
   if (IsVideo() && aInfo->HasVideo()) {
     // We are a video element playing video so update the screen wakelock
     NotifyOwnerDocumentActivityChanged();
@@ -5525,6 +5509,8 @@ HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
     SetCurrentTime(mDefaultPlaybackStartPosition);
     mDefaultPlaybackStartPosition = 0.0;
   }
+
+  UpdateReadyStateInternal();
 
   if (!mSrcStream) {
     return;
@@ -5701,6 +5687,7 @@ void
 HTMLMediaElement::NotifySuspendedByCache(bool aSuspendedByCache)
 {
   mDownloadSuspendedByCache = aSuspendedByCache;
+  UpdateReadyStateInternal();
 }
 
 void HTMLMediaElement::DownloadSuspended()
@@ -5788,11 +5775,10 @@ void HTMLMediaElement::StartProgressTimer()
   MOZ_ASSERT(mNetworkState == nsIDOMHTMLMediaElement::NETWORK_LOADING);
   NS_ASSERTION(!mProgressTimer, "Already started progress timer.");
 
-  mProgressTimer = do_CreateInstance("@mozilla.org/timer;1");
-  mProgressTimer->SetTarget(mMainThreadEventTarget);
-  mProgressTimer->InitWithNamedFuncCallback(
-    ProgressTimerCallback, this, PROGRESS_MS, nsITimer::TYPE_REPEATING_SLACK,
-    "HTMLMediaElement::ProgressTimerCallback");
+  NS_NewTimerWithFuncCallback(getter_AddRefs(mProgressTimer),
+                              ProgressTimerCallback, this, PROGRESS_MS, nsITimer::TYPE_REPEATING_SLACK,
+                              "HTMLMediaElement::ProgressTimerCallback",
+                              mMainThreadEventTarget);
 }
 
 void HTMLMediaElement::StartProgress()
@@ -6036,17 +6022,21 @@ static const char* const gReadyStateToString[] = {
   "HAVE_ENOUGH_DATA"
 };
 
-void HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
+void
+HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
 {
-  nsMediaReadyState oldState = mReadyState;
-  mReadyState = aState;
-
-  if (mNetworkState == nsIDOMHTMLMediaElement::NETWORK_EMPTY ||
-      oldState == mReadyState) {
+  if (mReadyState == aState) {
     return;
   }
 
-  LOG(LogLevel::Debug, ("%p Ready state changed to %s", this, gReadyStateToString[aState]));
+  nsMediaReadyState oldState = mReadyState;
+  mReadyState = aState;
+  LOG(LogLevel::Debug,
+      ("%p Ready state changed to %s", this, gReadyStateToString[aState]));
+
+  if (mNetworkState == nsIDOMHTMLMediaElement::NETWORK_EMPTY) {
+    return;
+  }
 
   UpdateAudioChannelPlayingState();
 
@@ -6440,7 +6430,7 @@ void HTMLMediaElement::UpdateMediaSize(const nsIntSize& aSize)
   }
 
   mMediaInfo.mVideo.mDisplay = aSize;
-  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
+  UpdateReadyStateInternal();
 }
 
 void HTMLMediaElement::UpdateInitialMediaSize(const nsIntSize& aSize)

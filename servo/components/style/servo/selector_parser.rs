@@ -16,14 +16,12 @@ use invalidation::element::element_wrapper::ElementSnapshot;
 use properties::ComputedValues;
 use properties::PropertyFlags;
 use properties::longhands::display::computed_value as display;
-use selector_parser::{AttrValue as SelectorAttrValue, ElementExt, PseudoElementCascadeType, SelectorParser};
-use selectors::Element;
+use selector_parser::{AttrValue as SelectorAttrValue, PseudoElementCascadeType, SelectorParser};
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint, CaseSensitivity};
 use selectors::parser::{SelectorMethods, SelectorParseErrorKind};
 use selectors::visitor::SelectorVisitor;
 use std::ascii::AsciiExt;
 use std::fmt;
-use std::fmt::Debug;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use style_traits::{ParseError, StyleParseErrorKind};
@@ -32,7 +30,7 @@ use style_traits::{ParseError, StyleParseErrorKind};
 ///
 /// NB: If you add to this list, be sure to update `each_simple_pseudo_element` too.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 #[allow(missing_docs)]
 #[repr(usize)]
 pub enum PseudoElement {
@@ -253,7 +251,7 @@ pub type PseudoClassStringArg = Box<str>;
 /// A non tree-structural pseudo-class.
 /// See https://drafts.csswg.org/selectors-4/#structural-pseudos
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 #[allow(missing_docs)]
 pub enum NonTSPseudoClass {
     Active,
@@ -370,7 +368,7 @@ impl NonTSPseudoClass {
 /// The abstract struct we implement the selector parser implementation on top
 /// of.
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct SelectorImpl;
 
 impl ::selectors::SelectorImpl for SelectorImpl {
@@ -603,7 +601,7 @@ impl DerefMut for SnapshotMap {
 
 /// Servo's version of an element snapshot.
 #[derive(Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct ServoElementSnapshot {
     /// The stored state of the element.
     pub state: Option<ElementState>,
@@ -712,13 +710,6 @@ impl ServoElementSnapshot {
                 self.any_attr_ignore_ns(local_name, |value| value.eval_selector(operation))
             }
         }
-    }
-}
-
-impl<E: Element<Impl=SelectorImpl> + Debug> ElementExt for E {
-    #[inline]
-    fn matches_user_and_author_rules(&self) -> bool {
-        true
     }
 }
 
