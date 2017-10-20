@@ -32,7 +32,7 @@ job-template:
          default: browser/locales/l10n-changesets.json
          android-api-16-nightly: mobile/locales/l10n-changesets.json
    locales-per-chunk: 2
-   run-on-projects: ['release', 'maple']
+   run-on-projects: ['mozilla-central']
    ignore-locales:
       by-build-platform:
          # OSX has a special locale for japanese
