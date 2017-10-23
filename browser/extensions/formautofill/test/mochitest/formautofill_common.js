@@ -7,23 +7,45 @@
 let formFillChromeScript;
 let expectingPopup = null;
 
+const {FormAutofillUtils} = SpecialPowers.Cu.import("resource://formautofill/FormAutofillUtils.jsm");
+
 async function sleep(ms = 500, reason = "Intentionally wait for UI ready") {
   SimpleTest.requestFlakyTimeout(reason);
   await new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function setInput(selector, value) {
-  let input = document.querySelector("input" + selector);
-  input.value = value;
+async function focusAndWaitForFieldsIdentified(input) {
+  const rootElement = input.form || input.ownerDocument.documentElement;
+  const previouslyFocused = input != document.activeElement;
+
   input.focus();
 
-  // "identifyAutofillFields" is invoked asynchronously in "focusin" event. We
-  // should make sure fields are ready for popup before doing tests.
-  //
-  // TODO: "sleep" is used here temporarily because there's no event to
-  //       notify us of the state of "identifyAutofillFields" for now. We should
-  //       figure out a better way after the heuristics land.
-  await sleep(500, "Guarantee asynchronous identifyAutofillFields is invoked");
+  if (rootElement.hasAttribute("test-formautofill-identified")) {
+    return;
+  }
+  if (!previouslyFocused) {
+    await new Promise(resolve => {
+      formFillChromeScript.addMessageListener("FormAutofillTest:FieldsIdentified", function onIdentified() {
+        formFillChromeScript.removeMessageListener("FormAutofillTest:FieldsIdentified", onIdentified);
+        resolve();
+      });
+    });
+  }
+  // In order to ensure that "markAsAutofillField" is fully executed, a short period
+  // of timeout is still required.
+  await sleep(300, "Guarantee asynchronous identifyAutofillFields is invoked");
+  rootElement.setAttribute("test-formautofill-identified", "true");
+}
+
+async function setInput(selector, value, userInput = false) {
+  const input = document.querySelector("input" + selector);
+  if (userInput) {
+    SpecialPowers.wrap(input).setUserInput(value);
+  } else {
+    input.value = value;
+  }
+  await focusAndWaitForFieldsIdentified(input);
+
   return input;
 }
 
@@ -112,6 +134,14 @@ async function cleanUpStorage() {
   await cleanUpCreditCards();
 }
 
+function patchRecordCCNumber(record) {
+  const ccNumber = record["cc-number"];
+  const normalizedCCNumber = "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
+  const ccNumberFmt = FormAutofillUtils.fmtMaskedCreditCardLabel(normalizedCCNumber);
+
+  return Object.assign({}, record, {ccNumberFmt});
+}
+
 // Utils for registerPopupShownListener(in satchel_common.js) that handles dropdown popup
 // Please call "initPopupListener()" in your test and "await expectPopup()"
 // if you want to wait for dropdown menu displayed.
@@ -119,6 +149,16 @@ function expectPopup() {
   info("expecting a popup");
   return new Promise(resolve => {
     expectingPopup = resolve;
+  });
+}
+
+function notExpectPopup(ms = 500) {
+  info("not expecting a popup");
+  return new Promise((resolve, reject) => {
+    expectingPopup = reject.bind(this, "Unexpected Popup");
+    // TODO: We don't have an event to notify no popup showing, so wait for 500
+    // ms (in default) to predict any unexpected popup showing.
+    setTimeout(resolve, ms);
   });
 }
 
@@ -144,8 +184,10 @@ function formAutoFillCommonSetup() {
     }
   });
 
-  SimpleTest.registerCleanupFunction(() => {
+  SimpleTest.registerCleanupFunction(async () => {
     formFillChromeScript.sendAsyncMessage("cleanup");
+    await formFillChromeScript.promiseOneMessage("cleanup-finished");
+
     formFillChromeScript.destroy();
     expectingPopup = null;
   });

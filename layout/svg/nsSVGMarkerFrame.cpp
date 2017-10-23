@@ -30,7 +30,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGMarkerFrame)
 
 nsresult
 nsSVGMarkerFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                   nsIAtom* aAttribute,
+                                   nsAtom* aAttribute,
                                    int32_t  aModType)
 {
   if (aNameSpaceID == kNameSpaceID_None &&
@@ -194,7 +194,7 @@ nsSVGMarkerFrame::GetMarkBBoxContribution(const Matrix& aToBBoxUserspace,
 }
 
 void
-nsSVGMarkerFrame::SetParentCoordCtxProvider(SVGSVGElement *aContext)
+nsSVGMarkerFrame::SetParentCoordCtxProvider(SVGViewportElement *aContext)
 {
   SVGMarkerElement *marker = static_cast<SVGMarkerElement*>(GetContent());
   marker->SetParentCoordCtxProvider(aContext);
@@ -219,7 +219,7 @@ nsSVGMarkerFrame::AutoMarkerReferencer::AutoMarkerReferencer(
   mFrame->mInUse = true;
   mFrame->mMarkedFrame = aMarkedFrame;
 
-  SVGSVGElement *ctx =
+  SVGViewportElement *ctx =
     static_cast<nsSVGElement*>(aMarkedFrame->GetContent())->GetCtx();
   mFrame->SetParentCoordCtxProvider(ctx);
 }

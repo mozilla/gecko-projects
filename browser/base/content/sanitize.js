@@ -27,7 +27,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "quotaManagerService",
                                    "@mozilla.org/dom/quota-manager-service;1",
                                    "nsIQuotaManagerService");
 
-var {classes: Cc, interfaces: Ci} = Components;
+var {classes: Cc, interfaces: Ci, results: Cr} = Components;
 
 /**
  * A number of iterations after which to yield time back
@@ -297,17 +297,37 @@ Sanitizer.prototype = {
         Services.obs.notifyObservers(null, "extension:purge-localStorage");
 
         // ServiceWorkers
+        let promises = [];
         let serviceWorkers = serviceWorkerManager.getAllRegistrations();
         for (let i = 0; i < serviceWorkers.length; i++) {
           let sw = serviceWorkers.queryElementAt(i, Ci.nsIServiceWorkerRegistrationInfo);
-          let host = sw.principal.URI.host;
-          serviceWorkerManager.removeAndPropagate(host);
+
+          promises.push(new Promise(resolve => {
+            let unregisterCallback = {
+              unregisterSucceeded: () => { resolve(true); },
+              // We don't care about failures.
+              unregisterFailed: () => { resolve(true); },
+              QueryInterface: XPCOMUtils.generateQI(
+                [Ci.nsIServiceWorkerUnregisterCallback])
+            };
+
+            serviceWorkerManager.propagateUnregister(sw.principal, unregisterCallback, sw.scope);
+          }));
         }
 
+        await Promise.all(promises);
+
         // QuotaManager
-        let promises = [];
+        promises = [];
         await new Promise(resolve => {
           quotaManagerService.getUsage(request => {
+            if (request.resultCode != Cr.NS_OK) {
+              // We are probably shutting down. We don't want to propagate the
+              // error, rejecting the promise.
+              resolve();
+              return;
+            }
+
             for (let item of request.result) {
               let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(item.origin);
               let uri = principal.URI;
@@ -618,7 +638,7 @@ Sanitizer.prototype = {
               return false;
             }
             return undefined;
-          }
+          };
           newWindow.addEventListener("fullscreen", onFullScreen);
         }
 
@@ -644,7 +664,7 @@ Sanitizer.prototype = {
               TelemetryStopwatch.finish("FX_SANITIZE_OPENWINDOWS", refObj);
               resolve();
             }
-          }
+          };
 
           let numWindowsClosing = windowList.length;
           let onWindowClosed = function() {
@@ -657,7 +677,7 @@ Sanitizer.prototype = {
                 resolve();
               }
             }
-          }
+          };
           Services.obs.addObserver(onWindowOpened, "browser-delayed-startup-finished");
           Services.obs.addObserver(onWindowClosed, "xul-window-destroyed");
         });

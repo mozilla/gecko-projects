@@ -108,6 +108,10 @@ PointerEventHandler::UpdateActivePointerState(WidgetMouseEvent* aEvent)
                                               pointerEvent->mIsPrimary));
     }
     break;
+  case ePointerCancel:
+    // pointercancel means a pointer is unlikely to continue to produce pointer
+    // events. In that case, we should turn off active state or remove the
+    // pointer from active pointers.
   case ePointerUp:
     // In this case we remove information about pointer or turn off active state
     if (WidgetPointerEvent* pointerEvent = aEvent->AsPointerEvent()) {
@@ -165,6 +169,17 @@ PointerEventHandler::ReleasePointerCaptureById(uint32_t aPointerId)
       nsIPresShell::SetCapturingContent(nullptr, CAPTURE_PREVENTDRAG);
     }
     pointerCaptureInfo->mPendingContent = nullptr;
+  }
+}
+
+/* static */ void
+PointerEventHandler::ReleaseAllPointerCapture()
+{
+  for (auto iter = sPointerCaptureList->Iter(); !iter.Done(); iter.Next()) {
+    PointerCaptureInfo* data = iter.UserData();
+    if (data && data->mPendingContent) {
+      ReleasePointerCaptureById(iter.Key());
+    }
   }
 }
 

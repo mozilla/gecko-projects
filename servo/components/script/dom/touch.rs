@@ -46,52 +46,56 @@ impl Touch {
               screen_x: Finite<f64>, screen_y: Finite<f64>,
               client_x: Finite<f64>, client_y: Finite<f64>,
               page_x: Finite<f64>, page_y: Finite<f64>) -> DomRoot<Touch> {
-        reflect_dom_object(box Touch::new_inherited(identifier, target,
-                                                    screen_x, screen_y,
-                                                    client_x, client_y,
-                                                    page_x, page_y),
-                           window,
-                           TouchBinding::Wrap)
+        reflect_dom_object(Box::new(
+            Touch::new_inherited(
+                identifier, target,
+                screen_x, screen_y,
+                client_x, client_y,
+                page_x, page_y
+            )),
+            window,
+            TouchBinding::Wrap
+        )
     }
 }
 
 impl TouchMethods for Touch {
-    /// https://w3c.github.io/touch-events/#widl-Touch-identifier
+    /// <https://w3c.github.io/touch-events/#widl-Touch-identifier>
     fn Identifier(&self) -> i32 {
         self.identifier
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-target
+    /// <https://w3c.github.io/touch-events/#widl-Touch-target>
     fn Target(&self) -> DomRoot<EventTarget> {
         self.target.get()
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-screenX
+    /// <https://w3c.github.io/touch-events/#widl-Touch-screenX>
     fn ScreenX(&self) -> Finite<f64> {
         Finite::wrap(self.screen_x)
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-screenY
+    /// <https://w3c.github.io/touch-events/#widl-Touch-screenY>
     fn ScreenY(&self) -> Finite<f64> {
         Finite::wrap(self.screen_y)
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-clientX
+    /// <https://w3c.github.io/touch-events/#widl-Touch-clientX>
     fn ClientX(&self) -> Finite<f64> {
         Finite::wrap(self.client_x)
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-clientY
+    /// <https://w3c.github.io/touch-events/#widl-Touch-clientY>
     fn ClientY(&self) -> Finite<f64> {
         Finite::wrap(self.client_y)
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-clientX
+    /// <https://w3c.github.io/touch-events/#widl-Touch-clientX>
     fn PageX(&self) -> Finite<f64> {
         Finite::wrap(self.page_x)
     }
 
-    /// https://w3c.github.io/touch-events/#widl-Touch-clientY
+    /// <https://w3c.github.io/touch-events/#widl-Touch-clientY>
     fn PageY(&self) -> Finite<f64> {
         Finite::wrap(self.page_y)
     }

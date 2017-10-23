@@ -24,7 +24,7 @@ pub struct CSSStyleSheet {
     stylesheet: StyleSheet,
     owner: Dom<Element>,
     rulelist: MutNullableDom<CSSRuleList>,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     style_stylesheet: Arc<StyleStyleSheet>,
     origin_clean: Cell<bool>,
 }
@@ -51,7 +51,7 @@ impl CSSStyleSheet {
                href: Option<DOMString>,
                title: Option<DOMString>,
                stylesheet: Arc<StyleStyleSheet>) -> DomRoot<CSSStyleSheet> {
-        reflect_dom_object(box CSSStyleSheet::new_inherited(owner, type_, href, title, stylesheet),
+        reflect_dom_object(Box::new(CSSStyleSheet::new_inherited(owner, type_, href, title, stylesheet)),
                            window,
                            CSSStyleSheetBinding::Wrap)
     }

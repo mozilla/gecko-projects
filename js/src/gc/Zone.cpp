@@ -58,6 +58,7 @@ JS::Zone::Zone(JSRuntime* rt, ZoneGroup* group)
 #endif
     jitZone_(group, nullptr),
     gcScheduled_(false),
+    gcScheduledSaved_(false),
     gcPreserveCode_(group, false),
     keepShapeTables_(group, false),
     listNext_(group, NotOnList)
@@ -68,8 +69,8 @@ JS::Zone::Zone(JSRuntime* rt, ZoneGroup* group)
 
     AutoLockGC lock(rt);
     threshold.updateAfterGC(8192, GC_NORMAL, rt->gc.tunables, rt->gc.schedulingState, lock);
-    setGCMaxMallocBytes(rt->gc.maxMallocBytesAllocated() * 0.9);
-    jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8);
+    setGCMaxMallocBytes(rt->gc.maxMallocBytesAllocated() * 0.9, lock);
+    jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8, lock);
 }
 
 Zone::~Zone()
@@ -82,9 +83,12 @@ Zone::~Zone()
     js_delete(jitZone_.ref());
 
 #ifdef DEBUG
-    // Avoid assertion destroying the weak map list if the embedding leaked GC things.
-    if (!rt->gc.shutdownCollectedEverything())
+    // Avoid assertions failures warning that not everything has been destroyed
+    // if the embedding leaked GC things.
+    if (!rt->gc.shutdownCollectedEverything()) {
         gcWeakMapList().clear();
+        regExps.clear();
+    }
 #endif
 }
 

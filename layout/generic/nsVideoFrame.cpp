@@ -13,7 +13,6 @@
 
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
-#include "nsIDOMHTMLImageElement.h"
 #include "nsDisplayList.h"
 #include "nsGenericHTMLElement.h"
 #include "nsPresContext.h"
@@ -497,7 +496,7 @@ public:
     SwapScaleWidthHeightForRotation(scaleHint, rotationDeg);
     container->SetScaleHint(scaleHint);
 
-    LayerRect rect(destGFXRect.x, destGFXRect.y, destGFXRect.width, destGFXRect.height);
+    LayoutDeviceRect rect(destGFXRect.x, destGFXRect.y, destGFXRect.width, destGFXRect.height);
     return aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, rect);
   }
 
@@ -796,7 +795,7 @@ nsVideoFrame::UpdatePosterSource(bool aNotify)
 
 nsresult
 nsVideoFrame::AttributeChanged(int32_t aNameSpaceID,
-                               nsIAtom* aAttribute,
+                               nsAtom* aAttribute,
                                int32_t aModType)
 {
   if (aAttribute == nsGkAtoms::poster && HasVideoElement()) {

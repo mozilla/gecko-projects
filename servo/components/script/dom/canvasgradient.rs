@@ -24,7 +24,7 @@ pub struct CanvasGradient {
     stops: DomRefCell<Vec<CanvasGradientStop>>,
 }
 
-#[derive(Clone, HeapSizeOf, JSTraceable)]
+#[derive(Clone, JSTraceable, MallocSizeOf)]
 pub enum CanvasGradientStyle {
     Linear(LinearGradientStyle),
     Radial(RadialGradientStyle),
@@ -40,7 +40,7 @@ impl CanvasGradient {
     }
 
     pub fn new(global: &GlobalScope, style: CanvasGradientStyle) -> DomRoot<CanvasGradient> {
-        reflect_dom_object(box CanvasGradient::new_inherited(style),
+        reflect_dom_object(Box::new(CanvasGradient::new_inherited(style)),
                            global,
                            CanvasGradientBinding::Wrap)
     }

@@ -11005,6 +11005,40 @@ class MGetPropertyCache
     }
 };
 
+class MHomeObjectSuperBase
+  : public MUnaryInstruction,
+    public SingleObjectPolicy::Data
+{
+    explicit MHomeObjectSuperBase(MDefinition* homeObject)
+      : MUnaryInstruction(classOpcode, homeObject)
+    {
+        setResultType(MIRType::Object);
+        setGuard(); // May throw if [[Prototype]] is null
+    }
+
+  public:
+    INSTRUCTION_HEADER(HomeObjectSuperBase)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, homeObject))
+};
+
+class MGetPropSuperCache
+  : public MTernaryInstruction,
+    public MixPolicy<ObjectPolicy<0>, BoxExceptPolicy<1, MIRType::Object>, CacheIdPolicy<2>>::Data
+{
+    MGetPropSuperCache(MDefinition* obj, MDefinition* receiver, MDefinition* id)
+      : MTernaryInstruction(classOpcode, obj, receiver, id)
+    {
+        setResultType(MIRType::Value);
+        setGuard();
+    }
+
+  public:
+    INSTRUCTION_HEADER(GetPropSuperCache)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, object), (1, receiver), (2, idval))
+};
+
 struct PolymorphicEntry {
     // The group and/or shape to guard against.
     ReceiverGuard receiver;
@@ -11806,6 +11840,28 @@ class MCopyLexicalEnvironmentObject
         return AliasSet::Load(AliasSet::ObjectFields |
                               AliasSet::FixedSlot |
                               AliasSet::DynamicSlot);
+    }
+};
+
+class MHomeObject
+  : public MUnaryInstruction,
+    public SingleObjectPolicy::Data
+{
+    explicit MHomeObject(MDefinition* function)
+        : MUnaryInstruction(classOpcode, function)
+    {
+        setResultType(MIRType::Object);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(HomeObject)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, function))
+
+    // A function's [[HomeObject]] is fixed.
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
     }
 };
 
@@ -13147,27 +13203,22 @@ class MNewNamedLambdaObject : public MNullaryInstruction
     }
 };
 
-class MNewCallObjectBase : public MNullaryInstruction
+class MNewCallObjectBase : public MUnaryInstruction
+                         , public SingleObjectPolicy::Data
 {
-    CompilerGCPointer<CallObject*> templateObj_;
-
   protected:
-    MNewCallObjectBase(Opcode op, CallObject* templateObj)
-      : MNullaryInstruction(op),
-        templateObj_(templateObj)
+    MNewCallObjectBase(Opcode op, MConstant* templateObj)
+      : MUnaryInstruction(op, templateObj)
     {
         setResultType(MIRType::Object);
     }
 
   public:
-    CallObject* templateObject() {
-        return templateObj_;
+    CallObject* templateObject() const {
+        return &getOperand(0)->toConstant()->toObject().as<CallObject>();
     }
     AliasSet getAliasSet() const override {
         return AliasSet::None();
-    }
-    bool appendRoots(MRootList& roots) const override {
-        return roots.append(templateObj_);
     }
 };
 
@@ -13175,17 +13226,17 @@ class MNewCallObject : public MNewCallObjectBase
 {
   public:
     INSTRUCTION_HEADER(NewCallObject)
+    TRIVIAL_NEW_WRAPPERS
 
-    explicit MNewCallObject(CallObject* templateObj)
+    explicit MNewCallObject(MConstant* templateObj)
       : MNewCallObjectBase(classOpcode, templateObj)
     {
-        MOZ_ASSERT(!templateObj->isSingleton());
+        MOZ_ASSERT(!templateObject()->isSingleton());
     }
 
-    static MNewCallObject*
-    New(TempAllocator& alloc, CallObject* templateObj)
-    {
-        return new(alloc) MNewCallObject(templateObj);
+    MOZ_MUST_USE bool writeRecoverData(CompactBufferWriter& writer) const override;
+    bool canRecoverOnBailout() const override {
+        return true;
     }
 };
 
@@ -13193,16 +13244,11 @@ class MNewSingletonCallObject : public MNewCallObjectBase
 {
   public:
     INSTRUCTION_HEADER(NewSingletonCallObject)
+    TRIVIAL_NEW_WRAPPERS
 
-    explicit MNewSingletonCallObject(CallObject* templateObj)
+    explicit MNewSingletonCallObject(MConstant* templateObj)
       : MNewCallObjectBase(classOpcode, templateObj)
     {}
-
-    static MNewSingletonCallObject*
-    New(TempAllocator& alloc, CallObject* templateObj)
-    {
-        return new(alloc) MNewSingletonCallObject(templateObj);
-    }
 };
 
 class MNewStringObject :

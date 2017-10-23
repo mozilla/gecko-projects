@@ -13,7 +13,7 @@
 #include "nsDebug.h"
 #include "nsError.h"
 #include "nsGkAtoms.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsIContent.h"
 #include "nsID.h"
 #include "nsIDOMCSSPrimitiveValue.h"
@@ -162,7 +162,7 @@ ElementDeletionObserver::NodeWillBeDestroyed(const nsINode* aNode)
 }
 
 ManualNACPtr
-HTMLEditor::CreateAnonymousElement(nsIAtom* aTag,
+HTMLEditor::CreateAnonymousElement(nsAtom* aTag,
                                    nsIContent& aParentContent,
                                    const nsAString& aAnonClass,
                                    bool aIsCreatedHidden)
@@ -352,11 +352,7 @@ HTMLEditor::CheckSelectionStateForAnonymousButtons(nsISelection* aSelection)
   }
 
   // what's its tag?
-  nsAutoString focusTagName;
-  rv = focusElement->GetTagName(focusTagName);
-  NS_ENSURE_SUCCESS(rv, rv);
-  ToLowerCase(focusTagName);
-  RefPtr<nsIAtom> focusTagAtom = NS_Atomize(focusTagName);
+  nsAtom* focusTagAtom = focusElementNode->NodeInfo()->NameAtom();
 
   nsCOMPtr<nsIDOMElement> absPosElement;
   if (mIsAbsolutelyPositioningEnabled) {

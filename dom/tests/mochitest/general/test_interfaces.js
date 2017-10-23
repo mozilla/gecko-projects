@@ -188,8 +188,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ChromeNodeList", xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ChromeWindow", xbl: true},
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "ClipboardEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "CloseEvent",
@@ -416,7 +414,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLCollection",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "HTMLContentElement", stylo: false},
+    "HTMLContentElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLDataElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -514,7 +512,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSelectElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "HTMLSlotElement", stylo: false},
+    "HTMLSlotElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSourceElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -846,7 +844,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ScopedCredentialInfo", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ShadowRoot", stylo: false}, // Bogus, but the test harness forces it on.  See bug 1159768.
+    "ShadowRoot", // Bogus, but the test harness forces it on.  See bug 1159768.
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "SharedWorker",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1176,21 +1174,21 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "VideoStreamTrack",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplay", releaseNonWindows: false},
+    {name: "VRDisplay", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayCapabilities", releaseNonWindows: false},
+    {name: "VRDisplayCapabilities", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayEvent", releaseNonWindows: false},
+    {name: "VRDisplayEvent", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VREyeParameters", releaseNonWindows: false},
+    {name: "VREyeParameters", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFieldOfView", releaseNonWindows: false},
+    {name: "VRFieldOfView", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFrameData", releaseNonWindows: false},
+    {name: "VRFrameData", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRPose", releaseNonWindows: false},
+    {name: "VRPose", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRStageParameters", releaseNonWindows: false},
+    {name: "VRStageParameters", releaseNonWindowsAndMac: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "VTTCue",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1302,7 +1300,6 @@ function createInterfaceMap(isXBLScope) {
   var isWindows = /Windows/.test(navigator.oscpu);
   var isAndroid = navigator.userAgent.includes("Android");
   var isLinux = /Linux/.test(navigator.oscpu) && !isAndroid;
-  var isStylo = SpecialPowers.DOMWindowUtils.isStyledByServo;
   var isSecureContext = window.isSecureContext;
 
   var interfaceMap = {};
@@ -1319,12 +1316,11 @@ function createInterfaceMap(isXBLScope) {
             (entry.xbl === !isXBLScope) ||
             (entry.desktop === !isDesktop) ||
             (entry.windows === !isWindows) ||
-            (entry.releaseNonWindows === !isRelease && !isWindows) ||
             (entry.mac === !isMac) ||
             (entry.linux === !isLinux) ||
             (entry.android === !isAndroid && !entry.nightlyAndroid) ||
-            (entry.stylo === !isStylo) ||
             (entry.release === !isRelease) ||
+            (entry.releaseNonWindowsAndMac === !(isRelease && !isWindows && !isMac)) ||
             (entry.isSecureContext === !isSecureContext) ||
             entry.disabled) {
           interfaceMap[entry.name] = false;

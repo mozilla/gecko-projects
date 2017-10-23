@@ -118,9 +118,11 @@ HTMLAreaElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsresult
-HTMLAreaElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+HTMLAreaElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                               const nsAttrValue* aValue,
-                              const nsAttrValue* aOldValue, bool aNotify)
+                              const nsAttrValue* aOldValue,
+                              nsIPrincipal* aSubjectPrincipal,
+                              bool aNotify)
 {
   if (aNamespaceID == kNameSpaceID_None) {
     // This must happen after the attribute is set. We will need the updated
@@ -133,7 +135,7 @@ HTMLAreaElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
   }
 
   return nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName, aValue,
-                                            aOldValue, aNotify);
+                                            aOldValue, aSubjectPrincipal, aNotify);
 }
 
 void

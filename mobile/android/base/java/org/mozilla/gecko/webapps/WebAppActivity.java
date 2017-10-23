@@ -32,8 +32,10 @@ import org.mozilla.gecko.ActivityHandlerHelper;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.DoorHangerPopup;
 import org.mozilla.gecko.GeckoScreenOrientation;
+import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.GeckoView;
 import org.mozilla.gecko.GeckoViewSettings;
+import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.customtabs.CustomTabsActivity;
 import org.mozilla.gecko.permissions.Permissions;
@@ -91,7 +93,20 @@ public class WebAppActivity extends AppCompatActivity
         mGeckoView.setContentListener(new GeckoView.ContentListener() {
             public void onTitleChange(GeckoView view, String title) {}
             public void onContextMenu(GeckoView view, int screenX, int screenY,
-                               String uri, String elementSrc) {}
+                               String uri, String elementSrc) {
+                final String content = uri != null ? uri : elementSrc != null ? elementSrc : "";
+                final Uri validUri = WebApps.getValidURL(content);
+                if (validUri == null) {
+                    return;
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        WebApps.openInFennec(validUri, WebAppActivity.this);
+                    }
+                });
+            }
             public void onFullScreen(GeckoView view, boolean fullScreen) {
                 updateFullScreenContent(fullScreen);
             }
@@ -105,6 +120,10 @@ public class WebAppActivity extends AppCompatActivity
 
         final GeckoViewSettings settings = mGeckoView.getSettings();
         settings.setBoolean(GeckoViewSettings.USE_MULTIPROCESS, false);
+        settings.setBoolean(
+            GeckoViewSettings.USE_REMOTE_DEBUGGER,
+            GeckoSharedPrefs.forApp(this).getBoolean(
+                GeckoPreferences.PREFS_DEVTOOLS_REMOTE_USB_ENABLED, false));
 
         mManifest = WebAppManifest.fromFile(getIntent().getStringExtra(MANIFEST_URL),
                                             getIntent().getStringExtra(MANIFEST_PATH));
@@ -217,7 +236,7 @@ public class WebAppActivity extends AppCompatActivity
         final GeckoScreenOrientation.ScreenOrientation orientation =
             GeckoScreenOrientation.screenOrientationFromString(orientString);
         final int activityOrientation =
-            GeckoScreenOrientation.screenOrientationToAndroidOrientation(orientation);
+            GeckoScreenOrientation.screenOrientationToActivityInfoOrientation(orientation);
 
         setRequestedOrientation(activityOrientation);
     }

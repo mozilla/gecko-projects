@@ -53,7 +53,6 @@ static constexpr FloatRegister ScratchDoubleReg = FloatRegister(X86Encoding::xmm
 static constexpr FloatRegister ScratchSimd128Reg = FloatRegister(X86Encoding::xmm7, FloatRegisters::Simd128);
 
 // Avoid ebp, which is the FramePointer, which is unavailable in some modes.
-static constexpr Register ArgumentsRectifierReg = esi;
 static constexpr Register CallTempReg0 = edi;
 static constexpr Register CallTempReg1 = eax;
 static constexpr Register CallTempReg2 = ebx;
@@ -207,6 +206,24 @@ static inline void
 PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::BackedgeTarget target)
 {
     PatchJump(jump_, label);
+}
+
+static inline Operand
+LowWord(const Operand& op) {
+    switch (op.kind()) {
+      case Operand::MEM_REG_DISP: return Operand(LowWord(op.toAddress()));
+      case Operand::MEM_SCALE:    return Operand(LowWord(op.toBaseIndex()));
+      default:                    MOZ_CRASH("Invalid operand type");
+    }
+}
+
+static inline Operand
+HighWord(const Operand& op) {
+    switch (op.kind()) {
+      case Operand::MEM_REG_DISP: return Operand(HighWord(op.toAddress()));
+      case Operand::MEM_SCALE:    return Operand(HighWord(op.toBaseIndex()));
+      default:                    MOZ_CRASH("Invalid operand type");
+    }
 }
 
 // Return operand from a JS -> JS call.
@@ -769,9 +786,7 @@ class Assembler : public AssemblerX86Shared
     CodeOffset movlWithPatchLow(Register regLow, const Operand& dest) {
         switch (dest.kind()) {
           case Operand::MEM_REG_DISP: {
-            Address addr = dest.toAddress();
-            Operand low(addr.base, addr.offset + INT64LOW_OFFSET);
-            return movlWithPatch(regLow, low);
+            return movlWithPatch(regLow, LowWord(dest));
           }
           case Operand::MEM_ADDRESS32: {
             Operand low(PatchedAbsoluteAddress(uint32_t(dest.address()) + INT64LOW_OFFSET));
@@ -784,9 +799,7 @@ class Assembler : public AssemblerX86Shared
     CodeOffset movlWithPatchHigh(Register regHigh, const Operand& dest) {
         switch (dest.kind()) {
           case Operand::MEM_REG_DISP: {
-            Address addr = dest.toAddress();
-            Operand high(addr.base, addr.offset + INT64HIGH_OFFSET);
-            return movlWithPatch(regHigh, high);
+            return movlWithPatch(regHigh, HighWord(dest));
           }
           case Operand::MEM_ADDRESS32: {
             Operand high(PatchedAbsoluteAddress(uint32_t(dest.address()) + INT64HIGH_OFFSET));

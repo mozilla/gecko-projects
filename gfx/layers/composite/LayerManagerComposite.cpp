@@ -865,10 +865,6 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   // Dump to console
   if (gfxPrefs::LayersDump()) {
     this->Dump(/* aSorted= */true);
-  } else if (profiler_feature_active(ProfilerFeature::LayersDump)) {
-    std::stringstream ss;
-    Dump(ss);
-    profiler_tracing("log", ss.str().c_str());
   }
 
   // Dump to LayerScope Viewer

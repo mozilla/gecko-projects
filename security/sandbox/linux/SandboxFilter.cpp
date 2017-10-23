@@ -19,11 +19,13 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/ioctl.h>
 #include <linux/ipc.h>
 #include <linux/net.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -60,6 +62,10 @@ using namespace sandbox::bpf_dsl;
 #ifndef PR_SET_PTRACER
 #define PR_SET_PTRACER 0x59616d61
 #endif
+
+// The headers define O_LARGEFILE as 0 on x86_64, but we need the
+// actual value because it shows up in file flags.
+#define O_LARGEFILE_REAL 00100000
 
 // To avoid visual confusion between "ifdef ANDROID" and "ifndef ANDROID":
 #ifndef ANDROID
@@ -319,7 +325,7 @@ public:
       // ASAN's error reporter wants to know if stderr is a tty.
     case __NR_ioctl: {
       Arg<int> fd(0);
-      return If(fd == STDERR_FILENO, Allow())
+      return If(fd == STDERR_FILENO, Error(ENOTTY))
         .Else(InvalidSyscall());
     }
 
@@ -531,11 +537,6 @@ public:
     : mBroker(aBroker),
       mSyscallWhitelist(aSyscallWhitelist) {}
   ~ContentSandboxPolicy() override = default;
-  ResultExpr PrctlPolicy() const override {
-    // Ideally this should be restricted to a whitelist, but content
-    // uses enough things that it's not trivial to determine it.
-    return Allow();
-  }
   Maybe<ResultExpr> EvaluateSocketCall(int aCall) const override {
     switch(aCall) {
     case SYS_RECVFROM:
@@ -712,17 +713,71 @@ public:
 #endif
       return Allow();
 
+#ifdef MOZ_ALSA
     case __NR_ioctl:
-      // ioctl() is for GL. Remove when GL proxy is implemented.
-      // Additionally ioctl() might be a place where we want to have
-      // argument filtering
       return Allow();
+#else
+    case __NR_ioctl: {
+      static const unsigned long kTypeMask = _IOC_TYPEMASK << _IOC_TYPESHIFT;
+      static const unsigned long kTtyIoctls = TIOCSTI & kTypeMask;
+      // On some older architectures (but not x86 or ARM), ioctls are
+      // assigned type fields differently, and the TIOC/TC/FIO group
+      // isn't all the same type.  If/when we support those archs,
+      // this would need to be revised (but really this should be a
+      // default-deny policy; see below).
+      static_assert(kTtyIoctls == (TCSETA & kTypeMask) &&
+                    kTtyIoctls == (FIOASYNC & kTypeMask),
+                    "tty-related ioctls use the same type");
 
-    CASES_FOR_fcntl:
-      // Some fcntls have significant side effects like sending
-      // arbitrary signals, and there's probably nontrivial kernel
-      // attack surface; this should be locked down more if possible.
-      return Allow();
+      Arg<unsigned long> request(1);
+      auto shifted_type = request & kTypeMask;
+
+      // Rust's stdlib seems to use FIOCLEX instead of equivalent fcntls.
+      return If(request == FIOCLEX, Allow())
+        // Rust's stdlib also uses FIONBIO instead of equivalent fcntls.
+        .ElseIf(request == FIONBIO, Allow())
+        // ffmpeg, and anything else that calls isatty(), will be told
+        // that nothing is a typewriter:
+        .ElseIf(request == TCGETS, Error(ENOTTY))
+        // Bug 1408498: libgio uses FIONREAD on inotify fds.
+        // (We should stop using inotify: bug 1408497.)
+        .ElseIf(request == FIONREAD, Allow())
+        // Allow anything that isn't a tty ioctl, for now; bug 1302711
+        // will cover changing this to a default-deny policy.
+        .ElseIf(shifted_type != kTtyIoctls, Allow())
+        .Else(SandboxPolicyCommon::EvaluateSyscall(sysno));
+    }
+#endif // !MOZ_ALSA
+
+    CASES_FOR_fcntl: {
+      Arg<int> cmd(1);
+      Arg<int> flags(2);
+      // Typical use of F_SETFL is to modify the flags returned by
+      // F_GETFL and write them back, including some flags that
+      // F_SETFL ignores.  This is a default-deny policy in case any
+      // new SETFL-able flags are added.  (In particular we want to
+      // forbid O_ASYNC; see bug 1328896, but also see bug 1408438.)
+      static const int ignored_flags = O_ACCMODE | O_LARGEFILE_REAL | O_CLOEXEC;
+      static const int allowed_flags = ignored_flags | O_APPEND | O_NONBLOCK;
+      return Switch(cmd)
+        // Close-on-exec is meaningless when execve isn't allowed, but
+        // NSPR reads the bit and asserts that it has the expected value.
+        .Case(F_GETFD, Allow())
+        .Case(F_SETFD,
+              If((flags & ~FD_CLOEXEC) == 0, Allow())
+              .Else(InvalidSyscall()))
+        .Case(F_GETFL, Allow())
+        .Case(F_SETFL,
+              If((flags & ~allowed_flags) == 0, Allow())
+              .Else(InvalidSyscall()))
+        .Case(F_DUPFD_CLOEXEC, Allow())
+        // Pulseaudio uses F_SETLKW.
+        .Case(F_SETLKW, Allow())
+#ifdef F_SETLKW64
+        .Case(F_SETLKW64, Allow())
+#endif
+        .Default(SandboxPolicyCommon::EvaluateSyscall(sysno));
+    }
 
     case __NR_mprotect:
     case __NR_brk:
@@ -814,11 +869,6 @@ public:
       // NSPR will start a thread to wait for child processes even if
       // fork() fails; see bug 227246 and bug 1299581.
       return Error(ECHILD);
-
-#ifdef __NR_arch_prctl
-    case __NR_arch_prctl:
-#endif
-      return Allow();
 
     case __NR_eventfd2:
     case __NR_inotify_init:

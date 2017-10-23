@@ -430,6 +430,12 @@ WebRenderAPI::UpdateResources(ResourceUpdateQueue& aUpdates)
   wr_api_update_resources(mDocHandle, aUpdates.Raw());
 }
 
+void
+WebRenderAPI::UpdatePipelineResources(ResourceUpdateQueue& aUpdates, PipelineId aPipeline, Epoch aEpoch)
+{
+  wr_api_update_pipeline_resources(mDocHandle, aPipeline, aEpoch, aUpdates.Raw());
+}
+
 ResourceUpdateQueue::ResourceUpdateQueue()
 {
   mUpdates = wr_resource_updates_new();
@@ -623,11 +629,12 @@ WebRenderAPI::RunOnRenderThread(UniquePtr<RendererEvent> aEvent)
 }
 
 DisplayListBuilder::DisplayListBuilder(PipelineId aId,
-                                       const wr::LayoutSize& aContentSize)
-  : mMaskClipCount(0)
+                                       const wr::LayoutSize& aContentSize,
+                                       size_t aCapacity)
+  : mExtraClipCount(0)
 {
   MOZ_COUNT_CTOR(DisplayListBuilder);
-  mWrState = wr_state_new(aId, aContentSize);
+  mWrState = wr_state_new(aId, aContentSize, aCapacity);
 }
 
 DisplayListBuilder::~DisplayListBuilder()
@@ -635,6 +642,10 @@ DisplayListBuilder::~DisplayListBuilder()
   MOZ_COUNT_DTOR(DisplayListBuilder);
   wr_state_delete(mWrState);
 }
+
+void DisplayListBuilder::Save() { wr_dp_save(mWrState); }
+void DisplayListBuilder::Restore() { wr_dp_restore(mWrState); }
+void DisplayListBuilder::ClearSave() { wr_dp_clear_save(mWrState); }
 
 void
 DisplayListBuilder::Finalize(wr::LayoutSize& aOutContentSize,
@@ -698,25 +709,25 @@ DisplayListBuilder::DefineClip(const wr::LayoutRect& aClipRect,
 }
 
 void
-DisplayListBuilder::PushClip(const wr::WrClipId& aClipId, bool aMask)
+DisplayListBuilder::PushClip(const wr::WrClipId& aClipId, bool aExtra)
 {
   wr_dp_push_clip(mWrState, aClipId.id);
   WRDL_LOG("PushClip id=%" PRIu64 "\n", mWrState, aClipId.id);
-  if (!aMask) {
+  if (!aExtra) {
     mClipIdStack.push_back(aClipId);
   } else {
-    mMaskClipCount++;
+    mExtraClipCount++;
   }
 }
 
 void
-DisplayListBuilder::PopClip(bool aMask)
+DisplayListBuilder::PopClip(bool aExtra)
 {
   WRDL_LOG("PopClip id=%" PRIu64 "\n", mWrState, mClipIdStack.back().id);
-  if (!aMask) {
+  if (!aExtra) {
     mClipIdStack.pop_back();
   } else {
-    mMaskClipCount--;
+    mExtraClipCount--;
   }
   wr_dp_pop_clip(mWrState);
 }
@@ -751,15 +762,6 @@ DisplayListBuilder::PopStickyFrame()
 {
   WRDL_LOG("PopSticky\n", mWrState);
   wr_dp_pop_clip(mWrState);
-}
-
-void
-DisplayListBuilder::PushBuiltDisplayList(BuiltDisplayList &dl)
-{
-  WRDL_LOG("PushBuiltDisplayList\n", mWrState);
-  wr_dp_push_built_display_list(mWrState,
-                                dl.dl_desc,
-                                &dl.dl.inner);
 }
 
 bool
@@ -1040,13 +1042,13 @@ void
 DisplayListBuilder::PushText(const wr::LayoutRect& aBounds,
                              const wr::LayoutRect& aClip,
                              bool aIsBackfaceVisible,
-                             const gfx::Color& aColor,
+                             const wr::ColorF& aColor,
                              wr::FontInstanceKey aFontKey,
                              Range<const wr::GlyphInstance> aGlyphBuffer,
                              const wr::GlyphOptions* aGlyphOptions)
 {
   wr_dp_push_text(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                  ToColorF(aColor),
+                  aColor,
                   aFontKey,
                   &aGlyphBuffer[0], aGlyphBuffer.length(),
                   aGlyphOptions);
@@ -1079,18 +1081,18 @@ DisplayListBuilder::PushLine(const wr::LayoutRect& aClip,
 }
 
 void
-DisplayListBuilder::PushTextShadow(const wr::LayoutRect& aRect,
-                                   const wr::LayoutRect& aClip,
-                                   bool aIsBackfaceVisible,
-                                   const wr::TextShadow& aShadow)
+DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
+                               const wr::LayoutRect& aClip,
+                               bool aIsBackfaceVisible,
+                               const wr::Shadow& aShadow)
 {
-  wr_dp_push_text_shadow(mWrState, aRect, aClip, aIsBackfaceVisible, aShadow);
+  wr_dp_push_shadow(mWrState, aRect, aClip, aIsBackfaceVisible, aShadow);
 }
 
 void
-DisplayListBuilder::PopTextShadow()
+DisplayListBuilder::PopAllShadows()
 {
-  wr_dp_pop_text_shadow(mWrState);
+  wr_dp_pop_all_shadows(mWrState);
 }
 
 void

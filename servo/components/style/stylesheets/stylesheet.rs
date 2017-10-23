@@ -38,7 +38,7 @@ pub struct UserAgentStylesheets {
 /// A set of namespaces applying to a given stylesheet.
 ///
 /// The namespace id is used in gecko
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, MallocSizeOf)]
 #[allow(missing_docs)]
 pub struct Namespaces {
     pub default: Option<(Namespace, NamespaceId)>,
@@ -275,9 +275,9 @@ impl StylesheetInDocument for Stylesheet {
 /// A simple wrapper over an `Arc<Stylesheet>`, with pointer comparison, and
 /// suitable for its use in a `StylesheetSet`.
 #[derive(Clone)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct DocumentStyleSheet(
-    #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
+    #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
     pub Arc<Stylesheet>
 );
 
@@ -394,10 +394,11 @@ impl Stylesheet {
                             break;
                         }
                     },
-                    Err(err) => {
-                        let error = ContextualParseError::InvalidRule(err.slice, err.error);
+                    Err((error, slice)) => {
+                        let location = error.location;
+                        let error = ContextualParseError::InvalidRule(slice, error);
                         iter.parser.context.log_css_error(&iter.parser.error_context,
-                                                          err.location, error);
+                                                          location, error);
                     }
                 }
             }

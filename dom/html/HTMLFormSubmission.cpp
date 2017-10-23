@@ -529,7 +529,7 @@ FSMultipartFormData::AddNameBlobOrNullPair(const nsAString& aName, Blob* aBlob)
       // Create buffered stream (for efficiency)
       nsCOMPtr<nsIInputStream> bufferedStream;
       rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream),
-                                     fileStream, 8192);
+                                     fileStream.forget(), 8192);
       NS_ENSURE_SUCCESS(rv, rv);
 
       fileStream = bufferedStream;
@@ -883,7 +883,7 @@ GetSubmitEncoding(nsGenericHTMLElement* aForm)
 
 void
 GetEnumAttr(nsGenericHTMLElement* aContent,
-            nsIAtom* atom, int32_t* aValue)
+            nsAtom* atom, int32_t* aValue)
 {
   const nsAttrValue* value = aContent->GetParsedAttr(atom);
   if (value && value->Type() == nsAttrValue::eEnum) {

@@ -229,7 +229,6 @@ dependencies {
     compile "com.android.support:recyclerview-v7:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
     compile "com.android.support:design:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
     compile "com.android.support:customtabs:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
-    compile "com.android.support:palette-v7:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
 
     if (mozconfig.substs.MOZ_NATIVE_DEVICES) {
         compile "com.android.support:mediarouter-v7:${mozconfig.substs.ANDROID_SUPPORT_LIBRARY_VERSION}"
@@ -353,6 +352,10 @@ android.applicationVariants.all { variant ->
     if (!audienceDimension.equals('official')) {
         configureVariantWithGeckoBinaries(variant)
     }
+}
+
+android.applicationVariants.all { variant ->
+    configureVariantWithJNIWrappers(variant, "Fennec")
 }
 
 apply plugin: 'spoon'
@@ -482,7 +485,7 @@ android.applicationVariants.all { variant ->
 
         reports {
             html.enabled = true // HTML reports for humans.
-            html.destination = "$project.buildDir/outputs/findbugs/findbugs-${variant.name}-output.html"
+            html.destination = "$project.buildDir/reports/findbugs/findbugs-${variant.name}-output.html"
             xml.enabled = false
         }
     }
@@ -506,7 +509,7 @@ android.applicationVariants.all { variant ->
 
         reports {
             xml.enabled = true // XML reports for machines.
-            xml.destination = "$project.buildDir/outputs/findbugs/findbugs-${variant.name}-output.xml"
+            xml.destination = "$project.buildDir/reports/findbugs/findbugs-${variant.name}-output.xml"
             html.enabled = false
         }
     }

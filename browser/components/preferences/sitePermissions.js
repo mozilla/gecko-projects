@@ -14,6 +14,8 @@ function Permission(principal, type, capability, capabilityString) {
   this.capabilityString = capabilityString;
 }
 
+const PERMISSION_STATES = [SitePermissions.ALLOW, SitePermissions.BLOCK, SitePermissions.PROMPT];
+
 var gSitePermissionsManager = {
   _type: "",
   _isObserving: false,
@@ -70,8 +72,8 @@ var gSitePermissionsManager = {
 
     let permission = subject.QueryInterface(Components.interfaces.nsIPermission);
 
-    // Ignore unrelated permission types.
-    if (permission.type !== this._type)
+    // Ignore unrelated permission types and permissions with unknown states.
+    if (permission.type !== this._type || !PERMISSION_STATES.includes(permission.capability))
       return;
 
     if (data == "added") {
@@ -105,14 +107,15 @@ var gSitePermissionsManager = {
       stringKey = "cannot";
       break;
     case Services.perms.PROMPT_ACTION:
-      stringKey = "prompt"
+      stringKey = "prompt";
       break;
     }
     return this._bundle.getString(stringKey);
   },
 
   _addPermissionToList(perm) {
-    if (perm.type !== this._type)
+    // Ignore unrelated permission types and permissions with unknown states.
+    if (perm.type !== this._type || !PERMISSION_STATES.includes(perm.capability))
       return;
     let capabilityString = this._getCapabilityString(perm.capability);
     let p = new Permission(perm.principal, perm.type, perm.capability,
@@ -157,8 +160,15 @@ var gSitePermissionsManager = {
     menulist.appendChild(menupopup);
     let states = SitePermissions.getAvailableStates(permission.type);
     for (let state of states) {
-      if (state == SitePermissions.UNKNOWN)
+      // Work around the (rare) edge case when a user has changed their
+      // default permission type back to UNKNOWN while still having a
+      // PROMPT permission set for an origin.
+      if (state == SitePermissions.UNKNOWN &&
+          permission.capability == SitePermissions.PROMPT) {
+        state = SitePermissions.PROMPT;
+      } else if (state == SitePermissions.UNKNOWN) {
         continue;
+      }
       let m = document.createElement("menuitem");
       m.setAttribute("label", this._getCapabilityString(state));
       m.setAttribute("value", state);
@@ -173,7 +183,7 @@ var gSitePermissionsManager = {
     row.appendChild(hbox);
     row.appendChild(menulist);
     richlistitem.appendChild(row);
-    this._list.appendChild(richlistitem)
+    this._list.appendChild(richlistitem);
   },
 
   onWindowKeyPress(event) {

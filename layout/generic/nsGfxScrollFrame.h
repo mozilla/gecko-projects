@@ -27,7 +27,7 @@
 class nsPresContext;
 class nsIPresShell;
 class nsIContent;
-class nsIAtom;
+class nsAtom;
 class nsPresState;
 class nsIScrollPositionListener;
 
@@ -88,7 +88,7 @@ public:
    * @note This method might destroy the frame, pres shell and other objects.
    * Called when the 'curpos' attribute on one of the scrollbars changes.
    */
-  void CurPosAttributeChanged(nsIContent* aChild);
+  void CurPosAttributeChanged(nsIContent* aChild, bool aDoScroll = true);
 
   void PostScrollEvent();
   void FireScrollEvent();
@@ -166,9 +166,9 @@ public:
   /**
    * @note This method might destroy the frame, pres shell and other objects.
    */
-  void SetCoordAttribute(nsIContent* aContent, nsIAtom* aAtom, nscoord aSize);
+  void SetCoordAttribute(nsIContent* aContent, nsAtom* aAtom, nscoord aSize);
 
-  nscoord GetCoordAttribute(nsIFrame* aFrame, nsIAtom* aAtom, nscoord aDefaultValue,
+  nscoord GetCoordAttribute(nsIFrame* aFrame, nsAtom* aAtom, nscoord aDefaultValue,
                             nscoord* aRangeStart, nscoord* aRangeLength);
 
   /**
@@ -235,20 +235,20 @@ public:
    * @note This method might destroy the frame, pres shell and other objects.
    */
   void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition,
-                                    nsIAtom* aOrigin = nullptr);
+                                    nsAtom* aOrigin = nullptr);
 
   CSSIntPoint GetScrollPositionCSSPixels();
   /**
    * @note This method might destroy the frame, pres shell and other objects.
    */
-  void ScrollToImpl(nsPoint aScrollPosition, const nsRect& aRange, nsIAtom* aOrigin = nullptr);
+  void ScrollToImpl(nsPoint aScrollPosition, const nsRect& aRange, nsAtom* aOrigin = nullptr);
   void ScrollVisual();
   /**
    * @note This method might destroy the frame, pres shell and other objects.
    */
   void ScrollBy(nsIntPoint aDelta, nsIScrollableFrame::ScrollUnit aUnit,
                 nsIScrollableFrame::ScrollMode aMode, nsIntPoint* aOverflow,
-                nsIAtom* aOrigin = nullptr,
+                nsAtom* aOrigin = nullptr,
                 nsIScrollableFrame::ScrollMomentum aMomentum = nsIScrollableFrame::NOT_MOMENTUM,
                 nsIScrollbarMediator::ScrollSnapMode aSnap
                   = nsIScrollbarMediator::DISABLE_SNAP);
@@ -417,7 +417,7 @@ public:
                              nsRect* aVisibleRect,
                              nsRect* aDirtyRect,
                              bool aSetBase,
-                             bool* aUsingDisplayPortDirtyRect = nullptr);
+                             bool* aDirtyRectHasBeenOverriden = nullptr);
   void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort);
   bool GetDisplayPortAtLastApproximateFrameVisibilityUpdate(nsRect* aDisplayPort);
 
@@ -430,9 +430,9 @@ public:
 
   void HandleScrollbarStyleSwitching();
 
-  nsIAtom* LastScrollOrigin() const { return mLastScrollOrigin; }
+  nsAtom* LastScrollOrigin() const { return mLastScrollOrigin; }
   void AllowScrollOriginDowngrade() { mAllowScrollOriginDowngrade = true; }
-  nsIAtom* LastSmoothScrollOrigin() const { return mLastSmoothScrollOrigin; }
+  nsAtom* LastSmoothScrollOrigin() const { return mLastSmoothScrollOrigin; }
   uint32_t CurrentScrollGeneration() const { return mScrollGeneration; }
   nsPoint LastScrollDestination() const { return mDestination; }
   void ResetScrollInfoIfGeneration(uint32_t aGeneration) {
@@ -499,9 +499,9 @@ public:
   RefPtr<AsyncSmoothMSDScroll> mAsyncSmoothMSDScroll;
   RefPtr<ScrollbarActivity> mScrollbarActivity;
   nsTArray<nsIScrollPositionListener*> mListeners;
-  nsIAtom* mLastScrollOrigin;
+  nsAtom* mLastScrollOrigin;
   bool mAllowScrollOriginDowngrade;
-  nsIAtom* mLastSmoothScrollOrigin;
+  nsAtom* mLastSmoothScrollOrigin;
   Maybe<nsPoint> mApzSmoothScrollDestination;
   uint32_t mScrollGeneration;
   nsRect mScrollPort;
@@ -644,12 +644,12 @@ protected:
    */
   void ScrollToWithOrigin(nsPoint aScrollPosition,
                           nsIScrollableFrame::ScrollMode aMode,
-                          nsIAtom *aOrigin, // nullptr indicates "other" origin
+                          nsAtom *aOrigin, // nullptr indicates "other" origin
                           const nsRect* aRange,
                           nsIScrollbarMediator::ScrollSnapMode aSnap
                             = nsIScrollbarMediator::DISABLE_SNAP);
 
-  void CompleteAsyncScroll(const nsRect &aRange, nsIAtom* aOrigin = nullptr);
+  void CompleteAsyncScroll(const nsRect &aRange, nsAtom* aOrigin = nullptr);
 
   bool HasPluginFrames();
   bool HasPerspective() const;
@@ -849,7 +849,7 @@ public:
     mHelper.ScrollToCSSPixels(aScrollPosition, aMode);
   }
   virtual void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition,
-                                            nsIAtom* aOrigin = nullptr) override {
+                                            nsAtom* aOrigin = nullptr) override {
     mHelper.ScrollToCSSPixelsApproximate(aScrollPosition, aOrigin);
   }
   /**
@@ -862,7 +862,7 @@ public:
    * @note This method might destroy the frame, pres shell and other objects.
    */
   virtual void ScrollBy(nsIntPoint aDelta, ScrollUnit aUnit, ScrollMode aMode,
-                        nsIntPoint* aOverflow, nsIAtom* aOrigin = nullptr,
+                        nsIntPoint* aOverflow, nsAtom* aOrigin = nullptr,
                         nsIScrollableFrame::ScrollMomentum aMomentum = nsIScrollableFrame::NOT_MOMENTUM,
                         nsIScrollbarMediator::ScrollSnapMode aSnap
                           = nsIScrollbarMediator::DISABLE_SNAP)
@@ -921,13 +921,13 @@ public:
   virtual nsRect ExpandRectToNearlyVisible(const nsRect& aRect) const override {
     return mHelper.ExpandRectToNearlyVisible(aRect);
   }
-  virtual nsIAtom* LastScrollOrigin() override {
+  virtual nsAtom* LastScrollOrigin() override {
     return mHelper.LastScrollOrigin();
   }
   virtual void AllowScrollOriginDowngrade() override {
     mHelper.AllowScrollOriginDowngrade();
   }
-  virtual nsIAtom* LastSmoothScrollOrigin() override {
+  virtual nsAtom* LastSmoothScrollOrigin() override {
     return mHelper.LastSmoothScrollOrigin();
   }
   virtual uint32_t CurrentScrollGeneration() override {
@@ -1293,7 +1293,7 @@ public:
     mHelper.ScrollToCSSPixels(aScrollPosition, aMode);
   }
   virtual void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition,
-                                            nsIAtom* aOrigin = nullptr) override {
+                                            nsAtom* aOrigin = nullptr) override {
     mHelper.ScrollToCSSPixelsApproximate(aScrollPosition, aOrigin);
   }
   virtual CSSIntPoint GetScrollPositionCSSPixels() override {
@@ -1303,7 +1303,7 @@ public:
    * @note This method might destroy the frame, pres shell and other objects.
    */
   virtual void ScrollBy(nsIntPoint aDelta, ScrollUnit aUnit, ScrollMode aMode,
-                        nsIntPoint* aOverflow, nsIAtom* aOrigin = nullptr,
+                        nsIntPoint* aOverflow, nsAtom* aOrigin = nullptr,
                         nsIScrollableFrame::ScrollMomentum aMomentum = nsIScrollableFrame::NOT_MOMENTUM,
                         nsIScrollbarMediator::ScrollSnapMode aSnap
                           = nsIScrollbarMediator::DISABLE_SNAP)
@@ -1362,13 +1362,13 @@ public:
   virtual nsRect ExpandRectToNearlyVisible(const nsRect& aRect) const override {
     return mHelper.ExpandRectToNearlyVisible(aRect);
   }
-  virtual nsIAtom* LastScrollOrigin() override {
+  virtual nsAtom* LastScrollOrigin() override {
     return mHelper.LastScrollOrigin();
   }
   virtual void AllowScrollOriginDowngrade() override {
     mHelper.AllowScrollOriginDowngrade();
   }
-  virtual nsIAtom* LastSmoothScrollOrigin() override {
+  virtual nsAtom* LastSmoothScrollOrigin() override {
     return mHelper.LastSmoothScrollOrigin();
   }
   virtual uint32_t CurrentScrollGeneration() override {

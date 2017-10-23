@@ -103,7 +103,7 @@ impl Document {
             self.pan.x as f32 / accumulated_scale_factor,
             self.pan.y as f32 / accumulated_scale_factor,
         );
-        self.frame.build(
+        self.frame.build_renderer_frame(
             resource_cache,
             gpu_cache,
             &self.scene.pipelines,
@@ -296,6 +296,17 @@ impl RenderBackend {
                 );
 
                 DocumentOp::Built
+            }
+            DocumentMsg::UpdatePipelineResources { resources, pipeline_id, epoch } => {
+                profile_scope!("UpdateResources");
+
+                self.resource_cache
+                    .update_resources(resources, &mut profile_counters.resources);
+
+                doc.scene.update_epoch(pipeline_id, epoch);
+                doc.frame.update_epoch(pipeline_id, epoch);
+
+                DocumentOp::Nop
             }
             DocumentMsg::SetRootPipeline(pipeline_id) => {
                 profile_scope!("SetRootPipeline");
@@ -712,12 +723,10 @@ impl ToDebugString for SpecificDisplayItem {
             SpecificDisplayItem::Clip(..) => String::from("clip"),
             SpecificDisplayItem::ScrollFrame(..) => String::from("scroll_frame"),
             SpecificDisplayItem::StickyFrame(..) => String::from("sticky_frame"),
-            SpecificDisplayItem::PushNestedDisplayList => String::from("push_nested_display_list"),
-            SpecificDisplayItem::PopNestedDisplayList => String::from("pop_nested_display_list"),
             SpecificDisplayItem::SetGradientStops => String::from("set_gradient_stops"),
             SpecificDisplayItem::PopStackingContext => String::from("pop_stacking_context"),
-            SpecificDisplayItem::PushTextShadow(..) => String::from("push_text_shadow"),
-            SpecificDisplayItem::PopTextShadow => String::from("pop_text_shadow"),
+            SpecificDisplayItem::PushShadow(..) => String::from("push_shadow"),
+            SpecificDisplayItem::PopAllShadows => String::from("pop_all_shadows"),
         }
     }
 }

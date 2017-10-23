@@ -1093,8 +1093,10 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
 
     mozilla::LogModule::Init();
 
+#ifdef MOZ_GECKO_PROFILER
     char aLocal;
     profiler_init(&aLocal);
+#endif
 
     if (PR_GetEnv("MOZ_CHAOSMODE")) {
         ChaosFeature feature = ChaosFeature::Any;
@@ -1115,7 +1117,7 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
 
     { // Start scoping nsCOMPtrs
         nsCOMPtr<nsIFile> appFile;
-        rv = XRE_GetBinaryPath(argv[0], getter_AddRefs(appFile));
+        rv = XRE_GetBinaryPath(getter_AddRefs(appFile));
         if (NS_FAILED(rv)) {
             printf("Couldn't find application file.\n");
             return 1;
@@ -1417,9 +1419,11 @@ XRE_XPCShellMain(int argc, char** argv, char** envp,
         CrashReporter::UnsetExceptionHandler();
 #endif
 
+#ifdef MOZ_GECKO_PROFILER
     // This must precede NS_LogTerm(), otherwise xpcshell return non-zero
     // during some tests, which causes failures.
     profiler_shutdown();
+#endif
 
     NS_LogTerm();
 

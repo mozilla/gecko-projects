@@ -416,7 +416,6 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mActiveSuppressDisplayport(0)
   , mLayersId(0)
   , mBeforeUnloadListeners(0)
-  , mLayersConnected(false)
   , mDidFakeShow(false)
   , mNotified(false)
   , mTriedBrowserInit(false)
@@ -1060,6 +1059,15 @@ TabChild::DestroyWindow()
       mCoalescedMouseEventFlusher->RemoveObserver();
       mCoalescedMouseEventFlusher = nullptr;
     }
+
+    // In case we don't have chance to process all entries, clean all data in
+    // the queue.
+    while (mToBeDispatchedMouseData.GetSize() > 0) {
+      UniquePtr<CoalescedMouseData> data(
+        static_cast<CoalescedMouseData*>(mToBeDispatchedMouseData.PopFront()));
+      data.reset();
+    }
+
     nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(WebNavigation());
     if (baseWindow)
         baseWindow->Destroy();
@@ -1176,7 +1184,7 @@ TabChild::DoFakeShow(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                      const CompositorOptions& aCompositorOptions,
                      PRenderFrameChild* aRenderFrame, const ShowInfo& aShowInfo)
 {
-  mLayersConnected = aRenderFrame ? true : false;
+  mLayersConnected = aRenderFrame ? Some(true) : Some(false);
   InitRenderingState(aTextureFactoryIdentifier, aLayersId, aCompositorOptions, aRenderFrame);
   RecvShow(ScreenIntSize(0, 0), aShowInfo, mParentIsActive, nsSizeMode_Normal);
   mDidFakeShow = true;
@@ -1275,7 +1283,7 @@ TabChild::RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdent
 {
   MOZ_ASSERT((!mDidFakeShow && aRenderFrame) || (mDidFakeShow && !aRenderFrame));
 
-  mLayersConnected = aLayersConnected;
+  mLayersConnected = Some(aLayersConnected);
   InitRenderingState(aTextureFactoryIdentifier, aLayersId, aCompositorOptions, aRenderFrame);
   return IPC_OK();
 }
@@ -1592,22 +1600,62 @@ TabChild::RecvMouseEvent(const nsString& aType,
 }
 
 void
-TabChild::MaybeDispatchCoalescedMouseMoveEvents()
+TabChild::ProcessPendingCoalescedMouseDataAndDispatchEvents()
 {
-  if (!mCoalesceMouseMoveEvents || mCoalescedMouseData.IsEmpty()) {
+  if (!mCoalesceMouseMoveEvents || !mCoalescedMouseEventFlusher) {
+    // We don't enable mouse coalescing or we are destroying TabChild.
     return;
   }
-  const WidgetMouseEvent* event = mCoalescedMouseData.GetCoalescedEvent();
-  MOZ_ASSERT(event);
-  // Dispatch the coalesced mousemove event. Using RecvRealMouseButtonEvent to
-  // bypass the coalesce handling in RecvRealMouseMoveEvent.
-  RecvRealMouseButtonEvent(*event,
-                           mCoalescedMouseData.GetScrollableLayerGuid(),
-                           mCoalescedMouseData.GetInputBlockId());
+
+  // We may reentry the event loop and push more data to
+  // mToBeDispatchedMouseData while dispatching an event.
+
+  // We may have some pending coalesced data while dispatch an event and reentry
+  // the event loop. In that case we don't have chance to consume the remainding
+  // pending data until we get new mouse events. Get some helps from
+  // mCoalescedMouseEventFlusher to trigger it.
+  mCoalescedMouseEventFlusher->StartObserver();
+
+  while (mToBeDispatchedMouseData.GetSize() > 0) {
+    UniquePtr<CoalescedMouseData> data(
+      static_cast<CoalescedMouseData*>(mToBeDispatchedMouseData.PopFront()));
+
+    UniquePtr<WidgetMouseEvent> event = data->TakeCoalescedEvent();
+    if (event) {
+      // Dispatch the pending events. Using HandleRealMouseButtonEvent
+      // to bypass the coalesce handling in RecvRealMouseMoveEvent. Can't use
+      // RecvRealMouseButtonEvent because we may also put some mouse events
+      // other than mousemove.
+      HandleRealMouseButtonEvent(*event,
+                                 data->GetScrollableLayerGuid(),
+                                 data->GetInputBlockId());
+    }
+  }
+  // mCoalescedMouseEventFlusher may be destroyed when reentrying the event
+  // loop.
   if (mCoalescedMouseEventFlusher) {
-    mCoalescedMouseData.Reset();
     mCoalescedMouseEventFlusher->RemoveObserver();
   }
+}
+
+void
+TabChild::FlushAllCoalescedMouseData()
+{
+  MOZ_ASSERT(mCoalesceMouseMoveEvents);
+
+  // Move all entries from mCoalescedMouseData to mToBeDispatchedMouseData.
+  for (auto iter = mCoalescedMouseData.Iter(); !iter.Done(); iter.Next()) {
+    CoalescedMouseData* data = iter.UserData();
+    if (!data || data->IsEmpty()) {
+      continue;
+    }
+    UniquePtr<CoalescedMouseData> dispatchData =
+      MakeUnique<CoalescedMouseData>();
+
+    dispatchData->RetrieveDataFrom(*data);
+    mToBeDispatchedMouseData.Push(dispatchData.release());
+  }
+  mCoalescedMouseData.Clear();
 }
 
 mozilla::ipc::IPCResult
@@ -1616,15 +1664,34 @@ TabChild::RecvRealMouseMoveEvent(const WidgetMouseEvent& aEvent,
                                  const uint64_t& aInputBlockId)
 {
   if (mCoalesceMouseMoveEvents && mCoalescedMouseEventFlusher) {
-    if (mCoalescedMouseData.CanCoalesce(aEvent, aGuid, aInputBlockId)) {
-      mCoalescedMouseData.Coalesce(aEvent, aGuid, aInputBlockId);
+    CoalescedMouseData* data = nullptr;
+    mCoalescedMouseData.Get(aEvent.pointerId, &data);
+    if (!data) {
+      data = new CoalescedMouseData();
+      mCoalescedMouseData.Put(aEvent.pointerId, data);
+    }
+    if (data->CanCoalesce(aEvent, aGuid, aInputBlockId)) {
+      data->Coalesce(aEvent, aGuid, aInputBlockId);
       mCoalescedMouseEventFlusher->StartObserver();
       return IPC_OK();
     }
-    // Can't coalesce current mousemove event. Dispatch the coalesced mousemove
-    // event and coalesce the current one.
-    MaybeDispatchCoalescedMouseMoveEvents();
-    mCoalescedMouseData.Coalesce(aEvent, aGuid, aInputBlockId);
+    // Can't coalesce current mousemove event. Put the coalesced mousemove data
+    // with the same pointer id to mToBeDispatchedMouseData, coalesce the
+    // current one, and process all pending data in mToBeDispatchedMouseData.
+    MOZ_ASSERT(data);
+    UniquePtr<CoalescedMouseData> dispatchData =
+      MakeUnique<CoalescedMouseData>();
+
+    dispatchData->RetrieveDataFrom(*data);
+    mToBeDispatchedMouseData.Push(dispatchData.release());
+
+    // Put new data to replace the old one in the hash table.
+    CoalescedMouseData* newData = new CoalescedMouseData();
+    mCoalescedMouseData.Put(aEvent.pointerId, newData);
+    newData->Coalesce(aEvent, aGuid, aInputBlockId);
+
+    // Dispatch all pending mouse events.
+    ProcessPendingCoalescedMouseDataAndDispatchEvents();
     mCoalescedMouseEventFlusher->StartObserver();
   } else if (!RecvRealMouseButtonEvent(aEvent, aGuid, aInputBlockId)) {
     return IPC_FAIL_NO_REASON(this);
@@ -1664,11 +1731,35 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
                                    const ScrollableLayerGuid& aGuid,
                                    const uint64_t& aInputBlockId)
 {
-  if (aEvent.mMessage != eMouseMove) {
-    // Flush the coalesced mousemove event before dispatching other mouse
-    // events.
-    MaybeDispatchCoalescedMouseMoveEvents();
+  if (mCoalesceMouseMoveEvents && mCoalescedMouseEventFlusher &&
+      aEvent.mMessage != eMouseMove) {
+    // When receiving a mouse event other than mousemove, we have to dispatch
+    // all coalesced events before it. However, we can't dispatch all pending
+    // coalesced events directly because we may reentry the event loop while
+    // dispatching. To make sure we won't dispatch disorder events, we move all
+    // coalesced mousemove events and current event to a deque to dispatch them.
+    // When reentrying the event loop and dispatching more events, we put new
+    // events in the end of the nsQueue and dispatch events from the beginning.
+    FlushAllCoalescedMouseData();
+
+    UniquePtr<CoalescedMouseData> dispatchData =
+      MakeUnique<CoalescedMouseData>();
+
+    dispatchData->Coalesce(aEvent, aGuid, aInputBlockId);
+    mToBeDispatchedMouseData.Push(dispatchData.release());
+
+    ProcessPendingCoalescedMouseDataAndDispatchEvents();
+    return IPC_OK();
   }
+  HandleRealMouseButtonEvent(aEvent, aGuid, aInputBlockId);
+  return IPC_OK();
+}
+
+void
+TabChild::HandleRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
+                                     const ScrollableLayerGuid& aGuid,
+                                     const uint64_t& aInputBlockId)
+{
   // Mouse events like eMouseEnterIntoWidget, that are created in the parent
   // process EventStateManager code, have an input block id which they get from
   // the InputAPZContext in the parent process stack. However, they did not
@@ -1698,7 +1789,6 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
   if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessMouseEvent(aEvent, aGuid, aInputBlockId);
   }
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
@@ -1763,13 +1853,12 @@ TabChild::MaybeDispatchCoalescedWheelEvent()
   if (mCoalescedWheelData.IsEmpty()) {
     return;
   }
-  const WidgetWheelEvent* wheelEvent =
-    mCoalescedWheelData.GetCoalescedEvent();
+  UniquePtr<WidgetWheelEvent> wheelEvent =
+    mCoalescedWheelData.TakeCoalescedEvent();
   MOZ_ASSERT(wheelEvent);
   DispatchWheelEvent(*wheelEvent,
                      mCoalescedWheelData.GetScrollableLayerGuid(),
                      mCoalescedWheelData.GetInputBlockId());
-  mCoalescedWheelData.Reset();
 }
 
 void
@@ -2783,6 +2872,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     mPuppetWidget->InitIMEState();
 
     if (!aRenderFrame) {
+      mLayersConnected = Some(false);
       NS_WARNING("failed to construct RenderFrame");
       return;
     }
@@ -2794,6 +2884,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     // compositor context.
     PCompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
     if (!compositorChild) {
+      mLayersConnected = Some(false);
       NS_WARNING("failed to get CompositorBridgeChild instance");
       return;
     }
@@ -2812,32 +2903,21 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       mLayersId = aLayersId;
     }
 
-    LayerManager* lm = mPuppetWidget->GetLayerManager();
-    if (lm->AsWebRenderLayerManager()) {
-      lm->AsWebRenderLayerManager()->Initialize(compositorChild,
-                                                wr::AsPipelineId(aLayersId),
-                                                &mTextureFactoryIdentifier);
+    MOZ_ASSERT(!mPuppetWidget->HasLayerManager());
+    bool success = false;
+    if (mLayersConnected == Some(true)) {
+      success = CreateRemoteLayerManager(compositorChild);
+    }
+
+    if (success) {
+      MOZ_ASSERT(mLayersConnected == Some(true));
+      // Succeeded to create "remote" layer manager
       ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
       gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
       InitAPZState();
-    }
-
-    ShadowLayerForwarder* lf =
-        mPuppetWidget->GetLayerManager(
-            nullptr, mTextureFactoryIdentifier.mParentBackend)
-                ->AsShadowForwarder();
-    if (lf) {
-      nsTArray<LayersBackend> backends;
-      backends.AppendElement(mTextureFactoryIdentifier.mParentBackend);
-      PLayerTransactionChild* shadowManager =
-          compositorChild->SendPLayerTransactionConstructor(backends, aLayersId);
-      if (shadowManager) {
-        lf->SetShadowManager(shadowManager);
-        lf->IdentifyTextureHost(mTextureFactoryIdentifier);
-        ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
-        gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
-        InitAPZState();
-      }
+    } else {
+      // Fallback to BasicManager
+      mLayersConnected = Some(false);
     }
 
     nsCOMPtr<nsIObserverService> observerService =
@@ -2848,6 +2928,42 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
                                      BEFORE_FIRST_PAINT,
                                      false);
     }
+}
+
+bool
+TabChild::CreateRemoteLayerManager(mozilla::layers::PCompositorBridgeChild* aCompositorChild)
+{
+  MOZ_ASSERT(aCompositorChild);
+
+  bool success = false;
+  if (gfxVars::UseWebRender()) {
+    success = mPuppetWidget->CreateRemoteLayerManager([&] (LayerManager* aLayerManager) -> bool {
+      MOZ_ASSERT(aLayerManager->AsWebRenderLayerManager());
+      return aLayerManager->AsWebRenderLayerManager()->Initialize(aCompositorChild,
+                                                                  wr::AsPipelineId(mLayersId),
+                                                                  &mTextureFactoryIdentifier);
+    });
+  } else {
+    nsTArray<LayersBackend> ignored;
+    PLayerTransactionChild* shadowManager = aCompositorChild->SendPLayerTransactionConstructor(ignored, LayersId());
+    if (shadowManager &&
+        shadowManager->SendGetTextureFactoryIdentifier(&mTextureFactoryIdentifier) &&
+        mTextureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_NONE)
+    {
+      success = true;
+    }
+    if (!success) {
+      NS_WARNING("failed to allocate layer transaction");
+    } else {
+      success = mPuppetWidget->CreateRemoteLayerManager([&] (LayerManager* aLayerManager) -> bool {
+        ShadowLayerForwarder* lf = aLayerManager->AsShadowForwarder();
+        lf->SetShadowManager(shadowManager);
+        lf->IdentifyTextureHost(mTextureFactoryIdentifier);
+        return true;
+      });
+    }
+  }
+  return success;
 }
 
 void
@@ -3147,33 +3263,9 @@ TabChild::ReinitRendering()
 
   bool success = false;
   RefPtr<CompositorBridgeChild> cb = CompositorBridgeChild::Get();
-  if (gfxVars::UseWebRender()) {
-    success = mPuppetWidget->RecreateLayerManager([&] (LayerManager* aLayerManager) -> bool {
-      MOZ_ASSERT(aLayerManager->AsWebRenderLayerManager());
-      return aLayerManager->AsWebRenderLayerManager()->Initialize(cb,
-                                                                  wr::AsPipelineId(mLayersId),
-                                                                  &mTextureFactoryIdentifier);
-    });
-  } else {
-    nsTArray<LayersBackend> ignored;
-    PLayerTransactionChild* shadowManager = cb->SendPLayerTransactionConstructor(ignored, LayersId());
-    if (shadowManager &&
-        shadowManager->SendGetTextureFactoryIdentifier(&mTextureFactoryIdentifier) &&
-        mTextureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_NONE)
-    {
-      success = true;
-    }
-    if (!success) {
-      NS_WARNING("failed to re-allocate layer transaction");
-      return;
-    }
 
-    success = mPuppetWidget->RecreateLayerManager([&] (LayerManager* aLayerManager) -> bool {
-      ShadowLayerForwarder* lf = aLayerManager->AsShadowForwarder();
-      lf->SetShadowManager(shadowManager);
-      lf->IdentifyTextureHost(mTextureFactoryIdentifier);
-      return true;
-    });
+  if (cb) {
+    success = CreateRemoteLayerManager(cb);
   }
 
   if (!success) {
@@ -3181,7 +3273,7 @@ TabChild::ReinitRendering()
     return;
   }
 
-  mLayersConnected = true;
+  mLayersConnected = Some(true);
   ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
   gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
 

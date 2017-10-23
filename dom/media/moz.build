@@ -32,6 +32,7 @@ with Files('GetUserMedia*'):
     BUG_COMPONENT = component_av
 
 DIRS += [
+    'doctor',
     'eme',
     'encoder',
     'fake-cdm',
@@ -101,10 +102,8 @@ EXPORTS += [
     'BufferMediaResource.h',
     'ChannelMediaDecoder.h',
     'CubebUtils.h',
-    'DecoderDoctorDiagnostics.h',
     'DecoderTraits.h',
     'DOMMediaStream.h',
-    'EncodedBufferCache.h',
     'FileBlockCache.h',
     'FrameStatistics.h',
     'Intervals.h',
@@ -210,15 +209,13 @@ UNIFIED_SOURCES += [
     'AudioStreamTrack.cpp',
     'AudioTrack.cpp',
     'AudioTrackList.cpp',
+    'BaseMediaResource.cpp',
     'Benchmark.cpp',
     'CanvasCaptureMediaStream.cpp',
     'ChannelMediaDecoder.cpp',
     'ChannelMediaResource.cpp',
     'CloneableWithRangeMediaResource.cpp',
-    'CubebUtils.cpp',
-    'DecoderDoctorDiagnostics.cpp',
     'DOMMediaStream.cpp',
-    'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
     'FileMediaResource.cpp',
     'GetUserMediaRequest.cpp',
@@ -280,8 +277,11 @@ if CONFIG['OS_TARGET'] == 'WINNT':
       'ThreadPoolCOMListener.cpp',
   ]
 
+# CubebUtils.cpp needs to be built separately due to what appears to be some kind
+# of compiler bug on Android 4.2 x86 opt. See bug 1408459.
 # DecoderTraits.cpp needs to be built separately because of Mac OS X headers.
 SOURCES += [
+    'CubebUtils.cpp',
     'DecoderTraits.cpp',
 ]
 
@@ -316,9 +316,6 @@ if CONFIG['MOZ_WEBRTC']:
     ]
 
 DEFINES['MOZILLA_INTERNAL_API'] = True
-
-if CONFIG['ANDROID_VERSION'] > '15':
-    DEFINES['MOZ_OMX_WEBM_DECODER'] = True
 
 if CONFIG['MOZ_ANDROID_HLS_SUPPORT']:
     DEFINES['MOZ_ANDROID_HLS_SUPPORT'] = True

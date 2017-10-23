@@ -79,6 +79,17 @@ class Manifest {
     await this._store.load();
   }
 
+  async prefetch(browser) {
+    const manifestData = await ManifestObtainer.browserObtainManifest(browser);
+    const icon = await ManifestIcons.browserFetchIcon(browser, manifestData, 192);
+    const data = {
+      installed: false,
+      manifest: manifestData,
+      cached_icon: icon
+    };
+    return data;
+  }
+
   async install() {
     const manifestData = await ManifestObtainer.browserObtainManifest(this._browser);
     this._store.data = {
@@ -109,6 +120,7 @@ class Manifest {
 
   get name() {
     return this._store.data.manifest.short_name ||
+      this._store.data.manifest.name ||
       this._store.data.manifest.short_url;
   }
 

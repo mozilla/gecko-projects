@@ -22,7 +22,7 @@ use servo_atoms::Atom;
 #[dom_struct]
 pub struct PopStateEvent {
     event: Event,
-    #[ignore_heap_size_of = "Defined in rust-mozjs"]
+    #[ignore_malloc_size_of = "Defined in rust-mozjs"]
     state: Heap<JSVal>,
 }
 
@@ -35,7 +35,7 @@ impl PopStateEvent {
     }
 
     pub fn new_uninitialized(window: &Window) -> DomRoot<PopStateEvent> {
-        reflect_dom_object(box PopStateEvent::new_inherited(),
+        reflect_dom_object(Box::new(PopStateEvent::new_inherited()),
                            window,
                            PopStateEventBinding::Wrap)
     }

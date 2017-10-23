@@ -6,11 +6,9 @@ use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use canvas_traits::canvas::{byte_swap, multiply_u8_pixel};
 use canvas_traits::webgl::{WebGLContextShareMode, WebGLCommand, WebGLError};
 use canvas_traits::webgl::{WebGLFramebufferBindingRequest, WebGLMsg, WebGLMsgSender, WebGLParameter, WebVRCommand};
+use canvas_traits::webgl::DOMToTextureCommand;
 use canvas_traits::webgl::WebGLError::*;
 use canvas_traits::webgl::webgl_channel;
-use core::cell::Ref;
-use core::iter::FromIterator;
-use core::nonzero::NonZero;
 use dom::bindings::cell::DomRefCell;
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::{self, WebGLContextAttributes};
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextConstants as constants;
@@ -19,12 +17,14 @@ use dom::bindings::codegen::UnionTypes::ImageDataOrHTMLImageElementOrHTMLCanvasE
 use dom::bindings::conversions::{ConversionResult, FromJSValConvertible, ToJSValConvertible};
 use dom::bindings::error::{Error, Fallible};
 use dom::bindings::inheritance::Castable;
+use dom::bindings::nonnull::NonNullJSObjectPtr;
 use dom::bindings::reflector::{DomObject, Reflector, reflect_dom_object};
 use dom::bindings::root::{Dom, DomRoot, LayoutDom, MutNullableDom};
 use dom::bindings::str::DOMString;
 use dom::event::{Event, EventBubbles, EventCancelable};
 use dom::htmlcanvaselement::HTMLCanvasElement;
 use dom::htmlcanvaselement::utils as canvas_utils;
+use dom::htmliframeelement::HTMLIFrameElement;
 use dom::node::{Node, NodeDamage, window_from_node};
 use dom::webgl_extensions::WebGLExtensions;
 use dom::webgl_validations::WebGLValidator;
@@ -55,7 +55,8 @@ use net_traits::image_cache::ImageResponse;
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
 use script_layout_interface::HTMLCanvasDataSource;
 use servo_config::prefs::PREFS;
-use std::cell::Cell;
+use std::cell::{Cell, Ref};
+use std::iter::FromIterator;
 use webrender_api;
 
 type ImagePixelResult = Result<(Vec<u8>, Size2D<i32>, bool), ()>;
@@ -134,7 +135,7 @@ fn has_invalid_blend_constants(arg1: u32, arg2: u32) -> bool {
 
 /// Set of bitflags for texture unpacking (texImage2d, etc...)
 bitflags! {
-    #[derive(HeapSizeOf, JSTraceable)]
+    #[derive(JSTraceable, MallocSizeOf)]
     flags TextureUnpacking: u8 {
         const FLIP_Y_AXIS = 0x01,
         const PREMULTIPLY_ALPHA = 0x02,
@@ -144,7 +145,7 @@ bitflags! {
 
 /// Information about the bound textures of a WebGL texture unit.
 #[must_root]
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 struct TextureUnitBindings {
     bound_texture_2d: MutNullableDom<WebGLTexture>,
     bound_texture_cube_map: MutNullableDom<WebGLTexture>,
@@ -180,15 +181,15 @@ impl TextureUnitBindings {
 #[dom_struct]
 pub struct WebGLRenderingContext {
     reflector_: Reflector,
-    #[ignore_heap_size_of = "Channels are hard"]
+    #[ignore_malloc_size_of = "Channels are hard"]
     webgl_sender: WebGLMsgSender,
-    #[ignore_heap_size_of = "Defined in webrender"]
+    #[ignore_malloc_size_of = "Defined in webrender"]
     webrender_image: Cell<Option<webrender_api::ImageKey>>,
     share_mode: WebGLContextShareMode,
-    #[ignore_heap_size_of = "Defined in offscreen_gl_context"]
+    #[ignore_malloc_size_of = "Defined in offscreen_gl_context"]
     limits: GLLimits,
     canvas: Dom<HTMLCanvasElement>,
-    #[ignore_heap_size_of = "Defined in canvas_traits"]
+    #[ignore_malloc_size_of = "Defined in canvas_traits"]
     last_error: Cell<Option<WebGLError>>,
     texture_unpacking_settings: Cell<TextureUnpacking>,
     texture_unpacking_alignment: Cell<u32>,
@@ -200,11 +201,11 @@ pub struct WebGLRenderingContext {
     bound_buffer_element_array: MutNullableDom<WebGLBuffer>,
     bound_attrib_buffers: DomRefCell<FnvHashMap<u32, Dom<WebGLBuffer>>>,
     current_program: MutNullableDom<WebGLProgram>,
-    #[ignore_heap_size_of = "Because it's small"]
+    #[ignore_malloc_size_of = "Because it's small"]
     current_vertex_attrib_0: Cell<(f32, f32, f32, f32)>,
-    #[ignore_heap_size_of = "Because it's small"]
+    #[ignore_malloc_size_of = "Because it's small"]
     current_scissor: Cell<(i32, i32, i32, i32)>,
-    #[ignore_heap_size_of = "Because it's small"]
+    #[ignore_malloc_size_of = "Because it's small"]
     current_clear_color: Cell<(f32, f32, f32, f32)>,
     extension_manager: WebGLExtensions,
 }
@@ -256,7 +257,7 @@ impl WebGLRenderingContext {
     pub fn new(window: &Window, canvas: &HTMLCanvasElement, size: Size2D<i32>, attrs: GLContextAttributes)
                -> Option<DomRoot<WebGLRenderingContext>> {
         match WebGLRenderingContext::new_inherited(window, canvas, size, attrs) {
-            Ok(ctx) => Some(reflect_dom_object(box ctx, window, WebGLRenderingContextBinding::Wrap)),
+            Ok(ctx) => Some(reflect_dom_object(Box::new(ctx), window, WebGLRenderingContextBinding::Wrap)),
             Err(msg) => {
                 error!("Couldn't create WebGLRenderingContext: {}", msg);
                 let event = WebGLContextEvent::new(window,
@@ -1377,7 +1378,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.14
     unsafe fn GetExtension(&self, _cx: *mut JSContext, name: DOMString)
-                    -> Option<NonZero<*mut JSObject>> {
+                    -> Option<NonNullJSObjectPtr> {
         self.extension_manager.init_once(|| {
             self.get_gl_extensions()
         });
@@ -3257,6 +3258,45 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
         self.tex_image_2d(&texture, target, data_type, format,
                           level, width, height, border, 1, pixels);
+        Ok(())
+    }
+
+    // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
+    fn TexImageDOM(&self,
+                   target: u32,
+                   level: i32,
+                   internal_format: u32,
+                   width: i32,
+                   height: i32,
+                   format: u32,
+                   data_type: u32,
+                   source: &HTMLIFrameElement) -> Fallible<()> {
+        // Currently DOMToTexture only supports TEXTURE_2D, RGBA, UNSIGNED_BYTE and no levels.
+        if target != constants::TEXTURE_2D || level != 0 || internal_format != constants::RGBA ||
+            format != constants::RGBA || data_type != constants::UNSIGNED_BYTE {
+            return Ok(self.webgl_error(InvalidValue));
+        }
+
+        // Get bound texture
+        let texture = match self.bound_texture(constants::TEXTURE_2D) {
+            Some(texture) => texture,
+            None => {
+                return Ok(self.webgl_error(InvalidOperation));
+            }
+        };
+
+        let pipeline_id = source.pipeline_id().ok_or(Error::InvalidState)?;
+        let document_id  = self.global().downcast::<Window>().ok_or(Error::InvalidState)?.webrender_document();
+
+        texture.set_attached_to_dom();
+
+        let command = DOMToTextureCommand::Attach(self.webgl_sender.context_id(),
+                                                  texture.id(),
+                                                  document_id,
+                                                  pipeline_id.to_webrender(),
+                                                  Size2D::new(width, height));
+        self.webgl_sender.send_dom_to_texture(command).unwrap();
+
         Ok(())
     }
 

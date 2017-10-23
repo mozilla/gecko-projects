@@ -1181,7 +1181,7 @@ nsComboboxControlFrame::HandleEvent(nsPresContext* aPresContext,
 
 
 nsresult
-nsComboboxControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
+nsComboboxControlFrame::SetFormProperty(nsAtom* aName, const nsAString& aValue)
 {
   nsIFormControlFrame* fcFrame = do_QueryFrame(mDropdownFrame);
   if (!fcFrame) {
@@ -1220,7 +1220,7 @@ nsComboboxControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   // isn't possible to set the display type in CSS2 to create a button frame.
 
     // create content used for display
-  //nsIAtom* tag = NS_Atomize("mozcombodisplay");
+  //nsAtom* tag = NS_Atomize("mozcombodisplay");
 
   // Add a child text content node for the label
 
@@ -1350,7 +1350,7 @@ void
 nsComboboxDisplayFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsDisplayListSet& aLists)
 {
-  nsDisplayListCollection set;
+  nsDisplayListCollection set(aBuilder);
   nsBlockFrame::BuildDisplayList(aBuilder, set);
 
   // remove background items if parent frame is themed

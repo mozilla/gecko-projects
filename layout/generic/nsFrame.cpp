@@ -26,7 +26,7 @@
 #include "nsIContentInlines.h"
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsStyleContext.h"
@@ -936,7 +936,7 @@ bool
 nsIFrame::HasDisplayItems()
 {
   DisplayItemArray* items = GetProperty(DisplayItems());
-  return !!items;
+  return items != nullptr;
 }
 
 bool
@@ -1504,7 +1504,13 @@ nsIFrame::HasOpacityInternal(float aThreshold,
 
   EffectSet* effects =
     aEffectSet ? aEffectSet : EffectSet::GetEffectSet(this);
-  return (IsPrimaryFrame() &&
+  if (!effects) {
+    return false;
+  }
+
+  return ((IsPrimaryFrame() ||
+           nsLayoutUtils::FirstContinuationOrIBSplitSibling(this)->
+             IsPrimaryFrame()) &&
           nsLayoutUtils::HasAnimationOfProperty(effects, eCSSProperty_opacity));
 }
 
@@ -2624,8 +2630,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     nsDisplayListBuilder::DisplayListBuildingData* data =
       GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
     if (data) {
-      dirtyRect = data->mDirtyRect;
-      dirtyRect.IntersectRect(dirtyRect, visibleRect);
+      dirtyRect = data->mDirtyRect.Intersect(visibleRect);
       hasOverrideDirtyRect = true;
     }
   }
@@ -2642,7 +2647,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   bool usingSVGEffects = usingFilter || usingMask;
 
   nsRect visibleRectOutsideSVGEffects = visibleRect;
-  nsDisplayList hoistedScrollInfoItemsStorage;
+  nsDisplayList hoistedScrollInfoItemsStorage(aBuilder);
   if (usingSVGEffects) {
     dirtyRect =
       nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(this, dirtyRect);
@@ -2728,7 +2733,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     clipState.Clear();
   }
 
-  nsDisplayListCollection set;
+  nsDisplayListCollection set(aBuilder);
   {
     DisplayListClipState::AutoSaveRestore nestedClipState(aBuilder);
     nsDisplayListBuilder::AutoInTransformSetter
@@ -2742,8 +2747,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       GetClipPropClipRect(disp, effects, GetSize());
 
     if (contentClip) {
-      aBuilder->IntersectVisibleRect(*contentClip);
       aBuilder->IntersectDirtyRect(*contentClip);
+      aBuilder->IntersectVisibleRect(*contentClip);
       nestedClipState.ClipContentDescendants(*contentClip +
                                              aBuilder->ToReferenceFrame(this));
     }
@@ -2776,7 +2781,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     // When we gain/remove a blend container item, we need to mark this frame
     // as invalid and have the full display list for merging to track
     // the change correctly.
-    // It seems really hard to track this in advanced, as the bookkeeping
+    // It seems really hard to track this in advance, as the bookkeeping
     // required to note which stacking contexts have blend descendants
     // is complex and likely to be buggy.
     // Instead we're doing the sad thing, detecting it afterwards, and just
@@ -2821,7 +2826,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       if (!eventRegions->IsEmpty()) {
         set.BorderBackground()->AppendToBottom(eventRegions);
       } else {
-
         aBuilder->SetLayerEventRegions(nullptr);
         eventRegions->Destroy(aBuilder);
         eventRegions = nullptr;
@@ -2855,7 +2859,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   // element itself.
   set.PositionedDescendants()->SortByZOrder();
 
-  nsDisplayList resultList;
+  nsDisplayList resultList(aBuilder);
   // Now follow the rules of http://www.w3.org/TR/CSS21/zindex.html
   // 1,2: backgrounds and borders
   resultList.AppendToTop(set.BorderBackground());
@@ -2984,8 +2988,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   if (isTransformed && extend3DContext) {
     // Install dummy nsDisplayTransform as a leaf containing
     // descendants not participating this 3D rendering context.
-    nsDisplayList nonparticipants;
-    nsDisplayList participants;
+    nsDisplayList nonparticipants(aBuilder);
+    nsDisplayList participants(aBuilder);
     int index = 1;
 
     while (nsDisplayItem* item = resultList.RemoveBottom()) {
@@ -3027,14 +3031,11 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     buildingDisplayList.SetReferenceFrameAndCurrentOffset(outerReferenceFrame,
       GetOffsetToCrossDoc(outerReferenceFrame));
 
-    if (!aBuilder->IsForGenerateGlyphMask() &&
-        !aBuilder->IsForPaintingSelectionBG()) {
-      nsDisplayTransform *transformItem =
-        new (aBuilder) nsDisplayTransform(aBuilder, this,
-                                          &resultList, visibleRect, 0,
-                                          allowAsyncAnimation);
-      resultList.AppendNewToTop(transformItem);
-    }
+    nsDisplayTransform *transformItem =
+      new (aBuilder) nsDisplayTransform(aBuilder, this,
+                                        &resultList, visibleRect, 0,
+                                        allowAsyncAnimation);
+    resultList.AppendNewToTop(transformItem);
 
     if (hasPerspective) {
       if (clipCapturedBy == ContainerItemType::ePerspective) {
@@ -3115,6 +3116,11 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
     return nullptr;
   }
 
+  // For perspective items we want to treat the 'frame' as being the transform
+  // frame that created it. This stops the transform frame from wrapping another
+  // nsDisplayWrapList around it (with mismatching reference frames), but still
+  // makes the perspective frame create one (so we have an atomic entry for z-index
+  // sorting).
   nsIFrame *itemFrame = item->Frame();
   if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
     itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
@@ -3132,7 +3138,7 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
  */
 static bool
 DescendIntoChild(nsDisplayListBuilder* aBuilder, nsIFrame *aChild,
-                 const nsRect& aDirty, const nsRect& aVisible)
+                 const nsRect& aVisible, const nsRect& aDirty)
 {
   nsIFrame* child = aChild;
   const nsRect& dirty = aDirty;
@@ -3191,7 +3197,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   nsIFrame* child = aChild;
   if (child->GetStateBits() & NS_FRAME_TOO_DEEP_IN_FRAME_TREE)
     return;
-  
+
   aBuilder->ClearWillChangeBudget(child);
 
   const bool doingShortcut =
@@ -3214,7 +3220,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     nsRect dirty = aBuilder->GetDirtyRect() - child->GetOffsetTo(this);
     nsRect visible = aBuilder->GetVisibleRect() - child->GetOffsetTo(this);
 
-    if (!DescendIntoChild(aBuilder, child, dirty, visible)) {
+    if (!DescendIntoChild(aBuilder, child, visible, dirty)) {
       return;
     }
 
@@ -3319,7 +3325,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     visible = child->GetVisualOverflowRect();
     dirty = child->GetVisualOverflowRect();
     awayFromCommonPath = true;
-  } else if (!DescendIntoChild(aBuilder, child, dirty, visible)) {
+  } else if (!DescendIntoChild(aBuilder, child, visible, dirty)) {
     return;
   }
 
@@ -3411,8 +3417,8 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     awayFromCommonPath = true;
   }
 
-  nsDisplayList list;
-  nsDisplayList extraPositionedDescendants;
+  nsDisplayList list(aBuilder);
+  nsDisplayList extraPositionedDescendants(aBuilder);
   const ActiveScrolledRoot* wrapListASR = aBuilder->CurrentActiveScrolledRoot();
   if (isStackingContext) {
     if (effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
@@ -3486,7 +3492,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     // We allow positioned descendants of the child to escape to our parent
     // stacking context's positioned descendant list, because they might be
     // z-index:non-auto
-    nsDisplayListCollection pseudoStack;
+    nsDisplayListCollection pseudoStack(aBuilder);
     aBuilder->AdjustWindowDraggingRegion(child);
     nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
     child->BuildDisplayList(aBuilder, pseudoStack);
@@ -6234,7 +6240,7 @@ nsFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 
 nsresult
 nsFrame::AttributeChanged(int32_t         aNameSpaceID,
-                          nsIAtom*        aAttribute,
+                          nsAtom*        aAttribute,
                           int32_t         aModType)
 {
   return NS_OK;
@@ -7271,7 +7277,7 @@ nsFrame::IsFrameTreeTooDeep(const ReflowInput& aReflowInput,
 bool
 nsIFrame::IsBlockWrapper() const
 {
-  nsIAtom *pseudoType = StyleContext()->GetPseudo();
+  nsAtom *pseudoType = StyleContext()->GetPseudo();
   return (pseudoType == nsCSSAnonBoxes::mozBlockInsideInlineWrapper ||
           pseudoType == nsCSSAnonBoxes::buttonContent ||
           pseudoType == nsCSSAnonBoxes::cellContent);
@@ -7451,7 +7457,7 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
   }
   aTo += nsPrintfCString(" [sc=%p", static_cast<void*>(mStyleContext));
   if (mStyleContext) {
-    nsIAtom* pseudoTag = mStyleContext->GetPseudo();
+    nsAtom* pseudoTag = mStyleContext->GetPseudo();
     if (pseudoTag) {
       nsAutoString atomString;
       pseudoTag->ToString(atomString);
@@ -7702,74 +7708,6 @@ nsIFrame::GetConstFrameSelection() const
 
   return PresContext()->PresShell()->ConstFrameSelection();
 }
-
-#ifdef DEBUG
-nsresult
-nsFrame::DumpRegressionData(nsPresContext* aPresContext, FILE* out, int32_t aIndent)
-{
-  IndentBy(out, aIndent);
-  fprintf(out, "<frame va=\"%p\" type=\"", (void*)this);
-  nsAutoString name;
-  GetFrameName(name);
-  XMLQuote(name);
-  fputs(NS_LossyConvertUTF16toASCII(name).get(), out);
-  fprintf(out, "\" state=\"%016llx\" parent=\"%p\">\n",
-          (unsigned long long)GetDebugStateBits(), (void*)GetParent());
-
-  aIndent++;
-  DumpBaseRegressionData(aPresContext, out, aIndent);
-  aIndent--;
-
-  IndentBy(out, aIndent);
-  fprintf(out, "</frame>\n");
-
-  return NS_OK;
-}
-
-void
-nsFrame::DumpBaseRegressionData(nsPresContext* aPresContext, FILE* out, int32_t aIndent)
-{
-  if (GetNextSibling()) {
-    IndentBy(out, aIndent);
-    fprintf(out, "<next-sibling va=\"%p\"/>\n", (void*)GetNextSibling());
-  }
-
-  if (HasView()) {
-    IndentBy(out, aIndent);
-    fprintf(out, "<view va=\"%p\">\n", (void*)GetView());
-    aIndent++;
-    // XXX add in code to dump out view state too...
-    aIndent--;
-    IndentBy(out, aIndent);
-    fprintf(out, "</view>\n");
-  }
-
-  IndentBy(out, aIndent);
-  fprintf(out, "<bbox x=\"%d\" y=\"%d\" w=\"%d\" h=\"%d\"/>\n",
-          mRect.x, mRect.y, mRect.width, mRect.height);
-
-  // Now dump all of the children on all of the child lists
-  ChildListIterator lists(this);
-  for (; !lists.IsDone(); lists.Next()) {
-    IndentBy(out, aIndent);
-    if (lists.CurrentID() != kPrincipalList) {
-      fprintf(out, "<child-list name=\"%s\">\n", mozilla::layout::ChildListName(lists.CurrentID()));
-    }
-    else {
-      fprintf(out, "<child-list>\n");
-    }
-    aIndent++;
-    nsFrameList::Enumerator childFrames(lists.CurrentList());
-    for (; !childFrames.AtEnd(); childFrames.Next()) {
-      nsIFrame* kid = childFrames.get();
-      kid->DumpRegressionData(aPresContext, out, aIndent);
-    }
-    aIndent--;
-    IndentBy(out, aIndent);
-    fprintf(out, "</child-list>\n");
-  }
-}
-#endif
 
 bool
 nsIFrame::IsFrameSelected() const
@@ -9144,7 +9082,7 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
   // contents of the anonymous blocks.
   nsIFrame *frameForArea = aFrame;
   do {
-    nsIAtom *pseudoType = frameForArea->StyleContext()->GetPseudo();
+    nsAtom *pseudoType = frameForArea->StyleContext()->GetPseudo();
     if (pseudoType != nsCSSAnonBoxes::mozBlockInsideInlineWrapper)
       break;
     // If we're done, we really want it and all its later siblings.
@@ -9504,7 +9442,7 @@ GetIBSplitSiblingForAnonymousBlock(const nsIFrame* aFrame)
   NS_ASSERTION(aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT,
                "GetIBSplitSibling should only be called on ib-split frames");
 
-  nsIAtom* type = aFrame->StyleContext()->GetPseudo();
+  nsAtom* type = aFrame->StyleContext()->GetPseudo();
   if (type != nsCSSAnonBoxes::mozBlockInsideInlineWrapper) {
     // it's not an anonymous block
     return nullptr;
@@ -9556,7 +9494,7 @@ GetCorrectedParent(const nsIFrame* aFrame)
   // Table wrappers are always anon boxes; if we're in here for an outer
   // table, that actually means its the _inner_ table that wants to
   // know its parent. So get the pseudo of the inner in that case.
-  nsIAtom* pseudo = aFrame->StyleContext()->GetPseudo();
+  nsAtom* pseudo = aFrame->StyleContext()->GetPseudo();
   if (pseudo == nsCSSAnonBoxes::tableWrapper) {
     pseudo = aFrame->PrincipalChildList().FirstChild()->StyleContext()->GetPseudo();
   }
@@ -9592,7 +9530,7 @@ GetCorrectedParent(const nsIFrame* aFrame)
 /* static */
 nsIFrame*
 nsFrame::CorrectStyleParentFrame(nsIFrame* aProspectiveParent,
-                                 nsIAtom* aChildPseudo)
+                                 nsAtom* aChildPseudo)
 {
   NS_PRECONDITION(aProspectiveParent, "Must have a prospective parent");
 
@@ -9628,7 +9566,7 @@ nsFrame::CorrectStyleParentFrame(nsIFrame* aProspectiveParent,
       }
     }
 
-    nsIAtom* parentPseudo = parent->StyleContext()->GetPseudo();
+    nsAtom* parentPseudo = parent->StyleContext()->GetPseudo();
     if (!parentPseudo ||
         (!nsCSSAnonBoxes::IsAnonBox(parentPseudo) &&
          // nsPlaceholderFrame pases in nsGkAtoms::placeholderFrame for
@@ -9667,7 +9605,7 @@ nsFrame::DoGetParentStyleContext(nsIFrame** aProviderFrame) const
   if (MOZ_LIKELY(mContent)) {
     nsIContent* parentContent = mContent->GetFlattenedTreeParent();
     if (MOZ_LIKELY(parentContent)) {
-      nsIAtom* pseudo = StyleContext()->GetPseudo();
+      nsAtom* pseudo = StyleContext()->GetPseudo();
       if (!pseudo || !mContent->IsElement() ||
           (!nsCSSAnonBoxes::IsAnonBox(pseudo) &&
            // Ensure that we don't return the display:contents style
@@ -10490,7 +10428,7 @@ nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
 
   // We could force the caller to pass in the pseudo, since some callers know it
   // statically...  But this API is a bit nicer.
-  nsIAtom* pseudo = aChildFrame->StyleContext()->GetPseudo();
+  nsAtom* pseudo = aChildFrame->StyleContext()->GetPseudo();
   MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(pseudo), "Child is not an anon box?");
   MOZ_ASSERT(!nsCSSAnonBoxes::IsNonInheritingAnonBox(pseudo),
              "Why did the caller bother calling us?");
@@ -10545,7 +10483,8 @@ nsIFrame::UpdateStyleOfOwnedChildFrame(
   nsChangeHint childHint = aChildFrame->StyleContext()->CalcStyleDifference(
     aNewStyleContext,
     &equalStructs,
-    &samePointerStructs);
+    &samePointerStructs,
+    /* aIgnoreVariables = */ true);
 
   // CalcStyleDifference will handle caching structs on the new style context,
   // but only if we're not on a style worker thread.
@@ -10830,7 +10769,16 @@ IsFrameScrolledOutOfView(nsIFrame *aFrame)
                                                 scrollableParent);
 
   nsRect scrollableRect = scrollableParent->GetVisualOverflowRect();
-  if (!transformedRect.Intersects(scrollableRect)) {
+  if (transformedRect.IsEmpty()) {
+    // If the transformed rect is empty it represents a line or a point that we
+    // should check is outside the the scrollable rect.
+    if (transformedRect.x > scrollableRect.XMost() ||
+        transformedRect.y > scrollableRect.YMost() ||
+        scrollableRect.x > transformedRect.XMost() ||
+        scrollableRect.y > transformedRect.YMost()) {
+      return true;
+    }
+  } else if (!transformedRect.Intersects(scrollableRect)) {
     return true;
   }
 
@@ -11028,6 +10976,15 @@ nsIFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aSizes) const
     if (!aSizes.mState.HaveSeenPtr(sc)) {
       sc->AddSizeOfIncludingThis(aSizes,
                                  &aSizes.mLayoutComputedValuesNonDom);
+    }
+
+    // And our additional style contexts.
+    int32_t index = 0;
+    while (auto* extra = GetAdditionalStyleContext(index++)) {
+      if (!aSizes.mState.HaveSeenPtr(extra)) {
+        extra->AsServo()->AddSizeOfIncludingThis(aSizes,
+                                                 &aSizes.mLayoutComputedValuesNonDom);
+      }
     }
   }
 

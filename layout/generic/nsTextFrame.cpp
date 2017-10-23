@@ -2603,7 +2603,7 @@ BuildTextRunsScanner::SetupBreakSinksForTextRun(gfxTextRun* aTextRun,
   const nsStyleFont *styleFont = mMappedFlows[0].mStartFrame->StyleFont();
   // We should only use a language for hyphenation if it was specified
   // explicitly.
-  nsIAtom* hyphenationLanguage =
+  nsAtom* hyphenationLanguage =
     styleFont->mExplicitLanguage ? styleFont->mLanguage.get() : nullptr;
   // We keep this pointed at the skip-chars data for the current mappedFlow.
   // This lets us cheaply check whether the flow has compressed initial
@@ -3090,7 +3090,7 @@ static bool IsChineseOrJapanese(const nsTextFrame* aFrame)
     return true;
   }
 
-  nsIAtom* language = aFrame->StyleFont()->mLanguage;
+  nsAtom* language = aFrame->StyleFont()->mLanguage;
   if (!language) {
     return false;
   }
@@ -4120,22 +4120,8 @@ nsTextPaintStyle::InitSelectionColorsAndShadow()
         sc->GetVisitedDependentColor(&nsStyleBackground::mBackgroundColor);
       mSelectionTextColor =
         sc->GetVisitedDependentColor(&nsStyleText::mWebkitTextFillColor);
-      if (auto* geckoStyleContext = sc->GetAsGecko()) {
-        mHasSelectionShadow =
-          nsRuleNode::HasAuthorSpecifiedRules(geckoStyleContext,
-                                              NS_AUTHOR_SPECIFIED_TEXT_SHADOW,
-                                              true);
-      } else {
-        NS_WARNING("stylo: Need a way to get HasAuthorSpecifiedRules from a "
-                   "raw style context");
-        // Or at least an element and a pseudo-style, which is probably a bit
-        // more doable, since we know that, at least when not in the presence of
-        // first-line / first-letter, we're inheriting from selectionElement.
-        mHasSelectionShadow = true;
-      }
-      if (mHasSelectionShadow) {
-        mSelectionShadow = sc->StyleText()->mTextShadow;
-      }
+      mHasSelectionShadow = true;
+      mSelectionShadow = sc->StyleText()->mTextShadow;
       return true;
     }
   }
@@ -4980,12 +4966,6 @@ public:
       aOutFrames->AppendElement(mFrame);
     }
   }
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override;
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                        mozilla::wr::IpcResourceUpdateQueue& aResources,
                                        const StackingContextHelper& aSc,
@@ -5044,7 +5024,7 @@ public:
   {
     NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
     mOpacity = aOpacity;
-    IntersectClip(aBuilder, aClip);
+    IntersectClip(aBuilder, aClip, false);
   }
 
   void WriteDebugInfo(std::stringstream& aStream) override
@@ -5061,7 +5041,6 @@ public:
 #endif
   }
 
-  RefPtr<TextDrawTarget> mTextDrawer;
   nsRect mBounds;
   float mOpacity;
 };
@@ -5137,46 +5116,6 @@ nsDisplayText::nsDisplayText(nsDisplayListBuilder* aBuilder, nsTextFrame* aFrame
   mBounds.Inflate(mFrame->PresContext()->AppUnitsPerDevPixel());
 }
 
-LayerState
-nsDisplayText::GetLayerState(nsDisplayListBuilder* aBuilder,
-                             LayerManager* aManager,
-                             const ContainerLayerParameters& aParameters)
-{
-
-  // Are we doing text layers or webrender?
-  if (!(gfxPrefs::LayersAllowTextLayers() &&
-      CanUseAdvancedLayer(aBuilder->GetWidgetLayerManager()))) {
-    return mozilla::LAYER_NONE;
-  }
-
-  // If we haven't yet, compute the layout/style of the text by running
-  // the painting algorithm with a TextDrawTarget (doesn't actually paint).
-  if (!mTextDrawer) {
-    mTextDrawer = new TextDrawTarget();
-    RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(mTextDrawer);
-
-    // TODO: Paint() checks mDisableSubpixelAA, we should too.
-    RenderToContext(captureCtx, aBuilder, true);
-  }
-
-  if (!mTextDrawer->CanSerializeFonts()) {
-    return mozilla::LAYER_NONE;
-  }
-
-  // If we're using the webrender backend, then we're good to go!
-  if (aManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
-    return mozilla::LAYER_ACTIVE;
-  }
-
-  // If we're using the TextLayer backend, then we need to make sure
-  // the input is plain enough for it to handle
-  if (!mTextDrawer->ContentsAreSimple()) {
-    return mozilla::LAYER_NONE;
-  }
-
-  return mozilla::LAYER_ACTIVE;
-}
-
 void
 nsDisplayText::Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) {
@@ -5194,8 +5133,7 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
                                        WebRenderLayerManager* aManager,
                                        nsDisplayListBuilder* aDisplayListBuilder)
 {
-  ContainerLayerParameters parameter;
-  if (GetLayerState(aDisplayListBuilder, aManager, parameter) != LAYER_ACTIVE) {
+  if (!gfxPrefs::LayersAllowTextLayers()) {
     return false;
   }
 
@@ -5203,67 +5141,12 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
     return true;
   }
 
-  mTextDrawer->CreateWebRenderCommands(aBuilder, aSc, aManager, this, mBounds);
+  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aSc, aManager, this, mBounds);
+  RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer);
 
-  return true;
-}
+  RenderToContext(captureCtx, aDisplayListBuilder, true);
 
-already_AddRefed<layers::Layer>
-nsDisplayText::BuildLayer(nsDisplayListBuilder* aBuilder,
-                          LayerManager* aManager,
-                          const ContainerLayerParameters& aContainerParameters)
-{
-  // If we're using webrender, we want layerless rendering, so emit a dummy.
-  // See CreateWebRenderCommands for actual drawing code.
-  if (aManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
-    return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
-  }
-
-  // We should have all the glyphs recorded now, build
-  // the TextLayer.
-  RefPtr<layers::TextLayer> layer = static_cast<layers::TextLayer*>
-    (aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, this));
-  if (!layer) {
-    layer = aManager->CreateTextLayer();
-  }
-
-  // GetLayerState has guaranteed to us that we have exactly one font
-  // so this will be overwritten by the time we use it.
-  ScaledFont* font = nullptr;
-
-  nsTArray<GlyphArray> allGlyphs;
-  size_t totalLength = 0;
-  for (auto& part : mTextDrawer->GetParts()) {
-    totalLength += part.text.Length();
-  }
-  allGlyphs.SetCapacity(totalLength);
-
-  for (auto& part : mTextDrawer->GetParts()) {
-    for (const mozilla::layout::TextRunFragment& text : part.text) {
-      if (!font) {
-        font = text.font;
-      }
-
-      GlyphArray* glyphs = allGlyphs.AppendElement();
-      glyphs->glyphs() = text.glyphs;
-      glyphs->color() = text.color;
-    }
-  }
-
-  MOZ_ASSERT(font);
-
-  layer->SetGlyphs(Move(allGlyphs));
-  layer->SetScaledFont(font);
-
-  auto A2D = mFrame->PresContext()->AppUnitsPerDevPixel();
-  bool dummy;
-  const LayoutDeviceIntRect destBounds =
-          LayoutDeviceIntRect::FromAppUnitsToOutside(GetBounds(aBuilder, &dummy), A2D);
-  layer->SetBounds(IntRect(destBounds.x, destBounds.y, destBounds.width, destBounds.height));
-
-  layer->SetBaseTransform(gfx::Matrix4x4::Translation(aContainerParameters.mOffset.x,
-                                                      aContainerParameters.mOffset.y, 0));
-  return layer.forget();
+  return !textDrawer->HasUnsupportedFeatures();
 }
 
 void
@@ -5463,7 +5346,7 @@ LazyGetLineBaselineOffset(nsIFrame* aChildFrame, nsBlockFrame* aBlockFrame)
 
 static bool IsUnderlineRight(nsIFrame* aFrame)
 {
-  nsIAtom* langAtom = aFrame->StyleFont()->mLanguage;
+  nsAtom* langAtom = aFrame->StyleFont()->mLanguage;
   if (!langAtom) {
     return false;
   }
@@ -5796,6 +5679,7 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
     params.ascent = gfxFloat(mAscent) / appUnitsPerDevUnit;
     params.style = decorationStyle;
     params.vertical = verticalRun;
+    params.sidewaysLeft = mTextRun->IsSidewaysLeft();
 
     params.offset = underlineOffset / appUnitsPerDevUnit;
     params.decoration = NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE;
@@ -5840,14 +5724,12 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
         frameBStart = GetSize().width;
         ascent = -ascent;
       }
-      // The decoration-line offsets need to be reversed for sideways-lr mode,
-      // so we will multiply the values from metrics by this factor.
-      gfxFloat decorationOffsetDir = mTextRun->IsSidewaysLeft() ? -1.0 : 1.0;
 
       nsCSSRendering::DecorationRectParams params;
       params.lineSize = Size(gfxWidth, 0);
       params.ascent = ascent;
       params.vertical = verticalDec;
+      params.sidewaysLeft = mTextRun->IsSidewaysLeft();
 
       nscoord topOrLeft(nscoord_MAX), bottomOrRight(nscoord_MIN);
       typedef gfxFont::Metrics Metrics;
@@ -5869,7 +5751,7 @@ nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
                               useVerticalMetrics);
 
         params.lineSize.height = metrics.*lineSize;
-        params.offset = decorationOffsetDir * metrics.*lineOffset;
+        params.offset = metrics.*lineOffset;
         const nsRect decorationRect =
           nsCSSRendering::GetTextDecorationRect(aPresContext, params) +
           (verticalDec ? nsPoint(frameBStart - dec.mBaselineOffset, 0)
@@ -6053,7 +5935,6 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
                                       const gfxFont::Metrics& aFontMetrics,
                                       DrawPathCallbacks* aCallbacks,
                                       bool aVertical,
-                                      gfxFloat aDecorationOffsetDir,
                                       uint8_t aDecoration)
 {
   PaintDecorationLineParams params;
@@ -6068,19 +5949,12 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
   params.decorationType = DecorationType::Selection;
   params.callbacks = aCallbacks;
   params.vertical = aVertical;
+  params.sidewaysLeft = mTextRun->IsSidewaysLeft();
   params.descentLimit =
     ComputeDescentLimitForSelectionUnderline(aTextPaintStyle.PresContext(),
                                              aFontMetrics);
 
   float relativeSize;
-
-  auto* textDrawer = aContext->GetTextDrawer();
-
-  // Since this happens after text, all we *should* be allowed to do is strikeThrough.
-  // If this isn't true, we're at least bug-compatible with gecko!
-  if (textDrawer) {
-    textDrawer->StartDrawing(TextDrawTarget::Phase::eLineThrough);
-  }
 
   switch (aSelectionType) {
     case SelectionType::eIMERawClause:
@@ -6176,7 +6050,6 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
       NS_WARNING("Requested selection decorations when there aren't any");
       return;
   }
-  params.offset *= aDecorationOffsetDir;
   params.lineSize.height *= relativeSize;
   params.icoordInFrame = (aVertical ? params.pt.y - aPt.y
                                     : params.pt.x - aPt.x) + aICoordInFrame;
@@ -6401,6 +6274,24 @@ nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
   gfxPoint shadowOffset(aShadowDetails->mXOffset, aShadowDetails->mYOffset);
   nscoord blurRadius = std::max(aShadowDetails->mRadius, 0);
 
+  nscolor shadowColor = aShadowDetails->mHasColor ? aShadowDetails->mColor
+                                                  : aParams.foregroundColor;
+
+  if (auto* textDrawer = aParams.context->GetTextDrawer()) {
+    wr::Shadow wrShadow;
+
+    wrShadow.offset = {
+      PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mXOffset),
+      PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mYOffset)
+    };
+
+    wrShadow.blur_radius = PresContext()->AppUnitsToFloatDevPixels(blurRadius);
+    wrShadow.color = wr::ToColorF(ToDeviceColor(shadowColor));
+
+    textDrawer->AppendShadow(wrShadow);
+    return;
+  }
+
   // This rect is the box which is equivalent to where the shadow will be painted.
   // The origin of aBoundingBox is the text baseline left, so we must translate it by
   // that much in order to make the origin the top-left corner of the text bounding box.
@@ -6435,25 +6326,6 @@ nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
     LayoutDevicePixel::ToAppUnits(aParams.dirtyRect, A2D), nullptr, aBlurFlags);
   if (!shadowContext)
     return;
-
-  nscolor shadowColor = aShadowDetails->mHasColor ? aShadowDetails->mColor
-                                                  : aParams.foregroundColor;
-
-  auto* textDrawer = aParams.context->GetTextDrawer();
-  if (textDrawer) {
-    wr::TextShadow wrShadow;
-
-    wrShadow.offset = {
-      PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mXOffset),
-      PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mYOffset)
-    };
-
-    wrShadow.blur_radius = PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mRadius);
-    wrShadow.color = wr::ToColorF(ToDeviceColor(shadowColor));
-
-    textDrawer->AppendShadow(wrShadow);
-    return;
-  }
 
   aParams.context->Save();
   aParams.context->SetColor(Color::FromABGR(shadowColor));
@@ -6558,13 +6430,8 @@ nsTextFrame::PaintTextWithSelectionColors(
     SelectionIterator iterator(prevailingSelections, contentRange,
                                *aParams.provider, mTextRun, startIOffset);
     SelectionType selectionType;
-    size_t selectionIndex = 0;
     while (iterator.GetNextSegment(&iOffset, &range, &hyphenWidth,
                                    &selectionType, &rangeStyle)) {
-      if (textDrawer) {
-        textDrawer->SetSelectionIndex(selectionIndex);
-      }
-
       nscolor foreground, background;
       GetSelectionTextColors(selectionType, *aParams.textPaintStyle,
                              rangeStyle, &foreground, &background);
@@ -6586,7 +6453,7 @@ nsTextFrame::PaintTextWithSelectionColors(
           LayoutDeviceRect::FromAppUnits(bgRect, appUnitsPerDevPixel);
 
         if (textDrawer) {
-          textDrawer->SetSelectionRect(selectionRect, ToDeviceColor(background));
+          textDrawer->AppendSelectionRect(selectionRect, ToDeviceColor(background));
         } else {
           PaintSelectionBackground(
             *aParams.context->GetDrawTarget(), background, aParams.dirtyRect,
@@ -6594,7 +6461,6 @@ nsTextFrame::PaintTextWithSelectionColors(
         }
       }
       iterator.UpdateWithAdvance(advance);
-      ++selectionIndex;
     }
   }
 
@@ -6621,14 +6487,8 @@ nsTextFrame::PaintTextWithSelectionColors(
   SelectionIterator iterator(prevailingSelections, contentRange,
                              *aParams.provider, mTextRun, startIOffset);
   SelectionType selectionType;
-
-  size_t selectionIndex = 0;
   while (iterator.GetNextSegment(&iOffset, &range, &hyphenWidth,
                                  &selectionType, &rangeStyle)) {
-    if (textDrawer) {
-      textDrawer->SetSelectionIndex(selectionIndex);
-    }
-
     nscolor foreground, background;
     if (aParams.IsGenerateTextMask()) {
       foreground = NS_RGBA(0, 0, 0, 255);
@@ -6667,7 +6527,6 @@ nsTextFrame::PaintTextWithSelectionColors(
     DrawText(range, textBaselinePt, params);
     advance += hyphenWidth;
     iterator.UpdateWithAdvance(advance);
-    ++selectionIndex;
   }
   return true;
 }
@@ -6740,18 +6599,11 @@ nsTextFrame::PaintTextSelectionDecorations(
   } else {
     pt.y = (aParams.textBaselinePt.y - mAscent) / app;
   }
-  gfxFloat decorationOffsetDir = mTextRun->IsSidewaysLeft() ? -1.0 : 1.0;
   SelectionType nextSelectionType;
   TextRangeStyle selectedStyle;
 
-  size_t selectionIndex = 0;
-  auto* textDrawer = aParams.context->GetTextDrawer();
-
   while (iterator.GetNextSegment(&iOffset, &range, &hyphenWidth,
                                  &nextSelectionType, &selectedStyle)) {
-    if (textDrawer) {
-      textDrawer->SetSelectionIndex(selectionIndex);
-    }
     gfxFloat advance = hyphenWidth +
       mTextRun->GetAdvanceWidth(range, aParams.provider);
     if (nextSelectionType == aSelectionType) {
@@ -6768,10 +6620,9 @@ nsTextFrame::PaintTextSelectionDecorations(
         aParams.context, aParams.dirtyRect, aSelectionType,
         *aParams.textPaintStyle, selectedStyle, pt, xInFrame,
         width, mAscent / app, decorationMetrics, aParams.callbacks,
-        verticalRun, decorationOffsetDir, kDecoration);
+        verticalRun, kDecoration);
     }
     iterator.UpdateWithAdvance(advance);
-    ++selectionIndex;
   }
 }
 
@@ -7295,11 +7146,6 @@ nsTextFrame::DrawTextRun(Range aRange, const gfxPoint& aTextBaselinePt,
 {
   MOZ_ASSERT(aParams.advanceWidth, "Must provide advanceWidth");
 
-  auto* textDrawer = aParams.context->GetTextDrawer();
-  if (textDrawer) {
-    textDrawer->StartDrawing(TextDrawTarget::Phase::eGlyphs);
-  }
-
   ::DrawTextRun(mTextRun, aTextBaselinePt, aRange, aParams);
 
   if (aParams.drawSoftHyphen) {
@@ -7375,10 +7221,6 @@ nsTextFrame::DrawTextRunAndDecorations(Range aRange,
     nscoord inflationMinFontSize =
       nsLayoutUtils::InflationMinFontSizeFor(this);
 
-    // The decoration-line offsets need to be reversed for sideways-lr mode,
-    // so we will multiply the values from metrics by this factor.
-    gfxFloat decorationOffsetDir = mTextRun->IsSidewaysLeft() ? -1.0 : 1.0;
-
     PaintDecorationLineParams params;
     params.context = aParams.context;
     params.dirtyRect = aParams.dirtyRect;
@@ -7391,6 +7233,7 @@ nsTextFrame::DrawTextRunAndDecorations(Range aRange,
     params.lineSize = Size(measure / app, 0);
     params.ascent = ascent;
     params.vertical = verticalDec;
+    params.sidewaysLeft = mTextRun->IsSidewaysLeft();
 
     // The matrix of the context may have been altered for text-combine-
     // upright. However, we want to draw decoration lines unscaled, thus
@@ -7425,18 +7268,12 @@ nsTextFrame::DrawTextRunAndDecorations(Range aRange,
       bCoord = (frameBStart - dec.mBaselineOffset) / app;
 
       params.color = dec.mColor;
-      params.offset = decorationOffsetDir * metrics.*lineOffset;
+      params.offset = metrics.*lineOffset;
       params.style = dec.mStyle;
       PaintDecorationLine(params);
     };
 
-    auto* textDrawer = aParams.context->GetTextDrawer();
-
     // Underlines
-    if (textDrawer && aDecorations.mUnderlines.Length() > 0) {
-      textDrawer->StartDrawing(TextDrawTarget::Phase::eUnderline);
-    }
-    //
     params.decoration = NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE;
     for (const LineDecoration& dec : Reversed(aDecorations.mUnderlines)) {
       paintDecorationLine(dec, &Metrics::underlineSize,
@@ -7444,9 +7281,6 @@ nsTextFrame::DrawTextRunAndDecorations(Range aRange,
     }
 
     // Overlines
-    if (textDrawer && aDecorations.mOverlines.Length() > 0) {
-      textDrawer->StartDrawing(TextDrawTarget::Phase::eOverline);
-    }
     params.decoration = NS_STYLE_TEXT_DECORATION_LINE_OVERLINE;
     for (const LineDecoration& dec : Reversed(aDecorations.mOverlines)) {
       paintDecorationLine(dec, &Metrics::underlineSize, &Metrics::maxAscent);
@@ -7465,17 +7299,11 @@ nsTextFrame::DrawTextRunAndDecorations(Range aRange,
     }
 
     // Emphasis marks
-    if (textDrawer) {
-      textDrawer->StartDrawing(TextDrawTarget::Phase::eEmphasisMarks);
-    }
     DrawEmphasisMarks(aParams.context, wm,
                       aTextBaselinePt, aParams.framePt, aRange,
                       aParams.decorationOverrideColor, aParams.provider);
 
     // Line-throughs
-    if (textDrawer && aDecorations.mStrikes.Length() > 0) {
-      textDrawer->StartDrawing(TextDrawTarget::Phase::eLineThrough);
-    }
     params.decoration = NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH;
     for (const LineDecoration& dec : Reversed(aDecorations.mStrikes)) {
       paintDecorationLine(dec, &Metrics::strikeoutSize,
@@ -7500,6 +7328,10 @@ nsTextFrame::DrawText(Range aRange, const gfxPoint& aTextBaselinePt,
     DrawTextRunAndDecorations(aRange, aTextBaselinePt, aParams, decorations);
   } else {
     DrawTextRun(aRange, aTextBaselinePt, aParams);
+  }
+
+  if (auto* textDrawer = aParams.context->GetTextDrawer()) {
+    textDrawer->TerminateShadows();
   }
 }
 
@@ -7700,6 +7532,9 @@ nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
   params.descentLimit =
     ComputeDescentLimitForSelectionUnderline(aPresContext, metrics);
   params.vertical = verticalRun;
+
+  EnsureTextRun(nsTextFrame::eInflated);
+  params.sidewaysLeft = mTextRun ? mTextRun->IsSidewaysLeft() : false;
 
   UniquePtr<SelectionDetails> details = GetSelectionDetails();
   for (SelectionDetails* sd = details.get(); sd; sd = sd->mNext.get()) {

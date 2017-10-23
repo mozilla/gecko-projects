@@ -369,6 +369,7 @@ private:
   DECL_GFX_PREF(Live, "dom.vr.require-gesture",                VRRequireGesture, bool, true);
   DECL_GFX_PREF(Live, "dom.vr.puppet.enabled",                 VRPuppetEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.vr.puppet.submitframe",             VRPuppetSubmitFrame, uint32_t, 0);
+  DECL_GFX_PREF(Live, "dom.vr.display.rafMaxDuration",         VRDisplayRafMaxDuration, uint32_t, 50);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_touch_events.enabled",          TouchEventsEnabled, int32_t, 0);
 
@@ -538,24 +539,23 @@ private:
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps.print-histogram",  FPSPrintHistogram, bool, false);
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps.write-to-file", WriteFPSToFile, bool, false);
   DECL_GFX_PREF(Once, "layers.acceleration.force-enabled",     LayersAccelerationForceEnabledDoNotUseDirectly, bool, false);
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.background-color",        LayersAllowBackgroundColorLayers, gfxPrefs::OverrideBase_WebRender());
+  DECL_GFX_PREF(Live, "layers.advanced.background-color",      LayersAllowBackgroundColorLayers, bool, false);
   DECL_OVERRIDE_PREF(Live, "layers.advanced.background-image",        LayersAllowBackgroundImage, gfxPrefs::OverrideBase_WebRender());
   DECL_GFX_PREF(Live, "layers.advanced.basic-layer.enabled",          LayersAdvancedBasicLayerEnabled, bool, false);
   DECL_OVERRIDE_PREF(Live, "layers.advanced.border-layers",           LayersAllowBorderLayers, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.boxshadow-inset-layers",  LayersAllowInsetBoxShadow, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.boxshadow-outer-layers",  LayersAllowOuterBoxShadow, gfxPrefs::OverrideBase_WebRender());
+  DECL_GFX_PREF(Live, "layers.advanced.boxshadow-inset-layers",       LayersAllowInsetBoxShadow, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.boxshadow-outer-layers",       LayersAllowOuterBoxShadow, bool, false);
   DECL_OVERRIDE_PREF(Live, "layers.advanced.bullet-layers",           LayersAllowBulletLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.button-foreground-layers", LayersAllowButtonForegroundLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.canvas-background-color", LayersAllowCanvasBackgroundColorLayers, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.caret-layers",            LayersAllowCaretLayers, gfxPrefs::OverrideBase_WebRender());
+  DECL_GFX_PREF(Live, "layers.advanced.caret-layers",                 LayersAllowCaretLayers, bool, false);
   DECL_OVERRIDE_PREF(Live, "layers.advanced.columnRule-layers",       LayersAllowColumnRuleLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.displaybuttonborder-layers", LayersAllowDisplayButtonBorder, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.filter-layers",           LayersAllowFilterLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.image-layers",            LayersAllowImageLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_OVERRIDE_PREF(Live, "layers.advanced.outline-layers",          LayersAllowOutlineLayers, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.solid-color",             LayersAllowSolidColorLayers, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.table",                   LayersAllowTable, gfxPrefs::OverrideBase_WebRender());
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.text-layers",             LayersAllowTextLayers, gfxPrefs::OverrideBase_WebRendest());
+  DECL_GFX_PREF(Live, "layers.advanced.solid-color",                  LayersAllowSolidColorLayers, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.table",                        LayersAllowTable, bool, false);
+  DECL_OVERRIDE_PREF(Live, "layers.advanced.text-layers",             LayersAllowTextLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.separate-event-thread", AsyncPanZoomSeparateEventThread, bool, false);
@@ -668,6 +668,7 @@ private:
 
   DECL_GFX_PREF(Live, "layout.display-list.dump",              LayoutDumpDisplayList, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.dump-content",      LayoutDumpDisplayListContent, bool, false);
+  DECL_GFX_PREF(Live, "layout.display-list.dump-parent",       LayoutDumpDisplayListParent, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.show-rebuild-area", LayoutDisplayListShowArea, bool, false);
   DECL_GFX_PREF(Live, "layout.event-regions.enabled",          LayoutEventRegionsEnabledDoNotUseDirectly, bool, false);
   DECL_GFX_PREF(Once, "layout.frame_rate",                     LayoutFrameRate, int32_t, -1);

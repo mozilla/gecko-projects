@@ -26,6 +26,11 @@
 #include "nsIThread.h"
 #include "mozilla/Mutex.h"
 
+// Work around nasty macro in webrtc/voice_engine/voice_engine_defines.h
+#ifdef GetLastError
+#undef GetLastError
+#endif
+
 #include "signaling/src/jsep/JsepSession.h"
 #include "signaling/src/jsep/JsepSessionImpl.h"
 #include "signaling/src/sdp/SdpMediaSection.h"
@@ -797,6 +802,8 @@ private:
   mozilla::UniquePtr<mozilla::JsepSession> mJsepSession;
   std::string mPreviousIceUfrag; // used during rollback of ice restart
   std::string mPreviousIcePwd; // used during rollback of ice restart
+  unsigned long mIceRestartCount;
+  unsigned long mIceRollbackCount;
 
   // Start time of ICE, used for telemetry
   mozilla::TimeStamp mIceStartTime;

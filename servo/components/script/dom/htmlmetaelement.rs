@@ -32,7 +32,7 @@ use style::stylesheets::{Stylesheet, StylesheetContents, CssRule, CssRules, Orig
 #[dom_struct]
 pub struct HTMLMetaElement {
     htmlelement: HTMLElement,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     stylesheet: DomRefCell<Option<Arc<Stylesheet>>>,
     cssom_stylesheet: MutNullableDom<CSSStyleSheet>,
 }
@@ -52,7 +52,7 @@ impl HTMLMetaElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLMetaElement> {
-        Node::reflect_node(box HTMLMetaElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLMetaElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLMetaElementBinding::Wrap)
     }
@@ -135,7 +135,7 @@ impl HTMLMetaElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#meta-referrer
+    /// <https://html.spec.whatwg.org/multipage/#meta-referrer>
     fn apply_referrer(&self) {
         if let Some(parent) = self.upcast::<Node>().GetParentElement() {
             if let Some(head) = parent.downcast::<HTMLHeadElement>() {

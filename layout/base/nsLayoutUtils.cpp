@@ -26,12 +26,11 @@
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsFrameList.h"
 #include "nsGkAtoms.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsCaret.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSAnonBoxes.h"
@@ -122,14 +121,14 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
-#include "SVGSVGElement.h"
-#include "nsAutoLayoutPhase.h"
+#include "SVGViewportElement.h"
 #include "DisplayItemClip.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "prenv.h"
 #include "RetainedDisplayListBuilder.h"
 #include "TextDrawTarget.h"
 #include "nsDeckFrame.h"
+#include "nsIEffectiveTLDService.h" // for IsInStyloBlocklist
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -195,8 +194,9 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ bool nsLayoutUtils::sTextCombineUprightDigitsEnabled;
 #ifdef MOZ_STYLO
 /* static */ bool nsLayoutUtils::sStyloEnabled;
+/* static */ bool nsLayoutUtils::sStyloBlocklistEnabled;
+/* static */ nsTArray<nsCString>* nsLayoutUtils::sStyloBlocklist = nullptr;
 #endif
-/* static */ bool nsLayoutUtils::sStyleAttrWithXMLBaseDisabled;
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
 
@@ -789,7 +789,7 @@ nsLayoutUtils::UnionChildOverflow(nsIFrame* aFrame,
   }
 }
 
-static void DestroyViewID(void* aObject, nsIAtom* aPropertyName,
+static void DestroyViewID(void* aObject, nsAtom* aPropertyName,
                           void* aPropertyValue, void* aData)
 {
   ViewID* id = static_cast<ViewID*>(aPropertyValue);
@@ -1378,8 +1378,8 @@ nsLayoutUtils::GetDisplayPortForVisibilityTesting(
 void
 nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
                                               bool aHadDisplayPort,
-                                              nsRect& aOldDisplayPort,
-                                              nsRect& aNewDisplayPort,
+                                              const nsRect& aOldDisplayPort,
+                                              const nsRect& aNewDisplayPort,
                                               RepaintMode aRepaintMode)
 {
   if (aRepaintMode != RepaintMode::Repaint) {
@@ -1572,6 +1572,8 @@ nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame)
 {
   nsIFrame::ChildListID id = nsIFrame::kPrincipalList;
 
+  MOZ_DIAGNOSTIC_ASSERT(!(aChildFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW));
+
   if (aChildFrame->GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) {
     nsIFrame* pif = aChildFrame->GetPrevInFlow();
     if (pif->GetParent() == aChildFrame->GetParent()) {
@@ -1580,35 +1582,6 @@ nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame)
     else {
       id = nsIFrame::kOverflowContainersList;
     }
-  }
-  // See if the frame is moved out of the flow
-  else if (aChildFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-    // Look at the style information to tell
-    const nsStyleDisplay* disp = aChildFrame->StyleDisplay();
-
-    if (NS_STYLE_POSITION_ABSOLUTE == disp->mPosition) {
-      id = nsIFrame::kAbsoluteList;
-    } else if (NS_STYLE_POSITION_FIXED == disp->mPosition) {
-      if (nsLayoutUtils::IsReallyFixedPos(aChildFrame)) {
-        id = nsIFrame::kFixedList;
-      } else {
-        id = nsIFrame::kAbsoluteList;
-      }
-#ifdef MOZ_XUL
-    } else if (StyleDisplay::MozPopup == disp->mDisplay) {
-      // Out-of-flows that are DISPLAY_POPUP must be kids of the root popup set
-#ifdef DEBUG
-      nsIFrame* parent = aChildFrame->GetParent();
-      NS_ASSERTION(parent && parent->IsPopupSetFrame(), "Unexpected parent");
-#endif // DEBUG
-
-      id = nsIFrame::kPopupList;
-#endif // MOZ_XUL
-    } else {
-      NS_ASSERTION(aChildFrame->IsFloating(), "not a floated frame");
-      id = nsIFrame::kFloatList;
-    }
-
   } else {
     LayoutFrameType childType = aChildFrame->Type();
     if (LayoutFrameType::MenuPopup == childType) {
@@ -1643,19 +1616,8 @@ nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame)
   nsContainerFrame* parent = aChildFrame->GetParent();
   bool found = parent->GetChildList(id).ContainsFrame(aChildFrame);
   if (!found) {
-    if (!(aChildFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW)) {
-      found = parent->GetChildList(nsIFrame::kOverflowList)
-                .ContainsFrame(aChildFrame);
-    }
-    else if (aChildFrame->IsFloating()) {
-      found = parent->GetChildList(nsIFrame::kOverflowOutOfFlowList)
-                .ContainsFrame(aChildFrame);
-      if (!found) {
-        found = parent->GetChildList(nsIFrame::kPushedFloatsList)
-                  .ContainsFrame(aChildFrame);
-      }
-    }
-    // else it's positioned and should have been on the 'id' child list.
+    found = parent->GetChildList(nsIFrame::kOverflowList)
+              .ContainsFrame(aChildFrame);
     NS_POSTCONDITION(found, "not in child list");
   }
 #endif
@@ -1664,7 +1626,7 @@ nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame)
 }
 
 static Element*
-GetPseudo(const nsIContent* aContent, nsIAtom* aPseudoProperty)
+GetPseudo(const nsIContent* aContent, nsAtom* aPseudoProperty)
 {
   MOZ_ASSERT(aPseudoProperty == nsGkAtoms::beforePseudoProperty ||
              aPseudoProperty == nsGkAtoms::afterPseudoProperty);
@@ -1776,7 +1738,7 @@ nsLayoutUtils::GetFloatFromPlaceholder(nsIFrame* aFrame) {
 bool
 nsLayoutUtils::IsGeneratedContentFor(nsIContent* aContent,
                                      nsIFrame* aFrame,
-                                     nsIAtom* aPseudoElement)
+                                     nsAtom* aPseudoElement)
 {
   NS_PRECONDITION(aFrame, "Must have a frame");
   NS_PRECONDITION(aPseudoElement, "Must have a pseudo name");
@@ -3052,7 +3014,7 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
                                nsDisplayListBuilderMode::TRANSFORM_COMPUTATION,
                                false/*don't build caret*/);
   builder.BeginFrame();
-  nsDisplayList list;
+  nsDisplayList list(&builder);
   nsDisplayTransform* item =
     new (&builder) nsDisplayTransform(&builder, aFrame, &list, nsRect());
 
@@ -3170,9 +3132,6 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
   Rect result;
 
   if (text) {
-    // TODO: Is it possible that there is a stacking context between aFrame
-    // and 'text'? I don't think it matters, the stacking context thing is
-    // just for retained-dl optimizations, not a requirement.
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
     result = TransformGfxRectToAncestor(text, result, aAncestor,
                                         nullptr, aMatrixCache,
@@ -3338,7 +3297,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
                                nsDisplayListBuilderMode::EVENT_DELIVERY,
                                false);
   builder.BeginFrame();
-  nsDisplayList list;
+  nsDisplayList list(&builder);
 
   if (aFlags & IGNORE_PAINT_SUPPRESSION) {
     builder.IgnorePaintSuppression();
@@ -3354,6 +3313,8 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   if (aFlags & IGNORE_CROSS_DOC) {
     builder.SetDescendIntoSubdocuments(false);
   }
+
+  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
 
   builder.EnterPresShell(aFrame);
 
@@ -3374,7 +3335,6 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
 #endif
 
   nsDisplayItem::HitTestState hitTestState;
-  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
   list.DeleteAll(&builder);
   builder.EndFrame();
@@ -3689,6 +3649,8 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
   TimeStamp startBuildDisplayList = TimeStamp::Now();
 
+  Maybe<nsDisplayListBuilder> nonRetainedBuilder;
+  Maybe<nsDisplayList> nonRetainedList;
   nsDisplayListBuilder* builderPtr = nullptr;
   nsDisplayList* listPtr = nullptr;
   RetainedDisplayListBuilder* retainedBuilder = nullptr;
@@ -3711,8 +3673,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     builderPtr = retainedBuilder->Builder();
     listPtr = retainedBuilder->List();
   } else {
-    builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode, buildCaret);
-    listPtr = new nsDisplayList();
+    nonRetainedBuilder.emplace(aFrame, aBuilderMode, buildCaret);
+    builderPtr = nonRetainedBuilder.ptr();
+    nonRetainedList.emplace(builderPtr);
+    listPtr = nonRetainedList.ptr();
   }
   nsDisplayListBuilder& builder = *builderPtr;
   nsDisplayList& list = *listPtr;
@@ -3800,12 +3764,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     MaybeCreateDisplayPortInFirstScrollFrameEncountered(aFrame, builder);
   }
 
-  nsRect dirtyRect = visibleRegion.GetBounds();
+  nsRect visibleRect = visibleRegion.GetBounds();
 
   {
     AUTO_PROFILER_LABEL("nsLayoutUtils::PaintFrame:BuildDisplayList",
                         GRAPHICS);
-    AutoProfilerTracing tracing("Paint", "DisplayList");
+    AUTO_PROFILER_TRACING("Paint", "DisplayList");
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
 
@@ -3840,7 +3804,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
-      builder.SetVisibleRect(dirtyRect);
+      builder.SetVisibleRect(visibleRect);
       builder.SetIsBuilding(true);
 
       TimeStamp dlStart = TimeStamp::Now();
@@ -3848,6 +3812,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       const bool paintedPreviously =
         aFrame->HasProperty(nsIFrame::ModifiedFrameList());
 
+       // Attempt to do a partial build and merge into the existing list.
+       // This calls BuildDisplayListForStacking context on a subset of the
+       // viewport.
       bool merged = false;
       if (retainedBuilder && paintedPreviously) {
         merged = retainedBuilder->AttemptPartialUpdate(aBackstop, stats);
@@ -3864,23 +3831,17 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       if (!merged) {
         list.DeleteAll(&builder);
         builder.EnterPresShell(aFrame);
-        builder.SetDirtyRect(dirtyRect);
+        builder.SetDirtyRect(visibleRect);
         builder.ClearWindowDraggingRegion();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
         AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
-  
+
         builder.LeavePresShell(aFrame, &list);
       }
       fullBuildTime = (TimeStamp::Now() - dlStart).ToMilliseconds();
     }
 
     builder.SetIsBuilding(false);
-
-    // if (XRE_IsContentProcess()) {
-    //   printf_stderr("Painting --- Full list:\n");
-    //   nsFrame::PrintDisplayList(&builder, list);
-    // }
-
     builder.IncrementPresShellPaintCount(presShell);
 
     if (gfxPrefs::LayersDrawFPS()) {
@@ -3918,15 +3879,13 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_BUILD_DISPLAYLIST_TIME,
                                  startBuildDisplayList);
 
-  bool profilerNeedsDisplayList =
-    profiler_feature_active(ProfilerFeature::DisplayListDump);
   bool consoleNeedsDisplayList = gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint();
 #ifdef MOZ_DUMP_PAINTING
   FILE* savedDumpFile = gfxUtils::sDumpPaintFile;
 #endif
 
   UniquePtr<std::stringstream> ss;
-  if (consoleNeedsDisplayList || profilerNeedsDisplayList) {
+  if (consoleNeedsDisplayList) {
     ss = MakeUnique<std::stringstream>();
 #ifdef MOZ_DUMP_PAINTING
     if (gfxEnv::DumpPaintToFile()) {
@@ -3957,17 +3916,13 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     }
 #endif
     *ss << nsPrintfCString("Painting --- before optimization (dirty %d,%d,%d,%d):\n",
-            dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height).get();
+            visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height).get();
     nsFrame::PrintDisplayList(&builder, list, *ss, gfxEnv::DumpPaintToFile());
 
     if (gfxEnv::DumpPaint() || gfxEnv::DumpPaintItems()) {
       // Flush stream now to avoid reordering dump output relative to
       // messages dumped by PaintRoot below.
-      if (profilerNeedsDisplayList && !consoleNeedsDisplayList) {
-        profiler_tracing("log", ss->str().c_str());
-      } else {
-        fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
-      }
+      fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
       ss = MakeUnique<std::stringstream>();
     }
   }
@@ -4026,7 +3981,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         pixelCount, rasterizeTime, paintedInLastSecond);
   }
 
-  if (consoleNeedsDisplayList || profilerNeedsDisplayList) {
+  if (consoleNeedsDisplayList) {
     *ss << "Painting --- after optimization:\n";
     nsFrame::PrintDisplayList(&builder, list, *ss, gfxEnv::DumpPaintToFile());
 
@@ -4036,11 +3991,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
                                                gfxEnv::DumpPaintToFile());
     }
 
-    if (profilerNeedsDisplayList && !consoleNeedsDisplayList) {
-      profiler_tracing("log", ss->str().c_str());
-    } else {
-      fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
-    }
+    fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
 
 #ifdef MOZ_DUMP_PAINTING
     if (gfxEnv::DumpPaintToFile()) {
@@ -4112,18 +4063,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   {
     AutoProfilerTracing tracing("Paint", "DisplayListResources");
 
-    
     // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
     if (!retainedBuilder) {
       list.DeleteAll(&builder);
       builder.EndFrame();
-      delete listPtr;
-      delete builderPtr;
     } else {
       builder.EndFrame();
-      if (builder.ShouldRecycle()) {
-        aFrame->DeleteProperty(RetainedDisplayListBuilder::Cached());
-      }
     }
   }
   return NS_OK;
@@ -4198,7 +4143,7 @@ void
 nsLayoutUtils::AddBoxesForFrame(nsIFrame* aFrame,
                                 nsLayoutUtils::BoxCallback* aCallback)
 {
-  nsIAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
+  nsAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
 
   if (pseudoType == nsCSSAnonBoxes::tableWrapper) {
     AddBoxesForFrame(aFrame->PrincipalChildList().FirstChild(), aCallback);
@@ -4232,7 +4177,7 @@ nsIFrame*
 nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame)
 {
   while (aFrame) {
-    nsIAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
+    nsAtom* pseudoType = aFrame->StyleContext()->GetPseudo();
 
     if (pseudoType == nsCSSAnonBoxes::tableWrapper) {
       nsIFrame* f = GetFirstNonAnonymousFrame(aFrame->PrincipalChildList().FirstChild());
@@ -6316,7 +6261,7 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
 
     // Webrender just needs the shadow details
     if (auto* textDrawer = aContext->GetTextDrawer()) {
-      wr::TextShadow wrShadow;
+      wr::Shadow wrShadow;
 
       wrShadow.offset = {
         presCtx->AppUnitsToFloatDevPixels(shadowDetails->mXOffset),
@@ -7583,14 +7528,19 @@ nsLayoutUtils::GetDeviceContextForScreenInfo(nsPIDOMWindowOuter* aWindow)
 }
 
 /* static */ bool
-nsLayoutUtils::IsReallyFixedPos(nsIFrame* aFrame)
+nsLayoutUtils::IsReallyFixedPos(const nsIFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame->GetParent(),
-                  "IsReallyFixedPos called on frame not in tree");
-  NS_PRECONDITION(aFrame->StyleDisplay()->mPosition ==
-                    NS_STYLE_POSITION_FIXED,
-                  "IsReallyFixedPos called on non-'position:fixed' frame");
+  MOZ_ASSERT(aFrame->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED,
+             "IsReallyFixedPos called on non-'position:fixed' frame");
+  return MayBeReallyFixedPos(aFrame);
+}
 
+
+/* static */ bool
+nsLayoutUtils::MayBeReallyFixedPos(const nsIFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame->GetParent(),
+             "MayBeReallyFixedPos called on frame not in tree");
   LayoutFrameType parentType = aFrame->GetParent()->Type();
   return parentType == LayoutFrameType::Viewport ||
          parentType == LayoutFrameType::PageContent;
@@ -7664,7 +7614,7 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
   result.mHasSize = status & imgIRequest::STATUS_SIZE_AVAILABLE;
   if ((status & imgIRequest::STATUS_LOAD_COMPLETE) == 0) {
     // Spec says to use GetComplete, but that only works on
-    // nsIDOMHTMLImageElement, and we support all sorts of other stuff
+    // HTMLImageElement, and we support all sorts of other stuff
     // here.  Do this for now pending spec clarification.
     result.mIsStillLoading = (status & imgIRequest::STATUS_ERROR) == 0;
     return result;
@@ -8162,9 +8112,25 @@ nsLayoutUtils::Initialize()
     Preferences::AddBoolVarCache(&sStyloEnabled,
                                  "layout.css.servo.enabled");
   }
+  // We should only create the blocklist ONCE, and ignore any blocklist
+  // reloads happen. Because otherwise we could have a top level page that
+  // uses Stylo (if its load happens before the blocklist reload) and a
+  // child iframe that uses Gecko (if its load happens after the blocklist
+  // reload). If some page contains both backends, and they try to move
+  // element across backend boundary, it could crash (see bug 1404020).
+  sStyloBlocklistEnabled =
+    Preferences::GetBool("layout.css.stylo-blocklist.enabled");
+  if (sStyloBlocklistEnabled && !sStyloBlocklist) {
+    nsAutoCString blocklist;
+    Preferences::GetCString("layout.css.stylo-blocklist.blocked_domains", blocklist);
+    if (!blocklist.IsEmpty()) {
+      sStyloBlocklist = new nsTArray<nsCString>;
+      for (const nsACString& domainString : blocklist.Split(',')) {
+        sStyloBlocklist->AppendElement(domainString);
+      }
+    }
+  }
 #endif
-  Preferences::AddBoolVarCache(&sStyleAttrWithXMLBaseDisabled,
-                               "layout.css.style-attr-with-xml-base.disabled");
   Preferences::AddUintVarCache(&sIdlePeriodDeadlineLimit,
                                "layout.idle_period.time_limit",
                                DEFAULT_IDLE_PERIOD_TIME_LIMIT);
@@ -8186,7 +8152,13 @@ nsLayoutUtils::Shutdown()
     delete sContentMap;
     sContentMap = nullptr;
   }
-
+#ifdef MOZ_STYLO
+  if (sStyloBlocklist) {
+    sStyloBlocklist->Clear();
+    delete sStyloBlocklist;
+    sStyloBlocklist = nullptr;
+  }
+#endif
   for (auto& callback : kPrefCallbacks) {
     Preferences::UnregisterCallback(callback.func, callback.name);
   }
@@ -8195,6 +8167,97 @@ nsLayoutUtils::Shutdown()
   // so the cached initial quotes array doesn't appear to be a leak
   nsStyleList::Shutdown();
 }
+
+#ifdef MOZ_STYLO
+/* static */
+bool
+nsLayoutUtils::ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal)
+{
+  // Disable stylo for system principal because XUL hasn't been fully
+  // supported. Other principal aren't able to use XUL by default, and
+  // the back door to enable XUL is mostly just for testing, which means
+  // they don't matter, and we shouldn't respect them at the same time.
+  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+    return false;
+  }
+  // Check any internal page which we need to explicitly blacklist.
+  if (aDocumentURI) {
+    bool isAbout = false;
+    if (NS_SUCCEEDED(aDocumentURI->SchemeIs("about", &isAbout)) && isAbout) {
+      nsAutoCString path;
+      aDocumentURI->GetFilePath(path);
+      // about:reader requires support of scoped style, so we have to
+      // use Gecko backend for now. See bug 1402094.
+      // This should be fixed by bug 1204818.
+      if (path.EqualsLiteral("reader")) {
+        return false;
+      }
+    }
+  }
+  // Check the stylo block list.
+  if (IsInStyloBlocklist(aPrincipal)) {
+    return false;
+  }
+  return true;
+}
+
+/* static */
+bool
+nsLayoutUtils::IsInStyloBlocklist(nsIPrincipal* aPrincipal)
+{
+  if (!sStyloBlocklist) {
+    return false;
+  }
+
+  // Note that a non-codebase principal (eg the system principal) will return
+  // a null URI.
+  nsCOMPtr<nsIURI> codebaseURI;
+  aPrincipal->GetURI(getter_AddRefs(codebaseURI));
+  if (!codebaseURI) {
+    return false;
+  }
+
+  nsCOMPtr<nsIEffectiveTLDService> tldService =
+    do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(tldService, false);
+
+  // Check if a document's eTLD+1 domain belongs to one of the stylo blocklist.
+  nsAutoCString baseDomain;
+  NS_SUCCEEDED(tldService->GetBaseDomain(codebaseURI, 0, baseDomain));
+  for (const nsCString& domains : *sStyloBlocklist) {
+    if (baseDomain.Equals(domains)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* static */
+void
+nsLayoutUtils::AddToStyloBlocklist(const nsACString& aBlockedDomain)
+{
+  if (!sStyloBlocklist) {
+    sStyloBlocklist = new nsTArray<nsCString>;
+  }
+  sStyloBlocklist->AppendElement(aBlockedDomain);
+}
+
+/* static */
+void
+nsLayoutUtils::RemoveFromStyloBlocklist(const nsACString& aBlockedDomain)
+{
+  if (!sStyloBlocklist) {
+    return;
+  }
+
+  sStyloBlocklist->RemoveElement(aBlockedDomain);
+
+  if (sStyloBlocklist->IsEmpty()) {
+    delete sStyloBlocklist;
+    sStyloBlocklist = nullptr;
+  }
+}
+#endif
 
 /* static */
 void
@@ -8306,7 +8369,7 @@ nsLayoutUtils::PostRestyleEvent(Element* aElement,
 }
 
 nsSetAttrRunnable::nsSetAttrRunnable(nsIContent* aContent,
-                                     nsIAtom* aAttrName,
+                                     nsAtom* aAttrName,
                                      const nsAString& aValue)
   : mozilla::Runnable("nsSetAttrRunnable")
   , mContent(aContent)
@@ -8317,7 +8380,7 @@ nsSetAttrRunnable::nsSetAttrRunnable(nsIContent* aContent,
 }
 
 nsSetAttrRunnable::nsSetAttrRunnable(nsIContent* aContent,
-                                     nsIAtom* aAttrName,
+                                     nsAtom* aAttrName,
                                      int32_t aValue)
   : mozilla::Runnable("nsSetAttrRunnable")
   , mContent(aContent)
@@ -8334,7 +8397,7 @@ nsSetAttrRunnable::Run()
 }
 
 nsUnsetAttrRunnable::nsUnsetAttrRunnable(nsIContent* aContent,
-                                         nsIAtom* aAttrName)
+                                         nsAtom* aAttrName)
   : mozilla::Runnable("nsUnsetAttrRunnable")
   , mContent(aContent)
   , mAttrName(aAttrName)
@@ -9127,7 +9190,7 @@ nsLayoutUtils::SetScrollPositionClampingScrollPortSize(nsIPresShell* aPresShell,
 }
 
 /* static */ bool
-nsLayoutUtils::CanScrollOriginClobberApz(nsIAtom* aScrollOrigin)
+nsLayoutUtils::CanScrollOriginClobberApz(nsAtom* aScrollOrigin)
 {
   return aScrollOrigin != nullptr
       && aScrollOrigin != nsGkAtoms::apz
@@ -9209,7 +9272,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     }
     scrollableFrame->AllowScrollOriginDowngrade();
 
-    nsIAtom* lastSmoothScrollOrigin = scrollableFrame->LastSmoothScrollOrigin();
+    nsAtom* lastSmoothScrollOrigin = scrollableFrame->LastSmoothScrollOrigin();
     if (lastSmoothScrollOrigin) {
       metrics.SetSmoothScrollOffsetUpdated(scrollableFrame->CurrentScrollGeneration());
     }
@@ -9871,7 +9934,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
     case StyleGeometryBox::ViewBox: {
       nsIContent* content = aFrame->GetContent();
       nsSVGElement* element = static_cast<nsSVGElement*>(content);
-      SVGSVGElement* svgElement = element->GetCtx();
+      SVGViewportElement* svgElement = element->GetCtx();
       MOZ_ASSERT(svgElement);
 
       if (svgElement && svgElement->HasViewBoxRect()) {

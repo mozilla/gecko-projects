@@ -12,11 +12,11 @@ use cssparser::{Delimiter, Parser};
 use cssparser::{Token, ParserInput};
 use error_reporting::{ContextualParseError, ParseErrorReporter};
 use parser::{ParserContext, ParserErrorContext};
-use selectors::parser::SelectorParseError;
+use selectors::parser::SelectorParseErrorKind;
 use serialize_comma_separated_list;
 use std::fmt;
 use str::string_as_ascii_lowercase;
-use style_traits::{ToCss, ParseError, StyleParseError};
+use style_traits::{ToCss, ParseError, StyleParseErrorKind};
 use values::CustomIdent;
 
 #[cfg(feature = "servo")]
@@ -26,7 +26,7 @@ pub use gecko::media_queries::{Device, Expression};
 
 /// A type that encapsulates a media query list.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct MediaList {
     /// The list of media queries.
     pub media_queries: Vec<MediaQuery>,
@@ -47,15 +47,15 @@ impl MediaList {
     }
 }
 
-/// https://drafts.csswg.org/mediaqueries/#mq-prefix
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+/// <https://drafts.csswg.org/mediaqueries/#mq-prefix>
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
 pub enum Qualifier {
     /// Hide a media query from legacy UAs:
-    /// https://drafts.csswg.org/mediaqueries/#mq-only
+    /// <https://drafts.csswg.org/mediaqueries/#mq-only>
     Only,
     /// Negate a media query:
-    /// https://drafts.csswg.org/mediaqueries/#mq-not
+    /// <https://drafts.csswg.org/mediaqueries/#mq-not>
     Not,
 }
 
@@ -63,7 +63,7 @@ pub enum Qualifier {
 ///
 /// [mq]: https://drafts.csswg.org/mediaqueries/
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct MediaQuery {
     /// The qualifier for this query.
     pub qualifier: Option<Qualifier>,
@@ -133,9 +133,9 @@ impl ToCss for MediaQuery {
     }
 }
 
-/// http://dev.w3.org/csswg/mediaqueries-3/#media0
+/// <http://dev.w3.org/csswg/mediaqueries-3/#media0>
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum MediaQueryType {
     /// A media type that matches every device.
     All,
@@ -162,9 +162,9 @@ impl MediaQueryType {
     }
 }
 
-/// https://drafts.csswg.org/mediaqueries/#media-types
+/// <https://drafts.csswg.org/mediaqueries/#media-types>
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct MediaType(pub CustomIdent);
 
 impl MediaType {
@@ -210,13 +210,13 @@ impl MediaQuery {
         let media_type = match input.try(|i| i.expect_ident_cloned()) {
             Ok(ident) => {
                 let result: Result<_, ParseError> = MediaQueryType::parse(&*ident)
-                    .map_err(|()| SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                    .map_err(|()| input.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(ident.clone())));
                 result?
             }
             Err(_) => {
                 // Media type is only optional if qualifier is not specified.
                 if qualifier.is_some() {
-                    return Err(StyleParseError::UnspecifiedError.into())
+                    return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
                 }
 
                 // Without a media type, require at least one expression.
@@ -241,7 +241,7 @@ impl MediaQuery {
 /// Always returns a media query list. If any invalid media query is found, the
 /// media query list is only filled with the equivalent of "not all", see:
 ///
-/// https://drafts.csswg.org/mediaqueries/#error-handling
+/// <https://drafts.csswg.org/mediaqueries/#error-handling>
 pub fn parse_media_query_list<R>(
     context: &ParserContext,
     input: &mut Parser,
@@ -257,17 +257,17 @@ where
     let mut media_queries = vec![];
     loop {
         let start_position = input.position();
-        let start_location = input.current_source_location();
         match input.parse_until_before(Delimiter::Comma, |i| MediaQuery::parse(context, i)) {
             Ok(mq) => {
                 media_queries.push(mq);
             },
             Err(err) => {
                 media_queries.push(MediaQuery::never_matching());
+                let location = err.location;
                 let error = ContextualParseError::InvalidMediaRule(
                     input.slice_from(start_position), err);
                 let error_context = ParserErrorContext { error_reporter };
-                context.log_css_error(&error_context, start_location, error);
+                context.log_css_error(&error_context, location, error);
             },
         }
 
@@ -311,7 +311,7 @@ impl MediaList {
     }
 
     /// Append a new media query item to the media list.
-    /// https://drafts.csswg.org/cssom/#dom-medialist-appendmedium
+    /// <https://drafts.csswg.org/cssom/#dom-medialist-appendmedium>
     ///
     /// Returns true if added, false if fail to parse the medium string.
     pub fn append_medium(&mut self, context: &ParserContext, new_medium: &str) -> bool {
@@ -330,7 +330,7 @@ impl MediaList {
     }
 
     /// Delete a media query from the media list.
-    /// https://drafts.csswg.org/cssom/#dom-medialist-deletemedium
+    /// <https://drafts.csswg.org/cssom/#dom-medialist-deletemedium>
     ///
     /// Returns true if found and deleted, false otherwise.
     pub fn delete_medium(&mut self, context: &ParserContext, old_medium: &str) -> bool {

@@ -814,7 +814,7 @@ PreparePattern(FcPattern* aPattern, bool aIsPrinterFont)
 void
 gfxFontconfigFontEntry::UnscaledFontCache::MoveToFront(size_t aIndex) {
     if (aIndex > 0) {
-        WeakPtr<UnscaledFont> front =
+        ThreadSafeWeakPtr<UnscaledFontFontconfig> front =
             Move(mUnscaledFonts[aIndex]);
         for (size_t i = aIndex; i > 0; i--) {
             mUnscaledFonts[i] = Move(mUnscaledFonts[i-1]);
@@ -826,13 +826,12 @@ gfxFontconfigFontEntry::UnscaledFontCache::MoveToFront(size_t aIndex) {
 already_AddRefed<UnscaledFontFontconfig>
 gfxFontconfigFontEntry::UnscaledFontCache::Lookup(const char* aFile, uint32_t aIndex) {
     for (size_t i = 0; i < kNumEntries; i++) {
-        UnscaledFontFontconfig* entry =
-            static_cast<UnscaledFontFontconfig*>(mUnscaledFonts[i].get());
+        RefPtr<UnscaledFontFontconfig> entry(mUnscaledFonts[i]);
         if (entry &&
             !strcmp(entry->GetFile(), aFile) &&
             entry->GetIndex() == aIndex) {
             MoveToFront(i);
-            return do_AddRef(entry);
+            return entry.forget();
         }
     }
     return nullptr;
@@ -1168,7 +1167,7 @@ PatternHasLang(const FcPattern *aPattern, const FcChar8 *aLang)
 }
 
 bool
-gfxFontconfigFontFamily::SupportsLangGroup(nsIAtom *aLangGroup) const
+gfxFontconfigFontFamily::SupportsLangGroup(nsAtom *aLangGroup) const
 {
     if (!aLangGroup || aLangGroup == nsGkAtoms::Unicode) {
         return true;
@@ -1250,15 +1249,13 @@ gfxFcPlatformFontList::gfxFcPlatformFontList()
     int rescanInterval = FcConfigGetRescanInterval(nullptr);
     if (rescanInterval) {
         mLastConfig = FcConfigGetCurrent();
-        mCheckFontUpdatesTimer = do_CreateInstance("@mozilla.org/timer;1");
-        if (mCheckFontUpdatesTimer) {
-          mCheckFontUpdatesTimer->InitWithNamedFuncCallback(
-            CheckFontUpdates,
-            this,
-            (rescanInterval + 1) * 1000,
-            nsITimer::TYPE_REPEATING_SLACK,
-            "gfxFcPlatformFontList::gfxFcPlatformFontList");
-        } else {
+        NS_NewTimerWithFuncCallback(getter_AddRefs(mCheckFontUpdatesTimer),
+                                    CheckFontUpdates,
+                                    this,
+                                    (rescanInterval + 1) * 1000,
+                                    nsITimer::TYPE_REPEATING_SLACK,
+                                    "gfxFcPlatformFontList::gfxFcPlatformFontList");
+        if (!mCheckFontUpdatesTimer) {
             NS_WARNING("Failure to create font updates timer");
         }
     }
@@ -1388,7 +1385,7 @@ gfxFcPlatformFontList::InitFontListForPlatform()
 // FcFontList results in the list containing the localized names as dictated
 // by system defaults.
 static void
-GetSystemFontList(nsTArray<nsString>& aListOfFonts, nsIAtom *aLangGroup)
+GetSystemFontList(nsTArray<nsString>& aListOfFonts, nsAtom *aLangGroup)
 {
     aListOfFonts.Clear();
 
@@ -1438,7 +1435,7 @@ GetSystemFontList(nsTArray<nsString>& aListOfFonts, nsIAtom *aLangGroup)
 }
 
 void
-gfxFcPlatformFontList::GetFontList(nsIAtom *aLangGroup,
+gfxFcPlatformFontList::GetFontList(nsAtom *aLangGroup,
                                    const nsACString& aGenericFamily,
                                    nsTArray<nsString>& aListOfFonts)
 {
@@ -1518,12 +1515,12 @@ gfxFcPlatformFontList::MakePlatformFont(const nsAString& aFontName,
 {
     FT_Face face = Factory::NewFTFaceFromData(nullptr, aFontData, aLength, 0);
     if (!face) {
-        NS_Free((void*)aFontData);
+        free((void*)aFontData);
         return nullptr;
     }
     if (FT_Err_Ok != FT_Select_Charmap(face, FT_ENCODING_UNICODE)) {
         Factory::ReleaseFTFace(face);
-        NS_Free((void*)aFontData);
+        free((void*)aFontData);
         return nullptr;
     }
 
@@ -1540,7 +1537,7 @@ gfxFcPlatformFontList::FindAndAddFamilies(const nsAString& aFamily,
 {
     nsAutoString familyName(aFamily);
     ToLowerCase(familyName);
-    nsIAtom* language = (aStyle ? aStyle->language.get() : nullptr);
+    nsAtom* language = (aStyle ? aStyle->language.get() : nullptr);
 
     // deprecated generic names are explicitly converted to standard generics
     bool isDeprecatedGeneric = false;
@@ -1729,7 +1726,7 @@ gfxFcPlatformFontList::GetStandardFamilyName(const nsAString& aFontName,
 
 void
 gfxFcPlatformFontList::AddGenericFonts(mozilla::FontFamilyType aGenericType,
-                                       nsIAtom* aLanguage,
+                                       nsAtom* aLanguage,
                                        nsTArray<gfxFontFamily*>& aFamilyList)
 {
     bool usePrefFontList = false;
@@ -1751,7 +1748,7 @@ gfxFcPlatformFontList::AddGenericFonts(mozilla::FontFamilyType aGenericType,
     NS_ConvertASCIItoUTF16 genericToLookup(generic);
     if ((!mAlwaysUseFontconfigGenerics && aLanguage) ||
         aLanguage == nsGkAtoms::x_math) {
-        nsIAtom* langGroup = GetLangGroup(aLanguage);
+        nsAtom* langGroup = GetLangGroup(aLanguage);
         nsAutoString fontlistValue;
         Preferences::GetString(NamePref(generic, langGroup).get(),
                                fontlistValue);
@@ -1840,7 +1837,7 @@ gfxFcPlatformFontList::GetFTLibrary()
 
 gfxPlatformFontList::PrefFontList*
 gfxFcPlatformFontList::FindGenericFamilies(const nsAString& aGeneric,
-                                           nsIAtom* aLanguage)
+                                           nsAtom* aLanguage)
 {
     // set up name
     NS_ConvertUTF16toUTF8 generic(aGeneric);

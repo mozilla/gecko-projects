@@ -43,12 +43,12 @@ impl HTMLBodyElement {
     #[allow(unrooted_must_root)]
     pub fn new(local_name: LocalName, prefix: Option<Prefix>, document: &Document)
                -> DomRoot<HTMLBodyElement> {
-        Node::reflect_node(box HTMLBodyElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLBodyElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLBodyElementBinding::Wrap)
     }
 
-    /// https://drafts.csswg.org/cssom-view/#the-html-body-element
+    /// <https://drafts.csswg.org/cssom-view/#the-html-body-element>
     pub fn is_the_html_body_element(&self) -> bool {
         let self_node = self.upcast::<Node>();
         let root_elem = self.upcast::<Element>().root_element();
@@ -76,7 +76,13 @@ impl HTMLBodyElementMethods for HTMLBodyElement {
     make_getter!(Background, "background");
 
     // https://html.spec.whatwg.org/multipage/#dom-body-background
-    make_url_setter!(SetBackground, "background");
+    fn SetBackground(&self, input: DOMString) {
+        let value = AttrValue::from_resolved_url(
+            &document_from_node(self).base_url(),
+            input.into(),
+        );
+        self.upcast::<Element>().set_attribute(&local_name!("background"), value);
+    }
 
     // https://html.spec.whatwg.org/multipage/#windoweventhandlers
     window_event_handlers!(ForwardToWindow);
@@ -114,7 +120,7 @@ impl HTMLBodyElementLayoutHelpers for LayoutDom<HTMLBodyElement> {
         unsafe {
             (*self.upcast::<Element>().unsafe_get())
                 .get_attr_for_layout(&ns!(), &local_name!("background"))
-                .and_then(AttrValue::as_url)
+                .and_then(AttrValue::as_resolved_url)
                 .cloned()
         }
     }
@@ -123,6 +129,14 @@ impl HTMLBodyElementLayoutHelpers for LayoutDom<HTMLBodyElement> {
 impl VirtualMethods for HTMLBodyElement {
     fn super_type(&self) -> Option<&VirtualMethods> {
         Some(self.upcast::<HTMLElement>() as &VirtualMethods)
+    }
+
+    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+        if attr.local_name() == &local_name!("bgcolor") {
+            return true;
+        }
+
+        self.super_type().unwrap().attribute_affects_presentational_hints(attr)
     }
 
     fn bind_to_tree(&self, tree_in_doc: bool) {
@@ -146,7 +160,10 @@ impl VirtualMethods for HTMLBodyElement {
             local_name!("bgcolor") |
             local_name!("text") => AttrValue::from_legacy_color(value.into()),
             local_name!("background") => {
-                AttrValue::from_url(document_from_node(self).url(), value.into())
+                AttrValue::from_resolved_url(
+                    &document_from_node(self).base_url(),
+                    value.into(),
+                )
             },
             _ => self.super_type().unwrap().parse_plain_attribute(name, value),
         }

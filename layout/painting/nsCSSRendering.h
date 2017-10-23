@@ -212,6 +212,16 @@ struct nsCSSRendering {
                                  const nsRect& aBorderArea,
                                  nsStyleContext* aStyleContext);
 
+
+  static bool CreateWebRenderCommandsForBorder(nsDisplayItem* aItem,
+                                               nsIFrame* aForFrame,
+                                               const nsRect& aBorderArea,
+                                               mozilla::wr::DisplayListBuilder& aBuilder,
+                                               mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                               const mozilla::layers::StackingContextHelper& aSc,
+                                               mozilla::layers::WebRenderLayerManager* aManager,
+                                               nsDisplayListBuilder* aDisplayListBuilder);
+
   /**
    * Render the outline for an element using css rendering rules
    * for borders.
@@ -592,6 +602,7 @@ struct nsCSSRendering {
     // NS_STYLE_TEXT_DECORATION_STYLE_*.
     uint8_t style = NS_STYLE_TEXT_DECORATION_STYLE_NONE;
     bool vertical = false;
+    bool sidewaysLeft = false;
   };
 
   struct PaintDecorationLineParams : DecorationRectParams

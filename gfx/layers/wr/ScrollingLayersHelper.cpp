@@ -150,7 +150,7 @@ ScrollingLayersHelper::DefineAndPushChain(const DisplayItemClipChain* aChain,
     // This item in the chain is a no-op, skip over it
     return;
   }
-  if (!clipId || aBuilder.HasMaskClip()) {
+  if (!clipId || aBuilder.HasExtraClip()) {
     // If we don't have a clip id for this chain item yet, define the clip in WR
     // and save the id
     LayoutDeviceRect clip = LayoutDeviceRect::FromAppUnits(
@@ -158,7 +158,7 @@ ScrollingLayersHelper::DefineAndPushChain(const DisplayItemClipChain* aChain,
     nsTArray<wr::ComplexClipRegion> wrRoundedRects;
     aChain->mClip.ToComplexClipRegions(aAppUnitsPerDevPixel, aStackingContext, wrRoundedRects);
     clipId = Some(aBuilder.DefineClip(aStackingContext.ToRelativeLayoutRect(clip), &wrRoundedRects));
-    if (!aBuilder.HasMaskClip()) {
+    if (!aBuilder.HasExtraClip()) {
       aCache[aChain] = clipId.value();
     }
   }
@@ -175,13 +175,11 @@ ScrollingLayersHelper::DefineAndPushScrollLayer(const FrameMetrics& aMetrics,
   if (!aMetrics.IsScrollable()) {
     return false;
   }
-  LayerRect contentRect = ViewAs<LayerPixel>(
-      aMetrics.GetExpandedScrollableRect() * aMetrics.GetDevPixelsPerCSSPixel(),
-      PixelCastJustification::WebRenderHasUnitResolution);
+  LayoutDeviceRect contentRect =
+      aMetrics.GetExpandedScrollableRect() * aMetrics.GetDevPixelsPerCSSPixel();
   // TODO: check coordinate systems are sane here
-  LayerRect clipBounds = ViewAs<LayerPixel>(
-      aMetrics.GetCompositionBounds(),
-      PixelCastJustification::MovingDownToChildren);
+  LayoutDeviceRect clipBounds =
+      LayoutDeviceRect::FromUnknownRect(aMetrics.GetCompositionBounds().ToUnknownRect());
   // The content rect that we hand to PushScrollLayer should be relative to
   // the same origin as the clipBounds that we hand to PushScrollLayer - that
   // is, both of them should be relative to the stacking context `aStackingContext`.

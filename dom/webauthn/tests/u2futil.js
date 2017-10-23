@@ -3,7 +3,11 @@ var _countCompletions = 0;
 var _expectedCompletions = 0;
 
 const flag_TUP = 0x01;
+const flag_UV = 0x04;
 const flag_AT = 0x40;
+
+const cose_alg_ECDSA_w_SHA256 = -7;
+const cose_alg_ECDSA_w_SHA512 = -36;
 
 function handleEventMessage(event) {
   if ("test" in event.data) {
@@ -283,9 +287,9 @@ function sanitizeSigArray(arr) {
 }
 
 function verifySignature(key, data, derSig) {
-  if (derSig.byteLength < 70) {
-    console.log("bad sig: " + hexEncode(new Uint8Array(derSig)))
-    return Promise.reject("Invalid signature length: " + derSig.byteLength);
+  if (derSig.byteLength < 68) {
+    return Promise.reject("Invalid signature (length=" + derSig.byteLength +
+                          "): " + hexEncode(new Uint8Array(derSig)));
   }
 
   let sigAsn1 = org.pkijs.fromBER(derSig);

@@ -50,7 +50,7 @@
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
 #include "nsIAnonymousContentCreator.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsIBaseWindow.h"
 #include "nsICategoryManager.h"
 #include "nsIContentIterator.h"
@@ -158,7 +158,7 @@ nsINode::~nsINode()
 }
 
 void*
-nsINode::GetProperty(uint16_t aCategory, nsIAtom *aPropertyName,
+nsINode::GetProperty(uint16_t aCategory, nsAtom *aPropertyName,
                      nsresult *aStatus) const
 {
   if (!HasProperties()) { // a fast HasFlag() test
@@ -172,7 +172,7 @@ nsINode::GetProperty(uint16_t aCategory, nsIAtom *aPropertyName,
 }
 
 nsresult
-nsINode::SetProperty(uint16_t aCategory, nsIAtom *aPropertyName, void *aValue,
+nsINode::SetProperty(uint16_t aCategory, nsAtom *aPropertyName, void *aValue,
                      NSPropertyDtorFunc aDtor, bool aTransfer,
                      void **aOldValue)
 {
@@ -190,13 +190,13 @@ nsINode::SetProperty(uint16_t aCategory, nsIAtom *aPropertyName, void *aValue,
 }
 
 void
-nsINode::DeleteProperty(uint16_t aCategory, nsIAtom *aPropertyName)
+nsINode::DeleteProperty(uint16_t aCategory, nsAtom *aPropertyName)
 {
   OwnerDoc()->PropertyTable(aCategory)->DeleteProperty(this, aPropertyName);
 }
 
 void*
-nsINode::UnsetProperty(uint16_t aCategory, nsIAtom *aPropertyName,
+nsINode::UnsetProperty(uint16_t aCategory, nsAtom *aPropertyName,
                        nsresult *aStatus)
 {
   return OwnerDoc()->PropertyTable(aCategory)->UnsetProperty(this,
@@ -409,11 +409,7 @@ nsINode::ChildNodes()
 {
   nsSlots* slots = Slots();
   if (!slots->mChildNodes) {
-    // Check |!IsElement()| first to catch the common case
-    // without virtual call |IsNodeOfType|
-    slots->mChildNodes = !IsElement() && IsNodeOfType(nsINode::eATTRIBUTE) ?
-                           new nsAttrChildContentList(this) :
-                           new nsParentNodeChildContentList(this);
+    slots->mChildNodes = new nsChildContentList(this);
   }
 
   return slots->mChildNodes;
@@ -773,7 +769,7 @@ nsINode::LookupPrefix(const nsAString& aNamespaceURI, nsAString& aPrefix)
                                  aNamespaceURI, eCaseMatters)) {
           // If the localName is "xmlns", the prefix we output should be
           // null.
-          nsIAtom *localName = name->LocalName();
+          nsAtom *localName = name->LocalName();
 
           if (localName != nsGkAtoms::xmlns) {
             localName->ToString(aPrefix);
@@ -791,7 +787,7 @@ nsINode::LookupPrefix(const nsAString& aNamespaceURI, nsAString& aPrefix)
 }
 
 static nsresult
-SetUserDataProperty(uint16_t aCategory, nsINode *aNode, nsIAtom *aKey,
+SetUserDataProperty(uint16_t aCategory, nsINode *aNode, nsAtom *aKey,
                     nsISupports* aValue, void** aOldValue)
 {
   nsresult rv = aNode->SetProperty(aCategory, aKey, aValue,
@@ -811,7 +807,7 @@ nsINode::SetUserData(const nsAString &aKey, nsIVariant *aData, nsIVariant **aRes
   OwnerDoc()->WarnOnceAbout(nsIDocument::eGetSetUserData);
   *aResult = nullptr;
 
-  RefPtr<nsIAtom> key = NS_Atomize(aKey);
+  RefPtr<nsAtom> key = NS_Atomize(aKey);
   if (!key) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -864,7 +860,7 @@ nsIVariant*
 nsINode::GetUserData(const nsAString& aKey)
 {
   OwnerDoc()->WarnOnceAbout(nsIDocument::eGetSetUserData);
-  RefPtr<nsIAtom> key = NS_Atomize(aKey);
+  RefPtr<nsAtom> key = NS_Atomize(aKey);
   if (!key) {
     return nullptr;
   }
@@ -1556,8 +1552,8 @@ nsresult
 nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
                          bool aNotify, nsAttrAndChildArray& aChildArray)
 {
-  MOZ_ASSERT(!aKid->GetParentNode(), "Inserting node that already has parent");
-  MOZ_ASSERT(!IsNodeOfType(nsINode::eATTRIBUTE));
+  NS_PRECONDITION(!aKid->GetParentNode(),
+                  "Inserting node that already has parent");
 
   // The id-handling code, and in the future possibly other code, need to
   // react to unexpected attribute changes.
@@ -1599,14 +1595,6 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
   NS_ENSURE_SUCCESS(rv, rv);
   if (aIndex == 0) {
     mFirstChild = aKid;
-  }
-
-  // Invalidate cached array of child nodes
-  nsSlots* slots = GetExistingSlots();
-  if (slots && slots->mChildNodes) {
-    auto childNodes =
-      static_cast<nsParentNodeChildContentList*>(slots->mChildNodes.get());
-    childNodes->InvalidateCache();
   }
 
   nsIContent* parent =
@@ -1914,10 +1902,9 @@ nsINode::doRemoveChildAt(uint32_t aIndex, bool aNotify,
   // nsIDocument::GetRootElement() calls until *after* it has removed aKid from
   // aChildArray. Any calls before then could potentially restore a stale
   // value for our cached root element, per note in nsDocument::RemoveChildAt().
-  MOZ_ASSERT(aKid && aKid->GetParentNode() == this &&
-             aKid == GetChildAt(aIndex) &&
-             IndexOf(aKid) == (int32_t)aIndex, "Bogus aKid");
-  MOZ_ASSERT(!IsNodeOfType(nsINode::eATTRIBUTE));
+  NS_PRECONDITION(aKid && aKid->GetParentNode() == this &&
+                  aKid == GetChildAt(aIndex) &&
+                  IndexOf(aKid) == (int32_t)aIndex, "Bogus aKid");
 
   nsMutationGuard::DidMutate();
   mozAutoDocUpdate updateBatch(GetComposedDoc(), UPDATE_CONTENT_MODEL, aNotify);
@@ -1929,14 +1916,6 @@ nsINode::doRemoveChildAt(uint32_t aIndex, bool aNotify,
   }
 
   aChildArray.RemoveChildAt(aIndex);
-
-  // Invalidate cached array of child nodes
-  nsSlots* slots = GetExistingSlots();
-  if (slots && slots->mChildNodes) {
-    auto childNodes =
-      static_cast<nsParentNodeChildContentList*>(slots->mChildNodes.get());
-    childNodes->InvalidateCache();
-  }
 
   if (aNotify) {
     nsNodeUtils::ContentRemoved(this, aKid, previousSibling);
@@ -2684,7 +2663,8 @@ nsINode::ParseServoSelectorList(
   nsIDocument* doc = OwnerDoc();
   MOZ_ASSERT(doc->IsStyledByServo());
 
-  nsIDocument::SelectorCache& cache = doc->GetSelectorCache();
+  nsIDocument::SelectorCache& cache =
+    doc->GetSelectorCache(mozilla::StyleBackendType::Servo);
   nsIDocument::SelectorCache::SelectorList* list =
     cache.GetList(aSelectorString);
   if (list) {
@@ -2694,13 +2674,10 @@ nsINode::ParseServoSelectorList(
         NS_LITERAL_CSTRING("'") + NS_ConvertUTF16toUTF8(aSelectorString) +
         NS_LITERAL_CSTRING("' is not a valid selector")
       );
+      return nullptr;
     }
 
-    // FIXME(emilio): Make this private and use `WithSelectorList` everywhere,
-    // then assert.
-    if (list->IsServo()) {
-      return list->AsServo();
-    }
+    return list->AsServo();
   }
 
   NS_ConvertUTF16toUTF8 selectorString(aSelectorString);
@@ -2722,7 +2699,8 @@ nsINode::ParseSelectorList(const nsAString& aSelectorString,
                            ErrorResult& aRv)
 {
   nsIDocument* doc = OwnerDoc();
-  nsIDocument::SelectorCache& cache = doc->GetSelectorCache();
+  nsIDocument::SelectorCache& cache =
+    doc->GetSelectorCache(mozilla::StyleBackendType::Gecko);
   nsIDocument::SelectorCache::SelectorList* list =
     cache.GetList(aSelectorString);
   if (list) {
@@ -2732,13 +2710,10 @@ nsINode::ParseSelectorList(const nsAString& aSelectorString,
         NS_LITERAL_CSTRING("'") + NS_ConvertUTF16toUTF8(aSelectorString) +
         NS_LITERAL_CSTRING("' is not a valid selector")
       );
+      return nullptr;
     }
 
-    // FIXME(emilio): Make this private and use `WithSelectorList` everywhere,
-    // then assert.
-    if (list->IsGecko()) {
-      return list->AsGecko();
-    }
+    return list->AsGecko();
   }
 
   nsCSSParser parser(doc->CSSLoader());
@@ -2881,7 +2856,7 @@ FindMatchingElements(nsINode* aRoot, nsCSSSelectorList* aSelectorList, T &aList,
       doc->GetCompatibilityMode() != eCompatibility_NavQuirks &&
       !aSelectorList->mNext &&
       aSelectorList->mSelectors->mIDList) {
-    nsIAtom* id = aSelectorList->mSelectors->mIDList->mAtom;
+    nsAtom* id = aSelectorList->mSelectors->mIDList->mAtom;
     SelectorMatchInfo info = { aSelectorList, matchingContext };
     FindMatchingElementsWithId<onlyFirstMatch, T>(nsDependentAtomString(id),
                                                   aRoot, &info, aList);
@@ -2974,7 +2949,7 @@ nsINode::GetElementById(const nsAString& aId)
     if (!kid->IsElement()) {
       continue;
     }
-    nsIAtom* id = kid->AsElement()->GetID();
+    nsAtom* id = kid->AsElement()->GetID();
     if (id && id->Equals(aId)) {
       return kid->AsElement();
     }

@@ -20,7 +20,6 @@
 #include "nsAttrValueInlines.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
-#include "nsCanvasFrame.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
@@ -29,7 +28,6 @@
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsFrameSetFrame.h"
-#include "nsIDOMHTMLFrameElement.h"
 #include "nsIScrollable.h"
 #include "nsNameSpaceManager.h"
 #include "nsDisplayList.h"
@@ -43,6 +41,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIDOMMutationEvent.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/HTMLFrameElement.h"
 
 using namespace mozilla;
 using mozilla::layout::RenderFrameParent;
@@ -113,9 +112,9 @@ nsSubDocumentFrame::Init(nsIContent*       aContent,
                          nsContainerFrame* aParent,
                          nsIFrame*         aPrevInFlow)
 {
+  MOZ_ASSERT(aContent);
   // determine if we are a <frame> or <iframe>
-  nsCOMPtr<nsIDOMHTMLFrameElement> frameElem = do_QueryInterface(aContent);
-  mIsInline = frameElem ? false : true;
+  mIsInline = !aContent->IsHTMLElement(nsGkAtoms::frame);
 
   static bool addedShowPreviousPage = false;
   if (!addedShowPreviousPage) {
@@ -285,9 +284,7 @@ nsSubDocumentFrame::GetSubdocumentSize()
   } else {
     nsSize docSizeAppUnits;
     nsPresContext* presContext = PresContext();
-    nsCOMPtr<nsIDOMHTMLFrameElement> frameElem =
-      do_QueryInterface(GetContent());
-    if (frameElem) {
+    if (GetContent()->IsHTMLElement(nsGkAtoms::frame)) {
       docSizeAppUnits = GetSize();
     } else {
       docSizeAppUnits = GetContentRect().Size();
@@ -314,11 +311,11 @@ WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
                               nsIFrame* aFrame,
                               nsDisplayList* aList)
 {
-  nsDisplayList tempItems;
+  nsDisplayList tempItems(aBuilder);
   nsDisplayItem* item;
   while ((item = aList->RemoveBottom()) != nullptr) {
     if (item->GetType() == DisplayItemType::TYPE_BACKGROUND_COLOR) {
-      nsDisplayList tmpList;
+      nsDisplayList tmpList(aBuilder);
       tmpList.AppendToTop(item);
       item = new (aBuilder) nsDisplayOwnLayer(aBuilder, aFrame, &tmpList, aBuilder->CurrentActiveScrolledRoot());
     }
@@ -344,7 +341,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   bool pointerEventsNone =
     StyleUserInterface()->mPointerEvents == NS_STYLE_POINTER_EVENTS_NONE;
   if (!aBuilder->IsForEventDelivery() || !pointerEventsNone) {
-    nsDisplayListCollection decorations;
+    nsDisplayListCollection decorations(aBuilder);
     DisplayBorderBackgroundOutline(aBuilder, decorations);
     if (rfp) {
       // Wrap background colors of <iframe>s with remote subdocuments in their
@@ -457,7 +454,8 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   if (aBuilder->IsRetainingDisplayList()) {
     // The value of needsOwnLayer can change between builds without
-    // an invalidation recorded for this frame. If this happens,
+    // an invalidation recorded for this frame (like if the root
+    // scrollframe becomes active). If this happens,
     // then we need to notify the builder so that merging can
     // happen correctly.
     if (!mPreviouslyNeededLayer ||
@@ -469,7 +467,9 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
-    // areas and save some work here.
+    // areas and save some work here. RetainedDisplayListBuilder
+    // does this, so we could teach it to find and check all
+    // subdocs in advance.
     if (mPreviousCaret != aBuilder->GetCaretFrame()) {
       dirty = visible;
       aBuilder->MarkFrameModifiedDuringBuilding(this);
@@ -477,7 +477,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     mPreviousCaret = aBuilder->GetCaretFrame();
   }
 
-  nsDisplayList childItems;
+  nsDisplayList childItems(aBuilder);
 
   {
     DisplayListClipState::AutoSaveRestore nestedClipState(aBuilder);
@@ -576,16 +576,13 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     childItems.AppendToTop(resolutionItem);
     needsOwnLayer = false;
   }
-
-  // We always want top level content documents to be in their own layer.
-  nsDisplaySubDocument* layerItem = new (aBuilder) nsDisplaySubDocument(
-    aBuilder, subdocRootFrame ? subdocRootFrame : this, this,
-    &childItems, flags);
-
-  childItems.AppendToTop(layerItem);
-
-  // Flatten the subdocument item if it does not need own layer.
-  layerItem->SetShouldFlattenAway(needsOwnLayer == false);
+  if (needsOwnLayer) {
+    // We always want top level content documents to be in their own layer.
+    nsDisplaySubDocument* layerItem = new (aBuilder) nsDisplaySubDocument(
+      aBuilder, subdocRootFrame ? subdocRootFrame : this, this,
+      &childItems, flags);
+    childItems.AppendToTop(layerItem);
+  }
 
   // If we're using containers for root frames, then the earlier call
   // to AddCanvasBackgroundColorItem won't have been able to add an
@@ -886,7 +883,7 @@ nsSubDocumentFrame::ReflowCallbackCanceled()
 
 nsresult
 nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      int32_t aModType)
 {
   if (aNameSpaceID != kNameSpaceID_None) {

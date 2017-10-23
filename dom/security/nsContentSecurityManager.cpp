@@ -26,7 +26,9 @@ nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
   nsIURI* aURI,
   nsContentPolicyType aContentPolicyType,
   nsIPrincipal* aTriggeringPrincipal,
-  bool aLoadFromExternal)
+  nsIDocument* aDoc,
+  bool aLoadFromExternal,
+  bool aIsDownLoad)
 {
   // Let's block all toplevel document navigations to a data: URI.
   // In all cases where the toplevel document is navigated to a
@@ -39,7 +41,7 @@ nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
   if (!mozilla::net::nsIOService::BlockToplevelDataUriNavigations()) {
     return true;
   }
-  if (aContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT) {
+  if (aContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT || aIsDownLoad) {
     return true;
   }
   bool isDataURI =
@@ -72,8 +74,7 @@ nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
   const char16_t* params[] = { specUTF16.get() };
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   NS_LITERAL_CSTRING("DATA_URI_BLOCKED"),
-                                  // no doc available, log to browser console
-                                  nullptr,
+                                  aDoc,
                                   nsContentUtils::eSECURITY_PROPERTIES,
                                   "BlockTopLevelDataURINavigation",
                                   params, ArrayLength(params));
@@ -455,18 +456,11 @@ DoContentSecurityChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo)
       MOZ_ASSERT(false, "can not perform security check without a valid contentType");
   }
 
-  // For document loads we use the triggeringPrincipal as the originPrincipal.
-  // Note the the loadingPrincipal for loads of TYPE_DOCUMENT is a nullptr.
-  nsCOMPtr<nsIPrincipal> principal =
-    (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT ||
-     contentPolicyType == nsIContentPolicy::TYPE_SUBDOCUMENT)
-    ? aLoadInfo->TriggeringPrincipal()
-    : aLoadInfo->LoadingPrincipal();
-
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
   rv = NS_CheckContentLoadPolicy(internalContentPolicyType,
                                  uri,
-                                 principal,
+                                 aLoadInfo->LoadingPrincipal(),
+                                 aLoadInfo->TriggeringPrincipal(),
                                  requestingContext,
                                  mimeTypeGuess,
                                  nullptr,        //extra,
@@ -590,6 +584,8 @@ nsContentSecurityManager::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
           uri,
           newLoadInfo->GetExternalContentPolicyType(),
           nullTriggeringPrincipal,
+          nullptr, // no doc available, log to browser console
+          false,
           false)) {
         // logging to console happens within AllowTopLevelNavigationToDataURI
       aOldChannel->Cancel(NS_ERROR_DOM_BAD_URI);

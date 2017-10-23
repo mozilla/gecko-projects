@@ -180,7 +180,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont
    * negative results.  The result is clamped to nscoord_MIN .. nscoord_MAX.
    */
   static nscoord UnZoomText(nsPresContext* aPresContext, nscoord aSize);
-  static already_AddRefed<nsIAtom> GetLanguage(const nsPresContext* aPresContext);
+  static already_AddRefed<nsAtom> GetLanguage(const nsPresContext* aPresContext);
 
   void* operator new(size_t sz, nsStyleFont* aSelf) { return aSelf; }
   void* operator new(size_t sz, nsPresContext* aContext) {
@@ -230,7 +230,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont
   nscoord mScriptUnconstrainedSize;
   nscoord mScriptMinSize;        // [inherited] length
   float   mScriptSizeMultiplier; // [inherited]
-  RefPtr<nsIAtom> mLanguage;   // [inherited]
+  RefPtr<nsAtom> mLanguage;   // [inherited]
 };
 
 struct nsStyleGradientStop
@@ -449,7 +449,7 @@ struct nsStyleImage
   void SetNull();
   void SetImageRequest(already_AddRefed<nsStyleImageRequest> aImage);
   void SetGradientData(nsStyleGradient* aGradient);
-  void SetElementId(already_AddRefed<nsIAtom> aElementId);
+  void SetElementId(already_AddRefed<nsAtom> aElementId);
   void SetCropRect(mozilla::UniquePtr<nsStyleSides> aCropRect);
   void SetURLValue(already_AddRefed<URLValue> aData);
 
@@ -478,7 +478,7 @@ struct nsStyleImage
   bool IsResolved() const {
     return mType != eStyleImageType_Image || GetImageRequest()->IsResolved();
   }
-  const nsIAtom* GetElementId() const {
+  const nsAtom* GetElementId() const {
     NS_ASSERTION(mType == eStyleImageType_Element, "Data is not an element!");
     return mElementId;
   }
@@ -578,7 +578,7 @@ private:
     URLValue* mURLValue; // See the comment in SetStyleImage's 'case
                          // eCSSUnit_URL' section to know why we need to
                          // store URLValues separately from mImage.
-    nsIAtom* mElementId;
+    nsAtom* mElementId;
   };
 
   // This is _currently_ used only in conjunction with eStyleImageType_Image.
@@ -2254,7 +2254,7 @@ struct StyleTransition
   float GetDelay() const { return mDelay; }
   float GetDuration() const { return mDuration; }
   nsCSSPropertyID GetProperty() const { return mProperty; }
-  nsIAtom* GetUnknownProperty() const { return mUnknownProperty; }
+  nsAtom* GetUnknownProperty() const { return mUnknownProperty; }
 
   float GetCombinedDuration() const {
     // http://dev.w3.org/csswg/css-transitions/#combined-duration
@@ -2275,7 +2275,7 @@ struct StyleTransition
   void SetUnknownProperty(nsCSSPropertyID aProperty,
                           const nsAString& aPropertyString);
   void SetUnknownProperty(nsCSSPropertyID aProperty,
-                          nsIAtom* aPropertyString);
+                          nsAtom* aPropertyString);
   void CopyPropertyFrom(const StyleTransition& aOther)
     {
       mProperty = aOther.mProperty;
@@ -2293,7 +2293,7 @@ private:
   float mDuration;
   float mDelay;
   nsCSSPropertyID mProperty;
-  RefPtr<nsIAtom> mUnknownProperty; // used when mProperty is
+  RefPtr<nsAtom> mUnknownProperty; // used when mProperty is
                                       // eCSSProperty_UNKNOWN or
                                       // eCSSPropertyExtra_variable
 };
@@ -2310,7 +2310,7 @@ struct StyleAnimation
   const nsTimingFunction& GetTimingFunction() const { return mTimingFunction; }
   float GetDelay() const { return mDelay; }
   float GetDuration() const { return mDuration; }
-  const nsString& GetName() const { return mName; }
+  nsAtom* GetName() const { return mName; }
   dom::PlaybackDirection GetDirection() const { return mDirection; }
   dom::FillMode GetFillMode() const { return mFillMode; }
   uint8_t GetPlayState() const { return mPlayState; }
@@ -2320,7 +2320,8 @@ struct StyleAnimation
     { mTimingFunction = aTimingFunction; }
   void SetDelay(float aDelay) { mDelay = aDelay; }
   void SetDuration(float aDuration) { mDuration = aDuration; }
-  void SetName(const nsAString& aName) { mName = aName; }
+  void SetName(already_AddRefed<nsAtom> aName) { mName = aName; }
+  void SetName(nsAtom* aName) { mName = aName; }
   void SetDirection(dom::PlaybackDirection aDirection) { mDirection = aDirection; }
   void SetFillMode(dom::FillMode aFillMode) { mFillMode = aFillMode; }
   void SetPlayState(uint8_t aPlayState) { mPlayState = aPlayState; }
@@ -2337,7 +2338,7 @@ private:
   nsTimingFunction mTimingFunction;
   float mDuration;
   float mDelay;
-  nsString mName; // empty string for 'none'
+  RefPtr<nsAtom> mName; // nsGkAtoms::_empty for 'none'
   dom::PlaybackDirection mDirection;
   dom::FillMode mFillMode;
   uint8_t mPlayState;
@@ -2578,7 +2579,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
                                 // match mWillChange. Also tracks if any of the
                                 // properties in the will-change list require
                                 // a stacking context.
-  nsTArray<RefPtr<nsIAtom>> mWillChange;
+  nsTArray<RefPtr<nsAtom>> mWillChange;
 
   uint8_t mTouchAction;         // [reset] see nsStyleConsts.h
   uint8_t mScrollBehavior;      // [reset] see nsStyleConsts.h NS_STYLE_SCROLL_BEHAVIOR_*
@@ -3372,7 +3373,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG
   RefPtr<mozilla::css::URLValue> mMarkerMid;   // [inherited]
   RefPtr<mozilla::css::URLValue> mMarkerStart; // [inherited]
   nsTArray<nsStyleCoord> mStrokeDasharray;  // [inherited] coord, percent, factor
-  nsTArray<RefPtr<nsIAtom>> mContextProps;
+  nsTArray<RefPtr<nsAtom>> mContextProps;
 
   nsStyleCoord     mStrokeDashoffset; // [inherited] coord, percent, factor
   nsStyleCoord     mStrokeWidth;      // [inherited] coord, percent, factor

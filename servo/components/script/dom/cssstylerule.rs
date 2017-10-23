@@ -25,7 +25,7 @@ use style::stylesheets::{StyleRule, Origin};
 #[dom_struct]
 pub struct CSSStyleRule {
     cssrule: CSSRule,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     stylerule: Arc<Locked<StyleRule>>,
     style_decl: MutNullableDom<CSSStyleDeclaration>,
 }
@@ -43,7 +43,7 @@ impl CSSStyleRule {
     #[allow(unrooted_must_root)]
     pub fn new(window: &Window, parent_stylesheet: &CSSStyleSheet,
                stylerule: Arc<Locked<StyleRule>>) -> DomRoot<CSSStyleRule> {
-        reflect_dom_object(box CSSStyleRule::new_inherited(parent_stylesheet, stylerule),
+        reflect_dom_object(Box::new(CSSStyleRule::new_inherited(parent_stylesheet, stylerule)),
                            window,
                            CSSStyleRuleBinding::Wrap)
     }

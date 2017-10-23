@@ -56,7 +56,7 @@ use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use task_source::TaskSource;
 
 bitflags! {
-    #[derive(HeapSizeOf, JSTraceable)]
+    #[derive(JSTraceable, MallocSizeOf)]
     flags SandboxAllowance: u8 {
         const ALLOW_NOTHING = 0x00,
         const ALLOW_SAME_ORIGIN = 0x01,
@@ -223,7 +223,7 @@ impl HTMLIFrameElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes
+    /// <https://html.spec.whatwg.org/multipage/#process-the-iframe-attributes>
     fn process_the_iframe_attributes(&self, mode: ProcessingMode) {
         // TODO: srcdoc
 
@@ -335,7 +335,7 @@ impl HTMLIFrameElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLIFrameElement> {
-        Node::reflect_node(box HTMLIFrameElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLIFrameElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLIFrameElementBinding::Wrap)
     }
@@ -568,14 +568,10 @@ pub fn Navigate(iframe: &HTMLIFrameElement, direction: TraversalDirection) -> Er
 
 impl HTMLIFrameElementMethods for HTMLIFrameElement {
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
-    fn Src(&self) -> DOMString {
-        self.upcast::<Element>().get_string_attribute(&local_name!("src"))
-    }
+    make_url_getter!(Src, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-src
-    fn SetSrc(&self, src: DOMString) {
-        self.upcast::<Element>().set_url_attribute(&local_name!("src"), src)
-    }
+    make_setter!(SetSrc, "src");
 
     // https://html.spec.whatwg.org/multipage/#dom-iframe-sandbox
     fn Sandbox(&self) -> DomRoot<DOMTokenList> {

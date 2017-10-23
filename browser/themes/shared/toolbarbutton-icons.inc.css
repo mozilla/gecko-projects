@@ -229,14 +229,6 @@ toolbar[brighttext] {
   list-style-image: url("chrome://browser/skin/new-window.svg");
 }
 
-#e10s-button {
-  list-style-image: url("chrome://browser/skin/new-window.svg");
-}
-
-#e10s-button > .toolbarbutton-icon {
-  transform: scaleY(-1);
-}
-
 #new-tab-button {
   list-style-image: url("chrome://browser/skin/new-tab.svg");
 }
@@ -526,8 +518,9 @@ toolbar[brighttext] {
 
 .bookmark-item {
   list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
-  -moz-context-properties: fill;
+  -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
+  fill-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 .bookmark-item[container] {

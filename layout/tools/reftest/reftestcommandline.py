@@ -246,7 +246,8 @@ class ReftestArgumentsParser(argparse.ArgumentParser):
         self.add_argument("--verify",
                           action="store_true",
                           default=False,
-                          help="Test verification mode.")
+                          help="Run tests in verification mode: Run many times in different "
+                               "ways, to see if there are intermittent failures.")
 
         self.add_argument("--verify-max-time",
                           type=int,
@@ -329,8 +330,16 @@ class ReftestArgumentsParser(argparse.ArgumentParser):
 
         options.leakThresholds = {
             "default": options.defaultLeakThreshold,
-            "tab": 5000,  # See dependencies of bug 1051230.
+            "tab": options.defaultLeakThreshold,
         }
+
+        if mozinfo.isWin:
+            if mozinfo.info['bits'] == 32:
+                # See bug 1408554.
+                options.leakThresholds["tab"] = 3000
+            else:
+                # See bug 1404482.
+                options.leakThresholds["tab"] = 100
 
 
 class DesktopArgumentsParser(ReftestArgumentsParser):

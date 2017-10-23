@@ -94,7 +94,7 @@ using mozilla::layers::ScrollInputMethod;
 
 static bool IsValidSelectionPoint(nsFrameSelection *aFrameSel, nsINode *aNode);
 
-static nsIAtom *GetTag(nsINode *aNode);
+static nsAtom *GetTag(nsINode *aNode);
 // returns the parent
 static nsINode* ParentOffset(nsINode *aNode, int32_t *aChildOffset);
 static nsINode* GetCellParent(nsINode *aDomNode);
@@ -629,7 +629,7 @@ void printRange(nsRange *aDomRange)
 #endif /* PRINT_RANGE */
 
 static
-nsIAtom *GetTag(nsINode *aNode)
+nsAtom *GetTag(nsINode *aNode)
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
   if (!content)
@@ -668,7 +668,7 @@ GetCellParent(nsINode *aDomNode)
     // Start with current node and look for a table cell
     while (current)
     {
-      nsIAtom* tag = GetTag(current);
+      nsAtom* tag = GetTag(current);
       if (tag == nsGkAtoms::td || tag == nsGkAtoms::th)
         return current;
       current = current->GetParent();
@@ -2511,16 +2511,15 @@ nsFrameSelection::UnselectCells(nsIContent *aTableContent,
         nsTableCellFrame* cellFrame =
           tableFrame->GetCellFrameAt(curRowIndex, curColIndex);
 
-        int32_t origRowIndex, origColIndex;
-        cellFrame->GetRowIndex(origRowIndex);
-        cellFrame->GetColIndex(origColIndex);
+        uint32_t origRowIndex = cellFrame->RowIndex();
+        uint32_t origColIndex = cellFrame->ColIndex();
         uint32_t actualRowSpan =
           tableFrame->GetEffectiveRowSpanAt(origRowIndex, origColIndex);
         uint32_t actualColSpan =
           tableFrame->GetEffectiveColSpanAt(curRowIndex, curColIndex);
-        if (origRowIndex <= maxRowIndex && maxRowIndex >= 0 &&
+        if (origRowIndex <= static_cast<uint32_t>(maxRowIndex) && maxRowIndex >= 0 &&
             origRowIndex + actualRowSpan - 1 >= static_cast<uint32_t>(minRowIndex) &&
-            origColIndex <= maxColIndex && maxColIndex >= 0 &&
+            origColIndex <= static_cast<uint32_t>(maxColIndex) && maxColIndex >= 0 &&
             origColIndex + actualColSpan - 1 >= static_cast<uint32_t>(minColIndex)) {
 
           mDomSelections[index]->RemoveRange(range);
@@ -2554,33 +2553,32 @@ nsFrameSelection::AddCellsToSelection(nsIContent *aTableContent,
     return NS_ERROR_FAILURE;
 
   nsresult result = NS_OK;
-  int32_t row = aStartRowIndex;
+  uint32_t row = aStartRowIndex;
   while(true)
   {
-    int32_t col = aStartColumnIndex;
+    uint32_t col = aStartColumnIndex;
     while(true)
     {
       nsTableCellFrame* cellFrame = tableFrame->GetCellFrameAt(row, col);
 
       // Skip cells that are spanned from previous locations or are already selected
       if (cellFrame) {
-        int32_t origRow, origCol;
-        cellFrame->GetRowIndex(origRow);
-        cellFrame->GetColIndex(origCol);
+        uint32_t origRow = cellFrame->RowIndex();
+        uint32_t origCol = cellFrame->ColIndex();
         if (origRow == row && origCol == col && !cellFrame->IsSelected()) {
           result = SelectCellElement(cellFrame->GetContent());
           if (NS_FAILED(result)) return result;
         }
       }
       // Done when we reach end column
-      if (col == aEndColumnIndex) break;
+      if (col == static_cast<uint32_t>(aEndColumnIndex)) break;
 
       if (aStartColumnIndex < aEndColumnIndex)
         col ++;
       else
         col--;
     }
-    if (row == aEndRowIndex) break;
+    if (row == static_cast<uint32_t>(aEndRowIndex)) break;
 
     if (aStartRowIndex < aEndRowIndex)
       row++;

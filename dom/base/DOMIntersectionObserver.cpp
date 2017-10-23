@@ -10,6 +10,7 @@
 #include "nsIFrame.h"
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
+#include "mozilla/ServoCSSParser.h"
 
 namespace mozilla {
 namespace dom {
@@ -47,7 +48,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMIntersectionObserver)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOwner)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCallback)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mQueuedEntries)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -55,7 +55,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMIntersectionObserver)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCallback)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueuedEntries)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -81,7 +80,10 @@ DOMIntersectionObserver::Constructor(const mozilla::dom::GlobalObject& aGlobal,
   RefPtr<DOMIntersectionObserver> observer =
     new DOMIntersectionObserver(window.forget(), aCb);
 
-  observer->mRoot = aOptions.mRoot;
+  if (aOptions.mRoot) {
+    observer->mRoot = aOptions.mRoot;
+    observer->mRoot->RegisterIntersectionObserver(observer);
+  }
 
   if (!observer->SetRootMargin(aOptions.mRootMargin)) {
     aRv.ThrowDOMException(NS_ERROR_DOM_SYNTAX_ERR,
@@ -115,6 +117,11 @@ DOMIntersectionObserver::Constructor(const mozilla::dom::GlobalObject& aGlobal,
 bool
 DOMIntersectionObserver::SetRootMargin(const nsAString& aString)
 {
+  if (mDocument && mDocument->IsStyledByServo()) {
+    return ServoCSSParser::ParseIntersectionObserverRootMargin(aString,
+                                                               &mRootMargin);
+  }
+
   // By not passing a CSS Loader object we make sure we don't parse in quirks
   // mode so that pixel/percent and unit-less values will be differentiated.
   nsCSSParser parser(nullptr);
@@ -175,8 +182,13 @@ DOMIntersectionObserver::Unobserve(Element& aTarget)
 }
 
 void
-DOMIntersectionObserver::UnlinkTarget(Element& aTarget)
+DOMIntersectionObserver::UnlinkElement(Element& aTarget)
 {
+  if (mRoot && mRoot == &aTarget) {
+    mRoot = nullptr;
+    Disconnect();
+    return;
+  }
   mObservationTargets.RemoveElement(&aTarget);
   if (mObservationTargets.Length() == 0) {
     Disconnect();
@@ -430,13 +442,15 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
       }
     }
 
-    double targetArea = targetRect.Width() * targetRect.Height();
-    double intersectionArea = !intersectionRect ?
-      0 : intersectionRect->Width() * intersectionRect->Height();
+    int64_t targetArea =
+      (int64_t) targetRect.Width() * (int64_t) targetRect.Height();
+    int64_t intersectionArea = !intersectionRect ? 0 :
+      (int64_t) intersectionRect->Width() *
+      (int64_t) intersectionRect->Height();
 
     double intersectionRatio;
     if (targetArea > 0.0) {
-      intersectionRatio = intersectionArea / targetArea;
+      intersectionRatio = (double) intersectionArea / (double) targetArea;
     } else {
       intersectionRatio = intersectionRect.isSome() ? 1.0 : 0.0;
     }

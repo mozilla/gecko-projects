@@ -183,7 +183,7 @@ impl<Window> Servo<Window> where Window: WindowMethods + 'static {
             };
 
             let mut debug_flags = webrender::DebugFlags::empty();
-            debug_flags.set(webrender::PROFILER_DBG, opts.webrender_stats);
+            debug_flags.set(webrender::DebugFlags::PROFILER_DBG, opts.webrender_stats);
 
             webrender::Renderer::new(window.gl(), webrender::RendererOptions {
                 device_pixel_ratio: device_pixel_ratio,
@@ -553,12 +553,17 @@ fn create_constellation(user_agent: Cow<'static, str>,
     };
 
     // Initialize WebGL Thread entry point.
-    let (webgl_threads, image_handler) = WebGLThreads::new(gl_factory,
-                                                           window_gl,
-                                                           webrender_api_sender.clone(),
-                                                           webvr_compositor.map(|c| c as Box<_>));
+    let (webgl_threads, image_handler, output_handler) = WebGLThreads::new(gl_factory,
+                                                                           window_gl,
+                                                                           webrender_api_sender.clone(),
+                                                                           webvr_compositor.map(|c| c as Box<_>));
     // Set webrender external image handler for WebGL textures
     webrender.set_external_image_handler(image_handler);
+
+    // Set DOM to texture handler, if enabled.
+    if let Some(output_handler) = output_handler {
+        webrender.set_output_image_handler(output_handler);
+    }
 
     let initial_state = InitialConstellationState {
         compositor_proxy,
@@ -648,16 +653,6 @@ pub fn run_content_process(token: String) {
     unprivileged_content.start_all::<script_layout_interface::message::Msg,
                                      layout_thread::LayoutThread,
                                      script::script_thread::ScriptThread>(true);
-}
-
-// This is a workaround for https://github.com/rust-lang/rust/pull/30175 until
-// https://github.com/lfairy/rust-errno/pull/5 lands, and should be removed once
-// we update Servo with the rust-errno crate.
-#[cfg(target_os = "android")]
-#[no_mangle]
-pub unsafe extern fn __errno_location() -> *mut i32 {
-    extern { fn __errno() -> *mut i32; }
-    __errno()
 }
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "ios")))]

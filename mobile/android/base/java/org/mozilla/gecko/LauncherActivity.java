@@ -54,8 +54,6 @@ public class LauncherActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        GeckoAppShell.ensureCrashHandling();
-
         final SafeIntent safeIntent = new SafeIntent(getIntent());
 
         // Is this deep link?
@@ -162,7 +160,7 @@ public class LauncherActivity extends Activity {
     }
 
     private static boolean isCustomTabsEnabled(@NonNull final Context context) {
-        return SwitchBoard.isInExperiment(context, Experiments.CUSTOM_TABS);
+        return GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_CUSTOM_TABS, true);
     }
 
     private static boolean isCustomTabsIntent(@NonNull final SafeIntent safeIntent) {

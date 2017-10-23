@@ -7,6 +7,7 @@
 
 #include "VRManagerChild.h"
 #include "VRManagerParent.h"
+#include "VRThread.h"
 #include "VRDisplayClient.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/StaticPtr.h"
@@ -119,7 +120,7 @@ VRManagerChild::InitSameProcess()
   sVRManagerChildSingleton = new VRManagerChild();
   sVRManagerParentSingleton = VRManagerParent::CreateSameProcess();
   sVRManagerChildSingleton->Open(sVRManagerParentSingleton->GetIPCChannel(),
-                                 mozilla::layers::CompositorThreadHolder::Loop(),
+                                 VRListenerThreadHolder::Loop(),
                                  mozilla::ipc::ChildSide);
 }
 
@@ -449,7 +450,7 @@ VRManagerChild::RecvReplyCreateVRServiceTestController(const nsCString& aID,
 void
 VRManagerChild::RunFrameRequestCallbacks()
 {
-  AutoProfilerTracing tracing("VR", "RunFrameRequestCallbacks");
+  AUTO_PROFILER_TRACING("VR", "RunFrameRequestCallbacks");
 
   TimeStamp nowTime = TimeStamp::Now();
   mozilla::TimeDuration duration = nowTime - mStartTimeStamp;

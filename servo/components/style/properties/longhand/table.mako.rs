@@ -19,9 +19,7 @@ ${helpers.single_keyword("table-layout", "auto fixed",
         use std::fmt;
         use style_traits::ToCss;
 
-        #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
         pub struct T(pub i32);
 
         impl ToCss for T {
@@ -39,8 +37,8 @@ ${helpers.single_keyword("table-layout", "auto fixed",
     // never parse it, only set via presentation attribute
     fn parse<'i, 't>(
         _: &ParserContext,
-        _: &mut Parser<'i, 't>,
+        input: &mut Parser<'i, 't>,
     ) -> Result<SpecifiedValue, ParseError<'i>> {
-        Err(StyleParseError::UnspecifiedError.into())
+        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 </%helpers:longhand>

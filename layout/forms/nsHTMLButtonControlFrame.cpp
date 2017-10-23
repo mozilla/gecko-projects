@@ -105,15 +105,15 @@ nsHTMLButtonControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     eventClipState->ClipContainingBlockDescendants(rect, hasRadii ? radii : nullptr);
   }
 
-  nsDisplayList onTop;
+  nsDisplayList onTop(aBuilder);
   if (IsVisibleForPainting(aBuilder)) {
     mRenderer.DisplayButton(aBuilder, aLists.BorderBackground(), &onTop);
   }
 
-  nsDisplayListCollection set;
+  nsDisplayListCollection set(aBuilder);
 
   // Do not allow the child subtree to receive events.
-  if (!isForEventDelivery) {
+  if (!isForEventDelivery || aBuilder->HitTestShouldStopAtFirstOpaque()) {
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
 
     if (ShouldClipPaintingToBorderBox()) {
@@ -372,7 +372,7 @@ nsHTMLButtonControlFrame::GetNaturalBaselineBOffset(mozilla::WritingMode aWM,
   return true;
 }
 
-nsresult nsHTMLButtonControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
+nsresult nsHTMLButtonControlFrame::SetFormProperty(nsAtom* aName, const nsAString& aValue)
 {
   if (nsGkAtoms::value == aName) {
     return mContent->SetAttr(kNameSpaceID_None, nsGkAtoms::value,

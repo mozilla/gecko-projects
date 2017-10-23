@@ -21,6 +21,7 @@
 #include "nsISupportsPriority.h"
 #include "nsITimer.h"
 #include "nsIURI.h"
+#include "nsIXULRuntime.h"
 #include "nsPIDOMWindow.h"
 
 #include <algorithm>
@@ -40,6 +41,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ErrorEventBinding.h"
 #include "mozilla/dom/EventTargetBinding.h"
+#include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/MessageChannel.h"
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/WorkerBinding.h"
@@ -321,6 +323,15 @@ LoadContextOptions(const char* aPrefName, void* /* aClosure */)
                 .setStreams(GetWorkerPref<bool>(NS_LITERAL_CSTRING("streams")))
                 .setExtraWarnings(GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict")));
 
+  nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
+  if (xr) {
+    bool safeMode = false;
+    xr->GetInSafeMode(&safeMode);
+    if (safeMode) {
+      contextOptions.disableOptionsForSafeMode();
+    }
+  }
+
   RuntimeService::SetDefaultContextOptions(contextOptions);
 
   if (rts) {
@@ -586,7 +597,7 @@ InterruptCallback(JSContext* aCx)
   MOZ_ASSERT(worker);
 
   // Now is a good time to turn on profiling if it's pending.
-  profiler_js_interrupt_callback();
+  PROFILER_JS_INTERRUPT_CALLBACK();
 
   return worker->InterruptCallback(aCx);
 }
@@ -813,6 +824,22 @@ DispatchToEventLoop(void* aClosure, JS::Dispatchable* aDispatchable)
   return r->Dispatch();
 }
 
+static bool
+ConsumeStream(JSContext* aCx,
+              JS::HandleObject aObj,
+              JS::MimeType aMimeType,
+              JS::StreamConsumer* aConsumer)
+{
+  WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+  if (!worker) {
+    JS_ReportErrorNumberASCII(aCx, js::GetErrorMessage, nullptr,
+                              JSMSG_ERROR_CONSUMING_RESPONSE);
+    return false;
+  }
+
+  return FetchUtil::StreamResponseToJS(aCx, aObj, aMimeType, aConsumer, worker);
+}
+
 class WorkerJSContext;
 
 class WorkerThreadContextPrivate : private PerThreadAtomCache
@@ -899,6 +926,8 @@ InitJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSContext* aWorkerCx)
   // A WorkerPrivate lives strictly longer than its JSRuntime so we can safely
   // store a raw pointer as the callback's closure argument on the JSRuntime.
   JS::InitDispatchToEventLoop(aWorkerCx, DispatchToEventLoop, (void*)aWorkerPrivate);
+
+  JS::InitConsumeStreamCallback(aWorkerCx, ConsumeStream);
 
   if (!JS::InitSelfHostedCode(aWorkerCx)) {
     NS_WARNING("Could not init self-hosted code!");
@@ -1955,7 +1984,7 @@ RuntimeService::Init()
     do_GetService(kStreamTransportServiceCID, &rv);
   NS_ENSURE_TRUE(sts, NS_ERROR_FAILURE);
 
-  mIdleThreadTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+  mIdleThreadTimer = NS_NewTimer();
   NS_ENSURE_STATE(mIdleThreadTimer);
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
@@ -2755,8 +2784,6 @@ WorkerThreadPrimaryRunnable::Run()
 {
   using mozilla::ipc::BackgroundChild;
 
-  char stackBaseGuess;
-
   NS_SetCurrentThreadName("DOM Worker");
 
   nsAutoCString threadName;
@@ -2764,7 +2791,7 @@ WorkerThreadPrimaryRunnable::Run()
   threadName.Append(NS_LossyConvertUTF16toASCII(mWorkerPrivate->ScriptURL()));
   threadName.Append('\'');
 
-  profiler_register_thread(threadName.get(), &stackBaseGuess);
+  AUTO_PROFILER_REGISTER_THREAD(threadName.get());
 
   // Note: GetOrCreateForCurrentThread() must be called prior to
   //       mWorkerPrivate->SetThread() in order to avoid accidentally consuming
@@ -2829,7 +2856,7 @@ WorkerThreadPrimaryRunnable::Run()
     }
 
     {
-      profiler_set_js_context(cx);
+      PROFILER_SET_JS_CONTEXT(cx);
 
       {
         JSAutoRequest ar(cx);
@@ -2843,7 +2870,7 @@ WorkerThreadPrimaryRunnable::Run()
 
       BackgroundChild::CloseForCurrentThread();
 
-      profiler_clear_js_context();
+      PROFILER_CLEAR_JS_CONTEXT();
     }
 
     // There may still be runnables on the debugger event queue that hold a
@@ -2883,7 +2910,6 @@ WorkerThreadPrimaryRunnable::Run()
   MOZ_ALWAYS_SUCCEEDS(mainTarget->Dispatch(finishedRunnable,
                                            NS_DISPATCH_NORMAL));
 
-  profiler_unregister_thread();
   return NS_OK;
 }
 

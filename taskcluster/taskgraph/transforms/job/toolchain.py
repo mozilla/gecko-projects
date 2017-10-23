@@ -16,7 +16,6 @@ from voluptuous import Optional, Required, Any
 
 from taskgraph.transforms.job import run_job_using
 from taskgraph.transforms.job.common import (
-    docker_worker_add_tc_vcs_cache,
     docker_worker_add_gecko_vcs_env_vars,
     docker_worker_add_public_artifacts,
     docker_worker_add_tooltool,
@@ -46,6 +45,13 @@ toolchain_run_schema = Schema({
         'public',
         'internal',
     ),
+
+    # Sparse profile to give to checkout using `run-task`.  If given,
+    # a filename in `build/sparse-profiles`.  Defaults to
+    # "toolchain-build", i.e., to
+    # `build/sparse-profiles/toolchain-build`.  If `None`, instructs
+    # `run-task` to not use a sparse profile at all.
+    Required('sparse-profile', default='toolchain-build'): Any(basestring, None),
 
     # Paths/patterns pointing to files that influence the outcome of a
     # toolchain build.
@@ -112,11 +118,14 @@ def docker_worker_toolchain(config, job, taskdesc):
     taskdesc['run-on-projects'] = ['trunk', 'try']
 
     worker = taskdesc['worker']
-    worker['artifacts'] = []
     worker['chain-of-trust'] = True
 
-    docker_worker_add_public_artifacts(config, job, taskdesc)
-    docker_worker_add_tc_vcs_cache(config, job, taskdesc)
+    # Allow the job to specify where artifacts come from, but add
+    # public/build if it's not there already.
+    artifacts = worker.setdefault('artifacts', [])
+    if not any(artifact.get('name') == 'public/build' for artifact in artifacts):
+        docker_worker_add_public_artifacts(config, job, taskdesc)
+
     docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc)
     support_vcs_checkout(config, job, taskdesc, sparse=True)
 
@@ -142,10 +151,15 @@ def docker_worker_toolchain(config, job, taskdesc):
     if args:
         args = ' ' + shell_quote(*args)
 
+    sparse_profile = []
+    if run.get('sparse-profile'):
+        sparse_profile = ['--sparse-profile',
+                          'build/sparse-profiles/{}'.format(run['sparse-profile'])]
+
     worker['command'] = [
         '/builds/worker/bin/run-task',
         '--vcs-checkout=/builds/worker/workspace/build/src',
-        '--sparse-profile', 'build/sparse-profiles/toolchain-build',
+    ] + sparse_profile + [
         '--',
         'bash',
         '-c',

@@ -53,7 +53,6 @@
 
 #include <algorithm>
 #include <functional>
-#include <list>
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -124,6 +123,7 @@ FrameLayerBuilder::FrameLayerBuilder()
   , mDetectedDOMModification(false)
   , mInvalidateAllLayers(false)
   , mInLayerTreeCompressionMode(false)
+  , mIsInactiveLayerManager(false)
   , mContainerLayerGeneration(0)
   , mMaxContainerLayerGeneration(0)
 {
@@ -962,7 +962,7 @@ public:
                                         const ActiveScrolledRoot* aASR,
                                         const DisplayItemClipChain* aClipChain,
                                         const nsIntRect& aVisibleRect,
-                                        const bool aBackfaceHidden,
+                                        bool aBackfaceidden,
                                         NewPaintedLayerCallbackType aNewPaintedLayerCallback);
 
   /**
@@ -1101,13 +1101,6 @@ public:
    * the child layers.
    */
   void ProcessDisplayItems(nsDisplayList* aList);
-  void ProcessDisplayItems(nsDisplayList* aList,
-                           AnimatedGeometryRoot* aLastAnimatedGeometryRoot,
-                           const ActiveScrolledRoot* aLastASR,
-                           const nsPoint& aLastAGRTopLeft,
-                           nsPoint& aTopLeft,
-                           int32_t aMaxLayers,
-                           int& aLayerCount);
   /**
    * This finalizes all the open PaintedLayers by popping every element off
    * mPaintedLayerDataStack, then sets the children of the container layer
@@ -1357,14 +1350,12 @@ protected:
    * @param  aTopLeft              The offset between aAnimatedGeometryRoot and
    *                               the reference frame.
    */
-  PaintedLayerData* FillPaintedLayerData(PaintedLayerData* aData,
-                                         AnimatedGeometryRoot* aAnimatedGeometryRoot,
-                                         const ActiveScrolledRoot* aASR,
-                                         const DisplayItemClipChain* aClipChain,
-                                         const ActiveScrolledRoot* aScrollMetadataASR,
-                                         const nsPoint& aTopLeft,
-                                         const bool aBackfaceHidden,
-                                         const nsIFrame* aReferenceFrame);
+  PaintedLayerData NewPaintedLayerData(nsDisplayItem* aItem,
+                                       AnimatedGeometryRoot* aAnimatedGeometryRoot,
+                                       const ActiveScrolledRoot* aASR,
+                                       const DisplayItemClipChain* aClipChain,
+                                       const ActiveScrolledRoot* aScrollMetadataASR,
+                                       const nsPoint& aTopLeft);
 
   /* Build a mask layer to represent the clipping region. Will return null if
    * there is no clipping specified or a mask layer cannot be built.
@@ -1800,6 +1791,7 @@ FrameLayerBuilder::Shutdown()
 void
 FrameLayerBuilder::Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
                         PaintedLayerData* aLayerData,
+                        bool aIsInactiveLayerManager,
                         const DisplayItemClip* aInactiveLayerClip)
 {
   mDisplayListBuilder = aBuilder;
@@ -1808,6 +1800,7 @@ FrameLayerBuilder::Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
     mInitialDOMGeneration = mRootPresContext->GetDOMGeneration();
   }
   mContainingPaintedLayer = aLayerData;
+  mIsInactiveLayerManager = aIsInactiveLayerManager;
   mInactiveLayerClip = aInactiveLayerClip;
   aManager->SetUserData(&gLayerManagerLayerBuilder, this);
 }
@@ -2764,7 +2757,7 @@ PaintedLayerDataNode::AddChildNodeFor(AnimatedGeometryRoot* aAnimatedGeometryRoo
 template<typename NewPaintedLayerCallbackType>
 PaintedLayerData*
 PaintedLayerDataNode::FindPaintedLayerFor(const nsIntRect& aVisibleRect,
-                                          const bool aBackfaceHidden,
+                                          bool aBackfaceHidden,
                                           const ActiveScrolledRoot* aASR,
                                           const DisplayItemClipChain* aClipChain,
                                           NewPaintedLayerCallbackType aNewPaintedLayerCallback)
@@ -2807,8 +2800,7 @@ PaintedLayerDataNode::FindPaintedLayerFor(const nsIntRect& aVisibleRect,
       return lowestUsableLayer;
     }
   }
-
-  return aNewPaintedLayerCallback(mPaintedLayerDataStack.AppendElement());
+  return mPaintedLayerDataStack.AppendElement(aNewPaintedLayerCallback());
 }
 
 void
@@ -3619,24 +3611,23 @@ PaintedLayerData::AccumulateEventRegions(ContainerState* aState, nsDisplayLayerE
   mScaledMaybeHitRegionBounds = aState->ScaleToOutsidePixels(mMaybeHitRegion.GetBounds());
 }
 
-PaintedLayerData*
-ContainerState::FillPaintedLayerData(PaintedLayerData* aData,
-                                     AnimatedGeometryRoot* aAnimatedGeometryRoot,
-                                     const ActiveScrolledRoot* aASR,
-                                     const DisplayItemClipChain* aClipChain,
-                                     const ActiveScrolledRoot* aScrollMetadataASR,
-                                     const nsPoint& aTopLeft,
-                                     const bool aBackfaceHidden,
-                                     const nsIFrame* aReferenceFrame)
+PaintedLayerData
+ContainerState::NewPaintedLayerData(nsDisplayItem* aItem,
+                                    AnimatedGeometryRoot* aAnimatedGeometryRoot,
+                                    const ActiveScrolledRoot* aASR,
+                                    const DisplayItemClipChain* aClipChain,
+                                    const ActiveScrolledRoot* aScrollMetadataASR,
+                                    const nsPoint& aTopLeft)
 {
-  aData->mAnimatedGeometryRoot = aAnimatedGeometryRoot;
-  aData->mASR = aASR;
-  aData->mClipChain = aClipChain;
-  aData->mAnimatedGeometryRootOffset = aTopLeft;
-  aData->mReferenceFrame = aReferenceFrame;
-  aData->mBackfaceHidden = aBackfaceHidden;
+  PaintedLayerData data;
+  data.mAnimatedGeometryRoot = aAnimatedGeometryRoot;
+  data.mASR = aASR;
+  data.mClipChain = aClipChain;
+  data.mAnimatedGeometryRootOffset = aTopLeft;
+  data.mReferenceFrame = aItem->ReferenceFrame();
+  data.mBackfaceHidden = aItem->Frame()->In3DContextAndBackfaceIsHidden();
 
-  aData->mNewChildLayersIndex = mNewChildLayers.Length();
+  data.mNewChildLayersIndex = mNewChildLayers.Length();
   NewLayerEntry* newLayerEntry = mNewChildLayers.AppendElement();
   newLayerEntry->mAnimatedGeometryRoot = aAnimatedGeometryRoot;
   newLayerEntry->mASR = aASR;
@@ -3648,7 +3639,7 @@ ContainerState::FillPaintedLayerData(PaintedLayerData* aData,
   // Allocate another entry for this layer's optimization to ColorLayer/ImageLayer
   mNewChildLayers.AppendElement();
 
-  return aData;
+  return data;
 }
 
 #ifdef MOZ_DUMP_PAINTING
@@ -3985,20 +3976,8 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
   int32_t maxLayers = gfxPrefs::MaxActiveLayers();
   int layerCount = 0;
 
-  ProcessDisplayItems(aList, lastAnimatedGeometryRoot, lastASR,
-                      lastAGRTopLeft, topLeft, maxLayers, layerCount);
-}
-
-void
-ContainerState::ProcessDisplayItems(nsDisplayList* aList,
-                                    AnimatedGeometryRoot* aLastAnimatedGeometryRoot,
-                                    const ActiveScrolledRoot* aLastASR,
-                                    const nsPoint& aLastAGRTopLeft,
-                                    nsPoint& aTopLeft,
-                                    int32_t aMaxLayers,
-                                    int& aLayerCount)
-{
-  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+  FlattenedDisplayItemIterator iter(mBuilder, aList);
+  while (nsDisplayItem* i = iter.GetNext()) {
     nsDisplayItem* item = i;
     MOZ_ASSERT(item);
 
@@ -4019,7 +3998,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     // item. We create a list of consecutive items that can be merged together.
     AutoTArray<nsDisplayItem*, 1> mergedItems;
     mergedItems.AppendElement(item);
-    for (nsDisplayItem* peek = item->GetAbove(); peek; peek = peek->GetAbove()) {
+    while (nsDisplayItem* peek = iter.PeekNext()) {
       if (!item->CanMerge(peek)) {
         break;
       }
@@ -4027,7 +4006,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       mergedItems.AppendElement(peek);
 
       // Move the iterator forward since we will merge this item.
-      i = peek;
+      i = iter.GetNext();
     }
 
     if (mergedItems.Length() > 1) {
@@ -4035,18 +4014,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       // item and process that item immediately.
       item = mBuilder->MergeItems(mergedItems);
       MOZ_ASSERT(item && itemType == item->GetType());
-    }
-
-    nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
-
-    if (item->ShouldFlattenAway(mBuilder)) {
-      MOZ_ASSERT(childItems);
-      ProcessDisplayItems(childItems, aLastAnimatedGeometryRoot, aLastASR,
-                          aLastAGRTopLeft, aTopLeft, aMaxLayers, aLayerCount);
-      if (childItems->NeedsTransparentSurface()) {
-        aList->SetNeedsTransparentSurface();
-      }
-      continue;
     }
 
     MOZ_ASSERT(item->GetType() != DisplayItemType::TYPE_WRAP_LIST);
@@ -4076,9 +4043,9 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     const DisplayItemClipChain* layerClipChain = nullptr;
     if (mFlattenToSingleLayer && layerState != LAYER_ACTIVE_FORCE) {
       forceInactive = true;
-      animatedGeometryRoot = aLastAnimatedGeometryRoot;
-      itemASR = aLastASR;
-      aTopLeft = aLastAGRTopLeft;
+      animatedGeometryRoot = lastAnimatedGeometryRoot;
+      itemASR = lastASR;
+      topLeft = lastAGRTopLeft;
       item->FuseClipChainUpTo(mBuilder, mContainerASR);
     } else {
       forceInactive = false;
@@ -4100,7 +4067,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         itemASR = mContainerASR;
         item->FuseClipChainUpTo(mBuilder, mContainerASR);
       }
-      aTopLeft = (*animatedGeometryRoot)->GetOffsetToCrossDoc(mContainerReferenceFrame);
+      topLeft = (*animatedGeometryRoot)->GetOffsetToCrossDoc(mContainerReferenceFrame);
     }
 
     const ActiveScrolledRoot* scrollMetadataASR =
@@ -4157,7 +4124,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         ScaleToOutsidePixels(item->GetVisibleRect(), false));
     }
 
-    if (aMaxLayers != -1 && aLayerCount >= aMaxLayers) {
+    if (maxLayers != -1 && layerCount >= maxLayers) {
       forceInactive = true;
     }
 
@@ -4168,7 +4135,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
          (layerState == LAYER_ACTIVE_EMPTY ||
           layerState == LAYER_ACTIVE))) {
 
-      aLayerCount++;
+      layerCount++;
 
       // LAYER_ACTIVE_EMPTY means the layer is created just for its metadata.
       // We should never see an empty layer with any visible content!
@@ -4373,11 +4340,11 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         nsDisplayMask* maskItem = static_cast<nsDisplayMask*>(item);
         SetupMaskLayerForCSSMask(ownLayer, maskItem);
 
-        if (i->GetAbove() &&
-            i->GetAbove()->GetType() == DisplayItemType::TYPE_SCROLL_INFO_LAYER) {
+        if (iter.PeekNext() &&
+            iter.PeekNext()->GetType() == DisplayItemType::TYPE_SCROLL_INFO_LAYER) {
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
-          i = i->GetAbove();
+          i = iter.GetNext();
         }
       }
 
@@ -4480,19 +4447,13 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
        */
       mLayerBuilder->AddLayerDisplayItem(ownLayer, item, layerState, nullptr);
     } else {
-      const nsIFrame* referenceFrame = item->ReferenceFrame();
-      const bool backfaceHidden = item->In3DContextAndBackfaceIsHidden();
-
       PaintedLayerData* paintedLayerData =
-        mPaintedLayerDataTree.FindPaintedLayerFor(animatedGeometryRoot, itemASR,
-                                                  layerClipChain,
+        mPaintedLayerDataTree.FindPaintedLayerFor(animatedGeometryRoot, itemASR, layerClipChain,
                                                   itemVisibleRect,
-                                                  backfaceHidden,
-                                                  [&](PaintedLayerData* aData) {
-          return FillPaintedLayerData(aData, animatedGeometryRoot,
-                                      itemASR, layerClipChain,
-                                      scrollMetadataASR, aTopLeft,
-                                      backfaceHidden, referenceFrame);
+                                                  item->Frame()->In3DContextAndBackfaceIsHidden(),
+                                                  [&]() {
+          return NewPaintedLayerData(item, animatedGeometryRoot, itemASR, layerClipChain, scrollMetadataASR,
+                                     topLeft);
         });
 
       if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
@@ -4510,7 +4471,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         if (!paintedLayerData->mLayer) {
           // Try to recycle the old layer of this display item.
           RefPtr<PaintedLayer> layer =
-            AttemptToRecyclePaintedLayer(animatedGeometryRoot, item, aTopLeft);
+            AttemptToRecyclePaintedLayer(animatedGeometryRoot, item, topLeft);
           if (layer) {
             paintedLayerData->mLayer = layer;
 
@@ -4522,6 +4483,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       }
     }
 
+    nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
     if (childItems && childItems->NeedsTransparentSurface()) {
       aList->SetNeedsTransparentSurface();
     }
@@ -4729,7 +4691,8 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
     if (tempManager) {
       FLB_LOG_PAINTED_LAYER_DECISION(aLayerData, "Creating nested FLB for item %p\n", aItem);
       FrameLayerBuilder* layerBuilder = new FrameLayerBuilder();
-      layerBuilder->Init(mDisplayListBuilder, tempManager, aLayerData, &aClip);
+      layerBuilder->Init(mDisplayListBuilder, tempManager, aLayerData, true,
+                         &aClip);
 
       tempManager->BeginTransaction();
       if (mRetainingManager) {

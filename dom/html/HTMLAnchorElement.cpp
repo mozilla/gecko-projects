@@ -297,7 +297,7 @@ HTMLAnchorElement::GetHrefURI() const
 }
 
 nsresult
-HTMLAnchorElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+HTMLAnchorElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify)
 {
@@ -313,9 +313,11 @@ HTMLAnchorElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 nsresult
-HTMLAnchorElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+HTMLAnchorElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
-                                const nsAttrValue* aOldValue, bool aNotify)
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aSubjectPrincipal,
+                                bool aNotify)
 {
   if (aNamespaceID == kNameSpaceID_None) {
     if (aName == nsGkAtoms::href) {
@@ -327,7 +329,7 @@ HTMLAnchorElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
   }
 
   return nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName,
-                                            aValue, aOldValue, aNotify);
+                                            aValue, aOldValue, aSubjectPrincipal, aNotify);
 }
 
 EventStates

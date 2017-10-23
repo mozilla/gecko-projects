@@ -7,6 +7,7 @@
 #ifndef mozilla_ServoStyleSet_h
 #define mozilla_ServoStyleSet_h
 
+#include "mozilla/AtomArray.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/EventStates.h"
@@ -21,7 +22,7 @@
 #include "nsCSSPseudoElements.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsChangeHint.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsIMemoryReporter.h"
 #include "nsTArray.h"
 
@@ -219,11 +220,10 @@ public:
   // Resolves style for a (possibly-pseudo) Element without assuming that the
   // style has been resolved. If the element was unstyled and a new style
   // context was resolved, it is not stored in the DOM. (That is, the element
-  // remains unstyled.) |aPeudoTag| and |aPseudoType| must match.
+  // remains unstyled.)
   already_AddRefed<ServoStyleContext>
   ResolveStyleLazily(dom::Element* aElement,
                      CSSPseudoElementType aPseudoType,
-                     nsIAtom* aPseudoTag,
                      StyleRuleInclusion aRules =
                        StyleRuleInclusion::All);
 
@@ -231,14 +231,22 @@ public:
   // use and must be non-null.  It must be an anon box, and must be one that
   // inherits style from the given aParentContext.
   already_AddRefed<ServoStyleContext>
-  ResolveInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag,
+  ResolveInheritingAnonymousBoxStyle(nsAtom* aPseudoTag,
                                      ServoStyleContext* aParentContext);
 
   // Get a style context for an anonymous box that does not inherit style from
   // anything.  aPseudoTag is the pseudo-tag to use and must be non-null.  It
   // must be an anon box, and must be a non-inheriting one.
   already_AddRefed<ServoStyleContext>
-  ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
+  ResolveNonInheritingAnonymousBoxStyle(nsAtom* aPseudoTag);
+
+#ifdef MOZ_XUL
+  already_AddRefed<ServoStyleContext>
+  ResolveXULTreePseudoStyle(dom::Element* aParentElement,
+                            nsICSSAnonBoxPseudo* aPseudoTag,
+                            ServoStyleContext* aParentContext,
+                            const AtomArray& aInputWord);
+#endif
 
   // manage the set of style sheets in the style set
   nsresult AppendStyleSheet(SheetType aType, ServoStyleSheet* aSheet);
@@ -365,7 +373,7 @@ public:
    */
   already_AddRefed<ServoStyleContext> ResolveServoStyle(dom::Element* aElement);
 
-  bool GetKeyframesForName(const nsString& aName,
+  bool GetKeyframesForName(nsAtom* aName,
                            const nsTimingFunction& aTimingFunction,
                            nsTArray<Keyframe>& aKeyframes);
 
@@ -382,19 +390,31 @@ public:
 
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
-  nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
+  nsCSSCounterStyleRule* CounterStyleRuleForName(nsAtom* aName);
 
   // Get all the currently-active font feature values set.
   already_AddRefed<gfxFontFeatureValueSet> BuildFontFeatureValueSet();
 
   already_AddRefed<ServoStyleContext>
   GetBaseContextForElement(dom::Element* aElement,
-                           ServoStyleContext* aParentContext,
                            nsPresContext* aPresContext,
-                           nsIAtom* aPseudoTag,
                            CSSPseudoElementType aPseudoType,
                            const ServoStyleContext* aStyle);
 
+  // Get a style context that represents |aStyle|, but as though
+  // it additionally matched the rules of the newly added |aAnimaitonaValue|.
+  // We use this function to temporarily generate a ServoStyleContext for
+  // calculating the cumulative change hints.
+  // This must hold:
+  //   The additional rules must be appropriate for the transition
+  //   level of the cascade, which is the highest level of the cascade.
+  //   (This is the case for one current caller, the cover rule used
+  //   for CSS transitions.)
+  // Note: |aElement| should be the generated element if it is pseudo.
+  already_AddRefed<ServoStyleContext>
+  ResolveServoStyleByAddingAnimation(dom::Element* aElement,
+                                     const ServoStyleContext* aStyle,
+                                     RawServoAnimationValue* aAnimationValue);
   /**
    * Resolve style for a given declaration block with/without the parent style.
    * If the parent style is not specified, the document default computed values
@@ -453,7 +473,7 @@ public:
    * a style sheet.
    */
   bool MightHaveAttributeDependency(const dom::Element& aElement,
-                                    nsIAtom* aAttribute) const;
+                                    nsAtom* aAttribute) const;
 
   /**
    * Returns true if a change in event state on an element might require
@@ -481,6 +501,9 @@ public:
                        ServoStyleContext* aNewLayoutParent,
                        Element* aElement);
 
+  bool IsMaster() const { return mKind == Kind::Master; }
+  bool IsForXBL() const { return mKind == Kind::ForXBL; }
+
 private:
   friend class AutoSetInServoTraversal;
   friend class AutoPrepareTraversal;
@@ -491,9 +514,6 @@ private:
    * Gets the pending snapshots to handle from the restyle manager.
    */
   const SnapshotTable& Snapshots();
-
-  bool IsMaster() const { return mKind == Kind::Master; }
-  bool IsForXBL() const { return mKind == Kind::ForXBL; }
 
   /**
    * Resolve all ServoDeclarationBlocks attached to mapped
@@ -559,8 +579,6 @@ private:
   already_AddRefed<ServoStyleContext>
     ResolveStyleLazilyInternal(dom::Element* aElement,
                                CSSPseudoElementType aPseudoType,
-                               nsIAtom* aPseudoTag,
-                               const ServoStyleContext* aParentContext,
                                StyleRuleInclusion aRules =
                                  StyleRuleInclusion::All,
                                bool aIgnoreExistingStyles = false);

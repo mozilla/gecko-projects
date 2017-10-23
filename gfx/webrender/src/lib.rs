@@ -69,6 +69,7 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
+mod picture;
 mod prim_store;
 mod print_tree;
 mod profiler;
@@ -149,7 +150,6 @@ extern crate gamma_lut;
 
 #[doc(hidden)]
 pub use device::build_shader_strings;
-pub use renderer::{ALPHA_PRIM_DBG, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
 pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, ReadPixelsFormat, Renderer, RendererOptions};

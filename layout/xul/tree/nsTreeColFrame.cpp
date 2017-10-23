@@ -120,7 +120,7 @@ nsTreeColFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
     return;
   }
 
-  nsDisplayListCollection set;
+  nsDisplayListCollection set(aBuilder);
   nsBoxFrame::BuildDisplayListForChildren(aBuilder, set);
 
   WrapListsInRedirector(aBuilder, set, aLists);
@@ -131,7 +131,7 @@ nsTreeColFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
 
 nsresult
 nsTreeColFrame::AttributeChanged(int32_t aNameSpaceID,
-                                 nsIAtom* aAttribute,
+                                 nsAtom* aAttribute,
                                  int32_t aModType)
 {
   nsresult rv = nsBoxFrame::AttributeChanged(aNameSpaceID, aAttribute,

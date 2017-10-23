@@ -12,7 +12,7 @@ use dom::globalscope::GlobalScope;
 use dom_struct::dom_struct;
 
 #[repr(u16)]
-#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable)]
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf)]
 pub enum DOMErrorName {
     IndexSizeError = DOMExceptionConstants::INDEX_SIZE_ERR,
     HierarchyRequestError = DOMExceptionConstants::HIERARCHY_REQUEST_ERR,
@@ -52,7 +52,7 @@ impl DOMException {
     }
 
     pub fn new(global: &GlobalScope, code: DOMErrorName) -> DomRoot<DOMException> {
-        reflect_dom_object(box DOMException::new_inherited(code),
+        reflect_dom_object(Box::new(DOMException::new_inherited(code)),
                            global,
                            DOMExceptionBinding::Wrap)
     }

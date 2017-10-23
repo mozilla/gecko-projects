@@ -20,6 +20,7 @@ import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import android.app.Activity;
 import android.content.ContentResolver;
@@ -27,6 +28,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.database.Cursor;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
@@ -42,6 +44,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 
 public class GeckoView extends LayerView {
 
@@ -308,6 +311,7 @@ public class GeckoView extends LayerView {
 
     private PromptDelegate mPromptDelegate;
     private InputConnectionListener mInputConnectionListener;
+    private boolean mIsResettingFocus;
 
     private GeckoViewSettings mSettings;
 
@@ -462,7 +466,7 @@ public class GeckoView extends LayerView {
      * @param context Activity or Application Context for starting GeckoView.
      */
     public static void preload(final Context context) {
-        preload(context, /* geckoArgs */ null);
+        preload(context, /* geckoArgs */ null, /* multiprocess */ false);
     }
 
     /**
@@ -470,23 +474,26 @@ public class GeckoView extends LayerView {
      * if Gecko is not already running.
      *
      * @param context Activity or Application Context for starting GeckoView.
-     * @param geckoArgs Arguments to be passed to Gecko, if Gecko is not already running
+     * @param geckoArgs Arguments to be passed to Gecko, if Gecko is not already running.
+     * @param multiprocess True if child process in multiprocess mode should be preloaded.
      */
-    public static void preload(final Context context, final String geckoArgs) {
+    public static void preload(final Context context, final String geckoArgs,
+                               final boolean multiprocess) {
         final Context appContext = context.getApplicationContext();
         if (GeckoAppShell.getApplicationContext() == null) {
             GeckoAppShell.setApplicationContext(appContext);
         }
 
-        if (GeckoThread.initMainProcess(/* profile */ null,
-                                        geckoArgs,
-                                        /* debugging */ false)) {
+        final int flags = multiprocess ? GeckoThread.FLAG_PRELOAD_CHILD : 0;
+        if (GeckoThread.initMainProcess(/* profile */ null, geckoArgs, flags)) {
             GeckoThread.launch();
         }
     }
 
     private void init(final Context context, final GeckoViewSettings settings) {
-        preload(context);
+        final boolean multiprocess = settings != null &&
+                                     settings.getBoolean(GeckoViewSettings.USE_MULTIPROCESS);
+        preload(context, /* geckoArgs */ null, multiprocess);
 
         initializeView();
         mListener.registerListeners();
@@ -700,6 +707,45 @@ public class GeckoView extends LayerView {
 
     public GeckoViewSettings getSettings() {
         return mSettings;
+    }
+
+    @Override
+    public void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+
+        if (gainFocus && !mIsResettingFocus) {
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isFocused()) {
+                        return;
+                    }
+
+                    final InputMethodManager imm = InputMethods.getInputMethodManager(getContext());
+                    // Bug 1404111:
+                    // Through View#onFocusChanged, the InputMethodManager queues up a checkFocus
+                    // call for the next spin of the message loop, so by posting this Runnable after
+                    // super#onFocusChanged, the IMM should have completed its focus change handling
+                    // at this point and we should be the active view for input handling.
+
+                    // If however onViewDetachedFromWindow for the previously active view gets
+                    // called *after* onFocusChanged, but *before* the focus change has been fully
+                    // processed by the IMM with the help of checkFocus, the IMM will lose track of
+                    // the currently active view, which means that we can't interact with the IME.
+                    if (!imm.isActive(GeckoView.this)) {
+                        // If that happens, we bring the IMM's internal state back into sync by
+                        // clearing and resetting our focus.
+                        mIsResettingFocus = true;
+                        clearFocus();
+                        // After calling clearFocus we might regain focus automatically, but we
+                        // explicitly request it again in case this doesn't happen.
+                        // If we've already got the focus back, this will then be a no-op anyway.
+                        requestFocus();
+                        mIsResettingFocus = false;
+                    }
+                }
+            });
+        }
     }
 
     @Override
@@ -1662,7 +1708,7 @@ public class GeckoView extends LayerView {
              * Called by the prompt implementation when the multiple-choice list is
              * dismissed by the user.
              *
-             * @param id IDs of the selected items.
+             * @param ids IDs of the selected items.
              */
             void confirm(String[] ids);
 
@@ -1679,7 +1725,7 @@ public class GeckoView extends LayerView {
              * Called by the prompt implementation when the multiple-choice list is
              * dismissed by the user.
              *
-             * @param item Bundle array representing the selected items; must be original
+             * @param items Bundle array representing the selected items; must be original
              *             GeckoBundle objects that were passed to the implementation.
              */
             void confirm(GeckoBundle[] items);

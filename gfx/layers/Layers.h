@@ -361,12 +361,6 @@ public:
   virtual bool BlendingRequiresIntermediateSurface() { return false; }
 
   /**
-   * Returns true if this LayerManager supports component alpha layers in
-   * situations that require a copy of the backdrop.
-   */
-  virtual bool SupportsBackdropCopyForComponentAlpha() { return true; }
-
-  /**
    * CONSTRUCTION PHASE ONLY
    * Set the root layer. The root layer is initially null. If there is
    * no root layer, EndTransaction won't draw anything.
@@ -2334,12 +2328,6 @@ public:
     return mEventRegionsOverride;
   }
 
-  void SetFilterChain(nsTArray<CSSFilter>&& aFilterChain) {
-    mFilterChain = aFilterChain;
-  }
-
-  nsTArray<CSSFilter>& GetFilterChain() { return mFilterChain; }
-  
   // If |aRect| is null, the entire layer should be considered invalid for
   // compositing.
   virtual void SetInvalidCompositeRect(const gfx::IntRect* aRect) {}
@@ -2430,7 +2418,6 @@ protected:
   // the intermediate surface.
   bool mChildrenChanged;
   EventRegionsOverride mEventRegionsOverride;
-  nsTArray<CSSFilter> mFilterChain;
 };
 
 /**

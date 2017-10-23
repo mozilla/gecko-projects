@@ -49,13 +49,13 @@ use uuid::Uuid;
 pub struct HTMLScriptElement {
     htmlelement: HTMLElement,
 
-    /// https://html.spec.whatwg.org/multipage/#already-started
+    /// <https://html.spec.whatwg.org/multipage/#already-started>
     already_started: Cell<bool>,
 
-    /// https://html.spec.whatwg.org/multipage/#parser-inserted
+    /// <https://html.spec.whatwg.org/multipage/#parser-inserted>
     parser_inserted: Cell<bool>,
 
-    /// https://html.spec.whatwg.org/multipage/#non-blocking
+    /// <https://html.spec.whatwg.org/multipage/#non-blocking>
     ///
     /// (currently unused)
     non_blocking: Cell<bool>,
@@ -84,7 +84,7 @@ impl HTMLScriptElement {
     #[allow(unrooted_must_root)]
     pub fn new(local_name: LocalName, prefix: Option<Prefix>, document: &Document,
                creator: ElementCreator) -> DomRoot<HTMLScriptElement> {
-        Node::reflect_node(box HTMLScriptElement::new_inherited(local_name, prefix, document, creator),
+        Node::reflect_node(Box::new(HTMLScriptElement::new_inherited(local_name, prefix, document, creator)),
                            document,
                            HTMLScriptElementBinding::Wrap)
     }
@@ -112,7 +112,7 @@ static SCRIPT_JS_MIMES: StaticStringVec = &[
     "text/x-javascript",
 ];
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub struct ClassicScript {
     text: DOMString,
     url: ServoUrl,
@@ -190,7 +190,7 @@ impl FetchResponseListener for ScriptContext {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#fetch-a-classic-script
+    /// <https://html.spec.whatwg.org/multipage/#fetch-a-classic-script>
     /// step 4-9
     fn process_response_eof(&mut self, response: Result<(), NetworkError>) {
         // Step 5.
@@ -226,7 +226,7 @@ impl FetchResponseListener for ScriptContext {
 
 impl PreInvoke for ScriptContext {}
 
-/// https://html.spec.whatwg.org/multipage/#fetch-a-classic-script
+/// <https://html.spec.whatwg.org/multipage/#fetch-a-classic-script>
 fn fetch_a_classic_script(script: &HTMLScriptElement,
                           kind: ExternalScriptKind,
                           url: ServoUrl,
@@ -279,14 +279,14 @@ fn fetch_a_classic_script(script: &HTMLScriptElement,
         canceller: Some(doc.window().task_canceller())
     };
 
-    ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
+    ROUTER.add_route(action_receiver.to_opaque(), Box::new(move |message| {
         listener.notify_fetch(message.to().unwrap());
-    });
+    }));
     doc.fetch_async(LoadType::Script(url), request, action_sender);
 }
 
 impl HTMLScriptElement {
-    /// https://html.spec.whatwg.org/multipage/#prepare-a-script
+    /// <https://html.spec.whatwg.org/multipage/#prepare-a-script>
     pub fn prepare(&self) {
         // Step 1.
         if self.already_started.get() {
@@ -500,7 +500,7 @@ impl HTMLScriptElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#execute-the-script-block
+    /// <https://html.spec.whatwg.org/multipage/#execute-the-script-block>
     pub fn execute(&self, result: Result<ClassicScript, NetworkError>) {
         // Step 1.
         let doc = document_from_node(self);
@@ -702,6 +702,7 @@ impl VirtualMethods for HTMLScriptElement {
 impl HTMLScriptElementMethods for HTMLScriptElement {
     // https://html.spec.whatwg.org/multipage/#dom-script-src
     make_url_getter!(Src, "src");
+
     // https://html.spec.whatwg.org/multipage/#dom-script-src
     make_setter!(SetSrc, "src");
 

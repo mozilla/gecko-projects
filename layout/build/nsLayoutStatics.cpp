@@ -86,8 +86,6 @@
 #include "nsMenuBarListener.h"
 #endif
 
-#include "nsTextServicesDocument.h"
-
 #ifdef MOZ_WEBSPEECH
 #include "nsSynthVoiceRegistry.h"
 #endif
@@ -116,7 +114,6 @@
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "TouchManager.h"
-#include "MediaDecoder.h"
 #include "MediaPrefs.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
@@ -155,7 +152,6 @@ nsLayoutStatics::Initialize()
   nsCSSProps::AddRefTable();
   nsColorNames::AddRefTable();
   nsGkAtoms::AddRefAtoms();
-  nsTextServicesDocument::RegisterAtoms();
   nsHTMLTags::RegisterAtoms();
   nsRDFAtoms::RegisterAtoms();
 
@@ -295,8 +291,6 @@ nsLayoutStatics::Initialize()
   GeckoStyleContext::Initialize();
   mozilla::LayerAnimationInfo::Initialize();
 #endif
-
-  MediaDecoder::InitStatics();
 
   PromiseDebugging::Init();
 

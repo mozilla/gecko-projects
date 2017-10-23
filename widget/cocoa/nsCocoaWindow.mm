@@ -885,9 +885,11 @@ nsCocoaWindow::Show(bool bState)
       // appear above the parent and move when the parent does. Setting this
       // needs to happen after the _setWindowNumber calls above, otherwise the
       // window doesn't focus properly.
-      if (nativeParentWindow && mPopupLevel == ePopupLevelParent)
+      if (nativeParentWindow && mPopupLevel == ePopupLevelParent) {
         [nativeParentWindow addChildWindow:mWindow
                             ordered:NSWindowAbove];
+        [mWindow setLevel:NSPopUpMenuWindowLevel];
+      }
     }
     else {
       NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
@@ -1375,6 +1377,7 @@ nsCocoaWindow::HideWindowChrome(bool aShouldHide)
   enumerator = [childWindows objectEnumerator];
   while ((child = [enumerator nextObject])) {
     [mWindow addChildWindow:child ordered:NSWindowAbove];
+    [mWindow setLevel:NSPopUpMenuWindowLevel];
   }
 
   // Show the new window.
@@ -1489,6 +1492,13 @@ nsCocoaWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
   [mFullscreenTransitionAnimation setDelegate:delegate];
   [mFullscreenTransitionAnimation setDuration:aDuration / 1000.0];
   [mFullscreenTransitionAnimation startAnimation];
+}
+
+void nsCocoaWindow::WillEnterFullScreen(bool aFullScreen)
+{
+  if (mWidgetListener) {
+    mWidgetListener->FullscreenWillChange(aFullScreen);
+  }
 }
 
 void nsCocoaWindow::EnteredFullScreen(bool aFullScreen, bool aNativeMode)
@@ -2378,7 +2388,13 @@ nsCocoaWindow::SetDrawsTitle(bool aDrawTitle)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  [mWindow setWantsTitleDrawn:aDrawTitle];
+  if (![mWindow drawsContentsIntoWindowFrame]) {
+    // If we don't draw into the window frame, we always want to display window
+    // titles.
+    [mWindow setWantsTitleDrawn:YES];
+  } else {
+    [mWindow setWantsTitleDrawn:aDrawTitle];
+  }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -2636,6 +2652,15 @@ nsCocoaWindow::GetEditCommands(NativeKeyBindingsType aType,
   mGeckoWindow->ReportMoveEvent();
 }
 
+- (void)windowWillEnterFullScreen:(NSNotification *)notification
+{
+  if (!mGeckoWindow) {
+    return;
+  }
+
+  mGeckoWindow->WillEnterFullScreen(true);
+}
+
 // Lion's full screen mode will bypass our internal fullscreen tracking, so
 // we need to catch it when we transition and call our own methods, which in
 // turn will fire "fullscreen" events.
@@ -2669,6 +2694,15 @@ nsCocoaWindow::GetEditCommands(NativeKeyBindingsType aType,
   if ([titlebarContainerView respondsToSelector:@selector(setTransparent:)]) {
     [titlebarContainerView setTransparent:NO];
   }
+}
+
+- (void)windowWillExitFullScreen:(NSNotification *)notification
+{
+  if (!mGeckoWindow) {
+    return;
+  }
+
+  mGeckoWindow->WillEnterFullScreen(false);
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification

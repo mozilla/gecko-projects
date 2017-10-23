@@ -42,10 +42,11 @@ describe("Highlights Feed", () => {
     };
     fakeScreenshot = {
       getScreenshotForURL: sandbox.spy(() => Promise.resolve(FAKE_IMAGE)),
-      maybeGetAndSetScreenshot: Screenshots.maybeGetAndSetScreenshot
+      maybeCacheScreenshot: Screenshots.maybeCacheScreenshot
     };
     filterAdultStub = sinon.stub().returns([]);
     shortURLStub = sinon.stub().callsFake(site => site.url.match(/\/([^/]+)/)[1]);
+
     globals.set("NewTabUtils", fakeNewTabUtils);
     ({HighlightsFeed, HIGHLIGHTS_UPDATE_TIME, SECTION_ID} = injector({
       "lib/FilterAdult.jsm": {filterAdult: filterAdultStub},
@@ -160,6 +161,17 @@ describe("Highlights Feed", () => {
       assert.equal(highlights.length, 1);
       assert.equal(highlights[0].url, links[0].url);
     });
+    it("should include bookmark but not history already in Top Sites", async () => {
+      links = [
+        {url: "http://www.topsite0.com", type: "bookmark"},
+        {url: "http://www.topsite1.com", type: "history"}
+      ];
+
+      const highlights = await fetchHighlights();
+
+      assert.equal(highlights.length, 1);
+      assert.equal(highlights[0].url, links[0].url);
+    });
     it("should not include history of same hostname as a bookmark", async () => {
       links = [
         {url: "https://site.com/bookmark", type: "bookmark"},
@@ -215,8 +227,12 @@ describe("Highlights Feed", () => {
   describe("#fetchImage", () => {
     const FAKE_URL = "https://mozilla.org";
     const FAKE_IMAGE_URL = "https://mozilla.org/preview.jpg";
+    function fetchImage(page) {
+      return feed.fetchImage(Object.assign({__sharedCache: {updateLink() {}}},
+        page));
+    }
     it("should capture the image, if available", async () => {
-      await feed.fetchImage({
+      await fetchImage({
         preview_image_url: FAKE_IMAGE_URL,
         url: FAKE_URL
       });
@@ -225,13 +241,13 @@ describe("Highlights Feed", () => {
       assert.calledWith(fakeScreenshot.getScreenshotForURL, FAKE_IMAGE_URL);
     });
     it("should fall back to capturing a screenshot", async () => {
-      await feed.fetchImage({url: FAKE_URL});
+      await fetchImage({url: FAKE_URL});
 
       assert.calledOnce(fakeScreenshot.getScreenshotForURL);
       assert.calledWith(fakeScreenshot.getScreenshotForURL, FAKE_URL);
     });
     it("should call SectionsManager.updateSectionCard with the right arguments", async () => {
-      await feed.fetchImage({
+      await fetchImage({
         preview_image_url: FAKE_IMAGE_URL,
         url: FAKE_URL
       });
@@ -239,7 +255,7 @@ describe("Highlights Feed", () => {
       assert.calledOnce(sectionsManagerStub.updateSectionCard);
       assert.calledWith(sectionsManagerStub.updateSectionCard, "highlights", FAKE_URL, {image: FAKE_IMAGE}, true);
     });
-    it("should update the card with the image", async () => {
+    it("should not update the card with the image", async () => {
       const card = {
         preview_image_url: FAKE_IMAGE_URL,
         url: FAKE_URL
@@ -247,7 +263,7 @@ describe("Highlights Feed", () => {
 
       await feed.fetchImage(card);
 
-      assert.propertyVal(card, "image", FAKE_IMAGE);
+      assert.notProperty(card, "image");
     });
   });
   describe("#uninit", () => {

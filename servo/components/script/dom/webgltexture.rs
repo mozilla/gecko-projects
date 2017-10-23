@@ -5,6 +5,7 @@
 // https://www.khronos.org/registry/webgl/specs/latest/1.0/webgl.idl
 
 use canvas_traits::webgl::{webgl_channel, WebGLCommand, WebGLError, WebGLMsgSender, WebGLResult, WebGLTextureId};
+use canvas_traits::webgl::DOMToTextureCommand;
 use dom::bindings::cell::DomRefCell;
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextConstants as constants;
 use dom::bindings::codegen::Bindings::WebGLTextureBinding;
@@ -35,7 +36,7 @@ pub struct WebGLTexture {
     target: Cell<Option<u32>>,
     is_deleted: Cell<bool>,
     /// Stores information about mipmap levels and cubemap faces.
-    #[ignore_heap_size_of = "Arrays are cumbersome"]
+    #[ignore_malloc_size_of = "Arrays are cumbersome"]
     image_info_array: DomRefCell<[ImageInfo; MAX_LEVEL_COUNT * MAX_FACE_COUNT]>,
     /// Face count can only be 1 or 6
     face_count: Cell<u8>,
@@ -43,8 +44,10 @@ pub struct WebGLTexture {
     // Store information for min and mag filters
     min_filter: Cell<Option<u32>>,
     mag_filter: Cell<Option<u32>>,
-    #[ignore_heap_size_of = "Defined in ipc-channel"]
+    #[ignore_malloc_size_of = "Defined in ipc-channel"]
     renderer: WebGLMsgSender,
+    /// True if this texture is used for the DOMToTexture feature.
+    attached_to_dom: Cell<bool>,
 }
 
 impl WebGLTexture {
@@ -62,6 +65,7 @@ impl WebGLTexture {
             mag_filter: Cell::new(None),
             image_info_array: DomRefCell::new([ImageInfo::new(); MAX_LEVEL_COUNT * MAX_FACE_COUNT]),
             renderer: renderer,
+            attached_to_dom: Cell::new(false),
         }
     }
 
@@ -78,7 +82,7 @@ impl WebGLTexture {
                renderer: WebGLMsgSender,
                id: WebGLTextureId)
                -> DomRoot<WebGLTexture> {
-        reflect_dom_object(box WebGLTexture::new_inherited(renderer, id),
+        reflect_dom_object(Box::new(WebGLTexture::new_inherited(renderer, id)),
                            window,
                            WebGLTextureBinding::Wrap)
     }
@@ -179,6 +183,10 @@ impl WebGLTexture {
     pub fn delete(&self) {
         if !self.is_deleted.get() {
             self.is_deleted.set(true);
+            // Notify WR to release the frame output when using DOMToTexture feature
+            if self.attached_to_dom.get() {
+                let _ = self.renderer.send_dom_to_texture(DOMToTextureCommand::Detach(self.id));
+            }
             let _ = self.renderer.send(WebGLCommand::DeleteTexture(self.id));
         }
     }
@@ -374,6 +382,10 @@ impl WebGLTexture {
 
         Some(self.image_info_at_face(0, self.base_mipmap_level))
     }
+
+    pub fn set_attached_to_dom(&self) {
+        self.attached_to_dom.set(true);
+    }
 }
 
 impl Drop for WebGLTexture {
@@ -382,7 +394,7 @@ impl Drop for WebGLTexture {
     }
 }
 
-#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
 pub struct ImageInfo {
     width: u32,
     height: u32,

@@ -492,8 +492,12 @@ pub enum FormattingContextType {
     Other,
 }
 
+#[allow(unsafe_code)]
+unsafe impl ::flow::HasBaseFlow for BlockFlow {}
+
 // A block formatting context.
 #[derive(Serialize)]
+#[repr(C)]
 pub struct BlockFlow {
     /// Data common to all flows.
     pub base: BaseFlow,
@@ -537,7 +541,7 @@ impl BlockFlow {
                 None => ForceNonfloatedFlag::ForceNonfloated,
             }),
             fragment: fragment,
-            float: float_kind.map(|kind| box FloatedBlockInfo::new(kind)),
+            float: float_kind.map(|kind| Box::new(FloatedBlockInfo::new(kind))),
             flags: BlockFlowFlags::empty(),
         }
     }
@@ -1664,20 +1668,6 @@ impl BlockFlow {
 
         self.base.intrinsic_inline_sizes = computation.finish();
         self.base.flags = flags
-    }
-
-    pub fn block_stacking_context_type(&self) -> BlockStackingContextType {
-        if self.fragment.establishes_stacking_context() {
-            return BlockStackingContextType::StackingContext
-        }
-
-        if self.base.flags.contains(IS_ABSOLUTELY_POSITIONED) ||
-                self.fragment.style.get_box().position != position::T::static_ ||
-                self.base.flags.is_float() {
-            BlockStackingContextType::PseudoStackingContext
-        } else {
-            BlockStackingContextType::NonstackingContext
-        }
     }
 
     pub fn overflow_style_may_require_clip_scroll_node(&self) -> bool {

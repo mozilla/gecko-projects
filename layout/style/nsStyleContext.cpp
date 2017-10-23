@@ -78,7 +78,7 @@ const uint32_t nsStyleContext::sDependencyTable[] = {
 
 #endif
 
-nsStyleContext::nsStyleContext(nsIAtom* aPseudoTag,
+nsStyleContext::nsStyleContext(nsAtom* aPseudoTag,
                                CSSPseudoElementType aPseudoType)
   : mPseudoTag(aPseudoTag)
   , mBits(((uint64_t)aPseudoType) << NS_STYLE_CONTEXT_TYPE_SHIFT)
@@ -106,19 +106,15 @@ nsChangeHint
 nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
                                     uint32_t* aEqualStructs,
                                     uint32_t* aSamePointerStructs,
-                                    uint32_t aRelevantStructs)
+                                    bool aIgnoreVariables)
 {
   AUTO_PROFILER_LABEL("nsStyleContext::CalcStyleDifference", CSS);
 
   static_assert(nsStyleStructID_Length <= 32,
                 "aEqualStructs is not big enough");
 
-  MOZ_ASSERT(aRelevantStructs == kAllResolvedStructs || IsServo(),
-             "aRelevantStructs must be kAllResolvedStructs for Gecko contexts");
-
-  if (aRelevantStructs == kAllResolvedStructs) {
-    aRelevantStructs = mBits & NS_STYLE_INHERIT_MASK;
-  }
+  MOZ_ASSERT(!aIgnoreVariables || IsServo(),
+             "aIgnoreVariables must be false for Gecko contexts");
 
   *aEqualStructs = 0;
   *aSamePointerStructs = 0;
@@ -158,7 +154,8 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
       *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
     }
   } else {
-    if (Servo_ComputedValues_EqualCustomProperties(
+    if (aIgnoreVariables ||
+        Servo_ComputedValues_EqualCustomProperties(
           AsServo()->ComputedData(),
           aNewContext->ComputedData())) {
       *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
@@ -437,7 +434,7 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
 
 already_AddRefed<GeckoStyleContext>
 NS_NewStyleContext(GeckoStyleContext* aParentContext,
-                   nsIAtom* aPseudoTag,
+                   nsAtom* aPseudoTag,
                    CSSPseudoElementType aPseudoType,
                    nsRuleNode* aRuleNode,
                    bool aSkipParentDisplayBasedStyleFixup)

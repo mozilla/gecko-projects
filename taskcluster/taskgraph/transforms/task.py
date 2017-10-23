@@ -495,6 +495,7 @@ GROUP_NAMES = {
     'mocha': 'Mocha unit tests',
     'py': 'Python unit tests',
     'tc': 'Executed by TaskCluster',
+    'tc-A': 'Android Gradle tests executed by TaskCluster',
     'tc-e10s': 'Executed by TaskCluster with e10s',
     'tc-Fxfn-l': 'Firefox functional tests (local) executed by TaskCluster',
     'tc-Fxfn-l-e10s': 'Firefox functional tests (local) executed by TaskCluster with e10s',
@@ -575,6 +576,17 @@ V2_L10N_TEMPLATES = [
 TREEHERDER_ROUTE_ROOTS = {
     'production': 'tc-treeherder',
     'staging': 'tc-treeherder-stage',
+}
+
+# Which repository repository revision to use when reporting results to treeherder.
+DEFAULT_BRANCH_REV_PARAM = 'head_rev'
+BRANCH_REV_PARAM = {
+    'comm-esr45': 'comm_head_rev',
+    'comm-esr52': 'comm_head_rev',
+    'comm-beta': 'comm_head_rev',
+    'comm-central': 'comm_head_rev',
+    'comm-aurora': 'comm_head_rev',
+    'try-comm-central': 'comm_head_rev',
 }
 
 COALESCE_KEY = '{project}.{job-identifier}'
@@ -1163,10 +1175,15 @@ def build_task(config, tasks):
             treeherder['jobKind'] = task_th['kind']
             treeherder['tier'] = task_th['tier']
 
+            treeherder_rev = config.params[
+                BRANCH_REV_PARAM.get(
+                    config.params['project'],
+                    DEFAULT_BRANCH_REV_PARAM)]
+
             routes.extend([
                 '{}.v2.{}.{}.{}'.format(TREEHERDER_ROUTE_ROOTS[env],
                                         config.params['project'],
-                                        config.params['head_rev'],
+                                        treeherder_rev,
                                         config.params['pushlog_id'])
                 for env in task_th['environments']
             ])
@@ -1218,7 +1235,7 @@ def build_task(config, tasks):
         if task_th:
             # link back to treeherder in description
             th_push_link = 'https://treeherder.mozilla.org/#/jobs?repo={}&revision={}'.format(
-                config.params['project'], config.params['head_rev'])
+                config.params['project'], treeherder_rev)
             task_def['metadata']['description'] += ' ([Treeherder push]({}))'.format(
                 th_push_link)
 

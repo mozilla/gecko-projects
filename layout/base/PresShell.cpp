@@ -225,7 +225,9 @@ struct RangePaintInfo {
   nsPoint mRootOffset;
 
   RangePaintInfo(nsRange* aRange, nsIFrame* aFrame)
-    : mRange(aRange), mBuilder(aFrame, nsDisplayListBuilderMode::PAINTING, false)
+    : mRange(aRange)
+    , mBuilder(aFrame, nsDisplayListBuilderMode::PAINTING, false)
+    , mList(&mBuilder)
   {
     MOZ_COUNT_CTOR(RangePaintInfo);
     mBuilder.BeginFrame();
@@ -1822,7 +1824,7 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     // Don't suppress painting if the document isn't loading.
     nsIDocument::ReadyState readyState = mDocument->GetReadyStateEnum();
     if (readyState != nsIDocument::READYSTATE_COMPLETE) {
-      mPaintSuppressionTimer = do_CreateInstance("@mozilla.org/timer;1");
+      mPaintSuppressionTimer = NS_NewTimer();
     }
     if (!mPaintSuppressionTimer) {
       mPaintingSuppressed = false;
@@ -1978,7 +1980,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord a
       !mAsyncResizeTimerIsActive) {
     if (mInResize) {
       if (!mAsyncResizeEventTimer) {
-        mAsyncResizeEventTimer = do_CreateInstance("@mozilla.org/timer;1");
+        mAsyncResizeEventTimer = NS_NewTimer();
       }
       if (mAsyncResizeEventTimer) {
         mAsyncResizeTimerIsActive = true;
@@ -3664,14 +3666,13 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
           self->ScheduleViewManagerFlush();
       };
 
-      mDelayedPaintTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-      mDelayedPaintTimer->SetTarget(
-          mDocument->EventTargetFor(TaskCategory::Other));
-      mDelayedPaintTimer->InitWithNamedFuncCallback(PaintTimerCallBack,
-                                                    this,
-                                                    kPaintDelayPeriod,
-                                                    nsITimer::TYPE_ONE_SHOT,
-                                                    "PaintTimerCallBack");
+      NS_NewTimerWithFuncCallback(getter_AddRefs(mDelayedPaintTimer),
+                                  PaintTimerCallBack,
+                                  this,
+                                  kPaintDelayPeriod,
+                                  nsITimer::TYPE_ONE_SHOT,
+                                  "PaintTimerCallBack",
+                                  mDocument->EventTargetFor(TaskCategory::Other));
     }
     return;
   }
@@ -3698,7 +3699,7 @@ void
 PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
                                   bool aFlushOnHoverChange)
 {
-  AutoProfilerTracing tracing("Paint", "DispatchSynthMouseMove");
+  AUTO_PROFILER_TRACING("Paint", "DispatchSynthMouseMove");
   RestyleManager* restyleManager = mPresContext->RestyleManager();
   uint32_t hoverGenerationBefore =
     restyleManager->GetHoverGeneration();
@@ -4032,6 +4033,7 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
 
   MOZ_ASSERT(NeedFlush(flushType), "Why did we get called?");
 
+#ifdef MOZ_GECKO_PROFILER
   static const EnumeratedArray<FlushType,
                                FlushType::Count,
                                const char*> flushTypeNames = {
@@ -4047,9 +4049,9 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     "Layout",
     "Display"
   };
-
   AUTO_PROFILER_LABEL_DYNAMIC("PresShell::DoFlushPendingNotifications",
                               GRAPHICS, flushTypeNames[flushType]);
+#endif
 
 #ifdef ACCESSIBILITY
 #ifdef DEBUG
@@ -4288,7 +4290,7 @@ void
 PresShell::AttributeWillChange(nsIDocument* aDocument,
                                Element*     aElement,
                                int32_t      aNameSpaceID,
-                               nsIAtom*     aAttribute,
+                               nsAtom*     aAttribute,
                                int32_t      aModType,
                                const nsAttrValue* aNewValue)
 {
@@ -4311,7 +4313,7 @@ void
 PresShell::AttributeChanged(nsIDocument* aDocument,
                             Element*     aElement,
                             int32_t      aNameSpaceID,
-                            nsIAtom*     aAttribute,
+                            nsAtom*     aAttribute,
                             int32_t      aModType,
                             const nsAttrValue* aOldValue)
 {
@@ -4449,11 +4451,9 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
   mPresContext->RestyleManager()->ContentRemoved(container, aChild, oldNextSibling);
 
   // After removing aChild from tree we should save information about live ancestor
-  if (mPointerEventTarget) {
-    MOZ_ASSERT(PointerEventHandler::IsPointerEventEnabled());
-    if (nsContentUtils::ContentIsDescendantOf(mPointerEventTarget, aChild)) {
-      mPointerEventTarget = aMaybeContainer;
-    }
+  if (mPointerEventTarget &&
+      nsContentUtils::ContentIsDescendantOf(mPointerEventTarget, aChild)) {
+    mPointerEventTarget = aMaybeContainer;
   }
 
   mFrameConstructor->ContentRemoved(aMaybeContainer, aChild, oldNextSibling,
@@ -4723,7 +4723,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
   // part of the selection. Then, append the wrapper to the top of the list.
   // Otherwise, just delete the item and don't append it.
   nsRect surfaceRect;
-  nsDisplayList tmpList;
+  nsDisplayList tmpList(aBuilder);
 
   nsDisplayItem* i;
   while ((i = aList->RemoveBottom())) {
@@ -4776,7 +4776,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
           const DisplayItemClipChain* newClipChain =
             aBuilder->AllocateDisplayItemClipChain(newClip, asr, nullptr);
 
-          i->IntersectClip(aBuilder, newClipChain);
+          i->IntersectClip(aBuilder, newClipChain, true);
           itemToInsert = i;
         }
       }
@@ -7317,7 +7317,6 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     // After HandlePositionedEvent we should reestablish
     // content (which still live in tree) in some cases
     if (aTargetContent && ePointerEventClass == aEvent->mClass) {
-      MOZ_ASSERT(PointerEventHandler::IsPointerEventEnabled());
       if (!weakFrame.IsAlive()) {
         shell->mPointerEventTarget.swap(*aTargetContent);
       }
@@ -8816,16 +8815,13 @@ PresShell::ScheduleReflowOffTimer()
   ASSERT_REFLOW_SCHEDULED_STATE();
 
   if (!mReflowContinueTimer) {
-    mReflowContinueTimer = do_CreateInstance("@mozilla.org/timer;1");
-    mReflowContinueTimer->SetTarget(
+    nsresult rv = NS_NewTimerWithFuncCallback(
+        getter_AddRefs(mReflowContinueTimer),
+        sReflowContinueCallback, this, 30,
+        nsITimer::TYPE_ONE_SHOT,
+        "sReflowContinueCallback",
         mDocument->EventTargetFor(TaskCategory::Other));
-    if (!mReflowContinueTimer ||
-        NS_FAILED(mReflowContinueTimer->
-                    InitWithNamedFuncCallback(sReflowContinueCallback, this, 30,
-                                              nsITimer::TYPE_ONE_SHOT,
-                                              "sReflowContinueCallback"))) {
-      return false;
-    }
+    return NS_SUCCEEDED(rv);
   }
   return true;
 }
@@ -9640,7 +9636,7 @@ FindTopFrame(nsIFrame* aRoot)
   if (aRoot) {
     nsIContent* content = aRoot->GetContent();
     if (content) {
-      nsIAtom* tag;
+      nsAtom* tag;
       content->GetTag(tag);
       if (nullptr != tag) {
         NS_RELEASE(tag);

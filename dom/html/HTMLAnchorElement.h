@@ -63,12 +63,13 @@ public:
   virtual void GetLinkTarget(nsAString& aTarget) override;
   virtual already_AddRefed<nsIURI> GetHrefURI() const override;
 
-  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
-  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,
+                                nsIPrincipal* aSubjectPrincipal,
                                 bool aNotify) override;
 
   virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
@@ -198,6 +199,10 @@ public:
     SetHTMLAttr(nsGkAtoms::charset, aValue, rv);
   }
   void GetName(DOMString& aValue)
+  {
+    GetHTMLAttr(nsGkAtoms::name, aValue);
+  }
+  void GetName(nsAString& aValue)
   {
     GetHTMLAttr(nsGkAtoms::name, aValue);
   }

@@ -1930,13 +1930,13 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
       aDragMetrics));
 }
 
-void
+bool
 nsBaseWidget::StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
                                    const ScrollableLayerGuid& aGuid)
 {
   MOZ_ASSERT(XRE_IsParentProcess() && AsyncPanZoomEnabled());
 
-  mAPZC->StartAutoscroll(aGuid, aAnchorLocation);
+  return mAPZC->StartAutoscroll(aGuid, aAnchorLocation);
 }
 
 void
@@ -1992,8 +1992,8 @@ nsIWidget::SynthesizeNativeTouchTap(LayoutDeviceIntPoint aPoint, bool aLongTap,
   int elapse = Preferences::GetInt("ui.click_hold_context_menus.delay",
                                    TOUCH_INJECT_LONG_TAP_DEFAULT_MSEC);
   if (!mLongTapTimer) {
-    mLongTapTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
-    if (NS_FAILED(rv)) {
+    mLongTapTimer = NS_NewTimer();
+    if (!mLongTapTimer) {
       SynthesizeNativeTouchPoint(pointerId, TOUCH_CANCEL,
                                  aPoint, 0, 0, nullptr);
       return NS_ERROR_UNEXPECTED;

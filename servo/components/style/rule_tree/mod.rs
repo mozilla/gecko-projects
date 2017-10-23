@@ -7,8 +7,8 @@
 //! The rule tree.
 
 use applicable_declarations::ApplicableDeclarationList;
-#[cfg(feature = "servo")]
-use heapsize::HeapSizeOf;
+#[cfg(feature = "gecko")]
+use gecko::selector_parser::PseudoElement;
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use properties::{Importance, LonghandIdSet, PropertyDeclarationBlock};
@@ -44,7 +44,7 @@ use thread_state;
 /// logs from http://logs.glob.uno/?c=mozilla%23servo&s=3+Apr+2017&e=3+Apr+2017#c644094
 /// to se a discussion about the different memory orderings used here.
 #[derive(Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct RuleTree {
     root: StrongRuleNode,
 }
@@ -446,6 +446,25 @@ impl RuleTree {
         let rule = self.insert_ordered_rules_from(last.parent().unwrap().clone(), children.drain().rev());
         rule
     }
+
+    /// Returns new rule node by adding animation rules at transition level.
+    /// The additional rules must be appropriate for the transition
+    /// level of the cascade, which is the highest level of the cascade.
+    /// (This is the case for one current caller, the cover rule used
+    /// for CSS transitions.)
+    pub fn add_animation_rules_at_transition_level(
+        &self,
+        path: &StrongRuleNode,
+        pdb: Arc<Locked<PropertyDeclarationBlock>>,
+        guards: &StylesheetGuards,
+    ) -> StrongRuleNode {
+        let mut dummy = false;
+        self.update_rule_at_level(CascadeLevel::Transitions,
+                                  Some(pdb.borrow_arc()),
+                                  path,
+                                  guards,
+                                  &mut dummy).expect("Should return a valid rule node")
+    }
 }
 
 /// The number of RuleNodes added to the free list before we will consider
@@ -461,7 +480,7 @@ const RULE_TREE_GC_INTERVAL: usize = 300;
 /// [1]: https://drafts.csswg.org/css-cascade/#cascade-origin
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum CascadeLevel {
     /// Normal User-Agent rules.
     UANormal = 0,
@@ -825,10 +844,7 @@ pub struct StrongRuleNode {
 }
 
 #[cfg(feature = "servo")]
-impl HeapSizeOf for StrongRuleNode {
-    fn heap_size_of_children(&self) -> usize { 0 }
-}
-
+malloc_size_of_is_0!(StrongRuleNode);
 
 impl StrongRuleNode {
     fn new(n: Box<RuleNode>) -> Self {
@@ -1077,14 +1093,16 @@ impl StrongRuleNode {
     #[cfg(feature = "gecko")]
     pub fn has_author_specified_rules<E>(&self,
                                          mut element: E,
+                                         mut pseudo: Option<PseudoElement>,
                                          guards: &StylesheetGuards,
                                          rule_type_mask: u32,
                                          author_colors_allowed: bool)
         -> bool
         where E: ::dom::TElement
     {
-        use gecko_bindings::structs::{NS_AUTHOR_SPECIFIED_BACKGROUND, NS_AUTHOR_SPECIFIED_BORDER};
-        use gecko_bindings::structs::{NS_AUTHOR_SPECIFIED_PADDING, NS_AUTHOR_SPECIFIED_TEXT_SHADOW};
+        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BACKGROUND;
+        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_BORDER;
+        use gecko_bindings::structs::NS_AUTHOR_SPECIFIED_PADDING;
         use properties::{CSSWideKeyword, LonghandId, LonghandIdSet};
         use properties::{PropertyDeclaration, PropertyDeclarationId};
         use std::borrow::Cow;
@@ -1140,15 +1158,6 @@ impl StrongRuleNode {
             LonghandId::PaddingBlockEnd,
         ];
 
-        // Inherited properties:
-        const TEXT_SHADOW_PROPS: &'static [LonghandId] = &[
-            LonghandId::TextShadow,
-        ];
-
-        fn inherited(id: LonghandId) -> bool {
-            id == LonghandId::TextShadow
-        }
-
         // Set of properties that we are currently interested in.
         let mut properties = LonghandIdSet::new();
 
@@ -1167,11 +1176,6 @@ impl StrongRuleNode {
                 properties.insert(*id);
             }
         }
-        if rule_type_mask & NS_AUTHOR_SPECIFIED_TEXT_SHADOW != 0 {
-            for id in TEXT_SHADOW_PROPS {
-                properties.insert(*id);
-            }
-        }
 
         // If author colors are not allowed, only claim to have author-specified
         // rules if we're looking at a non-color property or if we're looking at
@@ -1186,7 +1190,6 @@ impl StrongRuleNode {
             LonghandId::BorderInlineEndColor,
             LonghandId::BorderBlockStartColor,
             LonghandId::BorderBlockEndColor,
-            LonghandId::TextShadow,
         ];
 
         if !author_colors_allowed {
@@ -1205,14 +1208,6 @@ impl StrongRuleNode {
             // Note that we don't care here about inheritance due to lack of a
             // specified value, since all the properties we care about are reset
             // properties.
-            //
-            // FIXME: The above comment is copied from Gecko, but the last
-            // sentence is no longer correct since 'text-shadow' support was
-            // added.
-            //
-            // This is a bug in Gecko, replicated in Stylo for now:
-            //
-            // https://bugzilla.mozilla.org/show_bug.cgi?id=1363088
 
             let mut inherited_properties = LonghandIdSet::new();
             let mut have_explicit_ua_inherit = false;
@@ -1254,10 +1249,7 @@ impl StrongRuleNode {
                                 // However, if it is inherited, then it might be
                                 // inherited from an author rule from an
                                 // ancestor element's rule nodes.
-                                if declaration.get_css_wide_keyword() == Some(CSSWideKeyword::Inherit) ||
-                                    (declaration.get_css_wide_keyword() == Some(CSSWideKeyword::Unset) &&
-                                     inherited(id))
-                                {
+                                if declaration.get_css_wide_keyword() == Some(CSSWideKeyword::Inherit) {
                                     have_explicit_ua_inherit = true;
                                     inherited_properties.insert(id);
                                 }
@@ -1291,14 +1283,20 @@ impl StrongRuleNode {
             if !have_explicit_ua_inherit { break }
 
             // Continue to the parent element and search for the inherited properties.
-            element = match element.inheritance_parent() {
-                Some(parent) => parent,
-                None => break
-            };
+            if let Some(pseudo) = pseudo.take() {
+                if pseudo.inherits_from_default_values() {
+                    break;
+                }
+            } else {
+                element = match element.inheritance_parent() {
+                    Some(parent) => parent,
+                    None => break
+                };
 
-            let parent_data = element.mutate_data().unwrap();
-            let parent_rule_node = parent_data.styles.primary().rules().clone();
-            element_rule_node = Cow::Owned(parent_rule_node);
+                let parent_data = element.mutate_data().unwrap();
+                let parent_rule_node = parent_data.styles.primary().rules().clone();
+                element_rule_node = Cow::Owned(parent_rule_node);
+            }
 
             properties = inherited_properties;
         }

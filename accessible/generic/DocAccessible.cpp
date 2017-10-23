@@ -62,7 +62,7 @@ using namespace mozilla::a11y;
 ////////////////////////////////////////////////////////////////////////////////
 // Static member initialization
 
-static nsIAtom** kRelationAttrs[] =
+static nsAtom** kRelationAttrs[] =
 {
   &nsGkAtoms::aria_labelledby,
   &nsGkAtoms::aria_describedby,
@@ -650,15 +650,14 @@ DocAccessible::ScrollPositionDidChange(nscoord aX, nscoord aY)
     mScrollWatchTimer->SetDelay(kScrollPosCheckWait);  // Create new timer, to avoid leaks
   }
   else {
-    mScrollWatchTimer = do_CreateInstance("@mozilla.org/timer;1");
+    NS_NewTimerWithFuncCallback(getter_AddRefs(mScrollWatchTimer),
+                                ScrollTimerCallback,
+                                this,
+                                kScrollPosCheckWait,
+                                nsITimer::TYPE_REPEATING_SLACK,
+                                "a11y::DocAccessible::ScrollPositionDidChange");
     if (mScrollWatchTimer) {
       NS_ADDREF_THIS(); // Kung fu death grip
-      mScrollWatchTimer->InitWithNamedFuncCallback(
-        ScrollTimerCallback,
-        this,
-        kScrollPosCheckWait,
-        nsITimer::TYPE_REPEATING_SLACK,
-        "a11y::DocAccessible::ScrollPositionDidChange");
     }
   }
   mScrollPositionChangedTicks = 1;
@@ -715,7 +714,7 @@ void
 DocAccessible::AttributeWillChange(nsIDocument* aDocument,
                                    dom::Element* aElement,
                                    int32_t aNameSpaceID,
-                                   nsIAtom* aAttribute, int32_t aModType,
+                                   nsAtom* aAttribute, int32_t aModType,
                                    const nsAttrValue* aNewValue)
 {
   Accessible* accessible = GetAccessible(aElement);
@@ -767,7 +766,7 @@ DocAccessible::NativeAnonymousChildListChange(nsIDocument* aDocument,
 void
 DocAccessible::AttributeChanged(nsIDocument* aDocument,
                                 dom::Element* aElement,
-                                int32_t aNameSpaceID, nsIAtom* aAttribute,
+                                int32_t aNameSpaceID, nsAtom* aAttribute,
                                 int32_t aModType,
                                 const nsAttrValue* aOldValue)
 {
@@ -813,7 +812,7 @@ DocAccessible::AttributeChanged(nsIDocument* aDocument,
 // DocAccessible protected member
 void
 DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
-                                    int32_t aNameSpaceID, nsIAtom* aAttribute)
+                                    int32_t aNameSpaceID, nsAtom* aAttribute)
 {
   // Fire accessible event after short timer, because we need to wait for
   // DOM attribute & resulting layout to actually change. Otherwise,
@@ -952,7 +951,7 @@ DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
 
 // DocAccessible protected member
 void
-DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsIAtom* aAttribute)
+DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsAtom* aAttribute)
 {
   // Note: For universal/global ARIA states and properties we don't care if
   // there is an ARIA role present or not.
@@ -1580,14 +1579,14 @@ DocAccessible::ProcessLoad()
 }
 
 void
-DocAccessible::AddDependentIDsFor(Accessible* aRelProvider, nsIAtom* aRelAttr)
+DocAccessible::AddDependentIDsFor(Accessible* aRelProvider, nsAtom* aRelAttr)
 {
   dom::Element* relProviderEl = aRelProvider->Elm();
   if (!relProviderEl)
     return;
 
   for (uint32_t idx = 0; idx < kRelationAttrsLen; idx++) {
-    nsIAtom* relAttr = *kRelationAttrs[idx];
+    nsAtom* relAttr = *kRelationAttrs[idx];
     if (aRelAttr && aRelAttr != relAttr)
       continue;
 
@@ -1652,14 +1651,14 @@ DocAccessible::AddDependentIDsFor(Accessible* aRelProvider, nsIAtom* aRelAttr)
 
 void
 DocAccessible::RemoveDependentIDsFor(Accessible* aRelProvider,
-                                     nsIAtom* aRelAttr)
+                                     nsAtom* aRelAttr)
 {
   dom::Element* relProviderElm = aRelProvider->Elm();
   if (!relProviderElm)
     return;
 
   for (uint32_t idx = 0; idx < kRelationAttrsLen; idx++) {
-    nsIAtom* relAttr = *kRelationAttrs[idx];
+    nsAtom* relAttr = *kRelationAttrs[idx];
     if (aRelAttr && aRelAttr != *kRelationAttrs[idx])
       continue;
 
@@ -1693,7 +1692,7 @@ DocAccessible::RemoveDependentIDsFor(Accessible* aRelProvider,
 
 bool
 DocAccessible::UpdateAccessibleOnAttrChange(dom::Element* aElement,
-                                            nsIAtom* aAttribute)
+                                            nsAtom* aAttribute)
 {
   if (aAttribute == nsGkAtoms::role) {
     // It is common for js libraries to set the role on the body element after

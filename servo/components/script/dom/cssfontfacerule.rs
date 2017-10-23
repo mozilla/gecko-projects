@@ -17,7 +17,7 @@ use style::stylesheets::FontFaceRule;
 #[dom_struct]
 pub struct CSSFontFaceRule {
     cssrule: CSSRule,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     fontfacerule: Arc<Locked<FontFaceRule>>,
 }
 
@@ -33,7 +33,7 @@ impl CSSFontFaceRule {
     #[allow(unrooted_must_root)]
     pub fn new(window: &Window, parent_stylesheet: &CSSStyleSheet,
                fontfacerule: Arc<Locked<FontFaceRule>>) -> DomRoot<CSSFontFaceRule> {
-        reflect_dom_object(box CSSFontFaceRule::new_inherited(parent_stylesheet, fontfacerule),
+        reflect_dom_object(Box::new(CSSFontFaceRule::new_inherited(parent_stylesheet, fontfacerule)),
                            window,
                            CSSFontFaceRuleBinding::Wrap)
     }

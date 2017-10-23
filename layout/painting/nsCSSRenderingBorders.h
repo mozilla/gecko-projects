@@ -101,7 +101,8 @@ public:
                       const nscolor* aBorderColors,
                       const nsBorderColors* aCompositeColors,
                       nscolor aBackgroundColor,
-                      bool aBackfaceIsVisible);
+                      bool aBackfaceIsVisible,
+                      const mozilla::Maybe<Rect>& aClipRect);
 
   // draw the entire border
   void DrawBorders();
@@ -165,6 +166,7 @@ private:
   bool mNoBorderRadius;
   bool mAvoidStroke;
   bool mBackfaceIsVisible;
+  mozilla::Maybe<Rect> mLocalClip;
 
   // For all the sides in the bitmask, would they be rendered
   // in an identical color and style?
@@ -307,6 +309,14 @@ public:
                   gfxContext& aRenderingContext,
                   nsIFrame* aForFrame,
                   const nsRect& aDirtyRect);
+  void
+  CreateWebRenderCommands(nsDisplayItem* aItem,
+                          nsIFrame* aForFrame,
+                          mozilla::wr::DisplayListBuilder& aBuilder,
+                          mozilla::wr::IpcResourceUpdateQueue& aResources,
+                          const mozilla::layers::StackingContextHelper& aSc,
+                          mozilla::layers::WebRenderLayerManager* aManager,
+                          nsDisplayListBuilder* aDisplayListBuilder);
 
   nsCSSBorderImageRenderer(const nsCSSBorderImageRenderer& aRhs);
   nsCSSBorderImageRenderer& operator=(const nsCSSBorderImageRenderer& aRhs);
@@ -330,6 +340,7 @@ private:
   uint8_t mFill;
 
   friend class nsDisplayBorder;
+  friend struct nsCSSRendering;
 };
 
 namespace mozilla {

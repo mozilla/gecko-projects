@@ -84,6 +84,7 @@ import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.util.SimpleArrayMap;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
@@ -129,6 +130,11 @@ public class GeckoAppShell
             extras.putString("BuildID", AppConstants.MOZ_APP_BUILDID);
             extras.putString("Vendor", AppConstants.MOZ_APP_VENDOR);
             extras.putString("ReleaseChannel", AppConstants.MOZ_UPDATE_CHANNEL);
+
+            final String appNotes = getAppNotes();
+            if (appNotes != null) {
+                extras.putString("Notes", appNotes);
+            }
             return extras;
         }
 
@@ -161,9 +167,24 @@ public class GeckoAppShell
         }
     };
 
+    private static String sAppNotes;
+
     public static CrashHandler ensureCrashHandling() {
         // Crash handling is automatically enabled when GeckoAppShell is loaded.
         return CRASH_HANDLER;
+    }
+
+    @WrapForJNI(exceptionMode = "ignore")
+    /* package */ static synchronized String getAppNotes() {
+        return sAppNotes;
+    }
+
+    public static synchronized void appendAppNotesToCrashReport(final String notes) {
+        if (sAppNotes == null) {
+            sAppNotes = notes;
+        } else {
+            sAppNotes += '\n' + notes;
+        }
     }
 
     private static volatile boolean locationHighAccuracyEnabled;
@@ -608,7 +629,7 @@ public class GeckoAppShell
         return sScreenOrientationDelegate;
     }
 
-    public static void setScreenOrientationDelegate(ScreenOrientationDelegate screenOrientationDelegate) {
+    public static void setScreenOrientationDelegate(@Nullable ScreenOrientationDelegate screenOrientationDelegate) {
         sScreenOrientationDelegate = (screenOrientationDelegate != null) ? screenOrientationDelegate : DEFAULT_LISTENERS;
     }
 
@@ -1808,11 +1829,6 @@ public class GeckoAppShell
             sScreenSize = new Rect(0, 0, disp.getWidth(), disp.getHeight());
         }
         return sScreenSize;
-    }
-
-    @WrapForJNI
-    private static int startGeckoServiceChildProcess(String type, String[] args, int crashFd, int ipcFd) {
-        return GeckoProcessManager.getInstance().start(type, args, crashFd, ipcFd);
     }
 
     @WrapForJNI(calledFrom = "gecko")

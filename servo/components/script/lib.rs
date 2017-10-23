@@ -2,19 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#![feature(ascii_ctype)]
-#![feature(box_syntax)]
+#![cfg_attr(feature = "unstable", feature(core_intrinsics))]
+#![cfg_attr(feature = "unstable", feature(on_unimplemented))]
 #![feature(conservative_impl_trait)]
 #![feature(const_fn)]
-#![feature(const_ptr_null)]
-#![feature(const_ptr_null_mut)]
-#![feature(core_intrinsics)]
 #![feature(mpsc_select)]
-#![feature(nonzero)]
-#![feature(on_unimplemented)]
 #![feature(plugin)]
 #![feature(proc_macro)]
-#![feature(try_from)]
 
 #![deny(unsafe_code)]
 #![allow(non_snake_case)]
@@ -34,7 +28,6 @@ extern crate byteorder;
 extern crate canvas_traits;
 extern crate caseless;
 extern crate cookie as cookie_rs;
-extern crate core;
 #[macro_use] extern crate cssparser;
 #[macro_use] extern crate deny_public_fields;
 extern crate devtools_traits;
@@ -46,8 +39,6 @@ extern crate euclid;
 extern crate fnv;
 extern crate gleam;
 extern crate half;
-#[macro_use] extern crate heapsize;
-#[macro_use] extern crate heapsize_derive;
 #[macro_use] extern crate html5ever;
 #[macro_use]
 extern crate hyper;
@@ -63,6 +54,8 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate log;
+#[macro_use] extern crate malloc_size_of;
+#[macro_use] extern crate malloc_size_of_derive;
 extern crate metrics;
 #[macro_use]
 extern crate mime;
@@ -70,6 +63,7 @@ extern crate mime_guess;
 extern crate mitochondria;
 extern crate msg;
 extern crate net_traits;
+extern crate nonzero;
 extern crate num_traits;
 extern crate offscreen_gl_context;
 extern crate open;
@@ -84,6 +78,7 @@ extern crate script_layout_interface;
 extern crate script_traits;
 extern crate selectors;
 extern crate serde;
+extern crate servo_allocator;
 extern crate servo_arc;
 #[macro_use] extern crate servo_atoms;
 extern crate servo_config;

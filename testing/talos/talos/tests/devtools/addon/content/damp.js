@@ -259,6 +259,64 @@ Damp.prototype = {
     yield this.testTeardown();
   }),
 
+  _consoleObjectExpansionTest: Task.async(function* () {
+    let tab = yield this.testSetup(SIMPLE_URL);
+    let messageManager = tab.linkedBrowser.messageManager;
+    let {toolbox} = yield this.openToolbox("webconsole");
+    let webconsole = toolbox.getPanel("webconsole");
+
+    // Resolve once the first message is received.
+    let onMessageReceived = new Promise(resolve => {
+      function receiveMessages(e, messages) {
+        for (let m of messages) {
+          resolve(m);
+        }
+      }
+      webconsole.hud.ui.once("new-messages", receiveMessages);
+    });
+
+    // Load a frame script using a data URI so we can do logs
+    // from the page.
+    messageManager.loadFrameScript("data:,(" + encodeURIComponent(
+      `function () {
+        addMessageListener("do-dir", function () {
+          content.console.dir(Array.from({length:1000}).reduce((res, _, i)=> {
+            res["item_" + i] = i;
+            return res;
+          }, {}));
+        });
+      }`
+    ) + ")()", true);
+
+    // Kick off the logging
+    messageManager.sendAsyncMessage("do-dir");
+
+    let start = performance.now();
+    yield onMessageReceived;
+    const tree = webconsole.hud.ui.outputNode.querySelector(".dir.message .tree");
+    // The tree can be collapsed since the properties are fetched asynchronously.
+    if (tree.querySelectorAll(".node").length === 1) {
+      // If this is the case, we wait for the properties to be fetched and displayed.
+      yield new Promise(resolve => {
+        const observer = new MutationObserver(mutations => {
+          resolve(mutations);
+          observer.disconnect();
+        });
+        observer.observe(tree, {
+          childList: true
+        });
+      });
+    }
+
+    this._results.push({
+      name: "console.objectexpand",
+      value: performance.now() - start,
+    });
+
+    yield this.closeToolboxAndLog("console.objectexpanded");
+    yield this.testTeardown();
+  }),
+
   takeCensus(label) {
     let start = performance.now();
 
@@ -314,16 +372,16 @@ Damp.prototype = {
     this._results.push({name: name + ".reload.DAMP", value: time });
   },
 
-  async _coldInspectorOpen(url) {
-    await this.testSetup(url);
+  async _coldInspectorOpen() {
+    await this.testSetup(SIMPLE_URL);
     await this.openToolboxAndLog("cold.inspector", "inspector");
     await this.closeToolbox();
     await this.testTeardown();
   },
 
   _getToolLoadingTests(url, label, { expectedMessages, expectedSources }) {
-    let subtests = {
-      inspectorOpen: Task.async(function* () {
+    let tests = {
+      inspector: Task.async(function* () {
         yield this.testSetup(url);
         let toolbox = yield this.openToolboxAndLog(label + ".inspector", "inspector");
         let onReload = async function() {
@@ -338,7 +396,7 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
 
-      webconsoleOpen: Task.async(function* () {
+      webconsole: Task.async(function* () {
         yield this.testSetup(url);
         let toolbox = yield this.openToolboxAndLog(label + ".webconsole", "webconsole");
         let onReload = async function() {
@@ -359,7 +417,7 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
 
-      debuggerOpen: Task.async(function* () {
+      debugger: Task.async(function* () {
         yield this.testSetup(url);
         let onLoad = async function(toolbox, dbg) {
           await new Promise(done => {
@@ -395,7 +453,7 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
 
-      styleEditorOpen: Task.async(function* () {
+      styleeditor: Task.async(function* () {
         yield this.testSetup(url);
         yield this.openToolboxAndLog(label + ".styleeditor", "styleeditor");
         yield this.reloadPageAndLog(label + ".styleeditor");
@@ -403,7 +461,7 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
 
-      performanceOpen: Task.async(function* () {
+      performance: Task.async(function* () {
         yield this.testSetup(url);
         yield this.openToolboxAndLog(label + ".performance", "performance");
         yield this.reloadPageAndLog(label + ".performance");
@@ -411,7 +469,7 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
 
-      netmonitorOpen: Task.async(function* () {
+      netmonitor: Task.async(function* () {
         yield this.testSetup(url);
         const toolbox = yield this.openToolboxAndLog(label + ".netmonitor", "netmonitor");
         const requestsDone = this.waitForNetworkRequests(label + ".netmonitor", toolbox);
@@ -432,21 +490,12 @@ Damp.prototype = {
         yield this.testTeardown();
       }),
     };
-
-    // Construct the sequence array: config.repeat times config.subtests
-    let config = this._config;
-    let sequenceArray = [];
-    for (var i in config.subtests) {
-      for (var r = 0; r < config.repeat; r++) {
-        if (!config.subtests[i] || !subtests[config.subtests[i]]) {
-          continue;
-        }
-
-        sequenceArray.push(subtests[config.subtests[i]]);
-      }
+    // Prefix all tests with the page type (simple or complicated)
+    for (let name in tests) {
+      tests[label + "." + name] = tests[name];
+      delete tests[name];
     }
-
-    return sequenceArray;
+    return tests;
   },
 
   testSetup: Task.async(function* (url) {
@@ -603,33 +652,56 @@ Damp.prototype = {
 
     TalosParentProfiler.resume("DAMP - start");
 
-    let tests = [];
-    if (config.subtests.indexOf("inspectorOpen") > -1) {
-      // Run cold test only once
-      let topWindow = getMostRecentBrowserWindow();
-      if (!topWindow.coldRunDAMP) {
-        topWindow.coldRunDAMP = true;
-        tests = tests.concat(this._coldInspectorOpen);
-      }
+    let tests = {};
+
+    // Run cold test only once
+    let topWindow = getMostRecentBrowserWindow();
+    if (!topWindow.coldRunDAMP) {
+      topWindow.coldRunDAMP = true;
+      tests["cold.inspector"] = this._coldInspectorOpen;
     }
 
-    tests = tests.concat(this._getToolLoadingTests(SIMPLE_URL, "simple", {
+    Object.assign(tests, this._getToolLoadingTests(SIMPLE_URL, "simple", {
       expectedMessages: 1,
       expectedSources: 1,
     }));
 
-    tests = tests.concat(this._getToolLoadingTests(COMPLICATED_URL, "complicated", {
+    Object.assign(tests, this._getToolLoadingTests(COMPLICATED_URL, "complicated", {
       expectedMessages: 7,
       expectedSources: 14,
     }));
 
-    if (config.subtests.indexOf("consoleBulkLogging") > -1) {
-      tests = tests.concat(this._consoleBulkLoggingTest);
-    }
-    if (config.subtests.indexOf("consoleStreamLogging") > -1) {
-      tests = tests.concat(this._consoleStreamLoggingTest);
+    tests["console.bulklog"] = this._consoleBulkLoggingTest;
+    tests["console.streamlog"] = this._consoleStreamLoggingTest;
+    tests["console.objectexpand"] = this._consoleObjectExpansionTest;
+
+    // Filter tests via `./mach --subtests filter` command line argument
+    let filter = Services.prefs.getCharPref("talos.subtests", "");
+    if (filter) {
+      for (let name in tests) {
+        if (!name.includes(filter)) {
+          delete tests[name];
+        }
+      }
+      if (Object.keys(tests).length == 0) {
+        dump("ERROR: Unable to find any test matching '" + filter + "'\n");
+        this._doneInternal();
+        return;
+      }
     }
 
-    this._doSequence(tests, this._doneInternal);
+    // Construct the sequence array while filtering tests
+    let sequenceArray = [];
+    for (var i in config.subtests) {
+      for (var r = 0; r < config.repeat; r++) {
+        if (!config.subtests[i] || !tests[config.subtests[i]]) {
+          continue;
+        }
+
+        sequenceArray.push(tests[config.subtests[i]]);
+      }
+    }
+
+    this._doSequence(sequenceArray, this._doneInternal);
   }
 }

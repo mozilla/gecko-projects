@@ -251,6 +251,14 @@ public:
   static bool IsMSJapaneseIMEActive();
 
   /**
+   * Returns true if active TIP is Google Japanese Input.
+   * Note that if Google Japanese Input is installed as an IMM-IME,
+   * this return false even if Google Japanese Input is active.
+   * So, you may need to check IMMHandler::IsGoogleJapaneseInputActive() too.
+   */
+  static bool IsGoogleJapaneseInputActive();
+
+  /**
    * Returns true if TSF may crash if GetSelection() returns E_FAIL.
    */
   static bool DoNotReturnErrorFromGetSelection();
@@ -314,8 +322,8 @@ protected:
                                         ITfRange* aRange,
                                         bool aPreserveSelection);
   HRESULT  RecordCompositionStartAction(ITfCompositionView* aComposition,
-                                        ULONG aStart,
-                                        ULONG aLength,
+                                        LONG aStart,
+                                        LONG aLength,
                                         bool aPreserveSelection);
   HRESULT  RecordCompositionUpdateAction();
   HRESULT  RecordCompositionEndAction();
@@ -692,14 +700,14 @@ protected:
    *                            COMPOSITION_START and COMPOSITION_END and
    *                            aStart and aLength match their information.
    */
-  bool WasTextInsertedWithoutCompositionAt(ULONG aStart, ULONG aLength) const
+  bool WasTextInsertedWithoutCompositionAt(LONG aStart, LONG aLength) const
   {
     if (mPendingActions.Length() < 2) {
       return false;
     }
     const PendingAction& pendingLastAction = mPendingActions.LastElement();
     if (pendingLastAction.mType != PendingAction::COMPOSITION_END ||
-        pendingLastAction.mData.Length() != aLength) {
+        pendingLastAction.mData.Length() != ULONG(aLength)) {
       return false;
     }
     const PendingAction& pendingPreLastAction =

@@ -108,6 +108,7 @@ class TsBase(Test):
         'xperf_stackwalk',
         'tpmozafterpaint',
         'fnbpaint',
+        'profile',
         'firstpaint',
         'userready',
         'testeventmap',
@@ -144,7 +145,6 @@ class ts_paint(TsBase):
     win7_counters = []
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     tpmozafterpaint = True
-    rss = False
     mainthread = False
     responsiveness = False
     unit = 'ms'
@@ -154,6 +154,14 @@ class ts_paint(TsBase):
 class ts_paint_webext(ts_paint):
     webextensions = '${talos}/webextensions/dummy/dummy-signed.xpi'
     preferences = {'xpinstall.signatures.required': False}
+
+
+@register_test()
+class ts_paint_heavy(ts_paint):
+    """
+    ts_paint test ran against a heavy-user profile
+    """
+    profile = 'simple'
 
 
 @register_test()
@@ -238,13 +246,13 @@ class PageloaderTest(Test):
     timeout = None
     keys = ['tpmanifest', 'tpcycles', 'tppagecycles', 'tprender', 'tpchrome',
             'tpmozafterpaint', 'fnbpaint', 'tploadnocache', 'firstpaint', 'userready',
-            'testeventmap', 'base_vs_ref', 'rss', 'mainthread', 'resolution', 'cycles',
+            'testeventmap', 'base_vs_ref', 'mainthread', 'resolution', 'cycles',
             'gecko_profile', 'gecko_profile_interval', 'gecko_profile_entries',
             'tptimeout', 'win_counters', 'w7_counters', 'linux_counters', 'mac_counters',
             'tpscrolltest', 'xperf_counters', 'timeout', 'shutdown', 'responsiveness',
             'profile_path', 'xperf_providers', 'xperf_user_providers', 'xperf_stackwalk',
-            'filters', 'preferences', 'extensions', 'setup', 'cleanup',
-            'lower_is_better', 'alert_threshold', 'unit', 'webextensions']
+            'format_pagename', 'filters', 'preferences', 'extensions', 'setup', 'cleanup',
+            'lower_is_better', 'alert_threshold', 'unit', 'webextensions', 'profile']
 
 
 class QuantumPageloadTest(PageloaderTest):
@@ -515,7 +523,6 @@ class tp5n(PageloaderTest):
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = True
     w7_counters = []
     win_counters = []
@@ -552,14 +559,12 @@ class tp5o(PageloaderTest):
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = False
     tpmanifest = '${talos}/tests/tp5n/tp5o.manifest'
-    win_counters = ['Main_RSS', 'Private Bytes', '% Processor Time']
-    w7_counters = ['Main_RSS', 'Private Bytes', '% Processor Time',
-                   'Modified Page List Bytes']
-    linux_counters = ['Private Bytes', 'XRes', 'Main_RSS']
-    mac_counters = ['Main_RSS']
+    win_counters = ['% Processor Time']
+    w7_counters = ['% Processor Time']
+    linux_counters = ['XRes']
+    mac_counters = []
     responsiveness = True
     gecko_profile_interval = 2
     gecko_profile_entries = 4000000
@@ -831,6 +836,21 @@ class a11yr(PageloaderTest):
 
 
 @register_test()
+class speedometer(PageloaderTest):
+    """
+    Speedometer benchmark used by many browser vendors (from webkit)
+    """
+    tpmanifest = '${talos}/tests/speedometer/speedometer.manifest'
+    tpcycles = 1
+    tppagecycles = 5
+    tpmozafterpaint = False
+    tpchrome = False
+    format_pagename = False
+    lower_is_better = False
+    unit = 'score'
+
+
+@register_test()
 class perf_reftest(PageloaderTest):
     """
     Style perf-reftest a set of tests where the result is the difference of base vs ref pages
@@ -906,11 +926,27 @@ class tp6_google(QuantumPageloadTest):
 
 
 @register_test()
+class tp6_google_heavy(tp6_google):
+    """
+    tp6_google test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
 class tp6_youtube(QuantumPageloadTest):
     """
     Quantum Pageload Test - YouTube
     """
     tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_youtube.manifest'
+
+
+@register_test()
+class tp6_youtube_heavy(tp6_youtube):
+    """
+    tp6_youtube test ran against a heavy-user profile
+    """
+    profile = 'simple'
 
 
 @register_test()
@@ -922,8 +958,24 @@ class tp6_amazon(QuantumPageloadTest):
 
 
 @register_test()
+class tp6_amazon_heavy(tp6_amazon):
+    """
+    tp6_amazon test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
 class tp6_facebook(QuantumPageloadTest):
     """
     Quantum Pageload Test - Facebook
     """
     tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_facebook.manifest'
+
+
+@register_test()
+class tp6_facebook_heavy(tp6_facebook):
+    """
+    tp6_facebook test ran against a heavy-user profile
+    """
+    profile = 'simple'

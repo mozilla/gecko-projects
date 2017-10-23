@@ -8,6 +8,7 @@
 #define MediaDecoder_h_
 
 #include "DecoderDoctorDiagnostics.h"
+#include "MediaContainerType.h"
 #include "MediaDecoderOwner.h"
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
@@ -22,7 +23,6 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/StateMirroring.h"
 #include "mozilla/StateWatching.h"
-#include "necko-config.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
@@ -98,9 +98,6 @@ public:
     PLAY_STATE_ENDED,
     PLAY_STATE_SHUTDOWN
   };
-
-  // Must be called exactly once, on the main thread, during startup.
-  static void InitStatics();
 
   explicit MediaDecoder(MediaDecoderInit& aInit);
 
@@ -381,9 +378,9 @@ private:
     GetOwner()->UpdateReadyState();
   }
 
-  virtual MediaDecoderOwner::NextFrameStatus NextFrameStatus()
+  MediaDecoderOwner::NextFrameStatus NextFrameStatus() const
   {
-    return !IsEnded() ? mNextFrameStatus : MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
+    return mNextFrameStatus;
   }
 
   virtual MediaDecoderOwner::NextFrameStatus NextFrameBufferedStatus();
@@ -493,6 +490,8 @@ private:
     mMediaSeekable = false;
   }
 
+  void OnNextFrameStatus(MediaDecoderOwner::NextFrameStatus);
+
   void FinishShutdown();
 
   void ConnectMirrors(MediaDecoderStateMachine* aObject);
@@ -578,6 +577,9 @@ protected:
   // disabled.
   bool mHasSuspendTaint;
 
+  MediaDecoderOwner::NextFrameStatus mNextFrameStatus =
+    MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
+
   // A listener to receive metadata updates from MDSM.
   MediaEventListener mTimedMetadataListener;
 
@@ -591,6 +593,7 @@ protected:
   MediaEventListener mOnEncrypted;
   MediaEventListener mOnWaitingForKey;
   MediaEventListener mOnDecodeWarning;
+  MediaEventListener mOnNextFrameStatus;
 
 protected:
   // PlaybackRate and pitch preservation status we should start at.
@@ -598,9 +601,6 @@ protected:
 
   // Buffered range, mirrored from the reader.
   Mirror<media::TimeIntervals> mBuffered;
-
-  // NextFrameStatus, mirrored from the state machine.
-  Mirror<MediaDecoderOwner::NextFrameStatus> mNextFrameStatus;
 
   // NB: Don't use mCurrentPosition directly, but rather CurrentPosition().
   Mirror<media::TimeUnit> mCurrentPosition;

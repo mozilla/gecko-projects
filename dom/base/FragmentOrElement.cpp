@@ -29,7 +29,7 @@
 #include "mozilla/URLExtraData.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Event.h"
 #include "nsIDocumentInlines.h"
@@ -125,6 +125,7 @@
 #include "mozilla/CORSMode.h"
 
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/SVGUseElement.h"
 
@@ -326,7 +327,7 @@ nsIContent::LookupNamespaceURIInternal(const nsAString& aNamespacePrefix,
     return NS_OK;
   }
 
-  RefPtr<nsIAtom> name;
+  RefPtr<nsAtom> name;
   if (!aNamespacePrefix.IsEmpty()) {
     name = NS_Atomize(aNamespacePrefix);
     NS_ENSURE_TRUE(name, NS_ERROR_OUT_OF_MEMORY);
@@ -344,7 +345,7 @@ nsIContent::LookupNamespaceURIInternal(const nsAString& aNamespacePrefix,
   return NS_ERROR_FAILURE;
 }
 
-nsIAtom*
+nsAtom*
 nsIContent::GetLang() const
 {
   for (const auto* content = this; content; content = content->GetParent()) {
@@ -445,7 +446,7 @@ nsIContent::GetBaseURI(bool aTryUseXHRDocBaseURI) const
 }
 
 nsIURI*
-nsIContent::GetBaseURIWithoutXMLBase() const
+nsIContent::GetBaseURIForStyleAttr() const
 {
   if (IsInAnonymousSubtree() && IsAnonymousContentInSVGUseSubtree()) {
     nsIContent* bindingParent = GetBindingParent();
@@ -460,26 +461,6 @@ nsIContent::GetBaseURIWithoutXMLBase() const
   return OwnerDoc()->GetDocBaseURI();
 }
 
-already_AddRefed<nsIURI>
-nsIContent::GetBaseURIForStyleAttr() const
-{
-  nsIDocument* doc = OwnerDoc();
-  nsIURI* baseWithoutXMLBase = GetBaseURIWithoutXMLBase();
-  nsCOMPtr<nsIURI> base = GetBaseURI();
-  // If eXMLBaseAttribute is not triggered in GetBaseURI() call above,
-  // we don't need to count eXMLBaseAttributeForStyleAttr either.
-  if (doc->HasWarnedAbout(nsIDocument::eXMLBaseAttribute) &&
-      !doc->HasWarnedAbout(nsIDocument::eXMLBaseAttributeForStyleAttr)) {
-    bool isEqual = false;
-    base->Equals(baseWithoutXMLBase, &isEqual);
-    if (!isEqual) {
-      doc->WarnOnceAbout(nsIDocument::eXMLBaseAttributeForStyleAttr);
-    }
-  }
-  return nsLayoutUtils::StyleAttrWithXMLBaseDisabled()
-    ? do_AddRef(baseWithoutXMLBase) : base.forget();
-}
-
 URLExtraData*
 nsIContent::GetURLDataForStyleAttr() const
 {
@@ -491,9 +472,6 @@ nsIContent::GetURLDataForStyleAttr() const
       return data;
     }
   }
-  // We are not going to support xml:base for stylo, but we want to
-  // ensure we unship that support before we enabling stylo.
-  MOZ_ASSERT(nsLayoutUtils::StyleAttrWithXMLBaseDisabled());
   // This also ignores the case that SVG inside XBL binding.
   // But it is probably fine.
   return OwnerDoc()->DefaultStyleAttrURLData();
@@ -516,43 +494,42 @@ NeedsScriptTraverse(nsINode* aNode)
 
 //----------------------------------------------------------------------
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsAttrChildContentList)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsChildContentList)
 
-// If nsAttrChildContentList is changed so that any additional fields are
+// If nsChildContentList is changed so that any additional fields are
 // traversed by the cycle collector, then CAN_SKIP must be updated to
 // check that the additional fields are null.
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsChildContentList)
 
-// nsAttrChildContentList only ever has a single child, its wrapper, so if
+// nsChildContentList only ever has a single child, its wrapper, so if
 // the wrapper is known-live, the list can't be part of a garbage cycle.
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsChildContentList)
   return tmp->HasKnownLiveWrapper();
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_END
 
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(nsChildContentList)
   return tmp->HasKnownLiveWrapperAndDoesNotNeedTracing(tmp);
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_END
 
 // CanSkipThis returns false to avoid problems with incomplete unlinking.
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(nsChildContentList)
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
-NS_INTERFACE_TABLE_HEAD(nsAttrChildContentList)
+NS_INTERFACE_TABLE_HEAD(nsChildContentList)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(nsAttrChildContentList, nsINodeList, nsIDOMNodeList)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAttrChildContentList)
+  NS_INTERFACE_TABLE(nsChildContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsChildContentList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-nsAttrChildContentList::WrapObject(JSContext *cx,
-                                   JS::Handle<JSObject*> aGivenProto)
+nsChildContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
   return NodeListBinding::Wrap(cx, this, aGivenProto);
 }
 
 NS_IMETHODIMP
-nsAttrChildContentList::GetLength(uint32_t* aLength)
+nsChildContentList::GetLength(uint32_t* aLength)
 {
   *aLength = mNode ? mNode->GetChildCount() : 0;
 
@@ -560,7 +537,7 @@ nsAttrChildContentList::GetLength(uint32_t* aLength)
 }
 
 NS_IMETHODIMP
-nsAttrChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
   nsINode* node = Item(aIndex);
   if (!node) {
@@ -573,7 +550,7 @@ nsAttrChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 }
 
 nsIContent*
-nsAttrChildContentList::Item(uint32_t aIndex)
+nsChildContentList::Item(uint32_t aIndex)
 {
   if (mNode) {
     return mNode->GetChildAt(aIndex);
@@ -583,84 +560,13 @@ nsAttrChildContentList::Item(uint32_t aIndex)
 }
 
 int32_t
-nsAttrChildContentList::IndexOf(nsIContent* aContent)
+nsChildContentList::IndexOf(nsIContent* aContent)
 {
   if (mNode) {
     return mNode->IndexOf(aContent);
   }
 
   return -1;
-}
-
-//----------------------------------------------------------------------
-NS_IMETHODIMP
-nsParentNodeChildContentList::GetLength(uint32_t* aLength)
-{
-  if (!mIsCacheValid && !ValidateCache()) {
-    *aLength = 0;
-    return NS_OK;
-  }
-
-  MOZ_ASSERT(mIsCacheValid);
-
-  *aLength = mCachedChildArray.Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsParentNodeChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
-{
-  nsINode* node = Item(aIndex);
-  if (!node) {
-    *aReturn = nullptr;
-    return NS_OK;
-  }
-
-  return CallQueryInterface(node, aReturn);
-}
-
-nsIContent*
-nsParentNodeChildContentList::Item(uint32_t aIndex)
-{
-  if (!mIsCacheValid && !ValidateCache()) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(mIsCacheValid);
-
-  return mCachedChildArray.SafeElementAt(aIndex, nullptr);
-}
-
-int32_t
-nsParentNodeChildContentList::IndexOf(nsIContent* aContent)
-{
-  if (!mIsCacheValid && !ValidateCache()) {
-    return -1;
-  }
-
-  MOZ_ASSERT(mIsCacheValid);
-
-  return mCachedChildArray.IndexOf(aContent);
-}
-
-bool
-nsParentNodeChildContentList::ValidateCache()
-{
-  MOZ_ASSERT(!mIsCacheValid);
-  MOZ_ASSERT(mCachedChildArray.IsEmpty());
-
-  nsINode* parent = GetParentObject();
-  if (!parent) {
-    return false;
-  }
-
-  for (nsIContent* node = parent->GetFirstChild(); node;
-       node = node->GetNextSibling()) {
-    mCachedChildArray.AppendElement(node);
-  }
-  mIsCacheValid = true;
-
-  return true;
 }
 
 //----------------------------------------------------------------------
@@ -793,6 +699,9 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mContainingShadow");
   cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIContent*, mExtendedSlots->mContainingShadow));
 
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mAssignedSlot");
+  cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIContent*, mExtendedSlots->mAssignedSlot.get()));
+
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mXBLBinding");
   cb.NoteNativeChild(mExtendedSlots->mXBLBinding,
                      NS_CYCLE_COLLECTION_PARTICIPANT(nsXBLBinding));
@@ -814,14 +723,6 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb)
       cb.NoteNativeChild(mExtendedSlots->mCustomElementData->mCustomElementDefinition,
         NS_CYCLE_COLLECTION_PARTICIPANT(CustomElementDefinition));
     }
-  }
-
-  for (auto iter = mExtendedSlots->mRegisteredIntersectionObservers.Iter();
-       !iter.Done(); iter.Next()) {
-    DOMIntersectionObserver* observer = iter.Key();
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
-                                       "mExtendedSlots->mRegisteredIntersectionObservers[i]");
-    cb.NoteXPCOMChild(observer);
   }
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mFrameLoaderOrOpener");
@@ -848,6 +749,7 @@ FragmentOrElement::nsDOMSlots::Unlink()
   mExtendedSlots->mLabelsList = nullptr;
   mExtendedSlots->mShadowRoot = nullptr;
   mExtendedSlots->mContainingShadow = nullptr;
+  mExtendedSlots->mAssignedSlot = nullptr;
   MOZ_ASSERT(!(mExtendedSlots->mXBLBinding));
   mExtendedSlots->mXBLInsertionParent = nullptr;
   if (mExtendedSlots->mCustomElementData) {
@@ -856,7 +758,6 @@ FragmentOrElement::nsDOMSlots::Unlink()
     }
     mExtendedSlots->mCustomElementData = nullptr;
   }
-  mExtendedSlots->mRegisteredIntersectionObservers.Clear();
   nsCOMPtr<nsIFrameLoader> frameLoader =
     do_QueryInterface(mExtendedSlots->mFrameLoaderOrOpener);
   if (frameLoader) {
@@ -1131,7 +1032,7 @@ nsIContent::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 }
 
 bool
-nsIContent::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+nsIContent::GetAttr(int32_t aNameSpaceID, nsAtom* aName,
                     nsAString& aResult) const
 {
   if (IsElement()) {
@@ -1142,14 +1043,14 @@ nsIContent::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 bool
-nsIContent::HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const
+nsIContent::HasAttr(int32_t aNameSpaceID, nsAtom* aName) const
 {
   return IsElement() && AsElement()->HasAttr(aNameSpaceID, aName);
 }
 
 bool
 nsIContent::AttrValueIs(int32_t aNameSpaceID,
-                        nsIAtom* aName,
+                        nsAtom* aName,
                         const nsAString& aValue,
                         nsCaseTreatment aCaseSensitive) const
 {
@@ -1159,8 +1060,8 @@ nsIContent::AttrValueIs(int32_t aNameSpaceID,
 
 bool
 nsIContent::AttrValueIs(int32_t aNameSpaceID,
-                        nsIAtom* aName,
-                        nsIAtom* aValue,
+                        nsAtom* aName,
+                        nsAtom* aValue,
                         nsCaseTreatment aCaseSensitive) const
 {
   return IsElement() &&
@@ -1317,6 +1218,20 @@ FragmentOrElement::GetExistingDestInsertionPoints() const
     return &slots->mDestInsertionPoints;
   }
   return nullptr;
+}
+
+HTMLSlotElement*
+FragmentOrElement::GetAssignedSlot() const
+{
+  nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
+  return slots ? slots->mAssignedSlot.get() : nullptr;
+}
+
+void
+FragmentOrElement::SetAssignedSlot(HTMLSlotElement* aSlot)
+{
+  nsExtendedDOMSlots* slots = ExtendedDOMSlots();
+  slots->mAssignedSlot = aSlot;
 }
 
 void
@@ -1563,13 +1478,18 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
   // which is dispatched in UnbindFromTree.
 
   if (tmp->HasProperties()) {
+    if (tmp->IsElement()) {
+      Element* elem = tmp->AsElement();
+      elem->UnlinkIntersectionObservers();
+    }
+
     if (tmp->IsHTMLElement() || tmp->IsSVGElement()) {
-      nsIAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
+      nsAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         tmp->DeleteProperty(*props[i]);
       }
       if (tmp->MayHaveAnimations()) {
-        nsIAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
+        nsAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
         for (uint32_t i = 0; effectProps[i]; ++i) {
           tmp->DeleteProperty(effectProps[i]);
         }
@@ -1617,14 +1537,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
   {
     nsDOMSlots *slots = tmp->GetExistingDOMSlots();
     if (slots) {
-      if (slots->mExtendedSlots && tmp->IsElement()) {
-        Element* elem = tmp->AsElement();
-        for (auto iter = slots->mExtendedSlots->mRegisteredIntersectionObservers.Iter();
-             !iter.Done(); iter.Next()) {
-          DOMIntersectionObserver* observer = iter.Key();
-          observer->UnlinkTarget(*elem);
-        }
-      }
       slots->Unlink();
     }
   }
@@ -1634,7 +1546,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(FragmentOrElement)
 
 void
-FragmentOrElement::MarkUserData(void* aObject, nsIAtom* aKey, void* aChild,
+FragmentOrElement::MarkUserData(void* aObject, nsAtom* aKey, void* aChild,
                                void* aData)
 {
   uint32_t* gen = static_cast<uint32_t*>(aData);
@@ -2089,7 +2001,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
     }
 
     nsAutoString id;
-    nsIAtom* idAtom = tmp->GetID();
+    nsAtom* idAtom = tmp->GetID();
     if (idAtom) {
       id.AppendLiteral(" id='");
       id.Append(nsDependentAtomString(idAtom));
@@ -2138,22 +2050,35 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
 
   // Check that whenever we have effect properties, MayHaveAnimations is set.
 #ifdef DEBUG
-  nsIAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
+  nsAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
   for (uint32_t i = 0; effectProps[i]; ++i) {
     MOZ_ASSERT_IF(tmp->GetProperty(effectProps[i]), tmp->MayHaveAnimations());
   }
 #endif
 
   if (tmp->HasProperties()) {
+    if (tmp->IsElement()) {
+      Element* elem = tmp->AsElement();
+      IntersectionObserverList* observers =
+        static_cast<IntersectionObserverList*>(
+          elem->GetProperty(nsGkAtoms::intersectionobserverlist)
+        );
+      if (observers) {
+        for (auto iter = observers->Iter(); !iter.Done(); iter.Next()) {
+          DOMIntersectionObserver* observer = iter.Key();
+          cb.NoteXPCOMChild(observer);
+        }
+      }
+    }
     if (tmp->IsHTMLElement() || tmp->IsSVGElement()) {
-      nsIAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
+      nsAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         nsISupports* property =
           static_cast<nsISupports*>(tmp->GetProperty(*props[i]));
         cb.NoteXPCOMChild(property);
       }
       if (tmp->MayHaveAnimations()) {
-        nsIAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
+        nsAtom** effectProps = EffectSet::GetEffectSetPropertyAtoms();
         for (uint32_t i = 0; effectProps[i]; ++i) {
           EffectSet* effectSet =
             static_cast<EffectSet*>(tmp->GetProperty(effectProps[i]));
@@ -2328,9 +2253,9 @@ FragmentOrElement::IndexOf(const nsINode* aPossibleChild) const
 }
 
 static inline bool
-IsVoidTag(nsIAtom* aTag)
+IsVoidTag(nsAtom* aTag)
 {
-  static const nsIAtom* voidElements[] = {
+  static const nsAtom* voidElements[] = {
     nsGkAtoms::area, nsGkAtoms::base, nsGkAtoms::basefont,
     nsGkAtoms::bgsound, nsGkAtoms::br, nsGkAtoms::col,
     nsGkAtoms::embed, nsGkAtoms::frame,
@@ -2340,7 +2265,7 @@ IsVoidTag(nsIAtom* aTag)
     nsGkAtoms::wbr
   };
 
-  static mozilla::BloomFilter<12, nsIAtom> sFilter;
+  static mozilla::BloomFilter<12, nsAtom> sFilter;
   static bool sInitialized = false;
   if (!sInitialized) {
     sInitialized = true;
@@ -2361,7 +2286,7 @@ IsVoidTag(nsIAtom* aTag)
 
 /* static */
 bool
-FragmentOrElement::IsHTMLVoid(nsIAtom* aLocalName)
+FragmentOrElement::IsHTMLVoid(nsAtom* aLocalName)
 {
   return aLocalName && IsVoidTag(aLocalName);
 }
@@ -2500,7 +2425,7 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
 
   nsAutoScriptLoaderDisabler sld(doc);
 
-  nsIAtom* contextLocalName = NodeInfo()->NameAtom();
+  nsAtom* contextLocalName = NodeInfo()->NameAtom();
   int32_t contextNameSpaceID = GetNameSpaceID();
 
   ShadowRoot* shadowRoot = ShadowRoot::FromNode(this);

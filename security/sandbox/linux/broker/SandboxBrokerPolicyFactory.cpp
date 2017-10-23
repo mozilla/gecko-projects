@@ -8,9 +8,12 @@
 #include "SandboxInfo.h"
 #include "SandboxLogging.h"
 
+#include "mozilla/Array.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SandboxSettings.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsPrintfCString.h"
 #include "nsString.h"
@@ -19,6 +22,10 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "SpecialSystemDirectory.h"
+#include "nsReadableUtils.h"
+#include "nsIFileStreams.h"
+#include "nsILineInputStream.h"
+#include "nsNetCID.h"
 
 #ifdef ANDROID
 #include "cutils/properties.h"
@@ -26,6 +33,14 @@
 
 #ifdef MOZ_WIDGET_GTK
 #include <glib.h>
+#endif
+
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <sys/types.h>
+#ifndef ANDROID
+#include <glob.h>
 #endif
 
 namespace mozilla {
@@ -38,6 +53,129 @@ static const int rdwr = rdonly | wronly;
 static const int rdwrcr = rdwr | SandboxBroker::MAY_CREATE;
 }
 #endif
+
+static void
+AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy)
+{
+  // Bug 1384178: Mesa driver loader
+  aPolicy->AddPrefix(rdonly, "/sys/dev/char/226:");
+
+  // Bug 1401666: Mesa driver loader part 2: Mesa <= 12 using libudev
+  if (auto dir = opendir("/dev/dri")) {
+    while (auto entry = readdir(dir)) {
+      if (entry->d_name[0] != '.') {
+        nsPrintfCString devPath("/dev/dri/%s", entry->d_name);
+        struct stat sb;
+        if (stat(devPath.get(), &sb) == 0 && S_ISCHR(sb.st_mode)) {
+          // For both the DRI node and its parent (the physical
+          // device), allow reading the "uevent" file.
+          static const Array<const char*, 2> kSuffixes = { "", "/device" };
+          for (const auto suffix : kSuffixes) {
+            nsPrintfCString sysPath("/sys/dev/char/%u:%u%s",
+                                    major(sb.st_rdev),
+                                    minor(sb.st_rdev),
+                                    suffix);
+            // libudev will expand the symlink but not do full
+            // canonicalization, so it will leave in ".." path
+            // components that will be realpath()ed in the
+            // broker.  To match this, allow the canonical paths.
+            UniqueFreePtr<char[]> realSysPath(realpath(sysPath.get(), nullptr));
+            if (realSysPath) {
+              nsPrintfCString ueventPath("%s/uevent", realSysPath.get());
+              aPolicy->AddPath(rdonly, ueventPath.get());
+            }
+          }
+        }
+      }
+    }
+    closedir(dir);
+  }
+}
+
+static void
+AddPathsFromFile(SandboxBroker::Policy* aPolicy, nsACString& aPath)
+{
+  nsresult rv;
+  nsCOMPtr<nsIFile> ldconfig(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  rv = ldconfig->InitWithNativePath(aPath);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  nsCOMPtr<nsIFileInputStream> fileStream(
+    do_CreateInstance(NS_LOCALFILEINPUTSTREAM_CONTRACTID, &rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  rv = fileStream->Init(ldconfig, -1, -1, 0);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  nsCOMPtr<nsILineInputStream> lineStream(do_QueryInterface(fileStream, &rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  nsAutoCString line;
+  bool more = true;
+  do {
+    rv = lineStream->ReadLine(line, &more);
+    // Cut off any comments at the end of the line, also catches lines
+    // that are entirely a comment
+    int32_t hash = line.FindChar('#');
+    if (hash >= 0) {
+      line = Substring(line, 0, hash);
+    }
+    // Simplify our following parsing by trimming whitespace
+    line.CompressWhitespace(true, true);
+    if (line.IsEmpty()) {
+      // Skip comment lines
+      continue;
+    }
+    // Check for any included files and recursively process
+    nsACString::const_iterator start, end, token_end;
+
+    line.BeginReading(start);
+    line.EndReading(end);
+    token_end = end;
+
+    if (FindInReadable(NS_LITERAL_CSTRING("include "), start, token_end)) {
+      nsAutoCString includes(Substring(token_end, end));
+      for (const nsACString& includeGlob : includes.Split(' ')) {
+        glob_t globbuf;
+        if (!glob(PromiseFlatCString(includeGlob).get(), GLOB_NOSORT, nullptr, &globbuf)) {
+          for (size_t fileIdx = 0; fileIdx < globbuf.gl_pathc; fileIdx++) {
+            nsAutoCString filePath(globbuf.gl_pathv[fileIdx]);
+            AddPathsFromFile(aPolicy, filePath);
+          }
+          globfree(&globbuf);
+        }
+      }
+    }
+    // Skip anything left over that isn't an absolute path
+    if (line.First() != '/') {
+      continue;
+    }
+    // Cut off anything behind an = sign, used by dirname=TYPE directives
+    int32_t equals = line.FindChar('=');
+    if (equals >= 0) {
+      line = Substring(line, 0, equals);
+    }
+    char* resolvedPath = realpath(line.get(), nullptr);
+    if (resolvedPath) {
+      aPolicy->AddDir(rdonly, resolvedPath);
+      free(resolvedPath);
+    }
+  } while (more);
+}
+
+static void
+AddLdconfigPaths(SandboxBroker::Policy* aPolicy)
+{
+  nsAutoCString ldconfigPath(NS_LITERAL_CSTRING("/etc/ld.so.conf"));
+  AddPathsFromFile(aPolicy, ldconfigPath);
+}
 
 SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
 {
@@ -120,8 +258,8 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   policy->AddDir(rdonly, "/run/host/fonts");
   policy->AddDir(rdonly, "/run/host/user-fonts");
 
-  // Bug 1384178: Mesa driver loader
-  policy->AddPrefix(rdonly, "/sys/dev/char/226:");
+  AddMesaSysfsPaths(policy);
+  AddLdconfigPaths(policy);
 
   // Bug 1385715: NVIDIA PRIME support
   policy->AddPath(rdonly, "/proc/modules");
@@ -216,13 +354,25 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   // Firefox binary dir.
   // Note that unlike the previous cases, we use NS_GetSpecialDirectory
   // instead of GetSpecialSystemDirectory. The former requires a working XPCOM
-  // system, which may not be the case for some tests. For quering for the
+  // system, which may not be the case for some tests. For querying for the
   // location of XPCOM things, we can use it anyway.
   nsCOMPtr<nsIFile> ffDir;
   rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(ffDir));
   if (NS_SUCCEEDED(rv)) {
     nsAutoCString tmpPath;
     rv = ffDir->GetNativePath(tmpPath);
+    if (NS_SUCCEEDED(rv)) {
+      policy->AddDir(rdonly, tmpPath.get());
+    }
+  }
+
+  // ~/.mozilla/systemextensionsdev (bug 1393805)
+  nsCOMPtr<nsIFile> sysExtDevDir;
+  rv = NS_GetSpecialDirectory(XRE_USER_SYS_EXTENSION_DEV_DIR,
+                              getter_AddRefs(sysExtDevDir));
+  if (NS_SUCCEEDED(rv)) {
+    nsAutoCString tmpPath;
+    rv = sysExtDevDir->GetNativePath(tmpPath);
     if (NS_SUCCEEDED(rv)) {
       policy->AddDir(rdonly, tmpPath.get());
     }

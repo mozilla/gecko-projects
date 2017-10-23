@@ -36,7 +36,7 @@ impl Storage {
     }
 
     pub fn new(global: &Window, storage_type: StorageType) -> DomRoot<Storage> {
-        reflect_dom_object(box Storage::new_inherited(storage_type), global, StorageBinding::Wrap)
+        reflect_dom_object(Box::new(Storage::new_inherited(storage_type)), global, StorageBinding::Wrap)
     }
 
     fn get_url(&self) -> ServoUrl {
@@ -147,7 +147,7 @@ impl StorageMethods for Storage {
 
 
 impl Storage {
-    /// https://html.spec.whatwg.org/multipage/#send-a-storage-notification
+    /// <https://html.spec.whatwg.org/multipage/#send-a-storage-notification>
     fn broadcast_change_notification(&self, key: Option<String>, old_value: Option<String>,
                                      new_value: Option<String>) {
         let storage = self.storage_type;
@@ -156,7 +156,7 @@ impl Storage {
         self.global().script_to_constellation_chan().send(msg).unwrap();
     }
 
-    /// https://html.spec.whatwg.org/multipage/#send-a-storage-notification
+    /// <https://html.spec.whatwg.org/multipage/#send-a-storage-notification>
     pub fn queue_storage_event(
         &self,
         url: ServoUrl,

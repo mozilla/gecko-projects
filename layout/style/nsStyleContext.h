@@ -16,7 +16,7 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsStyleSet.h"
 
-class nsIAtom;
+class nsAtom;
 class nsPresContext;
 
 namespace mozilla {
@@ -79,7 +79,7 @@ public:
 
   inline nsPresContext* PresContext() const;
 
-  nsIAtom* GetPseudo() const { return mPseudoTag; }
+  nsAtom* GetPseudo() const { return mPseudoTag; }
   mozilla::CSSPseudoElementType GetPseudoType() const {
     return static_cast<mozilla::CSSPseudoElementType>(
              mBits >> NS_STYLE_CONTEXT_TYPE_SHIFT);
@@ -241,14 +241,6 @@ public:
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
 
-  // Value that can be passed as CalcStyleDifference's aRelevantStructs
-  // argument to indicate that all structs that are currently resolved on the
-  // old style context should be compared.  This is only relevant for
-  // ServoStyleContexts.
-  enum { kAllResolvedStructs = 0xffffffff };
-  static_assert(kAllResolvedStructs != NS_STYLE_INHERIT_MASK,
-                "uint32_t not big enough for special kAllResolvedStructs value");
-
   /**
    * Compute the style changes needed during restyling when this style
    * context is being replaced by aNewContext.  (This is nonsymmetric since
@@ -263,17 +255,14 @@ public:
    * aEqualStructs must not be null.  Into it will be stored a bitfield
    * representing which structs were compared to be non-equal.
    *
-   * aRelevantStructs must be kAllResolvedStructs for GeckoStyleContexts.
-   * For ServoStyleContexts, it controls which structs will be compared.
-   * This is needed because in some cases, we can't rely on mBits in the
-   * old style context to accurately reflect which are the relevant
-   * structs to be compared.
+   * aIgnoreVariables indicates whether to skip comparing the Variables
+   * struct.  This must only be true for Servo style contexts.  When
+   * true, the Variables bit in aEqualStructs will be set.
    */
   nsChangeHint CalcStyleDifference(nsStyleContext* aNewContext,
                                    uint32_t* aEqualStructs,
                                    uint32_t* aSamePointerStructs,
-                                   uint32_t aRelevantStructs =
-                                     kAllResolvedStructs);
+				   bool aIgnoreVariables = false);
 
 public:
   /**
@@ -313,7 +302,7 @@ protected:
   ~nsStyleContext() {}
 
   // Delegated Helper constructor.
-  nsStyleContext(nsIAtom* aPseudoTag,
+  nsStyleContext(nsAtom* aPseudoTag,
                  mozilla::CSSPseudoElementType aPseudoType);
 
   // Helper functions for GetStyle* and PeekStyle*
@@ -330,7 +319,7 @@ protected:
 
   // If this style context is for a pseudo-element or anonymous box,
   // the relevant atom.
-  RefPtr<nsIAtom> mPseudoTag;
+  RefPtr<nsAtom> mPseudoTag;
 
   // mBits stores a number of things:
   //  - It records (using the style struct bits) which structs are
@@ -354,7 +343,7 @@ protected:
 
 already_AddRefed<mozilla::GeckoStyleContext>
 NS_NewStyleContext(mozilla::GeckoStyleContext* aParentContext,
-                   nsIAtom* aPseudoTag,
+                   nsAtom* aPseudoTag,
                    mozilla::CSSPseudoElementType aPseudoType,
                    nsRuleNode* aRuleNode,
                    bool aSkipParentDisplayBasedStyleFixup);

@@ -89,6 +89,7 @@ load 786108-1.html
 load 786108-2.html
 load 788836.html
 load 806310-1.html
+load 809762.html
 load 812824.html
 load 822766-1.html
 load 822842.html
@@ -110,7 +111,7 @@ load 945048-1.html
 load 972199-1.html
 load 989965-1.html
 load 992333-1.html
-pref(dom.webcomponents.enabled,true) load 1017798-1.html # bug 1323689
+pref(dom.webcomponents.enabled,true) load 1017798-1.html # bug 1409086
 load 1028514-1.html
 load 1066089-1.html
 load 1074651-1.html
@@ -166,7 +167,9 @@ load 1331272.html
 HTTP load 1333001-1.html
 pref(dom.animations-api.core.enabled,true) load 1340344.html
 load 1342316-1.html
+load 1344210.html
 load 1356601-1.html
+load 1364139-1.html
 load 1370793-1.xhtml
 skip-if(Android) load 1371450-1.html
 load 1374175-1.html
@@ -229,6 +232,7 @@ load 1401256.html
 load 1401692.html
 load 1401706.html
 load 1401801.html
+load 1401825.html
 load 1402218-1.html
 load 1402366.html
 load 1402419.html
@@ -241,3 +245,13 @@ load 1403615.html
 load 1403712.html
 load 1404180-1.html
 load 1404316.html
+load 1406222-1.html
+load 1406222-2.html
+load 1404324-1.html
+load 1404324-2.html
+load 1404324-3.html
+load 1404057.html
+load 1409502.html
+load 1409931.html
+load 1410226-1.html
+load 1410226-2.html

@@ -14,7 +14,7 @@ use webvr_traits::WebVRDisplayCapabilities;
 #[dom_struct]
 pub struct VRDisplayCapabilities {
     reflector_: Reflector,
-    #[ignore_heap_size_of = "Defined in rust-webvr"]
+    #[ignore_malloc_size_of = "Defined in rust-webvr"]
     capabilities: DomRefCell<WebVRDisplayCapabilities>
 }
 
@@ -29,7 +29,7 @@ impl VRDisplayCapabilities {
     }
 
     pub fn new(capabilities: WebVRDisplayCapabilities, global: &GlobalScope) -> DomRoot<VRDisplayCapabilities> {
-        reflect_dom_object(box VRDisplayCapabilities::new_inherited(capabilities),
+        reflect_dom_object(Box::new(VRDisplayCapabilities::new_inherited(capabilities)),
                            global,
                            VRDisplayCapabilitiesBinding::Wrap)
     }

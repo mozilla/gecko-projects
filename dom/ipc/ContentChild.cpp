@@ -587,13 +587,6 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
 
-#ifdef NS_PRINTING
-  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
-  // PrintingParent, is always available for printing initiated from the parent.
-  // Create nsPrintingProxy instance later than the SystemGroup initialization.
-  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
-#endif
-
   return IPC_OK();
 }
 
@@ -680,6 +673,12 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
   mID = aChildID;
   mIsForBrowser = aIsForBrowser;
+
+#ifdef NS_PRINTING
+  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
+  // PrintingParent, is always available for printing initiated from the parent.
+  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
+#endif
 
   SetProcessName(NS_LITERAL_STRING("Web Content"));
 
@@ -2951,14 +2950,13 @@ ContentChild::StartForceKillTimer()
 
   int32_t timeoutSecs = Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
   if (timeoutSecs > 0) {
-    mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
+    NS_NewTimerWithFuncCallback(getter_AddRefs(mForceKillTimer),
+                                ContentChild::ForceKillTimerCallback,
+                                this,
+                                timeoutSecs * 1000,
+                                nsITimer::TYPE_ONE_SHOT,
+                                "dom::ContentChild::StartForceKillTimer");
     MOZ_ASSERT(mForceKillTimer);
-    mForceKillTimer->InitWithNamedFuncCallback(
-      ContentChild::ForceKillTimerCallback,
-      this,
-      timeoutSecs * 1000,
-      nsITimer::TYPE_ONE_SHOT,
-      "dom::ContentChild::StartForceKillTimer");
   }
 }
 
@@ -3036,11 +3034,16 @@ ContentChild::RecvShutdown()
 
 #if defined(MOZ_CRASHREPORTER)
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
-                                     NS_LITERAL_CSTRING("SendFinishShutdown"));
-#endif
+                                     NS_LITERAL_CSTRING("SendFinishShutdown (sending)"));
+  bool sent = SendFinishShutdown();
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
+                                     sent ? NS_LITERAL_CSTRING("SendFinishShutdown (sent)")
+                                          : NS_LITERAL_CSTRING("SendFinishShutdown (failed)"));
+#else
   // Ignore errors here. If this fails, the parent will kill us after a
   // timeout.
   Unused << SendFinishShutdown();
+#endif
   return IPC_OK();
 }
 
@@ -3062,9 +3065,11 @@ ContentChild::RecvUpdateWindow(const uintptr_t& aChildId)
   mozilla::plugins::PluginInstanceParent* parentInstance =
   mozilla::plugins::PluginInstanceParent::LookupPluginInstanceByID(aChildId);
   if (parentInstance) {
-  // sync! update call to the plugin instance that forces the
-  // plugin to paint its child window.
-  parentInstance->CallUpdateWindow();
+    // sync! update call to the plugin instance that forces the
+    // plugin to paint its child window.
+    if(!parentInstance->CallUpdateWindow()) {
+      return IPC_FAIL_NO_REASON(this);
+    }
   }
   return IPC_OK();
 #else

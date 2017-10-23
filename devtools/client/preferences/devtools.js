@@ -59,17 +59,7 @@ pref("devtools.inspector.showAllAnonymousContent", false);
 // Enable the new color widget
 pref("devtools.inspector.colorWidget.enabled", false);
 // Enable the CSS shapes highlighter
-pref("devtools.inspector.shapesHighlighter.enabled", false);
-
-// Enable the Font Inspector
-pref("devtools.fontinspector.enabled", true);
-
-// Counter to promote the inspector layout view.
-// @remove after release 56 (See Bug 1355747)
-pref("devtools.promote.layoutview", 1);
-// Whether or not to show the promote bar in the layout view
-// @remove after release 56 (See Bug 1355747)
-pref("devtools.promote.layoutview.showPromoteBar", true);
+pref("devtools.inspector.shapesHighlighter.enabled", true);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);

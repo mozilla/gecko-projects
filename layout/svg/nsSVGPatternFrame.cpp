@@ -48,7 +48,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGPatternFrame)
 
 nsresult
 nsSVGPatternFrame::AttributeChanged(int32_t         aNameSpaceID,
-                                    nsIAtom*        aAttribute,
+                                    nsAtom*        aAttribute,
                                     int32_t         aModType)
 {
   if (aNameSpaceID == kNameSpaceID_None &&
@@ -660,7 +660,7 @@ nsSVGPatternFrame::ConstructCTM(const nsSVGViewBox& aViewBox,
                                 const Matrix &callerCTM,
                                 nsIFrame *aTarget)
 {
-  SVGSVGElement *ctx = nullptr;
+  SVGViewportElement *ctx = nullptr;
   nsIContent* targetContent = aTarget->GetContent();
   gfxFloat scaleX, scaleY;
 

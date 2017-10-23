@@ -310,7 +310,9 @@ pref("browser.urlbar.maxRichResults", 10);
 pref("browser.urlbar.delay", 50);
 
 // The maximum number of historical search results to show.
-pref("browser.urlbar.maxHistoricalSearchSuggestions", 1);
+pref("browser.urlbar.maxHistoricalSearchSuggestions", 0);
+// The awesomebar result composition.
+pref("browser.urlbar.matchBuckets", "suggestion:4,general:5");
 
 // The default behavior for the urlbar can be configured to use any combination
 // of the match filters with each additional filter adding more results (union).
@@ -318,10 +320,9 @@ pref("browser.urlbar.suggest.history",              true);
 pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
 pref("browser.urlbar.suggest.searches",             true);
+
+// Whether the user made a choice in the old search suggestions opt-in bar.
 pref("browser.urlbar.userMadeSearchSuggestionsChoice", false);
-// The suggestion opt-in notification will be shown on 4 different days.
-pref("browser.urlbar.daysBeforeHidingSuggestionsPrompt", 4);
-pref("browser.urlbar.lastSuggestionsPromptDate", 20160601);
 // The suggestion opt-out hint will be hidden after being shown 4 times.
 pref("browser.urlbar.timesBeforeHidingSuggestionsHint", 4);
 
@@ -421,6 +422,13 @@ pref("browser.sessionhistory.max_entries", 50);
 // Built-in default permissions.
 pref("permissions.manager.defaultsUrl", "resource://app/defaults/permissions");
 
+// Set default fallback values for site permissions we want
+// the user to be able to globally change.
+pref("permissions.default.camera", 0);
+pref("permissions.default.microphone", 0);
+pref("permissions.default.geo", 0);
+pref("permissions.default.desktop-notification", 0);
+
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
 pref("browser.link.open_newwindow", 3);
@@ -459,6 +467,7 @@ pref("browser.tabs.loadDivertedInBackground", false);
 pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.loadBookmarksInTabs", false);
 pref("browser.tabs.tabClipWidth", 140);
+pref("browser.tabs.tabMinWidth", 76);
 #ifdef UNIX_BUT_NOT_MAC
 pref("browser.tabs.drawInTitlebar", false);
 #else
@@ -486,9 +495,6 @@ pref("browser.tabs.selectOwnerOnClose", true);
 pref("browser.tabs.showAudioPlayingIcon", true);
 // This should match Chromium's audio indicator delay.
 pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
-
-// The minimum tab width in pixels
-pref("browser.tabs.tabMinWidth", 50);
 
 pref("browser.ctrlTab.previews", false);
 
@@ -614,25 +620,32 @@ pref("browser.snapshots.limit", 0);
 // 1: Scrolling contents
 // 2: Go back or go forward, in your history
 // 3: Zoom in or out.
+// 4: Treat vertical wheel as horizontal scroll
 #ifdef XP_MACOSX
-// On OS X, if the wheel has one axis only, shift+wheel comes through as a
+// On macOS, if the wheel has one axis only, shift+wheel comes through as a
 // horizontal scroll event. Thus, we can't assign anything other than normal
 // scrolling to shift+wheel.
-pref("mousewheel.with_alt.action", 2);
 pref("mousewheel.with_shift.action", 1);
+pref("mousewheel.with_alt.action", 2);
 // On MacOS X, control+wheel is typically handled by system and we don't
 // receive the event.  So, command key which is the main modifier key for
 // acceleration is the best modifier for zoom-in/out.  However, we should keep
 // the control key setting for backward compatibility.
 pref("mousewheel.with_meta.action", 3); // command key on Mac
-// Disable control-/meta-modified horizontal mousewheel events, since
-// those are used on Mac as part of modified swipe gestures (e.g.
-// Left swipe+Cmd = go back in a new tab).
+// Disable control-/meta-modified horizontal wheel events, since those are
+// used on Mac as part of modified swipe gestures (e.g. Left swipe+Cmd is
+// "go back" in a new tab).
 pref("mousewheel.with_control.action.override_x", 0);
 pref("mousewheel.with_meta.action.override_x", 0);
 #else
-pref("mousewheel.with_alt.action", 1);
-pref("mousewheel.with_shift.action", 2);
+// On the other platforms (non-macOS), user may use legacy mouse which supports
+// only vertical wheel but want to scroll horizontally.  For such users, we
+// should provide horizontal scroll with shift+wheel (same as Chrome).
+// However, shift+wheel was used for navigating history.  For users who want
+// to keep using this feature, let's enable it with alt+wheel.  This is better
+// for consistency with macOS users.
+pref("mousewheel.with_shift.action", 4);
+pref("mousewheel.with_alt.action", 2);
 pref("mousewheel.with_meta.action", 1); // win key on Win, Super/Hyper on Linux
 #endif
 pref("mousewheel.with_control.action",3);
@@ -893,6 +906,8 @@ pref("browser.sessionstore.debug.no_auto_updates", false);
 pref("browser.sessionstore.cleanup.forget_closed_after", 1209600000);
 // Maximum number of bytes of DOMSessionStorage data we collect per origin.
 pref("browser.sessionstore.dom_storage_limit", 2048);
+// Amount of failed SessionFile writes until we restart the worker.
+pref("browser.sessionstore.max_write_failures", 5);
 
 // allow META refresh by default
 pref("accessibility.blockautorefresh", false);
@@ -1273,6 +1288,9 @@ pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/
 pref("browser.newtabpage.activity-stream.enabled", true);
 pref("browser.newtabpage.activity-stream.prerender", true);
 pref("browser.newtabpage.activity-stream.aboutHome.enabled", true);
+#ifndef RELEASE_OR_BETA
+pref("browser.newtabpage.activity-stream.debug", false);
+#endif
 
 pref("browser.library.activity-stream.enabled", true);
 
@@ -1541,16 +1559,8 @@ pref("privacy.userContext.longPressBehavior", 0);
 pref("privacy.userContext.extension", "");
 
 // Start the browser in e10s mode
-pref("browser.tabs.remote.autostart", false);
+pref("browser.tabs.remote.autostart", true);
 pref("browser.tabs.remote.desktopbehavior", true);
-
-#if !defined(RELEASE_OR_BETA) || defined(MOZ_DEV_EDITION)
-// At the moment, autostart.2 is used, while autostart.1 is unused.
-// We leave it here set to false to reset users' defaults and allow
-// us to change everybody to true in the future, when desired.
-pref("browser.tabs.remote.autostart.1", false);
-pref("browser.tabs.remote.autostart.2", true);
-#endif
 
 // For speculatively warming up tabs to improve perceived
 // performance while using the async tab switcher.
@@ -1576,12 +1586,6 @@ pref("extensions.allow-non-mpc-extensions", false);
 #endif
 
 pref("extensions.legacy.enabled", false);
-
-// Enable blocking of e10s and e10s-multi for add-on users on beta/release.
-#if defined(RELEASE_OR_BETA) && !defined(MOZ_DEV_EDITION)
-pref("extensions.e10sBlocksEnabling", true);
-pref("extensions.e10sMultiBlocksEnabling", true);
-#endif
 
 // How often to check for CPOW timeouts. CPOWs are only timed out by
 // the hang monitor.

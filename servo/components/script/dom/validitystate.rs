@@ -11,7 +11,7 @@ use dom::window::Window;
 use dom_struct::dom_struct;
 
 // https://html.spec.whatwg.org/multipage/#validity-states
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 #[allow(dead_code)]
 pub enum ValidityStatus {
     ValueMissing,
@@ -61,7 +61,7 @@ impl ValidityState {
     }
 
     pub fn new(window: &Window, element: &Element) -> DomRoot<ValidityState> {
-        reflect_dom_object(box ValidityState::new_inherited(element),
+        reflect_dom_object(Box::new(ValidityState::new_inherited(element)),
                            window,
                            ValidityStateBinding::Wrap)
     }

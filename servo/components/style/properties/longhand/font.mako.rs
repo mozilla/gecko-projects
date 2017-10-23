@@ -91,25 +91,22 @@ macro_rules! impl_gecko_keyword_conversions {
         use Atom;
         pub use self::FontFamily as SingleComputedValue;
 
-        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+        #[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
         pub enum FontFamily {
             FamilyName(FamilyName),
             Generic(Atom),
         }
 
-        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+        #[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
         pub struct FamilyName {
             pub name: Atom,
             pub syntax: FamilyNameSyntax,
         }
 
-        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+        #[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
         pub enum FamilyNameSyntax {
             /// The family name was specified in a quoted form, e.g. "Font Name"
             /// or 'Font Name'.
@@ -334,7 +331,7 @@ macro_rules! impl_gecko_keyword_conversions {
         }
 
         #[cfg(feature = "servo")]
-        #[derive(Clone, Debug, Eq, Hash, HeapSizeOf, PartialEq)]
+        #[derive(Clone, Debug, Eq, Hash, MallocSizeOf, PartialEq)]
         pub struct FontFamilyList(Vec<FontFamily>);
 
         #[cfg(feature = "gecko")]
@@ -460,7 +457,7 @@ macro_rules! impl_gecko_keyword_conversions {
         }
 
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
         pub struct T(pub FontFamilyList);
 
         #[cfg(feature = "gecko")]
@@ -587,7 +584,7 @@ macro_rules! impl_gecko_keyword_conversions {
         fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
             match FontFamily::parse(input) {
                 Ok(FontFamily::FamilyName(name)) => Ok(name),
-                Ok(FontFamily::Generic(_)) => Err(StyleParseError::UnspecifiedError.into()),
+                Ok(FontFamily::Generic(_)) => Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError)),
                 Err(e) => Err(e)
             }
         }
@@ -625,9 +622,7 @@ ${helpers.single_keyword_system("font-variant-caps",
     use properties::longhands::system_font::SystemFont;
 
 
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
+    #[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Normal,
         Bold,
@@ -679,9 +674,9 @@ ${helpers.single_keyword_system("font-variant-caps",
         ///
         /// However, system fonts may provide other values. Pango
         /// may provide 350, 380, and 1000 (on top of the existing values), for example.
-        #[derive(Clone, ComputeSquaredDistance, Copy, Debug, Eq, Hash, PartialEq, ToCss)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+        #[derive(Clone, ComputeSquaredDistance, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq,
+                 ToCss)]
+        #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
         pub struct T(pub u16);
 
         impl T {
@@ -744,7 +739,7 @@ ${helpers.single_keyword_system("font-variant-caps",
         fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>)
             -> Result<Self, ParseError<'i>> {
                 Self::from_int(input.expect_integer()?)
-                    .map_err(|_| StyleParseError::UnspecifiedError.into())
+                    .map_err(|_| input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
             }
     }
 
@@ -837,7 +832,7 @@ ${helpers.single_keyword_system("font-variant-caps",
             return Ok(SpecifiedValue::Keyword(kw.into()))
         }
 
-        try_match_ident_ignore_ascii_case! { input.expect_ident()?,
+        try_match_ident_ignore_ascii_case! { input,
             "smaller" => Ok(SpecifiedValue::Smaller),
             "larger" => Ok(SpecifiedValue::Larger),
         }
@@ -927,9 +922,7 @@ ${helpers.single_keyword_system("font-variant-caps",
     use properties::longhands::system_font::SystemFont;
 
 
-    #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         None,
         Number(specified::Number),
@@ -976,9 +969,8 @@ ${helpers.single_keyword_system("font-variant-caps",
         use values::CSSFloat;
         use values::animated::{ToAnimatedValue, ToAnimatedZero};
 
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, PartialEq, ToCss)]
+        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf, PartialEq,
+                 ToCss)]
         pub enum T {
             #[animation(error)]
             None,
@@ -1051,9 +1043,7 @@ ${helpers.single_keyword_system("font-variant-caps",
         pub use super::SpecifiedValue as T;
     }
 
-    #[derive(Clone, Debug, PartialEq, ToComputedValue)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
     pub struct SpecifiedValue {
         pub weight: bool,
         pub style: bool,
@@ -1082,7 +1072,7 @@ ${helpers.single_keyword_system("font-variant-caps",
                          -> Result<SpecifiedValue, ParseError<'i>> {
         let mut result = SpecifiedValue { weight: false, style: false };
         // FIXME: remove clone() when lifetimes are non-lexical
-        try_match_ident_ignore_ascii_case! { input.expect_ident()?.clone(),
+        try_match_ident_ignore_ascii_case! { input,
             "none" => Ok(result),
             "weight" => {
                 result.weight = true;
@@ -1159,9 +1149,7 @@ ${helpers.single_keyword_system("font-kerning",
     use values::CustomIdent;
 
 
-    #[derive(Clone, Debug, PartialEq)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
     pub enum VariantAlternates {
         Stylistic(CustomIdent),
         Styleset(Box<[CustomIdent]>),
@@ -1172,14 +1160,10 @@ ${helpers.single_keyword_system("font-kerning",
         HistoricalForms,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
     pub struct VariantAlternatesList(pub Box<[VariantAlternates]>);
 
-    #[derive(Clone, Debug, PartialEq, ToCss)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Value(VariantAlternatesList),
         System(SystemFont)
@@ -1268,7 +1252,7 @@ ${helpers.single_keyword_system("font-kerning",
     }
 
     bitflags! {
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
         pub flags ParsingFlags: u8 {
             const NORMAL = 0,
             const HISTORICAL_FORMS = 0x01,
@@ -1298,9 +1282,9 @@ ${helpers.single_keyword_system("font-kerning",
 
         let mut parsed_alternates = ParsingFlags::empty();
         macro_rules! check_if_parsed(
-            ($flag:ident) => (
+            ($input:expr, $flag:ident) => (
                 if parsed_alternates.contains($flag) {
-                    return Err(StyleParseError::UnspecifiedError.into())
+                    return Err($input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
                 }
                 parsed_alternates |= $flag;
             )
@@ -1310,11 +1294,11 @@ ${helpers.single_keyword_system("font-kerning",
             match input.next()?.clone() {
                 Token::Ident(ref ident) => {
                     if *ident == "historical-forms" {
-                        check_if_parsed!(HISTORICAL_FORMS);
+                        check_if_parsed!(input, HISTORICAL_FORMS);
                         alternates.push(VariantAlternates::HistoricalForms);
                         Ok(())
                     } else {
-                        return Err(StyleParseError::UnspecifiedError.into());
+                        return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
                     }
                 },
                 Token::Function(ref name) => {
@@ -1322,31 +1306,34 @@ ${helpers.single_keyword_system("font-kerning",
                         match_ignore_ascii_case! { &name,
                             % for value in "swash stylistic ornaments annotation".split():
                             "${value}" => {
-                                check_if_parsed!(${value.upper()});
-                                let ident = CustomIdent::from_ident(i.expect_ident()?, &[])?;
+                                check_if_parsed!(i, ${value.upper()});
+                                let location = i.current_source_location();
+                                let ident = CustomIdent::from_ident(location, i.expect_ident()?, &[])?;
                                 alternates.push(VariantAlternates::${to_camel_case(value)}(ident));
                                 Ok(())
                             },
                             % endfor
                             % for value in "styleset character-variant".split():
                             "${value}" => {
-                                check_if_parsed!(${to_rust_ident(value).upper()});
-                                let idents = i.parse_comma_separated(|i|
-                                    CustomIdent::from_ident(i.expect_ident()?, &[]))?;
+                                check_if_parsed!(i, ${to_rust_ident(value).upper()});
+                                let idents = i.parse_comma_separated(|i| {
+                                    let location = i.current_source_location();
+                                    CustomIdent::from_ident(location, i.expect_ident()?, &[])
+                                })?;
                                 alternates.push(VariantAlternates::${to_camel_case(value)}(idents.into_boxed_slice()));
                                 Ok(())
                             },
                             % endfor
-                            _ => return Err(StyleParseError::UnspecifiedError.into()),
+                            _ => return Err(i.new_custom_error(StyleParseErrorKind::UnspecifiedError)),
                         }
                     })
                 },
-                _ => Err(StyleParseError::UnspecifiedError.into()),
+                _ => Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError)),
             }
         }) { }
 
         if parsed_alternates.is_empty() {
-            return Err(StyleParseError::UnspecifiedError.into());
+            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
         }
         Ok(SpecifiedValue::Value(VariantAlternatesList(alternates.into_boxed_slice())))
     }
@@ -1372,8 +1359,7 @@ macro_rules! exclusive_value {
 
 
     bitflags! {
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(MallocSizeOf)]
         pub flags VariantEastAsian: u16 {
             const NORMAL = 0,
             const JIS78 = 0x01,
@@ -1501,7 +1487,7 @@ macro_rules! exclusive_value {
         if !result.is_empty() {
             Ok(SpecifiedValue::Value(result))
         } else {
-            Err(StyleParseError::UnspecifiedError.into())
+            Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
         }
     }
 
@@ -1518,8 +1504,7 @@ macro_rules! exclusive_value {
 
 
     bitflags! {
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(MallocSizeOf)]
         pub flags VariantLigatures: u16 {
             const NORMAL = 0,
             const NONE = 0x01,
@@ -1661,7 +1646,7 @@ macro_rules! exclusive_value {
         if !result.is_empty() {
             Ok(SpecifiedValue::Value(result))
         } else {
-            Err(StyleParseError::UnspecifiedError.into())
+            Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
         }
     }
 
@@ -1678,8 +1663,7 @@ macro_rules! exclusive_value {
 
 
     bitflags! {
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(MallocSizeOf)]
         pub flags VariantNumeric: u8 {
             const NORMAL = 0,
             const LINING_NUMS = 0x01,
@@ -1809,7 +1793,7 @@ macro_rules! exclusive_value {
         if !result.is_empty() {
             Ok(SpecifiedValue::Value(result))
         } else {
-            Err(StyleParseError::UnspecifiedError.into())
+            Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
         }
     }
 
@@ -1904,9 +1888,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
     use style_traits::ToCss;
     use byteorder::{BigEndian, ByteOrder};
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq)]
     pub enum SpecifiedValue {
         Normal,
         Override(String),
@@ -1962,9 +1944,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
         // OpenType "language system" tag, so we should be able to compute
         // it and store it as a 32-bit integer
         // (see http://www.microsoft.com/typography/otspec/languagetags.htm).
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
         pub struct T(pub u32);
     }
 
@@ -2071,9 +2051,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
             }
         }
 
-        #[derive(Clone, Debug, PartialEq, ToComputedValue)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
         pub struct T(pub Atom);
     }
 
@@ -2082,10 +2060,10 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
         computed_value::T(atom!(""))
     }
 
-    pub fn parse<'i, 't>(_context: &ParserContext, _input: &mut Parser<'i, 't>)
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<SpecifiedValue, ParseError<'i>> {
         debug_assert!(false, "Should be set directly by presentation attributes only.");
-        Err(StyleParseError::UnspecifiedError.into())
+        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 </%helpers:longhand>
 
@@ -2105,10 +2083,10 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
         ::gecko_bindings::structs::NS_MATHML_DEFAULT_SCRIPT_SIZE_MULTIPLIER as f32
     }
 
-    pub fn parse<'i, 't>(_context: &ParserContext, _input: &mut Parser<'i, 't>)
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<SpecifiedValue, ParseError<'i>> {
         debug_assert!(false, "Should be set directly by presentation attributes only.");
-        Err(StyleParseError::UnspecifiedError.into())
+        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 </%helpers:longhand>
 
@@ -2254,10 +2232,10 @@ ${helpers.single_keyword("-moz-math-variant",
         Length::new(NS_MATHML_DEFAULT_SCRIPT_MIN_SIZE_PT as f32 * (AU_PER_PT / AU_PER_PX))
     }
 
-    pub fn parse<'i, 't>(_context: &ParserContext, _input: &mut Parser<'i, 't>)
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<SpecifiedValue, ParseError<'i>> {
         debug_assert!(false, "Should be set directly by presentation attributes only.");
-        Err(StyleParseError::UnspecifiedError.into())
+        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 </%helpers:longhand>
 
@@ -2275,9 +2253,7 @@ ${helpers.single_keyword("-moz-math-variant",
             }
         }
 
-        #[derive(Clone, Debug, PartialEq, ToComputedValue)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
         /// text-zoom. Enable if true, disable if false
         pub struct T(pub bool);
     }
@@ -2287,10 +2263,10 @@ ${helpers.single_keyword("-moz-math-variant",
         computed_value::T(true)
     }
 
-    pub fn parse<'i, 't>(_context: &ParserContext, _input: &mut Parser<'i, 't>)
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<SpecifiedValue, ParseError<'i>> {
         debug_assert!(false, "Should be set directly by presentation attributes only.");
-        Err(StyleParseError::UnspecifiedError.into())
+        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 </%helpers:longhand>
 
@@ -2445,7 +2421,7 @@ ${helpers.single_keyword("-moz-math-variant",
 
         impl SystemFont {
             pub fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-                try_match_ident_ignore_ascii_case! { input.expect_ident()?,
+                try_match_ident_ignore_ascii_case! { input,
                     % for font in system_fonts:
                         "${font}" => Ok(SystemFont::${to_camel_case(font)}),
                     % endfor
@@ -2470,7 +2446,7 @@ ${helpers.single_keyword("-moz-math-variant",
         // dummy system font module that does nothing
 
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ToCss)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
         /// void enum for system font, can never exist
         pub enum SystemFont {}
         impl SystemFont {

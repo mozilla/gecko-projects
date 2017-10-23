@@ -231,12 +231,6 @@
 extern uint32_t gRestartMode;
 extern void InstallSignalHandlers(const char *ProgramName);
 
-// This workaround is fixed in Rust 1.19. For details, see bug 1358151.
-// Implementation in toolkit/library/rust/shared/lib.rs
-extern "C" {
-  void rust_init_please_remove_this_after_updating_rust_1_19();
-}
-
 #define FILE_COMPATIBILITY_INFO NS_LITERAL_CSTRING("compatibility.ini")
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
 
@@ -961,7 +955,6 @@ nsXULAppInfo::GetRemoteType(nsAString& aRemoteType)
 static bool gBrowserTabsRemoteAutostart = false;
 static uint64_t gBrowserTabsRemoteStatus = 0;
 static bool gBrowserTabsRemoteAutostartInitialized = false;
-static bool gListeningForCohortChange = false;
 
 NS_IMETHODIMP
 nsXULAppInfo::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) {
@@ -988,13 +981,6 @@ NS_IMETHODIMP
 nsXULAppInfo::GetMaxWebProcessCount(uint32_t* aResult)
 {
   *aResult = mozilla::GetMaxWebProcessCount();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXULAppInfo::GetMultiprocessBlockPolicy(uint32_t* aResult)
-{
-  *aResult = MultiprocessBlockPolicy();
   return NS_OK;
 }
 
@@ -1520,7 +1506,7 @@ ScopedXPCOMStartup::~ScopedXPCOMStartup()
       appStartup->DestroyHiddenWindow();
 
     gDirServiceProvider->DoShutdown();
-    profiler_add_marker("Shutdown early");
+    PROFILER_ADD_MARKER("Shutdown early");
 
     WriteConsoleLog();
 
@@ -1875,9 +1861,9 @@ XRE_InitOmnijar(nsIFile* greOmni, nsIFile* appOmni)
 }
 
 nsresult
-XRE_GetBinaryPath(const char* argv0, nsIFile* *aResult)
+XRE_GetBinaryPath(nsIFile* *aResult)
 {
-  return mozilla::BinaryPath::GetFile(argv0, aResult);
+  return mozilla::BinaryPath::GetFile(aResult);
 }
 
 #ifdef XP_WIN
@@ -1916,7 +1902,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   LaunchChildMac(gRestartArgc, gRestartArgv);
 #else
   nsCOMPtr<nsIFile> lf;
-  nsresult rv = XRE_GetBinaryPath(gArgv[0], getter_AddRefs(lf));
+  nsresult rv = XRE_GetBinaryPath(getter_AddRefs(lf));
   if (NS_FAILED(rv))
     return rv;
 
@@ -2590,7 +2576,9 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
 #endif
 
   if (!count) {
-    gDoMigration = true;
+    // For a fresh install, we would like to let users decide
+    // to do profile migration on their own later after using.
+    gDoMigration = false;
     gDoProfileReset = false;
 
     // create a default profile
@@ -3199,9 +3187,6 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   if (!aExitFlag)
     return 1;
   *aExitFlag = false;
-
-  // This workaround is fixed in Rust 1.19. For details, see bug 1358151.
-  rust_init_please_remove_this_after_updating_rust_1_19();
 
   atexit(UnexpectedExit);
   auto expectedShutdown = mozilla::MakeScopeExit([&] {
@@ -4747,9 +4732,7 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   CodeCoverageHandler::Init();
 #endif
 
-  char aLocal;
-  AutoProfilerInit profilerInit(&aLocal);
-
+  AUTO_PROFILER_INIT;
   AUTO_PROFILER_LABEL("XREMain::XRE_main", OTHER);
 
   nsresult rv = NS_OK;
@@ -4785,7 +4768,7 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   gAppData = mAppData.get();
 
   nsCOMPtr<nsIFile> binFile;
-  rv = XRE_GetBinaryPath(argv[0], getter_AddRefs(binFile));
+  rv = XRE_GetBinaryPath(getter_AddRefs(binFile));
   NS_ENSURE_SUCCESS(rv, 1);
 
   rv = binFile->GetPath(gAbsoluteArgv0Path);
@@ -4793,7 +4776,7 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
 
   if (!mAppData->xreDirectory) {
     nsCOMPtr<nsIFile> lf;
-    rv = XRE_GetBinaryPath(gArgv[0], getter_AddRefs(lf));
+    rv = XRE_GetBinaryPath(getter_AddRefs(lf));
     if (NS_FAILED(rv))
       return 2;
 
@@ -4976,7 +4959,7 @@ XRE_InitCommandLine(int aArgc, char* aArgv[])
 
   // get the canonical version of the binary's path
   nsCOMPtr<nsIFile> binFile;
-  rv = XRE_GetBinaryPath(aArgv[0], getter_AddRefs(binFile));
+  rv = XRE_GetBinaryPath(getter_AddRefs(binFile));
   if (NS_FAILED(rv))
     return NS_ERROR_FAILURE;
 
@@ -5108,7 +5091,7 @@ enum {
   // kE10sDisabledForAccessibility = 4,
   // kE10sDisabledForMacGfx = 5, was removed in bug 1068674.
   // kE10sDisabledForBidi = 6, removed in bug 1309599
-  kE10sDisabledForAddons = 7,
+  // kE10sDisabledForAddons = 7, removed in bug 1406212
   kE10sForceDisabled = 8,
   // kE10sDisabledForXPAcceleration = 9, removed in bug 1296353
   // kE10sDisabledForOperatingSystem = 10, removed due to xp-eol
@@ -5117,47 +5100,7 @@ enum {
 const char* kForceEnableE10sPref = "browser.tabs.remote.force-enable";
 const char* kForceDisableE10sPref = "browser.tabs.remote.force-disable";
 
-uint32_t
-MultiprocessBlockPolicy()
-{
-  if (XRE_IsContentProcess()) {
-    // If we're in a content process, we're not blocked.
-    return 0;
-  }
-
-  /**
-   * Avoids enabling e10s if there are add-ons installed.
-   */
-  bool addonsCanDisable = Preferences::GetBool("extensions.e10sBlocksEnabling", false);
-  bool disabledByAddons = Preferences::GetBool("extensions.e10sBlockedByAddons", false);
-
-#ifdef MOZ_CRASHREPORTER
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AddonsShouldHaveBlockedE10s"),
-                                     disabledByAddons ? NS_LITERAL_CSTRING("1")
-                                                      : NS_LITERAL_CSTRING("0"));
-#endif
-
-  if (addonsCanDisable && disabledByAddons) {
-    return kE10sDisabledForAddons;
-  }
-
-  /*
-   * None of the blocking policies matched, so e10s is allowed to run. Return
-   * 0, indicating success.
-   */
-  return 0;
-}
-
 namespace mozilla {
-
-static void
-CohortChanged(const char* aPref, void* aClosure)
-{
-  // Reset to the default state and recompute on the next call.
-  gBrowserTabsRemoteAutostartInitialized = false;
-  gBrowserTabsRemoteAutostart = false;
-  Preferences::UnregisterCallback(CohortChanged, "e10s.rollout.cohort");
-}
 
 bool
 BrowserTabsRemoteAutostart()
@@ -5173,40 +5116,18 @@ BrowserTabsRemoteAutostart()
     return gBrowserTabsRemoteAutostart;
   }
 
-  // This is a pretty heinous hack. On the first launch, we end up retrieving
-  // whether e10s is enabled setting up a document very early in startup. This
-  // caches that e10s is off before the e10srollout extension can run. See
-  // bug 1372824 comment 3 for a more thorough explanation.
-  if (!gListeningForCohortChange) {
-    gListeningForCohortChange = true;
-    Preferences::RegisterCallback(CohortChanged, "e10s.rollout.cohort");
-  }
+  bool optInPref = Preferences::GetBool("browser.tabs.remote.autostart", true);
+  int status = kE10sEnabledByDefault;
 
-  bool optInPref = Preferences::GetBool("browser.tabs.remote.autostart", false);
-  bool trialPref = Preferences::GetBool("browser.tabs.remote.autostart.2", false);
-  bool prefEnabled = optInPref || trialPref;
-  int status;
   if (optInPref) {
-    status = kE10sEnabledByUser;
-  } else if (trialPref) {
-    status = kE10sEnabledByDefault;
+    gBrowserTabsRemoteAutostart = true;
   } else {
     status = kE10sDisabledByUser;
-  }
-
-  if (prefEnabled) {
-    uint32_t blockPolicy = MultiprocessBlockPolicy();
-    if (blockPolicy != 0) {
-      status = blockPolicy;
-    } else {
-      gBrowserTabsRemoteAutostart = true;
-    }
   }
 
   // Uber override pref for manual testing purposes
   if (Preferences::GetBool(kForceEnableE10sPref, false)) {
     gBrowserTabsRemoteAutostart = true;
-    prefEnabled = true;
     status = kE10sEnabledByUser;
   }
 
@@ -5221,10 +5142,6 @@ BrowserTabsRemoteAutostart()
   gBrowserTabsRemoteStatus = status;
 
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_STATUS, status);
-  if (prefEnabled) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_BLOCKED_FROM_RUNNING,
-                                    !gBrowserTabsRemoteAutostart);
-  }
   return gBrowserTabsRemoteAutostart;
 }
 
@@ -5240,30 +5157,7 @@ GetMaxWebProcessCount()
 
   const char* optInPref = "dom.ipc.processCount";
   uint32_t optInPrefValue = Preferences::GetInt(optInPref, 1);
-  const char* useDefaultPerformanceSettings =
-    "browser.preferences.defaultPerformanceSettings.enabled";
-  bool useDefaultPerformanceSettingsValue =
-    Preferences::GetBool(useDefaultPerformanceSettings, true);
-
-  // If the user has set dom.ipc.processCount, or if they have opt out of
-  // default performances settings from about:preferences, respect their
-  // decision regardless of add-ons that might affect their experience or
-  // experiment cohort.
-  if (Preferences::HasUserValue(optInPref) || !useDefaultPerformanceSettingsValue) {
-    return std::max(1u, optInPrefValue);
-  }
-
-#ifdef RELEASE_OR_BETA
-  // For our rollout on Release and Beta, we set this pref from the
-  // e10srollout extension. On Nightly, we don't touch the pref at all,
-  // allowing stale values to disable e10s-multi for certain users.
-  if (Preferences::HasUserValue("dom.ipc.processCount.web")) {
-    // The user didn't opt in or out so read the .web version of the pref.
-    return std::max(1, Preferences::GetInt("dom.ipc.processCount.web", 1));
-  }
-#endif
-
-  return optInPrefValue;
+  return std::max(1u, optInPrefValue);
 }
 
 const char*

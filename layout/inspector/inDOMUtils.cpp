@@ -32,7 +32,7 @@
 #include "ChildIterator.h"
 #include "nsComputedDOMStyle.h"
 #include "mozilla/EventStateManager.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsRange.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/Element.h"
@@ -52,6 +52,7 @@
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleRule.h"
 #include "mozilla/ServoStyleRuleMap.h"
+#include "mozilla/ServoCSSParser.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -224,7 +225,7 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
 
   *_retval = nullptr;
 
-  RefPtr<nsIAtom> pseudoElt;
+  RefPtr<nsAtom> pseudoElt;
   if (!aPseudo.IsEmpty()) {
     pseudoElt = NS_Atomize(aPseudo);
   }
@@ -284,7 +285,8 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
     // Collect style rule maps for bindings.
     for (nsIContent* bindingContent = element; bindingContent;
          bindingContent = bindingContent->GetBindingParent()) {
-      if (nsXBLBinding* binding = bindingContent->GetXBLBinding()) {
+      for (nsXBLBinding* binding = bindingContent->GetXBLBinding();
+           binding; binding = binding->GetBaseBinding()) {
         if (ServoStyleSet* styleSet = binding->GetServoStyleSet()) {
           ServoStyleRuleMap* map = styleSet->StyleRuleMap();
           map->EnsureTable();
@@ -1005,19 +1007,25 @@ NS_IMETHODIMP
 inDOMUtils::ColorToRGBA(const nsAString& aColorString, JSContext* aCx,
                         JS::MutableHandle<JS::Value> aValue)
 {
-  nscolor color = 0;
+  nscolor color = NS_RGB(0, 0, 0);
+
+#ifdef MOZ_STYLO
+  if (!ServoCSSParser::ComputeColor(nullptr, NS_RGB(0, 0, 0), aColorString,
+                                    &color)) {
+    aValue.setNull();
+    return NS_OK;
+  }
+#else
   nsCSSParser cssParser;
   nsCSSValue cssValue;
 
-  bool isColor = cssParser.ParseColorString(aColorString, nullptr, 0,
-                                            cssValue, true);
-
-  if (!isColor) {
+  if (!cssParser.ParseColorString(aColorString, nullptr, 0, cssValue, true)) {
     aValue.setNull();
     return NS_OK;
   }
 
   nsRuleNode::ComputeColor(cssValue, nullptr, nullptr, color);
+#endif
 
   InspectorRGBATuple tuple;
   tuple.mR = NS_GET_R(color);
@@ -1035,34 +1043,13 @@ inDOMUtils::ColorToRGBA(const nsAString& aColorString, JSContext* aCx,
 NS_IMETHODIMP
 inDOMUtils::IsValidCSSColor(const nsAString& aColorString, bool *_retval)
 {
+#ifdef MOZ_STYLO
+  *_retval = ServoCSSParser::IsValidCSSColor(aColorString);
+#else
   nsCSSParser cssParser;
   nsCSSValue cssValue;
   *_retval = cssParser.ParseColorString(aColorString, nullptr, 0, cssValue, true);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-inDOMUtils::CssPropertyIsValid(const nsAString& aPropertyName,
-                               const nsAString& aPropertyValue,
-                               bool *_retval)
-{
-  nsCSSPropertyID propertyID = nsCSSProps::
-    LookupProperty(aPropertyName, CSSEnabledState::eIgnoreEnabledState);
-
-  if (propertyID == eCSSProperty_UNKNOWN) {
-    *_retval = false;
-    return NS_OK;
-  }
-
-  if (propertyID == eCSSPropertyExtra_variable) {
-    *_retval = true;
-    return NS_OK;
-  }
-
-  // Get a parser, parse the property.
-  nsCSSParser parser;
-  *_retval = parser.IsValueValidForProperty(propertyID, aPropertyValue);
-
+#endif
   return NS_OK;
 }
 
@@ -1151,7 +1138,7 @@ inDOMUtils::GetContentState(nsIDOMElement* aElement,
 
 /* static */ already_AddRefed<nsStyleContext>
 inDOMUtils::GetCleanStyleContextForElement(dom::Element* aElement,
-                                           nsIAtom* aPseudo)
+                                           nsAtom* aPseudo)
 {
   MOZ_ASSERT(aElement);
 
@@ -1207,7 +1194,7 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
                 static_cast<size_t>(CSSPseudoClassType::MAX),
                 "Length of PseudoClassStates array is incorrect");
 
-  RefPtr<nsIAtom> atom = NS_Atomize(aStatePseudo);
+  RefPtr<nsAtom> atom = NS_Atomize(aStatePseudo);
   CSSPseudoClassType type = nsCSSPseudoClasses::
     GetPseudoType(atom, CSSEnabledState::eIgnoreEnabledState);
 
@@ -1225,14 +1212,14 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
 NS_IMETHODIMP
 inDOMUtils::GetCSSPseudoElementNames(uint32_t* aLength, char16_t*** aNames)
 {
-  nsTArray<nsIAtom*> array;
+  nsTArray<nsAtom*> array;
 
   const CSSPseudoElementTypeBase pseudoCount =
     static_cast<CSSPseudoElementTypeBase>(CSSPseudoElementType::Count);
   for (CSSPseudoElementTypeBase i = 0; i < pseudoCount; ++i) {
     CSSPseudoElementType type = static_cast<CSSPseudoElementType>(i);
     if (nsCSSPseudoElements::IsEnabled(type, CSSEnabledState::eForAllContent)) {
-      nsIAtom* atom = nsCSSPseudoElements::GetPseudoAtom(type);
+      nsAtom* atom = nsCSSPseudoElements::GetPseudoAtom(type);
       array.AppendElement(atom);
     }
   }

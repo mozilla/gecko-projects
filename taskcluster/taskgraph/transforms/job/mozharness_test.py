@@ -59,7 +59,7 @@ VARIANTS = [
     'pgo',
     'asan',
     'stylo',
-    'stylo disabled',
+    'stylo-disabled',
     'stylo-sequential',
     'qr',
     'ccov',
@@ -145,7 +145,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
     if 'actions' in mozharness:
         env['MOZHARNESS_ACTIONS'] = ' '.join(mozharness['actions'])
 
-    if config.params['project'] == 'try':
+    if 'try' in config.params['project']:
         env['TRY_COMMIT_MSG'] = config.params['message']
 
     # handle some of the mozharness-specific options
@@ -248,6 +248,8 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
 
     env = worker.setdefault('env', {})
     env['MOZ_AUTOMATION'] = '1'
+    env['GECKO_HEAD_REPOSITORY'] = config.params['head_repository']
+    env['GECKO_HEAD_REV'] = config.params['head_rev']
 
     # this list will get cleaned up / reduced / removed in bug 1354088
     if is_macosx:
@@ -311,7 +313,7 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
                 if isinstance(c, basestring) and c.startswith('--test-suite'):
                     mh_command[i] += suffix
 
-    if config.params['project'] == 'try':
+    if 'try' in config.params['project']:
         env['TRY_COMMIT_MSG'] = config.params['message']
 
     worker['mounts'] = [{

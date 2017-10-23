@@ -284,7 +284,7 @@ class JSJitFrameIter
 
 class JitcodeGlobalTable;
 
-class JitProfilingFrameIterator
+class JSJitProfilingFrameIterator
 {
     uint8_t* fp_;
     FrameType type_;
@@ -297,12 +297,14 @@ class JitProfilingFrameIterator
                                        bool forLastCallSite);
     void fixBaselineReturnAddress();
 
+    void moveToCppEntryFrame();
+    void moveToWasmFrame(CommonFrameLayout* frame);
     void moveToNextFrame(CommonFrameLayout* frame);
 
   public:
-    JitProfilingFrameIterator(JSContext* cx,
-                              const JS::ProfilingFrameIterator::RegisterState& state);
-    explicit JitProfilingFrameIterator(void* exitFrame);
+    JSJitProfilingFrameIterator(JSContext* cx,
+                                const JS::ProfilingFrameIterator::RegisterState& state);
+    explicit JSJitProfilingFrameIterator(void* exitFrame);
 
     void operator++();
     bool done() const { return fp_ == nullptr; }

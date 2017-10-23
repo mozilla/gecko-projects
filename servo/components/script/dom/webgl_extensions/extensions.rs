@@ -3,23 +3,23 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use canvas_traits::webgl::WebGLError;
-use core::iter::FromIterator;
-use core::nonzero::NonZero;
 use dom::bindings::cell::DomRefCell;
 use dom::bindings::codegen::Bindings::OESStandardDerivativesBinding::OESStandardDerivativesConstants;
 use dom::bindings::codegen::Bindings::OESTextureHalfFloatBinding::OESTextureHalfFloatConstants;
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextConstants as constants;
+use dom::bindings::nonnull::NonNullJSObjectPtr;
 use dom::bindings::root::DomRoot;
 use dom::bindings::trace::JSTraceable;
 use dom::webglrenderingcontext::WebGLRenderingContext;
 use fnv::{FnvHashMap, FnvHashSet};
 use gleam::gl::GLenum;
-use heapsize::HeapSizeOf;
-use js::jsapi::{JSContext, JSObject};
+use js::jsapi::JSContext;
 use js::jsval::JSVal;
+use malloc_size_of::MallocSizeOf;
 use ref_filter_map::ref_filter_map;
 use std::cell::Ref;
 use std::collections::HashMap;
+use std::iter::FromIterator;
 use super::{ext, WebGLExtension};
 use super::wrapper::{WebGLExtensionWrapper, TypedWebGLExtensionWrapper};
 
@@ -45,7 +45,7 @@ const DEFAULT_DISABLED_GET_PARAMETER_NAMES: [GLenum; 1] = [
 ];
 
 /// WebGL features that are enabled/disabled by WebGL Extensions.
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 struct WebGLExtensionFeatures {
     gl_extensions: FnvHashSet<String>,
     disabled_tex_types: FnvHashSet<GLenum>,
@@ -74,7 +74,7 @@ impl Default for WebGLExtensionFeatures {
 
 /// Handles the list of implemented, supported and enabled WebGL extensions.
 #[must_root]
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub struct WebGLExtensions {
     extensions: DomRefCell<HashMap<String, Box<WebGLExtensionWrapper>>>,
     features: DomRefCell<WebGLExtensionFeatures>,
@@ -97,9 +97,9 @@ impl WebGLExtensions {
         }
     }
 
-    pub fn register<T:'static + WebGLExtension + JSTraceable + HeapSizeOf>(&self) {
+    pub fn register<T:'static + WebGLExtension + JSTraceable + MallocSizeOf>(&self) {
         let name = T::name().to_uppercase();
-        self.extensions.borrow_mut().insert(name, box TypedWebGLExtensionWrapper::<T>::new());
+        self.extensions.borrow_mut().insert(name, Box::new(TypedWebGLExtensionWrapper::<T>::new()));
     }
 
     pub fn get_suported_extensions(&self) -> Vec<&'static str> {
@@ -109,7 +109,7 @@ impl WebGLExtensions {
                                 .collect()
     }
 
-    pub fn get_or_init_extension(&self, name: &str, ctx: &WebGLRenderingContext) -> Option<NonZero<*mut JSObject>> {
+    pub fn get_or_init_extension(&self, name: &str, ctx: &WebGLRenderingContext) -> Option<NonNullJSObjectPtr> {
         let name = name.to_uppercase();
         self.extensions.borrow().get(&name).and_then(|extension| {
             if extension.is_supported(self) {
@@ -122,7 +122,7 @@ impl WebGLExtensions {
 
     pub fn is_enabled<T>(&self) -> bool
     where
-        T: 'static + WebGLExtension + JSTraceable + HeapSizeOf
+        T: 'static + WebGLExtension + JSTraceable + MallocSizeOf
     {
         let name = T::name().to_uppercase();
         self.extensions.borrow().get(&name).map_or(false, |ext| { ext.is_enabled() })
@@ -130,7 +130,7 @@ impl WebGLExtensions {
 
     pub fn get_dom_object<T>(&self) -> Option<DomRoot<T::Extension>>
     where
-        T: 'static + WebGLExtension + JSTraceable + HeapSizeOf
+        T: 'static + WebGLExtension + JSTraceable + MallocSizeOf
     {
         let name = T::name().to_uppercase();
         self.extensions.borrow().get(&name).and_then(|extension| {
@@ -224,15 +224,15 @@ impl WebGLExtensions {
 }
 
 // Helper structs
-#[derive(Eq, Hash, HeapSizeOf, JSTraceable, PartialEq)]
+#[derive(Eq, Hash, JSTraceable, MallocSizeOf, PartialEq)]
 struct TexFormatType(u32, u32);
 
 type WebGLQueryParameterFunc = Fn(*mut JSContext, &WebGLRenderingContext)
                                -> Result<JSVal, WebGLError>;
 
-#[derive(HeapSizeOf)]
+#[derive(MallocSizeOf)]
 struct WebGLQueryParameterHandler {
-    #[ignore_heap_size_of = "Closures are hard"]
+    #[ignore_malloc_size_of = "Closures are hard"]
     func: Box<WebGLQueryParameterFunc>
 }
 

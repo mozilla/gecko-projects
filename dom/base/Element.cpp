@@ -18,7 +18,7 @@
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/Grid.h"
 #include "nsDOMAttributeMap.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsIContentInlines.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
@@ -192,7 +192,7 @@ ASSERT_ELEMENT_SIZE(HTMLSpanElement, 128);
 #undef ASSERT_ELEMENT_SIZE
 #undef EXTRA_DOM_ELEMENT_BYTES
 
-nsIAtom*
+nsAtom*
 nsIContent::DoGetID() const
 {
   MOZ_ASSERT(HasID(), "Unexpected call");
@@ -1105,7 +1105,7 @@ Element::GetClientRects()
 //----------------------------------------------------------------------
 
 void
-Element::AddToIdTable(nsIAtom* aId)
+Element::AddToIdTable(nsAtom* aId)
 {
   NS_ASSERTION(HasID(), "Node doesn't have an ID?");
   if (IsInShadowTree()) {
@@ -1126,7 +1126,7 @@ Element::RemoveFromIdTable()
     return;
   }
 
-  nsIAtom* id = DoGetID();
+  nsAtom* id = DoGetID();
   if (IsInShadowTree()) {
     ShadowRoot* containingShadow = GetContainingShadow();
     // Check for containingShadow because it may have
@@ -1297,6 +1297,7 @@ Element::GetAttribute(const nsAString& aName, DOMString& aReturn)
 void
 Element::SetAttribute(const nsAString& aName,
                       const nsAString& aValue,
+                      nsIPrincipal* aTriggeringPrincipal,
                       ErrorResult& aError)
 {
   aError = nsContentUtils::CheckQName(aName, false);
@@ -1307,17 +1308,17 @@ Element::SetAttribute(const nsAString& aName,
   nsAutoString nameToUse;
   const nsAttrName* name = InternalGetAttrNameFromQName(aName, &nameToUse);
   if (!name) {
-    RefPtr<nsIAtom> nameAtom = NS_AtomizeMainThread(nameToUse);
+    RefPtr<nsAtom> nameAtom = NS_AtomizeMainThread(nameToUse);
     if (!nameAtom) {
       aError.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
     }
-    aError = SetAttr(kNameSpaceID_None, nameAtom, aValue, true);
+    aError = SetAttr(kNameSpaceID_None, nameAtom, aValue, aTriggeringPrincipal, true);
     return;
   }
 
   aError = SetAttr(name->NamespaceID(), name->LocalName(), name->GetPrefix(),
-                   aValue, true);
+                   aValue, aTriggeringPrincipal, true);
 }
 
 void
@@ -1343,17 +1344,12 @@ Element::RemoveAttribute(const nsAString& aName, ErrorResult& aError)
 Attr*
 Element::GetAttributeNode(const nsAString& aName)
 {
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eGetAttributeNode);
   return Attributes()->GetNamedItem(aName);
 }
 
 already_AddRefed<Attr>
 Element::SetAttributeNode(Attr& aNewAttr, ErrorResult& aError)
 {
-  // XXXbz can we just remove this warning and the one in setAttributeNodeNS and
-  // alias setAttributeNode to setAttributeNodeNS?
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eSetAttributeNode);
-
   return Attributes()->SetNamedItemNS(aNewAttr, aError);
 }
 
@@ -1367,7 +1363,6 @@ Element::RemoveAttributeNode(Attr& aAttribute,
     return nullptr;
   }
 
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eRemoveAttributeNode);
   nsAutoString nameSpaceURI;
   aAttribute.NodeInfo()->GetNamespaceURI(nameSpaceURI);
   return Attributes()->RemoveNamedItemNS(nameSpaceURI, aAttribute.NodeInfo()->LocalName(), aError);
@@ -1388,7 +1383,7 @@ Element::GetAttributeNS(const nsAString& aNamespaceURI,
     return;
   }
 
-  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsAtom> name = NS_AtomizeMainThread(aLocalName);
   bool hasAttr = GetAttr(nsid, name, aReturn);
   if (!hasAttr) {
     SetDOMStringToNull(aReturn);
@@ -1399,6 +1394,7 @@ void
 Element::SetAttributeNS(const nsAString& aNamespaceURI,
                         const nsAString& aQualifiedName,
                         const nsAString& aValue,
+                        nsIPrincipal* aTriggeringPrincipal,
                         ErrorResult& aError)
 {
   RefPtr<mozilla::dom::NodeInfo> ni;
@@ -1412,7 +1408,7 @@ Element::SetAttributeNS(const nsAString& aNamespaceURI,
   }
 
   aError = SetAttr(ni->NamespaceID(), ni->NameAtom(), ni->GetPrefixAtom(),
-                   aValue, true);
+                   aValue, aTriggeringPrincipal, true);
 }
 
 void
@@ -1420,7 +1416,7 @@ Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
                            const nsAString& aLocalName,
                            ErrorResult& aError)
 {
-  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsAtom> name = NS_AtomizeMainThread(aLocalName);
   int32_t nsid =
     nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI,
                                                        nsContentUtils::IsChromeDoc(OwnerDoc()));
@@ -1439,8 +1435,6 @@ Attr*
 Element::GetAttributeNodeNS(const nsAString& aNamespaceURI,
                             const nsAString& aLocalName)
 {
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eGetAttributeNodeNS);
-
   return GetAttributeNodeNSInternal(aNamespaceURI, aLocalName);
 }
 
@@ -1455,7 +1449,6 @@ already_AddRefed<Attr>
 Element::SetAttributeNodeNS(Attr& aNewAttr,
                             ErrorResult& aError)
 {
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eSetAttributeNodeNS);
   return Attributes()->SetNamedItemNS(aNewAttr, aError);
 }
 
@@ -1493,7 +1486,7 @@ Element::HasAttributeNS(const nsAString& aNamespaceURI,
     return false;
   }
 
-  RefPtr<nsIAtom> name = NS_AtomizeMainThread(aLocalName);
+  RefPtr<nsAtom> name = NS_AtomizeMainThread(aLocalName);
   return HasAttr(nsid, name);
 }
 
@@ -2135,20 +2128,20 @@ Element::SetInlineStyleDeclaration(DeclarationBlock* aDeclaration,
 }
 
 NS_IMETHODIMP_(bool)
-Element::IsAttributeMapped(const nsIAtom* aAttribute) const
+Element::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   return false;
 }
 
 nsChangeHint
-Element::GetAttributeChangeHint(const nsIAtom* aAttribute,
+Element::GetAttributeChangeHint(const nsAtom* aAttribute,
                                 int32_t aModType) const
 {
   return nsChangeHint(0);
 }
 
 bool
-Element::FindAttributeDependence(const nsIAtom* aAttribute,
+Element::FindAttributeDependence(const nsAtom* aAttribute,
                                  const MappedAttributeEntry* const aMaps[],
                                  uint32_t aMapCount)
 {
@@ -2319,7 +2312,7 @@ Element::LeaveLink(nsPresContext* aPresContext)
 }
 
 nsresult
-Element::SetEventHandler(nsIAtom* aEventName,
+Element::SetEventHandler(nsAtom* aEventName,
                          const nsAString& aValue,
                          bool aDefer)
 {
@@ -2374,8 +2367,8 @@ Element::InternalGetAttrNameFromQName(const nsAString& aStr,
 
 bool
 Element::MaybeCheckSameAttrVal(int32_t aNamespaceID,
-                               nsIAtom* aName,
-                               nsIAtom* aPrefix,
+                               nsAtom* aName,
+                               nsAtom* aPrefix,
                                const nsAttrValueOrString& aValue,
                                bool aNotify,
                                nsAttrValue& aOldValue,
@@ -2429,8 +2422,8 @@ Element::MaybeCheckSameAttrVal(int32_t aNamespaceID,
 }
 
 bool
-Element::OnlyNotifySameValueSet(int32_t aNamespaceID, nsIAtom* aName,
-                                nsIAtom* aPrefix,
+Element::OnlyNotifySameValueSet(int32_t aNamespaceID, nsAtom* aName,
+                                nsAtom* aPrefix,
                                 const nsAttrValueOrString& aValue,
                                 bool aNotify, nsAttrValue& aOldValue,
                                 uint8_t* aModType, bool* aHasListeners,
@@ -2448,7 +2441,7 @@ Element::OnlyNotifySameValueSet(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 nsresult
-Element::SetSingleClassFromParser(nsIAtom* aSingleClassName)
+Element::SetSingleClassFromParser(nsAtom* aSingleClassName)
 {
   // Keep this in sync with SetAttr and SetParsedAttr below.
 
@@ -2471,6 +2464,7 @@ Element::SetSingleClassFromParser(nsIAtom* aSingleClassName)
                           nullptr, // prefix
                           nullptr, // old value
                           value,
+                          nullptr,
                           static_cast<uint8_t>(nsIDOMMutationEvent::ADDITION),
                           false, // hasListeners
                           false, // notify
@@ -2480,8 +2474,9 @@ Element::SetSingleClassFromParser(nsIAtom* aSingleClassName)
 }
 
 nsresult
-Element::SetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                 nsIAtom* aPrefix, const nsAString& aValue,
+Element::SetAttr(int32_t aNamespaceID, nsAtom* aName,
+                 nsAtom* aPrefix, const nsAString& aValue,
+                 nsIPrincipal* aSubjectPrincipal,
                  bool aNotify)
 {
   // Keep this in sync with SetParsedAttr below and SetSingleClassFromParser
@@ -2541,13 +2536,14 @@ Element::SetAttr(int32_t aNamespaceID, nsIAtom* aName,
 
   return SetAttrAndNotify(aNamespaceID, aName, aPrefix,
                           oldValueSet ? &oldValue : nullptr,
-                          attrValue, modType, hasListeners, aNotify,
+                          attrValue, aSubjectPrincipal, modType,
+                          hasListeners, aNotify,
                           kCallAfterSetAttr, document, updateBatch);
 }
 
 nsresult
-Element::SetParsedAttr(int32_t aNamespaceID, nsIAtom* aName,
-                       nsIAtom* aPrefix, nsAttrValue& aParsedValue,
+Element::SetParsedAttr(int32_t aNamespaceID, nsAtom* aName,
+                       nsAtom* aPrefix, nsAttrValue& aParsedValue,
                        bool aNotify)
 {
   // Keep this in sync with SetAttr and SetSingleClassFromParser above
@@ -2586,16 +2582,17 @@ Element::SetParsedAttr(int32_t aNamespaceID, nsIAtom* aName,
   mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
   return SetAttrAndNotify(aNamespaceID, aName, aPrefix,
                           oldValueSet ? &oldValue : nullptr,
-                          aParsedValue, modType, hasListeners, aNotify,
+                          aParsedValue, nullptr, modType, hasListeners, aNotify,
                           kCallAfterSetAttr, document, updateBatch);
 }
 
 nsresult
 Element::SetAttrAndNotify(int32_t aNamespaceID,
-                          nsIAtom* aName,
-                          nsIAtom* aPrefix,
+                          nsAtom* aName,
+                          nsAtom* aPrefix,
                           const nsAttrValue* aOldValue,
                           nsAttrValue& aParsedValue,
+                          nsIPrincipal* aSubjectPrincipal,
                           uint8_t aModType,
                           bool aFireMutation,
                           bool aNotify,
@@ -2670,7 +2667,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
             nsContentUtils::GetElementDefinitionIfObservingAttr(this,
                                                                 data->mType,
                                                                 aName)) {
-        RefPtr<nsIAtom> oldValueAtom;
+        RefPtr<nsAtom> oldValueAtom;
         if (oldValue) {
           oldValueAtom = oldValue->GetAsAtom();
         } else {
@@ -2678,7 +2675,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
           // attribute that was swapped with aParsedValue.
           oldValueAtom = aParsedValue.GetAsAtom();
         }
-        RefPtr<nsIAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
+        RefPtr<nsAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
         nsAutoString ns;
         nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
 
@@ -2698,7 +2695,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
 
   if (aCallAfterSetAttr) {
     rv = AfterSetAttr(aNamespaceID, aName, &valueForAfterSetAttr, oldValue,
-                      aNotify);
+                      aSubjectPrincipal, aNotify);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (aNamespaceID == kNameSpaceID_None && aName == nsGkAtoms::dir) {
@@ -2746,7 +2743,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
 
 bool
 Element::ParseAttribute(int32_t aNamespaceID,
-                        nsIAtom* aAttribute,
+                        nsAtom* aAttribute,
                         const nsAString& aValue,
                         nsAttrValue& aResult)
 {
@@ -2774,7 +2771,7 @@ Element::ParseAttribute(int32_t aNamespaceID,
 }
 
 bool
-Element::SetAndSwapMappedAttribute(nsIAtom* aName,
+Element::SetAndSwapMappedAttribute(nsAtom* aName,
                                    nsAttrValue& aValue,
                                    bool* aValueWasSet,
                                    nsresult* aRetval)
@@ -2784,7 +2781,7 @@ Element::SetAndSwapMappedAttribute(nsIAtom* aName,
 }
 
 nsresult
-Element::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+Element::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                        const nsAttrValueOrString* aValue, bool aNotify)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -2807,7 +2804,7 @@ Element::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 void
-Element::PreIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
+Element::PreIdMaybeChange(int32_t aNamespaceID, nsAtom* aName,
                           const nsAttrValueOrString* aValue)
 {
   if (aNamespaceID != kNameSpaceID_None || aName != nsGkAtoms::id) {
@@ -2817,7 +2814,7 @@ Element::PreIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 void
-Element::PostIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
+Element::PostIdMaybeChange(int32_t aNamespaceID, nsAtom* aName,
                            const nsAttrValue* aValue)
 {
   if (aNamespaceID != kNameSpaceID_None || aName != nsGkAtoms::id) {
@@ -2835,7 +2832,7 @@ Element::PostIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 EventListenerManager*
-Element::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
+Element::GetEventListenerManagerForAttr(nsAtom* aAttrName,
                                         bool* aDefer)
 {
   *aDefer = true;
@@ -2843,7 +2840,7 @@ Element::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
 }
 
 BorrowedAttrInfo
-Element::GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const
+Element::GetAttrInfo(int32_t aNamespaceID, nsAtom* aName) const
 {
   NS_ASSERTION(nullptr != aName, "must have attribute name");
   NS_ASSERTION(aNamespaceID != kNameSpaceID_Unknown,
@@ -2868,7 +2865,7 @@ Element::GetAttrInfoAt(uint32_t aIndex) const
 }
 
 bool
-Element::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+Element::GetAttr(int32_t aNameSpaceID, nsAtom* aName,
                  nsAString& aResult) const
 {
   DOMString str;
@@ -2879,7 +2876,7 @@ Element::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 
 int32_t
 Element::FindAttrValueIn(int32_t aNameSpaceID,
-                         nsIAtom* aName,
+                         nsAtom* aName,
                          AttrValuesArray* aValues,
                          nsCaseTreatment aCaseSensitive) const
 {
@@ -2900,7 +2897,7 @@ Element::FindAttrValueIn(int32_t aNameSpaceID,
 }
 
 nsresult
-Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
                    bool aNotify)
 {
   NS_ASSERTION(nullptr != aName, "must have attribute name");
@@ -2977,7 +2974,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         nsAutoString ns;
         nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
 
-        RefPtr<nsIAtom> oldValueAtom = oldValue.GetAsAtom();
+        RefPtr<nsAtom> oldValueAtom = oldValue.GetAsAtom();
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           nsDependentAtomString(oldValueAtom),
@@ -2991,7 +2988,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     }
   }
 
-  rv = AfterSetAttr(aNameSpaceID, aName, nullptr, &oldValue, aNotify);
+  rv = AfterSetAttr(aNameSpaceID, aName, nullptr, &oldValue, nullptr, aNotify);
   NS_ENSURE_SUCCESS(rv, rv);
 
   UpdateState(aNotify);
@@ -3415,7 +3412,7 @@ Element::GetLinkTarget(nsAString& aTarget)
 }
 
 static void
-nsDOMTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
+nsDOMTokenListPropertyDestructor(void *aObject, nsAtom *aProperty,
                                  void *aPropertyValue, void *aData)
 {
   nsDOMTokenList* list =
@@ -3423,7 +3420,7 @@ nsDOMTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
   NS_RELEASE(list);
 }
 
-static nsIAtom** sPropertiesToTraverseAndUnlink[] =
+static nsAtom** sPropertiesToTraverseAndUnlink[] =
   {
     &nsGkAtoms::sandbox,
     &nsGkAtoms::sizes,
@@ -3432,18 +3429,18 @@ static nsIAtom** sPropertiesToTraverseAndUnlink[] =
   };
 
 // static
-nsIAtom***
+nsAtom***
 Element::HTMLSVGPropertiesToTraverseAndUnlink()
 {
   return sPropertiesToTraverseAndUnlink;
 }
 
 nsDOMTokenList*
-Element::GetTokenList(nsIAtom* aAtom,
+Element::GetTokenList(nsAtom* aAtom,
                       const DOMTokenListSupportedTokenArray aSupportedTokens)
 {
 #ifdef DEBUG
-  nsIAtom*** props =
+  nsAtom*** props =
     HTMLSVGPropertiesToTraverseAndUnlink();
   bool found = false;
   for (uint32_t i = 0; props[i]; ++i) {
@@ -3470,27 +3467,38 @@ Element::GetTokenList(nsIAtom* aAtom,
 Element*
 Element::Closest(const nsAString& aSelector, ErrorResult& aResult)
 {
-  nsCSSSelectorList* selectorList = ParseSelectorList(aSelector, aResult);
-  if (!selectorList) {
-    // Either we failed (and aResult already has the exception), or this
-    // is a pseudo-element-only selector that matches nothing.
-    return nullptr;
-  }
-  TreeMatchContext matchingContext(false,
-                                   nsRuleWalker::eRelevantLinkUnvisited,
-                                   OwnerDoc(),
-                                   TreeMatchContext::eNeverMatchVisited);
-  matchingContext.SetHasSpecifiedScope();
-  matchingContext.AddScopeElement(this);
-  for (nsINode* node = this; node; node = node->GetParentNode()) {
-    if (node->IsElement() &&
-        nsCSSRuleProcessor::SelectorListMatches(node->AsElement(),
-                                                matchingContext,
-                                                selectorList)) {
-      return node->AsElement();
+  return WithSelectorList<Element*>(
+    aSelector,
+    aResult,
+    [&](const RawServoSelectorList* aList) -> Element* {
+      if (!aList) {
+        return nullptr;
+      }
+      return const_cast<Element*>(Servo_SelectorList_Closest(this, aList));
+    },
+    [&](nsCSSSelectorList* aList) -> Element* {
+      if (!aList) {
+        // Either we failed (and aError already has the exception), or this
+        // is a pseudo-element-only selector that matches nothing.
+        return nullptr;
+      }
+      TreeMatchContext matchingContext(false,
+                                       nsRuleWalker::eRelevantLinkUnvisited,
+                                       OwnerDoc(),
+                                       TreeMatchContext::eNeverMatchVisited);
+      matchingContext.SetHasSpecifiedScope();
+      matchingContext.AddScopeElement(this);
+      for (nsINode* node = this; node; node = node->GetParentNode()) {
+        if (node->IsElement() &&
+            nsCSSRuleProcessor::SelectorListMatches(node->AsElement(),
+                                                    matchingContext,
+                                                    aList)) {
+          return node->AsElement();
+        }
+      }
+      return nullptr;
     }
-  }
-  return nullptr;
+  );
 }
 
 bool
@@ -3856,7 +3864,7 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
   }
 
   if (OwnerDoc()->IsHTMLDocument()) {
-    nsIAtom* localName;
+    nsAtom* localName;
     int32_t namespaceID;
     if (parent->IsElement()) {
       localName = parent->NodeInfo()->NameAtom();
@@ -3958,7 +3966,7 @@ Element::InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
        (position == eAfterBegin && !GetFirstChild()))) {
     int32_t oldChildCount = destination->GetChildCount();
     int32_t contextNs = destination->GetNameSpaceID();
-    nsIAtom* contextLocal = destination->NodeInfo()->NameAtom();
+    nsAtom* contextLocal = destination->NodeInfo()->NameAtom();
     if (contextLocal == nsGkAtoms::html && contextNs == kNameSpaceID_XHTML) {
       // For compat with IE6 through IE9. Willful violation of HTML5 as of
       // 2011-04-06. CreateContextualFragment does the same already.
@@ -4070,7 +4078,7 @@ Element::GetTextEditorInternal()
 }
 
 nsresult
-Element::SetBoolAttr(nsIAtom* aAttr, bool aValue)
+Element::SetBoolAttr(nsAtom* aAttr, bool aValue)
 {
   if (aValue) {
     return SetAttr(kNameSpaceID_None, aAttr, EmptyString(), true);
@@ -4080,7 +4088,7 @@ Element::SetBoolAttr(nsIAtom* aAttr, bool aValue)
 }
 
 void
-Element::GetEnumAttr(nsIAtom* aAttr,
+Element::GetEnumAttr(nsAtom* aAttr,
                      const char* aDefault,
                      nsAString& aResult) const
 {
@@ -4088,7 +4096,7 @@ Element::GetEnumAttr(nsIAtom* aAttr,
 }
 
 void
-Element::GetEnumAttr(nsIAtom* aAttr,
+Element::GetEnumAttr(nsAtom* aAttr,
                      const char* aDefaultMissing,
                      const char* aDefaultInvalid,
                      nsAString& aResult) const
@@ -4113,7 +4121,7 @@ Element::GetEnumAttr(nsIAtom* aAttr,
 }
 
 void
-Element::SetOrRemoveNullableStringAttr(nsIAtom* aName, const nsAString& aValue,
+Element::SetOrRemoveNullableStringAttr(nsAtom* aName, const nsAString& aValue,
                                        ErrorResult& aError)
 {
   if (DOMStringIsNull(aValue)) {
@@ -4194,13 +4202,6 @@ Element::ClearDataset()
   slots->mDataset = nullptr;
 }
 
-nsDataHashtable<nsRefPtrHashKey<DOMIntersectionObserver>, int32_t>*
-Element::RegisteredIntersectionObservers()
-{
-  nsExtendedDOMSlots* slots = ExtendedDOMSlots();
-  return &slots->mRegisteredIntersectionObservers;
-}
-
 enum nsPreviousIntersectionThreshold {
   eUninitialized = -2,
   eNonIntersecting = -1
@@ -4209,8 +4210,21 @@ enum nsPreviousIntersectionThreshold {
 void
 Element::RegisterIntersectionObserver(DOMIntersectionObserver* aObserver)
 {
-  RegisteredIntersectionObservers()->LookupForAdd(aObserver).OrInsert([]() {
-    // Value can be:
+  IntersectionObserverList* observers =
+    static_cast<IntersectionObserverList*>(
+      GetProperty(nsGkAtoms::intersectionobserverlist)
+    );
+
+  if (!observers) {
+    observers = new IntersectionObserverList();
+    observers->Put(aObserver, eUninitialized);
+    SetProperty(nsGkAtoms::intersectionobserverlist, observers,
+                nsINode::DeleteProperty<IntersectionObserverList>);
+    return;
+  }
+
+  observers->LookupForAdd(aObserver).OrInsert([]() {
+    // If element is being observed, value can be:
     //   -2:   Makes sure next calculated threshold always differs, leading to a
     //         notification task being scheduled.
     //   -1:   Non-intersecting.
@@ -4222,14 +4236,44 @@ Element::RegisterIntersectionObserver(DOMIntersectionObserver* aObserver)
 void
 Element::UnregisterIntersectionObserver(DOMIntersectionObserver* aObserver)
 {
-  RegisteredIntersectionObservers()->Remove(aObserver);
+  IntersectionObserverList* observers =
+    static_cast<IntersectionObserverList*>(
+      GetProperty(nsGkAtoms::intersectionobserverlist)
+    );
+  if (observers) {
+    observers->Remove(aObserver);
+  }
+}
+
+void
+Element::UnlinkIntersectionObservers()
+{
+  IntersectionObserverList* observers =
+    static_cast<IntersectionObserverList*>(
+      GetProperty(nsGkAtoms::intersectionobserverlist)
+    );
+  if (!observers) {
+    return;
+  }
+  for (auto iter = observers->Iter(); !iter.Done(); iter.Next()) {
+    DOMIntersectionObserver* observer = iter.Key();
+    observer->UnlinkElement(*this);
+  }
+  observers->Clear();
 }
 
 bool
 Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32_t aThreshold)
 {
+  IntersectionObserverList* observers =
+    static_cast<IntersectionObserverList*>(
+      GetProperty(nsGkAtoms::intersectionobserverlist)
+    );
+  if (!observers) {
+    return false;
+  }
   bool updated = false;
-  if (auto entry = RegisteredIntersectionObservers()->Lookup(aObserver)) {
+  if (auto entry = observers->Lookup(aObserver)) {
     updated = entry.Data() != aThreshold;
     entry.Data() = aThreshold;
   }
@@ -4352,10 +4396,29 @@ BitsArePropagated(const Element* aElement, uint32_t aBits, nsINode* aRestyleRoot
 #endif
 
 static inline void
-AssertNoBitsPropagatedFrom(nsINode* aRoot) {
+AssertNoBitsPropagatedFrom(nsINode* aRoot)
+{
 #ifdef DEBUG
   if (!aRoot || !aRoot->IsElement()) {
     return;
+  }
+
+  // If we are in the middle of unbinding a subtree, then the bits on elements
+  // in that subtree (and which we haven't yet unbound) could be dirty.
+  // Just skip asserting the absence of bits on those element that are in
+  // the unbinding subtree.  (The incorrect bits will only cause us to
+  // incorrectly choose a new restyle root if the newly dirty element is
+  // also within the unbinding subtree, so it is OK to leave them there.)
+  for (nsINode* n = aRoot; n; n = n->GetFlattenedTreeParentElementForStyle()) {
+    if (!n->IsInComposedDoc()) {
+      // Find the top-most element that is marked as no longer in the document,
+      // so we can start checking bits from its parent.
+      do {
+        aRoot = n;
+        n = n->GetFlattenedTreeParentElementForStyle();
+      } while (n && !n->IsInComposedDoc());
+      break;
+    }
   }
 
   auto* element = aRoot->GetFlattenedTreeParentElementForStyle();
@@ -4512,6 +4575,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
              nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
                aElement, doc->GetServoRestyleRoot()));
   MOZ_ASSERT(aElement == doc->GetServoRestyleRoot() ||
+             !doc->GetServoRestyleRoot()->IsElement() ||
              BitsArePropagated(parent, aBits, doc->GetServoRestyleRoot()));
   MOZ_ASSERT(doc->GetServoRestyleRootDirtyBits() & aBits);
 }

@@ -16,7 +16,6 @@
 #include "nsLayoutUtils.h"
 #include "imgINotificationObserver.h"
 #include "SVGObserverUtils.h"
-#include "mozilla/dom/SVGSVGElement.h"
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
 #include "SVGGeometryFrame.h"
@@ -120,7 +119,7 @@ nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 
 nsresult
 nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
-                                  nsIAtom*        aAttribute,
+                                  nsAtom*        aAttribute,
                                   int32_t         aModType)
 {
   if (aNameSpaceID == kNameSpaceID_None) {

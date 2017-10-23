@@ -128,7 +128,7 @@ var PluginHost = {
 
     throw Components.results.NS_ERROR_NO_INTERFACE;
   }
-}
+};
 
 function registerFakePluginHost() {
   MockRegistrar.register("@mozilla.org/plugin/host;1", PluginHost);
@@ -512,7 +512,8 @@ function checkGfxAdapter(data) {
 }
 
 function checkSystemSection(data) {
-  const EXPECTED_FIELDS = [ "memoryMB", "cpu", "os", "hdd", "gfx" ];
+  const EXPECTED_FIELDS = [ "memoryMB", "cpu", "os", "hdd", "gfx",
+                            "appleModelId" ];
   const EXPECTED_HDD_FIELDS = [ "profile", "binary", "system" ];
 
   Assert.ok("system" in data, "There must be a system section in Environment.");
@@ -660,6 +661,12 @@ function checkSystemSection(data) {
     Assert.equal(features.opengl, gfxData.features.opengl);
     Assert.equal(features.webgl, gfxData.features.webgl);
   } catch (e) {}
+
+  if (gIsMac) {
+    Assert.ok(checkString(data.system.appleModelId));
+  } else {
+    Assert.ok(checkNullOrString(data.system.appleModelId));
+  }
 }
 
 function checkActiveAddon(data, partialRecord) {
@@ -822,7 +829,7 @@ function checkExperimentsSection(data) {
 
     // Check that we have valid experiment info.
     let experimentData = experiments[id];
-    Assert.ok("branch" in experimentData, "The experiment must have branch data.")
+    Assert.ok("branch" in experimentData, "The experiment must have branch data.");
     Assert.ok(checkString(experimentData.branch), "The experiment data must be valid.");
     if ("type" in experimentData) {
       Assert.ok(checkString(experimentData.type));
@@ -869,7 +876,9 @@ add_task(async function setup() {
   // For test_addonsStartup below, we want to test a "warm" startup where
   // there is already a database on disk.  Simulate that here by just
   // restarting the AddonManager.
-  await AddonTestUtils.promiseRestartManager();
+  await AddonTestUtils.promiseShutdownManager();
+  await AddonTestUtils.overrideBuiltIns({"system": []});
+  await AddonTestUtils.promiseStartupManager();
 
   // Register a fake plugin host for consistent flash version data.
   registerFakePluginHost();

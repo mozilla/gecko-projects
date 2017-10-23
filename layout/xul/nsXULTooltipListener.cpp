@@ -195,21 +195,18 @@ nsXULTooltipListener::MouseMove(nsIDOMEvent* aEvent)
       }
     }
 
-    mTooltipTimer = do_CreateInstance("@mozilla.org/timer;1");
-    mTooltipTimer->SetTarget(
+    mTargetNode = do_GetWeakReference(eventTarget);
+    if (mTargetNode) {
+      nsresult rv = NS_NewTimerWithFuncCallback(
+        getter_AddRefs(mTooltipTimer),
+        sTooltipCallback, this,
+        LookAndFeel::GetInt(LookAndFeel::eIntID_TooltipDelay, 500),
+        nsITimer::TYPE_ONE_SHOT,
+        "sTooltipCallback",
         sourceContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
-    if (mTooltipTimer) {
-      mTargetNode = do_GetWeakReference(eventTarget);
-      if (mTargetNode) {
-        nsresult rv =
-          mTooltipTimer->InitWithNamedFuncCallback(sTooltipCallback, this,
-            LookAndFeel::GetInt(LookAndFeel::eIntID_TooltipDelay, 500),
-            nsITimer::TYPE_ONE_SHOT,
-            "sTooltipCallback");
-        if (NS_FAILED(rv)) {
-          mTargetNode = nullptr;
-          mSourceNode = nullptr;
-        }
+      if (NS_FAILED(rv)) {
+        mTargetNode = nullptr;
+        mSourceNode = nullptr;
       }
     }
     return;
@@ -552,7 +549,7 @@ nsXULTooltipListener::HideTooltip()
 }
 
 static void
-GetImmediateChild(nsIContent* aContent, nsIAtom *aTag, nsIContent** aResult)
+GetImmediateChild(nsIContent* aContent, nsAtom *aTag, nsIContent** aResult)
 {
   *aResult = nullptr;
   uint32_t childCount = aContent->GetChildCount();

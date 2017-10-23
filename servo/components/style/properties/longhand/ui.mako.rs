@@ -48,9 +48,7 @@ ${helpers.single_keyword("-moz-window-shadow", "none default menu tooltip sheet"
     use style_traits::ToCss;
 
     pub mod computed_value {
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue)]
+        #[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
         pub struct T(pub bool);
     }
 
@@ -77,7 +75,7 @@ ${helpers.single_keyword("-moz-window-shadow", "none default menu tooltip sheet"
         match input.expect_integer()? {
             0 => Ok(computed_value::T(false)),
             1 => Ok(computed_value::T(true)),
-            _ => Err(StyleParseError::UnspecifiedError.into()),
+            _ => Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError)),
         }
     }
 

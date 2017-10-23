@@ -282,7 +282,7 @@ ServoStyleRule::SelectorMatchesElement(Element* aElement,
 {
   CSSPseudoElementType pseudoType = CSSPseudoElementType::NotPseudo;
   if (!aPseudo.IsEmpty()) {
-    RefPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
+    RefPtr<nsAtom> pseudoElt = NS_Atomize(aPseudo);
     pseudoType = nsCSSPseudoElements::GetPseudoType(
         pseudoElt, CSSEnabledState::eIgnoreEnabledState);
 
@@ -296,6 +296,12 @@ ServoStyleRule::SelectorMatchesElement(Element* aElement,
                                                      aSelectorIndex, pseudoType);
 
   return NS_OK;
+}
+
+NotNull<DeclarationBlock*>
+ServoStyleRule::GetDeclarationBlock() const
+{
+  return WrapNotNull(mDecls.mDecls);
 }
 
 } // namespace mozilla

@@ -12,6 +12,7 @@
 #ifndef nsStyleSet_h_
 #define nsStyleSet_h_
 
+#include "mozilla/AtomArray.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/EnumeratedArray.h"
@@ -290,24 +291,24 @@ class nsStyleSet final
   // use and must be non-null.  It must be an anon box, and must be one that
   // inherits style from the given aParentContext.
   already_AddRefed<mozilla::GeckoStyleContext>
-  ResolveInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag,
+  ResolveInheritingAnonymousBoxStyle(nsAtom* aPseudoTag,
                                      mozilla::GeckoStyleContext* aParentContext);
 
   // Get a style context for an anonymous box that does not inherit style from
   // anything.  aPseudoTag is the pseudo-tag to use and must be non-null.  It
   // must be an anon box, and must be a non-inheriting one.
   already_AddRefed<mozilla::GeckoStyleContext>
-  ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
+  ResolveNonInheritingAnonymousBoxStyle(nsAtom* aPseudoTag);
 
 #ifdef MOZ_XUL
   // Get a style context for a XUL tree pseudo.  aPseudoTag is the
   // pseudo-tag to use and must be non-null.  aParentContent must be
-  // non-null.  aComparator must be non-null.
+  // non-null.
   already_AddRefed<mozilla::GeckoStyleContext>
   ResolveXULTreePseudoStyle(mozilla::dom::Element* aParentElement,
                             nsICSSAnonBoxPseudo* aPseudoTag,
                             mozilla::GeckoStyleContext* aParentContext,
-                            nsICSSPseudoComparator* aComparator);
+                            const mozilla::AtomArray& aInputWord);
 #endif
 
   // Append all the currently-active font face rules to aArray.  Return
@@ -315,10 +316,10 @@ class nsStyleSet final
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
   // Return the winning (in the cascade) @keyframes rule for the given name.
-  nsCSSKeyframesRule* KeyframesRuleForName(const nsString& aName);
+  nsCSSKeyframesRule* KeyframesRuleForName(nsAtom* aName);
 
   // Return the winning (in the cascade) @counter-style rule for the given name.
-  nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
+  nsCSSCounterStyleRule* CounterStyleRuleForName(nsAtom* aName);
 
   // Return gfxFontFeatureValueSet from font feature values rules.
   already_AddRefed<gfxFontFeatureValueSet> BuildFontFeatureValueSet();
@@ -379,7 +380,7 @@ class nsStyleSet final
   // Test if style is dependent on the presence of an attribute.
   nsRestyleHint HasAttributeDependentStyle(mozilla::dom::Element* aElement,
                                            int32_t        aNameSpaceID,
-                                           nsIAtom*       aAttribute,
+                                           nsAtom*       aAttribute,
                                            int32_t        aModType,
                                            bool           aAttrHasChanged,
                                            const nsAttrValue* aOtherValue,
@@ -573,7 +574,7 @@ private:
   GetContext(mozilla::GeckoStyleContext* aParentContext,
              nsRuleNode* aRuleNode,
              nsRuleNode* aVisitedRuleNode,
-             nsIAtom* aPseudoTag,
+             nsAtom* aPseudoTag,
              mozilla::CSSPseudoElementType aPseudoType,
              mozilla::dom::Element* aElementForAnimation,
              uint32_t aFlags);

@@ -40,6 +40,10 @@ public:
 
   void Destroy();
 
+  void EmptyTransaction();
+
+  bool NeedsEmptyTransaction();
+
   void BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder,
                               wr::IpcResourceUpdateQueue& aResourceUpdates,
                               nsDisplayList* aDisplayList,
@@ -52,7 +56,8 @@ public:
                                      mozilla::wr::DisplayListBuilder& aBuilder,
                                      mozilla::wr::IpcResourceUpdateQueue& aResources,
                                      const StackingContextHelper& aSc,
-                                     gfx::IntSize& aSize);
+                                     gfx::IntSize& aSize,
+                                     const Maybe<LayoutDeviceRect>& aAsyncImageBounds);
 
   WebRenderUserDataRefTable* GetWebRenderUserDataTable() { return &mWebRenderUserDatas; }
 
@@ -61,14 +66,14 @@ public:
                  mozilla::wr::DisplayListBuilder& aBuilder,
                  mozilla::wr::IpcResourceUpdateQueue& aResources,
                  const StackingContextHelper& aSc,
-                 const LayerRect& aRect);
+                 const LayoutDeviceRect& aRect);
 
   Maybe<wr::WrImageMask> BuildWrMaskImage(nsDisplayItem* aItem,
                                           wr::DisplayListBuilder& aBuilder,
                                           wr::IpcResourceUpdateQueue& aResources,
                                           const StackingContextHelper& aSc,
                                           nsDisplayListBuilder* aDisplayListBuilder,
-                                          const LayerRect& aBounds);
+                                          const LayoutDeviceRect& aBounds);
 
   bool PushItemAsImage(nsDisplayItem* aItem,
                        wr::DisplayListBuilder& aBuilder,
@@ -87,9 +92,10 @@ public:
                                                                wr::IpcResourceUpdateQueue& aResources,
                                                                const StackingContextHelper& aSc,
                                                                nsDisplayListBuilder* aDisplayListBuilder,
-                                                               LayerRect& aImageRect);
+                                                               LayoutDeviceRect& aImageRect);
 
   void RemoveUnusedAndResetWebRenderUserData();
+  void ClearCachedResources();
 
   // Those are data that we kept between transactions. We used to cache some
   // data in the layer. But in layers free mode, we don't have layer which
@@ -158,7 +164,6 @@ private:
 
   // These fields are used to save a copy of the display list for
   // empty transactions in layers-free mode.
-  wr::BuiltDisplayList mBuiltDisplayList;
   nsTArray<WebRenderParentCommand> mParentCommands;
 
   // We use this as a temporary data structure while building the mScrollData

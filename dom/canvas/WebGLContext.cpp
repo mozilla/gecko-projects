@@ -763,8 +763,12 @@ WebGLContext::CreateAndInitGL(bool forceEnabled,
 
     //////
 
-    if (tryANGLE)
-        return CreateAndInitGLWith(CreateGLWithANGLE, baseCaps, flags, out_failReasons);
+    if (tryANGLE) {
+        // Force enable alpha channel to make sure ANGLE use correct framebuffer formart
+        gl::SurfaceCaps& angleCaps = const_cast<gl::SurfaceCaps&>(baseCaps);
+        angleCaps.alpha = true;
+        return CreateAndInitGLWith(CreateGLWithANGLE, angleCaps, flags, out_failReasons);
+    }
 
     //////
 
@@ -1819,7 +1823,7 @@ WebGLContext::UpdateContextLossStatus()
         if (mCanvasElement) {
             nsContentUtils::DispatchTrustedEvent(
                 mCanvasElement->OwnerDoc(),
-                static_cast<nsIDOMHTMLCanvasElement*>(mCanvasElement),
+                static_cast<nsIContent*>(mCanvasElement),
                 kEventName,
                 kCanBubble,
                 kIsCancelable,
@@ -1887,7 +1891,7 @@ WebGLContext::UpdateContextLossStatus()
         if (mCanvasElement) {
             nsContentUtils::DispatchTrustedEvent(
                 mCanvasElement->OwnerDoc(),
-                static_cast<nsIDOMHTMLCanvasElement*>(mCanvasElement),
+                static_cast<nsIContent*>(mCanvasElement),
                 NS_LITERAL_STRING("webglcontextrestored"),
                 true,
                 true);

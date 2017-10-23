@@ -18,7 +18,7 @@
 #include "mozilla/css/NameSpaceRule.h"
 
 #include "nsString.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 
 #include "nsCSSProps.h"
 
@@ -692,7 +692,7 @@ DocumentRule::AppendConditionText(nsAString& aCssText) const
 // NameSpaceRule
 //
 
-NameSpaceRule::NameSpaceRule(nsIAtom* aPrefix, const nsString& aURLSpec,
+NameSpaceRule::NameSpaceRule(nsAtom* aPrefix, const nsString& aURLSpec,
                              uint32_t aLineNumber, uint32_t aColumnNumber)
   : CSSNamespaceRule(aLineNumber, aColumnNumber),
     mPrefix(aPrefix),
@@ -1726,7 +1726,7 @@ nsCSSKeyframesRule::List(FILE* out, int32_t aIndent) const
   }
 
   fprintf_stderr(out, "%s@keyframes %s {\n",
-                 indentStr.get(), NS_ConvertUTF16toUTF8(mName).get());
+                 indentStr.get(), nsAtomCString(mName).get());
 
   GroupRule::List(out, aIndent);
 
@@ -1738,7 +1738,7 @@ void
 nsCSSKeyframesRule::GetCssTextImpl(nsAString& aCssText) const
 {
   aCssText.AssignLiteral("@keyframes ");
-  aCssText.Append(mName);
+  aCssText.Append(nsDependentAtomString(mName));
   aCssText.AppendLiteral(" {\n");
   nsAutoString tmp;
   for (const Rule* rule : GeckoRules()) {
@@ -1752,21 +1752,21 @@ nsCSSKeyframesRule::GetCssTextImpl(nsAString& aCssText) const
 NS_IMETHODIMP
 nsCSSKeyframesRule::GetName(nsAString& aName)
 {
-  aName = mName;
+  mName->ToString(aName);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsCSSKeyframesRule::SetName(const nsAString& aName)
 {
-  if (mName == aName) {
+  if (mName->Equals(aName)) {
     return NS_OK;
   }
 
   nsIDocument* doc = GetDocument();
   MOZ_AUTO_DOC_UPDATE(doc, UPDATE_STYLE, true);
 
-  mName = aName;
+  mName = NS_Atomize(aName);
 
   if (StyleSheet* sheet = GetStyleSheet()) {
     sheet->AsGecko()->SetModifiedByChildRule();
@@ -2276,7 +2276,7 @@ NS_IMETHODIMP
 nsCSSCounterStyleRule::SetName(const nsAString& aName)
 {
   nsCSSParser parser;
-  if (RefPtr<nsIAtom> name = parser.ParseCounterStyleName(aName, nullptr)) {
+  if (RefPtr<nsAtom> name = parser.ParseCounterStyleName(aName, nullptr)) {
     nsIDocument* doc = GetDocument();
     MOZ_AUTO_DOC_UPDATE(doc, UPDATE_STYLE, true);
 

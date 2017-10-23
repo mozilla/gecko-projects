@@ -7,12 +7,8 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-const uuidGen = Cc["@mozilla.org/uuid-generator;1"]
-    .getService(Ci.nsIUUIDGenerator);
-const loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
-    .getService(Ci.mozIJSSubScriptLoader);
 const winUtil = content.QueryInterface(Ci.nsIInterfaceRequestor)
     .getInterface(Ci.nsIDOMWindowUtils);
 
@@ -25,7 +21,10 @@ Cu.import("chrome://marionette/content/accessibility.js");
 Cu.import("chrome://marionette/content/action.js");
 Cu.import("chrome://marionette/content/atom.js");
 Cu.import("chrome://marionette/content/capture.js");
-Cu.import("chrome://marionette/content/element.js");
+const {
+  element,
+  WebElement,
+} = Cu.import("chrome://marionette/content/element.js", {});
 const {
   ElementNotInteractableError,
   error,
@@ -35,6 +34,7 @@ const {
   InvalidSelectorError,
   NoSuchElementError,
   NoSuchFrameError,
+  pprint,
   TimeoutError,
   UnknownError,
 } = Cu.import("chrome://marionette/content/error.js", {});
@@ -48,8 +48,6 @@ Cu.import("chrome://marionette/content/proxy.js");
 Cu.import("chrome://marionette/content/session.js");
 
 Cu.importGlobalProperties(["URL"]);
-
-let marionetteTestName;
 
 let listenerId = null;  // unique ID of this listener
 let curContainer = {frame: content, shadowRoot: null};
@@ -71,28 +69,8 @@ let capabilities;
 
 let legacyactions = new legacyaction.Chain(checkForInterrupted);
 
-// the unload handler
-let onunload;
-
-// Flag to indicate whether an async script is currently running or not.
-let asyncTestRunning = false;
-let asyncTestCommandId;
-let asyncTestTimeoutId;
-
-let inactivityTimeoutId = null;
-
-let originalOnError;
-// Send move events about this often
-let EVENT_INTERVAL = 30; // milliseconds
 // last touch for each fingerId
 let multiLast = {};
-
-const asyncChrome = proxy.toChromeAsync({
-  addMessageListener: addMessageListenerId.bind(this),
-  removeMessageListener: removeMessageListenerId.bind(this),
-  sendAsyncMessage: sendAsyncMessage.bind(this),
-});
-const syncChrome = proxy.toChrome(sendSyncMessage.bind(this));
 
 const logger = Log.repository.getLogger("Marionette");
 // Append only once to avoid duplicated output after listener.js gets reloaded
@@ -100,21 +78,8 @@ if (logger.ownAppenders.length == 0) {
   logger.addAppender(new Log.DumpAppender());
 }
 
-const modalHandler = function() {
-  // This gets called on the system app only since it receives the
-  // mozbrowserprompt event
-  sendSyncMessage("Marionette:switchedToFrame",
-      {frameValue: null, storePrevious: true});
-  let isLocal = sendSyncMessage("MarionetteFrame:handleModal", {})[0].value;
-  if (isLocal) {
-    previousContainer = curContainer;
-  }
-  curContainer = {frame: content, shadowRoot: null};
-};
-
 // sandbox storage and name of the current sandbox
 const sandboxes = new Sandboxes(() => curContainer.frame);
-let sandboxName = "default";
 
 const eventObservers = new ContentEventObserverService(
     content, sendAsyncMessage.bind(this));
@@ -384,7 +349,7 @@ const loadListener = {
     }
   },
 
-  observe(subject, topic, data) {
+  observe(subject, topic) {
     const win = curContainer.frame;
     const winID = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
     const curWinID = win.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -454,7 +419,7 @@ const loadListener = {
     return (async () => {
       await trigger();
 
-    })().then(val => {
+    })().then(() => {
       if (!loadEventExpected) {
         sendOk(commandID);
         return;
@@ -501,35 +466,33 @@ function registerSelf() {
   }
 }
 
-// Eventually we will not have a closure for every single command, but
-// use a generic dispatch for all listener commands.
+// Eventually we will not have a closure for every single command,
+// but use a generic dispatch for all listener commands.
 //
-// Perhaps one could even conceive having a separate instance of
-// CommandProcessor for the listener, because the code is mostly the same.
+// Worth nothing that this shares many characteristics with
+// server.TCPConnection#execute.  Perhaps this could be generalised
+// at the point.
 function dispatch(fn) {
   if (typeof fn != "function") {
     throw new TypeError("Provided dispatch handler is not a function");
   }
 
-  return function(msg) {
-    let id = msg.json.commandID;
+  return msg => {
+    const id = msg.json.commandID;
 
-    let req = (async () => {
-      if (typeof msg.json == "undefined" || msg.json instanceof Array) {
-        return fn.apply(null, msg.json);
-      }
-      return fn(msg.json);
-    })();
+    let req = new Promise(resolve => {
+      const args = evaluate.fromJSON(msg.json, seenEls, curContainer.frame);
 
-    let okOrValueResponse = rv => {
-      if (typeof rv == "undefined") {
-        sendOk(id);
+      let rv;
+      if (typeof args == "undefined" || args instanceof Array) {
+        rv = fn.apply(null, args);
       } else {
-        sendResponse(rv, id);
+        rv = fn(args);
       }
-    };
+      resolve(rv);
+    });
 
-    req.then(okOrValueResponse, err => sendError(err, id))
+    req.then(rv => sendResponse(rv, id), err => sendError(err, id))
         .catch(error.report);
   };
 }
@@ -636,7 +599,7 @@ function newSession(msg) {
  * Puts the current session to sleep, so all listeners are removed except
  * for the 'restart' listener.
  */
-function sleepSession(msg) {
+function sleepSession() {
   deleteSession();
   addMessageListener("Marionette:restart", restart);
 }
@@ -644,7 +607,7 @@ function sleepSession(msg) {
 /**
  * Restarts all our listeners after this listener was put to sleep
  */
-function restart(msg) {
+function restart() {
   removeMessageListener("Marionette:restart", restart);
   registerSelf();
 }
@@ -652,7 +615,7 @@ function restart(msg) {
 /**
  * Removes all listeners
  */
-function deleteSession(msg) {
+function deleteSession() {
   removeMessageListenerId("Marionette:newSession", newSession);
   removeMessageListenerId("Marionette:execute", executeFn);
   removeMessageListenerId("Marionette:executeInSandbox", executeInSandboxFn);
@@ -743,7 +706,8 @@ function sendToServer(uuid, data = undefined) {
  *     Unique identifier of the request.
  */
 function sendResponse(obj, uuid) {
-  sendToServer(uuid, obj);
+  let payload = evaluate.toJSON(obj, seenEls);
+  sendToServer(uuid, payload);
 }
 
 /**
@@ -809,24 +773,14 @@ function checkForInterrupted() {
 
 async function execute(script, args, timeout, opts) {
   opts.timeout = timeout;
-
   let sb = sandbox.createMutable(curContainer.frame);
-  let wargs = evaluate.fromJSON(
-      args, seenEls, curContainer.frame, curContainer.shadowRoot);
-  let res = await evaluate.sandbox(sb, script, wargs, opts);
-
-  return evaluate.toJSON(res, seenEls);
+  return evaluate.sandbox(sb, script, args, opts);
 }
 
 async function executeInSandbox(script, args, timeout, opts) {
   opts.timeout = timeout;
-
   let sb = sandboxes.get(opts.sandboxName, opts.newSandbox);
-  let wargs = evaluate.fromJSON(
-      args, seenEls, curContainer.frame, curContainer.shadowRoot);
-
-  let res = await evaluate.sandbox(sb, script, wargs, opts);
-  return evaluate.toJSON(res, seenEls);
+  return evaluate.sandbox(sb, script, args, opts);
 }
 
 function emitTouchEvent(type, touch) {
@@ -887,8 +841,7 @@ function emitTouchEvent(type, touch) {
 /**
  * Function that perform a single tap
  */
-async function singleTap(id, corx, cory) {
-  let el = seenEls.get(id);
+async function singleTap(el, corx, cory) {
   // after this block, the element will be scrolled into view
   let visible = element.isVisible(el, corx, cory);
   if (!visible) {
@@ -944,7 +897,7 @@ function createATouch(el, corx, cory, touchId) {
  */
 async function performActions(msg) {
   let chain = action.Chain.fromJSON(msg.actions);
-  await action.dispatch(chain, seenEls, curContainer.frame);
+  await action.dispatch(chain, curContainer.frame);
 }
 
 /**
@@ -955,7 +908,7 @@ async function performActions(msg) {
  */
 async function releaseActions() {
   await action.dispatchTickActions(
-      action.inputsToCancel.reverse(), 0, seenEls, curContainer.frame);
+      action.inputsToCancel.reverse(), 0, curContainer.frame);
   action.inputsToCancel.length = 0;
   action.inputStateMap.clear();
 }
@@ -1038,7 +991,7 @@ function setDispatch(batches, touches, batchIndex = 0) {
 
     switch (command) {
       case "press":
-        el = seenEls.get(pack[2]);
+        el = seenEls.get(pack[2], curContainer.frame);
         c = element.coordinates(el, pack[3], pack[4]);
         touch = createATouch(el, c.x, c.y, touchId);
         multiLast[touchId] = touch;
@@ -1056,7 +1009,7 @@ function setDispatch(batches, touches, batchIndex = 0) {
         break;
 
       case "move":
-        el = seenEls.get(pack[2]);
+        el = seenEls.get(pack[2], curContainer.frame);
         c = element.coordinates(el);
         touch = createATouch(multiLast[touchId].target, c.x, c.y, touchId);
         touchIndex = touches.indexOf(lastTouch);
@@ -1123,8 +1076,7 @@ function setDispatch(batches, touches, batchIndex = 0) {
  */
 function multiAction(args, maxLen) {
   // unwrap the original nested array
-  let commandArray = evaluate.fromJSON(
-      args, seenEls, curContainer.frame, curContainer.shadowRoot);
+  let commandArray = evaluate.fromJSON(args, seenEls, curContainer.frame);
   let concurrentEvent = [];
   let temp;
   for (let i = 0; i < maxLen; i++) {
@@ -1176,7 +1128,6 @@ function cancelRequest() {
  */
 function waitForPageLoaded(msg) {
   let {commandID, pageTimeout, startTime} = msg.json;
-
   loadListener.waitForLoadAfterFramescriptReload(
       commandID, pageTimeout, startTime);
 }
@@ -1311,13 +1262,11 @@ async function findElementContent(strategy, selector, opts = {}) {
 
   opts.all = false;
   if (opts.startNode) {
-    opts.startNode = seenEls.get(opts.startNode);
+    opts.startNode = opts.startNode;
   }
 
   let el = await element.find(curContainer, strategy, selector, opts);
-  let elRef = seenEls.add(el);
-  let webEl = element.makeWebElement(elRef);
-  return webEl;
+  return seenEls.add(el);
 }
 
 /**
@@ -1330,13 +1279,8 @@ async function findElementsContent(strategy, selector, opts = {}) {
   }
 
   opts.all = true;
-  if (opts.startNode) {
-    opts.startNode = seenEls.get(opts.startNode);
-  }
-
   let els = await element.find(curContainer, strategy, selector, opts);
-  let elRefs = seenEls.addAll(els);
-  let webEls = elRefs.map(element.makeWebElement);
+  let webEls = seenEls.addAll(els);
   return webEls;
 }
 
@@ -1352,19 +1296,21 @@ function getActiveElement() {
  * @param {number} commandID
  *     ID of the currently handled message between the driver and
  *     listener.
- * @param {WebElement} id
+ * @param {WebElement} el
  *     Reference to the web element to click.
  * @param {number} pageTimeout
  *     Timeout in milliseconds the method has to wait for the page being
  *     finished loading.
  */
 function clickElement(msg) {
-  let {commandID, id, pageTimeout} = msg.json;
+  let {commandID, webElRef, pageTimeout} = msg.json;
+  let webEl = WebElement.fromJSON(webElRef);
+  let el = seenEls.get(webEl, curContainer.frame);
 
   try {
     let loadEventExpected = true;
 
-    let target = getElementAttribute(id, "target");
+    let target = getElementAttribute(el, "target");
 
     if (target === "_blank") {
       loadEventExpected = false;
@@ -1372,7 +1318,7 @@ function clickElement(msg) {
 
     loadListener.navigate(() => {
       return interaction.clickElement(
-          seenEls.get(id),
+          el,
           capabilities.get("moz:accessibilityChecks"),
           capabilities.get("moz:webdriverClick")
       );
@@ -1383,8 +1329,7 @@ function clickElement(msg) {
   }
 }
 
-function getElementAttribute(id, name) {
-  let el = seenEls.get(id);
+function getElementAttribute(el, name) {
   if (element.isBooleanAttribute(el, name)) {
     if (el.hasAttribute(name)) {
       return "true";
@@ -1394,22 +1339,15 @@ function getElementAttribute(id, name) {
   return el.getAttribute(name);
 }
 
-function getElementProperty(id, name) {
-  let el = seenEls.get(id);
+function getElementProperty(el, name) {
   return typeof el[name] != "undefined" ? el[name] : null;
 }
 
 /**
- * Get the text of this element. This includes text from child elements.
- *
- * @param {WebElement} id
- *     Reference to web element.
- *
- * @return {string}
- *     Text of element.
+ * Get the text of this element.  This includes text from child
+ * elements.
  */
-function getElementText(id) {
-  let el = seenEls.get(id);
+function getElementText(el) {
   return atom.getElementText(el, curContainer.frame);
 }
 
@@ -1422,8 +1360,7 @@ function getElementText(id) {
  * @return {string}
  *     Tag name of element.
  */
-function getElementTagName(id) {
-  let el = seenEls.get(id);
+function getElementTagName(el) {
   return el.tagName.toLowerCase();
 }
 
@@ -1433,8 +1370,7 @@ function getElementTagName(id) {
  * Also performs additional accessibility checks if enabled by session
  * capability.
  */
-function isElementDisplayed(id) {
-  let el = seenEls.get(id);
+function isElementDisplayed(el) {
   return interaction.isElementDisplayed(
       el, capabilities.get("moz:accessibilityChecks"));
 }
@@ -1442,17 +1378,8 @@ function isElementDisplayed(id) {
 /**
  * Retrieves the computed value of the given CSS property of the given
  * web element.
- *
- * @param {String} id
- *     Web element reference.
- * @param {String} prop
- *     The CSS property to get.
- *
- * @return {String}
- *     Effective value of the requested CSS property.
  */
-function getElementValueOfCssProperty(id, prop) {
-  let el = seenEls.get(id);
+function getElementValueOfCssProperty(el, prop) {
   let st = curContainer.frame.document.defaultView.getComputedStyle(el);
   return st.getPropertyValue(prop);
 }
@@ -1460,14 +1387,10 @@ function getElementValueOfCssProperty(id, prop) {
 /**
  * Get the position and dimensions of the element.
  *
- * @param {WebElement} id
- *     Reference to web element.
- *
  * @return {Object.<string, number>}
  *     The x, y, width, and height properties of the element.
  */
-function getElementRect(id) {
-  let el = seenEls.get(id);
+function getElementRect(el) {
   let clientRect = el.getBoundingClientRect();
   return {
     x: clientRect.x + curContainer.frame.pageXOffset,
@@ -1477,17 +1400,7 @@ function getElementRect(id) {
   };
 }
 
-/**
- * Check if element is enabled.
- *
- * @param {WebElement} id
- *     Reference to web element.
- *
- * @return {boolean}
- *     True if enabled, false otherwise.
- */
-function isElementEnabled(id) {
-  let el = seenEls.get(id);
+function isElementEnabled(el) {
   return interaction.isElementEnabled(
       el, capabilities.get("moz:accessibilityChecks"));
 }
@@ -1498,14 +1411,12 @@ function isElementEnabled(id) {
  * This operation only makes sense on input elements of the Checkbox-
  * and Radio Button states, or option elements.
  */
-function isElementSelected(id) {
-  let el = seenEls.get(id);
+function isElementSelected(el) {
   return interaction.isElementSelected(
       el, capabilities.get("moz:accessibilityChecks"));
 }
 
-async function sendKeysToElement(id, val) {
-  let el = seenEls.get(id);
+async function sendKeysToElement(el, val) {
   if (el.type == "file") {
     await interaction.uploadFile(el, val);
   } else if ((el.type == "date" || el.type == "time") &&
@@ -1518,9 +1429,8 @@ async function sendKeysToElement(id, val) {
 }
 
 /** Clear the text of an element. */
-function clearElement(id) {
+function clearElement(el) {
   try {
-    let el = seenEls.get(id);
     if (el.type == "file") {
       el.value = null;
     } else {
@@ -1537,14 +1447,9 @@ function clearElement(id) {
   }
 }
 
-/**
- * Switch the current context to the specified host's Shadow DOM.
- *
- * @param {WebElement} id
- *     Reference to web element.
- */
-function switchToShadowRoot(id) {
-  if (!id) {
+/** Switch the current context to the specified host's Shadow DOM. */
+function switchToShadowRoot(el) {
+  if (!el) {
     // If no host element is passed, attempt to find a parent shadow
     // root or, if none found, unset the current shadow root
     if (curContainer.shadowRoot) {
@@ -1565,11 +1470,9 @@ function switchToShadowRoot(id) {
     return;
   }
 
-  let foundShadowRoot;
-  let hostEl = seenEls.get(id);
-  foundShadowRoot = hostEl.shadowRoot;
+  let foundShadowRoot = el.shadowRoot;
   if (!foundShadowRoot) {
-    throw new NoSuchElementError("Unable to locate shadow root: " + id);
+    throw new NoSuchElementError(pprint`Unable to locate shadow root: ${el}`);
   }
   curContainer.shadowRoot = foundShadowRoot;
 }
@@ -1583,7 +1486,7 @@ function switchToParentFrame(msg) {
   let parentElement = seenEls.add(curContainer.frame);
 
   sendSyncMessage(
-      "Marionette:switchedToFrame", {frameValue: parentElement});
+      "Marionette:switchedToFrame", {frameValue: parentElement.uuid});
 
   sendOk(msg.json.commandID);
 }
@@ -1629,13 +1532,17 @@ function switchToFrame(msg) {
     return;
   }
 
-  let id = msg.json.element;
-  if (seenEls.has(id)) {
+  let webEl;
+  if (typeof msg.json.element != "undefined") {
+    webEl = WebElement.fromUUID(msg.json.element, "content");
+  }
+  if (webEl && seenEls.has(webEl)) {
     let wantedFrame;
     try {
-      wantedFrame = seenEls.get(id);
+      wantedFrame = seenEls.get(webEl, curContainer.frame);
     } catch (e) {
       sendError(e, commandID);
+      return;
     }
 
     if (frames.length > 0) {
@@ -1670,7 +1577,7 @@ function switchToFrame(msg) {
   }
 
   if (foundFrame === null) {
-    if (typeof(msg.json.id) === "number") {
+    if (typeof msg.json.id === "number") {
       try {
         foundFrame = frames[msg.json.id].frameElement;
         if (foundFrame !== null) {
@@ -1712,9 +1619,8 @@ function switchToFrame(msg) {
 
   // send a synchronous message to let the server update the currently active
   // frame element (for getActiveFrame)
-  let frameValue = evaluate.toJSON(
-      curContainer.frame.wrappedJSObject, seenEls)[element.Key];
-  sendSyncMessage("Marionette:switchedToFrame", {"frameValue": frameValue});
+  let frameWebEl = seenEls.add(curContainer.frame.wrappedJSObject);
+  sendSyncMessage("Marionette:switchedToFrame", {"frameValue": frameWebEl.uuid});
 
   if (curContainer.frame.contentWindow === null) {
     // The frame we want to switch to is a remote/OOP frame;
@@ -1766,24 +1672,28 @@ function takeScreenshot(format, opts = {}) {
   let highlights = opts.highlights || [];
   let scroll = !!opts.scroll;
 
-  let highlightEls = highlights.map(ref => seenEls.get(ref));
+  let win = curContainer.frame;
 
   let canvas;
+  let highlightEls = highlights
+      .map(ref => WebElement.fromUUID(ref, "content"))
+      .map(webEl => seenEls.get(webEl, win));
 
   // viewport
   if (!id && !full) {
-    canvas = capture.viewport(curContainer.frame, highlightEls);
+    canvas = capture.viewport(win, highlightEls);
 
   // element or full document element
   } else {
     let el;
     if (id) {
-      el = seenEls.get(id);
+      let webEl = WebElement.fromUUID(id, "content");
+      el = seenEls.get(webEl, win);
       if (scroll) {
         element.scrollIntoView(el);
       }
     } else {
-      el = curContainer.frame.document.documentElement;
+      el = win.document.documentElement;
     }
 
     canvas = capture.element(el, highlightEls);

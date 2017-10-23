@@ -8,7 +8,7 @@
 #include "nsMenuFrame.h"
 #include "nsBoxFrame.h"
 #include "nsIContent.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsStyleContext.h"
@@ -116,7 +116,7 @@ private:
 class nsMenuAttributeChangedEvent : public Runnable
 {
 public:
-  nsMenuAttributeChangedEvent(nsIFrame* aFrame, nsIAtom* aAttr)
+  nsMenuAttributeChangedEvent(nsIFrame* aFrame, nsAtom* aAttr)
     : mozilla::Runnable("nsMenuAttributeChangedEvent")
     , mFrame(aFrame)
     , mAttr(aAttr)
@@ -144,7 +144,7 @@ public:
   }
 protected:
   WeakFrame         mFrame;
-  RefPtr<nsIAtom> mAttr;
+  RefPtr<nsAtom> mAttr;
 };
 
 //
@@ -363,7 +363,7 @@ nsMenuFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
     return;
   }
 
-  nsDisplayListCollection set;
+  nsDisplayListCollection set(aBuilder);
   nsBoxFrame::BuildDisplayListForChildren(aBuilder, set);
 
   WrapListsInRedirector(aBuilder, set, aLists);
@@ -528,10 +528,9 @@ nsMenuFrame::HandleEvent(nsPresContext* aPresContext,
         LookAndFeel::GetInt(LookAndFeel::eIntID_SubmenuDelay, 300); // ms
 
       // We're a menu, we're built, we're closed, and no timer has been kicked off.
-      mOpenTimer = do_CreateInstance("@mozilla.org/timer;1");
-      mOpenTimer->SetTarget(
-          mContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
-      mOpenTimer->InitWithCallback(mTimerMediator, menuDelay, nsITimer::TYPE_ONE_SHOT);
+      NS_NewTimerWithCallback(getter_AddRefs(mOpenTimer),
+                              mTimerMediator, menuDelay, nsITimer::TYPE_ONE_SHOT,
+                              mContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
     }
   }
 
@@ -665,7 +664,7 @@ nsMenuFrame::SelectMenu(bool aActivateFlag)
 
 nsresult
 nsMenuFrame::AttributeChanged(int32_t aNameSpaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               int32_t aModType)
 {
   if (aAttribute == nsGkAtoms::acceltext && mIgnoreAccelTextChange) {
@@ -1242,10 +1241,9 @@ nsMenuFrame::StartBlinking(WidgetGUIEvent* aEvent, bool aFlipChecked)
   }
 
   // Set up a timer to blink back on.
-  mBlinkTimer = do_CreateInstance("@mozilla.org/timer;1");
-  mBlinkTimer->SetTarget(
-      mContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
-  mBlinkTimer->InitWithCallback(mTimerMediator, kBlinkDelay, nsITimer::TYPE_ONE_SHOT);
+  NS_NewTimerWithCallback(getter_AddRefs(mBlinkTimer),
+                          mTimerMediator, kBlinkDelay, nsITimer::TYPE_ONE_SHOT,
+                          mContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
   mBlinkState = 1;
 }
 

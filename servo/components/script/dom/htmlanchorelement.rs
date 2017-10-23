@@ -57,7 +57,7 @@ impl HTMLAnchorElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLAnchorElement> {
-        Node::reflect_node(box HTMLAnchorElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLAnchorElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLAnchorElementBinding::Wrap)
     }
@@ -576,12 +576,12 @@ impl Activatable for HTMLAnchorElement {
     }
 }
 
-/// https://html.spec.whatwg.org/multipage/#the-rules-for-choosing-a-browsing-context-given-a-browsing-context-name
+/// <https://html.spec.whatwg.org/multipage/#the-rules-for-choosing-a-browsing-context-given-a-browsing-context-name>
 fn is_current_browsing_context(target: DOMString) -> bool {
     target.is_empty() || target == "_self"
 }
 
-/// https://html.spec.whatwg.org/multipage/#following-hyperlinks-2
+/// <https://html.spec.whatwg.org/multipage/#following-hyperlinks-2>
 pub fn follow_hyperlink(subject: &Element, hyperlink_suffix: Option<String>, referrer_policy: Option<ReferrerPolicy>) {
     // Step 1: replace.
     // Step 2: source browsing context.

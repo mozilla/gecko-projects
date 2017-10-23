@@ -90,12 +90,13 @@ SVGStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsresult
-SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                         nsIAtom* aPrefix, const nsAString& aValue,
+SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                         nsAtom* aPrefix, const nsAString& aValue,
+                         nsIPrincipal* aSubjectPrincipal,
                          bool aNotify)
 {
   nsresult rv = SVGStyleElementBase::SetAttr(aNameSpaceID, aName, aPrefix,
-                                             aValue, aNotify);
+                                             aValue, aSubjectPrincipal, aNotify);
   if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None) {
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
@@ -111,7 +112,7 @@ SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsAtom* aAttribute,
                            bool aNotify)
 {
   nsresult rv = SVGStyleElementBase::UnsetAttr(aNameSpaceID, aAttribute,
@@ -132,7 +133,7 @@ SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
 
 bool
 SVGStyleElement::ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult)
 {
@@ -256,9 +257,10 @@ SVGStyleElement::SetTitle(const nsAString& aTitle, ErrorResult& rv)
 // nsStyleLinkElement methods
 
 already_AddRefed<nsIURI>
-SVGStyleElement::GetStyleSheetURL(bool* aIsInline)
+SVGStyleElement::GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal)
 {
   *aIsInline = true;
+  *aTriggeringPrincipal = nullptr;
   return nullptr;
 }
 

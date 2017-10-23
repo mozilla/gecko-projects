@@ -24,23 +24,21 @@
 //! originating `DomRoot<T>`.
 //!
 
-use core::nonzero::NonZero;
 use dom::bindings::conversions::DerivedFrom;
 use dom::bindings::inheritance::Castable;
 use dom::bindings::reflector::{DomObject, Reflector};
 use dom::bindings::trace::JSTraceable;
 use dom::bindings::trace::trace_reflector;
 use dom::node::Node;
-use heapsize::HeapSizeOf;
 use js::jsapi::{JSObject, JSTracer, Heap};
 use js::rust::GCMethods;
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use mitochondria::OnceCell;
+use nonzero::NonZero;
 use script_layout_interface::TrustedNodeAddress;
 use std::cell::{Cell, UnsafeCell};
 use std::default::Default;
 use std::hash::{Hash, Hasher};
-#[cfg(debug_assertions)]
-use std::intrinsics::type_name;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Deref;
@@ -159,12 +157,12 @@ impl<T: DomObject> DomRoot<T> {
     }
 }
 
-impl<T> HeapSizeOf for DomRoot<T>
+impl<T> MallocSizeOf for DomRoot<T>
 where
-    T: DomObject + HeapSizeOf,
+    T: DomObject + MallocSizeOf,
 {
-    fn heap_size_of_children(&self) -> usize {
-        (**self).heap_size_of_children()
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        (**self).size_of(ops)
     }
 }
 
@@ -319,8 +317,8 @@ pub struct Dom<T> {
 
 // Dom<T> is similar to Rc<T>, in that it's not always clear how to avoid double-counting.
 // For now, we choose not to follow any such pointers.
-impl<T> HeapSizeOf for Dom<T> {
-    fn heap_size_of_children(&self) -> usize {
+impl<T> MallocSizeOf for Dom<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
         0
     }
 }
@@ -359,11 +357,11 @@ impl<T: DomObject> Deref for Dom<T> {
 
 unsafe impl<T: DomObject> JSTraceable for Dom<T> {
     unsafe fn trace(&self, trc: *mut JSTracer) {
-        #[cfg(debug_assertions)]
-        let trace_str = format!("for {} on heap", type_name::<T>());
-        #[cfg(debug_assertions)]
+        #[cfg(all(feature = "unstable", debug_assertions))]
+        let trace_str = format!("for {} on heap", ::std::intrinsics::type_name::<T>());
+        #[cfg(all(feature = "unstable", debug_assertions))]
         let trace_info = &trace_str[..];
-        #[cfg(not(debug_assertions))]
+        #[cfg(not(all(feature = "unstable", debug_assertions)))]
         let trace_info = "for DOM object on heap";
 
         trace_reflector(trc,
@@ -518,9 +516,9 @@ impl<T: DomObject> MutDom<T> {
     }
 }
 
-impl<T: DomObject> HeapSizeOf for MutDom<T> {
-    fn heap_size_of_children(&self) -> usize {
-        // See comment on HeapSizeOf for Dom<T>.
+impl<T: DomObject> MallocSizeOf for MutDom<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
+        // See comment on MallocSizeOf for Dom<T>.
         0
     }
 }
@@ -637,9 +635,9 @@ impl<T: DomObject> Default for MutNullableDom<T> {
     }
 }
 
-impl<T: DomObject> HeapSizeOf for MutNullableDom<T> {
-    fn heap_size_of_children(&self) -> usize {
-        // See comment on HeapSizeOf for Dom<T>.
+impl<T: DomObject> MallocSizeOf for MutNullableDom<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
+        // See comment on MallocSizeOf for Dom<T>.
         0
     }
 }
@@ -680,9 +678,9 @@ impl<T: DomObject> Default for DomOnceCell<T> {
     }
 }
 
-impl<T: DomObject> HeapSizeOf for DomOnceCell<T> {
-    fn heap_size_of_children(&self) -> usize {
-        // See comment on HeapSizeOf for Dom<T>.
+impl<T: DomObject> MallocSizeOf for DomOnceCell<T> {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
+        // See comment on MallocSizeOf for Dom<T>.
         0
     }
 }
@@ -714,7 +712,7 @@ impl<T: DomObject> LayoutDom<T> {
     }
 }
 
-/// Helper trait for safer manipulations of Option<Heap<T>> values.
+/// Helper trait for safer manipulations of `Option<Heap<T>>` values.
 pub trait OptionalHeapSetter {
     type Value;
     /// Update this optional heap value with a new value.

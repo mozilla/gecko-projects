@@ -33,7 +33,7 @@ impl HTMLSourceElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLSourceElement> {
-        Node::reflect_node(box HTMLSourceElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLSourceElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLSourceElementBinding::Wrap)
     }
@@ -44,7 +44,7 @@ impl VirtualMethods for HTMLSourceElement {
         Some(self.upcast::<HTMLElement>() as &VirtualMethods)
     }
 
-    /// https://html.spec.whatwg.org/multipage/#the-source-element:nodes-are-inserted
+    /// <https://html.spec.whatwg.org/multipage/#the-source-element:nodes-are-inserted>
     fn bind_to_tree(&self, tree_in_doc: bool) {
         self.super_type().unwrap().bind_to_tree(tree_in_doc);
         let parent = self.upcast::<Node>().GetParentNode().unwrap();

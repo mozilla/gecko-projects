@@ -41,6 +41,7 @@
 #include "AudioChannelService.h"
 #include "PuppetWidget.h"
 #include "mozilla/layers/GeckoContentController.h"
+#include "nsDeque.h"
 #include "nsISHistoryListener.h"
 #include "nsIPartialSHistoryListener.h"
 
@@ -63,6 +64,7 @@ class APZEventState;
 class AsyncDragMetrics;
 class IAPZCTreeManager;
 class ImageCompositeNotification;
+class PCompositorBridgeChild;
 } // namespace layers
 
 namespace widget {
@@ -609,7 +611,7 @@ public:
   static TabChild* GetFrom(uint64_t aLayersId);
 
   uint64_t LayersId() { return mLayersId; }
-  bool IsLayersConnected() { return mLayersConnected; }
+  Maybe<bool> IsLayersConnected() { return mLayersConnected; }
 
   void DidComposite(uint64_t aTransactionId,
                     const TimeStamp& aCompositeStart,
@@ -760,8 +762,17 @@ public:
     return mWidgetNativeData;
   }
 
+  // Prepare to dispatch all coalesced mousemove events. We'll move all data
+  // in mCoalescedMouseData to a nsDeque; then we start processing them. We
+  // can't fetch the coalesced event one by one and dispatch it because we may
+  // reentry the event loop and access to the same hashtable. It's called when
+  // dispatching some mouse events other than mousemove.
+  void FlushAllCoalescedMouseData();
+  void ProcessPendingCoalescedMouseDataAndDispatchEvents();
 
-  void MaybeDispatchCoalescedMouseMoveEvents();
+  void HandleRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
+                                  const ScrollableLayerGuid& aGuid,
+                                  const uint64_t& aInputBlockId);
 
   static bool HasActiveTabs()
   {
@@ -884,6 +895,8 @@ private:
   void InternalSetDocShellIsActive(bool aIsActive,
                                    bool aPreserveLayers);
 
+  bool CreateRemoteLayerManager(mozilla::layers::PCompositorBridgeChild* aCompositorChild);
+
   class DelayedDeleteRunnable;
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
@@ -901,7 +914,7 @@ private:
   int64_t mBeforeUnloadListeners;
   CSSRect mUnscaledOuterRect;
   nscolor mLastBackgroundColor;
-  bool mLayersConnected;
+  Maybe<bool> mLayersConnected;
   bool mDidFakeShow;
   bool mNotified;
   bool mTriedBrowserInit;
@@ -945,7 +958,12 @@ private:
   // takes time, some repeated events can be skipped to not flood child process.
   mozilla::TimeStamp mLastWheelProcessedTimeFromParent;
   mozilla::TimeDuration mLastWheelProcessingDuration;
-  CoalescedMouseData mCoalescedMouseData;
+
+  // Hash table to track coalesced mousemove events for different pointers.
+  nsClassHashtable<nsUint32HashKey, CoalescedMouseData> mCoalescedMouseData;
+
+  nsDeque mToBeDispatchedMouseData;
+
   CoalescedWheelData mCoalescedWheelData;
   RefPtr<CoalescedMouseMoveFlusher> mCoalescedMouseEventFlusher;
 

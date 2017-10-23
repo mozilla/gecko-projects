@@ -20,7 +20,7 @@ pub struct Client {
     active_worker: MutNullableDom<ServiceWorker>,
     url: ServoUrl,
     frame_type: FrameType,
-    #[ignore_heap_size_of = "Defined in uuid"]
+    #[ignore_malloc_size_of = "Defined in uuid"]
     id: Uuid
 }
 
@@ -36,7 +36,7 @@ impl Client {
     }
 
     pub fn new(window: &Window) -> DomRoot<Client> {
-        reflect_dom_object(box Client::new_inherited(window.get_url()),
+        reflect_dom_object(Box::new(Client::new_inherited(window.get_url())),
                            window,
                            Wrap)
     }

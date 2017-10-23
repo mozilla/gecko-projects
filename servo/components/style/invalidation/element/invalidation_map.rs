@@ -55,14 +55,12 @@ pub fn dir_selector_to_state(s: &[u16]) -> ElementState {
 /// This allows us to quickly scan through the dependency sites of all style
 /// rules and determine the maximum effect that a given state or attribute
 /// change may have on the style of elements in the document.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, MallocSizeOf)]
 pub struct Dependency {
     /// The dependency selector.
     #[cfg_attr(feature = "gecko",
                ignore_malloc_size_of = "CssRules have primary refs, we measure there")]
-    #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
+    #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
     pub selector: Selector<SelectorImpl>,
 
     /// The offset into the selector that we should match on.
@@ -79,7 +77,7 @@ impl Dependency {
             return None;
         }
 
-        Some(self.selector.combinator_at(self.selector_offset))
+        Some(self.selector.combinator_at_match_order(self.selector_offset - 1))
     }
 
     /// Whether this dependency affects the style of the element.
@@ -115,9 +113,7 @@ impl SelectorMapEntry for Dependency {
 
 /// The same, but for state selectors, which can track more exactly what state
 /// do they track.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, MallocSizeOf)]
 pub struct StateDependency {
     /// The other dependency fields.
     pub dep: Dependency,
@@ -139,9 +135,7 @@ impl SelectorMapEntry for StateDependency {
 /// In particular, we want to lookup as few things as possible to get the fewer
 /// selectors the better, so this looks up by id, class, or looks at the list of
 /// state/other attribute affecting selectors.
-#[derive(Debug)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Debug, MallocSizeOf)]
 pub struct InvalidationMap {
     /// A map from a given class name to all the selectors with that class
     /// selector.
@@ -176,18 +170,6 @@ impl InvalidationMap {
             has_class_attribute_selectors: false,
             has_id_attribute_selectors: false,
         }
-    }
-
-    /// Returns the number of dependencies stored in the invalidation map.
-    pub fn len(&self) -> usize {
-        self.state_affecting_selectors.len() +
-        self.other_attribute_affecting_selectors.len() +
-        self.id_to_selector.iter().fold(0, |accum, (_, ref v)| {
-            accum + v.len()
-        }) +
-        self.class_to_selector.iter().fold(0, |accum, (_, ref v)| {
-            accum + v.len()
-        })
     }
 
     /// Adds a selector to this `InvalidationMap`.  Returns Err(..) to
@@ -252,8 +234,7 @@ impl InvalidationMap {
 
             for class in compound_visitor.classes {
                 self.class_to_selector
-                    .entry(class, quirks_mode)
-                    .or_insert_with(SmallVec::new)
+                    .try_get_or_insert_with(class, quirks_mode, SmallVec::new)?
                     .try_push(Dependency {
                         selector: selector.clone(),
                         selector_offset: sequence_start,
@@ -262,8 +243,7 @@ impl InvalidationMap {
 
             for id in compound_visitor.ids {
                 self.id_to_selector
-                    .entry(id, quirks_mode)
-                    .or_insert_with(SmallVec::new)
+                    .try_get_or_insert_with(id, quirks_mode, SmallVec::new)?
                     .try_push(Dependency {
                         selector: selector.clone(),
                         selector_offset: sequence_start,
@@ -298,6 +278,22 @@ impl InvalidationMap {
         }
 
         Ok(())
+    }
+
+    /// Allows mutation of this InvalidationMap.
+    pub fn begin_mutation(&mut self) {
+        self.class_to_selector.begin_mutation();
+        self.id_to_selector.begin_mutation();
+        self.state_affecting_selectors.begin_mutation();
+        self.other_attribute_affecting_selectors.begin_mutation();
+    }
+
+    /// Disallows mutation of this InvalidationMap.
+    pub fn end_mutation(&mut self) {
+        self.class_to_selector.end_mutation();
+        self.id_to_selector.end_mutation();
+        self.state_affecting_selectors.end_mutation();
+        self.other_attribute_affecting_selectors.end_mutation();
     }
 }
 

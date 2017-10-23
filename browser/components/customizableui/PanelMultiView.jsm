@@ -231,7 +231,7 @@ this.PanelMultiView = class {
    *                     dispatched.
    */
   get current() {
-    return this._viewShowing || this._currentSubView
+    return this._viewShowing || this._currentSubView;
   }
   get _currentSubView() {
     return this.panelViews ? this.panelViews.currentView : this.__currentSubView;
@@ -344,6 +344,7 @@ this.PanelMultiView = class {
     if (!this.node)
       return;
 
+    this._cleanupTransitionPhase();
     if (this._ephemeral)
       this.hideAllViewsExcept(null);
     let mainView = this._mainView;
@@ -512,6 +513,7 @@ this.PanelMultiView = class {
       // event has already been dispatched. Don't do it twice.
       let showingSameView = viewNode == previousViewNode;
       let playTransition = (!!previousViewNode && !showingSameView && this._panel.state == "open");
+      let isMainView = viewNode.id == this._mainViewId;
 
       let dwu, previousRect;
       if (playTransition || this.panelViews) {
@@ -519,16 +521,15 @@ this.PanelMultiView = class {
         previousRect = previousViewNode.__lastKnownBoundingRect =
           dwu.getBoundsWithoutFlushing(previousViewNode);
         if (this.panelViews) {
-          // Here go the measures that have the same caching lifetime as the width
-          // of the main view, i.e. 'forever', during the instance lifetime.
+          // Cache the measures that have the same caching lifetime as the width
+          // or height of the main view, i.e. whilst the panel is shown and/ or
+          // visible.
           if (!this._mainViewWidth) {
             this._mainViewWidth = previousRect.width;
             let top = dwu.getBoundsWithoutFlushing(previousViewNode.firstChild || previousViewNode).top;
             let bottom = dwu.getBoundsWithoutFlushing(previousViewNode.lastChild || previousViewNode).bottom;
             this._viewVerticalPadding = previousRect.height - (bottom - top);
           }
-          // Here go the measures that have the same caching lifetime as the height
-          // of the main view, i.e. whilst the panel is shown and/ or visible.
           if (!this._mainViewHeight) {
             this._mainViewHeight = previousRect.height;
             this._viewContainer.style.minHeight = this._mainViewHeight + "px";
@@ -540,7 +541,7 @@ this.PanelMultiView = class {
       // Because the 'mainview' attribute may be out-of-sync, due to view node
       // reparenting in combination with ephemeral PanelMultiView instances,
       // this is the best place to correct it (just before showing).
-      if (viewNode.id == this._mainViewId)
+      if (isMainView)
         viewNode.setAttribute("mainview", true);
       else
         viewNode.removeAttribute("mainview");
@@ -551,7 +552,7 @@ this.PanelMultiView = class {
           viewNode.setAttribute("title", aAnchor.getAttribute("label"));
         viewNode.classList.add("PanelUI-subView");
       }
-      if (this.panelViews && this._mainViewWidth)
+      if (this.panelViews && !isMainView && this._mainViewWidth)
         viewNode.style.maxWidth = viewNode.style.minWidth = this._mainViewWidth + "px";
 
       if (!showingSameView || !viewNode.hasAttribute("current")) {
@@ -743,6 +744,13 @@ this.PanelMultiView = class {
         delete details.listener;
         resolve();
       });
+      this._viewContainer.addEventListener("transitioncancel", details.cancelListener = ev => {
+        if (ev.target != this._viewStack)
+          return;
+        this._viewContainer.removeEventListener("transitioncancel", details.cancelListener);
+        delete details.cancelListener;
+        resolve();
+      });
     });
 
     details.phase = TRANSITION_PHASES.END;
@@ -754,14 +762,18 @@ this.PanelMultiView = class {
    * Attempt to clean up the attributes and properties set by `_transitionViews`
    * above. Which attributes and properties depends on the phase the transition
    * was left from - normally that'd be `TRANSITION_PHASES.END`.
+   *
+   * @param {Object} details Dictionary object containing details of the transition
+   *                         that should be cleaned up after. Defaults to the most
+   *                         recent details.
    */
   async _cleanupTransitionPhase(details = this._transitionDetails) {
-    // Make sure to only clean up a phase from the most recent transition.
-    if (!this._transitionDetails || details != this._transitionDetails)
+    if (!details || !this.node)
       return;
 
-    let {phase, previousViewNode, viewNode, reverse, resolve, listener, anchor} = this._transitionDetails;
-    this._transitionDetails = null;
+    let {phase, previousViewNode, viewNode, reverse, resolve, listener, cancelListener, anchor} = details;
+    if (details == this._transitionDetails)
+      this._transitionDetails = null;
 
     // Do the things we _always_ need to do whenever the transition ends or is
     // interrupted.
@@ -801,6 +813,8 @@ this.PanelMultiView = class {
       viewNode.style.removeProperty("width");
       if (listener)
         this._viewContainer.removeEventListener("transitionend", listener);
+      if (cancelListener)
+        this._viewContainer.removeEventListener("transitioncancel", cancelListener);
       if (resolve)
         resolve();
     }
@@ -1048,8 +1062,7 @@ this.PanelMultiView = class {
       case "popupshown":
         // Now that the main view is visible, we can check the height of the
         // description elements it contains.
-        if (!this.panelViews)
-          this.descriptionHeightWorkaround();
+        this.descriptionHeightWorkaround();
         break;
       case "popuphidden": {
         // WebExtensions consumers can hide the popup from viewshowing, or
@@ -1114,7 +1127,7 @@ this.PanelMultiView = class {
         // check here.
         do {
           buttonIndex = buttonIndex + (isDown ? 1 : -1);
-        } while (buttons[buttonIndex] && buttons[buttonIndex].disabled)
+        } while (buttons[buttonIndex] && buttons[buttonIndex].disabled);
         if (isDown && buttonIndex > maxIdx)
           buttonIndex = 0;
         else if (!isDown && buttonIndex < 0)
@@ -1369,4 +1382,4 @@ this.PanelMultiView = class {
       element.style.height = bounds.height + "px";
     }
   }
-}
+};

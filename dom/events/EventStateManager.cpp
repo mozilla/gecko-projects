@@ -319,11 +319,8 @@ EventStateManager::UpdateUserActivityTimer()
     return NS_OK;
 
   if (!gUserInteractionTimer) {
-    CallCreateInstance("@mozilla.org/timer;1", &gUserInteractionTimer);
-    if (gUserInteractionTimer) {
-      gUserInteractionTimer->SetTarget(
-        SystemGroup::EventTargetFor(TaskCategory::Other));
-    }
+    gUserInteractionTimer = NS_NewTimer(
+      SystemGroup::EventTargetFor(TaskCategory::Other)).take();
   }
 
   if (gUserInteractionTimer) {
@@ -725,6 +722,13 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     // into UpdateCursor().
     GenerateDragGesture(aPresContext, mouseEvent);
     UpdateCursor(aPresContext, aEvent, mCurrentTarget, aStatus);
+
+    UpdateLastRefPointOfMouseEvent(mouseEvent);
+    if (sIsPointerLocked) {
+      ResetPointerToWindowCenterWhilePointerLocked(mouseEvent);
+    }
+    UpdateLastPointerPosition(mouseEvent);
+
     GenerateMouseEnterExit(mouseEvent);
     // Flush pending layout changes, so that later mouse move events
     // will go to the right nodes.
@@ -1288,8 +1292,9 @@ EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
     return;
   }
   case eDragEventClass: {
-    if (remote->Manager()->IsContentParent()) {
-      remote->Manager()->AsContentParent()->MaybeInvokeDragSession(remote);
+    RefPtr<TabParent> tabParent = remote;
+    if (tabParent->Manager()->IsContentParent()) {
+      tabParent->Manager()->AsContentParent()->MaybeInvokeDragSession(tabParent);
     }
 
     nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
@@ -1305,7 +1310,7 @@ EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       }
     }
 
-    remote->SendRealDragEvent(*aEvent->AsDragEvent(), action, dropEffect);
+    tabParent->SendRealDragEvent(*aEvent->AsDragEvent(), action, dropEffect);
     return;
   }
   case ePluginEventClass: {
@@ -1446,18 +1451,15 @@ EventStateManager::CreateClickHoldTimer(nsPresContext* inPresContext,
       return;
   }
 
-  mClickHoldTimer = do_CreateInstance("@mozilla.org/timer;1");
-  if (mClickHoldTimer) {
-    int32_t clickHoldDelay =
-      Preferences::GetInt("ui.click_hold_context_menus.delay", 500);
-    mClickHoldTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::Other));
-    mClickHoldTimer->InitWithNamedFuncCallback(
-      sClickHoldCallback,
-      this,
-      clickHoldDelay,
-      nsITimer::TYPE_ONE_SHOT,
-      "EventStateManager::CreateClickHoldTimer");
-  }
+  int32_t clickHoldDelay =
+    Preferences::GetInt("ui.click_hold_context_menus.delay", 500);
+  NS_NewTimerWithFuncCallback(getter_AddRefs(mClickHoldTimer),
+                              sClickHoldCallback,
+                              this,
+                              clickHoldDelay,
+                              nsITimer::TYPE_ONE_SHOT,
+                              "EventStateManager::CreateClickHoldTimer",
+                              SystemGroup::EventTargetFor(TaskCategory::Other));
 } // CreateClickHoldTimer
 
 //
@@ -2624,7 +2626,7 @@ EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   }
 
   nsIScrollbarMediator::ScrollSnapMode snapMode = nsIScrollbarMediator::DISABLE_SNAP;
-  nsIAtom* origin = nullptr;
+  nsAtom* origin = nullptr;
   switch (aEvent->mDeltaMode) {
     case nsIDOMWheelEvent::DOM_DELTA_LINE:
       origin = nsGkAtoms::mouseWheel;
@@ -3263,6 +3265,20 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       }
 
       WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent();
+      MOZ_ASSERT(wheelEvent);
+
+      // When APZ is enabled, the actual scroll animation might be handled by
+      // the compositor.
+      WheelPrefs::Action action =
+        wheelEvent->mFlags.mHandledByAPZ ?
+          WheelPrefs::ACTION_NONE :
+          WheelPrefs::GetInstance()->ComputeActionFor(wheelEvent);
+
+      // Make the wheel event a horizontal scroll event.  I.e., deltaY values
+      // are set to deltaX and deltaY and deltaZ values are set to 0.
+      // When AutoWheelDeltaAdjuster instance is destroyed, the delta values
+      // are restored and make overflow deltaX becomes 0.
+      AutoWheelDeltaAdjuster adjuster(*wheelEvent);
 
       // Check if the frame to scroll before checking the default action
       // because if the scroll target is a plugin, the default action should be
@@ -3271,20 +3287,14 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         ComputeScrollTarget(mCurrentTarget, wheelEvent,
                             COMPUTE_DEFAULT_ACTION_TARGET);
       nsPluginFrame* pluginFrame = do_QueryFrame(frameToScroll);
-
-      // When APZ is enabled, the actual scroll animation might be handled by
-      // the compositor.
-      WheelPrefs::Action action;
       if (pluginFrame) {
         MOZ_ASSERT(pluginFrame->WantsToHandleWheelEventAsDefaultAction());
         action = WheelPrefs::ACTION_SEND_TO_PLUGIN;
-      } else if (wheelEvent->mFlags.mHandledByAPZ) {
-        action = WheelPrefs::ACTION_NONE;
-      } else {
-        action = WheelPrefs::GetInstance()->ComputeActionFor(wheelEvent);
       }
+
       switch (action) {
-        case WheelPrefs::ACTION_SCROLL: {
+        case WheelPrefs::ACTION_SCROLL:
+        case WheelPrefs::ACTION_HORIZONTAL_SCROLL: {
           // For scrolling of default action, we should honor the mouse wheel
           // transaction.
 
@@ -4266,6 +4276,91 @@ EventStateManager::GeneratePointerEnterExit(EventMessage aMessage,
   GenerateMouseEnterExit(&pointerEvent);
 }
 
+/* static */ void
+EventStateManager::UpdateLastRefPointOfMouseEvent(WidgetMouseEvent* aMouseEvent)
+{
+  if (aMouseEvent->mMessage != eMouseMove &&
+      aMouseEvent->mMessage != ePointerMove) {
+    return;
+  }
+
+  // Mouse movement is reported on the MouseEvent.movement{X,Y} fields.
+  // Movement is calculated in UIEvent::GetMovementPoint() as:
+  //   previous_mousemove_mRefPoint - current_mousemove_mRefPoint.
+  if (sIsPointerLocked && aMouseEvent->mWidget) {
+    // The pointer is locked. If the pointer is not located at the center of
+    // the window, dispatch a synthetic mousemove to return the pointer there.
+    // Doing this between "real" pointer moves gives the impression that the
+    // (locked) pointer can continue moving and won't stop at the screen
+    // boundary. We cancel the synthetic event so that we don't end up
+    // dispatching the centering move event to content.
+    aMouseEvent->mLastRefPoint =
+      GetWindowClientRectCenter(aMouseEvent->mWidget);
+
+  } else if (sLastRefPoint == kInvalidRefPoint) {
+    // We don't have a valid previous mousemove mRefPoint. This is either
+    // the first move we've encountered, or the mouse has just re-entered
+    // the application window. We should report (0,0) movement for this
+    // case, so make the current and previous mRefPoints the same.
+    aMouseEvent->mLastRefPoint = aMouseEvent->mRefPoint;
+  } else {
+    aMouseEvent->mLastRefPoint = sLastRefPoint;
+  }
+}
+
+/* static */ void
+EventStateManager::ResetPointerToWindowCenterWhilePointerLocked(
+                     WidgetMouseEvent* aMouseEvent)
+{
+  MOZ_ASSERT(sIsPointerLocked);
+  if ((aMouseEvent->mMessage != eMouseMove &&
+       aMouseEvent->mMessage != ePointerMove) || !aMouseEvent->mWidget) {
+    return;
+  }
+
+  // We generate pointermove from mousemove event, so only synthesize native
+  // mouse move and update sSynthCenteringPoint by mousemove event.
+  bool updateSynthCenteringPoint = aMouseEvent->mMessage == eMouseMove;
+
+  // The pointer is locked. If the pointer is not located at the center of
+  // the window, dispatch a synthetic mousemove to return the pointer there.
+  // Doing this between "real" pointer moves gives the impression that the
+  // (locked) pointer can continue moving and won't stop at the screen
+  // boundary. We cancel the synthetic event so that we don't end up
+  // dispatching the centering move event to content.
+  LayoutDeviceIntPoint center =
+    GetWindowClientRectCenter(aMouseEvent->mWidget);
+
+  if (aMouseEvent->mRefPoint != center && updateSynthCenteringPoint) {
+    // Mouse move doesn't finish at the center of the window. Dispatch a
+    // synthetic native mouse event to move the pointer back to the center
+    // of the window, to faciliate more movement. But first, record that
+    // we've dispatched a synthetic mouse movement, so we can cancel it
+    // in the other branch here.
+    sSynthCenteringPoint = center;
+    aMouseEvent->mWidget->SynthesizeNativeMouseMove(
+      center + aMouseEvent->mWidget->WidgetToScreenOffset(), nullptr);
+  } else if (aMouseEvent->mRefPoint == sSynthCenteringPoint) {
+    // This is the "synthetic native" event we dispatched to re-center the
+    // pointer. Cancel it so we don't expose the centering move to content.
+    aMouseEvent->StopPropagation();
+    // Clear sSynthCenteringPoint so we don't cancel other events
+    // targeted at the center.
+    if (updateSynthCenteringPoint) {
+      sSynthCenteringPoint = kInvalidRefPoint;
+    }
+  }
+}
+
+/* static */ void
+EventStateManager::UpdateLastPointerPosition(WidgetMouseEvent* aMouseEvent)
+{
+  if (aMouseEvent->mMessage != eMouseMove) {
+    return;
+  }
+  sLastRefPoint = aMouseEvent->mRefPoint;
+}
+
 void
 EventStateManager::GenerateMouseEnterExit(WidgetMouseEvent* aMouseEvent)
 {
@@ -4278,51 +4373,6 @@ EventStateManager::GenerateMouseEnterExit(WidgetMouseEvent* aMouseEvent)
 
   switch(aMouseEvent->mMessage) {
   case eMouseMove:
-    {
-      // Mouse movement is reported on the MouseEvent.movement{X,Y} fields.
-      // Movement is calculated in UIEvent::GetMovementPoint() as:
-      //   previous_mousemove_mRefPoint - current_mousemove_mRefPoint.
-      if (sIsPointerLocked && aMouseEvent->mWidget) {
-        // The pointer is locked. If the pointer is not located at the center of
-        // the window, dispatch a synthetic mousemove to return the pointer there.
-        // Doing this between "real" pointer moves gives the impression that the
-        // (locked) pointer can continue moving and won't stop at the screen
-        // boundary. We cancel the synthetic event so that we don't end up
-        // dispatching the centering move event to content.
-        LayoutDeviceIntPoint center =
-          GetWindowClientRectCenter(aMouseEvent->mWidget);
-        aMouseEvent->mLastRefPoint = center;
-        if (aMouseEvent->mRefPoint != center) {
-          // Mouse move doesn't finish at the center of the window. Dispatch a
-          // synthetic native mouse event to move the pointer back to the center
-          // of the window, to faciliate more movement. But first, record that
-          // we've dispatched a synthetic mouse movement, so we can cancel it
-          // in the other branch here.
-          sSynthCenteringPoint = center;
-          aMouseEvent->mWidget->SynthesizeNativeMouseMove(
-            center + aMouseEvent->mWidget->WidgetToScreenOffset(), nullptr);
-        } else if (aMouseEvent->mRefPoint == sSynthCenteringPoint) {
-          // This is the "synthetic native" event we dispatched to re-center the
-          // pointer. Cancel it so we don't expose the centering move to content.
-          aMouseEvent->StopPropagation();
-          // Clear sSynthCenteringPoint so we don't cancel other events
-          // targeted at the center.
-          sSynthCenteringPoint = kInvalidRefPoint;
-        }
-      } else if (sLastRefPoint == kInvalidRefPoint) {
-        // We don't have a valid previous mousemove mRefPoint. This is either
-        // the first move we've encountered, or the mouse has just re-entered
-        // the application window. We should report (0,0) movement for this
-        // case, so make the current and previous mRefPoints the same.
-        aMouseEvent->mLastRefPoint = aMouseEvent->mRefPoint;
-      } else {
-        aMouseEvent->mLastRefPoint = sLastRefPoint;
-      }
-
-      // Update the last known mRefPoint with the current mRefPoint.
-      sLastRefPoint = aMouseEvent->mRefPoint;
-    }
-    MOZ_FALLTHROUGH;
   case ePointerMove:
   case ePointerDown:
   case ePointerGotCapture:
@@ -4421,6 +4471,10 @@ EventStateManager::SetPointerLock(nsIWidget* aWidget,
 
   if (sIsPointerLocked) {
     MOZ_ASSERT(aWidget, "Locking pointer requires a widget");
+
+    // Release all pointer capture when a pointer lock is successfully applied
+    // on an element.
+    PointerEventHandler::ReleaseAllPointerCapture();
 
     // Store the last known ref point so we can reposition the pointer after unlock.
     sPreLockPoint = sLastRefPoint;
@@ -5611,11 +5665,10 @@ void
 EventStateManager::WheelPrefs::Reset()
 {
   memset(mInit, 0, sizeof(mInit));
-
 }
 
 EventStateManager::WheelPrefs::Index
-EventStateManager::WheelPrefs::GetIndexFor(WidgetWheelEvent* aEvent)
+EventStateManager::WheelPrefs::GetIndexFor(const WidgetWheelEvent* aEvent)
 {
   if (!aEvent) {
     return INDEX_DEFAULT;
@@ -5713,15 +5766,37 @@ EventStateManager::WheelPrefs::Init(EventStateManager::WheelPrefs::Index aIndex)
   // Compute action values overridden by .override_x pref.
   // At present, override is possible only for the x-direction
   // because this pref is introduced mainly for tilt wheels.
+  // Note that ACTION_HORIZONTAL_SCROLL isn't a valid value for this pref
+  // because it affects only to deltaY.
   prefNameAction.AppendLiteral(".override_x");
   int32_t actionOverrideX = Preferences::GetInt(prefNameAction.get(), -1);
-  if (actionOverrideX < -1 || actionOverrideX > int32_t(ACTION_LAST)) {
+  if (actionOverrideX < -1 || actionOverrideX > int32_t(ACTION_LAST) ||
+      actionOverrideX == ACTION_HORIZONTAL_SCROLL) {
     NS_WARNING("Unsupported action override pref value, didn't override.");
     actionOverrideX = -1;
   }
   mOverriddenActionsX[aIndex] = (actionOverrideX == -1)
                               ? static_cast<Action>(action)
                               : static_cast<Action>(actionOverrideX);
+}
+
+void
+EventStateManager::WheelPrefs::GetMultiplierForDeltaXAndY(
+                                 const WidgetWheelEvent* aEvent,
+                                 Index aIndex,
+                                 double* aMultiplierForDeltaX,
+                                 double* aMultiplierForDeltaY)
+{
+  // If the event should be treated as horizontal wheel operation, deltaY
+  // should be multiplied by mMultiplierY, however, it might be moved to
+  // deltaX for handling default action.  In such case, we need to treat
+  // mMultiplierX and mMultiplierY as swapped.
+  *aMultiplierForDeltaX = mMultiplierX[aIndex];
+  *aMultiplierForDeltaY = mMultiplierY[aIndex];
+  if (aEvent->mDeltaValuesAdjustedForDefaultHandler &&
+      ComputeActionFor(aEvent) == ACTION_HORIZONTAL_SCROLL) {
+    std::swap(*aMultiplierForDeltaX, *aMultiplierForDeltaY);
+  }
 }
 
 void
@@ -5734,16 +5809,19 @@ EventStateManager::WheelPrefs::ApplyUserPrefsToDelta(WidgetWheelEvent* aEvent)
   Index index = GetIndexFor(aEvent);
   Init(index);
 
-  aEvent->mDeltaX *= mMultiplierX[index];
-  aEvent->mDeltaY *= mMultiplierY[index];
+  double multiplierForDeltaX = 1.0, multiplierForDeltaY = 1.0;
+  GetMultiplierForDeltaXAndY(aEvent, index,
+                             &multiplierForDeltaX, &multiplierForDeltaY);
+  aEvent->mDeltaX *= multiplierForDeltaX;
+  aEvent->mDeltaY *= multiplierForDeltaY;
   aEvent->mDeltaZ *= mMultiplierZ[index];
 
   // If the multiplier is 1.0 or -1.0, i.e., it doesn't change the absolute
   // value, we should use lineOrPageDelta values which were set by widget.
   // Otherwise, we need to compute them from accumulated delta values.
   if (!NeedToComputeLineOrPageDelta(aEvent)) {
-    aEvent->mLineOrPageDeltaX *= static_cast<int32_t>(mMultiplierX[index]);
-    aEvent->mLineOrPageDeltaY *= static_cast<int32_t>(mMultiplierY[index]);
+    aEvent->mLineOrPageDeltaX *= static_cast<int32_t>(multiplierForDeltaX);
+    aEvent->mLineOrPageDeltaY *= static_cast<int32_t>(multiplierForDeltaY);
   } else {
     aEvent->mLineOrPageDeltaX = 0;
     aEvent->mLineOrPageDeltaY = 0;
@@ -5767,16 +5845,19 @@ EventStateManager::WheelPrefs::CancelApplyingUserPrefsFromOverflowDelta(
   //     happy?  Although, widget can know the pref applied delta values by
   //     referrencing the deltaX and deltaY of the event.
 
-  if (mMultiplierX[index]) {
-    aEvent->mOverflowDeltaX /= mMultiplierX[index];
+  double multiplierForDeltaX = 1.0, multiplierForDeltaY = 1.0;
+  GetMultiplierForDeltaXAndY(aEvent, index,
+                             &multiplierForDeltaX, &multiplierForDeltaY);
+  if (multiplierForDeltaX) {
+    aEvent->mOverflowDeltaX /= multiplierForDeltaX;
   }
-  if (mMultiplierY[index]) {
-    aEvent->mOverflowDeltaY /= mMultiplierY[index];
+  if (multiplierForDeltaY) {
+    aEvent->mOverflowDeltaY /= multiplierForDeltaY;
   }
 }
 
 EventStateManager::WheelPrefs::Action
-EventStateManager::WheelPrefs::ComputeActionFor(WidgetWheelEvent* aEvent)
+EventStateManager::WheelPrefs::ComputeActionFor(const WidgetWheelEvent* aEvent)
 {
   Index index = GetIndexFor(aEvent);
   Init(index);
@@ -5785,7 +5866,9 @@ EventStateManager::WheelPrefs::ComputeActionFor(WidgetWheelEvent* aEvent)
     (Abs(aEvent->mDeltaX) > Abs(aEvent->mDeltaY) &&
      Abs(aEvent->mDeltaX) > Abs(aEvent->mDeltaZ));
   Action* actions = deltaXPreferred ? mOverriddenActionsX : mActions;
-  if (actions[index] == ACTION_NONE || actions[index] == ACTION_SCROLL) {
+  if (actions[index] == ACTION_NONE ||
+      actions[index] == ACTION_SCROLL ||
+      actions[index] == ACTION_HORIZONTAL_SCROLL) {
     return actions[index];
   }
 
@@ -5793,8 +5876,11 @@ EventStateManager::WheelPrefs::ComputeActionFor(WidgetWheelEvent* aEvent)
   if (aEvent->mIsMomentum) {
     // Use the default action.  Note that user might kill the wheel scrolling.
     Init(INDEX_DEFAULT);
-    return (actions[INDEX_DEFAULT] == ACTION_SCROLL) ? ACTION_SCROLL :
-                                                       ACTION_NONE;
+    if (actions[INDEX_DEFAULT] == ACTION_SCROLL ||
+        actions[INDEX_DEFAULT] == ACTION_HORIZONTAL_SCROLL) {
+      return actions[INDEX_DEFAULT];
+    }
+    return ACTION_NONE;
   }
 
   return actions[index];
@@ -5802,7 +5888,7 @@ EventStateManager::WheelPrefs::ComputeActionFor(WidgetWheelEvent* aEvent)
 
 bool
 EventStateManager::WheelPrefs::NeedToComputeLineOrPageDelta(
-                                 WidgetWheelEvent* aEvent)
+                                 const WidgetWheelEvent* aEvent)
 {
   Index index = GetIndexFor(aEvent);
   Init(index);
@@ -5812,15 +5898,19 @@ EventStateManager::WheelPrefs::NeedToComputeLineOrPageDelta(
 }
 
 void
-EventStateManager::WheelPrefs::GetUserPrefsForEvent(WidgetWheelEvent* aEvent,
-                                                    double* aOutMultiplierX,
-                                                    double* aOutMultiplierY)
+EventStateManager::WheelPrefs::GetUserPrefsForEvent(
+                                 const WidgetWheelEvent* aEvent,
+                                 double* aOutMultiplierX,
+                                 double* aOutMultiplierY)
 {
   Index index = GetIndexFor(aEvent);
   Init(index);
 
-  *aOutMultiplierX = mMultiplierX[index];
-  *aOutMultiplierY = mMultiplierY[index];
+  double multiplierForDeltaX = 1.0, multiplierForDeltaY = 1.0;
+  GetMultiplierForDeltaXAndY(aEvent, index,
+                             &multiplierForDeltaX, &multiplierForDeltaY);
+  *aOutMultiplierX = multiplierForDeltaX;
+  *aOutMultiplierY = multiplierForDeltaY;
 }
 
 // static
@@ -5833,15 +5923,34 @@ EventStateManager::WheelPrefs::WheelEventsEnabledOnPlugins()
   return sWheelEventsEnabledOnPlugins;
 }
 
+// static
 bool
-EventStateManager::WheelEventIsScrollAction(WidgetWheelEvent* aEvent)
+EventStateManager::WheelEventIsScrollAction(const WidgetWheelEvent* aEvent)
 {
-  return aEvent->mMessage == eWheel &&
-         WheelPrefs::GetInstance()->ComputeActionFor(aEvent) == WheelPrefs::ACTION_SCROLL;
+  if (aEvent->mMessage != eWheel) {
+    return false;
+  }
+  WheelPrefs::Action action =
+    WheelPrefs::GetInstance()->ComputeActionFor(aEvent);
+  return action == WheelPrefs::ACTION_SCROLL ||
+         action == WheelPrefs::ACTION_HORIZONTAL_SCROLL;
+}
+
+// static
+bool
+EventStateManager::WheelEventIsHorizontalScrollAction(
+                     const WidgetWheelEvent* aEvent)
+{
+  if (aEvent->mMessage != eWheel) {
+    return false;
+  }
+  WheelPrefs::Action action =
+    WheelPrefs::GetInstance()->ComputeActionFor(aEvent);
+  return action == WheelPrefs::ACTION_HORIZONTAL_SCROLL;
 }
 
 void
-EventStateManager::GetUserPrefsForWheelEvent(WidgetWheelEvent* aEvent,
+EventStateManager::GetUserPrefsForWheelEvent(const WidgetWheelEvent* aEvent,
                                              double* aOutMultiplierX,
                                              double* aOutMultiplierY)
 {
@@ -5851,7 +5960,7 @@ EventStateManager::GetUserPrefsForWheelEvent(WidgetWheelEvent* aEvent,
 
 bool
 EventStateManager::WheelPrefs::IsOverOnePageScrollAllowedX(
-                                 WidgetWheelEvent* aEvent)
+                                 const WidgetWheelEvent* aEvent)
 {
   Index index = GetIndexFor(aEvent);
   Init(index);
@@ -5861,7 +5970,7 @@ EventStateManager::WheelPrefs::IsOverOnePageScrollAllowedX(
 
 bool
 EventStateManager::WheelPrefs::IsOverOnePageScrollAllowedY(
-                                 WidgetWheelEvent* aEvent)
+                                 const WidgetWheelEvent* aEvent)
 {
   Index index = GetIndexFor(aEvent);
   Init(index);

@@ -16,7 +16,6 @@ Components.utils.import("resource://gre/modules/Downloads.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
 Components.utils.import("resource:///modules/ShellService.jsm");
 Components.utils.import("resource:///modules/TransientPrefs.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
 Components.utils.import("resource://gre/modules/DownloadUtils.jsm");
 Components.utils.import("resource://gre/modules/LoadContextInfo.jsm");
@@ -97,11 +96,6 @@ const APP_ICON_ATTR_NAME = "appHandlerIcon";
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
   "resource://gre/modules/osfile.jsm");
 
-if (AppConstants.E10S_TESTING_ONLY) {
-  XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-    "resource://gre/modules/UpdateUtils.jsm");
-}
-
 if (AppConstants.MOZ_DEV_EDITION) {
   XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
     "resource://gre/modules/FxAccounts.jsm");
@@ -146,16 +140,13 @@ var gMainPane = {
 
   get _list() {
     delete this._list;
-    return this._list = document.getElementById("handlersView")
+    return this._list = document.getElementById("handlersView");
   },
 
   get _filter() {
     delete this._filter;
-    return this._filter = document.getElementById("filter")
+    return this._filter = document.getElementById("filter");
   },
-
-  _prefSvc: Cc["@mozilla.org/preferences-service;1"].
-    getService(Ci.nsIPrefBranch),
 
   _mimeSvc: Cc["@mozilla.org/mime;1"].
     getService(Ci.nsIMIMEService),
@@ -165,9 +156,6 @@ var gMainPane = {
 
   _handlerSvc: Cc["@mozilla.org/uriloader/handler-service;1"].
     getService(Ci.nsIHandlerService),
-
-  _ioSvc: Cc["@mozilla.org/network/io-service;1"].
-    getService(Ci.nsIIOService),
 
   _backoffIndex: 0,
 
@@ -244,9 +232,7 @@ var gMainPane = {
     if (AppConstants.platform == "win") {
       // Functionality for "Show tabs in taskbar" on Windows 7 and up.
       try {
-        let sysInfo = Cc["@mozilla.org/system-info;1"].
-          getService(Ci.nsIPropertyBag2);
-        let ver = parseFloat(sysInfo.getProperty("version"));
+        let ver = parseFloat(Services.sysinfo.getProperty("version"));
         let showTabsInTaskbar = document.getElementById("showTabsInTaskbar");
         showTabsInTaskbar.hidden = ver < 6.1;
       } catch (ex) { }
@@ -299,6 +285,8 @@ var gMainPane = {
       gMainPane.checkBrowserContainers);
     setEventListener("browserContainersSettings", "command",
       gMainPane.showContainerSettings);
+    setEventListener("browserHomePage", "input",
+      gMainPane.onBrowserHomePageChange);
 
     // Initializes the fonts dropdowns displayed in this pane.
     this._rebuildFonts();
@@ -314,26 +302,6 @@ var gMainPane = {
       Components.utils.import("resource:///modules/translation/Translation.jsm");
       if (Translation.translationEngine == "bing") {
         document.getElementById("bingAttribution").removeAttribute("hidden");
-      }
-    }
-
-    if (AppConstants.E10S_TESTING_ONLY) {
-      setEventListener("e10sAutoStart", "command",
-        gMainPane.enableE10SChange);
-      let e10sCheckbox = document.getElementById("e10sAutoStart");
-
-      let e10sPref = document.getElementById("browser.tabs.remote.autostart");
-      let e10sTempPref = document.getElementById("e10sTempPref");
-      let e10sForceEnable = document.getElementById("e10sForceEnable");
-
-      let preffedOn = e10sPref.value || e10sTempPref.value || e10sForceEnable.value;
-
-      if (preffedOn) {
-        // The checkbox is checked if e10s is preffed on and enabled.
-        e10sCheckbox.checked = Services.appinfo.browserTabsRemoteAutostart;
-
-        // but if it's force disabled, then the checkbox is disabled.
-        e10sCheckbox.disabled = !Services.appinfo.browserTabsRemoteAutostart;
       }
     }
 
@@ -422,22 +390,22 @@ var gMainPane = {
 
     // Observe preferences that influence what we display so we can rebuild
     // the view when they change.
-    this._prefSvc.addObserver(PREF_SHOW_PLUGINS_IN_LIST, this);
-    this._prefSvc.addObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_APP, this);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_WEB, this);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_ACTION, this);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_READER, this);
+    Services.prefs.addObserver(PREF_SHOW_PLUGINS_IN_LIST, this);
+    Services.prefs.addObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this);
+    Services.prefs.addObserver(PREF_FEED_SELECTED_APP, this);
+    Services.prefs.addObserver(PREF_FEED_SELECTED_WEB, this);
+    Services.prefs.addObserver(PREF_FEED_SELECTED_ACTION, this);
+    Services.prefs.addObserver(PREF_FEED_SELECTED_READER, this);
 
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_APP, this);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_WEB, this);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_READER, this);
+    Services.prefs.addObserver(PREF_VIDEO_FEED_SELECTED_APP, this);
+    Services.prefs.addObserver(PREF_VIDEO_FEED_SELECTED_WEB, this);
+    Services.prefs.addObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this);
+    Services.prefs.addObserver(PREF_VIDEO_FEED_SELECTED_READER, this);
 
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_APP, this);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
+    Services.prefs.addObserver(PREF_AUDIO_FEED_SELECTED_APP, this);
+    Services.prefs.addObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
+    Services.prefs.addObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
+    Services.prefs.addObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
 
     setEventListener("filter", "command", gMainPane.filter);
     setEventListener("handlersView", "select",
@@ -474,9 +442,7 @@ var gMainPane = {
     ]);
 
     // Notify observers that the UI is now ready
-    Components.classes["@mozilla.org/observer-service;1"]
-      .getService(Components.interfaces.nsIObserverService)
-      .notifyObservers(window, "main-pane-loaded");
+    Services.obs.notifyObservers(window, "main-pane-loaded");
   },
 
   preInit() {
@@ -535,61 +501,13 @@ var gMainPane = {
       document.getElementById("browserContainersbox").setAttribute("data-hidden-from-search", "true");
       return;
     }
-    this._prefSvc.addObserver(PREF_CONTAINERS_EXTENSION, this);
+    Services.prefs.addObserver(PREF_CONTAINERS_EXTENSION, this);
 
     const link = document.getElementById("browserContainersLearnMore");
     link.href = Services.urlFormatter.formatURLPref("app.support.baseURL") + "containers";
 
     document.getElementById("browserContainersbox").hidden = false;
     this.readBrowserContainersCheckbox();
-  },
-
-  isE10SEnabled() {
-    let e10sEnabled;
-    try {
-      let e10sStatus = Components.classes["@mozilla.org/supports-PRUint64;1"]
-        .createInstance(Ci.nsISupportsPRUint64);
-      let appinfo = Services.appinfo.QueryInterface(Ci.nsIObserver);
-      appinfo.observe(e10sStatus, "getE10SBlocked", "");
-      e10sEnabled = e10sStatus.data < 2;
-    } catch (e) {
-      e10sEnabled = false;
-    }
-
-    return e10sEnabled;
-  },
-
-  enableE10SChange() {
-    if (AppConstants.E10S_TESTING_ONLY) {
-      let e10sCheckbox = document.getElementById("e10sAutoStart");
-      let e10sPref = document.getElementById("browser.tabs.remote.autostart");
-      let e10sTempPref = document.getElementById("e10sTempPref");
-
-      let prefsToChange;
-      if (e10sCheckbox.checked) {
-        // Enabling e10s autostart
-        prefsToChange = [e10sPref];
-      } else {
-        // Disabling e10s autostart
-        prefsToChange = [e10sPref];
-        if (e10sTempPref.value) {
-          prefsToChange.push(e10sTempPref);
-        }
-      }
-
-      let buttonIndex = confirmRestartPrompt(e10sCheckbox.checked, 0,
-        true, false);
-      if (buttonIndex == CONFIRM_RESTART_PROMPT_RESTART_NOW) {
-        for (let prefToChange of prefsToChange) {
-          prefToChange.value = e10sCheckbox.checked;
-        }
-
-        Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
-      }
-
-      // Revert the checkbox in case we didn't quit
-      e10sCheckbox.checked = e10sPref.value || e10sTempPref.value;
-    }
   },
 
   separateProfileModeChange() {
@@ -644,9 +562,7 @@ var gMainPane = {
   onGetStarted(aEvent) {
     if (AppConstants.MOZ_DEV_EDITION) {
       const Cc = Components.classes, Ci = Components.interfaces;
-      let wm = Cc["@mozilla.org/appshell/window-mediator;1"]
-        .getService(Ci.nsIWindowMediator);
-      let win = wm.getMostRecentWindow("navigator:browser");
+      let win = Services.wm.getMostRecentWindow("navigator:browser");
 
       fxAccounts.getSignedInUser().then(data => {
         if (win) {
@@ -689,15 +605,24 @@ var gMainPane = {
     // Set the "Use Current Page(s)" button's text and enabled state.
     this._updateUseCurrentButton();
 
-    // This is an async task.
-    handleControllingExtension("prefs", "homepage_override")
-      .then((isControlled) => {
-        // Disable or enable the inputs based on if this is controlled by an extension.
-        document.querySelectorAll("#browserHomePage, .homepage-button")
-          .forEach((button) => {
-            button.disabled = isControlled;
-          });
-      });
+    function setInputDisabledStates(isControlled) {
+      // Disable or enable the inputs based on if this is controlled by an extension.
+      document.querySelectorAll("#browserHomePage, .homepage-button")
+        .forEach((element) => {
+          let isLocked = document.getElementById(element.getAttribute("preference")).locked;
+          element.disabled = isLocked || isControlled;
+        });
+    }
+
+    if (homePref.locked) {
+      // An extension can't control these settings if they're locked.
+      hideControllingExtension("homepage_override");
+      setInputDisabledStates(false);
+    } else {
+      // Asynchronously update the extension controlled UI.
+      handleControllingExtension("prefs", "homepage_override")
+        .then(setInputDisabledStates);
+    }
 
     // If the pref is set to about:home or about:newtab, set the value to ""
     // to show the placeholder text (about:home title) rather than
@@ -743,8 +668,11 @@ var gMainPane = {
     }
 
     // FIXME Bug 244192: using dangerous "|" joiner!
-    if (tabs.length)
+    if (tabs.length) {
       homePage.value = tabs.map(getTabURI).join("|");
+    }
+
+    Services.telemetry.scalarAdd("preferences.use_current_page", 1);
   },
 
   /**
@@ -757,6 +685,23 @@ var gMainPane = {
     gSubDialog.open("chrome://browser/content/preferences/selectBookmark.xul",
       "resizable=yes, modal=yes", rv,
       this._setHomePageToBookmarkClosed.bind(this, rv));
+    Services.telemetry.scalarAdd("preferences.use_bookmark", 1);
+  },
+
+  onBrowserHomePageChange() {
+    if (this.telemetryHomePageTimer) {
+      clearTimeout(this.telemetryHomePageTimer);
+    }
+    let browserHomePage = document.querySelector("#browserHomePage").value;
+    // The length of the home page URL string should be more then four,
+    // and it should contain at least one ".", for example, "https://mozilla.org".
+    if (browserHomePage.length > 4 && browserHomePage.includes(".")) {
+      this.telemetryHomePageTimer = setTimeout(() => {
+        let homePageNumber = browserHomePage.split("|").length;
+        Services.telemetry.scalarAdd("preferences.browser_home_page_change", 1);
+        Services.telemetry.keyedScalarAdd("preferences.browser_home_page_count", homePageNumber, 1);
+      }, 3000);
+    }
   },
 
   _setHomePageToBookmarkClosed(rv, aEvent) {
@@ -794,7 +739,7 @@ var gMainPane = {
     if (document.getElementById(prefName).locked)
       return;
 
-    useCurrent.disabled = !tabs.length
+    useCurrent.disabled = !tabs.length;
   },
 
   _getTabsForHomePage() {
@@ -802,9 +747,7 @@ var gMainPane = {
     var tabs = [];
 
     const Cc = Components.classes, Ci = Components.interfaces;
-    var wm = Cc["@mozilla.org/appshell/window-mediator;1"]
-      .getService(Ci.nsIWindowMediator);
-    win = wm.getMostRecentWindow("navigator:browser");
+    win = Services.wm.getMostRecentWindow("navigator:browser");
 
     if (win && win.document.documentElement
       .getAttribute("windowtype") == "navigator:browser") {
@@ -1032,9 +975,9 @@ var gMainPane = {
 
     let title = bundlePreferences.getString("disableContainersAlertTitle");
     let message = PluralForm.get(count, bundlePreferences.getString("disableContainersMsg"))
-      .replace("#S", count)
+      .replace("#S", count);
     let okButton = PluralForm.get(count, bundlePreferences.getString("disableContainersOkButton"))
-      .replace("#S", count)
+      .replace("#S", count);
     let cancelButton = bundlePreferences.getString("disableContainersButton2");
 
     let buttonFlags = (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0) +
@@ -1235,31 +1178,19 @@ var gMainPane = {
     let processCountPref = document.getElementById("dom.ipc.processCount");
     if (defaultPerformancePref.value) {
       let accelerationPref = document.getElementById("layers.acceleration.disabled");
-      // Unset the value so process count will be decided by e10s rollout.
+      // Unset the value so process count will be decided by the platform.
       processCountPref.value = processCountPref.defaultValue;
       accelerationPref.value = accelerationPref.defaultValue;
       performanceSettings.hidden = true;
     } else {
-      let e10sRolloutProcessCountPref =
-        document.getElementById("dom.ipc.processCount.web");
-      // Take the e10s rollout value as the default value (if it exists),
-      // but don't overwrite the user set value.
-      if (duringChangeEvent &&
-        e10sRolloutProcessCountPref.value &&
-        processCountPref.value == processCountPref.defaultValue) {
-        processCountPref.value = e10sRolloutProcessCountPref.value;
-      }
       performanceSettings.hidden = false;
     }
   },
 
   buildContentProcessCountMenuList() {
-    if (gMainPane.isE10SEnabled()) {
+    if (Services.appinfo.browserTabsRemoteAutostart) {
       let processCountPref = document.getElementById("dom.ipc.processCount");
-      let e10sRolloutProcessCountPref =
-        document.getElementById("dom.ipc.processCount.web");
-      let defaultProcessCount =
-        e10sRolloutProcessCountPref.value || processCountPref.defaultValue;
+      let defaultProcessCount = processCountPref.defaultValue;
       let bundlePreferences = document.getElementById("bundlePreferences");
       let label = bundlePreferences.getFormattedString("defaultContentProcessCount",
         [defaultProcessCount]);
@@ -1387,24 +1318,24 @@ var gMainPane = {
 
   destroy() {
     window.removeEventListener("unload", this);
-    this._prefSvc.removeObserver(PREF_SHOW_PLUGINS_IN_LIST, this);
-    this._prefSvc.removeObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this);
-    this._prefSvc.removeObserver(PREF_FEED_SELECTED_APP, this);
-    this._prefSvc.removeObserver(PREF_FEED_SELECTED_WEB, this);
-    this._prefSvc.removeObserver(PREF_FEED_SELECTED_ACTION, this);
-    this._prefSvc.removeObserver(PREF_FEED_SELECTED_READER, this);
+    Services.prefs.removeObserver(PREF_SHOW_PLUGINS_IN_LIST, this);
+    Services.prefs.removeObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this);
+    Services.prefs.removeObserver(PREF_FEED_SELECTED_APP, this);
+    Services.prefs.removeObserver(PREF_FEED_SELECTED_WEB, this);
+    Services.prefs.removeObserver(PREF_FEED_SELECTED_ACTION, this);
+    Services.prefs.removeObserver(PREF_FEED_SELECTED_READER, this);
 
-    this._prefSvc.removeObserver(PREF_VIDEO_FEED_SELECTED_APP, this);
-    this._prefSvc.removeObserver(PREF_VIDEO_FEED_SELECTED_WEB, this);
-    this._prefSvc.removeObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this);
-    this._prefSvc.removeObserver(PREF_VIDEO_FEED_SELECTED_READER, this);
+    Services.prefs.removeObserver(PREF_VIDEO_FEED_SELECTED_APP, this);
+    Services.prefs.removeObserver(PREF_VIDEO_FEED_SELECTED_WEB, this);
+    Services.prefs.removeObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this);
+    Services.prefs.removeObserver(PREF_VIDEO_FEED_SELECTED_READER, this);
 
-    this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_APP, this);
-    this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
-    this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
-    this._prefSvc.removeObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
+    Services.prefs.removeObserver(PREF_AUDIO_FEED_SELECTED_APP, this);
+    Services.prefs.removeObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
+    Services.prefs.removeObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
+    Services.prefs.removeObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
 
-    this._prefSvc.removeObserver(PREF_CONTAINERS_EXTENSION, this);
+    Services.prefs.removeObserver(PREF_CONTAINERS_EXTENSION, this);
   },
 
 
@@ -1561,9 +1492,9 @@ var gMainPane = {
     this._visibleTypeDescriptionCount = {};
 
     // Get the preferences that help determine what types to show.
-    var showPlugins = this._prefSvc.getBoolPref(PREF_SHOW_PLUGINS_IN_LIST);
+    var showPlugins = Services.prefs.getBoolPref(PREF_SHOW_PLUGINS_IN_LIST);
     var hidePluginsWithoutExtensions =
-      this._prefSvc.getBoolPref(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS);
+      Services.prefs.getBoolPref(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS);
 
     for (let type in this._handledTypes) {
       // Yield before processing each handler info object to avoid monopolizing
@@ -1964,7 +1895,7 @@ var gMainPane = {
         if (internalMenuItem) {
           menu.selectedItem = internalMenuItem;
         } else {
-          Cu.reportError("No menu item defined to set!")
+          Cu.reportError("No menu item defined to set!");
         }
         break;
       case Ci.nsIHandlerInfo.useSystemDefault:
@@ -2295,14 +2226,14 @@ var gMainPane = {
       return this._getIconURLForWebApp(aHandlerApp.uriTemplate);
 
     if (aHandlerApp instanceof Ci.nsIWebContentHandlerInfo)
-      return this._getIconURLForWebApp(aHandlerApp.uri)
+      return this._getIconURLForWebApp(aHandlerApp.uri);
 
     // We know nothing about other kinds of handler apps.
     return "";
   },
 
   _getIconURLForFile(aFile) {
-    var fph = this._ioSvc.getProtocolHandler("file").
+    var fph = Services.io.getProtocolHandler("file").
       QueryInterface(Ci.nsIFileProtocolHandler);
     var urlSpec = fph.getURLSpecFromFile(aFile);
 
@@ -2310,7 +2241,7 @@ var gMainPane = {
   },
 
   _getIconURLForWebApp(aWebAppURITemplate) {
-    var uri = this._ioSvc.newURI(aWebAppURITemplate);
+    var uri = Services.io.newURI(aWebAppURITemplate);
 
     // Unfortunately we can't use the favicon service to get the favicon,
     // because the service looks in the annotations table for a record with
@@ -2319,7 +2250,7 @@ var gMainPane = {
     // they'll only visit URLs derived from that template (i.e. with %s
     // in the template replaced by the URL of the content being handled).
 
-    if (/^https?$/.test(uri.scheme) && this._prefSvc.getBoolPref("browser.chrome.favicons"))
+    if (/^https?$/.test(uri.scheme) && Services.prefs.getBoolPref("browser.chrome.favicons"))
       return uri.prePath + "/favicon.ico";
 
     return "";
@@ -2539,9 +2470,7 @@ var gMainPane = {
     var currentDirPref = document.getElementById("browser.download.dir");
 
     // Used in defining the correct path to the folder icon.
-    var ios = Components.classes["@mozilla.org/network/io-service;1"]
-      .getService(Components.interfaces.nsIIOService);
-    var fph = ios.getProtocolHandler("file")
+    var fph = Services.io.getProtocolHandler("file")
       .QueryInterface(Components.interfaces.nsIFileProtocolHandler);
     var iconUrlSpec;
 
@@ -2592,9 +2521,7 @@ var gMainPane = {
   async _getDownloadsFolder(aFolder) {
     switch (aFolder) {
       case "Desktop":
-        var fileLoc = Components.classes["@mozilla.org/file/directory_service;1"]
-          .getService(Components.interfaces.nsIProperties);
-        return fileLoc.get("Desk", Components.interfaces.nsIFile);
+        return Services.dirsvc.get("Desk", Components.interfaces.nsIFile);
       case "Downloads":
         let downloadsDir = await Downloads.getSystemDownloadsDirectory();
         return new FileUtils.File(downloadsDir);
@@ -2795,9 +2722,6 @@ HandlerInfoWrapper.prototype = {
   _handlerSvc: Cc["@mozilla.org/uriloader/handler-service;1"].
     getService(Ci.nsIHandlerService),
 
-  _prefSvc: Cc["@mozilla.org/preferences-service;1"].
-    getService(Ci.nsIPrefBranch),
-
   _categoryMgr: Cc["@mozilla.org/categorymanager;1"].
     getService(Ci.nsICategoryManager),
 
@@ -2836,7 +2760,7 @@ HandlerInfoWrapper.prototype = {
 
     // Make sure the preferred handler is in the set of possible handlers.
     if (aNewValue)
-      this.addPossibleApplicationHandler(aNewValue)
+      this.addPossibleApplicationHandler(aNewValue);
   },
 
   get possibleApplicationHandlers() {
@@ -2957,7 +2881,7 @@ HandlerInfoWrapper.prototype = {
     try {
       if (this.wrappedHandlerInfo instanceof Ci.nsIMIMEInfo &&
         this.wrappedHandlerInfo.primaryExtension)
-        return this.wrappedHandlerInfo.primaryExtension
+        return this.wrappedHandlerInfo.primaryExtension;
     } catch (ex) { }
 
     return null;
@@ -2994,8 +2918,8 @@ HandlerInfoWrapper.prototype = {
   _getDisabledPluginTypes() {
     var types = "";
 
-    if (this._prefSvc.prefHasUserValue(PREF_DISABLED_PLUGIN_TYPES))
-      types = this._prefSvc.getCharPref(PREF_DISABLED_PLUGIN_TYPES);
+    if (Services.prefs.prefHasUserValue(PREF_DISABLED_PLUGIN_TYPES))
+      types = Services.prefs.getCharPref(PREF_DISABLED_PLUGIN_TYPES);
 
     // Only split if the string isn't empty so we don't end up with an array
     // containing a single empty string.
@@ -3011,7 +2935,7 @@ HandlerInfoWrapper.prototype = {
     if (disabledPluginTypes.indexOf(this.type) == -1)
       disabledPluginTypes.push(this.type);
 
-    this._prefSvc.setCharPref(PREF_DISABLED_PLUGIN_TYPES,
+    Services.prefs.setCharPref(PREF_DISABLED_PLUGIN_TYPES,
       disabledPluginTypes.join(","));
 
     // Update the category manager so existing browser windows update.
@@ -3026,7 +2950,7 @@ HandlerInfoWrapper.prototype = {
     var type = this.type;
     disabledPluginTypes = disabledPluginTypes.filter(v => v != type);
 
-    this._prefSvc.setCharPref(PREF_DISABLED_PLUGIN_TYPES,
+    Services.prefs.setCharPref(PREF_DISABLED_PLUGIN_TYPES,
       disabledPluginTypes.join(","));
 
     // Update the category manager so existing browser windows update.
@@ -3385,7 +3309,7 @@ var feedHandlerInfo = {
   _prefSelectedReader: PREF_FEED_SELECTED_READER,
   _smallIcon: "chrome://browser/skin/feeds/feedIcon16.png",
   _appPrefLabel: "webFeed"
-}
+};
 
 var videoFeedHandlerInfo = {
   __proto__: new FeedHandlerInfo(TYPE_MAYBE_VIDEO_FEED),
@@ -3395,7 +3319,7 @@ var videoFeedHandlerInfo = {
   _prefSelectedReader: PREF_VIDEO_FEED_SELECTED_READER,
   _smallIcon: "chrome://browser/skin/feeds/videoFeedIcon16.png",
   _appPrefLabel: "videoPodcastFeed"
-}
+};
 
 var audioFeedHandlerInfo = {
   __proto__: new FeedHandlerInfo(TYPE_MAYBE_AUDIO_FEED),
@@ -3405,7 +3329,7 @@ var audioFeedHandlerInfo = {
   _prefSelectedReader: PREF_AUDIO_FEED_SELECTED_READER,
   _smallIcon: "chrome://browser/skin/feeds/audioFeedIcon16.png",
   _appPrefLabel: "audioPodcastFeed"
-}
+};
 
 /**
  * InternalHandlerInfoWrapper provides a basic mechanism to create an internal

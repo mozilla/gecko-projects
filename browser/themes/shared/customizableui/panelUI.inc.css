@@ -199,6 +199,66 @@ panelview {
   -moz-box-flex: 1;
 }
 
+/* This section is to anchor all the drop down panels at the same height, shift the
+  panel`s top margin according to its positioning and the uidensity of the window. */
+#downloadsPanel,
+#widget-overflow,
+#appMenu-popup,
+#customizationui-widget-panel {
+  margin-top: -6px;
+}
+
+/* The difference between the toolbar buttons` padding and the urlbar-icons` padding,
+   then subtract 6px. */
+#pageActionActivatedActionPanel,
+#pageActionPanel,
+#editBookmarkPanel,
+.browser-extension-panel {
+  margin-top: calc(var(--toolbarbutton-inner-padding) - var(--urlbar-icon-padding) - 6px)
+}
+
+/* The identity popup does not have any padding of its own,
+   otherwise would use the same formula as above. */
+#identity-popup {
+  margin-top: calc(var(--toolbarbutton-inner-padding) - 6px);
+}
+
+/* The bookmarks toolbar is too thin to have the panels overlap 6px. */
+#downloadsPanel.bookmarks-toolbar,
+#widget-overflow.bookmarks-toolbar,
+#appMenu-popup.bookmarks-toolbar,
+#customizationui-widget-panel.bookmarks-toolbar {
+  margin-top: -1px;
+}
+
+/* The BMB_bookmarksPopup is unique because it is built into the
+   bookmarks-menu-button, resulting in many edge cases. */
+#BMB_bookmarksPopup {
+  margin-top: -8px;
+}
+
+:root:not([uidensity]) #nav-bar #BMB_bookmarksPopup {
+  margin-top: -11px;
+}
+
+:root[uidensity=touch] #nav-bar #BMB_bookmarksPopup,
+:root[uidensity=touch] #TabsToolbar #BMB_bookmarksPopup,
+:root[uidensity=compact] #BMB_bookmarksPopup {
+  margin-top: -9px;
+}
+
+:root[uidensity=compact] #TabsToolbar #BMB_bookmarksPopup {
+  margin-top: -7px;
+}
+
+#PersonalToolbar #BMB_bookmarksPopup  {
+  margin-top: -2px
+}
+
+:root[uidensity=touch] #PersonalToolbar #BMB_bookmarksPopup {
+  margin-top: -5px;
+}
+
 .panel-subview-body {
   overflow-y: auto;
   overflow-x: hidden;
@@ -416,9 +476,9 @@ photonpanelmultiview panelview {
   max-width: @wideMenuPanelWidth@;
 }
 
-/* Add 2 * 12px extra width for touch mode button padding. */
+/* Add 2 * 16px extra width for touch mode button padding. */
 #appMenu-popup[touchmode] panelview {
-  min-width: calc(@menuPanelWidth@ + 24px);
+  min-width: calc(@menuPanelWidth@ + 32px);
 }
 
 photonpanelmultiview .panel-subview-body {
@@ -467,6 +527,24 @@ photonpanelmultiview .panel-subview-body {
   -moz-box-orient: vertical;
   width: calc(@menuPanelButtonWidth@);
   height: calc(51px + 2.2em);
+}
+
+.animate-out {
+  animation-name: widget-animate-out;
+  animation-fill-mode: forwards;
+  animation-duration: 500ms;
+  animation-timing-function: var(--animation-easing-function);
+}
+
+@keyframes widget-animate-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0 ;
+    transform: scale(.5);
+  }
 }
 
 toolbarpaletteitem[place=panel] > .toolbarbutton-1 {
@@ -709,8 +787,8 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 }
 
 .addon-banner-item > .toolbarbutton-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .addon-banner-item::after {
@@ -777,6 +855,10 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 #appMenu-mainView > .panel-subview-body > .panel-banner-item {
   border-bottom: 1px solid var(--panel-separator-color);
   margin-bottom: 3px;
+  padding-inline-start: 12px;
+}
+
+#appMenu-addon-banners > .addon-banner-item {
   padding-inline-start: 12px;
 }
 
@@ -884,6 +966,7 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   display: none;
 }
 
+.addon-banner-item > .toolbarbutton-icon,
 .panel-banner-item > .toolbarbutton-icon,
 #PanelUI-fxa-label > .toolbarbutton-icon,
 #PanelUI-fxa-icon > .toolbarbutton-icon,
@@ -955,7 +1038,6 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   /* !important for the color as an OSX specific rule when a lightweight theme
      is used for buttons in the toolbox overrides. See bug 1238531 for details */
   color: white !important;
-  font-size: 13px;
   border-radius: 2px;
   /* If you change the margin or padding below, the min-height of the synced tabs
      panel (e.g. #PanelUI-remotetabs[mainview] #PanelUI-remotetabs-setupsync,
@@ -1226,6 +1308,7 @@ panelview .toolbarbutton-1,
   padding-top: 0;
 }
 
+.addon-banner-item > .toolbarbutton-text,
 .subviewbutton-iconic > .toolbarbutton-text,
 .cui-withicon > .toolbarbutton-text,
 .subviewbutton[image] > .toolbarbutton-text,
@@ -1280,6 +1363,7 @@ panelview .toolbarbutton-1,
 #widget-overflow-fixed-list .toolbarbutton-1 > .toolbarbutton-text,
 #widget-overflow-list .toolbarbutton-1 > .toolbarbutton-text,
 .subviewbutton:not(.panel-subview-footer) > .toolbarbutton-text,
+.addon-banner-item > .toolbarbutton-text,
 /* Bookmark items need a more specific selector. */
 .PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-text,
 .PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-iconic-text {
@@ -1409,6 +1493,7 @@ photonpanelmultiview .toolbaritem-combined-buttons > .subviewbutton:not(.subview
   padding-inline-start: 0;
 }
 
+photonpanelmultiview .addon-banner-item::after,
 photonpanelmultiview .panel-banner-item::after {
   margin-inline-end: 12px;
   margin-inline-start: 10px;
@@ -1707,6 +1792,13 @@ toolbarpaletteitem[place=panel] > .toolbaritem-combined-buttons > toolbarbutton 
 
 .widget-overflow-list {
   width: @wideMenuPanelWidth@;
+}
+
+/* In customize mode, the overflow list is constrained by its container,
+ * so we set width: auto to avoid the scrollbar not fitting.
+ */
+#customization-panelHolder > .widget-overflow-list {
+  width: auto;
 }
 
 toolbaritem[overflowedItem=true],
@@ -2102,11 +2194,17 @@ photonpanelmultiview #panelMenu_pocket {
 .subviewbutton.download {
   -moz-box-align: start;
   min-height: 48px;
+  padding-inline-start: 8px;
 }
 
 .subviewbutton.download > .toolbarbutton-icon,
 .subviewbutton.download > .toolbarbutton-text > label {
   margin: 4px 0 0;
+}
+
+.subviewbutton.download > .toolbarbutton-icon {
+  width: 32px;
+  height: 32px;
 }
 
 .subviewbutton.download > .toolbarbutton-text > .status-text {

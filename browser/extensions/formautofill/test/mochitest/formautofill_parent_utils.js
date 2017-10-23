@@ -89,19 +89,29 @@ var ParentUtils = {
   async cleanUpAddresses() {
     const guids = (await this._getRecords(ADDRESSES_COLLECTION_NAME)).map(record => record.guid);
 
+    if (guids.length == 0) {
+      sendAsyncMessage("FormAutofillTest:AddressesCleanedUp");
+      return;
+    }
+
     await this.operateAddress("remove", {guids}, "FormAutofillTest:AddressesCleanedUp");
   },
 
   async cleanUpCreditCards() {
     const guids = (await this._getRecords(CREDITCARDS_COLLECTION_NAME)).map(record => record.guid);
 
+    if (guids.length == 0) {
+      sendAsyncMessage("FormAutofillTest:CreditCardsCleanedUp");
+      return;
+    }
+
     await this.operateCreditCard("remove", {guids}, "FormAutofillTest:CreditCardsCleanedUp");
   },
 
   async cleanup() {
-    Services.obs.removeObserver(this, "formautofill-storage-changed");
     await this.cleanUpAddresses();
     await this.cleanUpCreditCards();
+    Services.obs.removeObserver(this, "formautofill-storage-changed");
   },
 
   _areRecordsMatching(recordA, recordB, collectionName) {
@@ -159,6 +169,10 @@ var ParentUtils = {
 
 Services.obs.addObserver(ParentUtils, "formautofill-storage-changed");
 
+Services.mm.addMessageListener("FormAutofill:FieldsIdentified", () => {
+  sendAsyncMessage("FormAutofillTest:FieldsIdentified");
+});
+
 addMessageListener("FormAutofillTest:AddAddress", (msg) => {
   ParentUtils.operateAddress("add", msg, "FormAutofillTest:AddressAdded");
 });
@@ -196,5 +210,7 @@ addMessageListener("FormAutofillTest:CleanUpCreditCards", (msg) => {
 });
 
 addMessageListener("cleanup", () => {
-  ParentUtils.cleanup();
+  ParentUtils.cleanup().then(() => {
+    sendAsyncMessage("cleanup-finished", {});
+  });
 });

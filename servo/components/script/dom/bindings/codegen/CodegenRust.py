@@ -1407,7 +1407,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider):
     if returnType.isAny():
         return CGGeneric("JSVal")
     if returnType.isObject() or returnType.isSpiderMonkeyInterface():
-        result = CGGeneric("NonZero<*mut JSObject>")
+        result = CGGeneric("NonNullJSObjectPtr")
         if returnType.nullable():
             result = CGWrapper(result, pre="Option<", post=">")
         return result
@@ -2029,7 +2029,7 @@ def DOMClass(descriptor):
     # padding.
     protoList.extend(['PrototypeList::ID::Last'] * (descriptor.config.maxProtoChainLength - len(protoList)))
     prototypeChainString = ', '.join(protoList)
-    heapSizeOf = 'heap_size_of_raw_self_and_children::<%s>' % descriptor.concreteType
+    mallocSizeOf = 'malloc_size_of_including_raw_self::<%s>' % descriptor.concreteType
     if descriptor.isGlobal():
         globals_ = camel_to_upper_snake(descriptor.name)
     else:
@@ -2038,9 +2038,9 @@ def DOMClass(descriptor):
 DOMClass {
     interface_chain: [ %s ],
     type_id: %s,
-    heap_size_of: %s as unsafe fn(_) -> _,
+    malloc_size_of: %s as unsafe fn(&mut _, _) -> _,
     global: InterfaceObjectMap::%s,
-}""" % (prototypeChainString, DOMClassTypeId(descriptor), heapSizeOf, globals_)
+}""" % (prototypeChainString, DOMClassTypeId(descriptor), mallocSizeOf, globals_)
 
 
 class CGDOMJSClass(CGThing):
@@ -2253,6 +2253,7 @@ def UnionTypes(descriptors, dictionaries, callbacks, typedefs, config):
         'dom::bindings::conversions::StringificationBehavior',
         'dom::bindings::conversions::root_from_handlevalue',
         'dom::bindings::error::throw_not_in_union',
+        'dom::bindings::nonnull::NonNullJSObjectPtr',
         'dom::bindings::mozmap::MozMap',
         'dom::bindings::root::DomRoot',
         'dom::bindings::str::ByteString',
@@ -3659,19 +3660,18 @@ class CGMemberJITInfo(CGThing):
                     call: ${opName} as *const os::raw::c_void,
                     protoID: PrototypeList::ID::${name} as u16,
                     depth: ${depth},
-                    _bitfield_1:
-                        JSJitInfo::new_bitfield_1(
-                            JSJitInfo_OpType::${opType} as u8,
-                            JSJitInfo_AliasSet::${aliasSet} as u8,
-                            JSValueType::${returnType} as u8,
-                            ${isInfallible},
-                            ${isMovable},
-                            ${isEliminatable},
-                            ${isAlwaysInSlot},
-                            ${isLazilyCachedInSlot},
-                            ${isTypedMethod},
-                            ${slotIndex} as u16,
-                        )
+                    _bitfield_1: new_jsjitinfo_bitfield_1!(
+                        JSJitInfo_OpType::${opType} as u8,
+                        JSJitInfo_AliasSet::${aliasSet} as u8,
+                        JSValueType::${returnType} as u8,
+                        ${isInfallible},
+                        ${isMovable},
+                        ${isEliminatable},
+                        ${isAlwaysInSlot},
+                        ${isLazilyCachedInSlot},
+                        ${isTypedMethod},
+                        ${slotIndex},
+                    ),
                 }
                 """,
                 opName=opName,
@@ -4005,7 +4005,7 @@ class CGEnum(CGThing):
         ident = enum.identifier.name
         decl = """\
 #[repr(usize)]
-#[derive(JSTraceable, PartialEq, Copy, Clone, HeapSizeOf, Debug)]
+#[derive(Copy, Clone, Debug, JSTraceable, MallocSizeOf, PartialEq)]
 pub enum %s {
     %s
 }
@@ -5574,7 +5574,6 @@ def generate_imports(config, cgthings, descriptors, callbacks=None, dictionaries
         typedefs = []
 
     return CGImports(cgthings, descriptors, callbacks, dictionaries, enums, typedefs, [
-        'core::nonzero::NonZero',
         'js',
         'js::JSCLASS_GLOBAL_SLOT_COUNT',
         'js::JSCLASS_IS_DOMJSCLASS',
@@ -5785,6 +5784,7 @@ def generate_imports(config, cgthings, descriptors, callbacks=None, dictionaries
         'dom::bindings::proxyhandler::get_expando_object',
         'dom::bindings::proxyhandler::get_property_descriptor',
         'dom::bindings::mozmap::MozMap',
+        'dom::bindings::nonnull::NonNullJSObjectPtr',
         'dom::bindings::num::Finite',
         'dom::bindings::str::ByteString',
         'dom::bindings::str::DOMString',
@@ -5794,7 +5794,7 @@ def generate_imports(config, cgthings, descriptors, callbacks=None, dictionaries
         'dom::bindings::weakref::WeakReferenceable',
         'dom::windowproxy::WindowProxy',
         'dom::globalscope::GlobalScope',
-        'mem::heap_size_of_raw_self_and_children',
+        'mem::malloc_size_of_including_raw_self',
         'libc',
         'servo_config::prefs::PREFS',
         'std::borrow::ToOwned',

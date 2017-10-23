@@ -64,6 +64,15 @@ bool gfx_use_wrench()
   return gfxEnv::EnableWebRenderRecording();
 }
 
+const char* gfx_wr_resource_path_override()
+{
+  const char* resourcePath = PR_GetEnv("WR_RESOURCE_PATH");
+  if (!resourcePath || resourcePath[0] == '\0') {
+    return nullptr;
+  }
+  return resourcePath;
+}
+
 void gfx_critical_note(const char* msg)
 {
   gfxCriticalNote << msg;
@@ -525,7 +534,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     return IPC_OK();
   }
 
-  AutoProfilerTracing tracing("Paint", "SetDisplayList");
+  AUTO_PROFILER_TRACING("Paint", "SetDisplayList");
   UpdateFwdTransactionId(aFwdTransactionId);
   AutoClearReadLocks clearLocks(mReadLocks);
 
@@ -535,12 +544,10 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
 
   uint32_t wrEpoch = GetNextWrEpoch();
 
+  mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
+  ProcessWebRenderParentCommands(aCommands);
 
   wr::ResourceUpdateQueue resources;
-
-  mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
-  ProcessWebRenderParentCommands(aCommands, resources);
-
   if (!UpdateResources(aResourceUpdates, aSmallShmems, aLargeShmems, resources)) {
     return IPC_FAIL(this, "Failed to deserialize resource updates");
   }
@@ -584,27 +591,45 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
 }
 
 mozilla::ipc::IPCResult
-WebRenderBridgeParent::RecvSetDisplayListSync(const gfx::IntSize &aSize,
-                                              InfallibleTArray<WebRenderParentCommand>&& aCommands,
-                                              InfallibleTArray<OpDestroy>&& aToDestroy,
-                                              const uint64_t& aFwdTransactionId,
-                                              const uint64_t& aTransactionId,
-                                              const wr::LayoutSize& aContentSize,
-                                              const wr::ByteBuffer& dl,
-                                              const wr::BuiltDisplayListDescriptor& dlDesc,
-                                              const WebRenderScrollData& aScrollData,
-                                              nsTArray<OpUpdateResource>&& aResourceUpdates,
-                                              nsTArray<ipc::Shmem>&& aSmallShmems,
-                                              nsTArray<ipc::Shmem>&& aLargeShmems,
-                                              const wr::IdNamespace& aIdNamespace,
-                                              const TimeStamp& aTxnStartTime,
-                                              const TimeStamp& aFwdTime)
+WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
+                                            InfallibleTArray<WebRenderParentCommand>&& aCommands,
+                                            InfallibleTArray<OpDestroy>&& aToDestroy,
+                                            const uint64_t& aFwdTransactionId,
+                                            const uint64_t& aTransactionId,
+                                            const wr::IdNamespace& aIdNamespace,
+                                            const TimeStamp& aTxnStartTime,
+                                            const TimeStamp& aFwdTime)
 {
-  return RecvSetDisplayList(aSize, Move(aCommands), Move(aToDestroy),
-                            aFwdTransactionId, aTransactionId,
-                            aContentSize, dl, dlDesc, aScrollData,
-                            Move(aResourceUpdates), Move(aSmallShmems), Move(aLargeShmems),
-                            aIdNamespace, aTxnStartTime, aFwdTime);
+  if (mDestroyed) {
+    for (const auto& op : aToDestroy) {
+      DestroyActor(op);
+    }
+    return IPC_OK();
+  }
+
+  AUTO_PROFILER_TRACING("Paint", "EmptyTransaction");
+  UpdateFwdTransactionId(aFwdTransactionId);
+  AutoClearReadLocks clearLocks(mReadLocks);
+
+  // This ensures that destroy operations are always processed. It is not safe
+  // to early-return without doing so.
+  AutoWebRenderBridgeParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
+
+  if (!aCommands.IsEmpty()) {
+    mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
+    ProcessWebRenderParentCommands(aCommands);
+    mCompositorScheduler->ScheduleComposition();
+  }
+
+  mScrollData.SetFocusTarget(aFocusTarget);
+  UpdateAPZ(false);
+
+  // XXX Call DidComposite at correct timing.
+  TimeStamp now = TimeStamp::Now();
+  HoldPendingTransactionId(mWrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
+  mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
+
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
@@ -621,15 +646,12 @@ WebRenderBridgeParent::RecvParentCommands(nsTArray<WebRenderParentCommand>&& aCo
   if (mDestroyed) {
     return IPC_OK();
   }
-  wr::ResourceUpdateQueue resources;
-  ProcessWebRenderParentCommands(aCommands, resources);
-  mApi->UpdateResources(resources);
+  ProcessWebRenderParentCommands(aCommands);
   return IPC_OK();
 }
 
 void
-WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
-                                                      wr::ResourceUpdateQueue& aResources)
+WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands)
 {
   for (InfallibleTArray<WebRenderParentCommand>::index_type i = 0; i < aCommands.Length(); ++i) {
     const WebRenderParentCommand& cmd = aCommands[i];
@@ -1083,7 +1105,7 @@ WebRenderBridgeParent::SampleAnimations(nsTArray<wr::WrOpacityProperty>& aOpacit
 void
 WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect)
 {
-  AutoProfilerTracing tracing("Paint", "CompositeToTraget");
+  AUTO_PROFILER_TRACING("Paint", "CompositeToTraget");
   if (mPaused) {
     return;
   }

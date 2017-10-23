@@ -17,44 +17,6 @@ namespace layout {
 
 using namespace gfx;
 
-// This is used by all Advanced Layers users, so we use plain gfx types
-struct TextRunFragment {
-  ScaledFont* font;
-  Color color;
-  nsTArray<gfx::Glyph> glyphs;
-};
-
-// Only webrender handles this, so we use webrender types
-struct SelectionFragment {
-  wr::ColorF color;
-  wr::LayoutRect rect;
-};
-
-// Selections are used in nsTextFrame to hack in sub-frame style changes.
-// Most notably text-shadows can be changed by selections, and so we need to
-// group all the glyphs and decorations attached to a shadow. We do this by
-// having shadows apply to an entire SelectedTextRunFragment, and creating
-// one for each "piece" of selection.
-//
-// For instance, this text:
-//
-// Hello [there] my name [is Mega]man
-//          ^                ^
-//  normal selection      Ctrl+F highlight selection (yeah it's very overloaded)
-//
-// Would be broken up into 5 SelectedTextRunFragments
-//
-// ["Hello ", "there", " my name ", "is Mega", "man"]
-//
-// For almost all nsTextFrames, there will be only one SelectedTextRunFragment.
-struct SelectedTextRunFragment {
-  Maybe<SelectionFragment> selection;
-  nsTArray<wr::TextShadow> shadows;
-  nsTArray<TextRunFragment> text;
-  nsTArray<wr::Line> beforeDecorations;
-  nsTArray<wr::Line> afterDecorations;
-};
-
 // This class is fake DrawTarget, used to intercept text draw calls, while
 // also collecting up the other aspects of text natively.
 //
@@ -81,40 +43,55 @@ struct SelectedTextRunFragment {
 // This is also likely to be a bit buggy (missing or misinterpreted info)
 // while we further develop the design.
 //
-// This does not currently support SVG text effects.
+// TextDrawTarget doesn't yet support all features. See mHasUnsupportedFeatures
+// for details.
 class TextDrawTarget : public DrawTarget
 {
 public:
-  // The different phases of drawing the text we're in
-  // Each should only happen once, and in the given order.
-  enum class Phase : uint8_t {
-    eSelection, eUnderline, eOverline, eGlyphs, eEmphasisMarks, eLineThrough
-  };
-
-  explicit TextDrawTarget()
-  : mCurrentlyDrawing(Phase::eSelection), mHasUnsupportedFeatures(false)
+  explicit TextDrawTarget(wr::DisplayListBuilder& aBuilder,
+                          const layers::StackingContextHelper& aSc,
+                          layers::WebRenderLayerManager* aManager,
+                          nsDisplayItem* aItem,
+                          nsRect& aBounds)
+    : mBuilder(aBuilder), mSc(aSc), mManager(aManager)
   {
-    SetSelectionIndex(0);
+    SetPermitSubpixelAA(!aItem->IsSubpixelAADisabled());
+
+    // Compute clip/bounds
+    auto appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
+    LayoutDeviceRect layoutBoundsRect = LayoutDeviceRect::FromAppUnits(
+        aBounds, appUnitsPerDevPixel);
+    LayoutDeviceRect layoutClipRect = layoutBoundsRect;
+
+    auto clip = aItem->GetClip();
+    if (clip.HasClip()) {
+      layoutClipRect = LayoutDeviceRect::FromAppUnits(
+                  clip.GetClipRect(), appUnitsPerDevPixel);
+    }
+
+    mBoundsRect = aSc.ToRelativeLayoutRect(layoutBoundsRect);
+    mClipRect = aSc.ToRelativeLayoutRect(layoutClipRect);
+
+    mBackfaceVisible = !aItem->BackfaceIsHidden();
+
+    mBuilder.Save();
   }
 
   // Prevent this from being copied
   TextDrawTarget(const TextDrawTarget& src) = delete;
   TextDrawTarget& operator=(const TextDrawTarget&) = delete;
 
-  // Change the phase of text we're drawing.
-  void StartDrawing(Phase aPhase) { mCurrentlyDrawing = aPhase; }
-  void FoundUnsupportedFeature() { mHasUnsupportedFeatures = true; }
-
-  void SetSelectionIndex(size_t i) {
-    // i should only be accessed if i-1 has already been
-    MOZ_ASSERT(i <= mParts.Length());
-
-    if (mParts.Length() == i){
-      mParts.AppendElement();
+  ~TextDrawTarget()
+  {
+    if (mHasUnsupportedFeatures) {
+      mBuilder.Restore();
+    } else {
+      mBuilder.ClearSave();
     }
-
-    mCurrentPart = &mParts[i];
   }
+
+  void FoundUnsupportedFeature() { mHasUnsupportedFeatures = true; }
+  bool HasUnsupportedFeatures() { return mHasUnsupportedFeatures; }
 
   // This overload just stores the glyphs/font/color.
   void
@@ -124,56 +101,64 @@ public:
              const DrawOptions& aOptions,
              const GlyphRenderingOptions* aRenderingOptions) override
   {
-    // FIXME: figure out which of these asserts are real
+    // FIXME(?): Deal with GlyphRenderingOptions
+
+    // Make sure we're only given boring color patterns
     MOZ_RELEASE_ASSERT(aOptions.mCompositionOp == CompositionOp::OP_OVER);
     MOZ_RELEASE_ASSERT(aOptions.mAlpha == 1.0f);
-
-    // Make sure we're only given color patterns
     MOZ_RELEASE_ASSERT(aPattern.GetType() == PatternType::COLOR);
-    const ColorPattern* colorPat = static_cast<const ColorPattern*>(&aPattern);
+    auto* colorPat = static_cast<const ColorPattern*>(&aPattern);
+    auto color = wr::ToColorF(colorPat->mColor);
 
-    // Make sure the font exists
+    // Make sure the font exists, and can be serialized
     MOZ_RELEASE_ASSERT(aFont);
-
-    // FIXME(?): Deal with AA on the DrawOptions, and the GlyphRenderingOptions
-
-    if (mCurrentlyDrawing != Phase::eGlyphs &&
-        mCurrentlyDrawing != Phase::eEmphasisMarks) {
-      MOZ_CRASH("TextDrawTarget received glyphs in wrong phase");
+    if (!aFont->CanSerialize()) {
+      FoundUnsupportedFeature();
+      return;
     }
 
-    // We need to push a new TextRunFragment whenever the font/color changes
-    // (usually this implies some font fallback from mixing languages/emoji)
-    TextRunFragment* fragment;
-    if (mCurrentPart->text.IsEmpty() ||
-        mCurrentPart->text.LastElement().font != aFont ||
-        mCurrentPart->text.LastElement().color != colorPat->mColor) {
-      fragment = mCurrentPart->text.AppendElement();
-      fragment->font = aFont;
-      fragment->color = colorPat->mColor;
-    } else {
-      fragment = &mCurrentPart->text.LastElement();
+    // 170 is the maximum size gfxFont is expected to hand us
+    AutoTArray<wr::GlyphInstance, 170> glyphs;
+    glyphs.SetLength(aBuffer.mNumGlyphs);
+
+    for (size_t i = 0; i < aBuffer.mNumGlyphs; i++) {
+      wr::GlyphInstance& targetGlyph = glyphs[i];
+      const gfx::Glyph& sourceGlyph = aBuffer.mGlyphs[i];
+      targetGlyph.index = sourceGlyph.mIndex;
+      targetGlyph.point = mSc.ToRelativeLayoutPoint(
+          LayoutDevicePoint::FromUnknownPoint(sourceGlyph.mPosition));
     }
 
-    nsTArray<Glyph>& glyphs = fragment->glyphs;
+    wr::GlyphOptions glyphOptions;
+    glyphOptions.render_mode = wr::ToFontRenderMode(aOptions.mAntialiasMode, GetPermitSubpixelAA());
 
-    size_t oldLength = glyphs.Length();
-    glyphs.SetLength(oldLength + aBuffer.mNumGlyphs);
-    PodCopy(glyphs.Elements() + oldLength, aBuffer.mGlyphs, aBuffer.mNumGlyphs);
+    mManager->WrBridge()->PushGlyphs(mBuilder, glyphs, aFont,
+                                     color, mSc, mBoundsRect, mClipRect,
+                                     mBackfaceVisible, &glyphOptions);
   }
 
   void
-  AppendShadow(const wr::TextShadow& aShadow) {
-    mCurrentPart->shadows.AppendElement(aShadow);
-  }
-
-  void
-  SetSelectionRect(const LayoutDeviceRect& aRect, const Color& aColor)
+  AppendShadow(const wr::Shadow& aShadow)
   {
-    SelectionFragment frag;
-    frag.rect = wr::ToLayoutRect(aRect);
-    frag.color = wr::ToColorF(aColor);
-    mCurrentPart->selection = Some(frag);
+    mBuilder.PushShadow(mBoundsRect, mClipRect, mBackfaceVisible, aShadow);
+    mHasShadows = true;
+  }
+
+  void
+  TerminateShadows()
+  {
+    if (mHasShadows) {
+      mBuilder.PopAllShadows();
+      mHasShadows = false;
+    }
+  }
+
+  void
+  AppendSelectionRect(const LayoutDeviceRect& aRect, const Color& aColor)
+  {
+    auto rect = wr::ToLayoutRect(aRect);
+    auto color = wr::ToColorF(aColor);
+    mBuilder.PushRect(rect, mClipRect, mBackfaceVisible, color);
   }
 
   void
@@ -184,19 +169,7 @@ public:
                    const Color& aColor,
                    const uint8_t aStyle)
   {
-    wr::Line* decoration;
-
-    switch (mCurrentlyDrawing) {
-      case Phase::eUnderline:
-      case Phase::eOverline:
-        decoration = mCurrentPart->beforeDecorations.AppendElement();
-        break;
-      case Phase::eLineThrough:
-        decoration = mCurrentPart->afterDecorations.AppendElement();
-        break;
-      default:
-        MOZ_CRASH("TextDrawTarget received Decoration in wrong phase");
-    }
+    wr::Line decoration;
 
     // This function is basically designed to slide into the decoration drawing
     // code of nsCSSRendering with minimum disruption, to minimize the
@@ -208,27 +181,27 @@ public:
     //
     // So we mangle the format here in a single centralized place, where neither
     // webrender nor nsCSSRendering has to care about this mismatch.
-    decoration->baseline = (aVertical ? aStart.x : aStart.y) - aThickness / 2;
-    decoration->start = aVertical ? aStart.y : aStart.x;
-    decoration->end = aVertical ? aEnd.y : aEnd.x;
-    decoration->width = aThickness;
-    decoration->color = wr::ToColorF(aColor);
-    decoration->orientation = aVertical
+    decoration.baseline = (aVertical ? aStart.x : aStart.y) - aThickness / 2;
+    decoration.start = aVertical ? aStart.y : aStart.x;
+    decoration.end = aVertical ? aEnd.y : aEnd.x;
+    decoration.width = aThickness;
+    decoration.color = wr::ToColorF(aColor);
+    decoration.orientation = aVertical
       ? wr::LineOrientation::Vertical
       : wr::LineOrientation::Horizontal;
 
     switch (aStyle) {
       case NS_STYLE_TEXT_DECORATION_STYLE_SOLID:
-        decoration->style = wr::LineStyle::Solid;
+        decoration.style = wr::LineStyle::Solid;
         break;
       case NS_STYLE_TEXT_DECORATION_STYLE_DOTTED:
-        decoration->style = wr::LineStyle::Dotted;
+        decoration.style = wr::LineStyle::Dotted;
         break;
       case NS_STYLE_TEXT_DECORATION_STYLE_DASHED:
-        decoration->style = wr::LineStyle::Dashed;
+        decoration.style = wr::LineStyle::Dashed;
         break;
       case NS_STYLE_TEXT_DECORATION_STYLE_WAVY:
-        decoration->style = wr::LineStyle::Wavy;
+        decoration.style = wr::LineStyle::Wavy;
         break;
       // Double lines should be lowered to two solid lines
       case NS_STYLE_TEXT_DECORATION_STYLE_DOUBLE:
@@ -236,145 +209,33 @@ public:
         MOZ_CRASH("TextDrawTarget received unsupported line style");
     }
 
-
+    mBuilder.PushLine(mClipRect, mBackfaceVisible, decoration);
   }
-
-  const nsTArray<SelectedTextRunFragment>& GetParts() { return mParts; }
-
-  bool
-  CanSerializeFonts()
-  {
-    if (mHasUnsupportedFeatures) {
-      return false;
-    }
-
-    for (const SelectedTextRunFragment& part : GetParts()) {
-      for (const TextRunFragment& frag : part.text) {
-        if (!frag.font->CanSerialize()) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  // TextLayers don't support very complicated text right now. This checks
-  // if any of the problem cases exist.
-  bool
-  ContentsAreSimple()
-  {
-
-    ScaledFont* font = nullptr;
-
-    for (const SelectedTextRunFragment& part : GetParts()) {
-      // Can't handle shadows, selections, or decorations
-      if (part.shadows.Length() > 0 ||
-          part.beforeDecorations.Length() > 0 ||
-          part.afterDecorations.Length() > 0 ||
-          part.selection.isSome()) {
-        return false;
-      }
-
-      // Must only have one font (multiple colors is fine)
-      for (const mozilla::layout::TextRunFragment& text : part.text) {
-        if (!font) {
-          font = text.font;
-        }
-        if (font != text.font) {
-          return false;
-        }
-      }
-    }
-
-    // Must have an actual font (i.e. actual text)
-    if (!font) {
-      return false;
-    }
-
-    return true;
-  }
-
-  void
-  CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
-                          const layers::StackingContextHelper& aSc,
-                          layers::WebRenderLayerManager* aManager,
-                          nsDisplayItem* aItem,
-                          nsRect& aBounds) {
-
-  // Drawing order: selections,
-  //                shadows,
-  //                underline, overline, [grouped in one array]
-  //                text, emphasisText,  [grouped in one array]
-  //                lineThrough
-
-  // Compute clip/bounds
-  auto appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
-  LayoutDeviceRect layoutBoundsRect = LayoutDeviceRect::FromAppUnits(
-      aBounds, appUnitsPerDevPixel);
-  LayoutDeviceRect layoutClipRect = layoutBoundsRect;
-  auto clip = aItem->GetClip();
-  if (clip.HasClip()) {
-    layoutClipRect = LayoutDeviceRect::FromAppUnits(
-                clip.GetClipRect(), appUnitsPerDevPixel);
-  }
-
-  LayerRect boundsRect = LayerRect::FromUnknownRect(layoutBoundsRect.ToUnknownRect());
-  LayerRect clipRect = LayerRect::FromUnknownRect(layoutClipRect.ToUnknownRect());
-
-  bool backfaceVisible = !aItem->BackfaceIsHidden();
-
-  wr::LayoutRect wrBoundsRect = aSc.ToRelativeLayoutRect(boundsRect);
-  wr::LayoutRect wrClipRect = aSc.ToRelativeLayoutRect(clipRect);
-
-
-  // Create commands
-  for (auto& part : GetParts()) {
-    if (part.selection) {
-      auto selection = part.selection.value();
-      aBuilder.PushRect(selection.rect, wrClipRect, backfaceVisible, selection.color);
-    }
-  }
-
-  for (auto& part : GetParts()) {
-    // WR takes the shadows in CSS-order (reverse of rendering order),
-    // because the drawing of a shadow actually occurs when it's popped.
-    for (const wr::TextShadow& shadow : part.shadows) {
-      aBuilder.PushTextShadow(wrBoundsRect, wrClipRect, backfaceVisible, shadow);
-    }
-
-    for (const wr::Line& decoration : part.beforeDecorations) {
-      aBuilder.PushLine(wrClipRect, backfaceVisible, decoration);
-    }
-
-    for (const mozilla::layout::TextRunFragment& text : part.text) {
-      aManager->WrBridge()->PushGlyphs(aBuilder, text.glyphs, text.font,
-                                       text.color, aSc, boundsRect, clipRect,
-                                       backfaceVisible);
-    }
-
-    for (const wr::Line& decoration : part.afterDecorations) {
-      aBuilder.PushLine(wrClipRect, backfaceVisible, decoration);
-    }
-
-    for (size_t i = 0; i < part.shadows.Length(); ++i) {
-      aBuilder.PopTextShadow();
-    }
-  }
-}
-
 
 private:
-  // The part of the text we're currently drawing (glyphs, underlines, etc.)
-  Phase mCurrentlyDrawing;
+  // Whether anything unsupported was encountered. Currently:
+  //
+  // * Synthetic bold/italics
+  // * SVG fonts
+  // * Unserializable fonts
+  // * Tofu glyphs
+  // * Pratial ligatures
+  // * Text writing-mode
+  // * Text stroke
+  bool mHasUnsupportedFeatures = false;
 
-  // Which chunk of mParts is actively being populated
-  SelectedTextRunFragment* mCurrentPart;
+  // Whether PopAllShadows needs to be called
+  bool mHasShadows = false;
 
-  // Chunks of the text, grouped by selection
-  nsTArray<SelectedTextRunFragment> mParts;
+  // Things used to push to webrender
+  wr::DisplayListBuilder& mBuilder;
+  const layers::StackingContextHelper& mSc;
+  layers::WebRenderLayerManager* mManager;
 
-  // Whether Tofu or SVG fonts were encountered
-  bool mHasUnsupportedFeatures;
+  // Computed facts
+  wr::LayerRect mBoundsRect;
+  wr::LayerRect mClipRect;
+  bool mBackfaceVisible;
 
   // The rest of this is dummy implementations of DrawTarget's API
 public:

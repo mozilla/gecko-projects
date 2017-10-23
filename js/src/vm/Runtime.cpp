@@ -105,6 +105,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     profilerSampleBufferGen_(0),
     profilerSampleBufferLapCount_(1),
     telemetryCallback(nullptr),
+    consumeStreamCallback(nullptr),
     readableStreamDataRequestCallback(nullptr),
     readableStreamWriteIntoReadRequestCallback(nullptr),
     readableStreamCancelCallback(nullptr),
@@ -728,7 +729,7 @@ JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject pro
                              HandleObject incumbentGlobal)
 {
     MOZ_ASSERT(cx->enqueuePromiseJobCallback,
-               "Must set a callback using JS_SetEnqeueuPromiseJobCallback before using Promises");
+               "Must set a callback using JS::SetEnqueuePromiseJobCallback before using Promises");
     MOZ_ASSERT_IF(incumbentGlobal, !IsWrapper(incumbentGlobal) && !IsWindowProxy(incumbentGlobal));
 
     void* data = cx->enqueuePromiseJobCallbackData;
@@ -799,13 +800,7 @@ JSRuntime::forkRandomKeyGenerator()
 void
 JSRuntime::updateMallocCounter(size_t nbytes)
 {
-    updateMallocCounter(nullptr, nbytes);
-}
-
-void
-JSRuntime::updateMallocCounter(JS::Zone* zone, size_t nbytes)
-{
-    gc.updateMallocCounter(zone, nbytes);
+    gc.updateMallocCounter(nbytes);
 }
 
 JS_FRIEND_API(void*)

@@ -37,7 +37,7 @@ use std::iter;
 use style::attr::AttrValue;
 use style::element_state::*;
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 struct OptionsFilter;
 impl CollectionFilter for OptionsFilter {
     fn filter<'a>(&self, elem: &'a Element, root: &'a Node) -> bool {
@@ -84,7 +84,7 @@ impl HTMLSelectElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLSelectElement> {
-        Node::reflect_node(box HTMLSelectElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLSelectElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLSelectElementBinding::Wrap)
     }
@@ -247,7 +247,7 @@ impl HTMLSelectElementMethods for HTMLSelectElement {
         self.options.or_init(|| {
             let window = window_from_node(self);
             HTMLOptionsCollection::new(
-                &window, self, box OptionsFilter)
+                &window, self, Box::new(OptionsFilter))
         })
     }
 

@@ -26,8 +26,12 @@ const EDIT_ADDRESS_KEYWORDS = [
   "givenName", "additionalName", "familyName", "organization", "streetAddress",
   "state", "province", "city", "country", "zip", "postalCode", "email", "tel",
 ];
-const MANAGE_CREDITCARDS_KEYWORDS = ["manageCreditCardsTitle", "addNewCreditCardTitle", "showCreditCards"];
+const MANAGE_CREDITCARDS_KEYWORDS = ["manageCreditCardsTitle", "addNewCreditCardTitle", "showCreditCardsBtnLabel"];
 const EDIT_CREDITCARD_KEYWORDS = ["cardNumber", "nameOnCard", "cardExpires"];
+
+// The maximum length of data to be saved in a single field for preventing DoS
+// attacks that fill the user's hard drive(s).
+const MAX_FIELD_VALUE_LENGTH = 200;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -45,6 +49,7 @@ this.FormAutofillUtils = {
   EDIT_ADDRESS_KEYWORDS,
   MANAGE_CREDITCARDS_KEYWORDS,
   EDIT_CREDITCARD_KEYWORDS,
+  MAX_FIELD_VALUE_LENGTH,
 
   _fieldNameInfo: {
     "name": "name",
@@ -178,7 +183,7 @@ this.FormAutofillUtils = {
     return doc.querySelectorAll("input, select");
   },
 
-  ALLOWED_TYPES: ["text", "email", "tel", "number"],
+  ALLOWED_TYPES: ["text", "email", "tel", "number", "month"],
   isFieldEligibleForAutofill(element) {
     let tagName = element.tagName;
     if (tagName == "INPUT") {
@@ -391,14 +396,17 @@ this.FormAutofillUtils = {
   },
 
   findCreditCardSelectOption(selectEl, creditCard, fieldName) {
-    let oneDigitMonth = creditCard["cc-exp-month"].toString();
-    let twoDigitsMonth = oneDigitMonth.padStart(2, "0");
-    let fourDigitsYear = creditCard["cc-exp-year"].toString();
-    let twoDigitsYear = fourDigitsYear.substr(2, 2);
+    let oneDigitMonth = creditCard["cc-exp-month"] ? creditCard["cc-exp-month"].toString() : null;
+    let twoDigitsMonth = oneDigitMonth ? oneDigitMonth.padStart(2, "0") : null;
+    let fourDigitsYear = creditCard["cc-exp-year"] ? creditCard["cc-exp-year"].toString() : null;
+    let twoDigitsYear = fourDigitsYear ? fourDigitsYear.substr(2, 2) : null;
     let options = Array.from(selectEl.options);
 
     switch (fieldName) {
       case "cc-exp-month": {
+        if (!oneDigitMonth) {
+          return null;
+        }
         for (let option of options) {
           if ([option.text, option.label, option.value].some(s => {
             let result = /[1-9]\d*/.exec(s);
@@ -410,6 +418,9 @@ this.FormAutofillUtils = {
         break;
       }
       case "cc-exp-year": {
+        if (!fourDigitsYear) {
+          return null;
+        }
         for (let option of options) {
           if ([option.text, option.label, option.value].some(
             s => s == twoDigitsYear || s == fourDigitsYear
@@ -420,6 +431,9 @@ this.FormAutofillUtils = {
         break;
       }
       case "cc-exp": {
+        if (!oneDigitMonth || !fourDigitsYear) {
+          return null;
+        }
         let patterns = [
           oneDigitMonth + "/" + twoDigitsYear,    // 8/22
           oneDigitMonth + "/" + fourDigitsYear,   // 8/2022
@@ -534,6 +548,10 @@ this.FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
 
 XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
   return Services.strings.createBundle("chrome://formautofill/locale/formautofill.properties");
+});
+
+XPCOMUtils.defineLazyGetter(FormAutofillUtils, "brandBundle", function() {
+  return Services.strings.createBundle("chrome://branding/locale/brand.properties");
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,

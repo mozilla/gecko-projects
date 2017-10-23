@@ -919,10 +919,7 @@ ifdef MOZ_USING_SCCACHE
 sccache_wrap := RUSTC_WRAPPER='$(CCACHE)'
 endif
 
-# XXX hack to work around dsymutil failing on cross-OSX builds (bug 1380381)
-ifeq ($(HOST_OS_ARCH)-$(OS_ARCH),Linux-Darwin)
-default_rustflags += -C debuginfo=1
-else
+ifdef MOZ_DEBUG_SYMBOLS
 default_rustflags += -C debuginfo=2
 endif
 

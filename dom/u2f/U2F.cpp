@@ -247,14 +247,8 @@ U2F::Register(const nsAString& aAppId,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<U2FManager> mgr = U2FManager::GetOrCreate();
-  MOZ_ASSERT(mgr);
-  if (!mgr || mRegisterCallback.isSome()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-
   Cancel();
+
   MOZ_ASSERT(mRegisterCallback.isNothing());
   mRegisterCallback = Some(nsMainThreadPtrHandle<U2FRegisterCallback>(
                         new nsMainThreadPtrHolder<U2FRegisterCallback>(
@@ -307,6 +301,7 @@ U2F::Register(const nsAString& aAppId,
 
   auto& localReqHolder = mPromiseHolder;
   auto& localCb = mRegisterCallback;
+  RefPtr<U2FManager> mgr = U2FManager::GetOrCreate();
   RefPtr<U2FPromise> p = mgr->Register(mParent, cAppId,
                                        NS_ConvertUTF16toUTF8(clientDataJSON),
                                        adjustedTimeoutMillis, excludeList);
@@ -344,14 +339,8 @@ U2F::Sign(const nsAString& aAppId,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<U2FManager> mgr = U2FManager::GetOrCreate();
-  MOZ_ASSERT(mgr);
-  if (!mgr || mSignCallback.isSome()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-
   Cancel();
+
   MOZ_ASSERT(mSignCallback.isNothing());
   mSignCallback = Some(nsMainThreadPtrHandle<U2FSignCallback>(
                     new nsMainThreadPtrHolder<U2FSignCallback>(
@@ -389,6 +378,7 @@ U2F::Sign(const nsAString& aAppId,
                                        permittedList);
   auto& localReqHolder = mPromiseHolder;
   auto& localCb = mSignCallback;
+  RefPtr<U2FManager> mgr = U2FManager::GetOrCreate();
   RefPtr<U2FPromise> p = mgr->Sign(mParent, cAppId,
                                    NS_ConvertUTF16toUTF8(clientDataJSON),
                                    adjustedTimeoutMillis, permittedList);
@@ -437,7 +427,7 @@ U2F::Cancel()
 
   RefPtr<U2FManager> mgr = U2FManager::Get();
   if (mgr) {
-    mgr->Cancel(NS_ERROR_DOM_OPERATION_ERR);
+    mgr->MaybeCancelTransaction(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   mPromiseHolder.DisconnectIfExists();

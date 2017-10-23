@@ -422,7 +422,7 @@ public:
 
   uint32_t AudioChannelCount() const
   {
-    return std::min<uint32_t>(8, CubebUtils::MaxNumberOfChannels());
+    return mOutputChannels;
   }
 
   double MediaTimeToSeconds(GraphTime aTime) const
@@ -456,13 +456,12 @@ public:
    */
   GraphDriver* CurrentDriver() const
   {
-    AssertOnGraphThreadOrNotRunning();
+#ifdef DEBUG
+    if (!OnGraphThreadOrNotRunning()) {
+      mMonitor.AssertCurrentThreadOwns();
+    }
+#endif
     return mDriver;
-  }
-
-  bool RemoveMixerCallback(MixerCallbackReceiver* aReceiver)
-  {
-    return mMixer.RemoveCallback(aReceiver);
   }
 
   /**
@@ -475,7 +474,10 @@ public:
    */
   void SetCurrentDriver(GraphDriver* aDriver)
   {
+#ifdef DEBUG
+    mMonitor.AssertCurrentThreadOwns();
     AssertOnGraphThreadOrNotRunning();
+#endif
     mDriver = aDriver;
   }
 
@@ -814,6 +816,11 @@ private:
    * Stream for window audio capture.
    */
   nsTArray<WindowAndStream> mWindowCaptureStreams;
+
+  /**
+   * Number of channels on output.
+   */
+  const uint32_t mOutputChannels;
 
 #ifdef DEBUG
   /**

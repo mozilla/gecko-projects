@@ -763,7 +763,7 @@ nsMathMLContainerFrame::RemoveFrame(ChildListID     aListID,
 
 nsresult
 nsMathMLContainerFrame::AttributeChanged(int32_t         aNameSpaceID,
-                                         nsIAtom*        aAttribute,
+                                         nsAtom*        aAttribute,
                                          int32_t         aModType)
 {
   // XXX Since they are numerous MathML attributes that affect layout, and
@@ -1536,7 +1536,7 @@ nsMathMLContainerFrame::ReportChildCountError()
 }
 
 nsresult
-nsMathMLContainerFrame::ReportInvalidChildError(nsIAtom* aChildTag)
+nsMathMLContainerFrame::ReportInvalidChildError(nsAtom* aChildTag)
 {
   const char16_t* argv[] =
     { aChildTag->GetUTF16String(),
@@ -1549,7 +1549,9 @@ nsMathMLContainerFrame::ReportInvalidChildError(nsIAtom* aChildTag)
 nsContainerFrame*
 NS_NewMathMLmathBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
-  return new (aPresShell) nsMathMLmathBlockFrame(aContext);
+  auto newFrame = new (aPresShell) nsMathMLmathBlockFrame(aContext);
+  newFrame->AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
+  return newFrame;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmathBlockFrame)

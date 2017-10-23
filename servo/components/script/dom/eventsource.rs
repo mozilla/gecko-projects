@@ -41,11 +41,11 @@ header! { (LastEventId, "Last-Event-ID") => [String] }
 
 const DEFAULT_RECONNECTION_TIME: u64 = 5000;
 
-#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
 struct GenerationId(u32);
 
-#[derive(Clone, Copy, Debug, HeapSizeOf, JSTraceable, PartialEq)]
-/// https://html.spec.whatwg.org/multipage/#dom-eventsource-readystate
+#[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
+/// <https://html.spec.whatwg.org/multipage/#dom-eventsource-readystate>
 enum ReadyState {
     Connecting = 0,
     Open = 1,
@@ -90,7 +90,7 @@ struct EventSourceContext {
 }
 
 impl EventSourceContext {
-    /// https://html.spec.whatwg.org/multipage/#announce-the-connection
+    /// <https://html.spec.whatwg.org/multipage/#announce-the-connection>
     fn announce_the_connection(&self) {
         let event_source = self.event_source.root();
         if self.gen_id != event_source.generation_id.get() {
@@ -111,7 +111,7 @@ impl EventSourceContext {
         );
     }
 
-    /// https://html.spec.whatwg.org/multipage/#fail-the-connection
+    /// <https://html.spec.whatwg.org/multipage/#fail-the-connection>
     fn fail_the_connection(&self) {
         let event_source = self.event_source.root();
         if self.gen_id != event_source.generation_id.get() {
@@ -413,7 +413,7 @@ impl EventSource {
     }
 
     fn new(global: &GlobalScope, url: ServoUrl, with_credentials: bool) -> DomRoot<EventSource> {
-        reflect_dom_object(box EventSource::new_inherited(url, with_credentials),
+        reflect_dom_object(Box::new(EventSource::new_inherited(url, with_credentials)),
                            global,
                            Wrap)
     }
@@ -486,9 +486,9 @@ impl EventSource {
             task_source: global.networking_task_source(),
             canceller: Some(global.task_canceller())
         };
-        ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
+        ROUTER.add_route(action_receiver.to_opaque(), Box::new(move |message| {
             listener.notify_fetch(message.to().unwrap());
-        });
+        }));
         global.core_resource_thread().send(CoreResourceMsg::Fetch(request, action_sender)).unwrap();
         // Step 13
         Ok(ev)
@@ -528,11 +528,11 @@ impl EventSourceMethods for EventSource {
     }
 }
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub struct EventSourceTimeoutCallback {
-    #[ignore_heap_size_of = "Because it is non-owning"]
+    #[ignore_malloc_size_of = "Because it is non-owning"]
     event_source: Trusted<EventSource>,
-    #[ignore_heap_size_of = "Because it is non-owning"]
+    #[ignore_malloc_size_of = "Because it is non-owning"]
     action_sender: ipc::IpcSender<FetchResponseMsg>,
 }
 

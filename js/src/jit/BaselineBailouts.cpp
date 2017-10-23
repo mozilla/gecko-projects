@@ -394,11 +394,13 @@ struct BaselineStackBuilder
         BufferPointer<RectifierFrameLayout> priorFrame =
             pointerAtStackOffset<RectifierFrameLayout>(priorOffset);
         FrameType priorType = priorFrame->prevType();
-        MOZ_ASSERT(priorType == JitFrame_IonJS || priorType == JitFrame_BaselineStub);
+        MOZ_ASSERT(JSJitFrameIter::isEntry(priorType) ||
+                   priorType == JitFrame_IonJS ||
+                   priorType == JitFrame_BaselineStub);
 
-        // If the frame preceding the rectifier is an IonJS frame, then once again
-        // the frame pointer does not matter.
-        if (priorType == JitFrame_IonJS)
+        // If the frame preceding the rectifier is an IonJS or entry frame,
+        // then once again the frame pointer does not matter.
+        if (priorType == JitFrame_IonJS || JSJitFrameIter::isEntry(priorType))
             return nullptr;
 
         // Otherwise, the frame preceding the rectifier is a BaselineStub frame.
@@ -1111,6 +1113,12 @@ InitFromBailout(JSContext* cx, HandleScript caller, jsbytecode* callerPC,
             // To enter a monitoring chain, we load the top stack value into R0
             JitSpew(JitSpew_BaselineBailouts, "      Popping top stack value into R0.");
             builder.popValueInto(PCMappingSlotInfo::SlotInR0);
+
+            if (JSOp(*pc) == JSOP_GETELEM_SUPER) {
+                // Push a fake value so that the stack stays balanced.
+                if (!builder.writeValue(UndefinedValue(), "GETELEM_SUPER stack blance"))
+                    return false;
+            }
 
             // Need to adjust the frameSize for the frame to match the values popped
             // into registers.

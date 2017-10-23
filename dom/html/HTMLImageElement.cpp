@@ -138,7 +138,6 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLImageElement,
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLImageElement,
                                              nsGenericHTMLElement,
-                                             nsIDOMHTMLImageElement,
                                              nsIImageLoadingContent,
                                              imgIOnloadBlocker,
                                              imgINotificationObserver)
@@ -225,7 +224,7 @@ HTMLImageElement::Y()
 
 bool
 HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
-                                 nsIAtom* aAttribute,
+                                 nsAtom* aAttribute,
                                  const nsAString& aValue,
                                  nsAttrValue& aResult)
 {
@@ -258,7 +257,7 @@ HTMLImageElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
 }
 
 nsChangeHint
-HTMLImageElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
+HTMLImageElement::GetAttributeChangeHint(const nsAtom* aAttribute,
                                          int32_t aModType) const
 {
   nsChangeHint retval =
@@ -276,7 +275,7 @@ HTMLImageElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
 }
 
 NS_IMETHODIMP_(bool)
-HTMLImageElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLImageElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry* const map[] = {
     sCommonAttributeMap,
@@ -296,7 +295,7 @@ HTMLImageElement::GetAttributeMappingFunction() const
 }
 
 nsresult
-HTMLImageElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+HTMLImageElement::BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                 const nsAttrValueOrString* aValue,
                                 bool aNotify)
 {
@@ -316,15 +315,17 @@ HTMLImageElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                const nsAttrValue* aValue,
-                               const nsAttrValue* aOldValue, bool aNotify)
+                               const nsAttrValue* aOldValue,
+                               nsIPrincipal* aMaybeScriptedPrincipal,
+                               bool aNotify)
 {
   nsAttrValueOrString attrVal(aValue);
 
   if (aValue) {
-    AfterMaybeChangeAttr(aNameSpaceID, aName, attrVal, aOldValue, true,
-                         aNotify);
+    AfterMaybeChangeAttr(aNameSpaceID, aName, attrVal, aOldValue,
+                         aMaybeScriptedPrincipal, true, aNotify);
   }
 
   if (aNameSpaceID == kNameSpaceID_None && mForm &&
@@ -366,6 +367,8 @@ HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     // initaiated by a user interaction.
     mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
 
+    mSrcsetTriggeringPrincipal = aMaybeScriptedPrincipal;
+
     PictureSourceSrcsetChanged(this, attrVal.String(), aNotify);
   } else if (aName == nsGkAtoms::sizes &&
              aNameSpaceID == kNameSpaceID_None) {
@@ -377,24 +380,27 @@ HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   }
 
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName,
-                                            aValue, aOldValue, aNotify);
+                                            aValue, aOldValue,
+                                            aMaybeScriptedPrincipal,
+                                            aNotify);
 }
 
 nsresult
-HTMLImageElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsIAtom* aName,
+HTMLImageElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                          const nsAttrValueOrString& aValue,
                                          bool aNotify)
 {
-  AfterMaybeChangeAttr(aNamespaceID, aName, aValue, nullptr, false, aNotify);
+  AfterMaybeChangeAttr(aNamespaceID, aName, aValue, nullptr, nullptr, false, aNotify);
 
   return nsGenericHTMLElement::OnAttrSetButNotChanged(aNamespaceID, aName,
                                                       aValue, aNotify);
 }
 
 void
-HTMLImageElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsIAtom* aName,
+HTMLImageElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsAtom* aName,
                                        const nsAttrValueOrString& aValue,
                                        const nsAttrValue* aOldValue,
+                                       nsIPrincipal* aMaybeScriptedPrincipal,
                                        bool aValueMaybeChanged, bool aNotify)
 {
   bool forceReload = false;
@@ -415,10 +421,14 @@ HTMLImageElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsIAtom* aName,
     // initaiated by a user interaction.
     mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
 
+    mSrcTriggeringPrincipal = nsContentUtils::GetAttrTriggeringPrincipal(
+        this, aValue.String(), aMaybeScriptedPrincipal);
+
     if (InResponsiveMode()) {
       if (mResponsiveSelector &&
           mResponsiveSelector->Content() == this) {
-        mResponsiveSelector->SetDefaultSource(aValue.String());
+        mResponsiveSelector->SetDefaultSource(aValue.String(),
+                                              mSrcTriggeringPrincipal);
       }
       QueueImageLoadTask(true);
     } else if (aNotify && OwnerDoc()->IsCurrentActiveDocument()) {
@@ -440,7 +450,8 @@ HTMLImageElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsIAtom* aName,
       // when aNotify is true, and 2) When this function is called by
       // OnAttrSetButNotChanged, SetAttrAndNotify will not subsequently call
       // UpdateState.
-      LoadImage(aValue.String(), true, aNotify, eImageLoadType_Normal);
+      LoadImage(aValue.String(), true, aNotify, eImageLoadType_Normal,
+                mSrcTriggeringPrincipal);
 
       mNewRequestsWillNeedAnimationReset = false;
     }
@@ -744,6 +755,13 @@ HTMLImageElement::Image(const GlobalObject& aGlobal,
   return img.forget();
 }
 
+NS_IMETHODIMP
+HTMLImageElement::GetNaturalHeight(uint32_t* aNaturalHeight)
+{
+  *aNaturalHeight = NaturalHeight();
+  return NS_OK;
+}
+
 uint32_t
 HTMLImageElement::NaturalHeight()
 {
@@ -765,9 +783,9 @@ HTMLImageElement::NaturalHeight()
 }
 
 NS_IMETHODIMP
-HTMLImageElement::GetNaturalHeight(uint32_t* aNaturalHeight)
+HTMLImageElement::GetNaturalWidth(uint32_t* aNaturalWidth)
 {
-  *aNaturalHeight = NaturalHeight();
+  *aNaturalWidth = NaturalWidth();
   return NS_OK;
 }
 
@@ -789,13 +807,6 @@ HTMLImageElement::NaturalWidth()
   }
 
   return width;
-}
-
-NS_IMETHODIMP
-HTMLImageElement::GetNaturalWidth(uint32_t* aNaturalWidth)
-{
-  *aNaturalWidth = NaturalWidth();
-  return NS_OK;
 }
 
 nsresult
@@ -972,13 +983,15 @@ HTMLImageElement::LoadSelectedImage(bool aForce, bool aNotify, bool aAlwaysLoad)
   double currentDensity = 1.0; // default to 1.0 for the src attribute case
   if (mResponsiveSelector) {
     nsCOMPtr<nsIURI> url = mResponsiveSelector->GetSelectedImageURL();
+    nsCOMPtr<nsIPrincipal> triggeringPrincipal = mResponsiveSelector->GetSelectedImageTriggeringPrincipal();
     selectedSource = url;
     currentDensity = mResponsiveSelector->GetSelectedImageDensity();
     if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource, currentDensity)) {
       return NS_OK;
     }
     if (url) {
-      rv = LoadImage(url, aForce, aNotify, eImageLoadType_Imageset);
+      rv = LoadImage(url, aForce, aNotify, eImageLoadType_Imageset,
+                     triggeringPrincipal);
     }
   } else {
     nsAutoString src;
@@ -999,7 +1012,8 @@ HTMLImageElement::LoadSelectedImage(bool aForce, bool aNotify, bool aAlwaysLoad)
       // valid responsive sources from either, per spec.
       rv = LoadImage(src, aForce, aNotify,
                      HaveSrcsetOrInPicture() ? eImageLoadType_Imageset
-                                             : eImageLoadType_Normal);
+                                             : eImageLoadType_Normal,
+                     mSrcTriggeringPrincipal);
     }
   }
   mLastSelectedSource = selectedSource;
@@ -1026,7 +1040,13 @@ HTMLImageElement::PictureSourceSrcsetChanged(nsIContent *aSourceNode,
   if (aSourceNode == currentSrc) {
     // We're currently using this node as our responsive selector
     // source.
-    mResponsiveSelector->SetCandidatesFromSourceSet(aNewValue);
+    nsCOMPtr<nsIPrincipal> principal;
+    if (aSourceNode == this) {
+      principal = mSrcsetTriggeringPrincipal;
+    } else if (auto* source = HTMLSourceElement::FromContent(aSourceNode)) {
+      principal = source->GetSrcsetTriggeringPrincipal();
+    }
+    mResponsiveSelector->SetCandidatesFromSourceSet(aNewValue, principal);
   }
 
   if (!mInDocResponsiveContent && IsInComposedDoc()) {
@@ -1211,15 +1231,20 @@ HTMLImageElement::SourceElementMatches(nsIContent* aSourceNode)
 bool
 HTMLImageElement::TryCreateResponsiveSelector(nsIContent *aSourceNode)
 {
+  nsCOMPtr<nsIPrincipal> principal;
+
   // Skip if this is not a <source> with matching media query
   bool isSourceTag = aSourceNode->IsHTMLElement(nsGkAtoms::source);
   if (isSourceTag) {
     if (!SourceElementMatches(aSourceNode)) {
       return false;
     }
+    auto* source = HTMLSourceElement::FromContent(aSourceNode);
+    principal = source->GetSrcsetTriggeringPrincipal();
   } else if (aSourceNode->IsHTMLElement(nsGkAtoms::img)) {
     // Otherwise this is the <img> tag itself
     MOZ_ASSERT(aSourceNode == this);
+    principal = mSrcsetTriggeringPrincipal;
   }
 
   // Skip if has no srcset or an empty srcset
@@ -1235,7 +1260,7 @@ HTMLImageElement::TryCreateResponsiveSelector(nsIContent *aSourceNode)
 
   // Try to parse
   RefPtr<ResponsiveImageSelector> sel = new ResponsiveImageSelector(aSourceNode);
-  if (!sel->SetCandidatesFromSourceSet(srcset)) {
+  if (!sel->SetCandidatesFromSourceSet(srcset, principal)) {
     // No possible candidates, don't need to bother parsing sizes
     return false;
   }
@@ -1249,7 +1274,7 @@ HTMLImageElement::TryCreateResponsiveSelector(nsIContent *aSourceNode)
     MOZ_ASSERT(aSourceNode == this);
     nsAutoString src;
     if (GetAttr(kNameSpaceID_None, nsGkAtoms::src, src) && !src.IsEmpty()) {
-      sel->SetDefaultSource(src);
+      sel->SetDefaultSource(src, mSrcTriggeringPrincipal);
     }
   }
 

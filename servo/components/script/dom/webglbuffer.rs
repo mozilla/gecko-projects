@@ -27,7 +27,7 @@ pub struct WebGLBuffer {
     // The Vertex Array Objects that are referencing this buffer
     vao_references: DomRefCell<Option<HashSet<WebGLVertexArrayId>>>,
     pending_delete: Cell<bool>,
-    #[ignore_heap_size_of = "Defined in ipc-channel"]
+    #[ignore_malloc_size_of = "Defined in ipc-channel"]
     renderer: WebGLMsgSender,
 }
 
@@ -60,7 +60,7 @@ impl WebGLBuffer {
                renderer: WebGLMsgSender,
                id: WebGLBufferId)
               -> DomRoot<WebGLBuffer> {
-        reflect_dom_object(box WebGLBuffer::new_inherited(renderer, id),
+        reflect_dom_object(Box::new(WebGLBuffer::new_inherited(renderer, id)),
                            window, WebGLBufferBinding::Wrap)
     }
 }

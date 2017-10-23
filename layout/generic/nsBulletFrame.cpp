@@ -229,7 +229,7 @@ public:
     MOZ_ASSERT(IsTextType());
   }
 
-  void
+  bool
   CreateWebRenderCommands(nsDisplayItem* aItem,
                           wr::DisplayListBuilder& aBuilder,
                           wr::IpcResourceUpdateQueue& aResources,
@@ -274,11 +274,16 @@ public:
   bool
   BuildGlyphForText(nsDisplayItem* aItem, bool disableSubpixelAA);
 
+  void
+  PaintTextToContext(nsIFrame* aFrame,
+                     gfxContext* aCtx,
+                     bool aDisableSubpixelAA);
+
   bool
   IsImageContainerAvailable(layers::LayerManager* aManager, uint32_t aFlags);
 
 private:
-  void
+  bool
   CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                                   wr::DisplayListBuilder& aBuilder,
                                   wr::IpcResourceUpdateQueue& aResources,
@@ -286,7 +291,7 @@ private:
                                   mozilla::layers::WebRenderLayerManager* aManager,
                                   nsDisplayListBuilder* aDisplayListBuilder);
 
-  void
+  bool
   CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
                                  wr::DisplayListBuilder& aBuilder,
                                  wr::IpcResourceUpdateQueue& aResources,
@@ -294,7 +299,7 @@ private:
                                  mozilla::layers::WebRenderLayerManager* aManager,
                                  nsDisplayListBuilder* aDisplayListBuilder);
 
-  void
+  bool
   CreateWebRenderCommandsForText(nsDisplayItem* aItem,
                                  wr::DisplayListBuilder& aBuilder,
                                  wr::IpcResourceUpdateQueue& aResources,
@@ -327,7 +332,7 @@ private:
   int32_t mListStyleType;
 };
 
-void
+bool
 BulletRenderer::CreateWebRenderCommands(nsDisplayItem* aItem,
                                         wr::DisplayListBuilder& aBuilder,
                                         wr::IpcResourceUpdateQueue& aResources,
@@ -336,15 +341,15 @@ BulletRenderer::CreateWebRenderCommands(nsDisplayItem* aItem,
                                         nsDisplayListBuilder* aDisplayListBuilder)
 {
   if (IsImageType()) {
-    CreateWebRenderCommandsForImage(aItem, aBuilder, aResources,
+    return CreateWebRenderCommandsForImage(aItem, aBuilder, aResources,
                                     aSc, aManager, aDisplayListBuilder);
   } else if (IsPathType()) {
-    CreateWebRenderCommandsForPath(aItem, aBuilder, aResources,
+    return CreateWebRenderCommandsForPath(aItem, aBuilder, aResources,
                                    aSc, aManager, aDisplayListBuilder);
   } else {
     MOZ_ASSERT(IsTextType());
-    CreateWebRenderCommandsForText(aItem, aBuilder, aResources, aSc,
-                                   aManager, aDisplayListBuilder);
+    return CreateWebRenderCommandsForText(aItem, aBuilder, aResources, aSc,
+                                          aManager, aDisplayListBuilder);
   }
 }
 
@@ -382,18 +387,7 @@ BulletRenderer::Paint(gfxContext& aRenderingContext, nsPoint aPt,
   }
 
   if (IsTextType()) {
-    DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
-    DrawTargetAutoDisableSubpixelAntialiasing
-      disable(drawTarget, aDisableSubpixelAA);
-
-    aRenderingContext.SetColor(Color::FromABGR(mColor));
-
-    nsPresContext* presContext = aFrame->PresContext();
-    if (!presContext->BidiEnabled() && HasRTLChars(mText)) {
-      presContext->SetBidiEnabled();
-    }
-    nsLayoutUtils::DrawString(aFrame, *mFontMetrics, &aRenderingContext,
-                              mText.get(), mText.Length(), mPoint);
+    PaintTextToContext(aFrame, &aRenderingContext, aDisableSubpixelAA);
   }
 
   return DrawResult::SUCCESS;
@@ -412,21 +406,7 @@ BulletRenderer::BuildGlyphForText(nsDisplayItem* aItem, bool disableSubpixelAA)
 
   RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(capture);
 
-  {
-    DrawTargetAutoDisableSubpixelAntialiasing
-      disable(capture, disableSubpixelAA);
-
-    captureCtx->SetColor(
-      Color::FromABGR(mColor));
-
-    nsPresContext* presContext = aItem->Frame()->PresContext();
-    if (!presContext->BidiEnabled() && HasRTLChars(mText)) {
-      presContext->SetBidiEnabled();
-    }
-
-    nsLayoutUtils::DrawString(aItem->Frame(), *mFontMetrics, captureCtx,
-                              mText.get(), mText.Length(), mPoint);
-  }
+  PaintTextToContext(aItem->Frame(), captureCtx, disableSubpixelAA);
 
   layers::GlyphArray* g = mGlyphs.AppendElement();
   std::vector<Glyph> glyphs;
@@ -444,6 +424,27 @@ BulletRenderer::BuildGlyphForText(nsDisplayItem* aItem, bool disableSubpixelAA)
   return true;
 }
 
+void
+BulletRenderer::PaintTextToContext(nsIFrame* aFrame,
+                                   gfxContext* aCtx,
+                                   bool aDisableSubpixelAA)
+{
+  MOZ_ASSERT(IsTextType());
+
+  DrawTarget* drawTarget = aCtx->GetDrawTarget();
+  DrawTargetAutoDisableSubpixelAntialiasing
+    disable(drawTarget, aDisableSubpixelAA);
+
+  aCtx->SetColor(Color::FromABGR(mColor));
+
+  nsPresContext* presContext = aFrame->PresContext();
+  if (!presContext->BidiEnabled() && HasRTLChars(mText)) {
+    presContext->SetBidiEnabled();
+  }
+  nsLayoutUtils::DrawString(aFrame, *mFontMetrics, aCtx,
+                            mText.get(), mText.Length(), mPoint);
+}
+
 bool
 BulletRenderer::IsImageContainerAvailable(layers::LayerManager* aManager, uint32_t aFlags)
 {
@@ -452,7 +453,7 @@ BulletRenderer::IsImageContainerAvailable(layers::LayerManager* aManager, uint32
   return mImage->IsImageContainerAvailable(aManager, aFlags);
 }
 
-void
+bool
 BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                                                 wr::DisplayListBuilder& aBuilder,
                                                 wr::IpcResourceUpdateQueue& aResources,
@@ -460,26 +461,29 @@ BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                                                 mozilla::layers::WebRenderLayerManager* aManager,
                                                 nsDisplayListBuilder* aDisplayListBuilder)
 {
-  MOZ_ASSERT(IsImageType());
-
-  if (!mImage) {
-     return;
-  }
+  MOZ_RELEASE_ASSERT(IsImageType());
+  MOZ_RELEASE_ASSERT(mImage);
 
   uint32_t flags = aDisplayListBuilder->ShouldSyncDecodeImages() ?
                    imgIContainer::FLAG_SYNC_DECODE :
                    imgIContainer::FLAG_NONE;
 
+  // FIXME: is this check always redundant with the next one?
+  if (IsImageContainerAvailable(aManager, flags)) {
+    return false;
+  }
+
   RefPtr<layers::ImageContainer> container =
     mImage->GetImageContainer(aManager, flags);
   if (!container) {
-    return;
+    return false;
   }
 
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(aItem, container, aBuilder, aResources, aSc, size);
+  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(aItem, container, aBuilder, aResources,
+                                                                      aSc, size, Nothing());
   if (key.isNothing()) {
-    return;
+    return true;  // Nothing to do
   }
 
   const int32_t appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
@@ -491,9 +495,11 @@ BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                      !aItem->BackfaceIsHidden(),
                      wr::ImageRendering::Auto,
                      key.value());
+
+  return true;
 }
 
-void
+bool
 BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
                                                wr::DisplayListBuilder& aBuilder,
                                                wr::IpcResourceUpdateQueue& aResources,
@@ -505,10 +511,13 @@ BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
 
   if (!aManager->CommandBuilder().PushItemAsImage(aItem, aBuilder, aResources, aSc, aDisplayListBuilder)) {
     NS_WARNING("Fail to create WebRender commands for Bullet path.");
+    return false;
   }
+
+  return true;
 }
 
-void
+bool
 BulletRenderer::CreateWebRenderCommandsForText(nsDisplayItem* aItem,
                                                wr::DisplayListBuilder& aBuilder,
                                                wr::IpcResourceUpdateQueue& aResources,
@@ -517,21 +526,20 @@ BulletRenderer::CreateWebRenderCommandsForText(nsDisplayItem* aItem,
                                                nsDisplayListBuilder* aDisplayListBuilder)
 {
   MOZ_ASSERT(IsTextType());
-  MOZ_ASSERT(mFont);
-  MOZ_ASSERT(!mGlyphs.IsEmpty());
 
-  const int32_t appUnitsPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   bool dummy;
-  LayerRect destRect = ViewAs<LayerPixel>(
-      LayoutDeviceRect::FromAppUnits(
-          aItem->GetBounds(aDisplayListBuilder, &dummy), appUnitsPerDevPixel),
-      PixelCastJustification::WebRenderHasUnitResolution);
+  nsRect bounds = aItem->GetBounds(aDisplayListBuilder, &dummy);
 
-  for (layers::GlyphArray& glyphs : mGlyphs) {
-    aManager->WrBridge()->PushGlyphs(aBuilder, glyphs.glyphs(), mFont,
-                                     glyphs.color().value(),
-                                     aSc, destRect, destRect, !aItem->BackfaceIsHidden());
+  if (bounds.IsEmpty()) {
+    return true;
   }
+
+  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aSc, aManager, aItem, bounds);
+  RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer);
+  PaintTextToContext(aItem->Frame(), captureCtx, aItem);
+  textDrawer->TerminateShadows();
+
+  return !textDrawer->HasUnsupportedFeatures();
 }
 
 class nsDisplayBullet final : public nsDisplayItem {
@@ -672,17 +680,19 @@ nsDisplayBullet::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilder,
                                          mozilla::layers::WebRenderLayerManager* aManager,
                                          nsDisplayListBuilder* aDisplayListBuilder)
 {
-  ContainerLayerParameters parameter;
-  if (GetLayerState(aDisplayListBuilder, aManager, parameter) != LAYER_ACTIVE) {
+  // FIXME: avoid needing to make this target if we're drawing text
+  // (non-trivial refactor of all this code)
+  RefPtr<gfxContext> screenRefCtx = gfxContext::CreateOrNull(
+    gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
+  Maybe<BulletRenderer> br = static_cast<nsBulletFrame*>(mFrame)->
+    CreateBulletRenderer(*screenRefCtx, ToReferenceFrame());
+
+  if (!br) {
     return false;
   }
 
-  if (!mBulletRenderer)
-    return false;
-
-  mBulletRenderer->CreateWebRenderCommands(this, aBuilder, aResources, aSc,
-                                           aManager, aDisplayListBuilder);
-  return true;
+  return br->CreateWebRenderCommands(this, aBuilder, aResources, aSc,
+                                     aManager, aDisplayListBuilder);
 }
 
 void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,

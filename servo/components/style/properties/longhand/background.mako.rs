@@ -52,9 +52,7 @@ ${helpers.predefined_type("background-image", "ImageLayer",
                              "round" => Round,
                              "no-repeat" => NoRepeat);
 
-    #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    #[derive(Clone, Debug, PartialEq, ToCss)]
+    #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         RepeatX,
         RepeatY,
@@ -64,9 +62,7 @@ ${helpers.predefined_type("background-image", "ImageLayer",
     pub mod computed_value {
         pub use super::RepeatKeyword;
 
-        #[derive(Clone, Debug, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
         pub struct T(pub RepeatKeyword, pub RepeatKeyword);
     }
 
@@ -132,7 +128,7 @@ ${helpers.predefined_type("background-image", "ImageLayer",
             _ => Err(()),
         }).or_else(|()| {
             let horizontal: Result<_, ParseError> = RepeatKeyword::from_ident(&ident)
-                .map_err(|()| SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                .map_err(|()| input.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(ident.clone())));
             let horizontal = horizontal?;
             let vertical = input.try(RepeatKeyword::parse).ok();
             Ok(SpecifiedValue::Other(horizontal, vertical))

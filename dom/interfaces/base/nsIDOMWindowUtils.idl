@@ -34,7 +34,6 @@ interface nsICycleCollectorListener;
 interface nsIDOMNode;
 interface nsIDOMNodeList;
 interface nsIDOMElement;
-interface nsIDOMHTMLCanvasElement;
 interface nsIDOMEvent;
 interface nsIPreloadedStyleSheet;
 interface nsITransferable;
@@ -928,8 +927,8 @@ interface nsIDOMWindowUtils : nsISupports {
    *
    * This method requires chrome privileges.
    */
-  uint32_t compareCanvases(in nsIDOMHTMLCanvasElement aCanvas1,
-                           in nsIDOMHTMLCanvasElement aCanvas2,
+  uint32_t compareCanvases(in nsISupports aCanvas1,
+                           in nsISupports aCanvas2,
                            out unsigned long aMaxDifference);
 
   /**
@@ -1606,7 +1605,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * clears the painted flags if they have.
    */
   boolean checkAndClearPaintedState(in nsIDOMElement aElement);
-  
+
   /**
    * Check if any display list building has been done for this element,
    * clears the display list flags if they have.
@@ -2052,6 +2051,20 @@ interface nsIDOMWindowUtils : nsISupports {
    * This calls nsIDocument::IsStyledByServo().
    */
   readonly attribute boolean isStyledByServo;
+
+  /**
+   * Add a domain to the existing stylo blocklist.
+   *
+   * This calls nsLayoutUtils::AddToStyloBlocklist().
+   */
+  void addToStyloBlocklist(in ACString aBlockedDomain);
+
+  /**
+   * Remove a domain from the existing stylo blocklist.
+   *
+   * This calls nsLayoutUtils::RemoveFromStyloBlocklist().
+   */
+  void removeFromStyloBlocklist(in ACString aBlockedDomain);
 
   // These consts are only for testing purposes.
   const long DEFAULT_MOUSE_POINTER_ID = 0;

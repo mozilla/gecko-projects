@@ -141,7 +141,7 @@ void
 nsFormFillController::AttributeChanged(nsIDocument* aDocument,
                                        mozilla::dom::Element* aElement,
                                        int32_t aNameSpaceID,
-                                       nsIAtom* aAttribute, int32_t aModType,
+                                       nsAtom* aAttribute, int32_t aModType,
                                        const nsAttrValue* aOldValue)
 {
   if ((aAttribute == nsGkAtoms::type || aAttribute == nsGkAtoms::readonly ||
@@ -216,7 +216,7 @@ void
 nsFormFillController::AttributeWillChange(nsIDocument* aDocument,
                                           mozilla::dom::Element* aElement,
                                           int32_t aNameSpaceID,
-                                          nsIAtom* aAttribute, int32_t aModType,
+                                          nsAtom* aAttribute, int32_t aModType,
                                           const nsAttrValue* aNewValue)
 {
 }
@@ -1067,7 +1067,12 @@ nsFormFillController::MaybeStartControllingInput(nsIDOMHTMLInputElement* aInput)
     isPwmgrInput = true;
   }
 
-  if (isPwmgrInput || hasList || autocomplete) {
+  bool isAutofillInput = false;
+  if (mAutofillInputs.Get(inputNode)) {
+    isAutofillInput = true;
+  }
+
+  if (isAutofillInput || isPwmgrInput ||  hasList || autocomplete) {
     StartControllingInput(aInput);
   }
 }

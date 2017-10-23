@@ -1,51 +1,3 @@
-android-dependencies/opt:
-    description: "Android armv7 api-16+ gradle dependencies"
-    index:
-        product: mobile
-        job-name: android-dependencies
-    treeherder:
-        platform: android-4-0-armv7-api16/opt
-        kind: build
-        tier: 2
-        symbol: tc(Deps)
-    worker-type: aws-provisioner-v1/gecko-{level}-b-android
-    worker:
-        docker-image: {in-tree: android-build}
-        env:
-            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/dotgradle-online"
-            PERFHERDER_EXTRA_OPTIONS: android-dependencies
-            TOOLTOOL_MANIFEST: "mobile/android/config/tooltool-manifests/android-gradle-dependencies/releng.manifest"
-            WORKSPACE: "/builds/worker/workspace"
-        artifacts:
-          - name: public/build
-            path: /builds/worker/artifacts/
-            type: directory
-          - name: private/android-sdk
-            path: /builds/worker/private/android-sdk
-            type: directory
-          - name: private/java_home
-            path: /builds/worker/private/java_home
-            type: directory
-        max-run-time: 36000
-    run:
-        using: mozharness
-        actions: [get-secrets build multi-l10n update]
-        config:
-            - builds/releng_base_android_64_builds.py
-            - disable_signing.py
-            - platform_supports_post_upload_to_latest.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        secrets: true
-        custom-build-variant-cfg: api-16-gradle-dependencies
-        tooltool-downloads: internal
-        job-script: taskcluster/scripts/builder/build-android-dependencies.sh
-    optimization:
-        skip-unless-changed:
-          - "mobile/android/config/**"
-          - "testing/mozharness/configs/builds/releng_sub_android_configs/*gradle_dependencies.py"
-          - "**/*.gradle"
-          - "taskcluster/docker/android-build/**"
-
 android-test/opt:
     description: "Android armv7 unit tests"
     index:
@@ -54,13 +6,13 @@ android-test/opt:
     treeherder:
         platform: android-4-0-armv7-api16/opt
         kind: build
-        tier: 2
-        symbol: tc(test)
+        tier: 1
+        symbol: tc-A(test)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
         docker-image: {in-tree: android-build}
         env:
-            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/dotgradle"
+            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/mobile/android/gradle/dotgradle-offline"
             PERFHERDER_EXTRA_OPTIONS: android-test
             TOOLTOOL_MANIFEST: "mobile/android/config/tooltool-manifests/android-frontend/releng.manifest"
         artifacts:
@@ -73,7 +25,7 @@ android-test/opt:
         max-run-time: 36000
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -82,6 +34,10 @@ android-test/opt:
         secrets: true
         custom-build-variant-cfg: android-test
         tooltool-downloads: internal
+    toolchains:
+        - android-gradle-dependencies
+        - android-sdk-linux
+        - proguard-jar
     optimization:
         skip-unless-changed:
           - "mobile/android/base/**"
@@ -97,33 +53,24 @@ android-lint/opt:
     treeherder:
         platform: android-4-0-armv7-api16/opt
         kind: build
-        tier: 2
-        symbol: tc(lint)
+        tier: 1
+        symbol: tc-A(lint)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
         docker-image: {in-tree: android-build}
         env:
-            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/dotgradle"
+            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/mobile/android/gradle/dotgradle-offline"
             PERFHERDER_EXTRA_OPTIONS: android-lint
             TOOLTOOL_MANIFEST: "mobile/android/config/tooltool-manifests/android-frontend/releng.manifest"
         artifacts:
-          - name: public/android/lint/lint-results-officialAustralisDebug.html
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialAustralisDebug.html
-            type: file
-          - name: public/android/lint/lint-results-officialAustralisDebug.xml
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialAustralisDebug.xml
-            type: file
-          - name: public/android/lint/lint-results-officialAustralisDebug_files
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialAustralisDebug_files
-            type: directory
           - name: public/android/lint/lint-results-officialPhotonDebug.html
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialPhotonDebug.html
+            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/reports/lint-results-officialPhotonDebug.html
             type: file
           - name: public/android/lint/lint-results-officialPhotonDebug.xml
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialPhotonDebug.xml
+            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/reports/lint-results-officialPhotonDebug.xml
             type: file
           - name: public/android/lint/lint-results-officialPhotonDebug_files
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/lint-results-officialPhotonDebug_files
+            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/reports/lint-results-officialPhotonDebug_files
             type: directory
           - name: public/build
             path: /builds/worker/artifacts/
@@ -131,7 +78,7 @@ android-lint/opt:
         max-run-time: 36000
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -140,6 +87,10 @@ android-lint/opt:
         secrets: true
         custom-build-variant-cfg: android-lint
         tooltool-downloads: internal
+    toolchains:
+        - android-gradle-dependencies
+        - android-sdk-linux
+        - proguard-jar
     optimization:
         skip-unless-changed:
           - "mobile/android/**/*.java"
@@ -161,13 +112,13 @@ android-checkstyle/opt:
     treeherder:
         platform: android-4-0-armv7-api16/opt
         kind: build
-        tier: 2
-        symbol: tc(checkstyle)
+        tier: 1
+        symbol: tc-A(checkstyle)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
         docker-image: {in-tree: android-build}
         env:
-            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/dotgradle"
+            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/mobile/android/gradle/dotgradle-offline"
             PERFHERDER_EXTRA_OPTIONS: android-checkstyle
             TOOLTOOL_MANIFEST: "mobile/android/config/tooltool-manifests/android-frontend/releng.manifest"
         artifacts:
@@ -183,7 +134,7 @@ android-checkstyle/opt:
         max-run-time: 36000
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -192,6 +143,10 @@ android-checkstyle/opt:
         secrets: true
         custom-build-variant-cfg: android-checkstyle
         tooltool-downloads: internal
+    toolchains:
+        - android-gradle-dependencies
+        - android-sdk-linux
+        - proguard-jar
     optimization:
         skip-unless-changed:
           - "mobile/android/**/checkstyle.xml"
@@ -209,27 +164,21 @@ android-findbugs/opt:
     treeherder:
         platform: android-4-0-armv7-api16/opt
         kind: build
-        tier: 2
-        symbol: tc(findbugs)
+        tier: 1
+        symbol: tc-A(findbugs)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
         docker-image: {in-tree: android-build}
         env:
-            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/dotgradle"
+            GRADLE_USER_HOME: "/builds/worker/workspace/build/src/mobile/android/gradle/dotgradle-offline"
             PERFHERDER_EXTRA_OPTIONS: android-findbugs
             TOOLTOOL_MANIFEST: "mobile/android/config/tooltool-manifests/android-frontend/releng.manifest"
         artifacts:
-          - name: public/android/findbugs/findbugs-officialAustralisDebug-output.html
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/findbugs/findbugs-officialAustralisDebug-output.html
-            type: file
-          - name: public/android/findbugs/findbugs-officialAustralisDebug-output.xml
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/findbugs/findbugs-officialAustralisDebug-output.xml
-            type: file
           - name: public/android/findbugs/findbugs-officialPhotonDebug-output.html
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/findbugs/findbugs-officialPhotonDebug-output.html
+            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/reports/findbugs/findbugs-officialPhotonDebug-output.html
             type: file
           - name: public/android/findbugs/findbugs-officialPhotonDebug-output.xml
-            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/outputs/findbugs/findbugs-officialPhotonDebug-output.xml
+            path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/reports/findbugs/findbugs-officialPhotonDebug-output.xml
             type: file
           - name: public/build
             path: /builds/worker/artifacts/
@@ -237,7 +186,7 @@ android-findbugs/opt:
         max-run-time: 36000
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -246,6 +195,10 @@ android-findbugs/opt:
         secrets: true
         custom-build-variant-cfg: android-findbugs
         tooltool-downloads: internal
+    toolchains:
+        - android-gradle-dependencies
+        - android-sdk-linux
+        - proguard-jar
     optimization:
         skip-unless-changed:
           - "mobile/android/**/*.java"

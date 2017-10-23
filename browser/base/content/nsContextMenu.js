@@ -29,6 +29,13 @@ function openContextMenu(aMessage) {
   let browser = aMessage.target;
   let spellInfo = data.spellInfo;
 
+  // ContextMenu.jsm sends us the target as a CPOW only so that
+  // we can send that CPOW back down to the content process and
+  // have it resolve to a DOM node. The parent should not attempt
+  // to access any properties on this CPOW (in fact, doing so
+  // will throw an exception).
+  data.context.targetAsCPOW = aMessage.objects.targetAsCPOW;
+
   if (spellInfo) {
     spellInfo.target = aMessage.target.messageManager;
   }
@@ -204,6 +211,7 @@ nsContextMenu.prototype = {
     this.onVideo             = context.onVideo;
 
     this.target = this.isRemote ? context.target : document.popupNode;
+    this.targetAsCPOW = context.targetAsCPOW;
 
     this.principal = context.principal;
     this.frameOuterWindowID = context.frameOuterWindowID;
@@ -717,7 +725,7 @@ nsContextMenu.prototype = {
       return;
     }
     let documentURI = gContextMenuContentData.documentURIObject;
-    let fragment = LoginManagerContextMenu.addLoginsToMenu(this.target, this.browser, documentURI);
+    let fragment = LoginManagerContextMenu.addLoginsToMenu(this.targetAsCPOW, this.browser, documentURI);
 
     this.showItem("fill-login-no-logins", !fragment);
 
@@ -869,7 +877,7 @@ nsContextMenu.prototype = {
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
       });
       return tabBrowser.getBrowserForTab(tab);
-    }
+    };
 
     let target = aContext == "mathml" ? this.target : null;
     top.gViewSourceUtils.viewPartialSourceInBrowser(gBrowser.selectedBrowser, target, openSelectionFn);
@@ -1115,7 +1123,7 @@ nsContextMenu.prototype = {
         this.extListener.onDataAvailable(aRequest, aContext, aInputStream,
                                          aOffset, aCount);
       }
-    }
+    };
 
     function callbacks() {}
     callbacks.prototype = {
@@ -1131,7 +1139,7 @@ nsContextMenu.prototype = {
         }
         throw Cr.NS_ERROR_NO_INTERFACE;
       }
-    }
+    };
 
     // if it we don't have the headers after a short time, the user
     // won't have received any feedback from their click.  that's bad.  so
@@ -1141,7 +1149,7 @@ nsContextMenu.prototype = {
       notify: function sLA_timer_notify(aTimer) {
         channel.cancel(NS_ERROR_SAVE_LINK_AS_TIMEOUT);
       }
-    }
+    };
 
     // setting up a new channel for 'right click - save link as ...'
     // ideally we should use:

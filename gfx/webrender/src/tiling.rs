@@ -9,14 +9,15 @@ use api::{LayerToWorldTransform, MixBlendMode, PipelineId, PropertyBinding, Tran
 use api::{LayerVector2D, TileOffset, WorldToLayerTransform, YuvColorSpace, YuvFormat};
 use border::{BorderCornerInstance, BorderCornerSide};
 use clip::{ClipSource, ClipStore};
+use clip_scroll_tree::CoordinateSystemId;
 use device::Texture;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle, GpuCacheUpdateList};
-use gpu_types::{BlurDirection, BlurInstance, BoxShadowCacheInstance, ClipMaskInstance};
+use gpu_types::{BlurDirection, BlurInstance, BrushInstance, ClipMaskInstance};
 use gpu_types::{CompositePrimitiveInstance, PrimitiveInstance, SimplePrimitiveInstance};
 use internal_types::{FastHashMap, SourceTexture};
 use internal_types::BatchTextures;
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
-use prim_store::DeferredResolve;
+use prim_store::{DeferredResolve, TextRunMode};
 use profiler::FrameProfileCounters;
 use render_task::{AlphaRenderItem, ClipWorkItem, MaskGeometryKind, MaskSegment};
 use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKey, RenderTaskKind};
@@ -26,7 +27,8 @@ use renderer::ImageBufferKind;
 use resource_cache::{GlyphFetchResult, ResourceCache};
 use std::{cmp, usize, f32, i32};
 use texture_allocator::GuillotineAllocator;
-use util::{TransformedRect, TransformedRectKind};
+use util::{MatrixHelpers, TransformedRect, TransformedRectKind};
+use euclid::rect;
 
 // Special sentinel value recognized by the shader. It is considered to be
 // a dummy task that doesn't mask out anything.
@@ -54,17 +56,17 @@ impl AlphaBatchHelpers for PrimitiveStore {
             PrimitiveKind::TextRun => {
                 let text_run_cpu = &self.cpu_text_runs[metadata.cpu_prim_index.0];
                 match text_run_cpu.font.render_mode {
-                    FontRenderMode::Subpixel => BlendMode::Subpixel(text_run_cpu.color),
+                    FontRenderMode::Subpixel => BlendMode::Subpixel,
                     FontRenderMode::Alpha |
                     FontRenderMode::Mono |
-                    FontRenderMode::Bitmap => BlendMode::Alpha,
+                    FontRenderMode::Bitmap => BlendMode::PremultipliedAlpha,
                 }
             }
             PrimitiveKind::Image |
             PrimitiveKind::AlignedGradient |
             PrimitiveKind::AngleGradient |
             PrimitiveKind::RadialGradient |
-            PrimitiveKind::TextShadow => if needs_blending {
+            PrimitiveKind::Picture => if needs_blending {
                 BlendMode::PremultipliedAlpha
             } else {
                 BlendMode::None
@@ -128,26 +130,49 @@ impl AlphaBatchList {
     ) -> &mut Vec<PrimitiveInstance> {
         let mut selected_batch_index = None;
 
-        // Composites always get added to their own batch.
-        // This is because the result of a composite can affect
-        // the input to the next composite. Perhaps we can
-        // optimize this in the future.
         match key.kind {
-            BatchKind::Composite { .. } => {}
-            _ => 'outer: for (batch_index, batch) in self.batches.iter().enumerate().rev().take(10)
-            {
-                if batch.key.is_compatible_with(&key) {
-                    selected_batch_index = Some(batch_index);
-                    break;
-                }
+            BatchKind::Composite { .. } => {
+                // Composites always get added to their own batch.
+                // This is because the result of a composite can affect
+                // the input to the next composite. Perhaps we can
+                // optimize this in the future.
+            }
+            BatchKind::Transformable(_, TransformBatchKind::TextRun) => {
+                'outer_text: for (batch_index, batch) in self.batches.iter().enumerate().rev().take(10) {
+                    // Subpixel text is drawn in two passes. Because of this, we need
+                    // to check for overlaps with every batch (which is a bit different
+                    // than the normal batching below).
+                    for item_rect in &batch.item_rects {
+                        if item_rect.intersects(item_bounding_rect) {
+                            break 'outer_text;
+                        }
+                    }
 
-                // check for intersections
-                for item_rect in &batch.item_rects {
-                    if item_rect.intersects(item_bounding_rect) {
-                        break 'outer;
+                    if batch.key.is_compatible_with(&key) {
+                        selected_batch_index = Some(batch_index);
+                        break;
                     }
                 }
-            },
+            }
+            _ => {
+                'outer_default: for (batch_index, batch) in self.batches.iter().enumerate().rev().take(10) {
+                    // For normal batches, we only need to check for overlaps for batches
+                    // other than the first batch we consider. If the first batch
+                    // is compatible, then we know there isn't any potential overlap
+                    // issues to worry about.
+                    if batch.key.is_compatible_with(&key) {
+                        selected_batch_index = Some(batch_index);
+                        break;
+                    }
+
+                    // check for intersections
+                    for item_rect in &batch.item_rects {
+                        if item_rect.intersects(item_bounding_rect) {
+                            break 'outer_default;
+                        }
+                    }
+                }
+            }
         }
 
         if selected_batch_index.is_none() {
@@ -228,7 +253,7 @@ impl BatchList {
     ) -> &mut Vec<PrimitiveInstance> {
         match key.blend_mode {
             BlendMode::None => self.opaque_batch_list.get_suitable_batch(key),
-            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel(..) => {
+            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel => {
                 self.alpha_batch_list
                     .get_suitable_batch(key, item_bounding_rect)
             }
@@ -376,6 +401,9 @@ impl AlphaRenderItem {
                 let blend_mode = ctx.prim_store.get_blend_mode(prim_metadata, transform_kind);
 
                 match prim_metadata.prim_kind {
+                    PrimitiveKind::Brush => {
+                        panic!("BUG: brush type not expected in an alpha task (yet)");
+                    }
                     PrimitiveKind::Border => {
                         let border_cpu =
                             &ctx.prim_store.cpu_borders[prim_metadata.cpu_prim_index.0];
@@ -457,6 +485,7 @@ impl AlphaRenderItem {
                         );
 
                         if color_texture_id == SourceTexture::Invalid {
+                            warn!("Warnings: skip a PrimitiveKind::Image at {:?}.\n", item_bounding_rect);
                             return;
                         }
 
@@ -507,8 +536,7 @@ impl AlphaRenderItem {
                         let text_cpu =
                             &ctx.prim_store.cpu_text_runs[prim_metadata.cpu_prim_index.0];
 
-                        let mut font = text_cpu.font.clone();
-                        font.size = font.size.scale_by(ctx.device_pixel_ratio);
+                        let font = text_cpu.get_font(TextRunMode::Normal, ctx.device_pixel_ratio);
 
                         ctx.resource_cache.fetch_glyphs(
                             font,
@@ -516,6 +544,8 @@ impl AlphaRenderItem {
                             glyph_fetch_buffer,
                             gpu_cache,
                             |texture_id, glyphs| {
+                                debug_assert_ne!(texture_id, SourceTexture::Invalid);
+
                                 let textures = BatchTextures {
                                     colors: [
                                         texture_id,
@@ -528,6 +558,7 @@ impl AlphaRenderItem {
                                     transform_kind,
                                     TransformBatchKind::TextRun,
                                 );
+
                                 let key = BatchKey::new(kind, blend_mode, textures);
                                 let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
 
@@ -541,15 +572,15 @@ impl AlphaRenderItem {
                             },
                         );
                     }
-                    PrimitiveKind::TextShadow => {
-                        let text_shadow =
-                            &ctx.prim_store.cpu_text_shadows[prim_metadata.cpu_prim_index.0];
-                        let cache_task_id = text_shadow.render_task_id.expect("no render task!");
+                    PrimitiveKind::Picture => {
+                        let picture =
+                            &ctx.prim_store.cpu_pictures[prim_metadata.cpu_prim_index.0];
+                        let cache_task_id = picture.render_task_id.expect("no render task!");
                         let cache_task_address = render_tasks.get_task_address(cache_task_id);
                         let textures = BatchTextures::render_target_cache();
                         let kind = BatchKind::Transformable(
                             transform_kind,
-                            TransformBatchKind::CacheImage,
+                            TransformBatchKind::CacheImage(picture.kind),
                         );
                         let key = BatchKey::new(kind, blend_mode, textures);
                         let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
@@ -608,6 +639,7 @@ impl AlphaRenderItem {
                             );
 
                             if texture == SourceTexture::Invalid {
+                                warn!("Warnings: skip a PrimitiveKind::YuvImage at {:?}.\n", item_bounding_rect);
                                 return;
                             }
 
@@ -666,26 +698,6 @@ impl AlphaRenderItem {
                             uv_rect_addresses[1],
                             uv_rect_addresses[2],
                         ));
-                    }
-                    PrimitiveKind::BoxShadow => {
-                        let box_shadow =
-                            &ctx.prim_store.cpu_box_shadows[prim_metadata.cpu_prim_index.0];
-                        let cache_task_id = box_shadow.render_task_id.unwrap();
-                        let cache_task_address = render_tasks.get_task_address(cache_task_id);
-                        let textures = BatchTextures::render_target_cache();
-
-                        let kind =
-                            BatchKind::Transformable(transform_kind, TransformBatchKind::BoxShadow);
-                        let key = BatchKey::new(kind, blend_mode, textures);
-                        let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
-
-                        for rect_index in 0 .. box_shadow.rects.len() {
-                            batch.push(base_instance.build(
-                                rect_index as i32,
-                                cache_task_address.0 as i32,
-                                0,
-                            ));
-                        }
                     }
                 }
             }
@@ -788,11 +800,13 @@ impl ClipBatcher {
         &mut self,
         task_address: RenderTaskAddress,
         clips: &[ClipWorkItem],
+        coordinate_system_id: CoordinateSystemId,
         resource_cache: &ResourceCache,
         gpu_cache: &GpuCache,
         geometry_kind: MaskGeometryKind,
         clip_store: &ClipStore,
     ) {
+        let mut coordinate_system_id = coordinate_system_id;
         for work_item in clips.iter() {
             let instance = ClipMaskInstance {
                 render_task_address: task_address,
@@ -810,23 +824,29 @@ impl ClipBatcher {
 
                 match *source {
                     ClipSource::Image(ref mask) => {
-                        let cache_item =
-                            resource_cache.get_cached_image(mask.image, ImageRendering::Auto, None);
-                        self.images
-                            .entry(cache_item.texture_id)
-                            .or_insert(Vec::new())
-                            .push(ClipMaskInstance {
+                        if let Ok(cache_item) = resource_cache.get_cached_image(mask.image, ImageRendering::Auto, None) {
+                            self.images
+                                .entry(cache_item.texture_id)
+                                .or_insert(Vec::new())
+                                .push(ClipMaskInstance {
+                                    clip_data_address: gpu_address,
+                                    resource_address: gpu_cache.get_address(&cache_item.uv_rect_handle),
+                                    ..instance
+                                });
+                        } else {
+                            warn!("Warnings: skip a image mask. Key:{:?} Rect::{:?}.\n", mask.image, mask.rect);
+                            continue;
+                        }
+                    }
+                    ClipSource::Rectangle(..) => {
+                        if work_item.coordinate_system_id != coordinate_system_id {
+                            self.rectangles.push(ClipMaskInstance {
                                 clip_data_address: gpu_address,
-                                resource_address: gpu_cache.get_address(&cache_item.uv_rect_handle),
+                                segment: MaskSegment::All as i32,
                                 ..instance
                             });
-                    }
-                    ClipSource::Rectangle(..) => if work_item.apply_rectangles {
-                        self.rectangles.push(ClipMaskInstance {
-                            clip_data_address: gpu_address,
-                            segment: MaskSegment::All as i32,
-                            ..instance
-                        });
+                            coordinate_system_id = work_item.coordinate_system_id;
+                        }
                     },
                     ClipSource::RoundedRectangle(..) => match geometry_kind {
                         MaskGeometryKind::Default => {
@@ -947,7 +967,7 @@ pub trait RenderTarget {
     fn used_rect(&self) -> DeviceIntRect;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum RenderTargetKind {
     Color, // RGBA32
     Alpha, // R8
@@ -1135,67 +1155,69 @@ impl RenderTarget for ColorRenderTarget {
                     blur_direction: BlurDirection::Horizontal,
                 });
             }
-            RenderTaskKind::CachePrimitive(prim_index) => {
-                let prim_metadata = ctx.prim_store.get_metadata(prim_index);
+            RenderTaskKind::Picture(ref task_info) => {
+                let prim_metadata = ctx.prim_store.get_metadata(task_info.prim_index);
                 let prim_address = prim_metadata.gpu_location.as_int(gpu_cache);
 
                 match prim_metadata.prim_kind {
-                    PrimitiveKind::TextShadow => {
-                        let prim = &ctx.prim_store.cpu_text_shadows[prim_metadata.cpu_prim_index.0];
+                    PrimitiveKind::Picture => {
+                        let prim = &ctx.prim_store.cpu_pictures[prim_metadata.cpu_prim_index.0];
 
                         let task_index = render_tasks.get_task_address(task_id);
 
-                        for sub_prim_index in &prim.primitives {
-                            let sub_metadata = ctx.prim_store.get_metadata(*sub_prim_index);
-                            let sub_prim_address =
-                                gpu_cache.get_address(&sub_metadata.gpu_location);
-                            let instance = SimplePrimitiveInstance::new(
-                                sub_prim_address,
-                                task_index,
-                                RenderTaskAddress(0),
-                                PackedLayerIndex(0).into(),
-                                0,
-                            ); // z is disabled for rendering cache primitives
+                        for run in &prim.prim_runs {
+                            for i in 0 .. run.count {
+                                let sub_prim_index = PrimitiveIndex(run.prim_index.0 + i);
 
-                            match sub_metadata.prim_kind {
-                                PrimitiveKind::TextRun => {
-                                    // Add instances that reference the text run GPU location. Also supply
-                                    // the parent text-shadow prim address as a user data field, allowing
-                                    // the shader to fetch the text-shadow parameters.
-                                    let text = &ctx.prim_store.cpu_text_runs
-                                        [sub_metadata.cpu_prim_index.0];
-                                    let text_run_cache_prims = &mut self.text_run_cache_prims;
+                                let sub_metadata = ctx.prim_store.get_metadata(sub_prim_index);
+                                let sub_prim_address =
+                                    gpu_cache.get_address(&sub_metadata.gpu_location);
+                                let instance = SimplePrimitiveInstance::new(
+                                    sub_prim_address,
+                                    task_index,
+                                    RenderTaskAddress(0),
+                                    PackedLayerIndex(0).into(),
+                                    0,
+                                ); // z is disabled for rendering cache primitives
 
-                                    let mut font = text.font.clone();
-                                    font.size = font.size.scale_by(ctx.device_pixel_ratio);
-                                    font.render_mode = text.shadow_render_mode;
+                                match sub_metadata.prim_kind {
+                                    PrimitiveKind::TextRun => {
+                                        // Add instances that reference the text run GPU location. Also supply
+                                        // the parent shadow prim address as a user data field, allowing
+                                        // the shader to fetch the shadow parameters.
+                                        let text = &ctx.prim_store.cpu_text_runs
+                                            [sub_metadata.cpu_prim_index.0];
+                                        let text_run_cache_prims = &mut self.text_run_cache_prims;
 
-                                    ctx.resource_cache.fetch_glyphs(
-                                        font,
-                                        &text.glyph_keys,
-                                        &mut self.glyph_fetch_buffer,
-                                        gpu_cache,
-                                        |texture_id, glyphs| {
-                                            let batch = text_run_cache_prims
-                                                .entry(texture_id)
-                                                .or_insert(Vec::new());
+                                        let font = text.get_font(TextRunMode::Shadow, ctx.device_pixel_ratio);
 
-                                            for glyph in glyphs {
-                                                batch.push(instance.build(
-                                                    glyph.index_in_text_run,
-                                                    glyph.uv_rect_address.as_int(),
-                                                    prim_address,
-                                                ));
-                                            }
-                                        },
-                                    );
-                                }
-                                PrimitiveKind::Line => {
-                                    self.line_cache_prims
-                                        .push(instance.build(prim_address, 0, 0));
-                                }
-                                _ => {
-                                    unreachable!("Unexpected sub primitive type");
+                                        ctx.resource_cache.fetch_glyphs(
+                                            font,
+                                            &text.glyph_keys,
+                                            &mut self.glyph_fetch_buffer,
+                                            gpu_cache,
+                                            |texture_id, glyphs| {
+                                                let batch = text_run_cache_prims
+                                                    .entry(texture_id)
+                                                    .or_insert(Vec::new());
+
+                                                for glyph in glyphs {
+                                                    batch.push(instance.build(
+                                                        glyph.index_in_text_run,
+                                                        glyph.uv_rect_address.as_int(),
+                                                        prim_address,
+                                                    ));
+                                                }
+                                            },
+                                        );
+                                    }
+                                    PrimitiveKind::Line => {
+                                        self.line_cache_prims
+                                            .push(instance.build(prim_address, 0, 0));
+                                    }
+                                    _ => {
+                                        unreachable!("Unexpected sub primitive type");
+                                    }
                                 }
                             }
                         }
@@ -1206,7 +1228,7 @@ impl RenderTarget for ColorRenderTarget {
                     }
                 }
             }
-            RenderTaskKind::CacheMask(..) | RenderTaskKind::BoxShadow(..) => {
+            RenderTaskKind::CacheMask(..) => {
                 panic!("Should not be added to color target!");
             }
             RenderTaskKind::Readback(device_rect) => {
@@ -1218,7 +1240,10 @@ impl RenderTarget for ColorRenderTarget {
 
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
-    pub box_shadow_cache_prims: Vec<BoxShadowCacheInstance>,
+    pub rect_cache_prims: Vec<PrimitiveInstance>,
+    // List of blur operations to apply for this render target.
+    pub vertical_blurs: Vec<BlurInstance>,
+    pub horizontal_blurs: Vec<BlurInstance>,
     allocator: TextureAllocator,
 }
 
@@ -1230,7 +1255,9 @@ impl RenderTarget for AlphaRenderTarget {
     fn new(size: Option<DeviceUintSize>) -> AlphaRenderTarget {
         AlphaRenderTarget {
             clip_batcher: ClipBatcher::new(),
-            box_shadow_cache_prims: Vec::new(),
+            rect_cache_prims: Vec::new(),
+            vertical_blurs: Vec::new(),
+            horizontal_blurs: Vec::new(),
             allocator: TextureAllocator::new(size.expect("bug: alpha targets need size")),
         }
     }
@@ -1253,24 +1280,59 @@ impl RenderTarget for AlphaRenderTarget {
                 panic!("BUG: add_task() called on invalidated task");
             }
             RenderTaskKind::Alpha(..) |
-            RenderTaskKind::VerticalBlur(..) |
-            RenderTaskKind::HorizontalBlur(..) |
-            RenderTaskKind::CachePrimitive(..) |
             RenderTaskKind::Readback(..) => {
                 panic!("Should not be added to alpha target!");
             }
-            RenderTaskKind::BoxShadow(prim_index) => {
-                let prim_metadata = ctx.prim_store.get_metadata(prim_index);
+            RenderTaskKind::VerticalBlur(..) => {
+                // Find the child render task that we are applying
+                // a vertical blur on.
+                self.vertical_blurs.push(BlurInstance {
+                    task_address: render_tasks.get_task_address(task_id),
+                    src_task_address: render_tasks.get_task_address(task.children[0]),
+                    blur_direction: BlurDirection::Vertical,
+                });
+            }
+            RenderTaskKind::HorizontalBlur(..) => {
+                // Find the child render task that we are applying
+                // a horizontal blur on.
+                self.horizontal_blurs.push(BlurInstance {
+                    task_address: render_tasks.get_task_address(task_id),
+                    src_task_address: render_tasks.get_task_address(task.children[0]),
+                    blur_direction: BlurDirection::Horizontal,
+                });
+            }
+            RenderTaskKind::Picture(ref task_info) => {
+                let prim_metadata = ctx.prim_store.get_metadata(task_info.prim_index);
 
                 match prim_metadata.prim_kind {
-                    PrimitiveKind::BoxShadow => {
-                        self.box_shadow_cache_prims.push(BoxShadowCacheInstance {
-                            prim_address: gpu_cache.get_address(&prim_metadata.gpu_location),
-                            task_index: render_tasks.get_task_address(task_id),
-                        });
+                    PrimitiveKind::Picture => {
+                        let prim = &ctx.prim_store.cpu_pictures[prim_metadata.cpu_prim_index.0];
+
+                        let task_index = render_tasks.get_task_address(task_id);
+
+                        for run in &prim.prim_runs {
+                            for i in 0 .. run.count {
+                                let sub_prim_index = PrimitiveIndex(run.prim_index.0 + i);
+
+                                let sub_metadata = ctx.prim_store.get_metadata(sub_prim_index);
+                                let sub_prim_address =
+                                    gpu_cache.get_address(&sub_metadata.gpu_location);
+
+                                match sub_metadata.prim_kind {
+                                    PrimitiveKind::Brush => {
+                                        let instance = BrushInstance::new(task_index, sub_prim_address);
+                                        self.rect_cache_prims.push(PrimitiveInstance::from(instance));
+                                    }
+                                    _ => {
+                                        unreachable!("Unexpected sub primitive type");
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {
-                        panic!("BUG: invalid prim kind");
+                        // No other primitives make use of primitive caching yet!
+                        unreachable!()
                     }
                 }
             }
@@ -1279,6 +1341,7 @@ impl RenderTarget for AlphaRenderTarget {
                 self.clip_batcher.add(
                     task_address,
                     &task_info.clips,
+                    task_info.coordinate_system_id,
                     &ctx.resource_cache,
                     gpu_cache,
                     task_info.geometry_kind,
@@ -1462,8 +1525,7 @@ pub enum TransformBatchKind {
     AlignedGradient,
     AngleGradient,
     RadialGradient,
-    BoxShadow,
-    CacheImage,
+    CacheImage(RenderTargetKind),
     BorderCorner,
     BorderEdge,
     Line,
@@ -1598,6 +1660,17 @@ pub struct StackingContext {
 
     /// Current stacking context visibility of backface.
     pub is_backface_visible: bool,
+
+    /// Allow subpixel AA for text runs on this stacking context.
+    /// This is a temporary hack while we don't support subpixel AA
+    /// on transparent stacking contexts.
+    pub allow_subpixel_aa: bool,
+
+    /// Indicate that if any pritimive contained in this stacking context.
+    pub has_any_primitive: bool,
+
+    /// Union of all stacking context bounds of all children.
+    pub children_sc_bounds: LayerRect,
 }
 
 impl StackingContext {
@@ -1615,6 +1688,8 @@ impl StackingContext {
             TransformStyle::Flat => ContextIsolation::None,
             TransformStyle::Preserve3D => ContextIsolation::Items,
         };
+        let allow_subpixel_aa = composite_ops.count() == 0 &&
+                                isolation == ContextIsolation::None;
         StackingContext {
             pipeline_id,
             reference_frame_offset,
@@ -1627,6 +1702,9 @@ impl StackingContext {
             is_pipeline_root,
             is_visible: false,
             is_backface_visible,
+            allow_subpixel_aa,
+            has_any_primitive: false,
+            children_sc_bounds: LayerRect::zero(),
         }
     }
 
@@ -1644,6 +1722,7 @@ pub struct ClipScrollGroup {
     pub clip_node_id: ClipId,
     pub packed_layer_index: PackedLayerIndex,
     pub screen_bounding_rect: Option<(TransformedRectKind, DeviceIntRect)>,
+    pub coordinate_system_id: CoordinateSystemId,
 }
 
 impl ClipScrollGroup {
@@ -1686,7 +1765,13 @@ impl PackedLayer {
         screen_rect: &DeviceIntRect,
         device_pixel_ratio: f32,
     ) -> Option<(TransformedRectKind, DeviceIntRect)> {
-        self.local_clip_rect = *local_rect;
+        self.local_clip_rect = if self.transform.has_perspective_component() {
+            // Given a very large rect which means any rect would be inside this rect.
+            // That is, nothing would be clipped.
+            rect(f32::MIN / 2.0, f32::MIN / 2.0, f32::MAX, f32::MAX)
+        } else {
+            *local_rect
+        };
         let xf_rect = TransformedRect::new(local_rect, &self.transform, device_pixel_ratio);
         xf_rect
             .bounding_rect
@@ -1776,10 +1861,12 @@ fn resolve_image(
                     (SourceTexture::External(external_image), cache_handle)
                 }
                 None => {
-                    let cache_item =
-                        resource_cache.get_cached_image(image_key, image_rendering, tile_offset);
-
-                    (cache_item.texture_id, cache_item.uv_rect_handle)
+                    if let Ok(cache_item) = resource_cache.get_cached_image(image_key, image_rendering, tile_offset) {
+                        (cache_item.texture_id, cache_item.uv_rect_handle)
+                    } else {
+                        // There is no usable texture entry for the image key. Just return an invalid texture here.
+                        (SourceTexture::Invalid, GpuCacheHandle::new())
+                    }
                 }
             }
         }

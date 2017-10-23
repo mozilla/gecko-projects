@@ -551,7 +551,7 @@ TextEditor::ExtendSelectionForDelete(Selection* aSelection,
         NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
 
         // node might be anonymous DIV, so we find better text node
-        FindBetterInsertionPoint(node, offset);
+        FindBetterInsertionPoint(node, offset, nullptr);
 
         if (IsTextNode(node)) {
           const nsTextFragment* data = node->GetAsText()->GetText();
@@ -704,6 +704,7 @@ TextEditor::InsertLineBreak()
     // get the (collapsed) selection location
     NS_ENSURE_STATE(selection->GetRangeAt(0));
     nsCOMPtr<nsINode> selNode = selection->GetRangeAt(0)->GetStartContainer();
+    nsCOMPtr<nsIContent> selChild = selection->GetRangeAt(0)->GetChildAtStartOffset();
     int32_t selOffset = selection->GetRangeAt(0)->StartOffset();
     NS_ENSURE_STATE(selNode);
 
@@ -722,7 +723,7 @@ TextEditor::InsertLineBreak()
 
     // insert a linefeed character
     rv = InsertTextImpl(NS_LITERAL_STRING("\n"), address_of(selNode),
-                        &selOffset, doc);
+                        address_of(selChild), &selOffset, doc);
     if (!selNode) {
       rv = NS_ERROR_NULL_POINTER; // don't return here, so DidDoAction is called
     }
@@ -1639,12 +1640,14 @@ TextEditor::SelectEntireDocument(Selection* aSelection)
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Don't select the trailing BR node if we have one
-  int32_t selOffset;
-  nsCOMPtr<nsINode> selNode;
-  rv = GetEndNodeAndOffset(aSelection, getter_AddRefs(selNode), &selOffset);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsINode* childNode = selNode->GetChildAt(selOffset - 1);
+  nsCOMPtr<nsIContent> childNode;
+  rv = GetEndChildNode(aSelection, getter_AddRefs(childNode));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  if (childNode) {
+    childNode = childNode->GetPreviousSibling();
+  }
 
   if (childNode && TextEditUtils::IsMozBR(childNode)) {
     int32_t parentOffset;
@@ -1666,7 +1669,7 @@ TextEditor::GetDOMEventTarget()
 
 nsresult
 TextEditor::SetAttributeOrEquivalent(Element* aElement,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      const nsAString& aValue,
                                      bool aSuppressTransaction)
 {
@@ -1675,7 +1678,7 @@ TextEditor::SetAttributeOrEquivalent(Element* aElement,
 
 nsresult
 TextEditor::RemoveAttributeOrEquivalent(Element* aElement,
-                                        nsIAtom* aAttribute,
+                                        nsAtom* aAttribute,
                                         bool aSuppressTransaction)
 {
   return EditorBase::RemoveAttribute(aElement, aAttribute);

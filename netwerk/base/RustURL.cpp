@@ -58,7 +58,7 @@ RustURL::SetSpec(const nsACString & aSpec)
 {
   ENSURE_MUTABLE();
 
-  rusturl* ptr = rusturl_new(&aSpec);
+  rusturl* ptr = rusturl_new(&aSpec, nullptr);
   if (!ptr) {
     return NS_ERROR_FAILURE;
   }
@@ -681,16 +681,16 @@ RustURL::GetScriptableHelper(nsIXPCScriptable * *_retval)
 }
 
 NS_IMETHODIMP
-RustURL::GetContractID(char * *aContractID)
+RustURL::GetContractID(nsACString& aContractID)
 {
-  *aContractID = nullptr;
+  aContractID.SetIsVoid(true);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-RustURL::GetClassDescription(char * *aClassDescription)
+RustURL::GetClassDescription(nsACString& aClassDescription)
 {
-  *aClassDescription = nullptr;
+  aClassDescription.SetIsVoid(true);
   return NS_OK;
 }
 

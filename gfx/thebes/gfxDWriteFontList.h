@@ -60,7 +60,7 @@ public:
     void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                                 FontListSizes* aSizes) const final;
 
-    bool FilterForFontList(nsIAtom* aLangGroup,
+    bool FilterForFontList(nsAtom* aLangGroup,
                            const nsACString& aGeneric) const final {
         return !IsSymbolFontFamily();
     }
@@ -212,8 +212,8 @@ protected:
     int8_t mIsCJK;
     bool mForceGDIClassic;
 
-    mozilla::WeakPtr<mozilla::gfx::UnscaledFont> mUnscaledFont;
-    mozilla::WeakPtr<mozilla::gfx::UnscaledFont> mUnscaledFontBold;
+    mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite> mUnscaledFont;
+    mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite> mUnscaledFontBold;
 };
 
 // custom text renderer used to determine the fallback font for a given char

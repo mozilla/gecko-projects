@@ -495,6 +495,14 @@ var BrowserApp = {
       InitLater(() => AccessFu.attach(window), window, "AccessFu");
     }
 
+    InitLater(() => {
+      Task.spawn(function* () {
+        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+        let logsDir = OS.Path.join(downloadsDir, "memory-reports");
+        yield OS.File.removeDir(logsDir);
+      });
+    });
+
     // Don't delay loading content.js because when we restore reader mode tabs,
     // we require the reader mode scripts in content.js right away.
     let mm = window.getGroupMessageManager("browsers");
@@ -2528,7 +2536,7 @@ var NativeWindow = {
 
     imageLocationCopyableContext: {
       matches: function imageLinkCopyableContextMatches(aElement) {
-        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+        if (ChromeUtils.getClassName(aElement) === "HTMLImageElement") {
           // The image is blocked by Tap-to-load Images
           if (aElement.hasAttribute("data-ctv-src") && !aElement.hasAttribute("data-ctv-show")) {
             return false;
@@ -2540,7 +2548,7 @@ var NativeWindow = {
 
     imageSaveableContext: {
       matches: function imageSaveableContextMatches(aElement) {
-        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+        if (ChromeUtils.getClassName(aElement) === "HTMLImageElement") {
           // The image is blocked by Tap-to-load Images
           if (aElement.hasAttribute("data-ctv-src") && !aElement.hasAttribute("data-ctv-show")) {
             return false;
@@ -2558,7 +2566,7 @@ var NativeWindow = {
     imageShareableContext: {
       matches: aElement => {
         let imgSrc = '';
-        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+        if (ChromeUtils.getClassName(aElement) === "HTMLImageElement") {
           imgSrc = aElement.src;
         } else if (aElement instanceof Ci.nsIImageLoadingContent &&
             aElement.currentURI &&
@@ -2588,7 +2596,8 @@ var NativeWindow = {
 
     imageBlockingPolicyContext: {
       matches: function imageBlockingPolicyContextMatches(aElement) {
-        if (aElement instanceof Ci.nsIDOMHTMLImageElement && aElement.getAttribute("data-ctv-src")) {
+        if (ChromeUtils.getClassName(aElement) === "HTMLImageElement" &&
+            aElement.getAttribute("data-ctv-src")) {
           // Only show the menuitem if we are blocking the image
           if (aElement.getAttribute("data-ctv-show") == "true") {
             return false;
@@ -3053,7 +3062,7 @@ var NativeWindow = {
       if (aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
           ((ChromeUtils.getClassName(aElement) === "HTMLAnchorElement" && aElement.href) ||
            (ChromeUtils.getClassName(aElement) === "HTMLAreaElement" && aElement.href) ||
-           aElement instanceof Ci.nsIDOMHTMLLinkElement ||
+           ChromeUtils.getClassName(aElement) === "HTMLLinkElement" ||
            aElement.getAttributeNS(kXLinkNamespace, "type") == "simple")) {
         try {
           let url = this._getLinkURL(aElement);
@@ -3950,12 +3959,20 @@ Tab.prototype = {
     }
   },
 
-  makeManifestMessage: function(target) {
-    return {
-      type: "Link:Manifest",
-      href: target.href,
-      tabID: this.id
-    };
+  makeManifestMessage: async function(target) {
+    try {
+        const manifest = await Manifests.getManifest(this.browser, target.href);
+        const data = await manifest.prefetch(this.browser);
+        var cache = {
+          type: "Link:Manifest",
+          href: target.href,
+          manifest: JSON.stringify(data),
+          tabID: this.id
+        };
+        GlobalEventDispatcher.sendRequest(cache);
+      } catch (err) {
+        Log.e("Browser", "error when makeManifestMessage:" + err);
+      }
   },
 
   sendOpenSearchMessage: function(eventTarget) {
@@ -4129,7 +4146,7 @@ Tab.prototype = {
 
       case "DOMFormHasPassword": {
         // Send logins for this hostname to Java.
-        let hostname = aEvent.target.baseURIObject.prePath;
+        let hostname = aEvent.target.baseURIObject.displayPrePath;
         let foundLogins = Services.logins.findLogins({}, hostname, "", "");
         if (foundLogins.length > 0) {
           let displayHost = IdentityHandler.getEffectiveHost();
@@ -4191,7 +4208,8 @@ Tab.prototype = {
         } else if (list.indexOf("[manifest]") != -1 &&
                    aEvent.type == "DOMLinkAdded" &&
                    SharedPreferences.forApp().getBoolPref("android.not_a_preference.pwa")){
-          jsonMessage = this.makeManifestMessage(target);
+          this.makeManifestMessage(target);
+          return;
         }
         if (!jsonMessage)
          return;

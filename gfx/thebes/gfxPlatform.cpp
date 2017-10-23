@@ -28,6 +28,7 @@
 #include "gfxUserFontSet.h"
 #include "gfxConfig.h"
 #include "MediaPrefs.h"
+#include "VRThread.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -1038,6 +1039,7 @@ gfxPlatform::InitLayersIPC()
     }
 
     layers::CompositorThreadHolder::Start();
+    gfx::VRListenerThreadHolder::Start();
   }
 }
 
@@ -1066,6 +1068,7 @@ gfxPlatform::ShutdownLayersIPC()
         layers::ImageBridgeChild::ShutDown();
         // This has to happen after shutting down the child protocols.
         layers::CompositorThreadHolder::Shutdown();
+        gfx::VRListenerThreadHolder::Shutdown();
         if (gfxVars::UseWebRender()) {
           wr::RenderThread::ShutDown();
 
@@ -1614,7 +1617,7 @@ gfxPlatform::BackendTypeForName(const nsCString& aName)
 }
 
 nsresult
-gfxPlatform::GetFontList(nsIAtom *aLangGroup,
+gfxPlatform::GetFontList(nsAtom *aLangGroup,
                          const nsACString& aGenericFamily,
                          nsTArray<nsString>& aListOfFonts)
 {

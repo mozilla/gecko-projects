@@ -80,10 +80,10 @@ ObjectActor.prototype = {
 
     // Check if the object has a wrapper which denies access. It may be a CPOW or a
     // security wrapper. Change the class so that this will be visible in the UI.
-    let unwrapped = unwrap(this.obj);
+    let unwrapped = DevToolsUtils.unwrap(this.obj);
     if (!unwrapped) {
       if (DevToolsUtils.isCPOW(this.obj)) {
-        g.class = "CPOW: " + g.class;
+        g.class = "CPOW: " + this.obj.class;
       } else {
         g.class = "Inaccessible";
       }
@@ -118,8 +118,7 @@ ObjectActor.prototype = {
     // when there is a bunch.
     if (isTypedArray(g)) {
       // Bug 1348761: getOwnPropertyNames is unnecessary slow on TypedArrays
-      let length = DevToolsUtils.getProperty(this.obj, "length");
-      g.ownPropertyLength = length;
+      g.ownPropertyLength = getArrayLength(this.obj);
     } else if (g.class != "Proxy") {
       g.ownPropertyLength = this.obj.getOwnPropertyNames().length;
     }
@@ -287,7 +286,7 @@ ObjectActor.prototype = {
     let ownSymbols = [];
 
     // Inaccessible, proxy and dead objects should not be accessed.
-    let unwrapped = unwrap(this.obj);
+    let unwrapped = DevToolsUtils.unwrap(this.obj);
     if (!unwrapped || unwrapped.isProxy || this.obj.class == "DeadObject") {
       return { from: this.actorID,
                prototype: this.hooks.createValueGrip(null),
@@ -336,7 +335,7 @@ ObjectActor.prototype = {
     let level = 0, i = 0;
 
     // Do not search safe getters in inaccessible nor proxy objects.
-    let unwrapped = unwrap(obj);
+    let unwrapped = DevToolsUtils.unwrap(obj);
     if (!unwrapped || unwrapped.isProxy) {
       return safeGetterValues;
     }
@@ -352,7 +351,7 @@ ObjectActor.prototype = {
 
     while (obj) {
       // Stop iterating when an inaccessible or a proxy object is found.
-      unwrapped = unwrap(obj);
+      unwrapped = DevToolsUtils.unwrap(obj);
       if (!unwrapped || unwrapped.isProxy) {
         break;
       }
@@ -870,21 +869,8 @@ PropertyIteratorActor.prototype.requestTypes = {
 };
 
 function enumArrayProperties(objectActor, options) {
-  let length = DevToolsUtils.getProperty(objectActor.obj, "length");
-  if (!isSafePositiveInteger(length)) {
-    // Pseudo arrays are flagged as ArrayLike if they have
-    // subsequent indexed properties without having any length attribute.
-    length = 0;
-    let names = objectActor.obj.getOwnPropertyNames();
-    for (let key of names) {
-      if (!isSafeIndex(key) || key != length++) {
-        break;
-      }
-    }
-  }
-
   return {
-    size: length,
+    size: getArrayLength(objectActor.obj),
     propertyName(index) {
       return index;
     },
@@ -908,22 +894,22 @@ function enumObjectProperties(objectActor, options) {
     let sliceIndex;
 
     const isLengthTrustworthy =
-      isSafePositiveInteger(length)
-      && (length > 0 && isSafeIndex(names[length - 1]))
-      && !isSafeIndex(names[length]);
+      isUint32(length)
+      && (!length || isArrayIndex(names[length - 1]))
+      && !isArrayIndex(names[length]);
 
     if (!isLengthTrustworthy) {
       // The length property may not reflect what the object looks like, let's find
       // where indexed properties end.
 
-      if (!isSafeIndex(names[0])) {
+      if (!isArrayIndex(names[0])) {
         // If the first item is not a number, this means there is no indexed properties
         // in this object.
         sliceIndex = 0;
       } else {
         sliceIndex = names.length;
         while (sliceIndex > 0) {
-          if (isSafeIndex(names[sliceIndex - 1])) {
+          if (isArrayIndex(names[sliceIndex - 1])) {
             break;
           }
           sliceIndex--;
@@ -1319,10 +1305,7 @@ DebuggerServer.ObjectActorPreviewers = {
   }],
 
   Array: [function ({obj, hooks}, grip) {
-    let length = DevToolsUtils.getProperty(obj, "length");
-    if (typeof length != "number") {
-      return false;
-    }
+    let length = getArrayLength(obj);
 
     grip.preview = {
       kind: "ArrayLike",
@@ -1636,14 +1619,9 @@ DebuggerServer.ObjectActorPreviewers.Object = [
       return false;
     }
 
-    let length = DevToolsUtils.getProperty(obj, "length");
-    if (typeof length != "number") {
-      return false;
-    }
-
     grip.preview = {
       kind: "ArrayLike",
-      length: length,
+      length: getArrayLength(obj),
     };
 
     if (hooks.getGripDepth() > 1) {
@@ -2475,36 +2453,6 @@ function arrayBufferGrip(buffer, pool) {
   return actor.grip();
 }
 
-/**
- * Removes all the non-opaque security wrappers of a debuggee object.
- * Returns null if some wrapper can't be removed.
- *
- * @param obj Debugger.Object
- *        The debuggee object to be unwrapped.
- */
-function unwrap(obj) {
-  // Check if `obj` has an opaque wrapper.
-  if (obj.class === "Opaque") {
-    return obj;
-  }
-
-  // Attempt to unwrap. If this operation is not allowed, it may return null or throw.
-  let unwrapped;
-  try {
-    unwrapped = obj.unwrap();
-  } catch (err) {
-    unwrapped = null;
-  }
-
-  // Check if further unwrapping is not possible.
-  if (!unwrapped || unwrapped === obj) {
-    return unwrapped;
-  }
-
-  // Recursively remove additional security wrappers.
-  return unwrap(unwrapped);
-}
-
 const TYPED_ARRAY_CLASSES = ["Uint8Array", "Uint8ClampedArray", "Uint16Array",
                              "Uint32Array", "Int8Array", "Int16Array", "Int32Array",
                              "Float32Array", "Float64Array"];
@@ -2532,28 +2480,56 @@ function isArray(object) {
 }
 
 /**
- * Returns true if the parameter is a safe positive integer.
+ * Returns the length of an array (or typed array).
+ *
+ * @param obj Debugger.Object
+ *        The debuggee object of the array.
+ * @return Number
+ * @throws if the object is not an array.
+ */
+function getArrayLength(object) {
+  if (!isArray(object)) {
+    throw new Error("Expected an array, got a " + object.class);
+  }
+
+  // Real arrays have a reliable `length` own property.
+  if (object.class === "Array") {
+    return DevToolsUtils.getProperty(object, "length");
+  }
+
+  // For typed arrays, `DevToolsUtils.getProperty` is not reliable because the `length`
+  // getter could be shadowed by an own property, and `getOwnPropertyNames` is
+  // unnecessarily slow. Obtain the `length` getter safely and call it manually.
+  let typedProto = Object.getPrototypeOf(Uint8Array.prototype);
+  let getter = Object.getOwnPropertyDescriptor(typedProto, "length").get;
+  return getter.call(object.unsafeDereference());
+}
+
+/**
+ * Returns true if the parameter can be stored as a 32-bit unsigned integer.
+ * If so, it will be suitable for use as the length of an array object.
  *
  * @param num Number
  *        The number to test.
  * @return Boolean
  */
-function isSafePositiveInteger(num) {
-  return Number.isSafeInteger(num) && 1 / num > 0;
+function isUint32(num) {
+  return num >>> 0 === num;
 }
 
 /**
  * Returns true if the parameter is suitable to be an array index.
  *
- * @param num Any
+ * @param str String
  * @return Boolean
  */
-function isSafeIndex(str) {
-  // Transform the parameter to a number using the Unary operator.
-  let num = +str;
-  return isSafePositiveInteger(num) &&
-    // Check the string since unary can transform non number (boolean, null, …).
-    num + "" === str;
+function isArrayIndex(str) {
+  // Transform the parameter to a 32-bit unsigned integer.
+  let num = str >>> 0;
+  // Check that the parameter is a canonical Uint32 index.
+  return num + "" === str &&
+    // Array indices cannot attain the maximum Uint32 value.
+    num != -1 >>> 0;
 }
 
 exports.ObjectActor = ObjectActor;

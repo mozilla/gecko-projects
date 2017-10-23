@@ -244,15 +244,6 @@
     "kind": "boolean",
     "description": "blocklist.xml has been loaded synchronously *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
-  "BOX_ALIGN_PROPS_IN_BLOCKS_FLAG": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["bwerth@mozilla.com"],
-    "bug_numbers": [1351383],
-    "releaseChannelCollection": "opt-out",
-    "expires_in_version": "57",
-    "kind": "boolean",
-    "description": "Whether we have layed out any display:block containers with not-yet-supported properties from CSS Box Align."
-  },
   "CHECKERBOARD_DURATION": {
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
@@ -7774,14 +7765,6 @@
     "n_buckets": 100,
     "description": "Life-span of a new tab without suggested tile: time delta between first-visible and unload events (half-seconds)."
   },
-  "NEWTAB_PAGE_LIFE_SPAN_SUGGESTED": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 1200,
-    "n_buckets": 100,
-    "description": "Life-span of a new tab with suggested tile: time delta between first-visible and unload events (half-seconds)."
-  },
   "NEWTAB_PAGE_PINNED_SITES_COUNT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "default",
@@ -8402,6 +8385,28 @@
      "releaseChannelCollection": "opt-out",
      "description": "A counter incremented every time the user prints a document."
    },
+  "DEVTOOLS_COLD_TOOLBOX_OPEN_DELAY_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
+    "bug_numbers": [1405584],
+    "expires_in_version": "62",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "keyed": true,
+    "description": "Time taken (in ms) to open the first DevTools toolbox. This is keyed by tool ID being opened [inspector, webconsole, jsdebugger, styleeditor, shadereditor, canvasdebugger, performance, memory, netmonitor, storage, webaudioeditor, scratchpad, dom]."
+  },
+  "DEVTOOLS_WARM_TOOLBOX_OPEN_DELAY_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
+    "bug_numbers": [1405584],
+    "expires_in_version": "62",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "keyed": true,
+    "description": "Time taken (in ms) to open all but first DevTools toolbox. This is keyed by tool ID being opened [inspector, webconsole, jsdebugger, styleeditor, shadereditor, canvasdebugger, performance, memory, netmonitor, storage, webaudioeditor, scratchpad, dom]."
+  },
   "DEVTOOLS_DEBUGGER_DISPLAY_SOURCE_LOCAL_MS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -8490,6 +8495,14 @@
     "bug_numbers": [1297556, 1257777],
     "description": "Records a value each time Fennec remote decoding process crashes unexpected while decoding media content.",
     "releaseChannelCollection": "opt-out"
+  },
+  "MEDIA_ANDROID_VIDEO_TUNNELING_SUPPORT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["bwu@mozilla.com", "jolin@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "boolean",
+    "description": "Records whether tunneled playback is supported by a video decoder when creating it.",
+    "bug_numbers": [1403849]
   },
   "MEDIA_EME_SECURE_CONTEXT": {
     "record_in_processes": ["main", "content"],
@@ -8815,6 +8828,36 @@
     "high": 10000,
     "n_buckets": 20,
     "description": "The length of time (in milliseconds) it took for the answerer to complete ICE, given that it failed. Does not count cases where StartChecks() was never called."
+  },
+  "WEBRTC_ICE_NR_ICE_GATHER_TIME": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["webrtc-ice-telemetry-alerts@mozilla.com", "bcampen@mozilla.com"],
+    "bug_numbers": [1319268],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 20,
+    "description": "The length of time (in milliseconds) it took to call nr_ice_gather, given that gathering did not succeed/fail immediately during the call."
+  },
+  "WEBRTC_ICE_NR_ICE_GATHER_TIME_IMMEDIATE_FAILURE": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["webrtc-ice-telemetry-alerts@mozilla.com", "bcampen@mozilla.com"],
+    "bug_numbers": [1319268],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 20,
+    "description": "The length of time (in milliseconds) it took to call nr_ice_gather, given that gathering failed immediately during the call."
+  },
+  "WEBRTC_ICE_NR_ICE_GATHER_TIME_IMMEDIATE_SUCCESS": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["webrtc-ice-telemetry-alerts@mozilla.com", "bcampen@mozilla.com"],
+    "bug_numbers": [1319268],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 20,
+    "description": "The length of time (in milliseconds) it took to call nr_ice_gather, given that gathering succeeded immediately during the call."
   },
   "WEBRTC_ICE_SUCCESS_TIME": {
     "record_in_processes": ["main", "content"],
@@ -10313,6 +10356,15 @@
     "n_values": 10,
     "releaseChannelCollection": "opt-out",
     "description": "Strict Secure Cookies: 0=blocked secure cookie from http; 1=blocked shadowing secure cookie from http; 2=shadowing secure cookie from https; 3=evicted newer insecure cookie; 4=evicted oldest insecure cookie; 5=evicted secure cookie; 6=evicting secure cookie blocked; 7=blocked downgrading secure cookie from http; 8=downgraded secure cookie from https"
+  },
+  "COOKIE_SCHEME_HTTPS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["cpeterson@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "bug_numbers": [1160368],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 10,
+    "description": "How often are first- and third-party cookies set from HTTPS origins? 0=first/http, 1=first/http+secure?!, 2=first/https, 3=first/https+secure, 4=third/http, 5=third/http+secure?!, 6=third/https, 7=third/https+secure"
   },
   "NTLM_MODULE_USED_2": {
     "record_in_processes": ["main", "content"],
@@ -13718,5 +13770,15 @@
     "keyed": true,
     "bug_numbers": [1341569],
     "description": "Milliseconds between starting to fill an autofill-eligible form field and submitting the form, keyed by the combination of form type and filling type."
+  },
+  "GFX_OMTP_PAINT_WAIT_TIME": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","danderson@mozilla.com"],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 200,
+    "n_buckets": 50,
+    "description": "Amount of time in milliseconds the main thread spends waiting for the paint thread to complete, if the time was greater than 200us.",
+    "bug_numbers": [1386968]
   }
 }

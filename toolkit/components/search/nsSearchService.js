@@ -136,7 +136,7 @@ const USER_DEFINED = "searchTerms";
 
 // Custom search parameters
 const MOZ_PARAM_LOCALE         = "moz:locale";
-const MOZ_PARAM_DIST_ID        = "moz:distributionID"
+const MOZ_PARAM_DIST_ID        = "moz:distributionID";
 const MOZ_PARAM_OFFICIAL       = "moz:official";
 
 // Supported OpenSearch parameters
@@ -339,7 +339,7 @@ loadListener.prototype = {
   // nsIProgressEventSink
   onProgress(aRequest, aContext, aProgress, aProgressMax) {},
   onStatus(aRequest, aContext, aStatus, aStatusArg) {}
-}
+};
 
 function isPartnerBuild() {
   try {
@@ -756,7 +756,7 @@ function getVerificationHash(aName) {
     "engine selection processes, and in a way which does not circumvent " +
     "user consent. I acknowledge that any attempt to change this file " +
     "from outside of $appName is a malicious act, and will be responded " +
-    "to accordingly."
+    "to accordingly.";
 
   let salt = OS.Path.basename(OS.Constants.Path.profileDir) + aName +
              disclaimer.replace(/\$appName/g, Services.appinfo.name);
@@ -1724,7 +1724,7 @@ Engine.prototype = {
         }
 
         if (aWidth && aHeight) {
-          this._addIconToMap(aWidth, aHeight, aIconURL)
+          this._addIconToMap(aWidth, aHeight, aIconURL);
         }
         break;
       case "http":
@@ -1754,7 +1754,7 @@ Engine.prototype = {
           aEngine._iconURI = makeURI(dataURL);
 
           if (aWidth && aHeight) {
-            aEngine._addIconToMap(aWidth, aHeight, dataURL)
+            aEngine._addIconToMap(aWidth, aHeight, dataURL);
           }
 
           notifyAction(aEngine, SEARCH_ENGINE_CHANGED);
@@ -2578,7 +2578,7 @@ Submission.prototype = {
     return this._postData;
   },
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISearchSubmission])
-}
+};
 
 // nsISearchParseSubmissionResult
 function ParseSubmissionResult(aEngine, aTerms, aTermsOffset, aTermsLength) {
@@ -2601,7 +2601,7 @@ ParseSubmissionResult.prototype = {
     return this._termsLength;
   },
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISearchParseSubmissionResult]),
-}
+};
 
 const gEmptyParseSubmissionResult =
       Object.freeze(new ParseSubmissionResult(null, "", -1, 0));
@@ -2725,14 +2725,10 @@ SearchService.prototype = {
     migrateRegionPrefs();
 
     // See if we have a cache file so we don't have to parse a bunch of XML.
-    let cache = {};
     // Not using checkForSyncCompletion here because we want to ensure we
     // fetch the country code and geo specific defaults asynchronously even
     // if a sync init has been forced.
-    cache = await this._asyncReadCacheFile();
-
-    if (!gInitialized && cache.metaData)
-      this._metaData = cache.metaData;
+    let cache = await this._asyncReadCacheFile();
 
     try {
       await checkForSyncCompletion(ensureKnownCountryCode(this));
@@ -2825,6 +2821,7 @@ SearchService.prototype = {
     let cache = {};
     let locale = getLocale();
     let buildID = Services.appinfo.platformBuildID;
+    let appVersion = Services.appinfo.version;
 
     // Allows us to force a cache refresh should the cache format change.
     cache.version = CACHE_VERSION;
@@ -2834,6 +2831,8 @@ SearchService.prototype = {
     // Extension-shipped plugins are the only exception to this, but their
     // directories are blown away during updates, so we'll detect their changes.
     cache.buildID = buildID;
+    // Store the appVersion as well so we can do extra things during major updates.
+    cache.appVersion = appVersion;
     cache.locale = locale;
 
     cache.visibleDefaultEngines = this._visibleDefaultEngines;
@@ -3108,10 +3107,7 @@ SearchService.prototype = {
         Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC,
                                      "uninit-complete");
 
-        let cache = {};
-        cache = await this._asyncReadCacheFile();
-        if (!gInitialized && cache.metaData)
-          this._metaData = cache.metaData;
+        let cache = await this._asyncReadCacheFile();
 
         await ensureKnownCountryCode(this);
         // Due to the HTTP requests done by ensureKnownCountryCode, it's possible that
@@ -3165,6 +3161,12 @@ SearchService.prototype = {
       let json = JSON.parse(new TextDecoder().decode(bytes));
       if (!json.engines || !json.engines.length)
         throw "no engine in the file";
+      // Reset search default expiration on major releases
+      if (json.appVersion != Services.appinfo.version &&
+          geoSpecificDefaultsEnabled() &&
+          json.metaData) {
+        json.metaData.searchDefaultExpir = 0;
+      }
       return json;
     } catch (ex) {
       LOG("_readCacheFile: Error reading cache file: " + ex);
@@ -3183,7 +3185,7 @@ SearchService.prototype = {
         LOG("_readCacheFile: migrating metadata from search-metadata.json");
         let data = metadata["[global]"];
         json.metaData = {};
-        let fields = ["searchDefault", "searchDefaultHash", "searchDefaultExpir",
+        let fields = ["searchDefault", "searchDefaultHash",
                       "current", "hash",
                       "visibleDefaultEngines", "visibleDefaultEnginesHash"];
         for (let field of fields) {
@@ -3219,6 +3221,12 @@ SearchService.prototype = {
       json = JSON.parse(new TextDecoder().decode(bytes));
       if (!json.engines || !json.engines.length)
         throw "no engine in the file";
+      // Reset search default expiration on major releases
+      if (json.appVersion != Services.appinfo.version &&
+          geoSpecificDefaultsEnabled() &&
+          json.metaData) {
+        json.metaData.searchDefaultExpir = 0;
+      }
       this._cacheFileJSON = json;
     } catch (ex) {
       LOG("_asyncReadCacheFile: Error reading cache file: " + ex);
@@ -3233,7 +3241,7 @@ SearchService.prototype = {
           LOG("_asyncReadCacheFile: migrating metadata from search-metadata.json");
           let data = metadata["[global]"];
           json.metaData = {};
-          let fields = ["searchDefault", "searchDefaultHash", "searchDefaultExpir",
+          let fields = ["searchDefault", "searchDefaultHash",
                         "current", "hash",
                         "visibleDefaultEngines", "visibleDefaultEnginesHash"];
           for (let field of fields) {
@@ -3246,6 +3254,9 @@ SearchService.prototype = {
         json._oldMetadata = metadata;
       } catch (ex) {}
     }
+    if (!gInitialized && json.metaData)
+      this._metaData = json.metaData;
+
     return json;
   },
 
@@ -3526,7 +3537,7 @@ SearchService.prototype = {
   },
 
   _findJAREngines: function SRCH_SVC_findJAREngines() {
-    LOG("_findJAREngines: looking for engines in JARs")
+    LOG("_findJAREngines: looking for engines in JARs");
 
     let chan = makeChannel(APP_SEARCH_PREFIX + "list.json");
     if (!chan) {
@@ -3559,7 +3570,7 @@ SearchService.prototype = {
    * succeeds.
    */
   async _asyncFindJAREngines() {
-    LOG("_asyncFindJAREngines: looking for engines in JARs")
+    LOG("_asyncFindJAREngines: looking for engines in JARs");
 
     let listURL = APP_SEARCH_PREFIX + "list.json";
     let chan = makeChannel(listURL);
@@ -3584,7 +3595,7 @@ SearchService.prototype = {
         request.onerror = function(aEvent) {
           LOG("_asyncFindJAREngines: failed to read " + APP_SEARCH_PREFIX + "list.txt");
           resolve("");
-        }
+        };
         request.open("GET", Services.io.newURI(APP_SEARCH_PREFIX + "list.txt").spec, true);
         request.send();
       };

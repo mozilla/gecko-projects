@@ -41,7 +41,9 @@
 #include <windows.h>
 #include <accctrl.h>
 
-#define PATH_MAX MAX_PATH
+#ifndef PATH_MAX
+#  define PATH_MAX MAX_PATH
+#endif
 
 #endif // defined(XP_WIN)
 
@@ -346,6 +348,7 @@ void CleanupOSFileConstants()
 
   gInitialized = false;
   delete gPaths;
+  gPaths = nullptr;
 }
 
 
@@ -874,9 +877,7 @@ bool SetStringProperty(JSContext *cx, JS::Handle<JSObject*> aObject, const char 
  */
 bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
 {
-  MOZ_ASSERT(gInitialized);
-
-  if (gPaths == nullptr) {
+  if (!gInitialized || gPaths == nullptr) {
     // If an initialization error was ignored, we may end up with
     // |gInitialized == true| but |gPaths == nullptr|. We cannot
     // |MOZ_ASSERT| this, as this would kill precompile_cache.js,

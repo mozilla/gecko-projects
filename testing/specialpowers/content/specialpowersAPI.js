@@ -670,6 +670,31 @@ SpecialPowersAPI.prototype = {
     return bindDOMWindowUtils(aWindow);
   },
 
+  waitForCrashes(aExpectingProcessCrash) {
+    return new Promise((resolve, reject) => {
+      if (!aExpectingProcessCrash) {
+        resolve();
+      }
+
+      var crashIds = this._encounteredCrashDumpFiles.filter((filename) => {
+        return ((filename.length === 40) && filename.endsWith(".dmp"));
+      }).map((id) => {
+        return id.slice(0, -4); // Strip the .dmp extension to get the ID
+      });
+
+      let self = this;
+      function messageListener(msg) {
+        self._removeMessageListener("SPProcessCrashManagerWait", messageListener);
+        resolve();
+      }
+
+      this._addMessageListener("SPProcessCrashManagerWait", messageListener);
+      this._sendAsyncMessage("SPProcessCrashManagerWait", {
+        crashIds
+      });
+    });
+  },
+
   removeExpectedCrashDumpFiles(aExpectingProcessCrash) {
     var success = true;
     if (aExpectingProcessCrash) {
@@ -1421,6 +1446,9 @@ SpecialPowersAPI.prototype = {
 
   getFullZoom(window) {
     return this._getMUDV(window).fullZoom;
+  },
+  getDeviceFullZoom(window) {
+    return this._getMUDV(window).deviceFullZoom;
   },
   setFullZoom(window, zoom) {
     this._getMUDV(window).fullZoom = zoom;

@@ -35,12 +35,12 @@ void
 ServoSpecifiedValues::SetIdentStringValue(nsCSSPropertyID aId,
                                           const nsString& aValue)
 {
-  RefPtr<nsIAtom> atom = NS_Atomize(aValue);
+  RefPtr<nsAtom> atom = NS_Atomize(aValue);
   SetIdentAtomValue(aId, atom);
 }
 
 void
-ServoSpecifiedValues::SetIdentAtomValue(nsCSSPropertyID aId, nsIAtom* aValue)
+ServoSpecifiedValues::SetIdentAtomValue(nsCSSPropertyID aId, nsAtom* aValue)
 {
   Servo_DeclarationBlock_SetIdentStringValue(mDecl, aId, aValue);
   if (aId == eCSSProperty__x_lang) {
@@ -121,6 +121,10 @@ ServoSpecifiedValues::SetTextDecorationColorOverride()
 void
 ServoSpecifiedValues::SetBackgroundImage(nsAttrValue& aValue)
 {
+  if (aValue.Type() != nsAttrValue::eURL &&
+      aValue.Type() != nsAttrValue::eImage) {
+    return;
+  }
   nsAutoString str;
   aValue.ToString(str);
   Servo_DeclarationBlock_SetBackgroundImage(

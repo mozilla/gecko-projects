@@ -4,9 +4,10 @@
 
 "use strict";
 
-const { CanvasFrameAnonymousContentHelper, getCSSStyleRules,
+const { CanvasFrameAnonymousContentHelper,
         createSVGNode, createNode, getComputedStyle } = require("./utils/markup");
-const { setIgnoreLayoutChanges, getCurrentZoom } = require("devtools/shared/layout/utils");
+const { setIgnoreLayoutChanges, getCurrentZoom,
+        getAdjustedQuads, getFrameOffsets } = require("devtools/shared/layout/utils");
 const { AutoRefreshHighlighter } = require("./auto-refresh");
 const {
   getDistance,
@@ -16,6 +17,7 @@ const {
   clickedOnPoint
 } = require("devtools/server/actors/utils/shapes-geometry-utils");
 const EventEmitter = require("devtools/shared/old-event-emitter");
+const { getCSSStyleRules } = require("devtools/shared/inspector/css-logic");
 
 const BASE_MARKER_SIZE = 5;
 // the width of the area around highlighter lines that can be clicked, in px
@@ -176,13 +178,47 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
     };
   }
 
+  get frameDimensions() {
+    // In an iframe, we get the node's quads relative to the frame,
+    // instead of the parent document.
+    let dims = getAdjustedQuads(this.currentNode.ownerGlobal,
+      this.currentNode, this.referenceBox)[0].bounds;
+    let zoom = getCurrentZoom(this.win);
+
+    if (this.currentNode.getBBox &&
+        getComputedStyle(this.currentNode).stroke !== "none" && !this.useStrokeBox) {
+      dims = getObjectBoundingBox(dims.top, dims.left,
+        dims.width, dims.height, this.currentNode);
+    }
+
+    return {
+      top: dims.top / zoom,
+      left: dims.left / zoom,
+      width: dims.width / zoom,
+      height: dims.height / zoom
+    };
+  }
+
   handleEvent(event, id) {
     // No event handling if the highlighter is hidden
     if (this.areShapesHidden()) {
       return;
     }
 
-    const { target, type, pageX, pageY } = event;
+    let { target, type, pageX, pageY } = event;
+
+    // For events on highlighted nodes in an iframe, when the event takes place
+    // outside the iframe. Check if event target belongs to the iframe. If it doesn't,
+    // adjust pageX/pageY to be relative to the iframe rather than the parent.
+    if (target.ownerDocument !== this.currentNode.ownerDocument) {
+      let [xOffset, yOffset] = getFrameOffsets(target.ownerGlobal, this.currentNode);
+      // xOffset/yOffset are relative to the viewport, so first find the top/left
+      // edges of the viewport relative to the page.
+      let viewportLeft = pageX - event.clientX;
+      let viewportTop = pageY - event.clientY;
+      pageX -= viewportLeft + xOffset;
+      pageY -= viewportTop + yOffset;
+    }
 
     switch (type) {
       case "pagehide":
@@ -702,7 +738,10 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
    *          in percentages relative to the element.
    */
   convertPageCoordsToPercent(pageX, pageY) {
-    let { top, left, width, height } = this.zoomAdjustedDimensions;
+    // If the current node is in an iframe, we get dimensions relative to the frame.
+    let dims = (this.highlighterEnv.window.document === this.currentNode.ownerDocument) ?
+               this.zoomAdjustedDimensions : this.frameDimensions;
+    let { top, left, width, height } = dims;
     pageX -= left;
     pageY -= top;
     let percentX = pageX * 100 / width;

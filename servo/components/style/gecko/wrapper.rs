@@ -54,7 +54,7 @@ use gecko_bindings::bindings::Gecko_UnsetDirtyStyleAttr;
 use gecko_bindings::bindings::Gecko_UpdateAnimations;
 use gecko_bindings::structs;
 use gecko_bindings::structs::{RawGeckoElement, RawGeckoNode, RawGeckoXBLBinding};
-use gecko_bindings::structs::{nsIAtom, nsIContent, nsINode_BooleanFlag};
+use gecko_bindings::structs::{nsAtom, nsIContent, nsINode_BooleanFlag};
 use gecko_bindings::structs::ELEMENT_HANDLED_SNAPSHOT;
 use gecko_bindings::structs::ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO;
 use gecko_bindings::structs::ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO;
@@ -75,10 +75,10 @@ use properties::animated_properties::{AnimationValue, AnimationValueMap};
 use properties::animated_properties::TransitionProperty;
 use properties::style_structs::Font;
 use rule_tree::CascadeLevel as ServoCascadeLevel;
-use selector_parser::{AttrValue, ElementExt, PseudoClassStringArg};
+use selector_parser::{AttrValue, PseudoClassStringArg};
 use selectors::{Element, OpaqueElement};
 use selectors::attr::{AttrSelectorOperation, AttrSelectorOperator, CaseSensitivity, NamespaceConstraint};
-use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext};
+use selectors::matching::{ElementSelectorFlags, MatchingContext};
 use selectors::matching::{RelevantLinkStatus, VisitedHandlingMode};
 use selectors::sink::Push;
 use servo_arc::{Arc, ArcBorrow, RawOffsetArc};
@@ -158,32 +158,6 @@ impl<'ln> GeckoNode<'ln> {
         unsafe { &*self.node_info().mDocument }
     }
 
-    #[inline]
-    fn first_child(&self) -> Option<GeckoNode<'ln>> {
-        unsafe { self.0.mFirstChild.as_ref().map(GeckoNode::from_content) }
-    }
-
-    #[inline]
-    fn last_child(&self) -> Option<GeckoNode<'ln>> {
-        unsafe { Gecko_GetLastChild(self.0).map(GeckoNode) }
-    }
-
-    #[inline]
-    fn prev_sibling(&self) -> Option<GeckoNode<'ln>> {
-        unsafe { self.0.mPreviousSibling.as_ref().map(GeckoNode::from_content) }
-    }
-
-    #[inline]
-    fn next_sibling(&self) -> Option<GeckoNode<'ln>> {
-        unsafe { self.0.mNextSibling.as_ref().map(GeckoNode::from_content) }
-    }
-
-    /// Simple iterator over all this node's children.  Unlike `.children()`, this iterator does
-    /// not filter out nodes that don't need layout.
-    fn dom_children(self) -> GeckoChildrenIterator<'ln> {
-        GeckoChildrenIterator::Current(self.first_child())
-    }
-
     /// WARNING: This logic is duplicated in Gecko's FlattenedTreeParentIsParent.
     /// Make sure to mirror any modifications in both places.
     fn flattened_tree_parent_is_parent(&self) -> bool {
@@ -222,11 +196,6 @@ impl<'ln> GeckoNode<'ln> {
     fn contains_non_whitespace_content(&self) -> bool {
         unsafe { Gecko_IsSignificantChild(self.0, true, false) }
     }
-
-    #[inline]
-    fn may_have_anonymous_children(&self) -> bool {
-        self.get_bool_flag(nsINode_BooleanFlag::ElementMayHaveAnonymousChildren)
-    }
 }
 
 impl<'ln> NodeInfo for GeckoNode<'ln> {
@@ -244,38 +213,33 @@ impl<'ln> NodeInfo for GeckoNode<'ln> {
 
 impl<'ln> TNode for GeckoNode<'ln> {
     type ConcreteElement = GeckoElement<'ln>;
-    type ConcreteChildrenIterator = GeckoChildrenIterator<'ln>;
 
     fn parent_node(&self) -> Option<Self> {
         unsafe { self.0.mParent.as_ref().map(GeckoNode) }
     }
 
-    fn children(&self) -> LayoutIterator<GeckoChildrenIterator<'ln>> {
-        LayoutIterator(self.dom_children())
+    #[inline]
+    fn first_child(&self) -> Option<Self> {
+        unsafe { self.0.mFirstChild.as_ref().map(GeckoNode::from_content) }
+    }
+
+    #[inline]
+    fn last_child(&self) -> Option<Self> {
+        unsafe { Gecko_GetLastChild(self.0).map(GeckoNode) }
+    }
+
+    #[inline]
+    fn prev_sibling(&self) -> Option<Self> {
+        unsafe { self.0.mPreviousSibling.as_ref().map(GeckoNode::from_content) }
+    }
+
+    #[inline]
+    fn next_sibling(&self) -> Option<Self> {
+        unsafe { self.0.mNextSibling.as_ref().map(GeckoNode::from_content) }
     }
 
     fn traversal_parent(&self) -> Option<GeckoElement<'ln>> {
         self.flattened_tree_parent().and_then(|n| n.as_element())
-    }
-
-    fn traversal_children(&self) -> LayoutIterator<GeckoChildrenIterator<'ln>> {
-        if let Some(element) = self.as_element() {
-            // This condition is similar to the check that
-            // StyleChildrenIterator::IsNeeded does, except that it might return
-            // true if we used to (but no longer) have anonymous content from
-            // ::before/::after, XBL bindings, or nsIAnonymousContentCreators.
-            if element.is_in_anonymous_subtree() ||
-               element.has_xbl_binding_with_content() ||
-               self.may_have_anonymous_children() {
-                unsafe {
-                    let mut iter: structs::StyleChildrenIterator = ::std::mem::zeroed();
-                    Gecko_ConstructStyleChildrenIterator(element.0, &mut iter);
-                    return LayoutIterator(GeckoChildrenIterator::GeckoIterator(iter));
-                }
-            }
-        }
-
-        LayoutIterator(self.dom_children())
     }
 
     fn opaque(&self) -> OpaqueNode {
@@ -305,10 +269,6 @@ impl<'ln> TNode for GeckoNode<'ln> {
     unsafe fn set_can_be_fragmented(&self, _value: bool) {
         // FIXME(SimonSapin): Servo uses this to implement CSS multicol / fragmentation
         // Maybe this isn’t useful for Gecko?
-    }
-
-    fn is_in_doc(&self) -> bool {
-        unsafe { bindings::Gecko_IsInDocument(self.0) }
     }
 }
 
@@ -447,6 +407,11 @@ impl<'le> fmt::Debug for GeckoElement<'le> {
 }
 
 impl<'le> GeckoElement<'le> {
+    #[inline]
+    fn may_have_anonymous_children(&self) -> bool {
+        self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementMayHaveAnonymousChildren)
+    }
+
     /// Parse the style attribute of an element.
     pub fn parse_style_attribute<R>(
         value: &str,
@@ -883,6 +848,7 @@ impl structs::FontSizePrefs {
 impl<'le> TElement for GeckoElement<'le> {
     type ConcreteNode = GeckoNode<'le>;
     type FontMetricsProvider = GeckoFontMetricsProvider;
+    type TraversalChildrenIterator = GeckoChildrenIterator<'le>;
 
     fn inheritance_parent(&self) -> Option<Self> {
         if self.is_native_anonymous() {
@@ -892,6 +858,25 @@ impl<'le> TElement for GeckoElement<'le> {
                 .flattened_tree_parent()
                 .and_then(|n| n.as_element())
         }
+    }
+
+    fn traversal_children(&self) -> LayoutIterator<GeckoChildrenIterator<'le>> {
+        // This condition is similar to the check that
+        // StyleChildrenIterator::IsNeeded does, except that it might return
+        // true if we used to (but no longer) have anonymous content from
+        // ::before/::after, XBL bindings, or nsIAnonymousContentCreators.
+        if self.is_in_anonymous_subtree() ||
+           self.has_xbl_binding_with_content() ||
+           self.is_in_shadow_tree() ||
+           self.may_have_anonymous_children() {
+            unsafe {
+                let mut iter: structs::StyleChildrenIterator = ::std::mem::zeroed();
+                Gecko_ConstructStyleChildrenIterator(self.0, &mut iter);
+                return LayoutIterator(GeckoChildrenIterator::GeckoIterator(iter));
+            }
+        }
+
+        LayoutIterator(GeckoChildrenIterator::Current(self.as_node().first_child()))
     }
 
     fn before_pseudo_element(&self) -> Option<Self> {
@@ -930,7 +915,7 @@ impl<'le> TElement for GeckoElement<'le> {
 
     fn closest_non_native_anonymous_ancestor(&self) -> Option<Self> {
         debug_assert!(self.is_native_anonymous());
-        let mut parent = match self.parent_element() {
+        let mut parent = match self.traversal_parent() {
             Some(e) => e,
             None => return None,
         };
@@ -940,7 +925,7 @@ impl<'le> TElement for GeckoElement<'le> {
                 return Some(parent);
             }
 
-            parent = match parent.parent_element() {
+            parent = match parent.traversal_parent() {
                 Some(p) => p,
                 None => return None,
             };
@@ -1103,6 +1088,11 @@ impl<'le> TElement for GeckoElement<'le> {
     fn is_native_anonymous(&self) -> bool {
         use gecko_bindings::structs::NODE_IS_NATIVE_ANONYMOUS;
         self.flags() & (NODE_IS_NATIVE_ANONYMOUS as u32) != 0
+    }
+
+    #[inline]
+    fn matches_user_and_author_rules(&self) -> bool {
+        !self.is_in_native_anonymous_subtree()
     }
 
     fn implemented_pseudo_element(&self) -> Option<PseudoElement> {
@@ -1303,22 +1293,27 @@ impl<'le> TElement for GeckoElement<'le> {
 
     fn get_css_transitions_info(
         &self,
-    ) -> FnvHashMap<TransitionProperty, Arc<AnimationValue>> {
+    ) -> FnvHashMap<LonghandId, Arc<AnimationValue>> {
         use gecko_bindings::bindings::Gecko_ElementTransitions_EndValueAt;
         use gecko_bindings::bindings::Gecko_ElementTransitions_Length;
-        use gecko_bindings::bindings::Gecko_ElementTransitions_PropertyAt;
 
         let collection_length =
-            unsafe { Gecko_ElementTransitions_Length(self.0) };
-        let mut map = FnvHashMap::with_capacity_and_hasher(collection_length, Default::default());
+            unsafe { Gecko_ElementTransitions_Length(self.0) } as usize;
+        let mut map = FnvHashMap::with_capacity_and_hasher(
+            collection_length,
+            Default::default()
+        );
+
         for i in 0..collection_length {
-            let (property, raw_end_value) = unsafe {
-                (Gecko_ElementTransitions_PropertyAt(self.0, i as usize).into(),
-                 Gecko_ElementTransitions_EndValueAt(self.0, i as usize))
+            let raw_end_value = unsafe {
+                 Gecko_ElementTransitions_EndValueAt(self.0, i)
             };
-            let end_value = AnimationValue::arc_from_borrowed(&raw_end_value);
-            debug_assert!(end_value.is_some());
-            map.insert(property, end_value.unwrap().clone_arc());
+
+            let end_value = AnimationValue::arc_from_borrowed(&raw_end_value)
+                .expect("AnimationValue not found in ElementTransitions");
+
+            let property = end_value.id();
+            map.insert(property, end_value.clone_arc());
         }
         map
     }
@@ -1363,7 +1358,7 @@ impl<'le> TElement for GeckoElement<'le> {
         after_change_style: &ComputedValues
     ) -> bool {
         use gecko_bindings::structs::nsCSSPropertyID;
-        use std::collections::HashSet;
+        use properties::LonghandIdSet;
 
         debug_assert!(self.might_need_transitions_update(Some(before_change_style),
                                                          after_change_style),
@@ -1381,13 +1376,7 @@ impl<'le> TElement for GeckoElement<'le> {
                    property == nsCSSPropertyID::eCSSProperty_UNKNOWN;
         };
 
-        let mut transitions_to_keep = if !existing_transitions.is_empty() &&
-                                         (after_change_box_style.transition_nscsspropertyid_at(0) !=
-                                              nsCSSPropertyID::eCSSPropertyExtra_all_properties) {
-            Some(HashSet::<TransitionProperty>::with_capacity(transitions_count))
-        } else {
-            None
-        };
+        let mut transitions_to_keep = LonghandIdSet::new();
 
         for i in 0..transitions_count {
             let property = after_change_box_style.transition_nscsspropertyid_at(i);
@@ -1400,7 +1389,8 @@ impl<'le> TElement for GeckoElement<'le> {
 
             let transition_property: TransitionProperty = property.into();
 
-            let property_check_helper = |property: &LonghandId| -> bool {
+            let mut property_check_helper = |property: &LonghandId| -> bool {
+                transitions_to_keep.insert(*property);
                 self.needs_transitions_update_per_property(
                     property,
                     combined_duration,
@@ -1427,17 +1417,13 @@ impl<'le> TElement for GeckoElement<'le> {
                         return true;
                     }
                 },
-            };
-
-            if let Some(ref mut transitions_to_keep) = transitions_to_keep {
-                transitions_to_keep.insert(transition_property);
             }
         }
 
         // Check if we have to cancel the running transition because this is not
         // a matching transition-property value.
-        transitions_to_keep.map_or(false, |set| {
-            existing_transitions.keys().any(|property| !set.contains(property))
+        existing_transitions.keys().any(|property| {
+            !transitions_to_keep.contains(*property)
         })
     }
 
@@ -1447,7 +1433,7 @@ impl<'le> TElement for GeckoElement<'le> {
         combined_duration: f32,
         before_change_style: &ComputedValues,
         after_change_style: &ComputedValues,
-        existing_transitions: &FnvHashMap<TransitionProperty, Arc<AnimationValue>>,
+        existing_transitions: &FnvHashMap<LonghandId, Arc<AnimationValue>>,
     ) -> bool {
         use values::animated::{Animate, Procedure};
 
@@ -1457,13 +1443,10 @@ impl<'le> TElement for GeckoElement<'le> {
         // If the end value has not changed, we should leave the currently
         // running transition as-is since we don't want to interrupt its timing
         // function.
-        //
-        // FIXME(emilio): The shorthand / longhand mapping with transitions
-        // looks pretty fishy!
-        if let Some(ref existing) = existing_transitions.get(&TransitionProperty::Longhand(*longhand_id)) {
+        if let Some(ref existing) = existing_transitions.get(longhand_id) {
             let after_value =
                 AnimationValue::from_computed_values(
-                    &longhand_id,
+                    longhand_id,
                     after_change_style
                 ).unwrap();
 
@@ -1851,7 +1834,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     fn match_non_ts_pseudo_class<F>(
         &self,
         pseudo_class: &NonTSPseudoClass,
-        context: &mut LocalMatchingContext<Self::Impl>,
+        context: &mut MatchingContext<Self::Impl>,
         relevant_link: &RelevantLinkStatus,
         flags_setter: &mut F,
     ) -> bool
@@ -1906,20 +1889,14 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::MozDirAttrRTL |
             NonTSPseudoClass::MozDirAttrLikeAuto |
             NonTSPseudoClass::MozAutofill |
+            NonTSPseudoClass::Active |
+            NonTSPseudoClass::Hover |
             NonTSPseudoClass::MozAutofillPreview => {
                 self.get_state().intersects(pseudo_class.state_flag())
             },
             NonTSPseudoClass::AnyLink => self.is_link(),
-            NonTSPseudoClass::Link => relevant_link.is_unvisited(self, context.shared),
-            NonTSPseudoClass::Visited => relevant_link.is_visited(self, context.shared),
-            NonTSPseudoClass::Active |
-            NonTSPseudoClass::Hover => {
-                if context.active_hover_quirk_matches() && !self.is_link() {
-                    false
-                } else {
-                    self.get_state().contains(pseudo_class.state_flag())
-                }
-            },
+            NonTSPseudoClass::Link => relevant_link.is_unvisited(self, context),
+            NonTSPseudoClass::Visited => relevant_link.is_visited(self, context),
             NonTSPseudoClass::MozFirstNode => {
                 flags_setter(self, HAS_EDGE_CHILD_SELECTOR);
                 let mut elem = self.as_node();
@@ -1982,7 +1959,6 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::Lang(ref lang_arg) => {
                 self.match_element_lang(None, lang_arg)
             }
-            NonTSPseudoClass::MozSystemMetric(ref s) |
             NonTSPseudoClass::MozLocaleDir(ref s) |
             NonTSPseudoClass::Dir(ref s) => {
                 unsafe {
@@ -1999,7 +1975,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     fn match_pseudo_element(
         &self,
         pseudo_element: &PseudoElement,
-        _context: &mut MatchingContext
+        _context: &mut MatchingContext<Self::Impl>,
     ) -> bool {
         // TODO(emilio): I believe we could assert we are a pseudo-element and
         // match the proper pseudo-element, given how we rulehash the stuff
@@ -2072,21 +2048,14 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 /// A few helpers to help with attribute selectors and snapshotting.
 pub trait NamespaceConstraintHelpers {
     /// Returns the namespace of the selector, or null otherwise.
-    fn atom_or_null(&self) -> *mut nsIAtom;
+    fn atom_or_null(&self) -> *mut nsAtom;
 }
 
 impl<'a> NamespaceConstraintHelpers for NamespaceConstraint<&'a Namespace> {
-    fn atom_or_null(&self) -> *mut nsIAtom {
+    fn atom_or_null(&self) -> *mut nsAtom {
         match *self {
             NamespaceConstraint::Any => ptr::null_mut(),
             NamespaceConstraint::Specific(ref ns) => ns.0.as_ptr(),
         }
-    }
-}
-
-impl<'le> ElementExt for GeckoElement<'le> {
-    #[inline]
-    fn matches_user_and_author_rules(&self) -> bool {
-        !self.is_in_native_anonymous_subtree()
     }
 }

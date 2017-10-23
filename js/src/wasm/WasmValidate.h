@@ -25,6 +25,17 @@
 namespace js {
 namespace wasm {
 
+// This struct captures the bytecode offset of a section's payload (so not
+// including the header) and the size of the payload.
+
+struct SectionRange
+{
+    uint32_t start;
+    uint32_t size;
+};
+
+typedef Maybe<SectionRange> MaybeSectionRange;
+
 // ModuleEnvironment contains all the state necessary to validate, process or
 // render functions. It is created by decoding all the sections before the wasm
 // code section and then used immutably during. When compiling a module using a
@@ -38,11 +49,8 @@ struct ModuleEnvironment
     // Constant parameters for the entire compilation:
     const DebugEnabled        debug;
     const ModuleKind          kind;
-
-    // Constant parameters determined no later than at the start of the code
-    // section:
-    CompileMode               mode_;
-    Tier                      tier_;
+    const CompileMode         mode;
+    const Tier                tier;
 
     // Module fields decoded from the module environment (or initialized while
     // validating an asm.js module) and immutable during compilation:
@@ -58,6 +66,7 @@ struct ModuleEnvironment
     ImportVector              imports;
     ExportVector              exports;
     Maybe<uint32_t>           startFuncIndex;
+    MaybeSectionRange         codeSection;
 
     // Fields decoded as part of the wasm module tail:
     ElemSegmentVector         elemSegments;
@@ -65,35 +74,18 @@ struct ModuleEnvironment
     NameInBytecodeVector      funcNames;
     CustomSectionVector       customSections;
 
-    static const CompileMode UnknownMode = (CompileMode)-1;
-    static const Tier        UnknownTier = (Tier)-1;
-
     explicit ModuleEnvironment(CompileMode mode = CompileMode::Once,
                                Tier tier = Tier::Ion,
                                DebugEnabled debug = DebugEnabled::False,
                                ModuleKind kind = ModuleKind::Wasm)
       : debug(debug),
         kind(kind),
-        mode_(mode),
-        tier_(tier),
+        mode(mode),
+        tier(tier),
         memoryUsage(MemoryUsage::None),
         minMemoryLength(0)
     {}
 
-    CompileMode mode() const {
-        MOZ_ASSERT(mode_ != UnknownMode);
-        return mode_;
-    }
-    Tier tier() const {
-        MOZ_ASSERT(tier_ != UnknownTier);
-        return tier_;
-    }
-    void setModeAndTier(CompileMode mode, Tier tier) {
-        MOZ_ASSERT(mode_ == UnknownMode);
-        MOZ_ASSERT(tier_ == UnknownTier);
-        mode_ = mode;
-        tier_ = tier;
-    }
     size_t numTables() const {
         return tables.length();
     }
@@ -553,21 +545,14 @@ class Decoder
 
     // See "section" description in Encoder.
 
-    static const uint32_t NotStarted = UINT32_MAX;
+    MOZ_MUST_USE bool readSectionHeader(uint8_t* id, SectionRange* range);
 
     MOZ_MUST_USE bool startSection(SectionId id,
                                    ModuleEnvironment* env,
-                                   uint32_t* sectionStart,
-                                   uint32_t* sectionSize,
-                                   const char* sectionName,
-                                   bool peeking = false);
-    MOZ_MUST_USE bool finishSection(uint32_t sectionStart,
-                                    uint32_t sectionSize,
+                                   MaybeSectionRange* range,
+                                   const char* sectionName);
+    MOZ_MUST_USE bool finishSection(const SectionRange& range,
                                     const char* sectionName);
-    MOZ_MUST_USE bool peekSectionSize(SectionId id,
-                                      ModuleEnvironment* env,
-                                      const char* sectionName,
-                                      uint32_t* sectionSize);
 
     // Custom sections do not cause validation errors unless the error is in
     // the section header itself.
@@ -575,24 +560,21 @@ class Decoder
     MOZ_MUST_USE bool startCustomSection(const char* expected,
                                          size_t expectedLength,
                                          ModuleEnvironment* env,
-                                         uint32_t* sectionStart,
-                                         uint32_t* sectionSize);
+                                         MaybeSectionRange* range);
     template <size_t NameSizeWith0>
     MOZ_MUST_USE bool startCustomSection(const char (&name)[NameSizeWith0],
                                          ModuleEnvironment* env,
-                                         uint32_t* sectionStart,
-                                         uint32_t* sectionSize)
+                                         MaybeSectionRange* range)
     {
         MOZ_ASSERT(name[NameSizeWith0 - 1] == '\0');
-        return startCustomSection(name, NameSizeWith0 - 1, env, sectionStart, sectionSize);
+        return startCustomSection(name, NameSizeWith0 - 1, env, range);
     }
-    void finishCustomSection(uint32_t sectionStart, uint32_t sectionSize);
+    void finishCustomSection(const SectionRange& range);
     MOZ_MUST_USE bool skipCustomSection(ModuleEnvironment* env);
 
-    // The Name section has its own subsections. Like startSection, NotStart is
-    // returned as the endOffset if the given name subsection wasn't present.
+    // The Name section has its own optional subsections.
 
-    MOZ_MUST_USE bool startNameSubsection(NameType nameType, uint32_t* endOffset);
+    MOZ_MUST_USE bool startNameSubsection(NameType nameType, Maybe<uint32_t>* endOffset);
     MOZ_MUST_USE bool finishNameSubsection(uint32_t endOffset);
 
     // The infallible "unchecked" decoding functions can be used when we are
@@ -685,6 +667,16 @@ EncodeLocalEntries(Encoder& d, const ValTypeVector& locals);
 
 MOZ_MUST_USE bool
 DecodeLocalEntries(Decoder& d, ModuleKind kind, ValTypeVector* locals);
+
+// Returns whether the given [begin, end) prefix of a module's bytecode starts a
+// code section and, if so, returns the SectionRange of that code section.
+// Note that, even if this function returns 'false', [begin, end) may actually
+// be a valid module in the special case when there are no function defs and the
+// code section is not present. Such modules can be valid so the caller must
+// handle this special case.
+
+MOZ_MUST_USE bool
+StartsCodeSection(const uint8_t* begin, const uint8_t* end, SectionRange* range);
 
 // Calling DecodeModuleEnvironment decodes all sections up to the code section
 // and performs full validation of all those sections. The client must then

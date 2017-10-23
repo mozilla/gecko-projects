@@ -20,21 +20,18 @@ StackingContextHelper::StackingContextHelper()
 
 StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParentSC,
                                              wr::DisplayListBuilder& aBuilder,
-                                             nsDisplayListBuilder* aDisplayListBuilder,
-                                             nsDisplayItem* aItem,
-                                             nsDisplayList* aDisplayList,
+                                             const nsTArray<wr::WrFilterOp>& aFilters,
                                              const gfx::Matrix4x4* aBoundTransform,
                                              uint64_t aAnimationsId,
                                              float* aOpacityPtr,
                                              gfx::Matrix4x4* aTransformPtr,
                                              gfx::Matrix4x4* aPerspectivePtr,
-                                             const nsTArray<wr::WrFilterOp>& aFilters,
                                              const gfx::CompositionOp& aMixBlendMode,
-                                             bool aBackfaceVisible)
+                                             bool aBackfaceVisible,
+                                             bool aIsPreserve3D)
   : mBuilder(&aBuilder)
   , mScale(1.0f, 1.0f)
 {
-  bool is2d = !aTransformPtr || (aTransformPtr->Is2D() && !aPerspectivePtr);
   if (aTransformPtr) {
     mTransform = *aTransformPtr;
   }
@@ -49,7 +46,7 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                 aAnimationsId,
                                 aOpacityPtr,
                                 aTransformPtr,
-                                is2d ? wr::TransformStyle::Flat : wr::TransformStyle::Preserve3D,
+                                aIsPreserve3D ? wr::TransformStyle::Preserve3D : wr::TransformStyle::Flat,
                                 aPerspectivePtr,
                                 wr::ToMixBlendMode(aMixBlendMode),
                                 aFilters,
@@ -64,28 +61,15 @@ StackingContextHelper::~StackingContextHelper()
 }
 
 void
-StackingContextHelper::AdjustOrigin(const LayerPoint& aDelta)
+StackingContextHelper::AdjustOrigin(const LayoutDevicePoint& aDelta)
 {
   mOrigin += aDelta;
 }
 
 wr::LayoutRect
-StackingContextHelper::ToRelativeLayoutRect(const LayerRect& aRect) const
-{
-  return wr::ToLayoutRect(RoundedToInt(aRect - mOrigin));
-}
-
-wr::LayoutRect
 StackingContextHelper::ToRelativeLayoutRect(const LayoutDeviceRect& aRect) const
 {
-  return wr::ToLayoutRect(RoundedToInt(ViewAs<LayerPixel>(aRect,
-                                                          PixelCastJustification::WebRenderHasUnitResolution) - mOrigin));
-}
-
-wr::LayoutPoint
-StackingContextHelper::ToRelativeLayoutPoint(const LayerPoint& aPoint) const
-{
-  return wr::ToLayoutPoint(aPoint - mOrigin);
+  return wr::ToLayoutRect(RoundedToInt(aRect - mOrigin));
 }
 
 } // namespace layers

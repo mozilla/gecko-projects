@@ -26,6 +26,7 @@
 #include "mozilla/LoadInfo.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/Services.h"
 #include "mozilla/StartupTimeline.h"
 #include "mozilla/Telemetry.h"
@@ -362,7 +363,7 @@ ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback, void* aClosure)
     return;
   }
 
-  RefPtr<nsIAtom> pingAtom = NS_Atomize("ping");
+  RefPtr<nsAtom> pingAtom = NS_Atomize("ping");
   if (!pingAtom) {
     return;
   }
@@ -456,23 +457,13 @@ nsPingListener::StartTimeout(DocGroup* aDocGroup)
 {
   NS_ENSURE_ARG(aDocGroup);
 
-  nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  timer->SetTarget(aDocGroup->EventTargetFor(TaskCategory::Network));
-
-  if (timer) {
-    nsresult rv =
-      timer->InitWithNamedFuncCallback(OnPingTimeout,
-                                       mLoadGroup,
-                                       PING_TIMEOUT,
-                                       nsITimer::TYPE_ONE_SHOT,
-                                       "nsPingListener::StartTimeout");
-    if (NS_SUCCEEDED(rv)) {
-      mTimer = timer;
-      return NS_OK;
-    }
-  }
-
-  return NS_ERROR_OUT_OF_MEMORY;
+  return NS_NewTimerWithFuncCallback(getter_AddRefs(mTimer),
+                                     OnPingTimeout,
+                                     mLoadGroup,
+                                     PING_TIMEOUT,
+                                     nsITimer::TYPE_ONE_SHOT,
+                                     "nsPingListener::StartTimeout",
+                                     aDocGroup->EventTargetFor(TaskCategory::Network));
 }
 
 NS_IMETHODIMP
@@ -879,6 +870,9 @@ nsDocShell::nsDocShell()
 nsDocShell::~nsDocShell()
 {
   MOZ_ASSERT(!mObserved);
+
+  // Avoid notifying observers while we're in the dtor.
+  mIsBeingDestroyed = true;
 
   Destroy();
 
@@ -4135,7 +4129,7 @@ nsDocShell::GetChildOffset(int32_t* aChildOffset)
 NS_IMETHODIMP
 nsDocShell::GetHistoryID(nsID** aID)
 {
-  *aID = static_cast<nsID*>(nsMemory::Clone(&mHistoryID, sizeof(nsID)));
+  *aID = mHistoryID.Clone();
   return NS_OK;
 }
 
@@ -6858,14 +6852,15 @@ nsDocShell::RefreshURI(nsIURI* aURI, int32_t aDelay, bool aRepeat,
   } else {
     // There is no page loading going on right now.  Create the
     // timer and fire it right away.
-    nsCOMPtr<nsITimer> timer = do_CreateInstance("@mozilla.org/timer;1");
-    NS_ENSURE_TRUE(timer, NS_ERROR_FAILURE);
     nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
     NS_ENSURE_TRUE(win, NS_ERROR_FAILURE);
 
+    nsCOMPtr<nsITimer> timer;
+    MOZ_TRY_VAR(timer,
+                NS_NewTimerWithCallback(refreshTimer, aDelay, nsITimer::TYPE_ONE_SHOT,
+                                        win->TabGroup()->EventTargetFor(TaskCategory::Network)));
+
     mRefreshURIList->AppendElement(timer, /*weak =*/ false);  // owning timer ref
-    timer->SetTarget(win->TabGroup()->EventTargetFor(TaskCategory::Network));
-    timer->InitWithCallback(refreshTimer, aDelay, nsITimer::TYPE_ONE_SHOT);
   }
   return NS_OK;
 }
@@ -7345,16 +7340,20 @@ nsDocShell::RefreshURIFromQueue()
       uint32_t delay =
         static_cast<nsRefreshTimer*>(
           static_cast<nsITimerCallback*>(refreshInfo))->GetDelay();
-      nsCOMPtr<nsITimer> timer = do_CreateInstance("@mozilla.org/timer;1");
       nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
-      if (timer && win) {
-        // Replace the nsRefreshTimer element in the queue with
-        // its corresponding timer object, so that in case another
-        // load comes through before the timer can go off, the timer will
-        // get cancelled in CancelRefreshURITimer()
-        mRefreshURIList->ReplaceElementAt(timer, n, /*weak =*/ false);
-        timer->SetTarget(win->TabGroup()->EventTargetFor(TaskCategory::Network));
-        timer->InitWithCallback(refreshInfo, delay, nsITimer::TYPE_ONE_SHOT);
+      if (win) {
+        nsCOMPtr<nsITimer> timer;
+        NS_NewTimerWithCallback(getter_AddRefs(timer),
+                                refreshInfo, delay, nsITimer::TYPE_ONE_SHOT,
+                                win->TabGroup()->EventTargetFor(TaskCategory::Network));
+
+        if (timer) {
+          // Replace the nsRefreshTimer element in the queue with
+          // its corresponding timer object, so that in case another
+          // load comes through before the timer can go off, the timer will
+          // get cancelled in CancelRefreshURITimer()
+          mRefreshURIList->ReplaceElementAt(timer, n, /*weak =*/ false);
+        }
       }
     }
   }
@@ -9963,11 +9962,15 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     isTargetTopLevelDocShell = true;
   }
 
+  nsIDocument* doc = mContentViewer ? mContentViewer->GetDocument()
+                                    : nullptr;
   if (!nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
         aURI,
         contentType,
         aTriggeringPrincipal,
-        (aLoadType == LOAD_NORMAL_EXTERNAL))) {
+        doc,
+        (aLoadType == LOAD_NORMAL_EXTERNAL),
+        !aFileName.IsVoid())) {
     // logging to console happens within AllowTopLevelNavigationToDataURI
     return NS_OK;
   }
@@ -10010,6 +10013,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     int16_t shouldLoad = nsIContentPolicy::ACCEPT;
     rv = NS_CheckContentLoadPolicy(contentType,
                                    aURI,
+                                   // This is a top-level load, so the loading
+                                   // principal is null.
+                                   nullptr,
                                    aTriggeringPrincipal,
                                    requestingContext,
                                    EmptyCString(),  // mime guess
@@ -10097,8 +10103,6 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     }
   }
 
-  const nsIDocument* doc = mContentViewer ? mContentViewer->GetDocument()
-                                          : nullptr;
   const bool isDocumentAuxSandboxed = doc &&
     (doc->GetSandboxFlags() & SANDBOXED_AUXILIARY_NAVIGATION);
 
@@ -15065,7 +15069,7 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
-    aChannel->Cancel(NS_ERROR_INTERCEPTION_FAILED);
+    aChannel->CancelInterception(NS_ERROR_INTERCEPTION_FAILED);
     return NS_OK;
   }
 

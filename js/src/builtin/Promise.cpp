@@ -19,9 +19,11 @@
 #include "js/Debug.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
+#include "vm/Debugger.h"
 
 #include "jsobjinlines.h"
 
+#include "vm/Debugger-inl.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
@@ -470,30 +472,30 @@ static bool ResolvePromiseFunction(JSContext* cx, unsigned argc, Value* vp);
 static bool RejectPromiseFunction(JSContext* cx, unsigned argc, Value* vp);
 
 // ES2016, 25.4.1.3.
-static MOZ_MUST_USE bool
+static MOZ_MUST_USE MOZ_ALWAYS_INLINE bool
 CreateResolvingFunctions(JSContext* cx, HandleObject promise,
                          MutableHandleObject resolveFn,
                          MutableHandleObject rejectFn)
 {
-    RootedAtom funName(cx, cx->names().empty);
-    RootedFunction resolve(cx, NewNativeFunction(cx, ResolvePromiseFunction, 1, funName,
-                                                 gc::AllocKind::FUNCTION_EXTENDED, GenericObject));
-    if (!resolve)
+    HandlePropertyName funName = cx->names().empty;
+    resolveFn.set(NewNativeFunction(cx, ResolvePromiseFunction, 1, funName,
+                                    gc::AllocKind::FUNCTION_EXTENDED, GenericObject));
+    if (!resolveFn)
         return false;
 
-    RootedFunction reject(cx, NewNativeFunction(cx, RejectPromiseFunction, 1, funName,
-                                                 gc::AllocKind::FUNCTION_EXTENDED, GenericObject));
-    if (!reject)
+    rejectFn.set(NewNativeFunction(cx, RejectPromiseFunction, 1, funName,
+                                   gc::AllocKind::FUNCTION_EXTENDED, GenericObject));
+    if (!rejectFn)
         return false;
 
-    resolve->setExtendedSlot(ResolveFunctionSlot_Promise, ObjectValue(*promise));
-    resolve->setExtendedSlot(ResolveFunctionSlot_RejectFunction, ObjectValue(*reject));
+    JSFunction* resolveFun = &resolveFn->as<JSFunction>();
+    JSFunction* rejectFun = &rejectFn->as<JSFunction>();
 
-    reject->setExtendedSlot(RejectFunctionSlot_Promise, ObjectValue(*promise));
-    reject->setExtendedSlot(RejectFunctionSlot_ResolveFunction, ObjectValue(*resolve));
+    resolveFun->initExtendedSlot(ResolveFunctionSlot_Promise, ObjectValue(*promise));
+    resolveFun->initExtendedSlot(ResolveFunctionSlot_RejectFunction, ObjectValue(*rejectFun));
 
-    resolveFn.set(resolve);
-    rejectFn.set(reject);
+    rejectFun->initExtendedSlot(RejectFunctionSlot_Promise, ObjectValue(*promise));
+    rejectFun->initExtendedSlot(RejectFunctionSlot_ResolveFunction, ObjectValue(*resolveFun));
 
     return true;
 }
@@ -1050,8 +1052,12 @@ TriggerPromiseReactions(JSContext* cx, HandleValue reactionsVal, JS::PromiseStat
     RootedObject reactions(cx, &reactionsVal.toObject());
     RootedObject reaction(cx);
 
-    if (reactions->is<PromiseReactionRecord>() || IsWrapper(reactions))
+    if (reactions->is<PromiseReactionRecord>() ||
+        IsWrapper(reactions) ||
+        JS_IsDeadWrapper(reactions))
+    {
         return EnqueuePromiseReactionJob(cx, reactions, valueOrReason, state);
+    }
 
     RootedNativeObject reactionsList(cx, &reactions->as<NativeObject>());
     size_t reactionsCount = reactionsList->getDenseInitializedLength();
@@ -1459,12 +1465,11 @@ ClearResolutionFunctionSlots(JSFunction* resolutionFun)
 }
 
 // ES2016, 25.4.3.1. steps 3-7.
-static MOZ_MUST_USE PromiseObject*
+static MOZ_MUST_USE MOZ_ALWAYS_INLINE PromiseObject*
 CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
                             bool protoIsWrapped /* = false */, bool informDebugger /* = true */)
 {
     // Step 3.
-    Rooted<PromiseObject*> promise(cx);
     // Enter the unwrapped proto's compartment, if that's different from
     // the current one.
     // All state stored in a Promise's fixed slots must be created in the
@@ -1474,12 +1479,12 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
     if (protoIsWrapped)
         ac.emplace(cx, proto);
 
-    promise = NewObjectWithClassProto<PromiseObject>(cx, proto);
+    PromiseObject* promise = NewObjectWithClassProto<PromiseObject>(cx, proto);
     if (!promise)
         return nullptr;
 
     // Step 4.
-    promise->setFixedSlot(PromiseSlot_Flags, Int32Value(0));
+    promise->initFixedSlot(PromiseSlot_Flags, Int32Value(0));
 
     // Steps 5-6.
     // Omitted, we allocate our single list of reaction records lazily.
@@ -1487,20 +1492,24 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
     // Step 7.
     // Implicit, the handled flag is unset by default.
 
+    if (MOZ_LIKELY(!ShouldCaptureDebugInfo(cx)))
+        return promise;
+
     // Store an allocation stack so we can later figure out what the
     // control flow was for some unexpected results. Frightfully expensive,
     // but oh well.
-    if (ShouldCaptureDebugInfo(cx)) {
-        PromiseDebugInfo* debugInfo = PromiseDebugInfo::create(cx, promise);
-        if (!debugInfo)
-            return nullptr;
-    }
+
+    Rooted<PromiseObject*> promiseRoot(cx, promise);
+
+    PromiseDebugInfo* debugInfo = PromiseDebugInfo::create(cx, promiseRoot);
+    if (!debugInfo)
+        return nullptr;
 
     // Let the Debugger know about this Promise.
     if (informDebugger)
-        JS::dbg::onNewPromise(cx, promise);
+        Debugger::onNewPromise(cx, promiseRoot);
 
-    return promise;
+    return promiseRoot;
 }
 
 // ES2016, 25.4.3.1.
@@ -1582,7 +1591,7 @@ PromiseConstructor(JSContext* cx, unsigned argc, Value* vp)
         if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto))
             return false;
     }
-    Rooted<PromiseObject*> promise(cx, PromiseObject::create(cx, executor, proto, needsWrapping));
+    PromiseObject* promise = PromiseObject::create(cx, executor, proto, needsWrapping);
     if (!promise)
         return false;
 
@@ -1633,14 +1642,16 @@ PromiseObject::create(JSContext* cx, HandleObject executor, HandleObject proto /
         return nullptr;
 
     // Need to wrap the resolution functions before storing them on the Promise.
+    MOZ_ASSERT(promise->getFixedSlot(PromiseSlot_RejectFunction).isUndefined(),
+               "Slot must be undefined so initFixedSlot can be used");
     if (needsWrapping) {
         AutoCompartment ac(cx, promise);
         RootedObject wrappedRejectFn(cx, rejectFn);
         if (!cx->compartment()->wrap(cx, &wrappedRejectFn))
             return nullptr;
-        promise->setFixedSlot(PromiseSlot_RejectFunction, ObjectValue(*wrappedRejectFn));
+        promise->initFixedSlot(PromiseSlot_RejectFunction, ObjectValue(*wrappedRejectFn));
     } else {
-        promise->setFixedSlot(PromiseSlot_RejectFunction, ObjectValue(*rejectFn));
+        promise->initFixedSlot(PromiseSlot_RejectFunction, ObjectValue(*rejectFn));
     }
 
     // Step 9.
@@ -1671,7 +1682,7 @@ PromiseObject::create(JSContext* cx, HandleObject executor, HandleObject proto /
     }
 
     // Let the Debugger know about this Promise.
-    JS::dbg::onNewPromise(cx, promise);
+    Debugger::onNewPromise(cx, promise);
 
     // Step 11.
     return promise;
@@ -2108,6 +2119,10 @@ PromiseAllResolveElementFunction(JSContext* cx, unsigned argc, Value* vp)
         // See comment for PerformPromiseAll, step 3 for why we unwrap here.
         valuesObj = UncheckedUnwrap(valuesObj);
     }
+    if (JS_IsDeadWrapper(valuesObj)) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+        return false;
+    }
     RootedNativeObject values(cx, &valuesObj->as<NativeObject>());
 
     // Step 6 (moved under step 10).
@@ -2395,6 +2410,15 @@ NewReactionRecord(JSContext* cx, HandleObject resultPromise, HandleValue onFulfi
                   HandleValue onRejected, HandleObject resolve, HandleObject reject,
                   HandleObject incumbentGlobalObject)
 {
+    // Either of the following conditions must be met:
+    //   * resultPromise is a PromiseObject
+    //   * resolve and reject are callable
+    // except for Async Generator, there resultPromise can be nullptr.
+    MOZ_ASSERT_IF(resultPromise && !resultPromise->is<PromiseObject>(), resolve);
+    MOZ_ASSERT_IF(resultPromise && !resultPromise->is<PromiseObject>(), IsCallable(resolve));
+    MOZ_ASSERT_IF(resultPromise && !resultPromise->is<PromiseObject>(), reject);
+    MOZ_ASSERT_IF(resultPromise && !resultPromise->is<PromiseObject>(), IsCallable(reject));
+
     Rooted<PromiseReactionRecord*> reaction(cx, NewObjectWithClassProto<PromiseReactionRecord>(cx));
     if (!reaction)
         return nullptr;
@@ -2741,6 +2765,8 @@ js::AsyncGeneratorResolve(JSContext* cx, Handle<AsyncGeneratorObject*> asyncGenO
     // Step 5.
     RootedObject resultPromise(cx, request->promise());
 
+    asyncGenObj->cacheRequest(request);
+
     // Step 6.
     RootedObject resultObj(cx, CreateIterResultObject(cx, value, done));
     if (!resultObj)
@@ -2778,6 +2804,8 @@ js::AsyncGeneratorReject(JSContext* cx, Handle<AsyncGeneratorObject*> asyncGenOb
 
     // Step 5.
     RootedObject resultPromise(cx, request->promise());
+
+    asyncGenObj->cacheRequest(request);
 
     // Step 6.
     if (!RejectMaybeWrappedPromise(cx, resultPromise, exception))
@@ -2916,7 +2944,8 @@ js::AsyncGeneratorEnqueue(JSContext* cx, HandleValue asyncGenVal,
 
     // Step 5 (reordered).
     Rooted<AsyncGeneratorRequest*> request(
-        cx, AsyncGeneratorRequest::create(cx, completionKind, completionValue, resultPromise));
+        cx, AsyncGeneratorObject::createRequest(cx, asyncGenObj, completionKind, completionValue,
+                                                resultPromise));
     if (!request)
         return false;
 
@@ -3102,7 +3131,7 @@ BlockOnPromise(JSContext* cx, HandleValue promiseVal, HandleObject blockedPromis
         // rejected promises list.
         bool addToDependent = true;
 
-        if (C == PromiseCtor) {
+        if (C == PromiseCtor && resultPromise->is<PromiseObject>()) {
             addToDependent = false;
         } else {
             // 25.4.5.3., step 4.
@@ -3161,11 +3190,13 @@ BlockOnPromise(JSContext* cx, HandleValue promiseVal, HandleObject blockedPromis
             return false;
     }
 
-    // If the object to depend on isn't a, maybe-wrapped, Promise instance,
-    // we ignore it. All this does is lose some small amount of debug
-    // information in scenarios that are highly unlikely to occur in useful
-    // code.
+    // If either the object to depend on or the object that gets blocked isn't
+    // a, maybe-wrapped, Promise instance, we ignore it. All this does is lose
+    // some small amount of debug information in scenarios that are highly
+    // unlikely to occur in useful code.
     if (!unwrappedPromiseObj->is<PromiseObject>())
+        return true;
+    if (!blockedPromise_->is<PromiseObject>())
         return true;
 
     Rooted<PromiseObject*> promise(cx, &unwrappedPromiseObj->as<PromiseObject>());
@@ -3385,7 +3416,7 @@ PromiseObject::onSettled(JSContext* cx, Handle<PromiseObject*> promise)
     if (promise->state() == JS::PromiseState::Rejected && promise->isUnhandled())
         cx->runtime()->addUnhandledRejectedPromise(cx, promise);
 
-    JS::dbg::onPromiseSettled(cx, promise);
+    Debugger::onPromiseSettled(cx, promise);
 }
 
 OffThreadPromiseTask::OffThreadPromiseTask(JSContext* cx, Handle<PromiseObject*> promise)
@@ -3393,7 +3424,7 @@ OffThreadPromiseTask::OffThreadPromiseTask(JSContext* cx, Handle<PromiseObject*>
     promise_(cx, promise),
     registered_(false)
 {
-    MOZ_ASSERT(runtime_ == promise->zone()->runtimeFromActiveCooperatingThread());
+    MOZ_ASSERT(runtime_ == promise_->zone()->runtimeFromActiveCooperatingThread());
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(runtime_));
     MOZ_ASSERT(cx->runtime()->offThreadPromiseState.ref().initialized());
 }
@@ -3452,7 +3483,7 @@ OffThreadPromiseTask::run(JSContext* cx, MaybeShuttingDown maybeShuttingDown)
 }
 
 void
-OffThreadPromiseTask::dispatchResolve()
+OffThreadPromiseTask::dispatchResolveAndDestroy()
 {
     MOZ_ASSERT(registered_);
 

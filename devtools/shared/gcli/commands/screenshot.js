@@ -36,11 +36,7 @@ const CONTAINER_FLASHING_DURATION = 500;
  */
 const filenameParam = {
   name: "filename",
-  type: {
-    name: "file",
-    filetype: "file",
-    existing: "maybe",
-  },
+  type: "string",
   defaultValue: FILENAME_DEFAULT_VALUE,
   description: l10n.lookup("screenshotFilenameDesc"),
   manual: l10n.lookup("screenshotFilenameManual")
@@ -184,7 +180,7 @@ exports.items = [
     manual: l10n.lookup("screenshotManual"),
     returnType: "imageSummary",
     buttonId: "command-button-screenshot",
-    buttonClass: "command-button command-button-invertable",
+    buttonClass: "command-button",
     tooltipText: l10n.lookup("screenshotTooltipPage"),
     params: [
       filenameParam,

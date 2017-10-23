@@ -12,6 +12,7 @@
 #include "nsIChannelEventSink.h"
 
 class nsIStreamListener;
+class nsIDocument;
 
 #define NS_CONTENTSECURITYMANAGER_CONTRACTID "@mozilla.org/contentsecuritymanager;1"
 // cdcc1ab8-3cea-4e6c-a294-a651fa35227f
@@ -35,7 +36,9 @@ public:
   static bool AllowTopLevelNavigationToDataURI(nsIURI* aURI,
                                                nsContentPolicyType aContentPolicyType,
                                                nsIPrincipal* aTriggeringPrincipal,
-                                               bool aLoadFromExternal);
+                                               nsIDocument* aDoc,
+                                               bool aLoadFromExternal,
+                                               bool aIsDownload);
 
 private:
   static nsresult CheckChannel(nsIChannel* aChannel);

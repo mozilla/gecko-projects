@@ -107,6 +107,12 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler
     JSCompartment* compartmentStubField(uint32_t offset) {
         return (JSCompartment*)readStubWord(offset, StubField::Type::RawWord);
     }
+    const Class* classStubField(uintptr_t offset) {
+        return (const Class*)readStubWord(offset, StubField::Type::RawWord);
+    }
+    const void* proxyHandlerStubField(uintptr_t offset) {
+        return (const void*)readStubWord(offset, StubField::Type::RawWord);
+    }
     jsid idStubField(uint32_t offset) {
         return mozilla::BitwiseCast<jsid>(readStubWord(offset, StubField::Type::Id));
     }
@@ -408,6 +414,32 @@ IonCacheIRCompiler::init()
             allocator.initInputLocation(1, ic->id());
         break;
       }
+      case CacheKind::GetPropSuper:
+      case CacheKind::GetElemSuper: {
+        IonGetPropSuperIC* ic = ic_->asGetPropSuperIC();
+        TypedOrValueRegister output = ic->output();
+
+        available.add(output.valueReg());
+
+        liveRegs_.emplace(ic->liveRegs());
+        outputUnchecked_.emplace(output);
+
+        allowDoubleResult_.emplace(true);
+
+        MOZ_ASSERT(numInputs == 2 || numInputs == 3);
+
+        allocator.initInputLocation(0, ic->object(), JSVAL_TYPE_OBJECT);
+
+        if (ic->kind() == CacheKind::GetPropSuper) {
+            MOZ_ASSERT(numInputs == 2);
+            allocator.initInputLocation(1, ic->receiver());
+        } else {
+            MOZ_ASSERT(numInputs == 3);
+            allocator.initInputLocation(1, ic->id());
+            allocator.initInputLocation(2, ic->receiver());
+        }
+        break;
+      }
       case CacheKind::SetProp:
       case CacheKind::SetElem: {
         IonSetPropertyIC* ic = ic_->asSetPropertyIC();
@@ -503,8 +535,6 @@ IonCacheIRCompiler::init()
       case CacheKind::Call:
       case CacheKind::Compare:
       case CacheKind::TypeOf:
-      case CacheKind::GetPropSuper:
-      case CacheKind::GetElemSuper:
         MOZ_CRASH("Unsupported IC");
     }
 
@@ -664,6 +694,37 @@ IonCacheIRCompiler::emitGuardCompartment()
 }
 
 bool
+IonCacheIRCompiler::emitGuardAnyClass()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    AutoScratchRegister scratch(allocator, masm);
+
+    const Class* clasp = classStubField(reader.stubOffset());
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.branchTestObjClass(Assembler::NotEqual, obj, scratch, clasp, failure->label());
+    return true;
+}
+
+bool
+IonCacheIRCompiler::emitGuardHasProxyHandler()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    const void* handler = proxyHandlerStubField(reader.stubOffset());
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    Address handlerAddr(obj, ProxyObject::offsetOfHandler());
+    masm.branchPtr(Assembler::NotEqual, handlerAddr, ImmPtr(handler), failure->label());
+    return true;
+}
+
+bool
 IonCacheIRCompiler::emitGuardSpecificObject()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -733,6 +794,55 @@ IonCacheIRCompiler::emitGuardSpecificSymbol()
         return false;
 
     masm.branchPtr(Assembler::NotEqual, sym, ImmGCPtr(expected), failure->label());
+    return true;
+}
+
+bool
+IonCacheIRCompiler::emitGuardXrayExpandoShapeAndDefaultProto()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    bool hasExpando = reader.readBool();
+    JSObject* shapeWrapper = objectStubField(reader.stubOffset());
+    MOZ_ASSERT(hasExpando == !!shapeWrapper);
+
+    AutoScratchRegister scratch(allocator, masm);
+    Maybe<AutoScratchRegister> scratch2;
+    if (hasExpando)
+        scratch2.emplace(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()), scratch);
+    Address holderAddress(scratch, sizeof(Value) * GetXrayJitInfo()->xrayHolderSlot);
+    Address expandoAddress(scratch, NativeObject::getFixedSlotOffset(GetXrayJitInfo()->holderExpandoSlot));
+
+    if (hasExpando) {
+        masm.branchTestObject(Assembler::NotEqual, holderAddress, failure->label());
+        masm.unboxObject(holderAddress, scratch);
+        masm.branchTestObject(Assembler::NotEqual, expandoAddress, failure->label());
+        masm.unboxObject(expandoAddress, scratch);
+
+        // Unwrap the expando before checking its shape.
+        masm.loadPtr(Address(scratch, ProxyObject::offsetOfReservedSlots()), scratch);
+        masm.unboxObject(Address(scratch, detail::ProxyReservedSlots::offsetOfPrivateSlot()), scratch);
+
+        masm.movePtr(ImmGCPtr(shapeWrapper), scratch2.ref());
+        LoadShapeWrapperContents(masm, scratch2.ref(), scratch2.ref(), failure->label());
+        masm.branchTestObjShape(Assembler::NotEqual, scratch, scratch2.ref(), failure->label());
+
+        // The reserved slots on the expando should all be in fixed slots.
+        Address protoAddress(scratch, NativeObject::getFixedSlotOffset(GetXrayJitInfo()->expandoProtoSlot));
+        masm.branchTestUndefined(Assembler::NotEqual, protoAddress, failure->label());
+    } else {
+        Label done;
+        masm.branchTestObject(Assembler::NotEqual, holderAddress, &done);
+        masm.unboxObject(holderAddress, scratch);
+        masm.branchTestObject(Assembler::Equal, expandoAddress, failure->label());
+        masm.bind(&done);
+    }
+
     return true;
 }
 

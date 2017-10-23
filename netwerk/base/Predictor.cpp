@@ -451,8 +451,8 @@ Predictor::InstallObserver()
   Preferences::AddBoolVarCache(&mDoingTests, PREDICTOR_DOING_TESTS_PREF, false);
 
   if (!mCleanedUp) {
-    mCleanupTimer = do_CreateInstance("@mozilla.org/timer;1");
-    mCleanupTimer->Init(this, 60 * 1000, nsITimer::TYPE_ONE_SHOT);
+    NS_NewTimerWithObserver(getter_AddRefs(mCleanupTimer),
+                            this, 60 * 1000, nsITimer::TYPE_ONE_SHOT);
   }
 
   return rv;
@@ -2586,7 +2586,7 @@ Predictor::UpdateCacheability(nsIURI *sourceURI, nsIURI *targetURI,
                               uint32_t httpStatus,
                               nsHttpRequestHead &requestHead,
                               nsHttpResponseHead *responseHead,
-                              nsILoadContextInfo *lci)
+                              nsILoadContextInfo *lci, bool isTracking)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -2609,8 +2609,11 @@ Predictor::UpdateCacheability(nsIURI *sourceURI, nsIURI *targetURI,
   if (self) {
     nsAutoCString method;
     requestHead.Method(method);
+    nsAutoCString vary;
+    Unused << responseHead->GetHeader(nsHttp::Vary, vary);
     self->UpdateCacheabilityInternal(sourceURI, targetURI, httpStatus,
-                                     method, *lci->OriginAttributesPtr());
+                                     method, *lci->OriginAttributesPtr(),
+                                     isTracking, !vary.IsEmpty());
   }
 }
 
@@ -2618,7 +2621,8 @@ void
 Predictor::UpdateCacheabilityInternal(nsIURI *sourceURI, nsIURI *targetURI,
                                       uint32_t httpStatus,
                                       const nsCString &method,
-                                      const OriginAttributes& originAttributes)
+                                      const OriginAttributes& originAttributes,
+                                      bool isTracking, bool couldVary)
 {
   PREDICTOR_LOG(("Predictor::UpdateCacheability httpStatus=%u", httpStatus));
 
@@ -2655,7 +2659,8 @@ Predictor::UpdateCacheabilityInternal(nsIURI *sourceURI, nsIURI *targetURI,
                        nsICacheStorage::OPEN_SECRETLY |
                        nsICacheStorage::CHECK_MULTITHREADED;
   RefPtr<Predictor::CacheabilityAction> action =
-    new Predictor::CacheabilityAction(targetURI, httpStatus, method, this);
+    new Predictor::CacheabilityAction(targetURI, httpStatus, method, isTracking,
+                                      couldVary, this);
   nsAutoCString uri;
   targetURI->GetAsciiSpec(uri);
   PREDICTOR_LOG(("    uri=%s action=%p", uri.get(), action.get()));
@@ -2730,7 +2735,10 @@ Predictor::CacheabilityAction::OnCacheEntryAvailable(nsICacheEntry *entry,
     }
 
     if (strTargetURI.Equals(uri)) {
-      if (mHttpStatus == 200 && mMethod.EqualsLiteral("GET") && !hasQueryString) {
+      if (mHttpStatus == 200 && mMethod.EqualsLiteral("GET") &&
+          !hasQueryString &&
+          !mIsTracking &&
+          !mCouldVary) {
         PREDICTOR_LOG(("    marking %s cacheable", key));
         flags |= FLAG_PREFETCHABLE;
       } else {

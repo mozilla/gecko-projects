@@ -17,7 +17,6 @@
 #include "nsLayoutUtils.h"
 #include "imgINotificationObserver.h"
 #include "SVGObserverUtils.h"
-#include "mozilla/dom/SVGSVGElement.h"
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
 #include "SVGGeometryFrame.h"
@@ -85,7 +84,7 @@ public:
 
   // nsIFrame interface:
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
-                                     nsIAtom*        aAttribute,
+                                     nsAtom*        aAttribute,
                                      int32_t         aModType) override;
 
   void OnVisibilityChange(Visibility aNewVisibility,

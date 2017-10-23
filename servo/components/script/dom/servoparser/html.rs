@@ -21,17 +21,17 @@ use html5ever::QualName;
 use html5ever::buffer_queue::BufferQueue;
 use html5ever::serialize::{AttrRef, Serialize, Serializer};
 use html5ever::serialize::TraversalScope;
-use html5ever::serialize::TraversalScope::ChildrenOnly;
+use html5ever::serialize::TraversalScope::IncludeNode;
 use html5ever::tokenizer::{Tokenizer as HtmlTokenizer, TokenizerOpts, TokenizerResult};
 use html5ever::tree_builder::{Tracer as HtmlTracer, TreeBuilder, TreeBuilderOpts};
 use js::jsapi::JSTracer;
 use servo_url::ServoUrl;
 use std::io;
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 #[must_root]
 pub struct Tokenizer {
-    #[ignore_heap_size_of = "Defined in html5ever"]
+    #[ignore_malloc_size_of = "Defined in html5ever"]
     inner: HtmlTokenizer<TreeBuilder<Dom<Node>, Sink>>,
 }
 
@@ -202,7 +202,7 @@ impl<'a> Serialize for &'a Node {
         let node = *self;
 
 
-        let iter = SerializationIterator::new(node, traversal_scope == ChildrenOnly);
+        let iter = SerializationIterator::new(node, traversal_scope != IncludeNode);
 
         for cmd in iter {
             match cmd {

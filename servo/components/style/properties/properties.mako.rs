@@ -12,6 +12,7 @@
 
 #[cfg(feature = "servo")]
 use app_units::Au;
+use custom_properties::CustomPropertiesBuilder;
 use servo_arc::{Arc, UniqueArc};
 use smallbitvec::SmallBitVec;
 use std::borrow::Cow;
@@ -33,13 +34,11 @@ use media_queries::Device;
 use parser::ParserContext;
 #[cfg(feature = "gecko")] use properties::longhands::system_font::SystemFont;
 use rule_cache::{RuleCache, RuleCacheConditions};
-use selector_map::PrecomputedHashSet;
 use selector_parser::PseudoElement;
-use selectors::parser::SelectorParseError;
+use selectors::parser::SelectorParseErrorKind;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
-use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError};
-use style_traits::{PropertyDeclarationParseError, StyleParseError, ValueParseError};
+use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError, StyleParseErrorKind};
 use stylesheets::{CssRuleType, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
@@ -153,7 +152,7 @@ macro_rules! unwrap_or_initial {
 pub mod shorthands {
     use cssparser::Parser;
     use parser::{Parse, ParserContext};
-    use style_traits::{ParseError, StyleParseError};
+    use style_traits::{ParseError, StyleParseErrorKind};
     use values::specified;
 
     <%include file="/shorthand/serialize.mako.rs" />
@@ -175,7 +174,9 @@ pub mod shorthands {
     // We don't defined the 'all' shorthand using the regular helpers:shorthand
     // mechanism, since it causes some very large types to be generated.
     <% data.declare_shorthand("all",
-                              [p.name for p in data.longhands if p.name not in ['direction', 'unicode-bidi']],
+                              [p.name for p in data.longhands
+                                if p.name not in ['direction', 'unicode-bidi']
+                                      and not p.internal],
                               spec="https://drafts.csswg.org/css-cascade-3/#all-shorthand") %>
 }
 
@@ -249,9 +250,7 @@ static ${name}: LonghandIdSet = LonghandIdSet {
 </%def>
 
 /// A set of longhand properties
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq)]
 pub struct LonghandIdSet {
     storage: [u32; (${len(data.longhands)} - 1 + 32) / 32]
 }
@@ -399,9 +398,7 @@ impl PropertyDeclarationIdSet {
 }
 
 /// An enum to represent a CSS Wide keyword.
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, ToCss)]
 pub enum CSSWideKeyword {
     /// The `initial` keyword.
     Initial,
@@ -464,9 +461,7 @@ bitflags! {
 }
 
 /// An identifier for a given longhand property.
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Eq, Hash, MallocSizeOf, PartialEq)]
 pub enum LonghandId {
     % for i, property in enumerate(data.longhands):
         /// ${property.name}
@@ -551,7 +546,9 @@ impl LonghandId {
                     % if not property.derived_from:
                         longhands::${property.ident}::parse_declared(context, input)
                     % else:
-                        Err(PropertyDeclarationParseError::UnknownProperty("${property.ident}".into()).into())
+                        Err(input.new_custom_error(
+                            StyleParseErrorKind::UnknownProperty("${property.ident}".into())
+                        ))
                     % endif
                 }
             % endfor
@@ -728,9 +725,7 @@ impl LonghandId {
 }
 
 /// An identifier for a given shorthand property.
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, Hash, MallocSizeOf, PartialEq, ToCss)]
 pub enum ShorthandId {
     % for property in data.shorthands:
         /// ${property.name}
@@ -866,9 +861,12 @@ impl ShorthandId {
         }
     }
 
-    fn parse_into<'i, 't>(&self, declarations: &mut SourcePropertyDeclaration,
-                          context: &ParserContext, input: &mut Parser<'i, 't>)
-                          -> Result<(), ParseError<'i>> {
+    fn parse_into<'i, 't>(
+        &self,
+        declarations: &mut SourcePropertyDeclaration,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         match *self {
             % for shorthand in data.shorthands_except_all():
                 ShorthandId::${shorthand.camel_case} => {
@@ -876,7 +874,7 @@ impl ShorthandId {
                 }
             % endfor
             // 'all' accepts no value other than CSS-wide keywords
-            ShorthandId::All => Err(StyleParseError::UnspecifiedError.into())
+            ShorthandId::All => Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
         }
     }
 }
@@ -960,7 +958,7 @@ impl UnparsedValue {
                     Some(ShorthandId::All) => {
                         // No need to parse the 'all' shorthand as anything other than a CSS-wide
                         // keyword, after variable substitution.
-                        Err(SelectorParseError::UnexpectedIdent("all".into()).into())
+                        Err(input.new_custom_error(SelectorParseErrorKind::UnexpectedIdent("all".into())))
                     }
                     % for shorthand in data.shorthands_except_all():
                         Some(ShorthandId::${shorthand.camel_case}) => {
@@ -1016,7 +1014,7 @@ impl<'a, T: ToCss> ToCss for DeclaredValue<'a, T> {
 /// An identifier for a given property declaration, which can be either a
 /// longhand or a custom property.
 #[derive(Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum PropertyDeclarationId<'a> {
     /// A longhand.
     Longhand(LonghandId),
@@ -1396,7 +1394,12 @@ pub enum PropertyDeclaration {
     ),
     /// A custom property declaration, with the property name and the declared
     /// value.
-    Custom(::custom_properties::Name, DeclaredValueOwned<Box<::custom_properties::SpecifiedValue>>),
+    #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
+    Custom(
+        ::custom_properties::Name,
+        #[cfg_attr(feature = "gecko", ignore_malloc_size_of = "XXX: how to handle this?")]
+        DeclaredValueOwned<Arc<::custom_properties::SpecifiedValue>>
+    ),
 }
 
 impl fmt::Debug for PropertyDeclaration {
@@ -1612,7 +1615,7 @@ impl PropertyDeclaration {
 
     /// The `context` parameter controls this:
     ///
-    /// https://drafts.csswg.org/css-animations/#keyframes
+    /// <https://drafts.csswg.org/css-animations/#keyframes>
     /// > The <declaration-list> inside of <keyframe-block> accepts any CSS property
     /// > except those defined in this specification,
     /// > but does accept the `animation-play-state` property and interprets it specially.
@@ -1620,10 +1623,13 @@ impl PropertyDeclaration {
     /// This will not actually parse Importance values, and will always set things
     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
     /// we only set them here so that we don't have to reallocate
-    pub fn parse_into<'i, 't>(declarations: &mut SourcePropertyDeclaration,
-                              id: PropertyId, name: CowRcStr<'i>,
-                              context: &ParserContext, input: &mut Parser<'i, 't>)
-                              -> Result<(), PropertyDeclarationParseError<'i>> {
+    pub fn parse_into<'i, 't>(
+        declarations: &mut SourcePropertyDeclaration,
+        id: PropertyId,
+        name: CowRcStr<'i>,
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<(), ParseError<'i>> {
         assert!(declarations.is_empty());
         let start = input.state();
         match id {
@@ -1633,10 +1639,9 @@ impl PropertyDeclaration {
                 // This probably affects some test results.
                 let value = match input.try(|i| CSSWideKeyword::parse(i)) {
                     Ok(keyword) => DeclaredValueOwned::CSSWideKeyword(keyword),
-                    Err(()) => match ::custom_properties::SpecifiedValue::parse(context, input) {
+                    Err(()) => match ::custom_properties::SpecifiedValue::parse(input) {
                         Ok(value) => DeclaredValueOwned::Value(value),
-                        Err(e) => return Err(PropertyDeclarationParseError::InvalidValue(name.to_string().into(),
-                        ValueParseError::from_parse_error(e))),
+                        Err(e) => return Err(StyleParseErrorKind::new_invalid(name, e)),
                     }
                 };
                 declarations.push(PropertyDeclaration::Custom(property_name, value));
@@ -1655,8 +1660,7 @@ impl PropertyDeclaration {
                             input.reset(&start);
                             let (first_token_type, css) =
                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
-                                    PropertyDeclarationParseError::InvalidValue(name,
-                                        ValueParseError::from_parse_error(e))
+                                    StyleParseErrorKind::new_invalid(name, e)
                                 })?;
                             Ok(PropertyDeclaration::WithVariables(id, Arc::new(UnparsedValue {
                                 css: css.into_owned(),
@@ -1665,8 +1669,7 @@ impl PropertyDeclaration {
                                 from_shorthand: None,
                             })))
                         } else {
-                            Err(PropertyDeclarationParseError::InvalidValue(name,
-                                ValueParseError::from_parse_error(err)))
+                            Err(StyleParseErrorKind::new_invalid(name, err))
                         }
                     })
                 }).map(|declaration| {
@@ -1694,8 +1697,7 @@ impl PropertyDeclaration {
                             input.reset(&start);
                             let (first_token_type, css) =
                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
-                                    PropertyDeclarationParseError::InvalidValue(name,
-                                        ValueParseError::from_parse_error(e))
+                                    StyleParseErrorKind::new_invalid(name, e)
                                 })?;
                             let unparsed = Arc::new(UnparsedValue {
                                 css: css.into_owned(),
@@ -1714,8 +1716,7 @@ impl PropertyDeclaration {
                             }
                             Ok(())
                         } else {
-                            Err(PropertyDeclarationParseError::InvalidValue(name,
-                                ValueParseError::from_parse_error(err)))
+                            Err(StyleParseErrorKind::new_invalid(name, err))
                         }
                     })
                 }
@@ -1801,12 +1802,10 @@ pub mod style_structs {
 
     % for style_struct in data.active_style_structs():
         % if style_struct.name == "Font":
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, MallocSizeOf)]
         % else:
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
         % endif
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         /// The ${style_struct.name} style struct.
         pub struct ${style_struct.name} {
             % for longhand in style_struct.longhands:
@@ -2208,7 +2207,7 @@ impl ComputedValuesInner {
     pub fn has_moz_binding(&self) -> bool { false }
 
     /// Clone the visited style.  Used for inheriting parent styles in
-    /// StyleBuilder::for_inheritance.
+    /// StyleBuilder::for_derived_style.
     pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
         self.visited_style.clone()
     }
@@ -2368,7 +2367,7 @@ impl ComputedValuesInner {
            effects.mix_blend_mode != mix_blend_mode::T::normal
     }
 
-    /// https://drafts.csswg.org/css-transforms/#grouping-property-values
+    /// <https://drafts.csswg.org/css-transforms/#grouping-property-values>
     pub fn get_used_transform_style(&self) -> computed_values::transform_style::T {
         use computed_values::transform_style;
 
@@ -2839,6 +2838,18 @@ impl<'a> StyleBuilder<'a> {
         parent: &'a ComputedValues,
         pseudo: Option<<&'a PseudoElement>,
     ) -> Self {
+        // Rebuild the visited style from the parent, ensuring that it will also
+        // not have rules.  This matches the unvisited style that will be
+        // produced by this builder.  This assumes that the caller doesn't need
+        // to adjust or process visited style, so we can just build visited
+        // style here for simplicity.
+        let visited_style = parent.visited_style().map(|style| {
+            Self::for_inheritance(
+                device,
+                style,
+                pseudo,
+            ).build()
+        });
         // FIXME(emilio): This Some(parent) here is inconsistent with what we
         // usually do if `parent` is the default computed values, but that's
         // fine, and we want to eventually get rid of it.
@@ -2851,8 +2862,8 @@ impl<'a> StyleBuilder<'a> {
             /* rules = */ None,
             parent.custom_properties().cloned(),
             parent.writing_mode,
-            parent.flags,
-            parent.clone_visited_style()
+            parent.flags.inherited(),
+            visited_style,
         )
     }
 
@@ -3226,26 +3237,18 @@ where
         }
     };
 
-    let inherited_custom_properties = inherited_style.custom_properties();
-    let mut custom_properties = None;
-    let mut seen_custom = PrecomputedHashSet::default();
-    for (declaration, _cascade_level) in iter_declarations() {
-        if let PropertyDeclaration::Custom(ref name, ref value) = *declaration {
-            ::custom_properties::cascade(
-                &mut custom_properties,
-                inherited_custom_properties,
-                &mut seen_custom,
-                name,
-                value.borrow(),
-            );
-        }
-    }
+    let custom_properties = {
+        let mut builder =
+            CustomPropertiesBuilder::new(inherited_style.custom_properties());
 
-    let custom_properties =
-        ::custom_properties::finish_cascade(
-            custom_properties,
-            inherited_custom_properties,
-        );
+        for (declaration, _cascade_level) in iter_declarations() {
+            if let PropertyDeclaration::Custom(ref name, ref value) = *declaration {
+                builder.cascade(name, value.borrow());
+            }
+        }
+
+        builder.build()
+    };
 
     let mut context = computed::Context {
         is_root_element: flags.contains(IS_ROOT_ELEMENT),
@@ -3562,7 +3565,7 @@ pub fn adjust_border_width(style: &mut StyleBuilder) {
 
 /// An identifier for a given alias property.
 #[derive(Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum AliasId {
     % for i, property in enumerate(data.all_aliases()):
         /// ${property.name}

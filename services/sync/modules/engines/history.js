@@ -28,7 +28,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesSyncUtils",
 
 this.HistoryRec = function HistoryRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
-}
+};
 HistoryRec.prototype = {
   __proto__: CryptoWrapper.prototype,
   _logName: "Sync.Record.History",
@@ -40,7 +40,7 @@ Utils.deferGetSet(HistoryRec, "cleartext", ["histUri", "title", "visits"]);
 
 this.HistoryEngine = function HistoryEngine(service) {
   SyncEngine.call(this, "History", service);
-}
+};
 HistoryEngine.prototype = {
   __proto__: SyncEngine.prototype,
   _recordObj: HistoryRec,
@@ -211,7 +211,7 @@ HistoryStore.prototype = {
     records.length = k; // truncate array
 
     if (records.length) {
-      await PlacesUtils.history.insertMany(records)
+      await PlacesUtils.history.insertMany(records);
     }
 
     return failed;
@@ -245,16 +245,17 @@ HistoryStore.prototype = {
     // the same timestamp and type as a local one won't get applied.
     // To avoid creating new objects, we rewrite the query result so we
     // can simply check for containment below.
-    let curVisits = [];
+    let curVisitsAsArray = [];
+    let curVisits = new Set();
     try {
-      curVisits = await PlacesSyncUtils.history.fetchVisitsForURL(record.histUri);
+      curVisitsAsArray = await PlacesSyncUtils.history.fetchVisitsForURL(record.histUri);
     } catch (e) {
       this._log.error("Error while fetching visits for URL ${record.histUri}", record.histUri);
     }
 
     let i, k;
-    for (i = 0; i < curVisits.length; i++) {
-      curVisits[i] = curVisits[i].date + "," + curVisits[i].type;
+    for (i = 0; i < curVisitsAsArray.length; i++) {
+      curVisits.add(curVisitsAsArray[i].date + "," + curVisitsAsArray[i].type);
     }
 
     // Walk through the visits, make sure we have sound data, and eliminate
@@ -275,16 +276,23 @@ HistoryStore.prototype = {
         continue;
       }
 
-      // Dates need to be integers.
-      visit.date = Math.round(visit.date);
+      // Dates need to be integers. Future and far past dates are clamped to the
+      // current date and earliest sensible date, respectively.
+      let originalVisitDate = PlacesUtils.toDate(Math.round(visit.date));
+      visit.date = PlacesSyncUtils.history.clampVisitDate(originalVisitDate);
 
-      if (curVisits.indexOf(visit.date + "," + visit.type) != -1) {
+      let visitDateAsPRTime = PlacesUtils.toPRTime(visit.date);
+      let visitKey = visitDateAsPRTime + "," + visit.type;
+      if (curVisits.has(visitKey)) {
         // Visit is a dupe, don't increment 'k' so the element will be
         // overwritten.
         continue;
       }
 
-      visit.date = PlacesUtils.toDate(visit.date);
+      // Note the visit key, so that we don't add duplicate visits with
+      // clamped timestamps.
+      curVisits.add(visitKey);
+
       visit.transition = visit.type;
       k += 1;
     }

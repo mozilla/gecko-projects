@@ -389,19 +389,6 @@ WebGLContext::ValidateStencilParamsForDrawCall()
     return true;
 }
 
-static inline int32_t
-FloorPOT(int32_t x)
-{
-    MOZ_ASSERT(x > 0);
-    int32_t pot = 1;
-    while (pot < 0x40000000) {
-        if (x < pot*2)
-            break;
-        pot *= 2;
-    }
-    return pot;
-}
-
 bool
 WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
 {
@@ -513,10 +500,10 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     // Note: GL_MAX_TEXTURE_UNITS is fixed at 4 for most desktop hardware,
     // even though the hardware supports much more.  The
     // GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS value is the accurate value.
-    gl->GetUIntegerv(LOCAL_GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &mGLMaxTextureUnits);
-    mGLMaxCombinedTextureImageUnits = mGLMaxTextureUnits;
+    mGLMaxCombinedTextureImageUnits = gl->GetIntAs<GLuint>(LOCAL_GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS);
+    mGLMaxTextureUnits = mGLMaxCombinedTextureImageUnits;
 
-    if (mGLMaxTextureUnits < 8) {
+    if (mGLMaxCombinedTextureImageUnits < 8) {
         const nsPrintfCString reason("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: %u is < 8!",
                                      mGLMaxTextureUnits);
         *out_failReason = { "FEATURE_FAILURE_WEBGL_T_UNIT", reason };
@@ -691,7 +678,7 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mBypassShaderValidation = gfxPrefs::WebGLBypassShaderValidator();
 
     // initialize shader translator
-    if (!ShInitialize()) {
+    if (!sh::Initialize()) {
         *out_failReason = { "FEATURE_FAILURE_WEBGL_GLSL",
                             "GLSL translator initialization failed!" };
         return false;

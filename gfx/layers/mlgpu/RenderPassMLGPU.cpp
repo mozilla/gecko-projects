@@ -305,6 +305,11 @@ ShaderRenderPass::ExecuteRendering()
     return;
   }
 
+  // Change the blend state if needed.
+  if (Maybe<MLGBlendState> blendState = GetBlendState()) {
+    mDevice->SetBlendState(blendState.value());
+  }
+
   mDevice->SetPSConstantBuffer(0, &mPSBuffer0);
   if (MaskOperation* mask = GetMask()) {
     mDevice->SetPSTexture(kMaskLayerTextureSlot, mask->GetTexture());
@@ -376,7 +381,7 @@ ClearViewPass::IsCompatible(const ItemInfo& aItem)
 bool
 ClearViewPass::AddToPass(LayerMLGPU* aItem, ItemInfo& aInfo)
 {
-  const LayerIntRegion& region = aItem->GetShadowVisibleRegion();
+  const LayerIntRegion& region = aItem->GetRenderRegion();
   for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
     IntRect rect = iter.Get().ToUnknownRect();
     rect += aInfo.translation.value();
@@ -409,7 +414,7 @@ SolidColorPass::AddToPass(LayerMLGPU* aLayer, ItemInfo& aInfo)
 
   gfx::Color color = ComputeLayerColor(aLayer, colorLayer->GetColor());
 
-  const LayerIntRegion& region = aLayer->GetShadowVisibleRegion();
+  const LayerIntRegion& region = aLayer->GetRenderRegion();
   for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
     const IntRect rect = iter.Get().ToUnknownRect();
     ColorTraits traits(aInfo, Rect(rect), color);
@@ -614,6 +619,8 @@ SingleTexturePass::AddToPass(LayerMLGPU* aLayer, ItemInfo& aItem)
 
   Txn txn(this);
 
+  // Note: these are two separate cases since no Info constructor takes in a
+  // base LayerMLGPU class.
   if (PaintedLayerMLGPU* layer = aLayer->AsPaintedLayerMLGPU()) {
     Info info(aItem, layer);
     if (!AddItems(txn, info, layer->GetRenderRegion())) {
@@ -621,8 +628,7 @@ SingleTexturePass::AddToPass(LayerMLGPU* aLayer, ItemInfo& aItem)
     }
   } else if (TexturedLayerMLGPU* layer = aLayer->AsTexturedLayerMLGPU()) {
     Info info(aItem, layer);
-    nsIntRegion visible = layer->GetShadowVisibleRegion().ToUnknownRegion();
-    if (!AddItems(txn, info, visible)) {
+    if (!AddItems(txn, info, layer->GetRenderRegion())) {
       return false;
     }
   }
@@ -773,8 +779,7 @@ VideoRenderPass::AddToPass(LayerMLGPU* aLayer, ItemInfo& aItem)
   Txn txn(this);
 
   Info info(aItem, layer);
-  nsIntRegion visible = layer->GetShadowVisibleRegion().ToUnknownRegion();
-  if (!AddItems(txn, info, visible)) {
+  if (!AddItems(txn, info, layer->GetRenderRegion())) {
     return false;
   }
   return txn.Commit();
@@ -876,7 +881,7 @@ RenderViewPass::AddToPass(LayerMLGPU* aLayer, ItemInfo& aItem)
   IntSize size = mAssignedLayer->GetTargetSize();
 
   // Clamp the visible region to the texture size.
-  nsIntRegion visible = mAssignedLayer->GetShadowVisibleRegion().ToUnknownRegion();
+  nsIntRegion visible = mAssignedLayer->GetRenderRegion().ToUnknownRegion();
   visible.AndWith(IntRect(offset, size));
 
   Info info(aItem, mAssignedLayer);
@@ -929,7 +934,7 @@ GetShaderForBlendMode(CompositionOp aOp)
 bool
 RenderViewPass::PrepareBlendState()
 {
-  Rect visibleRect(mAssignedLayer->GetShadowVisibleRegion().GetBounds().ToUnknownRect());
+  Rect visibleRect(mAssignedLayer->GetRenderRegion().GetBounds().ToUnknownRect());
   IntRect clipRect(mAssignedLayer->GetComputedClipRect().ToUnknownRect());
   const Matrix4x4& transform = mAssignedLayer->GetLayer()->GetEffectiveTransformForBuffer();
 
@@ -992,6 +997,52 @@ RenderViewPass::SetupPipeline()
 
   mDevice->SetPSTexture(0, mSource->GetTexture());
   mDevice->SetSamplerMode(kDefaultSamplerSlot, SamplerMode::LinearClamp);
+}
+
+void
+RenderViewPass::ExecuteRendering()
+{
+  if (mAssignedLayer->NeedsSurfaceCopy()) {
+    RenderWithBackdropCopy();
+    return;
+  }
+
+  TexturedRenderPass::ExecuteRendering();
+}
+
+void
+RenderViewPass::RenderWithBackdropCopy()
+{
+  MOZ_ASSERT(mAssignedLayer->NeedsSurfaceCopy());
+
+  DebugOnly<Matrix> transform2d;
+  const Matrix4x4& transform = mAssignedLayer->GetEffectiveTransform();
+  MOZ_ASSERT(transform.Is2D(&transform2d) &&
+             !gfx::ThebesMatrix(transform2d).HasNonIntegerTranslation());
+
+  IntPoint translation = IntPoint::Truncate(transform._41, transform._42);
+
+  RenderViewMLGPU* childView = mAssignedLayer->GetRenderView();
+
+  IntRect visible = mAssignedLayer->GetRenderRegion().GetBounds().ToUnknownRect();
+  IntRect sourceRect = visible + translation - mParentView->GetTargetOffset();
+  IntPoint destPoint = visible.TopLeft() - childView->GetTargetOffset();
+
+  RefPtr<MLGTexture> dest = mAssignedLayer->GetRenderTarget()->GetTexture();
+  RefPtr<MLGTexture> source = mParentView->GetRenderTarget()->GetTexture();
+
+  // Clamp the source rect to the source texture size.
+  sourceRect = sourceRect.Intersect(IntRect(IntPoint(0, 0), source->GetSize()));
+
+  // Clamp the source rect to the destination texture size.
+  IntRect destRect(destPoint, sourceRect.Size());
+  destRect = destRect.Intersect(IntRect(IntPoint(0, 0), dest->GetSize()));
+  sourceRect = sourceRect.Intersect(IntRect(sourceRect.TopLeft(), destRect.Size()));
+
+  mDevice->CopyTexture(dest, destPoint, source, sourceRect);
+  childView->RenderAfterBackdropCopy();
+  mParentView->RestoreDeviceState();
+  TexturedRenderPass::ExecuteRendering();
 }
 
 } // namespace layers

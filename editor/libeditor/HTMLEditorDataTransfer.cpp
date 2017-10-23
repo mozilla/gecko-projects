@@ -39,11 +39,7 @@
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentFragment.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMHTMLFrameElement.h"
-#include "nsIDOMHTMLIFrameElement.h"
-#include "nsIDOMHTMLImageElement.h"
 #include "nsIDOMHTMLInputElement.h"
-#include "nsIDOMHTMLLinkElement.h"
 #include "nsIDOMHTMLScriptElement.h"
 #include "nsIDOMNode.h"
 #include "nsIDocument.h"
@@ -76,7 +72,7 @@
 #include "nscore.h"
 #include "nsContentUtils.h"
 
-class nsIAtom;
+class nsAtom;
 class nsILoadContext;
 class nsISupports;
 
@@ -546,11 +542,15 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
         while (NS_FAILED(rv) && curNode) {
           curNode->GetParentNode(getter_AddRefs(parent));
           if (parent && !TextEditUtils::IsBody(parent)) {
-            rv = InsertNodeAtPoint(parent, address_of(parentNode), &offsetOfNewNode, true);
+            rv = InsertNodeAtPoint(parent, address_of(parentNode), &offsetOfNewNode, true,
+                                   address_of(lastInsertNode));
             if (NS_SUCCEEDED(rv)) {
               bDidInsert = true;
               insertedContextParent = parent;
-              lastInsertNode = GetChildAt(parentNode, offsetOfNewNode);
+#ifdef DEBUG
+              nsCOMPtr<nsINode> node = do_QueryInterface(parentNode);
+              MOZ_ASSERT(lastInsertNode == GetAsDOMNode(node->GetChildAt(offsetOfNewNode)));
+#endif
             }
           }
           curNode = parent;
@@ -2117,7 +2117,7 @@ HTMLEditor::CreateDOMFragmentFromPaste(const nsAString& aInputString,
   MOZ_ASSERT_IF(contextLeaf, contextLeafAsContent);
 
   // create fragment for pasted html
-  nsIAtom* contextAtom;
+  nsAtom* contextAtom;
   if (contextLeafAsContent) {
     contextAtom = contextLeafAsContent->NodeInfo()->NameAtom();
     if (contextLeafAsContent->IsHTMLElement(nsGkAtoms::html)) {
@@ -2191,7 +2191,7 @@ HTMLEditor::CreateDOMFragmentFromPaste(const nsAString& aInputString,
 
 nsresult
 HTMLEditor::ParseFragment(const nsAString& aFragStr,
-                          nsIAtom* aContextLocalName,
+                          nsAtom* aContextLocalName,
                           nsIDocument* aTargetDocument,
                           DocumentFragment** aFragment,
                           bool aTrustedInput)

@@ -68,14 +68,13 @@ def create_parser(mach_interface=False):
             help="List of tests to run, separated by ':' (ex. damp:cart)")
     add_arg('--suite',
             help="Suite to use (instead of --activeTests)")
+    add_arg('--subtests',
+            help="Name of the subtest(s) to run (works only on DAMP)")
     add_arg('--disable-e10s', dest='e10s',
             action='store_false', default=True,
             help="disable e10s")
     add_arg('--noChrome', action='store_true',
             help="do not run tests as chrome")
-    add_arg('--rss', action='store_true',
-            help="Collect RSS counters from pageloader instead of the"
-                 " operating system")
     add_arg('--mainthread', action='store_true',
             help="Collect mainthread IO data from the browser by setting"
                  " an environment variable")

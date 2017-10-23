@@ -8,9 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate heapsize;
-
 pub mod alloc;
+pub mod diagnostic;
 pub mod hash_map;
 pub mod hash_set;
 mod shim;

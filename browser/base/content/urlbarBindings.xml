@@ -29,9 +29,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <xul:hbox anonid="textbox-container"
                 class="autocomplete-textbox-container urlbar-textbox-container"
                 flex="1" xbl:inherits="focused">
-        <children includes="image|deck|stack|box">
-          <xul:image class="autocomplete-icon" allowevents="true"/>
-        </children>
+        <children includes="image|deck|stack|box"/>
         <xul:hbox anonid="textbox-input-box"
                   class="textbox-input-box urlbar-input-box"
                   flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
@@ -39,7 +37,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           <html:input anonid="input"
                       class="autocomplete-textbox urlbar-input textbox-input"
                       allowevents="true"
-                      inputmode="url"
+                      inputmode="mozAwesomebar"
                       xbl:inherits="tooltiptext=inputtooltiptext,value,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,focused,textoverflow"/>
         </xul:hbox>
         <xul:image anonid="urlbar-go-button"
@@ -48,10 +46,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                    tooltiptext="&goEndCap.tooltip;"
                    xbl:inherits="pageproxystate,parentfocused=focused,usertyping"/>
         <xul:dropmarker anonid="historydropmarker"
-                        class="autocomplete-history-dropmarker urlbar-history-dropmarker urlbar-icon"
+                        class="urlbar-history-dropmarker urlbar-icon chromeclass-toolbar-additional"
                         tooltiptext="&urlbar.openHistoryPopup.tooltip;"
                         allowevents="true"
-                        xbl:inherits="open,enablehistory,parentfocused=focused,usertyping"/>
+                        xbl:inherits="open,parentfocused=focused,usertyping"/>
         <children includes="hbox"/>
       </xul:hbox>
       <xul:popupset anonid="popupset"
@@ -128,6 +126,16 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         this.popup.addEventListener("popupshowing", () => {
           this._enableOrDisableOneOffSearches();
         }, {capturing: true, once: true});
+
+        // history dropmarker open state
+        this.popup.addEventListener("popupshowing", () => {
+          this.setAttribute("open", "true");
+        });
+        this.popup.addEventListener("popuphidden", () => {
+          requestAnimationFrame(() => {
+            this.removeAttribute("open");
+          });
+        });
 
         // The autocomplete controller uses heuristic on some internal caches
         // to handle cases like backspace, autofill or repeated searches.
@@ -811,7 +819,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // Only add the suffix when the URL bar value isn't already "URL-like",
           // and only if we get a keyboard event, to match user expectations.
           if (!/^\s*[^.:\/\s]+(?:\/.*|\s*)$/i.test(aUrl) ||
-              !(aTriggeringEvent instanceof KeyEvent)) {
+              !(aTriggeringEvent instanceof KeyboardEvent)) {
             return;
           }
 
@@ -1424,14 +1432,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           if (this.browserSearchSuggestEnabled && !this.inPrivateContext &&
               // In any case, if the user made a choice we should not nag him.
               !this._userMadeSearchSuggestionsChoice) {
-            let enabledByDefault = this._defaultPrefs.getBoolPref("suggest.searches");
-            if (!enabledByDefault &&
-                this._prefs.getIntPref("daysBeforeHidingSuggestionsPrompt")) {
-              return "opt-in";
-            }
-            if (enabledByDefault &&
-                // Has not been switched off.
-                this.urlbarSearchSuggestEnabled &&
+            if (this._defaultPrefs.getBoolPref("suggest.searches") &&
+                this.urlbarSearchSuggestEnabled && // Has not been switched off.
                 this._prefs.getIntPref("timesBeforeHidingSuggestionsHint")) {
               return "opt-out";
             }
@@ -1447,21 +1449,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             throw new Error("Unexpected notification type");
           }
 
-          let useDays = whichNotification == "opt-in";
-          let prefName = useDays ? "daysBeforeHidingSuggestionsPrompt"
-                                 : "timesBeforeHidingSuggestionsHint";
-          let remaining = this._prefs.getIntPref(prefName);
-          if (remaining <= 0)
-            return;
-
-          let now = new Date();
-          let date = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-
-          let previousDate = this._prefs.getIntPref("lastSuggestionsPromptDate");
-          if (!useDays || previousDate != date) {
-            this._prefs.setIntPref(prefName, remaining - 1);
+          let remaining = this._prefs.getIntPref("timesBeforeHidingSuggestionsHint");
+          if (remaining > 0) {
+            this._prefs.setIntPref("timesBeforeHidingSuggestionsHint", remaining - 1);
           }
-          this._prefs.setIntPref("lastSuggestionsPromptDate", date);
         ]]></body>
       </method>
 
@@ -1511,10 +1502,16 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       ]]></handler>
 
       <handler event="mousedown"><![CDATA[
-        // Eventually show the opt-out notification even if the location bar is
-        // empty, focused, and the user clicks on it.
-        if (event.button == 0 && this.focused && this.textValue == "") {
-          this.maybeShowSearchSuggestionsNotificationOnFocus(true);
+        if (event.button == 0) {
+          if (event.originalTarget.getAttribute("anonid") == "historydropmarker") {
+            this.toggleHistoryPopup();
+          }
+
+          // Eventually show the opt-out notification even if the location bar is
+          // empty, focused, and the user clicks on it.
+          if (this.focused && this.textValue == "") {
+            this.maybeShowSearchSuggestionsNotificationOnFocus(true);
+          }
         }
       ]]></handler>
 
@@ -1631,32 +1628,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                 align="center"
                 role="alert"
                 selectedIndex="0">
-        <!-- OPT-IN -->
-        <xul:hbox flex="1" align="center" anonid="search-suggestions-opt-in">
-          <xul:description flex="1" id="search-suggestions-question">
-            &urlbar.searchSuggestionsNotification.question;
-            <!-- Several things here are to make the label accessibile via an
-                accesskey so that a11y doesn't suck: the accesskey, using an
-                onclick handler instead of an href attribute, the control
-                attribute, and having the control attribute refer to a valid ID
-                that is the label itself. -->
-            <xul:label id="search-suggestions-learn-more"
-                      class="text-link"
-                      role="link"
-                      value="&urlbar.searchSuggestionsNotification.learnMore;"
-                      accesskey="&urlbar.searchSuggestionsNotification.learnMore.accesskey;"
-                      onclick="document.getBindingParent(this).openSearchSuggestionsNotificationLearnMoreURL();"
-                      control="search-suggestions-learn-more"/>
-          </xul:description>
-          <xul:button anonid="search-suggestions-notification-disable"
-                      label="&urlbar.searchSuggestionsNotification.disable;"
-                      accesskey="&urlbar.searchSuggestionsNotification.disable.accesskey;"
-                      onclick="document.getBindingParent(this).dismissSearchSuggestionsNotification(false);"/>
-          <xul:button anonid="search-suggestions-notification-enable"
-                      label="&urlbar.searchSuggestionsNotification.enable;"
-                      accesskey="&urlbar.searchSuggestionsNotification.enable.accesskey;"
-                      onclick="document.getBindingParent(this).dismissSearchSuggestionsNotification(true);"/>
-        </xul:hbox>
         <!-- OPT-OUT -->
         <xul:hbox flex="1" align="center" anonid="search-suggestions-opt-out">
           <xul:image class="ac-site-icon" type="searchengine"/>
@@ -1765,38 +1736,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
-      <method name="openSearchSuggestionsNotificationLearnMoreURL">
-        <body><![CDATA[
-        let url = Services.urlFormatter.formatURL(
-          Services.prefs.getCharPref("app.support.baseURL") + "suggestions"
-        );
-        openUILinkIn(url, "tab");
-        ]]></body>
-      </method>
-
-      <method name="dismissSearchSuggestionsNotification">
-        <parameter name="enableSuggestions"/>
-        <body><![CDATA[
-          // Make sure the urlbar is focused.  It won't be, for example, if the
-          // user used an accesskey to make an opt-in choice.  mIgnoreFocus
-          // prevents the text from being selected.
-          this.input.mIgnoreFocus = true;
-          this.input.focus();
-          this.input.mIgnoreFocus = false;
-
-          Services.prefs.setBoolPref(
-            "browser.urlbar.suggest.searches", enableSuggestions
-          );
-          Services.prefs.setBoolPref(
-            "browser.urlbar.userMadeSearchSuggestionsChoice", true
-          );
-          // Hide the notification.
-          this.searchSuggestionsNotificationWasDismissed(
-            Services.prefs.getBoolPref("browser.urlbar.suggest.searches")
-          );
-        ]]></body>
-      </method>
-
       <!-- Override this so that navigating between items results in an item
            always being selected. -->
       <method name="getNextIndex">
@@ -1869,6 +1808,46 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         </setter>
       </property>
 
+      <!-- This is set either to undefined or to a new object containing
+           { start, end } margin values in pixels. These are used to align the
+           results to the input field. -->
+      <property name="margins"
+                onget="return this._margins;">
+        <setter>
+          <![CDATA[
+          if (val == this._margins) {
+            return val;
+          }
+
+          if (val && this._margins && val.start == this._margins.start &&
+                                      val.end == this._margins.end) {
+            return val;
+          }
+
+          this._margins = val;
+
+          if (val) {
+            let paddingInCSS =
+                3   // .autocomplete-richlistbox padding-left/right
+              + 6   // .ac-site-icon margin-inline-start
+              + 16  // .ac-site-icon width
+              + 6;  // .ac-site-icon margin-inline-end
+            let actualVal = Math.round(val.start) - paddingInCSS;
+            let actualValEnd = Math.round(val.end);
+            this.style.setProperty("--item-padding-start", actualVal + "px");
+            this.style.setProperty("--item-padding-end", actualValEnd + "px");
+          } else {
+            this.style.removeProperty("--item-padding-start");
+            this.style.removeProperty("--item-padding-end");
+          }
+          for (let item of this.richlistbox.childNodes) {
+            item.handleOverUnderflow();
+          }
+          return val;
+          ]]>
+        </setter>
+      </property>
+
       <method name="openAutocompletePopup">
         <parameter name="aInput"/>
         <parameter name="aElement"/>
@@ -1923,25 +1902,40 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           // icon if it's not too far from the edge of the window.  We define
           // "too far" as "more than 30% of the window's width AND more than
           // 250px".  Do this *before* adding any items because when the new
-          // value of siteIconStart is different from the previous value, over-
+          // value of the margins are different from the previous value, over-
           // and underflow must be handled for each item already in the popup.
           let boundToCheck = popupDirection == "rtl" ? "right" : "left";
           let inputRect = this.DOMWindowUtils.getBoundsWithoutFlushing(aInput);
           let startOffset = Math.abs(inputRect[boundToCheck] - documentRect[boundToCheck]);
           let alignSiteIcons = startOffset / width <= 0.3 || startOffset <= 250;
           if (alignSiteIcons) {
+            // Calculate the end margin if we have a start margin.
+            let boundToCheckEnd = popupDirection == "rtl" ? "left" : "right";
+            let endOffset = Math.abs(inputRect[boundToCheckEnd] -
+                                     documentRect[boundToCheckEnd]);
+            if (endOffset > startOffset * 2) {
+              // Provide more space when aligning would result in an unbalanced
+              // margin. This allows the location bar to be moved to the start
+              // of the navigation toolbar to reclaim space for results.
+              endOffset = startOffset;
+            }
             let identityIcon = document.getElementById("identity-icon");
             let identityRect =
               this.DOMWindowUtils.getBoundsWithoutFlushing(identityIcon);
-            this.siteIconStart = popupDirection == "rtl" ? identityRect.right
-                                                         : identityRect.left;
+            if (popupDirection == "rtl") {
+              this.margins = { start: documentRect.right - identityRect.right,
+                               end: endOffset };
+            } else {
+              this.margins = { start: identityRect.left,
+                               end: endOffset };
+            }
           } else {
             // Reset the alignment so that the site icons are positioned
             // according to whatever's in the CSS.
-            this.siteIconStart = undefined;
+            this.margins = undefined;
           }
 
-          // Now that siteIconStart has been set, start adding items (via
+          // Now that the margins have been set, start adding items (via
           // _invalidate).
           this.mInput = aInput;
           aInput.controller.setInitiallySelectedIndex(this._isFirstResultHeuristic ? 0 : -1);
@@ -1984,15 +1978,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         <parameter name="popupDirection"/>
         <body>
           <![CDATA[
-          let deckIndex = 0;
           if (whichNotification == "opt-out") {
-            deckIndex = 1;
-
-            if (this.siteIconStart) {
-              let rect = this.DOMWindowUtils.getBoundsWithoutFlushing(window.document.documentElement);
-              let padding = popupDirection == "rtl" ? rect.right - this.siteIconStart
-                                                    : this.siteIconStart;
-              this.searchSuggestionsNotification.style.paddingInlineStart = padding + "px";
+            if (this.margins) {
+              this.searchSuggestionsNotification.style.paddingInlineStart =
+                this.margins.start + "px";
             } else {
               this.searchSuggestionsNotification.style.removeProperty("padding-inline-start");
             }
@@ -2003,12 +1992,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               this.searchSuggestionsNotification.setAttribute("animate", "true");
             }
           }
-          this.searchSuggestionsNotification.setAttribute("selectedIndex", deckIndex);
 
-          let ariaDescElt = whichNotification == "opt-in" ?
-            "search-suggestions-question" : "search-suggestions-hint";
-
-          this.searchSuggestionsNotification.setAttribute("aria-describedby", ariaDescElt);
+          this.searchSuggestionsNotification.setAttribute("aria-describedby",
+                                                          "search-suggestions-hint");
 
           // With the notification shown, the listbox's height can sometimes be
           // too small when it's flexed, as it normally is.  Also, it can start
@@ -2038,24 +2024,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         </body>
       </method>
 
-      <method name="searchSuggestionsNotificationWasDismissed">
-        <parameter name="enableSuggestions"/>
-        <body>
-          <![CDATA[
-          if (!this.popupOpen) {
-            this._hideSearchSuggestionsNotification();
-            return;
-          }
-          this._hideSearchSuggestionsNotificationWithAnimation().then(() => {
-            if (enableSuggestions && this.input.textValue) {
-              // Start a new search so that suggestions appear immediately.
-              this.input.controller.startSearch(this.input.textValue);
-            }
-          });
-          ]]>
-        </body>
-      </method>
-
       <method name="_hideSearchSuggestionsNotification">
         <body>
           <![CDATA[
@@ -2069,33 +2037,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           } else {
             this.closePopup();
           }
-          ]]>
-        </body>
-      </method>
-
-      <method name="_hideSearchSuggestionsNotificationWithAnimation">
-        <body>
-          <![CDATA[
-          return new Promise(resolve => {
-            let notificationHeight = this.searchSuggestionsNotification
-                                         .getBoundingClientRect()
-                                         .height;
-            this.searchSuggestionsNotification.style.marginTop =
-              "-" + notificationHeight + "px";
-
-            let popupHeightPx =
-              (this.getBoundingClientRect().height - notificationHeight) + "px";
-            this.style.height = popupHeightPx;
-
-            let onTransitionEnd = () => {
-              this.removeEventListener("transitionend", onTransitionEnd, true);
-              this.searchSuggestionsNotification.style.marginTop = "0px";
-              this.style.removeProperty("height");
-              this._hideSearchSuggestionsNotification();
-              resolve();
-            };
-            this.addEventListener("transitionend", onTransitionEnd, true);
-          });
           ]]>
         </body>
       </method>
@@ -2267,6 +2208,13 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           //    the default -1 value. Then handleEnter will know it should not
           //    delay the action, cause a result wont't ever arrive.
           this.input.controller.setInitiallySelectedIndex(0);
+
+          // Since we are starting a new search, reset the currently selected
+          // one-off button, to cover those cases where the oneoff buttons
+          // binding won't receive an actual DOM event. For example, a search
+          // could be started without an actual input event, and the popup may
+          // not have been closed from the previous search.
+          this.oneOffSearchButtons.selectedButton = null;
         ]]></body>
       </method>
 
@@ -2988,6 +2936,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           } else if (button2.default) {
             this._secondaryButton.setAttribute("default", "true");
           }
+
+          if (this._primaryButton.hidden) {
+            this._secondaryButton.setAttribute("alone", "true");
+          } else if (this._secondaryButton.hidden) {
+            this._primaryButton.setAttribute("alone", "true");
+          }
         ]]></body>
       </method>
       <method name="_setupDescription">
@@ -3106,17 +3060,5 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
            enter activates the button and not this default action -->
       <handler event="keypress" keycode="VK_RETURN" group="system" action="this._accept(event);"/>
     </handlers>
-  </binding>
-
-  <!-- This binding is only retained for add-ons compatibility -->
-  <binding id="menuitem-iconic-tooltip" extends="chrome://global/content/bindings/menu.xml#menuitem-iconic">
-    <implementation>
-      <constructor><![CDATA[
-        this.setAttribute("tooltiptext", this.getAttribute("acceltext"));
-        // TODO: Simplify this to this.setAttribute("acceltext", "") once bug
-        // 592424 is fixed
-        document.getAnonymousElementByAttribute(this, "anonid", "accel").firstChild.setAttribute("value", "");
-      ]]></constructor>
-    </implementation>
   </binding>
 </bindings>

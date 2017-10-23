@@ -62,7 +62,7 @@ public:
     MOZ_ASSERT(mDocWrapper, "Need a non-null SVG document wrapper");
     MOZ_ASSERT(mVectorImage, "Need a non-null VectorImage");
 
-    StartListening();
+    StartObserving();
     Element* elem = GetTarget();
     MOZ_ASSERT(elem, "no root SVG node for us to observe");
 
@@ -79,7 +79,7 @@ public:
 protected:
   virtual ~SVGRootRenderingObserver()
   {
-    StopListening();
+    StopObserving();
   }
 
   virtual Element* GetTarget() override
@@ -87,7 +87,7 @@ protected:
     return mDocWrapper->GetRootSVGElem();
   }
 
-  virtual void DoUpdate() override
+  virtual void OnRenderingChange() override
   {
     Element* elem = GetTarget();
     MOZ_ASSERT(elem, "missing root SVG node");
@@ -969,7 +969,7 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams, BackendTy
 
   // Try to create an imgFrame, initializing the surface it contains by drawing
   // our gfxDrawable into it. (We use FILTER_NEAREST since we never scale here.)
-  NotNull<RefPtr<imgFrame>> frame = WrapNotNull(new imgFrame);
+  auto frame = MakeNotNull<RefPtr<imgFrame>>();
   nsresult rv =
     frame->InitWithDrawable(svgDrawable, aParams.size,
                             SurfaceFormat::B8G8R8A8,
@@ -993,7 +993,7 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams, BackendTy
   // Attempt to cache the frame.
   SurfaceKey surfaceKey = VectorSurfaceKey(aParams.size, aParams.svgContext);
   NotNull<RefPtr<ISurfaceProvider>> provider =
-    WrapNotNull(new SimpleSurfaceProvider(ImageKey(this), surfaceKey, frame));
+    MakeNotNull<SimpleSurfaceProvider*>(ImageKey(this), surfaceKey, frame);
   SurfaceCache::Insert(provider);
 
   // Draw.

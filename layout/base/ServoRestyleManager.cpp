@@ -19,6 +19,7 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "nsBlockFrame.h"
 #include "nsBulletFrame.h"
+#include "nsImageFrame.h"
 #include "nsPlaceholderFrame.h"
 #include "nsContentUtils.h"
 #include "nsCSSFrameConstructor.h"
@@ -81,7 +82,10 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
   if (aFrame.IsLetterFrame()) {
     // Ditto for ::first-letter. A first-letter always arrives here via its
     // direct parent, except when it's parented to a ::first-line.
-    return parent->IsLineFrame() ? parent->GetParent() : parent;
+    if (parent->IsLineFrame()) {
+      parent = parent->GetParent();
+    }
+    return FirstContinuationOrPartOfIBSplit(parent);
   }
 
   if (parent->IsLetterFrame()) {
@@ -781,7 +785,7 @@ ServoRestyleManager::ProcessPostTraversal(
   // We should really fix the weird primary frame mapping for image maps
   // (bug 135040)...
   if (styleFrame && styleFrame->GetContent() != aElement) {
-    MOZ_ASSERT(styleFrame->IsImageFrame());
+    MOZ_ASSERT(static_cast<nsImageFrame*>(do_QueryFrame(styleFrame)));
     styleFrame = nullptr;
   }
 
@@ -1204,9 +1208,30 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
   mAnimationsWithDestroyedFrame->StopAnimationsForElementsWithoutFrames();
 }
 
+#ifdef DEBUG
+static void
+VerifyFlatTree(const nsIContent& aContent)
+{
+  StyleChildrenIterator iter(&aContent);
+
+  for (auto* content = iter.GetNextChild();
+       content;
+       content = iter.GetNextChild()) {
+    MOZ_ASSERT(content->GetFlattenedTreeParentNodeForStyle() == &aContent);
+    VerifyFlatTree(*content);
+  }
+}
+#endif
+
 void
 ServoRestyleManager::ProcessPendingRestyles()
 {
+#ifdef DEBUG
+  if (auto* root = mPresContext->Document()->GetRootElement()) {
+    VerifyFlatTree(*root);
+  }
+#endif
+
   DoProcessPendingRestyles(ServoTraversalFlags::Empty);
 }
 
@@ -1286,7 +1311,7 @@ ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
 
 static inline bool
 AttributeInfluencesOtherPseudoClassState(const Element& aElement,
-                                         const nsIAtom* aAttribute)
+                                         const nsAtom* aAttribute)
 {
   // We must record some state for :-moz-browser-frame and
   // :-moz-table-border-nonzero.
@@ -1305,7 +1330,7 @@ static inline bool
 NeedToRecordAttrChange(const ServoStyleSet& aStyleSet,
                        const Element& aElement,
                        int32_t aNameSpaceID,
-                       nsIAtom* aAttribute,
+                       nsAtom* aAttribute,
                        bool* aInfluencesOtherPseudoClassState)
 {
   *aInfluencesOtherPseudoClassState =
@@ -1343,7 +1368,7 @@ NeedToRecordAttrChange(const ServoStyleSet& aStyleSet,
 void
 ServoRestyleManager::AttributeWillChange(Element* aElement,
                                          int32_t aNameSpaceID,
-                                         nsIAtom* aAttribute, int32_t aModType,
+                                         nsAtom* aAttribute, int32_t aModType,
                                          const nsAttrValue* aNewValue)
 {
   TakeSnapshotForAttributeChange(aElement, aNameSpaceID, aAttribute);
@@ -1359,7 +1384,7 @@ ServoRestyleManager::ClassAttributeWillBeChangedBySMIL(Element* aElement)
 void
 ServoRestyleManager::TakeSnapshotForAttributeChange(Element* aElement,
                                                     int32_t aNameSpaceID,
-                                                    nsIAtom* aAttribute)
+                                                    nsAtom* aAttribute)
 {
   MOZ_ASSERT(!mInStyleRefresh);
 
@@ -1400,7 +1425,7 @@ ServoRestyleManager::TakeSnapshotForAttributeChange(Element* aElement,
 // * lang="" and xml:lang="" can affect all descendants due to :lang()
 //
 static inline bool
-AttributeChangeRequiresSubtreeRestyle(const Element& aElement, nsIAtom* aAttr)
+AttributeChangeRequiresSubtreeRestyle(const Element& aElement, nsAtom* aAttr)
 {
   if (aAttr == nsGkAtoms::cellpadding) {
     return aElement.IsHTMLElement(nsGkAtoms::table);
@@ -1411,7 +1436,7 @@ AttributeChangeRequiresSubtreeRestyle(const Element& aElement, nsIAtom* aAttr)
 
 void
 ServoRestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
-                                      nsIAtom* aAttribute, int32_t aModType,
+                                      nsAtom* aAttribute, int32_t aModType,
                                       const nsAttrValue* aOldValue)
 {
   MOZ_ASSERT(!mInStyleRefresh);

@@ -771,6 +771,7 @@ ParentAPIManager = {
 
     let {childId} = data;
     let handlingUserInput = false;
+    let lowPriority = data.path.startsWith("webRequest.");
 
     function listener(...listenerArgs) {
       return context.sendMessage(
@@ -781,9 +782,12 @@ ParentAPIManager = {
           handlingUserInput,
           listenerId: data.listenerId,
           path: data.path,
-          args: new StructuredCloneHolder(listenerArgs),
+          get args() {
+            return new StructuredCloneHolder(listenerArgs);
+          },
         },
         {
+          lowPriority,
           recipient: {childId},
         }).then(result => {
           return result && result.deserialize(global);
@@ -1310,9 +1314,9 @@ let IconDetails = {
           this._checkURL(lightURL, extension);
           this._checkURL(darkURL, extension);
 
-          let defaultURL = result[size];
+          let defaultURL = result[size] || result[19]; // always fallback to default first
           result[size] = {
-            "default": defaultURL || lightURL, // Fallback to the light url if no default is specified.
+            "default": defaultURL || darkURL, // Fallback to the dark url if no default is specified.
             "light": lightURL,
             "dark": darkURL,
           };

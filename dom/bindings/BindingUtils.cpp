@@ -1655,8 +1655,9 @@ XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
     nativePropertyHooks->mResolveOwnProperty;
 
   if (type == eNamedPropertiesObject) {
-    // None of these should be cached on the holder, since they're dynamic.
-    return resolveOwnProperty(cx, wrapper, obj, id, desc);
+    MOZ_ASSERT(!resolveOwnProperty,
+               "Shouldn't have any Xray-visible properties");
+    return true;
   }
 
   const NativePropertiesHolder& nativePropertiesHolder =
@@ -1966,7 +1967,9 @@ XrayOwnPropertyKeys(JSContext* cx, JS::Handle<JSObject*> wrapper,
     nativePropertyHooks->mEnumerateOwnProperties;
 
   if (type == eNamedPropertiesObject) {
-    return enumerateOwnProperties(cx, wrapper, obj, props);
+    MOZ_ASSERT(!enumerateOwnProperties,
+               "Shouldn't have any Xray-visible properties");
+    return true;
   }
 
   if (IsInstance(type)) {
@@ -2259,20 +2262,6 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
     propertyHolder = nullptr;
   }
 
-  // Expandos from other compartments are attached to the target JS object.
-  // Copy them over, and let the old ones die a natural death.
-
-  // Note that at this point the DOM_OBJECT_SLOT for |newobj| has not been set.
-  // CloneExpandoChain() will use this property of |newobj| when it calls
-  // preserveWrapper() via attachExpandoObject() if |aObj| has expandos set, and
-  // preserveWrapper() will not do anything in this case.  This is safe because
-  // if expandos are present then the wrapper will already have been preserved
-  // for this native.
-  if (!xpc::XrayUtils::CloneExpandoChain(aCx, newobj, aObj)) {
-    aError.StealExceptionFromJSContext(aCx);
-    return;
-  }
-
   // We've set up |newobj|, so we make it own the native by setting its reserved
   // slot and nulling out the reserved slot of |obj|.
   //
@@ -2283,7 +2272,7 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
                       js::GetReservedSlot(aObj, DOM_OBJECT_SLOT));
   js::SetReservedSlot(aObj, DOM_OBJECT_SLOT, JS::PrivateValue(nullptr));
 
-  aObj = xpc::TransplantObject(aCx, aObj, newobj);
+  aObj = xpc::TransplantObjectRetainingXrayExpandos(aCx, aObj, newobj);
   if (!aObj) {
     MOZ_CRASH();
   }

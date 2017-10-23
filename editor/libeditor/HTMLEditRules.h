@@ -17,7 +17,7 @@
 #include "nsTArray.h"
 #include "nscore.h"
 
-class nsIAtom;
+class nsAtom;
 class nsIDOMCharacterData;
 class nsIDOMDocument;
 class nsIDOMElement;
@@ -49,7 +49,7 @@ struct StyleCache final : public PropItem
     MOZ_COUNT_CTOR(StyleCache);
   }
 
-  StyleCache(nsIAtom* aTag,
+  StyleCache(nsAtom* aTag,
              const nsAString& aAttr,
              const nsAString& aValue)
     : PropItem(aTag, aAttr, aValue)
@@ -58,7 +58,7 @@ struct StyleCache final : public PropItem
     MOZ_COUNT_CTOR(StyleCache);
   }
 
-  StyleCache(nsIAtom* aTag,
+  StyleCache(nsAtom* aTag,
              const nsAString& aAttr)
     : PropItem(aTag, aAttr, EmptyString())
     , mPresent(false)
@@ -270,7 +270,7 @@ protected:
   nsresult WillMakeBasicBlock(Selection& aSelection,
                               const nsAString& aBlockType,
                               bool* aCancel, bool* aHandled);
-  nsresult MakeBasicBlock(Selection& aSelection, nsIAtom& aBlockType);
+  nsresult MakeBasicBlock(Selection& aSelection, nsAtom& aBlockType);
   nsresult DidMakeBasicBlock(Selection* aSelection, RulesInfo* aInfo,
                              nsresult aResult);
   nsresult DidAbsolutePosition();
@@ -286,12 +286,13 @@ protected:
                        int32_t* aIndex, Lists aLists = Lists::yes,
                        Tables aTables = Tables::yes);
   Element* IsInListItem(nsINode* aNode);
-  nsIAtom& DefaultParagraphSeparator();
+  nsAtom& DefaultParagraphSeparator();
   nsresult ReturnInHeader(Selection& aSelection, Element& aHeader,
                           nsINode& aNode, int32_t aOffset);
-  nsresult ReturnInParagraph(Selection* aSelection, nsIDOMNode* aHeader,
-                             nsIDOMNode* aTextNode, int32_t aOffset,
-                             bool* aCancel, bool* aHandled);
+  nsresult ReturnInParagraph(Selection* aSelection, nsINode* aHeader,
+                             nsINode* aTextNode, int32_t aOffset,
+                             nsIContent* aChildAtOffset, bool* aCancel,
+                             bool* aHandled);
   nsresult SplitParagraph(nsIDOMNode* aPara,
                           nsIContent* aBRNode,
                           Selection* aSelection,
@@ -316,8 +317,8 @@ protected:
                               nsIContent** aOutLeftNode,
                               nsIContent** aOutRightNode);
 
-  already_AddRefed<Element> ConvertListType(Element* aList, nsIAtom* aListType,
-                                            nsIAtom* aItemType);
+  already_AddRefed<Element> ConvertListType(Element* aList, nsAtom* aListType,
+                                            nsAtom* aItemType);
 
   nsresult CreateStyleForInsertText(Selection& aSelection, nsIDocument& aDoc);
   enum class MozBRCounts { yes, no };
@@ -376,19 +377,21 @@ protected:
                           nsTArray<bool>& aTransitionArray);
   nsresult RemoveBlockStyle(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
   nsresult ApplyBlockStyle(nsTArray<OwningNonNull<nsINode>>& aNodeArray,
-                           nsIAtom& aBlockTag);
+                           nsAtom& aBlockTag);
   nsresult MakeBlockquote(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
-  nsresult SplitAsNeeded(nsIAtom& aTag, OwningNonNull<nsINode>& inOutParent,
-                         int32_t& inOutOffset);
-  nsresult SplitAsNeeded(nsIAtom& aTag, nsCOMPtr<nsINode>& inOutParent,
-                         int32_t& inOutOffset);
+  nsresult SplitAsNeeded(nsAtom& aTag, OwningNonNull<nsINode>& inOutParent,
+                         int32_t& inOutOffset,
+                         nsCOMPtr<nsIContent>* inOutChildAtOffset = nullptr);
+  nsresult SplitAsNeeded(nsAtom& aTag, nsCOMPtr<nsINode>& inOutParent,
+                         int32_t& inOutOffset,
+                         nsCOMPtr<nsIContent>* inOutChildAtOffset = nullptr);
   nsresult AddTerminatingBR(nsIDOMNode *aBlock);
   EditorDOMPoint JoinNodesSmart(nsIContent& aNodeLeft,
                                 nsIContent& aNodeRight);
   Element* GetTopEnclosingMailCite(nsINode& aNode);
   nsresult PopListItem(nsIContent& aListItem, bool* aOutOfList = nullptr);
   nsresult RemoveListStructure(Element& aList);
-  nsresult CacheInlineStyles(nsIDOMNode* aNode);
+  nsresult CacheInlineStyles(nsINode* aNode);
   nsresult ReapplyCachedStyles();
   void ClearCachedStyles();
   void AdjustSpecialBreaks();
@@ -397,10 +400,11 @@ protected:
   void CheckInterlinePosition(Selection& aSelection);
   nsresult AdjustSelection(Selection* aSelection,
                            nsIEditor::EDirection aAction);
-  nsresult FindNearSelectableNode(nsIDOMNode* aSelNode,
+  nsresult FindNearSelectableNode(nsINode* aSelNode,
                                   int32_t aSelOffset,
+                                  nsINode* aChildAtOffset,
                                   nsIEditor::EDirection& aDirection,
-                                  nsCOMPtr<nsIDOMNode>* outSelectableNode);
+                                  nsCOMPtr<nsIContent>* outSelectableNode);
   /**
    * Returns true if aNode1 or aNode2 or both is the descendant of some type of
    * table element, but their nearest table element ancestors differ.  "Table
@@ -455,7 +459,7 @@ protected:
    * GetInlineStyles() retrieves the style of aNode and modifies each item of
    * aStyleCache.
    */
-  nsresult GetInlineStyles(nsIDOMNode* aNode,
+  nsresult GetInlineStyles(nsINode* aNode,
                            StyleCache aStyleCache[SIZE_STYLE_TABLE]);
 
 protected:

@@ -91,21 +91,14 @@ public:
                                              const wr::IdNamespace& aIdNamespace,
                                              const TimeStamp& aTxnStartTime,
                                              const TimeStamp& aFwdTime) override;
-  mozilla::ipc::IPCResult RecvSetDisplayListSync(const gfx::IntSize& aSize,
-                                                 InfallibleTArray<WebRenderParentCommand>&& aCommands,
-                                                 InfallibleTArray<OpDestroy>&& aToDestroy,
-                                                 const uint64_t& aFwdTransactionId,
-                                                 const uint64_t& aTransactionId,
-                                                 const wr::LayoutSize& aContentSize,
-                                                 const wr::ByteBuffer& dl,
-                                                 const wr::BuiltDisplayListDescriptor& dlDesc,
-                                                 const WebRenderScrollData& aScrollData,
-                                                 nsTArray<OpUpdateResource>&& aResourceUpdates,
-                                                 nsTArray<ipc::Shmem>&& aSmallShmems,
-                                                 nsTArray<ipc::Shmem>&& aLargeShmems,
-                                                 const wr::IdNamespace& aIdNamespace,
-                                                 const TimeStamp& aTxnStartTime,
-                                                 const TimeStamp& aFwdTime) override;
+  mozilla::ipc::IPCResult RecvEmptyTransaction(const FocusTarget& aFocusTarget,
+                                               InfallibleTArray<WebRenderParentCommand>&& aCommands,
+                                               InfallibleTArray<OpDestroy>&& aToDestroy,
+                                               const uint64_t& aFwdTransactionId,
+                                               const uint64_t& aTransactionId,
+                                               const wr::IdNamespace& aIdNamespace,
+                                               const TimeStamp& aTxnStartTime,
+                                               const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvSetFocusTarget(const FocusTarget& aFocusTarget) override;
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvGetSnapshot(PTextureParent* aTexture) override;
@@ -201,8 +194,7 @@ private:
                         wr::ResourceUpdateQueue& aResources);
 
   uint64_t GetLayersId() const;
-  void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
-                                      wr::ResourceUpdateQueue& aResources);
+  void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands);
 
   void ClearResources();
   uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }

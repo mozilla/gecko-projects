@@ -493,7 +493,7 @@ class HandleValueArray
     HandleValueArray(size_t len, const Value* elements) : length_(len), elements_(elements) {}
 
   public:
-    explicit HandleValueArray(const RootedValue& value) : length_(1), elements_(value.address()) {}
+    explicit HandleValueArray(HandleValue value) : length_(1), elements_(value.address()) {}
 
     MOZ_IMPLICIT HandleValueArray(const AutoValueVector& values)
       : length_(values.length()), elements_(values.begin()) {}
@@ -1140,9 +1140,10 @@ class JS_PUBLIC_API(ContextOptions) {
       : baseline_(true),
         ion_(true),
         asmJS_(true),
-        wasm_(false),
-        wasmBaseline_(false),
-        wasmIon_(false),
+        wasm_(true),
+        wasmBaseline_(true),
+        wasmIon_(true),
+        testWasmAwaitTier2_(false),
         throwOnAsmJSValidationFailure_(false),
         nativeRegExp_(true),
         asyncStack_(true),
@@ -1229,6 +1230,16 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
+    bool testWasmAwaitTier2() const { return testWasmAwaitTier2_; }
+    ContextOptions& setTestWasmAwaitTier2(bool flag) {
+        testWasmAwaitTier2_ = flag;
+        return *this;
+    }
+    ContextOptions& toggleTestWasmAwaitTier2() {
+        testWasmAwaitTier2_ = !testWasmAwaitTier2_;
+        return *this;
+    }
+
     bool throwOnAsmJSValidationFailure() const { return throwOnAsmJSValidationFailure_; }
     ContextOptions& setThrowOnAsmJSValidationFailure(bool flag) {
         throwOnAsmJSValidationFailure_ = flag;
@@ -1307,6 +1318,16 @@ class JS_PUBLIC_API(ContextOptions) {
     }
 #endif
 
+    void disableOptionsForSafeMode() {
+        setBaseline(false);
+        setIon(false);
+        setAsmJS(false);
+        setWasm(false);
+        setWasmBaseline(false);
+        setWasmIon(false);
+        setNativeRegExp(false);
+    }
+
   private:
     bool baseline_ : 1;
     bool ion_ : 1;
@@ -1314,6 +1335,7 @@ class JS_PUBLIC_API(ContextOptions) {
     bool wasm_ : 1;
     bool wasmBaseline_ : 1;
     bool wasmIon_ : 1;
+    bool testWasmAwaitTier2_ : 1;
     bool throwOnAsmJSValidationFailure_ : 1;
     bool nativeRegExp_ : 1;
     bool asyncStack_ : 1;
@@ -1426,6 +1448,9 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, JS::Handle<JSObject*> obj);
  * enter/leave calls on the context. Furthermore, only the return value of a
  * JS_EnterCompartment call may be passed as the 'oldCompartment' argument of
  * the corresponding JS_LeaveCompartment call.
+ *
+ * Entering a compartment roots the compartment and its global object for the
+ * lifetime of the JSAutoCompartment.
  */
 
 class MOZ_RAII JS_PUBLIC_API(JSAutoCompartment)
@@ -1454,7 +1479,11 @@ class MOZ_RAII JS_PUBLIC_API(JSAutoNullableCompartment)
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-/** NB: This API is infallible; a nullptr return value does not indicate error. */
+/** NB: This API is infallible; a nullptr return value does not indicate error.
+ *
+ * Entering a compartment roots the compartment and its global object until the
+ * matching JS_LeaveCompartment() call.
+ */
 extern JS_PUBLIC_API(JSCompartment*)
 JS_EnterCompartment(JSContext* cx, JSObject* target);
 
@@ -4921,6 +4950,48 @@ typedef bool
 
 extern JS_PUBLIC_API(void)
 InitDispatchToEventLoop(JSContext* cx, DispatchToEventLoopCallback callback, void* closure);
+
+/**
+ * The ConsumeStreamCallback is called from an active JSContext, passing a
+ * StreamConsumer that wishes to consume the given host object as a stream of
+ * bytes with the given MIME type. On failure, the embedding must report the
+ * appropriate error on 'cx'. On success, the embedding must call
+ * consumer->consumeChunk() repeatedly on any thread until exactly one of:
+ *  - consumeChunk() returns false
+ *  - the embedding calls consumer->streamClosed()
+ * before JS_DestroyContext(cx) or JS::ShutdownAsyncTasks(cx) is called.
+ *
+ * Note: consumeChunk() and streamClosed() may be called synchronously by
+ * ConsumeStreamCallback.
+ */
+
+class JS_PUBLIC_API(StreamConsumer)
+{
+  protected:
+    // AsyncStreamConsumers are created and destroyed by SpiderMonkey.
+    StreamConsumer() = default;
+    virtual ~StreamConsumer() = default;
+
+  public:
+    // Called by the embedding as each chunk of bytes becomes available.
+    // If this function returns 'false', the stream must drop all pointers to
+    // this StreamConsumer.
+    virtual bool consumeChunk(const uint8_t* begin, size_t length) = 0;
+
+    // Called by the embedding when the stream is closed according to the
+    // contract described above.
+    enum CloseReason { EndOfFile, Error };
+    virtual void streamClosed(CloseReason reason) = 0;
+};
+
+enum class MimeType { Wasm };
+
+typedef bool
+(*ConsumeStreamCallback)(JSContext* cx, JS::HandleObject obj, MimeType mimeType,
+                         StreamConsumer* consumer);
+
+extern JS_PUBLIC_API(void)
+InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback callback);
 
 /**
  * When a JSRuntime is destroyed it implicitly cancels all async tasks in

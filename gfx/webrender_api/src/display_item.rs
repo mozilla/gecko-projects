@@ -102,16 +102,13 @@ pub enum SpecificDisplayItem {
     PushStackingContext(PushStackingContextDisplayItem),
     PopStackingContext,
     SetGradientStops,
-    PushNestedDisplayList,
-    PopNestedDisplayList,
-    PushTextShadow(TextShadow),
-    PopTextShadow,
+    PushShadow(Shadow),
+    PopAllShadows,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClipDisplayItem {
     pub id: ClipId,
-    pub parent_id: ClipId,
     pub image_mask: Option<ImageMask>,
 }
 
@@ -139,7 +136,6 @@ pub enum ScrollSensitivity {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ScrollFrameDisplayItem {
     pub id: ClipId,
-    pub parent_id: ClipId,
     pub image_mask: Option<ImageMask>,
     pub scroll_sensitivity: ScrollSensitivity,
 }
@@ -290,9 +286,8 @@ pub enum BorderStyle {
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BoxShadowClipMode {
-    None = 0,
-    Outset = 1,
-    Inset = 2,
+    Outset = 0,
+    Inset = 1,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -308,7 +303,7 @@ pub struct BoxShadowDisplayItem {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct TextShadow {
+pub struct Shadow {
     pub offset: LayoutVector2D,
     pub color: ColorF,
     pub blur_radius: f32,
@@ -629,18 +624,16 @@ impl ComplexClipRegion {
     }
 }
 
-pub type NestingIndex = u64;
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ClipId {
-    Clip(u64, NestingIndex, PipelineId),
+    Clip(u64, PipelineId),
     ClipExternalId(u64, PipelineId),
     DynamicallyAddedNode(u64, PipelineId),
 }
 
 impl ClipId {
     pub fn root_scroll_node(pipeline_id: PipelineId) -> ClipId {
-        ClipId::Clip(0, 0, pipeline_id)
+        ClipId::Clip(0, pipeline_id)
     }
 
     pub fn root_reference_frame(pipeline_id: PipelineId) -> ClipId {
@@ -659,7 +652,7 @@ impl ClipId {
 
     pub fn pipeline_id(&self) -> PipelineId {
         match *self {
-            ClipId::Clip(_, _, pipeline_id) |
+            ClipId::Clip(_, pipeline_id) |
             ClipId::ClipExternalId(_, pipeline_id) |
             ClipId::DynamicallyAddedNode(_, pipeline_id) => pipeline_id,
         }
@@ -674,14 +667,7 @@ impl ClipId {
 
     pub fn is_root_scroll_node(&self) -> bool {
         match *self {
-            ClipId::Clip(0, 0, _) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_nested(&self) -> bool {
-        match *self {
-            ClipId::Clip(_, nesting_level, _) => nesting_level != 0,
+            ClipId::Clip(0, _) => true,
             _ => false,
         }
     }

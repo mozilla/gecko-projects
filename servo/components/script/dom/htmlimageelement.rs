@@ -85,7 +85,7 @@ pub struct Descriptor {
     pub den: Option<f64>,
 }
 
-#[derive(Clone, Copy, HeapSizeOf, JSTraceable)]
+#[derive(Clone, Copy, JSTraceable, MallocSizeOf)]
 #[allow(dead_code)]
 enum State {
     Unavailable,
@@ -100,19 +100,19 @@ pub struct Size {
     pub length: Length,
 }
 
-#[derive(Clone, Copy, HeapSizeOf, JSTraceable)]
+#[derive(Clone, Copy, JSTraceable, MallocSizeOf)]
 enum ImageRequestPhase {
     Pending,
     Current
 }
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 #[must_root]
 struct ImageRequest {
     state: State,
     parsed_url: Option<ServoUrl>,
     source_url: Option<DOMString>,
     blocker: Option<LoadBlocker>,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     image: Option<Arc<Image>>,
     metadata: Option<ImageMetadata>,
     final_url: Option<ServoUrl>,
@@ -200,7 +200,7 @@ impl HTMLImageElement {
             let task_source = window.networking_task_source();
             let task_canceller = window.task_canceller();
             let generation = elem.generation.get();
-            ROUTER.add_route(responder_receiver.to_opaque(), box move |message| {
+            ROUTER.add_route(responder_receiver.to_opaque(), Box::new(move |message| {
                 debug!("Got image {:?}", message);
                 // Return the image via a message to the script thread, which marks
                 // the element as dirty and triggers a reflow.
@@ -217,7 +217,7 @@ impl HTMLImageElement {
                     }),
                     &task_canceller,
                 );
-            });
+            }));
 
             image_cache.add_listener(id, ImageResponder::new(responder_sender, id));
         }
@@ -268,9 +268,9 @@ impl HTMLImageElement {
             task_source: window.networking_task_source(),
             canceller: Some(window.task_canceller()),
         };
-        ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
+        ROUTER.add_route(action_receiver.to_opaque(), Box::new(move |message| {
             listener.notify_fetch(message.to().unwrap());
-        });
+        }));
 
         let request = RequestInit {
             url: img_url.clone(),
@@ -357,7 +357,7 @@ impl HTMLImageElement {
         window.add_pending_reflow();
     }
 
-    /// https://html.spec.whatwg.org/multipage/#abort-the-image-request
+    /// <https://html.spec.whatwg.org/multipage/#abort-the-image-request>
     fn abort_request(&self, state: State, request: ImageRequestPhase) {
         let mut request = match request {
             ImageRequestPhase::Current => self.current_request.borrow_mut(),
@@ -369,7 +369,7 @@ impl HTMLImageElement {
         request.metadata = None;
     }
 
-    /// https://html.spec.whatwg.org/multipage/#update-the-source-set
+    /// <https://html.spec.whatwg.org/multipage/#update-the-source-set>
     fn update_source_set(&self) -> Vec<DOMString> {
         let elem = self.upcast::<Element>();
         // TODO: follow the algorithm
@@ -380,7 +380,7 @@ impl HTMLImageElement {
         vec![src]
     }
 
-    /// https://html.spec.whatwg.org/multipage/#select-an-image-source
+    /// <https://html.spec.whatwg.org/multipage/#select-an-image-source>
     fn select_image_source(&self) -> Option<DOMString> {
         // TODO: select an image source from source set
         self.update_source_set().first().cloned()
@@ -536,7 +536,7 @@ impl HTMLImageElement {
         }
     }
 
-    /// https://html.spec.whatwg.org/multipage/#update-the-image-data
+    /// <https://html.spec.whatwg.org/multipage/#update-the-image-data>
     fn update_the_image_data(&self) {
         let document = document_from_node(self);
         let window = document.window();
@@ -640,7 +640,7 @@ impl HTMLImageElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLImageElement> {
-        Node::reflect_node(box HTMLImageElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLImageElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLImageElementBinding::Wrap)
     }
@@ -695,7 +695,7 @@ impl HTMLImageElement {
 
 }
 
-#[derive(HeapSizeOf, JSTraceable)]
+#[derive(JSTraceable, MallocSizeOf)]
 pub enum ImageElementMicrotask {
     StableStateUpdateImageDataTask {
         elem: DomRoot<HTMLImageElement>,
@@ -824,6 +824,7 @@ impl HTMLImageElementMethods for HTMLImageElement {
 
     // https://html.spec.whatwg.org/multipage/#dom-img-src
     make_url_getter!(Src, "src");
+
     // https://html.spec.whatwg.org/multipage/#dom-img-src
     make_setter!(SetSrc, "src");
 

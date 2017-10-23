@@ -825,7 +825,7 @@ DoGetElemFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_
 
 static bool
 DoGetElemSuperFallback(JSContext* cx, BaselineFrame* frame, ICGetElem_Fallback* stub_,
-                       HandleValue receiver, HandleValue lhs, HandleValue rhs,
+                       HandleValue lhs, HandleValue receiver, HandleValue rhs,
                        MutableHandleValue res)
 {
     // This fallback stub may trigger debug mode toggling.
@@ -907,7 +907,7 @@ typedef bool (*DoGetElemSuperFallbackFn)(JSContext*, BaselineFrame*, ICGetElem_F
                                          MutableHandleValue);
 static const VMFunction DoGetElemSuperFallbackInfo =
     FunctionInfo<DoGetElemSuperFallbackFn>(DoGetElemSuperFallback, "DoGetElemSuperFallback",
-                                           TailCall, PopValues(1));
+                                           TailCall, PopValues(3));
 
 bool
 ICGetElem_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
@@ -920,13 +920,18 @@ ICGetElem_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 
     // Super property getters use a |this| that differs from base object
     if (hasReceiver_) {
-        // Ensure stack is fully synced for the expression decompiler.
-        masm.pushValue(R1);
+        // State: index in R0, receiver in R1, obj on the stack
 
-        masm.pushValue(R1); // Index
-        masm.pushValue(R0); // Object
-        masm.loadValue(Address(masm.getStackPointer(), 3 * sizeof(Value)), R0);
-        masm.pushValue(R0); // Receiver
+        // Ensure stack is fully synced for the expression decompiler.
+        // We need: index, receiver, obj
+        masm.pushValue(R0);
+        masm.pushValue(R1);
+        masm.pushValue(Address(masm.getStackPointer(), sizeof(Value) * 2));
+
+        // Push arguments.
+        masm.pushValue(R0); // Index
+        masm.pushValue(R1); // Reciver
+        masm.pushValue(Address(masm.getStackPointer(), sizeof(Value) * 5)); // Obj
         masm.push(ICStubReg);
         pushStubPayload(masm, R0.scratchReg());
 
@@ -3057,10 +3062,7 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
     bool canUseTailCallReg = regs.has(ICTailCallReg);
 
     Register argcReg = R0.scratchReg();
-    MOZ_ASSERT(argcReg != ArgumentsRectifierReg);
-
     regs.take(argcReg);
-    regs.take(ArgumentsRectifierReg);
     regs.takeUnchecked(ICTailCallReg);
 
     if (isSpread_)
@@ -3169,7 +3171,6 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         MOZ_ASSERT(JSReturnOperand == R0);
         regs = availableGeneralRegs(0);
         regs.take(R0);
-        regs.take(ArgumentsRectifierReg);
         argcReg = regs.takeAny();
 
         // Restore saved argc so we can use it to calculate the address to save
@@ -3252,15 +3253,11 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
     masm.branch32(Assembler::AboveOrEqual, argcReg, callee, &noUnderflow);
     {
         // Call the arguments rectifier.
-        MOZ_ASSERT(ArgumentsRectifierReg != code);
-        MOZ_ASSERT(ArgumentsRectifierReg != argcReg);
-
         JitCode* argumentsRectifier =
             cx->runtime()->jitRuntime()->getArgumentsRectifier();
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, JitCode::offsetOfCode()), code);
-        masm.movePtr(argcReg, ArgumentsRectifierReg);
     }
 
     masm.bind(&noUnderflow);
@@ -3681,7 +3678,6 @@ ICCall_ScriptedApplyArray::Compiler::generateStubCode(MacroAssembler& masm)
     Register argcReg = R0.scratchReg();
     regs.take(argcReg);
     regs.takeUnchecked(ICTailCallReg);
-    regs.takeUnchecked(ArgumentsRectifierReg);
 
     //
     // Validate inputs
@@ -3749,15 +3745,11 @@ ICCall_ScriptedApplyArray::Compiler::generateStubCode(MacroAssembler& masm)
     masm.branch32(Assembler::AboveOrEqual, argcReg, scratch, &noUnderflow);
     {
         // Call the arguments rectifier.
-        MOZ_ASSERT(ArgumentsRectifierReg != target);
-        MOZ_ASSERT(ArgumentsRectifierReg != argcReg);
-
         JitCode* argumentsRectifier =
             cx->runtime()->jitRuntime()->getArgumentsRectifier();
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), target);
         masm.loadPtr(Address(target, JitCode::offsetOfCode()), target);
-        masm.movePtr(argcReg, ArgumentsRectifierReg);
     }
     masm.bind(&noUnderflow);
     regs.add(argcReg);
@@ -3785,7 +3777,6 @@ ICCall_ScriptedApplyArguments::Compiler::generateStubCode(MacroAssembler& masm)
     Register argcReg = R0.scratchReg();
     regs.take(argcReg);
     regs.takeUnchecked(ICTailCallReg);
-    regs.takeUnchecked(ArgumentsRectifierReg);
 
     //
     // Validate inputs
@@ -3847,15 +3838,11 @@ ICCall_ScriptedApplyArguments::Compiler::generateStubCode(MacroAssembler& masm)
     masm.branch32(Assembler::AboveOrEqual, argcReg, scratch, &noUnderflow);
     {
         // Call the arguments rectifier.
-        MOZ_ASSERT(ArgumentsRectifierReg != target);
-        MOZ_ASSERT(ArgumentsRectifierReg != argcReg);
-
         JitCode* argumentsRectifier =
             cx->runtime()->jitRuntime()->getArgumentsRectifier();
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), target);
         masm.loadPtr(Address(target, JitCode::offsetOfCode()), target);
-        masm.movePtr(argcReg, ArgumentsRectifierReg);
     }
     masm.bind(&noUnderflow);
     regs.add(argcReg);
@@ -3882,10 +3869,7 @@ ICCall_ScriptedFunCall::Compiler::generateStubCode(MacroAssembler& masm)
     bool canUseTailCallReg = regs.has(ICTailCallReg);
 
     Register argcReg = R0.scratchReg();
-    MOZ_ASSERT(argcReg != ArgumentsRectifierReg);
-
     regs.take(argcReg);
-    regs.take(ArgumentsRectifierReg);
     regs.takeUnchecked(ICTailCallReg);
 
     // Load the callee in R1.
@@ -3978,15 +3962,11 @@ ICCall_ScriptedFunCall::Compiler::generateStubCode(MacroAssembler& masm)
     masm.branch32(Assembler::AboveOrEqual, argcReg, callee, &noUnderflow);
     {
         // Call the arguments rectifier.
-        MOZ_ASSERT(ArgumentsRectifierReg != code);
-        MOZ_ASSERT(ArgumentsRectifierReg != argcReg);
-
         JitCode* argumentsRectifier =
             cx->runtime()->jitRuntime()->getArgumentsRectifier();
 
         masm.movePtr(ImmGCPtr(argumentsRectifier), code);
         masm.loadPtr(Address(code, JitCode::offsetOfCode()), code);
-        masm.movePtr(argcReg, ArgumentsRectifierReg);
     }
 
     masm.bind(&noUnderflow);

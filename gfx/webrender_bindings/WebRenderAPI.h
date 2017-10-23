@@ -158,6 +158,8 @@ public:
 
   void UpdateResources(ResourceUpdateQueue& aUpdates);
 
+  void UpdatePipelineResources(ResourceUpdateQueue& aUpdates, PipelineId aPipeline, Epoch aEpoch);
+
   void SetFrameStartTime(const TimeStamp& aTime);
 
   void RunOnRenderThread(UniquePtr<RendererEvent> aEvent);
@@ -202,10 +204,15 @@ protected:
 class DisplayListBuilder {
 public:
   explicit DisplayListBuilder(wr::PipelineId aId,
-                              const wr::LayoutSize& aContentSize);
+                              const wr::LayoutSize& aContentSize,
+                              size_t aCapacity = 0);
   DisplayListBuilder(DisplayListBuilder&&) = default;
 
   ~DisplayListBuilder();
+
+  void Save();
+  void Restore();
+  void ClearSave();
 
   void Finalize(wr::LayoutSize& aOutContentSize,
                 wr::BuiltDisplayList& aOutDisplayList);
@@ -224,8 +231,8 @@ public:
   wr::WrClipId DefineClip(const wr::LayoutRect& aClipRect,
                           const nsTArray<wr::ComplexClipRegion>* aComplex = nullptr,
                           const wr::WrImageMask* aMask = nullptr);
-  void PushClip(const wr::WrClipId& aClipId, bool aMask = false);
-  void PopClip(bool aMask = false);
+  void PushClip(const wr::WrClipId& aClipId, bool aExtra = false);
+  void PopClip(bool aExtra = false);
 
   wr::WrStickyId DefineStickyFrame(const wr::LayoutRect& aContentRect,
                                    const wr::StickySideConstraint* aTop,
@@ -234,8 +241,6 @@ public:
                                    const wr::StickySideConstraint* aLeft);
   void PushStickyFrame(const wr::WrStickyId& aStickyId);
   void PopStickyFrame();
-
-  void PushBuiltDisplayList(wr::BuiltDisplayList &dl);
 
   bool IsScrollLayerDefined(layers::FrameMetrics::ViewID aScrollId) const;
   void DefineScrollLayer(const layers::FrameMetrics::ViewID& aScrollId,
@@ -357,7 +362,7 @@ public:
   void PushText(const wr::LayoutRect& aBounds,
                 const wr::LayoutRect& aClip,
                 bool aIsBackfaceVisible,
-                const gfx::Color& aColor,
+                const wr::ColorF& aColor,
                 wr::FontInstanceKey aFontKey,
                 Range<const wr::GlyphInstance> aGlyphBuffer,
                 const wr::GlyphOptions* aGlyphOptions = nullptr);
@@ -366,12 +371,12 @@ public:
                 bool aIsBackfaceVisible,
                 const wr::Line& aLine);
 
-  void PushTextShadow(const wr::LayoutRect& aBounds,
+  void PushShadow(const wr::LayoutRect& aBounds,
                       const wr::LayoutRect& aClip,
                       bool aIsBackfaceVisible,
-                      const wr::TextShadow& aShadow);
+                      const wr::Shadow& aShadow);
 
-  void PopTextShadow();
+  void PopAllShadows();
 
 
 
@@ -400,8 +405,8 @@ public:
   // Try to avoid using this when possible.
   wr::WrState* Raw() { return mWrState; }
 
-  // Return true if the current clip stack has any mask type clip.
-  bool HasMaskClip() { return mMaskClipCount > 0; }
+  // Return true if the current clip stack has any extra clip.
+  bool HasExtraClip() { return mExtraClipCount > 0; }
 
 protected:
   wr::WrState* mWrState;
@@ -418,8 +423,8 @@ protected:
   // ensure that we don't define a particular scroll layer multiple times.
   std::unordered_map<layers::FrameMetrics::ViewID, Maybe<layers::FrameMetrics::ViewID>> mScrollParents;
 
-  // The number of mask clips that are in the stack.
-  uint32_t mMaskClipCount;
+  // The number of extra clips that are in the stack.
+  uint32_t mExtraClipCount;
 
   friend class WebRenderAPI;
 };

@@ -1213,6 +1213,7 @@ class MochitestDesktop(object):
         if self.websocketProcessBridge is not None:
             try:
                 self.websocketProcessBridge.kill()
+                self.websocketProcessBridge.wait()
                 self.log.info('Stopping websocket/process bridge')
             except Exception:
                 self.log.critical('Exception stopping websocket/process bridge')
@@ -1613,6 +1614,9 @@ toolbar#nav-bar {
         if hasattr(options, "topobjdir"):
             browserEnv["MOZ_DEVELOPER_OBJ_DIR"] = options.topobjdir
 
+        if options.headless:
+            browserEnv["MOZ_HEADLESS"] = '1'
+
         # These variables are necessary for correct application startup; change
         # via the commandline at your own risk.
         browserEnv["XPCOM_DEBUG_BREAK"] = "stack"
@@ -1799,7 +1803,7 @@ toolbar#nav-bar {
 
         options.extraPrefs.append(
             "idle.lastDailyNotification=%d" %
-            (int(time.time()) * 1000))
+            int(time.time()))
 
         # get extensions to install
         extensions = self.getExtensionsToInstall(options)
@@ -2364,6 +2368,8 @@ toolbar#nav-bar {
             stepOptions.repeat = VERIFY_REPEAT
             stepOptions.keep_open = False
             stepOptions.runUntilFailure = True
+            stepOptions.profilePath = None
+            self.urlOpts = []
             result = self.runTests(stepOptions)
             result = result or (-2 if self.countfail > 0 else 0)
             self.message_logger.finish()
@@ -2374,6 +2380,8 @@ toolbar#nav-bar {
             stepOptions.repeat = 0
             stepOptions.keep_open = False
             for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                stepOptions.profilePath = None
+                self.urlOpts = []
                 result = self.runTests(stepOptions)
                 result = result or (-2 if self.countfail > 0 else 0)
                 self.message_logger.finish()
@@ -2386,6 +2394,8 @@ toolbar#nav-bar {
             stepOptions.repeat = VERIFY_REPEAT
             stepOptions.keep_open = False
             stepOptions.environment.append("MOZ_CHAOSMODE=3")
+            stepOptions.profilePath = None
+            self.urlOpts = []
             result = self.runTests(stepOptions)
             result = result or (-2 if self.countfail > 0 else 0)
             self.message_logger.finish()
@@ -2397,6 +2407,8 @@ toolbar#nav-bar {
             stepOptions.keep_open = False
             stepOptions.environment.append("MOZ_CHAOSMODE=3")
             for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                stepOptions.profilePath = None
+                self.urlOpts = []
                 result = self.runTests(stepOptions)
                 result = result or (-2 if self.countfail > 0 else 0)
                 self.message_logger.finish()
@@ -2465,6 +2477,7 @@ toolbar#nav-bar {
         if options.flavor in ('a11y', 'chrome'):
             options.e10s = False
         mozinfo.update({"e10s": options.e10s})  # for test manifest parsing.
+        mozinfo.update({"headless": options.headless})  # for test manifest parsing.
 
         if options.jscov_dir_prefix is not None:
             mozinfo.update({'coverage': True})

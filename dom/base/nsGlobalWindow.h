@@ -452,6 +452,7 @@ public:
   // Outer windows only.
   virtual nsresult SetFullscreenInternal(
     FullscreenReason aReason, bool aIsFullscreen) override final;
+  virtual void FullscreenWillChange(bool aIsFullscreen) override final;
   virtual void FinishFullscreenChange(bool aIsFullscreen) override final;
   bool SetWidgetFullscreen(FullscreenReason aReason, bool aIsFullscreen,
                            nsIWidget* aWidget, nsIScreen* aScreen);
@@ -465,9 +466,9 @@ public:
   bool IsVRContentPresenting() const;
 
   using EventTarget::EventListenerAdded;
-  virtual void EventListenerAdded(nsIAtom* aType) override;
+  virtual void EventListenerAdded(nsAtom* aType) override;
   using EventTarget::EventListenerRemoved;
-  virtual void EventListenerRemoved(nsIAtom* aType) override;
+  virtual void EventListenerRemoved(nsAtom* aType) override;
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -1312,6 +1313,11 @@ public:
   mozilla::dom::Performance* GetPerformance();
 
   void UpdateTopInnerWindow();
+
+  virtual bool IsInSyncOperation() override
+  {
+    return GetExtantDoc() && GetExtantDoc()->IsInSyncOperation();
+  }
 
 protected:
   // Web IDL helpers

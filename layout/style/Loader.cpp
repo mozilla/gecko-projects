@@ -887,14 +887,15 @@ Loader::ObsoleteSheet(nsIURI* aURI)
 }
 
 nsresult
-Loader::CheckContentPolicy(nsIPrincipal* aSourcePrincipal,
-                          nsIURI* aTargetURI,
-                          nsISupports* aContext,
-                          bool aIsPreload)
+Loader::CheckContentPolicy(nsIPrincipal* aLoadingPrincipal,
+                           nsIPrincipal* aTriggeringPrincipal,
+                           nsIURI* aTargetURI,
+                           nsISupports* aContext,
+                           bool aIsPreload)
 {
   // When performing a system load (e.g. aUseSystemPrincipal = true)
-  // then aSourcePrincipal == null; don't consult content policies.
-  if (!aSourcePrincipal) {
+  // then aLoadingPrincipal == null; don't consult content policies.
+  if (!aLoadingPrincipal) {
     return NS_OK;
   }
 
@@ -905,7 +906,8 @@ Loader::CheckContentPolicy(nsIPrincipal* aSourcePrincipal,
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
   nsresult rv = NS_CheckContentLoadPolicy(contentPolicyType,
                                           aTargetURI,
-                                          aSourcePrincipal,
+                                          aLoadingPrincipal,
+                                          aTriggeringPrincipal,
                                           aContext,
                                           NS_LITERAL_CSTRING("text/css"),
                                           nullptr,  //extra param
@@ -1402,7 +1404,7 @@ Loader::LoadSheet(SheetLoadData* aLoadData,
     // This will call back into OnStreamComplete
     // and thence to ParseSheet.  Regardless of whether this fails,
     // SheetComplete has been called.
-    return nsSyncLoadService::PushSyncStreamToListener(stream,
+    return nsSyncLoadService::PushSyncStreamToListener(stream.forget(),
                                                        streamLoader,
                                                        channel);
   }
@@ -1922,6 +1924,7 @@ Loader::LoadInlineStyle(nsIContent* aElement,
 nsresult
 Loader::LoadStyleLink(nsIContent* aElement,
                       nsIURI* aURL,
+                      nsIPrincipal* aTriggeringPrincipal,
                       const nsAString& aTitle,
                       const nsAString& aMedia,
                       bool aHasAlternateRel,
@@ -1947,15 +1950,18 @@ Loader::LoadStyleLink(nsIContent* aElement,
 
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_INITIALIZED);
 
-  nsIPrincipal* principal =
-    aElement ? aElement->NodePrincipal() : mDocument->NodePrincipal();
+  nsIPrincipal* loadingPrincipal = aElement ? aElement->NodePrincipal()
+                                            : mDocument->NodePrincipal();
+
+  nsIPrincipal* principal = aTriggeringPrincipal ? aTriggeringPrincipal
+                                                 : loadingPrincipal;
 
   nsISupports* context = aElement;
   if (!context) {
     context = mDocument;
   }
 
-  nsresult rv = CheckContentPolicy(principal, aURL, context, false);
+  nsresult rv = CheckContentPolicy(loadingPrincipal, principal, aURL, context, false);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     // Don't fire the error event if our document is loaded as data.  We're
     // supposed to not even try to do loads in that case... Unfortunately, we
@@ -2091,13 +2097,18 @@ Loader::LoadChildSheet(StyleSheet* aParentSheet,
     owningNode = topSheet->GetOwnerNode();
   }
 
-  nsISupports* context = owningNode;
-  if (!context) {
+  nsISupports* context = nullptr;
+  nsIPrincipal* loadingPrincipal = nullptr;
+  if (owningNode) {
+    context = owningNode;
+    loadingPrincipal = owningNode->NodePrincipal();
+  } else if (mDocument) {
     context = mDocument;
+    loadingPrincipal = mDocument->NodePrincipal();
   }
 
   nsIPrincipal* principal = aParentSheet->Principal();
-  nsresult rv = CheckContentPolicy(principal, aURL, context, false);
+  nsresult rv = CheckContentPolicy(loadingPrincipal, principal, aURL, context, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   SheetLoadData* parentData = nullptr;
@@ -2284,7 +2295,11 @@ Loader::InternalLoadNonDocumentSheet(nsIURI* aURL,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsresult rv = CheckContentPolicy(aOriginPrincipal, aURL, mDocument, aIsPreload);
+  nsCOMPtr<nsIPrincipal> loadingPrincipal = (aOriginPrincipal && mDocument
+                                             ? mDocument->NodePrincipal()
+                                             : nullptr);
+  nsresult rv = CheckContentPolicy(loadingPrincipal, aOriginPrincipal,
+                                   aURL, mDocument, aIsPreload);
   NS_ENSURE_SUCCESS(rv, rv);
 
   StyleSheetState state;

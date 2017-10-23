@@ -11,12 +11,12 @@
 /**
  * Code for doing display list building for a modified subset of the window,
  * and then merging it into the existing display list (for the full window).
- * 
+ *
  * The approach primarily hinges on the observation that the ‘true’ ordering of
  * display items is represented by a DAG (only items that intersect in 2d space
  * have a defined ordering). Our display list is just one of a many possible linear
  * representations of this ordering.
- * 
+ *
  * Each time a frame changes (gets a new style context, or has a size/position
  * change), we schedule a paint (as we do currently), but also reord the frame that
  * changed.
@@ -52,7 +52,7 @@ void MarkFramesWithItemsAndImagesModified(nsDisplayList* aList)
       }
 
       if (invalidate) {
-        i->Frame()->MarkNeedsDisplayItemRebuild();
+        i->FrameForInvalidation()->MarkNeedsDisplayItemRebuild();
       }
     }
     if (i->GetChildren()) {
@@ -83,19 +83,21 @@ void
 RetainedDisplayListBuilder::PreProcessDisplayList(nsDisplayList* aList,
                                                   AnimatedGeometryRoot* aAGR)
 {
-  nsDisplayList saved;
+  nsDisplayList saved(&mBuilder);
   while (nsDisplayItem* i = aList->RemoveBottom()) {
     if (i->HasDeletedFrame() || !i->CanBeReused()) {
       i->Destroy(&mBuilder);
       continue;
     }
 
+    nsIFrame* f = i->Frame();
+
     if (i->GetChildren()) {
       AnimatedGeometryRoot *childAGR = aAGR;
-      if (i->Frame()->IsStackingContext()) {
-        if (i->Frame()->HasOverrideDirtyRegion()) {
+      if (f->IsStackingContext()) {
+        if (f->HasOverrideDirtyRegion()) {
           nsDisplayListBuilder::DisplayListBuildingData* data =
-            i->Frame()->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+            f->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
           if (data) {
             childAGR = data->mModifiedAGR;
           }
@@ -110,7 +112,7 @@ RetainedDisplayListBuilder::PreProcessDisplayList(nsDisplayList* aList,
     // to the common AGR (of both the existing item and the invalidated
     // frame) and determine if they can ever intersect.
     if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
-      mBuilder.MarkFrameForDisplayIfVisible(i->Frame());
+      mBuilder.MarkFrameForDisplayIfVisible(f);
     }
 
     // TODO: This is here because we sometimes reuse the previous display list
@@ -130,15 +132,15 @@ bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
          aFirst->GetPerFrameKey() == aSecond->GetPerFrameKey();
 }
 
-struct DisplayItemKey {
-
+struct DisplayItemKey
+{
   bool operator ==(const DisplayItemKey& aOther) const {
     return mFrame == aOther.mFrame &&
-           mKey == aOther.mKey;
+           mPerFrameKey == aOther.mPerFrameKey;
   }
 
   nsIFrame* mFrame;
-  uint32_t mKey;
+  uint32_t mPerFrameKey;
 };
 
 class DisplayItemHashEntry : public PLDHashEntryHdr
@@ -165,7 +167,7 @@ public:
     if (!aKey)
       return 0;
 
-    return mozilla::HashGeneric(aKey->mFrame, aKey->mKey);
+    return mozilla::HashGeneric(aKey->mFrame, aKey->mPerFrameKey);
   }
   enum { ALLOW_MEMMOVE = true };
 
@@ -184,11 +186,11 @@ void SwapAndRemove(nsTArray<T>& aArray, uint32_t aIndex)
   aArray.RemoveElementAt(aArray.Length() - 1);
 }
 
-void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
-                     nsDisplayLayerEventRegions* aNewItem,
-                     nsDisplayLayerEventRegions::FrameRects nsDisplayLayerEventRegions::*aRectList,
-                     bool aUpdateOld,
-                     nsTArray<nsIFrame*>& aAddedFrames)
+static void
+MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
+                nsDisplayLayerEventRegions* aNewItem,
+                nsDisplayLayerEventRegions::FrameRects nsDisplayLayerEventRegions::*aRectList,
+                nsTArray<nsIFrame*>& aAddedFrames)
 {
   // Go through the old item's rect list and remove any rectangles
   // belonging to invalidated frames (deleted frames should
@@ -214,18 +216,9 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
 
   // Copy items from the source list to the dest list, but
   // only if the dest doesn't already include them.
-  nsDisplayItem* destItem;
-  nsDisplayLayerEventRegions::FrameRects* destRects;
-  nsDisplayLayerEventRegions::FrameRects* srcRects;
-  if (aUpdateOld) {
-    destItem = aOldItem;
-    destRects = &(aOldItem->*aRectList);
-    srcRects = &(aNewItem->*aRectList);
-  } else {
-    destItem = aNewItem;
-    destRects = &(aNewItem->*aRectList);
-    srcRects = &(aOldItem->*aRectList);
-  }
+  nsDisplayItem* destItem = aOldItem;
+  nsDisplayLayerEventRegions::FrameRects* destRects = &(aOldItem->*aRectList);
+  nsDisplayLayerEventRegions::FrameRects* srcRects = &(aNewItem->*aRectList);
 
   for (uint32_t i = 0; i < srcRects->mFrames.Length(); i++) {
     nsIFrame* f = srcRects->mFrames[i];
@@ -245,8 +238,7 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
 }
 
 void MergeLayerEventRegions(nsDisplayItem* aOldItem,
-                            nsDisplayItem* aNewItem,
-                            bool aUpdateOld)
+                            nsDisplayItem* aNewItem)
 {
   nsDisplayLayerEventRegions* oldItem =
     static_cast<nsDisplayLayerEventRegions*>(aOldItem);
@@ -255,20 +247,19 @@ void MergeLayerEventRegions(nsDisplayItem* aOldItem,
 
   nsTArray<nsIFrame*> addedFrames;
 
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mHitRegion, aUpdateOld, addedFrames);
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mMaybeHitRegion, aUpdateOld, addedFrames);
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mDispatchToContentHitRegion, aUpdateOld, addedFrames);
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mNoActionRegion, aUpdateOld, addedFrames);
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mHorizontalPanRegion, aUpdateOld, addedFrames);
-  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mVerticalPanRegion, aUpdateOld, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mHitRegion, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mMaybeHitRegion, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mDispatchToContentHitRegion, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mNoActionRegion, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mHorizontalPanRegion, addedFrames);
+  MergeFrameRects(oldItem, newItem, &nsDisplayLayerEventRegions::mVerticalPanRegion, addedFrames);
 
   // MergeFrameRects deferred updating the display item data list during
   // processing so that earlier calls didn't change the result of later
   // ones. Fix that up now.
-  nsDisplayItem* dest = aUpdateOld ? aOldItem : aNewItem;
   for (nsIFrame* f : addedFrames) {
-    if (!f->HasDisplayItem(dest)) {
-      f->AddDisplayItem(dest);
+    if (!f->HasDisplayItem(aOldItem)) {
+      f->AddDisplayItem(aOldItem);
     }
   }
 }
@@ -295,10 +286,10 @@ RetainedDisplayListBuilder::IncrementSubDocPresShellPaintCount(nsDisplayItem* aI
  *
  * For-each item in the new list:
  *     If the item has a matching item in the old list:
- *         Pop items off the old list until we reach the matching item:
+ *         Remove items from the bottom of the old list until we reach the matching item:
  *             Add valid items to the merged list, destroy invalid items.
  *         Destroy the matching item from the old list.
- *     Add the item from the new lis into the merged list.
+ *     Add the item from the new list into the merged list.
  * Add all remaining valid items from the old list into the merged list.
  *
  * If any item has a child display list, then we recurse into the merge
@@ -341,8 +332,7 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
                                               nsDisplayList* aOutList,
                                               DisplayListStatistics& aStats)
 {
-  nsDisplayList merged;
-  nsDisplayItem* old;
+  nsDisplayList merged(&mBuilder);
 
   const auto UseItem = [&](nsDisplayItem* aItem) {
     merged.AppendToTop(aItem);
@@ -388,29 +378,30 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
   }
 #endif
 
-  while (nsDisplayItem* i = aNewList->RemoveBottom()) {
+  while (nsDisplayItem* newItem = aNewList->RemoveBottom()) {
     aStats.newItems++;
 
-    if (nsDisplayItem* oldItem = oldListLookup.Get({ i->Frame(), i->GetPerFrameKey() })) {
+    if (nsDisplayItem* oldItem = oldListLookup.Get({ newItem->Frame(), newItem->GetPerFrameKey() })) {
       if (oldItem->IsReused()) {
         // If there's a matching item in the old list, but we've already put it into the
         // merged list then stick with that one. Merge any child lists, and then delete the
         // new item. This solves example 2 from above.
 
         if (oldItem->GetChildren()) {
-          MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(i->GetChildren(), oldItem->GetChildren(),
+          MOZ_ASSERT(newItem->GetChildren());
+          MergeDisplayLists(newItem->GetChildren(), oldItem->GetChildren(),
                             oldItem->GetChildren(), aStats);
           oldItem->UpdateBounds(&mBuilder);
         }
         if (oldItem->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
-          MergeLayerEventRegions(oldItem, i, true);
+          MergeLayerEventRegions(oldItem, newItem);
         }
-        i->Destroy(&mBuilder);
+        newItem->Destroy(&mBuilder);
       } else {
-        // If the new item has a matching counterpart in the old list, copy all valid
-        // items from the old list into the merged list until we get to the repeat.
-        while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
+        // The new item has a matching counterpart in the old list, so copy all valid
+        // items from the old list into the merged list until we get to the matched item.
+        nsDisplayItem* old = nullptr;
+        while ((old = aOldList->RemoveBottom()) && !IsSameItem(newItem, old)) {
           if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
             ReuseItem(old);
           } else {
@@ -418,7 +409,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
             old->Destroy(&mBuilder);
           }
         }
-        MOZ_ASSERT(old && IsSameItem(i, old));
+        MOZ_ASSERT(old && IsSameItem(newItem, old));
+        MOZ_ASSERT(old == oldItem);
 
         // Recursively merge any child lists, destroy the old item and add
         // the new one to the list.
@@ -428,31 +420,31 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
           // the lists of regions and frames, so we have no need to use the
           // newer item. Always use the old item instead since we assume it's
           // likely to have the bigger lists and merging will be quicker.
-          MergeLayerEventRegions(old, i, true);
+          MergeLayerEventRegions(old, newItem);
           ReuseItem(old);
-          i->Destroy(&mBuilder);
+          newItem->Destroy(&mBuilder);
         } else {
           if (!IsAnyAncestorModified(old->FrameForInvalidation()) &&
               old->GetChildren()) {
-            MOZ_ASSERT(i->GetChildren());
-            MergeDisplayLists(i->GetChildren(), old->GetChildren(),
-                              i->GetChildren(), aStats);
-            i->UpdateBounds(&mBuilder);
+            MOZ_ASSERT(newItem->GetChildren());
+            MergeDisplayLists(newItem->GetChildren(), old->GetChildren(),
+                              newItem->GetChildren(), aStats);
+            newItem->UpdateBounds(&mBuilder);
           }
 
           old->Destroy(&mBuilder);
-          UseItem(i);
+          UseItem(newItem);
         }
       }
     } else {
       // If there was no matching item in the old list, then we only need to
       // add the new item to the merged list.
-      UseItem(i);
+      UseItem(newItem);
     }
   }
 
   // Reuse the remaining valid items from the old display list.
-  while ((old = aOldList->RemoveBottom())) {
+  while (nsDisplayItem* old = aOldList->RemoveBottom()) {
     if (!IsAnyAncestorModified(old->FrameForInvalidation())) {
       ReuseItem(old);
 
@@ -461,14 +453,14 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
         // with modified or deleted children will be correctly handled.
         // Passing an empty new display list as an argument skips the merging
         // loop above and jumps back here.
-        nsDisplayList empty;
+        nsDisplayList empty(&mBuilder);
 
         MergeDisplayLists(&empty, old->GetChildren(),
                           old->GetChildren(), aStats);
         old->UpdateBounds(&mBuilder);
       }
       if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
-        MergeLayerEventRegions(old, nullptr, false);
+        MergeLayerEventRegions(old, nullptr);
       }
     } else {
       old->Destroy(&mBuilder);
@@ -479,8 +471,8 @@ RetainedDisplayListBuilder::MergeDisplayLists(nsDisplayList* aNewList,
 }
 
 static void
-AddModifiedFramesFromRootFrame(nsTArray<nsIFrame*>& aFrames,
-                               nsIFrame* aRootFrame)
+TakeAndAddModifiedFramesFromRootFrame(nsTArray<nsIFrame*>& aFrames,
+                                      nsIFrame* aRootFrame)
 {
   MOZ_ASSERT(aRootFrame);
 
@@ -515,7 +507,7 @@ SubDocEnumCb(nsIDocument* aDocument, void* aData)
   nsIFrame* rootFrame = presShell ? presShell->GetRootFrame() : nullptr;
 
   if (rootFrame) {
-    AddModifiedFramesFromRootFrame(*modifiedFrames, rootFrame);
+    TakeAndAddModifiedFramesFromRootFrame(*modifiedFrames, rootFrame);
   }
 
   aDocument->EnumerateSubDocuments(SubDocEnumCb, aData);
@@ -528,7 +520,7 @@ GetModifiedFrames(nsIFrame* aDisplayRootFrame)
   MOZ_ASSERT(aDisplayRootFrame);
 
   nsTArray<nsIFrame*> modifiedFrames;
-  AddModifiedFramesFromRootFrame(modifiedFrames, aDisplayRootFrame);
+  TakeAndAddModifiedFramesFromRootFrame(modifiedFrames, aDisplayRootFrame);
 
   nsIDocument* rootdoc = aDisplayRootFrame->PresContext()->Document();
 
@@ -540,7 +532,7 @@ GetModifiedFrames(nsIFrame* aDisplayRootFrame)
 }
 
 // ComputeRebuildRegion  debugging
-// #define CRR_DEBUG 0
+// #define CRR_DEBUG 1
 #if CRR_DEBUG
 #  define CRR_LOG(...) printf_stderr(__VA_ARGS__)
 #else
@@ -651,7 +643,8 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
       if (currentFrame->IsStackingContext()) {
         CRR_LOG("Frame belongs to stacking context frame %p\n", currentFrame);
         // If we found an intermediate stacking context with an existing display item
-        // then we can store the dirty rect there and stop.
+        // then we can store the dirty rect there and stop. If we couldn't find one then
+        // we need to keep bubbling up to the next stacking context.
         if (currentFrame != mBuilder.RootReferenceFrame() &&
             currentFrame->HasDisplayItems()) {
           mBuilder.MarkFrameForDisplayIfVisible(currentFrame);
@@ -668,7 +661,8 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
             aOutFramesWithProps->AppendElement(currentFrame);
           }
           data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
-          CRR_LOG("Adding area to stacking context draw area: %d %d %d %d\n", overflow.x, overflow.y, overflow.width, overflow.height);
+          CRR_LOG("Adding area to stacking context draw area: %d %d %d %d\n",
+                  overflow.x, overflow.y, overflow.width, overflow.height);
           if (!data->mModifiedAGR) {
             data->mModifiedAGR = agr;
           } else if (data->mModifiedAGR != agr) {
@@ -773,7 +767,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
     PreProcessDisplayList(&mList, modifiedAGR);
 
-    nsDisplayList modifiedDL;
+    nsDisplayList modifiedDL(&mBuilder);
     if (!modifiedDirty.IsEmpty() || !framesWithProps.IsEmpty()) {
       mBuilder.SetDirtyRect(modifiedDirty);
       mBuilder.SetPartialUpdate(true);
@@ -807,7 +801,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
     merged = true;
   }
-      
+
   mBuilder.LeavePresShell(mBuilder.RootReferenceFrame(), &mList);
 
   // TODO: Do we mark frames as modified during displaylist building? If
@@ -818,6 +812,8 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
     }
   }
 
+  // Override dirty regions should only exist during this function. We set them up during
+  // ComputeRebuildRegion, and clear them here.
   for (nsIFrame* f: framesWithProps) {
     f->SetHasOverrideDirtyRegion(false);
     f->DeleteProperty(nsDisplayListBuilder::DisplayListBuildingRect());

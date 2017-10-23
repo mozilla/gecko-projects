@@ -67,7 +67,7 @@
  * 5. the view system handles moving of widgets, i.e., it's not our problem
  */
 
-class nsIAtom;
+class nsAtom;
 class nsPresContext;
 class nsIPresShell;
 class nsView;
@@ -617,12 +617,6 @@ public:
     , mNextSibling(nullptr)
     , mPrevSibling(nullptr)
     , mState(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)
-    , mFrameIsModified(false)
-    , mHasOverrideDirtyRegion(false)
-    , mBuiltDisplayList(false)
-    , mForceDescendIntoIfVisible(false)
-    , mMayHaveWillChangeBudget(false)
-    , mBuiltBlendContainer(false)
     , mClass(aID)
     , mMayHaveRoundedCorners(false)
     , mHasImageRequest(false)
@@ -630,28 +624,16 @@ public:
     , mParentIsWrapperAnonBox(false)
     , mIsWrapperBoxNeedingRestyle(false)
     , mReflowRequestedForCharDataChange(false)
+    , mForceDescendIntoIfVisible(false)
+    , mBuiltDisplayList(false)
+    , mFrameIsModified(false)
+    , mHasOverrideDirtyRegion(false)
+    , mMayHaveWillChangeBudget(false)
+    , mBuiltBlendContainer(false)
     , mIsPrimaryFrame(false)
   {
     mozilla::PodZero(&mOverflow);
   }
-
-  bool IsFrameModified() { return mFrameIsModified; }
-  void SetFrameIsModified(bool aFrameIsModified) { mFrameIsModified = aFrameIsModified; }
-
-  bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
-  void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
-
-  bool BuiltDisplayList() { return mBuiltDisplayList; }
-  void SetBuiltDisplayList(bool aBuilt) { mBuiltDisplayList = aBuilt; }
-
-  bool ForceDescendIntoIfVisible() { return mForceDescendIntoIfVisible; }
-  void SetForceDescendIntoIfVisible(bool aForce) { mForceDescendIntoIfVisible = aForce; }
-
-  bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
-  void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
-
-  bool BuiltBlendContainer() { return mBuiltBlendContainer; }
-  void SetBuiltBlendContainer(bool aBuilt) { mBuiltBlendContainer = aBuilt; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -2086,7 +2068,7 @@ public:
    *   The constants are defined in nsIDOMMutationEvent.h.
    */
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
-                                     nsIAtom*        aAttribute,
+                                     nsAtom*        aAttribute,
                                      int32_t         aModType) = 0;
 
   /**
@@ -3873,8 +3855,8 @@ public:
   // Checks if we (or any of our descendents) have NS_FRAME_PAINTED_THEBES set, and
   // clears this bit if so.
   bool CheckAndClearPaintedState();
-  
-  // Checks if we (or any of our descendents) have NS_FRAME_BUILT_DISPLAY_LIST set, and
+
+  // Checks if we (or any of our descendents) have mBuiltDisplayList set, and
   // clears this bit if so.
   bool CheckAndClearDisplayListState();
 
@@ -4128,6 +4110,24 @@ public:
 
   void DestroyAnonymousContent(already_AddRefed<nsIContent> aContent);
 
+  bool ForceDescendIntoIfVisible() { return mForceDescendIntoIfVisible; }
+  void SetForceDescendIntoIfVisible(bool aForce) { mForceDescendIntoIfVisible = aForce; }
+
+  bool BuiltDisplayList() { return mBuiltDisplayList; }
+  void SetBuiltDisplayList(bool aBuilt) { mBuiltDisplayList = aBuilt; }
+
+  bool IsFrameModified() { return mFrameIsModified; }
+  void SetFrameIsModified(bool aFrameIsModified) { mFrameIsModified = aFrameIsModified; }
+
+  bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
+  void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
+
+  bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
+  void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
+
+  bool BuiltBlendContainer() { return mBuiltBlendContainer; }
+  void SetBuiltBlendContainer(bool aBuilt) { mBuiltBlendContainer = aBuilt; }
+
 protected:
 
   /**
@@ -4195,14 +4195,6 @@ protected:
   }
 
   nsFrameState     mState;
-
-  // TODO: Make this a frame state bit.
-  bool mFrameIsModified : 1;
-  bool mHasOverrideDirtyRegion : 1;
-  bool mBuiltDisplayList : 1;
-  bool mForceDescendIntoIfVisible : 1;
-  bool mMayHaveWillChangeBudget : 1;
-  bool mBuiltBlendContainer : 1;
 
   /**
    * List of properties attached to the frame.
@@ -4297,6 +4289,37 @@ protected:
    */
   bool mReflowRequestedForCharDataChange : 1;
 
+  /**
+   * This bit is used during BuildDisplayList to mark frames that need to
+   * have display items rebuilt. We will descend into them if they are
+   * currently visible, even if they don't intersect the dirty area.
+   */
+  bool mForceDescendIntoIfVisible : 1;
+
+  /**
+   * True if we have built display items for this frame since
+   * the last call to CheckAndClearDisplayListState, false
+   * otherwise. Used for the reftest harness to verify minimal
+   * display list building.
+   */
+  bool mBuiltDisplayList : 1;
+
+  bool mFrameIsModified : 1;
+
+  bool mHasOverrideDirtyRegion : 1;
+
+  /**
+   * True if frame has will-change, and currently has display
+   * items consuming some of the will-change budget.
+   */
+  bool mMayHaveWillChangeBudget : 1;
+
+  /**
+   * True if we built an nsDisplayBlendContainer last time
+   * we did retained display list building for this frame.
+   */
+  bool mBuiltBlendContainer : 1;
+
 private:
   /**
    * True if this is the primary frame for mContent.
@@ -4305,7 +4328,7 @@ private:
 
 protected:
 
-  // There is a 9-bit gap left here.
+  // There is a 3-bit gap left here.
 
   // Helpers
   /**
@@ -4508,8 +4531,6 @@ public:
 #ifdef DEBUG
 public:
   virtual nsFrameState  GetDebugStateBits() const = 0;
-  virtual nsresult  DumpRegressionData(nsPresContext* aPresContext,
-                                       FILE* out, int32_t aIndent) = 0;
 #endif
 };
 

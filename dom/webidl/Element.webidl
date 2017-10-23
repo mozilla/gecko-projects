@@ -40,9 +40,9 @@ interface Element : Node {
   DOMString? getAttribute(DOMString name);
   [Pure]
   DOMString? getAttributeNS(DOMString? namespace, DOMString localName);
-  [CEReactions, Throws]
+  [CEReactions, NeedsSubjectPrincipal, Throws]
   void setAttribute(DOMString name, DOMString value);
-  [CEReactions, Throws]
+  [CEReactions, NeedsSubjectPrincipal, Throws]
   void setAttributeNS(DOMString? namespace, DOMString name, DOMString value);
   [CEReactions, Throws]
   void removeAttribute(DOMString name);
@@ -237,12 +237,14 @@ partial interface Element {
 
 // http://w3c.github.io/webcomponents/spec/shadow/#extensions-to-element-interface
 partial interface Element {
-  [Throws,Func="nsDocument::IsWebComponentsEnabled"]
+  [Throws,Pref="dom.webcomponents.enabled"]
   ShadowRoot createShadowRoot();
-  [Func="nsDocument::IsWebComponentsEnabled"]
+  [Pref="dom.webcomponents.enabled"]
   NodeList getDestinationInsertionPoints();
-  [Func="nsDocument::IsWebComponentsEnabled"]
+  [Pref="dom.webcomponents.enabled"]
   readonly attribute ShadowRoot? shadowRoot;
+  [Pref="dom.webcomponents.enabled"]
+  readonly attribute HTMLSlotElement? assignedSlot;
 };
 
 Element implements ChildNode;

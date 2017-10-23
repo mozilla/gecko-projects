@@ -930,7 +930,7 @@ nsObjectLoadingContent::BuildParametersArray()
   for (uint32_t i = 0; i != content->GetAttrCount(); i += 1) {
     MozPluginParameter param;
     const nsAttrName* attrName = content->GetAttrNameAt(i);
-    nsIAtom* atom = attrName->LocalName();
+    nsAtom* atom = attrName->LocalName();
     content->GetAttr(attrName->NamespaceID(), atom, param.mValue);
     atom->ToString(param.mName);
     mCachedAttributes.AppendElement(param);
@@ -1482,7 +1482,8 @@ nsObjectLoadingContent::CheckLoadPolicy(int16_t *aContentPolicy)
   *aContentPolicy = nsIContentPolicy::ACCEPT;
   nsresult rv = NS_CheckContentLoadPolicy(contentPolicyType,
                                           mURI,
-                                          doc->NodePrincipal(),
+                                          doc->NodePrincipal(), // loading principal
+                                          doc->NodePrincipal(), // triggering principal
                                           thisContent,
                                           mContentType,
                                           nullptr, //extra
@@ -1535,7 +1536,8 @@ nsObjectLoadingContent::CheckProcessPolicy(int16_t *aContentPolicy)
   nsresult rv =
     NS_CheckContentProcessPolicy(objectType,
                                  mURI ? mURI : mBaseURI,
-                                 doc->NodePrincipal(),
+                                 doc->NodePrincipal(), // loading principal
+                                 doc->NodePrincipal(), // triggering principal
                                  static_cast<nsIImageLoadingContent*>(this),
                                  mContentType,
                                  nullptr, //extra

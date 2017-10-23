@@ -1903,7 +1903,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.33, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.34, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -n "$MOZ_SYSTEM_NSS"; then
@@ -2220,7 +2220,7 @@ dnl ========================================================
 
 case "$MOZ_BUILD_APP" in
 mobile/android)
-    MOZ_ANDROID_SDK(23, 23, 23.0.3 23.0.1, 25.3.2 25.3.1)
+    MOZ_ANDROID_SDK(23, 23, 25.0.3, 26.0.0 26.0.0-dev 25.3.2 25.3.1)
     ;;
 esac
 
@@ -4058,15 +4058,6 @@ dnl ========================================================
 MOZ_ARG_HEADER(Misc. Options)
 
 dnl ========================================================
-dnl = Define default location for MOZILLA_FIVE_HOME
-dnl ========================================================
-MOZ_ARG_WITH_STRING(default-mozilla-five-home,
-[  --with-default-mozilla-five-home
-                          Set the default value for MOZILLA_FIVE_HOME],
-[ val=`echo $withval`
-  AC_DEFINE_UNQUOTED(MOZ_DEFAULT_MOZILLA_FIVE_HOME,"$val") ])
-
-dnl ========================================================
 dnl = Location of the mozilla user directory (default is ~/.mozilla).],
 dnl ========================================================
 MOZ_ARG_WITH_STRING(user-appdir,
@@ -4427,20 +4418,24 @@ dnl
 dnl option to disable necko's wifi scanner
 dnl
 
-case "$OS_TARGET" in
-  Darwin)
-    if test -z "$MOZ_IOS"; then
+if test "$MOZ_WIDGET_TOOLKIT"; then
+
+  case "$OS_TARGET" in
+    Darwin)
+      if test -z "$MOZ_IOS"; then
+	NECKO_WIFI=1
+      fi
+      ;;
+    DragonFly|FreeBSD|WINNT)
       NECKO_WIFI=1
-    fi
-    ;;
-  DragonFly|FreeBSD|WINNT)
-    NECKO_WIFI=1
-    ;;
-  Linux)
-    NECKO_WIFI=1
-    NECKO_WIFI_DBUS=1
-    ;;
-esac
+      ;;
+    Linux)
+      NECKO_WIFI=1
+      NECKO_WIFI_DBUS=1
+      ;;
+  esac
+
+fi
 
 MOZ_ARG_DISABLE_BOOL(necko-wifi,
 [  --disable-necko-wifi    Disable necko wifi scanner],
@@ -5037,7 +5032,7 @@ if test -n "$_subconfigure_subdir"; then
   srcdir="$_save_srcdir"
 fi
 
-if test "$COMPILE_ENVIRONMENT"; then
+if test "$COMPILE_ENVIRONMENT" -a "$MOZ_WIDGET_TOOLKIT"; then
 
 export WRAP_LDFLAGS
 

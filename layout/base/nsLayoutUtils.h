@@ -39,7 +39,7 @@
 class gfxContext;
 class nsPresContext;
 class nsIContent;
-class nsIAtom;
+class nsAtom;
 class nsIScrollableFrame;
 class nsIDOMEvent;
 class nsRegion;
@@ -257,8 +257,8 @@ public:
    */
   static void InvalidateForDisplayPortChange(nsIContent* aContent,
                                              bool aHadDisplayPort,
-                                             nsRect& aOldDisplayPort,
-                                             nsRect& aNewDisplayPort,
+                                             const nsRect& aOldDisplayPort,
+                                             const nsRect& aNewDisplayPort,
                                              RepaintMode aRepaintMode = RepaintMode::Repaint);
 
   /**
@@ -408,7 +408,7 @@ public:
    * @return whether aFrame is the generated aPseudoElement frame for aContent
    */
   static bool IsGeneratedContentFor(nsIContent* aContent, nsIFrame* aFrame,
-                                      nsIAtom* aPseudoElement);
+                                      nsAtom* aPseudoElement);
 
 #ifdef DEBUG
   // TODO: remove, see bug 598468.
@@ -2089,12 +2089,23 @@ public:
   GetDeviceContextForScreenInfo(nsPIDOMWindowOuter* aWindow);
 
   /**
-   * Some frames with 'position: fixed' (nsStylePosition::mDisplay ==
+   * Some frames with 'position: fixed' (nsStyleDisplay::mPosition ==
    * NS_STYLE_POSITION_FIXED) are not really fixed positioned, since
    * they're inside an element with -moz-transform.  This function says
    * whether such an element is a real fixed-pos element.
    */
-  static bool IsReallyFixedPos(nsIFrame* aFrame);
+  static bool IsReallyFixedPos(const nsIFrame* aFrame);
+
+  /**
+   * This function says whether `aFrame` would really be a fixed positioned
+   * frame if the frame was created with NS_STYLE_POSITION_FIXED.
+   *
+   * It is effectively the same as IsReallyFixedPos, but without asserting the
+   * position value. Use it only when you know what you're doing, like when
+   * tearing down the frame tree (where styles may have changed due to
+   * ::first-line reparenting and rule changes at the same time).
+   */
+  static bool MayBeReallyFixedPos(const nsIFrame* aFrame);
 
   /**
    * Obtain a SourceSurface from the given DOM element, if possible.
@@ -2521,10 +2532,6 @@ public:
             (XRE_IsParentProcess() && !XRE_IsE10sParentProcess());
   }
 
-  static bool StyleAttrWithXMLBaseDisabled() {
-    return sStyleAttrWithXMLBaseDisabled;
-  }
-
   static uint32_t IdlePeriodDeadlineLimit() {
     return sIdlePeriodDeadlineLimit;
   }
@@ -2552,6 +2559,41 @@ public:
 
   static void Initialize();
   static void Shutdown();
+
+#ifdef MOZ_STYLO
+  /**
+   * Return whether stylo should be used for a given document URI and
+   * principal.
+   */
+  static bool ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal);
+
+  /**
+   * Principal-based blocklist for stylo.
+   * Check if aPrincipal is blocked by stylo's blocklist and should fallback to
+   * use Gecko's style backend. Note that using a document's principal rather
+   * than the document URI will let us piggy-back off the existing principal
+   * relationships and symmetries.
+   */
+  static bool IsInStyloBlocklist(nsIPrincipal* aPrincipal);
+
+  /**
+   * Add aBlockedDomain to the existing stylo blocklist, i.e., sStyloBlocklist.
+   * This function is exposed to nsDOMWindowUtils and only for testing purpose.
+   * So, NEVER use this in any other cases.
+   */
+  static void AddToStyloBlocklist(const nsACString& aBlockedDomain);
+
+  /**
+   * Remove aBlockedDomain from the existing stylo blocklist, i.e., sStyloBlocklist.
+   * This function is exposed to nsDOMWindowUtils and only for testing purpose.
+   * So, NEVER use this in any other cases.
+   */
+  static void RemoveFromStyloBlocklist(const nsACString& aBlockedDomain);
+#else
+  static bool ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal) {
+    return false;
+  }
+#endif
 
   /**
    * Register an imgIRequest object with a refresh driver.
@@ -2870,7 +2912,7 @@ public:
    * returns true for those, and returns false for other origins like APZ
    * itself, or scroll position updates from the history restore code.
    */
-  static bool CanScrollOriginClobberApz(nsIAtom* aScrollOrigin);
+  static bool CanScrollOriginClobberApz(nsAtom* aScrollOrigin);
 
   static ScrollMetadata ComputeScrollMetadata(nsIFrame* aForFrame,
                                               nsIFrame* aScrollFrame,
@@ -3020,8 +3062,9 @@ private:
   static bool sTextCombineUprightDigitsEnabled;
 #ifdef MOZ_STYLO
   static bool sStyloEnabled;
+  static bool sStyloBlocklistEnabled;
+  static nsTArray<nsCString>* sStyloBlocklist;
 #endif
-  static bool sStyleAttrWithXMLBaseDisabled;
   static uint32_t sIdlePeriodDeadlineLimit;
   static uint32_t sQuiescentFramesBeforeIdlePeriod;
 
@@ -3157,27 +3200,27 @@ void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
 class nsSetAttrRunnable : public mozilla::Runnable
 {
 public:
-  nsSetAttrRunnable(nsIContent* aContent, nsIAtom* aAttrName,
+  nsSetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName,
                     const nsAString& aValue);
-  nsSetAttrRunnable(nsIContent* aContent, nsIAtom* aAttrName,
+  nsSetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName,
                     int32_t aValue);
 
   NS_DECL_NSIRUNNABLE
 
   nsCOMPtr<nsIContent> mContent;
-  RefPtr<nsIAtom> mAttrName;
+  RefPtr<nsAtom> mAttrName;
   nsAutoString mValue;
 };
 
 class nsUnsetAttrRunnable : public mozilla::Runnable
 {
 public:
-  nsUnsetAttrRunnable(nsIContent* aContent, nsIAtom* aAttrName);
+  nsUnsetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName);
 
   NS_DECL_NSIRUNNABLE
 
   nsCOMPtr<nsIContent> mContent;
-  RefPtr<nsIAtom> mAttrName;
+  RefPtr<nsAtom> mAttrName;
 };
 
 // This class allows you to easily set any pointer variable and ensure it's

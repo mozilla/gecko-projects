@@ -92,13 +92,13 @@ public:
   }
 
   static already_AddRefed<nsStyleContext>
-  GetStyleContext(mozilla::dom::Element* aElement, nsIAtom* aPseudo,
+  GetStyleContext(mozilla::dom::Element* aElement, nsAtom* aPseudo,
                   nsIPresShell* aPresShell,
                   StyleType aStyleType = eAll);
 
   static already_AddRefed<nsStyleContext>
   GetStyleContextNoFlush(mozilla::dom::Element* aElement,
-                         nsIAtom* aPseudo,
+                         nsAtom* aPseudo,
                          nsIPresShell* aPresShell,
                          StyleType aStyleType = eAll)
   {
@@ -111,7 +111,7 @@ public:
 
   static already_AddRefed<nsStyleContext>
   GetUnanimatedStyleContextNoFlush(mozilla::dom::Element* aElement,
-                                   nsIAtom* aPseudo,
+                                   nsAtom* aPseudo,
                                    nsIPresShell* aPresShell,
                                    StyleType aStyleType = eAll)
   {
@@ -175,7 +175,7 @@ private:
 
   static already_AddRefed<nsStyleContext>
   DoGetStyleContextNoFlush(mozilla::dom::Element* aElement,
-                           nsIAtom* aPseudo,
+                           nsAtom* aPseudo,
                            nsIPresShell* aPresShell,
                            StyleType aStyleType,
                            AnimationFlag aAnimationFlag);
@@ -692,8 +692,9 @@ private:
   bool GetFrameBorderRectWidth(nscoord& aWidth);
   bool GetFrameBorderRectHeight(nscoord& aHeight);
 
-  /* Helper functions for computing the filter property style. */
-  void SetCssTextToCoord(nsAString& aCssText, const nsStyleCoord& aCoord);
+  /* Helper functions for computing and serializing a nsStyleCoord. */
+  void SetCssTextToCoord(nsAString& aCssText, const nsStyleCoord& aCoord,
+                         bool aClampNegativeCalc);
   already_AddRefed<CSSValue> CreatePrimitiveValueForStyleFilter(
     const nsStyleFilter& aStyleFilter);
 
@@ -712,7 +713,8 @@ private:
   already_AddRefed<CSSValue> CreatePrimitiveValueForBasicShape(
     const mozilla::UniquePtr<mozilla::StyleBasicShape>& aStyleBasicShape);
   void BoxValuesToString(nsAString& aString,
-                         const nsTArray<nsStyleCoord>& aBoxValues);
+                         const nsTArray<nsStyleCoord>& aBoxValues,
+                         bool aClampNegativeCalc);
   void BasicShapeRadiiToString(nsAString& aCssText,
                                const nsStyleCorners& aCorners);
 
@@ -746,7 +748,7 @@ private:
    * if the pres arena from which it was allocated goes away.
    */
   mozilla::ArenaRefPtr<nsStyleContext> mStyleContext;
-  RefPtr<nsIAtom> mPseudo;
+  RefPtr<nsAtom> mPseudo;
 
   /*
    * While computing style data, the primary frame for mContent --- named "outer"

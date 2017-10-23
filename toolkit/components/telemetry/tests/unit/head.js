@@ -129,7 +129,7 @@ const PingServer = {
 function decodeRequestPayload(request) {
   let s = request.bodyInputStream;
   let payload = null;
-  let decoder = Cc["@mozilla.org/dom/json;1"].createInstance(Ci.nsIJSON)
+  let decoder = Cc["@mozilla.org/dom/json;1"].createInstance(Ci.nsIJSON);
 
   if (request.hasHeader("content-encoding") &&
       request.getHeader("content-encoding") == "gzip") {
@@ -188,6 +188,8 @@ function loadAddonManager(...args) {
   // used by system add-ons.
   const distroDir = FileUtils.getDir("ProfD", ["sysfeatures", "app0"], true);
   AddonTestUtils.registerDirectory("XREAppFeat", distroDir);
+  AddonTestUtils.awaitPromise(AddonTestUtils.overrideBuiltIns(
+          {"system": ["tel-system-xpi@tests.mozilla.org"]}));
   return AddonTestUtils.promiseStartupManager();
 }
 

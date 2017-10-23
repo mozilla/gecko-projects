@@ -788,8 +788,6 @@ function looksLikeUrl(str, ignoreAlphanumericHosts = false) {
  *        * user-context-id: The userContextId of the selected tab.
  * @param autocompleteListener
  *        An nsIAutoCompleteObserver.
- * @param resultListener
- *        An nsIAutoCompleteSimpleResultListener.
  * @param autocompleteSearch
  *        An nsIAutoCompleteSearch.
  * @param prohibitSearchSuggestions
@@ -798,8 +796,7 @@ function looksLikeUrl(str, ignoreAlphanumericHosts = false) {
  *        The result object from the previous search. if available.
  */
 function Search(searchString, searchParam, autocompleteListener,
-                resultListener, autocompleteSearch, prohibitSearchSuggestions,
-                previousResult) {
+                autocompleteSearch, prohibitSearchSuggestions, previousResult) {
   // We want to store the original string for case sensitive searches.
   this._originalSearchString = searchString;
   this._trimmedOriginalSearchString = searchString.trim();
@@ -844,7 +841,16 @@ function Search(searchString, searchParam, autocompleteListener,
                Cc["@mozilla.org/autocomplete/simple-result;1"]
                  .createInstance(Ci.nsIAutoCompleteSimpleResult);
   result.setSearchString(searchString);
-  result.setListener(resultListener);
+  result.setListener({
+    onValueRemoved(result, spec, removeFromDB) {
+      if (removeFromDB) {
+        PlacesUtils.history.remove(spec).catch(Cu.reportError);
+      }
+    },
+    QueryInterface: XPCOMUtils.generateQI([
+      Ci.nsIAutoCompleteSimpleResultListener
+    ])
+  });
   // Will be set later, if needed.
   result.setDefaultIndex(-1);
   this._result = result;
@@ -1023,7 +1029,7 @@ Search.prototype = {
       if (!SwitchToTabStorage.updating) {
         conn.interrupt();
       }
-    }
+    };
 
     TelemetryStopwatch.start(TELEMETRY_1ST_RESULT, this);
     TelemetryStopwatch.start(TELEMETRY_6_FIRST_RESULTS, this);
@@ -1242,7 +1248,7 @@ Search.prototype = {
       return site.uri.host.startsWith(this._searchStringFromWWW)
              && matchScheme(site, this);
     }
-    let site = PreloadedSiteStorage.sites.find(matchStrict, this)
+    let site = PreloadedSiteStorage.sites.find(matchStrict, this);
     if (site) {
       let match = {
         // We keep showing prefix that user typed, then what we match on
@@ -1690,7 +1696,7 @@ Search.prototype = {
         // by "remote" matches.
         frecency: FRECENCY_DEFAULT + 1,
         icon,
-      }
+      };
       this._addMatch(match);
     }
   },
@@ -2374,12 +2380,11 @@ Search.prototype = {
     this._listener.onSearchResult(this._autocompleteSearch, result);
     if (!searchOngoing) {
       // Break possible cycles.
-      this._result.setListener(null);
       this._listener = null;
       this._autocompleteSearch = null;
     }
   },
-}
+};
 
 // UnifiedComplete class
 // component @mozilla.org/autocomplete/search;1?name=unifiedcomplete
@@ -2490,7 +2495,6 @@ UnifiedComplete.prototype = {
       searchString.length > this._lastLowResultsSearchSuggestion.length &&
       searchString.startsWith(this._lastLowResultsSearchSuggestion);
 
-
     // We don't directly reuse the controller provided previousResult because:
     //  * it is only populated when the new searchString is an extension of the
     //    previous one. We want to handle the backspace case too.
@@ -2524,7 +2528,7 @@ UnifiedComplete.prototype = {
     }
 
     this._currentSearch = new Search(searchString, searchParam, listener,
-                                     this, this, prohibitSearchSuggestions,
+                                     this, prohibitSearchSuggestions,
                                      previousResult);
 
     // If we are not enabled, we need to return now.  Notice we need an empty
@@ -2593,14 +2597,6 @@ UnifiedComplete.prototype = {
     search.notifyResults(false);
   },
 
-  // nsIAutoCompleteSimpleResultListener
-
-  onValueRemoved(result, spec, removeFromDB) {
-    if (removeFromDB) {
-      PlacesUtils.history.remove(spec).catch(Cu.reportError);
-    }
-  },
-
   // nsIAutoCompleteSearchDescriptor
 
   get searchType() {
@@ -2619,7 +2615,6 @@ UnifiedComplete.prototype = {
 
   QueryInterface: XPCOMUtils.generateQI([
     Ci.nsIAutoCompleteSearch,
-    Ci.nsIAutoCompleteSimpleResultListener,
     Ci.nsIAutoCompleteSearchDescriptor,
     Ci.mozIPlacesAutoComplete,
     Ci.nsIObserver,

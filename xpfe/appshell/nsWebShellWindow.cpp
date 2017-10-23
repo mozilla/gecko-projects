@@ -414,6 +414,16 @@ nsWebShellWindow::UIResolutionChanged()
 }
 
 void
+nsWebShellWindow::FullscreenWillChange(bool aInFullscreen)
+{
+  if (mDocShell) {
+    if (nsCOMPtr<nsPIDOMWindowOuter> ourWindow = mDocShell->GetWindow()) {
+      ourWindow->FullscreenWillChange(aInFullscreen);
+    }
+  }
+}
+
+void
 nsWebShellWindow::FullscreenChanged(bool aInFullscreen)
 {
   if (mDocShell) {
@@ -574,7 +584,7 @@ nsWebShellWindow::SetPersistenceTimer(uint32_t aDirtyFlags)
 {
   MutexAutoLock lock(mSPTimerLock);
   if (!mSPTimer) {
-    mSPTimer = do_CreateInstance("@mozilla.org/timer;1");
+    mSPTimer = NS_NewTimer();
     if (!mSPTimer) {
       NS_WARNING("Couldn't create @mozilla.org/timer;1 instance?");
       return;

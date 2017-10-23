@@ -7,7 +7,7 @@
 use app_units::AU_PER_PX;
 use app_units::Au;
 use context::QuirksMode;
-use cssparser::{CssStringWriter, Parser, RGBA, Token, BasicParseError};
+use cssparser::{CssStringWriter, Parser, RGBA, Token, BasicParseErrorKind};
 use euclid::ScaleFactor;
 use euclid::Size2D;
 use font_metrics::get_metrics_provider_for_product;
@@ -30,8 +30,9 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 use str::starts_with_ignore_ascii_case;
 use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
-use style_traits::{ToCss, ParseError, StyleParseError};
+use style_traits::{ToCss, ParseError, StyleParseErrorKind};
 use style_traits::viewport::ViewportConstraints;
+use stylesheets::Origin;
 use values::{CSSFloat, CustomIdent, serialize_dimension};
 use values::computed::{self, ToComputedValue};
 use values::specified::Length;
@@ -56,7 +57,7 @@ pub struct Device {
     /// The body text color, stored as an `nscolor`, used for the "tables
     /// inherit from body" quirk.
     ///
-    /// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    /// <https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk>
     body_text_color: AtomicUsize,
     /// Whether any styles computed in the document relied on the root font-size
     /// by using rem units.
@@ -117,7 +118,7 @@ impl Device {
 
     /// Sets the body text color for the "inherit color from body" quirk.
     ///
-    /// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    /// <https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk>
     pub fn set_body_text_color(&self, color: RGBA) {
         self.body_text_color.store(convert_rgba_to_nscolor(&color) as usize, Ordering::Relaxed)
     }
@@ -284,15 +285,16 @@ impl Resolution {
     }
 
     fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        let location = input.current_source_location();
         let (value, unit) = match *input.next()? {
             Token::Dimension { value, ref unit, .. } => {
                 (value, unit)
             },
-            ref t => return Err(BasicParseError::UnexpectedToken(t.clone()).into()),
+            ref t => return Err(location.new_unexpected_token_error(t.clone())),
         };
 
         if value <= 0. {
-            return Err(StyleParseError::UnspecifiedError.into())
+            return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError))
         }
 
         (match_ignore_ascii_case! { &unit,
@@ -300,7 +302,7 @@ impl Resolution {
             "dppx" => Ok(Resolution::Dppx(value)),
             "dpcm" => Ok(Resolution::Dpcm(value)),
             _ => Err(())
-        }).map_err(|()| StyleParseError::UnexpectedDimension(unit.clone()).into())
+        }).map_err(|()| location.new_custom_error(StyleParseErrorKind::UnexpectedDimension(unit.clone())))
     }
 }
 
@@ -373,8 +375,8 @@ impl MediaExpressionValue {
                 Some(MediaExpressionValue::BoolInteger(i == 1))
             }
             nsMediaFeature_ValueType::eResolution => {
-                debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Inch);
-                Some(MediaExpressionValue::Resolution(Resolution::Dpi(css_value.float_unchecked())))
+                debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Pixel);
+                Some(MediaExpressionValue::Resolution(Resolution::Dppx(css_value.float_unchecked())))
             }
             nsMediaFeature_ValueType::eEnumerated => {
                 let value = css_value.integer_unchecked() as i16;
@@ -497,7 +499,7 @@ fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
            // for parity with gecko. We should remove this check when we want
            // to support it.
            if let Length::Calc(_) = length {
-               return Err(StyleParseError::UnspecifiedError.into())
+               return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
            }
            MediaExpressionValue::Length(length)
         },
@@ -507,14 +509,14 @@ fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
            // supported in media queries per FIXME above.
            let i = input.expect_integer()?;
            if i < 0 {
-               return Err(StyleParseError::UnspecifiedError.into())
+               return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
            }
            MediaExpressionValue::Integer(i as u32)
         }
         nsMediaFeature_ValueType::eBoolInteger => {
            let i = input.expect_integer()?;
            if i < 0 || i > 1 {
-               return Err(StyleParseError::UnspecifiedError.into())
+               return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
            }
            MediaExpressionValue::BoolInteger(i == 1)
         }
@@ -524,14 +526,14 @@ fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
         nsMediaFeature_ValueType::eIntRatio => {
            let a = input.expect_integer()?;
            if a <= 0 {
-               return Err(StyleParseError::UnspecifiedError.into())
+               return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
            }
 
            input.expect_delim('/')?;
 
            let b = input.expect_integer()?;
            if b <= 0 {
-               return Err(StyleParseError::UnspecifiedError.into())
+               return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
            }
            MediaExpressionValue::IntRatio(a as u32, b as u32)
         }
@@ -539,28 +541,26 @@ fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
            MediaExpressionValue::Resolution(Resolution::parse(input)?)
         }
         nsMediaFeature_ValueType::eEnumerated => {
-           let keyword = input.expect_ident()?;
-           let keyword = unsafe {
-               bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
-               keyword.len() as u32)
-           };
+            let location = input.current_source_location();
+            let keyword = input.expect_ident()?;
+            let keyword = unsafe {
+                bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
+                keyword.len() as u32)
+            };
 
-           let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
-               *feature.mData.mKeywordTable.as_ref()
-           };
+            let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
+                *feature.mData.mKeywordTable.as_ref()
+            };
 
-           let value =
-               match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
-                   Some((_kw, value)) => {
-                       value
-                   }
-                   None => return Err(StyleParseError::UnspecifiedError.into()),
-               };
+            let value = match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
+                Some((_kw, value)) => value,
+                None => return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError)),
+            };
 
-           MediaExpressionValue::Enumerated(value)
+            MediaExpressionValue::Enumerated(value)
         }
         nsMediaFeature_ValueType::eIdent => {
-           MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
+            MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
         }
     };
 
@@ -584,13 +584,15 @@ impl Expression {
     /// ```
     /// (media-feature: media-value)
     /// ```
-    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<Self, ParseError<'i>> {
+    pub fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
         input.expect_parenthesis_block().map_err(|err|
-            match err {
-                BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
-                _ => StyleParseError::UnspecifiedError,
-            }
+            err.location.new_custom_error(match err.kind {
+                BasicParseErrorKind::UnexpectedToken(t) => StyleParseErrorKind::ExpectedIdentifier(t),
+                _ => StyleParseErrorKind::UnspecifiedError,
+            })
         )?;
 
         input.parse_nested_block(|input| {
@@ -598,14 +600,21 @@ impl Expression {
             let feature;
             let range;
             {
+                let location = input.current_source_location();
                 let ident = input.expect_ident().map_err(|err|
-                    match err {
-                        BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
-                        _ => StyleParseError::UnspecifiedError,
-                    }
+                    err.location.new_custom_error(match err.kind {
+                        BasicParseErrorKind::UnexpectedToken(t) => StyleParseErrorKind::ExpectedIdentifier(t),
+                        _ => StyleParseErrorKind::UnspecifiedError,
+                    })
                 )?;
 
                 let mut flags = 0;
+
+                if context.in_chrome_stylesheet() ||
+                    context.stylesheet_origin == Origin::UserAgent {
+                    flags |= nsMediaFeature_RequirementFlags::eUserAgentAndChromeOnly as u8;
+                }
+
                 let result = {
                     let mut feature_name = &**ident;
 
@@ -639,19 +648,25 @@ impl Expression {
                     Ok((f, r)) => {
                         feature = f;
                         range = r;
-                    },
+                    }
                     Err(()) => {
-                        return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into())
-                    },
+                        return Err(location.new_custom_error(
+                            StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone())
+                        ))
+                    }
                 }
 
                 if (feature.mReqFlags & !flags) != 0 {
-                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
+                    return Err(location.new_custom_error(
+                        StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone())
+                    ))
                 }
 
                 if range != nsMediaExpression_Range::eEqual &&
                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
+                    return Err(location.new_custom_error(
+                        StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone())
+                    ))
                 }
             }
 
@@ -662,15 +677,15 @@ impl Expression {
             // reject them here too.
             if input.try(|i| i.expect_colon()).is_err() {
                 if range != nsMediaExpression_Range::eEqual {
-                    return Err(StyleParseError::RangedExpressionWithNoValue.into())
+                    return Err(input.new_custom_error(StyleParseErrorKind::RangedExpressionWithNoValue))
                 }
                 return Ok(Expression::new(feature, None, range));
             }
 
             let value = parse_feature_value(feature,
                                             feature.mValueType,
-                                            context, input).map_err(|_|
-                StyleParseError::MediaQueryExpectedFeatureValue
+                                            context, input).map_err(|err|
+                err.location.new_custom_error(StyleParseErrorKind::MediaQueryExpectedFeatureValue)
             )?;
 
             Ok(Expression::new(feature, Some(value), range))

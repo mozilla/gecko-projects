@@ -26,7 +26,7 @@ use std::default::Default;
 #[dom_struct]
 pub struct HTMLObjectElement {
     htmlelement: HTMLElement,
-    #[ignore_heap_size_of = "Arc"]
+    #[ignore_malloc_size_of = "Arc"]
     image: DomRefCell<Option<Arc<Image>>>,
     form_owner: MutNullableDom<HTMLFormElement>,
 }
@@ -47,7 +47,7 @@ impl HTMLObjectElement {
     pub fn new(local_name: LocalName,
                prefix: Option<Prefix>,
                document: &Document) -> DomRoot<HTMLObjectElement> {
-        Node::reflect_node(box HTMLObjectElement::new_inherited(local_name, prefix, document),
+        Node::reflect_node(Box::new(HTMLObjectElement::new_inherited(local_name, prefix, document)),
                            document,
                            HTMLObjectElementBinding::Wrap)
     }

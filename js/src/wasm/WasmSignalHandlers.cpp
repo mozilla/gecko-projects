@@ -173,6 +173,7 @@ class AutoSetHandlingSegFault
 #  define EPC_sig(p) ((p)->uc_mcontext.pc)
 #  define RFP_sig(p) ((p)->uc_mcontext.gregs[30])
 #  define RSP_sig(p) ((p)->uc_mcontext.gregs[29])
+#  define R31_sig(p) ((p)->uc_mcontext.gregs[31])
 # endif
 #elif defined(__NetBSD__)
 # define XMM_sig(p,i) (((struct fxsave64*)(p)->uc_mcontext.__fpregs)->fx_xmm[i])
@@ -418,6 +419,7 @@ struct macos_arm_context {
 # define PC_sig(p) EPC_sig(p)
 # define FP_sig(p) RFP_sig(p)
 # define SP_sig(p) RSP_sig(p)
+# define LR_sig(p) R31_sig(p)
 #endif
 
 static uint8_t**
@@ -447,7 +449,7 @@ ContextToSP(CONTEXT* context)
     return reinterpret_cast<uint8_t*>(SP_sig(context));
 }
 
-# if defined(__arm__) || defined(__aarch64__)
+# if defined(__arm__) || defined(__aarch64__) || defined(__mips__)
 static uint8_t*
 ContextToLR(CONTEXT* context)
 {
@@ -538,7 +540,7 @@ ToRegisterState(CONTEXT* context)
     state.fp = ContextToFP(context);
     state.pc = *ContextToPC(context);
     state.sp = ContextToSP(context);
-# if defined(__arm__) || defined(__aarch64__)
+# if defined(__arm__) || defined(__aarch64__) || defined(__mips__)
     state.lr = ContextToLR(context);
 # endif
     return state;
@@ -990,7 +992,7 @@ HandleFault(PEXCEPTION_POINTERS exception)
         return false;
     JitActivation* activation = cx->activation()->asJit();
 
-    const CodeSegment* codeSegment = activation->compartment()->wasm.lookupCodeSegment(pc);
+    const CodeSegment* codeSegment = LookupCodeSegment(pc);
     if (!codeSegment)
         return false;
 
@@ -1125,7 +1127,7 @@ HandleMachException(JSContext* cx, const ExceptionRequest& request)
         return false;
     JitActivation* activation = cx->activation()->asJit();
 
-    const CodeSegment* codeSegment = activation->compartment()->wasm.lookupCodeSegment(pc);
+    const CodeSegment* codeSegment = LookupCodeSegment(pc);
     if (!codeSegment)
         return false;
 
@@ -1336,7 +1338,7 @@ HandleFault(int signum, siginfo_t* info, void* ctx)
         return false;
     JitActivation* activation = cx->activation()->asJit();
 
-    const CodeSegment* segment = activation->compartment()->wasm.lookupCodeSegment(pc);
+    const CodeSegment* segment = LookupCodeSegment(pc);
     if (!segment)
         return false;
 
@@ -1445,7 +1447,7 @@ wasm::InInterruptibleCode(JSContext* cx, uint8_t* pc, const CodeSegment** cs)
     if (!cx->compartment())
         return false;
 
-    *cs = cx->compartment()->wasm.lookupCodeSegment(pc);
+    *cs = LookupCodeSegment(pc);
     if (!*cs)
         return false;
 
@@ -1617,7 +1619,7 @@ ProcessHasSignalHandlers()
 
     // Allow handling OOB with signals on all architectures
     struct sigaction faultHandler;
-    faultHandler.sa_flags = SA_SIGINFO | SA_NODEFER;
+    faultHandler.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
     faultHandler.sa_sigaction = WasmFaultHandler<Signal::SegFault>;
     sigemptyset(&faultHandler.sa_mask);
     if (sigaction(SIGSEGV, &faultHandler, &sPrevSEGVHandler))
@@ -1626,7 +1628,7 @@ ProcessHasSignalHandlers()
 #  if defined(JS_CODEGEN_ARM)
     // On Arm Handle Unaligned Accesses
     struct sigaction busHandler;
-    busHandler.sa_flags = SA_SIGINFO | SA_NODEFER;
+    busHandler.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
     busHandler.sa_sigaction = WasmFaultHandler<Signal::BusError>;
     sigemptyset(&busHandler.sa_mask);
     if (sigaction(SIGBUS, &busHandler, &sPrevSIGBUSHandler))

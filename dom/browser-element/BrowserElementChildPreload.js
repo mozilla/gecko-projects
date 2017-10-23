@@ -668,7 +668,7 @@ BrowserElementChild.prototype = {
     let isHTMLLink = node =>
         ((ChromeUtils.getClassName(node) === "HTMLAnchorElement" && node.href) ||
          (ChromeUtils.getClassName(node) === "HTMLAreaElement" && node.href) ||
-         node instanceof Ci.nsIDOMHTMLLinkElement);
+         ChromeUtils.getClassName(node) === "HTMLLinkElement");
 
     // Open in a new tab if middle click or ctrl/cmd-click,
     // and e.target is a link or inside a link.
@@ -865,7 +865,7 @@ BrowserElementChild.prototype = {
     if (elem instanceof Ci.nsIImageLoadingContent && elem.currentURI) {
       return {uri: elem.currentURI.spec, documentURI: documentURI};
     }
-    if (elem instanceof Ci.nsIDOMHTMLImageElement) {
+    if (ChromeUtils.getClassName(elem) === "HTMLImageElement") {
       return {uri: elem.src, documentURI: documentURI};
     }
     if (elem instanceof Ci.nsIDOMHTMLMediaElement) {

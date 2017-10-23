@@ -313,6 +313,8 @@ this.ExtensionData = class {
     this.dependencies = new Set();
     this.permissions = new Set();
 
+    this.startupData = null;
+
     this.errors = [];
     this.warnings = [];
   }
@@ -620,6 +622,24 @@ this.ExtensionData = class {
         webAccessibleResources = manifest.web_accessible_resources
           .map(path => path.replace(/^\/*/, "/"));
       }
+    } else if (this.type == "langpack") {
+      // Compute the chrome resources to be registered for this langpack
+      // and stash them in startupData
+      const platform = AppConstants.platform;
+      const chromeEntries = [];
+      for (const [language, entry] of Object.entries(manifest.languages)) {
+        for (const [alias, path] of Object.entries(entry.chrome_resources || {})) {
+          if (typeof path === "string") {
+            chromeEntries.push(["locale", alias, language, path]);
+          } else if (platform in path) {
+            // If the path is not a string, it's an object with path per
+            // platform where the keys are taken from AppConstants.platform
+            chromeEntries.push(["locale", alias, language, path[platform]]);
+          }
+        }
+      }
+
+      this.startupData = {chromeEntries};
     }
 
     return {apiNames, dependencies, originPermissions, id, manifest, permissions,
@@ -884,8 +904,11 @@ this.ExtensionData = class {
       result.msgs.push(bundle.formatStringFromName(permissionKey(NATIVE_MSG_PERM), [info.appName], 1));
     }
 
-    // Finally, show remaining permissions, in any order.
-    for (let permission of perms.permissions) {
+    // Finally, show remaining permissions, in the same order as AMO.
+    // The permissions are sorted alphabetically by the permission
+    // string to match AMO.
+    let permissionsCopy = perms.permissions.slice(0);
+    for (let permission of permissionsCopy.sort()) {
       // Handled above
       if (permission == "nativeMessaging") {
         continue;
@@ -1190,8 +1213,24 @@ this.Extension = class extends ExtensionData {
     return [this.id, this.version, Services.locale.getAppLocaleAsLangTag()];
   }
 
+  async _parseManifest() {
+    let manifest = await super.parseManifest();
+    if (manifest && manifest.permissions.has("mozillaAddons") &&
+        this.addonData.signedState !== AddonManager.SIGNEDSTATE_PRIVILEGED) {
+      Cu.reportError(`Stripping mozillaAddons permission from ${this.id}`);
+      manifest.permissions.delete("mozillaAddons");
+      let i = manifest.manifest.permissions.indexOf("mozillaAddons");
+      if (i >= 0) {
+        manifest.manifest.permissions.splice(i, 1);
+      } else {
+        throw new Error("Could not find mozilaAddons in original permissions array");
+      }
+    }
+    return manifest;
+  }
+
   parseManifest() {
-    return StartupCache.manifests.get(this.manifestCacheKey, () => super.parseManifest());
+    return StartupCache.manifests.get(this.manifestCacheKey, () => this._parseManifest());
   }
 
   async cachePermissions() {
@@ -1608,6 +1647,8 @@ this.Extension = class extends ExtensionData {
 this.Langpack = class extends ExtensionData {
   constructor(addonData, startupReason) {
     super(addonData.resourceURI);
+    this.startupData = addonData.startupData;
+    this.manifestCacheKey = [addonData.id, addonData.version];
   }
 
   static getBootstrapScope(id, file) {
@@ -1627,10 +1668,6 @@ this.Langpack = class extends ExtensionData {
       .then(result => {
         this.localeData.messages.set(locale, result);
       });
-  }
-
-  get manifestCacheKey() {
-    return [this.id, this.version, Services.locale.getAppLocaleAsLangTag()];
   }
 
   async _parseManifest() {
@@ -1661,7 +1698,6 @@ this.Langpack = class extends ExtensionData {
     }
 
     data.l10nRegistrySources = l10nRegistrySources;
-    data.chromeResources = this.getChromeResources(data.manifest);
 
     return data;
   }
@@ -1672,19 +1708,18 @@ this.Langpack = class extends ExtensionData {
   }
 
   async startup(reason) {
+    this.chromeRegistryHandle = null;
+    if (this.startupData.chromeEntries.length > 0) {
+      const manifestURI = Services.io.newURI("manifest.json", null, this.rootURI);
+      this.chromeRegistryHandle =
+        aomStartup.registerChrome(manifestURI, this.startupData.chromeEntries);
+    }
+
     const data = await this.parseManifest();
     this.langpackId = data.langpackId;
     this.l10nRegistrySources = data.l10nRegistrySources;
 
     const languages = Object.keys(data.manifest.languages);
-    const manifestURI = Services.io.newURI("manifest.json", null, this.rootURI);
-
-    this.chromeRegistryHandle = null;
-    if (data.chromeResources.length > 0) {
-      this.chromeRegistryHandle =
-        aomStartup.registerChrome(manifestURI, data.chromeResources);
-    }
-
     resourceProtocol.setSubstitution(this.langpackId, this.rootURI);
 
     for (const [sourceName, basePath] of Object.entries(this.l10nRegistrySources)) {
@@ -1706,24 +1741,5 @@ this.Langpack = class extends ExtensionData {
     }
 
     resourceProtocol.setSubstitution(this.langpackId, null);
-  }
-
-  getChromeResources(manifest) {
-    const chromeEntries = [];
-    for (const [language, entry] of Object.entries(manifest.languages)) {
-      for (const [alias, path] of Object.entries(entry.chrome_resources || {})) {
-        if (typeof path === "string") {
-          chromeEntries.push(["locale", alias, language, path]);
-        } else {
-          // If the path is not a string, it's an object with path per platform
-          // where the keys are taken from AppConstants.platform
-          const platform = AppConstants.platform;
-          if (platform in path) {
-            chromeEntries.push(["locale", alias, language, path[platform]]);
-          }
-        }
-      }
-    }
-    return chromeEntries;
   }
 };

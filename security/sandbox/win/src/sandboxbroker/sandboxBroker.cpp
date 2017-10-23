@@ -7,6 +7,7 @@
 #include "sandboxBroker.h"
 
 #include <string>
+#include <vector>
 
 #include "base/win/windows_version.h"
 #include "mozilla/Assertions.h"
@@ -28,10 +29,22 @@
 #include "sandbox/win/src/security_level.h"
 #include "WinUtils.h"
 
-// We're just blocking one DLL for the moment because of problems with the
-// Alternate Desktop. If and when we expand this we'll make this a static list
-// and add checking to see if DLL is loaded in the parent.
-#define WEBROOT_DLL L"WRusr.dll"
+// This list of DLLs have been found to cause instability in sandboxed child
+// processes and so they will be unloaded if they attempt to load.
+const std::vector<std::wstring> kDllsToUnload = {
+  // HitmanPro - SurfRight now part of Sophos (bug 1400637)
+  L"hmpalert.dll",
+
+  // K7 Computing (bug 1400637)
+  L"k7pswsen.dll",
+
+  // Avast Antivirus (bug 1400637)
+  L"snxhk64.dll",
+  L"snxhk.dll",
+
+  // Webroot SecureAnywhere (bug 1400637)
+  L"wrusr.dll",
+};
 
 namespace mozilla
 {
@@ -50,6 +63,7 @@ static UniquePtr<nsString> sProfileDir;
 static UniquePtr<nsString> sContentTempDir;
 static UniquePtr<nsString> sRoamingAppDataDir;
 static UniquePtr<nsString> sLocalAppDataDir;
+static UniquePtr<nsString> sUserExtensionsDevDir;
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
 static UniquePtr<nsString> sUserExtensionsDir;
 #endif
@@ -130,6 +144,7 @@ SandboxBroker::CacheRulesDirectories()
   CacheDirAndAutoClear(dirSvc, NS_APP_CONTENT_PROCESS_TEMP_DIR, &sContentTempDir);
   CacheDirAndAutoClear(dirSvc, NS_WIN_APPDATA_DIR, &sRoamingAppDataDir);
   CacheDirAndAutoClear(dirSvc, NS_WIN_LOCAL_APPDATA_DIR, &sLocalAppDataDir);
+  CacheDirAndAutoClear(dirSvc, XRE_USER_SYS_EXTENSION_DEV_DIR, &sUserExtensionsDevDir);
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
   CacheDirAndAutoClear(dirSvc, XRE_USER_SYS_EXTENSION_DIR, &sUserExtensionsDir);
 #endif
@@ -214,9 +229,20 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
                      sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileName);
   }
 
+  // Add DLLs to the policy that have been found to cause instability with the
+  // sandbox, so that they will be unloaded when they attempt to load.
+  sandbox::ResultCode result;
+  for (std::wstring dllToUnload : kDllsToUnload) {
+    // Similar to Chromium, we only add a DLL if it is loaded in this process.
+    if (::GetModuleHandleW(dllToUnload.c_str())) {
+      result = mPolicy->AddDllToUnload(dllToUnload.c_str());
+      MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
+                         "AddDllToUnload should never fail, what happened?");
+    }
+  }
+
   // Ceate the sandboxed process
   PROCESS_INFORMATION targetInfo = {0};
-  sandbox::ResultCode result;
   sandbox::ResultCode last_warning = sandbox::SBOX_ALL_OK;
   DWORD last_error = ERROR_SUCCESS;
   result = sBrokerService->SpawnTarget(aPath, aArguments, mPolicy,
@@ -351,7 +377,7 @@ SetJobLevel(sandbox::TargetPolicy* aPolicy, sandbox::JobLevel aJobLevel,
 
 void
 SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
-                                                 base::ChildPrivileges aPrivs)
+                                                 bool aIsFileProcess)
 {
   MOZ_RELEASE_ASSERT(mPolicy, "mPolicy must be set before this call.");
 
@@ -391,8 +417,9 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     delayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
   }
 
-  // If PRIVILEGES_FILEREAD required, don't allow settings that block reads.
-  if (aPrivs == base::ChildPrivileges::PRIVILEGES_FILEREAD) {
+  // If the process will handle file: URLs, don't allow settings that
+  // block reads.
+  if (aIsFileProcess) {
     if (accessTokenLevel < sandbox::USER_NON_ADMIN) {
       accessTokenLevel = sandbox::USER_NON_ADMIN;
     }
@@ -443,12 +470,6 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                        "Failed to create alternate desktop for sandbox.");
 
-    // Webroot SecureAnywhere causes crashes when we use an Alternate Desktop,
-    // so block the DLL from loading in the child process. (bug 1400637)
-    result = mPolicy->AddDllToUnload(WEBROOT_DLL);
-    MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
-                       "AddDllToUnload should never fail, what happened?");
-
     mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
     // If we're running from a network drive then we can't block loading from
     // remote locations.
@@ -479,8 +500,7 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
 
   // We still have edge cases where the child at low integrity can't read some
   // files, so add a rule to allow read access to everything when required.
-  if (aSandboxLevel == 1 ||
-      aPrivs == base::ChildPrivileges::PRIVILEGES_FILEREAD) {
+  if (aSandboxLevel == 1 || aIsFileProcess) {
     result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                               sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                               L"*");
@@ -498,6 +518,10 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     // Add rule to allow read access to the extensions directory within profile.
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      sProfileDir, NS_LITERAL_STRING("\\extensions\\*"));
+
+    // Read access to a directory for system extension dev (see bug 1393805)
+    AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
+                     sUserExtensionsDevDir, NS_LITERAL_STRING("\\*"));
 
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
     // Add rule to allow read access to the per-user extensions directory.
@@ -826,12 +850,6 @@ SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel)
   result = mPolicy->SetAlternateDesktop(true);
   SANDBOX_ENSURE_SUCCESS(result,
                          "Failed to create alternate desktop for sandbox.");
-
-  // Webroot SecureAnywhere causes crashes when we use an Alternate Desktop,
-  // so block the DLL from loading in the child process. (bug 1400637)
-  result = mPolicy->AddDllToUnload(WEBROOT_DLL);
-  MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
-                     "AddDllToUnload should never fail, what happened?");
 
   result = mPolicy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
   MOZ_ASSERT(sandbox::SBOX_ALL_OK == result,

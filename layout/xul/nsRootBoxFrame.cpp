@@ -176,7 +176,8 @@ nsRootBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // The XUL document's root element may have displayport margins set in
     // ChromeProcessController::InitializeRoot, and we should to supply the
     // base rect.
-    nsRect displayPortBase = aBuilder->GetVisibleRect().Intersect(nsRect(nsPoint(0, 0), GetSize()));
+    nsRect displayPortBase =
+      aBuilder->GetVisibleRect().Intersect(nsRect(nsPoint(0, 0), GetSize()));
     nsLayoutUtils::SetDisplayPortBase(mContent, displayPortBase);
   }
 

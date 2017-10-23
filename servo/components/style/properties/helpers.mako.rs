@@ -93,9 +93,9 @@
             #[allow(unused_imports)]
             use properties::ShorthandId;
             #[allow(unused_imports)]
-            use selectors::parser::SelectorParseError;
+            use selectors::parser::SelectorParseErrorKind;
             #[allow(unused_imports)]
-            use style_traits::{ParseError, StyleParseError};
+            use style_traits::{ParseError, StyleParseErrorKind};
             #[allow(unused_imports)]
             use values::computed::{Context, ToComputedValue};
             #[allow(unused_imports)]
@@ -117,9 +117,7 @@
             use values::computed::ComputedVecIter;
 
             /// The computed value, effectively a list of single values.
-            #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-            #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-            #[derive(Clone, Debug, PartialEq)]
+            #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
             % if need_animatable or animation_value_type == "ComputedValue":
             #[derive(Animate, ComputeSquaredDistance)]
             % endif
@@ -178,9 +176,7 @@
         }
 
         /// The specified value of ${name}.
-        #[derive(Clone, Debug, PartialEq)]
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq)]
         pub struct SpecifiedValue(pub Vec<single_value::SpecifiedValue>);
 
         impl ToCss for SpecifiedValue {
@@ -285,11 +281,11 @@
         #[allow(unused_imports)]
         use properties::style_structs;
         #[allow(unused_imports)]
-        use selectors::parser::SelectorParseError;
+        use selectors::parser::SelectorParseErrorKind;
         #[allow(unused_imports)]
         use servo_arc::Arc;
         #[allow(unused_imports)]
-        use style_traits::{ParseError, StyleParseError};
+        use style_traits::{ParseError, StyleParseErrorKind};
         #[allow(unused_imports)]
         use values::computed::{Context, ToComputedValue};
         #[allow(unused_imports)]
@@ -699,11 +695,11 @@
         use parser::ParserContext;
         use properties::{PropertyDeclaration, SourcePropertyDeclaration, MaybeBoxed, longhands};
         #[allow(unused_imports)]
-        use selectors::parser::SelectorParseError;
+        use selectors::parser::SelectorParseErrorKind;
         #[allow(unused_imports)]
         use std::fmt;
         #[allow(unused_imports)]
-        use style_traits::{ParseError, StyleParseError};
+        use style_traits::{ParseError, StyleParseErrorKind};
         #[allow(unused_imports)]
         use style_traits::ToCss;
 
@@ -950,9 +946,7 @@
             pub type T = ::values::computed::${length_type};
         }
 
-        #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, Debug, PartialEq, ToCss)]
+        #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
         pub struct SpecifiedValue(pub ${length_type});
 
         % if length_type == "MozLength":
@@ -992,7 +986,7 @@
             // Keyword values don't make sense in the block direction; don't parse them
             % if "block" in name:
                 if let Ok(${length_type}::ExtremumLength(..)) = ret {
-                    return Err(StyleParseError::UnspecifiedError.into())
+                    return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
                 }
             % endif
             ret.map(SpecifiedValue)

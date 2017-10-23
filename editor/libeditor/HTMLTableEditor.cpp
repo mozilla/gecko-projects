@@ -19,7 +19,7 @@
 #include "nsDebug.h"
 #include "nsError.h"
 #include "nsGkAtoms.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsIContent.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
@@ -1961,8 +1961,8 @@ HTMLEditor::SwitchTableCellHeaderType(nsIDOMElement* aSourceCell,
   AutoSelectionRestorer selectionRestorer(selection, this);
 
   // Set to the opposite of current type
-  RefPtr<nsIAtom> atom = EditorBase::GetTag(aSourceCell);
-  nsIAtom* newCellType = atom == nsGkAtoms::td ? nsGkAtoms::th : nsGkAtoms::td;
+  nsAtom* newCellType =
+    sourceCell->IsHTMLElement(nsGkAtoms::td) ? nsGkAtoms::th : nsGkAtoms::td;
 
   // This creates new node, moves children, copies attributes (true)
   //   and manages the selection!
@@ -2716,8 +2716,8 @@ HTMLEditor::GetCellDataAt(nsIDOMElement* aTable,
   }
 
   *aIsSelected = cellFrame->IsSelected();
-  cellFrame->GetRowIndex(*aStartRowIndex);
-  cellFrame->GetColIndex(*aStartColIndex);
+  *aStartRowIndex = cellFrame->RowIndex();
+  *aStartColIndex = cellFrame->ColIndex();
   *aRowSpan = cellFrame->GetRowSpan();
   *aColSpan = cellFrame->GetColSpan();
   *aActualRowSpan = tableFrame->GetEffectiveRowSpanAt(aRowIndex, aColIndex);

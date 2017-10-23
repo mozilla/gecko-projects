@@ -10,6 +10,7 @@ with Files("**"):
 MOCHITEST_MANIFESTS += [
     'test/mochitest.ini',
     'test/pointerevents/mochitest.ini',
+    'test/pointerevents/pointerlock/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
@@ -35,6 +36,7 @@ EXPORTS.mozilla += [
     'PhysicalKeyCodeNameList.h',
     'TextComposition.h',
     'VirtualKeyCodeList.h',
+    'WheelHandlingHelper.h',
 ]
 
 EXPORTS.mozilla.dom += [

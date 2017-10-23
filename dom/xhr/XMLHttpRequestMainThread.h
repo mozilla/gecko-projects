@@ -261,7 +261,7 @@ public:
 
   // request
   nsresult CreateChannel();
-  nsresult InitiateFetch(nsIInputStream* aUploadStream,
+  nsresult InitiateFetch(already_AddRefed<nsIInputStream> aUploadStream,
                          int64_t aUploadLength,
                          nsACString& aUploadContentType);
 
@@ -520,8 +520,7 @@ protected:
   };
 
   nsresult DetectCharset();
-  nsresult AppendToResponseText(const char* aBuffer, uint32_t aBufferLen,
-                                bool aLast = false);
+  nsresult AppendToResponseText(const char * aBuffer, uint32_t aBufferLen);
   static nsresult StreamReaderFunc(nsIInputStream* in,
                                    void* closure,
                                    const char* fromRawSegment,

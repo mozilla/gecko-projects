@@ -117,6 +117,11 @@
   list-style-image: url(chrome://browser/skin/notification-icons/screen-blocked.svg);
 }
 
+#canvas-notification-icon,
+.popup-notification-icon[popupid="canvas-permissions-prompt"] {
+  list-style-image: url(chrome://browser/skin/notification-icons/canvas.svg);
+}
+
 #webRTC-preview:not([hidden]) {
   display: -moz-stack;
   border-radius: 4px;
@@ -148,6 +153,15 @@ html|*#webRTC-previewVideo {
 /* This icon has a block sign in it, so we don't need a blocked version. */
 .popup-icon {
   list-style-image: url("chrome://browser/skin/notification-icons/popup.svg");
+}
+
+.popup-subitem {
+  list-style-image: url("chrome://browser/skin/notification-icons/popup-subitem.svg");
+  margin-inline-start: 30px;
+}
+
+.identity-popup-popup-menulist {
+  width: 72px;
 }
 
 /* EME */
@@ -205,7 +219,7 @@ html|*#webRTC-previewVideo {
 }
 
 .popup-notification-icon[popupid="click-to-play-plugins"] {
-  list-style-image: url(chrome://mozapps/skin/plugins/pluginBlocked-64.png);
+  list-style-image: url(chrome://mozapps/skin/plugins/pluginBlocked.svg);
 }
 
 /* OFFLINE APPS */

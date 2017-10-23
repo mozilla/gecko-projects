@@ -113,6 +113,7 @@ import org.mozilla.gecko.icons.IconsHelper;
 import org.mozilla.gecko.icons.decoders.FaviconDecoder;
 import org.mozilla.gecko.icons.decoders.IconDirectoryEntry;
 import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
+import org.mozilla.gecko.lwt.LightweightTheme;
 import org.mozilla.gecko.media.VideoPlayer;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
@@ -184,7 +185,6 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
@@ -198,6 +198,7 @@ public class BrowserApp extends GeckoApp
                                    DynamicToolbarAnimator.MetricsListener,
                                    DynamicToolbarAnimator.ToolbarChromeProxy,
                                    LayoutInflater.Factory,
+                                   LightweightTheme.OnChangeListener,
                                    OnUrlOpenListener,
                                    OnUrlOpenInBackgroundListener,
                                    PropertyAnimator.PropertyAnimationListener,
@@ -562,7 +563,7 @@ public class BrowserApp extends GeckoApp
                     return true;
 
                 case KeyEvent.KEYCODE_F:
-                    mFindInPageBar.show();
+                    mFindInPageBar.show(mBrowserToolbar.isPrivateMode());
                 return true;
             }
         }
@@ -641,7 +642,8 @@ public class BrowserApp extends GeckoApp
         // This has to be prepared prior to calling GeckoApp.onCreate, because
         // widget code and BrowserToolbar need it, and they're created by the
         // layout, which GeckoApp takes care of.
-        ((GeckoApplication) getApplication()).prepareLightweightTheme();
+        final GeckoApplication app = (GeckoApplication) getApplication();
+        app.prepareLightweightTheme();
 
         super.onCreate(savedInstanceState);
 
@@ -675,6 +677,8 @@ public class BrowserApp extends GeckoApp
                 return false;
             }
         });
+
+        app.getLightweightTheme().addListener(this);
 
         mProgressView = (AnimatedProgressBar) findViewById(R.id.page_progress);
         mDynamicToolbar.setLayerView(mLayerView);
@@ -1506,7 +1510,7 @@ public class BrowserApp extends GeckoApp
             ThreadUtils.postToBackgroundThread(new Runnable() {
                 @Override
                 public void run() {
-                    GeckoApplication.createShortcut(title, url);
+                    GeckoApplication.createBrowserShortcut(title, url);
                 }
             });
 
@@ -1550,6 +1554,9 @@ public class BrowserApp extends GeckoApp
         }
 
         mDynamicToolbar.destroy();
+
+        final GeckoApplication app = (GeckoApplication) getApplication();
+        app.getLightweightTheme().removeListener(this);
 
         if (mBrowserToolbar != null)
             mBrowserToolbar.onDestroy();
@@ -2330,8 +2337,7 @@ public class BrowserApp extends GeckoApp
             delegate.onTabsTrayHidden(this, mTabsPanel);
         }
 
-        final boolean isPrivate = mBrowserToolbar.isPrivateMode();
-        WindowUtil.setStatusBarColor(this, isPrivate);
+        refreshStatusBarColor();
     }
 
     @Override
@@ -2765,6 +2771,12 @@ public class BrowserApp extends GeckoApp
         // URL, but the reverse doesn't apply: manually switching panels doesn't update the URL.)
         // Hence we need to restore the panel, in addition to panel state, here.
         if (isAboutHome(tab)) {
+            // For some reason(e.g. from SearchWidget) we are showing the splash schreen. We should hide it now.
+            if (splashScreen != null && splashScreen.getVisibility() == View.VISIBLE) {
+                // Below line will be run when LOCATION_CHANGE. Which means the page load is almost completed.
+                splashScreen.hide();
+            }
+
             String panelId = AboutPages.getPanelIdFromAboutHomeUrl(tab.getURL());
             Bundle panelRestoreData = null;
             if (panelId == null) {
@@ -2800,7 +2812,7 @@ public class BrowserApp extends GeckoApp
             // In that case, we don't want to show the SlashScreen/
             if (showSplashScreen && !GeckoThread.isRunning()) {
 
-                final ViewGroup main = (ViewGroup) findViewById(R.id.main_layout);
+                final ViewGroup main = (ViewGroup) findViewById(R.id.gecko_layout);
                 final View splashLayout = LayoutInflater.from(this).inflate(R.layout.splash_screen, main);
                 splashScreen = (SplashScreen) splashLayout.findViewById(R.id.splash_root);
 
@@ -3953,7 +3965,7 @@ public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.find_in_page) {
-            mFindInPageBar.show();
+            mFindInPageBar.show(mBrowserToolbar.isPrivateMode());
             return true;
         }
 
@@ -4441,5 +4453,20 @@ public class BrowserApp extends GeckoApp
     @Override
     public void onEditBookmark(@NonNull Bundle bundle) {
         new EditBookmarkTask(this, bundle).execute();
+    }
+
+    @Override
+    public void onLightweightThemeChanged() {
+        refreshStatusBarColor();
+    }
+
+    @Override
+    public void onLightweightThemeReset() {
+        refreshStatusBarColor();
+    }
+
+    private void refreshStatusBarColor() {
+        final boolean isPrivate = mBrowserToolbar.isPrivateMode();
+        WindowUtil.setStatusBarColor(BrowserApp.this, isPrivate);
     }
 }

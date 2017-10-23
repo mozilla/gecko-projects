@@ -15,7 +15,7 @@ const {
 const Message = createFactory(require("devtools/client/webconsole/new-console-output/components/Message"));
 const actions = require("devtools/client/webconsole/new-console-output/actions/index");
 const { l10n } = require("devtools/client/webconsole/new-console-output/utils/messages");
-const TabboxPanel = createFactory(require("devtools/client/netmonitor/src/components/tabbox-panel"));
+const TabboxPanel = createFactory(require("devtools/client/netmonitor/src/components/TabboxPanel"));
 
 NetworkEventMessage.displayName = "NetworkEventMessage";
 
@@ -92,18 +92,37 @@ function NetworkEventMessage({
   const xhr = isXHR
     ? dom.span({ className: "xhr" }, l10n.getStr("webConsoleXhrIndicator"))
     : null;
-  const url = dom.a({ className: "url", title: request.url, onClick: toggle },
+  const requestUrl = dom.a({ className: "url", title: request.url, onClick: toggle },
     request.url.replace(/\?.+/, ""));
   const statusBody = statusInfo
     ? dom.a({ className: "status", onClick: toggle }, statusInfo)
     : null;
 
-  const messageBody = [method, xhr, url, statusBody];
+  const messageBody = [method, xhr, requestUrl, statusBody];
+
+  // API consumed by Net monitor UI components. Most of the method
+  // are not needed in context of the Console panel (atm) and thus
+  // let's just provide empty implementation.
+  // Individual methods might be implemented step by step as needed.
+  let connector = {
+    viewSourceInDebugger: (url, line) => {
+      serviceContainer.onViewSourceInDebugger({url, line});
+    },
+    getLongString: (grip) => {
+      return serviceContainer.getLongString(grip);
+    },
+    getTabTarget: () => {},
+    getNetworkRequest: () => {},
+    sendHTTPRequest: () => {},
+    setPreferences: () => {},
+    triggerActivity: () => {},
+  };
 
   // Only render the attachment if the network-event is
   // actually opened (performance optimization).
   const attachment = open && dom.div({className: "network-info devtools-monospace"},
     TabboxPanel({
+      connector,
       activeTabId: networkMessageActiveTabId,
       request: networkMessageUpdate,
       sourceMapService: serviceContainer.sourceMapService,

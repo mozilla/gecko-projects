@@ -112,7 +112,7 @@ MustBeAccessible(nsIContent* aContent, DocAccessible* aDocument)
   for (uint32_t attrIdx = 0; attrIdx < attrCount; attrIdx++) {
     const nsAttrName* attr = aContent->GetAttrNameAt(attrIdx);
     if (attr->NamespaceEquals(kNameSpaceID_None)) {
-      nsIAtom* attrAtom = attr->Atom();
+      nsAtom* attrAtom = attr->Atom();
       nsDependentAtomString attrStr(attrAtom);
       if (!StringBeginsWith(attrStr, NS_LITERAL_STRING("aria-")))
         continue; // not ARIA
@@ -468,9 +468,10 @@ nsAccessibilityService::CreatePluginAccessible(nsPluginFrame* aFrame,
     if (!sPendingPlugins->Contains(aContent) &&
         (Preferences::GetBool("accessibility.delay_plugins") ||
          Compatibility::IsJAWS() || Compatibility::IsWE())) {
-      nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID);
       RefPtr<PluginTimerCallBack> cb = new PluginTimerCallBack(aContent);
-      timer->InitWithCallback(cb, Preferences::GetUint("accessibility.delay_plugin_time"),
+      nsCOMPtr<nsITimer> timer;
+      NS_NewTimerWithCallback(getter_AddRefs(timer),
+                              cb, Preferences::GetUint("accessibility.delay_plugin_time"),
                               nsITimer::TYPE_ONE_SHOT);
       sPluginTimers->AppendElement(timer);
       sPendingPlugins->AppendElement(aContent);

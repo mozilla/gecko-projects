@@ -673,7 +673,7 @@ nsNavHistory::GetNow()
   if (!mCachedNow) {
     mCachedNow = PR_Now();
     if (!mExpireNowTimer)
-      mExpireNowTimer = do_CreateInstance("@mozilla.org/timer;1");
+      mExpireNowTimer = NS_NewTimer();
     if (mExpireNowTimer)
       mExpireNowTimer->InitWithNamedFuncCallback(expireNowTimerCallback,
                                                  this,
@@ -2532,81 +2532,6 @@ nsNavHistory::CleanupPlacesOnVisitsDelete(const nsCString& aPlaceIdsQueryString)
                      nsINavHistoryObserver,
                      OnDeleteURI(URIs[i], GUIDs[i], nsINavHistoryObserver::REASON_DELETED));
   }
-
-  return NS_OK;
-}
-
-
-// nsNavHistory::RemovePages
-//
-//    Removes a bunch of uris from history.
-//    Has better performance than RemovePage when deleting a lot of history.
-//    We don't do duplicates removal, URIs array should be cleaned-up before.
-
-NS_IMETHODIMP
-nsNavHistory::RemovePages(nsIURI **aURIs, uint32_t aLength)
-{
-  PLACES_WARN_DEPRECATED();
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-  NS_ENSURE_ARG(aURIs);
-
-  nsresult rv;
-  // build a list of place ids to delete
-  nsCString deletePlaceIdsQueryString;
-  for (uint32_t i = 0; i < aLength; i++) {
-    int64_t placeId;
-    nsAutoCString guid;
-    if (!aURIs[i])
-      continue;
-    rv = GetIdForPage(aURIs[i], &placeId, guid);
-    NS_ENSURE_SUCCESS(rv, rv);
-    if (placeId != 0) {
-      if (!deletePlaceIdsQueryString.IsEmpty())
-        deletePlaceIdsQueryString.Append(',');
-      deletePlaceIdsQueryString.AppendInt(placeId);
-    }
-  }
-
-  UpdateBatchScoper batch(*this); // sends Begin/EndUpdateBatch to observers
-
-  rv = RemovePagesInternal(deletePlaceIdsQueryString);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Clear the registered embed visits.
-  clearEmbedVisits();
-
-  return NS_OK;
-}
-
-
-// nsNavHistory::RemovePage
-//
-//    Removes all visits and the main history entry for the given URI.
-//    Silently fails if we have no knowledge of the page.
-
-NS_IMETHODIMP
-nsNavHistory::RemovePage(nsIURI *aURI)
-{
-  PLACES_WARN_DEPRECATED();
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-  NS_ENSURE_ARG(aURI);
-
-  // Build a list of place ids to delete.
-  int64_t placeId;
-  nsAutoCString guid;
-  nsresult rv = GetIdForPage(aURI, &placeId, guid);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (placeId == 0) {
-    return NS_OK;
-  }
-  nsAutoCString deletePlaceIdQueryString;
-  deletePlaceIdQueryString.AppendInt(placeId);
-
-  rv = RemovePagesInternal(deletePlaceIdQueryString);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Clear the registered embed visits.
-  clearEmbedVisits();
 
   return NS_OK;
 }

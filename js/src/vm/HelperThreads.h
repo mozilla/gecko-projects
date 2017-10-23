@@ -146,6 +146,7 @@ class GlobalHelperThreadState
     size_t maxIonCompilationThreads() const;
     size_t maxWasmCompilationThreads() const;
     size_t maxWasmTier2GeneratorThreads() const;
+    size_t maxPromiseHelperThreads() const;
     size_t maxParseThreads() const;
     size_t maxCompressionThreads() const;
     size_t maxGCHelperThreads() const;
@@ -483,7 +484,8 @@ StartOffThreadPromiseHelperTask(JSContext* cx, UniquePtr<PromiseHelperTask> task
  * generated and read everything needed from the VM state.
  */
 bool
-StartOffThreadIonCompile(JSContext* cx, jit::IonBuilder* builder);
+StartOffThreadIonCompile(JSContext* cx, jit::IonBuilder* builder,
+                         const AutoLockHelperThreadState& lock);
 
 /*
  * Schedule deletion of Ion compilation data.
@@ -536,12 +538,6 @@ inline void
 CancelOffThreadIonCompilesUsingNurseryPointers(JSRuntime* runtime)
 {
     CancelOffThreadIonCompile(CompilationSelector(CompilationsUsingNursery{runtime}), true);
-}
-
-inline void
-CancelOffThreadIonCompile()
-{
-    CancelOffThreadIonCompile(CompilationSelector(AllCompilations()), false);
 }
 
 #ifdef DEBUG
@@ -795,7 +791,7 @@ struct PromiseHelperTask : OffThreadPromiseTask
 
     // May be called in the absence of helper threads or off-thread promise
     // support to synchronously execute and resolve a PromiseTask.
-    void executeAndResolve(JSContext* cx);
+    void executeAndResolveAndDestroy(JSContext* cx);
 };
 
 } /* namespace js */

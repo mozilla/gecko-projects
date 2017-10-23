@@ -72,8 +72,8 @@ use js::glue::GetWindowProxyClass;
 use js::jsapi::{JSAutoCompartment, JSContext, JS_SetWrapObjectCallbacks};
 use js::jsapi::{JSTracer, SetWindowProxyClass};
 use js::jsval::UndefinedValue;
-use js::rust::Runtime;
-use mem::heap_size_of_self_and_children;
+use malloc_size_of::MallocSizeOfOps;
+use mem::malloc_size_of_including_self;
 use metrics::PaintTimeMetrics;
 use microtask::{MicrotaskQueue, Microtask};
 use msg::constellation_msg::{BrowsingContextId, FrameType, PipelineId, PipelineNamespace, TopLevelBrowsingContextId};
@@ -86,7 +86,7 @@ use profile_traits::mem::{self, OpaqueSender, Report, ReportKind, ReportsChan};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_layout_interface::message::{self, Msg, NewLayoutThreadInfo, ReflowGoal};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
-use script_runtime::{ScriptPort, get_reports, new_rt_and_cx};
+use script_runtime::{ScriptPort, get_reports, new_rt_and_cx, Runtime};
 use script_traits::{CompositorEvent, ConstellationControlMsg};
 use script_traits::{DiscardBrowsingContext, DocumentActivity, EventResult};
 use script_traits::{InitialScriptState, JsEvalResult, LayoutMsg, LoadData};
@@ -124,6 +124,7 @@ use time::{get_time, precise_time_ns, Tm};
 use url::Position;
 use url::percent_encoding::percent_decode;
 use webdriver_handlers;
+use webrender_api::DocumentId;
 use webvr_traits::{WebVREvent, WebVRMsg};
 
 pub type ImageCacheMsg = (PipelineId, PendingImageResponse);
@@ -290,7 +291,7 @@ impl ScriptChan for SendableMainThreadScriptChan {
     }
 
     fn clone(&self) -> Box<ScriptChan + Send> {
-        box SendableMainThreadScriptChan((&self.0).clone())
+        Box::new(SendableMainThreadScriptChan((&self.0).clone()))
     }
 }
 
@@ -304,7 +305,7 @@ impl ScriptChan for MainThreadScriptChan {
     }
 
     fn clone(&self) -> Box<ScriptChan + Send> {
-        box MainThreadScriptChan((&self.0).clone())
+        Box::new(MainThreadScriptChan((&self.0).clone()))
     }
 }
 
@@ -467,7 +468,7 @@ pub struct ScriptThread {
 
     content_process_shutdown_chan: IpcSender<()>,
 
-    /// https://html.spec.whatwg.org/multipage/#microtask-queue
+    /// <https://html.spec.whatwg.org/multipage/#microtask-queue>
     microtask_queue: Rc<MicrotaskQueue>,
 
     /// Microtask Queue for adding support for mutation observer microtasks
@@ -493,8 +494,11 @@ pub struct ScriptThread {
     /// of the transition.
     transitioning_nodes: DomRefCell<Vec<Dom<Node>>>,
 
-    /// https://html.spec.whatwg.org/multipage/#custom-element-reactions-stack
+    /// <https://html.spec.whatwg.org/multipage/#custom-element-reactions-stack>
     custom_element_reaction_stack: CustomElementReactionStack,
+
+    /// The Webrender Document ID associated with this thread.
+    webrender_document: DocumentId,
 }
 
 /// In the event of thread panic, all data on the stack runs its destructor. However, there
@@ -804,7 +808,7 @@ impl ScriptThread {
         // Ask the router to proxy IPC messages from the control port to us.
         let control_port = ROUTER.route_ipc_receiver_to_new_mpsc_receiver(state.control_port);
 
-        let boxed_script_sender = box MainThreadScriptChan(chan.clone());
+        let boxed_script_sender = Box::new(MainThreadScriptChan(chan.clone()));
 
         let (image_cache_channel, image_cache_port) = channel();
 
@@ -871,6 +875,8 @@ impl ScriptThread {
             transitioning_nodes: Default::default(),
 
             custom_element_reaction_stack: CustomElementReactionStack::new(),
+
+            webrender_document: state.webrender_document,
         }
     }
 
@@ -1004,7 +1010,7 @@ impl ScriptThread {
                 }
                 FromConstellation(ConstellationControlMsg::SendEvent(
                         _,
-                        MouseMoveEvent(_))) => {
+                        MouseMoveEvent(..))) => {
                     match mouse_move_event_index {
                         None => {
                             mouse_move_event_index = Some(sequential.len());
@@ -1497,14 +1503,17 @@ impl ScriptThread {
         let mut path_seg = String::from("url(");
         let mut dom_tree_size = 0;
         let mut reports = vec![];
+        // Servo uses vanilla jemalloc, which doesn't have a
+        // malloc_enclosing_size_of function.
+        let mut ops = MallocSizeOfOps::new(::servo_allocator::usable_size, None, None);
 
         for (_, document) in self.documents.borrow().iter() {
             let current_url = document.url();
 
             for child in document.upcast::<Node>().traverse_preorder() {
-                dom_tree_size += heap_size_of_self_and_children(&*child);
+                dom_tree_size += malloc_size_of_including_self(&mut ops, &*child);
             }
-            dom_tree_size += heap_size_of_self_and_children(document.window());
+            dom_tree_size += malloc_size_of_including_self(&mut ops, document.window());
 
             if reports.len() > 0 {
                 path_seg.push_str(", ");
@@ -1596,7 +1605,7 @@ impl ScriptThread {
     }
 
     /// Handles a mozbrowser event, for example see:
-    /// https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowserloadstart
+    /// <https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowserloadstart>
     fn handle_mozbrowser_event_msg(&self,
                                    parent_pipeline_id: PipelineId,
                                    top_level_browsing_context_id: Option<TopLevelBrowsingContextId>,
@@ -2062,6 +2071,7 @@ impl ScriptThread {
             self.webgl_chan.channel(),
             self.webvr_chan.clone(),
             self.microtask_queue.clone(),
+            self.webrender_document,
         );
 
         // Initialize the browsing context for the window.
@@ -2180,11 +2190,18 @@ impl ScriptThread {
                 self.handle_resize_event(pipeline_id, new_size, size_type);
             }
 
-            MouseButtonEvent(event_type, button, point) => {
-                self.handle_mouse_event(pipeline_id, event_type, button, point);
+            MouseButtonEvent(event_type, button, point, node_address, point_in_node) => {
+                self.handle_mouse_event(
+                    pipeline_id,
+                    event_type,
+                    button,
+                    point,
+                    node_address,
+                    point_in_node
+                );
             }
 
-            MouseMoveEvent(point) => {
+            MouseMoveEvent(point, node_address) => {
                 let document = match { self.documents.borrow().find_document(pipeline_id) } {
                     Some(document) => document,
                     None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
@@ -2194,7 +2211,8 @@ impl ScriptThread {
                 let prev_mouse_over_target = self.topmost_mouse_over_target.get();
 
                 document.handle_mouse_move_event(self.js_runtime.rt(), point,
-                                                 &self.topmost_mouse_over_target);
+                                                 &self.topmost_mouse_over_target,
+                                                 node_address);
 
                 // Short-circuit if nothing changed
                 if self.topmost_mouse_over_target.get() == prev_mouse_over_target {
@@ -2237,8 +2255,14 @@ impl ScriptThread {
                     }
                 }
             }
-            TouchEvent(event_type, identifier, point) => {
-                let touch_result = self.handle_touch_event(pipeline_id, event_type, identifier, point);
+            TouchEvent(event_type, identifier, point, node_address) => {
+                let touch_result = self.handle_touch_event(
+                    pipeline_id,
+                    event_type,
+                    identifier,
+                    point,
+                    node_address
+                );
                 match (event_type, touch_result) {
                     (TouchEventType::Down, TouchEventResult::Processed(handled)) => {
                         let result = if handled {
@@ -2256,12 +2280,17 @@ impl ScriptThread {
                 }
             }
 
-            TouchpadPressureEvent(point, pressure, phase) => {
+            TouchpadPressureEvent(_point, pressure, phase, node_address) => {
                 let doc = match { self.documents.borrow().find_document(pipeline_id) } {
                     Some(doc) => doc,
                     None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
                 };
-                doc.handle_touchpad_pressure_event(self.js_runtime.rt(), point, pressure, phase);
+                doc.handle_touchpad_pressure_event(
+                    self.js_runtime.rt(),
+                    pressure,
+                    phase,
+                    node_address
+                );
             }
 
             KeyEvent(ch, key, state, modifiers) => {
@@ -2274,24 +2303,37 @@ impl ScriptThread {
         }
     }
 
-    fn handle_mouse_event(&self,
-                          pipeline_id: PipelineId,
-                          mouse_event_type: MouseEventType,
-                          button: MouseButton,
-                          point: Point2D<f32>) {
+    fn handle_mouse_event(
+        &self,
+        pipeline_id: PipelineId,
+        mouse_event_type: MouseEventType,
+        button: MouseButton,
+        point: Point2D<f32>,
+        node_address: Option<UntrustedNodeAddress>,
+        point_in_node: Option<Point2D<f32>>
+    ) {
         let document = match { self.documents.borrow().find_document(pipeline_id) } {
             Some(document) => document,
             None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
         };
-        document.handle_mouse_event(self.js_runtime.rt(), button, point, mouse_event_type);
+        document.handle_mouse_event(
+            self.js_runtime.rt(),
+            button,
+            point,
+            mouse_event_type,
+            node_address,
+            point_in_node
+        );
     }
 
-    fn handle_touch_event(&self,
-                          pipeline_id: PipelineId,
-                          event_type: TouchEventType,
-                          identifier: TouchId,
-                          point: Point2D<f32>)
-                          -> TouchEventResult {
+    fn handle_touch_event(
+        &self,
+        pipeline_id: PipelineId,
+        event_type: TouchEventType,
+        identifier: TouchId,
+        point: Point2D<f32>,
+        node_address: Option<UntrustedNodeAddress>
+    ) -> TouchEventResult {
         let document = match { self.documents.borrow().find_document(pipeline_id) } {
             Some(document) => document,
             None => {
@@ -2299,10 +2341,16 @@ impl ScriptThread {
                 return TouchEventResult::Processed(true);
             },
         };
-        document.handle_touch_event(self.js_runtime.rt(), event_type, identifier, point)
+        document.handle_touch_event(
+            self.js_runtime.rt(),
+            event_type,
+            identifier,
+            point,
+            node_address
+        )
     }
 
-    /// https://html.spec.whatwg.org/multipage/#navigating-across-documents
+    /// <https://html.spec.whatwg.org/multipage/#navigating-across-documents>
     /// The entry point for content to notify that a new load has been requested
     /// for the given pipeline (specifically the "navigate" algorithm).
     fn handle_navigate(&self, parent_pipeline_id: PipelineId,

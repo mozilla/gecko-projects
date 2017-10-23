@@ -537,7 +537,7 @@ class ContextMenu {
 
     // Media related cache info parent needs for saving
     let contentType = null;
-    let contentDisposition = null
+    let contentDisposition = null;
     if (aEvent.target.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
         aEvent.target instanceof Ci.nsIImageLoadingContent &&
         aEvent.target.currentURI) {
@@ -572,7 +572,8 @@ class ContextMenu {
     let principal = null;
     let customMenuItems = null;
 
-    if (context.target) {
+    let targetAsCPOW = context.target;
+    if (targetAsCPOW) {
       this._cleanContext();
     }
 
@@ -621,7 +622,9 @@ class ContextMenu {
     };
 
     if (isRemote) {
-      this.global.sendAsyncMessage("contextmenu", data);
+      this.global.sendAsyncMessage("contextmenu", data, {
+        targetAsCPOW,
+      });
     } else {
       let browser = this.global.docShell.chromeEventHandler;
       let mainWin = browser.ownerGlobal;
@@ -629,6 +632,8 @@ class ContextMenu {
       data.documentURIObject = doc.documentURIObject;
       data.disableSetDesktopBackground = data.disableSetDesktopBg;
       delete data.disableSetDesktopBg;
+
+      data.context.targetAsCPOW = targetAsCPOW;
 
       mainWin.setContextMenuContentData(data);
     }
@@ -654,7 +659,7 @@ class ContextMenu {
       contentType: context.target.ownerDocument.contentType,
 
       // used for nsContextMenu.saveLink
-      isPrivate: context.target.ownerDocument.isPrivate,
+      isPrivate: PrivateBrowsingUtils.isContentWindowPrivate(context.target.ownerGlobal),
     };
 
     // used for nsContextMenu.initMediaPlayerItems

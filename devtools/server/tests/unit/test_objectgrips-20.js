@@ -93,6 +93,10 @@ async function run_test_with_server(server) {
     expectedIndexedProperties: [["1", 1]],
     expectedNonIndexedProperties: [],
   }, {
+    evaledObject: { a: 1, [2 ** 32 - 2]: 2, [2 ** 32 - 1]: 3 },
+    expectedIndexedProperties: [["4294967294", 2]],
+    expectedNonIndexedProperties: [["a", 1], ["4294967295", 3]],
+  }, {
     evaledObject: `(() => {
       x = [12, 42];
       x.foo = 90;
@@ -149,6 +153,27 @@ async function run_test_with_server(server) {
       ["byteLength", 2],
       ["byteOffset", 0],
     ],
+  }, {
+    evaledObject: `(() => {
+      x = new Int8Array([1, 2]);
+      Object.defineProperty(x, 'length', {value: 0});
+      return x;
+    })()`,
+    expectedIndexedProperties: [["0", 1], ["1", 2]],
+    expectedNonIndexedProperties: [
+      ["length", 0],
+      ["buffer", DO_NOT_CHECK_VALUE],
+      ["byteLength", 2],
+      ["byteOffset", 0],
+    ],
+  }, {
+    evaledObject: `(() => {
+      x = new Int32Array([1, 2]);
+      Object.setPrototypeOf(x, null);
+      return x;
+    })()`,
+    expectedIndexedProperties: [["0", 1], ["1", 2]],
+    expectedNonIndexedProperties: [],
   }].forEach(async (testData) => {
     await test_object_grip(debuggee, dbgClient, threadClient, testData);
   });

@@ -340,6 +340,7 @@ public:
 
   void Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
             PaintedLayerData* aLayerData = nullptr,
+            bool aIsInactiveLayerManager = false,
             const DisplayItemClip* aInactiveLayerClip = nullptr);
 
   /**
@@ -503,6 +504,8 @@ public:
 
   void ClearCachedGeometry(nsDisplayItem* aItem);
 
+  static DisplayItemData* GetOldDataFor(nsDisplayItem* aItem);
+
   /**
    * Return the layer that all display items of aFrame were assigned to in the
    * last paint, or nullptr if there was no single layer assigned to all of the
@@ -586,6 +589,7 @@ public:
   static void RemoveFrameFromLayerManager(const nsIFrame* aFrame,
                                           SmallPointerArray<DisplayItemData>& aArray);
 
+protected:
 
   friend class LayerManagerData;
 
@@ -598,8 +602,6 @@ public:
    */
   DisplayItemData* GetOldLayerForFrame(nsIFrame* aFrame, uint32_t aDisplayItemKey);
 
-  static DisplayItemData* GetOldDataFor(nsDisplayItem* aItem);
-
   /**
    * Stores DisplayItemData associated with aFrame, stores the data in
    * mNewDisplayItemData.
@@ -609,7 +611,6 @@ public:
                          uint32_t aDisplayItemKey,
                          Layer* aLayer,
                          LayerState aState);
-protected:
 
   // Flash the area within the context clip if paint flashing is enabled.
   static void FlashPaint(gfxContext *aContext);
@@ -730,7 +731,7 @@ public:
 
   bool IsBuildingRetainedLayers()
   {
-    return !mContainingPaintedLayer && mRetainingManager;
+    return !mIsInactiveLayerManager && mRetainingManager;
   }
 
   /**
@@ -798,6 +799,8 @@ protected:
   bool                                mInvalidateAllLayers;
 
   bool                                mInLayerTreeCompressionMode;
+
+  bool                                mIsInactiveLayerManager;
 
   uint32_t                            mContainerLayerGeneration;
   uint32_t                            mMaxContainerLayerGeneration;

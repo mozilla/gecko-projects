@@ -23,8 +23,10 @@ import org.mozilla.gecko.icons.Icons;
 import org.mozilla.gecko.reader.ReaderModeUtils;
 import org.mozilla.gecko.reader.ReadingListHelper;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
+import org.mozilla.gecko.toolbar.PageActionLayout;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.webapps.WebAppManifest;
 import org.mozilla.gecko.widget.SiteLogins;
 
 import android.content.ContentResolver;
@@ -36,6 +38,8 @@ import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
+
+import static org.mozilla.gecko.toolbar.PageActionLayout.PageAction.UUID_PAGE_ACTION_PWA;
 
 public class Tab {
     private static final String LOGTAG = "GeckoTab";
@@ -57,6 +61,7 @@ public class Tab {
 
     private boolean mHasFeeds;
     private String mManifestUrl;
+    private WebAppManifest mWebAppManifest;
     private boolean mHasOpenSearch;
     private final SiteIdentity mSiteIdentity;
     private SiteLogins mSiteLogins;
@@ -108,6 +113,14 @@ public class Tab {
     public static final int LOAD_PROGRESS_LOCATION_CHANGE = 60;
     public static final int LOAD_PROGRESS_LOADED = 80;
     public static final int LOAD_PROGRESS_STOP = 100;
+
+    public WebAppManifest getWebAppManifest() {
+        return mWebAppManifest;
+    }
+
+    public void setWebAppManifest(WebAppManifest mWebAppManifest) {
+        this.mWebAppManifest = mWebAppManifest;
+    }
 
     public enum ErrorType {
         CERT_ERROR,  // Pages with certificate problems
@@ -463,6 +476,16 @@ public class Tab {
 
     public void setManifestUrl(String manifestUrl) {
         mManifestUrl = manifestUrl;
+        updatePageAction();
+    }
+
+    public void updatePageAction() {
+        if (mManifestUrl != null) {
+            showPwaPageAction();
+
+        } else {
+            clearPwaPageAction();
+        }
     }
 
     public void setHasOpenSearch(boolean hasOpenSearch) {
@@ -838,5 +861,22 @@ public class Tab {
 
     public boolean getShouldShowToolbarWithoutAnimationOnFirstSelection() {
         return mShouldShowToolbarWithoutAnimationOnFirstSelection;
+    }
+
+    private void clearPwaPageAction() {
+        GeckoBundle bundle = new GeckoBundle();
+        bundle.putString("id", UUID_PAGE_ACTION_PWA);
+        EventDispatcher.getInstance().dispatch("PageActions:Remove", bundle);
+    }
+
+    private void showPwaPageAction() {
+        if (!isPrivate()) {
+            GeckoBundle bundle = new GeckoBundle();
+            bundle.putString("id", UUID_PAGE_ACTION_PWA);
+            bundle.putString("title", mAppContext.getString(R.string.pwa_add_to_launcher_badge));
+            bundle.putString("icon", "drawable://add_to_homescreen");
+            bundle.putBoolean("important", true);
+            EventDispatcher.getInstance().dispatch("PageActions:Add", bundle);
+        }
     }
 }
