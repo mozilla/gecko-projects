@@ -152,7 +152,6 @@ public:
   using PropertyType = typename detail::FramePropertyTypeHelper<T>::Type;
 
   explicit FrameProperties()
-    : mInDeleteAll(false)
   {
   }
 
@@ -289,14 +288,12 @@ public:
    * Remove and destroy all property values for the frame.
    */
   void DeleteAll(const nsIFrame* aFrame) {
-    mozilla::DebugOnly<size_t> len = mProperties.Length();
-    mInDeleteAll = true;
-    for (auto& prop : mProperties) {
+    nsTArray<PropertyValue> toDelete;
+    toDelete.SwapElements(mProperties);
+    for (auto& prop : toDelete) {
       prop.DestroyValueFor(aFrame);
-      MOZ_ASSERT(mProperties.Length() == len);
     }
-    mInDeleteAll = false;
-    mProperties.Clear();
+    MOZ_ASSERT(mProperties.IsEmpty(), "a property dtor added new properties");
   }
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
@@ -374,9 +371,6 @@ private:
       : mProperty(aProperty), mValue(aValue) {}
 
     void DestroyValueFor(const nsIFrame* aFrame) {
-      if (!mProperty) {
-        return;
-      }
       if (mProperty->mDestructor) {
         mProperty->mDestructor(mValue);
       } else if (mProperty->mDestructorWithFrame) {
@@ -406,7 +400,6 @@ private:
   };
 
   nsTArray<PropertyValue> mProperties;
-  bool mInDeleteAll;
 };
 
 
@@ -476,13 +469,7 @@ FrameProperties::RemoveInternal(UntypedDescriptor aProperty, bool* aFoundResult)
   }
 
   void* result = mProperties.ElementAt(index).mValue;
-
-  if (mInDeleteAll) {
-    mProperties.ElementAt(index).mProperty = nullptr;
-    mProperties.ElementAt(index).mValue = nullptr;
-  } else {
-    mProperties.RemoveElementAt(index);
-  }
+  mProperties.RemoveElementAt(index);
 
   return result;
 }
@@ -496,14 +483,8 @@ FrameProperties::DeleteInternal(UntypedDescriptor aProperty,
 
   auto index = mProperties.IndexOf(aProperty, 0, PropertyComparator());
   if (index != nsTArray<PropertyValue>::NoIndex) {
-    PropertyValue pv = mProperties.ElementAt(index);
-    if (mInDeleteAll) {
-      mProperties.ElementAt(index).mProperty = nullptr;
-      mProperties.ElementAt(index).mValue = nullptr;
-    } else {
-      mProperties.RemoveElementAt(index);
-    }
-    pv.DestroyValueFor(aFrame);
+    mProperties.ElementAt(index).DestroyValueFor(aFrame);
+    mProperties.RemoveElementAt(index);
   }
 }
 

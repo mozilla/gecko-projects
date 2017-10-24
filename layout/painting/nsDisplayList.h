@@ -195,6 +195,7 @@ protected:
   static void DetachAGR(AnimatedGeometryRoot* aAGR) {
     aAGR->mFrame = nullptr;
     aAGR->mParentAGR = nullptr;
+    NS_RELEASE(aAGR);
   }
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(AnimatedGeometryRootCache, AnimatedGeometryRoot, DetachAGR)
 
@@ -206,6 +207,7 @@ protected:
   {
     MOZ_ASSERT(mParentAGR || mIsAsync, "The root AGR should always be treated as an async AGR.");
     if (mIsRetained) {
+      NS_ADDREF(this);
       aFrame->SetProperty(AnimatedGeometryRootCache(), this);
     }
   }
@@ -253,7 +255,8 @@ struct ActiveScrolledRoot {
       asr = new ActiveScrolledRoot();
 
       if (aIsRetained) {
-        f->SetProperty(ActiveScrolledRootCache(), asr);
+        RefPtr<ActiveScrolledRoot> ref = asr;
+        f->SetProperty(ActiveScrolledRootCache(), ref.forget().take());
       }
     }
     asr->mParent = aParent;
@@ -307,6 +310,7 @@ private:
   static void DetachASR(ActiveScrolledRoot* aASR) {
     aASR->mParent = nullptr;
     aASR->mScrollableFrame = nullptr;
+    NS_RELEASE(aASR);
   }
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(ActiveScrolledRootCache, ActiveScrolledRoot, DetachASR)
 
