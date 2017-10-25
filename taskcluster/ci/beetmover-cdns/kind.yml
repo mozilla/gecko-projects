@@ -17,7 +17,7 @@ job-defaults:
    run-on-projects: []
 
 jobs:
-   fennec:
+   fennec-push-to-cdns:
       name: fennec_push_to_cdns
       product: mobile
       run:

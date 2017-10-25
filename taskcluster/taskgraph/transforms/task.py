@@ -964,7 +964,7 @@ def build_beetmover_cdns_payload(config, task, task_def):
         'maxRunTime': worker['max-run-time'],
         'product': worker['product'],
         'version': release_config['version'],
-        'build_number': release_config['version'],
+        'build_number': release_config['build_number'],
     }
 
 
