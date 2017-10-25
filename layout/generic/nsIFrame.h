@@ -1701,6 +1701,9 @@ public:
   /**
    * Builds a display list for the content represented by this frame,
    * treating this frame as the root of a stacking context.
+   * Optionally sets aCreatedContainerItem to true if we created a
+   * single container display item for the stacking context, and no
+   * other wrapping items are needed.
    */
   void BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
                                           nsDisplayList*        aList,

@@ -41,6 +41,13 @@ enum class BoxShadowClipMode : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class ClipMode {
+  Clip = 0,
+  ClipOut = 1,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class ExtendMode : uint32_t {
   Clamp = 0,
   Repeat = 1,
@@ -450,10 +457,14 @@ struct ComplexClipRegion {
   LayoutRect rect;
   // Border radii of this rectangle.
   BorderRadius radii;
+  // Whether we are clipping inside or outside
+  // the region.
+  ClipMode mode;
 
   bool operator==(const ComplexClipRegion& aOther) const {
     return rect == aOther.rect &&
-           radii == aOther.radii;
+           radii == aOther.radii &&
+           mode == aOther.mode;
   }
 };
 
@@ -821,6 +832,40 @@ struct FontInstancePlatformOptions {
 };
 #endif
 
+// A 2d Point tagged with a unit.
+struct TypedPoint2D_u32__DevicePixel {
+  uint32_t x;
+  uint32_t y;
+
+  bool operator==(const TypedPoint2D_u32__DevicePixel& aOther) const {
+    return x == aOther.x &&
+           y == aOther.y;
+  }
+};
+
+struct TypedSize2D_u32__DevicePixel {
+  uint32_t width;
+  uint32_t height;
+
+  bool operator==(const TypedSize2D_u32__DevicePixel& aOther) const {
+    return width == aOther.width &&
+           height == aOther.height;
+  }
+};
+
+// A 2d Rectangle optionally tagged with a unit.
+struct TypedRect_u32__DevicePixel {
+  TypedPoint2D_u32__DevicePixel origin;
+  TypedSize2D_u32__DevicePixel size;
+
+  bool operator==(const TypedRect_u32__DevicePixel& aOther) const {
+    return origin == aOther.origin &&
+           size == aOther.size;
+  }
+};
+
+typedef TypedRect_u32__DevicePixel DeviceUintRect;
+
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
  *   1. Get the latest cbindgen using `cargo install --force cbindgen`
@@ -936,6 +981,8 @@ WR_FUNC;
 
 WR_INLINE
 uint64_t wr_dp_define_clip(WrState *aState,
+                           const uint64_t *aAncestorScrollId,
+                           const uint64_t *aAncestorClipId,
                            LayoutRect aClipRect,
                            const ComplexClipRegion *aComplex,
                            size_t aComplexCount,
@@ -945,6 +992,8 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_define_scroll_layer(WrState *aState,
                                uint64_t aScrollId,
+                               const uint64_t *aAncestorScrollId,
+                               const uint64_t *aAncestorClipId,
                                LayoutRect aContentRect,
                                LayoutRect aClipRect)
 WR_FUNC;
@@ -1042,7 +1091,7 @@ void wr_dp_push_box_shadow(WrState *aState,
                            ColorF aColor,
                            float aBlurRadius,
                            float aSpreadRadius,
-                           float aBorderRadius,
+                           BorderRadius aBorderRadius,
                            BoxShadowClipMode aClipMode)
 WR_FUNC;
 
@@ -1359,7 +1408,8 @@ WR_INLINE
 void wr_resource_updates_update_blob_image(ResourceUpdates *aResources,
                                            WrImageKey aImageKey,
                                            const WrImageDescriptor *aDescriptor,
-                                           WrVecU8 *aBytes)
+                                           WrVecU8 *aBytes,
+                                           DeviceUintRect aDirtyRect)
 WR_FUNC;
 
 WR_INLINE

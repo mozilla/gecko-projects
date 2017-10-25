@@ -17,6 +17,7 @@
 #include "gfxContext.h"
 #include "mozilla/ArenaAllocator.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/Array.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EnumSet.h"
@@ -877,25 +878,27 @@ public:
    * effects applied to them (e.g. CSS opacity or filters).
    *
    * @param aWidgetType the -moz-appearance value for the themed widget
+   * @param aItem the item associated with the theme geometry
    * @param aRect the device-pixel rect relative to the widget's displayRoot
    * for the themed widget
    */
-  void RegisterThemeGeometry(uint8_t aWidgetType, nsIFrame* aFrame,
-                             const mozilla::LayoutDeviceIntRect& aRect) {
-    if (mIsPaintingToWindow) {
-      nsTArray<ThemeGeometry>* geometries =
-        mThemeGeometries.LookupOrAdd(aFrame);
-
-      geometries->AppendElement(ThemeGeometry(aWidgetType, aRect));
+  void RegisterThemeGeometry(uint8_t aWidgetType, nsDisplayItem* aItem,
+                             const mozilla::LayoutDeviceIntRect& aRect)
+  {
+    if (!mIsPaintingToWindow) {
+      return;
     }
+
+    nsTArray<ThemeGeometry>* geometries = mThemeGeometries.LookupOrAdd(aItem);
+    geometries->AppendElement(ThemeGeometry(aWidgetType, aRect));
   }
 
   /**
-   * Removes theme geometries associated with the given frame.
+   * Removes theme geometries associated with the given display item |aItem|.
    */
-  void UnregisterThemeGeometry(nsIFrame* aFrame)
+  void UnregisterThemeGeometry(nsDisplayItem* aItem)
   {
-    mThemeGeometries.Remove(aFrame);
+    mThemeGeometries.Remove(aItem);
   }
 
   /**
@@ -1706,7 +1709,7 @@ private:
   nsCOMPtr<nsISelection>         mBoundingSelection;
   AutoTArray<PresShellState,8> mPresShellStates;
   AutoTArray<nsIFrame*,400>    mFramesMarkedForDisplay;
-  nsClassHashtable<nsPtrHashKey<nsIFrame>, nsTArray<ThemeGeometry>> mThemeGeometries;
+  nsClassHashtable<nsPtrHashKey<nsDisplayItem>, nsTArray<ThemeGeometry>> mThemeGeometries;
   nsDisplayTableItem*            mCurrentTableItem;
   DisplayListClipState           mClipState;
   const ActiveScrolledRoot*      mCurrentActiveScrolledRoot;
@@ -3861,7 +3864,7 @@ public:
 
   void Destroy(nsDisplayListBuilder* aBuilder) override
   {
-    aBuilder->UnregisterThemeGeometry(mFrame);
+    aBuilder->UnregisterThemeGeometry(this);
     nsDisplayItem::Destroy(aBuilder);
   }
 

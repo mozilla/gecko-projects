@@ -493,10 +493,18 @@ if test -n "$COMPILE_ENVIRONMENT"; then
    MOZ_CONFIG_SANITIZE
 fi
 
-# Add the hardening flags from moz.configure
+dnl ========================================================
+dnl Add optional and non-optional hardening flags
+dnl ========================================================
 CFLAGS="$CFLAGS $HARDENING_CFLAGS"
 CPPFLAGS="$CPPFLAGS $HARDENING_CFLAGS"
 CXXFLAGS="$CXXFLAGS $HARDENING_CFLAGS"
+
+if test "$GNU_CC" -o test -n "${CLANG_CC}${CLANG_CL}"; then
+   CFLAGS="$CFLAGS -D_FORTIFY_SOURCE=2"
+   CPPFLAGS="$CPPFLAGS -D_FORTIFY_SOURCE=2"
+   CXXFLAGS="$CXXFLAGS -D_FORTIFY_SOURCE=2"
+fi
 
 dnl ========================================================
 dnl GNU specific defaults
@@ -4485,7 +4493,6 @@ AC_SUBST(FILTER)
 AC_SUBST(BIN_FLAGS)
 AC_SUBST(MOZ_AUTH_EXTENSION)
 AC_SUBST(MOZ_PREF_EXTENSIONS)
-AC_SUBST(MOZ_DEBUG)
 AC_SUBST(MOZ_DEBUG_LDFLAGS)
 AC_SUBST(WARNINGS_AS_ERRORS)
 AC_SUBST_SET(MOZ_EXTENSIONS)

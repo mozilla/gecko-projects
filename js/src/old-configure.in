@@ -544,6 +544,15 @@ esac
 MOZ_DOING_LTO(lto_is_enabled)
 
 dnl ========================================================
+dnl Add optional and non-optional hardening flags
+dnl ========================================================
+if test "$GNU_CC" -o test -n "${CLANG_CC}${CLANG_CL}"; then
+   CFLAGS="$CFLAGS -D_FORTIFY_SOURCE=2"
+   CPPFLAGS="$CPPFLAGS -D_FORTIFY_SOURCE=2"
+   CXXFLAGS="$CXXFLAGS -D_FORTIFY_SOURCE=2"
+fi
+
+dnl ========================================================
 dnl System overrides of the defaults for target
 dnl ========================================================
 
@@ -1952,7 +1961,6 @@ AC_SUBST(WINDRES)
 AC_SUBST(IMPLIB)
 AC_SUBST(FILTER)
 AC_SUBST(BIN_FLAGS)
-AC_SUBST(MOZ_DEBUG)
 AC_SUBST(MOZ_DEBUG_LDFLAGS)
 AC_SUBST(WARNINGS_AS_ERRORS)
 AC_SUBST(LIBICONV)

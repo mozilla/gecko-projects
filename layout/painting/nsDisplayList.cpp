@@ -3223,15 +3223,15 @@ nsDisplaySolidColorRegion::CreateWebRenderCommands(mozilla::wr::DisplayListBuild
 }
 
 static void
-RegisterThemeGeometry(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                      nsITheme::ThemeGeometryType aType)
+RegisterThemeGeometry(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
+                      nsIFrame* aFrame, nsITheme::ThemeGeometryType aType)
 {
   if (aBuilder->IsInChromeDocumentOrPopup() && !aBuilder->IsInTransform()) {
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
     nsPoint offset = aBuilder->IsInSubdocument() ? aBuilder->ToReferenceFrame(aFrame)
                                                  : aFrame->GetOffsetTo(displayRoot);
     nsRect borderBox = nsRect(offset, aFrame->GetSize());
-    aBuilder->RegisterThemeGeometry(aType, aFrame,
+    aBuilder->RegisterThemeGeometry(aType, aItem,
       LayoutDeviceIntRect::FromUnknownRect(
         borderBox.ToNearestPixels(
           aFrame->PresContext()->AppUnitsPerDevPixel())));
@@ -4187,7 +4187,7 @@ nsDisplayThemedBackground::nsDisplayThemedBackground(nsDisplayListBuilder* aBuil
   nsITheme::ThemeGeometryType type =
     theme->ThemeGeometryTypeForWidget(mFrame, disp->mAppearance);
   if (type != nsITheme::eThemeGeometryTypeUnknown) {
-    RegisterThemeGeometry(aBuilder, aFrame, type);
+    RegisterThemeGeometry(aBuilder, this, aFrame, type);
   }
 
   if (disp->mAppearance == NS_THEME_WIN_BORDERLESS_GLASS ||
@@ -4734,7 +4734,7 @@ nsDisplayOutline::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuil
     return false;
   }
 
-  mBorderRenderer->CreateWebRenderCommands(aBuilder, aResources, aSc);
+  mBorderRenderer->CreateWebRenderCommands(this, aBuilder, aResources, aSc);
   return true;
 }
 
@@ -5633,7 +5633,6 @@ nsDisplayBoxShadowOuter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
                                                      borderRect,
                                                      mFrame,
                                                      borderRadii);
-    MOZ_ASSERT(borderRadii.AreRadiiSame());
   }
 
   // Everything here is in app units, change to device units.
@@ -5666,9 +5665,17 @@ nsDisplayBoxShadowOuter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
       wr::LayoutRect deviceBoxRect = aSc.ToRelativeLayoutRect(deviceBox);
       wr::LayoutRect deviceClipRect = aSc.ToRelativeLayoutRect(clipRect);
 
-      // TODO: support non-uniform border radius.
-      float borderRadius = hasBorderRadius ? borderRadii.TopLeft().width
-                                           : 0.0;
+      LayoutDeviceSize zeroSize;
+      wr::BorderRadius borderRadius = wr::ToBorderRadius(zeroSize, zeroSize,
+                                                         zeroSize, zeroSize);
+      if (hasBorderRadius) {
+        borderRadius = wr::ToBorderRadius(
+          LayoutDeviceSize::FromUnknownSize(borderRadii.TopLeft()),
+          LayoutDeviceSize::FromUnknownSize(borderRadii.TopRight()),
+          LayoutDeviceSize::FromUnknownSize(borderRadii.BottomLeft()),
+          LayoutDeviceSize::FromUnknownSize(borderRadii.BottomRight()));
+      }
+
       float spreadRadius = float(shadow->mSpread) / float(appUnitsPerDevPixel);
 
       aBuilder.PushBoxShadow(deviceBoxRect,
@@ -5838,8 +5845,12 @@ nsDisplayBoxShadowInner::CreateInsetBoxShadowWebRenderCommands(mozilla::wr::Disp
           appUnitsPerDevPixel);
 
       float blurRadius = float(shadowItem->mRadius) / float(appUnitsPerDevPixel);
-      // TODO: WR doesn't support non-uniform border radii
-      float borderRadius = innerRadii.TopLeft().width;
+
+      wr::BorderRadius borderRadius = wr::ToBorderRadius(
+        LayoutDeviceSize::FromUnknownSize(innerRadii.TopLeft()),
+        LayoutDeviceSize::FromUnknownSize(innerRadii.TopRight()),
+        LayoutDeviceSize::FromUnknownSize(innerRadii.BottomLeft()),
+        LayoutDeviceSize::FromUnknownSize(innerRadii.BottomRight()));
       // NOTE: Any spread radius > 0 will render nothing. WR Bug.
       float spreadRadius = float(shadowItem->mSpread) / float(appUnitsPerDevPixel);
 
@@ -6306,7 +6317,8 @@ nsDisplayOpacity::ApplyOpacity(nsDisplayListBuilder* aBuilder,
 bool
 nsDisplayOpacity::CanApplyOpacity() const
 {
-  return true;
+  return !EffectCompositor::HasAnimationsForCompositor(mFrame,
+                                                       eCSSProperty_opacity);
 }
 
 /**
@@ -7346,7 +7358,7 @@ nsDisplayStickyPosition::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
     wr::WrStickyId id = aBuilder.DefineStickyFrame(aSc.ToRelativeLayoutRect(bounds),
         top.ptrOr(nullptr), right.ptrOr(nullptr), bottom.ptrOr(nullptr), left.ptrOr(nullptr));
 
-    aBuilder.PushStickyFrame(id);
+    aBuilder.PushStickyFrame(id, GetClipChain());
   }
 
   // All the things inside this position:sticky item also have the main-thread
@@ -7358,16 +7370,11 @@ nsDisplayStickyPosition::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
   StackingContextHelper sc(aSc, aBuilder);
   sc.AdjustOrigin(scTranslation);
 
-  // TODO: if, inside this nested command builder, we try to turn a gecko clip
-  // chain into a WR clip chain, we might end up repushing the clip stack
-  // without `id` which effectively throws out the sticky behaviour. The
-  // repushing can happen because of the need to define a new clip while
-  // particular things are on the stack
   nsDisplayOwnLayer::CreateWebRenderCommands(aBuilder, aResources, sc,
       aManager, aDisplayListBuilder);
 
   if (stickyScrollContainer) {
-    aBuilder.PopStickyFrame();
+    aBuilder.PopStickyFrame(GetClipChain());
   }
 
   return true;
@@ -9399,18 +9406,18 @@ nsDisplayMask::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
                                                                             aSc, aDisplayListBuilder,
                                                                             bounds);
   if (mask) {
-    wr::WrClipId clipId = aBuilder.DefineClip(
+    wr::WrClipId clipId = aBuilder.DefineClip(Nothing(), Nothing(),
         aSc.ToRelativeLayoutRect(bounds), nullptr, mask.ptr());
     // Don't record this clip push in aBuilder's internal clip stack, because
     // otherwise any nested ScrollingLayersHelper instances that are created
     // will get confused about which clips are pushed.
-    aBuilder.PushClip(clipId, /*aMask*/ true);
+    aBuilder.PushClip(clipId, GetClipChain());
   }
 
   nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
 
   if (mask) {
-    aBuilder.PopClip(/*aMask*/ true);
+    aBuilder.PopClip(GetClipChain());
   }
 
   return true;
@@ -9572,6 +9579,13 @@ nsDisplayFilter::PaintAsLayer(nsDisplayListBuilder* aBuilder,
   nsDisplayFilterGeometry::UpdateDrawResult(this, imgParams.result);
 }
 
+static float
+ClampStdDeviation(float aStdDeviation)
+{
+  // Cap software blur radius for performance reasons.
+  return std::min(std::max(0.0f, aStdDeviation), 100.0f);
+}
+
 bool
 nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                          mozilla::wr::IpcResourceUpdateQueue& aResources,
@@ -9598,6 +9612,18 @@ nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
         mozilla::wr::WrFilterOp filterOp = {
           wr::ToWrFilterOpType(filter.GetType()),
           filter.GetFilterParameter().GetFactorOrPercentValue(),
+        };
+        wrFilters.AppendElement(filterOp);
+        break;
+      }
+      case NS_STYLE_FILTER_BLUR: {
+        float appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
+        mozilla::wr::WrFilterOp filterOp = {
+          wr::ToWrFilterOpType(filter.GetType()),
+          ClampStdDeviation(
+            NSAppUnitsToFloatPixels(
+              filter.GetFilterParameter().GetCoordValue(),
+              appUnitsPerDevPixel)),
         };
         wrFilters.AppendElement(filterOp);
         break;
