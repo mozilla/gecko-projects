@@ -252,9 +252,11 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   AUTO_PROFILER_TRACING("Paint", "RenderLayers");
   mTransactionIncomplete = false;
 
-  if (gfxPrefs::LayersDump()) {
-    this->Dump();
-  }
+#if 0
+  // Useful for debugging, it dumps the display list *before* we try to build
+  // WR commands from it
+  nsFrame::PrintDisplayList(aDisplayListBuilder, *aDisplayList);
+#endif
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
@@ -297,7 +299,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
     mScrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
   }
 
-  bool sync = mTarget != nullptr;
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
 
@@ -321,9 +322,8 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   mLastDisplayListSize = dl.dl.inner.capacity;
 
   {
-    AUTO_PROFILER_TRACING("Paint", sync ? "ForwardDPTransactionSync"
-                                        : "ForwardDPTransaction");
-    WrBridge()->EndTransaction(contentSize, dl, resourceUpdates, size.ToUnknownSize(), sync,
+    AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction");
+    WrBridge()->EndTransaction(contentSize, dl, resourceUpdates, size.ToUnknownSize(),
                                mLatestTransactionId, mScrollData, transactionStart);
   }
 

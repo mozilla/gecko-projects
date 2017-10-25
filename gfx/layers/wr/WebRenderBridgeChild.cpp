@@ -122,7 +122,6 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
                                      wr::BuiltDisplayList& aDL,
                                      wr::IpcResourceUpdateQueue& aResources,
                                      const gfx::IntSize& aSize,
-                                     bool aIsSync,
                                      uint64_t aTransactionId,
                                      const WebRenderScrollData& aScrollData,
                                      const mozilla::TimeStamp& aTxnStartTime)
@@ -142,19 +141,11 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  if (aIsSync) {
-    this->SendSetDisplayListSync(aSize, mParentCommands, mDestroyedActors,
-                                 GetFwdTransactionId(), aTransactionId,
-                                 aContentSize, dlData, aDL.dl_desc, aScrollData,
-                                 Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
-                                 mIdNamespace, aTxnStartTime, fwdTime);
-  } else {
-    this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
-                             GetFwdTransactionId(), aTransactionId,
-                             aContentSize, dlData, aDL.dl_desc, aScrollData,
-                             Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
-                             mIdNamespace, aTxnStartTime, fwdTime);
-  }
+  this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
+                           GetFwdTransactionId(), aTransactionId,
+                           aContentSize, dlData, aDL.dl_desc, aScrollData,
+                           Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
+                           mIdNamespace, aTxnStartTime, fwdTime);
 
   mParentCommands.Clear();
   mDestroyedActors.Clear();
@@ -271,7 +262,8 @@ WriteFontFileData(const uint8_t* aData, uint32_t aLength, uint32_t aIndex,
 void
 WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<wr::GlyphInstance>& aGlyphs,
                                  gfx::ScaledFont* aFont, const wr::ColorF& aColor, const StackingContextHelper& aSc,
-                                 const wr::LayerRect& aBounds, const wr::LayerRect& aClip, bool aBackfaceVisible)
+                                 const wr::LayerRect& aBounds, const wr::LayerRect& aClip, bool aBackfaceVisible,
+                                 const wr::GlyphOptions* aGlyphOptions)
 {
   MOZ_ASSERT(aFont);
   MOZ_ASSERT(!aGlyphs.IsEmpty());
@@ -284,7 +276,8 @@ WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArra
                     aBackfaceVisible,
                     aColor,
                     key,
-                    Range<const wr::GlyphInstance>(aGlyphs.Elements(), aGlyphs.Length()));
+                    Range<const wr::GlyphInstance>(aGlyphs.Elements(), aGlyphs.Length()),
+                    aGlyphOptions);
 }
 
 wr::FontInstanceKey

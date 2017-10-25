@@ -47,10 +47,6 @@
 #endif
 
 #include "GmpVideoCodec.h"
-#ifdef MOZ_WEBRTC_OMX
-#include "OMXCodecWrapper.h"
-#include "OMXVideoCodec.h"
-#endif
 
 #ifdef MOZ_WEBRTC_MEDIACODEC
 #include "MediaCodecVideoCodec.h"
@@ -230,7 +226,9 @@ VideoSessionConduit::Create(RefPtr<WebRtcCallWrapper> aCall)
     return nullptr;
   }
 
-  nsAutoPtr<WebrtcVideoConduit> obj(new WebrtcVideoConduit(aCall));
+  UniquePtr<cricket::VideoAdapter> videoAdapter(new cricket::VideoAdapter(1));
+  nsAutoPtr<WebrtcVideoConduit> obj(new WebrtcVideoConduit(aCall,
+                                    std::move(videoAdapter)));
   if(obj->Init() != kMediaConduitNoError) {
     CSFLogError(LOGTAG, "%s VideoConduit Init Failed ", __FUNCTION__);
     return nullptr;
@@ -239,10 +237,11 @@ VideoSessionConduit::Create(RefPtr<WebRtcCallWrapper> aCall)
   return obj.forget();
 }
 
-WebrtcVideoConduit::WebrtcVideoConduit(RefPtr<WebRtcCallWrapper> aCall)
+WebrtcVideoConduit::WebrtcVideoConduit(RefPtr<WebRtcCallWrapper> aCall,
+                                       UniquePtr<cricket::VideoAdapter>&& aVideoAdapter)
   : mTransportMonitor("WebrtcVideoConduit")
   , mRenderer(nullptr)
-  , mVideoAdapter(1)
+  , mVideoAdapter(std::move(aVideoAdapter))
   , mVideoBroadcaster()
   , mEngineTransmitting(false)
   , mEngineReceiving(false)
@@ -785,7 +784,7 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
       codecConfig->mName, this));
 
   // Always call this to ensure it's reset
-  mVideoAdapter.OnScaleResolutionBy(
+  mVideoAdapter->OnScaleResolutionBy(
     (streamCount >= 1 && codecConfig->mSimulcastEncodings[0].constraints.scaleDownBy > 1.0) ?
     rtc::Optional<float>(codecConfig->mSimulcastEncodings[0].constraints.scaleDownBy) :
     rtc::Optional<float>());
@@ -1477,11 +1476,7 @@ WebrtcVideoConduit::CreateDecoder(webrtc::VideoCodecType aType)
   switch (aType) {
     case webrtc::VideoCodecType::kVideoCodecH264:
       // get an external decoder
-#ifdef MOZ_WEBRTC_OMX
-      decoder = OMXVideoCodec::CreateDecoder(OMXVideoCodec::CodecType::CODEC_H264);
-#else
       decoder = GmpVideoCodec::CreateDecoder();
-#endif
       if (decoder) {
         mRecvCodecPlugin = static_cast<WebrtcVideoDecoder*>(decoder);
       }
@@ -1542,11 +1537,7 @@ WebrtcVideoConduit::CreateEncoder(webrtc::VideoCodecType aType,
   switch (aType) {
     case webrtc::VideoCodecType::kVideoCodecH264:
       // get an external encoder
-#ifdef MOZ_WEBRTC_OMX
-      encoder = OMXVideoCodec::CreateEncoder(OMXVideoCodec::CodecType::CODEC_H264);
-#else
       encoder = GmpVideoCodec::CreateEncoder();
-#endif
       if (encoder) {
         mSendCodecPlugin = static_cast<WebrtcVideoEncoder*>(encoder);
       }
@@ -1718,8 +1709,8 @@ WebrtcVideoConduit::SelectSendResolution(unsigned short width,
       if (max_fs > mLastSinkWanted.max_pixel_count.value_or(max_fs)) {
         max_fs = mLastSinkWanted.max_pixel_count.value_or(max_fs);
       }
-      mVideoAdapter.OnResolutionRequest(rtc::Optional<int>(max_fs),
-                                        rtc::Optional<int>());
+      mVideoAdapter->OnResolutionRequest(rtc::Optional<int>(max_fs),
+                                         rtc::Optional<int>());
     }
   }
 
@@ -1941,8 +1932,8 @@ WebrtcVideoConduit::OnSinkWantsChanged(
       }
     }
 
-    mVideoAdapter.OnResolutionRequest(max_pixel_count,
-                                      max_pixel_count_step_up);
+    mVideoAdapter->OnResolutionRequest(max_pixel_count,
+                                       max_pixel_count_step_up);
   }
 }
 
@@ -1984,7 +1975,7 @@ WebrtcVideoConduit::SendVideoFrame(webrtc::VideoFrame& frame)
     int crop_height;
     int crop_x;
     int crop_y;
-    if (!mVideoAdapter.AdaptFrameResolution(
+    if (!mVideoAdapter->AdaptFrameResolution(
           frame.width(), frame.height(),
           frame.timestamp_us() * rtc::kNumNanosecsPerMicrosec,
           &crop_width, &crop_height, &adapted_width, &adapted_height)) {

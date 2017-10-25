@@ -72,8 +72,7 @@ use js::glue::GetWindowProxyClass;
 use js::jsapi::{JSAutoCompartment, JSContext, JS_SetWrapObjectCallbacks};
 use js::jsapi::{JSTracer, SetWindowProxyClass};
 use js::jsval::UndefinedValue;
-use js::rust::Runtime;
-use malloc_size_of::{malloc_size_of, MallocSizeOfOps};
+use malloc_size_of::MallocSizeOfOps;
 use mem::malloc_size_of_including_self;
 use metrics::PaintTimeMetrics;
 use microtask::{MicrotaskQueue, Microtask};
@@ -87,7 +86,7 @@ use profile_traits::mem::{self, OpaqueSender, Report, ReportKind, ReportsChan};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_layout_interface::message::{self, Msg, NewLayoutThreadInfo, ReflowGoal};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
-use script_runtime::{ScriptPort, get_reports, new_rt_and_cx};
+use script_runtime::{ScriptPort, get_reports, new_rt_and_cx, Runtime};
 use script_traits::{CompositorEvent, ConstellationControlMsg};
 use script_traits::{DiscardBrowsingContext, DocumentActivity, EventResult};
 use script_traits::{InitialScriptState, JsEvalResult, LayoutMsg, LoadData};
@@ -1506,7 +1505,7 @@ impl ScriptThread {
         let mut reports = vec![];
         // Servo uses vanilla jemalloc, which doesn't have a
         // malloc_enclosing_size_of function.
-        let mut ops = MallocSizeOfOps::new(malloc_size_of, None, None);
+        let mut ops = MallocSizeOfOps::new(::servo_allocator::usable_size, None, None);
 
         for (_, document) in self.documents.borrow().iter() {
             let current_url = document.url();

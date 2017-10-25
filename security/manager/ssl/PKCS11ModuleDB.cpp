@@ -46,20 +46,6 @@ PKCS11ModuleDB::DeleteModule(const nsAString& aModuleName)
   }
 
   NS_ConvertUTF16toUTF8 moduleName(aModuleName);
-  // Introduce additional scope for module so all references to it are released
-  // before we call SECMOD_DeleteModule, below.
-#ifndef MOZ_NO_SMART_CARDS
-  {
-    UniqueSECMODModule module(SECMOD_FindModule(moduleName.get()));
-    if (!module) {
-      return NS_ERROR_FAILURE;
-    }
-    nsCOMPtr<nsINSSComponent> nssComponent(
-      do_GetService(PSM_COMPONENT_CONTRACTID));
-    nssComponent->ShutdownSmartCardThread(module.get());
-  }
-#endif
-
   // modType is an output variable. We ignore it.
   int32_t modType;
   SECStatus srv = SECMOD_DeleteModule(moduleName.get(), &modType);
@@ -149,12 +135,6 @@ PKCS11ModuleDB::AddModule(const nsAString& aModuleName,
     return NS_ERROR_FAILURE;
   }
 
-#ifndef MOZ_NO_SMART_CARDS
-  nsCOMPtr<nsINSSComponent> nssComponent(
-    do_GetService(PSM_COMPONENT_CONTRACTID));
-  nssComponent->LaunchSmartCardThread(module.get());
-#endif
-
   nsAutoString scalarKey;
   GetModuleNameForTelemetry(module.get(), scalarKey);
   // Scalar keys must be between 0 and 70 characters (exclusive).
@@ -220,7 +200,7 @@ PKCS11ModuleDB::ListModules(nsISimpleEnumerator** _retval)
   for (SECMODModuleList* list = SECMOD_GetDefaultModuleList(); list;
        list = list->next) {
     nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(list->module);
-    nsresult rv = array->AppendElement(module, false);
+    nsresult rv = array->AppendElement(module);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -230,7 +210,7 @@ PKCS11ModuleDB::ListModules(nsISimpleEnumerator** _retval)
   for (SECMODModuleList* list = SECMOD_GetDeadModuleList(); list;
        list = list->next) {
     nsCOMPtr<nsIPKCS11Module> module = new nsPKCS11Module(list->module);
-    nsresult rv = array->AppendElement(module, false);
+    nsresult rv = array->AppendElement(module);
     if (NS_FAILED(rv)) {
       return rv;
     }

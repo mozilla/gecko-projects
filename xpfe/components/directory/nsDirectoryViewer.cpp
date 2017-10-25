@@ -744,19 +744,11 @@ nsHTTPIndex::isWellknownContainerURI(nsIRDFResource *r)
 
 
 NS_IMETHODIMP
-nsHTTPIndex::GetURI(char * *uri)
+nsHTTPIndex::GetURI(nsACString& aURI)
 {
-	NS_PRECONDITION(uri != nullptr, "null ptr");
-	if (! uri)
-		return(NS_ERROR_NULL_POINTER);
-
-	if ((*uri = strdup("rdf:httpindex")) == nullptr)
-		return(NS_ERROR_OUT_OF_MEMORY);
-
-	return(NS_OK);
+  aURI.AssignLiteral("rdf:httpindex");
+  return NS_OK;
 }
-
-
 
 NS_IMETHODIMP
 nsHTTPIndex::GetSource(nsIRDFResource *aProperty, nsIRDFNode *aTarget, bool aTruthValue,
@@ -852,7 +844,7 @@ nsHTTPIndex::GetTargets(nsIRDFResource *aSource, nsIRDFResource *aProperty, bool
 		    if (NS_FAILED(idx_rv))
 		    {
     		    // add aSource into list of connections to make
-	    	    mConnectionList->AppendElement(aSource, /*weak =*/ false);
+	    	    mConnectionList->AppendElement(aSource);
 
                 // if we don't have a timer about to fire, create one
                 // which should fire as soon as possible (out-of-band)
@@ -886,9 +878,9 @@ nsHTTPIndex::AddElement(nsIRDFResource *parent, nsIRDFResource *prop, nsIRDFNode
     }
 
     // order required: parent, prop, then child
-    mNodeList->AppendElement(parent, /*weak =*/ false);
-    mNodeList->AppendElement(prop, /*weak =*/ false);
-    mNodeList->AppendElement(child, /*weak = */ false);
+    mNodeList->AppendElement(parent);
+    mNodeList->AppendElement(prop);
+    mNodeList->AppendElement(child);
 
 	if (!mTimer)
 	{

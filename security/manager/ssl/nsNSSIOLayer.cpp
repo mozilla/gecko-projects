@@ -2233,6 +2233,14 @@ ClientAuthDataRunnable::RunOnTargetThread()
   void* wincx = mSocketInfo;
   nsresult rv;
 
+  if (NS_FAILED(CheckForSmartCardChanges())) {
+    mRV = SECFailure;
+    *mPRetCert = nullptr;
+    *mPRetKey = nullptr;
+    mErrorCodeToReport = SEC_ERROR_LIBRARY_FAILURE;
+    return;
+  }
+
   nsCOMPtr<nsIX509Cert> socketClientCert;
   mSocketInfo->GetClientCert(getter_AddRefs(socketClientCert));
 
@@ -2420,7 +2428,7 @@ ClientAuthDataRunnable::RunOnTargetThread()
           goto loser;
         }
 
-        rv = certArray->AppendElement(tempCert, false);
+        rv = certArray->AppendElement(tempCert);
         if (NS_FAILED(rv)) {
           goto loser;
         }

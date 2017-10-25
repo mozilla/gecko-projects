@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "mozilla/AtomArray.h"
 #include "mozilla/ServoTypes.h"
 #include "mozilla/ServoBindingTypes.h"
 #include "mozilla/ServoElementSnapshot.h"
@@ -65,6 +66,7 @@ using mozilla::SharedFontList;
 class nsCSSCounterStyleRule;
 class nsCSSFontFaceRule;
 struct nsMediaFeature;
+class nsSimpleContentList;
 struct nsStyleList;
 struct nsStyleImage;
 struct nsStyleGradientStop;
@@ -709,6 +711,11 @@ void Gecko_ReportUnexpectedCSSError(mozilla::css::ErrorReporter* reporter,
                                     uint32_t sourceLen,
                                     uint32_t lineNumber,
                                     uint32_t colNumber);
+
+// DOM APIs.
+void Gecko_ContentList_AppendAll(nsSimpleContentList* aContentList,
+                                 const RawGeckoElement** aElements,
+                                 size_t aLength);
 
 } // extern "C"
 

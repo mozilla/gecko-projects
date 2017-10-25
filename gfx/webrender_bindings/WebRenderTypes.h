@@ -12,7 +12,6 @@
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
-#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/Variant.h"
@@ -197,6 +196,19 @@ inline ImageRendering ToImageRendering(gfx::SamplingFilter aFilter)
                                                : ImageRendering::Auto;
 }
 
+static inline FontRenderMode ToFontRenderMode(gfx::AntialiasMode aMode, bool aPermitSubpixelAA = true)
+{
+  switch (aMode) {
+    case gfx::AntialiasMode::NONE:
+      return FontRenderMode::Mono;
+    case gfx::AntialiasMode::GRAY:
+      return FontRenderMode::Alpha;
+    case gfx::AntialiasMode::SUBPIXEL:
+    default:
+      return aPermitSubpixelAA ? FontRenderMode::Subpixel : FontRenderMode::Alpha;
+  }
+}
+
 static inline MixBlendMode ToMixBlendMode(gfx::CompositionOp compositionOp)
 {
   switch (compositionOp)
@@ -313,6 +325,7 @@ static inline wr::ComplexClipRegion ToComplexClipRegion(const RoundedRect& rect)
   ret.radii.top_right    = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerTopRight]));
   ret.radii.bottom_left  = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomLeft]));
   ret.radii.bottom_right = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomRight]));
+  ret.mode = wr::ClipMode::Clip;
   return ret;
 }
 
@@ -659,36 +672,29 @@ struct BuiltDisplayList {
   wr::BuiltDisplayListDescriptor dl_desc;
 };
 
-static inline wr::WrFilterOpType ToWrFilterOpType(const layers::CSSFilterType type) {
+static inline wr::WrFilterOpType ToWrFilterOpType(uint32_t type) {
   switch (type) {
-    case layers::CSSFilterType::BLUR:
+    case NS_STYLE_FILTER_BLUR:
       return wr::WrFilterOpType::Blur;
-    case layers::CSSFilterType::BRIGHTNESS:
+    case NS_STYLE_FILTER_BRIGHTNESS:
       return wr::WrFilterOpType::Brightness;
-    case layers::CSSFilterType::CONTRAST:
+    case NS_STYLE_FILTER_CONTRAST:
       return wr::WrFilterOpType::Contrast;
-    case layers::CSSFilterType::GRAYSCALE:
+    case NS_STYLE_FILTER_GRAYSCALE:
       return wr::WrFilterOpType::Grayscale;
-    case layers::CSSFilterType::HUE_ROTATE:
+    case NS_STYLE_FILTER_HUE_ROTATE:
       return wr::WrFilterOpType::HueRotate;
-    case layers::CSSFilterType::INVERT:
+    case NS_STYLE_FILTER_INVERT:
       return wr::WrFilterOpType::Invert;
-    case layers::CSSFilterType::OPACITY:
+    case NS_STYLE_FILTER_OPACITY:
       return wr::WrFilterOpType::Opacity;
-    case layers::CSSFilterType::SATURATE:
+    case NS_STYLE_FILTER_SATURATE:
       return wr::WrFilterOpType::Saturate;
-    case layers::CSSFilterType::SEPIA:
+    case NS_STYLE_FILTER_SEPIA:
       return wr::WrFilterOpType::Sepia;
   }
   MOZ_ASSERT_UNREACHABLE("Tried to convert unknown filter type.");
   return wr::WrFilterOpType::Grayscale;
-}
-
-static inline wr::WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
-  return {
-    ToWrFilterOpType(filter.type),
-    filter.argument,
-  };
 }
 
 // Corresponds to an "internal" webrender clip id. That is, a

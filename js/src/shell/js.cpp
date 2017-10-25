@@ -310,6 +310,7 @@ static bool enableNativeRegExp = false;
 static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
 static bool enableWasmBaseline = false;
 static bool enableWasmIon = false;
+static bool enableTestWasmAwaitTier2 = false;
 static bool enableAsyncStacks = false;
 static bool enableStreams = false;
 #ifdef JS_GC_ZEAL
@@ -5147,16 +5148,46 @@ GetMaxArgs(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-ObjectEmulatingUndefined(JSContext* cx, unsigned argc, Value* vp)
+IsHTMLDDA_Call(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    static const JSClass cls = {
-        "ObjectEmulatingUndefined",
-        JSCLASS_EMULATES_UNDEFINED
+    // These are the required conditions under which this object may be called
+    // by test262 tests, and the required behavior under those conditions.
+    if (args.length() == 0 ||
+        (args.length() == 1 && args[0].isString() && args[0].toString()->length() == 0))
+    {
+        args.rval().setNull();
+        return true;
+    }
+
+    JS_ReportErrorASCII(cx, "IsHTMLDDA object is being called in an impermissible manner");
+    return false;
+}
+
+static bool
+CreateIsHTMLDDA(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    static const JSClassOps classOps = {
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        IsHTMLDDA_Call,
     };
 
-    RootedObject obj(cx, JS_NewObject(cx, &cls));
+    static const JSClass cls = {
+        "IsHTMLDDA",
+        JSCLASS_EMULATES_UNDEFINED,
+        &classOps,
+    };
+
+    JSObject* obj = JS_NewObject(cx, &cls);
     if (!obj)
         return false;
     args.rval().setObject(*obj);
@@ -5584,7 +5615,6 @@ struct BufferStreamJob
 struct BufferStreamState
 {
     Vector<UniquePtr<BufferStreamJob>, 0, SystemAllocPolicy> jobs;
-    ConditionVariable jobsEmpty;
     size_t delayMillis;
     size_t chunkSize;
     bool shutdown;
@@ -5601,7 +5631,7 @@ struct BufferStreamState
     }
 };
 
-ExclusiveData<BufferStreamState> bufferStreamState(mutexid::BufferStreamState);
+ExclusiveWaitableData<BufferStreamState> bufferStreamState(mutexid::BufferStreamState);
 
 static void
 BufferStreamMain(BufferStreamJob* job)
@@ -5647,7 +5677,7 @@ BufferStreamMain(BufferStreamJob* job)
     job->thread.detach();  // quiet assert in ~Thread() called by erase().
     state->jobs.erase(state->jobs.begin() + jobIndex);
     if (state->jobs.empty())
-        state->jobsEmpty.notify_all();
+        state.notify_all(/* jobs empty */);
 }
 
 static bool
@@ -5684,7 +5714,7 @@ ShutdownBufferStreams()
     auto state = bufferStreamState.lock();
     state->shutdown = true;
     while (!state->jobs.empty())
-        state.wait(state->jobsEmpty);
+        state.wait(/* jobs empty */);
 }
 
 static bool
@@ -6803,10 +6833,15 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "getMaxArgs()",
 "  Return the maximum number of supported args for a call."),
 
-    JS_FN_HELP("objectEmulatingUndefined", ObjectEmulatingUndefined, 0, 0,
-"objectEmulatingUndefined()",
-"  Return a new object obj for which typeof obj === \"undefined\", obj == null\n"
-"  and obj == undefined (and vice versa for !=), and ToBoolean(obj) === false.\n"),
+    JS_FN_HELP("createIsHTMLDDA", CreateIsHTMLDDA, 0, 0,
+"createIsHTMLDDA()",
+"  Return an object |obj| that \"looks like\" the |document.all| object in\n"
+"  browsers in certain ways: |typeof obj === \"undefined\"|, |obj == null|\n"
+"  and |obj == undefined| (vice versa for !=), |ToBoolean(obj) === false|,\n"
+"  and when called with no arguments or the single argument \"\" returns\n"
+"  null.  (Calling |obj| any other way crashes or throws an exception.)\n"
+"  This function implements the exact requirements of the $262.IsHTMLDDA\n"
+"  property in test262."),
 
     JS_FN_HELP("isCachingEnabled", IsCachingEnabled, 0, 0,
 "isCachingEnabled()",
@@ -8132,6 +8167,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     enableNativeRegExp = !op.getBoolOption("no-native-regexp");
     enableWasmBaseline = !op.getBoolOption("no-wasm-baseline");
     enableWasmIon = !op.getBoolOption("no-wasm-ion");
+    enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
     enableStreams = op.getBoolOption("enable-streams");
 
@@ -8141,12 +8177,10 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
                              .setWasm(enableWasm)
                              .setWasmBaseline(enableWasmBaseline)
                              .setWasmIon(enableWasmIon)
+                             .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
                              .setNativeRegExp(enableNativeRegExp)
                              .setAsyncStack(enableAsyncStacks)
                              .setStreams(enableStreams);
-
-    if (op.getBoolOption("wasm-check-bce"))
-        jit::JitOptions.wasmAlwaysCheckBounds = true;
 
     if (op.getBoolOption("wasm-test-mode"))
         jit::JitOptions.wasmTestMode = true;
@@ -8427,6 +8461,7 @@ SetWorkerContextOptions(JSContext* cx)
                              .setWasm(enableWasm)
                              .setWasmBaseline(enableWasmBaseline)
                              .setWasmIon(enableWasmIon)
+                             .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
                              .setNativeRegExp(enableNativeRegExp)
                              .setStreams(enableStreams);
     cx->runtime()->setOffthreadIonCompilationEnabled(offthreadCompilation);
@@ -8631,9 +8666,10 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-wasm", "Disable WebAssembly compilation")
         || !op.addBoolOption('\0', "no-wasm-baseline", "Disable wasm baseline compiler")
         || !op.addBoolOption('\0', "no-wasm-ion", "Disable wasm ion compiler")
+        || !op.addBoolOption('\0', "test-wasm-await-tier2", "Forcibly activate tiering and block "
+                                   "instantiation on completion of tier2")
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
-        || !op.addBoolOption('\0', "wasm-check-bce", "Always generate wasm bounds check, even redundant ones.")
         || !op.addBoolOption('\0', "wasm-test-mode", "Enable wasm testing mode, creating synthetic "
                                    "objects for non-canonical NaNs and i64 returned from wasm.")
         || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams")

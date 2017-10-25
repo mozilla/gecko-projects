@@ -113,6 +113,7 @@ import org.mozilla.gecko.icons.IconsHelper;
 import org.mozilla.gecko.icons.decoders.FaviconDecoder;
 import org.mozilla.gecko.icons.decoders.IconDirectoryEntry;
 import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
+import org.mozilla.gecko.lwt.LightweightTheme;
 import org.mozilla.gecko.media.VideoPlayer;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
@@ -149,6 +150,7 @@ import org.mozilla.gecko.telemetry.measurements.SearchCountMeasurements;
 import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
+import org.mozilla.gecko.toolbar.PwaConfirm;
 import org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt;
 import org.mozilla.gecko.updater.PostUpdateHandler;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
@@ -184,7 +186,6 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
@@ -198,6 +199,7 @@ public class BrowserApp extends GeckoApp
                                    DynamicToolbarAnimator.MetricsListener,
                                    DynamicToolbarAnimator.ToolbarChromeProxy,
                                    LayoutInflater.Factory,
+                                   LightweightTheme.OnChangeListener,
                                    OnUrlOpenListener,
                                    OnUrlOpenInBackgroundListener,
                                    PropertyAnimator.PropertyAnimationListener,
@@ -641,7 +643,8 @@ public class BrowserApp extends GeckoApp
         // This has to be prepared prior to calling GeckoApp.onCreate, because
         // widget code and BrowserToolbar need it, and they're created by the
         // layout, which GeckoApp takes care of.
-        ((GeckoApplication) getApplication()).prepareLightweightTheme();
+        final GeckoApplication app = (GeckoApplication) getApplication();
+        app.prepareLightweightTheme();
 
         super.onCreate(savedInstanceState);
 
@@ -675,6 +678,8 @@ public class BrowserApp extends GeckoApp
                 return false;
             }
         });
+
+        app.getLightweightTheme().addListener(this);
 
         mProgressView = (AnimatedProgressBar) findViewById(R.id.page_progress);
         mDynamicToolbar.setLayerView(mLayerView);
@@ -1506,7 +1511,7 @@ public class BrowserApp extends GeckoApp
             ThreadUtils.postToBackgroundThread(new Runnable() {
                 @Override
                 public void run() {
-                    GeckoApplication.createShortcut(title, url);
+                    GeckoApplication.createBrowserShortcut(title, url);
                 }
             });
 
@@ -1550,6 +1555,9 @@ public class BrowserApp extends GeckoApp
         }
 
         mDynamicToolbar.destroy();
+
+        final GeckoApplication app = (GeckoApplication) getApplication();
+        app.getLightweightTheme().removeListener(this);
 
         if (mBrowserToolbar != null)
             mBrowserToolbar.onDestroy();
@@ -2037,7 +2045,7 @@ public class BrowserApp extends GeckoApp
                 break;
 
             case "Sanitize:OpenTabs":
-                Tabs.getInstance().closeAll();
+                Tabs.getInstance().closeAllTabs();
                 callback.sendSuccess(null);
                 break;
 
@@ -2108,6 +2116,9 @@ public class BrowserApp extends GeckoApp
                     final Bitmap icon = loadIconResult
                         .getBestBitmap(GeckoAppShell.getPreferredIconSize());
                     GeckoApplication.createAppShortcut(name, startUrl, manifestPath, manifestUrl, icon);
+
+                    Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.PAGEACTION, PwaConfirm.TELEMETRY_EXTRA_ADDED);
+
                 } else {
                     Log.e(LOGTAG, "Failed to load icon!");
                 }
@@ -2330,8 +2341,7 @@ public class BrowserApp extends GeckoApp
             delegate.onTabsTrayHidden(this, mTabsPanel);
         }
 
-        final boolean isPrivate = mBrowserToolbar.isPrivateMode();
-        WindowUtil.setStatusBarColor(this, isPrivate);
+        refreshStatusBarColor();
     }
 
     @Override
@@ -4447,5 +4457,20 @@ public class BrowserApp extends GeckoApp
     @Override
     public void onEditBookmark(@NonNull Bundle bundle) {
         new EditBookmarkTask(this, bundle).execute();
+    }
+
+    @Override
+    public void onLightweightThemeChanged() {
+        refreshStatusBarColor();
+    }
+
+    @Override
+    public void onLightweightThemeReset() {
+        refreshStatusBarColor();
+    }
+
+    private void refreshStatusBarColor() {
+        final boolean isPrivate = mBrowserToolbar.isPrivateMode();
+        WindowUtil.setStatusBarColor(BrowserApp.this, isPrivate);
     }
 }

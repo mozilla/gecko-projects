@@ -1279,7 +1279,9 @@ pref("dom.require_user_interaction_for_beforeunload", true);
 pref("dom.disable_open_during_load",                false);
 pref("dom.popup_maximum",                           20);
 pref("dom.popup_allowed_events", "change click dblclick mouseup pointerup notificationclick reset submit touchend");
+
 pref("dom.disable_open_click_delay", 1000);
+pref("dom.serviceWorkers.disable_open_click_delay", 1000);
 
 pref("dom.storage.enabled", true);
 pref("dom.storage.default_quota",      5120);
@@ -1367,13 +1369,6 @@ pref("dom.sysmsg.enabled", false);
 pref("dom.webapps.useCurrentProfile", false);
 
 pref("dom.cycle_collector.incremental", true);
-
-// Whether Xrays expose properties from the named properties object (aka global
-// scope polluter).  Values are:
-//   0 = properties exposed on Xrays
-//   1 = properties exposed on Xrays, except in web extension content scripts.
-//   2 = properties not exposed on xrays
-pref("dom.allow_named_properties_object_for_xrays", 1);
 
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
@@ -2288,6 +2283,7 @@ pref("network.cookie.cookieBehavior",       0); // 0-Accept, 1-dontAcceptForeign
 pref("network.cookie.cookieBehavior",       0); // Keep the old default of accepting all cookies
 #endif
 pref("network.cookie.thirdparty.sessionOnly", false);
+pref("network.cookie.thirdparty.nonsecureSessionOnly", false);
 pref("network.cookie.leave-secure-alone",   true);
 pref("network.cookie.ipc.sync",             false);
 pref("network.cookie.lifetimePolicy",       0); // 0-accept, 1-dontUse 2-acceptForSession, 3-acceptForNDays
@@ -3138,6 +3134,13 @@ pref("layout.display-list.dump", false);
 pref("layout.display-list.dump-content", false);
 pref("layout.display-list.dump-parent", false);
 
+// Toggle retaining display lists between paints
+#ifdef ANDROID
+pref("layout.display-list.retain", false);
+#else
+pref("layout.display-list.retain", false);
+#endif
+
 // pref to control whether layout warnings that are hit quite often are enabled
 pref("layout.spammy_warnings.enabled", false);
 
@@ -3361,6 +3364,9 @@ pref("dom.ipc.processCount.webLargeAllocation", 10);
 
 // Enable the Large-Allocation header
 pref("dom.largeAllocationHeader.enabled", true);
+
+// Disable e10s for Gecko by default. This is overridden in firefox.js.
+pref("browser.tabs.remote.autostart", false);
 
 // Pref to control whether we use separate content processes for top-level load
 // of file:// URIs.
@@ -3709,7 +3715,11 @@ pref("font.name-list.sans-serif.ja", "Meiryo, Yu Gothic, MS PGothic, MS Gothic, 
 pref("font.name-list.monospace.ja", "MS Gothic, MS Mincho, Meiryo, Yu Gothic, Yu Mincho, MS PGothic, MS PMincho");
 
 pref("font.name-list.serif.ko", "Batang, Gulim");
+#ifdef EARLY_BETA_OR_EARLIER
+pref("font.name-list.sans-serif.ko", "Malgun Gothic, Gulim");
+#else
 pref("font.name-list.sans-serif.ko", "Gulim, Malgun Gothic");
+#endif
 pref("font.name-list.monospace.ko", "GulimChe");
 pref("font.name-list.cursive.ko", "Gungsuh");
 
@@ -5232,18 +5242,6 @@ pref("memory.dump_reports_on_oom", false);
 
 // Number of stack frames to capture in createObjectURL for about:memory.
 pref("memory.blob_report.stack_frames", 0);
-
-// comma separated list of domain origins (e.g. https://domain.com) that still
-// need localStorage in the frameworker
-pref("social.whitelist", "https://mozsocial.cliqz.com");
-// comma separated list of domain origins (e.g. https://domain.com) for
-// directory websites (e.g. AMO) that can install providers for other sites
-pref("social.directories", "https://activations.cdn.mozilla.net");
-// remote-install allows any website to activate a provider, with extended UI
-// notifying user of installation. we can later pref off remote install if
-// necessary. This does not affect whitelisted and directory installs.
-pref("social.remote-install.enabled", true);
-pref("social.toast-notifications.enabled", true);
 
 // Disable idle observer fuzz, because only privileged content can access idle
 // observers (bug 780507).

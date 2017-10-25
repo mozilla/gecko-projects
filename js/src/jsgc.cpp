@@ -215,7 +215,6 @@
 #include "jsscript.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jswatchpoint.h"
 #include "jsweakmap.h"
 #ifdef XP_WIN
 # include "jswin.h"
@@ -2733,10 +2732,6 @@ GCRuntime::updateZonePointersToRelocatedCells(Zone* zone, AutoLockForExclusiveAc
         gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_ROOTS);
 
         WeakMapBase::traceZone(zone, &trc);
-        for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-            if (c->watchpointMap)
-                c->watchpointMap->trace(&trc);
-        }
     }
 
     // Sweep everything to fix up weak pointers.
@@ -2777,7 +2772,6 @@ GCRuntime::updateRuntimePointersToRelocatedCells(AutoLockForExclusiveAccess& loc
     }
 
     // Sweep everything to fix up weak pointers.
-    WatchpointMap::sweepAll(rt);
     Debugger::sweepAll(rt->defaultFreeOp());
     jit::JitRuntime::SweepJitcodeGlobalTable(rt);
     for (JS::detail::WeakCacheBase* cache : rt->weakCaches())
@@ -4345,7 +4339,7 @@ GCRuntime::updateMallocCountersOnGC()
     // Update the malloc counters for any zones we are collecting.
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         if (zone->isCollecting())
-            zone->updateGCMallocBytesOnGC(lock);
+            zone->updateAllMallocBytesOnGC(lock);
     }
 
     // Update the runtime malloc counter only if we are doing a full GC.
@@ -4372,10 +4366,6 @@ GCRuntime::markWeakReferences(gcstats::PhaseKind phase)
         if (!marker.isWeakMarkingTracer()) {
             for (ZoneIterT zone(rt); !zone.done(); zone.next())
                 markedAny |= WeakMapBase::markZoneIteratively(zone, &marker);
-        }
-        for (CompartmentsIterT<ZoneIterT> c(rt); !c.done(); c.next()) {
-            if (c->watchpointMap)
-                markedAny |= c->watchpointMap->markIteratively(&marker);
         }
         markedAny |= Debugger::markIteratively(&marker);
         markedAny |= jit::JitRuntime::MarkJitcodeGlobalTableIteratively(&marker);
@@ -5283,7 +5273,6 @@ SweepMisc(JSRuntime* runtime)
         c->sweepTemplateLiteralMap();
         c->sweepSelfHostingScriptSource();
         c->sweepNativeIterators();
-        c->sweepWatchpoints();
     }
 }
 
@@ -7159,8 +7148,9 @@ class AutoScheduleZonesForGC
             if (rt->gc.gcMode() == JSGC_MODE_GLOBAL)
                 zone->scheduleGC();
 
-            // This is a heuristic to avoid resets.
-            if (rt->gc.isIncrementalGCInProgress() && zone->needsIncrementalBarrier())
+            // To avoid resets, continue to collect any zones that were being
+            // collected in a previous slice.
+            if (rt->gc.isIncrementalGCInProgress() && zone->wasGCStarted())
                 zone->scheduleGC();
 
             // This is a heuristic to reduce the total number of collections.

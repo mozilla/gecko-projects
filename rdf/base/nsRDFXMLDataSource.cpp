@@ -157,7 +157,7 @@ public:
                                              nsIRDFDataSource)
 
     // nsIRDFDataSource
-    NS_IMETHOD GetURI(char* *uri) override;
+    NS_IMETHOD GetURI(nsACString& aURI) override;
 
     NS_IMETHOD GetSource(nsIRDFResource* property,
                          nsIRDFNode* target,
@@ -596,22 +596,14 @@ RDFXMLDataSourceImpl::Init(const char* uri)
 
 
 NS_IMETHODIMP
-RDFXMLDataSourceImpl::GetURI(char* *aURI)
+RDFXMLDataSourceImpl::GetURI(nsACString& aURI)
 {
-    *aURI = nullptr;
     if (!mURL) {
+        aURI.SetIsVoid(true);
         return NS_OK;
     }
 
-    nsAutoCString spec;
-    nsresult rv = mURL->GetSpec(spec);
-    NS_ENSURE_SUCCESS(rv, rv);
-    *aURI = ToNewCString(spec);
-    if (!*aURI) {
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    return NS_OK;
+    return mURL->GetSpec(aURI);
 }
 
 NS_IMETHODIMP
@@ -766,7 +758,8 @@ RDFXMLDataSourceImpl::rdfXMLFlush(nsIURI *aURI)
             if (NS_FAILED(rv)) return rv;
 
             nsCOMPtr<nsIOutputStream> bufferedOut;
-            rv = NS_NewBufferedOutputStream(getter_AddRefs(bufferedOut), out, 4096);
+            rv = NS_NewBufferedOutputStream(getter_AddRefs(bufferedOut),
+                                            out.forget(), 4096);
             if (NS_FAILED(rv)) return rv;
 
             rv = Serialize(bufferedOut);

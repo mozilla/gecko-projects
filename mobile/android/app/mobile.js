@@ -403,14 +403,6 @@ pref("ui.bookmark.mobilefolder.enabled", true);
 pref("ui.bookmark.mobilefolder.enabled", false);
 #endif
 
-#if MOZ_UPDATE_CHANNEL == nightly
-pref("mma.enabled", true);
-#elif MOZ_UPDATE_CHANNEL == beta
-pref("mma.enabled", true);
-#else
-pref("mma.enabled", true);
-#endif
-
 
 pref("ui.touch.radius.enabled", false);
 pref("ui.touch.radius.leftmm", 3);
@@ -869,6 +861,10 @@ pref("browser.tabs.showAudioPlayingIcon", true);
 pref("dom.serviceWorkers.enabled", true);
 pref("dom.serviceWorkers.interception.enabled", true);
 pref("dom.serviceWorkers.openWindow.enabled", true);
+
+// Allow service workers to open windows for a longer period after a notification
+// click on mobile.  This is to account for some devices being quite slow.
+pref("dom.serviceWorkers.disable_open_click_delay", 5000);
 
 pref("dom.push.debug", false);
 // The upstream autopush endpoint must have the Google API key corresponding to

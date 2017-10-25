@@ -3440,10 +3440,10 @@ class CGGetNamedPropertiesObjectMethod(CGAbstractStaticMethod):
                          "Expected ${nativeType}::CreateNamedPropertiesObject to return a named properties object");
               MOZ_ASSERT(clasp->mNativeHooks,
                          "The named properties object for ${nativeType} should have NativePropertyHooks.");
-              MOZ_ASSERT(clasp->mNativeHooks->mResolveOwnProperty,
-                         "Don't know how to resolve the properties of the named properties object for ${nativeType}.");
-              MOZ_ASSERT(clasp->mNativeHooks->mEnumerateOwnProperties,
-                         "Don't know how to enumerate the properties of the named properties object for ${nativeType}.");
+              MOZ_ASSERT(!clasp->mNativeHooks->mResolveOwnProperty,
+                         "Shouldn't resolve the properties of the named properties object for ${nativeType} for Xrays.");
+              MOZ_ASSERT(!clasp->mNativeHooks->mEnumerateOwnProperties,
+                         "Shouldn't enumerate the properties of the named properties object for ${nativeType} for Xrays.");
             }
             return namedPropertiesObject.get();
             """,
@@ -13556,9 +13556,9 @@ class CGDictionary(CGThing):
         # continues to match the list in test_Object.prototype_props.html
         if (member.identifier.name in
             ["constructor", "toSource", "toString", "toLocaleString", "valueOf",
-             "watch", "unwatch", "hasOwnProperty", "isPrototypeOf",
-             "propertyIsEnumerable", "__defineGetter__", "__defineSetter__",
-             "__lookupGetter__", "__lookupSetter__", "__proto__"]):
+             "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
+             "__defineGetter__", "__defineSetter__", "__lookupGetter__",
+             "__lookupSetter__", "__proto__"]):
             raise TypeError("'%s' member of %s dictionary shadows "
                             "a property of Object.prototype, and Xrays to "
                             "Object can't handle that.\n"
