@@ -19,7 +19,7 @@ job-defaults:
 jobs:
    fennec-push-to-cdns:
       name: fennec_push_to_cdns
-      product: mobile
+      product: fennec
       run:
          routes:
             - index.releases.v1.{branch}.latest.fennec.latest.beetmover_cdns

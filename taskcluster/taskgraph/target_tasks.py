@@ -410,7 +410,7 @@ def target_tasks_publish_fennec(full_task_graph, parameters):
                              ):
                 return True
 
-        if task.task['payload'].get('product') == 'mobile':
+        if task.task['payload'].get('product') == 'fennec':
             if task.kind in ('beetmover-cdns', ):
                 return True
 
