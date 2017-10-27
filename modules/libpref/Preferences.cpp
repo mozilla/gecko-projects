@@ -98,7 +98,8 @@ using namespace mozilla;
     if (MOZ_UNLIKELY(!XRE_IsParentProcess())) {                                \
       nsPrintfCString msg(                                                     \
         "ENSURE_MAIN_PROCESS: called %s on %s in a non-main process",          \
-        func, pref);                                                           \
+        func,                                                                  \
+        pref);                                                                 \
       NS_ERROR(msg.get());                                                     \
       return NS_ERROR_NOT_AVAILABLE;                                           \
     }                                                                          \
@@ -109,7 +110,8 @@ using namespace mozilla;
     if (MOZ_UNLIKELY(!XRE_IsParentProcess())) {                                \
       nsPrintfCString msg(                                                     \
         "ENSURE_MAIN_PROCESS: called %s on %s in a non-main process",          \
-        func, pref);                                                           \
+        func,                                                                  \
+        pref);                                                                 \
       NS_WARNING(msg.get());                                                   \
       return NS_ERROR_NOT_AVAILABLE;                                           \
     }                                                                          \
@@ -243,11 +245,8 @@ private:
   {
     PREF_FLAG_LOCKED = 4,
     PREF_FLAG_USERSET = 8,
-    PREF_FLAG_CONFIG = 16,
-    PREF_FLAG_REMOTE = 32,
-    PREF_FLAG_LILOCAL = 64,
-    PREF_FLAG_HAS_DEFAULT = 128,
-    PREF_FLAG_STICKY_DEFAULT = 256,
+    PREF_FLAG_HAS_DEFAULT = 16,
+    PREF_FLAG_STICKY_DEFAULT = 32,
   };
   uint16_t mValue;
 };
@@ -333,29 +332,6 @@ static PLDHashTableOps pref_HashTableOps = {
   ClearPrefEntry,
   nullptr,
 };
-
-typedef void (*PrefsDirtyFunc)();
-static PrefsDirtyFunc gDirtyCallback = nullptr;
-
-static inline void
-MakeDirtyCallback()
-{
-  // Right now the callback function is always set, so we don't need
-  // to complicate the code to cover the scenario where we set the callback
-  // after we've already tried to make it dirty.  If this assert triggers
-  // we will add that code.
-  MOZ_ASSERT(gDirtyCallback);
-  if (gDirtyCallback) {
-    gDirtyCallback();
-  }
-}
-
-// Callback for whenever we change a preference.
-static void
-PREF_SetDirtyCallback(PrefsDirtyFunc aFunc)
-{
-  gDirtyCallback = aFunc;
-}
 
 //---------------------------------------------------------------------------
 
@@ -853,7 +829,7 @@ PREF_DeleteBranch(const char* aBranchName)
     }
   }
 
-  MakeDirtyCallback();
+  Preferences::HandleDirty();
   return NS_OK;
 }
 
@@ -874,7 +850,7 @@ PREF_ClearUserPref(const char* aPrefName)
     }
 
     pref_DoCallback(aPrefName);
-    MakeDirtyCallback();
+    Preferences::HandleDirty();
   }
   return NS_OK;
 }
@@ -907,7 +883,7 @@ PREF_ClearAllUserPrefs()
     pref_DoCallback(prefString.c_str());
   }
 
-  MakeDirtyCallback();
+  Preferences::HandleDirty();
   return NS_OK;
 }
 
@@ -1000,26 +976,6 @@ pref_SetValue(PrefValue* aExistingValue,
 
 static pref_initPhase gPhase = START;
 
-static bool gWatchingPref = false;
-
-static void
-pref_SetInitPhase(pref_initPhase aPhase)
-{
-  gPhase = aPhase;
-}
-
-static pref_initPhase
-pref_GetInitPhase()
-{
-  return gPhase;
-}
-
-static void
-pref_SetWatchingPref(bool aWatching)
-{
-  gWatchingPref = aWatching;
-}
-
 struct StringComparator
 {
   const char* mKey;
@@ -1039,11 +995,13 @@ InInitArray(const char* aKey)
   return BinarySearchIf(list, 0, prefsLen, StringComparator(aKey), &found);
 }
 
+static bool gWatchingPref = false;
+
 class WatchingPrefRAII
 {
 public:
-  WatchingPrefRAII() { pref_SetWatchingPref(true); }
-  ~WatchingPrefRAII() { pref_SetWatchingPref(false); }
+  WatchingPrefRAII() { gWatchingPref = true; }
+  ~WatchingPrefRAII() { gWatchingPref = false; }
 };
 
 #define WATCHING_PREF_RAII() WatchingPrefRAII watchingPrefRAII
@@ -1142,7 +1100,7 @@ pref_HashPref(const char* aKey,
         // XXX should we free a user-set string value if there is one?
         pref->mPrefFlags.SetHasUserValue(false);
         if (!pref->mPrefFlags.IsLocked()) {
-          MakeDirtyCallback();
+          Preferences::HandleDirty();
           valueChanged = true;
         }
       }
@@ -1153,7 +1111,7 @@ pref_HashPref(const char* aKey,
         pref_SetValue(&pref->mUserPref, pref->mPrefFlags, aValue, aType)
           .SetHasUserValue(true);
       if (!pref->mPrefFlags.IsLocked()) {
-        MakeDirtyCallback();
+        Preferences::HandleDirty();
         valueChanged = true;
       }
     }
@@ -1175,18 +1133,6 @@ pref_SizeOfPrivateData(MallocSizeOf aMallocSizeOf)
     n += aMallocSizeOf(node->mDomain);
   }
   return n;
-}
-
-static PrefType
-PREF_GetPrefType(const char* aPrefName)
-{
-  if (gHashTable) {
-    PrefHashEntry* pref = pref_HashTableLookup(aPrefName);
-    if (pref) {
-      return pref->mPrefFlags.GetPrefType();
-    }
-  }
-  return PrefType::Invalid;
 }
 
 // Bool function that returns whether or not the preference is locked and
@@ -1498,49 +1444,6 @@ pref_ReportParseProblem(PrefParseState& aPS,
                   aLine,
                   aMessage);
   }
-}
-
-// This function is called when a complete pref name-value pair has been
-// extracted from the input data.
-//
-// @param aPS
-//        parse state instance
-//
-// @return false to indicate a fatal error.
-static bool
-pref_DoCallback(PrefParseState* aPS)
-{
-  PrefValue value;
-
-  switch (aPS->mVtype) {
-    case PrefType::String:
-      value.mStringVal = aPS->mVb;
-      break;
-
-    case PrefType::Int:
-      if ((aPS->mVb[0] == '-' || aPS->mVb[0] == '+') && aPS->mVb[1] == '\0') {
-        pref_ReportParseProblem(*aPS, "invalid integer value", 0, true);
-        NS_WARNING("malformed integer value");
-        return false;
-      }
-      value.mIntVal = atoi(aPS->mVb);
-      break;
-
-    case PrefType::Bool:
-      value.mBoolVal = (aPS->mVb == kTrue);
-      break;
-
-    default:
-      break;
-  }
-
-  (*aPS->mReader)(aPS->mClosure,
-                  aPS->mLb,
-                  value,
-                  aPS->mVtype,
-                  aPS->mIsDefault,
-                  aPS->mIsStickyDefault);
-  return true;
 }
 
 // Initialize a PrefParseState instance.
@@ -1987,9 +1890,40 @@ PREF_ParseBuf(PrefParseState* aPS, const char* aBuf, int aBufLen)
       case PREF_PARSE_UNTIL_SEMICOLON:
         // tolerate only whitespace and embedded comments
         if (c == ';') {
-          if (!pref_DoCallback(aPS)) {
-            return false;
+
+          PrefValue value;
+
+          switch (aPS->mVtype) {
+            case PrefType::String:
+              value.mStringVal = aPS->mVb;
+              break;
+
+            case PrefType::Int:
+              if ((aPS->mVb[0] == '-' || aPS->mVb[0] == '+') &&
+                  aPS->mVb[1] == '\0') {
+                pref_ReportParseProblem(*aPS, "invalid integer value", 0, true);
+                NS_WARNING("malformed integer value");
+                return false;
+              }
+              value.mIntVal = atoi(aPS->mVb);
+              break;
+
+            case PrefType::Bool:
+              value.mBoolVal = (aPS->mVb == kTrue);
+              break;
+
+            default:
+              break;
           }
+
+          // We've extracted a complete name/value pair.
+          aPS->mReader(aPS->mClosure,
+                       aPS->mLb,
+                       value,
+                       aPS->mVtype,
+                       aPS->mIsDefault,
+                       aPS->mIsStickyDefault);
+
           state = PREF_PARSE_INIT;
         } else if (c == '/') {
           aPS->mNextState = state; // return here when done with comment
@@ -2176,8 +2110,6 @@ public:
 
   int32_t GetRootLength() const { return mPrefRoot.Length(); }
 
-  nsresult RemoveObserverFromMap(const char* aDomain, nsISupports* aObserver);
-
   static void NotifyObserver(const char* aNewpref, void* aData);
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
@@ -2261,8 +2193,7 @@ private:
   nsClassHashtable<PrefCallback, PrefCallback> mObservers;
 };
 
-class nsPrefLocalizedString final
-  : public nsIPrefLocalizedString
+class nsPrefLocalizedString final : public nsIPrefLocalizedString
 {
 public:
   nsPrefLocalizedString();
@@ -2349,8 +2280,17 @@ NS_IMETHODIMP
 nsPrefBranch::GetPrefType(const char* aPrefName, int32_t* aRetVal)
 {
   NS_ENSURE_ARG(aPrefName);
+
   const PrefName& pref = GetPrefName(aPrefName);
-  switch (PREF_GetPrefType(pref.get())) {
+  PrefType type = PrefType::Invalid;
+  if (gHashTable) {
+    PrefHashEntry* entry = pref_HashTableLookup(pref.get());
+    if (entry) {
+      type = entry->mPrefFlags.GetPrefType();
+    }
+  }
+
+  switch (type) {
     case PrefType::String:
       *aRetVal = PREF_STRING;
       break;
@@ -3270,7 +3210,7 @@ namespace mozilla {
 static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 
 void
-Preferences::DirtyCallback()
+Preferences::HandleDirty()
 {
   if (!XRE_IsParentProcess()) {
     // TODO: this should really assert because you can't set prefs in a
@@ -3578,7 +3518,7 @@ public:
                                [fileCopy, rvCopy] {
                                  MOZ_RELEASE_ASSERT(NS_IsMainThread());
                                  if (NS_FAILED(rvCopy)) {
-                                   Preferences::DirtyCallback();
+                                   Preferences::HandleDirty();
                                  }
                                }));
     }
@@ -3830,12 +3770,11 @@ public:
 
 } // namespace
 
-/* static */ Preferences*
+/* static */ already_AddRefed<Preferences>
 Preferences::GetInstanceForService()
 {
   if (sPreferences) {
-    NS_ADDREF(sPreferences);
-    return sPreferences;
+    return do_AddRef(sPreferences);
   }
 
   if (sShutdown) {
@@ -3872,8 +3811,7 @@ Preferences::GetInstanceForService()
     new AddPreferencesMemoryReporterRunnable();
   NS_DispatchToMainThread(runnable);
 
-  NS_ADDREF(sPreferences);
-  return sPreferences;
+  return do_AddRef(sPreferences);
 }
 
 /* static */ bool
@@ -3967,7 +3905,6 @@ Preferences::SetInitPreferences(nsTArray<PrefSetting>* aPrefs)
 Result<Ok, const char*>
 Preferences::Init()
 {
-  PREF_SetDirtyCallback(&DirtyCallback);
   PREF_Init();
 
   MOZ_TRY(pref_InitInitialObjects());
@@ -4265,15 +4202,15 @@ Preferences::GetPreferences(InfallibleTArray<PrefSetting>* aPrefs)
 
 #ifdef DEBUG
 void
-Preferences::SetInitPhase(pref_initPhase phase)
+Preferences::SetInitPhase(pref_initPhase aPhase)
 {
-  pref_SetInitPhase(phase);
+  gPhase = aPhase;
 }
 
 pref_initPhase
 Preferences::InitPhase()
 {
-  return pref_GetInitPhase();
+  return gPhase;
 }
 #endif
 
@@ -4441,7 +4378,7 @@ Preferences::SavePrefFileInternal(nsIFile* aFile, SaveMethod aSaveMethod)
     }
 
     // Check for profile shutdown after mDirty because the runnables from
-    // DirtyCallback can still be pending.
+    // HandleDirty() can still be pending.
     if (mProfileShutdown) {
       NS_WARNING("Cannot save pref file after profile shutdown.");
       return NS_ERROR_ILLEGAL_DURING_SHUTDOWN;

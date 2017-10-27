@@ -897,9 +897,6 @@ pref("gfx.webrender.debug.render-targets", false);
 pref("gfx.webrender.debug.alpha-primitives", false);
 pref("gfx.webrender.debug.profiler", false);
 
-// Whether webrender should be used as much as possible.
-pref("gfx.webrendest.enabled", false);
-
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -3141,6 +3138,10 @@ pref("layout.display-list.retain", false);
 pref("layout.display-list.retain", false);
 #endif
 
+// Set the maximum amount of modified frames allowed before doing a full
+// display list rebuild.
+pref("layout.display-list.rebuild-frame-limit", 500);
+
 // pref to control whether layout warnings that are hit quite often are enabled
 pref("layout.spammy_warnings.enabled", false);
 
@@ -4005,6 +4006,12 @@ pref("mousewheel.enable_pixel_scrolling", true);
 // If your mouse drive sends WM_*SCROLL messages when you turn your mouse wheel,
 // set this to true.  Then, gecko processes them as mouse wheel messages.
 pref("mousewheel.emulate_at_wm_scroll", false);
+
+// Some odd touchpad utils give focus to window under cursor when user tries
+// to scroll.  If this is true, Gecko tries to emulate such odd behavior.
+// Don't make this true unless you want to debug.  Enabling this pref causes
+// making damage to the performance.
+pref("mousewheel.debug.make_window_under_cursor_foreground", false);
 
 // Enables or disabled the TrackPoint hack, -1 is autodetect, 0 is off,
 // and 1 is on.  Set this to 1 if TrackPoint scrolling is not working.

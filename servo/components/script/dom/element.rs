@@ -446,7 +446,7 @@ pub trait LayoutElementHelpers {
     #[allow(unsafe_code)]
     unsafe fn get_rowspan(self) -> u32;
     #[allow(unsafe_code)]
-    unsafe fn html_element_in_html_document_for_layout(&self) -> bool;
+    unsafe fn is_html_element(&self) -> bool;
     fn id_attribute(&self) -> *const Option<Atom>;
     fn style_attribute(&self) -> *const Option<Arc<Locked<PropertyDeclarationBlock>>>;
     fn local_name(&self) -> &LocalName;
@@ -781,11 +781,8 @@ impl LayoutElementHelpers for LayoutDom<Element> {
 
     #[inline]
     #[allow(unsafe_code)]
-    unsafe fn html_element_in_html_document_for_layout(&self) -> bool {
-        if (*self.unsafe_get()).namespace != ns!(html) {
-            return false;
-        }
-        self.upcast::<Node>().owner_doc_for_layout().is_html_document_for_layout()
+    unsafe fn is_html_element(&self) -> bool {
+        (*self.unsafe_get()).namespace == ns!(html)
     }
 
     #[allow(unsafe_code)]
@@ -1040,24 +1037,20 @@ impl Element {
     // https://dom.spec.whatwg.org/#locate-a-namespace-prefix
     pub fn lookup_prefix(&self, namespace: Namespace) -> Option<DOMString> {
         for node in self.upcast::<Node>().inclusive_ancestors() {
-            match node.downcast::<Element>() {
-                Some(element) => {
-                    // Step 1.
-                    if *element.namespace() == namespace {
-                        if let Some(prefix) = element.GetPrefix() {
-                            return Some(prefix);
-                        }
-                    }
+            let element = node.downcast::<Element>()?;
+            // Step 1.
+            if *element.namespace() == namespace {
+                if let Some(prefix) = element.GetPrefix() {
+                    return Some(prefix);
+                }
+            }
 
-                    // Step 2.
-                    for attr in element.attrs.borrow().iter() {
-                        if attr.prefix() == Some(&namespace_prefix!("xmlns")) &&
-                           **attr.value() == *namespace {
-                            return Some(attr.LocalName());
-                        }
-                    }
-                },
-                None => return None,
+            // Step 2.
+            for attr in element.attrs.borrow().iter() {
+                if attr.prefix() == Some(&namespace_prefix!("xmlns")) &&
+                   **attr.value() == *namespace {
+                    return Some(attr.LocalName());
+                }
             }
         }
         None

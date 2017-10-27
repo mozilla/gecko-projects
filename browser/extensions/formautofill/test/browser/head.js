@@ -2,10 +2,11 @@
             BASE_URL, TEST_ADDRESS_1, TEST_ADDRESS_2, TEST_ADDRESS_3, TEST_ADDRESS_4, TEST_ADDRESS_5,
             TEST_CREDIT_CARD_1, TEST_CREDIT_CARD_2, TEST_CREDIT_CARD_3, FORM_URL, CREDITCARD_FORM_URL,
             FTU_PREF, ENABLED_AUTOFILL_ADDRESSES_PREF, AUTOFILL_CREDITCARDS_AVAILABLE_PREF, ENABLED_AUTOFILL_CREDITCARDS_PREF,
-            SYNC_USERNAME_PREF, SYNC_ADDRESSES_PREF,
+            SYNC_USERNAME_PREF, SYNC_ADDRESSES_PREF, SYNC_CREDITCARDS_PREF, SYNC_CREDITCARDS_AVAILABLE_PREF,
             sleep, expectPopupOpen, openPopupOn, expectPopupClose, closePopup, clickDoorhangerButton,
             getAddresses, saveAddress, removeAddresses, saveCreditCard,
-            getDisplayedPopupItems, getDoorhangerCheckbox, waitForMasterPasswordDialog */
+            getDisplayedPopupItems, getDoorhangerCheckbox, waitForMasterPasswordDialog,
+            getNotification, getDoorhangerButton */
 
 "use strict";
 
@@ -25,6 +26,8 @@ const AUTOFILL_CREDITCARDS_AVAILABLE_PREF = "extensions.formautofill.creditCards
 const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
 const SYNC_USERNAME_PREF = "services.sync.username";
 const SYNC_ADDRESSES_PREF = "services.sync.engine.addresses";
+const SYNC_CREDITCARDS_PREF = "services.sync.engine.creditcards";
+const SYNC_CREDITCARDS_AVAILABLE_PREF = "services.sync.engine.creditcards.available";
 
 const TEST_ADDRESS_1 = {
   "given-name": "John",
@@ -234,7 +237,7 @@ async function clickDoorhangerButton(button, index) {
   } else if (button == MENU_BUTTON) {
     // Click the dropmarker arrow and wait for the menu to show up.
     await BrowserTestUtils.waitForCondition(() => getNotification().menubutton);
-    await sleep(); // menubutton needs extra time for binding
+    await sleep(2000); // menubutton needs extra time for binding
     let notification = getNotification();
     ok(notification.menubutton, "notification menupopup displayed");
     let dropdownPromise =
@@ -248,8 +251,13 @@ async function clickDoorhangerButton(button, index) {
   await popuphidden;
 }
 
+
 function getDoorhangerCheckbox() {
   return getNotification().checkbox;
+}
+
+function getDoorhangerButton(button) {
+  return getNotification()[button];
 }
 
 

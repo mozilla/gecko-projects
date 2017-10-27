@@ -160,9 +160,7 @@ var TabsInTitlebar = {
       // then later set the properties affecting layout together in a batch.
 
       // Get the height of the tabs toolbar:
-      let tabsToolbar = $("TabsToolbar");
-      let tabsStyles = window.getComputedStyle(tabsToolbar);
-      let fullTabsHeight = rect(tabsToolbar).height + verticalMargins(tabsStyles);
+      let fullTabsHeight = rect($("TabsToolbar")).height;
 
       // Buttons first:
       let captionButtonsBoxWidth = rect($("titlebar-buttonbox-container")).width;
@@ -187,12 +185,10 @@ var TabsInTitlebar = {
 
       // On Windows 10, adjust the window controls to span the entire
       // tab strip height if we're not showing a menu bar.
-      if (AppConstants.isPlatformAndVersionAtLeast("win", "10.0")) {
-        if (!menuHeight) {
-          // Add a pixel to slightly overlap the navbar border.
-          titlebarContentHeight = fullTabsHeight + 1;
-          $("titlebar-buttonbox").style.height = titlebarContentHeight + "px";
-        }
+      if (AppConstants.isPlatformAndVersionAtLeast("win", "10.0") &&
+          !menuHeight) {
+        titlebarContentHeight = fullTabsHeight;
+        $("titlebar-buttonbox").style.height = titlebarContentHeight + "px";
       }
 
       // If the menubar is around (menuHeight is non-zero), try to adjust

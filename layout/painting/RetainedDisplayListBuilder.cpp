@@ -112,7 +112,7 @@ RetainedDisplayListBuilder::PreProcessDisplayList(nsDisplayList* aList,
     // to the common AGR (of both the existing item and the invalidated
     // frame) and determine if they can ever intersect.
     if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
-      mBuilder.MarkFrameForDisplayIfVisible(f);
+      mBuilder.MarkFrameForDisplayIfVisible(f, mBuilder.RootReferenceFrame());
     }
 
     // TODO: This is here because we sometimes reuse the previous display list
@@ -632,7 +632,7 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
         // we need to keep bubbling up to the next stacking context.
         if (currentFrame != mBuilder.RootReferenceFrame() &&
             currentFrame->HasDisplayItems()) {
-          mBuilder.MarkFrameForDisplayIfVisible(currentFrame);
+          mBuilder.MarkFrameForDisplayIfVisible(currentFrame, mBuilder.RootReferenceFrame());
 
           // Store the stacking context relative dirty area such
           // that display list building will pick it up when it
@@ -678,6 +678,37 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
   return true;
 }
 
+/*
+ * A simple early exit heuristic to avoid slow partial display list rebuilds.
+ */
+static bool
+ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames)
+{
+  if (aModifiedFrames.Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
+    return false;
+  }
+
+  for (nsIFrame* f : aModifiedFrames) {
+    MOZ_ASSERT(f);
+
+    const LayoutFrameType type = f->Type();
+
+    // If we have any modified frames of the following types, it is likely that
+    // doing a partial rebuild of the display list will be slower than doing a
+    // full rebuild.
+    // This is because these frames either intersect or may intersect with most
+    // of the page content. This is either due to display port size or different
+    // async AGR.
+    if (type == LayoutFrameType::Viewport ||
+        type == LayoutFrameType::PageContent ||
+        type == LayoutFrameType::Canvas ||
+        type == LayoutFrameType::Scrollbar) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 bool
 RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
@@ -692,13 +723,19 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
   nsTArray<nsIFrame*> modifiedFrames =
     GetModifiedFrames(mBuilder.RootReferenceFrame());
 
+  const bool shouldBuildPartial = ShouldBuildPartial(modifiedFrames);
+
   if (mPreviousCaret != mBuilder.GetCaretFrame()) {
     if (mPreviousCaret) {
-      mBuilder.MarkFrameModifiedDuringBuilding(mPreviousCaret);
+      if (mBuilder.MarkFrameModifiedDuringBuilding(mPreviousCaret)) {
+        modifiedFrames.AppendElement(mPreviousCaret);
+      }
     }
 
     if (mBuilder.GetCaretFrame()) {
-      mBuilder.MarkFrameModifiedDuringBuilding(mBuilder.GetCaretFrame());
+      if (mBuilder.MarkFrameModifiedDuringBuilding(mBuilder.GetCaretFrame())) {
+        modifiedFrames.AppendElement(mBuilder.GetCaretFrame());
+      }
     }
 
     mPreviousCaret = mBuilder.GetCaretFrame();
@@ -708,7 +745,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
   AnimatedGeometryRoot* modifiedAGR = nullptr;
   nsTArray<nsIFrame*> framesWithProps;
   bool merged = false;
-  if (!mList.IsEmpty() &&
+  if (shouldBuildPartial && !mList.IsEmpty() &&
       ComputeRebuildRegion(modifiedFrames, &modifiedDirty, &modifiedAGR, &framesWithProps)) {
     modifiedDirty.IntersectRect(modifiedDirty, mBuilder.RootReferenceFrame()->GetVisualOverflowRectRelativeToSelf());
 
@@ -727,7 +764,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
 
       //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
       //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
-      //nsFrame::PrintDisplayList(&builder, modifiedDL);
+      //nsFrame::PrintDisplayList(&mBuilder, modifiedDL);
 
     } else {
       // TODO: We can also skip layer building and painting if
@@ -744,7 +781,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop)
     MergeDisplayLists(&modifiedDL, &mList, &mList);
 
     //printf_stderr("Painting --- Merged list:\n");
-    //nsFrame::PrintDisplayList(&builder, list);
+    //nsFrame::PrintDisplayList(&mBuilder, mList);
 
     merged = true;
   }
