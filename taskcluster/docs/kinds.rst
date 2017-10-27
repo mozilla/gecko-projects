@@ -293,3 +293,7 @@ in the parameters. See ``mach release-history`` if doing this manually.
 partials-signing
 ----------------
 Partials-signing takes the partial updates produced in Partials and signs them.
+
+post-beetmover-dummy
+--------------------
+Dummy tasks to handle beetmover tasks as dependencies without hitting max-dependencies.
