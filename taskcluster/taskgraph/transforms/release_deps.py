@@ -22,6 +22,8 @@ def _get_product(job_or_task):
 
     if 'run' in job_or_task:
         product = product or job_or_task['run'].get('product')
+    if 'extra' in job_or_task:
+        product = product or job_or_task['extra'].get('product')
     return product
 
 
