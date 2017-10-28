@@ -646,10 +646,63 @@ Inspector.prototype = {
               this.browserRequire("devtools/client/inspector/layout/layout");
             this.layoutview = new LayoutView(this, this.panelWin);
           }
+
           return this.layoutview.provider;
         }
       },
       defaultTab == layoutId);
+
+    if (Services.prefs.getBoolPref("devtools.changesview.enabled")) {
+      // Inject a lazy loaded react tab by exposing a fake React object
+      // with a lazy defined Tab thanks to `panel` being a function
+      let changesId = "changesview";
+      let changesTitle = INSPECTOR_L10N.getStr("inspector.sidebar.changesViewTitle");
+      this.sidebar.addTab(
+        changesId,
+        changesTitle,
+        {
+          props: {
+            id: changesId,
+            title: changesTitle
+          },
+          panel: () => {
+            if (!this.changesview) {
+              const ChangesView =
+                this.browserRequire("devtools/client/inspector/changes/changes");
+              this.changesview = new ChangesView(this, this.panelWin);
+            }
+
+            return this.changesview.provider;
+          }
+        },
+        defaultTab == changesId);
+    }
+
+    if (Services.prefs.getBoolPref("devtools.eventsview.enabled")) {
+      // Inject a lazy loaded react tab by exposing a fake React object
+      // with a lazy defined Tab thanks to `panel` being a function
+      let eventsId = "eventsview";
+      let eventsTitle = INSPECTOR_L10N.getStr("inspector.sidebar.eventsViewTitle");
+      this.sidebar.addTab(
+        eventsId,
+        eventsTitle,
+        {
+          props: {
+            id: eventsId,
+            title: eventsTitle
+          },
+          panel: () => {
+            if (!this.eventview) {
+              const EventsView =
+                this.browserRequire("devtools/client/inspector/events/events");
+              this.eventsview = new EventsView(this, this.panelWin);
+            }
+
+            return this.eventsview.provider;
+          }
+        },
+        defaultTab == eventsId);
+    }
 
     if (this.target.form.animationsActor) {
       this.sidebar.addFrameTab(
@@ -678,6 +731,7 @@ Inspector.prototype = {
                 this.browserRequire("devtools/client/inspector/fonts/fonts");
               this.fontinspector = new FontInspector(this, this.panelWin);
             }
+
             return this.fontinspector.provider;
           }
         },
@@ -848,6 +902,9 @@ Inspector.prototype = {
    * Reset the inspector on new root mutation.
    */
   onNewRoot: function () {
+    // Record new-root timing for telemetry
+    this._newRootStart = this.panelWin.performance.now();
+
     this._defaultNode = null;
     this.selection.setNodeFront(null);
     this._destroyMarkup();
@@ -883,7 +940,7 @@ Inspector.prototype = {
       return;
     }
 
-    this.markup.expandNode(this.selection.nodeFront);
+    let onExpand = this.markup.expandNode(this.selection.nodeFront);
 
     // Restore the highlighter states prior to emitting "new-root".
     yield Promise.all([
@@ -892,6 +949,26 @@ Inspector.prototype = {
     ]);
 
     this.emit("new-root");
+
+    // Wait for full expand of the selected node in order to ensure
+    // the markup view is fully emitted before firing 'reloaded'.
+    // 'reloaded' is used to know when the panel is fully updated
+    // after a page reload.
+    yield onExpand;
+
+    this.emit("reloaded");
+
+    // Record the time between new-root event and inspector fully loaded.
+    if (this._newRootStart) {
+      // Only log the timing when inspector is not destroyed and is in foreground.
+      if (this.toolbox && this.toolbox.currentToolId == "inspector") {
+        let delay = this.panelWin.performance.now() - this._newRootStart;
+        let telemetryKey = "DEVTOOLS_INSPECTOR_NEW_ROOT_TO_RELOAD_DELAY_MS";
+        let histogram = Services.telemetry.getHistogramById(telemetryKey);
+        histogram.add(delay);
+      }
+      delete this._newRootStart;
+    }
   }),
 
   _selectionCssSelector: null,

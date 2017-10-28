@@ -6847,6 +6847,7 @@ nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
                                            nsDisplayList* aList, uint32_t aFlags)
     : nsDisplayOwnLayer(aBuilder, aFrame, aList, aBuilder->CurrentActiveScrolledRoot(), aFlags)
     , mScrollParentId(aBuilder->GetCurrentScrollParentId())
+    , mShouldFlatten(false)
     , mSubDocFrame(aSubDocFrame)
 {
   MOZ_COUNT_CTOR(nsDisplaySubDocument);
@@ -9618,7 +9619,7 @@ nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
                                          mozilla::layers::WebRenderLayerManager* aManager,
                                          nsDisplayListBuilder* aDisplayListBuilder)
 {
-  if (mFrame->IsFrameOfType(nsIFrame::eSVG) || mFrame->StyleEffects()->mOpacity != 1.0f) {
+  if (mFrame->IsFrameOfType(nsIFrame::eSVG)) {
     return false;
   }
 
@@ -9658,7 +9659,8 @@ nsDisplayFilter::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
     }
   }
 
-  StackingContextHelper sc(aSc, aBuilder, wrFilters);
+  float opacity = mFrame->StyleEffects()->mOpacity;
+  StackingContextHelper sc(aSc, aBuilder, wrFilters, nullptr, 0, opacity != 1.0f && mHandleOpacity ? &opacity : nullptr);
 
   nsDisplaySVGEffects::CreateWebRenderCommands(aBuilder, aResources, sc, aManager, aDisplayListBuilder);
   return true;
