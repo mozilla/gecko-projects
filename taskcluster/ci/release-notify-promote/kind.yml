@@ -39,3 +39,5 @@ jobs:
                      #- "{task[tags][createdForUser]}"
                   default:
                      - "release-drivers"
+      extra:
+         product: fennec

@@ -37,6 +37,12 @@ def add_dependencies(config, jobs):
             continue
 
         for dep_task in config.kind_dependencies_tasks:
+            # Don't ship single locale fennec anymore - Bug 1408083
+            if product == 'fennec':
+                attr = dep_task.attributes.get
+                if attr("locale") or attr("chunk_locales"):
+                    continue
+            # Add matching product tasks to deps
             if _get_product(dep_task.task) == product:
                 dependencies[dep_task.label] = dep_task.label
 
