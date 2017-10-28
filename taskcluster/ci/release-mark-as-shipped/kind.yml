@@ -8,9 +8,11 @@ transforms:
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
-# TODO:
-# kind-dependencies:
-#   - release-push-to-cdns
+kind-dependencies:
+   - push-apk
+   - release-bouncer-aliases
+   - release-version-bump
+
 
 jobs:
    fennec:
@@ -51,3 +53,5 @@ jobs:
                   #- "{task[tags][createdForUser]}"
                default:
                   - "release-drivers"
+      extra:
+         product: fennec
