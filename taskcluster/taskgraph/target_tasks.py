@@ -359,8 +359,11 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
+        if task.task['payload'].get('properties', {}).get('product') == 'firefox':
+            if task.kind in ('release-version-bump',
+                             ):
+                return True
         # TODO: add beetmover push-to-releases
-        # TODO: tagging / version bumping
         # TODO: publish to balrog
         # TODO: funsize balrog submission
         # TODO: recompression push-to-releases + balrog
@@ -370,7 +373,7 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
         # TODO: checksums
         # TODO: shipit mark as shipped
 
-    return [l for l, t in full_task_graph.iteritems() if filter(t)]
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
 @_target_task('candidates_fennec')

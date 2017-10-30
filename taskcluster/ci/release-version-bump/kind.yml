@@ -12,42 +12,53 @@ transforms:
 kind-dependencies:
    - beetmover-cdns
 
+job-defaults:
+   description: Release Promotion version bump
+   worker-type: buildbot-bridge/buildbot-bridge
+   run-on-projects: []
+   run:
+      using: buildbot
+      release-promotion: true
+   notifications:
+      completed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      failed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      exception:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+
 jobs:
    fennec:
       name: fennec-version-bump
-      description: Release Promotion version bump
-      worker-type: buildbot-bridge/buildbot-bridge
-      run-on-projects: []
       run:
-         using: buildbot
          product: fennec
          buildername: release-{branch}-fennec_version_bump
-         release-promotion: true
          routes:
             - index.releases.v1.{branch}.latest.fennec.latest.version_bump
             - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.version_bump
-      notifications:
-         completed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         failed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         exception:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
+   firefox:
+      name: firefox-version-bump
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_version_bump
+         routes:
+            - index.releases.v1.{branch}.latest.firefox.latest.version_bump
+            - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.version_bump
