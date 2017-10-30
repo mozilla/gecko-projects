@@ -700,14 +700,19 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
  * A simple early exit heuristic to avoid slow partial display list rebuilds.
  */
 static bool
-ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames)
+ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames,
+                   DisplayListStatistics& aStats)
 {
+  aStats.modifiedFrames = aModifiedFrames.Length();
+
   if (aModifiedFrames.Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
     return false;
   }
 
   for (nsIFrame* f : aModifiedFrames) {
     MOZ_ASSERT(f);
+
+    aStats.frames.AppendElement(f);
 
     const LayoutFrameType type = f->Type();
 
