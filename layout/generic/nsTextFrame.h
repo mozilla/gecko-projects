@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -441,7 +442,7 @@ public:
   struct PaintTextParams
   {
     gfxContext* context;
-    gfxPoint framePt;
+    mozilla::gfx::Point framePt;
     LayoutDeviceRect dirtyRect;
     mozilla::SVGContextPaint* contextPaint = nullptr;
     DrawPathCallbacks* callbacks = nullptr;
@@ -468,7 +469,7 @@ public:
 
   struct PaintTextSelectionParams : PaintTextParams
   {
-    gfxPoint textBaselinePt;
+    mozilla::gfx::Point textBaselinePt;
     PropertyProvider* provider = nullptr;
     Range contentRange;
     nsTextPaintStyle* textPaintStyle = nullptr;
@@ -495,7 +496,7 @@ public:
 
   struct DrawTextParams : DrawTextRunParams
   {
-    gfxPoint framePt;
+    mozilla::gfx::Point framePt;
     LayoutDeviceRect dirtyRect;
     const nsTextPaintStyle* textStyle = nullptr;
     const nsCharClipDisplayItem::ClipEdges* clipEdges = nullptr;
@@ -535,8 +536,8 @@ public:
 
   void DrawEmphasisMarks(gfxContext* aContext,
                          mozilla::WritingMode aWM,
-                         const gfxPoint& aTextBaselinePt,
-                         const gfxPoint& aFramePt,
+                         const mozilla::gfx::Point& aTextBaselinePt,
+                         const mozilla::gfx::Point& aFramePt,
                          Range aRange,
                          const nscolor* aDecorationOverrideColor,
                          PropertyProvider* aProvider);
@@ -703,8 +704,8 @@ protected:
   {
     gfxTextRun::Range range;
     LayoutDeviceRect dirtyRect;
-    gfxPoint framePt;
-    gfxPoint textBaselinePt;
+    mozilla::gfx::Point framePt;
+    mozilla::gfx::Point textBaselinePt;
     gfxContext* context;
     nscolor foregroundColor = NS_RGBA(0, 0, 0, 0);
     const nsCharClipDisplayItem::ClipEdges* clipEdges = nullptr;
@@ -801,16 +802,16 @@ protected:
                           TextDecorations& aDecorations);
 
   void DrawTextRun(Range aRange,
-                   const gfxPoint& aTextBaselinePt,
+                   const mozilla::gfx::Point& aTextBaselinePt,
                    const DrawTextRunParams& aParams);
 
   void DrawTextRunAndDecorations(Range aRange,
-                                 const gfxPoint& aTextBaselinePt,
+                                 const mozilla::gfx::Point& aTextBaselinePt,
                                  const DrawTextParams& aParams,
                                  const TextDecorations& aDecorations);
 
   void DrawText(Range aRange,
-                const gfxPoint& aTextBaselinePt,
+                const mozilla::gfx::Point& aTextBaselinePt,
                 const DrawTextParams& aParams);
 
   // Set non empty rect to aRect, it should be overflow rect or frame rect.

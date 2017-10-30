@@ -20,7 +20,8 @@
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
 #include "gc/Zone.h"
-#include "vm/PIC.h"
+#include "vm/ArrayBufferObject.h"
+#include "vm/GlobalObject.h"
 #include "vm/ReceiverGuard.h"
 #include "vm/RegExpShared.h"
 #include "vm/SavedStacks.h"
@@ -622,7 +623,6 @@ struct JSCompartment
   public:
     bool                         isSelfHosting;
     bool                         marked;
-    bool                         warnedAboutDateToLocaleFormat : 1;
     bool                         warnedAboutExprClosure : 1;
     bool                         warnedAboutForEach : 1;
     bool                         warnedAboutLegacyGenerator : 1;

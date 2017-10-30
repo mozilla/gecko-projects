@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -2079,7 +2080,8 @@ nsMathMLChar::PaintForeground(nsIFrame* aForFrame,
       // draw a single glyph (base size or size variant)
       // XXXfredw verify if mGlyphs[0] is non-null to workaround bug 973322.
       if (mGlyphs[0]) {
-        mGlyphs[0]->Draw(Range(mGlyphs[0].get()), gfxPoint(0.0, mUnscaledAscent),
+        mGlyphs[0]->Draw(Range(mGlyphs[0].get()),
+                         gfx::Point(0.0, mUnscaledAscent),
                          gfxTextRun::DrawParams(&aRenderingContext));
       }
       break;
@@ -2237,7 +2239,7 @@ nsMathMLChar::PaintVertically(nsPresContext* aPresContext,
       }
       if (!clipRect.IsEmpty()) {
         AutoPushClipRect clip(aThebesContext, oneDevPixel, clipRect);
-        mGlyphs[i]->Draw(Range(mGlyphs[i].get()), gfxPoint(dx, dy), params);
+        mGlyphs[i]->Draw(Range(mGlyphs[i].get()), gfx::Point(dx, dy), params);
       }
     }
   }
@@ -2303,7 +2305,7 @@ nsMathMLChar::PaintVertically(nsPresContext* aPresContext,
         clipRect.height = std::min(bm.ascent + bm.descent, fillEnd - dy);
         AutoPushClipRect clip(aThebesContext, oneDevPixel, clipRect);
         dy += bm.ascent;
-        mGlyphs[3]->Draw(Range(mGlyphs[3].get()), gfxPoint(dx, dy), params);
+        mGlyphs[3]->Draw(Range(mGlyphs[3].get()), gfx::Point(dx, dy), params);
         dy += bm.descent;
       }
     }
@@ -2407,7 +2409,7 @@ nsMathMLChar::PaintHorizontally(nsPresContext* aPresContext,
       }
       if (!clipRect.IsEmpty()) {
         AutoPushClipRect clip(aThebesContext, oneDevPixel, clipRect);
-        mGlyphs[i]->Draw(Range(mGlyphs[i].get()), gfxPoint(dx, dy), params);
+        mGlyphs[i]->Draw(Range(mGlyphs[i].get()), gfx::Point(dx, dy), params);
       }
     }
   }
@@ -2471,7 +2473,7 @@ nsMathMLChar::PaintHorizontally(nsPresContext* aPresContext,
         clipRect.width = std::min(bm.rightBearing - bm.leftBearing, fillEnd - dx);
         AutoPushClipRect clip(aThebesContext, oneDevPixel, clipRect);
         dx -= bm.leftBearing;
-        mGlyphs[3]->Draw(Range(mGlyphs[3].get()), gfxPoint(dx, dy), params);
+        mGlyphs[3]->Draw(Range(mGlyphs[3].get()), gfx::Point(dx, dy), params);
         dx += bm.rightBearing;
       }
     }

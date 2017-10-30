@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: set ts=2 sw=2 et tw=78:
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
@@ -700,36 +700,32 @@ RetainedDisplayListBuilder::ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedF
  * A simple early exit heuristic to avoid slow partial display list rebuilds.
  */
 static bool
-ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames,
-                   DisplayListStatistics& aStats)
+ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames)
 {
-  aStats.modifiedFrames = aModifiedFrames.Length();
-
   if (aModifiedFrames.Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
     return false;
   }
 
-  bool shouldBuildPartial = true;
   for (nsIFrame* f : aModifiedFrames) {
     MOZ_ASSERT(f);
-
-    aStats.frames.AppendElement(f);
 
     const LayoutFrameType type = f->Type();
 
     // If we have any modified frames of the following types, it is likely that
     // doing a partial rebuild of the display list will be slower than doing a
     // full rebuild.
-    // TODO: Optimize these cases.
+    // This is because these frames either intersect or may intersect with most
+    // of the page content. This is either due to display port size or different
+    // async AGR.
     if (type == LayoutFrameType::Viewport ||
         type == LayoutFrameType::PageContent ||
         type == LayoutFrameType::Canvas ||
         type == LayoutFrameType::Scrollbar) {
-      shouldBuildPartial = false;
+      return false;
     }
   }
 
-  return shouldBuildPartial;
+  return true;
 }
 
 bool
@@ -750,11 +746,15 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
   if (mPreviousCaret != mBuilder.GetCaretFrame()) {
     if (mPreviousCaret) {
-      mBuilder.MarkFrameModifiedDuringBuilding(mPreviousCaret);
+      if (mBuilder.MarkFrameModifiedDuringBuilding(mPreviousCaret)) {
+        modifiedFrames.AppendElement(mPreviousCaret);
+      }
     }
 
     if (mBuilder.GetCaretFrame()) {
-      mBuilder.MarkFrameModifiedDuringBuilding(mBuilder.GetCaretFrame());
+      if (mBuilder.MarkFrameModifiedDuringBuilding(mBuilder.GetCaretFrame())) {
+        modifiedFrames.AppendElement(mBuilder.GetCaretFrame());
+      }
     }
 
     mPreviousCaret = mBuilder.GetCaretFrame();
@@ -783,7 +783,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
 
       //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
       //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
-      //nsFrame::PrintDisplayList(&builder, modifiedDL);
+      //nsFrame::PrintDisplayList(&mBuilder, modifiedDL);
 
     } else {
       // TODO: We can also skip layer building and painting if
@@ -800,7 +800,7 @@ RetainedDisplayListBuilder::AttemptPartialUpdate(nscolor aBackstop,
     MergeDisplayLists(&modifiedDL, &mList, &mList, aStats);
 
     //printf_stderr("Painting --- Merged list:\n");
-    //nsFrame::PrintDisplayList(&builder, list);
+    //nsFrame::PrintDisplayList(&mBuilder, mList);
 
     merged = true;
   }

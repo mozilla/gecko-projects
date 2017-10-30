@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: set ts=2 sw=2 et tw=78:
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
@@ -1599,12 +1599,14 @@ public:
     mBuildingInvisibleItems = aBuildingInvisibleItems;
   }
 
-  void MarkFrameModifiedDuringBuilding(nsIFrame* aFrame)
+  bool MarkFrameModifiedDuringBuilding(nsIFrame* aFrame)
   {
     if (!aFrame->IsFrameModified()) {
       mModifiedFramesDuringBuilding.AppendElement(aFrame);
       aFrame->SetFrameIsModified(true);
+      return true;
     }
+    return false;
   }
 
   /**
@@ -1613,11 +1615,11 @@ public:
    */
   AnimatedGeometryRoot* AnimatedGeometryRootForASR(const ActiveScrolledRoot* aASR);
 
-  bool HitTestShouldStopAtFirstOpaque() const {
-    return mHitTestShouldStopAtFirstOpaque;
+  bool HitTestIsForVisibility() const {
+    return mHitTestIsForVisibility;
   }
-  void SetHitTestShouldStopAtFirstOpaque(bool aHitTestShouldStopAtFirstOpaque) {
-    mHitTestShouldStopAtFirstOpaque = aHitTestShouldStopAtFirstOpaque;
+  void SetHitTestIsForVisibility(bool aHitTestIsForVisibility) {
+    mHitTestIsForVisibility = aHitTestIsForVisibility;
   }
 
 private:
@@ -1803,7 +1805,7 @@ private:
   bool                           mForceLayerForScrollParent;
   bool                           mAsyncPanZoomEnabled;
   bool                           mBuildingInvisibleItems;
-  bool                           mHitTestShouldStopAtFirstOpaque;
+  bool                           mHitTestIsForVisibility;
   bool                           mIsBuilding;
   bool                           mInInvalidSubtree;
 };
@@ -5106,12 +5108,22 @@ public:
     mShouldFlatten = aShouldFlatten;
   }
 
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override
+  {
+    if (mShouldFlatten) {
+      return mozilla::LAYER_NONE;
+    }
+    return nsDisplayOwnLayer::GetLayerState(aBuilder, aManager, aParameters);
+  }
+
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) const override;
 
   NS_DISPLAY_DECL_NAME("SubDocument", TYPE_SUBDOCUMENT)
 
-  mozilla::UniquePtr<ScrollMetadata> ComputeScrollMetadata(Layer* aLayer,
+  mozilla::UniquePtr<ScrollMetadata> ComputeScrollMetadata(LayerManager* aLayerManager,
                                                            const ContainerLayerParameters& aContainerParameters);
 
 protected:
@@ -5336,7 +5348,7 @@ public:
 
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
-  mozilla::UniquePtr<ScrollMetadata> ComputeScrollMetadata(Layer* aLayer,
+  mozilla::UniquePtr<ScrollMetadata> ComputeScrollMetadata(LayerManager* aLayerManager,
                                                            const ContainerLayerParameters& aContainerParameters);
 
   virtual bool UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
@@ -5857,15 +5869,16 @@ public:
     FrameTransformProperties(const nsIFrame* aFrame,
                              float aAppUnitsPerPixel,
                              const nsRect* aBoundsOverride);
-    FrameTransformProperties(nsCSSValueSharedList* aTransformList,
+    FrameTransformProperties(RefPtr<const nsCSSValueSharedList>&&
+                               aTransformList,
                              const Point3D& aToTransformOrigin)
       : mFrame(nullptr)
-      , mTransformList(aTransformList)
+      , mTransformList(mozilla::Move(aTransformList))
       , mToTransformOrigin(aToTransformOrigin)
     {}
 
     const nsIFrame* mFrame;
-    RefPtr<nsCSSValueSharedList> mTransformList;
+    const RefPtr<const nsCSSValueSharedList> mTransformList;
     const Point3D mToTransformOrigin;
   };
 

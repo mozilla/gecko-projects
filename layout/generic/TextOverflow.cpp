@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -279,7 +279,7 @@ nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
     if (textRun) {
       NS_ASSERTION(!textRun->IsRightToLeft(),
                    "Ellipsis textruns should always be LTR!");
-      gfxPoint gfxPt(pt.x, pt.y);
+      gfx::Point gfxPt(pt.x, pt.y);
       textRun->Draw(gfxTextRun::Range(textRun), gfxPt,
                     gfxTextRun::DrawParams(aCtx));
     }

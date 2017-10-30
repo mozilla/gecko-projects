@@ -27,15 +27,15 @@ const CONFIG_PREFS = [
   "identity.fxaccounts.settings.devices.uri",
   "identity.fxaccounts.remote.signup.uri",
   "identity.fxaccounts.remote.signin.uri",
+  "identity.fxaccounts.remote.email.uri",
   "identity.fxaccounts.remote.force_auth.uri",
 ];
 
 this.FxAccountsConfig = {
 
-  // Returns a promise that resolves with the URI of the remote UI flows.
-  async promiseAccountsSignUpURI() {
+  async _getPrefURL(prefName) {
     await this.ensureConfigured();
-    let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.signup.uri");
+    let url = Services.urlFormatter.formatURLPref(prefName);
     if (fxAccounts.requiresHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
       throw new Error("Firefox Accounts server must use HTTPS");
     }
@@ -43,13 +43,17 @@ this.FxAccountsConfig = {
   },
 
   // Returns a promise that resolves with the URI of the remote UI flows.
-  async promiseAccountsSignInURI() {
-    await this.ensureConfigured();
-    let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.signin.uri");
-    if (fxAccounts.requiresHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
-      throw new Error("Firefox Accounts server must use HTTPS");
-    }
-    return url;
+  promiseAccountsSignUpURI() {
+    return this._getPrefURL("identity.fxaccounts.remote.signup.uri");
+  },
+
+  // Returns a promise that resolves with the URI of the remote UI flows.
+  promiseAccountsSignInURI() {
+    return this._getPrefURL("identity.fxaccounts.remote.signin.uri");
+  },
+
+  promiseAccountsEmailURI() {
+    return this._getPrefURL("identity.fxaccounts.remote.email.uri");
   },
 
   resetConfigURLs() {
@@ -156,6 +160,7 @@ this.FxAccountsConfig = {
       Services.prefs.setCharPref("identity.fxaccounts.settings.devices.uri", rootURL + "/settings/clients?service=sync&context=" + contextParam);
       Services.prefs.setCharPref("identity.fxaccounts.remote.signup.uri", rootURL + "/signup?service=sync&context=" + contextParam);
       Services.prefs.setCharPref("identity.fxaccounts.remote.signin.uri", rootURL + "/signin?service=sync&context=" + contextParam);
+      Services.prefs.setCharPref("identity.fxaccounts.remote.email.uri", rootURL + "/?service=sync&context=" + contextParam + "&action=email");
       Services.prefs.setCharPref("identity.fxaccounts.remote.force_auth.uri", rootURL + "/force_auth?service=sync&context=" + contextParam);
 
       let whitelistValue = Services.prefs.getCharPref("webchannel.allowObject.urlWhitelist");

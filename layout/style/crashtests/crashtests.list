@@ -25,7 +25,7 @@ load 431705-1.xul
 load 432561-1.html
 load 437170-1.html
 load 437532-1.html
-load 439184-1.html
+skip-if(Android&&stylo&&isDebugBuild) load 439184-1.html # Bug 1411522
 load 444237-1.html
 load 444848-1.html
 load 447776-1.html
@@ -47,6 +47,7 @@ load 473892-1.html
 load 473914-1.html
 load 474377-1.xhtml
 load 478321-1.xhtml
+load 481557.html
 load 495269-1.html
 load 495269-2.html
 load 498036-1.html
@@ -256,3 +257,4 @@ load 1409931.html
 load 1410226-1.html
 load 1410226-2.html
 load 1411143.html
+load 1411478.html

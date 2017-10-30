@@ -206,7 +206,7 @@ nsIContent::GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const
     }
   }
 
-  if (parent && nsContentUtils::HasDistributedChildren(parent) &&
+  if (nsContentUtils::HasDistributedChildren(parent) &&
       nsContentUtils::IsInSameAnonymousTree(parent, this)) {
     // This node is distributed to insertion points, thus we
     // need to consult the destination insertion points list to
@@ -218,9 +218,9 @@ nsIContent::GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const
     parent = destInsertionPoints && !destInsertionPoints->IsEmpty() ?
       destInsertionPoints->LastElement()->GetParent() : nullptr;
   } else if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-    nsIContent* insertionParent = GetXBLInsertionParent();
-    if (insertionParent) {
-      parent = insertionParent;
+    if (nsIContent* insertionPoint = GetXBLInsertionPoint()) {
+      parent = insertionPoint->GetParent();
+      MOZ_ASSERT(parent);
     }
   }
 
@@ -494,42 +494,43 @@ NeedsScriptTraverse(nsINode* aNode)
 
 //----------------------------------------------------------------------
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsChildContentList)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsAttrChildContentList)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAttrChildContentList)
 
-// If nsChildContentList is changed so that any additional fields are
+// If nsAttrChildContentList is changed so that any additional fields are
 // traversed by the cycle collector, then CAN_SKIP must be updated to
 // check that the additional fields are null.
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsAttrChildContentList)
 
-// nsChildContentList only ever has a single child, its wrapper, so if
+// nsAttrChildContentList only ever has a single child, its wrapper, so if
 // the wrapper is known-live, the list can't be part of a garbage cycle.
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsAttrChildContentList)
   return tmp->HasKnownLiveWrapper();
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_END
 
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(nsAttrChildContentList)
   return tmp->HasKnownLiveWrapperAndDoesNotNeedTracing(tmp);
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_END
 
 // CanSkipThis returns false to avoid problems with incomplete unlinking.
-NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(nsChildContentList)
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(nsAttrChildContentList)
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
-NS_INTERFACE_TABLE_HEAD(nsChildContentList)
+NS_INTERFACE_TABLE_HEAD(nsAttrChildContentList)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(nsChildContentList, nsINodeList, nsIDOMNodeList)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsChildContentList)
+  NS_INTERFACE_TABLE(nsAttrChildContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAttrChildContentList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-nsChildContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
+nsAttrChildContentList::WrapObject(JSContext *cx,
+                                   JS::Handle<JSObject*> aGivenProto)
 {
   return NodeListBinding::Wrap(cx, this, aGivenProto);
 }
 
 NS_IMETHODIMP
-nsChildContentList::GetLength(uint32_t* aLength)
+nsAttrChildContentList::GetLength(uint32_t* aLength)
 {
   *aLength = mNode ? mNode->GetChildCount() : 0;
 
@@ -537,7 +538,7 @@ nsChildContentList::GetLength(uint32_t* aLength)
 }
 
 NS_IMETHODIMP
-nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+nsAttrChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
   nsINode* node = Item(aIndex);
   if (!node) {
@@ -550,7 +551,7 @@ nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 }
 
 nsIContent*
-nsChildContentList::Item(uint32_t aIndex)
+nsAttrChildContentList::Item(uint32_t aIndex)
 {
   if (mNode) {
     return mNode->GetChildAt(aIndex);
@@ -560,13 +561,84 @@ nsChildContentList::Item(uint32_t aIndex)
 }
 
 int32_t
-nsChildContentList::IndexOf(nsIContent* aContent)
+nsAttrChildContentList::IndexOf(nsIContent* aContent)
 {
   if (mNode) {
     return mNode->IndexOf(aContent);
   }
 
   return -1;
+}
+
+//----------------------------------------------------------------------
+NS_IMETHODIMP
+nsParentNodeChildContentList::GetLength(uint32_t* aLength)
+{
+  if (!mIsCacheValid && !ValidateCache()) {
+    *aLength = 0;
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(mIsCacheValid);
+
+  *aLength = mCachedChildArray.Length();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsParentNodeChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  nsINode* node = Item(aIndex);
+  if (!node) {
+    *aReturn = nullptr;
+    return NS_OK;
+  }
+
+  return CallQueryInterface(node, aReturn);
+}
+
+nsIContent*
+nsParentNodeChildContentList::Item(uint32_t aIndex)
+{
+  if (!mIsCacheValid && !ValidateCache()) {
+    return nullptr;
+  }
+
+  MOZ_ASSERT(mIsCacheValid);
+
+  return mCachedChildArray.SafeElementAt(aIndex, nullptr);
+}
+
+int32_t
+nsParentNodeChildContentList::IndexOf(nsIContent* aContent)
+{
+  if (!mIsCacheValid && !ValidateCache()) {
+    return -1;
+  }
+
+  MOZ_ASSERT(mIsCacheValid);
+
+  return mCachedChildArray.IndexOf(aContent);
+}
+
+bool
+nsParentNodeChildContentList::ValidateCache()
+{
+  MOZ_ASSERT(!mIsCacheValid);
+  MOZ_ASSERT(mCachedChildArray.IsEmpty());
+
+  nsINode* parent = GetParentObject();
+  if (!parent) {
+    return false;
+  }
+
+  for (nsIContent* node = parent->GetFirstChild(); node;
+       node = node->GetNextSibling()) {
+    mCachedChildArray.AppendElement(node);
+  }
+  mIsCacheValid = true;
+
+  return true;
 }
 
 //----------------------------------------------------------------------
@@ -706,23 +778,11 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb)
   cb.NoteNativeChild(mExtendedSlots->mXBLBinding,
                      NS_CYCLE_COLLECTION_PARTICIPANT(nsXBLBinding));
 
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mXBLInsertionParent");
-  cb.NoteXPCOMChild(mExtendedSlots->mXBLInsertionParent.get());
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mXBLInsertionPoint");
+  cb.NoteXPCOMChild(mExtendedSlots->mXBLInsertionPoint.get());
 
   if (mExtendedSlots->mCustomElementData) {
-    for (uint32_t i = 0;
-         i < mExtendedSlots->mCustomElementData->mReactionQueue.Length(); i++) {
-      if (mExtendedSlots->mCustomElementData->mReactionQueue[i]) {
-        mExtendedSlots->mCustomElementData->mReactionQueue[i]->Traverse(cb);
-      }
-    }
-
-    if (mExtendedSlots->mCustomElementData->mCustomElementDefinition) {
-      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
-        "mExtendedSlots->mCustomElementData->mCustomElementDefinition");
-      cb.NoteNativeChild(mExtendedSlots->mCustomElementData->mCustomElementDefinition,
-        NS_CYCLE_COLLECTION_PARTICIPANT(CustomElementDefinition));
-    }
+    mExtendedSlots->mCustomElementData->Traverse(cb);
   }
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mExtendedSlots->mFrameLoaderOrOpener");
@@ -751,11 +811,9 @@ FragmentOrElement::nsDOMSlots::Unlink()
   mExtendedSlots->mContainingShadow = nullptr;
   mExtendedSlots->mAssignedSlot = nullptr;
   MOZ_ASSERT(!(mExtendedSlots->mXBLBinding));
-  mExtendedSlots->mXBLInsertionParent = nullptr;
+  mExtendedSlots->mXBLInsertionPoint = nullptr;
   if (mExtendedSlots->mCustomElementData) {
-    if (mExtendedSlots->mCustomElementData->mCustomElementDefinition) {
-      mExtendedSlots->mCustomElementData->mCustomElementDefinition = nullptr;
-    }
+    mExtendedSlots->mCustomElementData->Unlink();
     mExtendedSlots->mCustomElementData = nullptr;
   }
   nsCOMPtr<nsIFrameLoader> frameLoader =
@@ -1174,12 +1232,12 @@ FragmentOrElement::SetXBLBinding(nsXBLBinding* aBinding,
 }
 
 nsIContent*
-FragmentOrElement::GetXBLInsertionParent() const
+FragmentOrElement::GetXBLInsertionPoint() const
 {
   if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
     nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
     if (slots) {
-      return slots->mXBLInsertionParent;
+      return slots->mXBLInsertionPoint;
     }
   }
 
@@ -1235,24 +1293,24 @@ FragmentOrElement::SetAssignedSlot(HTMLSlotElement* aSlot)
 }
 
 void
-FragmentOrElement::SetXBLInsertionParent(nsIContent* aContent)
+FragmentOrElement::SetXBLInsertionPoint(nsIContent* aContent)
 {
-  nsCOMPtr<nsIContent> oldInsertionParent = nullptr;
+  nsCOMPtr<nsIContent> oldInsertionPoint = nullptr;
   if (aContent) {
     nsExtendedDOMSlots* slots = ExtendedDOMSlots();
     SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
-    oldInsertionParent = slots->mXBLInsertionParent.forget();
-    slots->mXBLInsertionParent = aContent;
+    oldInsertionPoint = slots->mXBLInsertionPoint.forget();
+    slots->mXBLInsertionPoint = aContent;
   } else {
     if (nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots()) {
-      oldInsertionParent = slots->mXBLInsertionParent.forget();
-      slots->mXBLInsertionParent = nullptr;
+      oldInsertionPoint = slots->mXBLInsertionPoint.forget();
+      slots->mXBLInsertionPoint = nullptr;
     }
   }
 
   // We just changed the flattened tree, so any Servo style data is now invalid.
   // We rely on nsXBLService::LoadBindings to re-traverse the subtree afterwards.
-  if (oldInsertionParent != aContent &&
+  if (oldInsertionPoint != aContent &&
       IsStyledByServo() && IsElement() && AsElement()->HasServoData()) {
     ServoRestyleManager::ClearServoDataFromSubtree(AsElement());
   }
@@ -1383,6 +1441,9 @@ public:
     FragmentOrElement* container = static_cast<FragmentOrElement*>(aNode);
     uint32_t childCount = container->mAttrsAndChildren.ChildCount();
     if (childCount) {
+      // Invalidate cached array of child nodes
+      container->InvalidateChildNodes();
+
       while (childCount-- > 0) {
         // Hold a strong ref to the node when we remove it, because we may be
         // the last reference to it.  We need to call TakeChildAt() and
@@ -1484,7 +1545,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
     }
 
     if (tmp->IsHTMLElement() || tmp->IsSVGElement()) {
-      nsAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
+      nsStaticAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         tmp->DeleteProperty(*props[i]);
       }
@@ -2071,7 +2132,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
       }
     }
     if (tmp->IsHTMLElement() || tmp->IsSVGElement()) {
-      nsAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
+      nsStaticAtom*** props = Element::HTMLSVGPropertiesToTraverseAndUnlink();
       for (uint32_t i = 0; props[i]; ++i) {
         nsISupports* property =
           static_cast<nsISupports*>(tmp->GetProperty(*props[i]));

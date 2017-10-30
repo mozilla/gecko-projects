@@ -36,7 +36,7 @@
 #endif
 
 class nsAttrAndChildArray;
-class nsChildContentList;
+class nsAttrChildContentList;
 struct nsCSSSelectorList;
 class nsDOMAttributeMap;
 class nsIAnimationObserver;
@@ -374,8 +374,6 @@ public:
    * Bit-flags to pass (or'ed together) to IsNodeOfType()
    */
   enum {
-    /** nsIContent nodes */
-    eCONTENT             = 1 << 0,
     /** nsIDocument nodes */
     eDOCUMENT            = 1 << 1,
     /** nsIAttribute nodes */
@@ -1114,7 +1112,7 @@ public:
      * @see nsIDOMNodeList
      * @see nsGenericHTMLElement::GetChildNodes
      */
-    RefPtr<nsChildContentList> mChildNodes;
+    RefPtr<nsAttrChildContentList> mChildNodes;
 
     /**
      * Weak reference to this node.  This is cleared by the destructor of
@@ -1155,7 +1153,7 @@ public:
                                   NODE_DESCENDANTS_NEED_FRAMES |
                                   NODE_NEEDS_FRAME |
                                   NODE_CHROME_ONLY_ACCESS)) ||
-                 IsNodeOfType(eCONTENT),
+                 IsContent(),
                  "Flag only permitted on nsIContent nodes");
     nsWrapperCache::SetFlags(aFlagsToSet);
   }
@@ -1770,7 +1768,7 @@ protected:
   void SetSubtreeRootPointer(nsINode* aSubtreeRoot)
   {
     NS_ASSERTION(aSubtreeRoot, "aSubtreeRoot can never be null!");
-    NS_ASSERTION(!(IsNodeOfType(eCONTENT) && IsInUncomposedDoc()) &&
+    NS_ASSERTION(!(IsContent() && IsInUncomposedDoc()) &&
                  !IsInShadowTree(), "Shouldn't be here!");
     mSubtreeRoot = aSubtreeRoot;
   }
@@ -1979,6 +1977,12 @@ protected:
   {
     return HasSlots() ? &GetExistingSlots()->mMutationObservers : nullptr;
   }
+
+  /**
+   * Invalidate cached child array inside mChildNodes
+   * of type nsParentNodeChildContentList.
+   */
+  void InvalidateChildNodes();
 
   bool IsEditableInternal() const;
   virtual bool IsEditableExternal() const

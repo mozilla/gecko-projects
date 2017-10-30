@@ -25,6 +25,8 @@
 namespace mozilla {
 namespace layers {
 
+using namespace gfx;
+
 void WebRenderCommandBuilder::Destroy()
 {
   mLastCanvasDatas.Clear();
@@ -38,7 +40,9 @@ WebRenderCommandBuilder::EmptyTransaction()
   for (auto iter = mLastCanvasDatas.Iter(); !iter.Done(); iter.Next()) {
     RefPtr<WebRenderCanvasData> canvasData = iter.Get()->GetKey();
     WebRenderCanvasRendererAsync* canvas = canvasData->GetCanvasRenderer();
-    canvas->UpdateCompositableClient();
+    if (canvas) {
+      canvas->UpdateCompositableClient();
+    }
   }
 }
 
@@ -60,11 +64,11 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
 
     StackingContextHelper sc;
     mParentCommands.Clear();
-    aScrollData = WebRenderScrollData();
+    aScrollData = WebRenderScrollData(mManager);
     MOZ_ASSERT(mLayerScrollData.empty());
     mLastCanvasDatas.Clear();
     mLastAsr = nullptr;
-    mScrollingHelper.BeginBuild(aBuilder);
+    mScrollingHelper.BeginBuild(mManager, aBuilder);
 
     {
       StackingContextHelper pageRootSc(sc, aBuilder);
@@ -85,7 +89,7 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
       return aScrollData.HasMetadataFor(aScrollId);
     };
     if (Maybe<ScrollMetadata> rootMetadata = nsLayoutUtils::GetRootMetadata(
-          aDisplayListBuilder, nullptr, ContainerLayerParameters(), callback)) {
+          aDisplayListBuilder, mManager, ContainerLayerParameters(), callback)) {
       mLayerScrollData.back().AppendScrollMetadata(aScrollData, rootMetadata.ref());
     }
     // Append the WebRenderLayerScrollData items into WebRenderScrollData
@@ -500,12 +504,20 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
       bool snapped;
       bool isOpaque = aItem->GetOpaqueRegion(aDisplayListBuilder, &snapped).Contains(clippedBounds);
 
-      RefPtr<gfx::DrawEventRecorderMemory> recorder = MakeAndAddRef<gfx::DrawEventRecorderMemory>();
+      RefPtr<gfx::DrawEventRecorderMemory> recorder = MakeAndAddRef<gfx::DrawEventRecorderMemory>([&] (MemStream &aStream, std::vector<RefPtr<UnscaledFont>> &aUnscaledFonts) {
+          size_t count = aUnscaledFonts.size();
+          aStream.write((const char*)&count, sizeof(count));
+          for (auto unscaled : aUnscaledFonts) {
+            wr::FontKey key = mManager->WrBridge()->GetFontKeyForUnscaledFont(unscaled);
+            aStream.write((const char*)&key, sizeof(key));
+          }
+        });
       RefPtr<gfx::DrawTarget> dummyDt =
         gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), format);
       RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, paintSize.ToUnknownSize());
       PaintItemByDrawTarget(aItem, dt, paintRect, offset, aDisplayListBuilder,
                             fallbackData->mBasicLayerManager, mManager, scale);
+      recorder->FlushItem(IntRect());
       recorder->Finish();
 
       Range<uint8_t> bytes((uint8_t*)recorder->mOutputStream.mData, recorder->mOutputStream.mLength);

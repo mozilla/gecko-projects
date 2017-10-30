@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.1.26 */
+/* Generated with cbindgen:0.1.28 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -224,9 +224,38 @@ struct WrState;
 
 struct WrThreadPool;
 
-typedef Vec_u8 VecU8;
+struct IdNamespace {
+  uint32_t mHandle;
+
+  bool operator==(const IdNamespace& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator!=(const IdNamespace& aOther) const {
+    return mHandle != aOther.mHandle;
+  }
+  bool operator<(const IdNamespace& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const IdNamespace& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
+struct FontKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const FontKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+typedef FontKey WrFontKey;
 
 typedef Arc_VecU8 ArcVecU8;
+
+typedef Vec_u8 VecU8;
 
 struct Epoch {
   uint32_t mHandle;
@@ -373,23 +402,6 @@ typedef TypedTransform3D_f32__LayoutPixel__LayoutPixel LayoutTransform;
 struct WrTransformProperty {
   uint64_t id;
   LayoutTransform transform;
-};
-
-struct IdNamespace {
-  uint32_t mHandle;
-
-  bool operator==(const IdNamespace& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator!=(const IdNamespace& aOther) const {
-    return mHandle != aOther.mHandle;
-  }
-  bool operator<(const IdNamespace& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const IdNamespace& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
 };
 
 typedef IdNamespace WrIdNamespace;
@@ -772,18 +784,6 @@ struct WrImageDescriptor {
 
 typedef ExternalImageType WrExternalImageBufferType;
 
-struct FontKey {
-  IdNamespace mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const FontKey& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
-  }
-};
-
-typedef FontKey WrFontKey;
-
 struct FontInstanceOptions {
   FontRenderMode render_mode;
   SubpixelDirection subpx_dir;
@@ -810,10 +810,10 @@ struct FontInstancePlatformOptions {
 
 #if defined(XP_MACOSX)
 struct FontInstancePlatformOptions {
-  uint32_t unused;
+  bool font_smoothing;
 
   bool operator==(const FontInstancePlatformOptions& aOther) const {
-    return unused == aOther.unused;
+    return font_smoothing == aOther.font_smoothing;
   }
 };
 #endif
@@ -872,6 +872,14 @@ typedef TypedRect_u32__DevicePixel DeviceUintRect;
  *      a. Alternatively, you can clone `https://github.com/rlhunt/cbindgen` and use a tagged release
  *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
  */
+
+extern void AddFontData(WrFontKey aKey,
+                        const uint8_t *aData,
+                        size_t aSize,
+                        uint32_t aIndex,
+                        const ArcVecU8 *aVec);
+
+extern void DeleteFontData(WrFontKey aKey);
 
 extern void gfx_critical_note(const char *aMsg);
 
@@ -1126,14 +1134,12 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_line(WrState *aState,
-                     LayoutRect aClip,
+                     const LayoutRect *aClip,
                      bool aIsBackfaceVisible,
-                     float aBaseline,
-                     float aStart,
-                     float aEnd,
+                     const LayoutRect *aBounds,
+                     float aWavyLineThickness,
                      LineOrientation aOrientation,
-                     float aWidth,
-                     ColorF aColor,
+                     const ColorF *aColor,
                      LineStyle aStyle)
 WR_FUNC;
 

@@ -124,7 +124,6 @@ android {
 
             java {
                 srcDir "${topsrcdir}/mobile/android/base/java"
-                srcDir "${topsrcdir}/mobile/android/search/java"
                 srcDir "${topsrcdir}/mobile/android/services/src/main/java"
 
                 if (mozconfig.substs.MOZ_ANDROID_MLS_STUMBLER) {
@@ -173,9 +172,7 @@ android {
             }
 
             assets {
-                if (mozconfig.substs.MOZ_ANDROID_DISTRIBUTION_DIRECTORY && !mozconfig.substs.MOZ_ANDROID_PACKAGE_INSTALL_BOUNCER) {
-                    // If we are packaging the bouncer, it will have the distribution, so don't put
-                    // it in the main APK as well.
+                if (mozconfig.substs.MOZ_ANDROID_DISTRIBUTION_DIRECTORY) {
                     srcDir "${mozconfig.substs.MOZ_ANDROID_DISTRIBUTION_DIRECTORY}/assets"
                 }
                 srcDir "${topsrcdir}/mobile/android/app/assets"

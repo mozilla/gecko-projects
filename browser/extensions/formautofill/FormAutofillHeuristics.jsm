@@ -539,11 +539,14 @@ this.FormAutofillHeuristics = {
    *        all field details in the form.
    */
   getFormInfo(form, allowDuplicates = false) {
-    if (form.elements.length <= 0) {
+    const eligibleFields = Array.from(form.elements)
+      .filter(elem => FormAutofillUtils.isFieldEligibleForAutofill(elem));
+
+    if (eligibleFields.length <= 0) {
       return [];
     }
 
-    let fieldScanner = new FieldScanner(form.elements);
+    let fieldScanner = new FieldScanner(eligibleFields);
     while (!fieldScanner.parsingFinished) {
       let parsedPhoneFields = this._parsePhoneFields(fieldScanner);
       let parsedAddressFields = this._parseAddressFields(fieldScanner);
@@ -565,11 +568,70 @@ this.FormAutofillHeuristics = {
     return fieldScanner.trimmedFieldDetail;
   },
 
-  getInfo(element) {
-    if (!FormAutofillUtils.isFieldEligibleForAutofill(element)) {
+  _regExpTableHashValue(...signBits) {
+    return signBits.reduce((p, c, i) => p | !!c << i, 0);
+  },
+
+  _setRegExpListCache(regexps, b0, b1, b2) {
+    if (!this._regexpList) {
+      this._regexpList = [];
+    }
+    this._regexpList[this._regExpTableHashValue(b0, b1, b2)] = regexps;
+  },
+
+  _getRegExpListCache(b0, b1, b2) {
+    if (!this._regexpList) {
       return null;
     }
+    return this._regexpList[this._regExpTableHashValue(b0, b1, b2)];
+  },
 
+  _getRegExpList(isAutoCompleteOff, elementTagName) {
+    let isSelectElem = elementTagName == "SELECT";
+    let regExpListCache = this._getRegExpListCache(
+      isAutoCompleteOff,
+      FormAutofillUtils.isAutofillCreditCardsAvailable,
+      isSelectElem
+    );
+    if (regExpListCache) {
+      return regExpListCache;
+    }
+    const FIELDNAMES_IGNORING_AUTOCOMPLETE_OFF = [
+      "cc-name",
+      "cc-number",
+      "cc-exp-month",
+      "cc-exp-year",
+      "cc-exp",
+    ];
+    let regexps = isAutoCompleteOff ? FIELDNAMES_IGNORING_AUTOCOMPLETE_OFF : Object.keys(this.RULES);
+
+    if (!FormAutofillUtils.isAutofillCreditCardsAvailable) {
+      regexps = regexps.filter(name => !FormAutofillUtils.isCreditCardField(name));
+    }
+
+    if (isSelectElem) {
+      const FIELDNAMES_FOR_SELECT_ELEMENT = [
+        "address-level1",
+        "address-level2",
+        "country",
+        "cc-exp-month",
+        "cc-exp-year",
+        "cc-exp",
+      ];
+      regexps = regexps.filter(name => FIELDNAMES_FOR_SELECT_ELEMENT.includes(name));
+    }
+
+    this._setRegExpListCache(
+      regexps,
+      isAutoCompleteOff,
+      FormAutofillUtils.isAutofillCreditCardsAvailable,
+      isSelectElem
+    );
+
+    return regexps;
+  },
+
+  getInfo(element) {
     let info = element.getAutocompleteInfo();
     // An input[autocomplete="on"] will not be early return here since it stll
     // needs to find the field name.
@@ -598,28 +660,7 @@ this.FormAutofillHeuristics = {
       };
     }
 
-    const FIELDNAMES_IGNORING_AUTOCOMPLETE_OFF = [
-      "cc-name",
-      "cc-number",
-      "cc-exp-month",
-      "cc-exp-year",
-      "cc-exp",
-    ];
-    let regexps = isAutoCompleteOff ? FIELDNAMES_IGNORING_AUTOCOMPLETE_OFF : Object.keys(this.RULES);
-
-    if (!FormAutofillUtils.isAutofillCreditCardsAvailable) {
-      if (isAutoCompleteOff) {
-        if (!this._regexpListOf_CcUnavailable_AcOff) {
-          this._regexpListOf_CcUnavailable_AcOff = regexps.filter(name => !FormAutofillUtils.isCreditCardField(name));
-        }
-        regexps = this._regexpListOf_CcUnavailable_AcOff;
-      } else {
-        if (!this._regexpListOf_CcUnavailable_AcOn) {
-          this._regexpListOf_CcUnavailable_AcOn = regexps.filter(name => !FormAutofillUtils.isCreditCardField(name));
-        }
-        regexps = this._regexpListOf_CcUnavailable_AcOn;
-      }
-    }
+    let regexps = this._getRegExpList(isAutoCompleteOff, element.tagName);
     if (regexps.length == 0) {
       return null;
     }

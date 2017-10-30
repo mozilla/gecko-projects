@@ -38,7 +38,7 @@ type WrPipelineId = PipelineId;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrImageKey = ImageKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
-type WrFontKey = FontKey;
+pub type WrFontKey = FontKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrFontInstanceKey = FontInstanceKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
@@ -1525,27 +1525,22 @@ pub extern "C" fn wr_dp_pop_all_shadows(state: &mut WrState) {
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_line(state: &mut WrState,
-                                  clip: LayoutRect,
+                                  clip: &LayoutRect,
                                   is_backface_visible: bool,
-                                  baseline: f32,
-                                  start: f32,
-                                  end: f32,
+                                  bounds: &LayoutRect,
+                                  wavy_line_thickness: f32,
                                   orientation: LineOrientation,
-                                  width: f32,
-                                  color: ColorF,
+                                  color: &ColorF,
                                   style: LineStyle) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(LayoutRect::zero(), clip.into());
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(*bounds, (*clip).into());
     prim_info.is_backface_visible = is_backface_visible;
     state.frame_builder
          .dl_builder
          .push_line(&prim_info,
-                    baseline,
-                    start,
-                    end,
+                    wavy_line_thickness,
                     orientation,
-                    width,
                     color,
                     style);
 

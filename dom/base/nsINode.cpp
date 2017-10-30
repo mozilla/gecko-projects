@@ -341,7 +341,7 @@ nsINode::GetSelectionRootContent(nsIPresShell* aPresShell)
 
   if (IsNodeOfType(eDOCUMENT))
     return static_cast<nsIDocument*>(this)->GetRootElement();
-  if (!IsNodeOfType(eCONTENT))
+  if (!IsContent())
     return nullptr;
 
   if (GetComposedDoc() != aPresShell->GetDocument()) {
@@ -409,10 +409,29 @@ nsINode::ChildNodes()
 {
   nsSlots* slots = Slots();
   if (!slots->mChildNodes) {
-    slots->mChildNodes = new nsChildContentList(this);
+    // Check |!IsElement()| first to catch the common case
+    // without virtual call |IsNodeOfType|
+    slots->mChildNodes = !IsElement() && IsNodeOfType(nsINode::eATTRIBUTE) ?
+                           new nsAttrChildContentList(this) :
+                           new nsParentNodeChildContentList(this);
   }
 
   return slots->mChildNodes;
+}
+
+void
+nsINode::InvalidateChildNodes()
+{
+  MOZ_ASSERT(IsElement() || !IsNodeOfType(nsINode::eATTRIBUTE));
+
+  nsSlots* slots = GetExistingSlots();
+  if (!slots || !slots->mChildNodes) {
+    return;
+  }
+
+  auto childNodes =
+    static_cast<nsParentNodeChildContentList*>(slots->mChildNodes.get());
+  childNodes->InvalidateCache();
 }
 
 void
@@ -435,7 +454,7 @@ nsINode::GetComposedDocInternal() const
 void
 nsINode::CheckNotNativeAnonymous() const
 {
-  if (!IsNodeOfType(eCONTENT))
+  if (!IsContent())
     return;
   nsIContent* content = static_cast<const nsIContent *>(this)->GetBindingParent();
   while (content) {
@@ -1552,8 +1571,8 @@ nsresult
 nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
                          bool aNotify, nsAttrAndChildArray& aChildArray)
 {
-  NS_PRECONDITION(!aKid->GetParentNode(),
-                  "Inserting node that already has parent");
+  MOZ_ASSERT(!aKid->GetParentNode(), "Inserting node that already has parent");
+  MOZ_ASSERT(!IsNodeOfType(nsINode::eATTRIBUTE));
 
   // The id-handling code, and in the future possibly other code, need to
   // react to unexpected attribute changes.
@@ -1611,6 +1630,9 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
     aKid->UnbindFromTree();
     return rv;
   }
+
+  // Invalidate cached array of child nodes
+  InvalidateChildNodes();
 
   NS_ASSERTION(aKid->GetParentNode() == this,
                "Did we run script inappropriately?");
@@ -1902,9 +1924,10 @@ nsINode::doRemoveChildAt(uint32_t aIndex, bool aNotify,
   // nsIDocument::GetRootElement() calls until *after* it has removed aKid from
   // aChildArray. Any calls before then could potentially restore a stale
   // value for our cached root element, per note in nsDocument::RemoveChildAt().
-  NS_PRECONDITION(aKid && aKid->GetParentNode() == this &&
-                  aKid == GetChildAt(aIndex) &&
-                  IndexOf(aKid) == (int32_t)aIndex, "Bogus aKid");
+  MOZ_ASSERT(aKid && aKid->GetParentNode() == this &&
+             aKid == GetChildAt(aIndex) &&
+             IndexOf(aKid) == (int32_t)aIndex, "Bogus aKid");
+  MOZ_ASSERT(!IsNodeOfType(nsINode::eATTRIBUTE));
 
   nsMutationGuard::DidMutate();
   mozAutoDocUpdate updateBatch(GetComposedDoc(), UPDATE_CONTENT_MODEL, aNotify);
@@ -1916,6 +1939,9 @@ nsINode::doRemoveChildAt(uint32_t aIndex, bool aNotify,
   }
 
   aChildArray.RemoveChildAt(aIndex);
+
+  // Invalidate cached array of child nodes
+  InvalidateChildNodes();
 
   if (aNotify) {
     nsNodeUtils::ContentRemoved(this, aKid, previousSibling);
@@ -2100,7 +2126,7 @@ nsINode::EnsurePreInsertionValidity1(nsINode& aNewChild, nsINode* aRefChild,
   if ((!IsNodeOfType(eDOCUMENT) &&
        !IsNodeOfType(eDOCUMENT_FRAGMENT) &&
        !IsElement()) ||
-      !aNewChild.IsNodeOfType(eCONTENT)) {
+      !aNewChild.IsContent()) {
     aError.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
     return;
   }
@@ -2610,8 +2636,7 @@ nsINode::Contains(const nsINode* aOther) const
   if (!aOther ||
       OwnerDoc() != aOther->OwnerDoc() ||
       IsInUncomposedDoc() != aOther->IsInUncomposedDoc() ||
-      !(aOther->IsElement() ||
-        aOther->IsNodeOfType(nsINode::eCONTENT)) ||
+      !aOther->IsContent() ||
       !GetFirstChild()) {
     return false;
   }
@@ -2647,8 +2672,8 @@ nsINode::Length() const
   case nsIDOMNode::CDATA_SECTION_NODE:
   case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
   case nsIDOMNode::COMMENT_NODE:
-    MOZ_ASSERT(IsNodeOfType(eCONTENT));
-    return static_cast<const nsIContent*>(this)->TextLength();
+    MOZ_ASSERT(IsContent());
+    return AsContent()->TextLength();
 
   default:
     return GetChildCount();

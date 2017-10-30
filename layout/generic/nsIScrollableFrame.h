@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,6 +36,7 @@ namespace mozilla {
 struct ContainerLayerParameters;
 namespace layers {
 class Layer;
+class LayerManager;
 } // namespace layers
 } // namespace mozilla
 
@@ -409,11 +411,13 @@ public:
    */
   virtual bool WantAsyncScroll() const = 0;
   /**
-   * aLayer's animated geometry root is this frame. If there needs to be a
-   * ScrollMetadata contributed by this frame, append it to aOutput.
+   * aLayer's animated geometry root is this frame. Returns the ScrollMetadata
+   * contributed by this frame, if there is one.
+   * If aClip is non-null, then aLayer must also be non-null.
    */
   virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     mozilla::layers::Layer* aLayer,
+    mozilla::layers::LayerManager* aLayerManager,
     const nsIFrame* aContainerReferenceFrame,
     const ContainerLayerParameters& aParameters,
     const mozilla::DisplayItemClip* aClip) const = 0;

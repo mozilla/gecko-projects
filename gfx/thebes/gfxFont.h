@@ -1701,7 +1701,7 @@ public:
      * -- all glyphs use this font
      */
     void Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
-              gfxPoint *aPt, const TextRunDrawParams& aRunParams,
+              mozilla::gfx::Point* aPt, const TextRunDrawParams& aRunParams,
               mozilla::gfx::ShapedTextFlags aOrientation);
 
     /**
@@ -1710,7 +1710,8 @@ public:
      * @param aPt the baseline origin of the emphasis marks.
      * @param aParams some drawing parameters, see EmphasisMarkDrawParams.
      */
-    void DrawEmphasisMarks(const gfxTextRun* aShapedText, gfxPoint* aPt,
+    void DrawEmphasisMarks(const gfxTextRun* aShapedText,
+                           mozilla::gfx::Point* aPt,
                            uint32_t aOffset, uint32_t aCount,
                            const EmphasisMarkDrawParams& aParams);
 
@@ -1951,25 +1952,43 @@ protected:
 
     mozilla::UniquePtr<const Metrics> CreateVerticalMetrics();
 
-    // Output a single glyph at *aPt, which is updated by the glyph's advance.
-    // Normal glyphs are simply accumulated in aBuffer until it is full and
-    // gets flushed, but SVG or color-font glyphs will instead be rendered
-    // directly to the destination (found from the buffer's parameters).
-    void DrawOneGlyph(uint32_t           aGlyphID,
-                      double             aAdvance,
-                      gfxPoint          *aPt,
-                      GlyphBufferAzure&  aBuffer,
-                      bool              *aEmittedGlyphs) const;
+    // Template parameters for DrawGlyphs/DrawOneGlyph, used to select
+    // simplified versions of the methods in the most common cases.
+    enum class FontComplexityT {
+        SimpleFont,
+        ComplexFont
+    };
+    enum class SpacingT {
+        NoSpacing,
+        HasSpacing
+    };
 
     // Output a run of glyphs at *aPt, which is updated to follow the last glyph
     // in the run. This method also takes account of any letter-spacing provided
     // in aRunParams.
-    bool DrawGlyphs(const gfxShapedText      *aShapedText,
-                    uint32_t                  aOffset, // offset in the textrun
-                    uint32_t                  aCount, // length of run to draw
-                    gfxPoint                 *aPt,
-                    const TextRunDrawParams&  aRunParams,
-                    const FontDrawParams&     aFontParams);
+    template<FontComplexityT FC, SpacingT S>
+    bool DrawGlyphs(const gfxShapedText*     aShapedText,
+                    uint32_t                 aOffset, // offset in the textrun
+                    uint32_t                 aCount, // length of run to draw
+                    mozilla::gfx::Point*     aPt,
+                    GlyphBufferAzure&        aBuffer);
+
+    // Output a single glyph at *aPt.
+    // Normal glyphs are simply accumulated in aBuffer until it is full and
+    // gets flushed, but SVG or color-font glyphs will instead be rendered
+    // directly to the destination (found from the buffer's parameters).
+    template<FontComplexityT FC>
+    void DrawOneGlyph(uint32_t                   aGlyphID,
+                      const mozilla::gfx::Point& aPt,
+                      GlyphBufferAzure&          aBuffer,
+                      bool*                      aEmittedGlyphs) const;
+
+    // Helper for DrawOneGlyph to handle missing glyphs, rendering either
+    // nothing (for default-ignorables) or a missing-glyph hexbox.
+    bool DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
+                          const FontDrawParams&               aFontParams,
+                          const gfxShapedText::DetailedGlyph* aDetails,
+                          const mozilla::gfx::Point&          aPt);
 
     // set the font size and offset used for
     // synthetic subscript/superscript glyphs
@@ -2243,9 +2262,9 @@ protected:
     // if this font has bad underline offset, aIsBadUnderlineFont should be true.
     void SanitizeMetrics(Metrics *aMetrics, bool aIsBadUnderlineFont);
 
-    bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
+    bool RenderSVGGlyph(gfxContext *aContext, mozilla::gfx::Point aPoint,
                         uint32_t aGlyphId, SVGContextPaint* aContextPaint) const;
-    bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
+    bool RenderSVGGlyph(gfxContext *aContext, mozilla::gfx::Point aPoint,
                         uint32_t aGlyphId, SVGContextPaint* aContextPaint,
                         gfxTextRunDrawCallbacks *aCallbacks,
                         bool& aEmittedGlyphs) const;
@@ -2265,7 +2284,7 @@ protected:
     // the second draw occurs at a constant offset in device pixels.
     // This helper calculates the scale factor we need to apply to the
     // synthetic-bold offset.
-    static double CalcXScale(DrawTarget* aDrawTarget);
+    static mozilla::gfx::Float CalcXScale(DrawTarget* aDrawTarget);
 };
 
 // proportion of ascent used for x-height, if unable to read value from font
@@ -2282,7 +2301,7 @@ struct MOZ_STACK_CLASS TextRunDrawParams {
     gfxTextRunDrawCallbacks *callbacks;
     mozilla::SVGContextPaint *runContextPaint;
     mozilla::gfx::Color      fontSmoothingBGColor;
-    gfxFloat                 direction;
+    mozilla::gfx::Float      direction;
     double                   devPerApp;
     nscolor                  textStrokeColor;
     gfxPattern              *textStrokePattern;
@@ -2300,7 +2319,7 @@ struct MOZ_STACK_CLASS FontDrawParams {
     mozilla::SVGContextPaint *contextPaint;
     mozilla::gfx::Matrix     *passedInvMatrix;
     mozilla::gfx::Matrix      matInv;
-    double                    synBoldOnePixelOffset;
+    mozilla::gfx::Float       synBoldOnePixelOffset;
     int32_t                   extraStrikes;
     mozilla::gfx::DrawOptions drawOptions;
     bool                      isVerticalFont;

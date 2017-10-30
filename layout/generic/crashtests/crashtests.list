@@ -563,7 +563,7 @@ load 944909-1.html
 load 946167-1.html
 load 947158.html
 load 949932.html
-asserts-if(Android,0-1) load 964078.html # bug 989718
+load 964078.html
 load 970710.html
 load 973701-1.xhtml
 load 973701-2.xhtml
@@ -638,6 +638,8 @@ load text-overflow-form-elements.html
 load text-overflow-iframe.html
 asserts(1-4) load 1225005.html # bug 682647 and bug 448083
 load 1233191.html
+load 1234701-1.html
+load 1234701-2.html
 load 1271765.html
 asserts(2) asserts-if(stylo&&Android,1) load 1272983-1.html # bug 586628
 asserts(2) asserts-if(stylo&&Android,1) load 1272983-2.html # bug 586628

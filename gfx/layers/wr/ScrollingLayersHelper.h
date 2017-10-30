@@ -25,13 +25,15 @@ namespace layers {
 
 struct FrameMetrics;
 class StackingContextHelper;
+class WebRenderLayerManager;
 
 class ScrollingLayersHelper
 {
 public:
   ScrollingLayersHelper();
 
-  void BeginBuild(wr::DisplayListBuilder& aBuilder);
+  void BeginBuild(WebRenderLayerManager* aManager,
+                  wr::DisplayListBuilder& aBuilder);
   void EndBuild();
 
   void BeginList();
@@ -42,6 +44,8 @@ public:
   ~ScrollingLayersHelper();
 
 private:
+  typedef std::pair<FrameMetrics::ViewID, Maybe<wr::WrClipId>> ClipAndScroll;
+
   std::pair<Maybe<FrameMetrics::ViewID>, Maybe<wr::WrClipId>>
   DefineClipChain(nsDisplayItem* aItem,
                   const ActiveScrolledRoot* aAsr,
@@ -63,6 +67,8 @@ private:
                       int32_t aAppUnitsPerDevPixel,
                       const StackingContextHelper& aSc);
 
+  Maybe<ClipAndScroll> EnclosingClipAndScroll() const;
+
   // Note: two DisplayItemClipChain* A and B might actually be "equal" (as per
   // DisplayItemClipChain::Equal(A, B)) even though they are not the same pointer
   // (A != B). In this hopefully-rare case, they will get separate entries
@@ -75,6 +81,7 @@ private:
   // have separate clip ids. Hopefully this won't happen very often.
   typedef std::unordered_map<const DisplayItemClipChain*, wr::WrClipId> ClipIdMap;
 
+  WebRenderLayerManager* MOZ_NON_OWNING_REF mManager;
   wr::DisplayListBuilder* mBuilder;
   ClipIdMap mCache;
 
@@ -87,7 +94,7 @@ private:
 
     Maybe<FrameMetrics::ViewID> mScrollId;
     Maybe<wr::WrClipId> mClipId;
-    Maybe<std::pair<FrameMetrics::ViewID, Maybe<wr::WrClipId>>> mClipAndScroll;
+    Maybe<ClipAndScroll> mClipAndScroll;
 
     void Apply(wr::DisplayListBuilder* aBuilder);
     void Unapply(wr::DisplayListBuilder* aBuilder);

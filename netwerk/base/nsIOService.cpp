@@ -351,23 +351,19 @@ nsIOService::InitializeProtocolProxyService()
     return rv;
 }
 
-nsIOService*
+already_AddRefed<nsIOService>
 nsIOService::GetInstance() {
     if (!gIOService) {
-        gIOService = new nsIOService();
-        if (!gIOService)
-            return nullptr;
-        NS_ADDREF(gIOService);
-
-        nsresult rv = gIOService->Init();
-        if (NS_FAILED(rv)) {
-            NS_RELEASE(gIOService);
+        RefPtr<nsIOService> ios = new nsIOService();
+        gIOService = ios.get();
+        if (NS_FAILED(ios->Init())) {
+            gIOService = nullptr;
             return nullptr;
         }
-        return gIOService;
+
+        return ios.forget();
     }
-    NS_ADDREF(gIOService);
-    return gIOService;
+    return do_AddRef(gIOService);
 }
 
 NS_IMPL_ISUPPORTS(nsIOService,
@@ -1489,6 +1485,11 @@ nsIOService::Observe(nsISupports *subject,
             nsCOMPtr<nsIPrefBranch> prefBranch;
             GetPrefBranch(getter_AddRefs(prefBranch));
             PrefsChanged(prefBranch, MANAGE_OFFLINE_STATUS_PREF);
+
+            // Bug 870460 - Read cookie database at an early-as-possible time
+            // off main thread. Hence, we have more chance to finish db query
+            // before something calls into the cookie service.
+            nsCOMPtr<nsISupports> cookieServ = do_GetService(NS_COOKIESERVICE_CONTRACTID);
         }
     } else if (!strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
         // Remember we passed XPCOM shutdown notification to prevent any

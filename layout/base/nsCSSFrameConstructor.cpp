@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=2:et:sw=2:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7491,17 +7491,7 @@ nsCSSFrameConstructor::GetRangeInsertionPoint(nsIContent* aContainer,
     return insertionPoint; // Don't build the frames.
   }
 
-  bool hasInsertion = false;
-  if (!insertionPoint.mMultiple) {
-    // XXXbz XBL2/sXBL issue
-    nsIDocument* document = aStartChild->GetComposedDoc();
-    // XXXbz how would |document| be null here?
-    if (document && aStartChild->GetXBLInsertionParent()) {
-      hasInsertion = true;
-    }
-  }
-
-  if (insertionPoint.mMultiple || hasInsertion) {
+  if (insertionPoint.mMultiple || aStartChild->GetXBLInsertionPoint()) {
     // We have an insertion point.  There are some additional tests we need to do
     // in order to ensure that an append is a safe operation.
     uint32_t childCount = 0;
@@ -8048,6 +8038,16 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   }
 #endif
 
+  auto styleNewChildRangeEagerly =
+    [this, aInsertionKind, aContainer, aStartChild, aEndChild]() {
+      // When aInsertionKind == InsertionKind::Sync, we know that the
+      // styles are up-to-date already.
+      if (aInsertionKind == InsertionKind::Async &&
+          aContainer->IsStyledByServo()) {
+        StyleNewChildRange(aStartChild, aEndChild);
+      }
+    };
+
   bool isSingleInsert = (aStartChild->GetNextSibling() == aEndChild);
   NS_ASSERTION(isSingleInsert ||
                aInsertionKind == InsertionKind::Sync,
@@ -8057,6 +8057,8 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
 
 #ifdef MOZ_XUL
   if (aContainer && IsXULListBox(aContainer)) {
+    // For XUL list box, we need to style the new children eagerly.
+    styleNewChildRangeEagerly();
     if (isSingleInsert) {
       if (NotifyListBoxBody(mPresShell->GetPresContext(), aContainer,
                             // The insert case in NotifyListBoxBody
@@ -8153,11 +8155,8 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   }
 
   // We couldn't construct lazily. Make Servo eagerly traverse the new content
-  // if needed (when aInsertionKind == InsertionKind::Sync, we know that the
-  // styles are up-to-date already).
-  if (aInsertionKind == InsertionKind::Async && aContainer->IsStyledByServo()) {
-    StyleNewChildRange(aStartChild, aEndChild);
-  }
+  // if needed.
+  styleNewChildRangeEagerly();
 
   InsertionPoint insertion;
   if (isSingleInsert) {
@@ -12297,7 +12296,7 @@ nsCSSFrameConstructor::CreateListBoxContent(nsContainerFrame*      aParentFrame,
                                   GetAbsoluteContainingBlock(aParentFrame, FIXED_POS),
                                   GetAbsoluteContainingBlock(aParentFrame, ABS_POS),
                                   GetFloatContainingBlock(aParentFrame),
-                                  do_AddRef(mTempFrameTreeState.get()));
+                                  do_AddRef(mTempFrameTreeState));
 
     // If we ever initialize the ancestor filter on |state|, make sure
     // to push the right parent!

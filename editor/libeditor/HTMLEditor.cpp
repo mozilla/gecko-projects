@@ -373,7 +373,7 @@ already_AddRefed<nsIContent>
 HTMLEditor::FindSelectionRoot(nsINode* aNode)
 {
   NS_PRECONDITION(aNode->IsNodeOfType(nsINode::eDOCUMENT) ||
-                  aNode->IsNodeOfType(nsINode::eCONTENT),
+                  aNode->IsContent(),
                   "aNode must be content or document node");
 
   nsCOMPtr<nsIDocument> doc = aNode->GetUncomposedDoc();
@@ -4186,6 +4186,11 @@ HTMLEditor::SetAttributeOrEquivalent(Element* aElement,
 
   if (!IsCSSEnabled() || !mCSSEditUtils) {
     // we are not in an HTML+CSS editor; let's set the attribute the HTML way
+    if (mCSSEditUtils) {
+      mCSSEditUtils->RemoveCSSEquivalentToHTMLStyle(aElement, nullptr,
+                                                    aAttribute, nullptr,
+                                                    aSuppressTransaction);
+    }
     return aSuppressTransaction ?
              aElement->SetAttr(kNameSpaceID_None, aAttribute, aValue, true) :
              SetAttribute(aElement, aAttribute, aValue);

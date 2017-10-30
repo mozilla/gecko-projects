@@ -13,7 +13,6 @@
 
 #include "jscntxt.h"
 #include "jsfriendapi.h"
-#include "jsgc.h"
 #include "jsiter.h"
 #include "jswrapper.h"
 
@@ -55,7 +54,6 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     isAtomsCompartment_(false),
     isSelfHosting(false),
     marked(true),
-    warnedAboutDateToLocaleFormat(false),
     warnedAboutExprClosure(false),
     warnedAboutForEach(false),
     warnedAboutLegacyGenerator(false),

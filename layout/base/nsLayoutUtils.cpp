@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -3314,7 +3314,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
     builder.SetDescendIntoSubdocuments(false);
   }
 
-  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
+  builder.SetHitTestIsForVisibility(aFlags & ONLY_VISIBLE);
 
   builder.EnterPresShell(aFrame);
 
@@ -8177,7 +8177,8 @@ nsLayoutUtils::ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal)
   // supported. Other principal aren't able to use XUL by default, and
   // the back door to enable XUL is mostly just for testing, which means
   // they don't matter, and we shouldn't respect them at the same time.
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (!StyloChromeEnabled() &&
+      nsContentUtils::IsSystemPrincipal(aPrincipal)) {
     return false;
   }
   // Check any internal page which we need to explicitly blacklist.
@@ -8256,6 +8257,21 @@ nsLayoutUtils::RemoveFromStyloBlocklist(const nsACString& aBlockedDomain)
     delete sStyloBlocklist;
     sStyloBlocklist = nullptr;
   }
+}
+
+/* static */
+bool
+nsLayoutUtils::StyloChromeEnabled()
+{
+  static bool sInitialized = false;
+  static bool sEnabled = false;
+  if (!sInitialized) {
+    // We intentionally don't allow dynamic toggling of this pref
+    // because it is rather risky to mix style backend in XUL.
+    sEnabled = Preferences::GetBool("layout.css.servo.chrome.enabled");
+    sInitialized = true;
+  }
+  return sEnabled;
 }
 #endif
 
@@ -9202,7 +9218,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
                                      nsIFrame* aScrollFrame,
                                      nsIContent* aContent,
                                      const nsIFrame* aReferenceFrame,
-                                     Layer* aLayer,
+                                     LayerManager* aLayerManager,
                                      ViewID aScrollParentId,
                                      const nsRect& aViewport,
                                      const Maybe<nsRect>& aClipRect,
@@ -9228,14 +9244,14 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     if (nsLayoutUtils::GetDisplayPort(aContent, &dp)) {
       metrics.SetDisplayPort(CSSRect::FromAppUnits(dp));
       if (IsAPZTestLoggingEnabled()) {
-        LogTestDataForPaint(aLayer->Manager(), scrollId, "displayport",
+        LogTestDataForPaint(aLayerManager, scrollId, "displayport",
                             metrics.GetDisplayPort());
       }
     }
     if (nsLayoutUtils::GetCriticalDisplayPort(aContent, &dp)) {
       metrics.SetCriticalDisplayPort(CSSRect::FromAppUnits(dp));
       if (IsAPZTestLoggingEnabled()) {
-        LogTestDataForPaint(aLayer->Manager(), scrollId, "criticalDisplayport",
+        LogTestDataForPaint(aLayerManager, scrollId, "criticalDisplayport",
                             metrics.GetCriticalDisplayPort());
       }
     }
@@ -9399,7 +9415,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
       content->Describe(contentDescription);
       metadata.SetContentDescription(NS_LossyConvertUTF16toASCII(contentDescription));
       if (IsAPZTestLoggingEnabled()) {
-        LogTestDataForPaint(aLayer->Manager(), scrollId, "contentDescription",
+        LogTestDataForPaint(aLayerManager, scrollId, "contentDescription",
                             metadata.GetContentDescription().get());
       }
     }
@@ -9439,7 +9455,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
 
 /*static*/ Maybe<ScrollMetadata>
 nsLayoutUtils::GetRootMetadata(nsDisplayListBuilder* aBuilder,
-                               Layer* aRootLayer,
+                               LayerManager* aLayerManager,
                                const ContainerLayerParameters& aContainerParameters,
                                const std::function<bool(ViewID& aScrollId)>& aCallback)
 {
@@ -9489,7 +9505,7 @@ nsLayoutUtils::GetRootMetadata(nsDisplayListBuilder* aBuilder,
     return Some(nsLayoutUtils::ComputeScrollMetadata(frame,
                            rootScrollFrame, content,
                            aBuilder->FindReferenceFrameFor(frame),
-                           aRootLayer, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
+                           aLayerManager, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
                            isRootContent, aContainerParameters));
   }
 

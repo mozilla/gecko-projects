@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -4431,14 +4432,14 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
         nsDisplayScrollInfoLayer* scrollItem = static_cast<nsDisplayScrollInfoLayer*>(item);
         newLayerEntry->mOpaqueForAnimatedGeometryRootParent = false;
         newLayerEntry->mBaseScrollMetadata =
-            scrollItem->ComputeScrollMetadata(ownLayer, mParameters);
+            scrollItem->ComputeScrollMetadata(ownLayer->Manager(), mParameters);
       } else if ((itemType == DisplayItemType::TYPE_SUBDOCUMENT ||
                   itemType == DisplayItemType::TYPE_ZOOM ||
                   itemType == DisplayItemType::TYPE_RESOLUTION) &&
                  gfxPrefs::LayoutUseContainersForRootFrames())
       {
         newLayerEntry->mBaseScrollMetadata =
-          static_cast<nsDisplaySubDocument*>(item)->ComputeScrollMetadata(ownLayer, mParameters);
+          static_cast<nsDisplaySubDocument*>(item)->ComputeScrollMetadata(ownLayer->Manager(), mParameters);
       }
 
       /**
@@ -5132,8 +5133,8 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
       (clipChain && clipChain->mASR == asr->mParent) ? &clipChain->mClip : nullptr;
 
     Maybe<ScrollMetadata> metadata =
-      scrollFrame->ComputeScrollMetadata(aEntry->mLayer, mContainerReferenceFrame,
-                                         mParameters, clip);
+      scrollFrame->ComputeScrollMetadata(aEntry->mLayer, aEntry->mLayer->Manager(),
+            mContainerReferenceFrame, mParameters, clip);
     if (!metadata) {
       continue;
     }
