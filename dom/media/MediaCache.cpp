@@ -26,6 +26,7 @@
 #include "nsIPrincipal.h"
 #include "nsISeekableStream.h"
 #include "nsPrintfCString.h"
+#include "nsProxyRelease.h"
 #include "nsThreadUtils.h"
 #include "prio.h"
 #include <algorithm>
@@ -267,15 +268,6 @@ public:
     int64_t  mResourceID;
     uint32_t mNext;
   };
-
-  // Called during shutdown to clear sThread.
-  void operator=(std::nullptr_t)
-  {
-    nsCOMPtr<nsIThread> thread = sThread.forget();
-    if (thread) {
-      thread->Shutdown();
-    }
-  }
 
 protected:
   explicit MediaCache(MediaBlockCacheBase* aCache)
@@ -726,10 +718,18 @@ MediaCache::GetMediaCache(int64_t aContentLength)
       return nullptr;
     }
     sThread = thread.forget();
-    // Note it is safe to pass an invalid pointer for operator=(std::nullptr_t)
-    // is non-virtual and it will not access |this|.
-    ClearOnShutdown(reinterpret_cast<MediaCache*>(0x1),
-                    ShutdownPhase::ShutdownThreads);
+
+    static struct ClearThread
+    {
+      // Called during shutdown to clear sThread.
+      void operator=(std::nullptr_t)
+      {
+        nsCOMPtr<nsIThread> thread = sThread.forget();
+        MOZ_ASSERT(thread);
+        thread->Shutdown();
+      }
+    } sClearThread;
+    ClearOnShutdown(&sClearThread, ShutdownPhase::ShutdownThreads);
   }
 
   if (!sThread) {
@@ -1538,6 +1538,10 @@ public:
   NS_IMETHOD Run() override
   {
     mMediaCache->Update();
+    // Ensure MediaCache is deleted on the main thread.
+    NS_ProxyRelease("UpdateEvent::mMediaCache",
+                    SystemGroup::EventTargetFor(mozilla::TaskCategory::Other),
+                    mMediaCache.forget());
     return NS_OK;
   }
 
