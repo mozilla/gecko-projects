@@ -361,6 +361,7 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
             return True
         if task.task['payload'].get('properties', {}).get('product') == 'firefox':
             if task.kind in ('release-version-bump',
+                             'release-bouncer-sub',
                              ):
                 return True
         # TODO: add beetmover push-to-releases
@@ -369,7 +370,6 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
         # TODO: recompression push-to-releases + balrog
         # TODO: final verify
         # TODO: uptake monitoring
-        # TODO: bouncer aliases
         # TODO: checksums
         # TODO: shipit mark as shipped
 

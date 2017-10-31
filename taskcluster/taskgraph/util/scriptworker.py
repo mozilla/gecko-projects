@@ -15,6 +15,7 @@ happen on mozilla-beta and mozilla-release.
 """
 from __future__ import absolute_import, print_function, unicode_literals
 import functools
+import json
 import os
 
 
@@ -434,6 +435,15 @@ def get_release_config(config, force=False):
         next_version = str(os.environ.get("NEXT_VERSION", ""))
         if next_version != "":
             release_config['next_version'] = next_version
+        partial_updates = os.environ.get("PARTIAL_UPDATES", "")
+        if partial_updates != "":
+            partial_updates = json.loads(partial_updates)
+            release_config['partial_updates'] = ', '.join([
+                '{}build{}'.format(version, info['buildNumber'])
+                for version, info in partial_updates.items()
+            ])
+            if release_config['partial_updates'] == "":
+                del release_config['partial_updates']
         build_number = str(os.environ.get("BUILD_NUMBER", 1))
         if not build_number.isdigit():
             raise ValueError("Release graphs must specify `BUILD_NUMBER` in the environment!")

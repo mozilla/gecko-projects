@@ -9,20 +9,13 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 
-jobs:
-   fennec:
-      name: fennec_release_bouncer_sub
+job-defaults:
       description: release bouncer submission job
       worker-type: buildbot-bridge/buildbot-bridge
       run-on-projects: []
       run:
          using: buildbot
-         product: fennec
-         buildername: release-{branch}-fennec_bncr_sub
          release-promotion: true
-         routes:
-            - index.releases.v1.{branch}.latest.fennec.latest.bouncer_submitter
-            - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.bouncer_submitter
       notifications:
          completed:
             by-project:
@@ -48,3 +41,21 @@ jobs:
                   #- "{task[tags][createdForUser]}"
                default:
                   - "release-drivers"
+
+jobs:
+   fennec:
+      name: fennec_release_bouncer_sub
+      run:
+         product: fennec
+         buildername: release-{branch}-fennec_bncr_sub
+         routes:
+            - index.releases.v1.{branch}.latest.fennec.latest.bouncer_submitter
+            - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.bouncer_submitter
+   firefox:
+      name: firefox_release_bouncer_sub
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_bncr_sub
+         routes:
+            - index.releases.v1.{branch}.latest.firefox.latest.bouncer_submitter
+            - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.bouncer_submitter

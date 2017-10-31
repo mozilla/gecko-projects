@@ -6,6 +6,7 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import json
 import os
 
 from .registry import register_callback_action
@@ -59,6 +60,11 @@ RELEASE_PROMOTION_CONFIG = {
 
 VERSION_BUMP_FLAVORS = (
     'publish_fennec',
+    'publish_firefox',
+    'publish_devedition',
+)
+
+BOUNCER_PARTIALS_FLAVORS = (
     'publish_firefox',
     'publish_devedition',
 )
@@ -137,6 +143,42 @@ def is_release_promotion_available(parameters):
                 'description': 'Next version.',
                 'default': '',
             },
+
+            # Example:
+            #   'partial_updates': {
+            #       '38.0': {
+            #           'buildNumber': 1,
+            #           'locales': ['de', 'en-GB', 'ru', 'uk', 'zh-TW']
+            #       },
+            #       '37.0': {
+            #           'buildNumber': 2,
+            #           'locales': ['de', 'en-GB', 'ru', 'uk']
+            #       }
+            #   }
+            'partial_updates': {
+                'type': 'object',
+                'description': 'Partial updates.',
+                'default': {},
+                'additionalProperties': {
+                    'type': 'object',
+                    'properties': {
+                        'buildNumber': {
+                            'type': 'number',
+                        },
+                        'locales': {
+                            'type': 'array',
+                            'items':  {
+                                'type': 'string',
+                            },
+                        },
+                    },
+                    'required': [
+                        'buildNumber',
+                        'locales',
+                    ],
+                    'additionalProperties': False,
+                }
+            },
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -152,6 +194,14 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
         os.environ['NEXT_VERSION'] = next_version
+    if release_promotion_flavor in BOUNCER_PARTIALS_FLAVORS:
+        partial_updates = json.dumps(input.get('partial_updates', {}))
+        if partial_updates == "{}":
+            raise Exception(
+                "`partial_updates` property needs to be provided for %s "
+                "targets." % ', '.join(BOUNCER_PARTIALS_FLAVORS)
+            )
+        os.environ['PARTIAL_UPDATES'] = partial_updates
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
     target_tasks_method = input.get(
