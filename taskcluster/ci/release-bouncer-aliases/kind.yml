@@ -12,49 +12,60 @@ transforms:
 kind-dependencies:
    - release-uptake-monitoring
 
+job-defaults:
+   description: Update bouncer aliases job
+   worker-type: buildbot-bridge/buildbot-bridge
+   run-on-projects: []
+   run:
+      using: buildbot
+      release-promotion: true
+      properties:
+          tuxedo_server_url:
+             by-project:
+                 mozilla-beta: https://bounceradmin.mozilla.com/api
+                 mozilla-release: https://bounceradmin.mozilla.com/api
+                 maple: https://admin-bouncer.stage.mozaws.net/api/
+                 default: http://localhost/api
+   notifications:
+      completed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      failed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      exception:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+
 jobs:
    fennec:
       name: fennec_release_bouncer_aliases
-      description: Update bouncer aliases job
-      worker-type: buildbot-bridge/buildbot-bridge
-      run-on-projects: []
       run:
-         using: buildbot
          product: fennec
          buildername: release-{branch}-fennec_bouncer_aliases
-         release-promotion: true
          routes:
             - index.releases.v1.{branch}.latest.fennec.latest.bouncer_submitter
             - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.bouncer_submitter
-         properties:
-             tuxedo_server_url:
-                by-project:
-                    mozilla-beta: https://bounceradmin.mozilla.com/api
-                    mozilla-release: https://bounceradmin.mozilla.com/api
-                    maple: https://admin-bouncer.stage.mozaws.net/api/
-                    default: http://localhost/api
-      notifications:
-         completed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         failed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         exception:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
+   firefox:
+      name: firefox_release_bouncer_aliases
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_bouncer_aliases
+         routes:
+            - index.releases.v1.{branch}.latest.firefox.latest.bouncer_submitter
+            - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.bouncer_submitter

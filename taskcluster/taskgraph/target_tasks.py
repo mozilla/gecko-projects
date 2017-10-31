@@ -363,6 +363,7 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
         if task.task['payload'].get('properties', {}).get('product') == 'firefox':
             if task.kind in ('release-version-bump',
                              'release-bouncer-sub',
+                             'release-bouncer-aliases',
                              ):
                 return True
         # TODO: add beetmover push-to-releases
