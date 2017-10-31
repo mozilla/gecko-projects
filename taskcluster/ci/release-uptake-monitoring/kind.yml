@@ -12,51 +12,60 @@ transforms:
 kind-dependencies:
    - beetmover-cdns
 
+job-defaults:
+   description: Uptake monitoring job
+   worker-type: buildbot-bridge/buildbot-bridge
+   run-on-projects: []
+   run:
+      using: buildbot
+      release-promotion: true
+      properties:
+          tuxedo_server_url:
+             by-project:
+                 mozilla-beta: https://bounceradmin.mozilla.com/api
+                 mozilla-release: https://bounceradmin.mozilla.com/api
+                 maple: https://admin-bouncer.stage.mozaws.net/api/
+                 default: http://localhost/api
+   notifications:
+      completed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      failed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      exception:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+
 jobs:
    fennec:
       name: fennec_release_uptake_monitoring
-      description: Uptake monitoring job
-      worker-type: buildbot-bridge/buildbot-bridge
-      run-on-projects: []
       run:
-         using: buildbot
          product: fennec
          buildername: release-{branch}-fennec_uptake_monitoring
-         release-promotion: true
          routes:
             - index.releases.v1.{branch}.latest.fennec.latest.uptake_monitoring
             - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.uptake_monitoring
-         properties:
-             # TODO: Calculate "platforms" dynamically
-             platforms: "android-api-16, android-x86"
-             tuxedo_server_url:
-                by-project:
-                    mozilla-beta: https://bounceradmin.mozilla.com/api
-                    mozilla-release: https://bounceradmin.mozilla.com/api
-                    maple: https://admin-bouncer.stage.mozaws.net/api/
-                    default: http://localhost/api
-      notifications:
-         completed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         failed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         exception:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
+   firefox:
+      name: firefox_release_uptake_monitoring
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_uptake_monitoring
+         routes:
+            - index.releases.v1.{branch}.latest.firefox.latest.uptake_monitoring
+            - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.uptake_monitoring

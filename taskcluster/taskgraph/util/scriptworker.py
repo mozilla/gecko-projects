@@ -432,22 +432,36 @@ def get_release_config(config, force=False):
     """
     release_config = {}
     if force or config.params['target_tasks_method'] in BEETMOVER_RELEASE_TARGET_TASKS:
+
         next_version = str(os.environ.get("NEXT_VERSION", ""))
         if next_version != "":
             release_config['next_version'] = next_version
+
         partial_updates = os.environ.get("PARTIAL_UPDATES", "")
-        if partial_updates != "":
+        if partial_updates != "" and config.kind in ('release-bouncer-sub',
+                                                     'release-uptake-monitoring',
+                                                     ) :
             partial_updates = json.loads(partial_updates)
-            release_config['partial_updates'] = ', '.join([
+            release_config['partial_versions'] = ', '.join([
                 '{}build{}'.format(version, info['buildNumber'])
                 for version, info in partial_updates.items()
             ])
-            if release_config['partial_updates'] == "":
-                del release_config['partial_updates']
+            if release_config['partial_versions'] == "{}":
+                del release_config['partial_versions']
+
+        uptake_monitoring_platforms = os.environ.get("UPTAKE_MONITORING_PLATFORMS", "[]")
+        if uptake_monitoring_platforms != "[]" and config.kind in ('release-uptake-monitoring',
+                                                                   ):
+            uptake_monitoring_platforms = json.loads(uptake_monitoring_platforms)
+            release_config['platforms'] = ', '.join(uptake_monitoring_platforms)
+            if release_config['platforms'] == "[]":
+                del release_config['platforms']
+
         build_number = str(os.environ.get("BUILD_NUMBER", 1))
         if not build_number.isdigit():
             raise ValueError("Release graphs must specify `BUILD_NUMBER` in the environment!")
         release_config['build_number'] = int(build_number)
+
         with open(VERSION_PATH, "r") as fh:
             version = fh.readline().rstrip()
         release_config['version'] = version

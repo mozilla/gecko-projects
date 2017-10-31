@@ -64,7 +64,7 @@ VERSION_BUMP_FLAVORS = (
     'publish_devedition',
 )
 
-BOUNCER_PARTIALS_FLAVORS = (
+UPTAKE_MONITORING_PLATFORMS_FLAVORS = PARTIAL_UPDATES_FLAVORS = (
     'publish_firefox',
     'publish_devedition',
 )
@@ -179,6 +179,21 @@ def is_release_promotion_available(parameters):
                     'additionalProperties': False,
                 }
             },
+
+            'uptake_monitoring_platforms': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                    'enum': [
+                        'macosx',
+                        'win32',
+                        'win64',
+                        'linux',
+                        'linux64',
+                    ],
+                },
+                'default': [],
+            }
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -194,14 +209,23 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
         os.environ['NEXT_VERSION'] = next_version
-    if release_promotion_flavor in BOUNCER_PARTIALS_FLAVORS:
+    if release_promotion_flavor in PARTIAL_UPDATES_FLAVORS:
         partial_updates = json.dumps(input.get('partial_updates', {}))
         if partial_updates == "{}":
             raise Exception(
                 "`partial_updates` property needs to be provided for %s "
-                "targets." % ', '.join(BOUNCER_PARTIALS_FLAVORS)
+                "targets." % ', '.join(PARTIAL_UPDATES_FLAVORS)
             )
         os.environ['PARTIAL_UPDATES'] = partial_updates
+    if release_promotion_flavor in UPTAKE_MONITORING_PLATFORMS_FLAVORS:
+        uptake_monitoring_platforms = json.dumps(input.get('uptake_monitoring_platforms', []))
+        if partial_updates == "[]":
+            raise Exception(
+                "`uptake_monitoring_platforms` property needs to be provided for %s "
+                "targets." % ', '.join(UPTAKE_MONITORING_PLATFORMS_FLAVORS)
+            )
+        os.environ['UPTAKE_MONITORING_PLATFORMS'] = uptake_monitoring_platforms
+
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
     target_tasks_method = input.get(
