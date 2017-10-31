@@ -15,44 +15,57 @@ kind-dependencies:
    - release-version-bump
 
 
+job-defaults:
+   description: mark release as shipped in Ship-It
+   worker-type: buildbot-bridge/buildbot-bridge
+   run-on-projects: []
+   run:
+      using: buildbot
+      release-promotion: true
+   notifications:
+      completed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      failed:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+      exception:
+         by-project:
+            maple:
+               - "release-drivers-staging"
+            try:
+               #- "{task[tags][createdForUser]}"
+            default:
+               - "release-drivers"
+
 jobs:
    fennec:
       name: release-fennec_mark_as_shipped
-      description: mark release as shipped in Ship-It
-      worker-type: buildbot-bridge/buildbot-bridge
-      run-on-projects: []
       run:
-         using: buildbot
          product: fennec
          buildername: release-{branch}-fennec_mark_as_shipped
-         release-promotion: true
          routes:
             - index.releases.v1.{branch}.latest.fennec.latest.mark_as_shipped
             - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.mark_as_shipped
-      notifications:
-         completed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         failed:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
-         exception:
-            by-project:
-               maple:
-                  - "release-drivers-staging"
-               try:
-                  #- "{task[tags][createdForUser]}"
-               default:
-                  - "release-drivers"
       extra:
          product: fennec
+   firefox:
+      name: release-firefox_mark_as_shipped
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_mark_as_shipped
+         routes:
+            - index.releases.v1.{branch}.latest.firefox.latest.mark_as_shipped
+            - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.mark_as_shipped
+      extra:
+         product: firefox
