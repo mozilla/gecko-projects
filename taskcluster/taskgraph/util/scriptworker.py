@@ -440,7 +440,7 @@ def get_release_config(config, force=False):
         partial_updates = os.environ.get("PARTIAL_UPDATES", "")
         if partial_updates != "" and config.kind in ('release-bouncer-sub',
                                                      'release-uptake-monitoring',
-                                                     ) :
+                                                     ):
             partial_updates = json.loads(partial_updates)
             release_config['partial_versions'] = ', '.join([
                 '{}build{}'.format(version, info['buildNumber'])
