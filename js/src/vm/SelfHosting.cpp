@@ -186,20 +186,7 @@ intrinsic_IsConstructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 1);
-
-    if (!IsConstructor(args[0])) {
-        args.rval().setBoolean(false);
-        return true;
-    }
-
-    JSObject* obj = &args[0].toObject();
-    if (!IsWrapper(obj)) {
-        args.rval().setBoolean(true);
-        return true;
-    }
-
-    obj = UncheckedUnwrap(obj);
-    args.rval().setBoolean(obj && obj->isConstructor());
+    args.rval().setBoolean(IsConstructor(args[0]));
     return true;
 }
 
@@ -3067,23 +3054,29 @@ CloneObject(JSContext* cx, HandleNativeObject selfHostedObject)
     RootedObject clone(cx);
     if (selfHostedObject->is<JSFunction>()) {
         RootedFunction selfHostedFunction(cx, &selfHostedObject->as<JSFunction>());
-        bool hasName = selfHostedFunction->explicitName() != nullptr;
+        if (selfHostedFunction->isInterpreted()) {
+            bool hasName = selfHostedFunction->explicitName() != nullptr;
 
-        // Arrow functions use the first extended slot for their lexical |this| value.
-        MOZ_ASSERT(!selfHostedFunction->isArrow());
-        js::gc::AllocKind kind = hasName
-                                 ? gc::AllocKind::FUNCTION_EXTENDED
-                                 : selfHostedFunction->getAllocKind();
-        MOZ_ASSERT(!CanReuseScriptForClone(cx->compartment(), selfHostedFunction, cx->global()));
-        Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
-        RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
-        clone = CloneFunctionAndScript(cx, selfHostedFunction, globalLexical, emptyGlobalScope,
-                                       kind);
-        // To be able to re-lazify the cloned function, its name in the
-        // self-hosting compartment has to be stored on the clone.
-        if (clone && hasName) {
-            clone->as<JSFunction>().setExtendedSlot(LAZY_FUNCTION_NAME_SLOT,
-                                                    StringValue(selfHostedFunction->explicitName()));
+            // Arrow functions use the first extended slot for their lexical |this| value.
+            MOZ_ASSERT(!selfHostedFunction->isArrow());
+            js::gc::AllocKind kind = hasName
+                ? gc::AllocKind::FUNCTION_EXTENDED
+                : selfHostedFunction->getAllocKind();
+
+            Handle<GlobalObject*> global = cx->global();
+            Rooted<LexicalEnvironmentObject*> globalLexical(cx, &global->lexicalEnvironment());
+            RootedScope emptyGlobalScope(cx, &global->emptyGlobalScope());
+            MOZ_ASSERT(!CanReuseScriptForClone(cx->compartment(), selfHostedFunction, global));
+            clone = CloneFunctionAndScript(cx, selfHostedFunction, globalLexical, emptyGlobalScope,
+                                           kind);
+            // To be able to re-lazify the cloned function, its name in the
+            // self-hosting compartment has to be stored on the clone.
+            if (clone && hasName) {
+                Value nameVal = StringValue(selfHostedFunction->explicitName());
+                clone->as<JSFunction>().setExtendedSlot(LAZY_FUNCTION_NAME_SLOT, nameVal);
+            }
+        } else {
+            clone = CloneSelfHostingIntrinsic(cx, selfHostedFunction);
         }
     } else if (selfHostedObject->is<RegExpObject>()) {
         RegExpObject& reobj = selfHostedObject->as<RegExpObject>();

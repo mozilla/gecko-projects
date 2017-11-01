@@ -800,19 +800,24 @@ DisplayListBuilder::GetCacheOverride(const DisplayItemClipChain* aParent)
 
 wr::WrStickyId
 DisplayListBuilder::DefineStickyFrame(const wr::LayoutRect& aContentRect,
-                                      const wr::StickySideConstraint* aTop,
-                                      const wr::StickySideConstraint* aRight,
-                                      const wr::StickySideConstraint* aBottom,
-                                      const wr::StickySideConstraint* aLeft)
+                                      const float* aTopMargin,
+                                      const float* aRightMargin,
+                                      const float* aBottomMargin,
+                                      const float* aLeftMargin,
+                                      const StickyOffsetBounds& aVerticalBounds,
+                                      const StickyOffsetBounds& aHorizontalBounds)
 {
-  uint64_t id = wr_dp_define_sticky_frame(mWrState, aContentRect, aTop,
-      aRight, aBottom, aLeft);
-  WRDL_LOG("DefineSticky id=%" PRIu64 " c=%s t=%s r=%s b=%s l=%s\n", mWrState, id,
+  uint64_t id = wr_dp_define_sticky_frame(mWrState, aContentRect, aTopMargin,
+      aRightMargin, aBottomMargin, aLeftMargin, aVerticalBounds, aHorizontalBounds);
+  WRDL_LOG("DefineSticky id=%" PRIu64 " c=%s t=%s r=%s b=%s l=%s v=%s h=%s\n",
+      mWrState, id,
       Stringify(aContentRect).c_str(),
-      aTop ? Stringify(*aTop).c_str() : "none",
-      aRight ? Stringify(*aRight).c_str() : "none",
-      aBottom ? Stringify(*aBottom).c_str() : "none",
-      aLeft ? Stringify(*aLeft).c_str() : "none");
+      aTopMargin ? Stringify(*aTopMargin).c_str() : "none",
+      aRightMargin ? Stringify(*aRightMargin).c_str() : "none",
+      aBottomMargin ? Stringify(*aBottomMargin).c_str() : "none",
+      aLeftMargin ? Stringify(*aLeftMargin).c_str() : "none",
+      Stringify(aVerticalBounds).c_str(),
+      Stringify(aHorizontalBounds).c_str());
   return wr::WrStickyId { id };
 }
 
@@ -918,6 +923,14 @@ DisplayListBuilder::PushRect(const wr::LayoutRect& aBounds,
       Stringify(aClip).c_str(),
       Stringify(aColor).c_str());
   wr_dp_push_rect(mWrState, aBounds, aClip, aIsBackfaceVisible, aColor);
+}
+
+void
+DisplayListBuilder::PushClearRect(const wr::LayoutRect& aBounds)
+{
+  WRDL_LOG("PushClearRect b=%s\n", mWrState,
+      Stringify(aBounds).c_str());
+  wr_dp_push_clear_rect(mWrState, aBounds);
 }
 
 void
