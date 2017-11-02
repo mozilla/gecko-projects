@@ -928,7 +928,7 @@ js::GetIterator(JSContext* cx, HandleObject obj, unsigned flags)
             numGuards = 0;
     }
 
-    if (MOZ_UNLIKELY(obj->is<PropertyIteratorObject>() || obj->is<LegacyGeneratorObject>()))
+    if (MOZ_UNLIKELY(obj->is<PropertyIteratorObject>()))
         return obj;
 
     // We should only call the enumerate trap for "for-in".
@@ -1263,8 +1263,8 @@ js::ValueToIterator(JSContext* cx, unsigned flags, HandleValue vp)
     return GetIterator(cx, obj, flags);
 }
 
-bool
-js::CloseIterator(JSContext* cx, HandleObject obj)
+void
+js::CloseIterator(JSObject* obj)
 {
     if (obj->is<PropertyIteratorObject>()) {
         /* Remove enumerators from the active list, which is a stack. */
@@ -1282,32 +1282,7 @@ js::CloseIterator(JSContext* cx, HandleObject obj)
              */
             ni->props_cursor = ni->props_array;
         }
-    } else if (obj->is<LegacyGeneratorObject>()) {
-        Rooted<LegacyGeneratorObject*> genObj(cx, &obj->as<LegacyGeneratorObject>());
-        if (genObj->isClosed())
-            return true;
-        if (genObj->isRunning() || genObj->isClosing()) {
-            // Nothing sensible to do.
-            return true;
-        }
-        return LegacyGeneratorObject::close(cx, obj);
     }
-
-    return true;
-}
-
-bool
-js::UnwindIteratorForException(JSContext* cx, HandleObject obj)
-{
-    RootedValue v(cx);
-    bool getOk = cx->getPendingException(&v);
-    cx->clearPendingException();
-    if (!CloseIterator(cx, obj))
-        return false;
-    if (!getOk)
-        return false;
-    cx->setPendingException(v);
-    return true;
 }
 
 bool

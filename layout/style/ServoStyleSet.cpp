@@ -340,7 +340,6 @@ ServoStyleSet::ResolveStyleFor(Element* aElement,
                                ServoStyleContext* aParentContext,
                                LazyComputeBehavior aMayCompute)
 {
-  RefPtr<ServoStyleContext> computedValues;
   if (aMayCompute == LazyComputeBehavior::Allow) {
     PreTraverseSync();
     return ResolveStyleLazilyInternal(
@@ -1601,6 +1600,13 @@ ServoStyleSet::HasStateDependency(const Element& aElement,
 {
   return Servo_StyleSet_HasStateDependency(
       mRawSet.get(), &aElement, aState.ServoValue());
+}
+
+bool
+ServoStyleSet::HasDocumentStateDependency(EventStates aState) const
+{
+  return Servo_StyleSet_HasDocumentStateDependency(
+      mRawSet.get(), aState.ServoValue());
 }
 
 already_AddRefed<ServoStyleContext>

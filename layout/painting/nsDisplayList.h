@@ -1824,6 +1824,7 @@ class nsDisplayItemLink {
 protected:
   nsDisplayItemLink() : mAbove(nullptr) {}
   nsDisplayItemLink(const nsDisplayItemLink&) : mAbove(nullptr) {}
+  uint64_t mSentinel = 0xDEADBEEFDEADBEEF;
   nsDisplayItem* mAbove;
 
   friend class nsDisplayList;
@@ -2626,6 +2627,10 @@ public:
   {
     return nullptr;
   }
+
+  virtual mozilla::Maybe<nsRect> GetClipWithRespectToASR(
+      nsDisplayListBuilder* aBuilder,
+      const ActiveScrolledRoot* aASR) const;
 
 protected:
   nsDisplayItem() = delete;
@@ -5539,10 +5544,14 @@ public:
                                        const StackingContextHelper& aSc,
                                        mozilla::layers::WebRenderLayerManager* aManager,
                                        nsDisplayListBuilder* aDisplayListBuilder) override;
+
+  virtual mozilla::Maybe<nsRect> GetClipWithRespectToASR(
+      nsDisplayListBuilder* aBuilder,
+      const ActiveScrolledRoot* aASR) const override;
 private:
   // According to mask property and the capability of aManager, determine
-  // whether paint mask onto a dedicate mask layer.
-  bool ShouldPaintOnMaskLayer(LayerManager* aManager);
+  // whether we can paint the mask onto a dedicate mask layer.
+  bool CanPaintOnMaskLayer(LayerManager* aManager);
 
   nsTArray<nsRect> mDestRects;
 };

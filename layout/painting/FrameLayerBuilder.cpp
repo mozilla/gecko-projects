@@ -3869,8 +3869,6 @@ void
 ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
                                          nsDisplayMask* aMaskItem)
 {
-  MOZ_ASSERT(mManager->IsCompositingCheap());
-
   RefPtr<ImageLayer> maskLayer =
     CreateOrRecycleMaskImageLayerFor(MaskLayerKey(aLayer, Nothing()),
                                      SetCSSMaskLayerUserData);
@@ -4105,11 +4103,8 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     }
     if (!bounds.IsEmpty()) {
       if (itemASR != mContainerASR) {
-        const DisplayItemClip* clip = DisplayItemClipChain::ClipForASR(item->GetClipChain(), mContainerASR);
-        MOZ_ASSERT(clip || gfxPrefs::LayoutUseContainersForRootFrames(),
-                   "the item should have finite bounds with respect to mContainerASR.");
-        if (clip) {
-          bounds = clip->GetClipRect();
+        if (Maybe<nsRect> clip = item->GetClipWithRespectToASR(mBuilder, mContainerASR)) {
+          bounds = clip.ref();
         }
       }
     }
@@ -6015,7 +6010,7 @@ FrameLayerBuilder::PaintItems(nsTArray<ClippedDisplayItem>& aItems,
         aContext->Save();
         NS_ASSERTION(aCommonClipCount < 100,
           "Maybe you really do have more than a hundred clipping rounded rects, or maybe something has gone wrong.");
-        currentClip.ApplyTo(aContext, aPresContext, aCommonClipCount);
+        currentClip.ApplyTo(aContext, aPresContext->AppUnitsPerDevPixel(), aCommonClipCount);
         aContext->NewPath();
       }
     }

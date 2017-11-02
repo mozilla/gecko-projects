@@ -16,6 +16,7 @@
 #include "mozilla/media/MediaChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/SchedulerGroup.h"
+#include "mozilla/dom/ClientManagerActors.h"
 #include "mozilla/dom/PFileSystemRequestChild.h"
 #include "mozilla/dom/FileSystemTaskBase.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
@@ -41,7 +42,7 @@
 #include "mozilla/net/HttpBackgroundChannelChild.h"
 #include "mozilla/net/PUDPSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
-#include "mozilla/dom/WebAuthnTransactionChild.h"
+#include "mozilla/dom/WebAuthnTransactionChildBase.h"
 #include "nsID.h"
 #include "nsTraceRefcnt.h"
 
@@ -85,7 +86,7 @@ using mozilla::dom::cache::PCacheStreamControlChild;
 using mozilla::dom::LocalStorage;
 using mozilla::dom::StorageDBChild;
 
-using mozilla::dom::WebAuthnTransactionChild;
+using mozilla::dom::WebAuthnTransactionChildBase;
 
 // -----------------------------------------------------------------------------
 // BackgroundChildImpl::ThreadLocal
@@ -571,6 +572,18 @@ BackgroundChildImpl::DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* a
   return true;
 }
 
+mozilla::dom::PClientManagerChild*
+BackgroundChildImpl::AllocPClientManagerChild()
+{
+  return mozilla::dom::AllocClientManagerChild();
+}
+
+bool
+BackgroundChildImpl::DeallocPClientManagerChild(mozilla::dom::PClientManagerChild* aActor)
+{
+  return mozilla::dom::DeallocClientManagerChild(aActor);
+}
+
 #ifdef EARLY_BETA_OR_EARLIER
 void
 BackgroundChildImpl::OnChannelReceivedMessage(const Message& aMsg)
@@ -594,8 +607,8 @@ bool
 BackgroundChildImpl::DeallocPWebAuthnTransactionChild(PWebAuthnTransactionChild* aActor)
 {
   MOZ_ASSERT(aActor);
-  RefPtr<dom::WebAuthnTransactionChild> child =
-    dont_AddRef(static_cast<dom::WebAuthnTransactionChild*>(aActor));
+  RefPtr<dom::WebAuthnTransactionChildBase> child =
+    dont_AddRef(static_cast<dom::WebAuthnTransactionChildBase*>(aActor));
   return true;
 }
 

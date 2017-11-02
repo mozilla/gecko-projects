@@ -558,6 +558,8 @@ def set_tier(config, tests):
                                          'windows10-64-stylo-disabled/opt',
                                          'macosx64/opt',
                                          'macosx64/debug',
+                                         'macosx64-nightly/opt',
+                                         'macosx64-devedition/opt',
                                          'macosx64-stylo-disabled/debug',
                                          'macosx64-stylo-disabled/opt',
                                          'android-4.3-arm7-api-16/opt',
@@ -680,6 +682,7 @@ def enable_code_coverage(config, tests):
                 test['mozharness']['extra-options'].append('--tptimeout,15000')
         elif test['build-platform'] == 'linux64-jsdcov/opt':
             test['run-on-projects'] = ['mozilla-central']
+            test['mozharness'].setdefault('extra-options', []).append('--jsd-code-coverage')
         yield test
 
 

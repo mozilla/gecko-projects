@@ -149,8 +149,7 @@ class JSFunction : public js::NativeObject
         MOZ_ASSERT_IF(nonLazyScript()->funHasExtensibleScope() ||
                       nonLazyScript()->needsHomeObject()       ||
                       nonLazyScript()->isDerivedClassConstructor() ||
-                      isStarGenerator() ||
-                      isLegacyGenerator() ||
+                      isGenerator() ||
                       isAsync(),
                       nonLazyScript()->bodyScope()->hasEnvironment());
 
@@ -511,18 +510,16 @@ class JSFunction : public js::NativeObject
 
     js::GeneratorKind generatorKind() const {
         if (!isInterpreted())
-            return js::NotGenerator;
+            return js::GeneratorKind::NotGenerator;
         if (hasScript())
             return nonLazyScript()->generatorKind();
         if (js::LazyScript* lazy = lazyScriptOrNull())
             return lazy->generatorKind();
         MOZ_ASSERT(isSelfHostedBuiltin());
-        return js::NotGenerator;
+        return js::GeneratorKind::NotGenerator;
     }
 
-    bool isLegacyGenerator() const { return generatorKind() == js::LegacyGenerator; }
-
-    bool isStarGenerator() const { return generatorKind() == js::StarGenerator; }
+    bool isGenerator() const { return generatorKind() == js::GeneratorKind::Generator; }
 
     js::FunctionAsyncKind asyncKind() const {
         return isInterpretedLazy() ? lazyScript()->asyncKind() : nonLazyScript()->asyncKind();

@@ -32,9 +32,7 @@ const {
   ORDERED_NODE_ITERATOR_TYPE,
 } = Ci.nsIDOMXPathResult;
 
-const SVGNS = "http://www.w3.org/2000/svg";
 const XBLNS = "http://www.mozilla.org/xbl";
-const XHTMLNS = "http://www.w3.org/1999/xhtml";
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 /** XUL elements that support checked property. */
@@ -144,14 +142,14 @@ element.Store = class {
    */
   add(el) {
     const isDOMElement = element.isDOMElement(el);
-    const isSVGElement = element.isSVGElement(el);
     const isDOMWindow = element.isDOMWindow(el);
     const isXULElement = element.isXULElement(el);
     const context = isXULElement ? "chrome" : "content";
 
-    if (!(isDOMElement || isSVGElement || isDOMWindow || isXULElement)) {
-      throw new TypeError("Expected Element, SVGElement, " +
-          pprint`WindowProxy, or XULElement, got: ${el}`);
+    if (!(isDOMElement || isDOMWindow || isXULElement)) {
+      throw new TypeError(
+          "Expected an element or WindowProxy, " +
+          pprint`got: ${el}`);
     }
 
     for (let i in this.els) {
@@ -851,25 +849,28 @@ element.inViewport = function(el, x = undefined, y = undefined) {
  *     Container element of |el|.
  */
 element.getContainer = function(el) {
-  if (el.localName != "option") {
-    return el;
+
+  function findAncestralElement(startNode, validAncestors) {
+    let node = startNode;
+    while (node.parentNode) {
+      node = node.parentNode;
+      if (validAncestors.includes(node.localName)) {
+        return node;
+      }
+    }
+
+    return startNode;
   }
 
-  function validContext(ctx) {
-    return ctx.localName == "datalist" || ctx.localName == "select";
-  }
-
-  // does <option> have a valid context,
+  // Does <option> have a valid context,
   // meaning is it a child of <datalist> or <select>?
-  let parent = el;
-  while (parent.parentNode && !validContext(parent)) {
-    parent = parent.parentNode;
+  if (el.localName === "option") {
+    return findAncestralElement(el, ["datalist", "select"]);
   }
 
-  if (!validContext(parent)) {
-    return el;
-  }
-  return parent;
+  // Child nodes of button will not be part of the element tree for
+  // elementsFromPoint until bug 1089326 is fixed.
+  return findAncestralElement(el, ["button"]);
 };
 
 /**
@@ -895,9 +896,17 @@ element.getContainer = function(el) {
  */
 element.isInView = function(el) {
   let originalPointerEvents = el.style.pointerEvents;
+
   try {
     el.style.pointerEvents = "auto";
     const tree = element.getPointerInteractablePaintTree(el);
+
+    // Bug 1413493 - <tr> is not part of the returned paint tree yet. As
+    // workaround check the visibility based on the first contained cell.
+    if (el.localName === "tr" && el.cells && el.cells.length > 0) {
+      return tree.includes(el.cells[0]);
+    }
+
     return tree.includes(el);
   } finally {
     el.style.pointerEvents = originalPointerEvents;
@@ -1059,16 +1068,14 @@ element.scrollIntoView = function(el) {
  * Ascertains whether <var>node</var> is a DOM-, SVG-, or XUL element.
  *
  * @param {*} node
- *     Element thought to be an <code>Element</code>,
- *     <code>SVGElement</code>, or <code>XULElement</code>.
+ *     Element thought to be an <code>Element</code> or
+ *     <code>XULElement</code>.
  *
  * @return {boolean}
  *     True if <var>node</var> is an element, false otherwise.
  */
 element.isElement = function(node) {
-  return element.isDOMElement(node) ||
-      element.isSVGElement(node) ||
-      element.isXULElement(node);
+  return element.isDOMElement(node) || element.isXULElement(node);
 };
 
 /**
@@ -1083,24 +1090,9 @@ element.isElement = function(node) {
 element.isDOMElement = function(node) {
   return typeof node == "object" &&
       node !== null &&
+      "nodeType" in node &&
       node.nodeType === node.ELEMENT_NODE &&
-      node.namespaceURI === XHTMLNS;
-};
-
-/**
- * Ascertains whether <var>node</var> is an SVG element.
- *
- * @param {*} node
- *     Object thought to be an <code>SVGElement</code>.
- *
- * @return {boolean}
- *     True if <var>node</var> is an SVG element, false otherwise.
- */
-element.isSVGElement = function(node) {
-  return typeof node == "object" &&
-      node !== null &&
-      node.nodeType === node.ELEMENT_NODE &&
-      node.namespaceURI === SVGNS;
+      !element.isXULElement(node);
 };
 
 /**
@@ -1116,6 +1108,7 @@ element.isSVGElement = function(node) {
 element.isXULElement = function(node) {
   return typeof node == "object" &&
       node !== null &&
+      "nodeType" in node &&
       node.nodeType === node.ELEMENT_NODE &&
       [XBLNS, XULNS].includes(node.namespaceURI);
 };
@@ -1253,7 +1246,7 @@ class WebElement {
   static from(node) {
     const uuid = WebElement.generateUUID();
 
-    if (element.isDOMElement(node) || element.isSVGElement(node)) {
+    if (element.isDOMElement(node)) {
       return new ContentWebElement(uuid);
     } else if (element.isDOMWindow(node)) {
       if (node.parent === node) {

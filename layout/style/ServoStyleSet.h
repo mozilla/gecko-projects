@@ -449,6 +449,7 @@ public:
   // Called by StyleSheet::EnsureUniqueInner to let us know it cloned
   // its inner.
   void SetNeedsRestyleAfterEnsureUniqueInner() {
+    MOZ_ASSERT(!IsForXBL(), "Should not be cloning things for XBL stylesheet");
     mNeedsRestyleAfterEnsureUniqueInner = true;
   }
 
@@ -485,6 +486,12 @@ public:
    */
   bool HasStateDependency(const dom::Element& aElement,
                           EventStates aState) const;
+
+  /**
+   * Returns true if a change in document state might require us to restyle the
+   * document.
+   */
+  bool HasDocumentStateDependency(EventStates aState) const;
 
   /**
    * Get a new style context that uses the same rules as the given style context
