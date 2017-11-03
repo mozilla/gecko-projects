@@ -1,0 +1,40 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+loader: taskgraph.loader.transform:loader
+
+transforms:
+   - taskgraph.transforms.google_play_strings:transforms
+   - taskgraph.transforms.job:transforms
+   - taskgraph.transforms.task:transforms
+
+jobs:
+    google-play-strings:
+        description: Download strings to display on Google Play from https://l10n.mozilla-community.org/stores_l10n/
+        attributes:
+            build_type: google_play_strings
+            build_platform: android-nightly
+            nightly: true
+        worker-type: aws-provisioner-v1/taskcluster-generic
+        worker:
+            docker-image: ubuntu:17.10  # TODO: Use in-tree task
+            max-run-time: 600
+        treeherder:
+            symbol: pub(gps)
+            platform: Android/opt
+            tier: 2
+            kind: other
+        run:
+          using: run-task
+          checkout: false
+          command: >
+                  mkdir -p /work &&
+                  apt-get update &&
+                  apt-get install --yes git python3-setuptools build-essential libssl-dev libffi-dev python3-dev &&
+                  git clone https://github.com/JohanLorenzo/mozapkpublisher &&
+                  cd mozapkpublisher &&
+                  git checkout bf380662e601540928b51b606060d589fdc66c3d &&
+                  python3 setup.py develop &&
+                  python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
+        run-on-projects: ['maple', 'mozilla-central', 'mozilla-beta', 'mozilla-release']
