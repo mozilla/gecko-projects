@@ -316,6 +316,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
     allow_kinds = [
         'build', 'build-signing', 'repackage', 'repackage-signing',
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+        'upload-generated-sources',
     ]
 
     def filter(task):
