@@ -239,6 +239,14 @@ release-bouncer-aliases
 ------------------------------
 Update Bouncers (download.mozilla.org) "latest" aliases.
 
+release-update-verify
+---------------------
+todo
+
+release-buildbot-update-verify
+---------------------
+todo
+
 release-uptake-monitoring
 -------------------------
 Run uptake monitoring for releases.

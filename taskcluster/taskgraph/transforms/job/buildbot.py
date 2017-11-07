@@ -37,7 +37,12 @@ buildbot_run_schema = Schema({
 
 def bb_release_worker(config, worker, run):
     # props
-    release_props = get_release_config(config, force=True)
+    release_props = {}
+    release_config = get_release_config(config, force=True)
+    for key, value in release_config.iteritems():
+        # this is shit
+        if not isinstance(value, (dict, list, tuple)):
+            release_props[key] = value
     repo_path = urlparse(config.params['head_repository']).path.lstrip('/')
     revision = config.params['head_rev']
     branch = config.params['project']

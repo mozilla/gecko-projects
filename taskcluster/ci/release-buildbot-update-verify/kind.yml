@@ -1,0 +1,44 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+loader: taskgraph.loader.transform:loader
+
+# TODO: we probably hove some of these?
+#kind-dependencies:
+
+transforms:
+    #- taskgraph.transforms.update_verify:transforms
+    - taskgraph.transforms.job:transforms
+    - taskgraph.transforms.task:transforms
+
+# TODO: how to make this support multiple platforms?
+jobs:
+   firefox-win64:
+      name: update-verify
+      description: buildbot update verify
+      worker-type: buildbot-bridge/buildbot-bridge
+      run-on-projects: [] # to make sure this never runs as part of CI
+      run:
+          using: buildbot
+          product: firefox
+          buildername: release-{branch}_firefox_win64_update_verify
+          release-promotion: true # needed?
+          properties:
+              platform: win64
+#      notifications:
+#         completed:
+#            subject: "{config[params][project]} {release_config[version]} build{release_config[build_number]} {platform} beta update verification {this_chunk}/{total_chunks}"
+#            message: "{config[params][project]} {release_config[version]} build{release_config[build_number]} {platform} beta update verification {this_chunk}/{total_chunks} completed successfully"
+#            subject: fixme
+#            message: fixme
+#            ids:
+#               by-project:
+#                  maple:
+#                     - "release-drivers-staging"
+#                  try:
+#                     #- "{task[tags][createdForUser]}"
+#                  default:
+#                     - "release-drivers"
+      extra:
+          product: firefox
