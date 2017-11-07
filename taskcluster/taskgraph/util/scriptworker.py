@@ -430,43 +430,41 @@ def get_release_config(config, force=False):
         dict: containing both `build_number` and `version`.  This can be used to
             update `task.payload`.
     """
-    release_config = {
-        "build_tools_repo": "https://hg.mozilla.org/users/stage-ffxbld/tools",
-        "update_verify_channel": "beta-localtest",
-        "update_verify_configs": {
-            "linux": "beta-firefox-linux.cfg",
-            "linux64": "beta-firefox-linux64.cfg",
-        }
-    }
-    with open(VERSION_PATH, "r") as fh:
-        version = fh.readline().rstrip()
-    release_config['version'] = version
-    release_config['next_version'] = str(os.environ.get("NEXT_VERSION", ""))
+    release_config = {}
+    if force or config.params['target_tasks_method'] in BEETMOVER_RELEASE_TARGET_TASKS:
 
-    partial_updates = os.environ.get("PARTIAL_UPDATES", "")
-    if partial_updates != "" and config.kind in ('release-bouncer-sub',
-                                                    'release-uptake-monitoring',
-                                                    ):
-        partial_updates = json.loads(partial_updates)
-        release_config['partial_versions'] = ', '.join([
-            '{}build{}'.format(version, info['buildNumber'])
-            for version, info in partial_updates.items()
-        ])
-        if release_config['partial_versions'] == "{}":
-            del release_config['partial_versions']
+        next_version = str(os.environ.get("NEXT_VERSION", ""))
+        if next_version != "":
+            release_config['next_version'] = next_version
 
-    uptake_monitoring_platforms = os.environ.get("UPTAKE_MONITORING_PLATFORMS", "[]")
-    if uptake_monitoring_platforms != "[]" and config.kind in ('release-uptake-monitoring',
-                                                                ):
-        uptake_monitoring_platforms = json.loads(uptake_monitoring_platforms)
-        release_config['platforms'] = ', '.join(uptake_monitoring_platforms)
-        if release_config['platforms'] == "[]":
-            del release_config['platforms']
+        partial_updates = os.environ.get("PARTIAL_UPDATES", "")
+        if partial_updates != "" and config.kind in ('release-bouncer-sub',
+                                                     'release-uptake-monitoring',
+                                                     ):
+            partial_updates = json.loads(partial_updates)
+            release_config['partial_versions'] = ', '.join([
+                '{}build{}'.format(version, info['buildNumber'])
+                for version, info in partial_updates.items()
+            ])
+            if release_config['partial_versions'] == "{}":
+                del release_config['partial_versions']
 
-    build_number = str(os.environ.get("BUILD_NUMBER", 1))
-    if not build_number.isdigit():
-        raise ValueError("Release graphs must specify `BUILD_NUMBER` in the environment!")
-    release_config['build_number'] = int(build_number)
+        uptake_monitoring_platforms = os.environ.get("UPTAKE_MONITORING_PLATFORMS", "[]")
+        if uptake_monitoring_platforms != "[]" and config.kind in ('release-uptake-monitoring',
+                                                                   ):
+            uptake_monitoring_platforms = json.loads(uptake_monitoring_platforms)
+            release_config['platforms'] = ', '.join(uptake_monitoring_platforms)
+            if release_config['platforms'] == "[]":
+                del release_config['platforms']
+
+        build_number = str(os.environ.get("BUILD_NUMBER", 1))
+        if not build_number.isdigit():
+            raise ValueError("Release graphs must specify `BUILD_NUMBER` in the environment!")
+        release_config['build_number'] = int(build_number)
+
+        with open(VERSION_PATH, "r") as fh:
+            version = fh.readline().rstrip()
+        release_config['version'] = version
     return release_config
 
 

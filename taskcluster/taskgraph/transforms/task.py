@@ -973,9 +973,7 @@ def build_beetmover_payload(config, task, task_def):
     if worker.get('locale'):
         task_def['payload']['locale'] = worker['locale']
     if release_config:
-        task_def['payload']['version'] = release_config['version']
-        task_def['payload']['build_number'] = release_config['build_number']
-        task_def['payload']['next_version'] = release_config['next_version']
+        task_def['payload'].update(release_config)
 
 
 @payload_builder('beetmover-cdns')
