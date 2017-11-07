@@ -21,6 +21,7 @@ from mozbuild.util import memoize
 from mozbuild import schedules
 from taskgraph.util.attributes import TRUNK_PROJECTS
 from taskgraph.util.hash import hash_path
+from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.treeherder import split_symbol
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema, Schema, optionally_keyed_by, resolve_keyed_by
@@ -132,6 +133,7 @@ task_description_schema = Schema({
         # the name of the product this build produces
         'product': Any(
             'firefox',
+            'fennec',
             'mobile',
             'static-analysis',
             'devedition',
@@ -142,7 +144,7 @@ task_description_schema = Schema({
         'job-name': basestring,
 
         # Type of gecko v2 index to use
-        'type': Any('generic', 'nightly', 'l10n', 'nightly-with-multi-l10n'),
+        'type': Any('generic', 'nightly', 'l10n', 'nightly-with-multi-l10n', 'release'),
 
         # The rank that the task will receive in the TaskCluster
         # index.  A newly completed task supercedes the currently
@@ -407,8 +409,6 @@ task_description_schema = Schema({
             Optional('tuxedo_server_url'): optionally_keyed_by('project', basestring),
             Extra: taskref_or_string,  # additional properties are allowed
         },
-        Optional('scopes'): [basestring],
-        Optional('routes'): [basestring],
     }, {
         Required('implementation'): 'native-engine',
         Required('os'): Any('macosx', 'linux'),
@@ -713,6 +713,12 @@ def superseder_url(config, task):
         size=size,
         key=key
     )
+
+
+def verify_index_job_name(index):
+    job_name = index['job-name']
+    if job_name not in JOB_NAME_WHITELIST:
+        raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
 
 
 @payload_builder('docker-worker')
@@ -1061,8 +1067,11 @@ def build_buildbot_bridge_payload(config, task, task_def):
         'sourcestamp': worker['sourcestamp'],
         'properties': worker['properties'],
     }
-    task_def['scopes'].extend(worker.get('scopes', []))
-    task_def['routes'].extend(worker.get('routes', []))
+    task_def.setdefault('scopes', [])
+    if worker['properties'].get('release_promotion'):
+        task_def['scopes'].append(
+            "project:releng:buildbot-bridge:builder-name:{}".format(worker['buildername'])
+        )
 
 
 transforms = TransformSequence()
@@ -1093,12 +1102,10 @@ def add_generic_index_routes(config, task):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    job_name = index['job-name']
-    if job_name not in JOB_NAME_WHITELIST:
-        raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
+    verify_index_job_name(index)
 
     subs = config.params.copy()
-    subs['job-name'] = job_name
+    subs['job-name'] = index['job-name']
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
@@ -1122,12 +1129,10 @@ def add_nightly_index_routes(config, task):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    job_name = index['job-name']
-    if job_name not in JOB_NAME_WHITELIST:
-        raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
+    verify_index_job_name(index)
 
     subs = config.params.copy()
-    subs['job-name'] = job_name
+    subs['job-name'] = index['job-name']
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['build_date'] = time.strftime("%Y.%m.%d",
@@ -1139,6 +1144,29 @@ def add_nightly_index_routes(config, task):
 
     # Also add routes for en-US
     task = add_l10n_index_routes(config, task, force_locale="en-US")
+
+    return task
+
+
+@index_builder('release')
+def add_release_index_routes(config, task):
+    index = task.get('index')
+    routes = []
+    release_config = get_release_config(config, force=True)
+
+    verify_index_job_name(index)
+
+    subs = config.params.copy()
+    subs['build_number'] = str(release_config['build_number'])
+    subs['revision'] = subs['head_rev']
+    subs['underscore_version'] = release_config['version'].replace('.', '_')
+    subs['product'] = index['product']
+    subs['branch'] = subs['project']
+
+    for rt in task.get('routes', []):
+        routes.append(rt.format(**subs))
+
+    task['routes'] = routes
 
     return task
 
@@ -1155,12 +1183,10 @@ def add_l10n_index_routes(config, task, force_locale=None):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    job_name = index['job-name']
-    if job_name not in JOB_NAME_WHITELIST:
-        raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
+    verify_index_job_name(index)
 
     subs = config.params.copy()
-    subs['job-name'] = job_name
+    subs['job-name'] = index['job-name']
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
