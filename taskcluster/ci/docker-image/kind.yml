@@ -32,3 +32,5 @@ jobs:
     symbol: I(fbs)
   beet-mover:
     symbol: I(bm)
+  update-verify:
+    symbol: I(uv)
