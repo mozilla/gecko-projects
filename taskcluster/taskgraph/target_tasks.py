@@ -317,7 +317,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         'build', 'build-signing', 'repackage', 'repackage-signing',
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'upload-generated-sources',
-        'partials', 'partials-signing',
     ]
 
     def filter(task):
@@ -336,10 +335,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         if task.label in beta_tasks:
             return True
 
-        if task.kind in ('partials',
-                         'partials-signing',
-                         ):
-            return True
         # TODO: partner repacks
         # TODO: source task
         # TODO: funsize, all but balrog submission
