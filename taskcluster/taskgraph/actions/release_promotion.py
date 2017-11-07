@@ -14,6 +14,7 @@ from .registry import register_callback_action
 from .util import (find_decision_task, find_existing_tasks_from_previous_kinds,
                    find_hg_revision_pushlog_id)
 from taskgraph.util.taskcluster import get_artifact
+from taskgraph.util.partials import populate_release_history
 from taskgraph.taskgraph import TaskGraph
 from taskgraph.decision import taskgraph_decision
 from taskgraph.parameters import Parameters
@@ -54,6 +55,7 @@ RELEASE_PROMOTION_CONFIG = {
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+            'partials', 'partials-signing',
         ],
         'do_not_optimize': [],
     },
@@ -65,9 +67,14 @@ VERSION_BUMP_FLAVORS = (
     'publish_devedition',
 )
 
-UPTAKE_MONITORING_PLATFORMS_FLAVORS = PARTIAL_UPDATES_FLAVORS = (
+UPTAKE_MONITORING_PLATFORMS_FLAVORS = (
     'publish_firefox',
     'publish_devedition',
+)
+
+PARTIAL_UPDATES_FLAVORS = UPTAKE_MONITORING_PLATFORMS_FLAVORS + (
+    'promote_firefox',
+    'promote_devedition',
 )
 
 
@@ -202,6 +209,8 @@ def is_release_promotion_available(parameters):
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
     os.environ['BUILD_NUMBER'] = str(input['build_number'])
     release_promotion_flavor = input['release_promotion_flavor']
+    release_history = {}
+
     if release_promotion_flavor in VERSION_BUMP_FLAVORS:
         next_version = str(input.get('next_version', ''))
         if next_version == "":
@@ -210,6 +219,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
         os.environ['NEXT_VERSION'] = next_version
+
     if release_promotion_flavor in PARTIAL_UPDATES_FLAVORS:
         partial_updates = json.dumps(input.get('partial_updates', {}))
         if partial_updates == "{}":
@@ -218,6 +228,10 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(PARTIAL_UPDATES_FLAVORS)
             )
         os.environ['PARTIAL_UPDATES'] = partial_updates
+        release_history = populate_release_history(
+            'Firefox', parameters['project'], partial_updates=input['partial_updates']
+        )
+
     if release_promotion_flavor in UPTAKE_MONITORING_PLATFORMS_FLAVORS:
         uptake_monitoring_platforms = json.dumps(input.get('uptake_monitoring_platforms', []))
         if partial_updates == "[]":
@@ -260,6 +274,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
+    parameters['release_history'] = release_history
 
     # make parameters read-only
     parameters = Parameters(**parameters)
