@@ -45,20 +45,6 @@ BALROG_PLATFORM_MAP = {
     ]
 }
 
-FTP_PLATFORM_MAP = {
-    "Darwin_x86-gcc3": "mac",
-    "Darwin_x86-gcc3-u-i386-x86_64": "mac",
-    "Darwin_x86_64-gcc3": "mac",
-    "Darwin_x86_64-gcc3-u-i386-x86_64": "mac",
-    "Linux_x86-gcc3": "linux-i686",
-    "Linux_x86_64-gcc3": "linux-x86_64",
-    "WINNT_x86-msvc": "win32",
-    "WINNT_x86-msvc-x64": "win32",
-    "WINNT_x86-msvc-x86": "win32",
-    "WINNT_x86_64-msvc": "win64",
-    "WINNT_x86_64-msvc-x64": "win64",
-}
-
 
 def get_balrog_platform_name(platform):
     """Convert build platform names into balrog platform names"""
@@ -147,25 +133,7 @@ def get_release_builds(release):
     return req.json()
 
 
-def find_localtest(fileUrls):
-    for channel in fileUrls:
-        if "-localtest" in channel:
-            return channel
-
-
-def populate_release_history(product, branch, maxbuilds=4, maxsearch=10,
-                             partial_updates=None):
-    # Assuming we are using release branches when we know the list of previous
-    # releases in advance
-    if partial_updates:
-        return _populate_release_history(
-            product, branch, partial_updates=partial_updates)
-    else:
-        return _populate_nightly_history(
-            product, branch, maxbuilds=maxbuilds, maxsearch=maxsearch)
-
-
-def _populate_nightly_history(product, branch, maxbuilds=4, maxsearch=10):
+def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
     """Find relevant releases in Balrog
     Not all releases have all platforms and locales, due
     to Taskcluster migration.
@@ -224,40 +192,5 @@ def _populate_nightly_history(product, branch, maxbuilds=4, maxsearch=10):
                 builds[platform][locale][partial_mar_tmpl.format(nextkey)] = {
                     'buildid': buildid,
                     'mar_url': url,
-                }
-    return builds
-
-
-def _populate_release_history(product, branch, partial_updates):
-    builds = dict()
-    for version, release in partial_updates.iteritems():
-        prev_release_blob = '{product}-{version}-build{build_number}'.format(
-            product=product, version=version, build_number=release['buildNumber']
-        )
-        partial_mar_key = 'target-{version}.partial.mar'.format(version=version)
-        history = get_release_builds(prev_release_blob)
-        # use one of the localtest channels to avoid relying on bouncer
-        localtest = find_localtest(history['fileUrls'])
-        url_pattern = history['fileUrls'][localtest]['completes']['*']
-
-        for platform in history['platforms']:
-            if 'alias' in history['platforms'][platform]:
-                continue
-            if platform not in builds:
-                builds[platform] = dict()
-            for locale in history['platforms'][platform]['locales']:
-                if locale not in builds[platform]:
-                    builds[platform][locale] = dict()
-                buildid = history['platforms'][platform]['locales'][locale]['buildID']
-                url = url_pattern.replace(
-                    '%OS_FTP%', FTP_PLATFORM_MAP[platform]).replace(
-                    '%LOCALE%', locale
-                )
-                builds[platform][locale][partial_mar_key] = {
-                    'buildid': buildid,
-                    'mar_url': url,
-                    'previousVersion': version,
-                    'previousBuildNumber': release['buildNumber'],
-                    'product': product,
                 }
     return builds
