@@ -318,6 +318,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'release-update-verify', 'release-buildbot-update-verify',
         'upload-generated-sources',
+        'partials', 'partials-signing',
     ]
 
     def filter(task):
@@ -337,7 +338,9 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
             return True
 
         # TODO: do we need to filter on product, too? is this target tasks method only for firefox? if so, we should rename it
-        if task.kind in ('release-update-verify', 'release-buildbot-update-verify'):
+        if task.kind in ('release-update-verify', 'release-buildbot-update-verify'
+                         'partials', 'partial-signing',
+                         ):
             return True
         # TODO: partner repacks
         # TODO: source task

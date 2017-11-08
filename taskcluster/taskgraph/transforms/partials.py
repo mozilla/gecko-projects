@@ -92,7 +92,7 @@ def make_task_description(config, jobs):
             'target.complete.mar'
         )
         for build in builds:
-            extra['funsize']['partials'].append({
+            partial_info = {
                 'locale': build_locale,
                 'from_mar': builds[build]['mar_url'],
                 'to_mar': {'task-reference': artifact_path},
@@ -100,7 +100,14 @@ def make_task_description(config, jobs):
                 'branch': config.params['project'],
                 'update_number': update_number,
                 'dest_mar': build,
-            })
+            }
+            if 'product' in builds[build]:
+                partial_info['product'] = builds[build]['product']
+            if 'previousVersion' in builds[build]:
+                partial_info['previousVersion'] = builds[build]['previousVersion']
+            if 'previousBuildNumber' in builds[build]:
+                partial_info['previousBuildNumber'] = builds[build]['previousBuildNumber']
+            extra['funsize']['partials'].append(partial_info)
             update_number += 1
 
         cot = extra.setdefault('chainOfTrust', {})
