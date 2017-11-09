@@ -39,6 +39,8 @@ def add_command(config, tasks):
             if not chunked["run"].get("properties"):
                 chunked["run"]["properties"] = {}
             chunked["run"]["properties"]["NO_BBCONFIG"] = "1"
+            chunked["run"]["properties"]["CHANNEL"] = \
+                release_config["update_verify_channel"]
             chunked["run"]["properties"]["VERIFY_CONFIG"] = \
                 release_config["update_verify_configs"][platform]
             chunked["run"]["properties"]["THIS_CHUNK"] = str(this_chunk)

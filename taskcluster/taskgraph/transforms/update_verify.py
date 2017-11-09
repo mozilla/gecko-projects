@@ -34,9 +34,8 @@ def add_command(config, tasks):
             if not chunked["worker"].get("env"):
                 chunked["worker"]["env"] = {}
             chunked["worker"]["env"]["NO_BBCONFIG"] = "1"
-            # looks this isn't used by current update verify?
-#            chunked["worker"]["env"]["CHANNEL"] = \
-#                release_config["update_verify_channel"]
+            chunked["worker"]["env"]["CHANNEL"] = \
+                release_config["update_verify_channel"]
             chunked["worker"]["env"]["VERIFY_CONFIG"] = \
                 release_config["update_verify_configs"][platform]
             chunked["worker"]["command"] = [
