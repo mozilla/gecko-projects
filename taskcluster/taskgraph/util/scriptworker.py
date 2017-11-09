@@ -436,6 +436,9 @@ def get_release_config(config, force=False):
         "update_verify_configs": {
             "linux": "beta-firefox-linux.cfg",
             "linux64": "beta-firefox-linux64.cfg",
+            "macosx64": "beta-firefox-macosx64.cfg",
+            "win32": "beta-firefox-win32.cfg",
+            "win64": "beta-firefox-win64.cfg",
         }
     }
     with open(VERSION_PATH, "r") as fh:
@@ -445,19 +448,19 @@ def get_release_config(config, force=False):
 
     partial_updates = os.environ.get("PARTIAL_UPDATES", "")
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
-                                                    'release-uptake-monitoring',
-                                                    ):
+                                                 'release-uptake-monitoring',
+                                                 ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([
-            '{}build{}'.format(version, info['buildNumber'])
-            for version, info in partial_updates.items()
+            '{}build{}'.format(v, info['buildNumber'])
+            for v, info in partial_updates.items()
         ])
         if release_config['partial_versions'] == "{}":
             del release_config['partial_versions']
 
     uptake_monitoring_platforms = os.environ.get("UPTAKE_MONITORING_PLATFORMS", "[]")
-    if uptake_monitoring_platforms != "[]" and config.kind in ('release-uptake-monitoring',
-                                                                ):
+    if uptake_monitoring_platforms != "[]" and \
+            config.kind in ('release-uptake-monitoring',):
         uptake_monitoring_platforms = json.loads(uptake_monitoring_platforms)
         release_config['platforms'] = ', '.join(uptake_monitoring_platforms)
         if release_config['platforms'] == "[]":

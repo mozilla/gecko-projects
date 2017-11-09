@@ -8,37 +8,49 @@ loader: taskgraph.loader.transform:loader
 #kind-dependencies:
 
 transforms:
-    #- taskgraph.transforms.update_verify:transforms
+    - taskgraph.transforms.buildbot_update_verify:transforms
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms
 
-# TODO: how to make this support multiple platforms?
+job-defaults:
+    name: update-verify
+    run-on-projects: [] # to make sure this never runs in CI
+    worker-type: buildbot-bridge/buildbot-bridge
+    run:
+        using: buildbot
+    extra:
+        chunks: 12
+        
 jobs:
-   firefox-win64:
-      name: update-verify
-      description: buildbot update verify
-      worker-type: buildbot-bridge/buildbot-bridge
-      run-on-projects: [] # to make sure this never runs as part of CI
-      run:
-          using: buildbot
-          product: firefox
-          buildername: release-{branch}_firefox_win64_update_verify
-          release-promotion: true # needed?
-          properties:
-              platform: win64
-#      notifications:
-#         completed:
-#            subject: "{config[params][project]} {release_config[version]} build{release_config[build_number]} {platform} beta update verification {this_chunk}/{total_chunks}"
-#            message: "{config[params][project]} {release_config[version]} build{release_config[build_number]} {platform} beta update verification {this_chunk}/{total_chunks} completed successfully"
-#            subject: fixme
-#            message: fixme
-#            ids:
-#               by-project:
-#                  maple:
-#                     - "release-drivers-staging"
-#                  try:
-#                     #- "{task[tags][createdForUser]}"
-#                  default:
-#                     - "release-drivers"
-      extra:
-          product: firefox
+    firefox-win64:
+        description: win64 update verify
+        attributes:
+            build_platform: win64
+        run:
+            product: firefox
+            properties:
+                platform: win64
+        extra:
+            product: firefox
+
+    firefox-win32:
+        description: win32 update verify
+        attributes:
+            build_platform: win32
+        run:
+            product: firefox
+            properties:
+                platform: win32
+        extra:
+            product: firefox
+
+    firefox-macosx64:
+        description: macosx64 update verify
+        attributes:
+            build_platform: macosx64
+        run:
+            product: firefox
+            properties:
+                platform: macosx64
+        extra:
+            product: firefox

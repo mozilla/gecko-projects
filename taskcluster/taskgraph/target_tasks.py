@@ -337,7 +337,8 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         if task.label in beta_tasks:
             return True
 
-        # TODO: do we need to filter on product, too? is this target tasks method only for firefox? if so, we should rename it
+        # TODO: do we need to filter on product, too?
+        # is this target tasks method only for firefox? if so, we should rename it
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
                          'partials', 'partial-signing',
                          ):

@@ -20,36 +20,23 @@ def add_command(config, tasks):
     for task in tasks:
         total_chunks = task["extra"]["chunks"]
         platform = task["attributes"]["build_platform"]
+        product = task["extra"]["product"]
         release_config = get_release_config(config)
-        release_tag = "{}_{}_RELEASE".format(
-            task["extra"]["product"].upper(),
-            release_config["version"].replace(".", "_")
-        )
 
         for this_chunk in range(1, total_chunks+1):
             chunked = deepcopy(task)
             chunked["label"] = "release-update-verify-{}-{}/{}".format(
                 chunked["name"], this_chunk, total_chunks
             )
-            if not chunked["worker"].get("env"):
-                chunked["worker"]["env"] = {}
-            chunked["worker"]["env"]["NO_BBCONFIG"] = "1"
-            # looks this isn't used by current update verify?
-#            chunked["worker"]["env"]["CHANNEL"] = \
-#                release_config["update_verify_channel"]
-            chunked["worker"]["env"]["VERIFY_CONFIG"] = \
+            # TODO: looks like the magical autocomplete might set branch wrong.
+            # not sure if buildbot actually needs it.
+            chunked["run"]["buildername"] = "release-{branch}_" + product + \
+                "_" + platform + "_update_verify"
+            if not chunked["run"].get("properties"):
+                chunked["run"]["properties"] = {}
+            chunked["run"]["properties"]["NO_BBCONFIG"] = "1"
+            chunked["run"]["properties"]["VERIFY_CONFIG"] = \
                 release_config["update_verify_configs"][platform]
-            chunked["worker"]["command"] = [
-                "/bin/bash",
-                "-c",
-                "hg clone {} tools && cd tools && hg up -r {} && cd .. && ".format(
-                    release_config["build_tools_repo"],
-                    release_tag,
-                ) +
-                "tools/scripts/release/updates/chunked-verify.sh " +
-                "UNUSED UNUSED {} {}".format(
-                    total_chunks,
-                    this_chunk,
-                )
-            ]
+            chunked["run"]["properties"]["THIS_CHUNK"] = str(this_chunk)
+            chunked["run"]["properties"]["TOTAL_CHUNKS"] = str(total_chunks)
             yield chunked
