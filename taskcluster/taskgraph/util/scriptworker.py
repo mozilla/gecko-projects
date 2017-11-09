@@ -89,6 +89,8 @@ Used for both `BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK` and `get_release_build_numb
 """
 BEETMOVER_CANDIDATES_TARGET_TASKS = set([
     'candidates_fennec',
+    'maple_desktop_promotion',
+    'mozilla-beta_desktop_promotion'
 ])
 BEETMOVER_PUBLISH_TARGET_TASKS = set([
     'publish_fennec',

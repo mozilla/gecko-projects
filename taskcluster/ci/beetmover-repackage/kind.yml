@@ -20,3 +20,6 @@ only-for-build-platforms:
   - macosx64-nightly/opt
   - win32-nightly/opt
   - win64-nightly/opt
+
+# FIXME: temporary hack until we find a better home for this
+product: firefox

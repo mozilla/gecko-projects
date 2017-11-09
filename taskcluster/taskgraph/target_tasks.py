@@ -319,6 +319,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         'release-update-verify', 'release-buildbot-update-verify',
         'upload-generated-sources',
         'partials', 'partials-signing',
+        'beetmover-repackage',
     ]
 
     def filter(task):
@@ -326,6 +327,9 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
 
         # Android has its own promotion.
         if platform and 'android' in platform:
+            return False
+
+        if platform and 'devedition' in platform:
             return False
 
         if task.kind not in allow_kinds:
@@ -338,17 +342,22 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
             return True
 
         # TODO: do we need to filter on product, too?
+
         # is this target tasks method only for firefox? if so, we should rename it
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'partials', 'partial-signing',
-                         ):
+                         'partials', 'partials-signing'):
             return True
+
+        if task.task.get('extra', {}).get('product') == 'firefox':
+            if task.kind in ('beetmover-repackage',
+                             ):
+                return True
+
         # TODO: partner repacks
         # TODO: source task
         # TODO: funsize, all but balrog submission
         # TODO: bbb update verify
         # TODO: tc update verify
-        # TODO: beetmover push-to-candidates
         # TODO: binary transparency
         # TODO: bouncer sub
         # TODO: snap

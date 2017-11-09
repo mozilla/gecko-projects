@@ -55,7 +55,7 @@ RELEASE_PROMOTION_CONFIG = {
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-            'partials', 'partials-signing',
+            'partials', 'partials-signing', 'beetmover-repackage',
         ],
         'do_not_optimize': [],
     },
