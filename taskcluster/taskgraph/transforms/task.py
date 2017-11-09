@@ -1222,9 +1222,10 @@ def build_task(config, tasks):
         level = str(config.params['level'])
         worker_type = task['worker-type'].format(level=level)
         provisioner_id, worker_type = worker_type.split('/', 1)
+        branch = config.params['project']
 
         routes = task.get('routes', [])
-        scopes = [s.format(level=level) for s in task.get('scopes', [])]
+        scopes = [s.format(level=level, branch=branch) for s in task.get('scopes', [])]
 
         # set up extra
         extra = task.get('extra', {})

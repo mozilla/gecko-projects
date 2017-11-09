@@ -20,7 +20,7 @@ job-defaults:
         using: buildbot
     extra:
         chunks: 12
-        
+
 jobs:
     firefox-win64:
         description: win64 update verify

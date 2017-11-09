@@ -21,17 +21,21 @@ def add_command(config, tasks):
         total_chunks = task["extra"]["chunks"]
         platform = task["attributes"]["build_platform"]
         product = task["extra"]["product"]
+        buildername = "release-{branch}_" + product + "_" + platform + \
+            "_update_verify"
         release_config = get_release_config(config)
 
         for this_chunk in range(1, total_chunks+1):
             chunked = deepcopy(task)
+            chunked["scopes"] = [
+                "project:releng:buildbot-bridge:builder-name:{}".format(
+                    buildername
+                )
+            ]
             chunked["label"] = "release-update-verify-{}-{}/{}".format(
                 chunked["name"], this_chunk, total_chunks
             )
-            # TODO: looks like the magical autocomplete might set branch wrong.
-            # not sure if buildbot actually needs it.
-            chunked["run"]["buildername"] = "release-{branch}_" + product + \
-                "_" + platform + "_update_verify"
+            chunked["run"]["buildername"] = buildername
             if not chunked["run"].get("properties"):
                 chunked["run"]["properties"] = {}
             chunked["run"]["properties"]["NO_BBCONFIG"] = "1"
