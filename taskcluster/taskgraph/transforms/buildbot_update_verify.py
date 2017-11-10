@@ -11,7 +11,6 @@ from copy import deepcopy
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
 
@@ -24,7 +23,6 @@ def add_command(config, tasks):
         product = task["extra"]["product"]
         buildername = "release-{branch}_" + product + "_" + platform + \
             "_update_verify"
-        release_config = get_release_config(config)
 
         for this_chunk in range(1, total_chunks+1):
             chunked = deepcopy(task)

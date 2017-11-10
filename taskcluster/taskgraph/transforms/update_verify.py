@@ -20,7 +20,6 @@ transforms = TransformSequence()
 def add_command(config, tasks):
     for task in tasks:
         total_chunks = task["extra"]["chunks"]
-        platform = task["attributes"]["build_platform"]
         release_config = get_release_config(config)
         release_tag = "{}_{}_RELEASE".format(
             task["extra"]["product"].upper(),

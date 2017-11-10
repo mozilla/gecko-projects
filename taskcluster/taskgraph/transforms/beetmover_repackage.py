@@ -147,6 +147,8 @@ beetmover_description_schema = Schema({
 
     # locale is passed only for l10n beetmoving
     Optional('locale'): basestring,
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
+    Optional('shipping-product'): task_description_schema['shipping-product'],
 })
 
 

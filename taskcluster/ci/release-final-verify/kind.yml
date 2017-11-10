@@ -16,6 +16,7 @@ job-defaults:
     name: final-verify
     description: final verify
     run-on-projects: [] # to make sure this never runs as part of CI
+    shipping-phase: ship
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         implementation: docker-worker
@@ -38,6 +39,7 @@ job-defaults:
 
 jobs:
     firefox:
+        shipping-product: firefox
         worker:
             env:
                 FINAL_VERIFY_CONFIGS:
@@ -47,5 +49,6 @@ jobs:
                         mozilla-beta: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
                         mozilla-release: "release-firefox-linux.cfg release-firefox-linux64.cfg release-firefox-macosx64.cfg release-firefox-win32.cfg release-firefox-win64.cfg"
                         mozilla-esr52: "esr-firefox-linux.cfg esr-firefox-linux64.cfg esr-firefox-macosx64.cfg esr-firefox-win32.cfg esr-firefox-win64.cfg"
+                        default: ""
         extra:
             product: firefox

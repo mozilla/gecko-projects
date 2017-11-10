@@ -342,6 +342,13 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         if task.label in beta_tasks:
             return True
 
+        # TODO add shipping_product / shipping_phase
+        if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
+                         'release-final-verify', 'partials', 'partials-signing',
+                         'beetmover-repackage',
+                         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n'):
+            return True
+
         if task.attributes.get('shipping_product') == 'firefox' and \
                 task.attributes.get('shipping_phase') == 'promote':
             return True

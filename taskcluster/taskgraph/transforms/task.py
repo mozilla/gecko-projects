@@ -21,7 +21,6 @@ from mozbuild.util import memoize
 from mozbuild import schedules
 from taskgraph.util.attributes import TRUNK_PROJECTS
 from taskgraph.util.hash import hash_path
-from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.treeherder import split_symbol
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema, Schema, optionally_keyed_by, resolve_keyed_by

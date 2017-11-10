@@ -15,9 +15,11 @@ transforms:
 job-defaults:
     name: update-verify
     run-on-projects: [] # to make sure this never runs in CI
+    shipping-phase: promote
     worker-type: buildbot-bridge/buildbot-bridge
     run:
         using: buildbot
+    worker:
         properties:
             NO_BBCONFIG: "1"
     extra:
@@ -27,6 +29,7 @@ jobs:
     # TODO: need beta channel tests when project = mozilla-release
     firefox-win64:
         description: win64 update verify
+        shipping-product: firefox
         attributes:
             build_platform: win64
         run:
@@ -55,6 +58,7 @@ jobs:
 
     firefox-win32:
         description: win32 update verify
+        shipping-product: firefox
         attributes:
             build_platform: win32
         run:
@@ -83,6 +87,7 @@ jobs:
 
     firefox-macosx64:
         description: macosx64 update verify
+        shipping-product: firefox
         attributes:
             build_platform: macosx64
         run:

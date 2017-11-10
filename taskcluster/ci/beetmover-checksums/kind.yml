@@ -14,3 +14,7 @@ kind-dependencies:
 
 only-for-attributes:
   - nightly
+
+job-template:
+  shipping-phase: promote
+  shipping-product: firefox
