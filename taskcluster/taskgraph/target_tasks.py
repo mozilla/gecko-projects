@@ -343,13 +343,9 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
             return True
 
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'release-final-verify', 'partials', 'partials-signing'):
+                         'release-final-verify', 'partials', 'partials-signing',
+                         'beetmover-repackage'):
             return True
-
-        if task.task.get('extra', {}).get('product') == 'firefox':
-            if task.kind in ('beetmover-repackage',
-                             ):
-                return True
 
         # TODO: partner repacks
         # TODO: source task
