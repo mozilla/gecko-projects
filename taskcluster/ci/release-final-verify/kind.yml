@@ -22,13 +22,30 @@ job-defaults:
         os: linux
         docker-image: mozillareleases/python-test-runner@sha256:0729c2e6e7bc0d6a4cbccb2e66a78e1d8e8cbb5e44105d56e3c9c610230ebd69
         max-run-time: 7200
+        retry-exit-status: 1
+        env:
+            BUILD_TOOLS_REPO:
+                by-project:
+                    jamun: https://hg.mozilla.org/users/stage-ffxbld/tools
+                    maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
+                    default: https://hg.mozilla.org/build/tools
     treeherder:
         platform: linux64/opt
         kind: test
-        symbol: FV
+        symbol: Rel(FV)
         tier: 1
+    extra:
 
 jobs:
     firefox:
+        worker:
+            env:
+                FINAL_VERIFY_CONFIGS:
+                    by-project:
+                        jamun: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
+                        maple: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
+                        mozilla-beta: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
+                        mozilla-release: "release-firefox-linux.cfg release-firefox-linux64.cfg release-firefox-macosx64.cfg release-firefox-win32.cfg release-firefox-win64.cfg"
+                        mozilla-esr52: "esr-firefox-linux.cfg esr-firefox-linux64.cfg esr-firefox-macosx64.cfg esr-firefox-win32.cfg esr-firefox-win64.cfg"
         extra:
             product: firefox

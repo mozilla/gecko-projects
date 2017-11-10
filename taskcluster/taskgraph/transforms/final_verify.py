@@ -8,6 +8,7 @@ Transform the beetmover task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
@@ -21,17 +22,19 @@ def add_command(config, tasks):
             task["extra"]["product"].upper(),
             release_config["version"].replace(".", "_")
         )
-        #final_verify_configs = release_config["update_verify_configs"].values()
 
         if not task["worker"].get("env"):
             task["worker"]["env"] = {}
         task["worker"]["command"] = [
             "/bin/bash",
             "-c",
-            "hg clone {} tools && cd tools && hg up -r {} && cd release && ".format(
-                "FIXME",
+            "hg clone $BUILD_TOOLS_REPO tools && cd tools &&" +
+            "hg up -r {} && cd release && ".format(
                 release_tag,
             ) +
-            "./final-verification.sh FIXME"
+            "./final-verification.sh $FINAL_VERIFY_CONFIGS"
         ]
+        for thing in ("FINAL_VERIFY_CONFIGS", "BUILD_TOOLS_REPO"):
+            thing = "worker.env.{}".format(thing)
+            resolve_keyed_by(task, thing, thing, **config.params)
         yield task
