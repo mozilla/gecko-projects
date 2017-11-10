@@ -432,21 +432,11 @@ def get_release_config(config, force=False):
         dict: containing both `build_number` and `version`.  This can be used to
             update `task.payload`.
     """
-    release_config = {
-        "build_tools_repo": "https://hg.mozilla.org/users/stage-ffxbld/tools",
-        "update_verify_channel": "beta-localtest",
-        "update_verify_configs": {
-            "linux": "beta-firefox-linux.cfg",
-            "linux64": "beta-firefox-linux64.cfg",
-            "macosx64": "beta-firefox-macosx64.cfg",
-            "win32": "beta-firefox-win32.cfg",
-            "win64": "beta-firefox-win64.cfg",
-        }
-    }
-    with open(VERSION_PATH, "r") as fh:
-        version = fh.readline().rstrip()
-    release_config['version'] = version
-    release_config['next_version'] = str(os.environ.get("NEXT_VERSION", ""))
+    release_config = {}
+
+    next_version = str(os.environ.get("NEXT_VERSION", ""))
+    if next_version != "":
+        release_config['next_version'] = next_version
 
     partial_updates = os.environ.get("PARTIAL_UPDATES", "")
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
@@ -472,6 +462,11 @@ def get_release_config(config, force=False):
     if not build_number.isdigit():
         raise ValueError("Release graphs must specify `BUILD_NUMBER` in the environment!")
     release_config['build_number'] = int(build_number)
+
+    with open(VERSION_PATH, "r") as fh:
+        version = fh.readline().rstrip()
+    release_config['version'] = version
+
     return release_config
 
 

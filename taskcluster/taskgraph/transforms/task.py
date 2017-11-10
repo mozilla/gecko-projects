@@ -307,7 +307,10 @@ task_description_schema = Schema({
         Required('max-run-time'): int,
 
         # the exit status code that indicates the task should be retried
-        Optional('retry-exit-status'): int,
+        Optional('retry-exit-status'): Any(
+            int,
+            [int],
+        ),
     }, {
         Required('implementation'): 'generic-worker',
         Required('os'): Any('windows', 'macosx'),
@@ -798,7 +801,10 @@ def build_docker_worker_payload(config, task, task_def):
         payload['maxRunTime'] = worker['max-run-time']
 
     if 'retry-exit-status' in worker:
-        payload['onExitStatus'] = {'retry': [worker['retry-exit-status']]}
+        if isinstance(worker['retry-exit-status'], int):
+            payload['onExitStatus'] = {'retry': [worker['retry-exit-status']]}
+        elif isinstance(worker['retry-exit-status'], list):
+            payload['onExitStatus'] = {'retry': worker['retry-exit-status']}
 
     if 'artifacts' in worker:
         artifacts = {}

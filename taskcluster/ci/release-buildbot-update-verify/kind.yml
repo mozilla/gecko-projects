@@ -18,10 +18,13 @@ job-defaults:
     worker-type: buildbot-bridge/buildbot-bridge
     run:
         using: buildbot
+        properties:
+            NO_BBCONFIG: "1"
     extra:
         chunks: 12
 
 jobs:
+    # TODO: need beta channel tests when project = mozilla-release
     firefox-win64:
         description: win64 update verify
         attributes:
@@ -30,6 +33,22 @@ jobs:
             product: firefox
             properties:
                 platform: win64
+                CHANNEL:
+                    by-project:
+                        jamun: "beta"
+                        maple: "beta"
+                        mozilla-beta: "beta"
+                        mozilla-release: "release"
+                        mozilla-esr52: "esr"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "beta-firefox-win64.cfg"
+                        maple: "beta-firefox-win64.cfg"
+                        mozilla-beta: "beta-firefox-win64.cfg"
+                        mozilla-release: "release-firefox-win64.cfg"
+                        mozilla-esr52: "esr-firefox-win64.cfg"
+                        default: "none"
         extra:
             product: firefox
 
@@ -41,6 +60,22 @@ jobs:
             product: firefox
             properties:
                 platform: win32
+                CHANNEL:
+                    by-project:
+                        jamun: "beta"
+                        maple: "beta"
+                        mozilla-beta: "beta"
+                        mozilla-release: "release"
+                        mozilla-esr52: "esr"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "beta-firefox-win32.cfg"
+                        maple: "beta-firefox-win32.cfg"
+                        mozilla-beta: "beta-firefox-win32.cfg"
+                        mozilla-release: "release-firefox-win32.cfg"
+                        mozilla-esr52: "esr-firefox-win32.cfg"
+                        default: "none"
         extra:
             product: firefox
 
@@ -52,5 +87,21 @@ jobs:
             product: firefox
             properties:
                 platform: macosx64
+                CHANNEL:
+                    by-project:
+                        jamun: "beta"
+                        maple: "beta"
+                        mozilla-beta: "beta"
+                        mozilla-release: "release"
+                        mozilla-esr52: "esr"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "beta-firefox-macosx64.cfg"
+                        maple: "beta-firefox-macosx64.cfg"
+                        mozilla-beta: "beta-firefox-macosx64.cfg"
+                        mozilla-release: "release-firefox-macosx64.cfg"
+                        mozilla-esr52: "esr-firefox-macosx64.cfg"
+                        default: "none"
         extra:
             product: firefox

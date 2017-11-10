@@ -10,6 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from copy import deepcopy
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
@@ -38,11 +39,9 @@ def add_command(config, tasks):
             chunked["run"]["buildername"] = buildername
             if not chunked["run"].get("properties"):
                 chunked["run"]["properties"] = {}
-            chunked["run"]["properties"]["NO_BBCONFIG"] = "1"
-            chunked["run"]["properties"]["CHANNEL"] = \
-                release_config["update_verify_channel"]
-            chunked["run"]["properties"]["VERIFY_CONFIG"] = \
-                release_config["update_verify_configs"][platform]
             chunked["run"]["properties"]["THIS_CHUNK"] = str(this_chunk)
             chunked["run"]["properties"]["TOTAL_CHUNKS"] = str(total_chunks)
+            for thing in ("CHANNEL", "VERIFY_CONFIG"):
+                thing = "run.properties.{}".format(thing)
+                resolve_keyed_by(chunked, thing, thing, **config.params)
             yield chunked

@@ -10,6 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from copy import deepcopy
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
@@ -34,16 +35,11 @@ def add_command(config, tasks):
             )
             if not chunked["worker"].get("env"):
                 chunked["worker"]["env"] = {}
-            chunked["worker"]["env"]["NO_BBCONFIG"] = "1"
-            chunked["worker"]["env"]["CHANNEL"] = \
-                release_config["update_verify_channel"]
-            chunked["worker"]["env"]["VERIFY_CONFIG"] = \
-                release_config["update_verify_configs"][platform]
             chunked["worker"]["command"] = [
                 "/bin/bash",
                 "-c",
-                "hg clone {} tools && cd tools && hg up -r {} && cd .. && ".format(
-                    release_config["build_tools_repo"],
+                "hg clone $BUILD_TOOLS_REPO tools && cd tools && " +
+                "hg up -r {} && cd .. && ".format(
                     release_tag,
                 ) +
                 "tools/scripts/release/updates/chunked-verify.sh " +
@@ -52,4 +48,7 @@ def add_command(config, tasks):
                     this_chunk,
                 )
             ]
+            for thing in ("CHANNEL", "VERIFY_CONFIG", "BUILD_TOOLS_REPO"):
+                thing = "worker.env.{}".format(thing)
+                resolve_keyed_by(chunked, thing, thing, **config.params)
             yield chunked

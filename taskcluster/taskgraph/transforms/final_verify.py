@@ -21,7 +21,7 @@ def add_command(config, tasks):
             task["extra"]["product"].upper(),
             release_config["version"].replace(".", "_")
         )
-        final_verify_configs = release_config["update_verify_configs"].values()
+        #final_verify_configs = release_config["update_verify_configs"].values()
 
         if not task["worker"].get("env"):
             task["worker"]["env"] = {}
@@ -29,9 +29,9 @@ def add_command(config, tasks):
             "/bin/bash",
             "-c",
             "hg clone {} tools && cd tools && hg up -r {} && cd release && ".format(
-                release_config["build_tools_repo"],
+                "FIXME",
                 release_tag,
             ) +
-            "./final-verification.sh " + " ".join(final_verify_configs)
+            "./final-verification.sh FIXME"
         ]
         yield task

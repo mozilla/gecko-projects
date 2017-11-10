@@ -241,7 +241,7 @@ Update Bouncers (download.mozilla.org) "latest" aliases.
 
 release-final-verify
 ---------------------
-todo
+Verifies the contents and package of release update MARs.
 
 release-update-verify
 ---------------------
