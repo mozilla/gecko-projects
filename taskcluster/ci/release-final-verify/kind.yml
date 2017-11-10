@@ -1,0 +1,34 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+loader: taskgraph.loader.transform:loader
+
+# TODO: we probably hove some of these?
+#kind-dependencies:
+
+transforms:
+    - taskgraph.transforms.final_verify:transforms
+    - taskgraph.transforms.task:transforms
+
+job-defaults:
+    label: release-final-verify
+    name: final-verify
+    description: final verify
+    run-on-projects: [] # to make sure this never runs as part of CI
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        implementation: docker-worker
+        os: linux
+        docker-image: mozillareleases/python-test-runner@sha256:0729c2e6e7bc0d6a4cbccb2e66a78e1d8e8cbb5e44105d56e3c9c610230ebd69
+        max-run-time: 7200
+    treeherder:
+        platform: linux64/opt
+        kind: test
+        symbol: FV
+        tier: 1
+
+jobs:
+    firefox:
+        extra:
+            product: firefox

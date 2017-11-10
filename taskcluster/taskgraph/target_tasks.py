@@ -320,6 +320,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
         'upload-generated-sources',
         'partials', 'partials-signing',
         'beetmover-repackage',
+        'release-final-verify',
     ]
 
     def filter(task):
@@ -342,7 +343,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters):
             return True
 
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'partials', 'partials-signing'):
+                         'release-final-verify', 'partials', 'partials-signing'):
             return True
 
         if task.task.get('extra', {}).get('product') == 'firefox':
@@ -372,7 +373,8 @@ def target_tasks_publish_firefox(full_task_graph, parameters):
     )
 
     def filter(task):
-        if task.kind in ('release-update-verify', 'release-buildbot-update-verify'):
+        if task.kind in ('release-final-verify', 'release-update-verify',
+                         'release-buildbot-update-verify'):
             return False
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
