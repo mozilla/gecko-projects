@@ -207,7 +207,6 @@ def is_release_promotion_available(parameters):
     }
 )
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
-    os.environ['BUILD_NUMBER'] = str(input['build_number'])
     release_promotion_flavor = input['release_promotion_flavor']
     release_history = {}
 
@@ -218,7 +217,6 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "`next_version` property needs to be provided for %s "
                 "targets." % ', '.join(VERSION_BUMP_FLAVORS)
             )
-        os.environ['NEXT_VERSION'] = next_version
 
     if release_promotion_flavor in PARTIAL_UPDATES_FLAVORS:
         partial_updates = json.dumps(input.get('partial_updates', {}))
@@ -274,6 +272,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
+    parameters['build_number'] = str(input['build_number'])
+    parameters['next_version'] = next_version
     parameters['release_history'] = release_history
 
     # make parameters read-only
