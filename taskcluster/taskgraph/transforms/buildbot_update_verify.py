@@ -37,11 +37,10 @@ def add_command(config, tasks):
                 chunked["name"], this_chunk, total_chunks
             )
             chunked["run"]["buildername"] = buildername
-            if not chunked["run"].get("properties"):
-                chunked["run"]["properties"] = {}
-            chunked["run"]["properties"]["THIS_CHUNK"] = str(this_chunk)
-            chunked["run"]["properties"]["TOTAL_CHUNKS"] = str(total_chunks)
+            chunked.setdefault("worker", {}).setdefault("properties", {})
+            chunked["worker"]["properties"]["THIS_CHUNK"] = str(this_chunk)
+            chunked["worker"]["properties"]["TOTAL_CHUNKS"] = str(total_chunks)
             for thing in ("CHANNEL", "VERIFY_CONFIG"):
-                thing = "run.properties.{}".format(thing)
+                thing = "worker.properties.{}".format(thing)
                 resolve_keyed_by(chunked, thing, thing, **config.params)
             yield chunked
