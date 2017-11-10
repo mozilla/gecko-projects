@@ -28,10 +28,20 @@ job-defaults:
 jobs:
     firefox-linux64:
         description: linux64 update verify
+        treeherder:
+            symbol: UV
+            platform: linux64/opt
+            kind: test
+            tier: 1
         attributes:
             build_platform: linux64
 
     firefox-linux:
         description: linux update verify
+        treeherder:
+            symbol: UV
+            platform: linux/opt
+            kind: test
+            tier: 1
         attributes:
             build_platform: linux

@@ -241,11 +241,11 @@ Update Bouncers (download.mozilla.org) "latest" aliases.
 
 release-update-verify
 ---------------------
-todo
+Verifies the contents and package of release update MARs.
 
 release-buildbot-update-verify
 ---------------------
-todo
+Verifies the contents and package of release update MARs.
 
 release-uptake-monitoring
 -------------------------

@@ -28,6 +28,7 @@ def add_command(config, tasks):
 
         for this_chunk in range(1, total_chunks+1):
             chunked = deepcopy(task)
+            chunked["treeherder"]["symbol"] += str(this_chunk)
             chunked["label"] = "release-update-verify-{}-{}/{}".format(
                 chunked["name"], this_chunk, total_chunks
             )
