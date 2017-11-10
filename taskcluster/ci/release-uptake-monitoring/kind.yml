@@ -16,6 +16,7 @@ job-defaults:
    description: Uptake monitoring job
    worker-type: buildbot-bridge/buildbot-bridge
    run-on-projects: []
+   shipping-phase: publish
    run:
       using: buildbot
       release-promotion: true
@@ -56,6 +57,7 @@ job-defaults:
 jobs:
    fennec:
       name: fennec_release_uptake_monitoring
+      shipping-product: fennec
       run:
          product: fennec
          buildername: release-{branch}-fennec_uptake_monitoring
@@ -68,6 +70,7 @@ jobs:
          job-name: android-api-16-opt
    firefox:
       name: firefox_release_uptake_monitoring
+      shipping-product: firefox
       run:
          product: firefox
          buildername: release-{branch}-firefox_uptake_monitoring

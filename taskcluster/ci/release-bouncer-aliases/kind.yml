@@ -16,6 +16,7 @@ job-defaults:
    description: Update bouncer aliases job
    worker-type: buildbot-bridge/buildbot-bridge
    run-on-projects: []
+   shipping-phase: ship
    run:
       using: buildbot
       release-promotion: true
@@ -56,6 +57,7 @@ job-defaults:
 jobs:
    fennec:
       name: fennec_release_bouncer_aliases
+      shipping-product: fennec
       run:
          product: fennec
          buildername: release-{branch}-fennec_bouncer_aliases
@@ -68,6 +70,7 @@ jobs:
          job-name: android-api-16-opt
    firefox:
       name: firefox_release_bouncer_aliases
+      shipping-product: firefox
       run:
          product: firefox
          buildername: release-{branch}-firefox_bouncer_aliases

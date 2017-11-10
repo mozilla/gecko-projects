@@ -174,3 +174,11 @@ toolchain-alias
 ===============
 For toolchain jobs, this optionally gives an alias that can be used instead of the
 real toolchain job name in the toolchains list for build jobs.
+
+shipping_product
+================
+For release promotion jobs, this is the product we are shipping.
+
+shipping_phase
+==============
+For release promotion jobs, this is the shipping phase (promote, publish, ship).

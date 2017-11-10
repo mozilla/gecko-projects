@@ -19,6 +19,7 @@ job-defaults:
    description: mark release as shipped in Ship-It
    worker-type: buildbot-bridge/buildbot-bridge
    run-on-projects: []
+   shipping-phase: ship
    run:
       using: buildbot
       release-promotion: true
@@ -51,6 +52,7 @@ job-defaults:
 jobs:
    fennec:
       name: release-fennec_mark_as_shipped
+      shipping-product: fennec
       run:
          product: fennec
          buildername: release-{branch}-fennec_mark_as_shipped
@@ -65,6 +67,7 @@ jobs:
          product: fennec
    firefox:
       name: release-firefox_mark_as_shipped
+      shipping-product: firefox
       run:
          product: firefox
          buildername: release-{branch}-firefox_mark_as_shipped

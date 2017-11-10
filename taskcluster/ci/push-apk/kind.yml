@@ -18,6 +18,8 @@ jobs:
         attributes:
             build_platform: android-nightly
             nightly: true
+        shipping-phase: ship
+        shipping-product: fennec
         worker-type: test-dummy-provisioner/fake-pushapk
         worker:
             upstream-artifacts: # see transforms

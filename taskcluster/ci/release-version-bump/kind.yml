@@ -16,6 +16,7 @@ job-defaults:
    description: Release Promotion version bump
    worker-type: buildbot-bridge/buildbot-bridge
    run-on-projects: []
+   shipping-phase: ship
    run:
       using: buildbot
       release-promotion: true
@@ -48,6 +49,7 @@ job-defaults:
 jobs:
    fennec:
       name: fennec-version-bump
+      shipping-product: fennec
       run:
          product: fennec
          buildername: release-{branch}-fennec_version_bump
@@ -60,6 +62,7 @@ jobs:
          job-name: android-api-16-opt
    firefox:
       name: firefox-version-bump
+      shipping-product: firefox
       run:
          product: firefox
          buildername: release-{branch}-firefox_version_bump

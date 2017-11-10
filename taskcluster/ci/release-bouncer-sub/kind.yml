@@ -13,6 +13,7 @@ job-defaults:
       description: release bouncer submission job
       worker-type: buildbot-bridge/buildbot-bridge
       run-on-projects: []
+      shipping-phase: promote
       run:
          using: buildbot
          release-promotion: true
@@ -45,6 +46,7 @@ job-defaults:
 jobs:
    fennec:
       name: fennec_release_bouncer_sub
+      shipping-product: fennec
       run:
          product: fennec
          buildername: release-{branch}-fennec_bncr_sub
@@ -57,6 +59,7 @@ jobs:
          job-name: android-api-16-opt
    firefox:
       name: firefox_release_bouncer_sub
+      shipping-product: firefox
       run:
          product: firefox
          buildername: release-{branch}-firefox_bncr_sub
