@@ -253,6 +253,7 @@ ScaledFontFontconfig::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* a
   options.render_mode = wr::FontRenderMode::Alpha;
   options.subpx_dir = wr::SubpixelDirection::Horizontal;
   options.synthetic_italics = false;
+  options.bg_color = wr::ToColorU(Color());
 
   wr::FontInstancePlatformOptions platformOptions;
   platformOptions.flags = 0;
@@ -398,8 +399,9 @@ ScaledFontFontconfig::CreateFromInstanceData(const InstanceData& aInstanceData,
     gfxWarning() << "Failing initializing Fontconfig pattern for scaled font";
     return nullptr;
   }
-  if (aUnscaledFont->GetFace()) {
-    FcPatternAddFTFace(pattern, FC_FT_FACE, aUnscaledFont->GetFace());
+  FT_Face face = aUnscaledFont->GetFace();
+  if (face) {
+    FcPatternAddFTFace(pattern, FC_FT_FACE, face);
   } else {
     FcPatternAddString(pattern, FC_FILE, reinterpret_cast<const FcChar8*>(aUnscaledFont->GetFile()));
     FcPatternAddInteger(pattern, FC_INDEX, aUnscaledFont->GetIndex());
@@ -419,10 +421,17 @@ ScaledFontFontconfig::CreateFromInstanceData(const InstanceData& aInstanceData,
     // was freed. To prevent this, we must bind the NativeFontResource to the font face so that
     // it stays alive at least as long as the font face.
     aNativeFontResource->AddRef();
-    if (cairo_font_face_set_user_data(font,
-                                      &sNativeFontResourceKey,
-                                      aNativeFontResource,
-                                      ReleaseNativeFontResource) != CAIRO_STATUS_SUCCESS) {
+    // Bug 1412545 - Setting Cairo font user data is not thread-safe. If Fontconfig patterns match,
+    // cairo_ft_font_face_create_for_pattern may share Cairo faces. We need to lock setting user data
+    // to prevent races if multiple threads are thus sharing the same Cairo face.
+    FT_Library library = face ? face->glyph->library : Factory::GetFTLibrary();
+    Factory::LockFTLibrary(library);
+    cairo_status_t err = cairo_font_face_set_user_data(font,
+                                                       &sNativeFontResourceKey,
+                                                       aNativeFontResource,
+                                                       ReleaseNativeFontResource);
+    Factory::UnlockFTLibrary(library);
+    if (err != CAIRO_STATUS_SUCCESS) {
       gfxWarning() << "Failed binding NativeFontResource to Cairo font face";
       aNativeFontResource->Release();
       cairo_font_face_destroy(font);
@@ -462,26 +471,33 @@ ScaledFontFontconfig::CreateFromInstanceData(const InstanceData& aInstanceData,
 }
 
 already_AddRefed<UnscaledFont>
-UnscaledFontFontconfig::CreateFromFontDescriptor(const uint8_t* aData, uint32_t aDataLength)
+UnscaledFontFontconfig::CreateFromFontDescriptor(const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex)
 {
-  if (aDataLength < sizeof(FontDescriptor)) {
+  if (aDataLength <= 1) {
     gfxWarning() << "Fontconfig font descriptor is truncated.";
     return nullptr;
   }
-  const FontDescriptor* desc = reinterpret_cast<const FontDescriptor*>(aData);
-  if (desc->mPathLength < 1 ||
-      desc->mPathLength > aDataLength - sizeof(FontDescriptor)) {
-    gfxWarning() << "Pathname in Fontconfig font descriptor has invalid size.";
-    return nullptr;
-  }
-  const char* path = reinterpret_cast<const char*>(aData + sizeof(FontDescriptor));
-  if (path[desc->mPathLength - 1] != '\0') {
+  const char* path = reinterpret_cast<const char*>(aData);
+  if (path[aDataLength - 1] != '\0') {
     gfxWarning() << "Pathname in Fontconfig font descriptor is not terminated.";
     return nullptr;
   }
 
-  RefPtr<UnscaledFont> unscaledFont = new UnscaledFontFontconfig(path, desc->mIndex);
+  RefPtr<UnscaledFont> unscaledFont = new UnscaledFontFontconfig(path, aIndex);
   return unscaledFont.forget();
+}
+
+bool
+UnscaledFontFontconfig::GetWRFontDescriptor(WRFontDescriptorOutput aCb, void* aBaton)
+{
+  if (mFile.empty()) {
+    return false;
+  }
+
+  const char* path = mFile.c_str();
+  size_t pathLength = strlen(path);
+  aCb(reinterpret_cast<const uint8_t*>(path), pathLength, 0, aBaton);
+  return true;
 }
 
 } // namespace gfx

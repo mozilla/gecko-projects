@@ -546,6 +546,21 @@ struct StickyOffsetBounds {
   }
 };
 
+// A 2d Vector tagged with a unit.
+struct TypedVector2D_f32__LayerPixel {
+  float x;
+  float y;
+
+  bool operator==(const TypedVector2D_f32__LayerPixel& aOther) const {
+    return x == aOther.x &&
+           y == aOther.y;
+  }
+};
+
+typedef TypedVector2D_f32__LayerPixel LayerVector2D;
+
+typedef LayerVector2D LayoutVector2D;
+
 struct BorderWidths {
   float left;
   float top;
@@ -625,21 +640,6 @@ struct NinePatchDescriptor {
            slice == aOther.slice;
   }
 };
-
-// A 2d Vector tagged with a unit.
-struct TypedVector2D_f32__LayerPixel {
-  float x;
-  float y;
-
-  bool operator==(const TypedVector2D_f32__LayerPixel& aOther) const {
-    return x == aOther.x &&
-           y == aOther.y;
-  }
-};
-
-typedef TypedVector2D_f32__LayerPixel LayerVector2D;
-
-typedef LayerVector2D LayoutVector2D;
 
 struct Shadow {
   LayoutVector2D offset;
@@ -818,15 +818,37 @@ struct WrImageDescriptor {
 
 typedef ExternalImageType WrExternalImageBufferType;
 
+// Represents RGBA screen colors with one byte per channel.
+//
+// If the alpha value `a` is 255 the color is opaque.
+struct ColorU {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  uint8_t a;
+
+  bool operator==(const ColorU& aOther) const {
+    return r == aOther.r &&
+           g == aOther.g &&
+           b == aOther.b &&
+           a == aOther.a;
+  }
+};
+
 struct FontInstanceOptions {
   FontRenderMode render_mode;
   SubpixelDirection subpx_dir;
   bool synthetic_italics;
+  // When bg_color.a is != 0 and render_mode is FontRenderMode::Subpixel,
+  // the text will be rendered with bg_color.r/g/b as an opaque estimated
+  // background color.
+  ColorU bg_color;
 
   bool operator==(const FontInstanceOptions& aOther) const {
     return render_mode == aOther.render_mode &&
            subpx_dir == aOther.subpx_dir &&
-           synthetic_italics == aOther.synthetic_italics;
+           synthetic_italics == aOther.synthetic_italics &&
+           bg_color == aOther.bg_color;
   }
 };
 
@@ -912,6 +934,10 @@ extern void AddFontData(WrFontKey aKey,
                         size_t aSize,
                         uint32_t aIndex,
                         const ArcVecU8 *aVec);
+
+extern void AddNativeFontHandle(WrFontKey aKey,
+                                void *aHandle,
+                                uint32_t aIndex);
 
 extern void DeleteFontData(WrFontKey aKey);
 
@@ -1052,7 +1078,8 @@ uint64_t wr_dp_define_sticky_frame(WrState *aState,
                                    const float *aBottomMargin,
                                    const float *aLeftMargin,
                                    StickyOffsetBounds aVerticalBounds,
-                                   StickyOffsetBounds aHorizontalBounds)
+                                   StickyOffsetBounds aHorizontalBounds,
+                                   LayoutVector2D aAppliedOffset)
 WR_FUNC;
 
 WR_INLINE
@@ -1397,6 +1424,13 @@ void wr_resource_updates_add_external_image(ResourceUpdates *aResources,
                                             WrExternalImageId aExternalImageId,
                                             WrExternalImageBufferType aBufferType,
                                             uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_add_font_descriptor(ResourceUpdates *aResources,
+                                             WrFontKey aKey,
+                                             WrVecU8 *aBytes,
+                                             uint32_t aIndex)
 WR_FUNC;
 
 WR_INLINE

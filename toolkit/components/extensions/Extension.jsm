@@ -221,13 +221,6 @@ var UUIDMap = {
   },
 };
 
-// This is the old interface that UUIDMap replaced, to be removed when
-// the references listed in bug 1291399 are updated.
-/* exported getExtensionUUID */
-function getExtensionUUID(id) {
-  return UUIDMap.get(id, true);
-}
-
 // For extensions that have called setUninstallURL(), send an event
 // so the browser can display the URL.
 var UninstallObserver = {
@@ -851,7 +844,10 @@ this.ExtensionData = class {
         allUrls = true;
         break;
       }
-      let match = /^[htps*]+:\/\/([^/]+)\//.exec(permission);
+      if (permission.startsWith("moz-extension:")) {
+        continue;
+      }
+      let match = /^https?:\/\/([^/]+)\//.exec(permission);
       if (!match) {
         Cu.reportError(`Unparseable host permission ${permission}`);
         continue;

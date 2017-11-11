@@ -7,6 +7,7 @@
 #define HTMLEditRules_h
 
 #include "TypeInState.h"
+#include "mozilla/EditorDOMPoint.h" // for EditorDOMPoint
 #include "mozilla/SelectionState.h"
 #include "mozilla/TextEditRules.h"
 #include "nsCOMPtr.h"
@@ -32,7 +33,6 @@ class EditActionResult;
 class HTMLEditor;
 class RulesInfo;
 class TextEditor;
-struct EditorDOMPoint;
 namespace dom {
 class Element;
 class Selection;
@@ -106,10 +106,9 @@ public:
 
   // nsIEditActionListener methods
 
-  NS_IMETHOD WillCreateNode(const nsAString& aTag, nsIDOMNode* aParent,
-                            int32_t aPosition) override;
-  NS_IMETHOD DidCreateNode(const nsAString& aTag, nsIDOMNode* aNode,
-                           nsIDOMNode* aParent, int32_t aPosition,
+  NS_IMETHOD WillCreateNode(const nsAString& aTag,
+                            nsIDOMNode* aNextSiblingOfNewNode) override;
+  NS_IMETHOD DidCreateNode(const nsAString& aTag, nsIDOMNode* aNewNode,
                            nsresult aResult) override;
   NS_IMETHOD WillInsertNode(nsIDOMNode* aNode, nsIDOMNode* aParent,
                             int32_t aPosition) override;
@@ -189,8 +188,8 @@ protected:
    */
   nsresult InsertBRIfNeededInternal(nsINode& aNode, bool aInsertMozBR);
 
-  mozilla::EditorDOMPoint GetGoodSelPointForNode(nsINode& aNode,
-                                                 nsIEditor::EDirection aAction);
+  EditorDOMPoint GetGoodSelPointForNode(nsINode& aNode,
+                                        nsIEditor::EDirection aAction);
 
   /**
    * TryToJoinBlocks() tries to join two block elements.  The right element is
@@ -355,7 +354,7 @@ protected:
   void GetChildNodesForOperation(
          nsINode& aNode,
          nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes);
-  nsresult GetNodesFromPoint(EditorDOMPoint aPoint,
+  nsresult GetNodesFromPoint(const EditorDOMPoint& aPoint,
                              EditAction aOperation,
                              nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
                              TouchContent aTouchContent);
@@ -411,11 +410,22 @@ protected:
   void CheckInterlinePosition(Selection& aSelection);
   nsresult AdjustSelection(Selection* aSelection,
                            nsIEditor::EDirection aAction);
-  nsresult FindNearSelectableNode(nsINode* aSelNode,
-                                  int32_t aSelOffset,
-                                  nsINode* aChildAtOffset,
-                                  nsIEditor::EDirection& aDirection,
-                                  nsCOMPtr<nsIContent>* outSelectableNode);
+
+  /**
+   * FindNearEditableNode() tries to find an editable node near aPoint.
+   *
+   * @param aPoint      The DOM point where to start to search from.
+   * @param aDirection  If nsIEditor::ePrevious is set, this searches an
+   *                    editable node from next nodes.  Otherwise, from
+   *                    previous nodes.
+   * @return            If found, returns non-nullptr.  Otherwise, nullptr.
+   *                    Note that if found node is in different table element,
+   *                    this returns nullptr.
+   *                    And also if aDirection is not nsIEditor::ePrevious,
+   *                    the result may be the node pointed by aPoint.
+   */
+  nsIContent* FindNearEditableNode(const EditorRawDOMPoint& aPoint,
+                                   nsIEditor::EDirection aDirection);
   /**
    * Returns true if aNode1 or aNode2 or both is the descendant of some type of
    * table element, but their nearest table element ancestors differ.  "Table

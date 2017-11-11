@@ -213,12 +213,6 @@ popupnotification {
   display: none;
 }
 
-/********** image **********/
-
-image {
-  -moz-binding: url("chrome://global/content/bindings/general.xml#image");
-}
-
 /********** checkbox **********/
 
 checkbox {
@@ -478,6 +472,10 @@ panel[type="arrow"][side][animate="cancel"] {
 }
 
 %elifndef MOZ_WIDGET_GTK
+
+panel[type="arrow"][side] {
+  will-change: transform, opacity; /* workaround for bug 1414033 */
+}
 
 panel[type="arrow"][side]:not([animate="false"]) {
   opacity: 0;

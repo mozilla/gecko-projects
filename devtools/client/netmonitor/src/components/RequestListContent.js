@@ -26,8 +26,10 @@ const RequestListContextMenu = require("../request-list-context-menu");
 
 const { div } = DOM;
 
-// tooltip show/hide delay in ms
+// Tooltip show / hide delay in ms
 const REQUESTS_TOOLTIP_TOGGLE_DELAY = 500;
+// Gecko's scrollTop is int32_t, so the maximum value is 2^31 - 1 = 2147483647
+const MAX_SCROLL_HEIGHT = 2147483647;
 
 /**
  * Renders the actual contents of the request list.
@@ -54,7 +56,6 @@ class RequestListContent extends Component {
 
   constructor(props) {
     super(props);
-    this.setScalingStyles = this.setScalingStyles.bind(this);
     this.isScrolledToBottom = this.isScrolledToBottom.bind(this);
     this.onHover = this.onHover.bind(this);
     this.onScroll = this.onScroll.bind(this);
@@ -75,9 +76,6 @@ class RequestListContent extends Component {
   }
 
   componentDidMount() {
-    // Set the CSS variables for waterfall scaling
-    this.setScalingStyles();
-
     // Install event handler for displaying a tooltip
     this.tooltip.startTogglingOnHover(this.refs.contentEl, this.onHover, {
       toggleDelay: REQUESTS_TOOLTIP_TOGGLE_DELAY,
@@ -96,13 +94,11 @@ class RequestListContent extends Component {
   }
 
   componentDidUpdate(prevProps) {
-    // Update the CSS variables for waterfall scaling after props change
-    this.setScalingStyles(prevProps);
-
+    let node = this.refs.contentEl;
     // Keep the list scrolled to bottom if a new row was added
-    if (this.shouldScrollBottom) {
-      let node = this.refs.contentEl;
-      node.scrollTop = node.scrollHeight;
+    if (this.shouldScrollBottom && node.scrollTop !== MAX_SCROLL_HEIGHT) {
+      // Using maximum scroll height rather than node.scrollHeight to avoid sync reflow.
+      node.scrollTop = MAX_SCROLL_HEIGHT;
     }
   }
 
@@ -111,26 +107,6 @@ class RequestListContent extends Component {
 
     // Uninstall the tooltip event handler
     this.tooltip.stopTogglingOnHover();
-  }
-
-  /**
-   * Set the CSS variables for waterfall scaling. If React supported setting CSS
-   * variables as part of the "style" property of a DOM element, we would use that.
-   *
-   * However, React doesn't support this, so we need to use a hack and update the
-   * DOM element directly: https://github.com/facebook/react/issues/6411
-   */
-  setScalingStyles(prevProps) {
-    const { scale } = this.props;
-    if (prevProps && prevProps.scale === scale) {
-      return;
-    }
-
-    const { style } = this.refs.contentEl;
-    style.removeProperty("--timings-scale");
-    style.removeProperty("--timings-rev-scale");
-    style.setProperty("--timings-scale", scale);
-    style.setProperty("--timings-rev-scale", 1 / scale);
   }
 
   isScrolledToBottom() {
@@ -247,6 +223,7 @@ class RequestListContent extends Component {
       onSecurityIconMouseDown,
       onThumbnailMouseDown,
       onWaterfallMouseDown,
+      scale,
       selectedRequestId,
     } = this.props;
 
@@ -258,6 +235,7 @@ class RequestListContent extends Component {
             className: "requests-list-contents",
             tabIndex: 0,
             onKeyDown: this.onKeyDown,
+            style: {"--timings-scale": scale, "--timings-rev-scale": 1 / scale}
           },
             RequestListHeader(),
             displayedRequests.map((item, index) => RequestListItem({

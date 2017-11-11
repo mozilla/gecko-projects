@@ -8,6 +8,7 @@
 #define MediaCache_h_
 
 #include "Intervals.h"
+#include "mozilla/Result.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
@@ -264,7 +265,9 @@ public:
   // the starting offset is known via NotifyDataStarted or because
   // the cache requested the offset in
   // ChannelMediaResource::CacheClientSeek, or because it defaulted to 0.
-  void NotifyDataReceived(uint32_t aLoadID, int64_t aSize, const char* aData);
+  void NotifyDataReceived(uint32_t aLoadID,
+                          uint32_t aCount,
+                          const uint8_t* aData);
   // Notifies the cache that the current bytes should be written to disk.
   // Called on the main thread.
   void FlushPartialBlock();
@@ -274,6 +277,10 @@ public:
   // Notifies the stream that the channel is reopened. The stream should
   // reset variables such as |mDidNotifyDataEnded|.
   void NotifyChannelRecreated();
+
+  // Notifies the stream that the suspend status of the client has changed.
+  // Main thread only.
+  void NotifyClientSuspended(bool aSuspended);
 
   // These methods can be called on any thread.
   // Cached blocks associated with this stream will not be evicted
@@ -308,9 +315,7 @@ public:
   // in the cache. Will not mark blocks as read. Can be called from the main
   // thread. It's the caller's responsibility to wrap the call in a pin/unpin,
   // and also to check that the range they want is cached before calling this.
-  nsresult ReadFromCache(char* aBuffer,
-                         int64_t aOffset,
-                         int64_t aCount);
+  nsresult ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCount);
 
   // IsDataCachedToEndOfStream returns true if all the data from
   // aOffset to the end of the stream (the server-reported end, if the
@@ -324,8 +329,6 @@ public:
   // because it doesn't know when the decoder was paused, buffering, etc.
   // Do not pass zero.
   void SetPlaybackRate(uint32_t aBytesPerSecond);
-  // Returns the last set value of SetTransportSeekable.
-  bool IsTransportSeekable();
 
   // Returns true when all streams for this resource are suspended or their
   // channel has ended.
@@ -334,9 +337,6 @@ public:
   // These methods must be called on a different thread from the main
   // thread. They should always be called on the same thread for a given
   // stream.
-  // This can fail when aWhence is NS_SEEK_END and no stream length
-  // is known.
-  nsresult Seek(int32_t aWhence, int64_t aOffset);
   int64_t Tell();
   // *aBytes gets the number of bytes that were actually read. This can
   // be less than aCount. If the first byte of data is not in the cache,
@@ -420,6 +420,19 @@ private:
     int32_t mCount;
   };
 
+  // Read data from the partial block and return the number of bytes read
+  // successfully. 0 if aOffset is not an offset in the partial block or there
+  // is nothing to read.
+  uint32_t ReadPartialBlock(int64_t aOffset, Span<char> aBuffer);
+
+  // Read data from the cache block specified by aOffset. Return the number of
+  // bytes read successfully or an error code if any failure.
+  Result<uint32_t, nsresult> ReadBlockFromCache(int64_t aOffset,
+                                                Span<char> aBuffer);
+
+  // Non-main thread only.
+  nsresult Seek(int64_t aOffset);
+
   // Returns the end of the bytes starting at the given offset
   // which are in cache.
   // This method assumes that the cache monitor is held and can be called on
@@ -456,7 +469,9 @@ private:
   // This is a unique ID representing the resource we're loading.
   // All streams with the same mResourceID are loading the same
   // underlying resource and should share data.
-  int64_t mResourceID;
+  // Initialized to 0 as invalid. Will be allocated a valid ID (always positive)
+  // from the cache.
+  int64_t mResourceID = 0;
   // The last reported seekability state for the underlying channel
   bool mIsTransportSeekable;
   // True if the cache has suspended our channel because the cache is
@@ -518,6 +533,9 @@ private:
 
   // True if associated with a private browsing window.
   const bool mIsPrivateBrowsing;
+
+  // True if the client is suspended. Accessed on the owner thread only.
+  bool mClientSuspended = false;
 };
 
 } // namespace mozilla

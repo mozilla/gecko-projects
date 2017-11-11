@@ -35,6 +35,7 @@
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/MediaStreamBinding.h"
 #include "mozilla/dom/MediaStreamTrackBinding.h"
@@ -416,7 +417,7 @@ public:
 
     if (!windowListener) {
       nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-      auto* globalWindow = nsGlobalWindow::GetInnerWindowWithId(mWindowID);
+      auto* globalWindow = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID);
       if (globalWindow) {
         RefPtr<GetUserMediaRequest> req =
           new GetUserMediaRequest(globalWindow->AsInner(),
@@ -471,7 +472,7 @@ public:
 
       if (revokeVideoPermission) {
         nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-        auto* globalWindow = nsGlobalWindow::GetInnerWindowWithId(mWindowID);
+        auto* globalWindow = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID);
         nsPIDOMWindowInner* window = globalWindow ? globalWindow->AsInner()
                                                   : nullptr;
         RefPtr<GetUserMediaRequest> req =
@@ -499,7 +500,7 @@ public:
 
       if (revokeAudioPermission) {
         nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-        auto* globalWindow = nsGlobalWindow::GetInnerWindowWithId(mWindowID);
+        auto* globalWindow = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID);
         nsPIDOMWindowInner* window = globalWindow ? globalWindow->AsInner()
                                                   : nullptr;
         RefPtr<GetUserMediaRequest> req =
@@ -667,7 +668,7 @@ public:
     }
     // This is safe since we're on main-thread, and the windowlist can only
     // be invalidated from the main-thread (see OnNavigation)
-    if (auto* window = nsGlobalWindow::GetInnerWindowWithId(mWindowID)) {
+    if (auto* window = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID)) {
       RefPtr<MediaStreamError> error =
         new MediaStreamError(window->AsInner(), *mError);
       onFailure->OnError(error);
@@ -1040,7 +1041,7 @@ public:
   Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
-    nsGlobalWindow* globalWindow = nsGlobalWindow::GetInnerWindowWithId(mWindowID);
+    nsGlobalWindowInner* globalWindow = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID);
     nsPIDOMWindowInner* window = globalWindow ? globalWindow->AsInner() : nullptr;
 
     // We're on main-thread, and the windowlist can only
@@ -1190,7 +1191,7 @@ public:
       nsCOMPtr<nsIDOMGetUserMediaErrorCallback> onFailure = mOnFailure.forget();
       LOG(("Returning error for getUserMedia() - no stream"));
 
-      if (auto* window = nsGlobalWindow::GetInnerWindowWithId(mWindowID)) {
+      if (auto* window = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID)) {
         RefPtr<MediaStreamError> error = new MediaStreamError(window->AsInner(),
             NS_LITERAL_STRING("InternalError"),
             sInShutdown ? NS_LITERAL_STRING("In shutdown") :
@@ -1588,7 +1589,7 @@ public:
       nsCOMPtr<nsIDOMGetUserMediaSuccessCallback> onSuccess = mOnSuccess.forget();
       nsCOMPtr<nsIDOMGetUserMediaErrorCallback> onFailure = mOnFailure.forget();
 
-      if (auto* window = nsGlobalWindow::GetInnerWindowWithId(mWindowID)) {
+      if (auto* window = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID)) {
         RefPtr<MediaStreamError> error = new MediaStreamError(window->AsInner(),
                                                               aName, aMessage);
         onFailure->OnError(error);
@@ -2094,13 +2095,12 @@ void MediaManager::OnDeviceChange() {
       for (auto& id : self->mDeviceIDs) {
         if (!deviceIDs.Contains(id)) {
           // Stop the coresponding SourceListener
-          nsGlobalWindow::WindowByIdTable* windowsById = nsGlobalWindow::GetWindowsTable();
+          nsGlobalWindowInner::InnerWindowByIdTable* windowsById =
+            nsGlobalWindowInner::GetWindowsTable();
           if (windowsById) {
             for (auto iter = windowsById->Iter(); !iter.Done(); iter.Next()) {
-              nsGlobalWindow* window = iter.Data();
-              if (window->IsInnerWindow()) {
-                self->IterateWindowListeners(window->AsInner(), StopRawIDCallback, &id);
-              }
+              nsGlobalWindowInner* window = iter.Data();
+              self->IterateWindowListeners(window->AsInner(), StopRawIDCallback, &id);
             }
           }
         }
@@ -2128,6 +2128,35 @@ nsresult MediaManager::GenerateUUID(nsAString& aResult)
   id.ToProvidedString(buffer);
   aResult.Assign(NS_ConvertUTF8toUTF16(buffer));
   return NS_OK;
+}
+
+static bool IsFullyActive(nsPIDOMWindowInner* aWindow)
+{
+  while (true) {
+    if (!aWindow) {
+      return false;
+    }
+    nsIDocument* document = aWindow->GetExtantDoc();
+    if (!document) {
+      return false;
+    }
+    if (!document->IsCurrentActiveDocument()) {
+      return false;
+    }
+    nsPIDOMWindowOuter* context = aWindow->GetOuterWindow();
+    if (!context) {
+      return false;
+    }
+    if (context->IsTopLevelWindow()) {
+      return true;
+    }
+    nsCOMPtr<Element> frameElement =
+      nsGlobalWindowOuter::Cast(context)->GetRealFrameElementOuter();
+    if (!frameElement) {
+      return false;
+    }
+    aWindow = frameElement->OwnerDoc()->GetInnerWindow();
+  }
 }
 
 enum class GetUserMediaSecurityState {
@@ -2173,6 +2202,14 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
     onFailure->OnError(error);
     return NS_OK;
   }
+
+  if (!IsFullyActive(aWindow)) {
+    RefPtr<MediaStreamError> error =
+        new MediaStreamError(aWindow, NS_LITERAL_STRING("InvalidStateError"));
+    onFailure->OnError(error);
+    return NS_OK;
+  }
+
   if (sInShutdown) {
     RefPtr<MediaStreamError> error =
         new MediaStreamError(aWindow,
@@ -2230,7 +2267,7 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
   }
 
   nsCOMPtr<nsIPrincipal> principal =
-    nsGlobalWindow::Cast(aWindow)->GetPrincipal();
+    nsGlobalWindowInner::Cast(aWindow)->GetPrincipal();
   if (NS_WARN_IF(!principal)) {
     return NS_ERROR_FAILURE;
   }
@@ -2477,7 +2514,7 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
     auto devices = MakeRefPtr<Refcountable<UniquePtr<SourceSet>>>(aDevices);
 
     // Ensure that our windowID is still good.
-    if (!nsGlobalWindow::GetInnerWindowWithId(windowID)) {
+    if (!nsGlobalWindowInner::GetInnerWindowWithId(windowID)) {
       return;
     }
 
@@ -2490,7 +2527,7 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
              ](const char*& badConstraint) mutable {
 
       // Ensure that the captured 'this' pointer and our windowID are still good.
-      auto* globalWindow = nsGlobalWindow::GetInnerWindowWithId(windowID);
+      auto* globalWindow = nsGlobalWindowInner::GetInnerWindowWithId(windowID);
       RefPtr<nsPIDOMWindowInner> window = globalWindow ? globalWindow->AsInner()
                                                        : nullptr;
       if (!MediaManager::Exists() || !window) {
@@ -2668,7 +2705,7 @@ MediaManager::EnumerateDevicesImpl(uint64_t aWindowId,
 {
   MOZ_ASSERT(NS_IsMainThread());
   nsPIDOMWindowInner* window =
-    nsGlobalWindow::GetInnerWindowWithId(aWindowId)->AsInner();
+    nsGlobalWindowInner::GetInnerWindowWithId(aWindowId)->AsInner();
 
   // This function returns a pledge, a promise-like object with the future result
   RefPtr<PledgeSourceSet> pledge = new PledgeSourceSet();
@@ -2680,7 +2717,7 @@ MediaManager::EnumerateDevicesImpl(uint64_t aWindowId,
   // 3. Anonymize the raw list with the origin-key.
 
   nsCOMPtr<nsIPrincipal> principal =
-    nsGlobalWindow::Cast(window)->GetPrincipal();
+    nsGlobalWindowInner::Cast(window)->GetPrincipal();
   MOZ_ASSERT(principal);
 
   ipc::PrincipalInfo principalInfo;
@@ -2898,7 +2935,7 @@ MediaManager::OnNavigation(uint64_t aWindowID)
 
   // This is safe since we're on main-thread, and the windowlist can only
   // be added to from the main-thread
-  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowID);
+  auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
   if (window) {
     IterateWindowListeners(window->AsInner(), StopSharingCallback, nullptr);
   } else {
@@ -2951,7 +2988,7 @@ MediaManager::RemoveWindowID(uint64_t aWindowId)
   mActiveWindows.Remove(aWindowId);
 
   // get outer windowID
-  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowId);
+  auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowId);
   if (!window) {
     LOG(("No inner window for %" PRIu64, aWindowId));
     return;
@@ -3307,7 +3344,7 @@ MediaManager::GetActiveMediaCaptureWindows(nsIArray** aArray)
     }
 
     nsPIDOMWindowInner* window =
-      nsGlobalWindow::GetInnerWindowWithId(id)->AsInner();
+      nsGlobalWindowInner::GetInnerWindowWithId(id)->AsInner();
     MOZ_ASSERT(window);
     // XXXkhuey ...
     if (!window) {
@@ -3431,7 +3468,7 @@ MediaManager::StopScreensharing(uint64_t aWindowID)
   // We need to stop window/screensharing for all streams in all innerwindows that
   // correspond to that outerwindow.
 
-  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowID);
+  auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
   if (!window) {
     return;
   }
@@ -3511,7 +3548,7 @@ MediaManager::IsActivelyCapturingOrHasAPermission(uint64_t aWindowId)
 
   // Or are persistent permissions (audio or video) granted?
 
-  auto* window = nsGlobalWindow::GetInnerWindowWithId(aWindowId);
+  auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowId);
   if (NS_WARN_IF(!window)) {
     return false;
   }
@@ -3747,7 +3784,7 @@ SourceListener::StopSharing()
   if (mAudioDevice &&
       mAudioDevice->GetMediaSource() == MediaSourceEnum::AudioCapture) {
     uint64_t windowID = mWindowListener->WindowID();
-    nsCOMPtr<nsPIDOMWindowInner> window = nsGlobalWindow::GetInnerWindowWithId(windowID)->AsInner();
+    nsCOMPtr<nsPIDOMWindowInner> window = nsGlobalWindowInner::GetInnerWindowWithId(windowID)->AsInner();
     MOZ_RELEASE_ASSERT(window);
     window->SetAudioCapture(false);
     MediaStreamGraph* graph =
@@ -4011,7 +4048,7 @@ SourceListener::ApplyConstraintsToTrack(
         if (NS_SUCCEEDED(rv)) {
           p->Resolve(false);
         } else {
-          auto* window = nsGlobalWindow::GetInnerWindowWithId(windowId);
+          auto* window = nsGlobalWindowInner::GetInnerWindowWithId(windowId);
           if (window) {
             if (badConstraint) {
               nsString constraint;
@@ -4156,7 +4193,7 @@ GetUserMediaNotificationEvent::Run()
     break;
   }
 
-  RefPtr<nsGlobalWindow> window = nsGlobalWindow::GetInnerWindowWithId(mWindowID);
+  RefPtr<nsGlobalWindowInner> window = nsGlobalWindowInner::GetInnerWindowWithId(mWindowID);
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
   return MediaManager::NotifyRecordingStatusChange(window->AsInner(), msg);

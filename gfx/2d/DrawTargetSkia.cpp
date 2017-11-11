@@ -50,6 +50,8 @@
 #include "ScaledFontDWrite.h"
 #endif
 
+using namespace std;
+
 namespace mozilla {
 namespace gfx {
 
@@ -276,6 +278,7 @@ GetSkImageForSurface(SourceSurface* aSurface, const Rect* aBounds = nullptr, con
 
 DrawTargetSkia::DrawTargetSkia()
   : mSnapshot(nullptr)
+  , mSnapshotLock{make_shared<Mutex>("DrawTargetSkia::mSnapshotLock")}
 #ifdef MOZ_WIDGET_COCOA
   , mCG(nullptr)
   , mColorSpace(nullptr)
@@ -316,7 +319,7 @@ DrawTargetSkia::Snapshot()
     } else {
       image = mSurface->makeImageSnapshot();
     }
-    if (!snapshot->InitFromImage(image, mFormat, this)) {
+    if (!snapshot->InitFromImage(image, mFormat, this, mSnapshotLock)) {
       return nullptr;
     }
     mSnapshot = snapshot;
@@ -1255,8 +1258,7 @@ bool
 DrawTargetSkia::FillGlyphsWithCG(ScaledFont *aFont,
                                  const GlyphBuffer &aBuffer,
                                  const Pattern &aPattern,
-                                 const DrawOptions &aOptions,
-                                 const GlyphRenderingOptions *aRenderingOptions)
+                                 const DrawOptions &aOptions)
 {
   MOZ_ASSERT(aFont->GetType() == FontType::MAC);
   MOZ_ASSERT(aPattern.GetType() == PatternType::COLOR);
@@ -1273,10 +1275,11 @@ DrawTargetSkia::FillGlyphsWithCG(ScaledFont *aFont,
     return false;
   }
 
-  SetFontSmoothingBackgroundColor(cgContext, mColorSpace, aRenderingOptions);
+  ScaledFontMac* macFont = static_cast<ScaledFontMac*>(aFont);
+  SetFontSmoothingBackgroundColor(cgContext, mColorSpace,
+                                  macFont->FontSmoothingBackgroundColor());
   SetFontColor(cgContext, mColorSpace, aPattern);
 
-  ScaledFontMac* macFont = static_cast<ScaledFontMac*>(aFont);
   if (ScaledFontMac::CTFontDrawGlyphsPtr != nullptr) {
     ScaledFontMac::CTFontDrawGlyphsPtr(macFont->mCTFont, glyphs.begin(),
                                        positions.begin(),
@@ -1310,12 +1313,12 @@ DrawTargetSkia::FillGlyphsWithCG(ScaledFont *aFont,
 }
 
 static bool
-HasFontSmoothingBackgroundColor(const GlyphRenderingOptions* aRenderingOptions)
+HasFontSmoothingBackgroundColor(ScaledFont* aFont)
 {
   // This should generally only be true if we have a popup context menu
-  if (aRenderingOptions && aRenderingOptions->GetType() == FontType::MAC) {
+  if (aFont && aFont->GetType() == FontType::MAC) {
     Color fontSmoothingBackgroundColor =
-      static_cast<const GlyphRenderingOptionsCG*>(aRenderingOptions)->FontSmoothingBackgroundColor();
+      static_cast<ScaledFontMac*>(aFont)->FontSmoothingBackgroundColor();
     return fontSmoothingBackgroundColor.a > 0;
   }
 
@@ -1323,9 +1326,9 @@ HasFontSmoothingBackgroundColor(const GlyphRenderingOptions* aRenderingOptions)
 }
 
 static bool
-ShouldUseCGToFillGlyphs(const GlyphRenderingOptions* aOptions, const Pattern& aPattern)
+ShouldUseCGToFillGlyphs(ScaledFont* aFont, const Pattern& aPattern)
 {
-  return HasFontSmoothingBackgroundColor(aOptions) &&
+  return HasFontSmoothingBackgroundColor(aFont) &&
           aPattern.GetType() == PatternType::COLOR;
 }
 
@@ -1352,8 +1355,7 @@ DrawTargetSkia::DrawGlyphs(ScaledFont* aFont,
                            const GlyphBuffer& aBuffer,
                            const Pattern& aPattern,
                            const StrokeOptions* aStrokeOptions,
-                           const DrawOptions& aOptions,
-                           const GlyphRenderingOptions* aRenderingOptions)
+                           const DrawOptions& aOptions)
 {
   if (!CanDrawFont(aFont)) {
     return;
@@ -1363,8 +1365,8 @@ DrawTargetSkia::DrawGlyphs(ScaledFont* aFont,
 
 #ifdef MOZ_WIDGET_COCOA
   if (!aStrokeOptions &&
-      ShouldUseCGToFillGlyphs(aRenderingOptions, aPattern)) {
-    if (FillGlyphsWithCG(aFont, aBuffer, aPattern, aOptions, aRenderingOptions)) {
+      ShouldUseCGToFillGlyphs(aFont, aPattern)) {
+    if (FillGlyphsWithCG(aFont, aBuffer, aPattern, aOptions)) {
       return;
     }
   }
@@ -1484,10 +1486,9 @@ void
 DrawTargetSkia::FillGlyphs(ScaledFont* aFont,
                            const GlyphBuffer& aBuffer,
                            const Pattern& aPattern,
-                           const DrawOptions& aOptions,
-                           const GlyphRenderingOptions* aRenderingOptions)
+                           const DrawOptions& aOptions)
 {
-  DrawGlyphs(aFont, aBuffer, aPattern, nullptr, aOptions, aRenderingOptions);
+  DrawGlyphs(aFont, aBuffer, aPattern, nullptr, aOptions);
 }
 
 void
@@ -1495,10 +1496,9 @@ DrawTargetSkia::StrokeGlyphs(ScaledFont* aFont,
                              const GlyphBuffer& aBuffer,
                              const Pattern& aPattern,
                              const StrokeOptions& aStrokeOptions,
-                             const DrawOptions& aOptions,
-                             const GlyphRenderingOptions* aRenderingOptions)
+                             const DrawOptions& aOptions)
 {
-  DrawGlyphs(aFont, aBuffer, aPattern, &aStrokeOptions, aOptions, aRenderingOptions);
+  DrawGlyphs(aFont, aBuffer, aPattern, &aStrokeOptions, aOptions);
 }
 
 void
@@ -1573,12 +1573,14 @@ DrawTarget::Draw3DTransformedSurface(SourceSurface* aSurface, const Matrix4x4& a
   if (!dstSurf) {
     return false;
   }
+
+  DataSourceSurface::ScopedMap map(dstSurf, DataSourceSurface::READ_WRITE);
   std::unique_ptr<SkCanvas> dstCanvas(
     SkCanvas::MakeRasterDirect(
                         SkImageInfo::Make(xformBounds.Width(), xformBounds.Height(),
                         GfxFormatToSkiaColorType(dstSurf->GetFormat()),
                         kPremul_SkAlphaType),
-      dstSurf->GetData(), dstSurf->Stride()));
+      map.GetData(), map.GetStride()));
   if (!dstCanvas) {
     return false;
   }
@@ -1746,13 +1748,14 @@ DrawTargetSkia::OptimizeSourceSurfaceForUnknownAlpha(SourceSurface *aSurface) co
   }
 
   RefPtr<DataSourceSurface> dataSurface = aSurface->GetDataSurface();
+  DataSourceSurface::ScopedMap map(dataSurface, DataSourceSurface::READ_WRITE);
 
   // For plugins, GDI can sometimes just write 0 to the alpha channel
   // even for RGBX formats. In this case, we have to manually write
   // the alpha channel to make Skia happy with RGBX and in case GDI
   // writes some bad data. Luckily, this only happens on plugins.
-  WriteRGBXFormat(dataSurface->GetData(), dataSurface->GetSize(),
-                  dataSurface->Stride(), dataSurface->GetFormat());
+  WriteRGBXFormat(map.GetData(), dataSurface->GetSize(),
+                  map.GetStride(), dataSurface->GetFormat());
   return dataSurface.forget();
 }
 
@@ -1775,8 +1778,11 @@ DrawTargetSkia::OptimizeSourceSurface(SourceSurface *aSurface) const
   // to trigger any required readback so that it only happens
   // once.
   RefPtr<DataSourceSurface> dataSurface = aSurface->GetDataSurface();
-  MOZ_ASSERT(VerifyRGBXFormat(dataSurface->GetData(), dataSurface->GetSize(),
-                              dataSurface->Stride(), dataSurface->GetFormat()));
+#ifdef DEBUG
+  DataSourceSurface::ScopedMap map(dataSurface, DataSourceSurface::READ);
+  MOZ_ASSERT(VerifyRGBXFormat(map.GetData(), dataSurface->GetSize(),
+                              map.GetStride(), dataSurface->GetFormat()));
+#endif
   return dataSurface.forget();
 }
 
@@ -2217,6 +2223,7 @@ DrawTargetSkia::CreateFilter(FilterType aType)
 void
 DrawTargetSkia::MarkChanged()
 {
+  MutexAutoLock lock(*mSnapshotLock);
   if (mSnapshot) {
     mSnapshot->DrawTargetWillChange();
     mSnapshot = nullptr;

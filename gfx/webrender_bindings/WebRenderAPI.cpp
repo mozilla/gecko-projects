@@ -138,9 +138,21 @@ private:
   layers::SynchronousTask* mTask;
 };
 
+/*static*/ void
+WebRenderAPI::InitExternalLogHandler()
+{
+  // Redirect the webrender's log to gecko's log system.
+  // The current log level is "error".
+  mozilla::wr::wr_init_external_log_handler(wr::LogLevelFilter::Error);
+}
 
-//static
-already_AddRefed<WebRenderAPI>
+/*static*/ void
+WebRenderAPI::ShutdownExternalLogHandler()
+{
+  mozilla::wr::wr_shutdown_external_log_handler();
+}
+
+/*static*/ already_AddRefed<WebRenderAPI>
 WebRenderAPI::Create(layers::CompositorBridgeParentBase* aBridge,
                      RefPtr<widget::CompositorWidget>&& aWidget,
                      LayoutDeviceIntSize aSize)
@@ -568,6 +580,12 @@ ResourceUpdateQueue::AddRawFont(wr::FontKey aKey, wr::Vec_u8& aBytes, uint32_t a
 }
 
 void
+ResourceUpdateQueue::AddFontDescriptor(wr::FontKey aKey, wr::Vec_u8& aBytes, uint32_t aIndex)
+{
+  wr_resource_updates_add_font_descriptor(mUpdates, aKey, &aBytes.inner, aIndex);
+}
+
+void
 ResourceUpdateQueue::DeleteFont(wr::FontKey aKey)
 {
   wr_resource_updates_delete_font(mUpdates, aKey);
@@ -805,11 +823,13 @@ DisplayListBuilder::DefineStickyFrame(const wr::LayoutRect& aContentRect,
                                       const float* aBottomMargin,
                                       const float* aLeftMargin,
                                       const StickyOffsetBounds& aVerticalBounds,
-                                      const StickyOffsetBounds& aHorizontalBounds)
+                                      const StickyOffsetBounds& aHorizontalBounds,
+                                      const wr::LayoutVector2D& aAppliedOffset)
 {
   uint64_t id = wr_dp_define_sticky_frame(mWrState, aContentRect, aTopMargin,
-      aRightMargin, aBottomMargin, aLeftMargin, aVerticalBounds, aHorizontalBounds);
-  WRDL_LOG("DefineSticky id=%" PRIu64 " c=%s t=%s r=%s b=%s l=%s v=%s h=%s\n",
+      aRightMargin, aBottomMargin, aLeftMargin, aVerticalBounds, aHorizontalBounds,
+      aAppliedOffset);
+  WRDL_LOG("DefineSticky id=%" PRIu64 " c=%s t=%s r=%s b=%s l=%s v=%s h=%s a=%s\n",
       mWrState, id,
       Stringify(aContentRect).c_str(),
       aTopMargin ? Stringify(*aTopMargin).c_str() : "none",
@@ -817,7 +837,8 @@ DisplayListBuilder::DefineStickyFrame(const wr::LayoutRect& aContentRect,
       aBottomMargin ? Stringify(*aBottomMargin).c_str() : "none",
       aLeftMargin ? Stringify(*aLeftMargin).c_str() : "none",
       Stringify(aVerticalBounds).c_str(),
-      Stringify(aHorizontalBounds).c_str());
+      Stringify(aHorizontalBounds).c_str(),
+      Stringify(aAppliedOffset).c_str());
   return wr::WrStickyId { id };
 }
 

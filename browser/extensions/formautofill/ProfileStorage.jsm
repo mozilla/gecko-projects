@@ -1116,6 +1116,10 @@ class AutofillRecords {
   _migrateRecord(record) {
     let hasChanges = false;
 
+    if (record.deleted) {
+      return hasChanges;
+    }
+
     if (!record.version || isNaN(record.version) || record.version < 1) {
       this.log.warn("Invalid record version:", record.version);
 
@@ -1149,6 +1153,27 @@ class AutofillRecords {
     }
   }
 
+  /**
+   * Merge the record if storage has multiple mergeable records.
+   * @param {Object} targetRecord
+   *        The record for merge.
+   * @param {boolean} [strict = false]
+   *        In strict merge mode, we'll treat the subset record with empty field
+   *        as unable to be merged, but mergeable if in non-strict mode.
+   * @returns {Array.<string>}
+   *          Return an array of the merged GUID string.
+   */
+  mergeToStorage(targetRecord, strict = false) {
+    let mergedGUIDs = [];
+    for (let record of this.data) {
+      if (!record.deleted && this.mergeIfPossible(record.guid, targetRecord, strict)) {
+        mergedGUIDs.push(record.guid);
+      }
+    }
+    this.log.debug("Existing records matching and merging count is", mergedGUIDs.length);
+    return mergedGUIDs;
+  }
+
   // A test-only helper.
   _nukeAllRecords() {
     this._store.data[this._collectionName] = [];
@@ -1169,10 +1194,7 @@ class AutofillRecords {
   _normalizeFields(record) {}
 
   // An interface to be inherited.
-  mergeIfPossible(guid, record) {}
-
-  // An interface to be inherited.
-  mergeToStorage(targetRecord) {}
+  mergeIfPossible(guid, record, strict) {}
 }
 
 class Addresses extends AutofillRecords {
@@ -1195,6 +1217,10 @@ class Addresses extends AutofillRecords {
     //       computed fields)
 
     let hasNewComputedFields = false;
+
+    if (address.deleted) {
+      return hasNewComputedFields;
+    }
 
     // Compute name
     if (!("name" in address)) {
@@ -1363,10 +1389,13 @@ class Addresses extends AutofillRecords {
    *         Indicates which address to merge.
    * @param  {Object} address
    *         The new address used to merge into the old one.
+   * @param  {boolean} strict
+   *         In strict merge mode, we'll treat the subset record with empty field
+   *         as unable to be merged, but mergeable if in non-strict mode.
    * @returns {boolean}
    *          Return true if address is merged into target with specific guid or false if not.
    */
-  mergeIfPossible(guid, address) {
+  mergeIfPossible(guid, address, strict) {
     this.log.debug("mergeIfPossible:", guid, address);
 
     let addressFound = this._findByGUID(guid);
@@ -1374,7 +1403,7 @@ class Addresses extends AutofillRecords {
       throw new Error("No matching address.");
     }
 
-    let addressToMerge = this._clone(address);
+    let addressToMerge = strict ? this._clone(address) : this._cloneAndCleanUp(address);
     this._normalizeRecord(addressToMerge);
     let hasMatchingField = false;
 
@@ -1409,34 +1438,25 @@ class Addresses extends AutofillRecords {
       return false;
     }
 
-    // Early return if the data is the same.
-    let exactlyMatch = this.VALID_FIELDS.every((field) =>
-      addressFound[field] === addressToMerge[field]
-    );
-    if (exactlyMatch) {
+    // Early return if the data is the same or subset.
+    let noNeedToUpdate = this.VALID_FIELDS.every((field) => {
+      // When addressFound doesn't contain a field, it's unnecessary to update
+      // if the same field in addressToMerge is omitted or an empty string.
+      if (addressFound[field] === undefined) {
+        return !addressToMerge[field];
+      }
+
+      // When addressFound contains a field, it's unnecessary to update if
+      // the same field in addressToMerge is omitted or a duplicate.
+      return (addressToMerge[field] === undefined) ||
+             (addressFound[field] === addressToMerge[field]);
+    });
+    if (noNeedToUpdate) {
       return true;
     }
 
     this.update(guid, addressToMerge, true);
     return true;
-  }
-
-  /**
-   * Merge the address if storage has multiple mergeable records.
-   * @param {Object} targetAddress
-   *        The address for merge.
-   * @returns {Array.<string>}
-   *          Return an array of the merged GUID string.
-   */
-  mergeToStorage(targetAddress) {
-    let mergedGUIDs = [];
-    for (let address of this.data) {
-      if (!address.deleted && this.mergeIfPossible(address.guid, targetAddress)) {
-        mergedGUIDs.push(address.guid);
-      }
-    }
-    this.log.debug("Existing records matching and merging count is", mergedGUIDs.length);
-    return mergedGUIDs;
   }
 }
 
@@ -1458,6 +1478,10 @@ class CreditCards extends AutofillRecords {
     //       computed fields)
 
     let hasNewComputedFields = false;
+
+    if (creditCard.deleted) {
+      return hasNewComputedFields;
+    }
 
     // Compute split names
     if (!("cc-given-name" in creditCard)) {
@@ -1500,7 +1524,11 @@ class CreditCards extends AutofillRecords {
   }
 
   _normalizeFields(creditCard) {
-    // Normalize name
+    this._normalizeCCName(creditCard);
+    this._normalizeCCExpirationDate(creditCard);
+  }
+
+  _normalizeCCName(creditCard) {
     if (creditCard["cc-given-name"] || creditCard["cc-additional-name"] || creditCard["cc-family-name"]) {
       if (!creditCard["cc-name"]) {
         creditCard["cc-name"] = FormAutofillNameUtils.joinNameParts({
@@ -1514,8 +1542,9 @@ class CreditCards extends AutofillRecords {
       delete creditCard["cc-additional-name"];
       delete creditCard["cc-family-name"];
     }
+  }
 
-    // Validate expiry date
+  _normalizeCCExpirationDate(creditCard) {
     if (creditCard["cc-exp-month"]) {
       let expMonth = parseInt(creditCard["cc-exp-month"], 10);
       if (isNaN(expMonth) || expMonth < 1 || expMonth > 12) {
@@ -1524,6 +1553,7 @@ class CreditCards extends AutofillRecords {
         creditCard["cc-exp-month"] = expMonth;
       }
     }
+
     if (creditCard["cc-exp-year"]) {
       let expYear = parseInt(creditCard["cc-exp-year"], 10);
       if (isNaN(expYear) || expYear < 0) {
@@ -1535,6 +1565,147 @@ class CreditCards extends AutofillRecords {
         creditCard["cc-exp-year"] = expYear;
       }
     }
+
+    if (creditCard["cc-exp"] && (!creditCard["cc-exp-month"] || !creditCard["cc-exp-year"])) {
+      let rules = [
+        {
+          regex: "(\\d{4})[-/](\\d{1,2})",
+          yearIndex: 1,
+          monthIndex: 2,
+        },
+        {
+          regex: "(\\d{1,2})[-/](\\d{4})",
+          yearIndex: 2,
+          monthIndex: 1,
+        },
+        {
+          regex: "(\\d{1,2})[-/](\\d{1,2})",
+        },
+        {
+          regex: "(\\d{2})(\\d{2})",
+        },
+      ];
+
+      for (let rule of rules) {
+        let result = new RegExp(`(?:^|\\D)${rule.regex}(?!\\d)`).exec(creditCard["cc-exp"]);
+        if (!result) {
+          continue;
+        }
+
+        let expYear, expMonth;
+
+        if (!rule.yearIndex || !rule.monthIndex) {
+          expMonth = parseInt(result[1], 10);
+          if (expMonth > 12) {
+            expYear = parseInt(result[1], 10);
+            expMonth = parseInt(result[2], 10);
+          } else {
+            expYear = parseInt(result[2], 10);
+          }
+        } else {
+          expYear = parseInt(result[rule.yearIndex], 10);
+          expMonth = parseInt(result[rule.monthIndex], 10);
+        }
+
+        if (expMonth < 1 || expMonth > 12) {
+          continue;
+        }
+
+        if (expYear < 100) {
+          expYear += 2000;
+        } else if (expYear < 2000) {
+          continue;
+        }
+
+        creditCard["cc-exp-month"] = expMonth;
+        creditCard["cc-exp-year"] = expYear;
+        break;
+      }
+    }
+
+    delete creditCard["cc-exp"];
+  }
+
+  /**
+   * Normailze the given record and retrun the first matched guid if storage has the same record.
+   * @param {Object} targetCreditCard
+   *        The credit card for duplication checking.
+   * @returns {string|null}
+   *          Return the first guid if storage has the same credit card and null otherwise.
+   */
+  getDuplicateGuid(targetCreditCard) {
+    let clonedTargetCreditCard = this._clone(targetCreditCard);
+    this._normalizeRecord(clonedTargetCreditCard);
+    for (let creditCard of this.data) {
+      let isDuplicate = this.VALID_FIELDS.every(field => {
+        if (!clonedTargetCreditCard[field]) {
+          return !creditCard[field];
+        }
+        if (field == "cc-number") {
+          return this._getMaskedCCNumber(clonedTargetCreditCard[field]) == creditCard[field];
+        }
+        return clonedTargetCreditCard[field] == creditCard[field];
+      });
+      if (isDuplicate) {
+        return creditCard.guid;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Merge new credit card into the specified record if cc-number is identical.
+   *
+   * @param  {string} guid
+   *         Indicates which credit card to merge.
+   * @param  {Object} creditCard
+   *         The new credit card used to merge into the old one.
+   * @returns {boolean}
+   *          Return true if credit card is merged into target with specific guid or false if not.
+   */
+  mergeIfPossible(guid, creditCard) {
+    this.log.debug("mergeIfPossible:", guid, creditCard);
+
+    // Query raw data for comparing the decrypted credit card number
+    let creditCardFound = this.get(guid, {rawData: true});
+    if (!creditCardFound) {
+      throw new Error("No matching credit card.");
+    }
+
+    let creditCardToMerge = this._cloneAndCleanUp(creditCard);
+    this._normalizeRecord(creditCardToMerge);
+
+    for (let field of this.VALID_FIELDS) {
+      let existingField = creditCardFound[field];
+
+      // Make sure credit card field is existed and have value
+      if (field == "cc-number" && (!existingField || !creditCardToMerge[field])) {
+        return false;
+      }
+
+      if (!creditCardToMerge[field]) {
+        creditCardToMerge[field] = existingField;
+      }
+
+      let incomingField = creditCardToMerge[field];
+      if (incomingField && existingField) {
+        if (incomingField != existingField) {
+          this.log.debug("Conflicts: field", field, "has different value.");
+          return false;
+        }
+      }
+    }
+
+    // Early return if the data is the same.
+    let exactlyMatch = this.VALID_FIELDS.every((field) =>
+      creditCardFound[field] === creditCardToMerge[field]
+    );
+    if (exactlyMatch) {
+      return true;
+    }
+
+    this.update(guid, creditCardToMerge, true);
+    return true;
   }
 }
 

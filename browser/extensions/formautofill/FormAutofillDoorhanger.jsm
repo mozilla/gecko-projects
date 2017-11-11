@@ -46,7 +46,7 @@ const CONTENT = {
     },
     mainAction: {
       label: GetStringFromName(changeAutofillOptsKey),
-      accessKey: "C",
+      accessKey: GetStringFromName("changeAutofillOptionsAccessKey"),
       callbackState: "open-pref",
       disableHighlight: true,
     },
@@ -71,7 +71,7 @@ const CONTENT = {
       hideClose: true,
     },
   },
-  update: {
+  updateAddress: {
     notificationId: "autofill-address",
     message: GetStringFromName("updateAddressMessage"),
     linkMessage: GetStringFromName(autofillOptsKey),
@@ -82,12 +82,12 @@ const CONTENT = {
     },
     mainAction: {
       label: GetStringFromName("updateAddressLabel"),
-      accessKey: "U",
+      accessKey: GetStringFromName("updateAddressAccessKey"),
       callbackState: "update",
     },
     secondaryActions: [{
       label: GetStringFromName("createAddressLabel"),
-      accessKey: "C",
+      accessKey: GetStringFromName("createAddressAccessKey"),
       callbackState: "create",
     }],
     options: {
@@ -96,7 +96,7 @@ const CONTENT = {
       hideClose: true,
     },
   },
-  creditCard: {
+  addCreditCard: {
     notificationId: "autofill-credit-card",
     message: formatStringFromName("saveCreditCardMessage", [brandShortName], 1),
     linkMessage: GetStringFromName(autofillSecurityOptionsKey),
@@ -107,16 +107,16 @@ const CONTENT = {
     },
     mainAction: {
       label: GetStringFromName("saveCreditCardLabel"),
-      accessKey: "S",
+      accessKey: GetStringFromName("saveCreditCardAccessKey"),
       callbackState: "save",
     },
     secondaryActions: [{
       label: GetStringFromName("cancelCreditCardLabel"),
-      accessKey: "D",
+      accessKey: GetStringFromName("cancelCreditCardAccessKey"),
       callbackState: "cancel",
     }, {
       label: GetStringFromName("neverSaveCreditCardLabel"),
-      accessKey: "N",
+      accessKey: GetStringFromName("neverSaveCreditCardAccessKey"),
       callbackState: "disable",
     }],
     options: {
@@ -147,6 +147,31 @@ const CONTENT = {
           log.debug("Set creditCard sync to", checked);
         },
       },
+    },
+  },
+  updateCreditCard: {
+    notificationId: "autofill-credit-card",
+    message: GetStringFromName("updateCreditCardMessage"),
+    linkMessage: GetStringFromName(autofillOptsKey),
+    anchor: {
+      id: "autofill-credit-card-notification-icon",
+      URL: "chrome://formautofill/content/formfill-anchor.svg",
+      tooltiptext: GetStringFromName("openAutofillMessagePanel"),
+    },
+    mainAction: {
+      label: GetStringFromName("updateCreditCardLabel"),
+      accessKey: GetStringFromName("updateCreditCardAccessKey"),
+      callbackState: "update",
+    },
+    secondaryActions: [{
+      label: GetStringFromName("createCreditCardLabel"),
+      accessKey: GetStringFromName("createCreditCardAccessKey"),
+      callbackState: "create",
+    }],
+    options: {
+      persistWhileVisible: true,
+      popupIconURL: "chrome://formautofill/content/icon-credit-card.svg",
+      hideClose: true,
     },
   },
 };

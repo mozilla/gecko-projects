@@ -12,6 +12,8 @@ Cu.import("resource://testing-common/AppInfo.jsm");
 Cu.import("resource://testing-common/httpd.js");
 XPCOMUtils.defineLazyModuleGetter(this, "TestUtils",
                                   "resource://testing-common/TestUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 
 const BROWSER_SEARCH_PREF = "browser.search.";
 const NS_APP_SEARCH_DIR = "SrchPlugns";
@@ -24,6 +26,7 @@ const MODE_TRUNCATE = FileUtils.MODE_TRUNCATE;
 const CACHE_FILENAME = "search.json.mozlz4";
 
 // nsSearchService.js uses Services.appinfo.name to build a salt for a hash.
+// eslint-disable-next-line mozilla/use-services
 var XULRuntime = Components.classesByID["{95d89e3e-a169-41a3-8e56-719978e15b12}"]
                            .getService(Ci.nsIXULRuntime);
 
@@ -254,14 +257,14 @@ function isUSTimezone() {
 
 const kDefaultenginenamePref = "browser.search.defaultenginename";
 const kTestEngineName = "Test search engine";
-const kLocalePref = "general.useragent.locale";
+const REQ_LOCALES_CHANGED_TOPIC = "intl:requested-locales-changed";
 
 function getDefaultEngineName(isUS) {
   const nsIPLS = Ci.nsIPrefLocalizedString;
   // Copy the logic from nsSearchService
   let pref = kDefaultenginenamePref;
   if (isUS === undefined)
-    isUS = Services.prefs.getCharPref(kLocalePref) == "en-US" && isUSTimezone();
+    isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
   if (isUS) {
     pref += ".US";
   }
@@ -277,9 +280,8 @@ function promiseAfterCache() {
 }
 
 function parseJsonFromStream(aInputStream) {
-  const json = Cc["@mozilla.org/dom/json;1"].createInstance(Components.interfaces.nsIJSON);
-  const data = json.decodeFromStream(aInputStream, aInputStream.available());
-  return data;
+  let bytes = NetUtil.readInputStream(aInputStream, aInputStream.available());
+  return JSON.parse((new TextDecoder()).decode(bytes));
 }
 
 /**
@@ -509,7 +511,7 @@ function asyncReInit() {
   let promise = waitForSearchNotification("reinit-complete");
 
   Services.search.QueryInterface(Ci.nsIObserver)
-          .observe(null, "nsPref:changed", kLocalePref);
+          .observe(null, REQ_LOCALES_CHANGED_TOPIC, null);
 
   return promise;
 }

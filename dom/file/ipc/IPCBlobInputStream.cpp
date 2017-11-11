@@ -8,13 +8,13 @@
 #include "IPCBlobInputStreamChild.h"
 #include "IPCBlobInputStreamStorage.h"
 #include "mozilla/ipc/InputStreamParams.h"
+#include "mozilla/SlicedInputStream.h"
 #include "IPCBlobInputStreamThread.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIPipe.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
-#include "SlicedInputStream.h"
 
 namespace mozilla {
 namespace dom {
@@ -159,7 +159,7 @@ IPCBlobInputStream::~IPCBlobInputStream()
 NS_IMETHODIMP
 IPCBlobInputStream::Available(uint64_t* aLength)
 {
-  // We don't have a remoteStream yet. Let's return the full known size.
+  // We don't have a remoteStream yet: let's return 0.
   if (mState == eInit || mState == ePending) {
     *aLength = 0;
     return NS_OK;

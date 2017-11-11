@@ -14,6 +14,11 @@ var TabsInTitlebar = {
     this._readPref();
     Services.prefs.addObserver(this._prefName, this);
 
+    // Always disable on unsupported GTK versions.
+    if (AppConstants.MOZ_WIDGET_TOOLKIT == "gtk3") {
+      this.allowedBy("gtk", window.matchMedia("(-moz-gtk-csd-available)"));
+    }
+
     // We need to update the appearance of the titlebar when the menu changes
     // from the active to the inactive state. We can't, however, rely on
     // DOMMenuBarInactive, because the menu fires this event and then removes
@@ -163,7 +168,7 @@ var TabsInTitlebar = {
       let fullTabsHeight = rect($("TabsToolbar")).height;
 
       // Buttons first:
-      let captionButtonsBoxWidth = rect($("titlebar-buttonbox-container")).width;
+      let captionButtonsBoxWidth = rect($("titlebar-buttonbox")).width;
 
       let secondaryButtonsWidth, menuHeight, fullMenuHeight, menuStyles;
       if (AppConstants.platform == "macosx") {

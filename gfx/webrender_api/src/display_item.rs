@@ -39,6 +39,22 @@ impl ClipAndScrollInfo {
     }
 }
 
+bitflags! {
+    /// Each bit of the edge AA mask is:
+    /// 0, when the edge of the primitive needs to be considered for AA
+    /// 1, when the edge of the segment needs to be considered for AA
+    ///
+    /// *Note*: the bit values have to match the shader logic in
+    /// `write_transform_vertex()` function.
+    #[derive(Deserialize, Serialize)]
+    pub struct EdgeAaSegmentMask: u8 {
+        const LEFT = 0x1;
+        const TOP = 0x2;
+        const RIGHT = 0x4;
+        const BOTTOM = 0x8;
+    }
+}
+
 /// A tag that can be used to identify items during hit testing. If the tag
 /// is missing then the item doesn't take part in hit testing at all. This
 /// is composed of two numbers. In Servo, the first is an identifier while the
@@ -57,6 +73,7 @@ pub struct DisplayItem {
 pub struct PrimitiveInfo<T> {
     pub rect: TypedRect<f32, T>,
     pub local_clip: LocalClip,
+    pub edge_aa_segment_mask: EdgeAaSegmentMask,
     pub is_backface_visible: bool,
     pub tag: Option<ItemTag>,
 }
@@ -66,9 +83,10 @@ impl LayerPrimitiveInfo {
         Self::with_clip_rect(rect, rect)
     }
 
-    pub fn with_clip_rect(rect: TypedRect<f32, LayerPixel>,
-                          clip_rect: TypedRect<f32, LayerPixel>)
-                          -> Self {
+    pub fn with_clip_rect(
+        rect: TypedRect<f32, LayerPixel>,
+        clip_rect: TypedRect<f32, LayerPixel>,
+    ) -> Self {
         Self::with_clip(rect, LocalClip::from(clip_rect))
     }
 
@@ -76,6 +94,7 @@ impl LayerPrimitiveInfo {
         PrimitiveInfo {
             rect: rect,
             local_clip: clip,
+            edge_aa_segment_mask: EdgeAaSegmentMask::empty(),
             is_backface_visible: true,
             tag: None,
         }
@@ -155,6 +174,13 @@ pub struct StickyFrameDisplayItem {
     /// position is scrolled out of view. Constraints specify a maximum and minimum offset from the
     /// original position relative to non-sticky content within the same scrolling frame.
     pub horizontal_offset_bounds: StickyOffsetBounds,
+
+    /// The amount of offset that has already been applied to the sticky frame. A positive y
+    /// component this field means that a top-sticky item was in a scrollframe that has been
+    /// scrolled down, such that the sticky item's position needed to be offset downwards by
+    /// `previously_applied_offset.y`. A negative y component corresponds to the upward offset
+    /// applied due to bottom-stickiness. The x-axis works analogously.
+    pub previously_applied_offset: LayoutVector2D,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -676,7 +702,7 @@ impl ComplexClipRegion {
         rect: LayoutRect,
         radii: BorderRadius,
         mode: ClipMode,
-    ) -> ComplexClipRegion {
+    ) -> Self {
         ComplexClipRegion { rect, radii, mode }
     }
 }
@@ -689,15 +715,19 @@ pub enum ClipId {
 }
 
 impl ClipId {
+    pub fn root_scroll_node(pipeline_id: PipelineId) -> ClipId {
+        ClipId::Clip(0, pipeline_id)
+    }
+
     pub fn root_reference_frame(pipeline_id: PipelineId) -> ClipId {
         ClipId::DynamicallyAddedNode(0, pipeline_id)
     }
 
     pub fn new(id: u64, pipeline_id: PipelineId) -> ClipId {
-        // We do this because it is very easy to accidentally create something that
-        // seems like the root node, but isn't one.
+        // We do this because it is very easy to create accidentally create something that
+        // seems like a root scroll node, but isn't one.
         if id == 0 {
-            return ClipId::root_reference_frame(pipeline_id);
+            return ClipId::root_scroll_node(pipeline_id);
         }
 
         ClipId::ClipExternalId(id, pipeline_id)
@@ -718,9 +748,9 @@ impl ClipId {
         }
     }
 
-    pub fn is_root(&self) -> bool {
+    pub fn is_root_scroll_node(&self) -> bool {
         match *self {
-            ClipId::DynamicallyAddedNode(0, _) => true,
+            ClipId::Clip(0, _) => true,
             _ => false,
         }
     }

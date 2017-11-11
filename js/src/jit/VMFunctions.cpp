@@ -469,7 +469,7 @@ StringFromCharCode(JSContext* cx, int32_t code)
     if (StaticStrings::hasUnit(c))
         return cx->staticStrings().getUnit(c);
 
-    return NewStringCopyN<CanGC>(cx, &c, 1);
+    return NewStringCopyNDontDeflate<CanGC>(cx, &c, 1);
 }
 
 JSString*
@@ -691,9 +691,7 @@ PostWriteElementBarrier(JSRuntime* rt, JSObject* obj, int32_t index)
     if (InBounds == IndexInBounds::Yes) {
         MOZ_ASSERT(uint32_t(index) < obj->as<NativeObject>().getDenseInitializedLength());
     } else {
-        if (MOZ_UNLIKELY(!obj->is<NativeObject>()) ||
-            uint32_t(index) >= obj->as<NativeObject>().getDenseInitializedLength())
-        {
+        if (MOZ_UNLIKELY(!obj->is<NativeObject>() || index < 0)) {
             rt->gc.storeBuffer().putWholeCell(obj);
             return;
         }

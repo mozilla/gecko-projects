@@ -24,9 +24,8 @@ namespace mozilla {
 class ChannelSuspendAgent
 {
 public:
-  explicit ChannelSuspendAgent(nsIChannel* aChannel)
-    : mChannel(aChannel)
-    , mIsChannelSuspended(false)
+  explicit ChannelSuspendAgent(MediaCacheStream& aCacheStream)
+    : mCacheStream(aCacheStream)
   {
   }
 
@@ -40,23 +39,19 @@ public:
   // Return true only when the suspend count is equal to zero.
   bool Resume();
 
-  // Call after opening channel, set channel and check whether the channel
-  // needs to be suspended.
-  void NotifyChannelOpened(nsIChannel* aChannel);
-
-  // Call before closing channel, reset the channel internal status if needed.
-  void NotifyChannelClosing();
-
-  // Check whether we need to suspend the channel.
-  void UpdateSuspendedStatusIfNeeded();
+  // Tell the agent to manage the suspend status of the channel.
+  void Delegate(nsIChannel* aChannel);
+  // Stop the management of the suspend status of the channel.
+  void Revoke();
 
 private:
   // Only suspends channel but not changes the suspend count.
   void SuspendInternal();
 
-  nsIChannel* mChannel;
+  nsIChannel* mChannel = nullptr;
+  MediaCacheStream& mCacheStream;
   uint32_t mSuspendCount = 0;
-  bool mIsChannelSuspended;
+  bool mIsChannelSuspended = false;
 };
 
 /**
@@ -180,6 +175,7 @@ public:
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
     void Revoke();
+    void SetReopenOnError() { mReopenOnError = true; }
 
   private:
     Mutex mMutex;
@@ -187,6 +183,10 @@ public:
     // So it can be read without lock on the main thread or on other threads
     // with the lock.
     RefPtr<ChannelMediaResource> mResource;
+    // When this flag is set, if we get a network error we should silently
+    // reopen the stream. Main thread only.
+    bool mReopenOnError = false;
+
     const int64_t mOffset;
     const uint32_t mLoadID;
   };
@@ -200,7 +200,9 @@ protected:
   bool IsSuspendedByCache();
   // These are called on the main thread by Listener.
   nsresult OnStartRequest(nsIRequest* aRequest, int64_t aRequestOffset);
-  nsresult OnStopRequest(nsIRequest* aRequest, nsresult aStatus);
+  nsresult OnStopRequest(nsIRequest* aRequest,
+                         nsresult aStatus,
+                         bool aReopenOnError);
   nsresult OnDataAvailable(uint32_t aLoadID,
                            nsIInputStream* aStream,
                            uint32_t aCount);
@@ -246,15 +248,14 @@ protected:
   // Main thread access only
   // True if Close() has been called.
   bool mClosed = false;
+  // The last reported seekability state for the underlying channel
+  bool mIsTransportSeekable = false;
   RefPtr<Listener> mListener;
   // A mono-increasing integer to uniquely identify the channel we are loading.
   uint32_t mLoadID = 0;
   // Used by the cache to store the offset to seek to when we are resumed.
   // -1 means no seek initiated by the cache is waiting.
   int64_t mPendingSeekOffset = -1;
-  // When this flag is set, if we get a network error we should silently
-  // reopen the stream.
-  bool               mReopenOnError;
 
   // Any thread access
   MediaCacheStream mCacheStream;

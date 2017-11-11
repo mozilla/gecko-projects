@@ -315,6 +315,15 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
         aUpdates.AddRawFont(op.key(), bytes, op.fontIndex());
         break;
       }
+      case OpUpdateResource::TOpAddFontDescriptor: {
+        const auto& op = cmd.get_OpAddFontDescriptor();
+        wr::Vec_u8 bytes;
+        if (!reader.Read(op.bytes(), bytes)) {
+          return false;
+        }
+        aUpdates.AddFontDescriptor(op.key(), bytes, op.fontIndex());
+        break;
+      }
       case OpUpdateResource::TOpAddFontInstance: {
         const auto& op = cmd.get_OpAddFontInstance();
         wr::Vec_u8 variations;
@@ -800,8 +809,13 @@ WebRenderBridgeParent::RecvAddPipelineIdForCompositable(const wr::PipelineId& aP
   if (!host) {
     return IPC_FAIL_NO_REASON(this);
   }
-  MOZ_ASSERT(host->AsWebRenderImageHost());
+
   WebRenderImageHost* wrHost = host->AsWebRenderImageHost();
+  MOZ_ASSERT(wrHost);
+  if (!wrHost) {
+    gfxCriticalNote << "Incompatible CompositableHost at WebRenderBridgeParent.";
+  }
+
   if (!wrHost) {
     return IPC_OK();
   }
@@ -843,6 +857,12 @@ WebRenderBridgeParent::RecvAddExternalImageIdForCompositable(const ExternalImage
 
   RefPtr<CompositableHost> host = FindCompositable(aHandle);
   WebRenderImageHost* wrHost = host->AsWebRenderImageHost();
+
+  MOZ_ASSERT(wrHost);
+  if (!wrHost) {
+    gfxCriticalNote << "Incompatible CompositableHost for external image at WebRenderBridgeParent.";
+  }
+
   if (!wrHost) {
     return IPC_OK();
   }
@@ -1141,10 +1161,8 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
     return;
   }
 
-  const uint32_t maxPendingFrameCount = 1;
-
   if (!mForceRendering &&
-      wr::RenderThread::Get()->GetPendingFrameCount(mApi->GetId()) >= maxPendingFrameCount) {
+      wr::RenderThread::Get()->TooManyPendingFrames(mApi->GetId())) {
     // Render thread is busy, try next time.
     ScheduleComposition();
     return;

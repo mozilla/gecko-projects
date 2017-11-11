@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* eslint mozilla/use-services:off */
+
 this.EXPORTED_SYMBOLS = ["Services"];
 
 const Ci = Components.interfaces;
@@ -67,7 +69,7 @@ XPCOMUtils.defineLazyGetter(Services, "ppmm", () => {
 
 XPCOMUtils.defineLazyGetter(Services, "io", () => {
   return Cc["@mozilla.org/network/io-service;1"]
-           .getService(Ci.nsIIOService2)
+           .getService(Ci.nsIIOService)
            .QueryInterface(Ci.nsISpeculativeConnect);
 });
 

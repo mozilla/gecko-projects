@@ -384,11 +384,13 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'GeckoProfile.java',
     'GeckoProfileDirectories.java',
     'GeckoScreenOrientation.java',
+    'GeckoSession.java',
+    'GeckoSessionHandler.java',
+    'GeckoSessionSettings.java',
     'GeckoSharedPrefs.java',
     'GeckoThread.java',
     'GeckoView.java',
-    'GeckoViewHandler.java',
-    'GeckoViewSettings.java',
+    'GeckoVRManager.java',
     'gfx/BitmapUtils.java',
     'gfx/BufferedImage.java',
     'gfx/BufferedImageGLInfo.java',
@@ -817,7 +819,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'preferences/SetHomepagePreference.java',
     'preferences/SyncPreference.java',
     'preferences/TopSitesPanelsPreference.java',
-    'PresentationView.java',
     'PrintHelper.java',
     'PrivateTab.java',
     'promotion/AddToHomeScreenPromotion.java',
@@ -1407,7 +1408,7 @@ ANDROID_GENERATED_RESFILES += [
 ]
 
 ANDROID_ASSETS_DIRS += [
-    '/mobile/android/app/assets',
+    '/mobile/android/app/src/main/assets',
 ]
 
 if CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY']:

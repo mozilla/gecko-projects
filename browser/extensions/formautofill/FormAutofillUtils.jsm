@@ -18,7 +18,9 @@ const ALTERNATIVE_COUNTRY_NAMES = {
 
 const ADDRESSES_COLLECTION_NAME = "addresses";
 const CREDITCARDS_COLLECTION_NAME = "creditCards";
+const ADDRESSES_FIRST_TIME_USE_PREF = "extensions.formautofill.firstTimeUse";
 const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabled";
+const CREDITCARDS_USED_STATUS_PREF = "extensions.formautofill.creditCards.used";
 const AUTOFILL_CREDITCARDS_AVAILABLE_PREF = "extensions.formautofill.creditCards.available";
 const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
 const MANAGE_ADDRESSES_KEYWORDS = ["manageAddressesTitle", "addNewAddressTitle"];
@@ -45,6 +47,8 @@ this.FormAutofillUtils = {
   CREDITCARDS_COLLECTION_NAME,
   ENABLED_AUTOFILL_ADDRESSES_PREF,
   ENABLED_AUTOFILL_CREDITCARDS_PREF,
+  ADDRESSES_FIRST_TIME_USE_PREF,
+  CREDITCARDS_USED_STATUS_PREF,
   MANAGE_ADDRESSES_KEYWORDS,
   EDIT_ADDRESS_KEYWORDS,
   MANAGE_CREDITCARDS_KEYWORDS,
@@ -236,6 +240,54 @@ this.FormAutofillUtils = {
       this._collators[country] = languages.map(lang => new Intl.Collator(lang, {sensitivity: "base", ignorePunctuation: true}));
     }
     return this._collators[country];
+  },
+
+  /**
+   * Parse a country address format string and outputs an array of fields.
+   * Spaces, commas, and other literals are ignored in this implementation.
+   * For example, format string "%A%n%C, %S" should return:
+   * [
+   *   {fieldId: "street-address", newLine: true},
+   *   {fieldId: "address-level2"},
+   *   {fieldId: "address-level1"},
+   * ]
+   *
+   * @param   {string} fmt Country address format string
+   * @returns {array<object>} List of fields
+   */
+  parseAddressFormat(fmt) {
+    if (!fmt) {
+      throw new Error("fmt string is missing.");
+    }
+    // Based on the list of fields abbreviations in
+    // https://github.com/googlei18n/libaddressinput/wiki/AddressValidationMetadata
+    const fieldsLookup = {
+      N: "name",
+      O: "organization",
+      A: "street-address",
+      S: "address-level1",
+      C: "address-level2",
+      Z: "postal-code",
+      n: "newLine",
+    };
+
+    return fmt.match(/%[^%]/g).reduce((parsed, part) => {
+      // Take the first letter of each segment and try to identify it
+      let fieldId = fieldsLookup[part[1]];
+      // Early return if cannot identify part.
+      if (!fieldId) {
+        return parsed;
+      }
+      // If a new line is detected, add an attribute to the previous field.
+      if (fieldId == "newLine") {
+        let size = parsed.length;
+        if (size) {
+          parsed[size - 1].newLine = true;
+        }
+        return parsed;
+      }
+      return parsed.concat({fieldId});
+    }, []);
   },
 
   /**
@@ -560,3 +612,7 @@ XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
                                       "isAutofillCreditCardsAvailable", AUTOFILL_CREDITCARDS_AVAILABLE_PREF);
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
                                       "_isAutofillCreditCardsEnabled", ENABLED_AUTOFILL_CREDITCARDS_PREF);
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "isAutofillAddressesFirstTimeUse", ADDRESSES_FIRST_TIME_USE_PREF);
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "AutofillCreditCardsUsedStatus", CREDITCARDS_USED_STATUS_PREF);

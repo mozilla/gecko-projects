@@ -921,16 +921,17 @@ private:
 class RecordedFontDescriptor : public RecordedEventDerived<RecordedFontDescriptor> {
 public:
 
-  static void FontDescCb(const uint8_t* aData, uint32_t aSize,
+  static void FontDescCb(const uint8_t* aData, uint32_t aSize, uint32_t aIndex,
                          void* aBaton)
   {
     auto recordedFontDesc = static_cast<RecordedFontDescriptor*>(aBaton);
-    recordedFontDesc->SetFontDescriptor(aData, aSize);
+    recordedFontDesc->SetFontDescriptor(aData, aSize, aIndex);
   }
 
   explicit RecordedFontDescriptor(UnscaledFont* aUnscaledFont)
     : RecordedEventDerived(FONTDESC)
     , mType(aUnscaledFont->GetType())
+    , mIndex(0)
     , mRefPtr(aUnscaledFont)
   {
     mHasDesc = aUnscaledFont->GetFontDescriptor(FontDescCb, this);
@@ -951,12 +952,13 @@ public:
 private:
   friend class RecordedEvent;
 
-  void SetFontDescriptor(const uint8_t* aData, uint32_t aSize);
+  void SetFontDescriptor(const uint8_t* aData, uint32_t aSize, uint32_t aIndex);
 
   bool mHasDesc;
 
   FontType mType;
   std::vector<uint8_t> mData;
+  uint32_t mIndex;
   ReferencePtr mRefPtr;
 
   template<class S>
@@ -1077,7 +1079,7 @@ public:
                                    const FontVariation* aVariations, uint32_t aNumVariations,
                                    void* aBaton)
   {
-    auto recordedScaledFontCreation = static_cast<RecordedScaledFontCreation*>(aBaton);
+    auto recordedScaledFontCreation = static_cast<RecordedScaledFontCreationByIndex*>(aBaton);
     recordedScaledFontCreation->SetFontInstanceData(aData, aSize, aVariations, aNumVariations);
   }
 
@@ -1098,7 +1100,8 @@ public:
   virtual std::string GetName() const { return "ScaledFont Creation"; }
   virtual ReferencePtr GetObjectRef() const { return mRefPtr; }
 
-  void SetFontInstanceData(const uint8_t *aData, uint32_t aSize);
+  void SetFontInstanceData(const uint8_t *aData, uint32_t aSize,
+                           const FontVariation* aVariations, uint32_t aNumVariations);
 
 private:
   friend class RecordedEvent;
@@ -1530,8 +1533,10 @@ RecordedDrawTargetCreation::Record(S &aStream) const
     MOZ_ASSERT(mExistingData);
     MOZ_ASSERT(mExistingData->GetSize() == mSize);
     RefPtr<DataSourceSurface> dataSurf = mExistingData->GetDataSurface();
+
+    DataSourceSurface::ScopedMap map(dataSurf, DataSourceSurface::READ);
     for (int y = 0; y < mSize.height; y++) {
-      aStream.write((const char*)dataSurf->GetData() + y * dataSurf->Stride(),
+      aStream.write((const char*)map.GetData() + y * map.GetStride(),
                     BytesPerPixel(mFormat) * mSize.width);
     }
   }
@@ -1556,8 +1561,9 @@ RecordedDrawTargetCreation::RecordedDrawTargetCreation(S &aStream)
       return;
     }
 
+    DataSourceSurface::ScopedMap map(dataSurf, DataSourceSurface::READ);
     for (int y = 0; y < mSize.height; y++) {
-      aStream.read((char*)dataSurf->GetData() + y * dataSurf->Stride(),
+      aStream.read((char*)map.GetData() + y * map.GetStride(),
                     BytesPerPixel(mFormat) * mSize.width);
     }
     mExistingData = dataSurf;
@@ -2809,7 +2815,7 @@ inline bool
 RecordedFontDescriptor::PlayEvent(Translator *aTranslator) const
 {
   RefPtr<UnscaledFont> font =
-    Factory::CreateUnscaledFontFromFontDescriptor(mType, mData.data(), mData.size());
+    Factory::CreateUnscaledFontFromFontDescriptor(mType, mData.data(), mData.size(), mIndex);
   if (!font) {
     gfxDevCrash(LogReason::InvalidFont) <<
       "Failed creating UnscaledFont of type " << int(mType) << " from font descriptor";
@@ -2827,6 +2833,7 @@ RecordedFontDescriptor::Record(S &aStream) const
   MOZ_ASSERT(mHasDesc);
   WriteElement(aStream, mType);
   WriteElement(aStream, mRefPtr);
+  WriteElement(aStream, mIndex);
   WriteElement(aStream, (size_t)mData.size());
   aStream.write((char*)mData.data(), mData.size());
 }
@@ -2838,9 +2845,10 @@ RecordedFontDescriptor::OutputSimpleEventInfo(std::stringstream &aStringStream) 
 }
 
 inline void
-RecordedFontDescriptor::SetFontDescriptor(const uint8_t* aData, uint32_t aSize)
+RecordedFontDescriptor::SetFontDescriptor(const uint8_t* aData, uint32_t aSize, uint32_t aIndex)
 {
   mData.assign(aData, aData + aSize);
+  mIndex = aIndex;
 }
 
 template<class S>
@@ -2849,6 +2857,7 @@ RecordedFontDescriptor::RecordedFontDescriptor(S &aStream)
 {
   ReadElement(aStream, mType);
   ReadElement(aStream, mRefPtr);
+  ReadElement(aStream, mIndex);
 
   size_t size;
   ReadElement(aStream, size);
@@ -3038,9 +3047,11 @@ RecordedScaledFontCreationByIndex::OutputSimpleEventInfo(std::stringstream &aStr
 }
 
 inline void
-RecordedScaledFontCreationByIndex::SetFontInstanceData(const uint8_t *aData, uint32_t aSize)
+RecordedScaledFontCreationByIndex::SetFontInstanceData(const uint8_t *aData, uint32_t aSize,
+                                                const FontVariation* aVariations, uint32_t aNumVariations)
 {
   mInstanceData.assign(aData, aData + aSize);
+  mVariations.assign(aVariations, aVariations + aNumVariations);
 }
 
 template<class S>

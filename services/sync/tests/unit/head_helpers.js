@@ -36,15 +36,16 @@ Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js", 
 XPCOMUtils.defineLazyGetter(this, "SyncPingSchema", function() {
   let ns = {};
   Cu.import("resource://gre/modules/FileUtils.jsm", ns);
+  Cu.import("resource://gre/modules/NetUtil.jsm", ns);
   let stream = Cc["@mozilla.org/network/file-input-stream;1"]
                .createInstance(Ci.nsIFileInputStream);
-  let jsonReader = Cc["@mozilla.org/dom/json;1"]
-                   .createInstance(Components.interfaces.nsIJSON);
   let schema;
   try {
     let schemaFile = do_get_file("sync_ping_schema.json");
     stream.init(schemaFile, ns.FileUtils.MODE_RDONLY, ns.FileUtils.PERMS_FILE, 0);
-    schema = jsonReader.decodeFromStream(stream, stream.available());
+
+    let bytes = ns.NetUtil.readInputStream(stream, stream.available());
+    schema = JSON.parse((new TextDecoder()).decode(bytes));
   } finally {
     stream.close();
   }
@@ -61,20 +62,6 @@ XPCOMUtils.defineLazyGetter(this, "SyncPingValidator", function() {
   let ajv = new ns.Ajv({ async: "co*" });
   return ajv.compile(SyncPingSchema);
 });
-
-var provider = {
-  getFile(prop, persistent) {
-    persistent.value = true;
-    switch (prop) {
-      case "ExtPrefDL":
-        return [Services.dirsvc.get("CurProcD", Ci.nsIFile)];
-      default:
-        throw Cr.NS_ERROR_FAILURE;
-    }
-  },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider])
-};
-Services.dirsvc.QueryInterface(Ci.nsIDirectoryService).registerProvider(provider);
 
 // This is needed for loadAddonTestFunctions().
 var gGlobalScope = this;

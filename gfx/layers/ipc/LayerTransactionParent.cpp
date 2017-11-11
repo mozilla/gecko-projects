@@ -29,7 +29,6 @@
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "mozilla/Unused.h"
 #include "nsCoord.h"                    // for NSAppUnitsToFloatPixels
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsISupportsImpl.h"            // for Layer::Release, etc
 #include "nsLayoutUtils.h"              // for nsLayoutUtils
 #include "nsMathUtils.h"                // for NS_round
@@ -610,10 +609,6 @@ LayerTransactionParent::SetLayerAttributes(const OpSetLayerAttributes& aOp)
     containerLayer->SetInheritedScale(attrs.inheritedXScale(), attrs.inheritedYScale());
     containerLayer->SetScaleToResolution(attrs.scaleToResolution(),
                                          attrs.presShellResolution());
-    if (attrs.eventRegionsOverride() != containerLayer->GetEventRegionsOverride()) {
-      UpdateHitTestingTree(layer, "event regions override changed");
-      containerLayer->SetEventRegionsOverride(attrs.eventRegionsOverride());
-    }
     break;
   }
   case Specific::TColorLayerAttributes: {
@@ -877,6 +872,10 @@ LayerTransactionParent::Attach(Layer* aLayer,
   TextureSourceProvider* provider =
     static_cast<HostLayerManager*>(aLayer->Manager())->GetTextureSourceProvider();
 
+  MOZ_ASSERT(!aCompositable->AsWebRenderImageHost());
+  if (aCompositable->AsWebRenderImageHost()) {
+    gfxCriticalNote << "Use WebRenderImageHost at LayerTransactionParent.";
+  }
   if (!layer->SetCompositableHost(aCompositable)) {
     // not all layer types accept a compositable, see bug 967824
     return false;

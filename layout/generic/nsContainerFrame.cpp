@@ -95,8 +95,7 @@ nsContainerFrame::SetInitialChildList(ChildListID  aListID,
                 "The placeholder should points to a backdrop frame");
     }
 #endif
-    nsFrameList* list =
-      new (PresContext()->PresShell()) nsFrameList(aChildList);
+    nsFrameList* list = new (PresShell()) nsFrameList(aChildList);
     SetProperty(BackdropProperty(), list);
   } else {
     MOZ_ASSERT_UNREACHABLE("Unexpected child list");
@@ -118,9 +117,8 @@ nsContainerFrame::AppendFrames(ChildListID  aListID,
   mFrames.AppendFrames(this, aFrameList);
 
   if (aListID != kNoReflowPrincipalList) {
-    PresContext()->PresShell()->
-      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                       NS_FRAME_HAS_DIRTY_CHILDREN);
+    PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                                  NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 }
 
@@ -142,9 +140,8 @@ nsContainerFrame::InsertFrames(ChildListID aListID,
   mFrames.InsertFrames(this, aPrevFrame, aFrameList);
 
   if (aListID != kNoReflowPrincipalList) {
-    PresContext()->PresShell()->
-      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                       NS_FRAME_HAS_DIRTY_CHILDREN);
+    PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                                  NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 }
 
@@ -162,7 +159,7 @@ nsContainerFrame::RemoveFrame(ChildListID aListID,
   if (kNoReflowPrincipalList == aListID) {
     generateReflowCommand = false;
   }
-  nsIPresShell* shell = PresContext()->PresShell();
+  nsIPresShell* shell = PresShell();
   nsContainerFrame* lastParent = nullptr;
   while (aOldFrame) {
     nsIFrame* oldFrameNextContinuation = aOldFrame->GetNextContinuation();
@@ -182,17 +179,19 @@ nsContainerFrame::RemoveFrame(ChildListID aListID,
 }
 
 void
-nsContainerFrame::DestroyAbsoluteFrames(nsIFrame* aDestructRoot)
+nsContainerFrame::DestroyAbsoluteFrames(nsIFrame* aDestructRoot,
+                                        PostDestroyData& aPostDestroyData)
 {
   if (IsAbsoluteContainer()) {
-    GetAbsoluteContainingBlock()->DestroyFrames(this, aDestructRoot);
+    GetAbsoluteContainingBlock()->DestroyFrames(this, aDestructRoot, aPostDestroyData);
     MarkAsNotAbsoluteContainingBlock();
   }
 }
 
 void
-nsContainerFrame::SafelyDestroyFrameListProp(nsIFrame* aDestructRoot,
-                                             nsIPresShell* aPresShell,
+nsContainerFrame::SafelyDestroyFrameListProp(nsIFrame*        aDestructRoot,
+                                             PostDestroyData& aPostDestroyData,
+                                             nsIPresShell*    aPresShell,
                                              FrameListPropertyDescriptor aProp)
 {
   // Note that the last frame can be removed through another route and thus
@@ -201,7 +200,7 @@ nsContainerFrame::SafelyDestroyFrameListProp(nsIFrame* aDestructRoot,
   while (nsFrameList* frameList = GetProperty(aProp)) {
     nsIFrame* frame = frameList->RemoveFirstChild();
     if (MOZ_LIKELY(frame)) {
-      frame->DestroyFrom(aDestructRoot);
+      frame->DestroyFrom(aDestructRoot, aPostDestroyData);
     } else {
       RemoveProperty(aProp);
       frameList->Delete(aPresShell);
@@ -211,17 +210,17 @@ nsContainerFrame::SafelyDestroyFrameListProp(nsIFrame* aDestructRoot,
 }
 
 void
-nsContainerFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsContainerFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   // Prevent event dispatch during destruction.
   if (HasView()) {
     GetView()->SetFrame(nullptr);
   }
 
-  DestroyAbsoluteFrames(aDestructRoot);
+  DestroyAbsoluteFrames(aDestructRoot, aPostDestroyData);
 
   // Destroy frames on the principal child list.
-  mFrames.DestroyFramesFrom(aDestructRoot);
+  mFrames.DestroyFramesFrom(aDestructRoot, aPostDestroyData);
 
   // If we have any IB split siblings, clear their references to us.
   if (HasAnyStateBits(NS_FRAME_PART_OF_IBSPLIT)) {
@@ -269,18 +268,19 @@ nsContainerFrame::DestroyFrom(nsIFrame* aDestructRoot)
     nsPresContext* pc = PresContext();
     nsIPresShell* shell = pc->PresShell();
     if (hasO) {
-      SafelyDestroyFrameListProp(aDestructRoot, shell, OverflowProperty());
+      SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
+                                 OverflowProperty());
     }
 
     MOZ_ASSERT(IsFrameOfType(eCanContainOverflowContainers) ||
                !(hasOC || hasEOC),
                "this type of frame shouldn't have overflow containers");
     if (hasOC) {
-      SafelyDestroyFrameListProp(aDestructRoot, shell,
+      SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
                                  OverflowContainersProperty());
     }
     if (hasEOC) {
-      SafelyDestroyFrameListProp(aDestructRoot, shell,
+      SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
                                  ExcessOverflowContainersProperty());
     }
 
@@ -288,11 +288,12 @@ nsContainerFrame::DestroyFrom(nsIFrame* aDestructRoot)
                StyleDisplay()->mTopLayer != NS_STYLE_TOP_LAYER_NONE,
                "only top layer frame may have backdrop");
     if (hasBackdrop) {
-      SafelyDestroyFrameListProp(aDestructRoot, shell, BackdropProperty());
+      SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
+                                 BackdropProperty());
     }
   }
 
-  nsSplittableFrame::DestroyFrom(aDestructRoot);
+  nsSplittableFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1253,7 +1254,7 @@ TryRemoveFrame(nsIFrame* aFrame,
     // aChildToRemove *may* have been removed from this list.
     if (list->IsEmpty()) {
       aFrame->RemoveProperty(aProp);
-      list->Delete(aFrame->PresContext()->PresShell());
+      list->Delete(aFrame->PresShell());
     }
     return true;
   }
@@ -1637,7 +1638,7 @@ nsContainerFrame::DrainExcessOverflowContainersList(ChildFrameMerger aMergeFunc)
     } else if (overflowContainers) {
       aMergeFunc(*overflowContainers, toMove, this);
       if (selfExcessOCFrames->IsEmpty()) {
-        selfExcessOCFrames->Delete(PresContext()->PresShell());
+        selfExcessOCFrames->Delete(PresShell());
       } else {
         SetPropTableFrames(selfExcessOCFrames, ExcessOverflowContainersProperty());
       }
@@ -1647,7 +1648,7 @@ nsContainerFrame::DrainExcessOverflowContainersList(ChildFrameMerger aMergeFunc)
         overflowContainers = selfExcessOCFrames;
       } else {
         SetPropTableFrames(selfExcessOCFrames, ExcessOverflowContainersProperty());
-        auto shell = PresContext()->PresShell();
+        auto shell = PresShell();
         overflowContainers = new (shell) nsFrameList(toMove);
       }
       SetPropTableFrames(overflowContainers, OverflowContainersProperty());
@@ -1983,9 +1984,8 @@ nsContainerFrame::AttributeChanged(int32_t         aNameSpaceID,
 
     // XXX Not sure if this is necessary anymore
     if (RenumberList()) {
-      PresContext()->PresShell()->
-        FrameNeedsReflow(this, nsIPresShell::eStyleChange,
-                         NS_FRAME_HAS_DIRTY_CHILDREN);
+      PresShell()->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+                                    NS_FRAME_HAS_DIRTY_CHILDREN);
     }
   }
   return rv;

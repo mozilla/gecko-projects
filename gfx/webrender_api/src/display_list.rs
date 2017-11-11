@@ -24,8 +24,8 @@ use std::slice;
 use time::precise_time_ns;
 
 // We don't want to push a long text-run. If a text-run is too long, split it into several parts.
-// Please check the renderer::MAX_VERTEX_TEXTURE_WIDTH for the detail.
-pub const MAX_TEXT_RUN_LENGTH: usize = 2040;
+// This needs to be set to (renderer::MAX_VERTEX_TEXTURE_WIDTH - VECS_PER_PRIM_HEADER - VECS_PER_TEXT_RUN) * 2
+pub const MAX_TEXT_RUN_LENGTH: usize = 2038;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -315,6 +315,7 @@ impl<'a, 'b> DisplayItemRef<'a, 'b> {
         LayerPrimitiveInfo {
             rect: info.rect.translate(&offset),
             local_clip: info.local_clip.create_with_offset(offset),
+            edge_aa_segment_mask: info.edge_aa_segment_mask,
             is_backface_visible: info.is_backface_visible,
             tag: info.tag,
         }
@@ -657,7 +658,7 @@ impl DisplayListBuilder {
             data: Vec::with_capacity(capacity),
             pipeline_id,
             clip_stack: vec![
-                ClipAndScrollInfo::simple(ClipId::root_reference_frame(pipeline_id)),
+                ClipAndScrollInfo::simple(ClipId::root_scroll_node(pipeline_id)),
             ],
             next_clip_id: FIRST_CLIP_ID,
             builder_start_time: start_time,
@@ -669,7 +670,7 @@ impl DisplayListBuilder {
     /// Saves the current display list state, so it may be `restore()`'d.
     ///
     /// # Conditions:
-    /// 
+    ///
     /// * Doesn't support popping clips that were pushed before the save.
     /// * Doesn't support nested saves.
     /// * Must call `clear_save()` if the restore becomes unnecessary.
@@ -1197,13 +1198,7 @@ impl DisplayListBuilder {
             image_mask: image_mask,
             scroll_sensitivity,
         });
-
-        let info = LayoutPrimitiveInfo {
-            rect: content_rect,
-            local_clip: LocalClip::from(clip_rect),
-            is_backface_visible: true,
-            tag: None,
-        };
+        let info = LayoutPrimitiveInfo::with_clip_rect(content_rect, clip_rect);
 
         let scrollinfo = ClipAndScrollInfo::simple(parent);
         self.push_item_with_clip_scroll_info(item, &info, scrollinfo);
@@ -1264,6 +1259,8 @@ impl DisplayListBuilder {
         margins: SideOffsets2D<Option<f32>>,
         vertical_offset_bounds: StickyOffsetBounds,
         horizontal_offset_bounds: StickyOffsetBounds,
+        previously_applied_offset: LayoutVector2D,
+
     ) -> ClipId {
         let id = self.generate_clip_id(id);
         let item = SpecificDisplayItem::StickyFrame(StickyFrameDisplayItem {
@@ -1271,6 +1268,7 @@ impl DisplayListBuilder {
             margins,
             vertical_offset_bounds,
             horizontal_offset_bounds,
+            previously_applied_offset,
         });
 
         let info = LayoutPrimitiveInfo::new(frame_rect);

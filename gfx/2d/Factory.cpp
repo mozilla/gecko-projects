@@ -614,16 +614,16 @@ Factory::CreateNativeFontResource(uint8_t *aData, uint32_t aSize, BackendType aB
 }
 
 already_AddRefed<UnscaledFont>
-Factory::CreateUnscaledFontFromFontDescriptor(FontType aType, const uint8_t* aData, uint32_t aDataLength)
+Factory::CreateUnscaledFontFromFontDescriptor(FontType aType, const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex)
 {
   switch (aType) {
 #ifdef WIN32
   case FontType::GDI:
-    return UnscaledFontGDI::CreateFromFontDescriptor(aData, aDataLength);
+    return UnscaledFontGDI::CreateFromFontDescriptor(aData, aDataLength, aIndex);
 #endif
 #ifdef MOZ_WIDGET_GTK
   case FontType::FONTCONFIG:
-    return UnscaledFontFontconfig::CreateFromFontDescriptor(aData, aDataLength);
+    return UnscaledFontFontconfig::CreateFromFontDescriptor(aData, aDataLength, aIndex);
 #endif
   default:
     gfxWarning() << "Invalid type specified for UnscaledFont font descriptor";
@@ -664,9 +664,12 @@ already_AddRefed<ScaledFont>
 Factory::CreateScaledFontForMacFont(CGFontRef aCGFont,
                                     const RefPtr<UnscaledFont>& aUnscaledFont,
                                     Float aSize,
+                                    const Color& aFontSmoothingBackgroundColor,
                                     bool aUseFontSmoothing)
 {
-  return MakeAndAddRef<ScaledFontMac>(aCGFont, aUnscaledFont, aSize, aUseFontSmoothing);
+  return MakeAndAddRef<ScaledFontMac>(
+    aCGFont, aUnscaledFont, aSize,
+    aFontSmoothingBackgroundColor, aUseFontSmoothing);
 }
 #endif
 
@@ -1052,14 +1055,6 @@ Factory::CreateWrappingDataSourceSurface(uint8_t *aData,
 
   return newSurf.forget();
 }
-
-#ifdef XP_DARWIN
-already_AddRefed<GlyphRenderingOptions>
-Factory::CreateCGGlyphRenderingOptions(const Color &aFontSmoothingBackgroundColor)
-{
-  return MakeAndAddRef<GlyphRenderingOptionsCG>(aFontSmoothingBackgroundColor);
-}
-#endif
 
 already_AddRefed<DataSourceSurface>
 Factory::CreateDataSourceSurface(const IntSize &aSize,

@@ -37,7 +37,6 @@
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
-#include "vm/StopIterationObject.h"
 #include "wasm/WasmJS.h"
 
 #include "jscompartmentinlines.h"
@@ -813,7 +812,7 @@ GlobalObject::addIntrinsicValue(JSContext* cx, Handle<GlobalObject*> global,
     Rooted<UnownedBaseShape*> base(cx, last->base()->unowned());
 
     RootedId id(cx, NameToId(name));
-    Rooted<StackShape> child(cx, StackShape(base, id, slot, 0, 0));
+    Rooted<StackShape> child(cx, StackShape(base, id, slot, 0));
     Shape* shape = cx->zone()->propertyTree().getChild(cx, last, child);
     if (!shape)
         return false;

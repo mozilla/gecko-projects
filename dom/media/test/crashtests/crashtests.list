@@ -86,6 +86,7 @@ load 1158427.html
 load 1185176.html
 load 1185192.html
 load 1257700.html
+load 1267263.html
 load 1270303.html
 load 1304948.html
 load 1319486.html
@@ -93,6 +94,7 @@ load 1368490.html
 load 1291702.html
 load 1378826.html
 load 1384248.html
+load 1389304.html
 load 1393272.webm
 load disconnect-wrong-destination.html
 load analyser-channels-1.html
@@ -108,6 +110,6 @@ load oscillator-ended-1.html
 load oscillator-ended-2.html
 skip-if(Android&&AndroidVersion=='22') load video-replay-after-audio-end.html # bug 1315125, bug 1358876
 # This needs to run at the end to avoid leaking busted state into other tests.
-load 691096-1.html
+skip-if(Android) load 691096-1.html # Bug 1365451
 load 1236639.html
 test-pref(media.navigator.permission.disabled,true) load 1388372.html

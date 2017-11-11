@@ -97,6 +97,8 @@ public:
 
   void AddRawFont(wr::FontKey aKey, wr::Vec_u8& aBytes, uint32_t aIndex);
 
+  void AddFontDescriptor(wr::FontKey aKey, wr::Vec_u8& aBytes, uint32_t aIndex);
+
   void DeleteFont(wr::FontKey aKey);
 
   void AddFontInstance(wr::FontInstanceKey aKey,
@@ -129,6 +131,10 @@ public:
   static already_AddRefed<WebRenderAPI> Create(layers::CompositorBridgeParentBase* aBridge,
                                                RefPtr<widget::CompositorWidget>&& aWidget,
                                                LayoutDeviceIntSize aSize);
+
+  // Redirect the WR's log to gfxCriticalError/Note.
+  static void InitExternalLogHandler();
+  static void ShutdownExternalLogHandler();
 
   already_AddRefed<WebRenderAPI> Clone();
 
@@ -245,7 +251,8 @@ public:
                                    const float* aBottomMargin,
                                    const float* aLeftMargin,
                                    const StickyOffsetBounds& aVerticalBounds,
-                                   const StickyOffsetBounds& aHorizontalBounds);
+                                   const StickyOffsetBounds& aHorizontalBounds,
+                                   const wr::LayoutVector2D& aAppliedOffset);
   void PushStickyFrame(const wr::WrStickyId& aStickyId,
                        const DisplayItemClipChain* aParent);
   void PopStickyFrame(const DisplayItemClipChain* aParent);

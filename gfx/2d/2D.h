@@ -746,10 +746,15 @@ public:
 
   typedef void (*FontFileDataOutput)(const uint8_t *aData, uint32_t aLength, uint32_t aIndex,
                                      void *aBaton);
+  typedef void (*WRFontDescriptorOutput)(const uint8_t *aData, uint32_t aLength, uint32_t aIndex,
+                                         void *aBaton);
   typedef void (*FontInstanceDataOutput)(const uint8_t* aData, uint32_t aLength, void* aBaton);
-  typedef void (*FontDescriptorOutput)(const uint8_t* aData, uint32_t aLength, void* aBaton);
+  typedef void (*FontDescriptorOutput)(const uint8_t* aData, uint32_t aLength, uint32_t aIndex,
+                                       void* aBaton);
 
   virtual bool GetFontFileData(FontFileDataOutput, void *) { return false; }
+
+  virtual bool GetWRFontDescriptor(WRFontDescriptorOutput, void *) { return false; }
 
   virtual bool GetFontInstanceData(FontInstanceDataOutput, void *) { return false; }
 
@@ -874,24 +879,6 @@ public:
                        uint32_t aInstanceDataLength) = 0;
 
   virtual ~NativeFontResource() {}
-};
-
-/** This class is designed to allow passing additional glyph rendering
- * parameters to the glyph drawing functions. This is an empty wrapper class
- * merely used to allow holding on to and passing around platform specific
- * parameters. This is because different platforms have unique rendering
- * parameters.
- */
-class GlyphRenderingOptions : public RefCounted<GlyphRenderingOptions>
-{
-public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GlyphRenderingOptions)
-  virtual ~GlyphRenderingOptions() {}
-
-  virtual FontType GetType() const = 0;
-
-protected:
-  GlyphRenderingOptions() {}
 };
 
 class DrawTargetCapture;
@@ -1106,8 +1093,7 @@ public:
   virtual void FillGlyphs(ScaledFont *aFont,
                           const GlyphBuffer &aBuffer,
                           const Pattern &aPattern,
-                          const DrawOptions &aOptions = DrawOptions(),
-                          const GlyphRenderingOptions *aRenderingOptions = nullptr) = 0;
+                          const DrawOptions &aOptions = DrawOptions()) = 0;
 
   /**
    * Stroke a series of glyphs on the draw target with a certain source pattern.
@@ -1116,8 +1102,7 @@ public:
                             const GlyphBuffer& aBuffer,
                             const Pattern& aPattern,
                             const StrokeOptions& aStrokeOptions = StrokeOptions(),
-                            const DrawOptions& aOptions = DrawOptions(),
-                            const GlyphRenderingOptions* aRenderingOptions = nullptr);
+                            const DrawOptions& aOptions = DrawOptions());
 
   /**
    * This takes a source pattern and a mask, and composites the source pattern
@@ -1564,7 +1549,7 @@ public:
 #ifdef XP_DARWIN
   static already_AddRefed<ScaledFont>
     CreateScaledFontForMacFont(CGFontRef aCGFont, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
-                               bool aUseFontSmoothing = true);
+                               const Color& aFontSmoothingBackgroundColor, bool aUseFontSmoothing = true);
 #endif
 
   /**
@@ -1585,7 +1570,7 @@ public:
    * data retrieved from ScaledFont::GetFontDescriptor.
    */
   static already_AddRefed<UnscaledFont>
-    CreateUnscaledFontFromFontDescriptor(FontType aType, const uint8_t* aData, uint32_t aDataLength);
+    CreateUnscaledFontFromFontDescriptor(FontType aType, const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex);
 
   /**
    * This creates a scaled font with an associated cairo_scaled_font_t, and
@@ -1682,11 +1667,6 @@ public:
 
 #ifdef USE_SKIA
   static already_AddRefed<DrawTarget> CreateDrawTargetWithSkCanvas(SkCanvas* aCanvas);
-#endif
-
-#ifdef XP_DARWIN
-  static already_AddRefed<GlyphRenderingOptions>
-    CreateCGGlyphRenderingOptions(const Color &aFontSmoothingBackgroundColor);
 #endif
 
 #ifdef MOZ_ENABLE_FREETYPE

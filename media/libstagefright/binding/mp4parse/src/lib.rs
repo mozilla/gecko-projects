@@ -319,14 +319,15 @@ pub enum AudioCodecSpecific {
     FLACSpecificBox(FLACSpecificBox),
     OpusSpecificBox(OpusSpecificBox),
     MP3,
+    LPCM,
 }
 
 #[derive(Debug, Clone)]
 pub struct AudioSampleEntry {
     data_reference_index: u16,
-    pub channelcount: u16,
+    pub channelcount: u32,
     pub samplesize: u16,
-    pub samplerate: u32,
+    pub samplerate: f64,
     pub codec_specific: AudioCodecSpecific,
     pub protection_info: Vec<ProtectionSchemeInfoBox>,
 }
@@ -464,6 +465,7 @@ pub enum CodecType {
     VP8,
     EncryptedVideo,
     EncryptedAudio,
+    LPCM,   // QT
 }
 
 impl Default for CodecType {
@@ -1836,13 +1838,13 @@ fn read_audio_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
     // Skip uninteresting fields.
     skip(src, 6)?;
 
-    let channelcount = be_u16(src)?;
+    let mut channelcount = be_u16(src)? as u32;
     let samplesize = be_u16(src)?;
 
     // Skip uninteresting fields.
     skip(src, 4)?;
 
-    let samplerate = be_u32(src)?;
+    let mut samplerate = (be_u32(src)? >> 16) as f64; // 16.16 fixed point;
 
     match version {
         0 => (),
@@ -1851,16 +1853,21 @@ fn read_audio_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
             // Skip uninteresting fields.
             skip(src, 16)?;
         },
+        2 => {
+            // Quicktime sound sample description version 2.
+            skip(src, 4)?;
+            samplerate = f64::from_bits(be_u64(src)?);
+            channelcount = be_u32(src)?;
+            skip(src, 20)?;
+        }
         _ => return Err(Error::Unsupported("unsupported non-isom audio sample entry")),
     }
 
-    // Skip chan/etc. for now.
-    let mut codec_type = CodecType::Unknown;
-    let mut codec_specific = None;
-    if name == BoxType::MP3AudioSampleEntry {
-        codec_type = CodecType::MP3;
-        codec_specific = Some(AudioCodecSpecific::MP3);
-    }
+    let (mut codec_type, mut codec_specific) = match name {
+        BoxType::MP3AudioSampleEntry => (CodecType::MP3, Some(AudioCodecSpecific::MP3)),
+        BoxType::LPCMAudioSampleEntry => (CodecType::LPCM, Some(AudioCodecSpecific::LPCM)),
+        _ => (CodecType::Unknown, None),
+    };
     let mut protection_info = Vec::new();
     let mut iter = src.box_iter();
     while let Some(mut b) = iter.next_box()? {

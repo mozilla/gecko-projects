@@ -47,7 +47,6 @@ HistoryEngine.prototype = {
   _storeObj: HistoryStore,
   _trackerObj: HistoryTracker,
   downloadLimit: MAX_HISTORY_DOWNLOAD,
-  applyIncomingBatchSize: HISTORY_STORE_BATCH_SIZE,
 
   syncPriority: 7,
 
@@ -183,7 +182,9 @@ HistoryStore.prototype = {
     // Convert incoming records to mozIPlaceInfo objects. Some records can be
     // ignored or handled directly, so we're rewriting the array in-place.
     let i, k;
+    let maybeYield = Async.jankYielder();
     for (i = 0, k = 0; i < records.length; i++) {
+      await maybeYield();
       let record = records[k] = records[i];
       let shouldApply;
 

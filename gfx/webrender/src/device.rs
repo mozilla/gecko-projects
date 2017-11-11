@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use super::shader_source;
-use api::ImageFormat;
+use api::{ColorF, ImageFormat};
 use api::{DeviceIntRect, DeviceUintSize};
 use euclid::Transform3D;
 use gleam::gl;
@@ -1912,6 +1912,25 @@ impl Device {
     }
     pub fn set_blend_mode_subpixel_pass1(&self) {
         self.gl.blend_func(gl::ONE, gl::ONE);
+    }
+    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&self) {
+        self.gl.blend_func_separate(gl::ZERO, gl::ONE_MINUS_SRC_COLOR, gl::ZERO, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&self) {
+        self.gl.blend_func_separate(gl::ONE_MINUS_DST_ALPHA, gl::ONE, gl::ZERO, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&self) {
+        self.gl.blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    pub fn set_blend_mode_subpixel_constant_text_color(&self, color: ColorF) {
+        // color is an unpremultiplied color.
+        self.gl.blend_color(color.r, color.g, color.b, 1.0);
+        self.gl
+            .blend_func(gl::CONSTANT_COLOR, gl::ONE_MINUS_SRC_COLOR);
+        self.gl.blend_equation(gl::FUNC_ADD);
     }
 }
 

@@ -330,9 +330,6 @@ pref("gfx.displayport.strategy_pb.threshold", -1); // velocity threshold in inch
 // Allow 24-bit colour when the hardware supports it
 pref("gfx.android.rgb16.force", false);
 
-// Allow GLContexts to be attached/detached from SurfaceTextures
-pref("gfx.SurfaceTexture.detach.enabled", true);
-
 // Use SurfaceTextures as preferred backend for TextureClient/Host
 pref("gfx.use-surfacetexture-textures", false);
 
@@ -709,9 +706,6 @@ pref("network.tickle-wifi.enabled", true);
 
 // Mobile manages state by autodetection
 pref("network.manage-offline-status", true);
-
-// increase the timeout clamp for background tabs to 15 minutes
-pref("dom.min_background_timeout_value", 900000);
 
 // Media plugins for libstagefright playback on android
 pref("media.plugins.enabled", true);

@@ -88,7 +88,7 @@
     impl Parse for computed_value::Keyword {
         fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<computed_value::Keyword, ParseError<'i>> {
-            use std::ascii::AsciiExt;
+            #[allow(unused_imports)] use std::ascii::AsciiExt;
             use style_traits::cursor::Cursor;
             let location = input.current_source_location();
             let ident = input.expect_ident()?;
@@ -180,15 +180,4 @@ ${helpers.predefined_type(
     boxed=True,
     ignored_when_colors_disabled=True,
     products="gecko",
-)}
-
-${helpers.predefined_type(
-    "-moz-font-smoothing-background-color",
-    "RGBAColor",
-    "RGBA::transparent()",
-    animation_value_type="AnimatedRGBA",
-    products="gecko",
-    gecko_ffi_name="mFontSmoothingBackgroundColor",
-    internal=True,
-    spec="None (Nonstandard internal property)"
 )}

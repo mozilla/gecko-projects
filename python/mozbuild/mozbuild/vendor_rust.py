@@ -269,7 +269,7 @@ license file's hash.
             ('gkrust', 'toolkit/library/rust'),
             ('gkrust-gtest', 'toolkit/library/gtest/rust'),
             ('js', 'js/rust'),
-            ('webdriver', 'testing/webdriver'),
+            ('mozjs_sys', 'js/src'),
             ('geckodriver', 'testing/geckodriver'),
         )
 

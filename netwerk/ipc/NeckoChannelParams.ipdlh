@@ -47,6 +47,7 @@ struct LoadInfoArgs
   bool                        upgradeInsecureRequests;
   bool                        verifySignedContent;
   bool                        enforceSRI;
+  bool                        forceAllowDataURI;
   bool                        forceInheritPrincipalDropped;
   uint64_t                    innerWindowID;
   uint64_t                    outerWindowID;
@@ -70,6 +71,7 @@ struct LoadInfoArgs
   nsCString[]                 corsUnsafeHeaders;
   bool                        forcePreflight;
   bool                        isPreflight;
+  bool                        loadTriggeredFromExternal;
   bool                        forceHSTSPriming;
   bool                        mixedContentWouldBlock;
   bool                        isHSTSPriming;

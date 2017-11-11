@@ -199,13 +199,23 @@ nsStyleFont::CalcDifference(const nsStyleFont& aNewData) const
   MOZ_ASSERT(mAllowZoom == aNewData.mAllowZoom,
              "expected mAllowZoom to be the same on both nsStyleFonts");
   if (mSize != aNewData.mSize ||
-      mFont != aNewData.mFont ||
       mLanguage != aNewData.mLanguage ||
       mExplicitLanguage != aNewData.mExplicitLanguage ||
       mMathVariant != aNewData.mMathVariant ||
       mMathDisplay != aNewData.mMathDisplay ||
       mMinFontSizeRatio != aNewData.mMinFontSizeRatio) {
     return NS_STYLE_HINT_REFLOW;
+  }
+
+  switch (mFont.CalcDifference(aNewData.mFont)) {
+    case nsFont::MaxDifference::eLayoutAffecting:
+      return NS_STYLE_HINT_REFLOW;
+
+    case nsFont::MaxDifference::eVisual:
+      return NS_STYLE_HINT_VISUAL;
+
+    case nsFont::MaxDifference::eNone:
+      break;
   }
 
   // XXX Should any of these cause a non-nsChangeHint_NeutralChange change?
@@ -4391,7 +4401,6 @@ nsStyleUserInterface::nsStyleUserInterface(const nsPresContext* aContext)
   , mPointerEvents(NS_STYLE_POINTER_EVENTS_AUTO)
   , mCursor(NS_STYLE_CURSOR_AUTO)
   , mCaretColor(StyleComplexColor::Auto())
-  , mFontSmoothingBackgroundColor(NS_RGBA(0, 0, 0, 0))
 {
   MOZ_COUNT_CTOR(nsStyleUserInterface);
 }
@@ -4404,7 +4413,6 @@ nsStyleUserInterface::nsStyleUserInterface(const nsStyleUserInterface& aSource)
   , mCursor(aSource.mCursor)
   , mCursorImages(aSource.mCursorImages)
   , mCaretColor(aSource.mCaretColor)
-  , mFontSmoothingBackgroundColor(aSource.mFontSmoothingBackgroundColor)
 {
   MOZ_COUNT_CTOR(nsStyleUserInterface);
 }
@@ -4466,8 +4474,7 @@ nsStyleUserInterface::CalcDifference(const nsStyleUserInterface& aNewData) const
     hint |= nsChangeHint_NeutralChange;
   }
 
-  if (mCaretColor != aNewData.mCaretColor ||
-      mFontSmoothingBackgroundColor != aNewData.mFontSmoothingBackgroundColor) {
+  if (mCaretColor != aNewData.mCaretColor) {
     hint |= nsChangeHint_RepaintFrame;
   }
 

@@ -173,7 +173,6 @@ android {
                 if (mozconfig.substs.MOZ_ANDROID_DISTRIBUTION_DIRECTORY) {
                     srcDir "${mozconfig.substs.MOZ_ANDROID_DISTRIBUTION_DIRECTORY}/assets"
                 }
-                srcDir "${topsrcdir}/mobile/android/app/assets"
             }
         }
 
@@ -191,7 +190,8 @@ android {
 
         test {
             java {
-                srcDir "${topsrcdir}/mobile/android/tests/background/junit4/src"
+                // Bug 1229149 tracks pushing this into a :services Gradle project.
+                srcDir "${topsrcdir}/mobile/android/services/src/test/java"
 
                 if (!mozconfig.substs.MOZ_ANDROID_GCM) {
                     exclude 'org/mozilla/gecko/gcm/**/*.java'
@@ -199,16 +199,17 @@ android {
                 }
             }
             resources {
-                srcDir "${topsrcdir}/mobile/android/tests/background/junit4/resources"
+                // Bug 1229149 tracks pushing this into a :services Gradle project.
+                srcDir "${topsrcdir}/mobile/android/services/src/test/resources"
             }
         }
 
         androidTest {
             java {
                 srcDir "${topsrcdir}/mobile/android/tests/browser/robocop/src"
-                srcDir "${topsrcdir}/mobile/android/tests/background/junit3/src"
+                // Bug 1229149 tracks pushing this into a :services Gradle project.
+                srcDir "${topsrcdir}/mobile/android/services/src/androidTest/java"
                 srcDir "${topsrcdir}/mobile/android/tests/browser/junit3/src"
-                srcDir "${topsrcdir}/mobile/android/tests/javaddons/src"
             }
             res {
                 srcDir "${topsrcdir}/mobile/android/tests/browser/robocop/res"
@@ -565,4 +566,15 @@ android.applicationVariants.all { variant ->
     }
 
     assembleTask.dependsOn dumpTask
+}
+
+// Bug 1415298: make Robolectric find assets.  Fix adapted from
+// https://github.com/robolectric/robolectric/issues/2647.
+android.applicationVariants.all { variant ->
+    def productFlavor = ""
+    variant.productFlavors.each {
+        productFlavor += "${it.name.capitalize()}"
+    }
+    def buildType = "${variant.buildType.name.capitalize()}"
+    tasks["compile${productFlavor}${buildType}UnitTestSources"].dependsOn(tasks["merge${productFlavor}${buildType}Assets"])
 }

@@ -465,6 +465,14 @@ TabChild::TabChild(nsIContentChild* aManager,
   }
 }
 
+const CompositorOptions&
+TabChild::GetCompositorOptions() const
+{
+  // If you're calling this before mCompositorOptions is set, well.. don't.
+  MOZ_ASSERT(mCompositorOptions);
+  return mCompositorOptions.ref();
+}
+
 bool
 TabChild::AsyncPanZoomEnabled() const
 {
@@ -2547,8 +2555,8 @@ mozilla::ipc::IPCResult
 TabChild::RecvPrint(const uint64_t& aOuterWindowID, const PrintData& aPrintData)
 {
 #ifdef NS_PRINTING
-  nsGlobalWindow* outerWindow =
-    nsGlobalWindow::GetOuterWindowWithId(aOuterWindowID);
+  nsGlobalWindowOuter* outerWindow =
+    nsGlobalWindowOuter::GetOuterWindowWithId(aOuterWindowID);
   if (NS_WARN_IF(!outerWindow)) {
     return IPC_OK();
   }
@@ -2950,7 +2958,7 @@ TabChild::CreateRemoteLayerManager(mozilla::layers::PCompositorBridgeChild* aCom
   MOZ_ASSERT(aCompositorChild);
 
   bool success = false;
-  if (gfxVars::UseWebRender()) {
+  if (mCompositorOptions->UseWebRender()) {
     success = mPuppetWidget->CreateRemoteLayerManager([&] (LayerManager* aLayerManager) -> bool {
       MOZ_ASSERT(aLayerManager->AsWebRenderLayerManager());
       return aLayerManager->AsWebRenderLayerManager()->Initialize(aCompositorChild,

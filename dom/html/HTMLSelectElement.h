@@ -8,10 +8,10 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
-#include "nsIDOMHTMLSelectElement.h"
 #include "nsIConstraintValidation.h"
 
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/HTMLOptionsCollection.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCheapSets.h"
@@ -120,7 +120,6 @@ private:
  * Implementation of &lt;select&gt;
  */
 class HTMLSelectElement final : public nsGenericHTMLFormElementWithState,
-                                public nsIDOMHTMLSelectElement,
                                 public nsIConstraintValidation
 {
 public:
@@ -164,9 +163,6 @@ public:
     return true;
   }
 
-  // nsIDOMHTMLSelectElement
-  NS_DECL_NSIDOMHTMLSELECTELEMENT
-
   // WebIdl HTMLSelectElement
   bool Autofocus() const
   {
@@ -204,7 +200,11 @@ public:
   {
     SetHTMLBoolAttr(nsGkAtoms::multiple, aVal, aRv);
   }
-  // Uses XPCOM GetName.
+
+  void GetName(DOMString& aValue)
+  {
+    GetHTMLAttr(nsGkAtoms::name, aValue);
+  }
   void SetName(const nsAString& aName, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::name, aName, aRv);
@@ -226,7 +226,7 @@ public:
     SetUnsignedIntAttr(nsGkAtoms::size, aSize, 0, aRv);
   }
 
-  // Uses XPCOM GetType.
+  void GetType(nsAString& aValue);
 
   HTMLOptionsCollection* Options() const
   {
@@ -252,7 +252,7 @@ public:
   void Add(const HTMLOptionElementOrHTMLOptGroupElement& aElement,
            const Nullable<HTMLElementOrLong>& aBefore,
            ErrorResult& aRv);
-  // Uses XPCOM Remove.
+  void Remove(int32_t aIndex);
   void IndexedSetter(uint32_t aIndex, HTMLOptionElement* aOption,
                      ErrorResult& aRv)
   {
@@ -273,7 +273,7 @@ public:
     aRv = SetSelectedIndexInternal(aIdx, true);
   }
   void GetValue(DOMString& aValue);
-  // Uses XPCOM SetValue.
+  void SetValue(const nsAString& aValue);
 
   // Override SetCustomValidity so we update our state properly when it's called
   // via bindings.
@@ -359,19 +359,6 @@ public:
   bool SetOptionsSelectedByIndex(int32_t aStartIndex,
                                  int32_t aEndIndex,
                                  uint32_t aOptionsMask);
-
-  /**
-   * Finds the index of a given option element
-   *
-   * @param aOption the option to get the index of
-   * @param aStartIndex the index to start looking at
-   * @param aForward TRUE to look forward, FALSE to look backward
-   * @return the option index
-   */
-  NS_IMETHOD GetOptionIndex(nsIDOMHTMLOptionElement* aOption,
-                            int32_t aStartIndex,
-                            bool aForward,
-                            int32_t* aIndex);
 
   /**
    * Called when an attribute is about to be changed

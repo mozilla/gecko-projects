@@ -3,10 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BorderRadius, BuiltDisplayList, ColorF, ComplexClipRegion, DeviceIntRect};
-use api::{DevicePoint, ExtendMode, FontInstance, FontRenderMode, GlyphInstance, GlyphKey};
+use api::{DevicePoint, ExtendMode, FontInstance, GlyphInstance, GlyphKey};
 use api::{GradientStop, ImageKey, ImageRendering, ItemRange, ItemTag, LayerPoint, LayerRect};
 use api::{ClipMode, LayerSize, LayerVector2D, LineOrientation, LineStyle};
-use api::{TileOffset, YuvColorSpace, YuvFormat};
+use api::{ClipAndScrollInfo, EdgeAaSegmentMask, TileOffset, YuvColorSpace, YuvFormat};
 use border::BorderCornerInstance;
 use clip::{ClipSourcesHandle, ClipStore, Geometry};
 use frame_builder::PrimitiveContext;
@@ -18,7 +18,21 @@ use renderer::MAX_VERTEX_TEXTURE_WIDTH;
 use resource_cache::{ImageProperties, ResourceCache};
 use std::{mem, usize};
 use std::rc::Rc;
-use util::{MatrixHelpers, pack_as_float, recycle_vec, TransformedRect};
+use util::{pack_as_float, recycle_vec, MatrixHelpers, TransformedRect, TransformedRectKind};
+
+#[derive(Clone, Debug)]
+pub struct PrimitiveRun {
+    pub base_prim_index: PrimitiveIndex,
+    pub count: usize,
+    pub clip_and_scroll: ClipAndScrollInfo,
+}
+
+#[derive(Debug)]
+pub struct PrimitiveRunResult {
+    pub local_rect: LayerRect,
+    pub device_rect: DeviceIntRect,
+    pub visible_primitives: usize,
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct PrimitiveOpacity {
@@ -161,6 +175,7 @@ pub enum RectangleContent {
 #[derive(Debug)]
 pub struct RectanglePrimitive {
     pub content: RectangleContent,
+    pub edge_aa_segment_mask: EdgeAaSegmentMask,
 }
 
 impl ToGpuBlocks for RectanglePrimitive {
@@ -174,6 +189,9 @@ impl ToGpuBlocks for RectanglePrimitive {
                 request.push(ColorF::new(0.0, 0.0, 0.0, 1.0));
             }
         }
+        request.extend_from_slice(&[GpuBlockData {
+            data: [self.edge_aa_segment_mask.bits() as f32, 0.0, 0.0, 0.0],
+        }]);
     }
 }
 
@@ -554,26 +572,10 @@ pub struct TextRunPrimitiveCpu {
     pub glyph_gpu_blocks: Vec<GpuBlockData>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum TextRunMode {
-    Normal,
-    Shadow,
-}
 
 impl TextRunPrimitiveCpu {
-    pub fn get_font(&self,
-                    run_mode: TextRunMode,
-                    device_pixel_ratio: f32,
-    ) -> FontInstance {
+    pub fn get_font(&self, device_pixel_ratio: f32) -> FontInstance {
         let mut font = self.font.clone();
-        match run_mode {
-            TextRunMode::Normal => {}
-            TextRunMode::Shadow => {
-                // Shadows never use subpixel AA, but need to respect the alpha/mono flag
-                // for reftests.
-                font.render_mode = font.render_mode.limit_by(FontRenderMode::Alpha);
-            }
-        };
         font.size = font.size.scale_by(device_pixel_ratio);
         font
     }
@@ -583,10 +585,9 @@ impl TextRunPrimitiveCpu {
         resource_cache: &mut ResourceCache,
         device_pixel_ratio: f32,
         display_list: &BuiltDisplayList,
-        run_mode: TextRunMode,
         gpu_cache: &mut GpuCache,
     ) {
-        let font = self.get_font(run_mode, device_pixel_ratio);
+        let font = self.get_font(device_pixel_ratio);
 
         // Cache the glyph positions, if not in the cache already.
         // TODO(gw): In the future, remove `glyph_instances`
@@ -628,6 +629,7 @@ impl TextRunPrimitiveCpu {
 
     fn write_gpu_blocks(&self, request: &mut GpuDataRequest) {
         request.push(ColorF::from(self.font.color).premultiplied());
+        request.push(ColorF::from(self.font.bg_color));
         request.push([
             self.offset.x,
             self.offset.y,
@@ -906,7 +908,6 @@ impl PrimitiveStore {
             is_backface_visible: is_backface_visible,
             screen_rect: None,
             tag,
-
             opacity: PrimitiveOpacity::translucent(),
             prim_kind: PrimitiveKind::Rectangle,
             cpu_prim_index: SpecificPrimitiveIndex(0),
@@ -1097,7 +1098,6 @@ impl PrimitiveStore {
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
-        text_run_mode: TextRunMode,
     ) {
         let metadata = &mut self.cpu_metadata[prim_index.0];
         match metadata.prim_kind {
@@ -1116,7 +1116,6 @@ impl PrimitiveStore {
                     resource_cache,
                     prim_context.device_pixel_ratio,
                     prim_context.display_list,
-                    text_run_mode,
                     gpu_cache,
                 );
             }
@@ -1227,8 +1226,10 @@ impl PrimitiveStore {
         clip_store: &mut ClipStore,
     ) -> bool {
         let metadata = &mut self.cpu_metadata[prim_index.0];
+        let transform = &prim_context.scroll_node.world_content_transform;
+
         clip_store.get_mut(&metadata.clip_sources).update(
-            &prim_context.packed_layer.transform,
+            transform,
             gpu_cache,
             resource_cache,
             prim_context.device_pixel_ratio,
@@ -1236,8 +1237,9 @@ impl PrimitiveStore {
 
         // Try to create a mask if we may need to.
         let prim_clips = clip_store.get(&metadata.clip_sources);
-        let is_axis_aligned = prim_context.packed_layer.transform.preserves_2d_axis_alignment();
-        let clip_task = if prim_context.clip_chain.is_some() || prim_clips.is_masking() {
+        let is_axis_aligned = transform.transform_kind() == TransformedRectKind::AxisAligned;
+
+        let clip_task = if prim_context.clip_node.clip_chain_node.is_some() || prim_clips.is_masking() {
             // Take into account the actual clip info of the primitive, and
             // mutate the current bounds accordingly.
             let mask_rect = match prim_clips.bounds.outer {
@@ -1254,9 +1256,9 @@ impl PrimitiveStore {
             let extra_clip = if prim_clips.is_masking() {
                 Some(Rc::new(ClipChainNode {
                     work_item: ClipWorkItem {
-                        layer_index: prim_context.packed_layer_index,
+                        scroll_node_id: prim_context.scroll_node.id,
                         clip_sources: metadata.clip_sources.weak(),
-                        coordinate_system_id: prim_context.coordinate_system_id,
+                        coordinate_system_id: prim_context.scroll_node.coordinate_system_id,
                     },
                     prev: None,
                 }))
@@ -1267,12 +1269,12 @@ impl PrimitiveStore {
             RenderTask::new_mask(
                 None,
                 mask_rect,
-                prim_context.clip_chain.clone(),
+                prim_context.clip_node.clip_chain_node.clone(),
                 extra_clip,
                 prim_screen_rect,
                 clip_store,
                 is_axis_aligned,
-                prim_context.coordinate_system_id,
+                prim_context.scroll_node.coordinate_system_id,
             )
         } else {
             None
@@ -1302,14 +1304,13 @@ impl PrimitiveStore {
             }
 
             if !metadata.is_backface_visible &&
-               prim_context.packed_layer.transform.is_backface_visible() {
+               prim_context.scroll_node.world_content_transform.is_backface_visible() {
                 return None;
             }
 
             let local_rect = metadata
                 .local_rect
-                .intersection(&metadata.local_clip_rect)
-                .and_then(|rect| rect.intersection(&prim_context.packed_layer.local_clip_rect));
+                .intersection(&metadata.local_clip_rect);
 
             let local_rect = match local_rect {
                 Some(local_rect) => local_rect,
@@ -1318,13 +1319,13 @@ impl PrimitiveStore {
 
             let xf_rect = TransformedRect::new(
                 &local_rect,
-                &prim_context.packed_layer.transform,
+                &prim_context.scroll_node.world_content_transform,
                 prim_context.device_pixel_ratio
             );
 
-            metadata.screen_rect = xf_rect
-                .bounding_rect
-                .intersection(&prim_context.clip_bounds);
+            let clip_bounds = &prim_context.clip_node.combined_clip_outer_bounds;
+            metadata.screen_rect = xf_rect.bounding_rect
+                                          .intersection(clip_bounds);
 
             let geometry = match metadata.screen_rect {
                 Some(device_rect) => Geometry {
@@ -1349,7 +1350,7 @@ impl PrimitiveStore {
         //           avoid borrow checker issues.
         for run in dependent_primitives {
             for i in 0 .. run.count {
-                let sub_prim_index = PrimitiveIndex(run.prim_index.0 + i);
+                let sub_prim_index = PrimitiveIndex(run.base_prim_index.0 + i);
 
                 self.prepare_prim_for_render_inner(
                     sub_prim_index,
@@ -1357,7 +1358,6 @@ impl PrimitiveStore {
                     resource_cache,
                     gpu_cache,
                     render_tasks,
-                    TextRunMode::Shadow,
                 );
             }
         }
@@ -1380,13 +1380,46 @@ impl PrimitiveStore {
             resource_cache,
             gpu_cache,
             render_tasks,
-            TextRunMode::Normal,
         );
 
         Some(geometry)
     }
-}
 
+    pub fn prepare_prim_run(
+        &mut self,
+        run: &PrimitiveRun,
+        prim_context: &PrimitiveContext,
+        gpu_cache: &mut GpuCache,
+        resource_cache: &mut ResourceCache,
+        render_tasks: &mut RenderTaskTree,
+        clip_store: &mut ClipStore,
+    ) -> PrimitiveRunResult {
+        let mut result = PrimitiveRunResult {
+            local_rect: LayerRect::zero(),
+            device_rect: DeviceIntRect::zero(),
+            visible_primitives: 0,
+        };
+
+        for i in 0 .. run.count {
+            let prim_index = PrimitiveIndex(run.base_prim_index.0 + i);
+
+            if let Some(prim_geom) = self.prepare_prim_for_render(
+                prim_index,
+                prim_context,
+                resource_cache,
+                gpu_cache,
+                render_tasks,
+                clip_store,
+            ) {
+                result.local_rect = result.local_rect.union(&prim_geom.local_rect);
+                result.device_rect = result.device_rect.union(&prim_geom.device_rect);
+                result.visible_primitives += 1;
+            }
+        }
+
+        result
+    }
+}
 
 //Test for one clip region contains another
 trait InsideTest<T> {

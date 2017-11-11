@@ -15,8 +15,12 @@
 #include <iostream>
 #include <unordered_map>
 
-#ifdef MOZ_ENABLE_FREETYPE
-#include "mozilla/ThreadLocal.h"
+#ifdef XP_MACOSX
+#include "mozilla/gfx/UnscaledFontMac.h"
+#elif defined(XP_WIN)
+#include "mozilla/gfx/UnscaledFontDWrite.h"
+#else
+#include "mozilla/gfx/UnscaledFontFreeType.h"
 #endif
 
 namespace std {
@@ -38,10 +42,6 @@ using namespace gfx;
 
 namespace wr {
 
-#ifdef MOZ_ENABLE_FREETYPE
-static MOZ_THREAD_LOCAL(FT_Library) sFTLibrary;
-#endif
-
 struct FontTemplate {
   const uint8_t *mData;
   size_t mSize;
@@ -50,7 +50,6 @@ struct FontTemplate {
   RefPtr<UnscaledFont> mUnscaledFont;
 };
 
-// we need to do special things for linux so that we have fonts per backend
 std::unordered_map<FontKey, FontTemplate> sFontDataTable;
 
 extern "C" {
@@ -68,10 +67,34 @@ AddFontData(WrFontKey aKey, const uint8_t *aData, size_t aSize, uint32_t aIndex,
 }
 
 void
+AddNativeFontHandle(WrFontKey aKey, void* aHandle, uint32_t aIndex) {
+  auto i = sFontDataTable.find(aKey);
+  if (i == sFontDataTable.end()) {
+    FontTemplate font;
+    font.mData = nullptr;
+    font.mSize = 0;
+    font.mIndex = 0;
+    font.mVec = nullptr;
+#ifdef XP_MACOSX
+    font.mUnscaledFont = new UnscaledFontMac(reinterpret_cast<CGFontRef>(aHandle), true);
+#elif defined(XP_WIN)
+    font.mUnscaledFont = new UnscaledFontDWrite(reinterpret_cast<IDWriteFontFace*>(aHandle), nullptr);
+#elif defined(ANDROID)
+    font.mUnscaledFont = new UnscaledFontFreeType(reinterpret_cast<const char*>(aHandle), aIndex);
+#else
+    font.mUnscaledFont = new UnscaledFontFontconfig(reinterpret_cast<const char*>(aHandle), aIndex);
+#endif
+    sFontDataTable[aKey] = font;
+  }
+}
+
+void
 DeleteFontData(WrFontKey aKey) {
   auto i = sFontDataTable.find(aKey);
   if (i != sFontDataTable.end()) {
-    wr_dec_ref_arc(i->second.mVec);
+    if (i->second.mVec) {
+      wr_dec_ref_arc(i->second.mVec);
+    }
     sFontDataTable.erase(i);
   }
 }
@@ -84,12 +107,13 @@ GetUnscaledFont(Translator *aTranslator, wr::FontKey key) {
   if (data.mUnscaledFont) {
     return data.mUnscaledFont;
   }
+  MOZ_ASSERT(data.mData);
   FontType type =
 #ifdef XP_MACOSX
     FontType::MAC;
-#elif XP_WIN
+#elif defined(XP_WIN)
     FontType::DWRITE;
-#elif ANDROID
+#elif defined(ANDROID)
     FontType::FREETYPE;
 #else
     FontType::FONTCONFIG;
@@ -126,21 +150,6 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   if (aOutput.length() < static_cast<size_t>(aSize.height * stride)) {
     return false;
   }
-
-  void* fontContext = nullptr;
-#ifdef MOZ_ENABLE_FREETYPE
-  if (!sFTLibrary.init()) {
-    return false;
-  }
-  if (!sFTLibrary.get()) {
-    FT_Library library = gfx::Factory::NewFTLibrary();
-    if (!library) {
-      return false;
-    }
-    sFTLibrary.set(library);
-  }
-  fontContext = sFTLibrary.get();
-#endif
 
   // In bindings.rs we allocate a buffer filled with opaque white.
   bool uninitialized = false;
@@ -195,7 +204,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
     size_t end = reader.ReadSize();
     size_t extra_end = reader.ReadSize();
 
-    gfx::InlineTranslator translator(dt, fontContext);
+    gfx::InlineTranslator translator(dt);
 
     size_t count = *(size_t*)(aBlob.begin().get() + end);
     for (size_t i = 0; i < count; i++) {

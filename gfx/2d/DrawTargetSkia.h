@@ -85,14 +85,12 @@ public:
   virtual void FillGlyphs(ScaledFont *aFont,
                           const GlyphBuffer &aBuffer,
                           const Pattern &aPattern,
-                          const DrawOptions &aOptions = DrawOptions(),
-                          const GlyphRenderingOptions *aRenderingOptions = nullptr) override;
+                          const DrawOptions &aOptions = DrawOptions()) override;
   virtual void StrokeGlyphs(ScaledFont* aFont,
                             const GlyphBuffer& aBuffer,
                             const Pattern& aPattern,
                             const StrokeOptions& aStrokeOptions = StrokeOptions(),
-                            const DrawOptions& aOptions = DrawOptions(),
-                            const GlyphRenderingOptions* aRenderingOptions = nullptr) override;
+                            const DrawOptions& aOptions = DrawOptions()) override;
   virtual void Mask(const Pattern &aSource,
                     const Pattern &aMask,
                     const DrawOptions &aOptions = DrawOptions()) override;
@@ -172,8 +170,7 @@ private:
                   const GlyphBuffer& aBuffer,
                   const Pattern& aPattern,
                   const StrokeOptions* aStrokeOptions = nullptr,
-                  const DrawOptions& aOptions = DrawOptions(),
-                  const GlyphRenderingOptions* aRenderingOptions = nullptr);
+                  const DrawOptions& aOptions = DrawOptions());
 
   bool UsingSkiaGPU() const;
 
@@ -209,6 +206,7 @@ private:
   sk_sp<SkSurface> mSurface;
   SkCanvas* mCanvas;
   SourceSurfaceSkia* mSnapshot;
+  std::shared_ptr<Mutex> mSnapshotLock;
 
 #ifdef MOZ_WIDGET_COCOA
   friend class BorrowedCGContext;
@@ -218,8 +216,7 @@ private:
   bool FillGlyphsWithCG(ScaledFont* aFont,
                         const GlyphBuffer& aBuffer,
                         const Pattern& aPattern,
-                        const DrawOptions& aOptions = DrawOptions(),
-                        const GlyphRenderingOptions* aRenderingOptions = nullptr);
+                        const DrawOptions& aOptions = DrawOptions());
 
   CGContextRef mCG;
   CGColorSpaceRef mColorSpace;

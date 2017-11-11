@@ -13,7 +13,7 @@ use properties::longhands::system_font::SystemFont;
 use std::fmt;
 use style_traits::{ToCss, StyleParseErrorKind, ParseError};
 use values::computed::{font as computed, Context, Length, NonNegativeLength, ToComputedValue};
-use values::specified::{LengthOrPercentage, NoCalcLength};
+use values::specified::{AllowQuirks, LengthOrPercentage, NoCalcLength, Number};
 use values::specified::length::{AU_PER_PT, AU_PER_PX, FontBaseSize};
 
 const DEFAULT_SCRIPT_MIN_SIZE_PT: u32 = 8;
@@ -148,6 +148,76 @@ impl ToCss for FontSize {
 impl From<LengthOrPercentage> for FontSize {
     fn from(other: LengthOrPercentage) -> Self {
         FontSize::Length(other)
+    }
+}
+
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, ToCss)]
+/// Preserve the readability of text when font fallback occurs
+pub enum FontSizeAdjust {
+    /// None variant
+    None,
+    /// Number variant
+    Number(Number),
+    /// system font
+    System(SystemFont),
+}
+
+impl FontSizeAdjust {
+    #[inline]
+    /// Default value of font-size-adjust
+    pub fn none() -> Self {
+        FontSizeAdjust::None
+    }
+
+    /// Get font-size-adjust with SystemFont
+    pub fn system_font(f: SystemFont) -> Self {
+        FontSizeAdjust::System(f)
+    }
+
+    /// Get SystemFont variant
+    pub fn get_system(&self) -> Option<SystemFont> {
+        if let FontSizeAdjust::System(s) = *self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl ToComputedValue for FontSizeAdjust {
+    type ComputedValue = computed::FontSizeAdjust;
+
+    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
+        match *self {
+            FontSizeAdjust::None => computed::FontSizeAdjust::None,
+            FontSizeAdjust::Number(ref n) => computed::FontSizeAdjust::Number(n.to_computed_value(context)),
+            FontSizeAdjust::System(_) => {
+                #[cfg(feature = "gecko")] {
+                    context.cached_system_font.as_ref().unwrap().font_size_adjust
+                }
+                #[cfg(feature = "servo")] {
+                    unreachable!()
+                }
+            }
+        }
+    }
+
+    fn from_computed_value(computed: &computed::FontSizeAdjust) -> Self {
+        match *computed {
+            computed::FontSizeAdjust::None => FontSizeAdjust::None,
+            computed::FontSizeAdjust::Number(ref v) => FontSizeAdjust::Number(Number::from_computed_value(v)),
+        }
+    }
+}
+
+impl Parse for FontSizeAdjust {
+    /// none | <number>
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<FontSizeAdjust, ParseError<'i>> {
+        if input.try(|input| input.expect_ident_matching("none")).is_ok() {
+            return Ok(FontSizeAdjust::None);
+        }
+
+        Ok(FontSizeAdjust::Number(Number::parse_non_negative(context, input)?))
     }
 }
 
@@ -466,6 +536,167 @@ impl FontSize {
             None
         }
     }
+
+    #[inline]
+    /// Get initial value for specified font size.
+    pub fn medium() -> Self {
+        FontSize::Keyword(computed::KeywordInfo::medium())
+    }
+
+    /// Parses a font-size, with quirks.
+    pub fn parse_quirky<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        allow_quirks: AllowQuirks
+    ) -> Result<FontSize, ParseError<'i>> {
+        if let Ok(lop) = input.try(|i| LengthOrPercentage::parse_non_negative_quirky(context, i, allow_quirks)) {
+            return Ok(FontSize::Length(lop))
+        }
+
+        if let Ok(kw) = input.try(KeywordSize::parse) {
+            return Ok(FontSize::Keyword(kw.into()))
+        }
+
+        try_match_ident_ignore_ascii_case! { input,
+            "smaller" => Ok(FontSize::Smaller),
+            "larger" => Ok(FontSize::Larger),
+        }
+    }
+
+    #[allow(unused_mut)]
+    /// Cascade `font-size` with specified value
+    pub fn cascade_specified_font_size(
+        context: &mut Context,
+        specified_value: &FontSize,
+        mut computed: computed::FontSize
+    ) {
+        // we could use clone_language and clone_font_family() here but that's
+        // expensive. Do it only in gecko mode for now.
+        #[cfg(feature = "gecko")] {
+            // if the language or generic changed, we need to recalculate
+            // the font size from the stored font-size origin information.
+            if context.builder.get_font().gecko().mLanguage.mRawPtr !=
+               context.builder.get_parent_font().gecko().mLanguage.mRawPtr ||
+               context.builder.get_font().gecko().mGenericID !=
+               context.builder.get_parent_font().gecko().mGenericID {
+                if let Some(info) = computed.keyword_info {
+                    computed.size = info.to_computed_value(context);
+                }
+            }
+        }
+
+        let device = context.builder.device;
+        let mut font = context.builder.take_font();
+        let parent_unconstrained = {
+            let parent_font = context.builder.get_parent_font();
+            font.apply_font_size(computed, parent_font, device)
+        };
+        context.builder.put_font(font);
+
+        if let Some(parent) = parent_unconstrained {
+            let new_unconstrained =
+                specified_value.to_computed_value_against(context, FontBaseSize::Custom(Au::from(parent)));
+            context.builder
+                   .mutate_font()
+                   .apply_unconstrained_font_size(new_unconstrained.size);
+        }
+    }
+}
+
+impl Parse for FontSize {
+    /// <length> | <percentage> | <absolute-size> | <relative-size>
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<FontSize, ParseError<'i>> {
+        FontSize::parse_quirky(context, input, AllowQuirks::No)
+    }
+}
+
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
+/// Whether user agents are allowed to synthesize bold or oblique font faces
+/// when a font family lacks bold or italic faces
+pub struct FontSynthesis {
+    /// If a `font-weight` is requested that the font family does not contain,
+    /// the user agent may synthesize the requested weight from the weights
+    /// that do exist in the font family.
+    pub weight: bool,
+    /// If a font-style is requested that the font family does not contain,
+    /// the user agent may synthesize the requested style from the normal face in the font family.
+    pub style: bool,
+}
+
+impl FontSynthesis {
+    #[inline]
+    /// Get the default value of font-synthesis
+    pub fn get_initial_value() -> Self {
+        FontSynthesis {
+            weight: true,
+            style: true
+        }
+    }
+}
+
+impl Parse for FontSynthesis {
+    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<FontSynthesis, ParseError<'i>> {
+        let mut result = FontSynthesis { weight: false, style: false };
+        try_match_ident_ignore_ascii_case! { input,
+            "none" => Ok(result),
+            "weight" => {
+                result.weight = true;
+                if input.try(|input| input.expect_ident_matching("style")).is_ok() {
+                    result.style = true;
+                }
+                Ok(result)
+            },
+            "style" => {
+                result.style = true;
+                if input.try(|input| input.expect_ident_matching("weight")).is_ok() {
+                    result.weight = true;
+                }
+                Ok(result)
+            },
+        }
+    }
+}
+
+impl ToCss for FontSynthesis {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        if self.weight && self.style {
+            dest.write_str("weight style")
+        } else if self.style {
+            dest.write_str("style")
+        } else if self.weight {
+            dest.write_str("weight")
+        } else {
+            dest.write_str("none")
+        }
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<u8> for FontSynthesis {
+    fn from(bits: u8) -> FontSynthesis {
+        use gecko_bindings::structs;
+
+        FontSynthesis {
+            weight: bits & structs::NS_FONT_SYNTHESIS_WEIGHT as u8 != 0,
+            style: bits & structs::NS_FONT_SYNTHESIS_STYLE as u8 != 0
+        }
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<FontSynthesis> for u8 {
+    fn from(v: FontSynthesis) -> u8 {
+        use gecko_bindings::structs;
+
+        let mut bits: u8 = 0;
+        if v.weight {
+            bits |= structs::NS_FONT_SYNTHESIS_WEIGHT as u8;
+        }
+        if v.style {
+            bits |= structs::NS_FONT_SYNTHESIS_STYLE as u8;
+        }
+        bits
+    }
 }
 
 #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToComputedValue)]
@@ -503,5 +734,43 @@ impl Parse for MozScriptMinSize {
     fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<MozScriptMinSize, ParseError<'i>> {
         debug_assert!(false, "Should be set directly by presentation attributes only.");
         Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
+    }
+}
+
+#[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+/// Changes the scriptlevel in effect for the children.
+/// Ref: https://wiki.mozilla.org/MathML:mstyle
+///
+/// The main effect of scriptlevel is to control the font size.
+/// https://www.w3.org/TR/MathML3/chapter3.html#presm.scriptlevel
+pub enum MozScriptLevel {
+    /// Change `font-size` relatively
+    Relative(i32),
+    /// Change `font-size` absolutely
+    Absolute(i32),
+    /// Change `font-size` automatically
+    Auto
+}
+
+impl ToCss for MozScriptLevel {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        match *self {
+            MozScriptLevel::Auto => dest.write_str("auto"),
+            MozScriptLevel::Relative(rel) => rel.to_css(dest),
+            // can only be specified by pres attrs; should not
+            // serialize to anything else
+            MozScriptLevel::Absolute(_) => Ok(()),
+        }
+    }
+}
+
+impl Parse for MozScriptLevel {
+    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<MozScriptLevel, ParseError<'i>> {
+        if let Ok(i) = input.try(|i| i.expect_integer()) {
+            return Ok(MozScriptLevel::Relative(i))
+        }
+        input.expect_ident_matching("auto")?;
+        Ok(MozScriptLevel::Auto)
     }
 }

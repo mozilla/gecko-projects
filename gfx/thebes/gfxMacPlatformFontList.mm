@@ -270,7 +270,7 @@ MacOSFontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBo
         if (!baseFont) {
             return nullptr;
         }
-        unscaledFont = new UnscaledFontMac(baseFont);
+        unscaledFont = new UnscaledFontMac(baseFont, mIsDataUserFont);
         mUnscaledFont = unscaledFont;
     }
 
@@ -1521,7 +1521,7 @@ gfxMacPlatformFontList::MakePlatformFont(const nsAString& aFontName,
     ::CFRelease(fontRef);
 
     // if succeeded and font cmap is good, return the new font
-    if (newFontEntry->mIsValid && NS_SUCCEEDED(newFontEntry->ReadCMAP())) {
+    if (NS_SUCCEEDED(newFontEntry->ReadCMAP())) {
         return newFontEntry.release();
     }
 

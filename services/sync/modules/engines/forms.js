@@ -14,6 +14,7 @@ Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/collection_validator.js");
+Cu.import("resource://services-common/async.js");
 Cu.import("resource://gre/modules/Log.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
                                   "resource://gre/modules/FormHistory.jsm");
@@ -107,7 +108,6 @@ FormEngine.prototype = {
   _storeObj: FormStore,
   _trackerObj: FormTracker,
   _recordObj: FormRec,
-  applyIncomingBatchSize: FORMS_STORE_BATCH_SIZE,
 
   syncPriority: 6,
 
@@ -139,6 +139,7 @@ FormStore.prototype = {
   },
 
   async applyIncomingBatch(records) {
+    Async.checkAppReady();
     // We collect all the changes to be made then apply them all at once.
     this._changes = [];
     let failures = await Store.prototype.applyIncomingBatch.call(this, records);

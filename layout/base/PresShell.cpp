@@ -742,6 +742,7 @@ nsIPresShell::nsIPresShell()
     , mAutoWeakFrames(nullptr)
     , mCanvasBackgroundColor(NS_RGBA(0,0,0,0))
     , mSelectionFlags(0)
+    , mChangeNestCount(0)
     , mRenderFlags(0)
     , mDidInitialize(false)
     , mIsDestroying(false)
@@ -765,7 +766,6 @@ nsIPresShell::nsIPresShell()
     , mFontSizeInflationForceEnabled(false)
     , mFontSizeInflationDisabledInMasterProcess(false)
     , mFontSizeInflationEnabled(false)
-    , mFontSizeInflationEnabledIsDirty(false)
     , mPaintingIsFrozen(false)
     , mIsNeverPainting(false)
     , mInFlush(false)
@@ -788,7 +788,6 @@ PresShell::PresShell()
   , mLastReflowStart(0.0)
   , mLastAnchorScrollPositionY(0)
   , mAPZFocusSequenceNumber(0)
-  , mChangeNestCount(0)
   , mDocumentLoading(false)
   , mIgnoreFrameDestruction(false)
   , mHaveShutDown(false)
@@ -1010,7 +1009,13 @@ PresShell::Init(nsIDocument* aDocument,
   QueryIsActive();
 
   // Setup our font inflation preferences.
-  SetupFontInflation();
+  mFontSizeInflationEmPerLine = nsLayoutUtils::FontSizeInflationEmPerLine();
+  mFontSizeInflationMinTwips = nsLayoutUtils::FontSizeInflationMinTwips();
+  mFontSizeInflationLineThreshold = nsLayoutUtils::FontSizeInflationLineThreshold();
+  mFontSizeInflationForceEnabled = nsLayoutUtils::FontSizeInflationForceEnabled();
+  mFontSizeInflationDisabledInMasterProcess = nsLayoutUtils::FontSizeInflationDisabledInMasterProcess();
+  // We'll compute the font size inflation state in Initialize(), when we know
+  // the document type.
 
   mTouchManager.Init(this, mDocument);
 
@@ -1700,6 +1705,10 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
   NS_ASSERTION(!mDidInitialize, "Why are we being called?");
 
   nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
+
+  RecomputeFontSizeInflationEnabled();
+  MOZ_DIAGNOSTIC_ASSERT(!mIsDestroying);
+
   mDidInitialize = true;
 
 #ifdef DEBUG
@@ -1725,6 +1734,7 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
   // time we do this!
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
   NS_ASSERTION(!rootFrame, "How did that happen, exactly?");
+
   if (!rootFrame) {
     nsAutoScriptBlocker scriptBlocker;
     mFrameConstructor->BeginUpdate();
@@ -3065,10 +3075,9 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
 
   // Search for an anchor element with a matching "name" attribute
   if (!content && htmlDoc) {
-    nsCOMPtr<nsIDOMNodeList> list;
     // Find a matching list of named nodes
-    rv = htmlDoc->GetElementsByName(aAnchorName, getter_AddRefs(list));
-    if (NS_SUCCEEDED(rv) && list) {
+    nsCOMPtr<nsIDOMNodeList> list = mDocument->GetElementsByName(aAnchorName);
+    if (list) {
       uint32_t i;
       // Loop through the named nodes looking for the first anchor
       for (i = 0; true; i++) {
@@ -4028,25 +4037,23 @@ PresShell::HandlePostedReflowCallbacks(bool aInterruptible)
 }
 
 bool
-PresShell::IsSafeToFlush() const
+nsIPresShell::IsSafeToFlush() const
 {
   // Not safe if we are reflowing or in the middle of frame construction
-  bool isSafeToFlush = !mIsReflowing &&
-                         !mChangeNestCount;
+  if (mIsReflowing || mChangeNestCount) {
+    return false;
+  }
 
-  if (isSafeToFlush) {
     // Not safe if we are painting
-    nsViewManager* viewManager = GetViewManager();
-    if (viewManager) {
-      bool isPainting = false;
-      viewManager->IsPainting(isPainting);
-      if (isPainting) {
-        isSafeToFlush = false;
-      }
+  if (nsViewManager* viewManager = GetViewManager()) {
+    bool isPainting = false;
+    viewManager->IsPainting(isPainting);
+    if (isPainting) {
+      return false;
     }
   }
 
-  return isSafeToFlush;
+  return true;
 }
 
 
@@ -4456,11 +4463,6 @@ PresShell::ContentInserted(nsIDocument* aDocument,
       nullptr,
       nsCSSFrameConstructor::InsertionKind::Async);
 
-  if (aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
-    MOZ_ASSERT(container == aDocument);
-    NotifyFontSizeInflationEnabledIsDirty();
-  }
-
   VERIFY_STYLE_TREE;
 }
 
@@ -4504,11 +4506,6 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
 
   mFrameConstructor->ContentRemoved(aMaybeContainer, aChild, oldNextSibling,
                                     nsCSSFrameConstructor::REMOVE_CONTENT);
-
-  if (aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
-    MOZ_ASSERT(container == aDocument);
-    NotifyFontSizeInflationEnabledIsDirty();
-  }
 
   VERIFY_STYLE_TREE;
 }
@@ -5280,7 +5277,7 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
   bool addedScrollingBackgroundColor = (aFlags & APPEND_UNSCROLLED_ONLY);
   if (!aFrame->GetParent() && !addedScrollingBackgroundColor) {
     nsIScrollableFrame* sf =
-      aFrame->PresContext()->PresShell()->GetRootScrollFrameAsScrollable();
+      aFrame->PresShell()->GetRootScrollFrameAsScrollable();
     if (sf) {
       nsCanvasFrame* canvasFrame = do_QueryFrame(sf->GetScrolledFrame());
       if (canvasFrame && canvasFrame->IsVisibleForPainting(&aBuilder)) {
@@ -5569,7 +5566,7 @@ static nsView* FindFloatingViewContaining(nsView* aView, nsPoint aPt)
   nsIFrame* frame = aView->GetFrame();
   if (frame) {
     if (!frame->IsVisibleConsideringAncestors(nsIFrame::VISIBILITY_CROSS_CHROME_CONTENT_BOUNDARY) ||
-        !frame->PresContext()->PresShell()->IsActive()) {
+        !frame->PresShell()->IsActive()) {
       return nullptr;
     }
   }
@@ -5606,7 +5603,7 @@ static nsView* FindViewContaining(nsView* aView, nsPoint aPt)
   nsIFrame* frame = aView->GetFrame();
   if (frame) {
     if (!frame->IsVisibleConsideringAncestors(nsIFrame::VISIBILITY_CROSS_CHROME_CONTENT_BOUNDARY) ||
-        !frame->PresContext()->PresShell()->IsActive()) {
+        !frame->PresShell()->IsActive()) {
       return nullptr;
     }
   }
@@ -5788,7 +5785,7 @@ PresShell::MarkFramesInListApproximatelyVisible(const nsDisplayList& aList,
     }
 
     // Use the presshell containing the frame.
-    auto* presShell = static_cast<PresShell*>(frame->PresContext()->PresShell());
+    auto* presShell = static_cast<PresShell*>(frame->PresShell());
     MOZ_ASSERT(!presShell->AssumeAllFramesVisible());
     if (presShell->mApproximatelyVisibleFrames.EnsureInserted(frame)) {
       // The frame was added to mApproximatelyVisibleFrames, so increment its visible count.
@@ -5922,7 +5919,7 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
                                                    Maybe<VisibleRegions>& aVisibleRegions,
                                                    bool aRemoveOnly /* = false */)
 {
-  MOZ_ASSERT(aFrame->PresContext()->PresShell() == this, "wrong presshell");
+  MOZ_ASSERT(aFrame->PresShell() == this, "wrong presshell");
 
   if (aFrame->TrackingVisibility() &&
       aFrame->StyleVisibility()->IsVisible() &&
@@ -7269,8 +7266,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       return NS_OK;
     }
 
-    PresShell* shell =
-        static_cast<PresShell*>(frame->PresContext()->PresShell());
+    PresShell* shell = static_cast<PresShell*>(frame->PresShell());
     switch (aEvent->mMessage) {
       case eTouchMove:
       case eTouchCancel:
@@ -7299,8 +7295,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
             break;
           }
 
-          shell = static_cast<PresShell*>(
-                      contentFrame->PresContext()->PresShell());
+          shell = static_cast<PresShell*>(contentFrame->PresShell());
           if (shell) {
             break;
           }
@@ -10702,32 +10697,33 @@ nsIPresShell::SetScrollPositionClampingScrollPortSize(nscoord aWidth, nscoord aH
 }
 
 void
-PresShell::SetupFontInflation()
-{
-  mFontSizeInflationEmPerLine = nsLayoutUtils::FontSizeInflationEmPerLine();
-  mFontSizeInflationMinTwips = nsLayoutUtils::FontSizeInflationMinTwips();
-  mFontSizeInflationLineThreshold = nsLayoutUtils::FontSizeInflationLineThreshold();
-  mFontSizeInflationForceEnabled = nsLayoutUtils::FontSizeInflationForceEnabled();
-  mFontSizeInflationDisabledInMasterProcess = nsLayoutUtils::FontSizeInflationDisabledInMasterProcess();
-
-  NotifyFontSizeInflationEnabledIsDirty();
-}
-
-void
 nsIPresShell::RecomputeFontSizeInflationEnabled()
 {
-  mFontSizeInflationEnabledIsDirty = false;
   mFontSizeInflationEnabled = DetermineFontSizeInflationState();
 
-  HandleSystemFontScale();
+  float fontScale = nsLayoutUtils::SystemFontScale();
+  if (fontScale == 0.0f) {
+    return;
+  }
+
+  MOZ_ASSERT(mDocument);
+  MOZ_ASSERT(mPresContext);
+  if (mFontSizeInflationEnabled || mDocument->IsSyntheticDocument()) {
+    mPresContext->SetSystemFontScale(1.0f);
+  } else {
+    mPresContext->SetSystemFontScale(fontScale);
+  }
 }
 
 bool
 nsIPresShell::DetermineFontSizeInflationState()
 {
   MOZ_ASSERT(mPresContext, "our pres context should not be null");
-  if ((FontSizeInflationEmPerLine() == 0 &&
-      FontSizeInflationMinTwips() == 0) || mPresContext->IsChrome()) {
+  if (mPresContext->IsChrome()) {
+    return false;
+  }
+
+  if (FontSizeInflationEmPerLine() == 0 && FontSizeInflationMinTwips() == 0) {
     return false;
   }
 
@@ -10786,33 +10782,6 @@ nsIPresShell::DetermineFontSizeInflationState()
   }
 
   return true;
-}
-
-bool
-nsIPresShell::FontSizeInflationEnabled()
-{
-  if (mFontSizeInflationEnabledIsDirty) {
-    RecomputeFontSizeInflationEnabled();
-  }
-
-  return mFontSizeInflationEnabled;
-}
-
-void
-nsIPresShell::HandleSystemFontScale()
-{
-  float fontScale = nsLayoutUtils::SystemFontScale();
-  if (fontScale == 0.0f) {
-    return;
-  }
-
-  MOZ_ASSERT(mDocument && mPresContext, "our document and pres context should not be null");
-
-  if (!mFontSizeInflationEnabled && !mDocument->IsSyntheticDocument()) {
-    mPresContext->SetSystemFontScale(fontScale);
-  } else {
-    mPresContext->SetSystemFontScale(1.0f);
-  }
 }
 
 void

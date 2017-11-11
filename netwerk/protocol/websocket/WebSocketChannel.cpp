@@ -25,7 +25,7 @@
 #include "nsIDNSRecord.h"
 #include "nsIDNSService.h"
 #include "nsIStreamConverterService.h"
-#include "nsIIOService2.h"
+#include "nsIIOService.h"
 #include "nsIProtocolProxyService.h"
 #include "nsIProxyInfo.h"
 #include "nsIProxiedChannel.h"
@@ -1046,13 +1046,6 @@ public:
   nsresult ConvertStreamToString()
   {
     MOZ_ASSERT(mMsgType == kMsgTypeStream, "Not a stream!");
-
-#ifdef DEBUG
-    // Make sure we got correct length from Blob
-    uint64_t bytes;
-    mMsg.pStream->Available(&bytes);
-    NS_ASSERTION(bytes == mLength, "Stream length != blob length!");
-#endif
 
     nsAutoPtr<nsCString> temp(new nsCString());
     nsresult rv = NS_ReadInputStreamToString(mMsg.pStream, *temp, mLength);
@@ -3475,15 +3468,9 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
     return rv;
   }
 
-  nsCOMPtr<nsIIOService2> io2 = do_QueryInterface(ioService, &rv);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("WebSocketChannel: unable to continue without ioservice2");
-    return rv;
-  }
-
   // Ideally we'd call newChannelFromURIWithLoadInfo here, but that doesn't
   // allow setting proxy uri/flags
-  rv = io2->NewChannelFromURIWithProxyFlags2(
+  rv = ioService->NewChannelFromURIWithProxyFlags2(
               localURI,
               mURI,
               nsIProtocolProxyService::RESOLVE_PREFER_HTTPS_PROXY |

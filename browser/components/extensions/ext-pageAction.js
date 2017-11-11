@@ -66,9 +66,10 @@ this.pageAction = class extends ExtensionAPI {
     if (!this.browserPageAction) {
       this.browserPageAction = PageActions.addAction(new PageActions.Action({
         id: widgetId,
+        extensionID: extension.id,
         title: this.defaults.title,
-        iconURL: this.defaults.icon,
-        shownInUrlbar: true,
+        iconURL: this.getIconData(this.defaults.icon),
+        pinnedToUrlbar: true,
         disabled: true,
         onCommand: (event, buttonNode) => {
           this.handleClick(event.target.ownerGlobal);
@@ -91,7 +92,11 @@ this.pageAction = class extends ExtensionAPI {
 
     this.tabContext.shutdown();
 
-    if (this.browserPageAction) {
+    // Removing the browser page action causes PageActions to forget about it
+    // across app restarts, so don't remove it on app shutdown, but do remove
+    // it on all other shutdowns since there's no guarantee the action will be
+    // coming back.
+    if (reason != "APP_SHUTDOWN" && this.browserPageAction) {
       this.browserPageAction.remove();
       this.browserPageAction = null;
     }
@@ -137,12 +142,21 @@ this.pageAction = class extends ExtensionAPI {
     if (typeof(tabData.icon) == "string") {
       iconURL = IconDetails.escapeUrl(tabData.icon);
     } else {
-      iconURL = Object.entries(tabData.icon).reduce((memo, [size, url]) => {
-        memo[size] = IconDetails.escapeUrl(url);
-        return memo;
-      }, {});
+      iconURL = this.getIconData(tabData.icon);
     }
     this.browserPageAction.setIconURL(iconURL, window);
+  }
+
+  getIconData(icons) {
+    let getIcon = size => {
+      let {icon} = IconDetails.getPreferredIcon(icons, this.extension, size);
+      // TODO: implement theme based icon for pageAction (Bug 1398156)
+      return IconDetails.escapeUrl(icon);
+    };
+    return {
+      "16": getIcon(16),
+      "32": getIcon(32),
+    };
   }
 
   /**

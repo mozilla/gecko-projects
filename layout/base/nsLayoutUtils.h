@@ -394,23 +394,6 @@ public:
    */
   static nsIFrame* GetRealPrimaryFrameFor(const nsIContent* aContent);
 
-  /**
-   * IsGeneratedContentFor returns true if aFrame is the outermost
-   * frame for generated content of type aPseudoElement for aContent.
-   * aFrame *might not* have the aPseudoElement pseudo-style! For example
-   * it might be a table wrapper frame and the inner table frame might
-   * have the pseudo-style.
-   *
-   * @param aContent the content node we're looking at.  If this is
-   *        null, then we just assume that aFrame has the right content
-   *        pointer.
-   * @param aFrame the frame we're looking at
-   * @param aPseudoElement the pseudo type we're interested in
-   * @return whether aFrame is the generated aPseudoElement frame for aContent
-   */
-  static bool IsGeneratedContentFor(nsIContent* aContent, nsIFrame* aFrame,
-                                      nsAtom* aPseudoElement);
-
 #ifdef DEBUG
   // TODO: remove, see bug 598468.
   static bool gPreventAssertInCompareTreePosition;
@@ -2034,11 +2017,6 @@ public:
    * popup frame or the root prescontext's root frame.
    */
   static nsIFrame* GetDisplayRootFrame(nsIFrame* aFrame);
-
-  /**
-   * Find the nearest viewport frame that is an ancestor of the given frame.
-   */
-  static nsIFrame* GetViewportFrame(nsIFrame* aFrame);
 
   /**
    * Get the reference frame that would be used when constructing a

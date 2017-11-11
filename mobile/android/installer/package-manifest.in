@@ -36,6 +36,10 @@
 @BINPATH@/@DLL_PREFIX@nspr4@DLL_SUFFIX@
 #endif
 @BINPATH@/@DLL_PREFIX@lgpllibs@DLL_SUFFIX@
+#ifdef MOZ_FFVPX
+@BINPATH@/@DLL_PREFIX@mozavutil@DLL_SUFFIX@
+@BINPATH@/@DLL_PREFIX@mozavcodec@DLL_SUFFIX@
+#endif
 #ifdef MOZ_OMX_PLUGIN
 @BINPATH@/@DLL_PREFIX@omxplugin@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@omxpluginkk@DLL_SUFFIX@
@@ -71,6 +75,10 @@
 # This should be MOZ_CHILD_PROCESS_NAME, but that has a "lib/" prefix.
 @BINPATH@/@MOZ_CHILD_PROCESS_NAME@
 @BINPATH@/@MOZ_CHILD_PROCESS_NAME_PIE@
+
+#ifdef MOZ_ANDROID_GOOGLE_VR
+@BINPATH@/@DLL_PREFIX@gvr@DLL_SUFFIX@
+#endif
 
 [xpcom]
 @BINPATH@/package-name.txt
@@ -123,7 +131,6 @@
 @BINPATH@/components/dom_notification.xpt
 @BINPATH@/components/dom_html.xpt
 @BINPATH@/components/dom_offline.xpt
-@BINPATH@/components/dom_json.xpt
 @BINPATH@/components/dom_payments.xpt
 @BINPATH@/components/dom_power.xpt
 #ifdef MOZ_ANDROID_GCM
@@ -227,7 +234,6 @@
 @BINPATH@/components/txtsvc.xpt
 @BINPATH@/components/txmgr.xpt
 @BINPATH@/components/uconv.xpt
-@BINPATH@/components/unicharutil.xpt
 @BINPATH@/components/update.xpt
 @BINPATH@/components/uriloader.xpt
 @BINPATH@/components/urlformatter.xpt

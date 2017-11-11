@@ -63,7 +63,6 @@ var ecmaGlobals =
     "Set",
     "SharedArrayBuffer",
     {name: "SIMD", nightly: true},
-    "StopIteration",
     "String",
     "Symbol",
     "SyntaxError",
@@ -343,8 +342,6 @@ var interfaceNamesInGlobalScope =
     "EventSource",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "EventTarget",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "External",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "File",
 // IMPORTANT: Do not change this list without review from a DOM peer!

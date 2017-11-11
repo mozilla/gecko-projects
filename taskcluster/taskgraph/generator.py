@@ -20,16 +20,24 @@ from .util.verify import (
     verify_docs,
     verifications,
 )
+from .config import validate_graph_config
 
 logger = logging.getLogger(__name__)
 
 
+class KindNotFound(Exception):
+    """
+    Raised when trying to load kind from a directory without a kind.yml.
+    """
+
+
 class Kind(object):
 
-    def __init__(self, name, path, config):
+    def __init__(self, name, path, config, graph_config):
         self.name = name
         self.path = path
         self.config = config
+        self.graph_config = graph_config
 
     def _get_loader(self):
         try:
@@ -55,7 +63,7 @@ class Kind(object):
 
         # perform the transformations on the loaded inputs
         trans_config = TransformConfig(self.name, self.path, config, parameters,
-                                       kind_dependencies_tasks)
+                                       kind_dependencies_tasks, self.graph_config)
         tasks = [Task(self.name,
                       label=task_dict['label'],
                       attributes=task_dict['attributes'],
@@ -64,6 +72,31 @@ class Kind(object):
                       dependencies=task_dict.get('dependencies'))
                  for task_dict in transforms(trans_config, inputs)]
         return tasks
+
+    @classmethod
+    def load(cls, root_dir, graph_config, kind_name):
+        path = os.path.join(root_dir, kind_name)
+        kind_yml = os.path.join(path, 'kind.yml')
+        if not os.path.exists(kind_yml):
+            raise KindNotFound(kind_yml)
+
+        logger.debug("loading kind `{}` from `{}`".format(kind_name, path))
+        with open(kind_yml) as f:
+            config = yaml.load(f)
+
+        return cls(kind_name, path, config, graph_config)
+
+
+def load_graph_config(root_dir):
+    config_yml = os.path.join(root_dir, "config.yml")
+    if not os.path.exists(config_yml):
+        raise Exception("Couldn't find taskgraph configuration: {}".format(config_yml))
+
+    logger.debug("loading config from `{}`".format(config_yml))
+    with open(config_yml) as f:
+        config = yaml.load(f)
+
+    return validate_graph_config(config)
 
 
 class TaskGraphGenerator(object):
@@ -179,28 +212,21 @@ class TaskGraphGenerator(object):
         """
         return self._run_until('morphed_task_graph')
 
-    def _load_kinds(self):
-        for path in os.listdir(self.root_dir):
-            path = os.path.join(self.root_dir, path)
-            if not os.path.isdir(path):
+    def _load_kinds(self, graph_config):
+        for kind_name in os.listdir(self.root_dir):
+            try:
+                yield Kind.load(self.root_dir, graph_config, kind_name)
+            except KindNotFound:
                 continue
-            kind_name = os.path.basename(path)
-
-            kind_yml = os.path.join(path, 'kind.yml')
-            if not os.path.exists(kind_yml):
-                continue
-
-            logger.debug("loading kind `{}` from `{}`".format(kind_name, path))
-            with open(kind_yml) as f:
-                config = yaml.load(f)
-
-            yield Kind(kind_name, path, config)
 
     def _run(self):
+        logger.info("Loading graph configuration.")
+        graph_config = load_graph_config(self.root_dir)
+
         logger.info("Loading kinds")
         # put the kinds into a graph and sort topologically so that kinds are loaded
         # in post-order
-        kinds = {kind.name: kind for kind in self._load_kinds()}
+        kinds = {kind.name: kind for kind in self._load_kinds(graph_config)}
         self.verify_kinds(kinds)
 
         edges = set()
@@ -242,7 +268,7 @@ class TaskGraphGenerator(object):
                                     Graph(set(all_tasks.keys()), set()))
         for fltr in self.filters:
             old_len = len(target_task_set.graph.nodes)
-            target_tasks = set(fltr(target_task_set, self.parameters))
+            target_tasks = set(fltr(target_task_set, self.parameters, graph_config))
             target_task_set = TaskGraph(
                 {l: all_tasks[l] for l in target_tasks},
                 Graph(target_tasks, set()))
@@ -257,7 +283,13 @@ class TaskGraphGenerator(object):
         # include all docker-image build tasks here, in case they are needed for a graph morph
         docker_image_tasks = set(t.label for t in full_task_graph.tasks.itervalues()
                                  if t.attributes['kind'] == 'docker-image')
-        target_graph = full_task_graph.graph.transitive_closure(target_tasks | docker_image_tasks)
+        # include all tasks with `always_target` set
+        always_target_tasks = set(t.label for t in full_task_graph.tasks.itervalues()
+                                  if t.attributes.get('always_target'))
+        logger.info('Adding %d tasks with `always_target` attribute' % (
+                    len(always_target_tasks) - len(always_target_tasks & target_tasks)))
+        target_graph = full_task_graph.graph.transitive_closure(
+            target_tasks | docker_image_tasks | always_target_tasks)
         target_task_graph = TaskGraph(
             {l: all_tasks[l] for l in target_graph.nodes},
             target_graph)

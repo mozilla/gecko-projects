@@ -38,6 +38,7 @@ from mozharness.mozilla.tooltool import TooltoolMixin
 from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.l10n.locales import LocalesMixin
 from mozharness.mozilla.mock import MockMixin
+from mozharness.mozilla.secrets import SecretsMixin
 from mozharness.mozilla.updates.balrog import BalrogMixin
 from mozharness.base.python import VirtualenvMixin
 from mozharness.mozilla.taskcluster_helper import Taskcluster
@@ -47,7 +48,7 @@ from mozharness.mozilla.taskcluster_helper import Taskcluster
 class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                          MobileSigningMixin, TransferMixin, TooltoolMixin,
                          BuildbotMixin, PurgeMixin, MercurialScript, BalrogMixin,
-                         VirtualenvMixin):
+                         VirtualenvMixin, SecretsMixin):
     config_options = [[
         ['--locale', ],
         {"action": "extend",
@@ -119,11 +120,21 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
          "type": "string",
          "help": "Override the gecko revision to use (otherwise use buildbot supplied"
                  " value, or en-US revision) "}
+    ], [
+        ['--scm-level'],
+        {"action": "store",
+         "type": "int",
+         "dest": "scm_level",
+         "default": 1,
+         "help": "This sets the SCM level for the branch being built."
+                 " See https://www.mozilla.org/en-US/about/"
+                 "governance/policies/commit/access-policy/"}
     ]]
 
     def __init__(self, require_config_file=True):
         buildscript_kwargs = {
             'all_actions': [
+                "get-secrets",
                 "clobber",
                 "pull",
                 "clone-locales",
@@ -185,6 +196,20 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
         if 'MOZ_SIGNING_SERVERS' in os.environ:
             repack_env['MOZ_SIGN_CMD'] = \
                 subprocess.list2cmdline(self.query_moz_sign_cmd(formats=['jar']))
+
+        if self.query_is_nightly() or self.query_is_nightly_promotion():
+            if self.query_is_nightly():
+                # Nightly promotion needs to set update_channel but not do all
+                # the 'IS_NIGHTLY' automation parts, like uploading symbols
+                # (for now).
+                repack_env["IS_NIGHTLY"] = "yes"
+            # In branch_specifics.py we might set update_channel explicitly.
+            if c.get('update_channel'):
+                repack_env["MOZ_UPDATE_CHANNEL"] = c['update_channel']
+            else:  # Let's just give the generic channel based on branch.
+                repack_env["MOZ_UPDATE_CHANNEL"] = \
+                    "nightly-%s" % (c['branch'],)
+
         self.repack_env = repack_env
         return self.repack_env
 

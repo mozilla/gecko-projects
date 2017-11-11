@@ -35,11 +35,11 @@ public:
 
   nsJSScriptTimeoutHandler();
   // This will call SwapElements on aArguments with an empty array.
-  nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindow* aWindow,
+  nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindowInner* aWindow,
                            Function& aFunction,
                            nsTArray<JS::Heap<JS::Value>>&& aArguments,
                            ErrorResult& aError);
-  nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindow* aWindow,
+  nsJSScriptTimeoutHandler(JSContext* aCx, nsGlobalWindowInner* aWindow,
                            const nsAString& aExpression, bool* aAllowEval,
                            ErrorResult& aError);
   nsJSScriptTimeoutHandler(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
@@ -115,7 +115,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsJSScriptTimeoutHandler)
     nsAutoCString name("nsJSScriptTimeoutHandler");
     if (tmp->mFunction) {
       JSObject* obj = tmp->mFunction->CallablePreserveColor();
-      JSFunction* fun = JS_GetObjectFunction(js::UncheckedUnwrap(obj));
+      JSFunction* fun = JS_GetObjectFunction(js::UncheckedUnwrapWithoutExpose(obj));
       if (fun && JS_GetFunctionId(fun)) {
         JSFlatString *funId = JS_ASSERT_STRING_IS_FLAT(JS_GetFunctionId(fun));
         size_t size = 1 + JS_PutEscapedFlatString(nullptr, 0, funId, 0);
@@ -165,7 +165,7 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsJSScriptTimeoutHandler)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsJSScriptTimeoutHandler)
 
 static bool
-CheckCSPForEval(JSContext* aCx, nsGlobalWindow* aWindow, ErrorResult& aError)
+CheckCSPForEval(JSContext* aCx, nsGlobalWindowInner* aWindow, ErrorResult& aError)
 {
   // if CSP is enabled, and setTimeout/setInterval was called with a string,
   // disable the registration and log an error
@@ -219,7 +219,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler()
 }
 
 nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
-                                                   nsGlobalWindow *aWindow,
+                                                   nsGlobalWindowInner *aWindow,
                                                    Function& aFunction,
                                                    nsTArray<JS::Heap<JS::Value>>&& aArguments,
                                                    ErrorResult& aError)
@@ -238,7 +238,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
 }
 
 nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(JSContext* aCx,
-                                                   nsGlobalWindow *aWindow,
+                                                   nsGlobalWindowInner *aWindow,
                                                    const nsAString& aExpression,
                                                    bool* aAllowEval,
                                                    ErrorResult& aError)
@@ -328,7 +328,7 @@ nsJSScriptTimeoutHandler::GetHandlerText()
 }
 
 already_AddRefed<nsIScriptTimeoutHandler>
-NS_CreateJSTimeoutHandler(JSContext *aCx, nsGlobalWindow *aWindow,
+NS_CreateJSTimeoutHandler(JSContext *aCx, nsGlobalWindowInner *aWindow,
                           Function& aFunction,
                           const Sequence<JS::Value>& aArguments,
                           ErrorResult& aError)
@@ -345,7 +345,7 @@ NS_CreateJSTimeoutHandler(JSContext *aCx, nsGlobalWindow *aWindow,
 }
 
 already_AddRefed<nsIScriptTimeoutHandler>
-NS_CreateJSTimeoutHandler(JSContext* aCx, nsGlobalWindow *aWindow,
+NS_CreateJSTimeoutHandler(JSContext* aCx, nsGlobalWindowInner *aWindow,
                           const nsAString& aExpression, ErrorResult& aError)
 {
   bool allowEval = false;

@@ -49,14 +49,14 @@ nsMeterFrame::~nsMeterFrame()
 }
 
 void
-nsMeterFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsMeterFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   NS_ASSERTION(!GetPrevContinuation(),
                "nsMeterFrame should not have continuations; if it does we "
                "need to call RegUnregAccessKey only for the first.");
   nsCheckboxRadioFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
-  DestroyAnonymousContent(mBarDiv.forget());
-  nsContainerFrame::DestroyFrom(aDestructRoot);
+  aPostDestroyData.AddAnonymousContent(mBarDiv.forget());
+  nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 nsresult
@@ -200,9 +200,8 @@ nsMeterFrame::AttributeChanged(int32_t  aNameSpaceID,
        aAttribute == nsGkAtoms::min )) {
     nsIFrame* barFrame = mBarDiv->GetPrimaryFrame();
     NS_ASSERTION(barFrame, "The meter frame should have a child with a frame!");
-    PresContext()->PresShell()->FrameNeedsReflow(barFrame,
-                                                 nsIPresShell::eResize,
-                                                 NS_FRAME_IS_DIRTY);
+    PresShell()->FrameNeedsReflow(barFrame, nsIPresShell::eResize,
+                                  NS_FRAME_IS_DIRTY);
     InvalidateFrame();
   }
 

@@ -541,11 +541,9 @@ public:
   virtual void RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot) = 0;
 
   /**
-   * Determine if it is safe to flush all pending notifications
-   * @param aIsSafeToFlush true if it is safe, false otherwise.
-   *
+   * Determine if it is safe to flush all pending notifications.
    */
-  virtual bool IsSafeToFlush() const = 0;
+  bool IsSafeToFlush() const;
 
   /**
    * Flush pending notifications of the type specified.  This method
@@ -1507,24 +1505,14 @@ public:
     return mFontSizeInflationDisabledInMasterProcess;
   }
 
-  /**
-   * Determine if font size inflation is enabled. This value is cached until
-   * it becomes dirty.
-   *
-   * @returns true, if font size inflation is enabled; false otherwise.
-   */
-  bool FontSizeInflationEnabled();
+  bool FontSizeInflationEnabled() const {
+    return mFontSizeInflationEnabled;
+  }
 
   /**
-   * Notify the pres shell that an event occurred making the current value of
-   * mFontSizeInflationEnabled invalid. This will schedule a recomputation of
-   * whether font size inflation is enabled on the next call to
-   * FontSizeInflationEnabled().
+   * Recomputes whether font-size inflation is enabled.
    */
-  void NotifyFontSizeInflationEnabledIsDirty()
-  {
-    mFontSizeInflationEnabledIsDirty = true;
-  }
+  void RecomputeFontSizeInflationEnabled();
 
   /**
    * Return true if the most recent interruptible reflow was interrupted.
@@ -1590,22 +1578,10 @@ protected:
   void DoObserveLayoutFlushes();
 
   /**
-   * Do computations necessary to determine if font size inflation is enabled.
-   * This value is cached after computation, as the computation is somewhat
-   * expensive.
-   */
-  void RecomputeFontSizeInflationEnabled();
-
-  /**
-   * Does the actual work of figuring out the current state of font size inflation.
+   * Does the actual work of figuring out the current state of font size
+   * inflation.
    */
   bool DetermineFontSizeInflationState();
-
-  /**
-   * Apply the system font scale from the corresponding pref to the PresContext,
-   * taking into account the current state of font size inflation.
-   */
-  void HandleSystemFontScale();
 
   void RecordAlloc(void* aPtr) {
 #ifdef DEBUG
@@ -1729,6 +1705,11 @@ protected:
   mozilla::Maybe<float>     mResolution;
 
   int16_t                   mSelectionFlags;
+
+  // This is used to protect ourselves from triggering reflow while in the
+  // middle of frame construction and the like... it really shouldn't be
+  // needed, one hopes, but it is for now.
+  uint16_t                  mChangeNestCount;
 
   // Flags controlling how our document is rendered.  These persist
   // between paints and so are tied with retained layer pixels.

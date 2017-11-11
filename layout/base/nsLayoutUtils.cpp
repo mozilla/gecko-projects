@@ -855,7 +855,7 @@ GetScrollFrameFromContent(nsIContent* aContent)
 {
   nsIFrame* frame = aContent->GetPrimaryFrame();
   if (aContent->OwnerDoc()->GetRootElement() == aContent) {
-    nsIPresShell* presShell = frame ? frame->PresContext()->PresShell() : nullptr;
+    nsIPresShell* presShell = frame ? frame->PresShell() : nullptr;
     if (!presShell) {
       presShell = aContent->OwnerDoc()->GetShell();
     }
@@ -1400,28 +1400,36 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
     // rect properties on so we can find the frame later to remove the properties.
     frame->SchedulePaint();
 
+    if (!gfxPrefs::LayoutRetainDisplayList()) {
+      return;
+    }
+
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(frame);
     RetainedDisplayListBuilder* retainedBuilder =
       displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
-    if (retainedBuilder) {
-      nsRect* rect =
-        frame->GetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
-      if (!rect) {
-        rect = new nsRect();
-        frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
-        frame->SetHasOverrideDirtyRegion(true);
-      }
-      if (aHadDisplayPort) {
-        // We only need to build a display list for any new areas added
-        nsRegion newRegion(aNewDisplayPort);
-        newRegion.SubOut(aOldDisplayPort);
-        rect->UnionRect(*rect, newRegion.GetBounds());
-      } else {
-        rect->UnionRect(*rect, aNewDisplayPort);
-      }
+
+    if (!retainedBuilder) {
+      return;
+    }
+
+    nsRect* rect =
+      frame->GetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+
+    if (!rect) {
+      rect = new nsRect();
+      frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
+      frame->SetHasOverrideDirtyRegion(true);
+    }
+
+    if (aHadDisplayPort) {
+      // We only need to build a display list for any new areas added
+      nsRegion newRegion(aNewDisplayPort);
+      newRegion.SubOut(aOldDisplayPort);
+      rect->UnionRect(*rect, newRegion.GetBounds());
+    } else {
+      rect->UnionRect(*rect, aNewDisplayPort);
     }
   }
-
 }
 
 bool
@@ -1733,33 +1741,6 @@ nsLayoutUtils::GetFloatFromPlaceholder(nsIFrame* aFrame) {
   }
 
   return nullptr;
-}
-
-// static
-bool
-nsLayoutUtils::IsGeneratedContentFor(nsIContent* aContent,
-                                     nsIFrame* aFrame,
-                                     nsAtom* aPseudoElement)
-{
-  NS_PRECONDITION(aFrame, "Must have a frame");
-  NS_PRECONDITION(aPseudoElement, "Must have a pseudo name");
-
-  if (!aFrame->IsGeneratedContentFrame()) {
-    return false;
-  }
-  nsIFrame* parent = aFrame->GetParent();
-  NS_ASSERTION(parent, "Generated content can't be root frame");
-  if (parent->IsGeneratedContentFrame()) {
-    // Not the root of the generated content
-    return false;
-  }
-
-  if (aContent && parent->GetContent() != aContent) {
-    return false;
-  }
-
-  return (aFrame->GetContent()->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore) ==
-    (aPseudoElement == nsCSSPseudoElements::before);
 }
 
 // static
@@ -2203,7 +2184,7 @@ nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame, uint32_t aFlags)
         }
       }
       if (aFlags & SCROLLABLE_ALWAYS_MATCH_ROOT) {
-        nsIPresShell* ps = f->PresContext()->PresShell();
+        nsIPresShell* ps = f->PresShell();
         if (ps->GetRootScrollFrame() == f &&
             ps->GetDocument() && ps->GetDocument()->IsRootDisplayDocument()) {
           return scrollableFrame;
@@ -2213,7 +2194,7 @@ nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame, uint32_t aFlags)
     if ((aFlags & SCROLLABLE_FIXEDPOS_FINDS_ROOT) &&
         f->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED &&
         nsLayoutUtils::IsReallyFixedPos(f)) {
-      return f->PresContext()->PresShell()->GetRootScrollFrameAsScrollable();
+      return f->PresShell()->GetRootScrollFrameAsScrollable();
     }
   }
   return nullptr;
@@ -2403,7 +2384,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
   int32_t localAPD = aFrame->PresContext()->AppUnitsPerDevPixel();
   widgetToView = widgetToView.ScaleToOtherAppUnits(rootAPD, localAPD);
-  nsIPresShell* shell = aFrame->PresContext()->PresShell();
+  nsIPresShell* shell = aFrame->PresShell();
 
   // XXX Bug 1224748 - Update nsLayoutUtils functions to correctly handle nsPresShell resolution
   widgetToView = widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(shell));
@@ -2804,7 +2785,7 @@ nsLayoutUtils::FindNearestCommonAncestorFrame(nsIFrame* aFrame1, nsIFrame* aFram
   AutoTArray<nsIFrame*,100> ancestors2;
   nsIFrame* commonAncestor = nullptr;
   if (aFrame1->PresContext() == aFrame2->PresContext()) {
-    commonAncestor = aFrame1->PresContext()->PresShell()->GetRootFrame();
+    commonAncestor = aFrame1->PresShell()->GetRootFrame();
   }
   for (nsIFrame* f = aFrame1; f != commonAncestor;
        f = nsLayoutUtils::GetCrossDocParentFrame(f)) {
@@ -3305,8 +3286,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   }
 
   if (aFlags & IGNORE_ROOT_SCROLL_FRAME) {
-    nsIFrame* rootScrollFrame =
-      aFrame->PresContext()->PresShell()->GetRootScrollFrame();
+    nsIFrame* rootScrollFrame = aFrame->PresShell()->GetRootScrollFrame();
     if (rootScrollFrame) {
       builder.SetIgnoreScrollFrame(rootScrollFrame);
     }
@@ -3487,11 +3467,11 @@ nsLayoutUtils::SetZeroMarginDisplayPortOnAsyncScrollableAncestors(nsIFrame* aFra
     frame = do_QueryFrame(scrollAncestor);
     MOZ_ASSERT(frame);
     MOZ_ASSERT(scrollAncestor->WantAsyncScroll() ||
-      frame->PresContext()->PresShell()->GetRootScrollFrame() == frame);
+      frame->PresShell()->GetRootScrollFrame() == frame);
     if (nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
         !nsLayoutUtils::HasDisplayPort(frame->GetContent())) {
       nsLayoutUtils::SetDisplayPortMargins(
-        frame->GetContent(), frame->PresContext()->PresShell(), ScreenMargin(), 0,
+        frame->GetContent(), frame->PresShell(), ScreenMargin(), 0,
         aRepaintMode);
     }
   }
@@ -3560,7 +3540,7 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
       break;
     }
     MOZ_ASSERT(scrollAncestor->WantAsyncScroll() ||
-      frame->PresContext()->PresShell()->GetRootScrollFrame() == frame);
+      frame->PresShell()->GetRootScrollFrame() == frame);
     if (nsLayoutUtils::HasDisplayPort(frame->GetContent())) {
       scrollAncestor->TriggerDisplayPortExpiration();
       // Stop after the first trigger. If it failed, there's no point in
@@ -3808,6 +3788,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
       builder.SetVisibleRect(visibleRect);
       builder.SetIsBuilding(true);
+      builder.SetAncestorHasApzAwareEventHandler(
+          builder.IsBuildingLayerEventRegions() &&
+          nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell));
 
       const bool paintedPreviously =
         aFrame->HasProperty(nsIFrame::ModifiedFrameList());
@@ -4310,7 +4293,7 @@ void nsLayoutUtils::RectListBuilder::AddRect(const nsRect& aRect) {
 
 nsIFrame* nsLayoutUtils::GetContainingBlockForClientRect(nsIFrame* aFrame)
 {
-  return aFrame->PresContext()->PresShell()->GetRootFrame();
+  return aFrame->PresShell()->GetRootFrame();
 }
 
 nsRect
@@ -4790,8 +4773,7 @@ nsLayoutUtils::IsViewportScrollbarFrame(nsIFrame* aFrame)
   if (!aFrame)
     return false;
 
-  nsIFrame* rootScrollFrame =
-    aFrame->PresContext()->PresShell()->GetRootScrollFrame();
+  nsIFrame* rootScrollFrame = aFrame->PresShell()->GetRootScrollFrame();
   if (!rootScrollFrame)
     return false;
 
@@ -6516,7 +6498,7 @@ nsLayoutUtils::GetClosestLayer(nsIFrame* aFrame)
   }
   if (layer)
     return layer;
-  return aFrame->PresContext()->PresShell()->FrameManager()->GetRootFrame();
+  return aFrame->PresShell()->FrameManager()->GetRootFrame();
 }
 
 SamplingFilter
@@ -7347,26 +7329,6 @@ nsLayoutUtils::GetDisplayRootFrame(nsIFrame* aFrame)
     nsIFrame* parent = GetCrossDocParentFrame(f);
     if (!parent)
       return f;
-    f = parent;
-  }
-}
-
-/* static */ nsIFrame*
-nsLayoutUtils::GetViewportFrame(nsIFrame* aFrame)
-{
-  nsIFrame* f = aFrame;
-
-  for (;;) {
-    MOZ_ASSERT(f);
-    if (f->Type() == LayoutFrameType::Viewport) {
-      return f;
-    }
-
-    nsIFrame* parent = GetCrossDocParentFrame(f);
-    if (!parent) {
-      return f;
-    }
-
     f = parent;
   }
 }
@@ -8881,13 +8843,13 @@ nsLayoutUtils::CalculateExpandedScrollableRect(nsIFrame* aFrame)
 {
   nsRect scrollableRect =
     CalculateScrollableRectForFrame(aFrame->GetScrollTargetFrame(),
-                                    aFrame->PresContext()->PresShell()->GetRootFrame());
+                                    aFrame->PresShell()->GetRootFrame());
   nsSize compSize = CalculateCompositionSizeForFrame(aFrame);
 
-  if (aFrame == aFrame->PresContext()->PresShell()->GetRootScrollFrame()) {
+  if (aFrame == aFrame->PresShell()->GetRootScrollFrame()) {
     // the composition size for the root scroll frame does not include the
     // local resolution, so we adjust.
-    float res = aFrame->PresContext()->PresShell()->GetResolution();
+    float res = aFrame->PresShell()->GetResolution();
     compSize.width = NSToCoordRound(compSize.width / res);
     compSize.height = NSToCoordRound(compSize.height / res);
   }
@@ -9130,16 +9092,16 @@ MaybeReflowForInflationScreenSizeChange(nsPresContext *aPresContext)
 {
   if (aPresContext) {
     nsIPresShell* presShell = aPresContext->GetPresShell();
-    bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
-    presShell->NotifyFontSizeInflationEnabledIsDirty();
+    const bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
+    presShell->RecomputeFontSizeInflationEnabled();
     bool changed = false;
-    if (presShell && presShell->FontSizeInflationEnabled() &&
+    if (presShell->FontSizeInflationEnabled() &&
         presShell->FontSizeInflationMinTwips() != 0) {
       aPresContext->ScreenSizeInchesForFontInflation(&changed);
     }
 
     changed = changed ||
-      (fontInflationWasEnabled != presShell->FontSizeInflationEnabled());
+      fontInflationWasEnabled != presShell->FontSizeInflationEnabled();
     if (changed) {
       nsCOMPtr<nsIDocShell> docShell = aPresContext->GetDocShell();
       if (docShell) {

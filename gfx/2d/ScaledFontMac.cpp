@@ -108,10 +108,12 @@ CreateCTFontFromCGFontWithVariations(CGFontRef aCGFont, CGFloat aSize)
 ScaledFontMac::ScaledFontMac(CGFontRef aFont,
                              const RefPtr<UnscaledFont>& aUnscaledFont,
                              Float aSize,
+                             const Color &aFontSmoothingBackgroundColor,
                              bool aUseFontSmoothing,
                              bool aOwnsFont)
   : ScaledFontBase(aUnscaledFont, aSize)
   , mFont(aFont)
+  , mFontSmoothingBackgroundColor(aFontSmoothingBackgroundColor)
   , mUseFontSmoothing(aUseFontSmoothing)
 {
   if (!sSymbolLookupDone) {
@@ -323,6 +325,31 @@ UnscaledFontMac::GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton)
     return true;
 }
 
+bool
+UnscaledFontMac::GetWRFontDescriptor(WRFontDescriptorOutput aCb, void* aBaton)
+{
+  if (mIsDataFont) {
+    return false;
+  }
+
+  CFStringRef psname = CGFontCopyPostScriptName(mFont);
+  if (!psname) {
+    return false;
+  }
+
+  char buf[256];
+  const char* cstr = CFStringGetCStringPtr(psname, kCFStringEncodingUTF8);
+  if (!cstr) {
+    if (!CFStringGetCString(psname, buf, sizeof(buf), kCFStringEncodingUTF8)) {
+      return false;
+    }
+    cstr = buf;
+  }
+
+  aCb(reinterpret_cast<const uint8_t*>(cstr), strlen(cstr), 0, aBaton);
+  return true;
+}
+
 static void
 CollectVariationsFromDictionary(const void* aKey, const void* aValue, void* aContext)
 {
@@ -378,6 +405,13 @@ ScaledFontMac::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOutOpti
                                         std::vector<FontVariation>* aOutVariations)
 {
     GetVariationsForCTFont(mCTFont, aOutVariations);
+
+    wr::FontInstanceOptions options;
+    options.render_mode = wr::FontRenderMode::Subpixel;
+    options.subpx_dir = wr::SubpixelDirection::Horizontal;
+    options.synthetic_italics = false;
+    options.bg_color = wr::ToColorU(mFontSmoothingBackgroundColor);
+    *aOutOptions = Some(options);
 
     wr::FontInstancePlatformOptions platformOptions;
     platformOptions.font_smoothing = mUseFontSmoothing;
@@ -521,7 +555,7 @@ UnscaledFontMac::CreateScaledFont(Float aGlyphSize,
   }
 
   RefPtr<ScaledFontMac> scaledFont =
-    new ScaledFontMac(fontRef, this, aGlyphSize, true, fontRef != mFont);
+    new ScaledFontMac(fontRef, this, aGlyphSize, Color(), true, fontRef != mFont);
 
   if (!scaledFont->PopulateCairoScaledFont()) {
     gfxWarning() << "Unable to create cairo scaled Mac font.";

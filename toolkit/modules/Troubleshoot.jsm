@@ -104,7 +104,6 @@ const PREFS_BLACKLIST = [
 ];
 
 // Table of getters for various preference types.
-// It's important to use getComplexValue for strings: it returns Unicode (wchars), getCharPref returns UTF-8 encoded chars.
 const PREFS_GETTERS = {};
 
 PREFS_GETTERS[Ci.nsIPrefBranch.PREF_STRING] = (prefs, name) => prefs.getStringPref(name);
@@ -651,7 +650,25 @@ var dataProviders = {
     done({
       exists: userJSFile.exists() && userJSFile.fileSize > 0,
     });
-  }
+  },
+
+  intl: function intl(done) {
+    const osPrefs =
+      Cc["@mozilla.org/intl/ospreferences;1"].getService(Ci.mozIOSPreferences);
+    done({
+      localeService: {
+        requested: Services.locale.getRequestedLocales(),
+        available: Services.locale.getAvailableLocales(),
+        supported: Services.locale.getAppLocalesAsBCP47(),
+        regionalPrefs: Services.locale.getRegionalPrefsLocales(),
+        defaultLocale: Services.locale.defaultLocale,
+      },
+      osPrefs: {
+        systemLocales: osPrefs.getSystemLocales(),
+        regionalPrefsLocales: osPrefs.getRegionalPrefsLocales()
+      },
+    });
+  },
 };
 
 if (AppConstants.MOZ_CRASHREPORTER) {

@@ -4,6 +4,7 @@
 
 import json
 import socket
+import sys
 import time
 
 
@@ -109,13 +110,17 @@ class TcpTransport(object):
 
     @property
     def socket_timeout(self):
+        if self.sock:
+            return self.sock.gettimeout()
+
         return self._socket_timeout
 
     @socket_timeout.setter
     def socket_timeout(self, value):
+        self._socket_timeout = value
+
         if self.sock:
             self.sock.settimeout(value)
-        self._socket_timeout = value
 
     def _unmarshal(self, packet):
         msg = None
@@ -192,13 +197,30 @@ class TcpTransport(object):
             self.sock = None
             raise
 
-        with SocketTimeout(self.sock, 2.0):
-            # first packet is always a JSON Object
-            # which we can use to tell which protocol level we are at
-            raw = self.receive(unmarshal=False)
+        try:
+            with SocketTimeout(self.sock, 60.0):
+                # first packet is always a JSON Object
+                # which we can use to tell which protocol level we are at
+                raw = self.receive(unmarshal=False)
+        except socket.timeout:
+            msg = "Connection attempt failed because no data has been received over the socket: {}"
+            exc, val, tb = sys.exc_info()
+
+            raise exc, msg.format(val), tb
+
         hello = json.loads(raw)
-        self.protocol = hello.get("marionetteProtocol", self.min_protocol_level)
-        self.application_type = hello.get("applicationType")
+        application_type = hello.get("applicationType")
+        protocol = hello.get("marionetteProtocol")
+
+        if application_type != "gecko":
+            raise ValueError("Application type '{}' is not supported".format(application_type))
+
+        if not isinstance(protocol, int) or protocol < self.min_protocol_level:
+            msg = "Earliest supported protocol level is '{}' but got '{}'"
+            raise ValueError(msg.format(self.min_protocol_level, protocol))
+
+        self.application_type = application_type
+        self.protocol = protocol
 
         return (self.protocol, self.application_type)
 

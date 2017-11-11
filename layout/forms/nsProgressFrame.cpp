@@ -48,14 +48,14 @@ nsProgressFrame::~nsProgressFrame()
 }
 
 void
-nsProgressFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsProgressFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   NS_ASSERTION(!GetPrevContinuation(),
                "nsProgressFrame should not have continuations; if it does we "
                "need to call RegUnregAccessKey only for the first.");
   nsCheckboxRadioFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
-  DestroyAnonymousContent(mBarDiv.forget());
-  nsContainerFrame::DestroyFrom(aDestructRoot);
+  aPostDestroyData.AddAnonymousContent(mBarDiv.forget());
+  nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 nsresult
@@ -212,7 +212,7 @@ nsProgressFrame::AttributeChanged(int32_t  aNameSpaceID,
 
   if (aNameSpaceID == kNameSpaceID_None &&
       (aAttribute == nsGkAtoms::value || aAttribute == nsGkAtoms::max)) {
-    auto shell = PresContext()->PresShell();
+    auto shell = PresShell();
     for (auto childFrame : PrincipalChildList()) {
       shell->FrameNeedsReflow(childFrame, nsIPresShell::eResize,
                               NS_FRAME_IS_DIRTY);

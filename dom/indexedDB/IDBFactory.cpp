@@ -143,7 +143,7 @@ IDBFactory::CreateForWindow(nsPIDOMWindowInner* aWindow,
   factory->mWindow = aWindow;
   factory->mTabChild = TabChild::GetFrom(aWindow);
   factory->mEventTarget =
-    nsGlobalWindow::Cast(aWindow)->EventTargetFor(TaskCategory::Other);
+    nsGlobalWindowInner::Cast(aWindow)->EventTargetFor(TaskCategory::Other);
   factory->mInnerWindowID = aWindow->WindowID();
   factory->mPrivateBrowsingMode =
     loadContext && loadContext->UsePrivateBrowsing();
@@ -275,8 +275,7 @@ IDBFactory::CreateForJSInternal(JSContext* aCx,
   factory->mPrincipalInfo = aPrincipalInfo.forget();
   factory->mOwningObject = aOwningObject;
   mozilla::HoldJSObjects(factory.get());
-  factory->mEventTarget = NS_IsMainThread() ?
-    SystemGroup::EventTargetFor(TaskCategory::Other) : GetCurrentThreadEventTarget();
+  factory->mEventTarget = GetCurrentThreadEventTarget();
   factory->mInnerWindowID = aInnerWindowID;
 
   factory.forget(aFactory);
@@ -612,7 +611,6 @@ IDBFactory::OpenInternal(JSContext* aCx,
   MOZ_ASSERT_IF(!mWindow, !mPrivateBrowsingMode);
 
   CommonFactoryRequestParams commonParams;
-  commonParams.privateBrowsingMode() = mPrivateBrowsingMode;
 
   PrincipalInfo& principalInfo = commonParams.principalInfo();
 
@@ -743,7 +741,7 @@ IDBFactory::OpenInternal(JSContext* aCx,
 
   if (mWindow) {
     JS::Rooted<JSObject*> scriptOwner(aCx,
-                                      nsGlobalWindow::Cast(mWindow.get())->FastGetGlobalJSObject());
+                                      nsGlobalWindowInner::Cast(mWindow.get())->FastGetGlobalJSObject());
     MOZ_ASSERT(scriptOwner);
 
     request = IDBOpenDBRequest::CreateForWindow(aCx, this, mWindow, scriptOwner);

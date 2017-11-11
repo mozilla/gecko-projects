@@ -1,10 +1,25 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 :root {
   /* Photon color variables used on the aboutdevtools page */
   --blue-60: #0060df;
   --blue-70: #003eaa;
   --blue-80: #002275;
   --grey-30: #d7d7db;
+  --grey-90: #0c0c0d;
+  --grey-90-alpha-10: rgba(12, 12, 13, 0.1);
+  --grey-90-alpha-20: rgba(12, 12, 13, 0.2);
+  --grey-90-alpha-30: rgba(12, 12, 13, 0.3);
+  --grey-90-alpha-40: rgba(12, 12, 13, 0.4);
+  --grey-90-alpha-50: rgba(12, 12, 13, 0.5);
+  --teal-60: #00c8d7;
+  --red-50: #ff0039;
   --white: #ffffff;
+
+  /* Shared variables */
+  --line-height: 1.5em;
 }
 
 html, body {
@@ -13,16 +28,15 @@ html, body {
 }
 
 p {
-  line-height: 1.5em;
+  line-height: var(--line-height);
 }
 
 .box {
   width: 100%;
   max-width: 850px;
   display: flex;
-  align-items: center;
-  height: 400px;
   flex-shrink: 0;
+  padding: 34px 0 50px 0;
 }
 
 .wrapper {
@@ -34,17 +48,14 @@ p {
 }
 
 .left-pane {
-  width: 360px;
-  height: 100%;
+  width: 300px;
+  height: 300px;
+  margin-inline-end: 20px;
   background-image: url(images/otter.svg);
-  background-size: 80%;
+  background-size: 100%;
   background-position: 50%;
   background-repeat: no-repeat;
   flex-shrink: 0;
-}
-
-.right-pane {
-  height: 250px;
 }
 
 .features {
@@ -80,10 +91,15 @@ p {
   margin: 1em 20px;
 }
 
-.installpage-link {
+.feature-link {
+  display: block;
+}
+
+.external,
+.external:hover,
+.external:visited,
+.external:hover:active {
   color: var(--blue-60);
-  -moz-context-properties: fill;
-  fill: var(--blue-60);
 }
 
 .external::after {
@@ -99,6 +115,9 @@ p {
   background-image: url(images/external-link.svg);
   background-repeat: no-repeat;
   background-size: 16px 16px;
+
+  -moz-context-properties: fill;
+  fill: var(--blue-60);
 }
 
 .title {
@@ -108,10 +127,16 @@ p {
   line-height: 44px;
 }
 
-.installpage-button {
-  display: block;
+.buttons-container {
+  display: flex;
+}
 
-  margin: 2em 0 0 0;
+.buttons-container button:not(:last-child) {
+  margin-right: 10px;
+}
+
+button {
+  margin: 20px 0 0 0;
   padding: 10px 20px;
 
   border: none;
@@ -120,26 +145,43 @@ p {
   font-size: 15px;
   font-weight: 400;
   line-height: 21px;
-
-  background-color: var(--blue-60);
-  color: var(--white);
-  box-shadow: 0 1px 0 rgba(0,0,0,0.23);
   cursor: pointer;
-}
 
-.installpage-button:enabled:hover {
-  background-color: var(--blue-70)
-}
-
-.installpage-button:active,
-.installpage-button:hover:active,
-.installpage-button:enabled:hover:active {
-  background-color: var(--blue-80);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.23);
 }
 
 /* Remove light gray outline when clicking on the button */
-.installpage-button::-moz-focus-inner {
+button::-moz-focus-inner {
   border: 0;
+}
+
+.primary-button {
+  background-color: var(--blue-60);
+  color: var(--white);
+}
+
+.primary-button:enabled:hover {
+  background-color: var(--blue-70)
+}
+
+.primary-button:active,
+.primary-button:hover:active,
+.primary-button:enabled:hover:active {
+  background-color: var(--blue-80);
+}
+
+.default-button {
+  background-color: var(--grey-90-alpha-10);
+}
+
+.default-button:enabled:hover {
+  background-color: var(--grey-90-alpha-20)
+}
+
+.default-button:active,
+.default-button:hover:active,
+.default-button:enabled:hover:active {
+  background-color: var(--grey-90-alpha-30);
 }
 
 [hidden="true"] {
@@ -174,7 +216,9 @@ footer {
 .footer-link {
   display: block;
   margin-top: 10px;
-  -moz-context-properties: fill;
+}
+
+.footer-link::after {
   fill: var(--white);
 }
 

@@ -1478,7 +1478,7 @@ nsHTMLDocument::Open(JSContext* /* unused */,
     rv.Throw(NS_ERROR_NOT_INITIALIZED);
     return nullptr;
   }
-  RefPtr<nsGlobalWindow> win = nsGlobalWindow::Cast(outer);
+  RefPtr<nsGlobalWindowOuter> win = nsGlobalWindowOuter::Cast(outer);
   nsCOMPtr<nsPIDOMWindowOuter> newWindow;
   // XXXbz We ignore aReplace for now.
   rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newWindow));
@@ -1530,6 +1530,13 @@ nsHTMLDocument::Open(JSContext* cx,
     // Note that aborting a parser leaves the parser "active" with its
     // insertion point "not undefined". We track this using mParserAborted,
     // because aborting a parser nulls out mParser.
+    nsCOMPtr<nsIDocument> ret = this;
+    return ret.forget();
+  }
+
+  // Implement Step 6 of:
+  // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-open-steps
+  if (ShouldIgnoreOpens()) {
     nsCOMPtr<nsIDocument> ret = this;
     return ret.forget();
   }
@@ -1947,6 +1954,12 @@ nsHTMLDocument::WriteCommon(JSContext *cx,
     return NS_OK;
   }
 
+  // Implement Step 4.1 of:
+  // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-write-steps
+  if (ShouldIgnoreOpens()) {
+    return NS_OK;
+  }
+
   nsresult rv = NS_OK;
 
   void *key = GenerateParserKey();
@@ -2048,38 +2061,6 @@ nsHTMLDocument::Writeln(JSContext* cx, const Sequence<nsString>& aText,
                         ErrorResult& rv)
 {
   WriteCommon(cx, aText, true, rv);
-}
-
-bool
-nsHTMLDocument::MatchNameAttribute(Element* aElement, int32_t aNamespaceID,
-                                   nsAtom* aAtom, void* aData)
-{
-  NS_PRECONDITION(aElement, "Must have element to work with!");
-
-  if (!aElement->HasName()) {
-    return false;
-  }
-
-  nsString* elementName = static_cast<nsString*>(aData);
-  return
-    aElement->GetNameSpaceID() == kNameSpaceID_XHTML &&
-    aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
-                          *elementName, eCaseMatters);
-}
-
-/* static */
-void*
-nsHTMLDocument::UseExistingNameString(nsINode* aRootNode, const nsString* aName)
-{
-  return const_cast<nsString*>(aName);
-}
-
-NS_IMETHODIMP
-nsHTMLDocument::GetElementsByName(const nsAString& aElementName,
-                                  nsIDOMNodeList** aReturn)
-{
-  *aReturn = GetElementsByName(aElementName).take();
-  return NS_OK;
 }
 
 void

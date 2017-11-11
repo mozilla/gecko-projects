@@ -85,11 +85,15 @@ protected:
                            const IntSize& aSize,
                            const gfx::Rect& aLeftEyeRect,
                            const gfx::Rect& aRightEyeRect) = 0;
+#elif defined(MOZ_ANDROID_GOOGLE_VR)
+  virtual bool SubmitFrame(const mozilla::layers::EGLImageDescriptor* aDescriptor,
+                           const gfx::Rect& aLeftEyeRect,
+                           const gfx::Rect& aRightEyeRect) = 0;
 #endif
 
   VRDisplayInfo mDisplayInfo;
 
-  nsTArray<RefPtr<VRLayerParent>> mLayers;
+  nsTArray<VRLayerParent *> mLayers;
   // Weak reference to mLayers entries are cleared in
   // VRLayerParent destructor
 

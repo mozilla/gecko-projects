@@ -372,11 +372,11 @@ FormAutofillParent.prototype = {
         }
       }
 
-      if (!this.profileStorage.addresses.mergeIfPossible(address.guid, address.record)) {
+      if (!this.profileStorage.addresses.mergeIfPossible(address.guid, address.record, true)) {
         this._recordFormFillingTime("address", "autofill-update", timeStartedFillingMS);
 
-        FormAutofillDoorhanger.show(target, "update").then((state) => {
-          let changedGUIDs = this.profileStorage.addresses.mergeToStorage(address.record);
+        FormAutofillDoorhanger.show(target, "updateAddress").then((state) => {
+          let changedGUIDs = this.profileStorage.addresses.mergeToStorage(address.record, true);
           switch (state) {
             case "create":
               if (!changedGUIDs.length) {
@@ -411,8 +411,8 @@ FormAutofillParent.prototype = {
       this._recordFormFillingTime("address", "manual", timeStartedFillingMS);
 
       // Show first time use doorhanger
-      if (Services.prefs.getBoolPref("extensions.formautofill.firstTimeUse")) {
-        Services.prefs.setBoolPref("extensions.formautofill.firstTimeUse", false);
+      if (FormAutofillUtils.isAutofillAddressesFirstTimeUse) {
+        Services.prefs.setBoolPref(FormAutofillUtils.ADDRESSES_FIRST_TIME_USE_PREF, false);
         FormAutofillDoorhanger.show(target, "firstTimeUse").then((state) => {
           if (state !== "open-pref") {
             return;
@@ -429,27 +429,66 @@ FormAutofillParent.prototype = {
   },
 
   async _onCreditCardSubmit(creditCard, target, timeStartedFillingMS) {
+    // Updates the used status for shield/heartbeat to recognize users who have
+    // used Credit Card Autofill.
+    let setUsedStatus = status => {
+      if (FormAutofillUtils.AutofillCreditCardsUsedStatus < status) {
+        Services.prefs.setIntPref(FormAutofillUtils.CREDITCARDS_USED_STATUS_PREF, status);
+      }
+    };
+
     // We'll show the credit card doorhanger if:
     //   - User applys autofill and changed
-    //   - User fills form manually
-    if (creditCard.guid &&
-        Object.keys(creditCard.record).every(key => creditCard.untouchedFields.includes(key))) {
-      // Add probe to record credit card autofill(without modification).
-      Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill", 1);
-      this._recordFormFillingTime("creditCard", "autofill", timeStartedFillingMS);
-      return;
-    }
-
-    // Add the probe to record credit card manual filling or autofill but modified case.
+    //   - User fills form manually and the filling data is not duplicated to storage
     if (creditCard.guid) {
+      // Indicate that the user has used Credit Card Autofill to fill in a form.
+      setUsedStatus(3);
+
+      let originalCCData = this.profileStorage.creditCards.get(creditCard.guid);
+      let unchanged = Object.keys(creditCard.record).every(field => {
+        if (creditCard.record[field] === "" && !originalCCData[field]) {
+          return true;
+        }
+        // Avoid updating the fields that users don't modify.
+        let untouched = creditCard.untouchedFields.includes(field);
+        if (untouched) {
+          creditCard.record[field] = originalCCData[field];
+        }
+        return untouched;
+      });
+
+      if (unchanged) {
+        this.profileStorage.creditCards.notifyUsed(creditCard.guid);
+        // Add probe to record credit card autofill(without modification).
+        Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill", 1);
+        this._recordFormFillingTime("creditCard", "autofill", timeStartedFillingMS);
+        return;
+      }
+      // Add the probe to record credit card autofill with modification.
       Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_autofill_modified", 1);
       this._recordFormFillingTime("creditCard", "autofill-update", timeStartedFillingMS);
     } else {
+      // Indicate that the user neither sees the doorhanger nor uses Autofill
+      // but somehow has a duplicate record in the storage. Will be reset to 2
+      // if the doorhanger actually shows below.
+      setUsedStatus(1);
+
+      // Add the probe to record credit card manual filling.
       Services.telemetry.scalarAdd("formautofill.creditCards.fill_type_manual", 1);
       this._recordFormFillingTime("creditCard", "manual", timeStartedFillingMS);
     }
 
-    let state = await FormAutofillDoorhanger.show(target, "creditCard");
+    // Early return if it's a duplicate data
+    let dupGuid = this.profileStorage.creditCards.getDuplicateGuid(creditCard.record);
+    if (dupGuid) {
+      this.profileStorage.creditCards.notifyUsed(dupGuid);
+      return;
+    }
+
+    // Indicate that the user has seen the doorhanger.
+    setUsedStatus(2);
+
+    let state = await FormAutofillDoorhanger.show(target, creditCard.guid ? "updateCreditCard" : "addCreditCard");
     if (state == "cancel") {
       return;
     }
@@ -466,7 +505,21 @@ FormAutofillParent.prototype = {
       return;
     }
 
-    this.profileStorage.creditCards.add(creditCard.record);
+    let changedGUIDs = [];
+    if (creditCard.guid) {
+      if (state == "update") {
+        this.profileStorage.creditCards.update(creditCard.guid, creditCard.record, true);
+        changedGUIDs.push(creditCard.guid);
+      } else if ("create") {
+        changedGUIDs.push(this.profileStorage.creditCards.add(creditCard.record));
+      }
+    } else {
+      changedGUIDs.push(...this.profileStorage.creditCards.mergeToStorage(creditCard.record));
+      if (!changedGUIDs.length) {
+        changedGUIDs.push(this.profileStorage.creditCards.add(creditCard.record));
+      }
+    }
+    changedGUIDs.forEach(guid => this.profileStorage.creditCards.notifyUsed(guid));
   },
 
   _onFormSubmit(data, target) {

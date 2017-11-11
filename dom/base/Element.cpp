@@ -1154,6 +1154,25 @@ Element::GetSlot(nsAString& aName)
   GetAttr(kNameSpaceID_None, nsGkAtoms::slot, aName);
 }
 
+// https://dom.spec.whatwg.org/#dom-element-shadowroot
+ShadowRoot*
+Element::GetShadowRootByMode() const
+{
+  /**
+   * 1. Let shadow be context object’s shadow root.
+   * 2. If shadow is null or its mode is "closed", then return null.
+   */
+  ShadowRoot* shadowRoot = GetShadowRoot();
+  if (!shadowRoot || shadowRoot->IsClosed()) {
+    return nullptr;
+  }
+
+  /**
+   * 3. Return shadow.
+   */
+  return shadowRoot;
+}
+
 // https://dom.spec.whatwg.org/#dom-element-attachshadow
 already_AddRefed<ShadowRoot>
 Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
@@ -1214,7 +1233,7 @@ Element::AttachShadowInternal(bool aClosed, ErrorResult& aError)
    * 3. If context object is a shadow host, then throw
    *    an "InvalidStateError" DOMException.
    */
-  if (GetShadowRoot()) {
+  if (GetShadowRoot() || GetXBLBinding()) {
     aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
   }

@@ -25,6 +25,8 @@ var gExceptionPaths = [
 
   // https://github.com/mozilla/activity-stream/issues/3053
   "resource://activity-stream/data/content/tippytop/images/",
+  // https://github.com/mozilla/activity-stream/issues/3758
+  "resource://activity-stream/prerendered/",
 
   // browser/extensions/pdfjs/content/build/pdf.js#1999
   "resource://pdf.js/web/images/",
@@ -58,10 +60,6 @@ var whitelist = [
   {file: "chrome://global/locale/printPreviewProgress.dtd",
    platforms: ["macosx"]},
   {file: "chrome://global/locale/printProgress.dtd", platforms: ["macosx"]},
-  {file: "chrome://global/locale/printdialog.dtd",
-   platforms: ["macosx", "win"]},
-  {file: "chrome://global/locale/printjoboptions.dtd",
-   platforms: ["macosx", "win"]},
 
   // devtools/client/inspector/bin/dev-server.js
   {file: "chrome://devtools/content/inspector/markup/markup.xhtml",
@@ -123,9 +121,6 @@ var whitelist = [
   // These are used in content processes. They are actually referenced.
   {file: "resource://shield-recipe-client-content/shield-content-frame.js"},
   {file: "resource://shield-recipe-client-content/shield-content-process.js"},
-
-  // New L10n API that is not yet used in production
-  {file: "chrome://global/content/l10n.js"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)

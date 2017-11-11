@@ -23,6 +23,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   setTimeout: "resource://gre/modules/Timer.jsm",
   clearTimeout: "resource://gre/modules/Timer.jsm",
   Lz4: "resource://gre/modules/lz4.js",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetters(this, {
@@ -46,6 +47,7 @@ XPCOMUtils.defineLazyGetter(this, "gEncoder",
                               return new TextEncoder();
                             });
 
+
 const MODE_RDONLY   = 0x01;
 const MODE_WRONLY   = 0x02;
 const MODE_CREATE   = 0x08;
@@ -67,6 +69,7 @@ const APP_SEARCH_PREFIX = "resource://search-plugins/";
 
 // See documentation in nsIBrowserSearchService.idl.
 const SEARCH_ENGINE_TOPIC        = "browser-search-engine-modified";
+const REQ_LOCALES_CHANGED_TOPIC  = "intl:requested-locales-changed";
 const QUIT_APPLICATION_TOPIC     = "quit-application";
 
 const SEARCH_ENGINE_REMOVED      = "engine-removed";
@@ -137,7 +140,6 @@ const URLTYPE_SEARCH_HTML  = "text/html";
 const URLTYPE_OPENSEARCH   = "application/opensearchdescription+xml";
 
 const BROWSER_SEARCH_PREF = "browser.search.";
-const LOCALE_PREF = "general.useragent.locale";
 
 const USER_DEFINED = "searchTerms";
 
@@ -953,9 +955,8 @@ function notifyAction(aEngine, aVerb) {
 }
 
 function parseJsonFromStream(aInputStream) {
-  const json = Cc["@mozilla.org/dom/json;1"].createInstance(Ci.nsIJSON);
-  const data = json.decodeFromStream(aInputStream, aInputStream.available());
-  return data;
+  let bytes = NetUtil.readInputStream(aInputStream, aInputStream.available());
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 /**
@@ -2290,7 +2291,7 @@ Engine.prototype = {
     // we'll accept as a 'default' engine anything that has been registered at
     // resource://search-plugins/ even if the file doesn't come from the
     // application folder.  If not, skip costly additional checks.
-    if (!Services.prefs.prefHasUserValue(LOCALE_PREF) &&
+    if (Services.locale.defaultLocale !== Services.locale.getRequestedLocale() &&
         !gEnvironment.get("XPCSHELL_TEST_PROFILE_DIR"))
       return false;
 
@@ -2375,8 +2376,7 @@ Engine.prototype = {
   get _defaultMobileResponseType() {
     let type = URLTYPE_SEARCH_HTML;
 
-    let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
-    let isTablet = sysInfo.get("tablet");
+    let isTablet = Services.sysinfo.get("tablet");
     if (isTablet && this.supportsResponseType("application/x-moz-tabletsearch")) {
       // Check for a tablet-specific search URL override
       type = "application/x-moz-tabletsearch";
@@ -4666,13 +4666,11 @@ SearchService.prototype = {
         this._removeObservers();
         break;
 
-      case "nsPref:changed":
-        if (aVerb == LOCALE_PREF) {
-          // Locale changed. Re-init. We rely on observers, because we can't
-          // return this promise to anyone.
-          this._asyncReInit();
-          break;
-        }
+      case REQ_LOCALES_CHANGED_TOPIC:
+        // Locale changed. Re-init. We rely on observers, because we can't
+        // return this promise to anyone.
+        this._asyncReInit();
+        break;
     }
   },
 
@@ -4727,7 +4725,7 @@ SearchService.prototype = {
     Services.obs.addObserver(this, QUIT_APPLICATION_TOPIC);
 
     if (AppConstants.MOZ_BUILD_APP == "mobile/android") {
-      Services.prefs.addObserver(LOCALE_PREF, this);
+      Services.obs.addObserver(this, REQ_LOCALES_CHANGED_TOPIC);
     }
 
     // The current stage of shutdown. Used to help analyze crash
@@ -4772,7 +4770,7 @@ SearchService.prototype = {
     Services.obs.removeObserver(this, QUIT_APPLICATION_TOPIC);
 
     if (AppConstants.MOZ_BUILD_APP == "mobile/android") {
-      Services.prefs.removeObserver(LOCALE_PREF, this);
+      Services.obs.removeObserver(this, REQ_LOCALES_CHANGED_TOPIC);
     }
   },
 
