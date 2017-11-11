@@ -21,3 +21,7 @@ only-for-build-platforms:
   - win64-nightly/opt
   - linux-nightly/opt
   - linux64-nightly/opt
+
+job-template:
+  shipping-phase: promote
+  shipping-product: firefox

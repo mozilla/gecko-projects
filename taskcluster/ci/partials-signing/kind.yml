@@ -11,3 +11,7 @@ transforms:
 
 kind-dependencies:
   - partials
+
+job-template:
+  shipping-phase: promote
+  shipping-product: firefox
