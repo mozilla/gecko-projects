@@ -20,7 +20,12 @@ jobs:
             nightly: true
         shipping-phase: ship
         shipping-product: fennec
-        worker-type: test-dummy-provisioner/fake-pushapk
+        worker-type:
+            by-project:
+                mozilla-central: scriptworker-prov-v1/pushapk-v1
+                mozilla-beta: scriptworker-prov-v1/pushapk-v1
+                mozilla-release: scriptworker-prov-v1/pushapk-v1
+                default: test-dummy-provisioner/fake-pushapk
         worker:
             upstream-artifacts: # see transforms
             google-play-track: # see transforms

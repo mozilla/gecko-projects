@@ -771,7 +771,7 @@ GenerateAndPushTextMask(nsIFrame* aFrame, gfxContext* aContext,
   {
     // Paint text selection background into sourceCtx.
     gfxContextMatrixAutoSaveRestore save(sourceCtx);
-    sourceCtx->SetMatrix(sourceCtx->CurrentMatrix().PreTranslate(bounds.TopLeft()));
+    sourceCtx->SetMatrixDouble(sourceCtx->CurrentMatrixDouble().PreTranslate(bounds.TopLeft()));
 
     nsLayoutUtils::PaintFrame(aContext, aFrame,
                               nsRect(nsPoint(0, 0), aFrame->GetSize()),
@@ -793,10 +793,10 @@ GenerateAndPushTextMask(nsIFrame* aFrame, gfxContext* aContext,
   }
   RefPtr<gfxContext> maskCtx = gfxContext::CreatePreservingTransformOrNull(maskDT);
   MOZ_ASSERT(maskCtx);
-  gfxMatrix currentMatrix = sourceCtx->CurrentMatrix();
-  maskCtx->SetMatrix(gfxMatrix::Translation(bounds.TopLeft()) *
-                     currentMatrix *
-                     gfxMatrix::Translation(-drawRect.TopLeft()));
+  gfxMatrix currentMatrix = sourceCtx->CurrentMatrixDouble();
+  maskCtx->SetMatrixDouble(gfxMatrix::Translation(bounds.TopLeft()) *
+                           currentMatrix *
+                           gfxMatrix::Translation(-drawRect.TopLeft()));
 
   // Shade text shape into mask A8 surface.
   nsLayoutUtils::PaintFrame(maskCtx, aFrame,
@@ -5589,19 +5589,6 @@ nsDisplayBoxShadowOuter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   return true;
 }
 
-
-LayerState
-nsDisplayBoxShadowOuter::GetLayerState(nsDisplayListBuilder* aBuilder,
-                                       LayerManager* aManager,
-                                       const ContainerLayerParameters& aParameters)
-{
-  if (ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowOuterBoxShadow)) {
-    return LAYER_ACTIVE;
-  }
-
-  return LAYER_NONE;
-}
-
 already_AddRefed<Layer>
 nsDisplayBoxShadowOuter::BuildLayer(nsDisplayListBuilder* aBuilder,
                                     LayerManager* aManager,
@@ -5801,18 +5788,6 @@ nsDisplayBoxShadowInner::CanCreateWebRenderCommands(nsDisplayListBuilder* aBuild
   }
 
   return true;
-}
-
-LayerState
-nsDisplayBoxShadowInner::GetLayerState(nsDisplayListBuilder* aBuilder,
-                                       LayerManager* aManager,
-                                       const ContainerLayerParameters& aParameters)
-{
-  if (ShouldUseAdvancedLayer(aManager, gfxPrefs::LayersAllowInsetBoxShadow)) {
-    return LAYER_ACTIVE;
-  }
-
-  return LAYER_NONE;
 }
 
 already_AddRefed<Layer>
@@ -9171,7 +9146,7 @@ ComputeMaskGeometry(PaintFramesParams& aParams)
                                    frame->PresContext()->AppUnitsPerDevPixel());
 
   gfxContextMatrixAutoSaveRestore matSR(&ctx);
-  ctx.SetMatrix(ctx.CurrentMatrix().PreTranslate(devPixelOffsetToUserSpace));
+  ctx.SetMatrixDouble(ctx.CurrentMatrixDouble().PreTranslate(devPixelOffsetToUserSpace));
 
   // Convert boaderArea and dirtyRect to user space.
   int32_t appUnitsPerDevPixel = frame->PresContext()->AppUnitsPerDevPixel();

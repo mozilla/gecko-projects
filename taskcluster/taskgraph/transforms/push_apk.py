@@ -11,7 +11,7 @@ import functools
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
-from taskgraph.util.schema import Schema
+from taskgraph.util.schema import optionally_keyed_by, resolve_keyed_by, Schema
 from taskgraph.util.scriptworker import get_push_apk_scope, get_push_apk_track, \
     get_push_apk_dry_run_option, get_push_apk_rollout_percentage
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial, \
@@ -37,7 +37,7 @@ push_apk_description_schema = Schema({
     Required('attributes'): object,
     Required('treeherder'): object,
     Required('run-on-projects'): list,
-    Required('worker-type'): basestring,
+    Required('worker-type'): optionally_keyed_by('project', basestring),
     Required('worker'): object,
     Required('scopes'): None,
     Required('deadline-after'): basestring,

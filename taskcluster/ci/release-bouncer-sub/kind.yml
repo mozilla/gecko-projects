@@ -8,7 +8,6 @@ transforms:
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
-
 job-defaults:
       description: release bouncer submission job
       worker-type: buildbot-bridge/buildbot-bridge

@@ -25,8 +25,8 @@
 #include "nsAttrName.h"
 #include "nsEventShell.h"
 #include "nsIURI.h"
+#include "nsTextFormatter.h"
 #include "OuterDocAccessible.h"
-#include "Platform.h"
 #include "Role.h"
 #ifdef MOZ_ACCESSIBILITY_ATK
 #include "RootAccessibleWrap.h"
@@ -94,6 +94,15 @@
 using namespace mozilla;
 using namespace mozilla::a11y;
 using namespace mozilla::dom;
+
+/**
+ * Accessibility service force enable/disable preference.
+ * Supported values:
+ *   Accessibility is force enabled (accessibility should always be enabled): -1
+ *   Accessibility is enabled (will be started upon a request, default value): 0
+ *   Accessibility is force disabled (never enable accessibility):             1
+ */
+#define PREF_ACCESSIBILITY_FORCE_DISABLED "accessibility.force_disabled"
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statics
@@ -267,6 +276,11 @@ New_MaybeImageOrToolbarButtonAccessible(nsIContent* aContent,
   return new ImageAccessibleWrap(aContent, aContext->Document());
 }
 #endif
+
+/**
+ * Cached value of the PREF_ACCESSIBILITY_FORCE_DISABLED preference.
+ */
+static int32_t sPlatformDisabledState = 0;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Markup maps array.
@@ -1384,8 +1398,7 @@ nsAccessibilityService::Shutdown()
   // if someone will try to operate with it.
 
   MOZ_ASSERT(gConsumers, "Accessibility was shutdown already");
-
-  gConsumers = 0;
+  UnsetConsumers(eXPCOM | eMainProcess | ePlatformAPI);
 
   // Remove observers.
   nsCOMPtr<nsIObserverService> observerService =
@@ -1843,6 +1856,47 @@ nsAccessibilityService::CreateAccessibleForXULTree(nsIContent* aContent,
 }
 #endif
 
+void
+nsAccessibilityService::SetConsumers(uint32_t aConsumers) {
+  if (gConsumers & aConsumers) {
+    return;
+  }
+
+  gConsumers |= aConsumers;
+  NotifyOfConsumersChange();
+}
+
+void
+nsAccessibilityService::UnsetConsumers(uint32_t aConsumers) {
+  if (!(gConsumers & aConsumers)) {
+    return;
+  }
+
+  gConsumers &= ~aConsumers;
+  NotifyOfConsumersChange();
+}
+
+void
+nsAccessibilityService::NotifyOfConsumersChange()
+{
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
+
+  if (!observerService) {
+    return;
+  }
+
+  const char16_t* kJSONFmt =
+    u"{ \"XPCOM\": %s, \"MainProcess\": %s, \"PlatformAPI\": %s }";
+  nsString json;
+  nsTextFormatter::ssprintf(json, kJSONFmt,
+    gConsumers & eXPCOM ? "true" : "false",
+    gConsumers & eMainProcess ? "true" : "false",
+    gConsumers & ePlatformAPI ? "true" : "false");
+  observerService->NotifyObservers(
+    nullptr, "a11y-consumers-changed", json.get());
+}
+
 nsAccessibilityService*
 GetOrCreateAccService(uint32_t aNewConsumer)
 {
@@ -1856,7 +1910,7 @@ GetOrCreateAccService(uint32_t aNewConsumer)
 
   MOZ_ASSERT(nsAccessibilityService::gAccessibilityService,
              "Accessible service is not initialized.");
-  nsAccessibilityService::gConsumers |= aNewConsumer;
+  nsAccessibilityService::gAccessibilityService->SetConsumers(aNewConsumer);
   return nsAccessibilityService::gAccessibilityService;
 }
 
@@ -1874,14 +1928,15 @@ MaybeShutdownAccService(uint32_t aFormerConsumer)
       xpcAccessibilityService::IsInUse() ||
       accService->HasXPCDocuments()) {
     // Still used by XPCOM
-    nsAccessibilityService::gConsumers =
-      (nsAccessibilityService::gConsumers & ~aFormerConsumer) |
-      nsAccessibilityService::eXPCOM;
+    if (aFormerConsumer != nsAccessibilityService::eXPCOM) {
+      // Only unset non-XPCOM consumers.
+      accService->UnsetConsumers(aFormerConsumer);
+    }
     return;
   }
 
   if (nsAccessibilityService::gConsumers & ~aFormerConsumer) {
-    nsAccessibilityService::gConsumers &= ~aFormerConsumer;
+    accService->UnsetConsumers(aFormerConsumer);
   } else {
     accService->Shutdown(); // Will unset all nsAccessibilityService::gConsumers
   }
@@ -1928,17 +1983,39 @@ XPCApplicationAcc()
 EPlatformDisabledState
 PlatformDisabledState()
 {
-  static int disabledState = 0xff;
-
-  if (disabledState == 0xff) {
-    disabledState = Preferences::GetInt("accessibility.force_disabled", 0);
-    if (disabledState < ePlatformIsForceEnabled)
-      disabledState = ePlatformIsForceEnabled;
-    else if (disabledState > ePlatformIsDisabled)
-      disabledState = ePlatformIsDisabled;
+  static bool platformDisabledStateCached = false;
+  if (platformDisabledStateCached) {
+    return static_cast<EPlatformDisabledState>(sPlatformDisabledState);
   }
 
-  return (EPlatformDisabledState)disabledState;
+  platformDisabledStateCached = true;
+  Preferences::RegisterCallback(PrefChanged, PREF_ACCESSIBILITY_FORCE_DISABLED);
+  return ReadPlatformDisabledState();
+}
+
+EPlatformDisabledState
+ReadPlatformDisabledState()
+{
+  sPlatformDisabledState = Preferences::GetInt(PREF_ACCESSIBILITY_FORCE_DISABLED, 0);
+  if (sPlatformDisabledState < ePlatformIsForceEnabled) {
+    sPlatformDisabledState = ePlatformIsForceEnabled;
+  } else if (sPlatformDisabledState > ePlatformIsDisabled){
+    sPlatformDisabledState = ePlatformIsDisabled;
+  }
+
+  return static_cast<EPlatformDisabledState>(sPlatformDisabledState);
+}
+
+void
+PrefChanged(const char* aPref, void* aClosure)
+{
+  if (ReadPlatformDisabledState() == ePlatformIsDisabled) {
+    // Force shut down accessibility.
+    nsAccessibilityService* accService = nsAccessibilityService::gAccessibilityService;
+    if (accService && !accService->IsShutdown()) {
+      accService->Shutdown();
+    }
+  }
 }
 
 }
