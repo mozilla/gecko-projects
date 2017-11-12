@@ -71,6 +71,11 @@ def make_task_description(config, jobs):
 
         job['scopes'] = [get_push_apk_scope(config)]
 
+        resolve_keyed_by(
+            job, 'worker-type', item_name=job['name'],
+            project=config.params['project']
+        )
+
         yield job
 
 
