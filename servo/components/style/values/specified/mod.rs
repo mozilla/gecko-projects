@@ -31,7 +31,7 @@ pub use self::background::{BackgroundRepeat, BackgroundSize};
 pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
 pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth, BorderSpacing};
 pub use self::font::{FontSize, FontSizeAdjust, FontSynthesis, FontWeight, FontVariantAlternates};
-pub use self::font::{MozScriptLevel, MozScriptMinSize, XTextZoom};
+pub use self::font::{FontLanguageOverride, MozScriptLevel, MozScriptMinSize, XTextZoom};
 pub use self::box_::{AnimationIterationCount, AnimationName, ScrollSnapType, VerticalAlign};
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
@@ -53,7 +53,7 @@ pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDash
 pub use self::table::XSpan;
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, TextOverflow, WordSpacing};
 pub use self::time::Time;
-pub use self::transform::{TimingFunction, TransformOrigin};
+pub use self::transform::{TimingFunction, Transform, TransformOrigin};
 pub use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 
 #[cfg(feature = "gecko")]

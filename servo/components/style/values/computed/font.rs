@@ -5,6 +5,7 @@
 //! Computed values for font properties
 
 use app_units::Au;
+use byteorder::{BigEndian, ByteOrder};
 use std::fmt;
 use style_traits::ToCss;
 use values::CSSFloat;
@@ -276,6 +277,54 @@ impl FontVariantAlternates {
     }
 }
 
+/// font-language-override can only have a single three-letter
+/// OpenType "language system" tag, so we should be able to compute
+/// it and store it as a 32-bit integer
+/// (see http://www.microsoft.com/typography/otspec/languagetags.htm).
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
+pub struct FontLanguageOverride(pub u32);
+
+impl FontLanguageOverride {
+    #[inline]
+    /// Get computed default value of `font-language-override` with 0
+    pub fn zero() -> FontLanguageOverride {
+        FontLanguageOverride(0)
+    }
+}
+
+impl ToCss for FontLanguageOverride {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        use std::str;
+
+        if self.0 == 0 {
+            return dest.write_str("normal")
+        }
+        let mut buf = [0; 4];
+        BigEndian::write_u32(&mut buf, self.0);
+        // Safe because we ensure it's ASCII during computing
+        let slice = if cfg!(debug_assertions) {
+            str::from_utf8(&buf).unwrap()
+        } else {
+            unsafe { str::from_utf8_unchecked(&buf) }
+        };
+        slice.trim_right().to_css(dest)
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<u32> for FontLanguageOverride {
+    fn from(bits: u32) -> FontLanguageOverride {
+        FontLanguageOverride(bits)
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl From<FontLanguageOverride> for u32 {
+    fn from(v: FontLanguageOverride) -> u32 {
+        v.0
+    }
+}
+
 impl ToComputedValue for specified::MozScriptMinSize {
     type ComputedValue = MozScriptMinSize;
 
@@ -326,12 +375,12 @@ impl ToComputedValue for specified::MozScriptLevel {
                 let parent = cx.builder.get_parent_font().clone__moz_script_level();
                 parent as i32 + rel
             }
-            specified::MozScriptLevel::Absolute(abs) => abs,
+            specified::MozScriptLevel::MozAbsolute(abs) => abs,
         };
         cmp::min(int, i8::MAX as i32) as i8
     }
 
     fn from_computed_value(other: &i8) -> Self {
-        specified::MozScriptLevel::Absolute(*other as i32)
+        specified::MozScriptLevel::MozAbsolute(*other as i32)
     }
 }
