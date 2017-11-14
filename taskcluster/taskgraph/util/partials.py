@@ -90,8 +90,16 @@ def get_partials_artifacts(release_history, platform, locale):
 
 def get_partials_artifact_map(release_history, platform, locale):
     platform = _sanitize_platform(platform)
-    return {k: release_history[platform][locale][k]['buildid']
-            for k in release_history.get(platform, {}).get(locale, {})}
+
+    artifact_map = {}
+    for k in release_history.get(platform, {}).get(locale, {}):
+        details = release_history[platform][locale][k]
+        attributes = ('buildid',
+                      'previousBuildNumber',
+                      'previousVersion')
+        artifact_map[k] = {attr: details[attr] for attr in attributes
+                           if attr in details}
+    return artifact_map
 
 
 def _retry_on_http_errors(url, verify, params, errors):
