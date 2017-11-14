@@ -317,9 +317,8 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         'build', 'build-signing', 'repackage', 'repackage-signing',
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'release-update-verify', 'release-buildbot-update-verify',
-        'upload-generated-sources',
         'partials', 'partials-signing',
-        'beetmover-repackage',
+        'beetmover-repackage', 'release-source',
         'release-final-verify',
     ]
 
@@ -345,7 +344,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         # TODO add shipping_product / shipping_phase
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
                          'release-final-verify', 'partials', 'partials-signing',
-                         'beetmover-repackage',
+                         'beetmover-repackage', 'release-source',
                          'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n'):
             return True
 
@@ -354,7 +353,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
             return True
 
         # TODO: partner repacks
-        # TODO: source task
         # TODO: funsize, all but balrog submission
         # TODO: bbb update verify
         # TODO: tc update verify

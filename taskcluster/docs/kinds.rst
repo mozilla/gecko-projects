@@ -259,6 +259,10 @@ release-version-bump
 --------------------
 Bumps to the next version.
 
+release-source
+--------------------
+Generates source for the release
+
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable

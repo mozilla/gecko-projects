@@ -46,7 +46,7 @@ RELEASE_PROMOTION_CONFIG = {
         'target_tasks_method': '{project}_desktop_promotion',
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
-            'upload-generated-sources',
+            'release-source',
         ],
         'do_not_optimize': [],
     },
