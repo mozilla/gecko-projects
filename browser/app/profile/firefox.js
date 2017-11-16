@@ -470,11 +470,7 @@ pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.loadBookmarksInTabs", false);
 pref("browser.tabs.tabClipWidth", 140);
 pref("browser.tabs.tabMinWidth", 76);
-#ifdef UNIX_BUT_NOT_MAC
-pref("browser.tabs.drawInTitlebar", false);
-#else
 pref("browser.tabs.drawInTitlebar", true);
-#endif
 
 // Offer additional drag space to the user. The drag space
 // will only be shown if browser.tabs.drawInTitlebar is true.
@@ -1463,6 +1459,8 @@ pref("media.eme.vp9-in-mp4.enabled", true);
 #else
 pref("media.eme.vp9-in-mp4.enabled", false);
 #endif
+
+pref("media.eme.hdcp-policy-check.enabled", false);
 
 // Whether we should run a test-pattern through EME GMPs before assuming they'll
 // decode H.264.

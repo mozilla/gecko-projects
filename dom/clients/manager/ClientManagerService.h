@@ -6,6 +6,7 @@
 #ifndef _mozilla_dom_ClientManagerService_h
 #define _mozilla_dom_ClientManagerService_h
 
+#include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsDataHashtable.h"
 
 namespace mozilla {
@@ -30,10 +31,10 @@ public:
   static already_AddRefed<ClientManagerService>
   GetOrCreateInstance();
 
-  void
+  bool
   AddSource(ClientSourceParent* aSource);
 
-  void
+  bool
   RemoveSource(ClientSourceParent* aSource);
 
   ClientSourceParent*

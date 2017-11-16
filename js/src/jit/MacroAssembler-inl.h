@@ -233,6 +233,14 @@ MacroAssembler::callJit(JitCode* callee)
     return currentOffset();
 }
 
+uint32_t
+MacroAssembler::callJit(ImmPtr code)
+{
+    AutoProfilerCallInstrumentation profiler(*this);
+    call(code);
+    return currentOffset();
+}
+
 void
 MacroAssembler::makeFrameDescriptor(Register frameSizeReg, FrameType type, uint32_t headerSize)
 {
@@ -307,26 +315,24 @@ MacroAssembler::PushStubCode()
 void
 MacroAssembler::enterExitFrame(Register cxreg, Register scratch, const VMFunction* f)
 {
+    MOZ_ASSERT(f);
     linkExitFrame(cxreg, scratch);
-    // Push the JitCode pointer. (Keep the code alive, when on the stack)
-    PushStubCode();
     // Push VMFunction pointer, to mark arguments.
     Push(ImmPtr(f));
 }
 
 void
-MacroAssembler::enterFakeExitFrame(Register cxreg, Register scratch, ExitFrameToken token)
+MacroAssembler::enterFakeExitFrame(Register cxreg, Register scratch, ExitFrameType type)
 {
     linkExitFrame(cxreg, scratch);
-    Push(Imm32(int32_t(token)));
-    Push(ImmPtr(nullptr));
+    Push(Imm32(int32_t(type)));
 }
 
 void
 MacroAssembler::enterFakeExitFrameForNative(Register cxreg, Register scratch, bool isConstructing)
 {
-    enterFakeExitFrame(cxreg, scratch, isConstructing ? ExitFrameToken::ConstructNative
-                                                      : ExitFrameToken::CallNative);
+    enterFakeExitFrame(cxreg, scratch, isConstructing ? ExitFrameType::ConstructNative
+                                                      : ExitFrameType::CallNative);
 }
 
 void

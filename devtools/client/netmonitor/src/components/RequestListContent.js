@@ -4,12 +4,9 @@
 
 "use strict";
 
-const {
-  Component,
-  createFactory,
-  DOM,
-  PropTypes,
-} = require("devtools/client/shared/vendor/react");
+const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { HTMLTooltip } = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const Actions = require("../actions/index");
@@ -24,7 +21,7 @@ const RequestListHeader = createFactory(require("./RequestListHeader"));
 const RequestListItem = createFactory(require("./RequestListItem"));
 const RequestListContextMenu = require("../request-list-context-menu");
 
-const { div } = DOM;
+const { div } = dom;
 
 // Tooltip show / hide delay in ms
 const REQUESTS_TOOLTIP_TOGGLE_DELAY = 500;
@@ -47,7 +44,6 @@ class RequestListContent extends Component {
       onItemMouseDown: PropTypes.func.isRequired,
       onSecurityIconMouseDown: PropTypes.func.isRequired,
       onSelectDelta: PropTypes.func.isRequired,
-      onThumbnailMouseDown: PropTypes.func.isRequired,
       onWaterfallMouseDown: PropTypes.func.isRequired,
       scale: PropTypes.number,
       selectedRequestId: PropTypes.string,
@@ -71,6 +67,7 @@ class RequestListContent extends Component {
       getTabTarget: connector.getTabTarget,
       getLongString: connector.getLongString,
       openStatistics: (open) => dispatch(Actions.openStatistics(connector, open)),
+      requestData: connector.requestData,
     });
     this.tooltip = new HTMLTooltip(window.parent.document, { type: "arrow" });
   }
@@ -148,7 +145,7 @@ class RequestListContent extends Component {
     }
 
     let { connector } = this.props;
-    if (requestItem.responseContent && target.closest(".requests-list-icon")) {
+    if (target.closest(".requests-list-file")) {
       return setTooltipImageContent(connector, tooltip, itemEl, requestItem);
     }
 
@@ -221,7 +218,6 @@ class RequestListContent extends Component {
       onCauseBadgeMouseDown,
       onItemMouseDown,
       onSecurityIconMouseDown,
-      onThumbnailMouseDown,
       onWaterfallMouseDown,
       scale,
       selectedRequestId,
@@ -251,7 +247,6 @@ class RequestListContent extends Component {
               onMouseDown: () => onItemMouseDown(item.id),
               onCauseBadgeMouseDown: () => onCauseBadgeMouseDown(item.cause),
               onSecurityIconMouseDown: () => onSecurityIconMouseDown(item.securityState),
-              onThumbnailMouseDown: () => onThumbnailMouseDown(),
               onWaterfallMouseDown: () => onWaterfallMouseDown(),
             }))
           )
@@ -290,13 +285,6 @@ module.exports = connect(
       }
     },
     onSelectDelta: (delta) => dispatch(Actions.selectDelta(delta)),
-    /**
-     * A handler that opens the response tab in the details view if
-     * the thumbnail is clicked.
-     */
-    onThumbnailMouseDown: () => {
-      dispatch(Actions.selectDetailsPanelTab("response"));
-    },
     /**
      * A handler that opens the timing sidebar panel if the waterfall is clicked.
      */

@@ -197,9 +197,23 @@ private:
   GlobalAllocPolicy& mPolicy; // reference to a singleton object.
 };
 
+static int32_t
+MediaDecoderLimitDefault()
+{
+#ifdef MOZ_WIDGET_ANDROID
+  if (jni::GetAPIVersion() < 18) {
+    // Older Android versions have broken support for multiple simultaneous
+    // decoders, see bug 1278574.
+    return 1;
+  }
+#endif
+  // Otherwise, set no decoder limit.
+  return -1;
+}
+
 GlobalAllocPolicy::GlobalAllocPolicy()
   : mMonitor("DecoderAllocPolicy::mMonitor")
-  , mDecoderLimit(MediaPrefs::MediaDecoderLimit())
+  , mDecoderLimit(MediaDecoderLimitDefault())
 {
   SystemGroup::Dispatch(
     TaskCategory::Other,
@@ -1011,9 +1025,11 @@ public:
   void Reset() override
   {
     RefPtr<Wrapper> self = this;
-    mTaskQueue->Dispatch(
-      NS_NewRunnableFunction("MediaFormatReader::DemuxerProxy::Wrapper::Reset",
-                             [self]() { self->mTrackDemuxer->Reset(); }));
+    nsresult rv =
+      mTaskQueue->Dispatch(
+        NS_NewRunnableFunction("MediaFormatReader::DemuxerProxy::Wrapper::Reset",
+                               [self]() { self->mTrackDemuxer->Reset(); }));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   }
 
   nsresult GetNextRandomAccessPoint(TimeUnit* aTime) override
@@ -1070,9 +1086,11 @@ private:
   ~Wrapper()
   {
     RefPtr<MediaTrackDemuxer> trackDemuxer = mTrackDemuxer.forget();
-    mTaskQueue->Dispatch(NS_NewRunnableFunction(
-      "MediaFormatReader::DemuxerProxy::Wrapper::~Wrapper",
-      [trackDemuxer]() { trackDemuxer->BreakCycles(); }));
+    nsresult rv =
+      mTaskQueue->Dispatch(NS_NewRunnableFunction(
+        "MediaFormatReader::DemuxerProxy::Wrapper::~Wrapper",
+        [trackDemuxer]() { trackDemuxer->BreakCycles(); }));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   }
 
   void UpdateRandomAccessPoint()
@@ -1980,7 +1998,8 @@ MediaFormatReader::ScheduleUpdate(TrackType aTrack)
   decoder.mUpdateScheduled = true;
   RefPtr<nsIRunnable> task(NewRunnableMethod<TrackType>(
     "MediaFormatReader::Update", this, &MediaFormatReader::Update, aTrack));
-  OwnerThread()->Dispatch(task.forget());
+  nsresult rv = OwnerThread()->Dispatch(task.forget());
+  MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
 }
 
 bool
@@ -2054,7 +2073,8 @@ MediaFormatReader::UpdateReceivedNewData(TrackType aTrack)
       LOG("Attempting Internal Seek");
       InternalSeek(aTrack, decoder.mTimeThreshold.ref());
     }
-    if (decoder.HasWaitingPromise() && !decoder.IsWaiting()) {
+    if (decoder.HasWaitingPromise() && !decoder.IsWaitingForKey() &&
+        !decoder.IsWaitingForData()) {
       MOZ_ASSERT(!decoder.HasPromise());
       LOG("We have new data. Resolving WaitingPromise");
       decoder.mWaitingPromise.Resolve(decoder.mType, __func__);
@@ -2560,9 +2580,9 @@ MediaFormatReader::Update(TrackType aTrack)
     return;
   }
 
-  if ((decoder.mWaitingForData &&
+  if ((decoder.IsWaitingForData() &&
        (!decoder.mTimeThreshold || decoder.mTimeThreshold.ref().mWaiting)) ||
-      (decoder.mWaitingForKey && decoder.mDecodeRequest.Exists())) {
+      (decoder.IsWaitingForKey())) {
     // Nothing more we can do at present.
     LOGV("Still waiting for data or key. data(%d)/key(%d)",
          decoder.mWaitingForData,
@@ -2657,7 +2677,7 @@ MediaFormatReader::WaitForData(MediaData::Type aType)
   TrackType trackType = aType == MediaData::VIDEO_DATA ?
     TrackType::kVideoTrack : TrackType::kAudioTrack;
   auto& decoder = GetDecoderData(trackType);
-  if (!decoder.IsWaiting()) {
+  if (!decoder.IsWaitingForData() && !decoder.IsWaitingForKey()) {
     // We aren't waiting for anything.
     return WaitForDataPromise::CreateAndResolve(decoder.mType, __func__);
   }
@@ -2878,8 +2898,10 @@ MediaFormatReader::ScheduleSeek()
     return;
   }
   mSeekScheduled = true;
-  OwnerThread()->Dispatch(NewRunnableMethod(
-    "MediaFormatReader::AttemptSeek", this, &MediaFormatReader::AttemptSeek));
+  nsresult rv =
+    OwnerThread()->Dispatch(NewRunnableMethod(
+      "MediaFormatReader::AttemptSeek", this, &MediaFormatReader::AttemptSeek));
+  MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
 }
 
 void

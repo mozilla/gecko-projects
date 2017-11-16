@@ -4,12 +4,9 @@
 
 "use strict";
 
-const {
-  Component,
-  createFactory,
-  DOM,
-  PropTypes,
-} = require("devtools/client/shared/vendor/react");
+const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const I = require("devtools/client/shared/vendor/immutable");
 const { propertiesEqual } = require("../utils/request-utils");
 const { RESPONSE_HEADERS } = require("../constants");
@@ -36,7 +33,7 @@ const RequestListColumnTransferredSize = createFactory(require("./RequestListCol
 const RequestListColumnType = createFactory(require("./RequestListColumnType"));
 const RequestListColumnWaterfall = createFactory(require("./RequestListColumnWaterfall"));
 
-const { div } = DOM;
+const { div } = dom;
 
 /**
  * Used by shouldComponentUpdate: compare two items, and compare only properties
@@ -48,7 +45,6 @@ const UPDATED_REQ_ITEM_PROPS = [
   "mimeType",
   "eventTimings",
   "securityState",
-  "responseContentDataUri",
   "status",
   "statusText",
   "fromCache",
@@ -87,7 +83,6 @@ class RequestListItem extends Component {
       onFocusedNodeChange: PropTypes.func,
       onMouseDown: PropTypes.func.isRequired,
       onSecurityIconMouseDown: PropTypes.func.isRequired,
-      onThumbnailMouseDown: PropTypes.func.isRequired,
       onWaterfallMouseDown: PropTypes.func.isRequired,
       waterfallWidth: PropTypes.number,
     };
@@ -126,7 +121,6 @@ class RequestListItem extends Component {
       onMouseDown,
       onCauseBadgeMouseDown,
       onSecurityIconMouseDown,
-      onThumbnailMouseDown,
       onWaterfallMouseDown,
     } = this.props;
 
@@ -145,7 +139,7 @@ class RequestListItem extends Component {
       },
         columns.get("status") && RequestListColumnStatus({ item }),
         columns.get("method") && RequestListColumnMethod({ item }),
-        columns.get("file") && RequestListColumnFile({ item, onThumbnailMouseDown }),
+        columns.get("file") && RequestListColumnFile({ item }),
         columns.get("protocol") && RequestListColumnProtocol({ item }),
         columns.get("scheme") && RequestListColumnScheme({ item }),
         columns.get("domain") && RequestListColumnDomain({ item,

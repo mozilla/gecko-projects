@@ -381,7 +381,7 @@ WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey
     return true;
   }
 
-  RefPtr<DataSourceSurface> dSurf = SharedSurfacesParent::Acquire(aExtId);
+  RefPtr<DataSourceSurface> dSurf = SharedSurfacesParent::Get(aExtId);
   if (dSurf) {
     if (!gfxEnv::EnableWebRenderRecording()) {
       wr::ImageDescriptor descriptor(dSurf->GetSize(), dSurf->Stride(),
@@ -670,11 +670,23 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
   mScrollData.SetFocusTarget(aFocusTarget);
   UpdateAPZ(false);
 
-  // XXX Call DidComposite at correct timing.
-  TimeStamp now = TimeStamp::Now();
-  HoldPendingTransactionId(mWrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
-  mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
-
+  if (!aCommands.IsEmpty()) {
+    uint32_t wrEpoch = GetNextWrEpoch();
+    // Send empty UpdatePipelineResources to WebRender just to notify a new epoch.
+    // The epoch is used to know a timing of calling DidComposite().
+    // This is much simpler than tracking an epoch of AsyncImagePipeline.
+    wr::ResourceUpdateQueue resourceUpdates;
+    mApi->UpdatePipelineResources(resourceUpdates, mPipelineId, wr::NewEpoch(wrEpoch));
+    HoldPendingTransactionId(wrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
+  } else {
+    HoldPendingTransactionId(mWrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
+    // If WebRenderBridgeParent does not have pending DidComposites,
+    // send DidComposite now.
+    if (mPendingTransactionIds.empty()) {
+      TimeStamp now = TimeStamp::Now();
+      mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
+    }
+  }
   return IPC_OK();
 }
 
@@ -855,6 +867,7 @@ WebRenderBridgeParent::RecvRemovePipelineIdForCompositable(const wr::PipelineId&
   wrHost->ClearWrBridge();
   mAsyncImageManager->RemoveAsyncImagePipeline(aPipelineId);
   mAsyncCompositables.Remove(wr::AsUint64(aPipelineId));
+  mApi->RemovePipeline(aPipelineId);
   return IPC_OK();
 }
 
@@ -889,10 +902,6 @@ mozilla::ipc::IPCResult
 WebRenderBridgeParent::RecvRemoveExternalImageId(const ExternalImageId& aImageId)
 {
   if (mDestroyed) {
-    return IPC_OK();
-  }
-
-  if (SharedSurfacesParent::Release(aImageId)) {
     return IPC_OK();
   }
 

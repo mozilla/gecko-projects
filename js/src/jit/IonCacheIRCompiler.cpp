@@ -358,15 +358,13 @@ IonCacheIRCompiler::callVM(MacroAssembler& masm, const VMFunction& fun)
 {
     MOZ_ASSERT(calledPrepareVMCall_);
 
-    JitCode* code = cx_->runtime()->jitRuntime()->getVMWrapper(fun);
-    if (!code)
-        return false;
+    uint8_t* code = cx_->runtime()->jitRuntime()->getVMWrapper(fun);
 
     uint32_t frameSize = fun.explicitStackSlots() * sizeof(void*);
     uint32_t descriptor = MakeFrameDescriptor(frameSize, JitFrame_IonICCall,
                                               ExitFrameLayout::Size());
     masm.Push(Imm32(descriptor));
-    masm.callJit(code);
+    masm.callJit(ImmPtr(code));
 
     // Remove rest of the frame left on the stack. We remove the return address
     // which is implicitly poped when returning.
@@ -1095,7 +1093,7 @@ IonCacheIRCompiler::emitCallNativeGetterResult()
 
     if (!masm.icBuildOOLFakeExitFrame(GetReturnAddressToIonCode(cx_), save))
         return false;
-    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameToken::IonOOLNative);
+    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameType::IonOOLNative);
 
     // Construct and execute call.
     masm.setupUnalignedABICall(scratch);
@@ -1153,7 +1151,7 @@ IonCacheIRCompiler::emitCallProxyGetResult()
 
     if (!masm.icBuildOOLFakeExitFrame(GetReturnAddressToIonCode(cx_), save))
         return false;
-    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameToken::IonOOLProxy);
+    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameType::IonOOLProxy);
 
     // Make the call.
     masm.setupUnalignedABICall(scratch);
@@ -2006,7 +2004,7 @@ IonCacheIRCompiler::emitCallNativeSetter()
 
     if (!masm.icBuildOOLFakeExitFrame(GetReturnAddressToIonCode(cx_), save))
         return false;
-    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameToken::IonOOLNative);
+    masm.enterFakeExitFrame(argJSContext, scratch, ExitFrameType::IonOOLNative);
 
     // Make the call.
     masm.setupUnalignedABICall(scratch);

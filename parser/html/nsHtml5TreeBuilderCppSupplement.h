@@ -76,8 +76,8 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
 {
   NS_PRECONDITION(aAttributes, "Got null attributes.");
   NS_PRECONDITION(aName, "Got null name.");
-  NS_PRECONDITION(aNamespace == kNameSpaceID_XHTML || 
-                  aNamespace == kNameSpaceID_SVG || 
+  NS_PRECONDITION(aNamespace == kNameSpaceID_XHTML ||
+                  aNamespace == kNameSpaceID_SVG ||
                   aNamespace == kNameSpaceID_MathML,
                   "Bogus namespace.");
 
@@ -123,8 +123,11 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
   }
 
   nsIContentHandle* content = AllocateContentHandle();
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
+  }
   treeOp->Init(aNamespace,
                aName,
                aAttributes,
@@ -170,8 +173,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
               srcset, sizes, type, media);
           }
         } else if (nsGkAtoms::script == aName) {
-          nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-          NS_ASSERTION(treeOp, "Tree op allocation failed.");
+          nsHtml5TreeOperation* treeOp =
+            mOpQueue.AppendElement(mozilla::fallible);
+          if (MOZ_UNLIKELY(!treeOp)) {
+            MarkAsBrokenAndRequestSuspensionWithoutBuilder(
+              NS_ERROR_OUT_OF_MEMORY);
+            return nullptr;
+          }
           treeOp->Init(eTreeOpSetScriptLineNumberAndFreeze, content, tokenizer->getLineNumber());
 
           nsHtml5String url =
@@ -240,8 +248,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
               url, nullptr, nullptr, nullptr, nullptr);
           }
         } else if (nsGkAtoms::style == aName) {
-          nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-          NS_ASSERTION(treeOp, "Tree op allocation failed.");
+          nsHtml5TreeOperation* treeOp =
+            mOpQueue.AppendElement(mozilla::fallible);
+          if (MOZ_UNLIKELY(!treeOp)) {
+            MarkAsBrokenAndRequestSuspensionWithoutBuilder(
+              NS_ERROR_OUT_OF_MEMORY);
+            return nullptr;
+          }
           treeOp->Init(eTreeOpSetStyleLineNumber, content, tokenizer->getLineNumber());
         } else if (nsGkAtoms::html == aName) {
           nsHtml5String url =
@@ -284,8 +297,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
               url, nullptr, nullptr, nullptr, nullptr);
           }
         } else if (nsGkAtoms::script == aName) {
-          nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-          NS_ASSERTION(treeOp, "Tree op allocation failed.");
+          nsHtml5TreeOperation* treeOp =
+            mOpQueue.AppendElement(mozilla::fallible);
+          if (MOZ_UNLIKELY(!treeOp)) {
+            MarkAsBrokenAndRequestSuspensionWithoutBuilder(
+              NS_ERROR_OUT_OF_MEMORY);
+            return nullptr;
+          }
           treeOp->Init(eTreeOpSetScriptLineNumberAndFreeze, content, tokenizer->getLineNumber());
 
           nsHtml5String url =
@@ -308,8 +326,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
               false);
           }
         } else if (nsGkAtoms::style == aName) {
-          nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-          NS_ASSERTION(treeOp, "Tree op allocation failed.");
+          nsHtml5TreeOperation* treeOp =
+            mOpQueue.AppendElement(mozilla::fallible);
+          if (MOZ_UNLIKELY(!treeOp)) {
+            MarkAsBrokenAndRequestSuspensionWithoutBuilder(
+              NS_ERROR_OUT_OF_MEMORY);
+            return nullptr;
+          }
           treeOp->Init(eTreeOpSetStyleLineNumber, content, tokenizer->getLineNumber());
 
           nsHtml5String url =
@@ -330,15 +353,21 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
   } else if (aNamespace != kNameSpaceID_MathML) {
     // No speculative loader--just line numbers and defer/async check
     if (nsGkAtoms::style == aName) {
-      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-      NS_ASSERTION(treeOp, "Tree op allocation failed.");
+      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+      if (MOZ_UNLIKELY(!treeOp)) {
+        MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+        return nullptr;
+      }
       treeOp->Init(eTreeOpSetStyleLineNumber, content, tokenizer->getLineNumber());
     } else if (nsGkAtoms::script == aName) {
-      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-      NS_ASSERTION(treeOp, "Tree op allocation failed.");
+      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+      if (MOZ_UNLIKELY(!treeOp)) {
+        MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+        return nullptr;
+      }
       treeOp->Init(eTreeOpSetScriptLineNumberAndFreeze, content, tokenizer->getLineNumber());
       if (aNamespace == kNameSpaceID_XHTML) {
-        mCurrentHtmlScriptIsAsyncOrDefer = 
+        mCurrentHtmlScriptIsAsyncOrDefer =
           aAttributes->contains(nsHtml5AttributeName::ATTR_SRC) &&
           (aAttributes->contains(nsHtml5AttributeName::ATTR_ASYNC) ||
            aAttributes->contains(nsHtml5AttributeName::ATTR_DEFER));
@@ -347,8 +376,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
       if (nsGkAtoms::html == aName) {
         nsHtml5String url =
           aAttributes->getValue(nsHtml5AttributeName::ATTR_MANIFEST);
-        nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-        NS_ASSERTION(treeOp, "Tree op allocation failed.");
+        nsHtml5TreeOperation* treeOp =
+          mOpQueue.AppendElement(mozilla::fallible);
+        if (MOZ_UNLIKELY(!treeOp)) {
+          MarkAsBrokenAndRequestSuspensionWithoutBuilder(
+            NS_ERROR_OUT_OF_MEMORY);
+          return nullptr;
+        }
         if (url) {
           nsString
             urlString; // Not Auto, because using it to hold nsStringBuffer*
@@ -362,13 +396,13 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
           aAttributes->getValue(nsHtml5AttributeName::ATTR_HREF);
         if (url) {
           mViewSource->AddBase(url);
-        } 
+        }
       }
     }
   }
 
   // End wall of code for speculative loading
-  
+
   return content;
 }
 
@@ -387,8 +421,11 @@ nsHtml5TreeBuilder::createElement(int32_t aNamespace,
       nsHtml5TreeOperation::SetFormElement(static_cast<nsIContent*>(content),
         static_cast<nsIContent*>(aFormElement));
     } else {
-      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-      NS_ASSERTION(treeOp, "Tree op allocation failed.");
+      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+      if (MOZ_UNLIKELY(!treeOp)) {
+        MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+        return nullptr;
+      }
       treeOp->Init(eTreeOpSetFormElement, content, aFormElement);
     }
   }
@@ -407,11 +444,14 @@ nsHtml5TreeBuilder::createHtmlElementSetAsRoot(nsHtml5HtmlAttributes* aAttribute
     nsresult rv = nsHtml5TreeOperation::AppendToDocument(static_cast<nsIContent*>(content),
                                                          mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
   } else {
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return nullptr;
+    }
     treeOp->Init(eTreeOpAppendToDocument, content);
   }
   return content;
@@ -474,8 +514,11 @@ nsHtml5TreeBuilder::detachFromParent(nsIContentHandle* aElement)
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpDetach, aElement);
 }
 
@@ -493,13 +536,16 @@ nsHtml5TreeBuilder::appendElement(nsIContentHandle* aChild, nsIContentHandle* aP
                                                static_cast<nsIContent*>(aParent),
                                                mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpAppend, aChild, aParent);
 }
 
@@ -515,13 +561,16 @@ nsHtml5TreeBuilder::appendChildrenToNewParent(nsIContentHandle* aOldParent, nsIC
       static_cast<nsIContent*>(aNewParent),
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpAppendChildrenToNewParent, aOldParent, aNewParent);
 }
 
@@ -541,12 +590,12 @@ nsHtml5TreeBuilder::insertFosterParentedCharacters(char16_t* aBuffer, int32_t aS
       static_cast<nsIContent*>(aTable),
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  char16_t* bufferCopy = new (mozilla::fallible) char16_t[aLength];
+  auto bufferCopy = MakeUniqueFallible<char16_t[]>(aLength);
   if (!bufferCopy) {
     // Just assigning mBroken instead of generating tree op. The caller
     // of tokenizeBuffer() will call MarkAsBroken() as appropriate.
@@ -555,11 +604,14 @@ nsHtml5TreeBuilder::insertFosterParentedCharacters(char16_t* aBuffer, int32_t aS
     return;
   }
 
-  memcpy(bufferCopy, aBuffer, aLength * sizeof(char16_t));
-  
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
-  treeOp->Init(eTreeOpFosterParentText, bufferCopy, aLength, aStackParent, aTable);
+  memcpy(bufferCopy.get(), aBuffer, aLength * sizeof(char16_t));
+
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+  treeOp->Init(eTreeOpFosterParentText, bufferCopy.release(), aLength, aStackParent, aTable);
 }
 
 void
@@ -576,13 +628,16 @@ nsHtml5TreeBuilder::insertFosterParentedChild(nsIContentHandle* aChild, nsIConte
       static_cast<nsIContent*>(aTable),
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpFosterParent, aChild, aStackParent, aTable);
 }
 
@@ -601,12 +656,12 @@ nsHtml5TreeBuilder::appendCharacters(nsIContentHandle* aParent, char16_t* aBuffe
                                deepTreeSurrogateParent : aParent),
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  char16_t* bufferCopy = new (mozilla::fallible) char16_t[aLength];
+  auto bufferCopy = MakeUniqueFallible<char16_t[]>(aLength);
   if (!bufferCopy) {
     // Just assigning mBroken instead of generating tree op. The caller
     // of tokenizeBuffer() will call MarkAsBroken() as appropriate.
@@ -615,11 +670,14 @@ nsHtml5TreeBuilder::appendCharacters(nsIContentHandle* aParent, char16_t* aBuffe
     return;
   }
 
-  memcpy(bufferCopy, aBuffer, aLength * sizeof(char16_t));
-  
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
-  treeOp->Init(eTreeOpAppendText, bufferCopy, aLength,
+  memcpy(bufferCopy.get(), aBuffer, aLength * sizeof(char16_t));
+
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+  treeOp->Init(eTreeOpAppendText, bufferCopy.release(), aLength,
       deepTreeSurrogateParent ? deepTreeSurrogateParent : aParent);
 }
 
@@ -641,12 +699,12 @@ nsHtml5TreeBuilder::appendComment(nsIContentHandle* aParent, char16_t* aBuffer, 
       aLength,
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  char16_t* bufferCopy = new (mozilla::fallible) char16_t[aLength];
+  auto bufferCopy = MakeUniqueFallible<char16_t[]>(aLength);
   if (!bufferCopy) {
     // Just assigning mBroken instead of generating tree op. The caller
     // of tokenizeBuffer() will call MarkAsBroken() as appropriate.
@@ -655,11 +713,14 @@ nsHtml5TreeBuilder::appendComment(nsIContentHandle* aParent, char16_t* aBuffer, 
     return;
   }
 
-  memcpy(bufferCopy, aBuffer, aLength * sizeof(char16_t));
-  
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
-  treeOp->Init(eTreeOpAppendComment, bufferCopy, aLength, aParent);
+  memcpy(bufferCopy.get(), aBuffer, aLength * sizeof(char16_t));
+
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+  treeOp->Init(eTreeOpAppendComment, bufferCopy.release(), aLength, aParent);
 }
 
 void
@@ -674,12 +735,12 @@ nsHtml5TreeBuilder::appendCommentToDocument(char16_t* aBuffer, int32_t aStart, i
       aLength,
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  char16_t* bufferCopy = new (mozilla::fallible) char16_t[aLength];
+  auto bufferCopy = MakeUniqueFallible<char16_t[]>(aLength);
   if (!bufferCopy) {
     // Just assigning mBroken instead of generating tree op. The caller
     // of tokenizeBuffer() will call MarkAsBroken() as appropriate.
@@ -688,11 +749,14 @@ nsHtml5TreeBuilder::appendCommentToDocument(char16_t* aBuffer, int32_t aStart, i
     return;
   }
 
-  memcpy(bufferCopy, aBuffer, aLength * sizeof(char16_t));
-  
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
-  treeOp->Init(eTreeOpAppendCommentToDocument, bufferCopy, aLength);
+  memcpy(bufferCopy.get(), aBuffer, aLength * sizeof(char16_t));
+
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+  treeOp->Init(eTreeOpAppendCommentToDocument, bufferCopy.release(), aLength);
 }
 
 void
@@ -713,13 +777,16 @@ nsHtml5TreeBuilder::addAttributesToElement(nsIContentHandle* aElement, nsHtml5Ht
       aAttributes,
       mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(aElement, aAttributes);
 }
 
@@ -734,8 +801,11 @@ nsHtml5TreeBuilder::markMalformedIfScript(nsIContentHandle* aElement)
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpMarkMalformedIfScript, aElement);
 }
 
@@ -773,13 +843,16 @@ nsHtml5TreeBuilder::appendDoctypeToDocument(nsAtom* aName,
     nsresult rv = nsHtml5TreeOperation::AppendDoctypeToDocument(
       name, publicId, systemId, mBuilder);
     if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
+      MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
     return;
   }
 
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(aName, publicId, systemId);
   // nsXMLContentSink can flush here, but what's the point?
   // It can also interrupt here, but we can't.
@@ -825,8 +898,11 @@ nsHtml5TreeBuilder::elementPushed(int32_t aNamespace, nsAtom* aName, nsIContentH
       // InnerHTML and DOMParser shouldn't start layout anyway
       return;
     }
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->Init(eTreeOpStartLayout);
     return;
   }
@@ -882,17 +958,23 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName, nsIContentH
       return;
     }
     if (mCurrentHtmlScriptIsAsyncOrDefer) {
-      NS_ASSERTION(aNamespace == kNameSpaceID_XHTML, 
+      NS_ASSERTION(aNamespace == kNameSpaceID_XHTML,
                    "Only HTML scripts may be async/defer.");
-      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-      NS_ASSERTION(treeOp, "Tree op allocation failed.");
-      treeOp->Init(eTreeOpRunScriptAsyncDefer, aElement);      
+      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+      if (MOZ_UNLIKELY(!treeOp)) {
+        MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+        return;
+      }
+      treeOp->Init(eTreeOpRunScriptAsyncDefer, aElement);
       mCurrentHtmlScriptIsAsyncOrDefer = false;
       return;
     }
     requestSuspension();
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->InitScript(aElement);
     return;
   }
@@ -901,8 +983,11 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName, nsIContentH
       nsHtml5TreeOperation::DoneAddingChildren(static_cast<nsIContent*>(aElement));
       return;
     }
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->Init(eTreeOpDoneAddingChildren, aElement);
     return;
   }
@@ -914,8 +999,11 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName, nsIContentH
       mBuilder->UpdateStyleSheet(static_cast<nsIContent*>(aElement));
       return;
     }
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->Init(eTreeOpUpdateStyleSheet, aElement);
     return;
   }
@@ -925,8 +1013,11 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName, nsIContentH
         nsHtml5TreeOperation::SvgLoad(static_cast<nsIContent*>(aElement));
         return;
       }
-      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-      NS_ASSERTION(treeOp, "Tree op allocation failed.");
+      nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+      if (MOZ_UNLIKELY(!treeOp)) {
+        MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+        return;
+      }
       treeOp->Init(eTreeOpSvgLoad, aElement);
     }
     return;
@@ -943,14 +1034,20 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName, nsIContentH
       nsHtml5TreeOperation::DoneAddingChildren(static_cast<nsIContent*>(aElement));
       return;
     }
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->Init(eTreeOpDoneAddingChildren, aElement);
     return;
   }
   if (aName == nsGkAtoms::meta && !fragment && !mBuilder) {
-    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-    NS_ASSERTION(treeOp, "Tree op allocation failed.");
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+    if (MOZ_UNLIKELY(!treeOp)) {
+      MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     treeOp->Init(eTreeOpProcessMeta, aElement);
     return;
   }
@@ -1094,7 +1191,7 @@ nsHtml5TreeBuilder::FlushLoads()
 }
 
 void
-nsHtml5TreeBuilder::SetDocumentCharset(NotNull<const Encoding*> aEncoding, 
+nsHtml5TreeBuilder::SetDocumentCharset(NotNull<const Encoding*> aEncoding,
                                        int32_t aCharsetSource)
 {
   if (mBuilder) {
@@ -1115,8 +1212,11 @@ nsHtml5TreeBuilder::StreamEnded()
 {
   MOZ_ASSERT(!mBuilder, "Must not call StreamEnded with builder.");
   MOZ_ASSERT(!fragment, "Must not parse fragments off the main thread.");
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpStreamEnded);
 }
 
@@ -1129,8 +1229,11 @@ nsHtml5TreeBuilder::NeedsCharsetSwitchTo(NotNull<const Encoding*> aEncoding,
     MOZ_ASSERT_UNREACHABLE("Must never switch charset with builder.");
     return;
   }
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(eTreeOpNeedsCharsetSwitchTo,
                aEncoding,
                aCharsetSource,
@@ -1185,7 +1288,7 @@ void
 nsHtml5TreeBuilder::MarkAsBrokenFromPortability(nsresult aRv)
 {
   if (mBuilder) {
-    MarkAsBrokenAndRequestSuspension(aRv);
+    MarkAsBrokenAndRequestSuspensionWithBuilder(aRv);
     return;
   }
   mBroken = aRv;
@@ -1252,8 +1355,11 @@ nsHtml5TreeBuilder::documentMode(nsHtml5DocumentMode m)
     mSpeculativeLoadQueue.AppendElement()->InitSetDocumentMode(m);
     return;
   }
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
   treeOp->Init(m);
 }
 
@@ -1263,8 +1369,11 @@ nsHtml5TreeBuilder::getDocumentFragmentForTemplate(nsIContentHandle* aTemplate)
   if (mBuilder) {
     return nsHtml5TreeOperation::GetDocumentFragmentForTemplate(static_cast<nsIContent*>(aTemplate));
   }
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
+  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement(mozilla::fallible);
+  if (MOZ_UNLIKELY(!treeOp)) {
+    MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
+  }
   nsIContentHandle* fragHandle = AllocateContentHandle();
   treeOp->Init(eTreeOpGetDocumentFragmentForTemplate, aTemplate, fragHandle);
   return fragHandle;
