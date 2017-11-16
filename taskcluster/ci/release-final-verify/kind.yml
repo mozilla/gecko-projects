@@ -41,7 +41,7 @@ job-defaults:
 jobs:
     firefox:
         description: final verify
-        shipping-phase: publish
+        shipping-phase: push
         shipping-product: firefox
         worker:
             env:
@@ -63,7 +63,7 @@ jobs:
 
     devedition:
         description: final verify
-        shipping-phase: publish
+        shipping-phase: push
         shipping-product: devedition
         worker:
             env:

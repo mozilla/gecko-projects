@@ -16,7 +16,7 @@ job-defaults:
    description: Uptake monitoring job
    worker-type: buildbot-bridge/buildbot-bridge
    run-on-projects: []
-   shipping-phase: publish
+   shipping-phase: push
    index:
       type: release
    run:

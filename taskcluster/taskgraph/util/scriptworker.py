@@ -88,14 +88,19 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
 Used for both `BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK` and `get_release_build_number`
 """
 BEETMOVER_CANDIDATES_TARGET_TASKS = set([
-    'candidates_fennec',
-    'maple_desktop_promotion',
-    'mozilla-beta_desktop_promotion'
+    'promote_fennec',
+    'promote_firefox',
+    'promote_devedition'
 ])
-BEETMOVER_PUBLISH_TARGET_TASKS = set([
-    'publish_fennec',
+BEETMOVER_PUSH_TARGET_TASKS = set([
+    'push_fennec',
+    'ship_fennec',
+    'push_firefox',
+    'ship_firefox',
+    'push_devedition',
+    'ship_devedition',
 ])
-BEETMOVER_RELEASE_TARGET_TASKS = BEETMOVER_CANDIDATES_TARGET_TASKS | BEETMOVER_PUBLISH_TARGET_TASKS
+BEETMOVER_RELEASE_TARGET_TASKS = BEETMOVER_CANDIDATES_TARGET_TASKS | BEETMOVER_PUSH_TARGET_TASKS
 
 """Map beetmover tasks aliases to sets of target task methods.
 
@@ -115,7 +120,7 @@ BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
 ], [
     'all-candidates-tasks', BEETMOVER_CANDIDATES_TARGET_TASKS
 ], [
-    'all-publish-tasks', BEETMOVER_PUBLISH_TARGET_TASKS
+    'all-push-tasks', BEETMOVER_PUSH_TARGET_TASKS
 ]]
 
 """Map the beetmover scope aliases to the actual scopes.
@@ -124,7 +129,7 @@ BEETMOVER_BUCKET_SCOPES = {
     'all-candidates-tasks': {
         'all-release-branches': 'project:releng:beetmover:bucket:release',
     },
-    'all-publish-tasks': {
+    'all-push-tasks': {
         'all-release-branches': 'project:releng:beetmover:bucket:release',
     },
     'all-nightly-tasks': {
@@ -137,7 +142,7 @@ BEETMOVER_BUCKET_SCOPES = {
 """
 BEETMOVER_ACTION_SCOPES = {
     'all-candidates-tasks': 'project:releng:beetmover:action:push-to-candidates',
-    'all-publish-tasks': 'project:releng:beetmover:action:push-to-releases',
+    'all-push-tasks': 'project:releng:beetmover:action:push-to-releases',
     'all-nightly-tasks': 'project:releng:beetmover:action:push-to-nightly',
     'default': 'project:releng:beetmover:action:push-to-staging',
 }

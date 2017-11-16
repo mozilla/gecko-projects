@@ -223,13 +223,17 @@ release-binary-transparency
 ---------------------------
 Binary transparency to issue a certificate
 
-release-notify-publish
+release-notify-push
 ----------------------
-Notify when publishing a release.
+Notify when a release has been pushed to CDNs.
+
+release-notify-ship
+----------------------
+Notify when a release has been shipped.
 
 release-notify-promote
 ----------------------
-Notify when promoting a release.
+Notify when a release has been promoted.
 
 release-bouncer-sub
 -------------------

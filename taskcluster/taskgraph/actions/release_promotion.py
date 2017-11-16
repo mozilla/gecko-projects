@@ -22,17 +22,16 @@ from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
 
 RELEASE_PROMOTION_CONFIG = {
     'promote_fennec': {
-        'target_tasks_method': 'candidates_fennec',
+        'target_tasks_method': 'promote_fennec',
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             "beetmover", "beetmover-checksums", "checksums-signing",
             "nightly-l10n", "nightly-l10n-signing", "release-bouncer-sub",
             "upload-generated-sources", "upload-symbols",
         ],
-        'do_not_optimize': [],
     },
-    'publish_fennec': {
-        'target_tasks_method': 'publish_fennec',
+    'ship_fennec': {
+        'target_tasks_method': 'ship_fennec',
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'release-bouncer-sub', 'beetmover', 'beetmover-checksums',
@@ -40,37 +39,65 @@ RELEASE_PROMOTION_CONFIG = {
             'beetmover-repackage-signing', "checksums-signing",
             'release-notify-promote',
         ],
-        'do_not_optimize': [],
     },
     'promote_firefox': {
-        'target_tasks_method': '{project}_desktop_promotion',
+        'target_tasks_method': 'promote_firefox',
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'release-source',
         ],
-        'do_not_optimize': [],
     },
-    'publish_firefox': {
-        'target_tasks_method': 'publish_firefox',
+    'push_firefox': {
+        'target_tasks_method': 'push_firefox',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+            'partials', 'partials-signing', 'beetmover-repackage',
+        ],
+    },
+    'ship_firefox': {
+        'target_tasks_method': 'ship_firefox',
         'previous_graph_kinds': [
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
             'partials', 'partials-signing', 'beetmover-repackage',
             'balrog',
         ],
-        'do_not_optimize': [],
+    },
+    'promote_devedition': {
+        'target_tasks_method': 'promote_devedition',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            'release-source',
+        ],
+    },
+    'push_devedition': {
+        'target_tasks_method': 'push_devedition',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+            'partials', 'partials-signing', 'beetmover-repackage',
+        ],
+    },
+    'ship_devedition': {
+        'target_tasks_method': 'ship_devedition',
+        'previous_graph_kinds': [
+            'build', 'build-signing', 'repackage', 'repackage-signing',
+            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
+            'partials', 'partials-signing', 'beetmover-repackage',
+        ],
     },
 }
 
 VERSION_BUMP_FLAVORS = (
-    'publish_fennec',
-    'publish_firefox',
-    'publish_devedition',
+    'ship_fennec',
+    'ship_firefox',
+    'ship_devedition',
 )
 
 UPTAKE_MONITORING_PLATFORMS_FLAVORS = (
-    'publish_firefox',
-    'publish_devedition',
+    'push_firefox',
+    'push_devedition',
 )
 
 PARTIAL_UPDATES_FLAVORS = UPTAKE_MONITORING_PLATFORMS_FLAVORS + (
@@ -251,7 +278,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
         'previous_graph_kinds', promotion_config['previous_graph_kinds']
     )
     do_not_optimize = input.get(
-        'do_not_optimize', promotion_config['do_not_optimize']
+        'do_not_optimize', promotion_config.get('do_not_optimize', [])
     )
 
     # make parameters read-write

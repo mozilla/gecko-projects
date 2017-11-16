@@ -193,4 +193,4 @@ For release promotion jobs, this is the product we are shipping.
 
 shipping_phase
 ==============
-For release promotion jobs, this is the shipping phase (promote, publish, ship).
+For release promotion jobs, this is the shipping phase (build, promote, push, ship).

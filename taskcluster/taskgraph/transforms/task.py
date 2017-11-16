@@ -177,8 +177,9 @@ task_description_schema = Schema({
     # release promotion phase that this task belongs to.
     Required('shipping-phase', default=None): Any(
         None,
+        'build',
         'promote',
-        'publish',
+        'push',
         'ship',
     ),
 
