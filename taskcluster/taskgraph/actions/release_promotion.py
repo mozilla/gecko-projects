@@ -23,69 +23,27 @@ from taskgraph.util.attributes import RELEASE_PROMOTION_PROJECTS
 RELEASE_PROMOTION_CONFIG = {
     'promote_fennec': {
         'target_tasks_method': 'promote_fennec',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            "beetmover", "beetmover-checksums", "checksums-signing",
-            "nightly-l10n", "nightly-l10n-signing", "release-bouncer-sub",
-            "upload-generated-sources", "upload-symbols",
-        ],
     },
     'ship_fennec': {
         'target_tasks_method': 'ship_fennec',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'release-bouncer-sub', 'beetmover', 'beetmover-checksums',
-            'beetmover-l10n', 'beetmover-repackage',
-            'beetmover-repackage-signing', "checksums-signing",
-            'release-notify-promote',
-        ],
     },
     'promote_firefox': {
         'target_tasks_method': 'promote_firefox',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'release-source',
-        ],
     },
     'push_firefox': {
         'target_tasks_method': 'push_firefox',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-            'partials', 'partials-signing', 'beetmover-repackage',
-        ],
     },
     'ship_firefox': {
         'target_tasks_method': 'ship_firefox',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-            'partials', 'partials-signing', 'beetmover-repackage',
-            'balrog',
-        ],
     },
     'promote_devedition': {
         'target_tasks_method': 'promote_devedition',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'release-source',
-        ],
     },
     'push_devedition': {
         'target_tasks_method': 'push_devedition',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-            'partials', 'partials-signing', 'beetmover-repackage',
-        ],
     },
     'ship_devedition': {
         'target_tasks_method': 'ship_devedition',
-        'previous_graph_kinds': [
-            'build', 'build-signing', 'repackage', 'repackage-signing',
-            'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-            'partials', 'partials-signing', 'beetmover-repackage',
-        ],
     },
 }
 
@@ -157,9 +115,9 @@ def is_release_promotion_available(parameters):
                 'description': ('Optional: the target task method to use to generate '
                                 'the new graph.'),
             },
-            'previous_graph_kinds': {
+            'rebuild_kinds': {
                 'type': 'array',
-                'description': ('Optional: an array of kinds to use from the previous '
+                'description': ('Optional: an array of kinds to ignore from the previous '
                                 'graph(s).'),
                 'items': {
                     'type': 'string',
@@ -274,8 +232,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
         'target_tasks_method',
         promotion_config['target_tasks_method'].format(project=parameters['project'])
     )
-    previous_graph_kinds = input.get(
-        'previous_graph_kinds', promotion_config['previous_graph_kinds']
+    rebuild_kinds = input.get(
+        'rebuild_kinds', promotion_config.get('rebuild_kinds', [])
     )
     do_not_optimize = input.get(
         'do_not_optimize', promotion_config.get('do_not_optimize', [])
@@ -297,7 +255,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     full_task_graph = get_artifact(previous_graph_ids[0], "public/full-task-graph.json")
     _, full_task_graph = TaskGraph.from_json(full_task_graph)
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
-        full_task_graph, previous_graph_ids, previous_graph_kinds
+        full_task_graph, previous_graph_ids, rebuild_kinds
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
