@@ -28,7 +28,8 @@ def add_command(config, tasks):
             chunked = deepcopy(task)
             chunked["scopes"] = [
                 "project:releng:buildbot-bridge:builder-name:{}".format(
-                    buildername
+                    # In scopes, "branch" is called "project"
+                    buildername.replace("branch", "project")
                 )
             ]
             chunked["label"] = "release-update-verify-{}-{}/{}".format(

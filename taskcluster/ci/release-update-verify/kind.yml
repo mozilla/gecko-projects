@@ -42,11 +42,11 @@ jobs:
             env:
                 CHANNEL:
                     by-project:
-                        jamun: "beta"
-                        maple: "beta"
-                        mozilla-beta: "beta"
-                        mozilla-release: "release"
-                        mozilla-esr52: "esr"
+                        jamun: "beta-cdntest"
+                        maple: "beta-cdntest"
+                        mozilla-beta: "beta-cdntest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
                         default: "default"
                 VERIFY_CONFIG:
                     by-project:
@@ -70,11 +70,11 @@ jobs:
             env:
                 CHANNEL:
                     by-project:
-                        jamun: "beta"
-                        maple: "beta"
-                        mozilla-beta: "beta"
-                        mozilla-release: "release"
-                        mozilla-esr52: "esr"
+                        jamun: "beta-cdntest"
+                        maple: "beta-cdntest"
+                        mozilla-beta: "beta-cdntest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
                         default: "default"
                 VERIFY_CONFIG:
                     by-project:
