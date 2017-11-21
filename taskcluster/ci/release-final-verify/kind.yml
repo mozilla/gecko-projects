@@ -35,7 +35,6 @@ job-defaults:
         kind: test
         symbol: Rel(FV)
         tier: 1
-    extra:
 
 jobs:
     firefox:
