@@ -4,13 +4,7 @@
 
 loader: taskgraph.loader.transform:loader
 
-# TODO: depends on:
-# - artifact completes task (dummy?)
-# - artifact partials task (dummy?)
-# - balrog submission builders (dummy?)
-# - updates builder (buildbot)
-# - uptake monitoring (buildbot, but only if the push requires cdn - generally just beta)
-# TODO: can we use the same kind when dependencies may differ by project or other things?
+# TODO: we probably hove some of these?
 #kind-dependencies:
 
 transforms:
@@ -90,34 +84,6 @@ jobs:
                         mozilla-release: "release-firefox-linux.cfg"
                         mozilla-esr52: "esr-firefox-linux.cfg"
                         default: "none"
-        treeherder:
-            symbol: UV
-            platform: linux/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux
-
-    firefox-linux64-rc-beta:
-        description: linux64 update verify rc beta channel
-        worker:
-            env:
-                CHANNEL: "beta-localtest"
-                VERIFY_CONFIG: "beta-firefox-linux64.cfg"
-        treeherder:
-            symbol: UV
-            platform: linux64/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux64
-
-    firefox-linux-rc-beta:
-        description: linux update verify rc beta channel
-        worker:
-            env:
-                CHANNEL: "beta-localtest"
-                VERIFY_CONFIG: "beta-firefox-linux64.cfg"
         treeherder:
             symbol: UV
             platform: linux/opt
