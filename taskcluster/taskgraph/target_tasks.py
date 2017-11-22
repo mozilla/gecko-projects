@@ -335,6 +335,14 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         if task.kind not in allow_kinds:
             return False
 
+        # Don't include rc-beta update verify for projects that don't use it.
+        # TODO: we still need to find a way to exclude this for releases on
+        # mozilla-release that don't use it. Most point releases don't, but
+        # some still may (eg: a point release that's done before we ship a
+        # proper beta to the beta channel after RC).
+        if 'rc-beta' in task.label and parameters['project'] != 'mozilla-release':
+            return False
+
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
@@ -354,8 +362,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
 
         # TODO: partner repacks
         # TODO: funsize, all but balrog submission
-        # TODO: bbb update verify
-        # TODO: tc update verify
         # TODO: binary transparency
         # TODO: bouncer sub
         # TODO: snap

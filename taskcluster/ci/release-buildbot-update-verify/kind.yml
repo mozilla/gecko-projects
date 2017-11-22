@@ -4,7 +4,13 @@
 
 loader: taskgraph.loader.transform:loader
 
-# TODO: we probably hove some of these?
+# TODO: depends on:
+# - artifact completes task (dummy?)
+# - artifact partials task (dummy?)
+# - balrog submission builders (dummy?)
+# - updates builder (buildbot)
+# - uptake monitoring (buildbot, but only if the push requires cdn - generally just beta)
+# TODO: can we use the same kind when dependencies may differ by project or other things?
 #kind-dependencies:
 
 transforms:
@@ -111,5 +117,50 @@ jobs:
                         mozilla-release: "release-firefox-macosx64.cfg"
                         mozilla-esr52: "esr-firefox-macosx64.cfg"
                         default: "none"
+        extra:
+            product: firefox
+
+    firefox-win64-rc-beta:
+        description: win64 update verify rc beta channel
+        shipping-product: firefox
+        attributes:
+            build_platform: win64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win64
+                CHANNEL: beta-localtest
+                VERIFY_CONFIG: beta-firefox-win64.cfg
+        extra:
+            product: firefox
+
+    firefox-win32-rc-beta:
+        description: win32 update verify rc beta channel
+        shipping-product: firefox
+        attributes:
+            build_platform: win32
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win32
+                CHANNEL: beta-localtest
+                VERIFY_CONFIG: beta-firefox-win32.cfg
+        extra:
+            product: firefox
+
+    firefox-macosx64-rc-beta:
+        description: macosx64 update verify rc beta channel
+        shipping-product: firefox
+        attributes:
+            build_platform: macosx64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: macosx64
+                CHANNEL: beta-localtest
+                VERIFY_CONFIG: beta-firefox-macosx64.cfg
         extra:
             product: firefox
