@@ -351,7 +351,8 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
             return False
 
         if task.kind in ('release-update-verify',
-                         'release-buildbot-update-verify'):
+                         'release-buildbot-update-verify',
+                         'release-final-verify'):
             if 'secondary' in task.label:
                 if parameters["project"] != "mozilla-release":
                     return False

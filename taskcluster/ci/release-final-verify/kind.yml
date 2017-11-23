@@ -4,7 +4,14 @@
 
 loader: taskgraph.loader.transform:loader
 
+# TODO: also depends on:
+# - artifact completes task (dummy?)
+# - artifact partials task (dummy?)
+# - balrog submission builders (dummy?)
+# - updates builder (buildbot)
 kind-dependencies:
+    # release-uptake-monitoring will get removed as a dep
+    # for secondary channel final verify
     - release-uptake-monitoring
 
 transforms:
@@ -13,11 +20,8 @@ transforms:
     - taskgraph.transforms.task:transforms
 
 job-defaults:
-    label: release-final-verify
     name: final-verify
-    description: final verify
     run-on-projects: [] # to make sure this never runs as part of CI
-    shipping-phase: publish
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         implementation: docker-worker
@@ -31,14 +35,12 @@ job-defaults:
                     jamun: https://hg.mozilla.org/users/stage-ffxbld/tools
                     maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
                     default: https://hg.mozilla.org/build/tools
-    treeherder:
-        platform: linux64/opt
-        kind: test
-        symbol: Rel(FV)
-        tier: 1
 
 jobs:
     firefox:
+        label: release-final-verify
+        description: final verify
+        shipping-phase: publish
         shipping-product: firefox
         worker:
             env:
@@ -52,3 +54,27 @@ jobs:
                         default: ""
         extra:
             product: firefox
+        treeherder:
+            platform: linux64/opt
+            kind: test
+            symbol: Rel(FV)
+            tier: 1
+
+    firefox-secondary-channel:
+        label: release-final-verify-secondary-channel
+        description: final verify secondary channel
+        shipping-phase: promote
+        shipping-product: firefox
+        worker:
+            env:
+                FINAL_VERIFY_CONFIGS:
+                    by-project:
+                        mozilla-beta: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
+                        default: ""
+        extra:
+            product: firefox
+        treeherder:
+            platform: linux64/opt
+            kind: test
+            symbol: Rel(FVS)
+            tier: 1
