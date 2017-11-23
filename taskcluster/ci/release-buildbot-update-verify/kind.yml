@@ -4,10 +4,16 @@
 
 loader: taskgraph.loader.transform:loader
 
-# TODO: we probably hove some of these?
+# TODO: depends on:
+# - artifact completes task (dummy?)
+# - artifact partials task (dummy?)
+# - balrog submission builders (dummy?)
+# - updates builder (buildbot)
 #kind-dependencies:
 
 transforms:
+    # after we have kind-dependencies
+    #- taskgraph.transforms.release_deps:transforms
     - taskgraph.transforms.buildbot_update_verify:transforms
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms
@@ -26,7 +32,6 @@ job-defaults:
         chunks: 12
 
 jobs:
-    # TODO: need beta channel tests when project = mozilla-release
     firefox-win64:
         description: win64 update verify
         shipping-product: firefox
@@ -39,9 +44,9 @@ jobs:
                 platform: win64
                 CHANNEL:
                     by-project:
-                        jamun: "beta-cdntest"
-                        maple: "beta-cdntest"
-                        mozilla-beta: "beta-cdntest"
+                        jamun: "beta-localtest"
+                        maple: "beta-localtest"
+                        mozilla-beta: "beta-localtest"
                         mozilla-release: "release-localtest"
                         mozilla-esr52: "esr-localtest"
                         default: "default"
@@ -68,9 +73,9 @@ jobs:
                 platform: win32
                 CHANNEL:
                     by-project:
-                        jamun: "beta-cdntest"
-                        maple: "beta-cdntest"
-                        mozilla-beta: "beta-cdntest"
+                        jamun: "beta-localtest"
+                        maple: "beta-localtest"
+                        mozilla-beta: "beta-localtest"
                         mozilla-release: "release-localtest"
                         mozilla-esr52: "esr-localtest"
                         default: "default"
@@ -97,9 +102,9 @@ jobs:
                 platform: macosx64
                 CHANNEL:
                     by-project:
-                        jamun: "beta-cdntest"
-                        maple: "beta-cdntest"
-                        mozilla-beta: "beta-cdntest"
+                        jamun: "beta-localtest"
+                        maple: "beta-localtest"
+                        mozilla-beta: "beta-localtest"
                         mozilla-release: "release-localtest"
                         mozilla-esr52: "esr-localtest"
                         default: "default"
@@ -110,6 +115,69 @@ jobs:
                         mozilla-beta: "beta-firefox-macosx64.cfg"
                         mozilla-release: "release-firefox-macosx64.cfg"
                         mozilla-esr52: "esr-firefox-macosx64.cfg"
+                        default: "none"
+        extra:
+            product: firefox
+
+    firefox-win64-secondary-channel:
+        description: win64 update verify secondary channel
+        shipping-product: firefox
+        attributes:
+            build_platform: win64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win64
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-win64.cfg"
+                        default: "none"
+        extra:
+            product: firefox
+
+    firefox-win32-secondary-channel:
+        description: win32 update verify secondary channel
+        shipping-product: firefox
+        attributes:
+            build_platform: win32
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win32
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-win32.cfg"
+                        default: "none"
+        extra:
+            product: firefox
+
+    firefox-macosx64-secondary-channel:
+        description: macosx64 update verify secondary channel
+        shipping-product: firefox
+        attributes:
+            build_platform: macosx64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: macosx64
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-macosx64.cfg"
                         default: "none"
         extra:
             product: firefox

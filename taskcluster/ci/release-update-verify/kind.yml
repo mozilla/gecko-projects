@@ -4,7 +4,11 @@
 
 loader: taskgraph.loader.transform:loader
 
-# TODO: we probably hove some of these?
+# TODO: depends on:
+# - artifact completes task (dummy?)
+# - artifact partials task (dummy?)
+# - balrog submission builders (dummy?)
+# - updates builder (buildbot)
 #kind-dependencies:
 
 transforms:
@@ -32,7 +36,6 @@ job-defaults:
                     maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
                     default: https://hg.mozilla.org/build/tools
     extra:
-        product: firefox
         chunks: 12
 
 jobs:
@@ -42,9 +45,9 @@ jobs:
             env:
                 CHANNEL:
                     by-project:
-                        jamun: "beta-cdntest"
-                        maple: "beta-cdntest"
-                        mozilla-beta: "beta-cdntest"
+                        jamun: "beta-localtest"
+                        maple: "beta-localtest"
+                        mozilla-beta: "beta-localtest"
                         mozilla-release: "release-localtest"
                         mozilla-esr52: "esr-localtest"
                         default: "default"
@@ -63,6 +66,8 @@ jobs:
             tier: 1
         attributes:
             build_platform: linux64
+        extra:
+            product: firefox
 
     firefox-linux:
         description: linux update verify
@@ -70,9 +75,9 @@ jobs:
             env:
                 CHANNEL:
                     by-project:
-                        jamun: "beta-cdntest"
-                        maple: "beta-cdntest"
-                        mozilla-beta: "beta-cdntest"
+                        jamun: "beta-localtest"
+                        maple: "beta-localtest"
+                        mozilla-beta: "beta-localtest"
                         mozilla-release: "release-localtest"
                         mozilla-esr52: "esr-localtest"
                         default: "default"
@@ -91,3 +96,49 @@ jobs:
             tier: 1
         attributes:
             build_platform: linux
+        extra:
+            product: firefox
+
+    firefox-linux64-secondary-channel:
+        description: linux64 update verify secondary channel
+        worker:
+            env:
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-linux64.cfg"
+                        default: "none"
+        treeherder:
+            symbol: UVS
+            platform: linux64/opt
+            kind: test
+            tier: 1
+        attributes:
+            build_platform: linux64
+        extra:
+            product: firefox
+
+    firefox-linux-secondary-channel:
+        description: linux update verify secondary channel
+        worker:
+            env:
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-linux.cfg"
+                        default: "none"
+        treeherder:
+            symbol: UVS
+            platform: linux/opt
+            kind: test
+            tier: 1
+        attributes:
+            build_platform: linux
+        extra:
+            product: firefox

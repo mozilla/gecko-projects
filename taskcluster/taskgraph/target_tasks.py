@@ -6,10 +6,23 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import re
+
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
 _target_task_methods = {}
+
+
+# If version has two parts with no trailing specifiers like "rc", we
+# consider it a "final" release for which we only create a _RELEASE tag.
+def is_final_release(version):
+    return bool(re.match("^\d+\.\d+$", version))
+
+
+def get_firefox_version():
+    with open('browser/config/version.txt', 'r') as f:
+        return f.readline().strip()
 
 
 def _target_task(name):
@@ -322,6 +335,8 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         'release-final-verify',
     ]
 
+    version = get_firefox_version()
+
     def filter(task):
         platform = task.attributes.get('build_platform')
 
@@ -334,6 +349,14 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
 
         if task.kind not in allow_kinds:
             return False
+
+        if task.kind in ('release-update-verify',
+                         'release-buildbot-update-verify'):
+            if 'secondary' in task.label:
+                if parameters["project"] != "mozilla-release":
+                    return False
+                if not is_final_release(version):
+                    return False
 
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
@@ -354,8 +377,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
 
         # TODO: partner repacks
         # TODO: funsize, all but balrog submission
-        # TODO: bbb update verify
-        # TODO: tc update verify
         # TODO: binary transparency
         # TODO: bouncer sub
         # TODO: snap
