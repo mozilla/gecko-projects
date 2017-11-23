@@ -13,7 +13,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import optionally_keyed_by, resolve_keyed_by, Schema
 from taskgraph.util.scriptworker import get_push_apk_scope, get_push_apk_track, \
-    get_push_apk_dry_run_option, get_push_apk_rollout_percentage
+    get_push_apk_commit_option, get_push_apk_rollout_percentage
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial, \
     validate_dependent_tasks_transform, delete_non_required_fields_transform, generate_dependencies
 
@@ -63,7 +63,7 @@ def make_task_description(config, jobs):
         job['dependencies'] = generate_dependencies(job['dependent-tasks'])
         job['worker']['upstream-artifacts'] = generate_upstream_artifacts(job['dependencies'])
         job['worker']['google-play-track'] = get_push_apk_track(config)
-        job['worker']['dry-run'] = get_push_apk_dry_run_option(config)
+        job['worker']['commit'] = get_push_apk_commit_option(config)
 
         rollout_percentage = get_push_apk_rollout_percentage(config)
         if rollout_percentage is not None:
