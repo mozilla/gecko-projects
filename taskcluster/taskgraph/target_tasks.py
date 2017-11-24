@@ -333,7 +333,8 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         'build', 'build-signing', 'repackage', 'repackage-signing',
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'release-update-verify', 'release-buildbot-update-verify',
-        'release-binary-transparency',
+        # Disabled for now because of missing scopes.
+        #'release-binary-transparency',
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
         'release-final-verify',
