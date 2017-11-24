@@ -338,6 +338,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
         'release-final-verify',
+        'balrog',
     ]
 
     version = get_firefox_version()
@@ -375,7 +376,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
                          'release-final-verify', 'release-binary-transparency',
                          'partials', 'partials-signing', 'beetmover-repackage',
                          'release-source', 'nightly-l10n', 'nightly-l10n-signing',
-                         'repackage-l10n',
+                         'repackage-l10n', 'balrog',
                          ):
             return True
 

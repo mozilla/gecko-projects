@@ -56,6 +56,7 @@ RELEASE_PROMOTION_CONFIG = {
             'build', 'build-signing', 'repackage', 'repackage-signing',
             'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
             'partials', 'partials-signing', 'beetmover-repackage',
+            'balrog',
         ],
         'do_not_optimize': [],
     },
