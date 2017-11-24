@@ -6,10 +6,13 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import os
 import re
 
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
+
+from .. import GECKO
 
 _target_task_methods = {}
 
@@ -21,7 +24,7 @@ def is_final_release(version):
 
 
 def get_firefox_version():
-    with open('browser/config/version.txt', 'r') as f:
+    with open(os.path.join(GECKO, 'browser', 'config', 'version.txt'), 'r') as f:
         return f.readline().strip()
 
 
