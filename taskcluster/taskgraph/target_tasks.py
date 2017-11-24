@@ -24,7 +24,7 @@ def is_final_release(version):
 
 
 def get_firefox_version():
-    with open(os.path.join(GECKO, 'browser', 'config', 'version.txt'), 'r') as f:
+    with open(os.path.join(GECKO, 'browser', 'config', 'version_display.txt'), 'r') as f:
         return f.readline().strip()
 
 
