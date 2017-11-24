@@ -9,6 +9,8 @@ loader: taskgraph.loader.transform:loader
 kind-dependencies:
     # TODO: this makes us depend on beetmover for all platforms
     # does it matter?
+    # TODO: uncomment this when we figure out how to reduce deps
+    # to <100
     - beetmover-repackage
 
 transforms:

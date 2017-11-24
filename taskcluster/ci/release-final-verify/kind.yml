@@ -9,7 +9,9 @@ loader: taskgraph.loader.transform:loader
 kind-dependencies:
     # TODO: this makes us depend on beetmover for all platforms
     # does it matter?
-    - beetmover-repackage
+    # TODO: uncomment this when we figure out how to reduce deps
+    # to <100
+    #- beetmover-repackage
     # release-uptake-monitoring will get removed as a dep
     # for secondary channel final verify
     - release-uptake-monitoring
