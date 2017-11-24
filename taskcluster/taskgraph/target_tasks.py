@@ -12,7 +12,7 @@ import re
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
-from .. import GECKO
+from . import GECKO
 
 _target_task_methods = {}
 
