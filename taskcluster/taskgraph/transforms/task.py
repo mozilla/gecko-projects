@@ -486,6 +486,16 @@ task_description_schema = Schema({
             Required('formats'): [basestring],
         }],
     }, {
+        Required('implementation'): 'binary-transparency',
+
+        Required('chain', default='TRANSPARENCY.pem'): basestring,
+
+        # When None is selected then metadata.owner is going to be used
+        Required('contact', default=None): optionally_keyed_by('project', 'product', Any(None, basestring)),
+
+        # the maximum time to run, in seconds
+        Required('max-run-time', default=600): int,
+    }, {
         Required('implementation'): 'beetmover',
 
         # the maximum time to run, in seconds
@@ -688,7 +698,7 @@ def superseder_url(config, task):
 
 
 def verify_index_job_name(index):
-    job_name = index['job-name']
+    job_name = index.get('job-name')
     if job_name not in JOB_NAME_WHITELIST:
         raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
 
@@ -944,6 +954,32 @@ def build_scriptworker_signing_payload(config, task, task_def):
     }
 
 
+@payload_builder('binary-transparency')
+def build_binary_transparency_payload(config, task, task_def):
+    worker = task['worker']
+    release_config=get_release_config(config)
+
+    contact = resolve_keyed_by(
+        worker, 'contact', 'binary-transparency',
+        project=config.params['project'],
+    )['contact']
+    if contact is None:
+        contact = task_def['metadata']['owner']
+
+    task_def['payload'] = {
+        'version': release_config['version'],
+        'chain': worker['chain'],
+        'contact': contact,
+        'maxRunTime': worker['max-run-time'],
+        'stage-product': task['shipping-product'],
+        'summary': 'https://archive.mozilla.org/pub/{}/candidates/{}-candidates/build{}/SHA256SUMMARY'.format(
+            task['shipping-product'],
+            release_config['version'],
+            release_config['build_number'],
+        ),
+    }
+
+
 @payload_builder('beetmover')
 def build_beetmover_payload(config, task, task_def):
     worker = task['worker']
@@ -963,7 +999,7 @@ def build_beetmover_payload(config, task, task_def):
 @payload_builder('beetmover-cdns')
 def build_beetmover_cdns_payload(config, task, task_def):
     worker = task['worker']
-    release_config = get_release_config(config, force=True)
+    release_config = get_release_config(config)
 
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
@@ -1131,9 +1167,7 @@ def add_nightly_index_routes(config, task):
 def add_release_index_routes(config, task):
     index = task.get('index')
     routes = []
-    release_config = get_release_config(config, force=True)
-
-    verify_index_job_name(index)
+    release_config = get_release_config(config)
 
     subs = config.params.copy()
     subs['build_number'] = str(release_config['build_number'])
@@ -1392,7 +1426,7 @@ def build_task(config, tasks):
                 notifications_kwargs = dict(
                     task=task_def,
                     config=config.__dict__,
-                    release_config=get_release_config(config, force=True),
+                    release_config=get_release_config(config),
                 )
                 task_def['extra']['notifications']['task-' + k] = {
                     'subject': v['subject'].format(**notifications_kwargs),

@@ -20,6 +20,8 @@ job-defaults:
          default: scriptworker-prov-v1/beetmoverworker-dev
    run-on-projects: []
    shipping-phase: publish
+   index:
+      type: release
 
 jobs:
    fennec-push-to-cdns:
@@ -31,6 +33,4 @@ jobs:
         - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.beetmover_cdns
       treeherder-platform: Android/opt
       index:
-         type: release
          product: fennec
-         job-name: android-api-16-opt

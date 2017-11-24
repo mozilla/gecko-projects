@@ -219,6 +219,10 @@ PushApk publishes Android packages onto Google Play Store. Jobs of this kind tak
 all the signed multi-locales (aka "multi") APKs for a given release and upload them
 all at once. They also depend on the breakpoint.
 
+release-binary-transparency
+---------------------------
+Binary transparency to issue a certificate
+
 release-notify-publish
 ----------------------
 Notify when publishing a release.

@@ -416,7 +416,7 @@ get_push_apk_rollout_percentage = functools.partial(
 
 
 # release_config {{{1
-def get_release_config(config, force=False):
+def get_release_config(config):
     """Get the build number and version for a release task.
 
     Currently only applies to beetmover tasks.

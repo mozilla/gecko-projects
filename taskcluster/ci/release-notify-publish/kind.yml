@@ -15,6 +15,8 @@ kind-dependencies:
 
 job-defaults:
    shipping-phase: ship
+   index:
+      type: release
 
 jobs:
    fennec:
@@ -48,9 +50,7 @@ jobs:
          - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.email-{channel}
          - index.releases.v1.{branch}.latest.{product}.latest.email-{channel}
       index:
-         type: release
          product: fennec
-         job-name: android-api-16-opt
          channel:
             by-project:
                mozilla-beta: beta
