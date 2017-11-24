@@ -5,15 +5,15 @@
 loader: taskgraph.loader.transform:loader
 
 # TODO: depends on:
-# - artifact completes task (dummy?)
-# - artifact partials task (dummy?)
 # - balrog submission builders (dummy?)
-# - updates builder (buildbot)
-#kind-dependencies:
+kind-dependencies:
+    # TODO: this makes us depend on beetmover for all platforms
+    # does it matter?
+    - beetmover-repackage
 
 transforms:
     # after we have kind-dependencies
-    #- taskgraph.transforms.release_deps:transforms
+    - taskgraph.transforms.release_deps:transforms
     - taskgraph.transforms.buildbot_update_verify:transforms
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms

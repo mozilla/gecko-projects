@@ -5,11 +5,11 @@
 loader: taskgraph.loader.transform:loader
 
 # TODO: also depends on:
-# - artifact completes task (dummy?)
-# - artifact partials task (dummy?)
 # - balrog submission builders (dummy?)
-# - updates builder (buildbot)
 kind-dependencies:
+    # TODO: this makes us depend on beetmover for all platforms
+    # does it matter?
+    - beetmover-repackage
     # release-uptake-monitoring will get removed as a dep
     # for secondary channel final verify
     - release-uptake-monitoring
