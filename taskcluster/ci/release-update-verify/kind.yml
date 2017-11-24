@@ -6,7 +6,7 @@ loader: taskgraph.loader.transform:loader
 
 # TODO: depends on:
 # - balrog submission builders (dummy?)
-kind-dependencies:
+#kind-dependencies:
     # TODO: uncomment this when we figure out how to reduce deps
     # to <100
     #- beetmover-repackage
