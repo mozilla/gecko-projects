@@ -38,8 +38,6 @@ balrog_description_schema = Schema({
     # taskcluster/taskgraph/transforms/task.py for the schema details, and the
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
-    Required('shipping-phase'): task_description_schema['shipping-phase'],
-    Required('shipping-product'): task_description_schema['shipping-product'],
 })
 
 
