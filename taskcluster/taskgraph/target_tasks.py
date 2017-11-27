@@ -6,26 +6,12 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import os
-import re
-
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
 from . import GECKO
 
 _target_task_methods = {}
-
-
-# If version has two parts with no trailing specifiers like "rc", we
-# consider it a "final" release for which we only create a _RELEASE tag.
-def is_final_release(version):
-    return bool(re.match("^\d+\.\d+$", version))
-
-
-def get_firefox_version():
-    with open(os.path.join(GECKO, 'browser', 'config', 'version_display.txt'), 'r') as f:
-        return f.readline().strip()
 
 
 def _target_task(name):
@@ -339,8 +325,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         'beetmover-repackage', 'release-source',
         'balrog',
     ]
-
-    version = get_firefox_version()
 
     def filter(task):
         platform = task.attributes.get('build_platform')
