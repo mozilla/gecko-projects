@@ -4,11 +4,10 @@
 
 loader: taskgraph.loader.transform:loader
 
-# TODO: depends on:
-# - balrog submission builders (dummy?)
 kind-dependencies:
-    # TODO: this makes us depend on beetmover for all platforms
+    # TODO: this makes us depend on beetmover/balrog for all platforms
     # does it matter?
+    - post-balrog-dummy
     - post-beetmover-dummy
 
 transforms:

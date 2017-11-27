@@ -298,6 +298,10 @@ partials-signing
 ----------------
 Partials-signing takes the partial updates produced in Partials and signs them.
 
+post-balrog-dummy
+--------------------
+Dummy tasks to handle balrog tasks as dependencies without hitting max-dependencies.
+
 post-beetmover-dummy
 --------------------
 Dummy tasks to handle beetmover tasks as dependencies without hitting max-dependencies.
