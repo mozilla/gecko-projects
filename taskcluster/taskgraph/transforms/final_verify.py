@@ -17,11 +17,6 @@ transforms = TransformSequence()
 @transforms.add
 def add_command(config, tasks):
     for task in tasks:
-        if "secondary" in task["name"]:
-            for dep in task["dependencies"].keys():
-                if "uptake" in dep:
-                    del task["dependencies"][dep]
-                    break
         release_config = get_release_config(config)
         release_tag = "{}_{}_RELEASE_RUNTIME".format(
             task["extra"]["product"].upper(),
