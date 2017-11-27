@@ -337,7 +337,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         #'release-binary-transparency',
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
-        'release-final-verify',
         'balrog',
     ]
 
@@ -356,15 +355,6 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
         if task.kind not in allow_kinds:
             return False
 
-        if task.kind in ('release-update-verify',
-                         'release-buildbot-update-verify',
-                         'release-final-verify'):
-            if 'secondary' in task.label:
-                if parameters["project"] != "mozilla-release":
-                    return False
-                if not is_final_release(version):
-                    return False
-
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
@@ -373,7 +363,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
 
         # TODO add shipping_product / shipping_phase
         if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'release-final-verify', 'release-binary-transparency',
+                         'release-binary-transparency',
                          'partials', 'partials-signing', 'beetmover-repackage',
                          'release-source', 'nightly-l10n', 'nightly-l10n-signing',
                          'repackage-l10n', 'balrog',
@@ -402,7 +392,7 @@ def target_tasks_publish_firefox(full_task_graph, parameters, graph_config):
     )
 
     def filter(task):
-        if task.kind in ('release-final-verify', 'release-update-verify',
+        if task.kind in ('release-update-verify',
                          'release-buildbot-update-verify'):
             return False
         # Include promotion tasks; these will be optimized out
