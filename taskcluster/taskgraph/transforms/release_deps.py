@@ -36,6 +36,7 @@ def add_dependencies(config, jobs):
         dependencies = {}
         # Add any kind_dependencies_tasks with matching product as dependencies
         product = _get_product(job)
+        phase = job.get('shipping-phase')
         if product is None:
             continue
 
@@ -52,6 +53,9 @@ def add_dependencies(config, jobs):
                 # Skip old-id
                 if 'old-id' in dep_task.label:
                     continue
+            # We can only depend on tasks within the same phase
+            if dep_task.attributes.get('shipping_phase') != phase:
+                continue
             # Add matching product tasks to deps
             if _get_product(dep_task.task) == product:
                 dependencies[dep_task.label] = dep_task.label

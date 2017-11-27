@@ -10,6 +10,7 @@ from copy import deepcopy
 
 from taskgraph.transforms.base import TransformSequence
 import taskgraph.transforms.release_deps as release_deps
+from taskgraph.util.treeherder import split_symbol, join_symbol
 
 transforms = TransformSequence()
 
@@ -22,6 +23,12 @@ def yield_job(orig_job, deps, count):
     job = deepcopy(orig_job)
     job['dependencies'] = deps
     job['name'] = "{}-{}".format(orig_job['name'], count)
+    if 'treeherder' in job:
+        groupSymbol, symbol = split_symbol(job['treeherder']['symbol'])
+        symbol += '-'
+        symbol += str(count)
+        job['treeherder']['symbol'] = join_symbol(groupSymbol, symbol)
+
     return job
 
 

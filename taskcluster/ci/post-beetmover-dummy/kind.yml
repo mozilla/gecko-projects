@@ -12,14 +12,12 @@ kind-dependencies:
    - beetmover-checksums
    - beetmover-repackage
 
-job-defaults:
-   shipping-phase: ship
-
 jobs:
-   firefox:
+   firefox-ship:
       name: post-beetmover-dummy
       description: Dummy task to deal with max_dependencies
       run-on-projects: []
+      shipping-phase: ship
       shipping-product: firefox
       worker-type: aws-provisioner-v1/gecko-{level}-b-linux
       worker:
@@ -31,3 +29,25 @@ jobs:
             - /bin/bash
             - -c
             - echo "Dummy task"
+
+   firefox-promote:
+      name: post-beetmover-dummy
+      description: Dummy task to deal with max_dependencies
+      run-on-projects: []
+      shipping-phase: promote
+      shipping-product: firefox
+      worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+      worker:
+         implementation: docker-worker
+         os: linux
+         docker-image: "ubuntu:16.10"
+         max-run-time: 600
+         command:
+            - /bin/bash
+            - -c
+            - echo "Dummy task"
+      treeherder:
+         symbol: Rel(BMD)
+         platform: linux/opt
+         kind: test
+         tier: 1

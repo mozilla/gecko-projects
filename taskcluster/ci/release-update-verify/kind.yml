@@ -6,10 +6,10 @@ loader: taskgraph.loader.transform:loader
 
 # TODO: depends on:
 # - balrog submission builders (dummy?)
-#kind-dependencies:
+kind-dependencies:
     # TODO: uncomment this when we figure out how to reduce deps
     # to <100
-    #- beetmover-repackage
+    - post-beetmover-dummy
 
 transforms:
     - taskgraph.transforms.release_deps:transforms
@@ -19,6 +19,7 @@ transforms:
 job-defaults:
     name: update-verify
     run-on-projects: [] # to make sure this never runs as part of CI
+    shipping-phase: promote
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         implementation: docker-worker
@@ -42,6 +43,7 @@ job-defaults:
 jobs:
     firefox-linux64:
         description: linux64 update verify
+        shipping-product: firefox
         worker:
             env:
                 CHANNEL:
@@ -72,6 +74,7 @@ jobs:
 
     firefox-linux:
         description: linux update verify
+        shipping-product: firefox
         worker:
             env:
                 CHANNEL:
