@@ -25,7 +25,7 @@ jobs:
                 mozilla-central: scriptworker-prov-v1/pushapk-v1
                 mozilla-beta: scriptworker-prov-v1/pushapk-v1
                 mozilla-release: scriptworker-prov-v1/pushapk-v1
-                default: scriptworker-prov-v1/pushapk-v1-dev
+                default: scriptworker-prov-v1/dep-pushapk
         worker:
             upstream-artifacts: # see transforms
             google-play-track: # see transforms
