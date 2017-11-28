@@ -103,3 +103,65 @@ jobs:
             build_platform: linux
         extra:
             product: firefox
+
+    devedition-linux64:
+        description: linux64 update verify
+        shipping-product: devedition
+        worker:
+            env:
+                CHANNEL:
+                    by-project:
+                        jamun: "aurora-localtest"
+                        maple: "aurora-localtest"
+                        mozilla-aurora: "aurora-localtest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "aurora-devedition-linux64.cfg"
+                        maple: "aurora-devedition-linux64.cfg"
+                        mozilla-aurora: "aurora-devedition-linux64.cfg"
+                        mozilla-release: "release-devedition-linux64.cfg"
+                        mozilla-esr52: "esr-devedition-linux64.cfg"
+                        default: "none"
+        treeherder:
+            symbol: UV
+            platform: linux64-devedition/opt
+            kind: test
+            tier: 1
+        attributes:
+            build_platform: linux64
+        extra:
+            product: devedition
+
+    devedition-linux:
+        description: linux update verify
+        shipping-product: devedition
+        worker:
+            env:
+                CHANNEL:
+                    by-project:
+                        jamun: "aurora-localtest"
+                        maple: "aurora-localtest"
+                        mozilla-aurora: "aurora-localtest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "aurora-devedition-linux.cfg"
+                        maple: "aurora-devedition-linux.cfg"
+                        mozilla-aurora: "aurora-devedition-linux.cfg"
+                        mozilla-release: "release-devedition-linux.cfg"
+                        mozilla-esr52: "esr-devedition-linux.cfg"
+                        default: "none"
+        treeherder:
+            symbol: UV
+            platform: linux-devedition/opt
+            kind: test
+            tier: 1
+        attributes:
+            build_platform: linux
+        extra:
+            product: devedition

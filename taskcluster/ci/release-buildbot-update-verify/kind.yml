@@ -118,3 +118,90 @@ jobs:
                         default: "none"
         extra:
             product: firefox
+
+    devedition-win64:
+        description: win64 update verify
+        shipping-product: devedition
+        attributes:
+            build_platform: win64
+        run:
+            product: devedition
+        worker:
+            properties:
+                platform: win64
+                CHANNEL:
+                    by-project:
+                        jamun: "aurora-localtest"
+                        maple: "aurora-localtest"
+                        mozilla-aurora: "aurora-localtest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "aurora-devedition-win64.cfg"
+                        maple: "aurora-devedition-win64.cfg"
+                        mozilla-aurora: "aurora-devedition-win64.cfg"
+                        mozilla-release: "release-devedition-win64.cfg"
+                        mozilla-esr52: "esr-devedition-win64.cfg"
+                        default: "none"
+        extra:
+            product: devedition
+
+    devedition-win32:
+        description: win32 update verify
+        shipping-product: devedition
+        attributes:
+            build_platform: win32
+        run:
+            product: devedition
+        worker:
+            properties:
+                platform: win32
+                CHANNEL:
+                    by-project:
+                        jamun: "aurora-localtest"
+                        maple: "aurora-localtest"
+                        mozilla-aurora: "aurora-localtest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "aurora-devedition-win32.cfg"
+                        maple: "aurora-devedition-win32.cfg"
+                        mozilla-aurora: "aurora-devedition-win32.cfg"
+                        mozilla-release: "release-devedition-win32.cfg"
+                        mozilla-esr52: "esr-devedition-win32.cfg"
+                        default: "none"
+        extra:
+            product: devedition
+
+    devedition-macosx64:
+        description: macosx64 update verify
+        shipping-product: devedition
+        attributes:
+            build_platform: macosx64
+        run:
+            product: devedition
+        worker:
+            properties:
+                platform: macosx64
+                CHANNEL:
+                    by-project:
+                        jamun: "aurora-localtest"
+                        maple: "aurora-localtest"
+                        mozilla-aurora: "aurora-localtest"
+                        mozilla-release: "release-localtest"
+                        mozilla-esr52: "esr-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        jamun: "aurora-devedition-macosx64.cfg"
+                        maple: "aurora-devedition-macosx64.cfg"
+                        mozilla-aurora: "aurora-devedition-macosx64.cfg"
+                        mozilla-release: "release-devedition-macosx64.cfg"
+                        mozilla-esr52: "esr-devedition-macosx64.cfg"
+                        default: "none"
+        extra:
+            product: devedition

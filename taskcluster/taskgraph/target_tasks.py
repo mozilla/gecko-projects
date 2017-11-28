@@ -346,8 +346,7 @@ def target_tasks_mozilla_beta_desktop_promotion(full_task_graph, parameters, gra
             return True
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'release-binary-transparency',
+        if task.kind in ('release-binary-transparency',
                          'partials', 'partials-signing', 'beetmover-repackage',
                          'release-source', 'nightly-l10n', 'nightly-l10n-signing',
                          'repackage-l10n', 'balrog',

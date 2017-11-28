@@ -40,7 +40,6 @@ job-defaults:
 
 jobs:
     firefox:
-        label: release-final-verify
         description: final verify
         shipping-phase: publish
         shipping-product: firefox
@@ -58,6 +57,28 @@ jobs:
             product: firefox
         treeherder:
             platform: linux64/opt
+            kind: test
+            symbol: Rel(FV)
+            tier: 1
+
+    devedition:
+        description: final verify
+        shipping-phase: publish
+        shipping-product: devedition
+        worker:
+            env:
+                FINAL_VERIFY_CONFIGS:
+                    by-project:
+                        jamun: "aurora-devedition-linux.cfg aurora-devedition-linux64.cfg aurora-devedition-macosx64.cfg aurora-devedition-win32.cfg aurora-devedition-win64.cfg"
+                        maple: "aurora-devedition-linux.cfg aurora-devedition-linux64.cfg aurora-devedition-macosx64.cfg aurora-devedition-win32.cfg aurora-devedition-win64.cfg"
+                        mozilla-aurora: "aurora-devedition-linux.cfg aurora-devedition-linux64.cfg aurora-devedition-macosx64.cfg aurora-devedition-win32.cfg aurora-devedition-win64.cfg"
+                        mozilla-release: "release-devedition-linux.cfg release-devedition-linux64.cfg release-devedition-macosx64.cfg release-devedition-win32.cfg release-devedition-win64.cfg"
+                        mozilla-esr52: "esr-devedition-linux.cfg esr-devedition-linux64.cfg esr-devedition-macosx64.cfg esr-devedition-win32.cfg esr-devedition-win64.cfg"
+                        default: ""
+        extra:
+            product: devedition
+        treeherder:
+            platform: linux64-devedition/opt
             kind: test
             symbol: Rel(FV)
             tier: 1
