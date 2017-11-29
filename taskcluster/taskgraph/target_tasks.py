@@ -321,6 +321,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         #'release-binary-transparency',
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
+        'release-source-signing', 'beetmover-source',
         'balrog',
     ]
 
@@ -337,6 +338,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if task.kind not in allow_kinds:
             return False
 
+
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
@@ -347,6 +349,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if task.kind in ('release-binary-transparency',
                          'partials', 'partials-signing', 'beetmover-repackage',
                          'release-source', 'nightly-l10n', 'nightly-l10n-signing',
+                         'release-source-signing', 'beetmover-source',
                          'repackage-l10n', 'balrog',
                          ):
             return True

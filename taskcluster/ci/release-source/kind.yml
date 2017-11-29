@@ -17,3 +17,7 @@ transforms:
 
 jobs-from:
     - source.yml
+
+job-template:
+   shipping-phase: promote
+   shipping-product: firefox

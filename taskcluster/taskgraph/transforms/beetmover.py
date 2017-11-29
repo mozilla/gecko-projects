@@ -146,6 +146,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
         "host/bin/mar",
         "host/bin/mbsdiff",
     ],
+    'linux64-source': [
+    ],
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-api-16-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
@@ -205,6 +207,10 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.tar.bz2.asc",
     ],
     'linux-devedition-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
+        "target.tar.bz2",
+        "target.tar.bz2.asc",
+    ],
+    'linux64-source': [
         "target.tar.bz2",
         "target.tar.bz2.asc",
     ],
@@ -288,6 +294,9 @@ beetmover_description_schema = Schema({
 
     # locale is passed only for l10n beetmoving
     Optional('locale'): basestring,
+
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
+    Optional('shipping-product'): task_description_schema['shipping-product'],
 })
 
 
