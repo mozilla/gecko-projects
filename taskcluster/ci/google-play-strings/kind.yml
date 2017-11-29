@@ -18,7 +18,8 @@ jobs:
             nightly: true
         worker-type: aws-provisioner-v1/taskcluster-generic
         worker:
-            docker-image: ubuntu:17.10  # TODO: Use in-tree task
+            docker-image:
+                in-tree: desktop1604-test
             max-run-time: 600
         treeherder:
             symbol: pub(gps)
@@ -29,12 +30,11 @@ jobs:
           using: run-task
           checkout: false
           command: >
-                  mkdir -p /work &&
-                  apt-get update &&
-                  apt-get install --yes git python3-setuptools build-essential libssl-dev libffi-dev python3-dev &&
-                  git clone https://github.com/JohanLorenzo/mozapkpublisher &&
-                  cd mozapkpublisher &&
-                  git checkout bf380662e601540928b51b606060d589fdc66c3d &&
-                  python3 setup.py develop &&
-                  python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
+              mkdir -p /work &&
+              apt-get update &&
+              apt-get install --yes git python3-setuptools build-essential libssl-dev libffi-dev python3-dev &&
+              git clone https://github.com/JohanLorenzo/mozapkpublisher &&
+              cd mozapkpublisher &&
+              python3 setup.py develop &&
+              python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
         run-on-projects: ['maple', 'mozilla-central', 'mozilla-beta', 'mozilla-release']
