@@ -131,7 +131,7 @@ jobs:
             kind: test
             tier: 1
         attributes:
-            build_platform: linux64
+            build_platform: linux64-devedition
         extra:
             product: devedition
 
@@ -162,6 +162,6 @@ jobs:
             kind: test
             tier: 1
         attributes:
-            build_platform: linux
+            build_platform: linux-devedition
         extra:
             product: devedition

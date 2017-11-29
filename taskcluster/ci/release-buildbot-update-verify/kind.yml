@@ -123,7 +123,7 @@ jobs:
         description: win64 update verify
         shipping-product: devedition
         attributes:
-            build_platform: win64
+            build_platform: win64-devedition
         run:
             product: devedition
         worker:
@@ -152,7 +152,7 @@ jobs:
         description: win32 update verify
         shipping-product: devedition
         attributes:
-            build_platform: win32
+            build_platform: win32-devedition
         run:
             product: devedition
         worker:
@@ -181,7 +181,7 @@ jobs:
         description: macosx64 update verify
         shipping-product: devedition
         attributes:
-            build_platform: macosx64
+            build_platform: macosx64-devedition
         run:
             product: devedition
         worker:
