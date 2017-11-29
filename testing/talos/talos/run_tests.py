@@ -37,15 +37,11 @@ def useBaseTestDefaults(base, tests):
     return tests
 
 
-def buildCommandLine(test):
-    """build firefox command line options for tp tests"""
-
+def set_tp_preferences(test, browser_config):
     # sanity check pageloader values
     # mandatory options: tpmanifest, tpcycles
     if test['tpcycles'] not in range(1, 1000):
         raise TalosError('pageloader cycles must be int 1 to 1,000')
-    if test.get('tpdelay') and test['tpdelay'] not in range(1, 10000):
-        raise TalosError('pageloader delay must be int 1 to 10,000')
     if 'tpmanifest' not in test:
         raise TalosError("tpmanifest not found in test: %s" % test)
 
@@ -57,24 +53,18 @@ def buildCommandLine(test):
             if test[cycle_var] > 2:
                 test[cycle_var] = 2
 
-    # build pageloader command from options
-    url = ['-tp', test['tpmanifest']]
-    CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tpnoisy', 'tprender',
-                        'tploadnocache', 'tpscrolltest', 'fnbpaint']
-    CLI_options = ['tpcycles', 'tppagecycles', 'tpdelay', 'tptimeout']
+    CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tploadnocache', 'tpscrolltest', 'fnbpaint']
+    CLI_options = ['tpcycles', 'tppagecycles', 'tptimeout', 'tpmanifest']
     for key in CLI_bool_options:
-        if test.get(key):
-            url.append('-%s' % key)
+        if key in test:
+            _pref_name = "talos.%s" % key
+            test['preferences'][_pref_name] = test.get(key)
 
     for key in CLI_options:
         value = test.get(key)
         if value:
-            url.extend(['-%s' % key, str(value)])
-
-    # XXX we should actually return the list but since we abuse
-    # the url as a command line flag to pass to firefox all over the place
-    # will just make a string for now
-    return ' '.join(url)
+            _pref_name = "talos.%s" % key
+            test['preferences'][_pref_name] = value
 
 
 def setup_webserver(webserver):
@@ -92,6 +82,7 @@ def run_tests(config, browser_config):
     tests = config['tests']
     tests = useBaseTestDefaults(config.get('basetest', {}), tests)
     paths = ['profile_path', 'tpmanifest', 'extensions', 'setup', 'cleanup']
+
     for test in tests:
         # Check for profile_path, tpmanifest and interpolate based on Talos
         # root https://bugzilla.mozilla.org/show_bug.cgi?id=727711
@@ -103,10 +94,8 @@ def run_tests(config, browser_config):
             test['tpmanifest'] = \
                 os.path.normpath('file:/%s' % (urllib.quote(test['tpmanifest'],
                                                '/\\t:\\')))
-        if not test.get('url'):
-            # build 'url' for tptest
-            test['url'] = buildCommandLine(test)
-        test['url'] = utils.interpolate(test['url'])
+            test['preferences']['talos.tpmanifest'] = test['tpmanifest']
+
         test['setup'] = utils.interpolate(test['setup'])
         test['cleanup'] = utils.interpolate(test['cleanup'])
 
@@ -234,6 +223,7 @@ def run_tests(config, browser_config):
                                          str(scripts_path))
 
     testname = None
+
     # run the tests
     timer = utils.Timer()
     LOG.suite_start(tests=[test['name'] for test in tests])
@@ -241,6 +231,11 @@ def run_tests(config, browser_config):
         for test in tests:
             testname = test['name']
             LOG.test_start(testname)
+
+            if not test.get('url'):
+                # set browser prefs for pageloader test setings (doesn't use cmd line args / url)
+                test['url'] = None
+                set_tp_preferences(test, browser_config)
 
             mytest = TTest()
 

@@ -34,8 +34,13 @@ mozharness_run_schema = Schema({
     # directory and using forward slashes even on Windows
     Required('script'): basestring,
 
+    # Additional paths to look for mozharness configs in. These should be
+    # relative to the base of the source checkout
+    Optional('config-paths'): [basestring],
+
     # the config files required for the task, relative to
-    # testing/mozharness/configs and using forward slashes even on Windows
+    # testing/mozharness/configs or one of the paths specified in
+    # `config-paths` and using forward slashes even on Windows
     Required('config'): [basestring],
 
     # any additional actions to pass to the mozharness command
@@ -140,6 +145,9 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
     if 'options' in run:
         env['MOZHARNESS_OPTIONS'] = ' '.join(run['options'])
 
+    if 'config-paths' in run:
+        env['MOZHARNESS_CONFIG_PATHS'] = ' '.join(run['config-paths'])
+
     if 'custom-build-variant-cfg' in run:
         env['MH_CUSTOM_BUILD_VARIANT_CFG'] = run['custom-build-variant-cfg']
 
@@ -235,6 +243,12 @@ def mozharness_on_generic_worker(config, job, taskdesc):
 
     mh_command = [r'c:\mozilla-build\python\python.exe']
     mh_command.append('\\'.join([r'.\build\src\testing', run['script'].replace('/', '\\')]))
+
+    if 'config-paths' in run:
+        for path in run['config-paths']:
+            mh_command.append(r'--extra-config-path '
+                              r'.\build\src\{}'.format(path.replace('/', '\\')))
+
     for cfg in run['config']:
         mh_command.append('--config ' + cfg.replace('/', '\\'))
     if run['use-magic-mh-args']:
@@ -262,8 +276,17 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         hg_command.append(head_repo)
         hg_command.append(path)
 
+        logging_command = [
+            b":: TinderboxPrint:<a href={source_repo}/rev/{revision} "
+            b"title='Built from {repo_name} revision {revision}'>{revision}</a>\n".format(
+                revision=head_rev,
+                source_repo=head_repo,
+                repo_name=head_repo.split('/')[-1],
+            )]
+
         return [
             ' '.join(hg_command),
+            ' '.join(logging_command),
         ]
 
     hg_commands = checkout_repo(

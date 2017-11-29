@@ -1356,7 +1356,7 @@ nsBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // and merge them into a single Content() list. This can cause us
     // to violate CSS stacking order, but forceLayer is a magic
     // XUL-only extension anyway.
-    nsDisplayList masterList(aBuilder);
+    nsDisplayList masterList;
     masterList.AppendToTop(tempLists.BorderBackground());
     masterList.AppendToTop(tempLists.BlockBorderBackgrounds());
     masterList.AppendToTop(tempLists.Floats());
@@ -1370,7 +1370,8 @@ nsBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     // Wrap the list to make it its own layer
     aLists.Content()->AppendNewToTop(new (aBuilder)
-      nsDisplayOwnLayer(aBuilder, this, &masterList, ownLayerASR, 0,
+      nsDisplayOwnLayer(aBuilder, this, &masterList, ownLayerASR,
+                        nsDisplayOwnLayerFlags::eNone,
                         mozilla::layers::FrameMetrics::NULL_SCROLL_ID,
                         mozilla::layers::ScrollThumbData{}, true, true));
   }

@@ -135,7 +135,14 @@ protected:
   // Can't take already_AddRefed because it can fail in stupid ways.
   nsresult DispatchToVideoCaptureThread(Runnable* event);
 
-  RefPtr<VideoEngine> mEngines[CaptureEngine::MaxEngine];
+  // sEngines will be accessed by VideoCapture thread only
+  // sNumOfCamerasParent, sNumOfOpenCamerasParentEngines, and sVideoCaptureThread will
+  // be accessed by main thread / PBackground thread / VideoCapture thread
+  // sNumOfCamerasParent and sThreadMonitor create & delete are protected by sMutex
+  // sNumOfOpenCamerasParentEngines and sVideoCaptureThread are protected by sThreadMonitor
+  static RefPtr<VideoEngine> sEngines[CaptureEngine::MaxEngine];
+  static int32_t sNumOfOpenCamerasParentEngines;
+  static int32_t sNumOfCamerasParents;
   nsTArray<CallbackHelper*> mCallbacks;
 
   // image buffers
@@ -144,11 +151,11 @@ protected:
   // PBackground parent thread
   nsCOMPtr<nsISerialEventTarget> mPBackgroundEventTarget;
 
-  // Monitors creation of the thread below
-  Monitor mThreadMonitor;
+  static StaticMutex sMutex;
+  static Monitor* sThreadMonitor;
 
   // video processing thread - where webrtc.org capturer code runs
-  base::Thread* mVideoCaptureThread;
+  static base::Thread* sVideoCaptureThread;
 
   // Shutdown handling
   bool mChildIsAlive;
@@ -156,7 +163,9 @@ protected:
   // Above 2 are PBackground only, but this is potentially
   // read cross-thread.
   mozilla::Atomic<bool> mWebRTCAlive;
-  nsTArray<RefPtr<InputObserver>> mObservers;
+  RefPtr<InputObserver> mCameraObserver;
+  std::map<nsCString, std::map<uint32_t, webrtc::VideoCaptureCapability>>
+    mAllCandidateCapabilities;
 };
 
 PCamerasParent* CreateCamerasParent();

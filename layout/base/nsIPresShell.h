@@ -17,6 +17,7 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/WeakPtr.h"
+#include "GeckoProfiler.h"
 #include "gfxPoint.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
@@ -685,9 +686,9 @@ public:
   /**
    * @param aWhere: Either a percentage or a special value.
    *                nsIPresShell defines:
-   *                * (Default) SCROLL_MINIMUM = -1: The visible area is
-   *                scrolled to show the entire frame. If the frame is too
-   *                large, the top and left edges are given precedence.
+   *                * (Default) SCROLL_MINIMUM = -1: The visible area is scrolled
+   *                the minimum amount to show as much as possible of the frame.
+   *                This won't hide any initially visible part of the frame.
    *                * SCROLL_TOP = 0: The frame's upper edge is aligned with the
    *                top edge of the visible area.
    *                * SCROLL_BOTTOM = 100: The frame's bottom edge is aligned
@@ -1571,6 +1572,11 @@ public:
                                                    bool* aRetVal);
 
   /**
+   * Returns whether or not the document has ever handled user input
+   */
+  virtual bool HasHandledUserInput() const = 0;
+
+  /**
    * Refresh observer management.
    */
 protected:
@@ -1696,6 +1702,14 @@ protected:
 
   // A hash table of heap allocated weak frames.
   nsTHashtable<nsPtrHashKey<WeakFrame>> mWeakFrames;
+
+#ifdef MOZ_GECKO_PROFILER
+  // These two fields capture call stacks of any changes that require a restyle
+  // or a reflow. Only the first change per restyle / reflow is recorded (the
+  // one that caused a call to SetNeedStyleFlush() / SetNeedLayoutFlush()).
+  UniqueProfilerBacktrace mStyleCause;
+  UniqueProfilerBacktrace mReflowCause;
+#endif
 
   // Most recent canvas background color.
   nscolor                   mCanvasBackgroundColor;

@@ -610,7 +610,6 @@ nsCookieService::nsCookieService()
  , mMonitor("CookieThread")
  , mInitializedDBStates(false)
  , mInitializedDBConn(false)
- , mAccumulatedWaitTelemetry(false)
 {
 }
 
@@ -1431,7 +1430,6 @@ nsCookieService::TryInitDB(bool aRecreateDB)
       gCookieService->ImportCookies(oldCookieFile);
       oldCookieFile->Remove(false);
       gCookieService->mDBState = initialState;
-      Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_OLD_SCHEMA, 0);
     });
 
   NS_DispatchToMainThread(runnable);
@@ -1450,10 +1448,6 @@ nsCookieService::InitDBConn()
     return;
   }
 
-  if (!mAccumulatedWaitTelemetry) {
-    mAccumulatedWaitTelemetry = true;
-    Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS, 0);
-  }
   for (uint32_t i = 0; i < mReadArray.Length(); ++i) {
     CookieDomainTuple& tuple = mReadArray[i];
     RefPtr<nsCookie> cookie = nsCookie::Create(tuple.cookie->name,
@@ -1488,6 +1482,7 @@ nsCookieService::InitDBConn()
   mInitializedDBConn = true;
 
   COOKIE_LOGSTRING(LogLevel::Debug, ("InitDBConn(): mInitializedDBConn = true"));
+  mEndInitDBConn = mozilla::TimeStamp::Now();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os && !mReadArray.IsEmpty()) {
@@ -1729,6 +1724,7 @@ nsCookieService::CloseDBStates()
   CleanupDefaultDBConnection();
 
   mDefaultDBState = nullptr;
+  mInitializedDBConn = false;
   mInitializedDBStates = false;
 }
 
@@ -1765,8 +1761,6 @@ nsCookieService::CleanupDefaultDBConnection()
   mDefaultDBState->updateListener = nullptr;
   mDefaultDBState->removeListener = nullptr;
   mDefaultDBState->closeListener = nullptr;
-
-  mInitializedDBConn = false;
 }
 
 void
@@ -1916,7 +1910,7 @@ nsCookieService::RebuildCorruptDB(DBState* aDBState)
             os->NotifyObservers(nullptr, "cookie-db-rebuilding", nullptr);
           }
 
-          gCookieService->InitDBConn();
+          gCookieService->InitDBConnInternal();
 
           // Enumerate the hash, and add cookies to the params array.
           mozIStorageAsyncStatement* stmt = gCookieService->mDefaultDBState->stmtInsert;
@@ -2762,6 +2756,8 @@ nsCookieService::EnsureReadComplete(bool aInitDBConn)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  bool isAccumulated = false;
+
   if (!mInitializedDBStates) {
     TimeStamp startBlockTime = TimeStamp::Now();
     MonitorAutoLock lock(mMonitor);
@@ -2769,12 +2765,32 @@ nsCookieService::EnsureReadComplete(bool aInitDBConn)
     while (!mInitializedDBStates) {
       mMonitor.Wait();
     }
-    Telemetry::AccumulateTimeDelta(Telemetry::MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS,
+    Telemetry::AccumulateTimeDelta(Telemetry::MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS_V2,
                                    startBlockTime);
-    mAccumulatedWaitTelemetry = true;
+    Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_TIME_TO_BLOCK_MAIN_THREAD_MS, 0);
+    isAccumulated = true;
+  } else if (!mEndInitDBConn.IsNull()) {
+    // We didn't block main thread, and here comes the first cookie request.
+    // Collect how close we're going to block main thread.
+    Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_TIME_TO_BLOCK_MAIN_THREAD_MS,
+                          (TimeStamp::Now() - mEndInitDBConn).ToMilliseconds());
+    // Nullify the timestamp so wo don't accumulate this telemetry probe again.
+    mEndInitDBConn = TimeStamp();
+    isAccumulated = true;
+  } else if (!mInitializedDBConn && aInitDBConn) {
+    // A request comes while we finished cookie thread task and InitDBConn is
+    // on the way from cookie thread to main thread. We're very close to block
+    // main thread.
+    Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_TIME_TO_BLOCK_MAIN_THREAD_MS, 0);
+    isAccumulated = true;
   }
+
   if (!mInitializedDBConn && aInitDBConn && mDefaultDBState) {
     InitDBConn();
+    if (isAccumulated) {
+      // Nullify the timestamp so wo don't accumulate this telemetry probe again.
+      mEndInitDBConn = TimeStamp();
+    }
   }
 }
 
@@ -3020,6 +3036,9 @@ nsCookieService::ImportCookies(nsIFile *aCookieFile)
     }
   }
 
+  if (mDefaultDBState->cookieCount - originalCookieCount > 0) {
+    Telemetry::Accumulate(Telemetry::MOZ_SQLITE_COOKIES_OLD_SCHEMA, 0);
+  }
 
   COOKIE_LOGSTRING(LogLevel::Debug, ("ImportCookies(): %" PRIu32 " cookies imported",
     mDefaultDBState->cookieCount));
@@ -4900,23 +4919,19 @@ nsCookieService::RemoveCookiesWithOriginAttributes(
     }
 
     // Pattern matches. Delete all cookies within this nsCookieEntry.
-    const nsCookieEntry::ArrayType& cookies = entry->GetCookies();
+    uint32_t cookiesCount = entry->GetCookies().Length();
 
-    while (!cookies.IsEmpty()) {
-      nsCookie *cookie = cookies.LastElement();
-
-      nsAutoCString host;
-      cookie->GetHost(host);
-
-      nsAutoCString name;
-      cookie->GetName(name);
-
-      nsAutoCString path;
-      cookie->GetPath(path);
+    for (nsCookieEntry::IndexType i = 0 ; i < cookiesCount; ++i) {
+      // Remove the first cookie from the list.
+      nsListIter iter(entry, 0);
+      RefPtr<nsCookie> cookie = iter.Cookie();
 
       // Remove the cookie.
-      nsresult rv = Remove(host, entry->mOriginAttributes, name, path, false);
-      NS_ENSURE_SUCCESS(rv, rv);
+      RemoveCookieFromList(iter);
+
+      if (cookie) {
+        NotifyChanged(cookie, u"deleted");
+      }
     }
   }
   DebugOnly<nsresult> rv = transaction.Commit();

@@ -21,6 +21,7 @@
 #include "nsIIPCSerializableURI.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "nsIURIMutator.h"
 
 using namespace mozilla::ipc;
 
@@ -469,7 +470,9 @@ nsSimpleURI::SetPathQueryRefEscaped(const nsACString &aPath, bool aNeedsEscape)
           return rv;
         }
     } else {
-        path.Assign(aPath);
+        if (!path.Assign(aPath, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
     }
 
     int32_t queryPos = path.FindChar('?');
@@ -881,6 +884,21 @@ nsSimpleURI::SetQueryWithEncoding(const nsACString& aQuery,
                                   const Encoding* aEncoding)
 {
     return SetQuery(aQuery);
+}
+
+NS_IMPL_ISUPPORTS(nsSimpleURI::Mutator, nsIURISetters, nsIURIMutator)
+
+
+NS_IMETHODIMP
+nsSimpleURI::Mutate(nsIURIMutator** aMutator)
+{
+    RefPtr<nsSimpleURI::Mutator> mutator = new nsSimpleURI::Mutator();
+    nsresult rv = mutator->InitFromURI(this);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+    mutator.forget(aMutator);
+    return NS_OK;
 }
 
 } // namespace net

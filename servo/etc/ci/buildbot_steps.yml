@@ -68,6 +68,7 @@ linux-rel-nogate:
   - ./mach clean-nightlies --keep 3 --force
   - env CC=gcc-5 CXX=g++-5 ./mach build --release
   - python ./etc/ci/chaos_monkey_test.py
+  - env CC=gcc-5 CXX=g++-5 bash ./etc/ci/mutation_test.sh
 
 mac-rel-intermittent:
   - ./mach clean-nightlies --keep 3 --force
@@ -79,7 +80,6 @@ linux-dev:
   - ./mach test-tidy --no-progress --all
   - ./mach test-tidy --no-progress --self-test
   - env CC=gcc-5 CXX=g++-5 ./mach build --dev
-  - env ./mach test-compiletest
   - env ./mach test-unit
   - env ./mach package --dev
   - env ./mach build-cef
@@ -113,6 +113,7 @@ linux-nightly:
   - env CC=gcc-5 CXX=g++-5 ./mach build --release
   - ./mach package --release
   - ./mach upload-nightly linux
+  - ./mach test-perf --submit
 
 android:
   - ./mach clean-nightlies --keep 3 --force

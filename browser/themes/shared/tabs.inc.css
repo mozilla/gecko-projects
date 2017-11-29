@@ -66,7 +66,7 @@ tabbrowser {
   padding: 0 @horizontalTabPadding@;
 }
 
-.tab-content[pinned] {
+:root:not([uidensity=compact]) .tab-content[pinned] {
   padding: 0 12px;
 }
 
@@ -193,7 +193,7 @@ tabbrowser {
   100% { transform: translateX(100%); }
 }
 
-#TabsToolbar[brighttext] .tab-throbber[busy]:not([visuallyselected=true])::before {
+#TabsToolbar[brighttext] .tab-throbber[busy]:not([selected=true])::before {
   /* Don't change the --tab-loading-fill variable because this should only affect
      tabs that are not visually selected. */
   fill: #717171;
@@ -205,7 +205,7 @@ tabbrowser {
   opacity: 1;
 }
 
-#TabsToolbar[brighttext] .tab-throbber[progress]:not([visuallyselected=true])::before {
+#TabsToolbar[brighttext] .tab-throbber[progress]:not([selected=true])::before {
   /* Don't change the --tab-loading-fill variable because this should only affect
      tabs that are not visually selected. */
   fill: #84c1ff;
@@ -610,6 +610,18 @@ tabbrowser {
   margin-top: 5px;
   margin-bottom: 4px;
   opacity: 0.3;
+}
+
+/* Move the ::before pseudo-element on tabs 1px to the left
+ * to avoid resizing the tab when the pseudo-element is removed again
+ * (this currently happens when a tab is dragged and dropped).
+ *
+ * Note that this doesn't perfectly solve the issue (dragged tabs
+ * may still resize very slightly) on some DPI settings with uneven
+ * scaling factors on Windows, because of bug 477157.
+ */
+.tabbrowser-tab::before {
+  margin-inline-start: -1px;
 }
 
 %ifdef CAN_DRAW_IN_TITLEBAR

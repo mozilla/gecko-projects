@@ -69,6 +69,7 @@ XPCOMUtils.defineLazyGetter(this, "browserSessionID", Utils.makeGUID);
 
 function Sync11Service() {
   this._notify = Utils.notify("weave:service:");
+  this.scheduler = new SyncScheduler(this);
 }
 Sync11Service.prototype = {
 
@@ -322,8 +323,6 @@ Sync11Service.prototype = {
     Svc.Obs.add("fxaccounts:device_disconnected", this);
     Services.prefs.addObserver(PREFS_BRANCH + "engine.", this);
 
-    this.scheduler = new SyncScheduler(this);
-
     if (!this.enabled) {
       this._log.info("Firefox Sync disabled.");
     }
@@ -433,7 +432,7 @@ Sync11Service.prototype = {
           // Sync in the background (it's fine not to wait on the returned promise
           // because sync() has a lock).
           // [] = clients collection only
-          this.sync([]).catch(e => {
+          this.sync({why: "collection_changed", engines: []}).catch(e => {
             this._log.error(e);
           });
         }
@@ -834,7 +833,7 @@ Sync11Service.prototype = {
   async login() {
     async function onNotify() {
       this._loggedIn = false;
-      if (Services.io.offline) {
+      if (this.scheduler.offline) {
         this.status.login = LOGIN_FAILED_NETWORK_ERROR;
         throw new Error("Application is offline, login should not be called");
       }
@@ -908,8 +907,8 @@ Sync11Service.prototype = {
 
   // Stuff we need to do after login, before we can really do
   // anything (e.g. key setup).
-  async _remoteSetup(infoResponse) {
-    if (!(await this._fetchServerConfiguration())) {
+  async _remoteSetup(infoResponse, fetchConfig = true) {
+    if (fetchConfig && !(await this._fetchServerConfiguration())) {
       return false;
     }
 
@@ -1044,7 +1043,7 @@ Sync11Service.prototype = {
    */
   _shouldLogin: function _shouldLogin() {
     return this.enabled &&
-           !Services.io.offline &&
+           !this.scheduler.offline &&
            !this.isLoggedIn &&
            Async.isAppReady();
   },
@@ -1064,7 +1063,7 @@ Sync11Service.prototype = {
       reason = kSyncNotConfigured;
     else if (Status.service == STATUS_DISABLED || !this.enabled)
       reason = kSyncWeaveDisabled;
-    else if (Services.io.offline)
+    else if (this.scheduler.offline)
       reason = kSyncNetworkOffline;
     else if (this.status.minimumNextSync > Date.now())
       reason = kSyncBackoffNotMet;
@@ -1082,7 +1081,7 @@ Sync11Service.prototype = {
     return reason;
   },
 
-  async sync(engineNamesToSync) {
+  async sync({engines, why} = {}) {
     let dateStr = Utils.formatTimestamp(new Date());
     this._log.debug("User-Agent: " + Utils.userAgent);
     this._log.info(`Starting sync at ${dateStr} in browser session ${browserSessionID}`);
@@ -1097,22 +1096,22 @@ Sync11Service.prototype = {
       } else {
         this._log.trace("In sync: no need to login.");
       }
-      await this._lockedSync(engineNamesToSync);
+      await this._lockedSync(engines, why);
     })();
   },
 
   /**
    * Sync up engines with the server.
    */
-  async _lockedSync(engineNamesToSync) {
+  async _lockedSync(engineNamesToSync, why) {
     return this._lock("service.js: sync",
-                      this._notify("sync", "", async function onNotify() {
+                      this._notify("sync", JSON.stringify({why}), async function onNotify() {
 
       let histogram = Services.telemetry.getHistogramById("WEAVE_START_COUNT");
       histogram.add(1);
 
       let synchronizer = new EngineSynchronizer(this);
-      await synchronizer.sync(engineNamesToSync); // Might throw!
+      await synchronizer.sync(engineNamesToSync, why); // Might throw!
 
       histogram = Services.telemetry.getHistogramById("WEAVE_COMPLETE_SUCCESS_COUNT");
       histogram.add(1);

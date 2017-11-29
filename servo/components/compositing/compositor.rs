@@ -329,12 +329,21 @@ impl webrender_api::RenderNotifier for RenderNotifier {
         Box::new(RenderNotifier::new(self.compositor_proxy.clone()))
     }
 
-    fn new_frame_ready(&self) {
+    fn wake_up(&self) {
         self.compositor_proxy.recomposite(CompositingReason::NewWebRenderFrame);
     }
 
-    fn new_scroll_frame_ready(&self, composite_needed: bool) {
-        self.compositor_proxy.send(Msg::NewScrollFrameReady(composite_needed));
+    fn new_document_ready(
+        &self,
+        _document_id: webrender_api::DocumentId,
+        scrolled: bool,
+        composite_needed: bool,
+    ) {
+        if scrolled {
+            self.compositor_proxy.send(Msg::NewScrollFrameReady(composite_needed));
+        } else {
+            self.wake_up();
+        }
     }
 }
 
@@ -760,7 +769,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                 warn!("Sending event to constellation failed ({}).", e);
             }
 
-            if let Some(cursor) =  Cursor::from_u8(item.tag.1).ok() {
+            if let Some(cursor) =  Cursor::from_u8(item.tag.1 as _).ok() {
                 let msg = ConstellationMsg::SetCursor(cursor);
                 if let Err(e) = self.constellation_chan.send(msg) {
                     warn!("Sending event to constellation failed ({}).", e);

@@ -123,6 +123,10 @@ AppendToString(std::stringstream& aStream, const wr::LayoutSize& s,
                const char* pfx="", const char* sfx="");
 
 void
+AppendToString(std::stringstream& aStream, const nsSize& sz,
+               const char* pfx="", const char* sfx="");
+
+void
 AppendToString(std::stringstream& aStream, const wr::StickyOffsetBounds& s,
                const char* pfx="", const char* sfx="");
 
@@ -165,6 +169,10 @@ AppendToString(std::stringstream& aStream, const mozilla::gfx::TiledRegion<T>& r
 
 void
 AppendToString(std::stringstream& aStream, const EventRegions& e,
+               const char* pfx="", const char* sfx="");
+
+void
+AppendToString(std::stringstream& aStream, OverscrollBehavior aBehavior,
                const char* pfx="", const char* sfx="");
 
 void

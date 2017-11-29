@@ -17,6 +17,7 @@ body {
   padding-top: 0px;
   overflow-y: auto;
   margin-bottom: 42px;
+  -moz-user-select: none;
 }
 
 .main-content.search > section > *:not(.data) {
@@ -37,6 +38,10 @@ body {
   position: absolute;
   bottom: 0;
   left: 0;
+}
+
+body[dir=rtl] #category-raw{
+  right: 0;
 }
 
 .heading {
@@ -118,7 +123,6 @@ body[dir=rtl] .dropdown {
   padding: 8px 0px;
   padding-inline-start: 16px;
   display: none;
-  -moz-user-select: none;
 }
 
 .category-subsection.selected {

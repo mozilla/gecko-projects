@@ -1907,11 +1907,11 @@ class CGClassConstructor(CGAbstractStaticMethod):
             signatures = self._ctor.signatures()
             assert len(signatures) == 1
             # Given that HTMLConstructor takes no args, we can just codegen a
-            # call to CreateHTMLElement() in BindingUtils which reuses the
+            # call to CreateXULOrHTMLElement() in BindingUtils which reuses the
             # factory thing in HTMLContentSink. Then we don't have to implement
             # Constructor on all the HTML elements.
             callGenerator = CGPerSignatureCall(signatures[0][0], signatures[0][1],
-                                               "CreateHTMLElement", True,
+                                               "CreateXULOrHTMLElement", True,
                                                self.descriptor, self._ctor,
                                                isConstructor=True)
         else:
@@ -2381,22 +2381,11 @@ class MethodDefiner(PropertyDefiner):
                 if len(signatures) > 1 or len(signatures[0][1]) > 1 or not argTypeIsIID(signatures[0][1][0]):
                     raise TypeError("There should be only one queryInterface method with 1 argument of type IID")
 
-                # Make sure to not stick QueryInterface on abstract interfaces that
-                # have hasXPConnectImpls (like EventTarget).  So only put it on
-                # interfaces that are concrete and all of whose ancestors are abstract.
-                def allAncestorsAbstract(iface):
-                    if not iface.parent:
-                        return True
-                    desc = self.descriptor.getDescriptor(iface.parent.identifier.name)
-                    if desc.concrete:
-                        return False
-                    return allAncestorsAbstract(iface.parent)
+                # Make sure to not stick QueryInterface on abstract interfaces.
                 if (not self.descriptor.interface.hasInterfacePrototypeObject() or
-                    not self.descriptor.concrete or
-                    not allAncestorsAbstract(self.descriptor.interface)):
+                    not self.descriptor.concrete):
                     raise TypeError("QueryInterface is only supported on "
-                                    "interfaces that are concrete and all "
-                                    "of whose ancestors are abstract: " +
+                                    "interfaces that are concrete: " +
                                     self.descriptor.name)
                 condition = "WantsQueryInterface<%s>::Enabled" % descriptor.nativeType
                 self.regular.append({
@@ -7876,7 +7865,7 @@ class CGPerSignatureCall(CGThing):
                 if (CustomElementRegistry::IsCustomElementEnabled()) {
                   CustomElementReactionsStack* reactionsStack = GetCustomElementReactionsStack(${obj});
                   if (reactionsStack) {
-                    ceReaction.emplace(reactionsStack);
+                    ceReaction.emplace(reactionsStack, cx);
                   }
                 }
                 """, obj=objectName)))

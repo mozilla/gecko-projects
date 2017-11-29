@@ -663,11 +663,70 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                                                     'resources',
                                                     module))
 
-    def _report_line(self, f, tag, info):
+    def _kill_proc_tree(self, pid):
+        # Kill a process tree (including grandchildren) with signal.SIGTERM
         try:
-            f.write("%s %s\n" % (tag, str(info)))
-        except:
-            f.write("Exception getting system info: %s" % sys.exc_info()[0])
+            import signal
+            import psutil
+            if pid == os.getpid():
+                return (None, None)
+
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            children.append(parent)
+
+            for p in children:
+                p.send_signal(signal.SIGTERM)
+
+            # allow for 60 seconds to kill procs
+            timeout = 60
+            gone, alive = psutil.wait_procs(children, timeout=timeout)
+            for p in gone:
+                self.info('psutil found pid %s dead' % p.pid)
+            for p in alive:
+                self.error('failed to kill pid %d after %d' % (p.pid, timeout))
+
+            return (gone, alive)
+        except Exception as e:
+            self.error('Exception while trying to kill process tree: %s' % str(e))
+
+    def _kill_named_proc(self, pname):
+        try:
+            import psutil
+        except Exception as e:
+            self.info("Error importing psutil, not killing process %s: %s" % pname, str(e))
+            return
+
+        for proc in psutil.process_iter():
+            try:
+                if proc.name() == pname:
+                    procd = proc.as_dict(attrs=['pid', 'ppid', 'name', 'username'])
+                    self.info("in _kill_named_proc, killing %s" % procd)
+                    self._kill_proc_tree(proc.pid)
+            except Exception as e:
+                self.info("Warning: Unable to kill process %s: %s" % (pname, str(e)))
+                # may not be able to access process info for all processes
+                continue
+
+    def _remove_xen_clipboard(self):
+        """
+            When running on a Windows 7 VM, we have XenDPriv.exe running which
+            interferes with the clipboard, lets terminate this process and remove
+            the binary so it doesn't restart
+        """
+        if not self._is_windows():
+            return
+
+        self._kill_named_proc('XenDPriv.exe')
+        xenpath = os.path.join(os.environ['ProgramFiles'],
+                               'Citrix',
+                               'XenTools',
+                               'XenDPriv.exe')
+        try:
+            if os.path.isfile(xenpath):
+                os.remove(xenpath)
+        except Exception as e:
+            self.error("Error: Failure to remove file %s: %s" % (xenpath, str(e)))
 
     def _report_system_info(self):
         """
@@ -680,27 +739,28 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             self.mkdir_p(dir)
             path = os.path.join(dir, "system-info.log")
             with open(path, "w") as f:
-                self._report_line(f, "System info collected at ", datetime.now())
-                self._report_line(f, "\nBoot time ",
-                                  datetime.fromtimestamp(psutil.boot_time()))
-                self._report_line(f, "\nVirtual memory: ", psutil.virtual_memory())
-                self._report_line(f, "\nDisk partitions: ", psutil.disk_partitions())
-                self._report_line(f, "\nDisk usage (/): ", psutil.disk_usage(os.path.sep))
-                self._report_line(f, "\nUsers: ", psutil.users())
-                self._report_line(f, "\nNetwork connections:", "")
+                f.write("System info collected at %s\n\n" % datetime.now())
+                f.write("\nBoot time %s\n" % datetime.fromtimestamp(psutil.boot_time()))
+                f.write("\nVirtual memory: %s\n" % str(psutil.virtual_memory()))
+                f.write("\nDisk partitions: %s\n" % str(psutil.disk_partitions()))
+                f.write("\nDisk usage (/): %s\n" % str(psutil.disk_usage(os.path.sep)))
+                if not self._is_windows():
+                    # bug 1417189: frequent errors querying users on Windows
+                    f.write("\nUsers: %s\n" % str(psutil.users()))
+                f.write("\nNetwork connections:\n")
                 try:
                     for nc in psutil.net_connections():
-                        self._report_line(f, "  ", nc)
+                        f.write("  %s\n" % str(nc))
                 except:
-                    f.write("Exception getting network info: %s" % sys.exc_info()[0])
-                self._report_line(f, "\nProcesses:", "")
+                    f.write("Exception getting network info: %s\n" % sys.exc_info()[0])
+                f.write("\nProcesses:\n")
                 try:
                     for p in psutil.process_iter():
                         ctime = str(datetime.fromtimestamp(p.create_time()))
-                        self._report_line(f, "  PID", "%d %s %s created at %s" %
-                                          (p.pid, p.name(), str(p.cmdline()), ctime))
+                        f.write("  PID %d %s %s created at %s\n" %
+                                (p.pid, p.name(), str(p.cmdline()), ctime))
                 except:
-                    f.write("Exception getting process info: %s" % sys.exc_info()[0])
+                    f.write("Exception getting process info: %s\n" % sys.exc_info()[0])
         except:
             # psutil throws a variety of intermittent exceptions
             self.info("Unable to complete system-info.log: %s" % sys.exc_info()[0])
@@ -709,6 +769,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     # preflight_run_tests defined in TestingMixin.
 
     def run_tests(self):
+        self._remove_xen_clipboard()
         self._report_system_info()
         self.start_time = datetime.now()
         for category in SUITE_CATEGORIES:

@@ -31,6 +31,7 @@
 #include "nsCSSPropertyIDSet.h"
 #include "nsCSSProps.h" // For nsCSSProps::PropHasFlags
 #include "nsCSSPseudoElements.h" // For CSSPseudoElementType
+#include "nsDocument.h" // For nsDocument::IsWebAnimationsEnabled
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
 #include "nsIScriptError.h"
@@ -532,7 +533,6 @@ KeyframeEffectReadOnly::EnsureBaseStyles(
   RefPtr<ServoStyleContext> baseStyleContext;
   for (const AnimationProperty& property : aProperties) {
     EnsureBaseStyle(property,
-                    mTarget->mPseudoType,
                     presContext,
                     aComputedValues,
                     baseStyleContext);
@@ -542,7 +542,6 @@ KeyframeEffectReadOnly::EnsureBaseStyles(
 void
 KeyframeEffectReadOnly::EnsureBaseStyle(
   const AnimationProperty& aProperty,
-  CSSPseudoElementType aPseudoType,
   nsPresContext* aPresContext,
   const ServoStyleContext* aComputedStyle,
  RefPtr<ServoStyleContext>& aBaseStyleContext)
@@ -561,11 +560,13 @@ KeyframeEffectReadOnly::EnsureBaseStyle(
   }
 
   if (!aBaseStyleContext) {
+    Element* animatingElement =
+      EffectCompositor::GetElementToRestyle(mTarget->mElement,
+                                            mTarget->mPseudoType);
     aBaseStyleContext =
       aPresContext->StyleSet()->AsServo()->GetBaseContextForElement(
-          mTarget->mElement,
+          animatingElement,
           aPresContext,
-          aPseudoType,
           aComputedStyle);
   }
   RefPtr<RawServoAnimationValue> baseValue =
@@ -829,7 +830,7 @@ KeyframeEffectParamsFromUnion(const OptionsType& aOptions,
   if (aOptions.IsUnrestrictedDouble() ||
       // Ignore iterationComposite if the Web Animations API is not enabled,
       // then the default value 'Replace' will be used.
-      !AnimationUtils::IsCoreAPIEnabledForCaller(aCallerType)) {
+      !nsDocument::IsWebAnimationsEnabled(aCallerType)) {
     return result;
   }
 

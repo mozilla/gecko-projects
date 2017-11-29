@@ -901,6 +901,15 @@ public:
   }
 
   /**
+   * Called when the document was decoded as UTF-8 and decoder encountered no
+   * errors.
+   */
+  void DisableEncodingMenu()
+  {
+    mEncodingMenuDisabled = true;
+  }
+
+  /**
    * Access HTTP header data (this may also get set from other
    * sources, like HTML META tags).
    */
@@ -1132,6 +1141,11 @@ protected:
     MOZ_ASSERT(mPageUnloadingEventTimeStamp);
     mPageUnloadingEventTimeStamp = mozilla::TimeStamp();
   }
+
+  /**
+   * Clears any Servo element data stored on Elements in the document.
+   */
+  void ClearStaleServoData();
 
 private:
   class SelectorCacheKey
@@ -1861,18 +1875,6 @@ public:
   {
     mIsContentDocument = aIsContentDocument;
   }
-
-  /**
-   * Checks if this document has no pres shell, and if so, clears any Servo
-   * element data stored on Elements in the document.
-   */
-  void ClearStaleServoDataFromDocument();
-
-  /**
-   * Returns true if there may be Servo element data on Elements in the document
-   * that were created for a pres shell that no longer exists.
-   */
-  bool MightHaveStaleServoData() const { return mMightHaveStaleServoData; }
 
   /**
    * Create an element with the specified name, prefix and namespace ID.
@@ -2851,7 +2853,6 @@ public:
   }
 
   enum ElementCallbackType {
-    eCreated,
     eConnected,
     eDisconnected,
     eAdopted,
@@ -3590,10 +3591,6 @@ protected:
 
   bool mIsContentDocument : 1;
 
-  // True if there may be Servo element data on Elements in the document that
-  // were created for a pres shell that no longer exists.
-  bool mMightHaveStaleServoData : 1;
-
   // True if we have called BeginLoad and are expecting a paired EndLoad call.
   bool mDidCallBeginLoad : 1;
 
@@ -3603,6 +3600,9 @@ protected:
 
   // True if the document is allowed to use PaymentRequest.
   bool mAllowPaymentRequest : 1;
+
+  // True if the encoding menu should be disabled.
+  bool mEncodingMenuDisabled : 1;
 
   // Whether <style scoped> support is enabled in this document.
   enum { eScopedStyle_Unknown, eScopedStyle_Disabled, eScopedStyle_Enabled };

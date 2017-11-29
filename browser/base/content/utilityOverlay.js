@@ -466,7 +466,8 @@ function openLinkIn(url, where, params) {
     loadInBackground = !loadInBackground;
     // fall through
   case "tab":
-    focusUrlBar = !loadInBackground && w.isBlankPageURL(url);
+    focusUrlBar = !loadInBackground && w.isBlankPageURL(url)
+      && !aboutNewTabService.willNotifyUser;
 
     let tabUsedForLoad = w.gBrowser.loadOneTab(url, {
       referrerURI: aReferrerURI,
@@ -815,14 +816,6 @@ function openPreferences(paneID, extraArgs) {
  */
 function openTroubleshootingPage() {
   openUILinkIn("about:support", "tab");
-}
-
-/**
- * Opens the troubleshooting information (about:support) page for this version
- * of the application.
- */
-function openHealthReport() {
-  openUILinkIn("about:healthreport", "tab");
 }
 
 /**

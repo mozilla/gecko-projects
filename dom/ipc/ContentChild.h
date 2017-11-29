@@ -321,12 +321,6 @@ public:
 
   virtual bool DeallocPPresentationChild(PPresentationChild* aActor) override;
 
-  virtual PFlyWebPublishedServerChild*
-    AllocPFlyWebPublishedServerChild(const nsString& name,
-                                     const FlyWebPublishOptions& params) override;
-
-  virtual bool DeallocPFlyWebPublishedServerChild(PFlyWebPublishedServerChild* aActor) override;
-
   virtual mozilla::ipc::IPCResult
   RecvNotifyPresentationReceiverLaunched(PBrowserChild* aIframe,
                                          const nsString& aSessionId) override;
@@ -371,7 +365,7 @@ public:
   // auto remove when alertfinished is received.
   nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
 
-  virtual mozilla::ipc::IPCResult RecvPreferenceUpdate(const PrefSetting& aPref) override;
+  virtual mozilla::ipc::IPCResult RecvPreferenceUpdate(const Pref& aPref) override;
   virtual mozilla::ipc::IPCResult RecvVarUpdate(const GfxVarUpdate& pref) override;
 
   virtual mozilla::ipc::IPCResult RecvDataStoragePut(const nsString& aFilename,
@@ -559,6 +553,7 @@ public:
   virtual PContentPermissionRequestChild*
   AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
                                       const IPC::Principal& aPrincipal,
+                                      const bool& aIsHandlingUserInput,
                                       const TabId& aTabId) override;
   virtual bool
   DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor) override;

@@ -542,7 +542,7 @@ base_alloc(size_t aSize);
 struct Mutex
 {
 #if defined(XP_WIN)
-  SRWLOCK mMutex;
+  CRITICAL_SECTION mMutex;
 #elif defined(XP_DARWIN)
   OSSpinLock mMutex;
 #else
@@ -556,34 +556,66 @@ struct Mutex
   inline void Unlock();
 };
 
-struct MOZ_RAII MutexAutoLock
+// Mutex that can be used for static initialization.
+// On Windows, CRITICAL_SECTION requires a function call to be initialized,
+// but for the initialization lock, a static initializer calling the
+// function would be called too late. We need no-function-call
+// initialization, which SRWLock provides.
+// Ideally, we'd use the same type of locks everywhere, but SRWLocks
+// everywhere incur a performance penalty. See bug 1418389.
+#if defined(XP_WIN)
+struct StaticMutex
 {
-  explicit MutexAutoLock(Mutex& aMutex MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  SRWLOCK mMutex;
+
+  constexpr StaticMutex()
+    : mMutex(SRWLOCK_INIT)
+  {
+  }
+
+  inline void Lock();
+
+  inline void Unlock();
+};
+#else
+struct StaticMutex : public Mutex
+{
+  constexpr StaticMutex()
+#if defined(XP_DARWIN)
+    : Mutex{ OS_SPINLOCK_INIT }
+#elif defined(XP_LINUX) && !defined(ANDROID)
+    : Mutex{ PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP }
+#else
+    : Mutex{ PTHREAD_MUTEX_INITIALIZER }
+#endif
+  {
+  }
+};
+#endif
+
+template<typename T>
+struct MOZ_RAII AutoLock
+{
+  explicit AutoLock(T& aMutex MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     : mMutex(aMutex)
   {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     mMutex.Lock();
   }
 
-  ~MutexAutoLock() { mMutex.Unlock(); }
+  ~AutoLock() { mMutex.Unlock(); }
 
 private:
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
-  Mutex& mMutex;
+  T& mMutex;
 };
+
+using MutexAutoLock = AutoLock<Mutex>;
 
 // Set to true once the allocator has been initialized.
 static Atomic<bool> malloc_initialized(false);
 
-#if defined(XP_WIN)
-static Mutex gInitLock = { SRWLOCK_INIT };
-#elif defined(XP_DARWIN)
-static Mutex gInitLock = { OS_SPINLOCK_INIT };
-#elif defined(XP_LINUX) && !defined(ANDROID)
-static Mutex gInitLock = { PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP };
-#else
-static Mutex gInitLock = { PTHREAD_MUTEX_INITIALIZER };
-#endif
+static StaticMutex gInitLock;
 
 // ***************************************************************************
 // Statistics data structures.
@@ -610,7 +642,7 @@ enum ChunkType
   UNKNOWN_CHUNK,
   ZEROED_CHUNK,   // chunk only contains zeroes.
   ARENA_CHUNK,    // used to back arena runs created by arena_t::AllocRun.
-  HUGE_CHUNK,     // used to back huge allocations (e.g. huge_malloc).
+  HUGE_CHUNK,     // used to back huge allocations (e.g. arena_t::MallocHuge).
   RECYCLED_CHUNK, // chunk has been stored for future use by chunk_recycle.
 };
 
@@ -645,10 +677,11 @@ struct ExtentTreeSzTrait
     return aThis->mLinkBySize;
   }
 
-  static inline int Compare(extent_node_t* aNode, extent_node_t* aOther)
+  static inline Order Compare(extent_node_t* aNode, extent_node_t* aOther)
   {
-    int ret = (aNode->mSize > aOther->mSize) - (aNode->mSize < aOther->mSize);
-    return ret ? ret : CompareAddr(aNode->mAddr, aOther->mAddr);
+    Order ret = CompareInt(aNode->mSize, aOther->mSize);
+    return (ret != Order::eEqual) ? ret
+                                  : CompareAddr(aNode->mAddr, aOther->mAddr);
   }
 };
 
@@ -659,7 +692,7 @@ struct ExtentTreeTrait
     return aThis->mLinkByAddr;
   }
 
-  static inline int Compare(extent_node_t* aNode, extent_node_t* aOther)
+  static inline Order Compare(extent_node_t* aNode, extent_node_t* aOther)
   {
     return CompareAddr(aNode->mAddr, aOther->mAddr);
   }
@@ -667,7 +700,7 @@ struct ExtentTreeTrait
 
 struct ExtentTreeBoundsTrait : public ExtentTreeTrait
 {
-  static inline int Compare(extent_node_t* aKey, extent_node_t* aNode)
+  static inline Order Compare(extent_node_t* aKey, extent_node_t* aNode)
   {
     uintptr_t key_addr = reinterpret_cast<uintptr_t>(aKey->mAddr);
     uintptr_t node_addr = reinterpret_cast<uintptr_t>(aNode->mAddr);
@@ -675,10 +708,10 @@ struct ExtentTreeBoundsTrait : public ExtentTreeTrait
 
     // Is aKey within aNode?
     if (node_addr <= key_addr && key_addr < node_addr + node_size) {
-      return 0;
+      return Order::eEqual;
     }
 
-    return (key_addr > node_addr) - (key_addr < node_addr);
+    return CompareAddr(aKey->mAddr, aNode->mAddr);
   }
 };
 
@@ -693,6 +726,7 @@ public:
     Tiny,
     Quantum,
     SubPage,
+    Large,
   };
 
   explicit inline SizeClass(size_t aSize)
@@ -706,6 +740,9 @@ public:
     } else if (aSize <= gMaxSubPageClass) {
       mType = SubPage;
       mSize = RoundUpPow2(aSize);
+    } else if (aSize <= gMaxLargeClass) {
+      mType = Large;
+      mSize = PAGE_CEILING(aSize);
     } else {
       MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Invalid size");
     }
@@ -789,7 +826,8 @@ struct ArenaChunkMapLink
 
 struct ArenaRunTreeTrait : public ArenaChunkMapLink
 {
-  static inline int Compare(arena_chunk_map_t* aNode, arena_chunk_map_t* aOther)
+  static inline Order Compare(arena_chunk_map_t* aNode,
+                              arena_chunk_map_t* aOther)
   {
     MOZ_ASSERT(aNode);
     MOZ_ASSERT(aOther);
@@ -799,14 +837,16 @@ struct ArenaRunTreeTrait : public ArenaChunkMapLink
 
 struct ArenaAvailTreeTrait : public ArenaChunkMapLink
 {
-  static inline int Compare(arena_chunk_map_t* aNode, arena_chunk_map_t* aOther)
+  static inline Order Compare(arena_chunk_map_t* aNode,
+                              arena_chunk_map_t* aOther)
   {
     size_t size1 = aNode->bits & ~gPageSizeMask;
     size_t size2 = aOther->bits & ~gPageSizeMask;
-    int ret = (size1 > size2) - (size1 < size2);
-    return ret ? ret
-               : CompareAddr((aNode->bits & CHUNK_MAP_KEY) ? nullptr : aNode,
-                             aOther);
+    Order ret = CompareInt(size1, size2);
+    return (ret != Order::eEqual)
+             ? ret
+             : CompareAddr((aNode->bits & CHUNK_MAP_KEY) ? nullptr : aNode,
+                           aOther);
   }
 };
 
@@ -817,7 +857,7 @@ struct ArenaDirtyChunkTrait
     return aThis->link_dirty;
   }
 
-  static inline int Compare(arena_chunk_t* aNode, arena_chunk_t* aOther)
+  static inline Order Compare(arena_chunk_t* aNode, arena_chunk_t* aOther)
   {
     MOZ_ASSERT(aNode);
     MOZ_ASSERT(aOther);
@@ -905,8 +945,8 @@ struct arena_bin_t
   unsigned long mNumRuns;
 
   // Amount of overhead runs are allowed to have.
-  static constexpr long double kRunOverhead = 1.6_percent;
-  static constexpr long double kRunRelaxedOverhead = 2.4_percent;
+  static constexpr double kRunOverhead = 1.6_percent;
+  static constexpr double kRunRelaxedOverhead = 2.4_percent;
 
   // Initialize a bin for the given size class.
   // The generated run sizes, for a page size of 4 KiB, are:
@@ -999,7 +1039,7 @@ public:
   //   --------+------+
   arena_bin_t mBins[1]; // Dynamically sized.
 
-  arena_t();
+  explicit arena_t(arena_params_t* aParams);
 
 private:
   void InitChunk(arena_chunk_t* aChunk, bool aZeroed);
@@ -1032,16 +1072,11 @@ private:
 
   void* MallocLarge(size_t aSize, bool aZero);
 
-public:
-  inline void* Malloc(size_t aSize, bool aZero);
+  void* MallocHuge(size_t aSize, bool aZero);
 
-  void* Palloc(size_t aAlignment, size_t aSize, size_t aAllocSize);
+  void* PallocLarge(size_t aAlignment, size_t aSize, size_t aAllocSize);
 
-  inline void DallocSmall(arena_chunk_t* aChunk,
-                          void* aPtr,
-                          arena_chunk_map_t* aMapElm);
-
-  void DallocLarge(arena_chunk_t* aChunk, void* aPtr);
+  void* PallocHuge(size_t aSize, size_t aAlignment, bool aZero);
 
   void RallocShrinkLarge(arena_chunk_t* aChunk,
                          void* aPtr,
@@ -1052,6 +1087,23 @@ public:
                        void* aPtr,
                        size_t aSize,
                        size_t aOldSize);
+
+  void* RallocSmallOrLarge(void* aPtr, size_t aSize, size_t aOldSize);
+
+  void* RallocHuge(void* aPtr, size_t aSize, size_t aOldSize);
+public:
+
+  inline void* Malloc(size_t aSize, bool aZero);
+
+  void* Palloc(size_t aAlignment, size_t aSize);
+
+  inline void DallocSmall(arena_chunk_t* aChunk,
+                          void* aPtr,
+                          arena_chunk_map_t* aMapElm);
+
+  void DallocLarge(arena_chunk_t* aChunk, void* aPtr);
+
+  void* Ralloc(void* aPtr, size_t aSize, size_t aOldSize);
 
   void Purge(bool aAll);
 
@@ -1081,11 +1133,11 @@ struct ArenaTreeTrait
     return aThis->mLink;
   }
 
-  static inline int Compare(arena_t* aNode, arena_t* aOther)
+  static inline Order Compare(arena_t* aNode, arena_t* aOther)
   {
     MOZ_ASSERT(aNode);
     MOZ_ASSERT(aOther);
-    return (aNode->mId > aOther->mId) - (aNode->mId < aOther->mId);
+    return CompareInt(aNode->mId, aOther->mId);
   }
 };
 
@@ -1101,19 +1153,17 @@ public:
   {
     mArenas.Init();
     mPrivateArenas.Init();
+    arena_params_t params;
+    // The main arena allows more dirty pages than the default for other arenas.
+    params.mMaxDirty = opt_dirty_max;
     mDefaultArena =
-      mLock.Init() ? CreateArena(/* IsPrivate = */ false) : nullptr;
-    if (mDefaultArena) {
-      // arena_t constructor sets this to a lower value for thread local
-      // arenas; Reset to the default value for the main arena.
-      mDefaultArena->mMaxDirty = opt_dirty_max;
-    }
+      mLock.Init() ? CreateArena(/* IsPrivate = */ false, &params) : nullptr;
     return bool(mDefaultArena);
   }
 
   inline arena_t* GetById(arena_id_t aArenaId, bool aIsPrivate);
 
-  arena_t* CreateArena(bool aIsPrivate);
+  arena_t* CreateArena(bool aIsPrivate, arena_params_t* aParams);
 
   void DisposeArena(arena_t* aArena)
   {
@@ -1250,12 +1300,6 @@ static void
 chunk_dealloc(void* aChunk, size_t aSize, ChunkType aType);
 static void
 chunk_ensure_zero(void* aPtr, size_t aSize, bool aZeroed);
-static void*
-huge_malloc(size_t size, bool zero, arena_t* aArena);
-static void*
-huge_palloc(size_t aSize, size_t aAlignment, bool aZero, arena_t* aArena);
-static void*
-huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena);
 static void
 huge_dalloc(void* aPtr, arena_t* aArena);
 static bool
@@ -1329,7 +1373,9 @@ bool
 Mutex::Init()
 {
 #if defined(XP_WIN)
-  InitializeSRWLock(&mMutex);
+  if (!InitializeCriticalSectionAndSpinCount(&mMutex, 5000)) {
+    return false;
+  }
 #elif defined(XP_DARWIN)
   mMutex = OS_SPINLOCK_INIT;
 #elif defined(XP_LINUX) && !defined(ANDROID)
@@ -1355,7 +1401,7 @@ void
 Mutex::Lock()
 {
 #if defined(XP_WIN)
-  AcquireSRWLockExclusive(&mMutex);
+  EnterCriticalSection(&mMutex);
 #elif defined(XP_DARWIN)
   OSSpinLockLock(&mMutex);
 #else
@@ -1367,13 +1413,27 @@ void
 Mutex::Unlock()
 {
 #if defined(XP_WIN)
-  ReleaseSRWLockExclusive(&mMutex);
+  LeaveCriticalSection(&mMutex);
 #elif defined(XP_DARWIN)
   OSSpinLockUnlock(&mMutex);
 #else
   pthread_mutex_unlock(&mMutex);
 #endif
 }
+
+#if defined(XP_WIN)
+void
+StaticMutex::Lock()
+{
+  AcquireSRWLockExclusive(&mMutex);
+}
+
+void
+StaticMutex::Unlock()
+{
+  ReleaseSRWLockExclusive(&mMutex);
+}
+#endif
 
 // End mutex.
 // ***************************************************************************
@@ -1398,6 +1458,18 @@ _getprogname(void)
 {
 
   return "<jemalloc>";
+}
+
+// Fill the given range of memory with zeroes or junk depending on opt_junk and
+// opt_zero. Callers can force filling with zeroes through the aForceZero argument.
+static inline void
+ApplyZeroOrJunk(void* aPtr, size_t aSize)
+{
+  if (opt_junk) {
+    memset(aPtr, kAllocJunk, aSize);
+  } else if (opt_zero) {
+    memset(aPtr, 0, aSize);
+  }
 }
 
 // ***************************************************************************
@@ -2220,7 +2292,8 @@ thread_local_arena(bool enabled)
     // called with `false`, but it doesn't matter at the moment.
     // because in practice nothing actually calls this function
     // with `false`, except maybe at shutdown.
-    arena = gArenas.CreateArena(/* IsPrivate = */ false);
+    arena =
+      gArenas.CreateArena(/* IsPrivate = */ false, /* Params = */ nullptr);
   } else {
     arena = gArenas.GetDefault();
   }
@@ -3025,12 +3098,8 @@ arena_t::MallocSmall(size_t aSize, bool aZero)
     mStats.allocated_small += aSize;
   }
 
-  if (aZero == false) {
-    if (opt_junk) {
-      memset(ret, kAllocJunk, aSize);
-    } else if (opt_zero) {
-      memset(ret, 0, aSize);
-    }
+  if (!aZero) {
+    ApplyZeroOrJunk(ret, aSize);
   } else {
     memset(ret, 0, aSize);
   }
@@ -3055,12 +3124,8 @@ arena_t::MallocLarge(size_t aSize, bool aZero)
     mStats.allocated_large += aSize;
   }
 
-  if (aZero == false) {
-    if (opt_junk) {
-      memset(ret, kAllocJunk, aSize);
-    } else if (opt_zero) {
-      memset(ret, 0, aSize);
-    }
+  if (!aZero) {
+    ApplyZeroOrJunk(ret, aSize);
   }
 
   return ret;
@@ -3071,27 +3136,19 @@ arena_t::Malloc(size_t aSize, bool aZero)
 {
   MOZ_DIAGNOSTIC_ASSERT(mMagic == ARENA_MAGIC);
   MOZ_ASSERT(aSize != 0);
-  MOZ_ASSERT(QUANTUM_CEILING(aSize) <= gMaxLargeClass);
 
-  return (aSize <= gMaxBinClass) ? MallocSmall(aSize, aZero)
-                                 : MallocLarge(aSize, aZero);
-}
-
-static inline void*
-imalloc(size_t aSize, bool aZero, arena_t* aArena)
-{
-  MOZ_ASSERT(aSize != 0);
-
-  aArena = aArena ? aArena : choose_arena(aSize);
-  if (aSize <= gMaxLargeClass) {
-    return aArena->Malloc(aSize, aZero);
+  if (aSize <= gMaxBinClass) {
+    return MallocSmall(aSize, aZero);
   }
-  return huge_malloc(aSize, aZero, aArena);
+  if (aSize <= gMaxLargeClass) {
+    return MallocLarge(aSize, aZero);
+  }
+  return MallocHuge(aSize, aZero);
 }
 
 // Only handles large allocations that require more than page alignment.
 void*
-arena_t::Palloc(size_t aAlignment, size_t aSize, size_t aAllocSize)
+arena_t::PallocLarge(size_t aAlignment, size_t aSize, size_t aAllocSize)
 {
   void* ret;
   size_t offset;
@@ -3135,16 +3192,12 @@ arena_t::Palloc(size_t aAlignment, size_t aSize, size_t aAllocSize)
     mStats.allocated_large += aSize;
   }
 
-  if (opt_junk) {
-    memset(ret, kAllocJunk, aSize);
-  } else if (opt_zero) {
-    memset(ret, 0, aSize);
-  }
+  ApplyZeroOrJunk(ret, aSize);
   return ret;
 }
 
-static inline void*
-ipalloc(size_t aAlignment, size_t aSize, arena_t* aArena)
+void*
+arena_t::Palloc(size_t aAlignment, size_t aSize)
 {
   void* ret;
   size_t ceil_size;
@@ -3174,10 +3227,9 @@ ipalloc(size_t aAlignment, size_t aSize, arena_t* aArena)
     return nullptr;
   }
 
-  aArena = aArena ? aArena : choose_arena(aSize);
   if (ceil_size <= gPageSize ||
       (aAlignment <= gPageSize && ceil_size <= gMaxLargeClass)) {
-    ret = aArena->Malloc(ceil_size, false);
+    ret = Malloc(ceil_size, false);
   } else {
     size_t run_size;
 
@@ -3217,11 +3269,11 @@ ipalloc(size_t aAlignment, size_t aSize, arena_t* aArena)
     }
 
     if (run_size <= gMaxLargeClass) {
-      ret = aArena->Palloc(aAlignment, ceil_size, run_size);
+      ret = PallocLarge(aAlignment, ceil_size, run_size);
     } else if (aAlignment <= kChunkSize) {
-      ret = huge_malloc(ceil_size, false, aArena);
+      ret = MallocHuge(ceil_size, false);
     } else {
-      ret = huge_palloc(ceil_size, aAlignment, false, aArena);
+      ret = PallocHuge(ceil_size, aAlignment, false);
     }
   }
 
@@ -3669,59 +3721,32 @@ arena_t::RallocGrowLarge(arena_chunk_t* aChunk,
   return false;
 }
 
-// Try to resize a large allocation, in order to avoid copying.  This will
-// always fail if growing an object, and the following run is already in use.
-// Returns whether reallocation was successful.
-static bool
-arena_ralloc_large(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
-{
-  size_t psize;
-
-  psize = PAGE_CEILING(aSize);
-  if (psize == aOldSize) {
-    // Same size class.
-    if (aSize < aOldSize) {
-      memset((void*)((uintptr_t)aPtr + aSize), kAllocPoison, aOldSize - aSize);
-    }
-    return true;
-  }
-
-  arena_chunk_t* chunk = GetChunkForPtr(aPtr);
-
-  if (psize < aOldSize) {
-    // Fill before shrinking in order avoid a race.
-    memset((void*)((uintptr_t)aPtr + aSize), kAllocPoison, aOldSize - aSize);
-    aArena->RallocShrinkLarge(chunk, aPtr, psize, aOldSize);
-    return true;
-  }
-
-  bool ret = aArena->RallocGrowLarge(chunk, aPtr, psize, aOldSize);
-  if (ret && opt_zero) {
-    memset((void*)((uintptr_t)aPtr + aOldSize), 0, aSize - aOldSize);
-  }
-  return ret;
-}
-
-static void*
-arena_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
+void*
+arena_t::RallocSmallOrLarge(void* aPtr, size_t aSize, size_t aOldSize)
 {
   void* ret;
   size_t copysize;
+  SizeClass sizeClass(aSize);
 
   // Try to avoid moving the allocation.
-  if (aSize <= gMaxBinClass) {
-    if (aOldSize <= gMaxBinClass && SizeClass(aSize) == SizeClass(aOldSize)) {
-      if (aSize < aOldSize) {
-        memset(
-          (void*)(uintptr_t(aPtr) + aSize), kAllocPoison, aOldSize - aSize);
-      } else if (opt_zero && aSize > aOldSize) {
-        memset((void*)(uintptr_t(aPtr) + aOldSize), 0, aSize - aOldSize);
-      }
+  if (aOldSize <= gMaxLargeClass && sizeClass.Size() == aOldSize) {
+    if (aSize < aOldSize) {
+      memset(
+        (void*)(uintptr_t(aPtr) + aSize), kAllocPoison, aOldSize - aSize);
+    }
+    return aPtr;
+  }
+  if (sizeClass.Type() == SizeClass::Large && aOldSize > gMaxBinClass &&
+      aOldSize <= gMaxLargeClass) {
+    arena_chunk_t* chunk = GetChunkForPtr(aPtr);
+    if (sizeClass.Size() < aOldSize) {
+      // Fill before shrinking in order to avoid a race.
+      memset((void*)((uintptr_t)aPtr + aSize), kAllocPoison, aOldSize - aSize);
+      RallocShrinkLarge(chunk, aPtr, sizeClass.Size(), aOldSize);
       return aPtr;
     }
-  } else if (aOldSize > gMaxBinClass && aOldSize <= gMaxLargeClass) {
-    MOZ_ASSERT(aSize > gMaxBinClass);
-    if (arena_ralloc_large(aPtr, aSize, aOldSize, aArena)) {
+    if (RallocGrowLarge(chunk, aPtr, sizeClass.Size(), aOldSize)) {
+      ApplyZeroOrJunk((void*)((uintptr_t)aPtr + aOldSize), aSize - aOldSize);
       return aPtr;
     }
   }
@@ -3729,7 +3754,7 @@ arena_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
   // If we get here, then aSize and aOldSize are different enough that we
   // need to move the object.  In that case, fall back to allocating new
   // space and copying.
-  ret = aArena->Malloc(aSize, false);
+  ret = Malloc(aSize, false);
   if (!ret) {
     return nullptr;
   }
@@ -3744,28 +3769,22 @@ arena_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
   {
     memcpy(ret, aPtr, copysize);
   }
-  idalloc(aPtr, aArena);
+  idalloc(aPtr, this);
   return ret;
 }
 
-static inline void*
-iralloc(void* aPtr, size_t aSize, arena_t* aArena)
+void*
+arena_t::Ralloc(void* aPtr, size_t aSize, size_t aOldSize)
 {
+  MOZ_DIAGNOSTIC_ASSERT(mMagic == ARENA_MAGIC);
   MOZ_ASSERT(aPtr);
   MOZ_ASSERT(aSize != 0);
 
-  auto info = AllocInfo::Get(aPtr);
-  auto arena = info.Arena();
-  MOZ_RELEASE_ASSERT(!aArena || arena == aArena);
-  aArena = aArena ? aArena : arena;
-  size_t oldsize = info.Size();
-  MOZ_DIAGNOSTIC_ASSERT(aArena->mMagic == ARENA_MAGIC);
-
-  return (aSize <= gMaxLargeClass) ? arena_ralloc(aPtr, aSize, oldsize, aArena)
-                                   : huge_ralloc(aPtr, aSize, oldsize, aArena);
+  return (aSize <= gMaxLargeClass) ? RallocSmallOrLarge(aPtr, aSize, aOldSize)
+                                   : RallocHuge(aPtr, aSize, aOldSize);
 }
 
-arena_t::arena_t()
+arena_t::arena_t(arena_params_t* aParams)
 {
   unsigned i;
 
@@ -3782,9 +3801,11 @@ arena_t::arena_t()
   mSpare = nullptr;
 
   mNumDirty = 0;
-  // Reduce the maximum amount of dirty pages we allow to be kept on
-  // thread local arenas. TODO: make this more flexible.
-  mMaxDirty = opt_dirty_max >> 3;
+
+  // The default maximum amount of dirty pages allowed on arenas is a fraction
+  // of opt_dirty_max.
+  mMaxDirty =
+    (aParams && aParams->mMaxDirty) ? aParams->mMaxDirty : (opt_dirty_max / 8);
 
   mRunsAvail.Init();
 
@@ -3810,10 +3831,10 @@ arena_t::arena_t()
 }
 
 arena_t*
-ArenaCollection::CreateArena(bool aIsPrivate)
+ArenaCollection::CreateArena(bool aIsPrivate, arena_params_t* aParams)
 {
   fallible_t fallible;
-  arena_t* ret = new (fallible) arena_t();
+  arena_t* ret = new (fallible) arena_t(aParams);
   if (!ret) {
     // Only reached if there is an OOM error.
 
@@ -3838,14 +3859,14 @@ ArenaCollection::CreateArena(bool aIsPrivate)
 // ***************************************************************************
 // Begin general internal functions.
 
-static void*
-huge_malloc(size_t size, bool zero, arena_t* aArena)
+void*
+arena_t::MallocHuge(size_t aSize, bool aZero)
 {
-  return huge_palloc(size, kChunkSize, zero, aArena);
+  return PallocHuge(aSize, kChunkSize, aZero);
 }
 
-static void*
-huge_palloc(size_t aSize, size_t aAlignment, bool aZero, arena_t* aArena)
+void*
+arena_t::PallocHuge(size_t aSize, size_t aAlignment, bool aZero)
 {
   void* ret;
   size_t csize;
@@ -3879,7 +3900,7 @@ huge_palloc(size_t aSize, size_t aAlignment, bool aZero, arena_t* aArena)
   node->mAddr = ret;
   psize = PAGE_CEILING(aSize);
   node->mSize = psize;
-  node->mArena = aArena ? aArena : choose_arena(aSize);
+  node->mArena = this;
 
   {
     MutexAutoLock lock(huge_mtx);
@@ -3913,27 +3934,19 @@ huge_palloc(size_t aSize, size_t aAlignment, bool aZero, arena_t* aArena)
   }
 #endif
 
-  if (aZero == false) {
-    if (opt_junk) {
+  if (!aZero) {
 #ifdef MALLOC_DECOMMIT
-      memset(ret, kAllocJunk, psize);
+    ApplyZeroOrJunk(ret, psize);
 #else
-      memset(ret, kAllocJunk, csize);
+    ApplyZeroOrJunk(ret, csize);
 #endif
-    } else if (opt_zero) {
-#ifdef MALLOC_DECOMMIT
-      memset(ret, 0, psize);
-#else
-      memset(ret, 0, csize);
-#endif
-    }
   }
 
   return ret;
 }
 
-static void*
-huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
+void*
+arena_t::RallocHuge(void* aPtr, size_t aSize, size_t aOldSize)
 {
   void* ret;
   size_t copysize;
@@ -3957,7 +3970,7 @@ huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
       extent_node_t* node = huge.Search(&key);
       MOZ_ASSERT(node);
       MOZ_ASSERT(node->mSize == aOldSize);
-      MOZ_RELEASE_ASSERT(!aArena || node->mArena == aArena);
+      MOZ_RELEASE_ASSERT(node->mArena == this);
       huge_allocated -= aOldSize - psize;
       // No need to change huge_mapped, because we didn't (un)map anything.
       node->mSize = psize;
@@ -3982,15 +3995,15 @@ huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
       extent_node_t* node = huge.Search(&key);
       MOZ_ASSERT(node);
       MOZ_ASSERT(node->mSize == aOldSize);
-      MOZ_RELEASE_ASSERT(!aArena || node->mArena == aArena);
+      MOZ_RELEASE_ASSERT(node->mArena == this);
       huge_allocated += psize - aOldSize;
       // No need to change huge_mapped, because we didn't
       // (un)map anything.
       node->mSize = psize;
     }
 
-    if (opt_zero && aSize > aOldSize) {
-      memset((void*)((uintptr_t)aPtr + aOldSize), 0, aSize - aOldSize);
+    if (aSize > aOldSize) {
+      ApplyZeroOrJunk((void*)((uintptr_t)aPtr + aOldSize), aSize - aOldSize);
     }
     return aPtr;
   }
@@ -3998,7 +4011,7 @@ huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
   // If we get here, then aSize and aOldSize are different enough that we
   // need to use a different size class.  In that case, fall back to
   // allocating new space and copying.
-  ret = huge_malloc(aSize, false, aArena);
+  ret = MallocHuge(aSize, false);
   if (!ret) {
     return nullptr;
   }
@@ -4012,7 +4025,7 @@ huge_ralloc(void* aPtr, size_t aSize, size_t aOldSize, arena_t* aArena)
   {
     memcpy(ret, aPtr, copysize);
   }
-  idalloc(aPtr, aArena);
+  idalloc(aPtr, this);
   return ret;
 }
 
@@ -4067,7 +4080,7 @@ malloc_init_hard()
   const char* opts;
   long result;
 
-  MutexAutoLock lock(gInitLock);
+  AutoLock<StaticMutex> lock(gInitLock);
 
   if (malloc_initialized) {
     // Another thread initialized the allocator before this one
@@ -4253,6 +4266,7 @@ inline void*
 BaseAllocator::malloc(size_t aSize)
 {
   void* ret;
+  arena_t* arena;
 
   if (!malloc_init()) {
     ret = nullptr;
@@ -4262,8 +4276,8 @@ BaseAllocator::malloc(size_t aSize)
   if (aSize == 0) {
     aSize = 1;
   }
-
-  ret = imalloc(aSize, /* zero = */ false, mArena);
+  arena = mArena ? mArena : choose_arena(aSize);
+  ret = arena->Malloc(aSize, /* zero = */ false);
 
 RETURN:
   if (!ret) {
@@ -4276,8 +4290,6 @@ RETURN:
 inline void*
 BaseAllocator::memalign(size_t aAlignment, size_t aSize)
 {
-  void* ret;
-
   MOZ_ASSERT(((aAlignment - 1) & aAlignment) == 0);
 
   if (!malloc_init()) {
@@ -4289,9 +4301,8 @@ BaseAllocator::memalign(size_t aAlignment, size_t aSize)
   }
 
   aAlignment = aAlignment < sizeof(void*) ? sizeof(void*) : aAlignment;
-  ret = ipalloc(aAlignment, aSize, mArena);
-
-  return ret;
+  arena_t* arena = mArena ? mArena : choose_arena(aSize);
+  return arena->Palloc(aAlignment, aSize);
 }
 
 inline void*
@@ -4306,7 +4317,8 @@ BaseAllocator::calloc(size_t aNum, size_t aSize)
       if (allocSize == 0) {
         allocSize = 1;
       }
-      ret = imalloc(allocSize, /* zero = */ true, mArena);
+      arena_t* arena = mArena ? mArena : choose_arena(allocSize);
+      ret = arena->Malloc(allocSize, /* zero = */ true);
     } else {
       ret = nullptr;
     }
@@ -4333,7 +4345,10 @@ BaseAllocator::realloc(void* aPtr, size_t aSize)
   if (aPtr) {
     MOZ_RELEASE_ASSERT(malloc_initialized);
 
-    ret = iralloc(aPtr, aSize, mArena);
+    auto info = AllocInfo::Get(aPtr);
+    auto arena = info.Arena();
+    MOZ_RELEASE_ASSERT(!mArena || arena == mArena);
+    ret = arena->Ralloc(aPtr, aSize, info.Size());
 
     if (!ret) {
       errno = ENOMEM;
@@ -4342,7 +4357,8 @@ BaseAllocator::realloc(void* aPtr, size_t aSize)
     if (!malloc_init()) {
       ret = nullptr;
     } else {
-      ret = imalloc(aSize, /* zero = */ false, mArena);
+      arena_t* arena = mArena ? mArena : choose_arena(aSize);
+      ret = arena->Malloc(aSize, /* zero = */ false);
     }
 
     if (!ret) {
@@ -4438,12 +4454,9 @@ template<>
 inline size_t
 MozJemalloc::malloc_good_size(size_t aSize)
 {
-  if (aSize <= gMaxSubPageClass) {
-    // Small
+  if (aSize <= gMaxLargeClass) {
+    // Small or large
     aSize = SizeClass(aSize).Size();
-  } else if (aSize <= gMaxLargeClass) {
-    // Large.
-    aSize = PAGE_CEILING(aSize);
   } else {
     // Huge.  We use PAGE_CEILING to get psize, instead of using
     // CHUNK_CEILING to get csize.  This ensures that this
@@ -4470,7 +4483,7 @@ MozJemalloc::jemalloc_stats(jemalloc_stats_t* aStats)
   if (!aStats) {
     return;
   }
-  if (!malloc_initialized) {
+  if (!malloc_init()) {
     memset(aStats, 0, sizeof(*aStats));
     return;
   }
@@ -4682,10 +4695,10 @@ ArenaCollection::GetById(arena_id_t aArenaId, bool aIsPrivate)
 #ifdef NIGHTLY_BUILD
 template<>
 inline arena_id_t
-MozJemalloc::moz_create_arena()
+MozJemalloc::moz_create_arena_with_params(arena_params_t* aParams)
 {
   if (malloc_init()) {
-    arena_t* arena = gArenas.CreateArena(/* IsPrivate = */ true);
+    arena_t* arena = gArenas.CreateArena(/* IsPrivate = */ true, aParams);
     return arena->mId;
   }
   return 0;
@@ -4799,8 +4812,9 @@ static
 // the zygote.
 #ifdef XP_DARWIN
 #define MOZ_REPLACE_WEAK __attribute__((weak_import))
-#elif defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
-#define MOZ_NO_REPLACE_FUNC_DECL
+#elif defined(XP_WIN) || defined(ANDROID)
+#define MOZ_DYNAMIC_REPLACE_INIT
+#define replace_init replace_init_decl
 #elif defined(__GNUC__)
 #define MOZ_REPLACE_WEAK __attribute__((weak))
 #endif
@@ -4809,18 +4823,14 @@ static
 
 #define MALLOC_DECL(name, return_type, ...) MozJemalloc::name,
 
-static const malloc_table_t malloc_table = {
+static malloc_table_t gReplaceMallocTable = {
 #include "malloc_decls.h"
 };
 
-static malloc_table_t replace_malloc_table;
-
-#ifdef MOZ_NO_REPLACE_FUNC_DECL
-#define MALLOC_DECL(name, return_type, ...)                                    \
-  typedef return_type(name##_impl_t)(__VA_ARGS__);                             \
-  name##_impl_t* replace_##name = nullptr;
-#define MALLOC_FUNCS (MALLOC_FUNCS_INIT | MALLOC_FUNCS_BRIDGE)
-#include "malloc_decls.h"
+#ifdef MOZ_DYNAMIC_REPLACE_INIT
+#undef replace_init
+typedef decltype(replace_init_decl) replace_init_impl_t;
+static replace_init_impl_t* replace_init = nullptr;
 #endif
 
 #ifdef XP_WIN
@@ -4838,8 +4848,8 @@ replace_malloc_handle()
   return nullptr;
 }
 
-#define REPLACE_MALLOC_GET_FUNC(handle, name)                                  \
-  (name##_impl_t*)GetProcAddress(handle, "replace_" #name)
+#define REPLACE_MALLOC_GET_INIT_FUNC(handle)                                   \
+  (replace_init_impl_t*)GetProcAddress(handle, "replace_init")
 
 #elif defined(ANDROID)
 #include <dlfcn.h>
@@ -4856,39 +4866,63 @@ replace_malloc_handle()
   return nullptr;
 }
 
-#define REPLACE_MALLOC_GET_FUNC(handle, name)                                  \
-  (name##_impl_t*)dlsym(handle, "replace_" #name)
-
-#else
-
-typedef bool replace_malloc_handle_t;
-
-static replace_malloc_handle_t
-replace_malloc_handle()
-{
-  return true;
-}
-
-#define REPLACE_MALLOC_GET_FUNC(handle, name) replace_##name
+#define REPLACE_MALLOC_GET_INIT_FUNC(handle)                                   \
+  (replace_init_impl_t*)dlsym(handle, "replace_init")
 
 #endif
 
 static void
 replace_malloc_init_funcs();
 
+#ifdef MOZ_REPLACE_MALLOC_STATIC
+extern "C" void
+logalloc_init(malloc_table_t*, ReplaceMallocBridge**);
+
+extern "C" void
+dmd_init(malloc_table_t*, ReplaceMallocBridge**);
+#endif
+
+bool
+Equals(malloc_table_t& aTable1, malloc_table_t& aTable2)
+{
+  return memcmp(&aTable1, &aTable2, sizeof(malloc_table_t)) == 0;
+}
+
 // Below is the malloc implementation overriding jemalloc and calling the
 // replacement functions if they exist.
-static int replace_malloc_initialized = 0;
+static bool gReplaceMallocInitialized = false;
+static ReplaceMallocBridge* gReplaceMallocBridge = nullptr;
 static void
 init()
 {
-  replace_malloc_init_funcs();
+#ifdef MOZ_REPLACE_MALLOC_STATIC
+  malloc_table_t initialTable = gReplaceMallocTable;
+#endif
+
+#ifdef MOZ_DYNAMIC_REPLACE_INIT
+  replace_malloc_handle_t handle = replace_malloc_handle();
+  if (handle) {
+    replace_init = REPLACE_MALLOC_GET_INIT_FUNC(handle);
+  }
+#endif
+
   // Set this *before* calling replace_init, otherwise if replace_init calls
   // malloc() we'll get an infinite loop.
-  replace_malloc_initialized = 1;
+  gReplaceMallocInitialized = true;
   if (replace_init) {
-    replace_init(&malloc_table);
+    replace_init(&gReplaceMallocTable, &gReplaceMallocBridge);
   }
+#ifdef MOZ_REPLACE_MALLOC_STATIC
+  if (Equals(initialTable, gReplaceMallocTable)) {
+    logalloc_init(&gReplaceMallocTable, &gReplaceMallocBridge);
+  }
+#ifdef MOZ_DMD
+  if (Equals(initialTable, gReplaceMallocTable)) {
+    dmd_init(&gReplaceMallocTable, &gReplaceMallocBridge);
+  }
+#endif
+#endif
+  replace_malloc_init_funcs();
 }
 
 #define MALLOC_DECL(name, return_type, ...)                                    \
@@ -4896,23 +4930,20 @@ init()
   inline return_type ReplaceMalloc::name(                                      \
     ARGS_HELPER(TYPED_ARGS, ##__VA_ARGS__))                                    \
   {                                                                            \
-    if (MOZ_UNLIKELY(!replace_malloc_initialized)) {                           \
+    if (MOZ_UNLIKELY(!gReplaceMallocInitialized)) {                            \
       init();                                                                  \
     }                                                                          \
-    return replace_malloc_table.name(ARGS_HELPER(ARGS, ##__VA_ARGS__));        \
+    return gReplaceMallocTable.name(ARGS_HELPER(ARGS, ##__VA_ARGS__));         \
   }
 #include "malloc_decls.h"
 
 MOZ_JEMALLOC_API struct ReplaceMallocBridge*
 get_bridge(void)
 {
-  if (MOZ_UNLIKELY(!replace_malloc_initialized)) {
+  if (MOZ_UNLIKELY(!gReplaceMallocInitialized)) {
     init();
   }
-  if (MOZ_LIKELY(!replace_get_bridge)) {
-    return nullptr;
-  }
-  return replace_get_bridge();
+  return gReplaceMallocBridge;
 }
 
 // posix_memalign, aligned_alloc, memalign and valloc all implement some kind
@@ -4923,45 +4954,29 @@ get_bridge(void)
 static void
 replace_malloc_init_funcs()
 {
-  replace_malloc_handle_t handle = replace_malloc_handle();
-  if (handle) {
-#ifdef MOZ_NO_REPLACE_FUNC_DECL
-#define MALLOC_DECL(name, ...)                                                 \
-  replace_##name = REPLACE_MALLOC_GET_FUNC(handle, name);
-
-#define MALLOC_FUNCS (MALLOC_FUNCS_INIT | MALLOC_FUNCS_BRIDGE)
-#include "malloc_decls.h"
-#endif
-
-#define MALLOC_DECL(name, ...)                                                 \
-  replace_malloc_table.name = REPLACE_MALLOC_GET_FUNC(handle, name);
-#include "malloc_decls.h"
-  }
-
-  if (!replace_malloc_table.posix_memalign && replace_malloc_table.memalign) {
-    replace_malloc_table.posix_memalign =
+  if (gReplaceMallocTable.posix_memalign == MozJemalloc::posix_memalign &&
+      gReplaceMallocTable.memalign != MozJemalloc::memalign) {
+    gReplaceMallocTable.posix_memalign =
       AlignedAllocator<ReplaceMalloc::memalign>::posix_memalign;
   }
-  if (!replace_malloc_table.aligned_alloc && replace_malloc_table.memalign) {
-    replace_malloc_table.aligned_alloc =
+  if (gReplaceMallocTable.aligned_alloc == MozJemalloc::aligned_alloc &&
+      gReplaceMallocTable.memalign != MozJemalloc::memalign) {
+    gReplaceMallocTable.aligned_alloc =
       AlignedAllocator<ReplaceMalloc::memalign>::aligned_alloc;
   }
-  if (!replace_malloc_table.valloc && replace_malloc_table.memalign) {
-    replace_malloc_table.valloc =
+  if (gReplaceMallocTable.valloc == MozJemalloc::valloc &&
+      gReplaceMallocTable.memalign != MozJemalloc::memalign) {
+    gReplaceMallocTable.valloc =
       AlignedAllocator<ReplaceMalloc::memalign>::valloc;
   }
-  if (!replace_malloc_table.moz_create_arena && replace_malloc_table.malloc) {
+  if (gReplaceMallocTable.moz_create_arena_with_params ==
+        MozJemalloc::moz_create_arena_with_params &&
+      gReplaceMallocTable.malloc != MozJemalloc::malloc) {
 #define MALLOC_DECL(name, ...)                                                 \
-  replace_malloc_table.name = DummyArenaAllocator<ReplaceMalloc>::name;
+  gReplaceMallocTable.name = DummyArenaAllocator<ReplaceMalloc>::name;
 #define MALLOC_FUNCS MALLOC_FUNCS_ARENA
 #include "malloc_decls.h"
   }
-
-#define MALLOC_DECL(name, ...)                                                 \
-  if (!replace_malloc_table.name) {                                            \
-    replace_malloc_table.name = MozJemalloc::name;                             \
-  }
-#include "malloc_decls.h"
 }
 
 #endif // MOZ_REPLACE_MALLOC

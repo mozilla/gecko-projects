@@ -3,14 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BorderRadius, ComplexClipRegion, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
-use api::{DevicePoint, DeviceRect, DeviceSize, LayerRect, LayerToWorldTransform};
-use api::{LayoutPoint, LayoutRect, LayoutSize};
-use api::WorldPoint3D;
+use api::{DevicePoint, DeviceRect, DeviceSize, LayerPoint, LayerRect, LayerSize};
+use api::{LayerToWorldTransform, LayoutPoint, LayoutRect, LayoutSize, WorldPoint3D};
 use euclid::{Point2D, Rect, Size2D, TypedPoint2D, TypedRect, TypedSize2D, TypedTransform2D};
 use euclid::TypedTransform3D;
 use num_traits::Zero;
 use std::f32::consts::FRAC_1_SQRT_2;
 use std::i32;
+use std::f32;
 
 // Matches the definition of SK_ScalarNearlyZero in Skia.
 const NEARLY_ZERO: f32 = 1.0 / 4096.0;
@@ -21,6 +21,7 @@ pub trait MatrixHelpers<Src, Dst> {
     fn is_identity(&self) -> bool;
     fn preserves_2d_axis_alignment(&self) -> bool;
     fn has_perspective_component(&self) -> bool;
+    fn has_2d_inverse(&self) -> bool;
     fn inverse_project(&self, target: &TypedPoint2D<f32, Dst>) -> Option<TypedPoint2D<f32, Src>>;
     fn inverse_rect_footprint(&self, rect: &TypedRect<f32, Dst>) -> TypedRect<f32, Src>;
     fn transform_kind(&self) -> TransformedRectKind;
@@ -73,6 +74,10 @@ impl<Src, Dst> MatrixHelpers<Src, Dst> for TypedTransform3D<f32, Src, Dst> {
 
     fn has_perspective_component(&self) -> bool {
          self.m14 != 0.0 || self.m24 != 0.0 || self.m34 != 0.0 || self.m44 != 1.0
+    }
+
+    fn has_2d_inverse(&self) -> bool {
+        self.m11 * self.m22 - self.m12 * self.m21 != 0.0
     }
 
     fn inverse_project(&self, target: &TypedPoint2D<f32, Dst>) -> Option<TypedPoint2D<f32, Src>> {
@@ -205,7 +210,7 @@ pub fn get_normal(x: f32) -> Option<f32> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-#[repr(u8)]
+#[repr(u32)]
 pub enum TransformedRectKind {
     AxisAligned = 0,
     Complex = 1,
@@ -433,6 +438,15 @@ pub mod test {
 
 pub trait MaxRect {
     fn max_rect() -> Self;
+}
+
+impl MaxRect for LayerRect {
+    fn max_rect() -> Self {
+        LayerRect::new(
+            LayerPoint::new(f32::MIN / 2.0, f32::MIN / 2.0),
+            LayerSize::new(f32::MAX, f32::MAX),
+        )
+    }
 }
 
 impl MaxRect for DeviceIntRect {

@@ -8,8 +8,7 @@ use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use dom::TElement;
 use gecko_bindings::bindings::{self, RawServoStyleSet};
 use gecko_bindings::structs::{RawGeckoPresContextOwned, ServoStyleSetSizes, ServoStyleSheet};
-use gecko_bindings::structs::{StyleSheetInfo, ServoStyleSheetInner};
-use gecko_bindings::structs::nsIDocument;
+use gecko_bindings::structs::{StyleSheetInfo, ServoStyleSheetInner, nsIDocument, self};
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasBoxFFI, HasFFI, HasSimpleFFI};
 use invalidation::media_queries::{MediaListKey, ToMediaListKey};
 use malloc_size_of::MallocSizeOfOps;
@@ -165,10 +164,18 @@ impl PerDocumentStyleDataImpl {
     }
 
     /// Returns whether private browsing is enabled.
-    pub fn is_private_browsing_enabled(&self) -> bool {
+    fn is_private_browsing_enabled(&self) -> bool {
         let doc =
             self.stylist.device().pres_context().mDocument.raw::<nsIDocument>();
         unsafe { bindings::Gecko_IsPrivateBrowsingEnabled(doc) }
+    }
+
+    /// Returns whether the document is being used as an image.
+    fn is_being_used_as_an_image(&self) -> bool {
+        let doc =
+            self.stylist.device().pres_context().mDocument.raw::<nsIDocument>();
+
+        unsafe { (*doc).mIsBeingUsedAsImage() }
     }
 
     /// Get the default computed values for this document.
@@ -178,11 +185,24 @@ impl PerDocumentStyleDataImpl {
 
     /// Returns whether visited links are enabled.
     fn visited_links_enabled(&self) -> bool {
-        unsafe { bindings::Gecko_AreVisitedLinksEnabled() }
+        unsafe { structs::StylePrefs_sVisitedLinksEnabled }
     }
+
     /// Returns whether visited styles are enabled.
     pub fn visited_styles_enabled(&self) -> bool {
-        self.visited_links_enabled() && !self.is_private_browsing_enabled()
+        if !self.visited_links_enabled() {
+            return false;
+        }
+
+        if self.is_private_browsing_enabled() {
+            return false;
+        }
+
+        if self.is_being_used_as_an_image() {
+            return false;
+        }
+
+        true
     }
 
     /// Measure heap usage.

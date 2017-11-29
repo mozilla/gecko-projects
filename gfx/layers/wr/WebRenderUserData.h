@@ -80,12 +80,12 @@ public:
   virtual UserDataType GetType() override { return UserDataType::eImage; }
   static UserDataType Type() { return UserDataType::eImage; }
   Maybe<wr::ImageKey> GetKey() { return mKey; }
-  void SetKey(const wr::ImageKey& aKey) { mKey = Some(aKey); }
+  void SetKey(const wr::ImageKey& aKey);
   already_AddRefed<ImageClient> GetImageClient();
 
   Maybe<wr::ImageKey> UpdateImageKey(ImageContainer* aContainer,
                                      wr::IpcResourceUpdateQueue& aResources,
-                                     bool aForceUpdate = false);
+                                     bool aFallback = false);
 
   void CreateAsyncImageWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                          ImageContainer* aContainer,

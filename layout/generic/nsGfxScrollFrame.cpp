@@ -1333,7 +1333,7 @@ ScrollFrameHelper::WantAsyncScroll() const
 }
 
 static nsRect
-GetOnePixelRangeAroundPoint(nsPoint aPoint, bool aIsHorizontal)
+GetOnePixelRangeAroundPoint(const nsPoint& aPoint, bool aIsHorizontal)
 {
   nsRect allowedRange(aPoint, nsSize());
   nscoord halfPixel = nsPresContext::CSSPixelsToAppUnits(0.5f);
@@ -2107,6 +2107,9 @@ ScrollFrameHelper::~ScrollFrameHelper()
   if (mScrollEvent) {
     mScrollEvent->Revoke();
   }
+  if (mScrollEndEvent) {
+    mScrollEndEvent->Revoke();
+  }
 }
 
 /*
@@ -2186,7 +2189,7 @@ ScrollFrameHelper::CompleteAsyncScroll(const nsRect &aRange, nsAtom* aOrigin)
   // We are done scrolling, set our destination to wherever we actually ended
   // up scrolling to.
   mDestination = GetScrollPosition();
-  FireScrollEndEvent();
+  PostScrollEndEvent();
 }
 
 bool
@@ -3028,12 +3031,20 @@ AppendToTop(nsDisplayListBuilder* aBuilder, const nsDisplayListSet& aLists,
   nsDisplayWrapList* newItem;
   const ActiveScrolledRoot* asr = aBuilder->CurrentActiveScrolledRoot();
   if (aFlags & APPEND_OWN_LAYER) {
-    uint32_t flags = (aFlags & APPEND_SCROLLBAR_CONTAINER)
-                     ? nsDisplayOwnLayer::SCROLLBAR_CONTAINER
-                     : 0;
-    FrameMetrics::ViewID scrollTarget = (aFlags & APPEND_SCROLLBAR_CONTAINER)
-                                        ? aBuilder->GetCurrentScrollbarTarget()
-                                        : FrameMetrics::NULL_SCROLL_ID;
+    FrameMetrics::ViewID scrollTarget = FrameMetrics::NULL_SCROLL_ID;
+    nsDisplayOwnLayerFlags flags = aBuilder->GetCurrentScrollbarFlags();
+    // The flags here should be at most one scrollbar direction and nothing else
+    MOZ_ASSERT(flags == nsDisplayOwnLayerFlags::eNone ||
+               flags == nsDisplayOwnLayerFlags::eVerticalScrollbar ||
+               flags == nsDisplayOwnLayerFlags::eHorizontalScrollbar);
+
+    if (aFlags & APPEND_SCROLLBAR_CONTAINER) {
+      scrollTarget = aBuilder->GetCurrentScrollbarTarget();
+      // The flags here should be exactly one scrollbar direction
+      MOZ_ASSERT(flags != nsDisplayOwnLayerFlags::eNone);
+      flags |= nsDisplayOwnLayerFlags::eScrollbarContainer;
+    }
+
     newItem = new (aBuilder) nsDisplayOwnLayer(aBuilder, aSourceFrame, aSource, asr, flags, scrollTarget);
   } else {
     newItem = new (aBuilder) nsDisplayWrapList(aBuilder, aSourceFrame, aSource, asr);
@@ -3115,14 +3126,14 @@ ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
   }
 
   for (uint32_t i = 0; i < scrollParts.Length(); ++i) {
-    uint32_t flags = 0;
+    nsDisplayOwnLayerFlags flags = nsDisplayOwnLayerFlags::eNone;
     uint32_t appendToTopFlags = 0;
     if (scrollParts[i] == mVScrollbarBox) {
-      flags |= nsDisplayOwnLayer::VERTICAL_SCROLLBAR;
+      flags |= nsDisplayOwnLayerFlags::eVerticalScrollbar;
       appendToTopFlags |= APPEND_SCROLLBAR_CONTAINER;
     }
     if (scrollParts[i] == mHScrollbarBox) {
-      flags |= nsDisplayOwnLayer::HORIZONTAL_SCROLLBAR;
+      flags |= nsDisplayOwnLayerFlags::eHorizontalScrollbar;
       appendToTopFlags |= APPEND_SCROLLBAR_CONTAINER;
     }
 
@@ -3139,7 +3150,7 @@ ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
 
     // Always create layers for overlay scrollbars so that we don't create a
     // giant layer covering the whole scrollport if both scrollbars are visible.
-    bool isOverlayScrollbar = (flags != 0) && overlayScrollbars;
+    bool isOverlayScrollbar = (flags != nsDisplayOwnLayerFlags::eNone) && overlayScrollbars;
     bool createLayer = aCreateLayer || isOverlayScrollbar ||
                        gfxPrefs::AlwaysLayerizeScrollbarTrackTestOnly();
 
@@ -3623,19 +3634,23 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (couldBuildLayer) {
     // Make sure that APZ will dispatch events back to content so we can create
     // a displayport for this frame. We'll add the item later on.
-    nsDisplayLayerEventRegions* inactiveRegionItem = nullptr;
-    if (aBuilder->IsPaintingToWindow() &&
-        !mWillBuildScrollableLayer &&
-        aBuilder->IsBuildingLayerEventRegions())
-    {
-      inactiveRegionItem = new (aBuilder) nsDisplayLayerEventRegions(aBuilder, mScrolledFrame, 1);
-      inactiveRegionItem->AddInactiveScrollPort(mScrolledFrame, mScrollPort + aBuilder->ToReferenceFrame(mOuter));
-    }
-
-    if (inactiveRegionItem) {
+    if (!mWillBuildScrollableLayer) {
       int32_t zIndex =
         MaxZIndexInListOfItemsContainedInFrame(scrolledContent.PositionedDescendants(), mOuter);
-      AppendInternalItemToTop(scrolledContent, inactiveRegionItem, zIndex);
+      if (aBuilder->BuildCompositorHitTestInfo()) {
+        CompositorHitTestInfo info = CompositorHitTestInfo::eVisibleToHitTest
+                                   | CompositorHitTestInfo::eDispatchToContent;
+        nsDisplayCompositorHitTestInfo* hitInfo =
+            new (aBuilder) nsDisplayCompositorHitTestInfo(aBuilder, mScrolledFrame, info, 1);
+        hitInfo->SetArea(mScrollPort + aBuilder->ToReferenceFrame(mOuter));
+        AppendInternalItemToTop(scrolledContent, hitInfo, zIndex);
+      }
+      if (aBuilder->IsBuildingLayerEventRegions()) {
+        nsDisplayLayerEventRegions* inactiveRegionItem =
+            new (aBuilder) nsDisplayLayerEventRegions(aBuilder, mScrolledFrame, 1);
+        inactiveRegionItem->AddInactiveScrollPort(mScrolledFrame, mScrollPort + aBuilder->ToReferenceFrame(mOuter));
+        AppendInternalItemToTop(scrolledContent, inactiveRegionItem, zIndex);
+      }
     }
 
     if (aBuilder->ShouldBuildScrollInfoItemsForHoisting()) {
@@ -4411,9 +4426,24 @@ ScrollFrameHelper::FireScrollPortEvent()
 }
 
 void
+ScrollFrameHelper::PostScrollEndEvent()
+{
+  if (mScrollEndEvent) {
+    return;
+  }
+
+  // The ScrollEndEvent constructor registers itself with the refresh driver.
+  mScrollEndEvent = new ScrollEndEvent(this);
+}
+
+void
 ScrollFrameHelper::FireScrollEndEvent()
 {
   MOZ_ASSERT(mOuter->GetContent());
+  MOZ_ASSERT(mScrollEndEvent);
+  mScrollEndEvent->Revoke();
+  mScrollEndEvent = nullptr;
+
   nsContentUtils::DispatchEventOnlyToChrome(mOuter->GetContent()->OwnerDoc(),
                                             mOuter->GetContent(),
                                             NS_LITERAL_STRING("scrollend"),
@@ -4805,6 +4835,22 @@ ScrollFrameHelper::ScrollEvent::Run()
 {
   if (mHelper) {
     mHelper->FireScrollEvent();
+  }
+  return NS_OK;
+}
+
+ScrollFrameHelper::ScrollEndEvent::ScrollEndEvent(ScrollFrameHelper* aHelper)
+  : Runnable("ScrollFrameHelper::ScrollEndEvent")
+  , mHelper(aHelper)
+{
+  mHelper->mOuter->PresContext()->RefreshDriver()->PostScrollEvent(this);
+}
+
+NS_IMETHODIMP
+ScrollFrameHelper::ScrollEndEvent::Run()
+{
+  if (mHelper) {
+    mHelper->FireScrollEndEvent();
   }
   return NS_OK;
 }
@@ -6267,12 +6313,12 @@ ComputeScrollSnapInfo(const ScrollFrameHelper& aScrollFrame)
   }
 
   if (styles.mScrollSnapPointsX.GetUnit() != eStyleUnit_None) {
-    result.mScrollSnapIntervalX = Some(nsRuleNode::ComputeCoordPercentCalc(
-        styles.mScrollSnapPointsX, scrollPortSize.width));
+    result.mScrollSnapIntervalX = Some(
+      styles.mScrollSnapPointsX.ComputeCoordPercentCalc(scrollPortSize.width));
   }
   if (styles.mScrollSnapPointsY.GetUnit() != eStyleUnit_None) {
-    result.mScrollSnapIntervalY = Some(nsRuleNode::ComputeCoordPercentCalc(
-        styles.mScrollSnapPointsY, scrollPortSize.height));
+    result.mScrollSnapIntervalY = Some(
+      styles.mScrollSnapPointsY.ComputeCoordPercentCalc(scrollPortSize.height));
   }
 
   CollectScrollSnapCoordinates(aScrollFrame.GetScrolledFrame(),

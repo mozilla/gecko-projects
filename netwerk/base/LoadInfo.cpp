@@ -7,6 +7,8 @@
 #include "mozilla/LoadInfo.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/dom/ClientIPCTypes.h"
+#include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozIThirdPartyUtil.h"
@@ -111,6 +113,15 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   }
 
   if (aLoadingContext) {
+    // Ensure that all network requests for a window client have the ClientInfo
+    // properly set.
+    // TODO: The ClientInfo is not set properly for worker initiated requests yet.
+    nsCOMPtr<nsPIDOMWindowInner> contextInner =
+      aLoadingContext->OwnerDoc()->GetInnerWindow();
+    if (contextInner) {
+      mClientInfo = contextInner->GetClientInfo();
+    }
+
     nsCOMPtr<nsPIDOMWindowOuter> contextOuter = aLoadingContext->OwnerDoc()->GetWindow();
     if (contextOuter) {
       ComputeIsThirdPartyContext(contextOuter);
@@ -303,6 +314,11 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
   , mPrincipalToInherit(rhs.mPrincipalToInherit)
   , mSandboxedLoadingPrincipal(rhs.mSandboxedLoadingPrincipal)
   , mResultPrincipalURI(rhs.mResultPrincipalURI)
+  , mClientInfo(rhs.mClientInfo)
+  // mReservedClientSource must be handled specially during redirect
+  // mReservedClientInfo must be handled specially during redirect
+  // mInitialClientInfo must be handled specially during redirect
+  // mController must be handled specially during redirect
   , mLoadingContext(rhs.mLoadingContext)
   , mContextForTopLevelLoad(rhs.mContextForTopLevelLoad)
   , mSecurityFlags(rhs.mSecurityFlags)
@@ -525,12 +541,8 @@ LoadInfo::FindPrincipalToInherit(nsIChannel* aChannel)
     Unused << aChannel->GetOriginalURI(getter_AddRefs(uri));
   }
 
-  bool dataInherits = mSecurityFlags & (SEC_REQUIRE_SAME_ORIGIN_DATA_INHERITS |
-                                        SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
-                                        SEC_REQUIRE_CORS_DATA_INHERITS);
-
   auto prin = BasePrincipal::Cast(mTriggeringPrincipal);
-  return prin->PrincipalToInherit(uri, dataInherits);
+  return prin->PrincipalToInherit(uri);
 }
 
 NS_IMETHODIMP
@@ -1153,6 +1165,76 @@ LoadInfo::SetResultPrincipalURI(nsIURI *aURI)
 {
   mResultPrincipalURI = aURI;
   return NS_OK;
+}
+
+void
+LoadInfo::SetClientInfo(const ClientInfo& aClientInfo)
+{
+  mClientInfo.emplace(aClientInfo);
+}
+
+const Maybe<ClientInfo>&
+LoadInfo::GetClientInfo()
+{
+  return mClientInfo;
+}
+
+void
+LoadInfo::GiveReservedClientSource(UniquePtr<ClientSource>&& aClientSource)
+{
+  MOZ_DIAGNOSTIC_ASSERT(aClientSource);
+  mReservedClientSource = Move(aClientSource);
+  SetReservedClientInfo(mReservedClientSource->Info());
+}
+
+UniquePtr<ClientSource>
+LoadInfo::TakeReservedClientSource()
+{
+  if (mReservedClientSource) {
+    // If the reserved ClientInfo was set due to a ClientSource being present,
+    // then clear that info object when the ClientSource is taken.
+    mReservedClientInfo.reset();
+  }
+  return Move(mReservedClientSource);
+}
+
+void
+LoadInfo::SetReservedClientInfo(const ClientInfo& aClientInfo)
+{
+  MOZ_DIAGNOSTIC_ASSERT(mInitialClientInfo.isNothing());
+  mReservedClientInfo.emplace(aClientInfo);
+}
+
+const Maybe<ClientInfo>&
+LoadInfo::GetReservedClientInfo()
+{
+  return mReservedClientInfo;
+}
+
+void
+LoadInfo::SetInitialClientInfo(const ClientInfo& aClientInfo)
+{
+  MOZ_DIAGNOSTIC_ASSERT(!mReservedClientSource);
+  MOZ_DIAGNOSTIC_ASSERT(mReservedClientInfo.isNothing());
+  mInitialClientInfo.emplace(aClientInfo);
+}
+
+const Maybe<ClientInfo>&
+LoadInfo::GetInitialClientInfo()
+{
+  return mInitialClientInfo;
+}
+
+void
+LoadInfo::SetController(const ServiceWorkerDescriptor& aServiceWorker)
+{
+  mController.emplace(aServiceWorker);
+}
+
+const Maybe<ServiceWorkerDescriptor>&
+LoadInfo::GetController()
+{
+  return mController;
 }
 
 } // namespace net

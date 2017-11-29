@@ -1314,15 +1314,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7 (obsolete), RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10"
-  },
-  "JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["jdemooij@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in add-ons: ForEach=0, DestructuringForIn=1 (obsolete), LegacyGenerator=2, ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7 (obsolete), RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10"
+    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0 (obsolete), DestructuringForIn=1 (obsolete), LegacyGenerator=2 (obsolete), ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7 (obsolete), RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10 (obsolete)"
   },
   "JS_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS": {
     "record_in_processes": ["main", "content"],
@@ -4435,7 +4427,7 @@
     "alert_emails": ["necko@mozilla.com", "junior@mozilla.com"],
     "description": "Old schema version of the cookie database. 0 for having legacy cookies.txt."
   },
-  "MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS": {
+  "MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS_V2": {
     "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
@@ -4443,7 +4435,17 @@
     "bug_numbers": [870460],
     "high": 3000,
     "n_buckets": 10,
-    "description": "Time spent on blocking main thread by startup cookie database read (ms)"
+    "description": "Time spent on blocking main thread by startup cookie database read (ms), only for blocking case"
+  },
+  "MOZ_SQLITE_COOKIES_TIME_TO_BLOCK_MAIN_THREAD_MS": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "alert_emails": ["necko@mozilla.com", "junior@mozilla.com"],
+    "bug_numbers": [1413839],
+    "high": 10000,
+    "n_buckets": 30,
+    "description": "How long (ms) after we finished reading the cookie db until the first cookie request came in (0 implies we blocked the main thread)"
   },
   "MOZ_SQLITE_COOKIES_READ_MAIN_THREAD_MS": {
     "record_in_processes": ["main", "content"],
@@ -6573,9 +6575,9 @@
   },
   "FX_PREFERENCES_OPENED_VIA": {
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1330315],
+    "bug_numbers": [1330315, 1420062],
     "alert_emails": ["jaws@mozilla.com"],
-    "expires_in_version": "59",
+    "expires_in_version": "63",
     "kind": "categorical",
     "labels": ["aboutHome", "aboutTelemetry", "browserMedia", "commandLine", "commandLineLegacy", "ContainersCommand", "contentSearch", "dataReporting", "doorhanger", "devDisconnectedAlert", "experimentsOpenPref", "fxa", "fxaSignedin", "fxaError", "offlineApps", "prefserviceDefaults", "preferencesButton", "paneSync", "storagePressure", "translationInfobar", "UITour", "menubar", "notifOpenSettings", "other", "autofillFooter", "autofillDoorhanger"],
     "releaseChannelCollection": "opt-out",

@@ -49,12 +49,8 @@ public class LayerView extends FrameLayout {
 
     private static AccessibilityManager sAccessibilityManager;
 
-    private GeckoLayerClient mLayerClient;
     private PanZoomController mPanZoomController;
-    private DynamicToolbarAnimator mToolbarAnimator;
     private FullScreenState mFullScreenState;
-
-    private Listener mListener;
 
     /* This should only be modified on the Java UI thread. */
     private final Overscroll mOverscroll;
@@ -62,24 +58,6 @@ public class LayerView extends FrameLayout {
     private int mDefaultClearColor = Color.WHITE;
     /* package */ GetPixelsResult mGetPixelsResult;
     private final List<DrawListener> mDrawListeners;
-
-    //
-    // NOTE: These values are also defined in gfx/layers/ipc/UiCompositorControllerMessageTypes.h
-    //       and must be kept in sync. Any new AnimatorMessageType added here must also be added there.
-    //
-    /* package */ final static int STATIC_TOOLBAR_NEEDS_UPDATE      = 0;  // Sent from compositor when the static toolbar wants to hide.
-    /* package */ final static int STATIC_TOOLBAR_READY             = 1;  // Sent from compositor when the static toolbar image has been updated and is ready to animate.
-    /* package */ final static int TOOLBAR_HIDDEN                   = 2;  // Sent to compositor when the real toolbar has been hidden.
-    /* package */ final static int TOOLBAR_VISIBLE                  = 3;  // Sent to compositor when the real toolbar is visible.
-    /* package */ final static int TOOLBAR_SHOW                     = 4;  // Sent from compositor when the static toolbar has been made visible so the real toolbar should be shown.
-    /* package */ final static int FIRST_PAINT                      = 5;  // Sent from compositor after first paint
-    /* package */ final static int REQUEST_SHOW_TOOLBAR_IMMEDIATELY = 6;  // Sent to compositor requesting toolbar be shown immediately
-    /* package */ final static int REQUEST_SHOW_TOOLBAR_ANIMATED    = 7;  // Sent to compositor requesting toolbar be shown animated
-    /* package */ final static int REQUEST_HIDE_TOOLBAR_IMMEDIATELY = 8;  // Sent to compositor requesting toolbar be hidden immediately
-    /* package */ final static int REQUEST_HIDE_TOOLBAR_ANIMATED    = 9;  // Sent to compositor requesting toolbar be hidden animated
-    /* package */ final static int LAYERS_UPDATED                   = 10; // Sent from compositor when a layer has been updated
-    /* package */ final static int TOOLBAR_SNAPSHOT_FAILED          = 11; // Sent to compositor when the toolbar snapshot fails.
-    /* package */ final static int COMPOSITOR_CONTROLLER_OPEN       = 20; // Special message sent from UiCompositorControllerChild once it is open
 
     private void postCompositorMessage(final int message) {
         ThreadUtils.postToUiThread(new Runnable() {
@@ -95,61 +73,12 @@ public class LayerView extends FrameLayout {
         return mCompositor != null && mCompositor.isReady();
     }
 
-    /* package */ void handleToolbarAnimatorMessage(int message) {
-        switch (message) {
-            case STATIC_TOOLBAR_NEEDS_UPDATE:
-                // Send updated toolbar image to compositor.
-                Bitmap bm = mToolbarAnimator.getBitmapOfToolbarChrome();
-                if (bm == null) {
-                    postCompositorMessage(TOOLBAR_SNAPSHOT_FAILED);
-                    break;
-                }
-                final int width = bm.getWidth();
-                final int height = bm.getHeight();
-                int[] pixels = new int[bm.getByteCount() / 4];
-                try {
-                    bm.getPixels(pixels, /* offset */ 0, /* stride */ width, /* x */ 0, /* y */ 0, width, height);
-                    mCompositor.sendToolbarPixelsToCompositor(width, height, pixels);
-                } catch (Exception e) {
-                    Log.e(LOGTAG, "Caught exception while getting toolbar pixels from Bitmap: " + e.toString());
-                }
-                break;
-            case STATIC_TOOLBAR_READY:
-                // Hide toolbar and send TOOLBAR_HIDDEN message to compositor
-                mToolbarAnimator.onToggleChrome(false);
-                mListener.surfaceChanged();
-                postCompositorMessage(TOOLBAR_HIDDEN);
-                break;
-            case TOOLBAR_SHOW:
-                // Show toolbar.
-                mToolbarAnimator.onToggleChrome(true);
-                mListener.surfaceChanged();
-                postCompositorMessage(TOOLBAR_VISIBLE);
-                break;
-            case FIRST_PAINT:
-                setSurfaceBackgroundColor(Color.TRANSPARENT);
-                break;
-            case LAYERS_UPDATED:
-                for (DrawListener listener : mDrawListeners) {
-                    listener.drawFinished();
-                }
-                break;
-            case COMPOSITOR_CONTROLLER_OPEN:
-                ThreadUtils.postToUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        mCompositor.setDefaultClearColor(mDefaultClearColor);
-                        mCompositor.enableLayerUpdateNotifications(!mDrawListeners.isEmpty());
-                        mToolbarAnimator.updateCompositor();
-                    }
-                });
-                break;
-            default:
-                Log.e(LOGTAG, "Unhandled Toolbar Animator Message: " + message);
-                break;
-        }
+    /* package */ void onCompositorReady() {
+        mCompositor.setDefaultClearColor(mDefaultClearColor);
+        mCompositor.enableLayerUpdateNotifications(!mDrawListeners.isEmpty());
     }
 
+    /* protected */ LayerSession mSession;
     private LayerSession.Compositor mCompositor;
 
     public LayerView(Context context, AttributeSet attrs) {
@@ -166,13 +95,10 @@ public class LayerView extends FrameLayout {
     }
 
     public void initializeView() {
-        mLayerClient = new GeckoLayerClient(this);
+        mPanZoomController = PanZoomController.Factory.create(this);
         if (mOverscroll != null) {
-            mLayerClient.setOverscrollHandler(mOverscroll);
+            mPanZoomController.setOverscrollHandler(mOverscroll);
         }
-
-        mPanZoomController = mLayerClient.getPanZoomController();
-        mToolbarAnimator = mLayerClient.getDynamicToolbarAnimator();
     }
 
     /**
@@ -195,9 +121,9 @@ public class LayerView extends FrameLayout {
                          (int)event.getToolMinor() / 2);
     }
 
-    public void destroy() {
-        if (mLayerClient != null) {
-            mLayerClient.destroy();
+    protected void destroy() {
+        if (mPanZoomController != null) {
+            mPanZoomController.destroy();
         }
     }
 
@@ -206,8 +132,8 @@ public class LayerView extends FrameLayout {
         super.dispatchDraw(canvas);
 
         // We must have a layer client to get valid viewport metrics
-        if (mLayerClient != null && mOverscroll != null) {
-            mOverscroll.draw(canvas, getViewportMetrics());
+        if (mOverscroll != null) {
+            mOverscroll.draw(canvas);
         }
     }
 
@@ -273,19 +199,7 @@ public class LayerView extends FrameLayout {
         return false;
     }
 
-    // Don't expose GeckoLayerClient to things outside this package; only expose it as an Object
-    GeckoLayerClient getLayerClient() { return mLayerClient; }
-
     public PanZoomController getPanZoomController() { return mPanZoomController; }
-    public DynamicToolbarAnimator getDynamicToolbarAnimator() { return mToolbarAnimator; }
-
-    public ImmutableViewportMetrics getViewportMetrics() {
-        return mLayerClient.getViewportMetrics();
-    }
-
-    public Matrix getMatrixForLayerRectToViewRect() {
-        return mLayerClient.getMatrixForLayerRectToViewRect();
-    }
 
     public void setSurfaceBackgroundColor(int newColor) {
     }
@@ -321,28 +235,18 @@ public class LayerView extends FrameLayout {
         }
     }
 
-    public void setListener(Listener listener) {
-        mListener = listener;
-    }
-
-    Listener getListener() {
-        return mListener;
-    }
-
     protected void attachCompositor(final LayerSession session) {
+        mSession = session;
         mCompositor = session.mCompositor;
         mCompositor.layerView = this;
-
-        mToolbarAnimator.notifyCompositorCreated(mCompositor);
 
         final NativePanZoomController npzc = (NativePanZoomController) mPanZoomController;
 
         if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-            mCompositor.attachToJava(mLayerClient, npzc);
+            mCompositor.attachToJava(npzc);
         } else {
             GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
                     mCompositor, "attachToJava",
-                    GeckoLayerClient.class, mLayerClient,
                     NativePanZoomController.class, npzc);
         }
     }
@@ -353,17 +257,9 @@ public class LayerView extends FrameLayout {
     }
 
     /* package */ void onSizeChanged(int width, int height) {
-        if (mListener != null) {
-            mListener.surfaceChanged();
-        }
-
         if (mOverscroll != null) {
             mOverscroll.setSize(width, height);
         }
-    }
-
-    public interface Listener {
-        void surfaceChanged();
     }
 
     @RobocopTarget
@@ -408,13 +304,15 @@ public class LayerView extends FrameLayout {
         mDrawListeners.clear();
     }
 
+    /* package */ void notifyDrawListeners() {
+        for (final DrawListener listener : mDrawListeners) {
+            listener.drawFinished();
+        }
+    }
+
     @RobocopTarget
     public static interface DrawListener {
         public void drawFinished();
-    }
-
-    public float getZoomFactor() {
-        return getLayerClient().getViewportMetrics().zoomFactor;
     }
 
     public void setFullScreenState(FullScreenState state) {
@@ -423,14 +321,6 @@ public class LayerView extends FrameLayout {
 
     public boolean isFullScreen() {
         return mFullScreenState != FullScreenState.NONE;
-    }
-
-    public void setMaxToolbarHeight(int maxHeight) {
-        mToolbarAnimator.setMaxToolbarHeight(maxHeight);
-    }
-
-    public int getCurrentToolbarHeight() {
-        return mToolbarAnimator.getCurrentToolbarHeight();
     }
 
     public void setClearColor(final int color) {

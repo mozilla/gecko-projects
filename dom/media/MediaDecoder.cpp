@@ -15,6 +15,7 @@
 #include "VideoFrameContainer.h"
 #include "VideoUtils.h"
 #include "mozilla/AbstractThread.h"
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
@@ -203,30 +204,32 @@ class MediaDecoder::BackgroundVideoDecodingPermissionObserver final :
 
     void EnableEvent() const
     {
-      nsCOMPtr<nsPIDOMWindowOuter> win = GetOwnerWindow();
-      if (!win) {
+      nsIDocument* doc = GetOwnerDoc();
+      if (!doc) {
         return;
       }
-      nsContentUtils::DispatchEventOnlyToChrome(
-        GetOwnerDoc(), ToSupports(win),
-        NS_LITERAL_STRING("UnselectedTabHover:Enable"),
-        /* Bubbles */ true,
-        /* Cancelable */ false,
-        /* DefaultAction */ nullptr);
+
+      RefPtr<AsyncEventDispatcher> asyncDispatcher =
+        new AsyncEventDispatcher(doc,
+                                 NS_LITERAL_STRING("UnselectedTabHover:Enable"),
+                                 /* Bubbles */ true,
+                                 /* OnlyChromeDispatch */ true);
+      asyncDispatcher->PostDOMEvent();
     }
 
     void DisableEvent() const
     {
-      nsCOMPtr<nsPIDOMWindowOuter> win = GetOwnerWindow();
-      if (!win) {
+      nsIDocument* doc = GetOwnerDoc();
+      if (!doc) {
         return;
       }
-      nsContentUtils::DispatchEventOnlyToChrome(
-        GetOwnerDoc(), ToSupports(win),
-        NS_LITERAL_STRING("UnselectedTabHover:Disable"),
-        /* Bubbles */ true,
-        /* Cancelable */ false,
-        /* DefaultAction */ nullptr);
+
+      RefPtr<AsyncEventDispatcher> asyncDispatcher =
+        new AsyncEventDispatcher(doc,
+                                 NS_LITERAL_STRING("UnselectedTabHover:Disable"),
+                                 /* Bubbles */ true,
+                                 /* OnlyChromeDispatch */ true);
+      asyncDispatcher->PostDOMEvent();
     }
 
     already_AddRefed<nsPIDOMWindowOuter> GetOwnerWindow() const
@@ -296,6 +299,14 @@ StaticRefPtr<MediaMemoryTracker> MediaMemoryTracker::sUniqueInstance;
 LazyLogModule gMediaTimerLog("MediaTimer");
 
 constexpr TimeUnit MediaDecoder::DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED;
+
+void
+MediaDecoder::InitStatics()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // Eagerly init gMediaDecoderLog to work around bug 1415441.
+  MOZ_LOG(gMediaDecoderLog, LogLevel::Info, ("MediaDecoder::InitStatics"));
+}
 
 NS_IMPL_ISUPPORTS(MediaMemoryTracker, nsIMemoryReporter)
 
@@ -525,6 +536,10 @@ MediaDecoder::OnPlaybackEvent(MediaEventType aEvent)
       break;
     case MediaEventType::SeekStarted:
       SeekingStarted();
+      break;
+    case MediaEventType::Loop:
+      GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("seeking"));
+      GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("seeked"));
       break;
     case MediaEventType::Invalidate:
       Invalidate();
@@ -865,11 +880,11 @@ MediaDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
 }
 
 void
-MediaDecoder::NetworkError()
+MediaDecoder::NetworkError(const MediaResult& aError)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-  GetOwner()->NetworkError();
+  GetOwner()->NetworkError(aError);
 }
 
 void

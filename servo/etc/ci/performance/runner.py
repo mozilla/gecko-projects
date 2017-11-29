@@ -5,13 +5,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import argparse
+import csv
 import itertools
 import json
 import os
+import platform
 import subprocess
+from datetime import datetime
 from functools import partial
 from statistics import median, StatisticsError
 from urllib.parse import urlsplit, urlunsplit, urljoin
+
+
+DATE = datetime.now().strftime("%Y%m%d")
+MACHINE = platform.machine()
+SYSTEM = platform.system()
 
 
 def load_manifest(filename):
@@ -127,7 +135,7 @@ def parse_log(log, testcase, url):
     def valid_timing(timing, url=None):
         if (timing is None or
                 testcase is None or
-                timing.get('title') == 'Error response' or
+                timing.get('title') == 'Error loading page' or
                 timing.get('testcase') != url):
             return False
         else:
@@ -139,6 +147,9 @@ def parse_log(log, testcase, url):
     # able to identify failed tests (successful tests have time >=0).
     def create_placeholder(testcase):
         return {
+            "system": SYSTEM,
+            "machine": MACHINE,
+            "date": DATE,
             "testcase": testcase,
             "title": "",
             "navigationStart": 0,
@@ -168,6 +179,9 @@ def parse_log(log, testcase, url):
     # rather than the url.
     def set_testcase(timing, testcase=None):
         timing['testcase'] = testcase
+        timing['system'] = SYSTEM
+        timing['machine'] = MACHINE
+        timing['date'] = DATE
         return timing
 
     valid_timing_for_case = partial(valid_timing, url=url)
@@ -234,6 +248,43 @@ def save_result_json(results, filename, manifest, expected_runs, base):
         with open(filename, 'w') as f:
             json.dump(results, f, indent=2)
     print("Result saved to {}".format(filename))
+
+
+def save_result_csv(results, filename, manifest, expected_runs, base):
+
+    fieldnames = [
+        'system',
+        'machine',
+        'date',
+        'testcase',
+        'title',
+        'connectEnd',
+        'connectStart',
+        'domComplete',
+        'domContentLoadedEventEnd',
+        'domContentLoadedEventStart',
+        'domInteractive',
+        'domLoading',
+        'domainLookupEnd',
+        'domainLookupStart',
+        'fetchStart',
+        'loadEventEnd',
+        'loadEventStart',
+        'navigationStart',
+        'redirectEnd',
+        'redirectStart',
+        'requestStart',
+        'responseEnd',
+        'responseStart',
+        'secureConnectionStart',
+        'unloadEventEnd',
+        'unloadEventStart',
+    ]
+
+    with open(filename, 'w') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames)
+        writer.writeheader()
+        writer.writerows(results)
 
 
 def format_result_summary(results):
@@ -306,7 +357,10 @@ def main():
                 # TODO: Record and analyze other performance.timing properties
 
         print(format_result_summary(results))
-        save_result_json(results, args.output_file, testcases, args.runs, args.base)
+        if args.output_file.endswith('.csv'):
+            save_result_csv(results, args.output_file, testcases, args.runs, args.base)
+        else:
+            save_result_json(results, args.output_file, testcases, args.runs, args.base)
 
     except KeyboardInterrupt:
         print("Test stopped by user, saving partial result")

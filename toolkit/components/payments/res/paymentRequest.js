@@ -18,6 +18,8 @@ let PaymentRequest = {
     // listen to content
     window.addEventListener("paymentChromeToContent", this);
 
+    window.addEventListener("keypress", this);
+
     this.domReadyPromise = new Promise(function dcl(resolve) {
       window.addEventListener("DOMContentLoaded", resolve, {once: true});
     }).then(this.handleEvent.bind(this));
@@ -39,6 +41,14 @@ let PaymentRequest = {
             break;
           }
         }
+        break;
+      }
+      case "keypress": {
+        if (event.code != "KeyD" || !event.altKey || !event.ctrlKey) {
+          break;
+        }
+        let debuggingConsole = document.getElementById("debugging-console");
+        debuggingConsole.hidden = !debuggingConsole.hidden;
         break;
       }
       case "unload": {
@@ -94,8 +104,9 @@ let PaymentRequest = {
 
     let totalItem = this.request.paymentDetails.totalItem;
     let totalEl = document.getElementById("total");
-    totalEl.querySelector(".value").textContent = totalItem.amount.value;
-    totalEl.querySelector(".currency").textContent = totalItem.amount.currency;
+    let currencyEl = totalEl.querySelector("currency-amount");
+    currencyEl.value = totalItem.amount.value;
+    currencyEl.currency = totalItem.amount.currency;
     totalEl.querySelector(".label").textContent = totalItem.label;
   },
 

@@ -54,7 +54,7 @@ const openOAuthWindow = (details, redirectURI) => {
   let window = Services.ww.openWindow(null,
                                       Services.prefs.getCharPref("browser.chromeURL"),
                                       "launchWebAuthFlow_dialog",
-                                      "chrome,location=yes,centerscreen,dialog=no,resizable=yes",
+                                      "chrome,location=yes,centerscreen,dialog=no,resizable=yes,scrollbars=yes",
                                       args);
 
   return new Promise((resolve, reject) => {
@@ -69,9 +69,12 @@ const openOAuthWindow = (details, redirectURI) => {
 
     wpl = {
       onStateChange(progress, request, flags, status) {
-        if (request instanceof Ci.nsIHttpChannel &&
+        // "request" is now a RemoteWebProgressRequest and is not cancelable
+        // using request.cancel.  We can however, stop everything using
+        // webNavigation.
+        if (request && request.URI &&
           request.URI.spec.startsWith(redirectURI)) {
-          request.cancel(Components.results.NS_BINDING_ABORTED);
+          window.gBrowser.webNavigation.stop(Ci.nsIWebNavigation.STOP_ALL);
           window.removeEventListener("unload", unloadlistener);
           window.gBrowser.removeProgressListener(wpl);
           window.close();

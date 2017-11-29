@@ -84,7 +84,7 @@ function TabboxPanel({
       },
         TimingsPanel({ request }),
       ),
-      request.cause && request.cause.stacktrace && request.cause.stacktrace.length > 0 &&
+      request.cause && request.cause.stacktraceAvailable &&
       TabPanel({
         id: PANELS.STACK_TRACE,
         title: STACK_TRACE_TITLE,
@@ -96,7 +96,11 @@ function TabboxPanel({
         id: PANELS.SECURITY,
         title: SECURITY_TITLE,
       },
-        SecurityPanel({ request, openLink }),
+        SecurityPanel({
+          connector,
+          openLink,
+          request,
+        }),
       ),
     )
   );

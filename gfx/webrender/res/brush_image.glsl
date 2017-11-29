@@ -4,6 +4,10 @@
 
 #include shared,prim_shared,brush
 
+#ifdef WR_FEATURE_ALPHA_PASS
+varying vec2 vLocalPos;
+#endif
+
 varying vec3 vUv;
 flat varying int vImageKind;
 flat varying vec4 vUvBounds;
@@ -31,20 +35,20 @@ void brush_vs(
     //           we can expand this to support items from
     //           the normal texture cache and unify this
     //           with the normal image shader.
-    BlurTask task = fetch_blur_task(user_data.x);
-    vUv.z = task.render_target_layer_index;
+    BlurTask blur_task = fetch_blur_task(user_data.x);
+    vUv.z = blur_task.common_data.texture_layer_index;
     vImageKind = user_data.y;
 
 #if defined WR_FEATURE_COLOR_TARGET
     vec2 texture_size = vec2(textureSize(sColor0, 0).xy);
 #else
     vec2 texture_size = vec2(textureSize(sColor1, 0).xy);
-    vColor = task.color;
+    vColor = blur_task.color;
 #endif
 
-    vec2 uv0 = task.target_rect.p0;
-    vec2 src_size = task.target_rect.size * task.scale_factor;
-    vec2 uv1 = uv0 + task.target_rect.size;
+    vec2 uv0 = blur_task.common_data.task_rect.p0;
+    vec2 src_size = blur_task.common_data.task_rect.size * blur_task.scale_factor;
+    vec2 uv1 = uv0 + blur_task.common_data.task_rect.size;
 
     // TODO(gw): In the future we'll probably draw these as segments
     //           with the brush shader. When that occurs, we can
@@ -76,6 +80,10 @@ void brush_vs(
 
     vUvBounds = vec4(uv0 + vec2(0.5), uv1 - vec2(0.5)) / texture_size.xyxy;
     vUvBounds_NoClamp = vec4(uv0, uv1) / texture_size.xyxy;
+
+#ifdef WR_FEATURE_ALPHA_PASS
+    vLocalPos = local_pos;
+#endif
 }
 #endif
 
@@ -114,6 +122,10 @@ vec4 brush_fs() {
     vec4 color = texture(sColor0, vec3(uv, vUv.z));
 #else
     vec4 color = vColor * texture(sColor1, vec3(uv, vUv.z)).r;
+#endif
+
+#ifdef WR_FEATURE_ALPHA_PASS
+    color *= init_transform_fs(vLocalPos);
 #endif
 
     return color;

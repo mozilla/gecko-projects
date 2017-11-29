@@ -924,7 +924,6 @@ public:
    * @param aNewFrame the frame to add
    * @param aFrameItems the list to add in-flow frames to
    * @param aContent the content pointer for aNewFrame
-   * @param aStyleContext the style context resolved for aContent
    * @param aParentFrame the parent frame for the content if it were in-flow
    * @param aCanBePositioned pass false if the frame isn't allowed to be
    *        positioned
@@ -936,7 +935,6 @@ public:
   void AddChild(nsIFrame* aNewFrame,
                 nsFrameItems& aFrameItems,
                 nsIContent* aContent,
-                nsStyleContext* aStyleContext,
                 nsContainerFrame* aParentFrame,
                 bool aCanBePositioned = true,
                 bool aCanBeFloated = true,
@@ -1320,7 +1318,6 @@ void
 nsFrameConstructorState::AddChild(nsIFrame* aNewFrame,
                                   nsFrameItems& aFrameItems,
                                   nsIContent* aContent,
-                                  nsStyleContext* aStyleContext,
                                   nsContainerFrame* aParentFrame,
                                   bool aCanBePositioned,
                                   bool aCanBeFloated,
@@ -2001,25 +1998,17 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
   }
 
   uint32_t contentCount = pseudoStyleContext->StyleContent()->ContentCount();
-  bool createdChildElement = false;
   for (uint32_t contentIndex = 0; contentIndex < contentCount; contentIndex++) {
     nsCOMPtr<nsIContent> content =
       CreateGeneratedContent(aState, aParentContent, pseudoStyleContext,
                              contentIndex);
     if (content) {
       container->AppendChildTo(content, false);
-      if (content->IsElement()) {
-        createdChildElement = true;
+      if (content->IsElement() && servoStyle) {
+        // If we created any children elements, Servo needs to traverse them, but
+        // the root is already set up.
+        mPresShell->StyleSet()->AsServo()->StyleNewSubtree(content->AsElement());
       }
-    }
-  }
-
-  // We may need to do a synchronous servo traversal in various uncommon cases.
-  if (servoStyle) {
-    if (createdChildElement) {
-      // If we created any children elements, Servo needs to traverse them, but
-      // the root is already set up.
-      mPresShell->StyleSet()->AsServo()->StyleNewChildren(container);
     }
   }
 
@@ -2220,7 +2209,7 @@ nsCSSFrameConstructor::ConstructTable(nsFrameConstructorState& aState,
   // Put the newly created frames into the right child list
   SetInitialSingleChild(newFrame, innerFrame);
 
-  aState.AddChild(newFrame, aFrameItems, content, styleContext, aParentFrame);
+  aState.AddChild(newFrame, aFrameItems, content, aParentFrame);
 
   if (!mRootElementFrame) {
     // The frame we're constructing will be the root element frame.
@@ -2610,23 +2599,19 @@ nsCSSFrameConstructor::ConstructDocElementFrame(Element*                 aDocEle
       mDocument->BindingManager()->AddToAttachedQueue(binding);
     }
 
-    if (resolveStyle) {
+    if (resolveStyle || styleContext->IsServo()) {
       // FIXME: Should this use ResolveStyleContext?  (The calls in this
-      // function are the only case in nsCSSFrameConstructor where we
-      // don't do so for the construction of a style context for an
-      // element.)
+      // function are the only case in nsCSSFrameConstructor where we don't do
+      // so for the construction of a style context for an element.)
       //
-      // FIXME(emilio): This looks fishy. It really wants to fully re-resolve
-      // the style, but it wont if the element is already styled afaict... It
-      // seems we handle it on a subsequent restyle?
+      // NOTE(emilio): In the case of Servo, even though resolveStyle returns
+      // false, we re-get the style context to avoid tripping otherwise-useful
+      // assertions when resolving pseudo-elements. Note that this operation in
+      // Servo is cheap.
       styleContext = mPresShell->StyleSet()->ResolveStyleFor(
           aDocElement, nullptr, LazyComputeBehavior::Assert);
       display = styleContext->StyleDisplay();
     }
-  } else if (display->mBinding.ForceGet() && aDocElement->IsStyledByServo()) {
-    // See the comment in AddFrameConstructionItemsInternal for why this is
-    // needed.
-    mPresShell->StyleSet()->AsServo()->StyleNewChildren(aDocElement);
   }
 
   // --------- IF SCROLLABLE WRAP IN SCROLLFRAME --------
@@ -3239,8 +3224,7 @@ nsCSSFrameConstructor::ConstructSelectFrame(nsFrameConstructorState& aState,
 
     comboboxFrame->AddStateBits(NS_FRAME_OWNS_ANON_BOXES);
 
-    aState.AddChild(comboboxFrame, aFrameItems, content, styleContext,
-                    aParentFrame);
+    aState.AddChild(comboboxFrame, aFrameItems, content, aParentFrame);
 
     // Resolve pseudo element style for the dropdown list
     RefPtr<nsStyleContext> listStyle;
@@ -3364,8 +3348,7 @@ nsCSSFrameConstructor::InitializeSelectFrame(nsFrameConstructorState& aState,
   scrollFrame->Init(aContent, geometricParent, nullptr);
 
   if (!aBuildCombobox) {
-    aState.AddChild(scrollFrame, aFrameItems, aContent,
-                    aStyleContext, aParentFrame);
+    aState.AddChild(scrollFrame, aFrameItems, aContent, aParentFrame);
   }
 
   BuildScrollFrame(aState, aContent, aStyleContext, scrolledFrame,
@@ -3474,7 +3457,7 @@ nsCSSFrameConstructor::ConstructFieldSetFrame(nsFrameConstructorState& aState,
     }
   }
 
-  aState.AddChild(fieldsetFrame, aFrameItems, content, styleContext, aParentFrame);
+  aState.AddChild(fieldsetFrame, aFrameItems, content, aParentFrame);
 
   // Process children
   nsFrameConstructorSaveState absoluteSaveState;
@@ -4139,8 +4122,8 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
       newFrame = innerFrame;
     }
 
-    aState.AddChild(frameToAddToList, aFrameItems, content, styleContext,
-                    aParentFrame, allowOutOfFlow, allowOutOfFlow, isPopup);
+    aState.AddChild(frameToAddToList, aFrameItems, content, aParentFrame,
+                    allowOutOfFlow, allowOutOfFlow, isPopup);
 
     nsContainerFrame* newFrameAsContainer = do_QueryFrame(newFrame);
     if (newFrameAsContainer) {
@@ -5050,7 +5033,7 @@ nsCSSFrameConstructor::ConstructScrollableBlockWithConstructor(
 
   // Make sure to AddChild before we call ConstructBlock so that we
   // end up before our descendants in fixed-pos lists as needed.
-  aState.AddChild(newFrame, aFrameItems, content, styleContext, aParentFrame);
+  aState.AddChild(newFrame, aFrameItems, content, aParentFrame);
 
   nsFrameItems blockItem;
   ConstructBlock(aState, content, newFrame, newFrame, scrolledContentStyle,
@@ -5428,7 +5411,7 @@ nsCSSFrameConstructor::ConstructFrameWithAnonymousChild(
   // Put the newly created frames into the right child list
   SetInitialSingleChild(newFrame, innerFrame);
 
-  aState.AddChild(newFrame, aFrameItems, content, styleContext, aParentFrame,
+  aState.AddChild(newFrame, aFrameItems, content, aParentFrame,
                   aCandidateRootFrame, aCandidateRootFrame);
 
   if (!mRootElementFrame && aCandidateRootFrame) {
@@ -5923,46 +5906,21 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
         aState.AddPendingBinding(newPendingBinding.forget());
       }
 
-      if (resolveStyle) {
-        if (styleContext->IsServo()) {
-          Element* element = aContent->AsElement();
-          ServoStyleSet* styleSet = mPresShell->StyleSet()->AsServo();
-
-          // XXX: We should have a better way to restyle ourselves.
-          ServoRestyleManager::ClearServoDataFromSubtree(element);
-          styleSet->StyleNewSubtree(element);
-
-          // Servo's should_traverse_children() in traversal.rs skips
-          // styling descendants of elements with a -moz-binding the
-          // first time. Thus call StyleNewChildren() again.
-          styleSet->StyleNewChildren(element);
-
-          // Because of LazyComputeBehavior::Assert we never create a style
-          // context here, so it's fine to pass a null parent.
-          styleContext =
-            styleSet->ResolveStyleFor(element, nullptr,
-                                      LazyComputeBehavior::Assert);
-        } else {
-          styleContext =
-            ResolveStyleContext(styleContext->AsGecko()->GetParent(),
-                                aContent, &aState);
-        }
-
-        display = styleContext->StyleDisplay();
-        aStyleContext = styleContext;
+      // See the comment in the similar-looking block in
+      // ConstructDocElementFrame to see why we always re-fetch the style
+      // context in Servo.
+      if (styleContext->IsServo()) {
+        styleContext =
+          mPresShell->StyleSet()->AsServo()->ResolveServoStyle(aContent->AsElement());
+      } else if (resolveStyle) {
+        styleContext =
+          ResolveStyleContext(styleContext->AsGecko()->GetParent(),
+                              aContent, &aState);
       }
 
+      display = styleContext->StyleDisplay();
+      aStyleContext = styleContext;
       aTag = mDocument->BindingManager()->ResolveTag(aContent, &aNameSpaceID);
-    } else if (display->mBinding.ForceGet()) {
-      if (aContent->IsStyledByServo()) {
-        // Servo's should_traverse_children skips styling descendants of
-        // elements with a -moz-binding value.  For -moz-binding URLs that can
-        // be resolved, we will load the binding above, which will style the
-        // children after they have been rearranged in the flattened tree.
-        // If the URL couldn't be resolved, we still need to style the children,
-        // so we do that here.
-        mPresShell->StyleSet()->AsServo()->StyleNewChildren(aContent->AsElement());
-      }
     }
   }
 
@@ -7528,6 +7486,22 @@ nsCSSFrameConstructor::LazilyStyleNewChildRange(nsIContent* aStartChild,
   }
 }
 
+#ifdef DEBUG
+static bool
+IsFlattenedTreeChild(nsIContent* aParent, nsIContent* aChild)
+{
+  FlattenedChildIterator iter(aParent);
+  for (nsIContent* node = iter.GetNextChild();
+       node;
+       node = iter.GetNextChild()) {
+    if (node == aChild) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 void
 nsCSSFrameConstructor::StyleNewChildRange(nsIContent* aStartChild,
                                           nsIContent* aEndChild)
@@ -7536,21 +7510,14 @@ nsCSSFrameConstructor::StyleNewChildRange(nsIContent* aStartChild,
 
   for (nsIContent* child = aStartChild; child != aEndChild;
        child = child->GetNextSibling()) {
-    // Calling StyleNewChildren on one child will end up styling another child,
-    // if they share the same flattened tree parent.  So we check HasServoData()
-    // to avoid a wasteful call to GetFlattenedTreeParent (on the child) and
-    // StyleNewChildren (on the flattened tree parent) when we detect we've
-    // already handled that parent.  In the common case of inserting elements
-    // into a container that does not have an XBL binding or shadow tree with
-    // distributed children, this boils down to a single call to
-    // GetFlattenedTreeParent/StyleNewChildren, and traversing the list of
-    // children checking HasServoData (which is fast).
     if (child->IsElement() && !child->AsElement()->HasServoData()) {
       Element* parent = child->AsElement()->GetFlattenedTreeParentElement();
       // NB: Parent may be null if the content is appended to a shadow root, and
       // isn't assigned to any insertion point.
       if (MOZ_LIKELY(parent) && parent->HasServoData()) {
-        styleSet->StyleNewChildren(parent);
+        MOZ_ASSERT(IsFlattenedTreeChild(parent, child),
+                   "GetFlattenedTreeParent and ChildIterator don't agree, fix this!");
+        styleSet->StyleNewSubtree(child->AsElement());
       }
     }
   }
@@ -8153,8 +8120,6 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     return;
   }
 
-  nsIContent* container = insertion.mParentFrame->GetContent();
-
   LayoutFrameType frameType = insertion.mParentFrame->Type();
   LAYOUT_PHASE_TEMP_EXIT();
   if (MaybeRecreateForFrameset(insertion.mParentFrame, aStartChild, aEndChild)) {
@@ -8294,7 +8259,6 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
         return;
       }
 
-      container = insertion.mParentFrame->GetContent();
       frameType = insertion.mParentFrame->Type();
     }
   }
@@ -8367,49 +8331,6 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
         LayoutFrameType::TableWrapper == frameType) {
       PullOutCaptionFrames(frameItems, captionItems);
     }
-  }
-
-  // If the parent of our current prevSibling is different from the frame we'll
-  // actually use as the parent, then the calculated insertion point is now
-  // invalid and as it is unknown where to insert correctly we append instead
-  // (bug 341858).
-  // This can affect our prevSibling and isAppend, but should not have any
-  // effect on the WipeContainingBlock above, since this should only happen
-  // when neither parent is a ib-split frame and should not affect whitespace
-  // handling inside table-related frames (and in fact, can only happen when
-  // one of the parents is a table wrapper and one is an inner table or when the
-  // parent is a fieldset or fieldset content frame).  So it won't affect the
-  // {ib} or XUL box cases in WipeContainingBlock(), and the table pseudo
-  // handling will only be affected by us maybe thinking we're not inserting
-  // at the beginning, whereas we really are.  That would have made us reframe
-  // unnecessarily, but that's ok.
-  // XXXbz we should push our frame construction item code up higher, so we
-  // know what our items are by the time we start figuring out previous
-  // siblings
-  if (prevSibling && frameItems.NotEmpty() &&
-      frameItems.FirstChild()->GetParent() != prevSibling->GetParent()) {
-#ifdef DEBUG
-    nsIFrame* frame1 = frameItems.FirstChild()->GetParent();
-    nsIFrame* frame2 = prevSibling->GetParent();
-    NS_ASSERTION(!IsFramePartOfIBSplit(frame1) &&
-                 !IsFramePartOfIBSplit(frame2),
-                 "Neither should be ib-split");
-    NS_ASSERTION((frame1->IsTableFrame() &&
-                  frame2->IsTableWrapperFrame()) ||
-                 (frame1->IsTableWrapperFrame() &&
-                  frame2->IsTableFrame()) ||
-                 frame1->IsFieldSetFrame() ||
-                 (frame1->GetParent() &&
-                  frame1->GetParent()->IsFieldSetFrame()),
-                 "Unexpected frame types");
-#endif
-    isAppend = true;
-    nsIFrame* appendAfterFrame;
-    insertion.mParentFrame =
-      ::AdjustAppendParentForAfterContent(this, container,
-                                          frameItems.FirstChild()->GetParent(),
-                                          aStartChild, &appendAfterFrame);
-    prevSibling = ::FindAppendPrevSibling(insertion.mParentFrame, appendAfterFrame);
   }
 
   if (haveFirstLineStyle && insertion.mParentFrame == containingBlock && isAppend) {
@@ -11621,9 +11542,8 @@ nsCSSFrameConstructor::CreateFloatingLetterFrame(
     link.Next();
   }
 
-  aState.AddChild(letterFrame, aResult, letterContent, aStyleContext,
-                  aParentFrame, false, true, false, true,
-                  link.PrevFrame());
+  aState.AddChild(letterFrame, aResult, letterContent, aParentFrame,
+                  false, true, false, true, link.PrevFrame());
 
   if (nextTextFrame) {
     aResult.AddChild(nextTextFrame);
@@ -11666,13 +11586,15 @@ nsCSSFrameConstructor::CreateLetterFrame(nsContainerFrame* aBlockFrame,
 
   if (sc) {
     if (sc->IsServo() && parentFrame->IsLineFrame()) {
-      ServoStyleContext* parentStyleIgnoringFirstLine =
-        aBlockFrame->StyleContext()->AsServo();
+      nsIFrame* parentIgnoringFirstLine =
+        nsFrame::CorrectStyleParentFrame(aBlockFrame,
+                                         nsCSSPseudoElements::firstLetter);
+
       sc =
         mPresShell->StyleSet()->AsServo()->ReparentStyleContext(
           sc->AsServo(),
           parentStyleContext->AsServo(),
-          parentStyleIgnoringFirstLine,
+          parentIgnoringFirstLine->StyleContext()->AsServo(),
           parentStyleContext->AsServo(),
           blockContent->AsElement());
     }
@@ -12185,7 +12107,7 @@ nsCSSFrameConstructor::ConstructBlock(nsFrameConstructorState& aState,
   blockFrame->SetStyleContextWithoutNotification(blockStyle);
   InitAndRestoreFrame(aState, aContent, parent, blockFrame);
 
-  aState.AddChild(*aNewFrame, aFrameItems, aContent, aStyleContext,
+  aState.AddChild(*aNewFrame, aFrameItems, aContent,
                   aContentParentFrame ? aContentParentFrame :
                                         aParentFrame);
   if (!mRootElementFrame) {
@@ -12327,7 +12249,7 @@ nsCSSFrameConstructor::ConstructInline(nsFrameConstructorState& aState,
     // constructed).  Just put all the kids into the single inline frame and
     // bail.
     newFrame->SetInitialChildList(kPrincipalList, childItems);
-    aState.AddChild(newFrame, aFrameItems, content, styleContext, aParentFrame);
+    aState.AddChild(newFrame, aFrameItems, content, aParentFrame);
     return newFrame;
   }
 

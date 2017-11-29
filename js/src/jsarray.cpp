@@ -1065,11 +1065,24 @@ js::IsWrappedArrayConstructor(JSContext* cx, const Value& v, bool* result)
     return true;
 }
 
-static bool
+static MOZ_ALWAYS_INLINE bool
 IsArraySpecies(JSContext* cx, HandleObject origArray)
 {
-    if (origArray->is<NativeObject>() && !origArray->is<ArrayObject>())
-        return true;
+    if (MOZ_UNLIKELY(origArray->is<ProxyObject>())) {
+        if (origArray->getClass()->isDOMClass()) {
+#ifdef DEBUG
+            // We assume DOM proxies never return true for IsArray.
+            IsArrayAnswer answer;
+            MOZ_ASSERT(Proxy::isArray(cx, origArray, &answer));
+            MOZ_ASSERT(answer == IsArrayAnswer::NotArray);
+#endif
+            return true;
+        }
+    } else {
+        // 9.4.2.3 Step 4. Non-array objects always use the default constructor.
+        if (!origArray->is<ArrayObject>())
+            return true;
+    }
 
     Value ctor;
     if (!GetPropertyPure(cx, origArray, NameToId(cx->names().constructor), &ctor))
@@ -4039,20 +4052,6 @@ js::NewCopiedArrayForCallingAllocationSite(JSContext* cx, const Value* vp, size_
     if (!group)
         return nullptr;
     return NewCopiedArrayTryUseGroup(cx, group, vp, length);
-}
-
-bool
-js::NewValuePair(JSContext* cx, const Value& val1, const Value& val2, MutableHandleValue rval)
-{
-    JS::AutoValueArray<2> vec(cx);
-    vec[0].set(val1);
-    vec[1].set(val2);
-
-    JSObject* aobj = js::NewDenseCopiedArray(cx, 2, vec.begin());
-    if (!aobj)
-        return false;
-    rval.setObject(*aobj);
-    return true;
 }
 
 #ifdef DEBUG

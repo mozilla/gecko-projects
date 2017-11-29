@@ -24,7 +24,7 @@ extern mozilla::LazyLogModule gMediaDemuxerLog;
 using mozilla::media::TimeUnit;
 using mozilla::media::TimeInterval;
 using mozilla::media::TimeIntervals;
-using mp4_demuxer::BufferReader;
+using mozilla::BufferReader;
 
 namespace mozilla {
 
@@ -541,7 +541,7 @@ MP3TrackDemuxer::FindNextFrame()
     BufferReader reader(buffer, read);
     uint32_t bytesToSkip = 0;
     auto res = mParser.Parse(&reader, &bytesToSkip);
-    foundFrame = res.isOk() ? res.unwrap() : false;
+    foundFrame = res.unwrapOr(false);
     frameHeaderOffset =
       mOffset + reader.Offset() - FrameParser::FrameHeader::SIZE;
 

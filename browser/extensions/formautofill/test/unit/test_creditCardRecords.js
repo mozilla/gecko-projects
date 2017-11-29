@@ -39,6 +39,14 @@ const TEST_CREDIT_CARD_WITH_EMPTY_FIELD = {
   "cc-exp-month": 1,
 };
 
+const TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD = {
+  "cc-given-name": "",
+  "cc-additional-name": "",
+  "cc-family-name": "",
+  "cc-exp": "",
+  "cc-number": "1928374619283746",
+};
+
 const TEST_CREDIT_CARD_WITH_2_DIGITS_YEAR = {
   "cc-number": "1234123412341234",
   "cc-exp-month": 1,
@@ -61,6 +69,17 @@ const TEST_CREDIT_CARD_WITH_INVALID_EXPIRY_DATE = {
 const TEST_CREDIT_CARD_WITH_SPACES_BETWEEN_DIGITS = {
   "cc-name": "John Doe",
   "cc-number": "1111 2222 3333 4444",
+};
+
+const TEST_CREDIT_CARD_EMPTY_AFTER_NORMALIZE = {
+  "cc-exp-month": 13,
+};
+
+const TEST_CREDIT_CARD_EMPTY_AFTER_UPDATE_CREDIT_CARD_1 = {
+  "cc-name": "",
+  "cc-number": "",
+  "cc-exp-month": 13,
+  "cc-exp-year": "",
 };
 
 const MERGE_TESTCASES = [
@@ -245,12 +264,24 @@ add_task(async function test_add() {
 
   // Empty string should be deleted before saving.
   profileStorage.creditCards.add(TEST_CREDIT_CARD_WITH_EMPTY_FIELD);
-  let creditCard = profileStorage.creditCards.data[2];
+  let creditCard = profileStorage.creditCards._data[2];
   do_check_eq(creditCard["cc-exp-month"], TEST_CREDIT_CARD_WITH_EMPTY_FIELD["cc-exp-month"]);
   do_check_eq(creditCard["cc-name"], undefined);
 
+  // Empty computed fields shouldn't cause any problem.
+  profileStorage.creditCards.add(TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD);
+  creditCard = profileStorage.creditCards._data[3];
+  do_check_eq(creditCard["cc-number"],
+    profileStorage.creditCards._getMaskedCCNumber(TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD["cc-number"]));
+
   Assert.throws(() => profileStorage.creditCards.add(TEST_CREDIT_CARD_WITH_INVALID_FIELD),
     /"invalidField" is not a valid field\./);
+
+  Assert.throws(() => profileStorage.creditCards.add({}),
+    /Record contains no valid field\./);
+
+  Assert.throws(() => profileStorage.creditCards.add(TEST_CREDIT_CARD_EMPTY_AFTER_NORMALIZE),
+    /Record contains no valid field\./);
 });
 
 add_task(async function test_update() {
@@ -282,10 +313,20 @@ add_task(async function test_update() {
   do_check_credit_card_matches(creditCard, TEST_CREDIT_CARD_3);
 
   // Empty string should be deleted while updating.
-  profileStorage.creditCards.update(profileStorage.creditCards.data[0].guid, TEST_CREDIT_CARD_WITH_EMPTY_FIELD);
-  creditCard = profileStorage.creditCards.data[0];
+  profileStorage.creditCards.update(profileStorage.creditCards._data[0].guid, TEST_CREDIT_CARD_WITH_EMPTY_FIELD);
+  creditCard = profileStorage.creditCards._data[0];
   do_check_eq(creditCard["cc-exp-month"], TEST_CREDIT_CARD_WITH_EMPTY_FIELD["cc-exp-month"]);
   do_check_eq(creditCard["cc-name"], undefined);
+
+  // Empty computed fields shouldn't cause any problem.
+  profileStorage.creditCards.update(profileStorage.creditCards._data[0].guid, TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD, false);
+  creditCard = profileStorage.creditCards._data[0];
+  do_check_eq(creditCard["cc-number"],
+    profileStorage.creditCards._getMaskedCCNumber(TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD["cc-number"]));
+  profileStorage.creditCards.update(profileStorage.creditCards._data[1].guid, TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD, true);
+  creditCard = profileStorage.creditCards._data[1];
+  do_check_eq(creditCard["cc-number"],
+    profileStorage.creditCards._getMaskedCCNumber(TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD["cc-number"]));
 
   Assert.throws(
     () => profileStorage.creditCards.update("INVALID_GUID", TEST_CREDIT_CARD_3),
@@ -295,6 +336,22 @@ add_task(async function test_update() {
   Assert.throws(
     () => profileStorage.creditCards.update(guid, TEST_CREDIT_CARD_WITH_INVALID_FIELD),
     /"invalidField" is not a valid field\./
+  );
+
+  Assert.throws(
+    () => profileStorage.creditCards.update(guid, {}),
+    /Record contains no valid field\./
+  );
+
+  Assert.throws(
+    () => profileStorage.creditCards.update(guid, TEST_CREDIT_CARD_EMPTY_AFTER_NORMALIZE),
+    /Record contains no valid field\./
+  );
+
+  profileStorage.creditCards.update(guid, TEST_CREDIT_CARD_1);
+  Assert.throws(
+    () => profileStorage.creditCards.update(guid, TEST_CREDIT_CARD_EMPTY_AFTER_UPDATE_CREDIT_CARD_1),
+    /Record contains no valid field\./
   );
 });
 
@@ -459,4 +516,7 @@ add_task(async function test_mergeToStorage() {
   do_check_eq(profileStorage.creditCards.getAll()[0]["cc-exp"], "2000-01");
   do_check_eq(profileStorage.creditCards.getAll()[1]["cc-name"], "Foo Bar");
   do_check_eq(profileStorage.creditCards.getAll()[1]["cc-exp"], "2000-01");
+
+  // Empty computed fields shouldn't cause any problem.
+  do_check_eq(profileStorage.creditCards.mergeToStorage(TEST_CREDIT_CARD_WITH_EMPTY_COMPUTED_FIELD).length, 0);
 });

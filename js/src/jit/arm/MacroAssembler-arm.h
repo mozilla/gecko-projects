@@ -664,9 +664,9 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void jump(JitCode* code) {
         branch(code);
     }
-    void jump(ImmPtr code) {
+    void jump(TrampolinePtr code) {
         ScratchRegisterScope scratch(asMasm());
-        movePtr(code, scratch);
+        movePtr(ImmPtr(code.value), scratch);
         ma_bx(scratch);
     }
     void jump(Register reg) {
@@ -980,7 +980,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void storeTypeTag(ImmTag tag, const Address& dest);
     void storeTypeTag(ImmTag tag, const BaseIndex& dest);
 
-    void handleFailureWithHandlerTail(void* handler);
+    void handleFailureWithHandlerTail(void* handler, Label* profilerExitTail);
 
     /////////////////////////////////////////////////////////////////
     // Common interface.
@@ -1166,6 +1166,10 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     template<typename T>
     void atomicEffectOp(int nbytes, AtomicOp op, const Register& value, const T& address,
                              Register flagTemp);
+
+    template<typename T>
+    void atomicFetchOp64(AtomicOp op, Register64 value, const T& mem, Register64 temp,
+                         Register64 output);
 
   public:
     // T in {Address,BaseIndex}
@@ -1385,6 +1389,48 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void atomicXor32(const S& value, const T& mem, Register flagTemp) {
         atomicEffectOp(4, AtomicFetchXorOp, value, mem, flagTemp);
     }
+
+    // Temp should be invalid; output must be (even,odd) pair.
+    template<typename T>
+    void atomicLoad64(const T& mem, Register64 temp, Register64 output);
+
+    // Registers must be distinct; temp and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicFetchAdd64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        atomicFetchOp64(AtomicFetchAddOp, value, mem, temp, output);
+    }
+
+    // Registers must be distinct; temp and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicFetchSub64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        atomicFetchOp64(AtomicFetchSubOp, value, mem, temp, output);
+    }
+
+    // Registers must be distinct; temp and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicFetchAnd64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        atomicFetchOp64(AtomicFetchAndOp, value, mem, temp, output);
+    }
+
+    // Registers must be distinct; temp and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicFetchOr64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        atomicFetchOp64(AtomicFetchOrOp, value, mem, temp, output);
+    }
+
+    // Registers must be distinct; temp and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicFetchXor64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        atomicFetchOp64(AtomicFetchXorOp, value, mem, temp, output);
+    }
+
+    // Registers must be distinct; value and output must be (even,odd) pairs.
+    template <typename T>
+    void atomicExchange64(const T& mem, Register64 value, Register64 output);
+
+    // Registers must be distinct; replace and output must be (even,odd) pairs.
+    template <typename T>
+    void compareExchange64(const T& mem, Register64 expect, Register64 replace, Register64 output);
 
     template<typename T>
     void compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem, Register oldval, Register newval,

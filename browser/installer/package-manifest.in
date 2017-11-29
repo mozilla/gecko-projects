@@ -68,9 +68,6 @@
 #ifndef MOZ_STATIC_JS
 @BINPATH@/@DLL_PREFIX@mozjs@DLL_SUFFIX@
 #endif
-#ifdef MOZ_DMD
-@BINPATH@/@DLL_PREFIX@dmd@DLL_SUFFIX@
-#endif
 #ifndef MOZ_SYSTEM_NSPR
 #ifndef MOZ_FOLD_LIBS
 @BINPATH@/@DLL_PREFIX@nspr4@DLL_SUFFIX@
@@ -246,6 +243,9 @@
 @RESPATH@/components/jsdownloads.xpt
 @RESPATH@/browser/components/jsinspector.xpt
 @RESPATH@/components/layout_base.xpt
+#ifdef MOZ_DEBUG
+@RESPATH@/components/layout_debug.xpt
+#endif
 #ifdef NS_PRINTING
 @RESPATH@/components/layout_printing.xpt
 #endif
@@ -373,6 +373,8 @@
 @RESPATH@/browser/components/aboutdebugging.manifest
 @RESPATH@/browser/components/aboutdevtools-registration.js
 @RESPATH@/browser/components/aboutdevtools.manifest
+@RESPATH@/browser/components/aboutdevtoolstoolbox-registration.js
+@RESPATH@/browser/components/aboutdevtoolstoolbox.manifest
 @RESPATH@/browser/components/Experiments.manifest
 @RESPATH@/browser/components/ExperimentsService.js
 @RESPATH@/browser/components/browser-newtab.xpt

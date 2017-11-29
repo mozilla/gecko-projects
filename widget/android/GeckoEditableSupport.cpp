@@ -536,15 +536,15 @@ ConvertAndroidColor(uint32_t aArgb)
 
 static jni::ObjectArray::LocalRef
 ConvertRectArrayToJavaRectFArray(const nsTArray<LayoutDeviceIntRect>& aRects,
-                                 const LayoutDeviceIntPoint& aOffset,
                                  const CSSToLayoutDeviceScale aScale)
 {
     const size_t length = aRects.Length();
     auto rects = jni::ObjectArray::New<sdk::RectF>(length);
 
     for (size_t i = 0; i < length; i++) {
-        LayoutDeviceIntRect tmp = aRects[i] + aOffset;
+        const LayoutDeviceIntRect& tmp = aRects[i];
 
+        // Character bounds in CSS units.
         auto rect = sdk::RectF::New(tmp.x / aScale.scale, tmp.y / aScale.scale,
                                     (tmp.x + tmp.width) / aScale.scale,
                                     (tmp.y + tmp.height) / aScale.scale);
@@ -915,7 +915,6 @@ GeckoEditableSupport::UpdateCompositionRects()
 
     auto rects = ConvertRectArrayToJavaRectFArray(
             textRects.mReply.mRectArray,
-            widget->WidgetToScreenOffset(),
             widget->GetDefaultScale());
 
     mEditable->UpdateCompositionRects(rects);
@@ -1372,7 +1371,7 @@ GeckoEditableSupport::SetInputContext(const InputContext& aContext,
     mIMEUpdatingContext = true;
 
     RefPtr<GeckoEditableSupport> self(this);
-    bool isUserAction = aAction.IsHandlingUserInput();
+    bool isUserAction = aAction.IsHandlingUserInput() || aContext.mHasHandledUserInput;
     nsAppShell::PostEvent([this, self, isUserAction] {
         nsCOMPtr<nsIWidget> widget = GetWidget();
 

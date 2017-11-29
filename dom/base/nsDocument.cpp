@@ -173,7 +173,6 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/MediaSource.h"
-#include "mozilla/dom/FlyWebService.h"
 
 #include "mozAutoDocUpdate.h"
 #include "nsGlobalWindow.h"
@@ -1535,10 +1534,10 @@ nsIDocument::nsIDocument()
     mFrameRequestCallbacksScheduled(false),
     mIsTopLevelContentDocument(false),
     mIsContentDocument(false),
-    mMightHaveStaleServoData(false),
     mDidCallBeginLoad(false),
     mBufferingCSPViolations(false),
     mAllowPaymentRequest(false),
+    mEncodingMenuDisabled(false),
     mIsScopedStyleEnabled(eScopedStyle_Unknown),
     mCompatMode(eCompatibility_FullStandards),
     mReadyState(ReadyState::READYSTATE_UNINITIALIZED),
@@ -3502,6 +3501,15 @@ nsDocument::IsWebAnimationsEnabled(JSContext* aCx, JSObject* /*unused*/)
          nsContentUtils::AnimationsAPICoreEnabled();
 }
 
+bool
+nsDocument::IsWebAnimationsEnabled(CallerType aCallerType)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return aCallerType == dom::CallerType::System ||
+         nsContentUtils::AnimationsAPICoreEnabled();
+}
+
 DocumentTimeline*
 nsDocument::Timeline()
 {
@@ -4118,8 +4126,17 @@ nsDocument::CreateShell(nsPresContext* aContext, nsViewManager* aViewManager,
 
   FillStyleSet(aStyleSet);
 
-  // Ensure we start with no stale data in the tree.
-  ClearStaleServoDataFromDocument();
+  {
+#ifdef DEBUG
+    for (nsINode* node = static_cast<nsINode*>(this)->GetFirstChild();
+         node;
+         node = node->GetNextNode(this)) {
+      if (node->IsElement()) {
+        MOZ_ASSERT(!node->AsElement()->HasServoData());
+      }
+    }
+#endif
+  }
 
   RefPtr<PresShell> shell = new PresShell;
   shell->Init(this, aContext, aViewManager, aStyleSet);
@@ -4244,16 +4261,17 @@ nsDocument::DeleteShell()
   UpdateFrameRequestCallbackSchedulingState(oldShell);
   mStyleSetFilled = false;
 
-  // Record that the tree might have stale Servo element data in it
-  // that would need to be cleared if we ever get a new pres shell
-  // or if we call ServoStyleSet style resolving functions on
-  // elements in the document. Most of the time this lazy clearing
-  // of Servo element data saves us work, since it's not often that a
-  // document gets a new pres shell after its old one is destroyed.
-  // In those cases we rely on the data being cleared in UnbindFromTree
-  // and save this additional traversal.
   if (IsStyledByServo()) {
-    mMightHaveStaleServoData = true;
+    ClearStaleServoData();
+#ifdef DEBUG
+    for (nsINode* node = static_cast<nsINode*>(this)->GetFirstChild();
+         node;
+         node = node->GetNextNode(this)) {
+      if (node->IsElement()) {
+        MOZ_ASSERT(!node->AsElement()->HasServoData());
+      }
+    }
+#endif
   }
 }
 
@@ -5045,14 +5063,6 @@ nsIDocument::GetContainer() const
 void
 nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
 {
-#ifdef DEBUG
-  {
-    nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(aScriptGlobalObject));
-
-    NS_ASSERTION(!win || win->IsInnerWindow(),
-                 "Script global object must be an inner window!");
-  }
-#endif
   MOZ_ASSERT(aScriptGlobalObject || !mAnimationController ||
              mAnimationController->IsPausedByType(
                nsSMILTimeContainer::PAUSE_PAGEHIDE |
@@ -6387,7 +6397,7 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
   // that old upgrade behavior could also share the new upgrade steps.
   // And this old upgrade will be remove at some point (when everything is
   // switched to latest custom element spec).
-  nsTArray<RefPtr<nsGenericHTMLElement>>& constructionStack =
+  nsTArray<RefPtr<Element>>& constructionStack =
     definition->mConstructionStack;
   if (constructionStack.Length()) {
     element = constructionStack.LastElement();
@@ -6448,9 +6458,6 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
 
     element->SetCustomElementDefinition(definition);
 
-    // It'll be removed when we deprecate custom elements v0.
-    nsContentUtils::SyncInvokeReactions(nsIDocument::eCreated, element,
-                                        definition);
     NS_ENSURE_TRUE(element, false);
   }
 
@@ -6495,7 +6502,8 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
     return;
   }
 
-  AutoCEReaction ceReaction(this->GetDocGroup()->CustomElementReactionsStack());
+  AutoCEReaction ceReaction(this->GetDocGroup()->CustomElementReactionsStack(),
+                            aCx);
   // Unconditionally convert TYPE to lowercase.
   nsAutoString lcType;
   nsContentUtils::ASCIIToLower(aType, lcType);
@@ -7920,7 +7928,7 @@ CheckCrossStyleBackendAdoption(nsIDocument* aOldDoc,
   if (styleDataTypes.isEmpty()) {
     return;
   }
-#ifdef MOZ_CRASHREPORTER
+
   // We are adopting node with pre-existing style data across style
   // backend. We want some more information to help diagnose when that
   // can happen.
@@ -7985,7 +7993,7 @@ CheckCrossStyleBackendAdoption(nsIDocument* aOldDoc,
   }
   note.Append('\n');
   CrashReporter::AppendAppNotesToCrashReport(note);
-#endif // MOZ_CRASHREPORTER
+
   MOZ_CRASH("Must not adopt a node with pre-existing style data "
             "into a document with different style backend");
 }
@@ -9110,13 +9118,6 @@ nsDocument::CanSavePresentation(nsIRequest *aNewRequest)
   // Don't save presentations for documents containing MSE content, to
   // reduce memory usage.
   if (ContainsMSEContent()) {
-    return false;
-  }
-
-  // Don't save presentation if there are active FlyWeb connections or FlyWeb
-  // servers.
-  FlyWebService* flyWebService = FlyWebService::GetExisting();
-  if (flyWebService && flyWebService->HasConnectionOrServer(win->WindowID())) {
     return false;
   }
 
@@ -10873,7 +10874,6 @@ nsIDocument::CreateTouch(nsGlobalWindowInner* aView,
                          float aRotationAngle,
                          float aForce)
 {
-  MOZ_ASSERT_IF(aView, aView->IsInnerWindow());
   RefPtr<Touch> touch = new Touch(aTarget,
                                   aIdentifier,
                                   aPageX, aPageY,
@@ -14348,17 +14348,12 @@ nsIDocument::IsScopedStyleEnabled()
 }
 
 void
-nsIDocument::ClearStaleServoDataFromDocument()
+nsIDocument::ClearStaleServoData()
 {
-  if (!mMightHaveStaleServoData) {
-    return;
-  }
-
   DocumentStyleRootIterator iter(this);
   while (Element* root = iter.GetNextStyleRoot()) {
     ServoRestyleManager::ClearServoDataFromSubtree(root);
   }
-  mMightHaveStaleServoData = false;
 }
 
 Selection*
@@ -14369,7 +14364,6 @@ nsIDocument::GetSelection(ErrorResult& aRv)
     return nullptr;
   }
 
-  NS_ASSERTION(window->IsInnerWindow(), "Should have inner window here!");
   if (!window->IsCurrentInnerWindow()) {
     return nullptr;
   }

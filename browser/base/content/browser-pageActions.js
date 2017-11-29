@@ -20,7 +20,7 @@ var BrowserPageActions = {
   },
 
   /**
-   * The photonmultiview node in the main page action panel (DOM node)
+   * The panelmultiview node in the main page action panel (DOM node)
    */
   get multiViewNode() {
     delete this.multiViewNode;
@@ -234,7 +234,7 @@ var BrowserPageActions = {
     let iframeNode = null;
 
     if (action.subview) {
-      let multiViewNode = document.createElement("photonpanelmultiview");
+      let multiViewNode = document.createElement("panelmultiview");
       panelViewNode = this._makePanelViewNodeForAction(action, true);
       multiViewNode.appendChild(panelViewNode);
       panelNode.appendChild(multiViewNode);
@@ -247,24 +247,26 @@ var BrowserPageActions = {
     let popupSet = document.getElementById("mainPopupSet");
     popupSet.appendChild(panelNode);
     panelNode.addEventListener("popuphidden", () => {
-      if (iframeNode) {
-        action.onIframeHidden(iframeNode, panelNode);
-      }
       panelNode.remove();
     }, { once: true });
 
     if (iframeNode) {
-      panelNode.addEventListener("popupshown", () => {
-        action.onIframeShown(iframeNode, panelNode);
+      panelNode.addEventListener("popupshowing", () => {
+        action.onIframeShowing(iframeNode, panelNode);
       }, { once: true });
       panelNode.addEventListener("popuphiding", () => {
         action.onIframeHiding(iframeNode, panelNode);
+      }, { once: true });
+      panelNode.addEventListener("popuphidden", () => {
+        action.onIframeHidden(iframeNode, panelNode);
       }, { once: true });
     }
 
     if (panelViewNode) {
       action.subview.onPlaced(panelViewNode);
-      action.subview.onShowing(panelViewNode);
+      panelNode.addEventListener("popupshowing", () => {
+        action.subview.onShowing(panelViewNode);
+      }, { once: true });
     }
 
     return panelNode;
@@ -870,8 +872,8 @@ var BrowserPageActionFeedback = {
     return this.feedbackLabel = document.getElementById("pageActionFeedbackMessage");
   },
 
-  show(action, event) {
-    this.feedbackLabel.textContent = this.panelNode.getAttribute(action.id + "Feedback");
+  show(action, event, textContentOverride) {
+    this.feedbackLabel.textContent = this.panelNode.getAttribute((textContentOverride || action.id) + "Feedback");
     this.panelNode.hidden = false;
 
     let anchor = BrowserPageActions.panelAnchorNodeForAction(action, event);
@@ -956,14 +958,11 @@ BrowserPageActions.sendToDevice = {
     }
   },
 
-  onShowingInPanel(buttonNode) {
+  onLocationChange() {
+    let action = PageActions.actionForID("sendToDevice");
     let browser = gBrowser.selectedBrowser;
     let url = browser.currentURI.spec;
-    if (gSync.isSendableURI(url)) {
-      buttonNode.removeAttribute("disabled");
-    } else {
-      buttonNode.setAttribute("disabled", "true");
-    }
+    action.setDisabled(!gSync.isSendableURI(url), window);
   },
 
   onShowingSubview(panelViewNode) {
@@ -995,7 +994,8 @@ BrowserPageActions.sendToDevice = {
         // in", "Learn about Sync", etc.  Device items will be .sendtab-target.
         if (event.target.classList.contains("sendtab-target")) {
           let action = PageActions.actionForID("sendToDevice");
-          BrowserPageActionFeedback.show(action, event);
+          let textOverride = gSync.offline && "sendToDeviceOffline";
+          BrowserPageActionFeedback.show(action, event, textOverride);
         }
       });
       return item;
@@ -1008,7 +1008,7 @@ BrowserPageActions.sendToDevice = {
       bodyNode.setAttribute("state", "notready");
       // Force a background Sync
       Services.tm.dispatchToMainThread(async () => {
-        await Weave.Service.sync([]); // [] = clients engine only
+        await Weave.Service.sync({why: "pageactions", engines: []}); // [] = clients engine only
         // There's no way Sync is still syncing at this point, but we check
         // anyway to avoid infinite looping.
         if (!window.closed && !gSync.syncConfiguredAndLoading) {

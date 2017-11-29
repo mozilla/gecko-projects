@@ -908,6 +908,9 @@ class DebugEnvironmentProxy : public ProxyObject
     static DebugEnvironmentProxy* create(JSContext* cx, EnvironmentObject& env,
                                          HandleObject enclosing);
 
+    // NOTE: The environment may be a debug hollow with invalid
+    // enclosingEnvironment. Always use the enclosingEnvironment accessor on
+    // the DebugEnvironmentProxy in order to walk the environment chain.
     EnvironmentObject& environment() const;
     JSObject& enclosingEnvironment() const;
 
@@ -925,7 +928,7 @@ class DebugEnvironmentProxy : public ProxyObject
                                       HandleId id, MutableHandleValue vp);
 
     // Returns true iff this is a function environment with its own this-binding
-    // (all functions except arrow functions and generator expression lambdas).
+    // (all functions except arrow functions).
     bool isFunctionEnvironmentWithThis();
 
     // Does this debug environment not have a real counterpart or was never

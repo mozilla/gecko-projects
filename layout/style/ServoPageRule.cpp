@@ -26,6 +26,7 @@ ServoPageRuleDeclaration::ServoPageRuleDeclaration(
 
 ServoPageRuleDeclaration::~ServoPageRuleDeclaration()
 {
+  mDecls->SetOwningRule(nullptr);
 }
 
 // QueryInterface implementation for ServoPageRuleDeclaration
@@ -89,7 +90,8 @@ ServoPageRuleDeclaration::DocToUpdate()
 
 void
 ServoPageRuleDeclaration::GetCSSParsingEnvironment(
-  CSSParsingEnvironment& aCSSParseEnv)
+  CSSParsingEnvironment& aCSSParseEnv,
+  nsIPrincipal* aSubjectPrincipal)
 {
   MOZ_ASSERT_UNREACHABLE("GetCSSParsingEnvironment "
                          "shouldn't be calling for a Servo rule");
@@ -97,7 +99,8 @@ ServoPageRuleDeclaration::GetCSSParsingEnvironment(
 }
 
 nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-ServoPageRuleDeclaration::GetServoCSSParsingEnvironment() const
+ServoPageRuleDeclaration::GetServoCSSParsingEnvironment(
+  nsIPrincipal* aSubjectPrincipal) const
 {
   return GetServoCSSParsingEnvironmentForRule(Rule());
 }
@@ -141,6 +144,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ServoPageRule, CSSPageRule)
   // NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER which we can't use
   // directly because the wrapper is on the declaration, not on us.
   tmp->mDecls.ReleaseWrapper(static_cast<nsISupports*>(p));
+  tmp->mDecls.mDecls->SetOwningRule(nullptr);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServoPageRule, CSSPageRule)

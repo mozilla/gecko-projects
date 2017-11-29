@@ -235,8 +235,6 @@ Gecko_GetActiveLinkAttrDeclarationBlock(RawGeckoElementBorrowed element);
 
 // Returns whether private browsing is enabled for a given element.
 bool Gecko_IsPrivateBrowsingEnabled(const nsIDocument* aDoc);
-// Returns whether visited links are enabled.
-bool Gecko_AreVisitedLinksEnabled();
 
 // Animations
 bool
@@ -540,8 +538,7 @@ mozilla::css::URLValue* Gecko_NewURLValue(ServoBundledURI uri);
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::URLValue, CSSURLValue);
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(RawGeckoURLExtraData, URLExtraData);
 
-void Gecko_FillAllBackgroundLists(nsStyleImageLayers* layers, uint32_t max_len);
-void Gecko_FillAllMaskLists(nsStyleImageLayers* layers, uint32_t max_len);
+void Gecko_FillAllImageLayers(nsStyleImageLayers* layers, uint32_t max_len);
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
 
 nsCSSShadowArray* Gecko_NewCSSShadowArray(uint32_t len);

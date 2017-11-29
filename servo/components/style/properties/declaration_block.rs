@@ -470,54 +470,56 @@ impl PropertyDeclarationBlock {
         if !definitely_new {
             let mut index_to_remove = None;
             for (i, slot) in self.declarations.iter_mut().enumerate() {
-                if slot.id() == declaration.id() {
-                    let important = self.declarations_importance.get(i as u32);
-                    match (important, importance.important()) {
-                        (false, true) => {}
+                if slot.id() != declaration.id() {
+                    continue;
+                }
 
-                        (true, false) => {
-                            // For declarations set from the OM, less-important
-                            // declarations are overridden.
-                            if !matches!(source, DeclarationSource::CssOm) {
-                                return false
-                            }
-                        }
-                        _ => if *slot == declaration {
-                            return false;
+                let important = self.declarations_importance.get(i as u32);
+                match (important, importance.important()) {
+                    (false, true) => {}
+
+                    (true, false) => {
+                        // For declarations set from the OM, more-important
+                        // declarations are overridden.
+                        if !matches!(source, DeclarationSource::CssOm) {
+                            return false
                         }
                     }
+                    _ => if *slot == declaration {
+                        return false;
+                    }
+                }
 
-                    match source {
-                        // CSSOM preserves the declaration position, and
-                        // overrides importance.
-                        DeclarationSource::CssOm => {
-                            *slot = declaration;
-                            self.declarations_importance.set(i as u32, importance.important());
-                            return true;
-                        }
-                        DeclarationSource::Parsing => {
-                            // As a compatibility hack, specially on Android,
-                            // don't allow to override a prefixed webkit display
-                            // value with an unprefixed version from parsing
-                            // code.
-                            //
-                            // TODO(emilio): Unship.
-                            if let PropertyDeclaration::Display(old_display) = *slot {
-                                use properties::longhands::display::computed_value::T as display;
+                match source {
+                    // CSSOM preserves the declaration position, and
+                    // overrides importance.
+                    DeclarationSource::CssOm => {
+                        *slot = declaration;
+                        self.declarations_importance.set(i as u32, importance.important());
+                        return true;
+                    }
+                    DeclarationSource::Parsing => {
+                        // As a compatibility hack, specially on Android,
+                        // don't allow to override a prefixed webkit display
+                        // value with an unprefixed version from parsing
+                        // code.
+                        //
+                        // TODO(emilio): Unship.
+                        if let PropertyDeclaration::Display(old_display) = *slot {
+                            use properties::longhands::display::computed_value::T as display;
 
-                                if let PropertyDeclaration::Display(new_display) = declaration {
-                                    if display::should_ignore_parsed_value(old_display, new_display) {
-                                        return false;
-                                    }
+                            if let PropertyDeclaration::Display(new_display) = declaration {
+                                if display::should_ignore_parsed_value(old_display, new_display) {
+                                    return false;
                                 }
                             }
-
-                            // NOTE(emilio): We could avoid this and just override for
-                            // properties not affected by logical props, but it's not
-                            // clear it's worth it given the `definitely_new` check.
-                            index_to_remove = Some(i);
-                            break;
                         }
+
+                        // NOTE(emilio): We could avoid this and just override for
+                        // properties not affected by logical props, but it's not
+                        // clear it's worth it given the `definitely_new` check.
+                        index_to_remove = Some(i);
+                        break;
                     }
                 }
             }
@@ -560,7 +562,8 @@ impl PropertyDeclarationBlock {
     ///
     /// Returns whether any declaration was actually removed.
     pub fn remove_property(&mut self, property: &PropertyId) -> bool {
-        if let PropertyId::Longhand(id) = *property {
+        let longhand_id = property.longhand_id();
+        if let Some(id) = longhand_id {
             if !self.longhands.contains(id) {
                 return false
             }
@@ -584,7 +587,7 @@ impl PropertyDeclarationBlock {
             !remove
         });
 
-        if let PropertyId::Longhand(_) = *property {
+        if longhand_id.is_some() {
             debug_assert!(removed_at_least_one);
         }
         removed_at_least_one
@@ -681,7 +684,7 @@ impl PropertyDeclarationBlock {
     /// property.
     #[cfg(feature = "gecko")]
     pub fn has_css_wide_keyword(&self, property: &PropertyId) -> bool {
-        if let PropertyId::Longhand(id) = *property {
+        if let Some(id) = property.longhand_id() {
             if !self.longhands.contains(id) {
                 return false
             }
@@ -1013,18 +1016,23 @@ pub fn append_serialization<'a, W, I, N>(dest: &mut W,
 
 /// A helper to parse the style attribute of an element, in order for this to be
 /// shared between Servo and Gecko.
-pub fn parse_style_attribute<R>(input: &str,
-                                url_data: &UrlExtraData,
-                                error_reporter: &R,
-                                quirks_mode: QuirksMode)
-                                -> PropertyDeclarationBlock
-    where R: ParseErrorReporter
+pub fn parse_style_attribute<R>(
+    input: &str,
+    url_data: &UrlExtraData,
+    error_reporter: &R,
+    quirks_mode: QuirksMode,
+) -> PropertyDeclarationBlock
+where
+    R: ParseErrorReporter
 {
-    let context = ParserContext::new(Origin::Author,
-                                     url_data,
-                                     Some(CssRuleType::Style),
-                                     ParsingMode::DEFAULT,
-                                     quirks_mode);
+    let context = ParserContext::new(
+        Origin::Author,
+        url_data,
+        Some(CssRuleType::Style),
+        ParsingMode::DEFAULT,
+        quirks_mode,
+    );
+
     let error_context = ParserErrorContext { error_reporter: error_reporter };
     let mut input = ParserInput::new(input);
     parse_property_declaration_list(&context, &error_context, &mut Parser::new(&mut input))
@@ -1046,11 +1054,14 @@ pub fn parse_one_declaration_into<R>(
 where
     R: ParseErrorReporter
 {
-    let context = ParserContext::new(Origin::Author,
-                                     url_data,
-                                     Some(CssRuleType::Style),
-                                     parsing_mode,
-                                     quirks_mode);
+    let context = ParserContext::new(
+        Origin::Author,
+        url_data,
+        Some(CssRuleType::Style),
+        parsing_mode,
+        quirks_mode,
+    );
+
     let mut input = ParserInput::new(input);
     let mut parser = Parser::new(&mut input);
     let start_position = parser.position();
@@ -1092,12 +1103,14 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for PropertyDeclarationParser<'a, 'b> {
     type Declaration = Importance;
     type Error = StyleParseErrorKind<'i>;
 
-    fn parse_value<'t>(&mut self, name: CowRcStr<'i>, input: &mut Parser<'i, 't>)
-                       -> Result<Importance, ParseError<'i>> {
-        let prop_context = PropertyParserContext::new(self.context);
-        let id = match PropertyId::parse(&name, Some(&prop_context)) {
+    fn parse_value<'t>(
+        &mut self,
+        name: CowRcStr<'i>,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Importance, ParseError<'i>> {
+        let id = match PropertyId::parse(&name) {
             Ok(id) => id,
-            Err(()) => {
+            Err(..) => {
                 return Err(input.new_custom_error(if is_non_mozilla_vendor_identifier(&name) {
                     StyleParseErrorKind::UnknownVendorProperty
                 } else {
@@ -1107,7 +1120,6 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for PropertyDeclarationParser<'a, 'b> {
         };
         input.parse_until_before(Delimiter::Bang, |input| {
             PropertyDeclaration::parse_into(self.declarations, id, name, self.context, input)
-                .map_err(|e| e.into())
         })?;
         let importance = match input.try(parse_important) {
             Ok(()) => Importance::Important,

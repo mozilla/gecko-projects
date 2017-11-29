@@ -70,6 +70,7 @@
 #include "gfxGradientCache.h"
 #include "gfxUtils.h" // for NextPowerOfTwo
 
+#include "nsExceptionHandler.h"
 #include "nsUnicodeRange.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTArray.h"
@@ -77,9 +78,6 @@
 #include "nsIScreenManager.h"
 #include "FrameMetrics.h"
 #include "MainThreadUtils.h"
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#endif
 
 #include "nsWeakReference.h"
 
@@ -298,12 +296,9 @@ void CrashStatsLogForwarder::UpdateCrashReport()
     message << logAnnotation << Get<0>(it) << "]" << Get<1>(it) << " (t=" << Get<2>(it) << ") ";
   }
 
-#ifdef MOZ_CRASHREPORTER
   nsCString reportString(message.str().c_str());
   nsresult annotated = CrashReporter::AnnotateCrashReport(mCrashCriticalKey, reportString);
-#else
-  nsresult annotated = NS_ERROR_NOT_IMPLEMENTED;
-#endif
+
   if (annotated != NS_OK) {
     printf("Crash Annotation %s: %s",
            mCrashCriticalKey.get(), message.str().c_str());
@@ -607,19 +602,20 @@ void
 WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
 {
   int32_t flags = 0;
+#define GFX_WEBRENDER_DEBUG(suffix, bit)                          \
+  if (Preferences::GetBool(WR_DEBUG_PREF suffix, false)) {        \
+    flags |= (bit);                                             \
+  }
+
   // TODO: It would be nice to get the bit patterns directly from the rust code.
-  if (Preferences::GetBool(WR_DEBUG_PREF".profiler", false)) {
-    flags |= (1 << 0);
-  }
-  if (Preferences::GetBool(WR_DEBUG_PREF".render-targets", false)) {
-    flags |= (1 << 1);
-  }
-  if (Preferences::GetBool(WR_DEBUG_PREF".texture-cache", false)) {
-    flags |= (1 << 2);
-  }
-  if (Preferences::GetBool(WR_DEBUG_PREF".alpha-primitives", false)) {
-    flags |= (1 << 3);
-  }
+  GFX_WEBRENDER_DEBUG(".profiler",           1 << 0)
+  GFX_WEBRENDER_DEBUG(".render-targets",     1 << 1)
+  GFX_WEBRENDER_DEBUG(".texture-cache",      1 << 2)
+  GFX_WEBRENDER_DEBUG(".alpha-primitives",   1 << 3)
+  GFX_WEBRENDER_DEBUG(".gpu-time-queries",   1 << 4)
+  GFX_WEBRENDER_DEBUG(".gpu-sample-queries", 1 << 5)
+  GFX_WEBRENDER_DEBUG(".disable-batching",   1 << 6)
+#undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
 }
@@ -773,10 +769,6 @@ gfxPlatform::Init()
 #  ifdef MOZ_ENABLE_FREETYPE
     SkInitCairoFT(gPlatform->FontHintingEnabled());
 #  endif
-#endif
-
-#ifdef MOZ_GL_DEBUG
-    GLContext::StaticInit();
 #endif
 
     InitLayersIPC();
@@ -2557,6 +2549,10 @@ gfxPlatform::InitWebRenderConfig()
   }
 #endif
 
+  if (Preferences::GetBool("gfx.webrender.program-binary", false)) {
+    gfx::gfxVars::SetUseWebRenderProgramBinary(gfxConfig::IsEnabled(Feature::WEBRENDER));
+  }
+
 #ifdef MOZ_WIDGET_ANDROID
   featureWebRender.ForceDisable(
     FeatureStatus::Unavailable,
@@ -2596,7 +2592,7 @@ gfxPlatform::InitOMTPConfig()
   omtp.SetDefaultFromPref(
     "layers.omtp.enabled",
     true,
-    Preferences::GetDefaultBool("layers.omtp.enabled", false));
+    Preferences::GetBool("layers.omtp.enabled", false, PrefValueKind::Default));
 
   if (mContentBackend == BackendType::CAIRO) {
     omtp.ForceDisable(FeatureStatus::Broken, "OMTP is not supported when using cairo",

@@ -105,33 +105,6 @@ linux64-stylo-disabled/opt:
         - awsy-stylo-disabled
         - stylo-disabled-tests
         - devtools-tests
-macosx64-stylo-disabled/debug:
-    build-platform: macosx64/debug
-    test-sets:
-        - stylo-disabled-tests
-macosx64-stylo-disabled/opt:
-    build-platform: macosx64/opt
-    test-sets:
-        - awsy-stylo-disabled
-        - stylo-disabled-tests
-windows7-32-stylo-disabled/debug:
-    build-platform: win32/debug
-    test-sets:
-        - stylo-disabled-tests
-windows7-32-stylo-disabled/opt:
-    build-platform: win32/opt
-    test-sets:
-        - awsy-stylo-disabled
-        - stylo-disabled-tests
-windows10-64-stylo-disabled/debug:
-    build-platform: win64/debug
-    test-sets:
-        - stylo-disabled-tests
-windows10-64-stylo-disabled/opt:
-    build-platform: win64/opt
-    test-sets:
-        - awsy-stylo-disabled
-        - stylo-disabled-tests
 
 # Stylo sequential runs check memory and performance when using a single thread.
 linux64-stylo-sequential/opt:
@@ -181,7 +154,6 @@ windows7-32/opt:
         - desktop-screenshot-capture
         - windows-reftest-gpu
         - windows-talos
-        - windows-talos-stylo-disabled
         - windows-tests
 
 windows7-32-pgo/opt:
@@ -191,7 +163,6 @@ windows7-32-pgo/opt:
         - desktop-screenshot-capture
         - windows-reftest-gpu
         - windows-talos
-        - windows-talos-stylo-disabled
         - windows-tests
 
 windows7-32-nightly/opt:
@@ -230,9 +201,7 @@ windows10-64/opt:
     test-sets:
         - awsy
         - desktop-screenshot-capture
-        - desktop-instrumentation
         - windows-talos
-        - windows-talos-stylo-disabled
         - windows-tests
         - mochitest-headless
 
@@ -242,7 +211,6 @@ windows10-64-pgo/opt:
         - awsy
         - desktop-screenshot-capture
         - windows-talos
-        - windows-talos-stylo-disabled
         - windows-tests
 
 windows10-64-nightly/opt:
@@ -250,6 +218,7 @@ windows10-64-nightly/opt:
     test-sets:
         - awsy
         - desktop-screenshot-capture
+        - desktop-instrumentation
         - windows-tests
 
 windows10-64-devedition/opt:
@@ -275,14 +244,13 @@ macosx64/opt:
     build-platform: macosx64/opt
     test-sets:
         - macosx64-talos
-        - macosx64-talos-stylo-disabled
         - macosx64-tests
         - desktop-screenshot-capture
         - awsy
 
 macosx64-nightly/opt:
-      build-platform: macosx64-nightly/opt
-      test-sets:
+    build-platform: macosx64-nightly/opt
+    test-sets:
         - macosx64-tests
         - awsy
 
@@ -299,12 +267,14 @@ android-4.3-arm7-api-16/debug:
     test-sets:
         - android-common-tests
         - android-debug-tests
+        - android-gradle-tests
 
 android-4.3-arm7-api-16/opt:
     build-platform: android-api-16/opt
     test-sets:
         - android-common-tests
         - android-opt-tests
+        - android-gradle-tests
 
 android-4.2-x86/opt:
     build-platform: android-x86/opt
@@ -314,4 +284,5 @@ android-4.2-x86/opt:
 android-4.3-arm7-api-16-gradle/opt:
     build-platform: android-api-16-gradle/opt
     test-sets:
-        - android-gradle-tests
+        - android-common-tests
+        - android-opt-tests

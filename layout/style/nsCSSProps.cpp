@@ -499,7 +499,7 @@ nsCSSProps::IsInherited(nsCSSPropertyID aProperty)
   MOZ_ASSERT(!IsShorthand(aProperty));
 
   nsStyleStructID sid = kSIDTable[aProperty];
-  return nsCachedStyleData::IsInherited(sid);
+  return nsStyleContext::IsInherited(sid);
 }
 
 /* static */ bool
@@ -859,6 +859,8 @@ const KTableEntry nsCSSProps::kAppearanceKTable[] = {
   { eCSSKeyword__moz_win_exclude_glass,         NS_THEME_WIN_EXCLUDE_GLASS },
   { eCSSKeyword__moz_mac_vibrancy_light,        NS_THEME_MAC_VIBRANCY_LIGHT },
   { eCSSKeyword__moz_mac_vibrancy_dark,         NS_THEME_MAC_VIBRANCY_DARK },
+  { eCSSKeyword__moz_mac_vibrant_titlebar_light, NS_THEME_MAC_VIBRANT_TITLEBAR_LIGHT },
+  { eCSSKeyword__moz_mac_vibrant_titlebar_dark,  NS_THEME_MAC_VIBRANT_TITLEBAR_DARK },
   { eCSSKeyword__moz_mac_disclosure_button_open,   NS_THEME_MAC_DISCLOSURE_BUTTON_OPEN },
   { eCSSKeyword__moz_mac_disclosure_button_closed, NS_THEME_MAC_DISCLOSURE_BUTTON_CLOSED },
   { eCSSKeyword__moz_gtk_info_bar,              NS_THEME_GTK_INFO_BAR },
@@ -1132,6 +1134,8 @@ const KTableEntry nsCSSProps::kColorKTable[] = {
   { eCSSKeyword__moz_mac_secondaryhighlight, LookAndFeel::eColorID__moz_mac_secondaryhighlight },
   { eCSSKeyword__moz_mac_vibrancy_light, LookAndFeel::eColorID__moz_mac_vibrancy_light },
   { eCSSKeyword__moz_mac_vibrancy_dark, LookAndFeel::eColorID__moz_mac_vibrancy_dark },
+  { eCSSKeyword__moz_mac_vibrant_titlebar_light, LookAndFeel::eColorID__moz_mac_vibrant_titlebar_light },
+  { eCSSKeyword__moz_mac_vibrant_titlebar_dark,  LookAndFeel::eColorID__moz_mac_vibrant_titlebar_dark },
   { eCSSKeyword__moz_mac_menuitem, LookAndFeel::eColorID__moz_mac_menuitem },
   { eCSSKeyword__moz_mac_active_menuitem, LookAndFeel::eColorID__moz_mac_active_menuitem },
   { eCSSKeyword__moz_mac_menupopup, LookAndFeel::eColorID__moz_mac_menupopup },
@@ -1932,6 +1936,13 @@ const KTableEntry nsCSSProps::kRubyPositionKTable[] = {
 const KTableEntry nsCSSProps::kScrollBehaviorKTable[] = {
   { eCSSKeyword_auto,       NS_STYLE_SCROLL_BEHAVIOR_AUTO },
   { eCSSKeyword_smooth,     NS_STYLE_SCROLL_BEHAVIOR_SMOOTH },
+  { eCSSKeyword_UNKNOWN,    -1 }
+};
+
+const KTableEntry nsCSSProps::kOverscrollBehaviorKTable[] = {
+  { eCSSKeyword_auto,       StyleOverscrollBehavior::Auto },
+  { eCSSKeyword_contain,    StyleOverscrollBehavior::Contain },
+  { eCSSKeyword_none,       StyleOverscrollBehavior::None },
   { eCSSKeyword_UNKNOWN,    -1 }
 };
 
@@ -2999,6 +3010,12 @@ static const nsCSSPropertyID gMozTransformSubpropTable[] = {
   eCSSProperty_UNKNOWN
 };
 
+static const nsCSSPropertyID gOverscrollBehaviorSubpropTable[] = {
+  eCSSProperty_overscroll_behavior_x,
+  eCSSProperty_overscroll_behavior_y,
+  eCSSProperty_UNKNOWN
+};
+
 static const nsCSSPropertyID gScrollSnapTypeSubpropTable[] = {
   eCSSProperty_scroll_snap_type_x,
   eCSSProperty_scroll_snap_type_y,
@@ -3358,6 +3375,17 @@ nsCSSProps::gPropertyUseCounter[eCSSProperty_COUNT_no_shorthands] = {
   #undef CSS_PROP
   #undef CSS_PROP_LIST_INCLUDE_LOGICAL
   #undef CSS_PROP_PUBLIC_OR_PRIVATE
+};
+
+const uint32_t
+nsCSSProps::kParserVariantTable[eCSSProperty_COUNT_no_shorthands] = {
+#define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, kwtable_, \
+                 stylestruct_, stylestructoffset_, animtype_)                 \
+  parsevariant_,
+#define CSS_PROP_LIST_INCLUDE_LOGICAL
+#include "nsCSSPropList.h"
+#undef CSS_PROP_LIST_INCLUDE_LOGICAL
+#undef CSS_PROP
 };
 
 // Check that all logical property flags are used appropriately.

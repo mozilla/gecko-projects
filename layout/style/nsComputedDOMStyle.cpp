@@ -419,7 +419,8 @@ nsComputedDOMStyle::GetPropertyValue(const nsCSSPropertyID aPropID,
 
 NS_IMETHODIMP
 nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
-                                     const nsAString& aValue)
+                                     const nsAString& aValue,
+                                     nsIPrincipal* aSubjectPrincipal)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
@@ -433,7 +434,8 @@ nsComputedDOMStyle::GetCssText(nsAString& aCssText)
 }
 
 NS_IMETHODIMP
-nsComputedDOMStyle::SetCssText(const nsAString& aCssText)
+nsComputedDOMStyle::SetCssText(const nsAString& aCssText,
+                               nsIPrincipal* aSubjectPrincipal)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
@@ -743,9 +745,15 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
                      aElement, result->AsGecko(),
                      eRestyle_AllHintsWithAnimations);
           } else {
+            Element* elementOrPseudoElement =
+              EffectCompositor::GetElementToRestyle(aElement, pseudoType);
+            if (!elementOrPseudoElement) {
+              return nullptr;
+            }
             return presContext->StyleSet()->AsServo()->
-              GetBaseContextForElement(aElement, presContext,
-                                       pseudoType, result->AsServo());
+              GetBaseContextForElement(elementOrPseudoElement,
+                                       presContext,
+                                       result->AsServo());
           }
         }
 
@@ -777,8 +785,14 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
       return result.forget();
     }
 
-    return servoSet->GetBaseContextForElement(aElement, presContext,
-                                              pseudoType, result);
+    Element* elementOrPseudoElement =
+      EffectCompositor::GetElementToRestyle(aElement, pseudoType);
+    if (!elementOrPseudoElement) {
+      return nullptr;
+    }
+    return servoSet->GetBaseContextForElement(elementOrPseudoElement,
+                                              presContext,
+                                              result);
   }
 
   RefPtr<GeckoStyleContext> parentContext;
@@ -856,13 +870,15 @@ nsComputedDOMStyle::DocToUpdate()
 }
 
 void
-nsComputedDOMStyle::GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv)
+nsComputedDOMStyle::GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv,
+                                             nsIPrincipal* aSubjectPrincipal)
 {
   MOZ_CRASH("called nsComputedDOMStyle::GetCSSParsingEnvironment");
 }
 
 nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-nsComputedDOMStyle::GetServoCSSParsingEnvironment() const
+nsComputedDOMStyle::GetServoCSSParsingEnvironment(
+  nsIPrincipal* aSubjectPrincipal) const
 {
   MOZ_CRASH("called nsComputedDOMStyle::GetServoCSSParsingEnvironment");
 }
@@ -1196,7 +1212,8 @@ nsComputedDOMStyle::GetPropertyPriority(const nsAString& aPropertyName,
 NS_IMETHODIMP
 nsComputedDOMStyle::SetProperty(const nsAString& aPropertyName,
                                 const nsAString& aValue,
-                                const nsAString& aPriority)
+                                const nsAString& aPriority,
+                                nsIPrincipal* aSubjectPrincipal)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
@@ -1267,7 +1284,7 @@ nsComputedDOMStyle::DoGetBinding()
 
   const nsStyleDisplay* display = StyleDisplay();
 
-  if (display->mBinding) {
+  if (display->mBinding && display->mBinding->GetURI()) {
     val->SetURI(display->mBinding->GetURI());
   } else {
     val->SetIdent(eCSSKeyword_none);
@@ -3606,6 +3623,26 @@ nsComputedDOMStyle::DoGetScrollBehavior()
 }
 
 already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetOverscrollBehaviorX()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mOverscrollBehaviorX,
+                                   nsCSSProps::kOverscrollBehaviorKTable));
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetOverscrollBehaviorY()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mOverscrollBehaviorY,
+                                   nsCSSProps::kOverscrollBehaviorKTable));
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetScrollSnapType()
 {
   const nsStyleDisplay* display = StyleDisplay();
@@ -5755,7 +5792,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
     case eStyleUnit_Calc:
       nscoord percentageBase;
       if (!aCoord.CalcHasPercent()) {
-        nscoord val = nsRuleNode::ComputeCoordPercentCalc(aCoord, 0);
+        nscoord val = aCoord.ComputeCoordPercentCalc(0);
         if (aClampNegativeCalc && val < 0) {
           MOZ_ASSERT(aCoord.IsCalcUnit(),
                      "parser should have rejected value");
@@ -5764,8 +5801,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
         aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
       } else if (aPercentageBaseGetter &&
                  (this->*aPercentageBaseGetter)(percentageBase)) {
-        nscoord val =
-          nsRuleNode::ComputeCoordPercentCalc(aCoord, percentageBase);
+        nscoord val = aCoord.ComputeCoordPercentCalc(percentageBase);
         if (aClampNegativeCalc && val < 0) {
           MOZ_ASSERT(aCoord.IsCalcUnit(),
                      "parser should have rejected value");
@@ -5821,8 +5857,7 @@ nsComputedDOMStyle::StyleCoordToNSCoord(const nsStyleCoord& aCoord,
   if (aCoord.GetUnit() == eStyleUnit_Percent || aCoord.IsCalcUnit()) {
     nscoord percentageBase;
     if ((this->*aPercentageBaseGetter)(percentageBase)) {
-      nscoord result =
-        nsRuleNode::ComputeCoordPercentCalc(aCoord, percentageBase);
+      nscoord result = aCoord.ComputeCoordPercentCalc(percentageBase);
       if (aClampNegativeCalc && result < 0) {
         // It's expected that we can get a negative value here with calc().
         // We can also get a negative value with a percentage value if

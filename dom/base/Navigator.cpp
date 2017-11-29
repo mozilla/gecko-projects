@@ -37,8 +37,6 @@
 #include "mozilla/dom/GamepadServiceTest.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "mozilla/dom/FlyWebPublishedServer.h"
-#include "mozilla/dom/FlyWebService.h"
 #include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/Presentation.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
@@ -168,7 +166,6 @@ Navigator::Init()
 Navigator::Navigator(nsPIDOMWindowInner* aWindow)
   : mWindow(aWindow)
 {
-  MOZ_ASSERT(aWindow->IsInnerWindow(), "Navigator must get an inner window!");
 }
 
 Navigator::~Navigator()
@@ -1375,61 +1372,6 @@ Navigator::GetBattery(ErrorResult& aRv)
   return mBatteryPromise;
 }
 
-already_AddRefed<Promise>
-Navigator::PublishServer(const nsAString& aName,
-                         const FlyWebPublishOptions& aOptions,
-                         ErrorResult& aRv)
-{
-  RefPtr<FlyWebService> service = FlyWebService::GetOrCreate();
-  if (!service) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  RefPtr<FlyWebPublishPromise> mozPromise =
-    service->PublishServer(aName, aOptions, mWindow);
-  MOZ_ASSERT(mozPromise);
-
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mWindow);
-  ErrorResult result;
-  RefPtr<Promise> domPromise = Promise::Create(global, result);
-  if (result.Failed()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  mozPromise->Then(global->AbstractMainThreadFor(TaskCategory::Other),
-                   __func__,
-                   [domPromise] (FlyWebPublishedServer* aServer) {
-                     domPromise->MaybeResolve(aServer);
-                   },
-                   [domPromise] (nsresult aStatus) {
-                     domPromise->MaybeReject(aStatus);
-                   });
-
-  return domPromise.forget();
-}
-
-already_AddRefed<WakeLock>
-Navigator::RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv)
-{
-  if (!mWindow) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  RefPtr<power::PowerManagerService> pmService =
-    power::PowerManagerService::GetInstance();
-  // Maybe it went away for some reason... Or maybe we're just called
-  // from our XPCOM method.
-  if (!pmService) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  return pmService->NewWakeLock(aTopic, mWindow, aRv);
-}
-
 already_AddRefed<LegacyMozTCPSocket>
 Navigator::MozTCPSocket()
 {
@@ -1648,8 +1590,6 @@ Navigator::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 void
 Navigator::SetWindow(nsPIDOMWindowInner *aInnerWindow)
 {
-  NS_ASSERTION(aInnerWindow->IsInnerWindow(),
-               "Navigator must get an inner window!");
   mWindow = aInnerWindow;
 }
 
@@ -1732,7 +1672,6 @@ Navigator::GetWindowFromGlobal(JSObject* aGlobal)
 {
   nsCOMPtr<nsPIDOMWindowInner> win =
     do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(aGlobal));
-  MOZ_ASSERT(!win || win->IsInnerWindow());
   return win.forget();
 }
 

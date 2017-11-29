@@ -59,7 +59,7 @@ if CONFIG['MOZ_ANDROID_HLS_SUPPORT']:
     DIRS += ['hls']
 
 if CONFIG['MOZ_FMP4']:
-    DIRS += ['fmp4']
+    DIRS += ['mp4']
 
 if CONFIG['MOZ_WEBRTC']:
     DIRS += ['bridge']
@@ -98,8 +98,12 @@ EXPORTS += [
     'AudioSampleFormat.h',
     'AudioSegment.h',
     'AudioStream.h',
+    'AutoplayPolicy.h',
     'Benchmark.h',
+    'BitReader.h',
     'BufferMediaResource.h',
+    'BufferReader.h',
+    'ByteWriter.h',
     'ChannelMediaDecoder.h',
     'CubebUtils.h',
     'DecoderTraits.h',
@@ -210,8 +214,10 @@ UNIFIED_SOURCES += [
     'AudioStreamTrack.cpp',
     'AudioTrack.cpp',
     'AudioTrackList.cpp',
+    'AutoplayPolicy.cpp',
     'BaseMediaResource.cpp',
     'Benchmark.cpp',
+    'BitReader.cpp',
     'CanvasCaptureMediaStream.cpp',
     'ChannelMediaDecoder.cpp',
     'ChannelMediaResource.cpp',

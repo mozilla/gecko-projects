@@ -58,11 +58,12 @@ ChannelMediaDecoder::ResourceCallback::GetMediaOwner() const
 }
 
 void
-ChannelMediaDecoder::ResourceCallback::NotifyNetworkError()
+ChannelMediaDecoder::ResourceCallback::NotifyNetworkError(
+  const MediaResult& aError)
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (mDecoder) {
-    mDecoder->NetworkError();
+    mDecoder->NetworkError(aError);
   }
 }
 
@@ -254,9 +255,6 @@ ChannelMediaDecoder::Load(nsIChannel* aChannel,
   rv = mResource->Open(aStreamListener);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Set mode to METADATA since we are about to read metadata.
-  mResource->SetReadMode(MediaCacheStream::MODE_METADATA);
-
   SetStateMachine(CreateStateMachine());
   NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
 
@@ -306,7 +304,7 @@ ChannelMediaDecoder::NotifyDownloadEnded(nsresult aStatus)
     // Download has been cancelled by user.
     owner->LoadAborted();
   } else {
-    NetworkError();
+    NetworkError(MediaResult(aStatus, "Download aborted"));
   }
 }
 

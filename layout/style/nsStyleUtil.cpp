@@ -10,13 +10,13 @@
 #include "nsIContent.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
-#include "nsRuleNode.h"
 #include "nsROCSSPrimitiveValue.h"
 #include "nsStyleStruct.h"
 #include "nsIContentPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIURI.h"
 #include "nsISupportsPrimitives.h"
+#include "nsLayoutUtils.h"
 #include "nsPrintfCString.h"
 #include <cctype>
 
@@ -407,7 +407,7 @@ nsStyleUtil::AppendFontFeatureSettings(const nsCSSValue& aSrc,
                   "improper value unit for font-feature-settings:");
 
   nsTArray<gfxFontFeature> featureSettings;
-  nsRuleNode::ComputeFontFeatures(aSrc.GetPairListValue(), featureSettings);
+  nsLayoutUtils::ComputeFontFeatures(aSrc.GetPairListValue(), featureSettings);
   AppendFontFeatureSettings(featureSettings, aResult);
 }
 
@@ -446,7 +446,8 @@ nsStyleUtil::AppendFontVariationSettings(const nsCSSValue& aSrc,
                   "improper value unit for font-variation-settings:");
 
   nsTArray<gfxFontVariation> variationSettings;
-  nsRuleNode::ComputeFontVariations(aSrc.GetPairListValue(), variationSettings);
+  nsLayoutUtils::ComputeFontVariations(aSrc.GetPairListValue(),
+                                       variationSettings);
   AppendFontVariationSettings(variationSettings, aResult);
 }
 
@@ -835,6 +836,7 @@ nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
 /* static */ bool
 nsStyleUtil::CSPAllowsInlineStyle(nsIContent* aContent,
                                   nsIPrincipal* aPrincipal,
+                                  nsIPrincipal* aTriggeringPrincipal,
                                   nsIURI* aSourceURI,
                                   uint32_t aLineNumber,
                                   const nsAString& aStyleText,
@@ -850,8 +852,14 @@ nsStyleUtil::CSPAllowsInlineStyle(nsIContent* aContent,
       "aContent passed to CSPAllowsInlineStyle "
       "for an element that is not <style>");
 
+  nsIPrincipal* principal = aPrincipal;
+  if (aTriggeringPrincipal &&
+      BasePrincipal::Cast(aTriggeringPrincipal)->OverridesCSP(aPrincipal)) {
+    principal = aTriggeringPrincipal;
+  }
+
   nsCOMPtr<nsIContentSecurityPolicy> csp;
-  rv = aPrincipal->GetCsp(getter_AddRefs(csp));
+  rv = principal->GetCsp(getter_AddRefs(csp));
 
   if (NS_FAILED(rv)) {
     if (aRv)

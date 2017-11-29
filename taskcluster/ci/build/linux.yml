@@ -15,6 +15,7 @@ linux64/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -45,13 +46,14 @@ linux64-dmd/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         custom-build-variant-cfg: dmd
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: [ ]
+    run-on-projects: []
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -76,6 +78,7 @@ linux64/pgo:
         actions: [get-secrets build check-test update]
         options: [enable-pgo]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -105,6 +108,7 @@ linux64/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -138,6 +142,7 @@ linux64-devedition-nightly/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - disable_signing.py
             - balrog/production.py
@@ -146,7 +151,7 @@ linux64-devedition-nightly/opt:
         tooltool-downloads: public
         need-xvfb: true
         custom-build-variant-cfg: devedition
-    run-on-projects: [ 'mozilla-beta', ]
+    run-on-projects: ['mozilla-beta']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -171,6 +176,7 @@ linux64-base-toolchains/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -201,6 +207,7 @@ linux64-base-toolchains/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -231,6 +238,7 @@ linux/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -260,6 +268,7 @@ linux/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -291,6 +300,7 @@ linux/pgo:
         actions: [get-secrets build check-test update]
         options: [enable-pgo]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -321,6 +331,7 @@ linux-rusttests/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -329,7 +340,7 @@ linux-rusttests/opt:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: [ 'trunk', 'try' ]
+    run-on-projects: ['trunk', 'try']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -354,6 +365,7 @@ linux-rusttests/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -362,7 +374,7 @@ linux-rusttests/debug:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: [ 'trunk', 'try' ]
+    run-on-projects: ['trunk', 'try']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -389,6 +401,7 @@ linux-devedition-nightly/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - disable_signing.py
             - balrog/production.py
@@ -397,7 +410,7 @@ linux-devedition-nightly/opt:
         tooltool-downloads: public
         need-xvfb: true
         custom-build-variant-cfg: devedition
-    run-on-projects: [ 'mozilla-beta', ]
+    run-on-projects: ['mozilla-beta']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -424,6 +437,7 @@ linux-nightly/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - disable_signing.py
             - taskcluster_nightly.py
@@ -456,6 +470,7 @@ linux64-asan/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -464,7 +479,7 @@ linux64-asan/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
+        - linux64-clang-6-pre
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
@@ -488,6 +503,7 @@ linux64-asan-fuzzing/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -496,7 +512,7 @@ linux64-asan-fuzzing/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang-4
+        - linux64-clang-6-pre
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
@@ -519,6 +535,7 @@ linux64-asan-reporter/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -527,7 +544,7 @@ linux64-asan-reporter/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang-4
+        - linux64-clang-6-pre
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
@@ -550,6 +567,7 @@ linux64-asan/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -558,7 +576,7 @@ linux64-asan/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
+        - linux64-clang-6-pre
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
@@ -583,6 +601,7 @@ linux64-nightly/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - disable_signing.py
             - taskcluster_nightly.py
@@ -614,6 +633,7 @@ linux64-noopt/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -622,7 +642,7 @@ linux64-noopt/debug:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: [ 'trunk', 'try' ]
+    run-on-projects: ['trunk', 'try']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -647,6 +667,7 @@ linux64-rusttests/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -655,7 +676,7 @@ linux64-rusttests/opt:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: [ 'trunk', 'try' ]
+    run-on-projects: ['trunk', 'try']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -680,6 +701,7 @@ linux64-rusttests/debug:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -688,7 +710,7 @@ linux64-rusttests/debug:
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
-    run-on-projects: [ 'trunk', 'try' ]
+    run-on-projects: ['trunk', 'try']
     toolchains:
         - linux64-clang
         - linux64-gcc
@@ -704,7 +726,7 @@ linux64-jsdcov/opt:
         platform: linux64-jsdcov/opt
         symbol: tc(B)
         tier: 2
-    run-on-projects: [ ]
+    run-on-projects: []
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 36000
@@ -714,6 +736,7 @@ linux64-jsdcov/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -735,7 +758,7 @@ linux64-ccov/opt:
         platform: linux64-ccov/opt
         symbol: tc(B)
         tier: 2
-    run-on-projects: [ ]
+    run-on-projects: []
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 36000
@@ -745,6 +768,7 @@ linux64-ccov/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -775,6 +799,7 @@ linux64-add-on-devel/opt:
         using: mozharness
         actions: [get-secrets build check-test update]
         config:
+            - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - balrog/production.py
         script: "mozharness/scripts/fx_desktop_build.py"
@@ -782,7 +807,7 @@ linux64-add-on-devel/opt:
         custom-build-variant-cfg: add-on-devel
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: [ 'mozilla-beta', 'mozilla-release', 'mozilla-esr45' ]
+    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
     toolchains:
         - linux64-clang
         - linux64-gcc

@@ -30,7 +30,7 @@ struct ImmType : public ImmTag
     { }
 };
 
-static const ValueOperand JSReturnOperand = ValueOperand(JSReturnReg_Type, JSReturnReg_Data);
+static constexpr ValueOperand JSReturnOperand{JSReturnReg_Type, JSReturnReg_Data};
 static const ValueOperand softfpReturnOperand = ValueOperand(v1, v0);
 
 static const int defaultShift = 3;
@@ -310,6 +310,14 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
         ma_b(target);
     }
 
+    void jump(TrampolinePtr code)
+    {
+        auto target = ImmPtr(code.value);
+        BufferOffset bo = m_buffer.nextOffset();
+        addPendingJump(bo, target, Relocation::HARDCODED);
+        ma_jump(target);
+    }
+
     void negl(Register reg) {
         ma_negu(reg, reg);
     }
@@ -505,7 +513,7 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void storeTypeTag(ImmTag tag, Address dest);
     void storeTypeTag(ImmTag tag, const BaseIndex& dest);
 
-    void handleFailureWithHandlerTail(void* handler);
+    void handleFailureWithHandlerTail(void* handler, Label* profilerExitTail);
 
     /////////////////////////////////////////////////////////////////
     // Common interface.
@@ -983,6 +991,124 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     // If source is a double, load it into dest. If source is int32,
     // convert it to double. Else, branch to failure.
     void ensureDouble(const ValueOperand& source, FloatRegister dest, Label* failure);
+
+    template<typename T>
+    void atomicFetchAdd8ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchSub8ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchAnd8ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchOr8ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchXor8ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void compareExchange8ZeroExtend(const T& mem, Register oldval, Register newval,
+                                    Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicExchange8ZeroExtend(const T& mem, Register value, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchAdd16ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchSub16ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchAnd16ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchOr16ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchXor16ZeroExtend(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void compareExchange16ZeroExtend(const T& mem, Register oldval, Register newval,
+                                     Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicExchange16ZeroExtend(const T& mem, Register value, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchAdd32(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchSub32(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchAnd32(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchOr32(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void atomicFetchXor32(Register value, const T& mem, Register temp, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T>
+    void compareExchange32(const T& mem, Register oldval, Register newval, Register output) {
+        MOZ_CRASH();
+    }
+    template<typename T> void atomicExchange32(const T& mem, Register value, Register output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicFetchAdd64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicFetchSub64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicFetchAnd64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicFetchOr64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicFetchXor64(Register64 value, const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicExchange64(const T& mem, Register64 src, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void compareExchange64(const T& mem, Register64 expect, Register64 replace, Register64 output) {
+        MOZ_CRASH();
+    }
+    template <typename T>
+    void atomicLoad64(const T& mem, Register64 temp, Register64 output) {
+        MOZ_CRASH();
+    }
 
   protected:
     bool buildOOLFakeExitFrame(void* fakeReturnAddr);

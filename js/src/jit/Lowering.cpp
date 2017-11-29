@@ -4421,6 +4421,7 @@ LIRGenerator::visitWasmAddOffset(MWasmAddOffset* ins)
 {
     MOZ_ASSERT(ins->base()->type() == MIRType::Int32);
     MOZ_ASSERT(ins->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->offset());
     define(new(alloc()) LWasmAddOffset(useRegisterAtStart(ins->base())), ins);
 }
 
@@ -4454,6 +4455,16 @@ LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
                                               useRegisterAtStart(boundsCheckLimit));
     add(lir, ins);
 #endif
+}
+
+void
+LIRGenerator::visitWasmAlignmentCheck(MWasmAlignmentCheck* ins)
+{
+    MDefinition* index = ins->index();
+    MOZ_ASSERT(index->type() == MIRType::Int32);
+
+    auto* lir = new(alloc()) LWasmAlignmentCheck(useRegisterAtStart(index));
+    add(lir, ins);
 }
 
 void

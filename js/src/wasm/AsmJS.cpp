@@ -1763,7 +1763,11 @@ class MOZ_STACK_CLASS ModuleValidator
         arrayViews_(cx),
         atomicsPresent_(false),
         simdPresent_(false),
-        env_(CompileMode::Once, Tier::Ion, DebugEnabled::False, ModuleKind::AsmJS),
+        env_(CompileMode::Once, Tier::Ion, DebugEnabled::False,
+             cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
+               ? Shareable::True
+               : Shareable::False,
+             ModuleKind::AsmJS),
         errorString_(nullptr),
         errorOffset_(UINT32_MAX),
         errorOverRecursed_(false)
@@ -2069,7 +2073,7 @@ class MOZ_STACK_CLASS ModuleValidator
                                    PropertyName* field)
     {
         if (!JitOptions.asmJSAtomicsEnable)
-            return failCurrentOffset("asm.js Atomics only enabled in wasm test mode");
+            return failCurrentOffset("asm.js Atomics only enabled when asmjs.atomics.enable is set");
 
         atomicsPresent_ = true;
 
@@ -7152,7 +7156,8 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
     ParseContext* outerpc = m.parser().pc;
     Directives directives(outerpc);
     FunctionBox* funbox = m.parser().newFunctionBox(fn, fun, toStringStart, directives,
-                                                    GeneratorKind::NotGenerator, SyncFunction);
+                                                    GeneratorKind::NotGenerator,
+                                                    FunctionAsyncKind::SyncFunction);
     if (!funbox)
         return false;
     funbox->initWithEnclosingParseContext(outerpc, frontend::Statement);
@@ -8022,8 +8027,13 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
         if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer, needGuard))
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
     } else {
-        if (!buffer->as<SharedArrayBufferObject>().isPreparedForAsmJS())
-            return LinkFail(cx, "SharedArrayBuffer must be created with wasm test mode enabled");
+        if (!buffer->as<SharedArrayBufferObject>().isPreparedForAsmJS()) {
+            if (buffer->as<SharedArrayBufferObject>().isWasm())
+                return LinkFail(cx, "SharedArrayBuffer created for Wasm cannot be used for asm.js");
+            if (!jit::JitOptions.asmJSAtomicsEnable)
+                return LinkFail(cx, "Can link with SharedArrayBuffer only when asmjs.atomics.enable is set");
+            return LinkFail(cx, "Unable to prepare SharedArrayBuffer for asm.js use");
+        }
     }
 
     MOZ_ASSERT(buffer->isPreparedForAsmJS());

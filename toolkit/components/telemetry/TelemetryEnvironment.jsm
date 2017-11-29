@@ -148,6 +148,7 @@ this.TelemetryEnvironment = {
   RECORD_PREF_STATE: 1, // Don't record the preference value
   RECORD_PREF_VALUE: 2, // We only record user-set prefs.
   RECORD_DEFAULTPREF_VALUE: 3, // We only record default pref if set
+  RECORD_DEFAULTPREF_STATE: 4, // We only record if the pref exists
 
   // Testing method
   testWatchPreferences(prefMap) {
@@ -180,6 +181,7 @@ this.TelemetryEnvironment = {
 const RECORD_PREF_STATE = TelemetryEnvironment.RECORD_PREF_STATE;
 const RECORD_PREF_VALUE = TelemetryEnvironment.RECORD_PREF_VALUE;
 const RECORD_DEFAULTPREF_VALUE = TelemetryEnvironment.RECORD_DEFAULTPREF_VALUE;
+const RECORD_DEFAULTPREF_STATE = TelemetryEnvironment.RECORD_DEFAULTPREF_STATE;
 const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["app.feedback.baseURL", {what: RECORD_PREF_VALUE}],
   ["app.support.baseURL", {what: RECORD_PREF_VALUE}],
@@ -200,6 +202,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["browser.newtabpage.enhanced", {what: RECORD_PREF_VALUE}],
   ["browser.shell.checkDefaultBrowser", {what: RECORD_PREF_VALUE}],
   ["browser.search.ignoredJAREngines", {what: RECORD_DEFAULTPREF_VALUE}],
+  ["browser.search.region", {what: RECORD_PREF_VALUE}],
   ["browser.search.suggest.enabled", {what: RECORD_PREF_VALUE}],
   ["browser.search.widget.inNavBar", {what: RECORD_DEFAULTPREF_VALUE}],
   ["browser.startup.homepage", {what: RECORD_PREF_STATE}],
@@ -227,6 +230,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["extensions.update.url", {what: RECORD_PREF_VALUE}],
   ["extensions.update.background.url", {what: RECORD_PREF_VALUE}],
   ["extensions.screenshots.disabled", {what: RECORD_PREF_VALUE}],
+  ["general.config.filename", {what: RECORD_DEFAULTPREF_STATE}],
   ["general.smoothScroll", {what: RECORD_PREF_VALUE}],
   ["gfx.direct2d.disabled", {what: RECORD_PREF_VALUE}],
   ["gfx.direct2d.force-enabled", {what: RECORD_PREF_VALUE}],
@@ -509,7 +513,7 @@ EnvironmentAddonBuilder.prototype = {
         // Gather initial addons details
         await this._updateAddons();
 
-        if (!AddonManagerPrivate.isDBLoaded()) {
+        if (!this._environment._addonsAreFull) {
           // The addon database has not been loaded, so listen for the event
           // triggered by the AddonManager when it is loaded so we can
           // immediately gather full data at that time.
@@ -650,9 +654,9 @@ EnvironmentAddonBuilder.prototype = {
    */
   async _getActiveAddons() {
     // Request addons, asynchronously.
-    let allAddons = await AddonManager.getActiveAddons(["extension", "service"]);
+    let {addons: allAddons, fullData} = await AddonManager.getActiveAddons(["extension", "service"]);
 
-    let isDBLoaded = AddonManagerPrivate.isDBLoaded();
+    this._environment._addonsAreFull = fullData;
     let activeAddons = {};
     for (let addon of allAddons) {
       // Weird addon data in the wild can lead to exceptions while collecting
@@ -673,7 +677,7 @@ EnvironmentAddonBuilder.prototype = {
 
         // getActiveAddons() gives limited data during startup and full
         // data after the addons database is loaded.
-        if (isDBLoaded) {
+        if (fullData) {
           let installDate = new Date(Math.max(0, addon.installDate));
           Object.assign(activeAddons[addon.id], {
             blocklisted: (addon.blocklistState !== Ci.nsIBlocklistService.STATE_NOT_BLOCKED),
@@ -702,7 +706,7 @@ EnvironmentAddonBuilder.prototype = {
    */
   async _getActiveTheme() {
     // Request themes, asynchronously.
-    let themes = await AddonManager.getActiveAddons(["theme"]);
+    let {addons: themes} = await AddonManager.getActiveAddons(["theme"]);
 
     let activeTheme = {};
     // We only store information about the active theme.
@@ -889,6 +893,10 @@ function EnvironmentCache() {
         this._log.error("EnvironmentCache - error while initializing", err);
         return setup();
       });
+
+  // Addons may contain partial or full data depending on whether the Addons DB
+  // has had a chance to load. Do we have full data yet?
+  this._addonsAreFull = false;
 }
 EnvironmentCache.prototype = {
   /**
@@ -1028,7 +1036,9 @@ EnvironmentCache.prototype = {
     for (let [pref, policy] of this._watchedPrefs.entries()) {
       let prefType = Services.prefs.getPrefType(pref);
 
-      if (policy.what == TelemetryEnvironment.RECORD_DEFAULTPREF_VALUE) {
+      let what = policy.what;
+      if (what == TelemetryEnvironment.RECORD_DEFAULTPREF_VALUE ||
+          what == TelemetryEnvironment.RECORD_DEFAULTPREF_STATE) {
         // For default prefs, make sure they exist
         if (prefType == Ci.nsIPrefBranch.PREF_INVALID) {
           continue;
@@ -1041,7 +1051,9 @@ EnvironmentCache.prototype = {
       // Check the policy for the preference and decide if we need to store its value
       // or whether it changed from the default value.
       let prefValue;
-      if (policy.what == TelemetryEnvironment.RECORD_PREF_STATE) {
+      if (what == TelemetryEnvironment.RECORD_DEFAULTPREF_STATE) {
+        prefValue = "<set>";
+      } else if (what == TelemetryEnvironment.RECORD_PREF_STATE) {
         prefValue = "<user-set>";
       } else if (prefType == Ci.nsIPrefBranch.PREF_STRING) {
         prefValue = Services.prefs.getStringPref(pref);

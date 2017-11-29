@@ -241,6 +241,12 @@ Object.defineProperty(GeckoDriver.prototype, "windows", {
   },
 });
 
+Object.defineProperty(GeckoDriver.prototype, "windowType", {
+  get() {
+    return this.curBrowser.window.document.documentElement.getAttribute("windowtype");
+  },
+});
+
 Object.defineProperty(GeckoDriver.prototype, "windowHandles", {
   get() {
     let hs = [];
@@ -1097,7 +1103,7 @@ GeckoDriver.prototype.execute_ = async function(
 GeckoDriver.prototype.get = async function(cmd) {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let url = cmd.parameters.url;
 
@@ -1140,7 +1146,7 @@ GeckoDriver.prototype.get = async function(cmd) {
  */
 GeckoDriver.prototype.getCurrentUrl = function() {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   return this.currentURL.toString();
 };
@@ -1158,16 +1164,16 @@ GeckoDriver.prototype.getCurrentUrl = function() {
  */
 GeckoDriver.prototype.getTitle = function() {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   return this.title;
 };
 
 /** Gets the current type of the window. */
 GeckoDriver.prototype.getWindowType = function(cmd, resp) {
-  let win = assert.window(this.getCurrentWindow());
+  assert.window(this.getCurrentWindow());
 
-  resp.body.value = win.document.documentElement.getAttribute("windowtype");
+  resp.body.value = this.windowType;
 };
 
 /**
@@ -1184,7 +1190,7 @@ GeckoDriver.prototype.getWindowType = function(cmd, resp) {
  */
 GeckoDriver.prototype.getPageSource = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   switch (this.context) {
     case Context.Chrome:
@@ -1212,7 +1218,7 @@ GeckoDriver.prototype.getPageSource = async function(cmd, resp) {
 GeckoDriver.prototype.goBack = async function() {
   assert.content(this.context);
   assert.contentBrowser(this.curBrowser);
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   // If there is no history, just return
   if (!this.curBrowser.contentBrowser.webNavigation.canGoBack) {
@@ -1255,7 +1261,7 @@ GeckoDriver.prototype.goBack = async function() {
 GeckoDriver.prototype.goForward = async function() {
   assert.content(this.context);
   assert.contentBrowser(this.curBrowser);
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   // If there is no history, just return
   if (!this.curBrowser.contentBrowser.webNavigation.canGoForward) {
@@ -1299,7 +1305,7 @@ GeckoDriver.prototype.goForward = async function() {
 GeckoDriver.prototype.refresh = async function() {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let refresh = this.listener.refresh(
       {pageTimeout: this.timeouts.pageLoad});
@@ -1440,7 +1446,7 @@ GeckoDriver.prototype.getChromeWindowHandles = function() {
  */
 GeckoDriver.prototype.getWindowRect = function() {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
   return this.curBrowser.rect;
 };
 
@@ -1477,7 +1483,7 @@ GeckoDriver.prototype.getWindowRect = function() {
 GeckoDriver.prototype.setWindowRect = async function(cmd) {
   assert.firefox();
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {x, y, width, height} = cmd.parameters;
   let origRect = this.curBrowser.rect;
@@ -1707,7 +1713,7 @@ GeckoDriver.prototype.getActiveFrame = function(cmd, resp) {
  */
 GeckoDriver.prototype.switchToParentFrame = async function() {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   await this.listener.switchToParentFrame();
 };
@@ -1728,7 +1734,7 @@ GeckoDriver.prototype.switchToParentFrame = async function() {
  */
 GeckoDriver.prototype.switchToFrame = async function(cmd) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {id, focus} = cmd.parameters;
 
@@ -1967,7 +1973,7 @@ GeckoDriver.prototype.performActions = async function(cmd) {
   assert.content(this.context,
       "Command 'performActions' is not yet available in chrome context");
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let actions = cmd.parameters.actions;
   await this.listener.performActions({"actions": actions});
@@ -1986,7 +1992,7 @@ GeckoDriver.prototype.performActions = async function(cmd) {
 GeckoDriver.prototype.releaseActions = async function() {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   await this.listener.releaseActions();
 };
@@ -2010,7 +2016,7 @@ GeckoDriver.prototype.releaseActions = async function() {
  */
 GeckoDriver.prototype.actionChain = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {chain, nextId} = cmd.parameters;
 
@@ -2049,7 +2055,7 @@ GeckoDriver.prototype.actionChain = async function(cmd, resp) {
 GeckoDriver.prototype.multiAction = async function(cmd) {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {value, max_length} = cmd.parameters; // eslint-disable-line camelcase
 
@@ -2072,7 +2078,7 @@ GeckoDriver.prototype.multiAction = async function(cmd) {
  */
 GeckoDriver.prototype.findElement = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {using, value} = cmd.parameters;
   let startNode;
@@ -2153,10 +2159,11 @@ GeckoDriver.prototype.findElements = async function(cmd, resp) {
 };
 
 /**
- * Return the active element on the page.
+ * Return the active element in the document.
  *
  * @return {WebElement}
- *     Active element of the current browsing context's document element.
+ *     Active element of the current browsing context's document
+ *     element, if the document element is non-null.
  *
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
@@ -2164,13 +2171,16 @@ GeckoDriver.prototype.findElements = async function(cmd, resp) {
  *     Top-level browsing context has been discarded.
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
+ * @throws {NoSuchElementError}
+ *     If the document does not have an active element, i.e. if
+ *     its document element has been deleted.
  */
-GeckoDriver.prototype.getActiveElement = async function(cmd, resp) {
+GeckoDriver.prototype.getActiveElement = async function() {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
-  resp.body.value = await this.listener.getActiveElement();
+  return this.listener.getActiveElement();
 };
 
 /**
@@ -2190,7 +2200,7 @@ GeckoDriver.prototype.getActiveElement = async function(cmd, resp) {
  */
 GeckoDriver.prototype.clickElement = async function(cmd) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2254,7 +2264,7 @@ GeckoDriver.prototype.clickElement = async function(cmd) {
  */
 GeckoDriver.prototype.getElementAttribute = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let name = assert.string(cmd.parameters.name);
@@ -2294,7 +2304,7 @@ GeckoDriver.prototype.getElementAttribute = async function(cmd, resp) {
  */
 GeckoDriver.prototype.getElementProperty = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let name = assert.string(cmd.parameters.name);
@@ -2333,7 +2343,7 @@ GeckoDriver.prototype.getElementProperty = async function(cmd, resp) {
  */
 GeckoDriver.prototype.getElementText = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2373,7 +2383,7 @@ GeckoDriver.prototype.getElementText = async function(cmd, resp) {
  */
 GeckoDriver.prototype.getElementTagName = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2410,7 +2420,7 @@ GeckoDriver.prototype.getElementTagName = async function(cmd, resp) {
  */
 GeckoDriver.prototype.isElementDisplayed = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2451,7 +2461,7 @@ GeckoDriver.prototype.isElementDisplayed = async function(cmd, resp) {
 GeckoDriver.prototype.getElementValueOfCssProperty = async function(
     cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let prop = assert.string(cmd.parameters.propertyName);
@@ -2491,7 +2501,7 @@ GeckoDriver.prototype.getElementValueOfCssProperty = async function(
  */
 GeckoDriver.prototype.isElementEnabled = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2530,7 +2540,7 @@ GeckoDriver.prototype.isElementEnabled = async function(cmd, resp) {
  */
 GeckoDriver.prototype.isElementSelected = async function(cmd, resp) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2561,7 +2571,7 @@ GeckoDriver.prototype.isElementSelected = async function(cmd, resp) {
  */
 GeckoDriver.prototype.getElementRect = async function(cmd, resp) {
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2603,7 +2613,7 @@ GeckoDriver.prototype.getElementRect = async function(cmd, resp) {
  */
 GeckoDriver.prototype.sendKeysToElement = async function(cmd) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let text = assert.string(cmd.parameters.text);
@@ -2639,7 +2649,7 @@ GeckoDriver.prototype.sendKeysToElement = async function(cmd) {
  */
 GeckoDriver.prototype.clearElement = async function(cmd) {
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let id = assert.string(cmd.parameters.id);
   let webEl = WebElement.fromUUID(id, this.context);
@@ -2701,7 +2711,7 @@ GeckoDriver.prototype.switchToShadowRoot = async function(cmd) {
 GeckoDriver.prototype.addCookie = function(cmd) {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {protocol, hostname} = this.currentURL;
 
@@ -2731,7 +2741,7 @@ GeckoDriver.prototype.addCookie = function(cmd) {
 GeckoDriver.prototype.getCookies = function(cmd, resp) {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {hostname, pathname} = this.currentURL;
   resp.body = [...cookie.iter(hostname, pathname)];
@@ -2750,7 +2760,7 @@ GeckoDriver.prototype.getCookies = function(cmd, resp) {
 GeckoDriver.prototype.deleteAllCookies = function() {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {hostname, pathname} = this.currentURL;
   for (let toDelete of cookie.iter(hostname, pathname)) {
@@ -2771,7 +2781,7 @@ GeckoDriver.prototype.deleteAllCookies = function() {
 GeckoDriver.prototype.deleteCookie = function(cmd) {
   assert.content(this.context);
   assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   let {hostname, pathname} = this.currentURL;
   let name = assert.string(cmd.parameters.name);
@@ -2800,8 +2810,8 @@ GeckoDriver.prototype.deleteCookie = function(cmd) {
  *     A modal dialog is open, blocking this operation.
  */
 GeckoDriver.prototype.close = async function() {
-  assert.contentBrowser(this.curBrowser);
-  assert.noUserPrompt(this.dialog);
+  assert.window(this.getCurrentWindow(Context.Content));
+  this._assertAndDismissModal();
 
   let nwins = 0;
 
@@ -3073,7 +3083,7 @@ GeckoDriver.prototype.setScreenOrientation = function(cmd) {
 GeckoDriver.prototype.minimizeWindow = async function() {
   assert.firefox();
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   if (WindowState.from(win.windowState) == WindowState.Fullscreen) {
     await exitFullscreen(win);
@@ -3110,7 +3120,7 @@ GeckoDriver.prototype.minimizeWindow = async function() {
 GeckoDriver.prototype.maximizeWindow = async function() {
   assert.firefox();
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   switch (WindowState.from(win.windowState)) {
     case WindowState.Fullscreen:
@@ -3196,7 +3206,7 @@ GeckoDriver.prototype.maximizeWindow = async function() {
 GeckoDriver.prototype.fullscreenWindow = async function() {
   assert.firefox();
   const win = assert.window(this.getCurrentWindow());
-  assert.noUserPrompt(this.dialog);
+  this._assertAndDismissModal();
 
   if (WindowState.from(win.windowState) == WindowState.Minimized) {
     await restoreWindow(win, this.curBrowser.eventObserver);
@@ -3290,6 +3300,15 @@ GeckoDriver.prototype.sendKeysToDialog = function(cmd) {
 GeckoDriver.prototype._checkIfAlertIsPresent = function() {
   if (!this.dialog || !this.dialog.ui) {
     throw new NoAlertOpenError("No modal dialog is currently open");
+  }
+};
+
+GeckoDriver.prototype._assertAndDismissModal = function() {
+  try {
+    assert.noUserPrompt(this.dialog);
+  } catch (e) {
+    this.dismissDialog();
+    throw e;
   }
 };
 
@@ -3496,7 +3515,7 @@ GeckoDriver.prototype.responseCompleted = function() {
  * Retrieve the localized string for the specified entity id.
  *
  * Example:
- *     localizeEntity(["chrome://global/locale/about.dtd"], "about.version")
+ *     localizeEntity(["chrome://branding/locale/brand.dtd"], "brandShortName")
  *
  * @param {Array.<string>} urls
  *     Array of .dtd URLs.

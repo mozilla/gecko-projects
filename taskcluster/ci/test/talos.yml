@@ -1,7 +1,10 @@
 job-defaults:
     max-run-time: 3600
     suite: talos
-    virtualization: hardware
+    virtualization:
+        by-test-platform:
+            windows10-64-ccov/.*: virtual
+            default: hardware
     mozharness:
         script: talos_script.py
         no-read-buildbot-config: true
@@ -11,6 +14,10 @@ job-defaults:
                     - talos/mac_config.py
                 windows.*:
                     - talos/windows_config.py
+                windows10-64-ccov/debug:
+                    - talos/windows_vm_config.py
+                linux64-ccov/opt:
+                    - talos/linux64_config_taskcluster.py
                 default:
                     - talos/linux_config.py
 
@@ -99,7 +106,7 @@ talos-g2:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
-            linux64-ccov/.*: ['try'] # Bug 1407593
+            linux64-ccov/.*: ['try']  # Bug 1407593
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         extra-options:
@@ -126,7 +133,7 @@ talos-g3:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         extra-options:
             - --suite=g3
@@ -151,7 +158,7 @@ talos-g4:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         extra-options:
             - --suite=g4
@@ -212,9 +219,11 @@ talos-h2:
     description: "Talos h2"
     try-name: h2
     treeherder-symbol: tc-T(h2)
+    max-run-time: 7200
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
+            windows7-32.*: ['try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         extra-options:
@@ -229,7 +238,7 @@ talos-other:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         extra-options:
             - --suite=other
@@ -368,6 +377,7 @@ talos-tp6:
     description: "Talos Tp6"
     try-name: tp6
     treeherder-symbol: tc-T(tp6)
+    max-run-time: 7200
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
@@ -383,6 +393,7 @@ talos-tp6-stylo-disabled:
     description: "Talos Stylo disabled Tp6"
     try-name: tp6-stylo-disabled
     treeherder-symbol: tc-Tsd(tp6)
+    max-run-time: 7200
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'try']
@@ -396,6 +407,7 @@ talos-tp6-stylo-threads:
     description: "Talos Stylo sequential Tp6"
     try-name: tp6-stylo-threads
     treeherder-symbol: tc-Tss(tp6)
+    max-run-time: 7200
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']

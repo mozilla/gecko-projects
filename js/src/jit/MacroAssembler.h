@@ -512,6 +512,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Call a target JitCode, which must be traceable, and may be movable.
     void call(JitCode* c) PER_SHARED_ARCH;
 
+    inline void call(TrampolinePtr code);
+
     inline void call(const wasm::CallSiteDesc& desc, const Register reg);
     inline void call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex);
     inline void call(const wasm::CallSiteDesc& desc, wasm::Trap trap);
@@ -651,7 +653,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline uint32_t callJitNoProfiler(Register callee);
     inline uint32_t callJit(Register callee);
     inline uint32_t callJit(JitCode* code);
-    inline uint32_t callJit(ImmPtr code);
+    inline uint32_t callJit(TrampolinePtr code);
 
     // The frame descriptor is the second field of all Jit frames, pushed before
     // calling the Jit function.  It is a composite value defined in JitFrames.h
@@ -700,17 +702,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     //
     // See JitFrames.h, and MarkJitExitFrame in JitFrames.cpp.
 
-    // If the current piece of code might be garbage collected, then the exit
-    // frame footer must contain a pointer to the current JitCode, such that the
-    // garbage collector can keep the code alive as long this code is on the
-    // stack. This function pushes a placeholder which is replaced when the code
-    // is linked.
-    inline void PushStubCode();
-
-    // Return true if the code contains a self-reference which needs to be
-    // patched when the code is linked.
-    inline bool hasSelfReference() const;
-
     // Push stub code and the VMFunction pointer.
     inline void enterExitFrame(Register cxreg, Register scratch, const VMFunction* f);
 
@@ -728,14 +719,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Save the top of the stack into JitActivation::packedExitFP of the
     // current thread, which should be the location of the latest exit frame.
     void linkExitFrame(Register cxreg, Register scratch);
-
-    // Patch the value of PushStubCode with the pointer to the finalized code.
-    void linkSelfReference(JitCode* code);
-
-    // If the JitCode that created this assembler needs to transition into the VM,
-    // we want to store the JitCode on the stack in order to mark it during a GC.
-    // This is a reference to a patch location where the JitCode* will be written.
-    CodeOffset selfReferencePatch_;
 
   public:
     // ===============================================================
@@ -1520,6 +1503,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Perform a stack-overflow test, branching to the given Label on overflow.
     void wasmEmitStackCheck(Register sp, Register scratch, Label* onOverflow);
 
+    void emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register temp1, Register temp2,
+                                Register temp3, Label* noBarrier);
+
   public:
     // ========================================================================
     // Clamping functions.
@@ -1699,7 +1685,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         computeEffectiveAddress(address, PreBarrierReg);
 
         const JitRuntime* rt = GetJitContext()->runtime->jitRuntime();
-        JitCode* preBarrier = rt->preBarrier(type);
+        TrampolinePtr preBarrier = rt->preBarrier(type);
 
         call(preBarrier);
         Pop(PreBarrierReg);
@@ -1934,8 +1920,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     Vector<CodeOffset, 0, SystemAllocPolicy> profilerCallSites_;
 
   public:
-    void loadBaselineOrIonRaw(Register script, Register dest, Label* failure);
-    void loadBaselineOrIonNoArgCheck(Register callee, Register dest, Label* failure);
+    void loadJitCodeRaw(Register callee, Register dest);
+    void loadJitCodeNoArgCheck(Register callee, Register dest);
 
     void loadBaselineFramePtr(Register framePtr, Register dest);
 
@@ -1947,6 +1933,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     void PushBaselineFramePtr(Register framePtr, Register scratch) {
         loadBaselineFramePtr(framePtr, scratch);
         Push(scratch);
+    }
+
+    using MacroAssemblerSpecific::movePtr;
+
+    void movePtr(TrampolinePtr ptr, Register dest) {
+        movePtr(ImmPtr(ptr.value), dest);
     }
 
   private:

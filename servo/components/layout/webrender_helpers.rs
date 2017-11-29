@@ -200,7 +200,9 @@ impl ToFilterOps for Vec<Filter> {
                 GenericFilter::Grayscale(amount) => result.push(webrender_api::FilterOp::Grayscale(amount.0)),
                 GenericFilter::HueRotate(angle) => result.push(webrender_api::FilterOp::HueRotate(angle.radians())),
                 GenericFilter::Invert(amount) => result.push(webrender_api::FilterOp::Invert(amount.0)),
-                GenericFilter::Opacity(amount) => result.push(webrender_api::FilterOp::Opacity(amount.0.into())),
+                GenericFilter::Opacity(amount) => {
+                    result.push(webrender_api::FilterOp::Opacity(amount.0.into(), amount.0));
+                }
                 GenericFilter::Saturate(amount) => result.push(webrender_api::FilterOp::Saturate(amount.0)),
                 GenericFilter::Sepia(amount) => result.push(webrender_api::FilterOp::Sepia(amount.0)),
                 GenericFilter::DropShadow(ref shadow) => match *shadow {},
@@ -251,7 +253,7 @@ impl WebRenderDisplayListConverter for DisplayList {
 impl WebRenderDisplayItemConverter for DisplayItem {
     fn prim_info(&self) -> webrender_api::LayoutPrimitiveInfo {
         let tag = match self.base().metadata.pointing {
-            Some(cursor) => Some((self.base().metadata.node.0 as u64, cursor as u8)),
+            Some(cursor) => Some((self.base().metadata.node.0 as u64, cursor as u16)),
             None => None,
         };
         webrender_api::LayoutPrimitiveInfo {
@@ -259,7 +261,7 @@ impl WebRenderDisplayItemConverter for DisplayItem {
             local_clip: self.base().local_clip,
             // TODO(gw): Make use of the WR backface visibility functionality.
             is_backface_visible: true,
-            tag: tag,
+            tag,
             edge_aa_segment_mask: webrender_api::EdgeAaSegmentMask::empty(),
         }
     }

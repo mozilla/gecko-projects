@@ -212,7 +212,6 @@ nsDOMWindowUtils::nsDOMWindowUtils(nsGlobalWindowOuter *aWindow)
 {
   nsCOMPtr<nsISupports> supports = do_QueryObject(aWindow);
   mWindow = do_GetWeakReference(supports);
-  NS_ASSERTION(aWindow->IsOuterWindow(), "How did that happen?");
 }
 
 nsDOMWindowUtils::~nsDOMWindowUtils()
@@ -2390,7 +2389,6 @@ nsDOMWindowUtils::GetOuterWindowID(uint64_t *aWindowID)
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_STATE(window);
 
-  NS_ASSERTION(window->IsOuterWindow(), "How did that happen?");
   *aWindowID = window->WindowID();
   return NS_OK;
 }
@@ -2401,7 +2399,6 @@ nsDOMWindowUtils::GetCurrentInnerWindowID(uint64_t *aWindowID)
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
   NS_ENSURE_TRUE(window, NS_ERROR_NOT_AVAILABLE);
 
-  NS_ASSERTION(window->IsOuterWindow(), "How did that happen?");
   nsGlobalWindowInner* inner =
     nsGlobalWindowOuter::Cast(window)->GetCurrentInnerWindowInternal();
   if (!inner) {
@@ -2970,6 +2967,7 @@ NS_IMETHODIMP
 nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
                                              const nsAString& aPseudoElement,
                                              const nsAString& aProperty,
+                                             int32_t aFlushType,
                                              nsAString& aResult)
 {
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
@@ -2984,6 +2982,20 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     return NS_ERROR_INVALID_ARG;
   }
 
+  switch (aFlushType) {
+    case FLUSH_NONE:
+      break;
+    case FLUSH_STYLE: {
+      nsIDocument* doc = element->GetComposedDoc();
+      if (doc) {
+        doc->FlushPendingNotifications(FlushType::Style);
+      }
+      break;
+    }
+    default:
+      return NS_ERROR_INVALID_ARG;
+  }
+
   nsIPresShell* shell = GetPresShell();
   if (!shell) {
     return NS_ERROR_FAILURE;
@@ -2993,6 +3005,9 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
   RefPtr<nsStyleContext> styleContext =
     nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element,
                                                          pseudo, shell);
+  if (!styleContext) {
+    return NS_ERROR_FAILURE;
+  }
 
   if (styleContext->IsServo()) {
     RefPtr<RawServoAnimationValue> value =

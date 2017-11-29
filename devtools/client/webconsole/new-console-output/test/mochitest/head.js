@@ -299,16 +299,40 @@ function hasFocus(node) {
  * @param {Integer} caretIndexOffset : A number that will be added to value.length
  *                  when setting the caret. A negative number will place the caret
  *                  in (end - offset) position. Default to 0 (caret set at the end)
+ * @param {Integer} completionType : One of the following jsterm property
+ *                   - COMPLETE_FORWARD
+ *                   - COMPLETE_BACKWARD
+ *                   - COMPLETE_HINT_ONLY
+ *                   - COMPLETE_PAGEUP
+ *                   - COMPLETE_PAGEDOWN
+ *                  Will default to COMPLETE_HINT_ONLY.
  * @returns {Promise} resolves when the jsterm is completed.
  */
-function jstermSetValueAndComplete(jsterm, value, caretIndexOffset = 0) {
+function jstermSetValueAndComplete(jsterm, value, caretIndexOffset = 0, completionType) {
   const {inputNode} = jsterm;
   inputNode.value = value;
   let index = value.length + caretIndexOffset;
   inputNode.setSelectionRange(index, index);
 
+  return jstermComplete(jsterm, completionType);
+}
+
+/**
+ * Fires a completion request on the jsterm with the specified completionType
+ *
+ * @param {JsTerm} jsterm
+ * @param {Integer} completionType : One of the following jsterm property
+ *                   - COMPLETE_FORWARD
+ *                   - COMPLETE_BACKWARD
+ *                   - COMPLETE_HINT_ONLY
+ *                   - COMPLETE_PAGEUP
+ *                   - COMPLETE_PAGEDOWN
+ *                  Will default to COMPLETE_HINT_ONLY.
+ * @returns {Promise} resolves when the jsterm is completed.
+ */
+function jstermComplete(jsterm, completionType = jsterm.COMPLETE_HINT_ONLY) {
   const updated = jsterm.once("autocomplete-updated");
-  jsterm.complete(jsterm.COMPLETE_HINT_ONLY);
+  jsterm.complete(completionType);
   return updated;
 }
 
@@ -367,6 +391,23 @@ async function openConsole(tab) {
   let target = TargetFactory.forTab(tab || gBrowser.selectedTab);
   const toolbox = await gDevTools.showToolbox(target, "webconsole");
   return toolbox.getCurrentPanel().hud;
+}
+
+/**
+ * Close the Web Console for the given tab.
+ *
+ * @param nsIDOMElement [tab]
+ *        Optional tab element for which you want close the Web Console.
+ *        Defaults to current selected tab.
+ * @return object
+ *         A promise that is resolved once the web console is closed.
+ */
+async function closeConsole(tab = gBrowser.selectedTab) {
+  let target = TargetFactory.forTab(tab);
+  let toolbox = gDevTools.getToolbox(target);
+  if (toolbox) {
+    await toolbox.destroy();
+  }
 }
 
 /**

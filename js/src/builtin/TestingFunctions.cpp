@@ -32,7 +32,6 @@
 #include "irregexp/RegExpEngine.h"
 #include "irregexp/RegExpParser.h"
 #endif
-#include "jit/AtomicOperations.h"
 #include "jit/InlinableNatives.h"
 #include "js/Debug.h"
 #include "js/HashTable.h"
@@ -551,16 +550,6 @@ WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp)
 #else
     bool isSupported = false;
 #endif
-
-    // NOTE!  When we land thread support, the following test and its comment
-    // should be moved into wasm::HasSupport() or wasm::HasCompilerSupport().
-
-    // Wasm threads require 8-byte lock-free atomics.  This guard will
-    // effectively disable Wasm support for some older devices, such as early
-    // ARMv6 and older MIPS.
-
-    isSupported = isSupported && jit::AtomicOperations::isLockfree8();
-
     args.rval().setBoolean(isSupported);
     return true;
 }
@@ -2054,6 +2043,11 @@ ResolvePromise(JSContext* cx, unsigned argc, Value* vp)
             return false;
     }
 
+    if (IsPromiseForAsync(promise)) {
+        JS_ReportErrorASCII(cx, "async function's promise shouldn't be manually resolved");
+        return false;
+    }
+
     bool result = JS::ResolvePromise(cx, promise, resolution);
     if (result)
         args.rval().setUndefined();
@@ -2079,6 +2073,11 @@ RejectPromise(JSContext* cx, unsigned argc, Value* vp)
         ac.emplace(cx, promise);
         if (!cx->compartment()->wrap(cx, &reason))
             return false;
+    }
+
+    if (IsPromiseForAsync(promise)) {
+        JS_ReportErrorASCII(cx, "async function's promise shouldn't be manually rejected");
+        return false;
     }
 
     bool result = JS::RejectPromise(cx, promise, reason);
@@ -3154,7 +3153,7 @@ static bool
 SharedArrayRawBufferCount(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setInt32(SharedArrayRawBuffer::liveBuffers());
+    args.rval().setInt32(LiveMappedBufferCount());
     return true;
 }
 
@@ -4305,8 +4304,6 @@ GetModuleEnvironment(JSContext* cx, HandleModuleObject module)
     // before they have been instantiated.
     RootedModuleEnvironmentObject env(cx, &module->initialEnvironment());
     MOZ_ASSERT(env);
-    MOZ_ASSERT_IF(module->environment(), module->environment() == env);
-
     return env;
 }
 
@@ -4755,24 +4752,6 @@ DisRegExp(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 #endif // DEBUG
-
-static bool
-EnableForEach(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setForEachStatement(true);
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-DisableForEach(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS::ContextOptionsRef(cx).setForEachStatement(false);
-    args.rval().setUndefined();
-    return true;
-}
 
 static bool
 GetTimeZone(JSContext* cx, unsigned argc, Value* vp)
@@ -5540,14 +5519,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("getModuleEnvironmentValue", GetModuleEnvironmentValue, 2, 0,
 "getModuleEnvironmentValue(module, name)",
 "  Get the value of a bound name in a module environment.\n"),
-
-    JS_FN_HELP("enableForEach", EnableForEach, 0, 0,
-"enableForEach()",
-"  Enables the deprecated, non-standard for-each.\n"),
-
-    JS_FN_HELP("disableForEach", DisableForEach, 0, 0,
-"disableForEach()",
-"  Disables the deprecated, non-standard for-each.\n"),
 
 #if defined(FUZZING) && defined(__AFL_COMPILER)
     JS_FN_HELP("aflloop", AflLoop, 1, 0,

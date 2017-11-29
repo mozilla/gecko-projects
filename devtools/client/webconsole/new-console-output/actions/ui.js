@@ -15,6 +15,7 @@ const {
   PERSIST_TOGGLE,
   PREFS,
   SELECT_NETWORK_MESSAGE_TAB,
+  SIDEBAR_TOGGLE,
   TIMESTAMPS_TOGGLE,
 } = require("devtools/client/webconsole/new-console-output/constants");
 
@@ -24,7 +25,7 @@ function filterBarToggle(show) {
       type: FILTER_BAR_TOGGLE,
     });
     const uiState = getAllUi(getState());
-    Services.prefs.setBoolPref(PREFS.UI.FILTER_BAR, uiState.get("filterBarVisible"));
+    Services.prefs.setBoolPref(PREFS.UI.FILTER_BAR, uiState.filterBarVisible);
   };
 }
 
@@ -34,7 +35,7 @@ function persistToggle(show) {
       type: PERSIST_TOGGLE,
     });
     const uiState = getAllUi(getState());
-    Services.prefs.setBoolPref(PREFS.UI.PERSIST, uiState.get("persistLogs"));
+    Services.prefs.setBoolPref(PREFS.UI.PERSIST, uiState.persistLogs);
   };
 }
 
@@ -58,10 +59,17 @@ function initialize() {
   };
 }
 
+function sidebarToggle(show) {
+  return {
+    type: SIDEBAR_TOGGLE,
+  };
+}
+
 module.exports = {
   filterBarToggle,
   initialize,
   persistToggle,
   selectNetworkMessageTab,
+  sidebarToggle,
   timestampsToggle,
 };

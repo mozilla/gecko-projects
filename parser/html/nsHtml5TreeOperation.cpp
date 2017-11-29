@@ -407,9 +407,12 @@ nsHtml5TreeOperation::CreateHTMLElement(
 
     isCustomElement = (aCreator == NS_NewCustomElement || !isValue.IsEmpty());
     if (isCustomElement && aFromParser != dom::FROM_PARSER_FRAGMENT) {
+      RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
+      RefPtr<nsAtom> typeAtom =
+        isValue.IsEmpty() ? tagAtom : NS_Atomize(isValue);
+
       definition = nsContentUtils::LookupCustomElementDefinition(document,
-        nodeInfo->LocalName(), nodeInfo->NamespaceID(),
-        (isValue.IsEmpty() ? nullptr : &isValue));
+        nodeInfo->LocalName(), nodeInfo->NamespaceID(), typeAtom);
 
       if (definition) {
         willExecuteScript = true;
@@ -425,7 +428,8 @@ nsHtml5TreeOperation::CreateHTMLElement(
       nsAutoMicroTask mt;
     }
     dom::AutoCEReaction
-      autoCEReaction(document->GetDocGroup()->CustomElementReactionsStack());
+      autoCEReaction(document->GetDocGroup()->CustomElementReactionsStack(),
+                     nullptr);
 
     nsCOMPtr<dom::Element> newElement;
     NS_NewHTMLElement(getter_AddRefs(newElement), nodeInfo.forget(),
@@ -1069,6 +1073,11 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       bool error = mTwo.integer;
       int32_t lineNumber = mThree.integer;
       aBuilder->MaybeComplainAboutCharset(msgId, error, (uint32_t)lineNumber);
+      return NS_OK;
+    }
+    case eTreeOpDisableEncodingMenu: {
+      nsIDocument* doc = aBuilder->GetDocument();
+      doc->DisableEncodingMenu();
       return NS_OK;
     }
     case eTreeOpAddClass: {

@@ -139,11 +139,6 @@ impl From<CompositePrimitiveInstance> for PrimitiveInstance {
     }
 }
 
-// Whether this brush is being drawn on a Picture
-// task (new) or an alpha batch task (legacy).
-// Can be removed once everything uses pictures.
-pub const BRUSH_FLAG_USES_PICTURE: i32 = (1 << 0);
-
 // TODO(gw): While we are comverting things over, we
 //           need to have the instance be the same
 //           size as an old PrimitiveInstance. In the
@@ -203,6 +198,8 @@ pub struct ClipScrollNodeData {
     pub local_clip_rect: LayerRect,
     pub reference_frame_relative_scroll_offset: LayerVector2D,
     pub scroll_offset: LayerVector2D,
+    pub transform_kind: f32,
+    pub padding: [f32; 3],
 }
 
 impl ClipScrollNodeData {
@@ -213,6 +210,8 @@ impl ClipScrollNodeData {
             local_clip_rect: LayerRect::zero(),
             reference_frame_relative_scroll_offset: LayerVector2D::zero(),
             scroll_offset: LayerVector2D::zero(),
+            transform_kind: 0.0,
+            padding: [0.0; 3],
         }
     }
 }

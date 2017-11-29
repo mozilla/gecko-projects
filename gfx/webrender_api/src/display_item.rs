@@ -59,8 +59,10 @@ bitflags! {
 /// is missing then the item doesn't take part in hit testing at all. This
 /// is composed of two numbers. In Servo, the first is an identifier while the
 /// second is used to select the cursor that should be used during mouse
-/// movement.
-pub type ItemTag = (u64, u8);
+/// movement. In Gecko, the first is a scrollframe identifier, while the second
+/// is used to store various flags that APZ needs to properly process input
+/// events.
+pub type ItemTag = (u64, u16);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DisplayItem {
@@ -471,7 +473,7 @@ pub enum FilterOp {
     Grayscale(f32),
     HueRotate(f32),
     Invert(f32),
-    Opacity(PropertyBinding<f32>),
+    Opacity(PropertyBinding<f32>, f32),
     Saturate(f32),
     Sepia(f32),
 }

@@ -16,6 +16,11 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/SyncRunnable.h"
 
+// Uncomment the following line to dispatch sync runnables when
+// painting so that rasterization happens synchronously from
+// the perspective of the main thread
+// #define OMTP_FORCE_SYNC
+
 namespace mozilla {
 namespace layers {
 
@@ -41,24 +46,25 @@ CapturedBufferState::Unrotate::UnrotateBuffer()
 bool
 CapturedBufferState::PrepareBuffer()
 {
-  return (!mBufferCopy || mBufferCopy->CopyBuffer()) &&
-         (!mBufferUnrotate || mBufferUnrotate->UnrotateBuffer());
+  return (!mBufferFinalize || mBufferFinalize->CopyBuffer()) &&
+         (!mBufferUnrotate || mBufferUnrotate->UnrotateBuffer()) &&
+         (!mBufferInitialize || mBufferInitialize->CopyBuffer());
 }
 
 void
 CapturedBufferState::GetTextureClients(nsTArray<RefPtr<TextureClient>>& aTextureClients)
 {
-  if (mBufferCopy) {
-    if (TextureClient* source = mBufferCopy->mSource->GetClient()) {
+  if (mBufferFinalize) {
+    if (TextureClient* source = mBufferFinalize->mSource->GetClient()) {
       aTextureClients.AppendElement(source);
     }
-    if (TextureClient* sourceOnWhite = mBufferCopy->mSource->GetClientOnWhite()) {
+    if (TextureClient* sourceOnWhite = mBufferFinalize->mSource->GetClientOnWhite()) {
       aTextureClients.AppendElement(sourceOnWhite);
     }
-    if (TextureClient* destination = mBufferCopy->mDestination->GetClient()) {
+    if (TextureClient* destination = mBufferFinalize->mDestination->GetClient()) {
       aTextureClients.AppendElement(destination);
     }
-    if (TextureClient* destinationOnWhite = mBufferCopy->mDestination->GetClientOnWhite()) {
+    if (TextureClient* destinationOnWhite = mBufferFinalize->mDestination->GetClientOnWhite()) {
       aTextureClients.AppendElement(destinationOnWhite);
     }
   }
@@ -69,6 +75,21 @@ CapturedBufferState::GetTextureClients(nsTArray<RefPtr<TextureClient>>& aTexture
     }
     if (TextureClient* clientOnWhite = mBufferUnrotate->mBuffer->GetClientOnWhite()) {
       aTextureClients.AppendElement(clientOnWhite);
+    }
+  }
+
+  if (mBufferInitialize) {
+    if (TextureClient* source = mBufferInitialize->mSource->GetClient()) {
+      aTextureClients.AppendElement(source);
+    }
+    if (TextureClient* sourceOnWhite = mBufferInitialize->mSource->GetClientOnWhite()) {
+      aTextureClients.AppendElement(sourceOnWhite);
+    }
+    if (TextureClient* destination = mBufferInitialize->mDestination->GetClient()) {
+      aTextureClients.AppendElement(destination);
+    }
+    if (TextureClient* destinationOnWhite = mBufferInitialize->mDestination->GetClientOnWhite()) {
+      aTextureClients.AppendElement(destinationOnWhite);
     }
   }
 }
@@ -96,10 +117,7 @@ struct MOZ_STACK_CLASS AutoCapturedPaintSetup
   {
     mTarget->SetTransform(mOldTransform);
     mTarget->SetPermitSubpixelAA(mRestorePermitsSubpixelAA);
-
-    if (mBridge) {
-      mBridge->NotifyFinishedAsyncPaint(mState);
-    }
+    mBridge->NotifyFinishedAsyncPaint(mState);
   }
 
   RefPtr<CapturedPaintState> mState;
@@ -219,12 +237,10 @@ PaintThread::PrepareBuffer(CapturedBufferState* aState)
   // If painting asynchronously, we need to acquire the compositor bridge which
   // owns the underlying MessageChannel. Otherwise we leave it null and use
   // synchronous dispatch.
-  RefPtr<CompositorBridgeChild> cbc;
-  if (!gfxPrefs::LayersOMTPForceSync()) {
-    cbc = CompositorBridgeChild::Get();
-    cbc->NotifyBeginAsyncPrepareBuffer(aState);
-  }
+  RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
   RefPtr<CapturedBufferState> state(aState);
+
+  cbc->NotifyBeginAsyncPrepareBuffer(state);
 
   RefPtr<PaintThread> self = this;
   RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PrepareBuffer",
@@ -234,11 +250,11 @@ PaintThread::PrepareBuffer(CapturedBufferState* aState)
                              state);
   });
 
-  if (cbc) {
-    sThread->Dispatch(task.forget());
-  } else {
-    SyncRunnable::DispatchToThread(sThread, task);
-  }
+#ifndef OMTP_FORCE_SYNC
+  sThread->Dispatch(task.forget());
+#else
+  SyncRunnable::DispatchToThread(sThread, task);
+#endif
 }
 
 void
@@ -257,9 +273,7 @@ PaintThread::AsyncPrepareBuffer(CompositorBridgeChild* aBridge,
     gfxCriticalNote << "Failed to prepare buffers on the paint thread.";
   }
 
-  if (aBridge) {
-    aBridge->NotifyFinishedAsyncPrepareBuffer(aState);
-  }
+  aBridge->NotifyFinishedAsyncPrepareBuffer(aState);
 }
 
 void
@@ -269,15 +283,10 @@ PaintThread::PaintContents(CapturedPaintState* aState,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aState);
 
-  // If painting asynchronously, we need to acquire the compositor bridge which
-  // owns the underlying MessageChannel. Otherwise we leave it null and use
-  // synchronous dispatch.
-  RefPtr<CompositorBridgeChild> cbc;
-  if (!gfxPrefs::LayersOMTPForceSync()) {
-    cbc = CompositorBridgeChild::Get();
-    cbc->NotifyBeginAsyncPaint(aState);
-  }
+  RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
   RefPtr<CapturedPaintState> state(aState);
+
+  cbc->NotifyBeginAsyncPaint(state);
 
   RefPtr<PaintThread> self = this;
   RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PaintContents",
@@ -288,11 +297,11 @@ PaintThread::PaintContents(CapturedPaintState* aState,
                              aCallback);
   });
 
-  if (cbc) {
-    sThread->Dispatch(task.forget());
-  } else {
-    SyncRunnable::DispatchToThread(sThread, task);
-  }
+#ifndef OMTP_FORCE_SYNC
+  sThread->Dispatch(task.forget());
+#else
+  SyncRunnable::DispatchToThread(sThread, task);
+#endif
 }
 
 void
@@ -343,11 +352,11 @@ PaintThread::EndLayer()
     self->AsyncEndLayer();
   });
 
-  if (!gfxPrefs::LayersOMTPForceSync()) {
-    sThread->Dispatch(task.forget());
-  } else {
-    SyncRunnable::DispatchToThread(sThread, task);
-  }
+#ifndef OMTP_FORCE_SYNC
+  sThread->Dispatch(task.forget());
+#else
+  SyncRunnable::DispatchToThread(sThread, task);
+#endif
 }
 
 void
@@ -369,13 +378,11 @@ PaintThread::EndLayerTransaction(SyncObjectClient* aSyncObject)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<CompositorBridgeChild> cbc;
-  if (!gfxPrefs::LayersOMTPForceSync()) {
-    cbc = CompositorBridgeChild::Get();
-    cbc->NotifyBeginAsyncEndLayerTransaction();
-  }
-
+  RefPtr<CompositorBridgeChild> cbc(CompositorBridgeChild::Get());
   RefPtr<SyncObjectClient> syncObject(aSyncObject);
+
+  cbc->NotifyBeginAsyncEndLayerTransaction();
+
   RefPtr<PaintThread> self = this;
   RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::AsyncEndLayerTransaction",
     [self, cbc, syncObject]() -> void
@@ -383,11 +390,11 @@ PaintThread::EndLayerTransaction(SyncObjectClient* aSyncObject)
     self->AsyncEndLayerTransaction(cbc, syncObject);
   });
 
-  if (cbc) {
-    sThread->Dispatch(task.forget());
-  } else {
-    SyncRunnable::DispatchToThread(sThread, task);
-  }
+#ifndef OMTP_FORCE_SYNC
+  sThread->Dispatch(task.forget());
+#else
+  SyncRunnable::DispatchToThread(sThread, task);
+#endif
 }
 
 void
@@ -404,9 +411,7 @@ PaintThread::AsyncEndLayerTransaction(CompositorBridgeChild* aBridge,
   mInAsyncPaintGroup = false;
   PROFILER_TRACING("Paint", "Rasterize", TRACING_INTERVAL_END);
 
-  if (aBridge) {
-    aBridge->NotifyFinishedAsyncEndLayerTransaction();
-  }
+  aBridge->NotifyFinishedAsyncEndLayerTransaction();
 }
 
 } // namespace layers

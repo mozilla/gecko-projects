@@ -13,6 +13,7 @@
 """
 from __future__ import absolute_import, print_function
 
+import json
 import os
 import platform
 import shutil
@@ -108,21 +109,20 @@ class TTest(object):
         if browser_config.get('stylothreads', 0) > 0:
             setup.env['STYLO_THREADS'] = str(browser_config['stylothreads'])
 
-        test_config['url'] = utils.interpolate(
-            test_config['url'],
-            profile=setup.profile_dir,
-            firefox=browser_config['browser_path']
-        )
+        # set url if there is one (i.e. receiving a test page, not a manifest/pageloader test)
+        if test_config.get('url', None) is not None:
+            test_config['url'] = utils.interpolate(
+                test_config['url'],
+                profile=setup.profile_dir,
+                firefox=browser_config['browser_path']
+            )
 
-        # setup global (cross-cycle) counters:
-        # shutdown, responsiveness
+        # setup global (cross-cycle) responsiveness counters
         global_counters = {}
         if browser_config.get('xperf_path'):
             for c in test_config.get('xperf_counters', []):
                 global_counters[c] = []
 
-        if test_config['shutdown']:
-            global_counters['shutdown'] = []
         if test_config.get('responsiveness') and \
            platform.system() != "Darwin":
             # ignore osx for now as per bug 1245793
@@ -170,6 +170,8 @@ class TTest(object):
                 # When profiling, give the browser some extra time
                 # to dump the profile.
                 timeout += 5 * 60
+                # store profiling info for pageloader; too late to add it as browser pref
+                setup.env["TPPROFILINGINFO"] = json.dumps(setup.gecko_profile.profiling_info)
 
             command_args = utils.GenerateBrowserCommandLine(
                 browser_config["browser_path"],

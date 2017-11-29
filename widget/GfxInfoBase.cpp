@@ -38,10 +38,6 @@
 #include "gfxConfig.h"
 #include "DriverCrashGuard.h"
 
-#if defined(MOZ_CRASHREPORTER)
-#include "nsExceptionHandler.h"
-#endif
-
 using namespace mozilla::widget;
 using namespace mozilla;
 using mozilla::MutexAutoLock;
@@ -591,7 +587,10 @@ GfxInfoBase::Init()
 {
   InitGfxDriverInfoShutdownObserver();
   gfxPrefs::GetSingleton();
-  MediaPrefs::GetSingleton();
+  if (!XRE_IsGPUProcess()) {
+    // MediaPrefs can't run in the GPU process.
+    MediaPrefs::GetSingleton();
+  }
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {

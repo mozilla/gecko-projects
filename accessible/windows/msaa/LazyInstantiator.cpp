@@ -8,6 +8,7 @@
 
 #include "MainThreadUtils.h"
 #include "mozilla/a11y/Accessible.h"
+#include "mozilla/a11y/Compatibility.h"
 #include "mozilla/a11y/Platform.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/mscom/MainThreadRuntime.h"
@@ -16,6 +17,7 @@
 #include "nsAccessibilityService.h"
 #include "nsWindowsHelpers.h"
 #include "nsCOMPtr.h"
+#include "nsExceptionHandler.h"
 #include "nsIFile.h"
 #include "nsXPCOM.h"
 #include "RootAccessibleWrap.h"
@@ -24,10 +26,6 @@
 #if defined(MOZ_TELEMETRY_REPORTING)
 #include "mozilla/Telemetry.h"
 #endif // defined(MOZ_TELEMETRY_REPORTING)
-
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#endif
 
 #include <oaidl.h>
 
@@ -231,6 +229,38 @@ LazyInstantiator::GetClientExecutableName(const DWORD aClientTid,
 }
 
 /**
+ * This is the blocklist for known "bad" DLLs that instantiate a11y.
+ */
+static const wchar_t* gBlockedInprocDlls[] = {
+  L"dtvhooks.dll",  // RealPlayer, bug 1418535
+  L"dtvhooks64.dll" // RealPlayer, bug 1418535
+};
+
+/**
+ * Check for the presence of any known "bad" injected DLLs that may be trying
+ * to instantiate a11y.
+ *
+ * @return true to block a11y instantiation, otherwise false to continue
+ */
+bool
+LazyInstantiator::IsBlockedInjection()
+{
+  if (Compatibility::HasKnownNonUiaConsumer()) {
+    // If we already see a known AT, don't block a11y instantiation
+    return false;
+  }
+
+  for (size_t index = 0, len = ArrayLength(gBlockedInprocDlls); index < len;
+       ++index) {
+    if (::GetModuleHandleW(gBlockedInprocDlls[index])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Given a remote client's thread ID, determine whether we should proceed with
  * a11y instantiation. This is where telemetry should be gathered and any
  * potential blocking of unwanted a11y clients should occur.
@@ -243,8 +273,9 @@ LazyInstantiator::ShouldInstantiate(const DWORD aClientTid)
   if (!aClientTid) {
     // aClientTid == 0 implies that this is either an in-process call, or else
     // we failed to retrieve information about the remote caller.
-    // We should always default to instantiating a11y in this case.
-    return true;
+    // We should always default to instantiating a11y in this case, provided
+    // that we don't see any known bad injected DLLs.
+    return !IsBlockedInjection();
   }
 
   nsCOMPtr<nsIFile> clientExe;
@@ -256,7 +287,8 @@ LazyInstantiator::ShouldInstantiate(const DWORD aClientTid)
     return true;
   }
 
-  // Blocklist checks should go here. return false if we should not instantiate.
+  // Blocklist checks for external clients should go here.
+  // return false if we should not instantiate.
   /*
   if (ClientShouldBeBlocked(clientExe)) {
     return false;
@@ -270,7 +302,7 @@ LazyInstantiator::ShouldInstantiate(const DWORD aClientTid)
     a11y::SetInstantiator(filePath);
   }
 
-#if defined(MOZ_TELEMETRY_REPORTING) || defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_TELEMETRY_REPORTING)
   if (!mTelemetryThread) {
     // Call GatherTelemetry on a background thread because it does I/O on
     // the executable file to retrieve version information.
@@ -283,12 +315,12 @@ LazyInstantiator::ShouldInstantiate(const DWORD aClientTid)
                                              new AccumulateRunnable(this)));
     NS_NewThread(getter_AddRefs(mTelemetryThread), runnable);
   }
-#endif // defined(MOZ_TELEMETRY_REPORTING) || defined(MOZ_CRASHREPORTER)
+#endif // defined(MOZ_TELEMETRY_REPORTING)
 
   return true;
 }
 
-#if defined(MOZ_TELEMETRY_REPORTING) || defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_TELEMETRY_REPORTING)
 /**
  * Appends version information in the format "|a.b.c.d".
  * If there is no version information, we append nothing.
@@ -371,11 +403,9 @@ LazyInstantiator::AccumulateTelemetry(const nsString& aValue)
     Telemetry::ScalarSet(Telemetry::ScalarID::A11Y_INSTANTIATORS,
                          aValue);
 #endif // defined(MOZ_TELEMETRY_REPORTING)
-#if defined(MOZ_CRASHREPORTER)
     CrashReporter::
       AnnotateCrashReport(NS_LITERAL_CSTRING("AccessibilityClient"),
                           NS_ConvertUTF16toUTF8(aValue));
-#endif // defined(MOZ_CRASHREPORTER)
   }
 
   if (mTelemetryThread) {
@@ -383,7 +413,7 @@ LazyInstantiator::AccumulateTelemetry(const nsString& aValue)
     mTelemetryThread = nullptr;
   }
 }
-#endif // defined(MOZ_TELEMETRY_REPORTING) || defined(MOZ_CRASHREPORTER)
+#endif // defined(MOZ_TELEMETRY_REPORTING)
 
 RootAccessibleWrap*
 LazyInstantiator::ResolveRootAccWrap()

@@ -259,8 +259,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     JS::Rooted<JS::Value> v (cx, JS::UndefinedValue());
     // Finally, we have everything needed to evaluate the expression.
     JS::CompileOptions options(cx);
-    options.setFileAndLine(mURL.get(), 1)
-           .setVersion(JSVERSION_DEFAULT);
+    options.setFileAndLine(mURL.get(), 1);
     {
         nsJSUtils::ExecutionContext exec(cx, globalJSObject);
         exec.SetCoerceToString(true);
@@ -411,9 +410,10 @@ nsresult nsJSChannel::Init(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     // Remember, until AsyncOpen is called, the script will not be evaluated
     // and the underlying Input Stream will not be created...
     nsCOMPtr<nsIChannel> channel;
+    RefPtr<nsJSThunk> thunk = mIOThunk;
     rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
                                           aURI,
-                                          mIOThunk,
+                                          thunk.forget(),
                                           NS_LITERAL_CSTRING("text/html"),
                                           EmptyCString(),
                                           aLoadInfo);
@@ -1374,6 +1374,20 @@ nsJSURI::StartClone(mozilla::net::nsSimpleURI::RefHandlingEnum refHandlingMode,
     nsJSURI* url = new nsJSURI(baseClone);
     SetRefOnClone(url, refHandlingMode, newRef);
     return url;
+}
+
+NS_IMPL_ISUPPORTS(nsJSURI::Mutator, nsIURISetters, nsIURIMutator)
+
+NS_IMETHODIMP
+nsJSURI::Mutate(nsIURIMutator** aMutator)
+{
+    RefPtr<nsJSURI::Mutator> mutator = new nsJSURI::Mutator();
+    nsresult rv = mutator->InitFromURI(this);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+    mutator.forget(aMutator);
+    return NS_OK;
 }
 
 /* virtual */ nsresult

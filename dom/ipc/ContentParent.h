@@ -517,6 +517,7 @@ public:
   virtual PContentPermissionRequestParent*
   AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
                                        const IPC::Principal& aPrincipal,
+                                       const bool& aIsTrusted,
                                        const TabId& aTabId) override;
 
   virtual bool
@@ -943,12 +944,6 @@ private:
 
   virtual mozilla::ipc::IPCResult RecvPPresentationConstructor(PPresentationParent* aActor) override;
 
-  virtual PFlyWebPublishedServerParent*
-    AllocPFlyWebPublishedServerParent(const nsString& name,
-                                      const FlyWebPublishOptions& params) override;
-
-  virtual bool DeallocPFlyWebPublishedServerParent(PFlyWebPublishedServerParent* aActor) override;
-
   virtual PSpeechSynthesisParent* AllocPSpeechSynthesisParent() override;
 
   virtual bool
@@ -1283,9 +1278,8 @@ private:
   nsTHashtable<nsCStringHashKey> mActivePermissionKeys;
 
   nsTArray<nsCString> mBlobURLs;
-#ifdef MOZ_CRASHREPORTER
+
   UniquePtr<mozilla::ipc::CrashReporterHost> mCrashReporter;
-#endif
 
   static uint64_t sNextTabParentId;
   static nsDataHashtable<nsUint64HashKey, TabParent*> sNextTabParents;

@@ -152,7 +152,6 @@ enum {
     JS_TELEMETRY_GC_NURSERY_BYTES,
     JS_TELEMETRY_GC_PRETENURE_COUNT,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
-    JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS,
     JS_TELEMETRY_ADDON_EXCEPTIONS,
     JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
@@ -1004,7 +1003,7 @@ IsObjectInContextCompartment(JSObject* obj, const JSContext* cx);
  * The first two are omitted because they shouldn't be used in new code.
  */
 #define JSITER_ENUMERATE  0x1   /* for-in compatible hidden default iterator */
-#define JSITER_FOREACH    0x2   /* get obj[key] for each property */
+/* 0x2 is no longer used */
 /* 0x4 is no longer used */
 #define JSITER_OWNONLY    0x8   /* iterate over obj's own properties only */
 #define JSITER_HIDDEN     0x10  /* also enumerate non-enumerable properties */

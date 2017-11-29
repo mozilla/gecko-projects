@@ -253,6 +253,22 @@ class ImmGCPtr
     ImmGCPtr() : value(0) {}
 };
 
+// Pointer to trampoline code. Trampoline code is kept alive until the runtime
+// is destroyed, so does not need to be traced.
+struct TrampolinePtr
+{
+    uint8_t* value;
+
+    TrampolinePtr()
+      : value(nullptr)
+    { }
+    explicit TrampolinePtr(uint8_t* value)
+      : value(value)
+    {
+        MOZ_ASSERT(value);
+    }
+};
+
 // Pointer to be embedded as an immediate that is loaded/stored from by an
 // instruction.
 struct AbsoluteAddress
@@ -298,7 +314,8 @@ struct Address
     Address(Register base, int32_t offset) : base(base), offset(offset)
     { }
 
-    Address() { mozilla::PodZero(this); }
+    Address() : base(Registers::Invalid), offset(0)
+    { }
 };
 
 #if JS_BITS_PER_WORD == 32
@@ -332,7 +349,12 @@ struct BaseIndex
       : base(base), index(index), scale(scale), offset(offset)
     { }
 
-    BaseIndex() { mozilla::PodZero(this); }
+    BaseIndex()
+      : base(Registers::Invalid)
+      , index(Registers::Invalid)
+      , scale(TimesOne)
+      , offset(0)
+    {}
 };
 
 #if JS_BITS_PER_WORD == 32
@@ -756,6 +778,7 @@ class MemoryAccessDesc
     bool isPlainAsmJS() const { return !hasTrap(); }
 
     void clearOffset() { offset_ = 0; }
+    void setOffset(uint32_t offset) { offset_ = offset; }
 };
 
 // Summarizes a global access for a mutable (in asm.js) or immutable value (in

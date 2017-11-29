@@ -181,6 +181,7 @@ AsyncImagePipelineManager::UpdateImageKeys(wr::ResourceUpdateQueue& aResources,
   // If we already had a texture and the format hasn't changed, better to reuse the image keys
   // than create new ones.
   bool canUpdate = !!previousTexture
+                   && previousTexture->GetSize() == texture->GetSize()
                    && previousTexture->GetFormat() == texture->GetFormat()
                    && aPipeline->mKeys.Length() == numKeys;
 
@@ -289,7 +290,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
 
     float opacity = 1.0f;
     builder.PushStackingContext(wr::ToLayoutRect(pipeline->mScBounds),
-                                0,
+                                nullptr,
                                 &opacity,
                                 pipeline->mScTransform.IsIdentity() ? nullptr : &pipeline->mScTransform,
                                 wr::TransformStyle::Flat,

@@ -17,7 +17,6 @@
 
 #include "nsAttrName.h"
 #include "nsCOMPtr.h"
-#include "nsIContentFilter.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsIDocumentObserver.h"
 #include "nsIDOMElement.h"
@@ -342,7 +341,7 @@ public:
   nsresult InsertNodeAtPoint(nsIDOMNode* aNode,
                              nsCOMPtr<nsIDOMNode>* ioParent,
                              int32_t* ioOffset,
-                             bool aNoEmptyNodes,
+                             SplitAtEdges aSplitAtEdges,
                              nsCOMPtr<nsIDOMNode>* ioChildAtOffset = nullptr);
 
   /**
@@ -470,14 +469,8 @@ protected:
   bool SetCaretInTableCell(nsIDOMElement* aElement);
 
   nsresult TabInTable(bool inIsShift, bool* outHandled);
-  already_AddRefed<Element> CreateBR(nsINode* aNode, int32_t aOffset,
-                                     EDirection aSelect = eNone);
-  NS_IMETHOD CreateBR(
-               nsIDOMNode* aNode, int32_t aOffset,
-               nsCOMPtr<nsIDOMNode>* outBRNode,
-               nsIEditor::EDirection aSelect = nsIEditor::eNone) override;
 
-  nsresult InsertBR(nsCOMPtr<nsIDOMNode>* outBRNode);
+  nsresult InsertBR();
 
   // Table Editing (implemented in nsTableEditor.cpp)
 
@@ -649,17 +642,6 @@ protected:
   bool HavePrivateHTMLFlavor(nsIClipboard* clipboard );
   nsresult ParseCFHTML(nsCString& aCfhtml, char16_t** aStuffToPaste,
                        char16_t** aCfcontext);
-  nsresult DoContentFilterCallback(const nsAString& aFlavor,
-                                   nsIDOMDocument* aSourceDoc,
-                                   bool aWillDeleteSelection,
-                                   nsIDOMNode** aFragmentAsNode,
-                                   nsIDOMNode** aFragStartNode,
-                                   int32_t* aFragStartOffset,
-                                   nsIDOMNode** aFragEndNode,
-                                   int32_t* aFragEndOffset,
-                                   nsIDOMNode** aTargetNode,
-                                   int32_t* aTargetOffset,
-                                   bool* aDoContinue);
 
   bool IsInLink(nsIDOMNode* aNode, nsCOMPtr<nsIDOMNode>* outLink = nullptr);
   nsresult StripFormattingNodes(nsIContent& aNode, bool aOnlyList = false);
@@ -924,8 +906,6 @@ protected:
                                   int32_t aDirection, bool aSelected);
 
 protected:
-  nsTArray<OwningNonNull<nsIContentFilter>> mContentFilters;
-
   RefPtr<TypeInState> mTypeInState;
 
   bool mCRInParagraphCreatesParagraph;

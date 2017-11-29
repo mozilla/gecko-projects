@@ -986,7 +986,26 @@ public:
     SetProperty(nsGkAtoms::pseudoProperty, reinterpret_cast<void*>(aPseudo));
   }
 
+  /**
+   * Return an array of all elements in the subtree rooted at this
+   * element that are styled as grid containers. This includes
+   * elements that don't actually generate any frames (by virtue of
+   * being in a 'display:none' subtree), but this does not include
+   * pseudo-elements.
+   */
+  void GetElementsWithGrid(nsTArray<RefPtr<Element>>& aElements);
+
 private:
+  /**
+   * Define a general matching function that can be passed to
+   * GetElementsByMatching(). Each Element being considered is
+   * passed in.
+   */
+  typedef bool (*nsElementMatchFunc)(Element* aElement);
+
+  void GetElementsByMatching(nsElementMatchFunc aFunc,
+                             nsTArray<RefPtr<Element>>& aElements);
+
   /**
    * Implement the algorithm specified at
    * https://dom.spec.whatwg.org/#insert-adjacent for both
@@ -1200,7 +1219,11 @@ public:
                                     nsTArray<RefPtr<Animation>>& aAnimations);
 
   NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML);
-  virtual void SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
+  void GetInnerHTML(nsAString& aInnerHTML, nsIPrincipal& aSubjectPrincipal)
+  {
+    GetInnerHTML(aInnerHTML);
+  }
+  virtual void SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal& aSubjectPrincipal, ErrorResult& aError);
   void GetOuterHTML(nsAString& aOuterHTML);
   void SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError);
   void InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
@@ -1546,12 +1569,18 @@ protected:
    * @param aNamespaceID the namespace of the attribute to convert
    * @param aAttribute the attribute to convert
    * @param aValue the string value to convert
+   * @param aMaybeScriptedPrincipal the principal of the script setting the
+   *        attribute, if one can be determined, or null otherwise. As in
+   *        AfterSetAttr, a null value does not guarantee that the attribute was
+   *        not set by a scripted caller, but a non-null value guarantees that
+   *        the attribute was set by a scripted caller with the given principal.
    * @param aResult the nsAttrValue [OUT]
    * @return true if the parsing was successful, false otherwise
    */
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsAtom* aAttribute,
                                 const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult);
 
   /**
@@ -1681,10 +1710,7 @@ protected:
   // inlined.  Those calls don't go through a vtable.
   virtual nsresult OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                           const nsAttrValueOrString& aValue,
-                                          bool aNotify)
-  {
-    return NS_OK;
-  }
+                                          bool aNotify);
 
   /**
    * Hook to allow subclasses to produce a different EventListenerManager if

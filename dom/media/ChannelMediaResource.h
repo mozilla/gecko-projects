@@ -88,7 +88,7 @@ public:
   // Notify that the principal for the cached resource changed.
   void CacheClientNotifyPrincipalChanged();
   // Notify the decoder that the cache suspended status changed.
-  void CacheClientNotifySuspendedStatusChanged();
+  void CacheClientNotifySuspendedStatusChanged(bool aSuspended);
 
   // These are called on the main thread by MediaCache. These shouldn't block,
   // but they may grab locks --- the media cache is not holding its lock
@@ -124,7 +124,6 @@ public:
                   uint32_t aCount, uint32_t* aBytes) override;
   // Data stored in IO&lock-encumbered MediaCacheStream, caching recommended.
   bool ShouldCacheReads() override { return true; }
-  int64_t Tell() override;
 
   // Any thread
   void    Pin() override;
@@ -175,7 +174,6 @@ public:
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
     void Revoke();
-    void SetReopenOnError() { mReopenOnError = true; }
 
   private:
     Mutex mMutex;
@@ -183,9 +181,6 @@ public:
     // So it can be read without lock on the main thread or on other threads
     // with the lock.
     RefPtr<ChannelMediaResource> mResource;
-    // When this flag is set, if we get a network error we should silently
-    // reopen the stream. Main thread only.
-    bool mReopenOnError = false;
 
     const int64_t mOffset;
     const uint32_t mLoadID;
@@ -197,12 +192,9 @@ public:
 protected:
   nsresult Seek(int64_t aOffset, bool aResume);
 
-  bool IsSuspendedByCache();
   // These are called on the main thread by Listener.
   nsresult OnStartRequest(nsIRequest* aRequest, int64_t aRequestOffset);
-  nsresult OnStopRequest(nsIRequest* aRequest,
-                         nsresult aStatus,
-                         bool aReopenOnError);
+  nsresult OnStopRequest(nsIRequest* aRequest, nsresult aStatus);
   nsresult OnDataAvailable(uint32_t aLoadID,
                            nsIInputStream* aStream,
                            uint32_t aCount);

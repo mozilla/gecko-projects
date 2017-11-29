@@ -170,7 +170,6 @@ user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
 // Point Firefox Health Report at a local server. We don't care if it actually
 // works. It just can't hit the default production endpoint.
 user_pref("datareporting.healthreport.documentServerURI", "http://%(server)s/healthreport/");
-user_pref("datareporting.healthreport.about.reportUrl", "http://%(server)s/abouthealthreport/v4/");
 
 // Make sure CSS error reporting is enabled for tests
 user_pref("layout.css.report_errors", true);
@@ -239,12 +238,12 @@ user_pref("dom.presentation.testing.simulate-receiver", false);
 
 // Don't connect to Yahoo! for RSS feed tests.
 // en-US only uses .types.0.uri, but set all of them just to be sure.
-user_pref("browser.contentHandlers.types.0.uri", "http://test1.example.org/rss?url=%%s")
-user_pref("browser.contentHandlers.types.1.uri", "http://test1.example.org/rss?url=%%s")
-user_pref("browser.contentHandlers.types.2.uri", "http://test1.example.org/rss?url=%%s")
-user_pref("browser.contentHandlers.types.3.uri", "http://test1.example.org/rss?url=%%s")
-user_pref("browser.contentHandlers.types.4.uri", "http://test1.example.org/rss?url=%%s")
-user_pref("browser.contentHandlers.types.5.uri", "http://test1.example.org/rss?url=%%s")
+user_pref("browser.contentHandlers.types.0.uri", "http://test1.example.org/rss?url=%%s");
+user_pref("browser.contentHandlers.types.1.uri", "http://test1.example.org/rss?url=%%s");
+user_pref("browser.contentHandlers.types.2.uri", "http://test1.example.org/rss?url=%%s");
+user_pref("browser.contentHandlers.types.3.uri", "http://test1.example.org/rss?url=%%s");
+user_pref("browser.contentHandlers.types.4.uri", "http://test1.example.org/rss?url=%%s");
+user_pref("browser.contentHandlers.types.5.uri", "http://test1.example.org/rss?url=%%s");
 
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref("toolkit.telemetry.server", "https://%(server)s/telemetry-dummy/");
@@ -307,6 +306,7 @@ user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
 // Use an empty list of sites to avoid fetching
 user_pref("browser.newtabpage.activity-stream.default.sites", "");
 user_pref("browser.newtabpage.activity-stream.telemetry", false);
+user_pref("browser.newtabpage.activity-stream.tippyTop.service.endpoint", "");
 user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 user_pref("browser.newtabpage.activity-stream.feeds.snippets", false);
 

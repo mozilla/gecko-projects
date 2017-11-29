@@ -312,22 +312,6 @@ public:
   void StyleNewSubtree(dom::Element* aRoot);
 
   /**
-   * Like the above, but skips the root node, and only styles unstyled children.
-   * When potentially appending multiple children, it's preferable to call
-   * StyleNewChildren on the node rather than making multiple calls to
-   * StyleNewSubtree on each child, since it allows for more parallelism.
-   */
-  void StyleNewChildren(dom::Element* aParent);
-
-  /**
-   * Eagerly styles the children of an element that has just had an XBL
-   * binding applied to it.  Some XBL consumers attach bindings to elements
-   * that have not been styled yet, and in such cases, this will do the
-   * equivalent of StyleNewSubtree instead.
-   */
-  void StyleNewlyBoundElement(dom::Element* aElement);
-
-  /**
    * Helper for correctly calling UpdateStylist without paying the cost of an
    * extra function call in the common no-rebuild-needed case.
    */
@@ -408,7 +392,6 @@ public:
   already_AddRefed<ServoStyleContext>
   GetBaseContextForElement(dom::Element* aElement,
                            nsPresContext* aPresContext,
-                           CSSPseudoElementType aPseudoType,
                            const ServoStyleContext* aStyle);
 
   // Get a style context that represents |aStyle|, but as though
@@ -597,8 +580,7 @@ private:
     ResolveStyleLazilyInternal(dom::Element* aElement,
                                CSSPseudoElementType aPseudoType,
                                StyleRuleInclusion aRules =
-                                 StyleRuleInclusion::All,
-                               bool aIgnoreExistingStyles = false);
+                                 StyleRuleInclusion::All);
 
   void RunPostTraversalTasks();
 

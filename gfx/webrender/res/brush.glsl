@@ -11,10 +11,8 @@ void brush_vs(
     ivec2 user_data
 );
 
-// Whether this brush is being drawn on a Picture
-// task (new) or an alpha batch task (legacy).
-// Can be removed once everything uses pictures.
-#define BRUSH_FLAG_USES_PICTURE     (1 << 0)
+#define RASTERIZATION_MODE_LOCAL_SPACE      0.0
+#define RASTERIZATION_MODE_SCREEN_SPACE     1.0
 
 struct BrushInstance {
     int picture_address;
@@ -54,36 +52,56 @@ void main(void) {
     vec2 device_pos, local_pos;
     RectWithSize local_rect = geom.local_rect;
 
-    if ((brush.flags & BRUSH_FLAG_USES_PICTURE) != 0) {
-        // Fetch the dynamic picture that we are drawing on.
-        PictureTask pic_task = fetch_picture_task(brush.picture_address);
+    // Fetch the dynamic picture that we are drawing on.
+    PictureTask pic_task = fetch_picture_task(brush.picture_address);
+
+    if (pic_task.rasterization_mode == RASTERIZATION_MODE_LOCAL_SPACE) {
 
         local_pos = local_rect.p0 + aPosition.xy * local_rect.size;
 
         // Right now - pictures only support local positions. In the future, this
         // will be expanded to support transform picture types (the common kind).
-        device_pos = pic_task.target_rect.p0 + uDevicePixelRatio * (local_pos - pic_task.content_origin);
+        device_pos = pic_task.common_data.task_rect.p0 +
+                     uDevicePixelRatio * (local_pos - pic_task.content_origin);
 
         // Write the final position transformed by the orthographic device-pixel projection.
         gl_Position = uTransform * vec4(device_pos, 0.0, 1.0);
     } else {
-        AlphaBatchTask alpha_task = fetch_alpha_batch_task(brush.picture_address);
+        VertexInfo vi;
         Layer layer = fetch_layer(brush.clip_node_id, brush.scroll_node_id);
         ClipArea clip_area = fetch_clip_area(brush.clip_address);
 
         // Write the normal vertex information out.
-        // TODO(gw): Support transform types in brushes. For now,
-        //           the old cache image shader didn't support
-        //           them yet anyway, so we're not losing any
-        //           existing functionality.
-        VertexInfo vi = write_vertex(
-            geom.local_rect,
-            geom.local_clip_rect,
-            float(brush.z),
-            layer,
-            alpha_task,
-            geom.local_rect
-        );
+        if (layer.is_axis_aligned) {
+            vi = write_vertex(
+                geom.local_rect,
+                geom.local_clip_rect,
+                float(brush.z),
+                layer,
+                pic_task,
+                geom.local_rect
+            );
+
+            // TODO(gw): vLocalBounds may be referenced by
+            //           the fragment shader when running in
+            //           the alpha pass, even on non-transformed
+            //           items. For now, just ensure it has no
+            //           effect. We can tidy this up as we move
+            //           more items to be brush shaders.
+            vLocalBounds = vec4(
+                geom.local_clip_rect.p0,
+                geom.local_clip_rect.p0 + geom.local_clip_rect.size
+            );
+        } else {
+            vi = write_transform_vertex(geom.local_rect,
+                geom.local_rect,
+                geom.local_clip_rect,
+                vec4(1.0),
+                float(brush.z),
+                layer,
+                pic_task
+            );
+        }
 
         local_pos = vi.local_pos;
 

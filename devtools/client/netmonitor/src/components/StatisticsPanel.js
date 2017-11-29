@@ -40,7 +40,7 @@ class StatisticsPanel extends Component {
       connector: PropTypes.object.isRequired,
       closeStatistics: PropTypes.func.isRequired,
       enableRequestFilterTypeOnly: PropTypes.func.isRequired,
-      requests: PropTypes.object,
+      requests: PropTypes.array,
     };
   }
 
@@ -67,7 +67,7 @@ class StatisticsPanel extends Component {
     MediaQueryList.addListener(this.onLayoutChange);
 
     const { requests } = this.props;
-    let ready = requests && !requests.isEmpty() && requests.every((req) =>
+    let ready = requests && requests.length && requests.every((req) =>
       req.contentSize !== undefined && req.mimeType && req.responseHeaders &&
       req.status !== undefined && req.totalTime !== undefined
     );
@@ -126,6 +126,7 @@ class StatisticsPanel extends Component {
         size: L10N.getStr("charts.size"),
         transferredSize: L10N.getStr("charts.transferred"),
         time: L10N.getStr("charts.time"),
+        nonBlockingTime: L10N.getStr("charts.nonBlockingTime"),
       },
       data,
       strings: {
@@ -135,6 +136,8 @@ class StatisticsPanel extends Component {
           L10N.getFormatStr("charts.transferredSizeKB",
             getSizeWithDecimals(value / 1024)),
         time: (value) =>
+          L10N.getFormatStr("charts.totalS", getTimeWithDecimals(value / 1000)),
+        nonBlockingTime: (value) =>
           L10N.getFormatStr("charts.totalS", getTimeWithDecimals(value / 1000)),
       },
       totals: {
@@ -150,6 +153,12 @@ class StatisticsPanel extends Component {
           let string = getTimeWithDecimals(seconds);
           return PluralForm.get(seconds,
             L10N.getStr("charts.totalSeconds")).replace("#1", string);
+        },
+        nonBlockingTime: (total) => {
+          let seconds = total / 1000;
+          let string = getTimeWithDecimals(seconds);
+          return PluralForm.get(seconds,
+            L10N.getStr("charts.totalSecondsNonBlocking")).replace("#1", string);
         },
       },
       sorted: true,
@@ -179,6 +188,7 @@ class StatisticsPanel extends Component {
       size: 0,
       transferredSize: 0,
       time: 0,
+      nonBlockingTime: 0,
     }));
 
     for (let request of requests) {
@@ -218,6 +228,9 @@ class StatisticsPanel extends Component {
         data[type].time += request.totalTime || 0;
         data[type].size += request.contentSize || 0;
         data[type].transferredSize += request.transferredSize || 0;
+        let nonBlockingTime =
+           request.eventTimings.totalTime - request.eventTimings.timings.blocked;
+        data[type].nonBlockingTime += nonBlockingTime || 0;
       } else {
         data[type].cached++;
       }

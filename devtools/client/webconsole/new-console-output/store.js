@@ -42,8 +42,10 @@ function configureStore(hud, options = {}) {
   const logLimit = options.logLimit
     || Math.max(Services.prefs.getIntPref("devtools.hud.loglimit"), 1);
 
+  const sidebarToggle = Services.prefs.getBoolPref(PREFS.UI.SIDEBAR_TOGGLE);
+
   const initialState = {
-    prefs: new PrefState({ logLimit }),
+    prefs: PrefState({ logLimit, sidebarToggle }),
     filters: new FilterState({
       error: Services.prefs.getBoolPref(PREFS.FILTER.ERROR),
       warn: Services.prefs.getBoolPref(PREFS.FILTER.WARN),
@@ -54,7 +56,7 @@ function configureStore(hud, options = {}) {
       net: Services.prefs.getBoolPref(PREFS.FILTER.NET),
       netxhr: Services.prefs.getBoolPref(PREFS.FILTER.NETXHR),
     }),
-    ui: new UiState({
+    ui: UiState({
       filterBarVisible: Services.prefs.getBoolPref(PREFS.UI.FILTER_BAR),
       networkMessageActiveTabId: "headers",
       persistLogs: Services.prefs.getBoolPref(PREFS.UI.PERSIST),

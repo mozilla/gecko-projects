@@ -19,6 +19,7 @@ import android.text.TextUtils;
 
 import org.mozilla.gecko.Experiments;
 import org.mozilla.gecko.MmaConstants;
+import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
@@ -64,7 +65,7 @@ public class MmaDelegate {
     public static final String KEY_ANDROID_PREF_STRING_LEANPLUM_DEVICE_ID = "android.not_a_preference.leanplum.device_id";
     private static final String DEBUG_LEANPLUM_DEVICE_ID = "8effda84-99df-11e7-abc4-cec278b6b50a";
 
-    private static MmaInterface mmaHelper = MmaConstants.getMma();
+    private static final MmaInterface mmaHelper = MmaConstants.getMma();
     private static WeakReference<Context> applicationContext;
 
     public static void init(Activity activity) {
@@ -74,7 +75,9 @@ public class MmaDelegate {
         // Note that generateUserAttribute always return a non null HashMap.
         final Map<String, Object> attributes = gatherUserAttributes(activity);
         mmaHelper.setGcmSenderId(PushManager.getSenderIds());
-        mmaHelper.setDeviceId(getDeviceId(activity));
+        final String deviceId = getDeviceId(activity);
+        mmaHelper.setDeviceId(deviceId);
+        PrefsHelper.setPref(GeckoPreferences.PREFS_MMA_DEVICE_ID, deviceId);
         // above two config setup required to be invoked before mmaHelper.init.
         mmaHelper.init(activity, attributes);
 

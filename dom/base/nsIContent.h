@@ -681,14 +681,23 @@ public:
    *
    * @return the binding parent
    */
-  virtual nsIContent *GetBindingParent() const = 0;
+  virtual nsIContent* GetBindingParent() const = 0;
 
   /**
    * Gets the current XBL binding that is bound to this element.
    *
    * @return the current binding.
    */
-  virtual nsXBLBinding *GetXBLBinding() const = 0;
+  nsXBLBinding* GetXBLBinding() const
+  {
+    if (!HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
+      return nullptr;
+    }
+
+    return DoGetXBLBinding();
+  }
+
+  virtual nsXBLBinding* DoGetXBLBinding() const = 0;
 
   /**
    * Sets or unsets an XBL binding for this element. Setting a
@@ -1015,7 +1024,10 @@ public:
   nsIURI* GetBaseURIForStyleAttr() const;
 
   // Returns the URL data for style attribute.
-  mozilla::URLExtraData* GetURLDataForStyleAttr() const;
+  // If aSubjectPrincipal is passed, it should be the scripted principal
+  // responsible for generating the URL data.
+  already_AddRefed<mozilla::URLExtraData>
+  GetURLDataForStyleAttr(nsIPrincipal* aSubjectPrincipal = nullptr) const;
 
   virtual nsresult GetEventTargetParent(
                      mozilla::EventChainPreVisitor& aVisitor) override;

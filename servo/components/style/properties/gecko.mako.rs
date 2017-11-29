@@ -59,7 +59,7 @@ use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
 use values::{self, Auto, CustomIdent, Either, KeyframesName, None_};
 use values::computed::{NonNegativeLength, ToComputedValue, Percentage};
-use values::computed::font::FontSize;
+use values::computed::font::{FontSize, SingleFontFamily};
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
 use computed_values::border_style;
 
@@ -296,7 +296,7 @@ impl ComputedValuesInner {
 
     #[allow(non_snake_case)]
     pub fn has_moz_binding(&self) -> bool {
-        !self.get_box().gecko.mBinding.mPtr.mRawPtr.is_null()
+        !self.get_box().gecko.mBinding.mRawPtr.is_null()
     }
 
     // FIXME(bholley): Implement this properly.
@@ -1514,6 +1514,7 @@ impl Clone for ${style_struct.gecko_struct_name} {
         "MaxLength": impl_style_coord,
         "MozLength": impl_style_coord,
         "MozScriptMinSize": impl_absolute_length,
+        "MozScriptSizeMultiplier": impl_simple,
         "NonNegativeLengthOrPercentage": impl_style_coord,
         "NonNegativeNumber": impl_simple,
         "Number": impl_simple,
@@ -2440,7 +2441,7 @@ fn static_assert() {
         0
     }
 
-    pub fn font_family_at(&self, _: usize) -> longhands::font_family::computed_value::FontFamily {
+    pub fn font_family_at(&self, _: usize) -> SingleFontFamily {
         unimplemented!()
     }
 
@@ -2456,9 +2457,7 @@ fn static_assert() {
 
     pub fn clone_font_family(&self) -> longhands::font_family::computed_value::T {
         use gecko_bindings::structs::FontFamilyType;
-        use properties::longhands::font_family::computed_value;
-        use properties::longhands::font_family::computed_value::FontFamily;
-        use properties::longhands::font_family::computed_value::FontFamilyList;
+        use values::computed::font::{FontFamily, SingleFontFamily, FontFamilyList};
 
         let fontlist = &self.gecko.mFont.fontlist;
         let shared_fontlist = unsafe { fontlist.mFontlist.mBasePtr.to_safe() };
@@ -2466,16 +2465,16 @@ fn static_assert() {
         if shared_fontlist.mNames.is_empty() {
             let default = match fontlist.mDefaultFontType {
                 FontFamilyType::eFamily_serif => {
-                    FontFamily::Generic(atom!("serif"))
+                    SingleFontFamily::Generic(atom!("serif"))
                 }
                 FontFamilyType::eFamily_sans_serif => {
-                    FontFamily::Generic(atom!("sans-serif"))
+                    SingleFontFamily::Generic(atom!("sans-serif"))
                 }
                 _ => panic!("Default generic must be serif or sans-serif"),
             };
-            computed_value::T(FontFamilyList::new(vec![default]))
+            FontFamily(FontFamilyList::new(Box::new([default])))
         } else {
-            computed_value::T(FontFamilyList(shared_fontlist))
+            FontFamily(FontFamilyList(shared_fontlist))
         }
     }
 
@@ -3098,6 +3097,8 @@ fn static_assert() {
                           scroll-snap-points-x scroll-snap-points-y
                           scroll-snap-type-x scroll-snap-type-y scroll-snap-coordinate
                           perspective-origin -moz-binding will-change
+                          overscroll-behavior-x overscroll-behavior-y
+                          perspective-origin -moz-binding will-change
                           shape-outside contain touch-action""" %>
 <%self:impl_trait style_struct_name="Box" skip_longhands="${skip_box_longhands}">
 
@@ -3289,7 +3290,7 @@ fn static_assert() {
         longhands::scroll_snap_coordinate::computed_value::T(vec)
     }
 
-    ${impl_css_url('_moz_binding', 'mBinding.mPtr')}
+    ${impl_css_url('_moz_binding', 'mBinding')}
 
     ${impl_transition_time_value('delay', 'Delay')}
     ${impl_transition_time_value('duration', 'Duration')}
@@ -3485,6 +3486,11 @@ fn static_assert() {
     ${impl_keyword('scroll_snap_type_y', 'mScrollSnapTypeY', scroll_snap_type_keyword)}
     ${impl_keyword('scroll_snap_type_x', 'mScrollSnapTypeX', scroll_snap_type_keyword)}
 
+    <% overscroll_behavior_keyword = Keyword("overscroll-behavior", "Auto Contain None",
+                                             gecko_enum_prefix="StyleOverscrollBehavior") %>
+    ${impl_keyword('overscroll_behavior_x', 'mOverscrollBehaviorX', overscroll_behavior_keyword)}
+    ${impl_keyword('overscroll_behavior_y', 'mOverscrollBehaviorY', overscroll_behavior_keyword)}
+
     pub fn set_perspective_origin(&mut self, v: longhands::perspective_origin::computed_value::T) {
         self.gecko.mPerspectiveOrigin[0].set(v.horizontal);
         self.gecko.mPerspectiveOrigin[1].set(v.vertical);
@@ -3560,7 +3566,7 @@ fn static_assert() {
                         Gecko_AppendWillChange(&mut self.gecko, feature.0.as_ptr());
                     }
 
-                    if let Ok(prop_id) = PropertyId::parse(&feature.0.to_string(), None) {
+                    if let Ok(prop_id) = PropertyId::parse(&feature.0.to_string()) {
                         match prop_id.as_shorthand() {
                             Ok(shorthand) => {
                                 for longhand in shorthand.longhands() {
@@ -4072,7 +4078,7 @@ fn static_assert() {
             fill_fields += " mMaskMode mComposite"
     %>
     pub fn fill_arrays(&mut self) {
-        use gecko_bindings::bindings::Gecko_FillAll${shorthand.title()}Lists;
+        use gecko_bindings::bindings::Gecko_FillAllImageLayers;
         use std::cmp;
         let mut max_len = 1;
         % for member in fill_fields.split():
@@ -4081,7 +4087,7 @@ fn static_assert() {
         unsafe {
             // While we could do this manually, we'd need to also manually
             // run all the copy constructors, so we just delegate to gecko
-            Gecko_FillAll${shorthand.title()}Lists(&mut self.gecko.${image_layers_field}, max_len);
+            Gecko_FillAllImageLayers(&mut self.gecko.${image_layers_field}, max_len);
         }
     }
 </%def>

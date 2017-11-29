@@ -172,6 +172,7 @@ WMFVideoMFTManager::WMFVideoMFTManager(
   : mVideoInfo(aConfig)
   , mImageSize(aConfig.mImage)
   , mVideoStride(0)
+  , mYUVColorSpace(YUVColorSpace::BT601)
   , mImageContainer(aImageContainer)
   , mKnowsCompositor(aKnowsCompositor)
   , mDXVAEnabled(aDXVAEnabled)
@@ -756,6 +757,7 @@ WMFVideoMFTManager::InitInternal()
                                RESULT_DETAIL("Fail to configure image size for "
                                              "DXVA2Manager.")));
   } else {
+    mYUVColorSpace = GetYUVColorSpace(outputType);
     GetDefaultStride(outputType, mVideoInfo.ImageRect().width, &mVideoStride);
   }
   LOG("WMFVideoMFTManager frame geometry stride=%u picture=(%d, %d, %d, %d) "
@@ -1005,6 +1007,9 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
   b.mPlanes[2].mOffset = 0;
   b.mPlanes[2].mSkip = 0;
 
+  // YuvColorSpace
+  b.mYUVColorSpace = mYUVColorSpace;
+
   TimeUnit pts = GetSampleTime(aSample);
   NS_ENSURE_TRUE(pts.IsValid(), E_FAIL);
   TimeUnit duration = GetSampleDuration(aSample);
@@ -1136,6 +1141,7 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
         RefPtr<IMFMediaType> outputType;
         hr = mDecoder->GetOutputMediaType(outputType);
         NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+        mYUVColorSpace = GetYUVColorSpace(outputType);
         hr = GetDefaultStride(outputType, mVideoInfo.ImageRect().width,
                               &mVideoStride);
         NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
@@ -1248,9 +1254,14 @@ WMFVideoMFTManager::GetDescriptionName() const
   if (mAMDVP9InUse) {
       return NS_LITERAL_CSTRING("amd vp9 hardware video decoder");
   }
-  return nsPrintfCString("wmf %s video decoder",
-                         IsHardwareAccelerated(failureReason) ? "hardware"
-                                                              : "software");
+  bool hw = IsHardwareAccelerated(failureReason);
+  return nsPrintfCString("wmf %s video decoder - %s",
+                         hw ? "hardware" : "software",
+                         hw ? gfxPrefs::PDMWMFUseNV12Format() &&
+                              gfx::DeviceManagerDx::Get()->CanUseNV12()
+                              ? "nv12"
+                              : "rgba32"
+                            : "yuv420");
 }
 
 } // namespace mozilla

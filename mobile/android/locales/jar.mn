@@ -19,9 +19,6 @@
   locale/@AB_CD@/browser/aboutHome.dtd            (%chrome/aboutHome.dtd)
   locale/@AB_CD@/browser/aboutHome.properties     (%chrome/aboutHome.properties)
   locale/@AB_CD@/browser/aboutPrivateBrowsing.dtd (%chrome/aboutPrivateBrowsing.dtd)
-#ifdef MOZ_SERVICES_HEALTHREPORT
-  locale/@AB_CD@/browser/aboutHealthReport.dtd    (%chrome/aboutHealthReport.dtd)
-#endif
   locale/@AB_CD@/browser/browser.properties       (%chrome/browser.properties)
   locale/@AB_CD@/browser/config.dtd               (%chrome/config.dtd)
   locale/@AB_CD@/browser/config.properties        (%chrome/config.properties)
@@ -40,7 +37,6 @@
 # overrides for toolkit l10n, also for en-US
 # keep this file list in sync with l10n.toml and filter.py
 relativesrcdir toolkit/locales:
-  locale/@AB_CD@/browser/overrides/about.dtd                       (%chrome/global/about.dtd)
   locale/@AB_CD@/browser/overrides/aboutAbout.dtd                  (%chrome/global/aboutAbout.dtd)
   locale/@AB_CD@/browser/overrides/aboutReader.properties          (%chrome/global/aboutReader.properties)
   locale/@AB_CD@/browser/overrides/aboutRights.dtd                 (%chrome/global/aboutRights.dtd)

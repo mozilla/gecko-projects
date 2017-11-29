@@ -558,7 +558,10 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
   // above for WebSockets apply to XHR, and XHR should have the same security
   // properties as WebSockets w.r.t. mixed content. XHR's handling of redirects
   // amplifies these concerns.
-
+  //
+  // TYPE_SAVEAS_DOWNLOAD: Save-link-as feature is used to download a resource
+  // without involving a docShell. This kind of loading must be always be
+  // allowed.
 
   static_assert(TYPE_DATAREQUEST == TYPE_XMLHTTPREQUEST,
                 "TYPE_DATAREQUEST is not a synonym for "
@@ -573,6 +576,13 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
     // in the websocket constructor. We don't need to check the blocking here
     // and we don't want to un-block
     case TYPE_WEBSOCKET:
+      *aDecision = ACCEPT;
+      return NS_OK;
+
+    // Creating insecure connections for a save-as link download is acceptable.
+    // This download is completely disconnected from the docShell, but still
+    // using the same loading principal.
+    case TYPE_SAVEAS_DOWNLOAD:
       *aDecision = ACCEPT;
       return NS_OK;
 

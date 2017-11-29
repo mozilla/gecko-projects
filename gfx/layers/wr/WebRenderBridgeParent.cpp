@@ -679,10 +679,14 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
     mApi->UpdatePipelineResources(resourceUpdates, mPipelineId, wr::NewEpoch(wrEpoch));
     HoldPendingTransactionId(wrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
   } else {
+    bool sendDidComposite = false;
+    if (mPendingTransactionIds.empty()) {
+      sendDidComposite = true;
+    }
     HoldPendingTransactionId(mWrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
     // If WebRenderBridgeParent does not have pending DidComposites,
     // send DidComposite now.
-    if (mPendingTransactionIds.empty()) {
+    if (sendDidComposite) {
       TimeStamp now = TimeStamp::Now();
       mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
     }
@@ -1287,9 +1291,6 @@ WebRenderBridgeParent::FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, cons
 #endif
     id = mPendingTransactionIds.front().mId;
     mPendingTransactionIds.pop();
-    if (diff == 0) {
-      break;
-    }
   }
   return id;
 }
@@ -1383,6 +1384,7 @@ WebRenderBridgeParent::ClearResources()
   mAsyncCompositables.Clear();
 
   mAsyncImageManager->RemovePipeline(mPipelineId, wr::NewEpoch(wrEpoch));
+  mApi->RemovePipeline(mPipelineId);
 
   for (std::unordered_set<uint64_t>::iterator iter = mActiveAnimations.begin(); iter != mActiveAnimations.end(); iter++) {
     mAnimStorage->ClearById(*iter);

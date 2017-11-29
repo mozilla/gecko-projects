@@ -652,6 +652,10 @@ PuppetWidget::RequestIMEToCommitComposition(bool aCancel)
     return NS_OK;
   }
 
+  MOZ_DIAGNOSTIC_ASSERT(composition->IsRequestingCommitOrCancelComposition(),
+    "Requesting commit or cancel composition should be requested via "
+    "TextComposition instance");
+
   bool isCommitted = false;
   nsAutoString committedString;
   if (NS_WARN_IF(!mTabChild->SendRequestIMEToCommitComposition(
@@ -803,7 +807,7 @@ PuppetWidget::NotifyIMEOfFocusChange(const IMENotification& aIMENotification)
     [self] (IMENotificationRequests aRequests) {
       self->mIMENotificationRequestsOfParent = aRequests;
     },
-    [self] (mozilla::ipc::PromiseRejectReason aReason) {
+    [self] (mozilla::ipc::ResponseRejectReason aReason) {
       NS_WARNING("SendNotifyIMEFocus got rejected.");
     });
 
@@ -1212,26 +1216,26 @@ PuppetWidget::SetNativeData(uint32_t aDataType, uintptr_t aVal)
 }
 #endif
 
-nsIntPoint
-PuppetWidget::GetChromeDimensions()
+LayoutDeviceIntPoint
+PuppetWidget::GetChromeOffset()
 {
   if (!GetOwningTabChild()) {
     NS_WARNING("PuppetWidget without Tab does not have chrome information.");
-    return nsIntPoint();
+    return LayoutDeviceIntPoint();
   }
-  return GetOwningTabChild()->GetChromeDisplacement().ToUnknownPoint();
+  return GetOwningTabChild()->GetChromeOffset();
 }
 
-nsIntPoint
+LayoutDeviceIntPoint
 PuppetWidget::GetWindowPosition()
 {
   if (!GetOwningTabChild()) {
-    return nsIntPoint();
+    return LayoutDeviceIntPoint();
   }
 
   int32_t winX, winY, winW, winH;
-  NS_ENSURE_SUCCESS(GetOwningTabChild()->GetDimensions(0, &winX, &winY, &winW, &winH), nsIntPoint());
-  return nsIntPoint(winX, winY) + GetOwningTabChild()->GetClientOffset().ToUnknownPoint();
+  NS_ENSURE_SUCCESS(GetOwningTabChild()->GetDimensions(0, &winX, &winY, &winW, &winH), LayoutDeviceIntPoint());
+  return LayoutDeviceIntPoint(winX, winY) + GetOwningTabChild()->GetClientOffset();
 }
 
 LayoutDeviceIntRect

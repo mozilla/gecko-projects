@@ -7,10 +7,8 @@
 #include "Compatibility.h"
 
 #include "mozilla/WindowsVersion.h"
-#if defined(MOZ_CRASHREPORTER)
 #include "nsExceptionHandler.h"
 #include "nsPrintfCString.h"
-#endif // defined(MOZ_CRASHREPORTER)
 #include "nsUnicharUtils.h"
 #include "nsWindowsDllInterceptor.h"
 #include "nsWinUtils.h"
@@ -161,11 +159,12 @@ DetectInSendMessageExCompat(PEXCEPTION_POINTERS aExceptionInfo)
 
 uint32_t Compatibility::sConsumers = Compatibility::UNKNOWN;
 
-void
-Compatibility::Init()
+/**
+ * This function is safe to call multiple times.
+ */
+/* static */ void
+Compatibility::InitConsumers()
 {
-  // Note we collect some AT statistics/telemetry here for convenience.
-
   HMODULE jawsHandle = ::GetModuleHandleW(L"jhook");
   if (jawsHandle)
     sConsumers |= (IsModuleVersionLessThan(jawsHandle, 19, 0)) ?
@@ -202,13 +201,25 @@ Compatibility::Init()
 
   // If we have a known consumer remove the unknown bit.
   if (sConsumers != Compatibility::UNKNOWN)
-    sConsumers ^= Compatibility::UNKNOWN;
+    sConsumers &= ~Compatibility::UNKNOWN;
+}
 
-#ifdef MOZ_CRASHREPORTER
+/* static */ bool
+Compatibility::HasKnownNonUiaConsumer()
+{
+  InitConsumers();
+  return sConsumers & ~(Compatibility::UNKNOWN | UIAUTOMATION);
+}
+
+void
+Compatibility::Init()
+{
+  // Note we collect some AT statistics/telemetry here for convenience.
+  InitConsumers();
+
   CrashReporter::
     AnnotateCrashReport(NS_LITERAL_CSTRING("AccessibilityInProcClient"),
                         nsPrintfCString("0x%X", sConsumers));
-#endif
 
   // Gather telemetry
   uint32_t temp = sConsumers;
@@ -396,13 +407,11 @@ UseIAccessibleProxyStub()
     return true;
   }
 
-#if defined(MOZ_CRASHREPORTER)
   // If we reach this point then something is seriously wrong with the
   // IAccessible configuration in the computer's registry. Let's annotate this
   // so that we can easily determine this condition during crash analysis.
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IAccessibleConfig"),
                                      NS_LITERAL_CSTRING("NoSystemTypeLibOrPS"));
-#endif // defined(MOZ_CRASHREPORTER)
   return false;
 }
 

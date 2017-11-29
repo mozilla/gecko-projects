@@ -2201,8 +2201,7 @@ this.XPIProvider = {
         Services.obs.notifyObservers(null, "chrome-flush-caches");
       }
 
-      if ("nsICrashReporter" in Ci &&
-          Services.appinfo instanceof Ci.nsICrashReporter) {
+      if (AppConstants.MOZ_CRASHREPORTER) {
         // Annotate the crash report with relevant add-on information.
         try {
           Services.appinfo.annotateCrashReport("Theme", this.currentSkin);
@@ -2763,14 +2762,16 @@ this.XPIProvider = {
    * Adds a list of currently active add-ons to the next crash report.
    */
   addAddonsToCrashReporter() {
-    if (!("nsICrashReporter" in Ci) ||
-        !(Services.appinfo instanceof Ci.nsICrashReporter))
+    if (!(Services.appinfo instanceof Ci.nsICrashReporter) ||
+        !AppConstants.MOZ_CRASHREPORTER) {
       return;
+    }
 
     // In safe mode no add-ons are loaded so we should not include them in the
     // crash report
-    if (Services.appinfo.inSafeMode)
+    if (Services.appinfo.inSafeMode) {
       return;
+    }
 
     let data = Array.from(XPIStates.enabledAddons(),
                           a => encoded`${a.id}:${a.version}`).join(",");
@@ -3720,8 +3721,10 @@ this.XPIProvider = {
           // The thing with experiments is an ugly hack but we want
           // Experiments.jsm to use this interface instead of getAddonsByTypes.
           // They'll go away at some point and we can forget this ever happened.
-          resolve(addons.filter(addon => addon.isActive ||
-                                       (addon.type == "experiment" && !addon.appDisabled)));
+          resolve({addons: addons.filter(addon => addon.isActive ||
+                                       (addon.type == "experiment" && !addon.appDisabled)),
+                   fullData: true
+          });
         });
       });
     }
@@ -3754,7 +3757,7 @@ this.XPIProvider = {
       });
     }
 
-    return Promise.resolve(result);
+    return Promise.resolve({addons: result, fullData: false});
   },
 
 

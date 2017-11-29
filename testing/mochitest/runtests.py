@@ -328,10 +328,29 @@ def call(*args, **kwargs):
 
 def killPid(pid, log):
     # see also https://bugzilla.mozilla.org/show_bug.cgi?id=911249#c58
-    try:
-        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-    except Exception as e:
-        log.info("Failed to kill process %d: %s" % (pid, str(e)))
+
+    if HAVE_PSUTIL:
+        # Kill a process tree (including grandchildren) with signal.SIGTERM
+        if pid == os.getpid():
+            raise RuntimeError("Error: trying to kill ourselves, not another process")
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            children.append(parent)
+            for p in children:
+                p.send_signal(signal.SIGTERM)
+            gone, alive = psutil.wait_procs(children, timeout=30)
+            for p in gone:
+                log.info('psutil found pid %s dead' % p.pid)
+            for p in alive:
+                log.info('failed to kill pid %d after 30s' % p.pid)
+        except Exception as e:
+            log.info("Error: Failed to kill process %d: %s" % (pid, str(e)))
+    else:
+        try:
+            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        except Exception as e:
+            log.info("Failed to kill process %d: %s" % (pid, str(e)))
 
 
 if mozinfo.isWin:
@@ -439,8 +458,6 @@ class MochitestServer(object):
         args = [
             "-g",
             self._xrePath,
-            "-v",
-            "170",
             "-f",
             os.path.join(
                 self._httpdPath,
@@ -1605,7 +1622,6 @@ toolbar#nav-bar {
             xrePath=options.xrePath,
             env=env,
             debugger=debugger,
-            dmdPath=options.dmdPath,
             lsanPath=lsanPath,
             ubsanPath=ubsanPath)
 
@@ -1616,6 +1632,9 @@ toolbar#nav-bar {
 
         if options.headless:
             browserEnv["MOZ_HEADLESS"] = '1'
+
+        if options.dmd:
+            browserEnv["DMD"] = os.environ.get('DMD', '1')
 
         # These variables are necessary for correct application startup; change
         # via the commandline at your own risk.
@@ -1672,7 +1691,8 @@ toolbar#nav-bar {
                             killPid(proc.pid, self.log)
                         else:
                             self.log.info("NOT killing %s (not an orphan?)" % procd)
-                except:
+                except Exception as e:
+                    self.log.info("Warning: Unable to kill process %s: %s" % (pname, str(e)))
                     # may not be able to access process info for all processes
                     continue
         else:
@@ -1985,20 +2005,21 @@ toolbar#nav-bar {
         """
         rv = []
         if parent_pid and HAVE_PSUTIL:
-            self.log.info("Determining child pids from psutil")
+            self.log.info("Determining child pids from psutil...")
             try:
                 rv = [p.pid for p in psutil.Process(parent_pid).children()]
+                self.log.info(str(rv))
             except psutil.NoSuchProcess:
                 self.log.warning("Failed to lookup children of pid %d" % parent_pid)
-            return rv
 
+        rv = set(rv)
         pid_re = re.compile(r'==> process \d+ launched child process (\d+)')
         with open(process_log) as fd:
             for line in fd:
                 self.log.info(line.rstrip())
                 m = pid_re.search(line)
                 if m:
-                    rv.append(int(m.group(1)))
+                    rv.add(int(m.group(1)))
         return rv
 
     def checkForZombies(self, processLog, utilityPath, debuggerInfo):
@@ -2236,6 +2257,7 @@ toolbar#nav-bar {
             # https://github.com/mozilla/mozbase/blob/master/mozrunner/mozrunner/runner.py#L61
             # until bug 913970 is fixed regarding mozrunner `wait` not returning status
             # see https://bugzilla.mozilla.org/show_bug.cgi?id=913970
+            self.log.info("runtests.py | Waiting for browser...")
             status = proc.wait()
             if status is None:
                 self.log.warning("runtests.py | Failed to get app exit code - running/crashed?")
@@ -2912,10 +2934,10 @@ toolbar#nav-bar {
 
         def finish(self):
             if self.shutdownLeaks:
-                self.shutdownLeaks.process()
+                self.harness.countfail += self.shutdownLeaks.process()
 
             if self.lsanLeaks:
-                self.lsanLeaks.process()
+                self.harness.countfail += self.lsanLeaks.process()
 
         # output message handlers:
         # these take a message and return a message

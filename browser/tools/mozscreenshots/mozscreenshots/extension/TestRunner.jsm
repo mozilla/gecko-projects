@@ -20,21 +20,8 @@ Cu.import("resource://gre/modules/Geometry.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserTestUtils",
                                   "resource://testing-common/BrowserTestUtils.jsm");
-
+// Screenshot.jsm must be imported this way for xpcshell tests to work
 XPCOMUtils.defineLazyModuleGetter(this, "Screenshot", "chrome://mozscreenshots/content/Screenshot.jsm");
-
-// Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
-// See LOG_LEVELS in Console.jsm. Common examples: "All", "Info", "Warn", & "Error".
-const PREF_LOG_LEVEL = "extensions.mozscreenshots@mozilla.org.loglevel";
-XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let ConsoleAPI = Cu.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
-  let consoleOptions = {
-    maxLogLevel: "info",
-    maxLogLevelPref: PREF_LOG_LEVEL,
-    prefix: "mozscreenshots",
-  };
-  return new ConsoleAPI(consoleOptions);
-});
 
 this.TestRunner = {
   combos: null,
@@ -43,10 +30,20 @@ this.TestRunner = {
   _lastCombo: null,
   _libDir: null,
   croppingPadding: 10,
+  mochitestScope: null,
 
   init(extensionPath) {
-    log.debug("init");
     this._extensionPath = extensionPath;
+  },
+
+  /**
+   * Initialize the mochitest interface. This allows TestRunner to integrate
+   * with mochitest functions like is(...) and ok(...). This must be called
+   * prior to invoking any of the TestRunner functions. Note that this should
+   * be properly setup in head.js, so you probably don't need to call it.
+   */
+  initTest(mochitestScope) {
+    this.mochitestScope = mochitestScope;
   },
 
   /**
@@ -62,7 +59,7 @@ this.TestRunner = {
       screenshotPath = MOZ_UPLOAD_DIR;
     }
 
-    log.info("Saving screenshots to:", screenshotPath);
+    this.mochitestScope.info("Saving screenshots to:", screenshotPath);
 
     let screenshotPrefix = Services.appinfo.appBuildID;
     if (jobName) {
@@ -77,9 +74,9 @@ this.TestRunner = {
 
     let sets = this.loadSets(setNames);
 
-    log.info(sets.length + " sets:", setNames);
+    this.mochitestScope.info(sets.length + " sets:", setNames);
     this.combos = new LazyProduct(sets);
-    log.info(this.combos.length + " combinations");
+    this.mochitestScope.info(this.combos.length + " combinations");
 
     this.currentComboIndex = this.completedCombos = 0;
     this._lastCombo = null;
@@ -110,8 +107,8 @@ this.TestRunner = {
       await this._performCombo(this.combos.item(this.currentComboIndex));
     }
 
-    log.info("Done: Completed " + this.completedCombos + " out of " +
-             this.combos.length + " configurations.");
+    this.mochitestScope.info("Done: Completed " + this.completedCombos + " out of " +
+                             this.combos.length + " configurations.");
     this.cleanup();
   },
 
@@ -149,38 +146,32 @@ this.TestRunner = {
         setName = filteredData.trimmedSetName;
         restrictions = filteredData.restrictions;
       }
-      try {
-        let imported = {};
-        Cu.import("chrome://mozscreenshots/content/configurations/" + setName + ".jsm",
-                  imported);
-        imported[setName].init(this._libDir);
-        let configurationNames = Object.keys(imported[setName].configurations);
-        if (!configurationNames.length) {
-          throw new Error(setName + " has no configurations for this environment");
-        }
-        // Checks to see if nonexistent configuration have been specified
-        if (restrictions) {
-          let incorrectConfigs = [...restrictions].filter(r => !configurationNames.includes(r));
-          if (incorrectConfigs.length) {
-            throw new Error("non existent configurations: " + incorrectConfigs);
-          }
-        }
-        let configurations = {};
-        for (let config of configurationNames) {
-          // Automatically set the name property of the configuration object to
-          // its name from the configuration object.
-          imported[setName].configurations[config].name = config;
-          // Filter restricted configurations.
-          if (!restrictions || restrictions.has(config)) {
-            configurations[config] = imported[setName].configurations[config];
-          }
-        }
-        sets.push(configurations);
-      } catch (ex) {
-        log.error("Error loading set: " + setName);
-        log.error(ex);
-        throw ex;
+      let imported = {};
+      Cu.import("chrome://mozscreenshots/content/configurations/" + setName + ".jsm",
+                imported);
+      imported[setName].init(this._libDir);
+      let configurationNames = Object.keys(imported[setName].configurations);
+      if (!configurationNames.length) {
+        throw new Error(setName + " has no configurations for this environment");
       }
+      // Checks to see if nonexistent configuration have been specified
+      if (restrictions) {
+        let incorrectConfigs = [...restrictions].filter(r => !configurationNames.includes(r));
+        if (incorrectConfigs.length) {
+          throw new Error("non existent configurations: " + incorrectConfigs);
+        }
+      }
+      let configurations = {};
+      for (let config of configurationNames) {
+        // Automatically set the name property of the configuration object to
+        // its name from the configuration object.
+        imported[setName].configurations[config].name = config;
+        // Filter restricted configurations.
+        if (!restrictions || restrictions.has(config)) {
+          configurations[config] = imported[setName].configurations[config];
+        }
+      }
+      sets.push(configurations);
     }
     return sets;
   },
@@ -206,10 +197,8 @@ this.TestRunner = {
   * @return {Geometry.jsm Rect} Rect holding relevant x, y, width, height with padding
   **/
   _findBoundingBox(selectors, windowType) {
-    // No selectors provided
     if (!selectors.length) {
-      log.info("_findBoundingBox: selectors argument is empty");
-      return null;
+      throw "No selectors specified.";
     }
 
     // Set window type, default "navigator:browser"
@@ -220,7 +209,13 @@ this.TestRunner = {
                         .getInterface(Ci.nsIDocShell).QueryInterface(Ci.nsIBaseWindow)
                         .devicePixelsPerDesktopPixel;
 
-    let finalRect = undefined;
+    const windowLeft = browserWindow.screenX * scale;
+    const windowTop = browserWindow.screenY * scale;
+    const windowWidth = browserWindow.outerWidth * scale;
+    const windowHeight = browserWindow.outerHeight * scale;
+
+    let bounds;
+    const rects = [];
     // Grab bounding boxes and find the union
     for (let selector of selectors) {
       let element;
@@ -231,53 +226,48 @@ this.TestRunner = {
         element = browserWindow.document.querySelector(selector);
       }
 
-      // Selector not found
       if (!element) {
-        log.info("_findBoundingBox: selector not found");
-        return null;
+        throw `No element for '${selector}' found.`;
       }
 
       // Calculate box region, convert to Rect
       let box = element.ownerDocument.getBoxObjectFor(element);
-      let newRect = new Rect(box.screenX * scale, box.screenY * scale,
+      let rect = new Rect(box.screenX * scale, box.screenY * scale,
                              box.width * scale, box.height * scale);
+      rect.inflateFixed(this.croppingPadding * scale);
+      rect.left = Math.max(rect.left, windowLeft);
+      rect.top = Math.max(rect.top, windowTop);
+      rect.right = Math.min(rect.right, windowLeft + windowWidth);
+      rect.bottom = Math.min(rect.bottom, windowTop + windowHeight);
+      rects.push(rect);
 
-      if (!finalRect) {
-        finalRect = newRect;
+      if (!bounds) {
+        bounds = rect;
       } else {
-        finalRect = finalRect.union(newRect);
+        bounds = bounds.union(rect);
       }
     }
 
-    // Add fixed padding
-    finalRect = finalRect.inflateFixed(this.croppingPadding * scale);
-
-    let windowLeft = browserWindow.screenX * scale;
-    let windowTop = browserWindow.screenY * scale;
-    let windowWidth = browserWindow.outerWidth * scale;
-    let windowHeight = browserWindow.outerHeight * scale;
-
-    // Clip dimensions to window only
-    finalRect.left = Math.max(finalRect.left, windowLeft);
-    finalRect.top = Math.max(finalRect.top, windowTop);
-    finalRect.right = Math.min(finalRect.right, windowLeft + windowWidth);
-    finalRect.bottom = Math.min(finalRect.bottom, windowTop + windowHeight);
-
-    return finalRect;
+    return {bounds, rects};
   },
 
   async _performCombo(combo) {
     let paddedComboIndex = padLeft(this.currentComboIndex + 1, String(this.combos.length).length);
-    log.info("Combination " + paddedComboIndex + "/" + this.combos.length + ": " +
-             this._comboName(combo).substring(1));
+    this.mochitestScope.info(
+      `Combination ${paddedComboIndex}/${this.combos.length}: ${this._comboName(combo).substring(1)}`
+    );
 
-    function changeConfig(config) {
-      log.debug("calling " + config.name);
+    // Notice that this does need to be a closure, not a function, as otherwise
+    // "this" gets replaced and we lose access to this.mochitestScope.
+    const changeConfig = (config) => {
+      this.mochitestScope.info("calling " + config.name);
+
       let applyPromise = Promise.resolve(config.applyConfig());
       let timeoutPromise = new Promise((resolve, reject) => {
         setTimeout(reject, APPLY_CONFIG_TIMEOUT_MS, "Timed out");
       });
-      log.debug("called " + config.name);
+
+      this.mochitestScope.info("called " + config.name);
       // Add a default timeout of 500ms to avoid conflicts when configurations
       // try to apply at the same time. e.g WindowSize and TabsInTitlebar
       return Promise.race([applyPromise, timeoutPromise]).then(() => {
@@ -285,20 +275,20 @@ this.TestRunner = {
           setTimeout(resolve, 500);
         });
       });
-    }
+    };
 
     try {
       // First go through and actually apply all of the configs
       for (let i = 0; i < combo.length; i++) {
         let config = combo[i];
         if (!this._lastCombo || config !== this._lastCombo[i]) {
-          log.debug("promising", config.name);
+          this.mochitestScope.info(`promising ${config.name}`);
           await changeConfig(config);
         }
       }
 
       // Update the lastCombo since it's now been applied regardless of whether it's accepted below.
-      log.debug("fulfilled all applyConfig so setting lastCombo.");
+      this.mochitestScope.info("fulfilled all applyConfig so setting lastCombo.");
       this._lastCombo = combo;
 
       // Then ask configs if the current setup is valid. We can't can do this in
@@ -311,12 +301,13 @@ this.TestRunner = {
         // if the this config was used in the lastCombo since another config may
         // have invalidated it.
         if (config.verifyConfig) {
-          log.debug("checking if the combo is valid with", config.name);
+          this.mochitestScope.info(`checking if the combo is valid with ${config.name}`);
           await config.verifyConfig();
         }
       }
     } catch (ex) {
-      log.warn("\tskipped configuration: " + ex);
+      this.mochitestScope.info(`\tskipped configuration [ ${combo.map((e) => e.name).join(", ")} ]`);
+      this.mochitestScope.info(`\treason: ${ex.toString()}`);
       // Don't set lastCombo here so that we properly know which configurations
       // need to be applied since the last screenshot
 
@@ -324,27 +315,108 @@ this.TestRunner = {
       return;
     }
 
-    await this._onConfigurationReady(combo);
+    // Collect selectors from combo configs for cropping region
+    let windowType;
+    const finalSelectors = [];
+    for (const obj of combo) {
+      if (!windowType) {
+        windowType = obj.windowType;
+      } else if (windowType !== obj.windowType) {
+        this.mochitestScope.ok(false, "All configurations in the combo have a single window type");
+        return;
+      }
+      for (const selector of obj.selectors) {
+        finalSelectors.push(selector);
+      }
+    }
+
+    const {bounds, rects} = this._findBoundingBox(finalSelectors, windowType);
+    this.mochitestScope.ok(bounds, "A valid bounding box was found");
+    if (!bounds) {
+      return;
+    }
+    await this._onConfigurationReady(combo, bounds, rects);
   },
 
-  _onConfigurationReady(combo) {
-    let delayedScreenshot = () => {
-      let filename = padLeft(this.currentComboIndex + 1,
-                             String(this.combos.length).length) + this._comboName(combo);
-      return Screenshot.captureExternal(filename)
-        .then(() => {
-          this.completedCombos++;
-        });
-    };
+  async _onConfigurationReady(combo, bounds, rects) {
+    let filename = padLeft(this.currentComboIndex + 1,
+                           String(this.combos.length).length) + this._comboName(combo);
+    const imagePath = await Screenshot.captureExternal(filename);
 
-    log.debug("_onConfigurationReady");
-    return delayedScreenshot();
+    let browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
+    await this._cropImage(browserWindow, OS.Path.toFileURI(imagePath), bounds, rects, imagePath).catch((msg) => {
+      throw `Cropping combo [${combo.map((e) => e.name).join(", ")}] failed: ${msg}`;
+    });
+    this.completedCombos++;
+    this.mochitestScope.info("_onConfigurationReady");
   },
 
   _comboName(combo) {
     return combo.reduce(function(a, b) {
       return a + "_" + b.name;
     }, "");
+  },
+
+  async _cropImage(window, srcPath, bounds, rects, targetPath) {
+    const { document, Image } = window;
+    const promise = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // Clip the cropping region to the size of the screenshot
+        // This is necessary mostly to deal with offscreen windows, since we
+        // are capturing an image of the operating system's desktop.
+        bounds.left = Math.max(0, bounds.left);
+        bounds.right = Math.min(img.naturalWidth, bounds.right);
+        bounds.top = Math.max(0, bounds.top);
+        bounds.bottom = Math.min(img.naturalHeight, bounds.bottom);
+
+        // Create a new offscreen canvas with the width and height given by the
+        // size of the region we want to crop to
+        const canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+        canvas.width = bounds.width;
+        canvas.height = bounds.height;
+        const ctx = canvas.getContext("2d");
+
+        for (const rect of rects) {
+          rect.left = Math.max(0, rect.left);
+          rect.right = Math.min(img.naturalWidth, rect.right);
+          rect.top = Math.max(0, rect.top);
+          rect.bottom = Math.min(img.naturalHeight, rect.bottom);
+
+          const width = rect.width;
+          const height = rect.height;
+
+          const screenX = rect.left;
+          const screenY = rect.top;
+
+          const imageX = screenX - bounds.left;
+          const imageY = screenY - bounds.top;
+          ctx.drawImage(img,
+            screenX, screenY, width, height,
+            imageX, imageY, width, height);
+        }
+
+        // Converts the canvas to a binary blob, which can be saved to a png
+        canvas.toBlob((blob) => {
+          // Use a filereader to convert the raw binary blob into a writable buffer
+          const fr = new FileReader();
+          fr.onload = (e) => {
+            const buffer = new Uint8Array(e.target.result);
+            // Save the file and complete the promise
+            OS.File.writeAtomic(targetPath, buffer, {}).then(resolve);
+          };
+          // Do the conversion
+          fr.readAsArrayBuffer(blob);
+        });
+      };
+
+      img.onerror = function() {
+        reject(`error loading image ${srcPath}`);
+      };
+      // Load the src image for drawing
+      img.src = srcPath;
+    });
+    return promise;
   },
 
   /**

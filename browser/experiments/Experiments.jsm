@@ -157,7 +157,7 @@ function addonInstallForURL(url, hash) {
 // Returns a promise that is resolved with an Array<Addon> of the installed
 // experiment addons.
 function installedExperimentAddons() {
-  return AddonManager.getActiveAddons(["experiment"]).then(addons => {
+  return AddonManager.getActiveAddons(["experiment"]).then(({addons}) => {
     return addons.filter(a => !a.appDisabled);
   });
 }
@@ -2248,7 +2248,7 @@ PreviousExperimentAddon.prototype = Object.freeze({
   },
 
   get blocklistState() {
-    Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
+    return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   },
 
   get creator() {

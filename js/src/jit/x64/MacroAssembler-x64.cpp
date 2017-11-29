@@ -298,7 +298,7 @@ MacroAssemblerX64::boxValue(JSValueType type, Register src, Register dest)
 }
 
 void
-MacroAssemblerX64::handleFailureWithHandlerTail(void* handler)
+MacroAssemblerX64::handleFailureWithHandlerTail(void* handler, Label* profilerExitTail)
 {
     // Reserve space for exception information.
     subq(Imm32(sizeof(ResumeFromException)), rsp);
@@ -370,7 +370,7 @@ MacroAssemblerX64::handleFailureWithHandlerTail(void* handler)
         Label skipProfilingInstrumentation;
         AbsoluteAddress addressOfEnabled(GetJitContext()->runtime->geckoProfiler().addressOfEnabled());
         asMasm().branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skipProfilingInstrumentation);
-        profilerExitFrame();
+        jump(profilerExitTail);
         bind(&skipProfilingInstrumentation);
     }
 
@@ -404,7 +404,7 @@ MacroAssemblerX64::profilerEnterFrame(Register framePtr, Register scratch)
 void
 MacroAssemblerX64::profilerExitFrame()
 {
-    jmp(GetJitContext()->runtime->jitRuntime()->getProfilerExitFrameTail());
+    jump(GetJitContext()->runtime->jitRuntime()->getProfilerExitFrameTail());
 }
 
 MacroAssembler&
@@ -790,7 +790,8 @@ MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, 
 void
 MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAddr, Register64 out)
 {
-    MOZ_ASSERT(!access.isAtomic());
+    memoryBarrier(access.barrierBefore());
+
     MOZ_ASSERT(!access.isSimd());
 
     size_t loadOffset = size();
@@ -829,6 +830,8 @@ MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAdd
         MOZ_CRASH("unexpected array type");
     }
     append(access, loadOffset, framePushed());
+
+    memoryBarrier(access.barrierAfter());
 }
 
 void

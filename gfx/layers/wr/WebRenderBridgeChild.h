@@ -88,6 +88,8 @@ public:
   // KnowsCompositor
   TextureForwarder* GetTextureForwarder() override;
   LayersIPCActor* GetLayersIPCActor() override;
+  void SyncWithCompositor() override;
+  ActiveResourceTracker* GetActiveResourceTracker() override { return mActiveResourceTracker.get(); }
 
   void AddPipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId,
                                          const CompositableHandle& aHandlee);
@@ -151,7 +153,7 @@ public:
 private:
   friend class CompositorBridgeChild;
 
-  ~WebRenderBridgeChild() {}
+  ~WebRenderBridgeChild();
 
   wr::ExternalImageId GetNextExternalImageId();
 
@@ -179,7 +181,9 @@ private:
 
   void ActorDestroy(ActorDestroyReason why) override;
 
-  virtual mozilla::ipc::IPCResult RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace) override;
+  void DoDestroy();
+
+  mozilla::ipc::IPCResult RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace) override;
 
   void AddIPDLReference() {
     MOZ_ASSERT(mIPCOpen == false);
@@ -214,6 +218,8 @@ private:
 
   uint32_t mFontInstanceKeysDeleted;
   nsDataHashtable<ScaledFontHashKey, wr::FontInstanceKey> mFontInstanceKeys;
+
+  UniquePtr<ActiveResourceTracker> mActiveResourceTracker;
 };
 
 } // namespace layers

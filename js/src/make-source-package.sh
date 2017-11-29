@@ -73,6 +73,7 @@ case $cmd in
        ${TOPSRCDIR}/test.mozbuild \
        ${tgtpath}
 
+    cp -pPR ${TOPSRCDIR}/js/app.mozbuild ${tgtpath}/js
     cp -pPR ${TOPSRCDIR}/js/moz.configure ${tgtpath}/js
     cp -pPR ${TOPSRCDIR}/js/ffi.configure ${tgtpath}/js
 
@@ -150,6 +151,10 @@ case $cmd in
         ${TOPSRCDIR}/toolkit/mozapps/installer/package-name.mk \
         ${TOPSRCDIR}/toolkit/mozapps/installer/upload-files.mk \
         ${tgtpath}/toolkit/mozapps/installer
+    ${MKDIR} -p ${tgtpath}/toolkit/crashreporter/tools
+    cp -pPR \
+        ${TOPSRCDIR}/toolkit/crashreporter/tools/symbolstore.py \
+        ${tgtpath}/toolkit/crashreporter/tools
     ${MKDIR} -p ${tgtpath}/mozglue
     cp -pPR \
         ${TOPSRCDIR}/mozglue/build \

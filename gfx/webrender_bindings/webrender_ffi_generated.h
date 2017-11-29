@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.1.29 */
+/* Generated with cbindgen:0.2.2 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -202,6 +202,13 @@ enum class TransformStyle : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class WrAnimationType : uint32_t {
+  Transform = 0,
+  Opacity = 1,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class WrExternalImageType : uint32_t {
   NativeTexture = 0,
   RawData = 1,
@@ -242,6 +249,8 @@ struct Renderer;
 struct ResourceUpdates;
 
 struct Vec_u8;
+
+struct WrProgramCache;
 
 struct WrRenderedEpochs;
 
@@ -431,6 +440,19 @@ struct WrTransformProperty {
 
 typedef IdNamespace WrIdNamespace;
 
+// A 2d Point tagged with a unit.
+struct TypedPoint2D_f32__WorldPixel {
+  float x;
+  float y;
+
+  bool operator==(const TypedPoint2D_f32__WorldPixel& aOther) const {
+    return x == aOther.x &&
+           y == aOther.y;
+  }
+};
+
+typedef TypedPoint2D_f32__WorldPixel WorldPoint;
+
 // Represents RGBA screen colors with floating point numbers.
 //
 // All components must be between 0.0 and 1.0.
@@ -512,6 +534,10 @@ struct ImageKey {
   bool operator==(const ImageKey& aOther) const {
     return mNamespace == aOther.mNamespace &&
            mHandle == aOther.mHandle;
+  }
+  bool operator!=(const ImageKey& aOther) const {
+    return mNamespace != aOther.mNamespace ||
+           mHandle != aOther.mHandle;
   }
 };
 
@@ -650,6 +676,16 @@ struct Shadow {
     return offset == aOther.offset &&
            color == aOther.color &&
            blur_radius == aOther.blur_radius;
+  }
+};
+
+struct WrAnimationProperty {
+  WrAnimationType effect_type;
+  uint64_t id;
+
+  bool operator==(const WrAnimationProperty& aOther) const {
+    return effect_type == aOther.effect_type &&
+           id == aOther.id;
   }
 };
 
@@ -1006,6 +1042,14 @@ WrIdNamespace wr_api_get_namespace(DocumentHandle *aDh)
 WR_FUNC;
 
 WR_INLINE
+bool wr_api_hit_test(DocumentHandle *aDh,
+                     WorldPoint aPoint,
+                     WrPipelineId *aOutPipelineId,
+                     uint64_t *aOutScrollId,
+                     uint16_t *aOutHitInfo)
+WR_FUNC;
+
+WR_INLINE
 void wr_api_remove_pipeline(DocumentHandle *aDh,
                             WrPipelineId aPipelineId)
 WR_FUNC;
@@ -1050,6 +1094,10 @@ WR_FUNC;
 WR_INLINE
 void wr_api_update_resources(DocumentHandle *aDh,
                              ResourceUpdates *aResources)
+WR_FUNC;
+
+WR_INLINE
+void wr_clear_item_tag(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
@@ -1276,7 +1324,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_stacking_context(WrState *aState,
                                  LayoutRect aBounds,
-                                 uint64_t aAnimationId,
+                                 const WrAnimationProperty *aAnimation,
                                  const float *aOpacity,
                                  const LayoutTransform *aTransform,
                                  TransformStyle aTransformStyle,
@@ -1364,6 +1412,14 @@ extern void wr_notifier_new_scroll_frame_ready(WrWindowId aWindowId,
                                                bool aCompositeNeeded);
 
 WR_INLINE
+void wr_program_cache_delete(WrProgramCache *aProgramCache)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+WrProgramCache *wr_program_cache_new()
+WR_FUNC;
+
+WR_INLINE
 void wr_rendered_epochs_delete(WrRenderedEpochs *aPipelineEpochs)
 WR_DESTRUCTOR_SAFE_FUNC;
 
@@ -1417,6 +1473,11 @@ WR_FUNC;
 
 WR_INLINE
 void wr_renderer_update(Renderer *aRenderer)
+WR_FUNC;
+
+WR_INLINE
+void wr_renderer_update_program_cache(Renderer *aRenderer,
+                                      WrProgramCache *aProgramCache)
 WR_FUNC;
 
 WR_INLINE
@@ -1522,6 +1583,12 @@ void wr_scroll_layer_with_id(DocumentHandle *aDh,
                              WrPipelineId aPipelineId,
                              uint64_t aScrollId,
                              LayoutPoint aNewScrollOrigin)
+WR_FUNC;
+
+WR_INLINE
+void wr_set_item_tag(WrState *aState,
+                     uint64_t aScrollId,
+                     uint16_t aHitInfo)
 WR_FUNC;
 
 WR_INLINE

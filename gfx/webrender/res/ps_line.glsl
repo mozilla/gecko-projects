@@ -2,10 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef WR_FEATURE_CACHE
-    #define PRIMITIVE_HAS_PICTURE_TASK
-#endif
-
 #include shared,prim_shared
 
 varying vec4 vColor;
@@ -14,11 +10,7 @@ flat varying float vAxisSelect;
 flat varying vec4 vParams;
 flat varying vec2 vLocalOrigin;
 
-#ifdef WR_FEATURE_TRANSFORM
-varying vec3 vLocalPos;
-#else
 varying vec2 vLocalPos;
-#endif
 
 #ifdef WR_VERTEX_SHADER
 #define LINE_ORIENTATION_VERTICAL       0
@@ -99,7 +91,7 @@ void main(void) {
     }
 
 #ifdef WR_FEATURE_CACHE
-    vec2 device_origin = prim.task.target_rect.p0 +
+    vec2 device_origin = prim.task.common_data.task_rect.p0 +
                          uDevicePixelRatio * (prim.local_rect.p0 - prim.task.content_origin);
     vec2 device_size = uDevicePixelRatio * prim.local_rect.size;
 
@@ -117,7 +109,7 @@ void main(void) {
     vColor = line.color;
 
     #ifdef WR_FEATURE_TRANSFORM
-        TransformVertexInfo vi = write_transform_vertex_primitive(prim);
+        VertexInfo vi = write_transform_vertex_primitive(prim);
     #else
         VertexInfo vi = write_vertex(prim.local_rect,
                                      prim.local_clip_rect,
@@ -171,14 +163,12 @@ float approx_distance(vec2 p, vec2 b0, vec2 b1, vec2 b2) {
 void main(void) {
     float alpha = 1.0;
 
-#ifdef WR_FEATURE_CACHE
     vec2 local_pos = vLocalPos;
+
+#ifdef WR_FEATURE_CACHE
 #else
     #ifdef WR_FEATURE_TRANSFORM
-        alpha = 0.0;
-        vec2 local_pos = init_transform_fs(vLocalPos, alpha);
-    #else
-        vec2 local_pos = vLocalPos;
+        alpha = init_transform_fs(vLocalPos);
     #endif
 
         alpha *= do_clip();

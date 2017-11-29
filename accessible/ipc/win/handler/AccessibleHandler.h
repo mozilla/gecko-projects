@@ -36,6 +36,8 @@ import NEWEST_IA2_IDL;
 
 #include "Accessible2_3.h"
 #include "AccessibleHyperlink.h"
+#include "AccessibleHypertext2.h"
+#include "AccessibleTableCell.h"
 #include "Handler.h"
 #include "mozilla/mscom/StructStream.h"
 #include "mozilla/UniquePtr.h"
@@ -51,6 +53,8 @@ class AccessibleHandler final : public mscom::Handler
                               , public IServiceProvider
                               , public IProvideClassInfo
                               , public IAccessibleHyperlink
+                              , public IAccessibleTableCell
+                              , public IAccessibleHypertext2
 {
 public:
   static HRESULT Create(IUnknown* aOuter, REFIID aIid, void** aOutInterface);
@@ -173,6 +177,71 @@ public:
   STDMETHODIMP get_endIndex(long* index) override;
   STDMETHODIMP get_valid(boolean* valid) override;
 
+  // IAccessibleTableCell
+  STDMETHODIMP get_columnExtent(long* nColumnsSpanned) override;
+  STDMETHODIMP get_columnHeaderCells(IUnknown*** cellAccessibles,
+                                     long* nColumnHeaderCells) override;
+  STDMETHODIMP get_columnIndex(long* columnIndex) override;
+  STDMETHODIMP get_rowExtent(long* nRowsSpanned) override;
+  STDMETHODIMP get_rowHeaderCells(IUnknown*** cellAccessibles,
+                                  long* nRowHeaderCells) override;
+  STDMETHODIMP get_rowIndex(long* rowIndex) override;
+  STDMETHODIMP get_isSelected(boolean* isSelected) override;
+  STDMETHODIMP get_rowColumnExtents(long* row, long* column,
+                                    long* rowExtents, long* columnExtents,
+                                    boolean* isSelected) override;
+  STDMETHODIMP get_table(IUnknown** table) override;
+
+  // IAccessibleText
+  STDMETHODIMP addSelection(long startOffset, long endOffset) override;
+  STDMETHODIMP get_attributes(long offset, long *startOffset, long *endOffset,
+                              BSTR *textAttributes) override;
+  STDMETHODIMP get_caretOffset(long *offset) override;
+  STDMETHODIMP get_characterExtents(long offset,
+                                    enum IA2CoordinateType coordType, long *x,
+                                    long *y, long *width, long *height) override;
+  STDMETHODIMP get_nSelections(long *nSelections) override;
+  STDMETHODIMP get_offsetAtPoint(long x, long y,
+                                 enum IA2CoordinateType coordType,
+                                 long *offset) override;
+  STDMETHODIMP get_selection(long selectionIndex, long *startOffset,
+                             long *endOffset) override;
+  STDMETHODIMP get_text(long startOffset, long endOffset, BSTR *text) override;
+  STDMETHODIMP get_textBeforeOffset(long offset,
+                                    enum IA2TextBoundaryType boundaryType,
+                                    long *startOffset, long *endOffset,
+                                    BSTR *text) override;
+  STDMETHODIMP get_textAfterOffset(long offset,
+                                   enum IA2TextBoundaryType boundaryType,
+                                   long *startOffset, long *endOffset,
+                                   BSTR *text) override;
+  STDMETHODIMP get_textAtOffset(long offset,
+                                enum IA2TextBoundaryType boundaryType,
+                                long *startOffset, long *endOffset,
+                                BSTR *text) override;
+  STDMETHODIMP removeSelection(long selectionIndex) override;
+  STDMETHODIMP setCaretOffset(long offset) override;
+  STDMETHODIMP setSelection(long selectionIndex, long startOffset,
+                            long endOffset) override;
+  STDMETHODIMP get_nCharacters(long *nCharacters) override;
+  STDMETHODIMP scrollSubstringTo(long startIndex, long endIndex,
+                                 enum IA2ScrollType scrollType) override;
+  STDMETHODIMP scrollSubstringToPoint(long startIndex, long endIndex,
+                                      enum IA2CoordinateType coordinateType,
+                                      long x, long y) override;
+  STDMETHODIMP get_newText(IA2TextSegment *newText) override;
+  STDMETHODIMP get_oldText(IA2TextSegment *oldText) override;
+
+  // IAccessibleHypertext
+  STDMETHODIMP get_nHyperlinks(long *hyperlinkCount) override;
+  STDMETHODIMP get_hyperlink(long index,
+                             IAccessibleHyperlink **hyperlink) override;
+  STDMETHODIMP get_hyperlinkIndex(long charIndex, long *hyperlinkIndex) override;
+
+  // IAccessibleHypertext2
+  STDMETHODIMP get_hyperlinks(IAccessibleHyperlink*** hyperlinks,
+                              long* nHyperlinks) override;
+
 private:
   AccessibleHandler(IUnknown* aOuter, HRESULT* aResult);
   virtual ~AccessibleHandler();
@@ -180,7 +249,11 @@ private:
   HRESULT ResolveIA2();
   HRESULT ResolveIDispatch();
   HRESULT ResolveIAHyperlink();
+  HRESULT ResolveIAHypertext();
+  HRESULT ResolveIATableCell();
   HRESULT MaybeUpdateCachedData();
+  HRESULT GetAllTextInfo(BSTR* aText);
+  void ClearTextCache();
 
   RefPtr<IUnknown>                  mDispatchUnk;
   /**
@@ -206,9 +279,15 @@ private:
   NEWEST_IA2_INTERFACE*             mIA2PassThru;      // weak
   IServiceProvider*                 mServProvPassThru; // weak
   IAccessibleHyperlink*             mIAHyperlinkPassThru; // weak
+  IAccessibleTableCell*             mIATableCellPassThru; // weak
+  IAccessibleHypertext2*             mIAHypertextPassThru; // weak
   IA2Payload                        mCachedData;
   UniquePtr<mscom::StructToStream>  mSerializer;
   uint32_t                          mCacheGen;
+  IAccessibleHyperlink**            mCachedHyperlinks;
+  long                              mCachedNHyperlinks;
+  IA2TextSegment*                   mCachedTextAttribRuns;
+  long                              mCachedNTextAttribRuns;
 };
 
 } // namespace a11y

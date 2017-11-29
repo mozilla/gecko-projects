@@ -39,6 +39,7 @@ mochitest:
             linux.*/debug: 16
             linux64-asan/opt: 10
             linux64-.*cov/opt: 10
+            windows10-64-ccov/debug: 10
             default: 5
     e10s:
         by-test-platform:
@@ -103,7 +104,8 @@ mochitest-browser-chrome:
             default: true
     max-run-time:
         by-test-platform:
-            linux64-*cov/opt: 7200
+            linux64-.*cov/opt: 7200
+            windows10-64-ccov/debug: 7200
             linux.*/debug: 5400
             default: 3600
     mozharness:
@@ -126,6 +128,10 @@ browser-instrumentation:
     treeherder-symbol: tc-M(inst)
     loopback-video: true
     tier: 3
+    run-on-projects:
+        by-test-platform:
+            windows.*-nightly/.*: ["mozilla-central"]
+            default: []
     max-run-time: 14400
     mozharness:
         mochitest-flavor: browser
@@ -191,10 +197,6 @@ mochitest-clipboard:
     treeherder-symbol: tc-M(cl)
     loopback-video: true
     instance-size: xlarge
-    worker-type:
-        by-test-platform:
-            windows7-32.*: buildbot-bridge/buildbot-bridge
-            default: null
     e10s:
         by-test-platform:
             windows7-32/debug: both
@@ -237,7 +239,7 @@ mochitest-devtools-chrome:
         chunked: true
     instance-size:
         by-test-platform:
-            linux64-asan/opt: xlarge # runs out of memory on default/m3.large
+            linux64-asan/opt: xlarge  # runs out of memory on default/m3.large
             default: default
     # Bug 1296086: high number of intermittents observed with software GL and large instances
     allow-software-gl-layers: false

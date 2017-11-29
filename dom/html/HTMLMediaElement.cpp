@@ -10,12 +10,15 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/NotNull.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/MediaEncryptedEvent.h"
 #include "mozilla/EMEUtils.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/Sprintf.h"
 
+#include "AutoplayPolicy.h"
 #include "base/basictypes.h"
 #include "nsIDOMHTMLMediaElement.h"
 #include "TimeRanges.h"
@@ -135,6 +138,7 @@ static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 
 #include "mozilla/EventStateManager.h"
 
+#include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
 #include "HTMLMediaElement.h"
@@ -545,7 +549,8 @@ HTMLMediaElement::MediaLoadListener::OnStartRequest(nsIRequest* aRequest,
           ownerDoc->AddBlockedTrackingNode(element);
         }
       }
-      element->NotifyLoadError();
+      element->NotifyLoadError(
+        nsPrintfCString("%u: %s", uint32_t(status), "Request failed"));
     }
     return status;
   }
@@ -579,7 +584,7 @@ HTMLMediaElement::MediaLoadListener::OnStartRequest(nsIRequest* aRequest,
     if (NS_FAILED(rv) && !mNextListener) {
       // Load failed, attempt to load the next candidate resource. If there
       // are none, this will trigger a MEDIA_ERR_SRC_NOT_SUPPORTED error.
-      element->NotifyLoadError();
+      element->NotifyLoadError(NS_LITERAL_CSTRING("Failed to init decoder"));
     }
     // If InitializeDecoderForChannel did not return a listener (but may
     // have otherwise succeeded), we abort the connection since we aren't
@@ -1226,7 +1231,7 @@ public:
 
     if (NS_FAILED(rv)) {
       // Notify load error so the element will try next resource candidate.
-      aElement->NotifyLoadError();
+      aElement->NotifyLoadError(NS_LITERAL_CSTRING("Fail to create channel"));
       return;
     }
 
@@ -1278,7 +1283,7 @@ public:
     rv = channel->AsyncOpen2(loadListener);
     if (NS_FAILED(rv)) {
       // Notify load error so the element will try next resource candidate.
-      aElement->NotifyLoadError();
+      aElement->NotifyLoadError(NS_LITERAL_CSTRING("Failed to open channel"));
       return;
     }
 
@@ -1723,7 +1728,7 @@ void HTMLMediaElement::ShutdownDecoder()
 {
   RemoveMediaElementFromURITable();
   NS_ASSERTION(mDecoder, "Must have decoder to shut down");
-  mSetCDMRequest.DisconnectIfExists();
+
   mWaitingForKeyListener.DisconnectIfExists();
   if (mMediaSource) {
     mMediaSource->CompletePendingTransactions();
@@ -1963,6 +1968,13 @@ NS_IMETHODIMP HTMLMediaElement::Load()
 
 void HTMLMediaElement::DoLoad()
 {
+  // Check if media is allowed for the docshell.
+  nsCOMPtr<nsIDocShell> docShell = OwnerDoc()->GetDocShell();
+  if (docShell && !docShell->GetAllowMedia()) {
+    LOG(LogLevel::Debug, ("%p Media not allowed", this));
+    return;
+  }
+
   if (mIsRunningLoadMethod) {
     return;
   }
@@ -1972,8 +1984,7 @@ void HTMLMediaElement::DoLoad()
   // intent to play by calling load() in the click handler of a "catalog
   // view" of a gallery of videos.
   if (EventStateManager::IsHandlingUserInput()) {
-    mHasUserInteraction = true;
-
+    mHasUserInteractedLoadOrSeek = true;
     // Mark the channel as urgent-start when autopaly so that it will play the
     // media from src after loading enough resource.
     if (HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) {
@@ -2038,7 +2049,7 @@ void HTMLMediaElement::SelectResource()
     SetupSrcMediaStreamPlayback(mSrcAttrStream);
   } else if (GetAttr(kNameSpaceID_None, nsGkAtoms::src, src)) {
     nsCOMPtr<nsIURI> uri;
-    nsresult rv = NewURIFromString(src, getter_AddRefs(uri));
+    MediaResult rv = NewURIFromString(src, getter_AddRefs(uri));
     if (NS_SUCCEEDED(rv)) {
       LOG(LogLevel::Debug, ("%p Trying load from src=%s", this, NS_ConvertUTF16toUTF8(src).get()));
       NS_ASSERTION(!mIsLoadingFromSourceChildren,
@@ -2064,13 +2075,16 @@ void HTMLMediaElement::SelectResource()
     } else {
       const char16_t* params[] = { src.get() };
       ReportLoadError("MediaLoadInvalidURI", params, ArrayLength(params));
+      rv = MediaResult(rv.Code(), "MediaLoadInvalidURI");
     }
     // The media element has neither a src attribute nor a source element child:
     // set the networkState to NETWORK_EMPTY, and abort these steps; the
     // synchronous section ends.
     mMainThreadEventTarget->Dispatch(NewRunnableMethod<nsCString>(
       "HTMLMediaElement::NoSupportedMediaSourceError",
-      this, &HTMLMediaElement::NoSupportedMediaSourceError, nsCString()));
+      this,
+      &HTMLMediaElement::NoSupportedMediaSourceError,
+      rv.Description()));
   } else {
     // Otherwise, the source elements will be used.
     mIsLoadingFromSourceChildren = true;
@@ -2407,8 +2421,9 @@ void HTMLMediaElement::ResumeLoad(PreloadAction aAction)
   ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_LOADING);
   if (!mIsLoadingFromSourceChildren) {
     // We were loading from the element's src attribute.
-    if (NS_FAILED(LoadResource())) {
-      NoSupportedMediaSourceError();
+    MediaResult rv = LoadResource();
+    if (NS_FAILED(rv)) {
+      NoSupportedMediaSourceError(rv.Description());
     }
   } else {
     // We were loading from a child <source> element. Try to resume the
@@ -2494,7 +2509,8 @@ void HTMLMediaElement::UpdatePreloadAction()
   }
 }
 
-nsresult HTMLMediaElement::LoadResource()
+MediaResult
+HTMLMediaElement::LoadResource()
 {
   AbstractThread::AutoEnter context(AbstractMainThread());
 
@@ -2504,12 +2520,6 @@ nsresult HTMLMediaElement::LoadResource()
   if (mChannelLoader) {
     mChannelLoader->Cancel();
     mChannelLoader = nullptr;
-  }
-
-  // Check if media is allowed for the docshell.
-  nsCOMPtr<nsIDocShell> docShell = OwnerDoc()->GetDocShell();
-  if (docShell && !docShell->GetAllowMedia()) {
-    return NS_ERROR_FAILURE;
   }
 
   // Set the media element's CORS mode only when loading a resource
@@ -2533,7 +2543,7 @@ nsresult HTMLMediaElement::LoadResource()
       GetCurrentSrc(spec);
       const char16_t* params[] = { spec.get() };
       ReportLoadError("MediaLoadInvalidURI", params, ArrayLength(params));
-      return rv;
+      return MediaResult(rv, "MediaLoadInvalidURI");
     }
     SetupSrcMediaStreamPlayback(stream);
     return NS_OK;
@@ -2556,7 +2566,7 @@ nsresult HTMLMediaElement::LoadResource()
       // all, due to network errors, causing the user agent to give up
       // trying to fetch the resource" section of resource fetch algorithm.
       decoder->Shutdown();
-      return NS_ERROR_FAILURE;
+      return MediaResult(NS_ERROR_FAILURE, "Failed to attach MediaSource");
     }
     ChangeDelayLoadStatus(false);
     nsresult rv = decoder->Load(mMediaSource->GetPrincipal());
@@ -2564,9 +2574,10 @@ nsresult HTMLMediaElement::LoadResource()
       decoder->Shutdown();
       LOG(LogLevel::Debug,
           ("%p Failed to load for decoder %p", this, decoder.get()));
-      return rv;
+      return MediaResult(rv, "Fail to load decoder");
     }
-    return FinishDecoderSetup(decoder);
+    rv = FinishDecoderSetup(decoder);
+    return MediaResult(rv, "Failed to set up decoder");
   }
 
   AssertReadyStateIsNothing();
@@ -2576,7 +2587,7 @@ nsresult HTMLMediaElement::LoadResource()
   if (NS_SUCCEEDED(rv)) {
     mChannelLoader = loader.forget();
   }
-  return rv;
+  return MediaResult(rv, "Failed to load channel");
 }
 
 nsresult HTMLMediaElement::LoadWithChannel(nsIChannel* aChannel,
@@ -2746,7 +2757,7 @@ HTMLMediaElement::Seek(double aTime,
   // Detect if user has interacted with element by seeking so that
   // play will not be blocked when initiated by a script.
   if (EventStateManager::IsHandlingUserInput()) {
-    mHasUserInteraction = true;
+    mHasUserInteractedLoadOrSeek = true;
   }
 
   StopSuspendingAfterFirstFrame();
@@ -3149,6 +3160,8 @@ public:
     MOZ_ASSERT(mCapturedTrackSource);
     MOZ_ASSERT(mOwningStream);
     MOZ_ASSERT(IsTrackIDExplicit(mDestinationTrackID));
+
+    mCapturedTrackSource->RegisterSink(this);
   }
 
   void Destroy() override
@@ -3187,6 +3200,15 @@ public:
     Destroy();
   }
 
+  /**
+   * Do not keep the track source alive. The source lifetime is controlled by
+   * its associated tracks.
+   */
+  bool KeepsSourceAlive() const override
+  {
+    return false;
+  }
+
   void PrincipalChanged() override
   {
     if (!mCapturedTrackSource) {
@@ -3196,6 +3218,16 @@ public:
 
     mPrincipal = mCapturedTrackSource->GetPrincipal();
     MediaStreamTrackSource::PrincipalChanged();
+  }
+
+  void MutedChanged(bool aNewState) override
+  {
+    if (!mCapturedTrackSource) {
+      // This could happen during shutdown.
+      return;
+    }
+
+    MediaStreamTrackSource::MutedChanged(aNewState);
   }
 
 private:
@@ -4011,7 +4043,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mIsEncrypted(false),
     mWaitingForKey(NOT_WAITING_FOR_KEY),
     mDisableVideo(false),
-    mHasUserInteraction(false),
+    mHasUserInteractedLoadOrSeek(false),
     mFirstFrameLoaded(false),
     mDefaultPlaybackStartPosition(0.0),
     mHasSuspendTaint(false),
@@ -4064,6 +4096,8 @@ HTMLMediaElement::~HTMLMediaElement()
     mVideoFrameContainer->ForgetElement();
   }
   UnregisterActivityObserver();
+
+  mSetCDMRequest.DisconnectIfExists();
   if (mDecoder) {
     ShutdownDecoder();
   }
@@ -4193,9 +4227,6 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
     return nullptr;
   }
   mPendingPlayPromises.AppendElement(promise);
-
-  // Play was not blocked so assume user interacted with the element.
-  mHasUserInteraction = true;
 
   if (mPreloadAction == HTMLMediaElement::PRELOAD_NONE) {
     // The media load algorithm will be initiated by a user interaction.
@@ -4383,9 +4414,64 @@ HTMLMediaElement::OutputMediaStream::~OutputMediaStream()
   }
 }
 
+nsresult
+HTMLMediaElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
+{
+  if (!this->Controls() || !aVisitor.mEvent->mFlags.mIsTrusted) {
+    return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  }
+
+  HTMLInputElement* el = nullptr;
+  nsCOMPtr<nsINode> node;
+
+  // We will need to trap pointer, touch, and mouse events within the media
+  // element, allowing media control exclusive consumption on these events,
+  // and preventing the content from handling them.
+  switch (aVisitor.mEvent->mMessage) {
+    case ePointerDown:
+    case ePointerUp:
+    case eTouchEnd:
+    // Always prevent touchmove captured in video element from being handled by content,
+    // since we always do that for touchstart.
+    case eTouchMove:
+    case eTouchStart:
+    case eMouseClick:
+    case eMouseDoubleClick:
+    case eMouseDown:
+    case eMouseUp:
+      aVisitor.mCanHandle = false;
+      return NS_OK;
+
+    // The *move events however are only comsumed when the range input is being
+    // dragged.
+    case ePointerMove:
+    case eMouseMove:
+      node = do_QueryInterface(aVisitor.mEvent->mOriginalTarget);
+      if (node->IsInNativeAnonymousSubtree()) {
+        if (node->IsHTMLElement(nsGkAtoms::input)) {
+          // The node is a <input type="range">
+          el = static_cast<HTMLInputElement*>(node.get());
+        } else if (node->GetParentNode() &&
+                   node->GetParentNode()->IsHTMLElement(nsGkAtoms::input)) {
+          // The node is a child of <input type="range">
+          el = static_cast<HTMLInputElement*>(node->GetParentNode());
+        }
+      }
+      if (el && el->IsDraggingRange()) {
+        aVisitor.mCanHandle = false;
+        return NS_OK;
+      }
+      return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+
+    default:
+      return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  }
+}
+
 bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID,
                                       nsAtom* aAttribute,
                                       const nsAString& aValue,
+                                      nsIPrincipal* aMaybeScriptedPrincipal,
                                       nsAttrValue& aResult)
 {
   // Mappings from 'preload' attribute strings to an enumeration.
@@ -4411,7 +4497,7 @@ bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void HTMLMediaElement::DoneCreatingElement()
@@ -5532,10 +5618,11 @@ void HTMLMediaElement::FirstFrameLoaded()
   }
 }
 
-void HTMLMediaElement::NetworkError()
+void
+HTMLMediaElement::NetworkError(const MediaResult& aError)
 {
   if (mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING) {
-    NoSupportedMediaSourceError();
+    NoSupportedMediaSourceError(aError.Description());
   } else {
     Error(MEDIA_ERR_NETWORK);
   }
@@ -6944,11 +7031,7 @@ HTMLMediaElement::UpdateAudioChannelPlayingState(bool aForcePlaying)
 bool
 HTMLMediaElement::IsAllowedToPlay()
 {
-  // Prevent media element from being auto-started by a script when
-  // media.autoplay.enabled=false
-  if (!mHasUserInteraction &&
-      !IsAutoplayEnabled() &&
-      !EventStateManager::IsHandlingUserInput()) {
+  if (!AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this))) {
 #if defined(MOZ_WIDGET_ANDROID)
     nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
                                          static_cast<nsIContent*>(this),

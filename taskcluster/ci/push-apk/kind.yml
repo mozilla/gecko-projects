@@ -28,8 +28,8 @@ jobs:
                 mozilla-release: scriptworker-prov-v1/pushapk-v1
                 default: scriptworker-prov-v1/dep-pushapk
         worker:
-            upstream-artifacts: # see transforms
-            google-play-track: # see transforms
+            upstream-artifacts:  # see transforms
+            google-play-track:  # see transforms
             implementation: push-apk
             commit: # see transforms
         requires: all-resolved

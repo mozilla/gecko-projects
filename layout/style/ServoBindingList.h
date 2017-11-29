@@ -694,8 +694,7 @@ SERVO_BINDING_FUNC(Servo_StyleSet_GetBaseComputedValuesForElement,
                    RawServoStyleSetBorrowed set,
                    RawGeckoElementBorrowed element,
                    ServoStyleContextBorrowed existing_style,
-                   const mozilla::ServoElementSnapshotTable* snapshots,
-                   mozilla::CSSPseudoElementType pseudo_type)
+                   const mozilla::ServoElementSnapshotTable* snapshots)
 // Returns computed values for the given element by adding an animation value.
 SERVO_BINDING_FUNC(Servo_StyleSet_GetComputedValuesByAddingAnimation,
                    ServoStyleContextStrong,
@@ -749,6 +748,13 @@ SERVO_BINDING_FUNC(Servo_ComputeColor, bool,
 SERVO_BINDING_FUNC(Servo_ParseIntersectionObserverRootMargin, bool,
                    const nsAString* value,
                    nsCSSRect* result);
+// Returning false means the parsed transform contains relative lengths or
+// percentage value, so we cannot compute the matrix. In this case, we keep
+// |result| and |contains_3d_transform| as-is.
+SERVO_BINDING_FUNC(Servo_ParseTransformIntoMatrix, bool,
+                   const nsAString* value,
+                   bool* contains_3d_transform,
+                   RawGeckoGfxMatrix4x4* result);
 
 // AddRef / Release functions
 #define SERVO_ARC_TYPE(name_, type_)                                \

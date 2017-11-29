@@ -477,6 +477,7 @@ enum class ExitFrameType : uint8_t
     IonDOMMethod      = 0x4,
     IonOOLNative      = 0x5,
     IonOOLProxy       = 0x6,
+    InterpreterStub   = 0xFC,
     VMFunction        = 0xFD,
     LazyLink          = 0xFE,
     Bare              = 0xFF,
@@ -830,7 +831,6 @@ struct IonDOMMethodExitFrameLayoutTraits {
 class LazyLinkExitFrameLayout
 {
   protected: // silence clang warning about unused private fields
-    JitCode* stubCode_;
     ExitFooterFrame footer_;
     JitFrameLayout exit_;
 
@@ -841,9 +841,6 @@ class LazyLinkExitFrameLayout
         return sizeof(LazyLinkExitFrameLayout);
     }
 
-    inline JitCode** stubCode() {
-        return &stubCode_;
-    }
     inline JitFrameLayout* jsFrame() {
         return &exit_;
     }
@@ -860,6 +857,36 @@ ExitFrameLayout::as<LazyLinkExitFrameLayout>()
     uint8_t* sp = reinterpret_cast<uint8_t*>(this);
     sp -= LazyLinkExitFrameLayout::offsetOfExitFrame();
     return reinterpret_cast<LazyLinkExitFrameLayout*>(sp);
+}
+
+class InterpreterStubExitFrameLayout
+{
+  protected: // silence clang warning about unused private fields
+    ExitFooterFrame footer_;
+    JitFrameLayout exit_;
+
+  public:
+    static ExitFrameType Type() { return ExitFrameType::InterpreterStub; }
+
+    static inline size_t Size() {
+        return sizeof(InterpreterStubExitFrameLayout);
+    }
+    inline JitFrameLayout* jsFrame() {
+        return &exit_;
+    }
+    static size_t offsetOfExitFrame() {
+        return offsetof(InterpreterStubExitFrameLayout, exit_);
+    }
+};
+
+template <>
+inline InterpreterStubExitFrameLayout*
+ExitFrameLayout::as<InterpreterStubExitFrameLayout>()
+{
+    MOZ_ASSERT(is<InterpreterStubExitFrameLayout>());
+    uint8_t* sp = reinterpret_cast<uint8_t*>(this);
+    sp -= InterpreterStubExitFrameLayout::offsetOfExitFrame();
+    return reinterpret_cast<InterpreterStubExitFrameLayout*>(sp);
 }
 
 class ICStub;

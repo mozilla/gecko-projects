@@ -19,6 +19,7 @@
 #include "nsIDOMStorageManager.h"
 #include "nsDocLoader.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
@@ -69,6 +70,8 @@ class Encoding;
 class HTMLEditor;
 enum class TaskCategory;
 namespace dom {
+class ClientInfo;
+class ClientSource;
 class EventTarget;
 class PendingGlobalHistoryEntry;
 typedef uint32_t ScreenOrientationInternal;
@@ -114,8 +117,12 @@ class nsRefreshTimer : public nsITimerCallback
                      , public nsINamed
 {
 public:
-  nsRefreshTimer(nsDocShell* aDocShell, nsIURI* aURI, int32_t aDelay,
-                 bool aRepeat, bool aMetaRefresh);
+  nsRefreshTimer(nsDocShell* aDocShell,
+                 nsIURI* aURI,
+                 nsIPrincipal* aPrincipal,
+                 int32_t aDelay,
+                 bool aRepeat,
+                 bool aMetaRefresh);
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
@@ -125,6 +132,7 @@ public:
 
   RefPtr<nsDocShell> mDocShell;
   nsCOMPtr<nsIURI> mURI;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
   int32_t mDelay;
   bool mRepeat;
   bool mMetaRefresh;
@@ -259,7 +267,8 @@ public:
   // ForceRefreshURI method on nsIRefreshURI, but makes sure to take
   // the timer involved out of mRefreshURIList if it's there.
   // aTimer must not be null.
-  nsresult ForceRefreshURIFromTimer(nsIURI* aURI, int32_t aDelay,
+  nsresult ForceRefreshURIFromTimer(nsIURI* aURI, nsIPrincipal* aPrincipal,
+                                    int32_t aDelay,
                                     bool aMetaRefresh, nsITimer* aTimer);
 
   friend class OnLinkClickEvent;
@@ -823,6 +832,26 @@ protected:
   // Convenience method for getting our parent docshell. Can return null
   already_AddRefed<nsDocShell> GetParentDocshell();
 
+  // Possibly create a ClientSource object to represent an initial about:blank
+  // window that has not been allocated yet.  Normally we try not to create
+  // this about:blank window until something calls GetDocument().  We still need
+  // the ClientSource to exist for this conceptual window, though.
+  //
+  // The ClientSource is created with the given principal if specified.  If
+  // the principal is not provided we will attempt to inherit it when we
+  // are sure it will match what the real about:blank window principal
+  // would have been.  There are some corner cases where we cannot easily
+  // determine the correct principal and will not create the ClientSource.
+  // In these cases the initial about:blank will appear to not exist until
+  // its real document and window are created.
+  void MaybeCreateInitialClientSource(nsIPrincipal* aPrincipal = nullptr);
+
+  // Return the ClientInfo for the initial about:blank window, if it exists
+  // or we have speculatively created a ClientSource in
+  // MaybeCreateInitialClientSource().  This can return a ClientInfo object
+  // even if GetExtantDoc() returns nullptr.
+  mozilla::Maybe<mozilla::dom::ClientInfo> GetInitialClientInfo() const;
+
 protected:
   nsresult GetCurScrollPos(int32_t aScrollOrientation, int32_t* aCurPos);
   nsresult SetCurScrollPosEx(int32_t aCurHorizontalPos,
@@ -1149,6 +1178,8 @@ private:
   mozilla::OriginAttributes mOriginAttributes;
 
   mozilla::UniquePtr<mozilla::dom::PendingGlobalHistoryEntry> mPrerenderGlobalHistory;
+
+  mozilla::UniquePtr<mozilla::dom::ClientSource> mInitialClientSource;
 
   // A depth count of how many times NotifyRunToCompletionStart
   // has been called without a matching NotifyRunToCompletionStop.

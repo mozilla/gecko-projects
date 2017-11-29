@@ -50,7 +50,7 @@
 #include "nsTextFrame.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsTextFragment.h"
-#include "nsCSSRuleProcessor.h"
+#include "nsMediaFeatures.h"
 #include "nsCORSListenerProxy.h"
 #include "nsHTMLDNSPrefetch.h"
 #include "nsHtml5Module.h"
@@ -116,6 +116,7 @@
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "TouchManager.h"
+#include "MediaDecoder.h"
 #include "MediaPrefs.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
@@ -236,7 +237,6 @@ nsLayoutStatics::Initialize()
   }
 
   StylePrefs::Init();
-  nsCSSRuleProcessor::Startup();
 
 #ifdef MOZ_XUL
   rv = nsXULPopupManager::Init();
@@ -295,6 +295,8 @@ nsLayoutStatics::Initialize()
   mozilla::LayerAnimationInfo::Initialize();
 #endif
 
+  MediaDecoder::InitStatics();
+
   PromiseDebugging::Init();
 
   mozilla::dom::WebCryptoThreadPool::Initialize();
@@ -341,7 +343,7 @@ nsLayoutStatics::Shutdown()
   EventListenerManager::Shutdown();
   IMEStateManager::Shutdown();
   nsCSSParser::Shutdown();
-  nsCSSRuleProcessor::Shutdown();
+  nsMediaFeatures::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
   nsCSSRendering::Shutdown();
   StaticPresData::Shutdown();

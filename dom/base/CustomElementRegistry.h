@@ -51,8 +51,7 @@ class CustomElementCallback
 public:
   CustomElementCallback(Element* aThisObject,
                         nsIDocument::ElementCallbackType aCallbackType,
-                        CallbackFunction* aCallback,
-                        CustomElementData* aOwnerData);
+                        CallbackFunction* aCallback);
   void Traverse(nsCycleCollectionTraversalCallback& aCb) const;
   void Call();
   void SetArgs(LifecycleCallbackArgs& aArgs)
@@ -79,9 +78,6 @@ private:
   // used by the attribute changed callback.
   LifecycleCallbackArgs mArgs;
   LifecycleAdoptedCallbackArgs mAdoptedCallbackArgs;
-  // CustomElementData that contains this callback in the
-  // callback queue.
-  CustomElementData* mOwnerData;
 };
 
 class CustomElementConstructor final : public CallbackFunction
@@ -114,14 +110,7 @@ struct CustomElementData
 
   explicit CustomElementData(nsAtom* aType);
   CustomElementData(nsAtom* aType, State aState);
-  // Custom element type, for <button is="x-button"> or <x-button>
-  // this would be x-button.
-  RefPtr<nsAtom> mType;
-  // Element is being created flag as described in the custom elements spec.
-  bool mElementIsBeingCreated;
-  // Flag to determine if the created callback has been invoked, thus it
-  // determines if other callbacks can be enqueued.
-  bool mCreatedCallbackInvoked;
+
   // Custom element state as described in the custom element spec.
   State mState;
   // custom element reaction queue as described in the custom element spec.
@@ -134,6 +123,7 @@ struct CustomElementData
 
   void SetCustomElementDefinition(CustomElementDefinition* aDefinition);
   CustomElementDefinition* GetCustomElementDefinition();
+  nsAtom* GetCustomElementType();
 
   void Traverse(nsCycleCollectionTraversalCallback& aCb) const;
   void Unlink();
@@ -141,6 +131,9 @@ struct CustomElementData
 private:
   virtual ~CustomElementData() {}
 
+  // Custom element type, for <button is="x-button"> or <x-button>
+  // this would be x-button.
+  RefPtr<nsAtom> mType;
   RefPtr<CustomElementDefinition> mCustomElementDefinition;
 };
 
@@ -181,7 +174,7 @@ struct CustomElementDefinition
   UniquePtr<mozilla::dom::LifecycleCallbacks> mCallbacks;
 
   // A construction stack. Use nullptr to represent an "already constructed marker".
-  nsTArray<RefPtr<nsGenericHTMLElement>> mConstructionStack;
+  nsTArray<RefPtr<Element>> mConstructionStack;
 
   // The document custom element order.
   uint32_t mDocOrder;
@@ -320,12 +313,11 @@ private:
   void Enqueue(Element* aElement, CustomElementReaction* aReaction);
 
 private:
-  class ProcessBackupQueueRunnable : public mozilla::Runnable {
+  class BackupQueueMicroTask final : public mozilla::MicroTaskRunnable {
     public:
-      explicit ProcessBackupQueueRunnable(
+      explicit BackupQueueMicroTask(
         CustomElementReactionsStack* aReactionStack)
-        : Runnable(
-            "dom::CustomElementReactionsStack::ProcessBackupQueueRunnable")
+        : MicroTaskRunnable()
         , mReactionStack(aReactionStack)
       {
         MOZ_ASSERT(!mReactionStack->mIsBackupQueueProcessing,
@@ -333,11 +325,10 @@ private:
         mReactionStack->mIsBackupQueueProcessing = true;
       }
 
-      NS_IMETHOD Run() override
+      virtual void Run(AutoSlowOperation& aAso) override
       {
         mReactionStack->InvokeBackupQueue();
         mReactionStack->mIsBackupQueueProcessing = false;
-        return NS_OK;
       }
 
     private:
@@ -359,8 +350,7 @@ public:
   static bool IsCustomElementEnabled(JSContext* aCx = nullptr,
                                      JSObject* aObject = nullptr)
   {
-    return nsContentUtils::IsCustomElementsEnabled() ||
-           nsContentUtils::IsWebComponentsEnabled();
+    return nsContentUtils::IsCustomElementsEnabled();
   }
 
   explicit CustomElementRegistry(nsPIDOMWindowInner* aWindow);
@@ -370,17 +360,10 @@ public:
    * https://html.spec.whatwg.org/#look-up-a-custom-element-definition
    */
   CustomElementDefinition* LookupCustomElementDefinition(
-    const nsAString& aLocalName, const nsAString* aIs = nullptr) const;
+    const nsAString& aLocalName, nsAtom* aTypeAtom) const;
 
   CustomElementDefinition* LookupCustomElementDefinition(
     JSContext* aCx, JSObject *aConstructor) const;
-
-  /**
-   * Enqueue created callback or register upgrade candidate for
-   * newly created custom elements, possibly extending an existing type.
-   * ex. <x-button>, <button is="x-button> (type extension)
-   */
-  void SetupCustomElement(Element* aElement, const nsAString* aTypeExtension);
 
   static void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
                                        Element* aCustomElement,
@@ -391,24 +374,11 @@ public:
   void GetCustomPrototype(nsAtom* aAtom,
                           JS::MutableHandle<JSObject*> aPrototype);
 
-  void SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
-                           Element* aCustomElement,
-                           CustomElementDefinition* aDefinition);
-
   /**
    * Upgrade an element.
    * https://html.spec.whatwg.org/multipage/scripting.html#upgrades
    */
   static void Upgrade(Element* aElement, CustomElementDefinition* aDefinition, ErrorResult& aRv);
-
-private:
-  ~CustomElementRegistry();
-
-  static UniquePtr<CustomElementCallback> CreateCustomElementCallback(
-    nsIDocument::ElementCallbackType aType, Element* aCustomElement,
-    LifecycleCallbackArgs* aArgs,
-    LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
-    CustomElementDefinition* aDefinition);
 
   /**
    * Registers an unresolved custom element that is a candidate for
@@ -420,6 +390,21 @@ private:
    */
   void RegisterUnresolvedElement(Element* aElement,
                                  nsAtom* aTypeName = nullptr);
+
+  /**
+   * Unregister an unresolved custom element that is a candidate for
+   * upgrade when a custom element is removed from tree.
+   */
+  void UnregisterUnresolvedElement(Element* aElement,
+                                   nsAtom* aTypeName = nullptr);
+private:
+  ~CustomElementRegistry();
+
+  static UniquePtr<CustomElementCallback> CreateCustomElementCallback(
+    nsIDocument::ElementCallbackType aType, Element* aCustomElement,
+    LifecycleCallbackArgs* aArgs,
+    LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
+    CustomElementDefinition* aDefinition);
 
   void UpgradeCandidates(nsAtom* aKey,
                          CustomElementDefinition* aDefinition,
@@ -477,31 +462,6 @@ private:
       CustomElementRegistry* mRegistry;
   };
 
-  class SyncInvokeReactionRunnable : public mozilla::Runnable {
-    public:
-      SyncInvokeReactionRunnable(
-        UniquePtr<CustomElementReaction> aReaction, Element* aCustomElement)
-        : Runnable(
-            "dom::CustomElementRegistry::SyncInvokeReactionRunnable")
-        , mReaction(Move(aReaction))
-        , mCustomElement(aCustomElement)
-      {
-      }
-
-      NS_IMETHOD Run() override
-      {
-        // It'll never throw exceptions, because all the exceptions are handled
-        // by Lifecycle*Callback::Call function.
-        ErrorResult rv;
-        mReaction->Invoke(mCustomElement, rv);
-        return NS_OK;
-      }
-
-    private:
-      UniquePtr<CustomElementReaction> mReaction;
-      Element* mCustomElement;
-  };
-
 public:
   nsISupports* GetParentObject() const;
 
@@ -518,15 +478,24 @@ public:
 
 class MOZ_RAII AutoCEReaction final {
   public:
-    explicit AutoCEReaction(CustomElementReactionsStack* aReactionsStack)
-      : mReactionsStack(aReactionsStack) {
+    // JSContext is allowed to be a nullptr if we are guaranteeing that we're
+    // not doing something that might throw but not finish reporting a JS
+    // exception during the lifetime of the AutoCEReaction.
+    AutoCEReaction(CustomElementReactionsStack* aReactionsStack, JSContext* aCx)
+      : mReactionsStack(aReactionsStack)
+      , mCx(aCx) {
       mReactionsStack->CreateAndPushElementQueue();
     }
     ~AutoCEReaction() {
+      Maybe<JS::AutoSaveExceptionState> ases;
+      if (mCx) {
+        ases.emplace(mCx);
+      }
       mReactionsStack->PopAndInvokeElementQueue();
     }
   private:
     RefPtr<CustomElementReactionsStack> mReactionsStack;
+    JSContext* mCx;
 };
 
 } // namespace dom

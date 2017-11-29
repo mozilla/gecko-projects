@@ -40,6 +40,7 @@
 #include "nsIFile.h"
 #include "nsCRT.h"
 #include "nsINetworkPredictor.h"
+#include "nsReadableUtils.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 
@@ -312,6 +313,48 @@ private:
           surfacePathPrefix.AppendInt(uint32_t(counter.Key().Flags()),
                                       /* aRadix = */ 16);
         }
+
+        if (counter.Key().SVGContext()) {
+          const SVGImageContext& context = counter.Key().SVGContext().ref();
+          surfacePathPrefix.AppendLiteral(", svgContext:[ ");
+          if (context.GetViewportSize()) {
+            const CSSIntSize& size = context.GetViewportSize().ref();
+            surfacePathPrefix.AppendLiteral("viewport=(");
+            surfacePathPrefix.AppendInt(size.width);
+            surfacePathPrefix.AppendLiteral("x");
+            surfacePathPrefix.AppendInt(size.height);
+            surfacePathPrefix.AppendLiteral(") ");
+          }
+          if (context.GetPreserveAspectRatio()) {
+            nsAutoString aspect;
+            context.GetPreserveAspectRatio()->ToString(aspect);
+            surfacePathPrefix.AppendLiteral("preserveAspectRatio=(");
+            LossyAppendUTF16toASCII(aspect, surfacePathPrefix);
+            surfacePathPrefix.AppendLiteral(") ");
+          }
+          if (context.GetContextPaint()) {
+            const SVGEmbeddingContextPaint* paint = context.GetContextPaint();
+            surfacePathPrefix.AppendLiteral("contextPaint=(");
+            if (paint->GetFill()) {
+              surfacePathPrefix.AppendLiteral(" fill=");
+              surfacePathPrefix.AppendInt(paint->GetFill()->ToABGR(), 16);
+            }
+            if (paint->GetFillOpacity()) {
+              surfacePathPrefix.AppendLiteral(" fillOpa=");
+              surfacePathPrefix.AppendFloat(paint->GetFillOpacity());
+            }
+            if (paint->GetStroke()) {
+              surfacePathPrefix.AppendLiteral(" stroke=");
+              surfacePathPrefix.AppendInt(paint->GetStroke()->ToABGR(), 16);
+            }
+            if (paint->GetStrokeOpacity()) {
+              surfacePathPrefix.AppendLiteral(" strokeOpa=");
+              surfacePathPrefix.AppendFloat(paint->GetStrokeOpacity());
+            }
+            surfacePathPrefix.AppendLiteral(" ) ");
+          }
+          surfacePathPrefix.AppendLiteral("]");
+        }
       } else if (counter.Type() == SurfaceMemoryCounterType::COMPOSITING) {
         surfacePathPrefix.AppendLiteral(", compositing frame");
       } else if (counter.Type() == SurfaceMemoryCounterType::COMPOSITING_PREV) {
@@ -577,14 +620,14 @@ ShouldLoadCachedImage(imgRequest* aImgRequest,
    * Cached images are keyed off of the first uri in a redirect chain.
    * Hence content policies don't get a chance to test the intermediate hops
    * or the final desitnation.  Here we test the final destination using
-   * mCurrentURI off of the imgRequest and passing it into content policies.
+   * mFinalURI off of the imgRequest and passing it into content policies.
    * For Mixed Content Blocker, we do an additional check to determine if any
    * of the intermediary hops went through an insecure redirect with the
    * mHadInsecureRedirect flag
    */
   bool insecureRedirect = aImgRequest->HadInsecureRedirect();
   nsCOMPtr<nsIURI> contentLocation;
-  aImgRequest->GetCurrentURI(getter_AddRefs(contentLocation));
+  aImgRequest->GetFinalURI(getter_AddRefs(contentLocation));
   nsresult rv;
 
   int16_t decision = nsIContentPolicy::REJECT_REQUEST;
@@ -2942,12 +2985,12 @@ imgCacheValidator::OnStartRequest(nsIRequest* aRequest, nsISupports* ctxt)
     nsCOMPtr<nsIURI> channelURI;
     channel->GetURI(getter_AddRefs(channelURI));
 
-    nsCOMPtr<nsIURI> currentURI;
-    mRequest->GetCurrentURI(getter_AddRefs(currentURI));
+    nsCOMPtr<nsIURI> finalURI;
+    mRequest->GetFinalURI(getter_AddRefs(finalURI));
 
     bool sameURI = false;
-    if (channelURI && currentURI) {
-      channelURI->Equals(currentURI, &sameURI);
+    if (channelURI && finalURI) {
+      channelURI->Equals(finalURI, &sameURI);
     }
 
     if (isFromCache && sameURI) {

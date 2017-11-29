@@ -135,7 +135,6 @@ _pdfjsLib.PDFJS.useOnlyCssZoom = _pdfjsLib.PDFJS.useOnlyCssZoom === undefined ? 
 _pdfjsLib.PDFJS.maxCanvasPixels = _pdfjsLib.PDFJS.maxCanvasPixels === undefined ? 16777216 : _pdfjsLib.PDFJS.maxCanvasPixels;
 _pdfjsLib.PDFJS.disableHistory = _pdfjsLib.PDFJS.disableHistory === undefined ? false : _pdfjsLib.PDFJS.disableHistory;
 _pdfjsLib.PDFJS.disableTextLayer = _pdfjsLib.PDFJS.disableTextLayer === undefined ? false : _pdfjsLib.PDFJS.disableTextLayer;
-_pdfjsLib.PDFJS.ignoreCurrentPositionOnZoom = _pdfjsLib.PDFJS.ignoreCurrentPositionOnZoom === undefined ? false : _pdfjsLib.PDFJS.ignoreCurrentPositionOnZoom;
 ;
 function getOutputScale(ctx) {
   let devicePixelRatio = window.devicePixelRatio || 1;
@@ -933,6 +932,8 @@ let PDFViewerApplication = {
     configure(_pdfjsLib.PDFJS);
     this.appConfig = appConfig;
     return this._readPreferences().then(() => {
+      return this._parseHashParameters();
+    }).then(() => {
       return this._initializeL10n();
     }).then(() => {
       return this._initializeViewerComponents();
@@ -1004,6 +1005,61 @@ let PDFViewerApplication = {
       viewerPrefs['enablePrintAutoRotate'] = value;
     })]).catch(function (reason) {});
   },
+  _parseHashParameters() {
+    let { appConfig, viewerPrefs } = this;
+    let waitOn = [];
+    if (viewerPrefs['pdfBugEnabled']) {
+      let hash = document.location.hash.substring(1);
+      let hashParams = (0, _ui_utils.parseQueryString)(hash);
+      if ('disableworker' in hashParams) {
+        _pdfjsLib.PDFJS.disableWorker = hashParams['disableworker'] === 'true';
+      }
+      if ('disablerange' in hashParams) {
+        _pdfjsLib.PDFJS.disableRange = hashParams['disablerange'] === 'true';
+      }
+      if ('disablestream' in hashParams) {
+        _pdfjsLib.PDFJS.disableStream = hashParams['disablestream'] === 'true';
+      }
+      if ('disableautofetch' in hashParams) {
+        _pdfjsLib.PDFJS.disableAutoFetch = hashParams['disableautofetch'] === 'true';
+      }
+      if ('disablefontface' in hashParams) {
+        _pdfjsLib.PDFJS.disableFontFace = hashParams['disablefontface'] === 'true';
+      }
+      if ('disablehistory' in hashParams) {
+        _pdfjsLib.PDFJS.disableHistory = hashParams['disablehistory'] === 'true';
+      }
+      if ('webgl' in hashParams) {
+        _pdfjsLib.PDFJS.disableWebGL = hashParams['webgl'] !== 'true';
+      }
+      if ('useonlycsszoom' in hashParams) {
+        _pdfjsLib.PDFJS.useOnlyCssZoom = hashParams['useonlycsszoom'] === 'true';
+      }
+      if ('verbosity' in hashParams) {
+        _pdfjsLib.PDFJS.verbosity = hashParams['verbosity'] | 0;
+      }
+      if ('textlayer' in hashParams) {
+        switch (hashParams['textlayer']) {
+          case 'off':
+            _pdfjsLib.PDFJS.disableTextLayer = true;
+            break;
+          case 'visible':
+          case 'shadow':
+          case 'hover':
+            let viewer = appConfig.viewerContainer;
+            viewer.classList.add('textLayer-' + hashParams['textlayer']);
+            break;
+        }
+      }
+      if ('pdfbug' in hashParams) {
+        _pdfjsLib.PDFJS.pdfBug = true;
+        let pdfBug = hashParams['pdfbug'];
+        let enabled = pdfBug.split(',');
+        waitOn.push(loadAndEnablePDFBug(enabled));
+      }
+    }
+    return Promise.all(waitOn);
+  },
   _initializeL10n() {
     this.l10n = this.externalServices.createL10n();
     return this.l10n.getDirection().then(dir => {
@@ -1011,7 +1067,7 @@ let PDFViewerApplication = {
     });
   },
   _initializeViewerComponents() {
-    let appConfig = this.appConfig;
+    let { appConfig, viewerPrefs } = this;
     return new Promise((resolve, reject) => {
       this.overlayManager = new _overlay_manager.OverlayManager();
       let eventBus = appConfig.eventBus || (0, _dom_events.getGlobalEventBus)();
@@ -1032,11 +1088,11 @@ let PDFViewerApplication = {
         renderingQueue: pdfRenderingQueue,
         linkService: pdfLinkService,
         downloadManager,
-        renderer: this.viewerPrefs['renderer'],
+        renderer: viewerPrefs['renderer'],
         l10n: this.l10n,
-        enhanceTextSelection: this.viewerPrefs['enhanceTextSelection'],
-        renderInteractiveForms: this.viewerPrefs['renderInteractiveForms'],
-        enablePrintAutoRotate: this.viewerPrefs['enablePrintAutoRotate']
+        enhanceTextSelection: viewerPrefs['enhanceTextSelection'],
+        renderInteractiveForms: viewerPrefs['renderInteractiveForms'],
+        enablePrintAutoRotate: viewerPrefs['enablePrintAutoRotate']
       });
       pdfRenderingQueue.setViewer(this.pdfViewer);
       pdfLinkService.setViewer(this.pdfViewer);
@@ -1137,9 +1193,6 @@ let PDFViewerApplication = {
   },
   get pagesCount() {
     return this.pdfDocument ? this.pdfDocument.numPages : 0;
-  },
-  get pageRotation() {
-    return this.pdfViewer.pagesRotation;
   },
   set page(val) {
     this.pdfViewer.currentPageNumber = val;
@@ -1300,6 +1353,9 @@ let PDFViewerApplication = {
     return loadingTask.promise.then(pdfDocument => {
       this.load(pdfDocument);
     }, exception => {
+      if (loadingTask !== this.pdfLoadingTask) {
+        return;
+      }
       let message = exception && exception.message;
       let loadingErrorMessage;
       if (exception instanceof _pdfjsLib.InvalidPDFException) {
@@ -1799,62 +1855,8 @@ function webViewerInitialized() {
   let appConfig = PDFViewerApplication.appConfig;
   let file;
   file = window.location.href.split('#')[0];
-  let waitForBeforeOpening = [];
   appConfig.toolbar.openFile.setAttribute('hidden', 'true');
   appConfig.secondaryToolbar.openFileButton.setAttribute('hidden', 'true');
-  if (PDFViewerApplication.viewerPrefs['pdfBugEnabled']) {
-    let hash = document.location.hash.substring(1);
-    let hashParams = (0, _ui_utils.parseQueryString)(hash);
-    if ('disableworker' in hashParams) {
-      _pdfjsLib.PDFJS.disableWorker = hashParams['disableworker'] === 'true';
-    }
-    if ('disablerange' in hashParams) {
-      _pdfjsLib.PDFJS.disableRange = hashParams['disablerange'] === 'true';
-    }
-    if ('disablestream' in hashParams) {
-      _pdfjsLib.PDFJS.disableStream = hashParams['disablestream'] === 'true';
-    }
-    if ('disableautofetch' in hashParams) {
-      _pdfjsLib.PDFJS.disableAutoFetch = hashParams['disableautofetch'] === 'true';
-    }
-    if ('disablefontface' in hashParams) {
-      _pdfjsLib.PDFJS.disableFontFace = hashParams['disablefontface'] === 'true';
-    }
-    if ('disablehistory' in hashParams) {
-      _pdfjsLib.PDFJS.disableHistory = hashParams['disablehistory'] === 'true';
-    }
-    if ('webgl' in hashParams) {
-      _pdfjsLib.PDFJS.disableWebGL = hashParams['webgl'] !== 'true';
-    }
-    if ('useonlycsszoom' in hashParams) {
-      _pdfjsLib.PDFJS.useOnlyCssZoom = hashParams['useonlycsszoom'] === 'true';
-    }
-    if ('verbosity' in hashParams) {
-      _pdfjsLib.PDFJS.verbosity = hashParams['verbosity'] | 0;
-    }
-    if ('ignorecurrentpositiononzoom' in hashParams) {
-      _pdfjsLib.PDFJS.ignoreCurrentPositionOnZoom = hashParams['ignorecurrentpositiononzoom'] === 'true';
-    }
-    if ('textlayer' in hashParams) {
-      switch (hashParams['textlayer']) {
-        case 'off':
-          _pdfjsLib.PDFJS.disableTextLayer = true;
-          break;
-        case 'visible':
-        case 'shadow':
-        case 'hover':
-          let viewer = appConfig.viewerContainer;
-          viewer.classList.add('textLayer-' + hashParams['textlayer']);
-          break;
-      }
-    }
-    if ('pdfbug' in hashParams) {
-      _pdfjsLib.PDFJS.pdfBug = true;
-      let pdfBug = hashParams['pdfbug'];
-      let enabled = pdfBug.split(',');
-      waitForBeforeOpening.push(loadAndEnablePDFBug(enabled));
-    }
-  }
   if (!PDFViewerApplication.supportsDocumentFonts) {
     _pdfjsLib.PDFJS.disableFontFace = true;
     PDFViewerApplication.l10n.get('web_fonts_disabled', null, 'Web fonts are disabled: unable to use embedded PDF fonts.').then(msg => {
@@ -1880,10 +1882,10 @@ function webViewerInitialized() {
   appConfig.sidebar.toggleButton.addEventListener('click', function () {
     PDFViewerApplication.pdfSidebar.toggle();
   });
-  Promise.all(waitForBeforeOpening).then(function () {
+  Promise.resolve().then(function () {
     webViewerOpenFileViaURL(file);
   }).catch(function (reason) {
-    PDFViewerApplication.l10n.get('loading_error', null, 'An error occurred while opening.').then(msg => {
+    PDFViewerApplication.l10n.get('loading_error', null, 'An error occurred while loading the PDF.').then(msg => {
       PDFViewerApplication.error(msg, reason);
     });
   });
@@ -5376,7 +5378,19 @@ class PDFThumbnailViewer {
     if (numVisibleThumbs > 0) {
       let first = visibleThumbs.first.id;
       let last = numVisibleThumbs > 1 ? visibleThumbs.last.id : first;
+      let shouldScroll = false;
       if (page <= first || page >= last) {
+        shouldScroll = true;
+      } else {
+        visibleThumbs.views.some(function (view) {
+          if (view.id !== page) {
+            return false;
+          }
+          shouldScroll = view.percent < 100;
+          return true;
+        });
+      }
+      if (shouldScroll) {
         (0, _ui_utils.scrollIntoView)(thumbnail, { top: THUMBNAIL_SCROLL_MARGIN });
       }
     }
@@ -6243,7 +6257,7 @@ class BaseViewer {
     if (!noScroll) {
       let page = this._currentPageNumber,
           dest;
-      if (this._location && !_pdfjsLib.PDFJS.ignoreCurrentPositionOnZoom && !(this.isInPresentationMode || this.isChangingPresentationMode)) {
+      if (this._location && !(this.isInPresentationMode || this.isChangingPresentationMode)) {
         page = this._location.pageNumber;
         dest = [null, { name: 'XYZ' }, this._location.left, this._location.top, null];
       }

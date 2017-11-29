@@ -161,10 +161,6 @@ public abstract class GeckoApp extends GeckoActivity
     // for crash loop detection purposes.
     private static final int STARTUP_PHASE_DURATION_MS = 30 * 1000;
 
-    protected static final int LOAD_DEFAULT = 0;
-    protected static final int LOAD_NEW_TAB = 1;
-    protected static final int LOAD_SWITCH_TAB = 2;
-
     private static boolean sAlreadyLoaded;
 
     protected RelativeLayout mRootLayout;
@@ -914,11 +910,12 @@ public abstract class GeckoApp extends GeckoActivity
             enableStrictMode();
         }
 
-        // Mozglue should already be loaded by BrowserApp.onCreate() in Fennec, but in
-        // custom tabs it may not be.
-        GeckoLoader.loadMozGlue(getApplicationContext());
-
-        if (!HardwareUtils.isSupportedSystem() || !GeckoLoader.neonCompatible()) {
+        boolean supported = HardwareUtils.isSupportedSystem();
+        if (supported) {
+            GeckoLoader.loadMozGlue(getApplicationContext());
+            supported = GeckoLoader.neonCompatible();
+        }
+        if (!supported) {
             // This build does not support the Android version of the device: Show an error and finish the app.
             mIsAbortingAppLaunch = true;
             super.onCreate(savedInstanceState);
@@ -1053,11 +1050,11 @@ public abstract class GeckoApp extends GeckoActivity
         GeckoAccessibility.setDelegate(mLayerView);
 
         getAppEventDispatcher().registerGeckoThreadListener(this,
-            "Accessibility:Event",
             "Locale:Set",
             null);
 
         getAppEventDispatcher().registerUiThreadListener(this,
+            "Accessibility:Event",
             "Contact:Add",
             "DevToolsAuth:Scan",
             "DOMFullScreen:Start",
@@ -1796,12 +1793,12 @@ public abstract class GeckoApp extends GeckoActivity
         } else if (ACTION_HOMESCREEN_SHORTCUT.equals(action)) {
             final GeckoBundle data = new GeckoBundle(2);
             data.putString("uri", uri);
-            data.putInt("flags", LOAD_SWITCH_TAB);
+            data.putString("flags", "OPEN_SWITCHTAB");
             getAppEventDispatcher().dispatch("Tab:OpenUri", data);
         } else if (Intent.ACTION_SEARCH.equals(action)) {
             final GeckoBundle data = new GeckoBundle(2);
             data.putString("uri", uri);
-            data.putInt("flags", LOAD_NEW_TAB);
+            data.putString("flags", "OPEN_NEWTAB");
             getAppEventDispatcher().dispatch("Tab:OpenUri", data);
         } else if (NotificationHelper.HELPER_BROADCAST_ACTION.equals(action)) {
             NotificationHelper.getInstance(getApplicationContext()).handleNotificationIntent(intent);
@@ -2052,11 +2049,11 @@ public abstract class GeckoApp extends GeckoActivity
             null);
 
         getAppEventDispatcher().unregisterGeckoThreadListener(this,
-            "Accessibility:Event",
             "Locale:Set",
             null);
 
         getAppEventDispatcher().unregisterUiThreadListener(this,
+            "Accessibility:Event",
             "Contact:Add",
             "DevToolsAuth:Scan",
             "DOMFullScreen:Start",

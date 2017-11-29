@@ -53,7 +53,7 @@ namespace dom {
  * image             | TYPE_INTERNAL_IMAGE, TYPE_INTERNAL_IMAGE_PRELOAD, TYPE_INTERNAL_IMAGE_FAVICON
  * imageset          | TYPE_IMAGESET
  * import            | Not supported by Gecko
- * internal          | TYPE_DOCUMENT, TYPE_XBL, TYPE_OTHER
+ * internal          | TYPE_DOCUMENT, TYPE_XBL, TYPE_OTHER, TYPE_SAVEAS_DOWNLOAD
  * location          |
  * manifest          | TYPE_WEB_MANIFEST
  * object            | TYPE_INTERNAL_OBJECT
@@ -402,6 +402,19 @@ public:
     MOZ_ASSERT(mIntegrity.IsEmpty());
     mIntegrity.Assign(aIntegrity);
   }
+
+  bool
+  MozErrors() const
+  {
+    return mMozErrors;
+  }
+
+  void
+  SetMozErrors()
+  {
+    mMozErrors = true;
+  }
+
   const nsCString&
   GetFragment() const
   {
@@ -581,6 +594,7 @@ private:
   RequestCache mCacheMode;
   RequestRedirect mRedirectMode;
   nsString mIntegrity;
+  bool mMozErrors;
   nsCString mFragment;
   MOZ_INIT_OUTSIDE_CTOR bool mAuthenticationFlag;
   MOZ_INIT_OUTSIDE_CTOR bool mForceOriginHeader;

@@ -145,11 +145,11 @@ def verify_dependency_tiers(task, taskgraph, scratch_pad):
         for task in taskgraph.tasks.itervalues():
             # Buildbot bridge tasks cannot have tiers, so we cannot enforce
             # this check for them
-            if task.task["workerType"] == "buildbot-bridge":
+            if task.task.get("workerType") == "buildbot-bridge":
                 continue
             tier = tiers[task.label]
             for d in task.dependencies.itervalues():
-                if taskgraph[d].task["workerType"] == "buildbot-bridge":
+                if taskgraph[d].task.get("workerType") == "buildbot-bridge":
                     continue
                 if tier < tiers[d]:
                     raise Exception(

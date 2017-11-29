@@ -11,6 +11,7 @@
 
 #include "gfxPoint.h"                   // for gfxPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/gfx/CompositorHitTestInfo.h"
 #include "mozilla/gfx/Logging.h"        // for gfx::TreeLog
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/layers/TouchCounter.h"// for TouchCounter
@@ -104,7 +105,7 @@ class APZCTreeManager : public IAPZCTreeManager {
   struct TreeBuildingState;
 
 public:
-  APZCTreeManager();
+  explicit APZCTreeManager(uint64_t aRootLayersId);
 
   /**
    * Initializes the global state used in AsyncPanZoomController.
@@ -422,13 +423,14 @@ public:
    *                   start a fling (in this case the fling is given to the
    *                   first APZC in the chain)
    *
-   * aHandoffState.mVelocity will be modified depending on how much of that
-   * velocity has been consumed by APZCs in the overscroll hand-off chain.
+   * The return value is the "residual velocity", the portion of
+   * |aHandoffState.mVelocity| that was not consumed by APZCs in the
+   * handoff chain doing flings.
    * The caller can use this value to determine whether it should consume
-   * the excess velocity by going into an overscroll fling.
+   * the excess velocity by going into overscroll.
    */
-  void DispatchFling(AsyncPanZoomController* aApzc,
-                     FlingHandoffState& aHandoffState);
+  ParentLayerPoint DispatchFling(AsyncPanZoomController* aApzc,
+                                 const FlingHandoffState& aHandoffState);
 
   void StartScrollbarDrag(
       const ScrollableLayerGuid& aGuid,
@@ -483,7 +485,7 @@ public:
   */
   RefPtr<HitTestingTreeNode> GetRootNode() const;
   already_AddRefed<AsyncPanZoomController> GetTargetAPZC(const ScreenPoint& aPoint,
-                                                         HitTestResult* aOutHitResult,
+                                                         gfx::CompositorHitTestInfo* aOutHitResult,
                                                          RefPtr<HitTestingTreeNode>* aOutScrollbarNode = nullptr);
   already_AddRefed<AsyncPanZoomController> GetTargetAPZC(const uint64_t& aLayersId,
                                                          const FrameMetrics::ViewID& aScrollId);
@@ -520,9 +522,12 @@ private:
                                      GuidComparator aComparator);
   AsyncPanZoomController* GetTargetApzcForNode(HitTestingTreeNode* aNode);
   AsyncPanZoomController* GetAPZCAtPoint(HitTestingTreeNode* aNode,
-                                         const ParentLayerPoint& aHitTestPoint,
-                                         HitTestResult* aOutHitResult,
+                                         const ScreenPoint& aHitTestPoint,
+                                         gfx::CompositorHitTestInfo* aOutHitResult,
                                          HitTestingTreeNode** aOutScrollbarNode);
+  already_AddRefed<AsyncPanZoomController> GetAPZCAtPointWR(const ScreenPoint& aHitTestPoint,
+                                                            gfx::CompositorHitTestInfo* aOutHitResult,
+                                                            HitTestingTreeNode** aOutScrollbarNode);
   AsyncPanZoomController* FindRootApzcForLayersId(uint64_t aLayersId) const;
   AsyncPanZoomController* FindRootContentApzcForLayersId(uint64_t aLayersId) const;
   AsyncPanZoomController* FindRootContentOrRootApzc() const;
@@ -548,7 +553,7 @@ private:
    */
   already_AddRefed<AsyncPanZoomController> GetTouchInputBlockAPZC(const MultiTouchInput& aEvent,
                                                                   nsTArray<TouchBehaviorFlags>* aOutTouchBehaviors,
-                                                                  HitTestResult* aOutHitResult,
+                                                                  gfx::CompositorHitTestInfo* aOutHitResult,
                                                                   RefPtr<HitTestingTreeNode>* aOutHitScrollbarNode);
   nsEventStatus ProcessTouchInput(MultiTouchInput& aInput,
                                   ScrollableLayerGuid* aOutTargetGuid,
@@ -611,6 +616,10 @@ private:
   // Requires the caller to hold mTreeLock.
   LayerToParentLayerMatrix4x4 ComputeTransformForNode(const HitTestingTreeNode* aNode) const;
 
+  // Returns a pointer to the WebRenderAPI for the root layers id this APZCTreeManager
+  // is for. This might be null (for example, if WebRender is not enabled).
+  already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() const;
+
 protected:
   /* The input queue where input events are held until we know enough to
    * figure out where they're going. Protected so gtests can access it.
@@ -618,6 +627,9 @@ protected:
   RefPtr<InputQueue> mInputQueue;
 
 private:
+  /* Layers id for the root CompositorBridgeParent that owns this APZCTreeManager. */
+  uint64_t mRootLayersId;
+
   /* Whenever walking or mutating the tree rooted at mRootNode, mTreeLock must be held.
    * This lock does not need to be held while manipulating a single APZC instance in
    * isolation (that is, if its tree pointers are not being accessed or mutated). The
@@ -647,7 +659,7 @@ private:
   /* The hit result for the current input event block; this should always be in
    * sync with mApzcForInputBlock.
    */
-  HitTestResult mHitResultForInputBlock;
+  gfx::CompositorHitTestInfo mHitResultForInputBlock;
   /* Sometimes we want to ignore all touches except one. In such cases, this
    * is set to the identifier of the touch we are not ignoring; in other cases,
    * this is set to -1.

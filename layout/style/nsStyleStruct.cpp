@@ -3177,6 +3177,83 @@ nsStyleImageLayers::Layer::operator==(const Layer& aOther) const
          mComposite == aOther.mComposite;
 }
 
+template <class ComputedValueItem>
+static void
+FillImageLayerList(
+    nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+    ComputedValueItem nsStyleImageLayers::Layer::* aResultLocation,
+    uint32_t aItemCount, uint32_t aFillCount)
+{
+  NS_PRECONDITION(aFillCount <= aLayers.Length(), "unexpected array length");
+  for (uint32_t sourceLayer = 0, destLayer = aItemCount;
+       destLayer < aFillCount;
+       ++sourceLayer, ++destLayer) {
+    aLayers[destLayer].*aResultLocation =
+      aLayers[sourceLayer].*aResultLocation;
+  }
+}
+
+// The same as FillImageLayerList, but for values stored in
+// layer.mPosition.*aResultLocation instead of layer.*aResultLocation.
+static void
+FillImageLayerPositionCoordList(
+    nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+    Position::Coord
+        Position::* aResultLocation,
+    uint32_t aItemCount, uint32_t aFillCount)
+{
+  NS_PRECONDITION(aFillCount <= aLayers.Length(), "unexpected array length");
+  for (uint32_t sourceLayer = 0, destLayer = aItemCount;
+       destLayer < aFillCount;
+       ++sourceLayer, ++destLayer) {
+    aLayers[destLayer].mPosition.*aResultLocation =
+      aLayers[sourceLayer].mPosition.*aResultLocation;
+  }
+}
+
+void
+nsStyleImageLayers::FillAllLayers(uint32_t aMaxItemCount)
+{
+  // Delete any extra items.  We need to keep layers in which any
+  // property was specified.
+  mLayers.TruncateLengthNonZero(aMaxItemCount);
+
+  uint32_t fillCount = mImageCount;
+  FillImageLayerList(mLayers,
+                     &Layer::mImage,
+                     mImageCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mRepeat,
+                     mRepeatCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mAttachment,
+                     mAttachmentCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mClip,
+                     mClipCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mBlendMode,
+                     mBlendModeCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mOrigin,
+                     mOriginCount, fillCount);
+  FillImageLayerPositionCoordList(mLayers,
+                                  &Position::mXPosition,
+                                  mPositionXCount, fillCount);
+  FillImageLayerPositionCoordList(mLayers,
+                                  &Position::mYPosition,
+                                  mPositionYCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mSize,
+                     mSizeCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mMaskMode,
+                     mMaskModeCount, fillCount);
+  FillImageLayerList(mLayers,
+                     &Layer::mComposite,
+                     mCompositeCount, fillCount);
+}
+
 nsChangeHint
 nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aNewLayer) const
 {
@@ -3491,6 +3568,8 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
   , mWillChangeBitField(0)
   , mTouchAction(NS_STYLE_TOUCH_ACTION_AUTO)
   , mScrollBehavior(NS_STYLE_SCROLL_BEHAVIOR_AUTO)
+  , mOverscrollBehaviorX(StyleOverscrollBehavior::Auto)
+  , mOverscrollBehaviorY(StyleOverscrollBehavior::Auto)
   , mScrollSnapTypeX(NS_STYLE_SCROLL_SNAP_TYPE_NONE)
   , mScrollSnapTypeY(NS_STYLE_SCROLL_SNAP_TYPE_NONE)
   , mScrollSnapPointsX(eStyleUnit_None)
@@ -3554,6 +3633,8 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
   , mWillChange(aSource.mWillChange)
   , mTouchAction(aSource.mTouchAction)
   , mScrollBehavior(aSource.mScrollBehavior)
+  , mOverscrollBehaviorX(aSource.mOverscrollBehaviorX)
+  , mOverscrollBehaviorY(aSource.mOverscrollBehaviorY)
   , mScrollSnapTypeX(aSource.mScrollSnapTypeX)
   , mScrollSnapTypeY(aSource.mScrollSnapTypeY)
   , mScrollSnapPointsX(aSource.mScrollSnapPointsX)
@@ -3622,7 +3703,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
-  if (!DefinitelyEqualURIsAndPrincipal(mBinding.ForceGet(), aNewData.mBinding.ForceGet())
+  if (!DefinitelyEqualURIsAndPrincipal(mBinding, aNewData.mBinding)
       || mPosition != aNewData.mPosition
       || mDisplay != aNewData.mDisplay
       || mContain != aNewData.mContain
@@ -3816,6 +3897,13 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
   // the layers and send it over to the compositor for APZ to handle.
   if (mTouchAction != aNewData.mTouchAction) {
     hint |= nsChangeHint_RepaintFrame;
+  }
+
+  // If overscroll-behavior has changed, the changes are picked up
+  // during a repaint.
+  if (mOverscrollBehaviorX != aNewData.mOverscrollBehaviorX ||
+      mOverscrollBehaviorY != aNewData.mOverscrollBehaviorY) {
+    hint |= nsChangeHint_SchedulePaint;
   }
 
   // Note:  Our current behavior for handling changes to the
@@ -4185,7 +4273,7 @@ nsStyleText::nsStyleText(const nsPresContext* aContext)
   , mRubyPosition(NS_STYLE_RUBY_POSITION_OVER)
   , mTextSizeAdjust(NS_STYLE_TEXT_SIZE_ADJUST_AUTO)
   , mTextCombineUpright(NS_STYLE_TEXT_COMBINE_UPRIGHT_NONE)
-  , mControlCharacterVisibility(nsCSSParser::ControlCharVisibilityDefault())
+  , mControlCharacterVisibility(nsLayoutUtils::ControlCharVisibilityDefault())
   , mTextEmphasisStyle(NS_STYLE_TEXT_EMPHASIS_STYLE_NONE)
   , mTextRendering(NS_STYLE_TEXT_RENDERING_AUTO)
   , mTextEmphasisColor(StyleComplexColor::CurrentColor())

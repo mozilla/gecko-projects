@@ -1799,18 +1799,18 @@ nsWindow::SetIcon(const nsAString& aIconSpec)
         // The last two entries (for the old XPM format) will be ignored unless
         // no icons are found using other suffixes. XPM icons are deprecated.
 
-        const char extensions[6][7] = { ".png", "16.png", "32.png", "48.png",
-                                    ".xpm", "16.xpm" };
+        const char16_t extensions[9][8] = { u".png", u"16.png", u"32.png",
+                                            u"48.png", u"64.png", u"128.png",
+                                            u"256.png",
+                                            u".xpm", u"16.xpm" };
 
         for (uint32_t i = 0; i < ArrayLength(extensions); i++) {
             // Don't bother looking for XPM versions if we found a PNG.
             if (i == ArrayLength(extensions) - 2 && foundIcon)
                 break;
 
-            nsAutoString extension;
-            extension.AppendASCII(extensions[i]);
-
-            ResolveIconName(aIconSpec, extension, getter_AddRefs(iconFile));
+            ResolveIconName(aIconSpec, nsDependentString(extensions[i]),
+                            getter_AddRefs(iconFile));
             if (iconFile) {
                 iconFile->GetNativePath(path);
                 GdkPixbuf *icon = gdk_pixbuf_new_from_file(path.get(), nullptr);
@@ -2738,6 +2738,19 @@ static guint ButtonMaskFromGDKButton(guint button)
 }
 
 void
+nsWindow::DispatchContextMenuEventFromMouseEvent(uint16_t domButton,
+                                                 GdkEventButton *aEvent)
+{
+    if (domButton == WidgetMouseEvent::eRightButton && MOZ_LIKELY(!mIsDestroyed)) {
+        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
+                                          WidgetMouseEvent::eReal);
+        InitButtonEvent(contextMenuEvent, aEvent);
+        contextMenuEvent.pressure = mLastMotionPressure;
+        DispatchInputEvent(&contextMenuEvent);
+    }
+}
+
+void
 nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
 {
     LOG(("Button %u press on %p\n", aEvent->button, (void *)this));
@@ -2806,13 +2819,8 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     DispatchInputEvent(&event);
 
     // right menu click on linux should also pop up a context menu
-    if (domButton == WidgetMouseEvent::eRightButton &&
-        MOZ_LIKELY(!mIsDestroyed)) {
-        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
-                                          WidgetMouseEvent::eReal);
-        InitButtonEvent(contextMenuEvent, aEvent);
-        contextMenuEvent.pressure = mLastMotionPressure;
-        DispatchInputEvent(&contextMenuEvent);
+    if (!nsBaseWidget::ShowContextMenuAfterMouseUp()) {
+        DispatchContextMenuEventFromMouseEvent(domButton, aEvent);
     }
 }
 
@@ -2848,6 +2856,11 @@ nsWindow::OnButtonReleaseEvent(GdkEventButton *aEvent)
 
     DispatchInputEvent(&event);
     mLastMotionPressure = pressure;
+
+    // right menu click on linux should also pop up a context menu
+    if (nsBaseWidget::ShowContextMenuAfterMouseUp()) {
+        DispatchContextMenuEventFromMouseEvent(domButton, aEvent);
+    }
 }
 
 void
@@ -3755,13 +3768,11 @@ nsWindow::Create(nsIWidget* aParent,
             gtk_window_group_add_window(group, GTK_WINDOW(mShell));
             g_object_unref(group);
 
-            if (GetCSDSupportLevel() != CSD_SUPPORT_NONE) {
-                int32_t isCSDAvailable = false;
-                nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
-                                                &isCSDAvailable);
-                if (NS_SUCCEEDED(rv)) {
-                   mIsCSDAvailable = isCSDAvailable;
-                }
+            int32_t isCSDAvailable = false;
+            nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
+                                              &isCSDAvailable);
+            if (NS_SUCCEEDED(rv)) {
+               mIsCSDAvailable = isCSDAvailable;
             }
         }
 
@@ -6635,7 +6646,12 @@ nsWindow::SetDrawsInTitlebar(bool aState)
       return;
 
   if (mShell) {
-      gint wmd = aState ? GDK_DECOR_BORDER : ConvertBorderStyles(mBorderStyle);
+      gint wmd;
+      if (aState) {
+          wmd = GetCSDSupportLevel() == CSD_SUPPORT_FULL ? GDK_DECOR_BORDER : 0;
+      } else {
+          wmd = ConvertBorderStyles(mBorderStyle);
+      }
       gdk_window_set_decorations(gtk_widget_get_window(mShell),
                                  (GdkWMDecoration) wmd);
   }
@@ -6924,13 +6940,12 @@ nsWindow::GetCSDSupportLevel() {
     if (sCSDSupportLevel != CSD_SUPPORT_UNKNOWN) {
         return sCSDSupportLevel;
     }
-    // TODO: MATE
     const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP");
     if (currentDesktop) {
         if (strcmp(currentDesktop, "GNOME") == 0) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
         } else if (strcmp(currentDesktop, "XFCE") == 0) {
-            sCSDSupportLevel = CSD_SUPPORT_FULL;
+            sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else if (strcmp(currentDesktop, "X-Cinnamon") == 0) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
         } else if (strcmp(currentDesktop, "KDE") == 0) {
@@ -6941,6 +6956,8 @@ nsWindow::GetCSDSupportLevel() {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else if (strcmp(currentDesktop, "i3") == 0) {
             sCSDSupportLevel = CSD_SUPPORT_NONE;
+        } else if (strcmp(currentDesktop, "MATE") == 0) {
+            sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else {
             sCSDSupportLevel = CSD_SUPPORT_NONE;
         }

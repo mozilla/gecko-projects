@@ -40,6 +40,7 @@
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMString.h"
+#include "mozilla/dom/FromParser.h"
 
 class nsIDocument;
 class nsXULPrototypeDocument;
@@ -212,7 +213,7 @@ class XULDocument;
 class nsXULPrototypeScript : public nsXULPrototypeNode
 {
 public:
-    nsXULPrototypeScript(uint32_t aLineNo, uint32_t version);
+    explicit nsXULPrototypeScript(uint32_t aLineNo);
     virtual ~nsXULPrototypeScript();
 
     virtual nsresult Serialize(nsIObjectOutputStream* aStream,
@@ -269,7 +270,6 @@ public:
     bool                     mSrcLoading;
     bool                     mOutOfLine;
     mozilla::dom::XULDocument* mSrcLoadWaiters;   // [OWNER] but not COMPtr
-    uint32_t                 mLangVersion;
 private:
     JS::Heap<JSScript*>      mScriptObject;
 };
@@ -760,6 +760,7 @@ protected:
     virtual bool ParseAttribute(int32_t aNamespaceID,
                                   nsAtom* aAttribute,
                                   const nsAString& aValue,
+                                  nsIPrincipal* aMaybeScriptedPrincipal,
                                   nsAttrValue& aResult) override;
 
     virtual mozilla::EventListenerManager*
@@ -799,7 +800,8 @@ protected:
     bool BoolAttrIsTrue(nsAtom* aName) const;
 
     friend nsresult
-    NS_NewXULElement(mozilla::dom::Element** aResult, mozilla::dom::NodeInfo *aNodeInfo);
+    NS_NewXULElement(mozilla::dom::Element** aResult, mozilla::dom::NodeInfo *aNodeInfo,
+                     mozilla::dom::FromParser aFromParser, const nsAString* aIs);
     friend void
     NS_TrustedNewXULElement(nsIContent** aResult, mozilla::dom::NodeInfo *aNodeInfo);
 

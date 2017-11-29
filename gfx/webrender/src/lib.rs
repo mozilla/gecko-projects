@@ -76,6 +76,7 @@ mod picture;
 mod prim_store;
 mod print_tree;
 mod profiler;
+mod query;
 mod record;
 mod render_backend;
 mod render_task;
@@ -149,10 +150,10 @@ extern crate ws;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::build_shader_strings;
+pub use device::{build_shader_strings, ProgramCache};
 pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, ReadPixelsFormat, Renderer, RendererOptions};
-pub use renderer::{ThreadListener};
+pub use renderer::{RendererStats, ThreadListener};
 pub use renderer::MAX_VERTEX_TEXTURE_WIDTH;
 pub use webrender_api as api;

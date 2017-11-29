@@ -5,17 +5,21 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'"/>
   <title></title>
-  <link rel="stylesheet" href="resource://payments/paymentRequest.css" />
-  <script src="resource://payments/paymentRequest.js"></script>
+  <link rel="stylesheet" href="paymentRequest.css"/>
+  <script src="vendor/custom-elements.min.js"></script>
+  <script src="mixins/ObservedPropertiesMixin.js"></script>
+  <script src="components/currency-amount.js"></script>
+  <script src="paymentRequest.js"></script>
 </head>
 <body>
+  <iframe id="debugging-console" hidden="hidden" src="debugging.html"></iframe>
   <div id="host-name"></div>
 
   <div id="total">
     <h2 class="label"></h2>
-    <span class="value"></span>
-    <span class="currency"></span>
+    <currency-amount></currency-amount>
   </div>
   <div id="controls-container">
     <button id="cancel">Cancel payment</button>

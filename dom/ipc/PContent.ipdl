@@ -43,7 +43,6 @@ include protocol PURLClassifier;
 include protocol PURLClassifierLocal;
 include protocol PVRManager;
 include protocol PVideoDecoderManager;
-include protocol PFlyWebPublishedServer;
 include protocol PProfiler;
 include protocol PScriptCache;
 include DOMTypes;
@@ -90,7 +89,6 @@ using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using mozilla::layers::CompositorOptions from "mozilla/layers/CompositorOptions.h";
-using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
 using mozilla::Telemetry::HistogramAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedHistogramAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
@@ -156,7 +154,7 @@ union MaybePrefValue {
   null_t;
 };
 
-struct PrefSetting {
+struct Pref {
   nsCString name;
   MaybePrefValue defaultValue;
   MaybePrefValue userValue;
@@ -272,7 +270,7 @@ struct XPCOMInitData
     ClipboardCapabilities clipboardCaps;
     DomainPolicyClone domainPolicy;
     OptionalURIParams userContentSheetURL;
-    PrefSetting[] prefs;
+    Pref[] prefs;
     GfxVarUpdate[] gfxNonDefaultVarUpdates;
     ContentDeviceData contentDeviceData;
     GfxInfoFeatureStatus[] gfxFeatureStatus;
@@ -313,7 +311,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PWebBrowserPersistDocument;
     manages PWebrtcGlobal;
     manages PPresentation;
-    manages PFlyWebPublishedServer;
     manages PURLClassifier;
     manages PURLClassifierLocal;
     manages PScriptCache;
@@ -427,7 +424,7 @@ child:
 
     async NotifyVisited(URIParams uri);
 
-    async PreferenceUpdate(PrefSetting pref);
+    async PreferenceUpdate(Pref pref);
     async VarUpdate(GfxVarUpdate var);
 
     async DataStoragePut(nsString aFilename, DataStorageItem aItem);
@@ -763,8 +760,6 @@ parent:
 
     async PPresentation();
 
-    async PFlyWebPublishedServer(nsString name, FlyWebPublishOptions params);
-
     sync PURLClassifier(Principal principal, bool useTrackingProtection)
         returns (bool success);
     sync ClassifyLocal(URIParams uri, nsCString tables)
@@ -997,7 +992,7 @@ parent:
      *       provided.
      */
     async PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal,
-                                    TabId tabId);
+                                    bool aIsHandlingUserInput, TabId tabId);
 
     async ShutdownProfile(nsCString aProfile);
 

@@ -305,12 +305,6 @@ nsNodeUtils::LastRelease(nsINode* aNode)
   }
   else {
     if (aNode->HasProperties()) {
-      if (aNode->IsElement()) {
-        Element* elem = aNode->AsElement();
-        elem->UnlinkIntersectionObservers();
-        elem->DeleteProperty(nsGkAtoms::intersectionobserverlist);
-      }
-
       // Strong reference to the document so that deleting properties can't
       // delete the document.
       nsCOMPtr<nsIDocument> document = aNode->OwnerDoc();
@@ -463,37 +457,31 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
       return nullptr;
     }
 
-    if (CustomElementRegistry::IsCustomElementEnabled() && clone->IsElement()) {
+    if (CustomElementRegistry::IsCustomElementEnabled() &&
+        (clone->IsHTMLElement() || clone->IsXULElement())) {
       // The cloned node may be a custom element that may require
       // enqueing upgrade reaction.
-      Element* elem = clone->AsElement();
-      CustomElementDefinition* definition = nullptr;
+      Element* cloneElem = clone->AsElement();
       RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
-      if (nsContentUtils::IsCustomElementName(tagAtom)) {
-        definition =
+      CustomElementData* data = elem->GetCustomElementData();
+
+      // Check if node may be custom element by type extension.
+      // ex. <button is="x-button">
+      nsAutoString extension;
+      if (!data || data->GetCustomElementType() != tagAtom) {
+        cloneElem->GetAttr(kNameSpaceID_None, nsGkAtoms::is, extension);
+      }
+
+      if (data || !extension.IsEmpty()) {
+        RefPtr<nsAtom> typeAtom = extension.IsEmpty() ? tagAtom : NS_Atomize(extension);
+        cloneElem->SetCustomElementData(new CustomElementData(typeAtom));
+        CustomElementDefinition* definition =
           nsContentUtils::LookupCustomElementDefinition(nodeInfo->GetDocument(),
                                                         nodeInfo->LocalName(),
-                                                        nodeInfo->NamespaceID());
+                                                        nodeInfo->NamespaceID(),
+                                                        typeAtom);
         if (definition) {
-          elem->SetCustomElementData(new CustomElementData(tagAtom));
-          nsContentUtils::EnqueueUpgradeReaction(elem, definition);
-        }
-      } else {
-        // Check if node may be custom element by type extension.
-        // ex. <button is="x-button">
-        nsAutoString extension;
-        if (elem->GetAttr(kNameSpaceID_None, nsGkAtoms::is, extension) &&
-            !extension.IsEmpty()) {
-          definition =
-            nsContentUtils::LookupCustomElementDefinition(nodeInfo->GetDocument(),
-                                                          nodeInfo->LocalName(),
-                                                          nodeInfo->NamespaceID(),
-                                                          &extension);
-          if (definition) {
-            RefPtr<nsAtom> typeAtom = NS_Atomize(extension);
-            elem->SetCustomElementData(new CustomElementData(typeAtom));
-            nsContentUtils::EnqueueUpgradeReaction(elem, definition);
-          }
+          nsContentUtils::EnqueueUpgradeReaction(cloneElem, definition);
         }
       }
     }
@@ -536,7 +524,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
         // shadow-including inclusive descendants that is custom.
         Element* element = aNode->IsElement() ? aNode->AsElement() : nullptr;
         if (element) {
-          RefPtr<CustomElementData> data = element->GetCustomElementData();
+          CustomElementData* data = element->GetCustomElementData();
           if (data && data->mState == CustomElementData::State::eCustom) {
             LifecycleAdoptedCallbackArgs args = {
               oldDoc,

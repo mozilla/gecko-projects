@@ -5,6 +5,7 @@
 
 #include "CloneableWithRangeMediaResource.h"
 
+#include "mozilla/AbstractThread.h"
 #include "mozilla/Monitor.h"
 #include "nsContentUtils.h"
 #include "nsIAsyncInputStream.h"
@@ -43,7 +44,10 @@ public:
     do {
       uint32_t read;
       nsresult rv = SyncRead(aBuffer + done, aSize - done, &read);
-      if (NS_WARN_IF(NS_FAILED(rv)) || read == 0) {
+      if (NS_SUCCEEDED(rv) && read == 0) {
+        break;
+      }
+      if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
       done += read;
@@ -78,7 +82,7 @@ private:
       nsresult rv = mStream->Read(aBuffer, aSize, aRead);
       // All good.
       if (rv == NS_BASE_STREAM_CLOSED || NS_SUCCEEDED(rv)) {
-        return rv;
+        return NS_OK;
       }
 
       // An error.
@@ -201,7 +205,6 @@ CloneableWithRangeMediaResource::ReadFromCache(char* aBuffer, int64_t aOffset,
     return rv;
   }
 
-  mCurrentPosition = bytes + aOffset;
   return bytes == aCount ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -222,14 +225,7 @@ CloneableWithRangeMediaResource::ReadAt(int64_t aOffset, char* aBuffer,
     return rv;
   }
 
-  mCurrentPosition = *aBytes + aOffset;
   return NS_OK;
-}
-
-int64_t CloneableWithRangeMediaResource::Tell()
-{
-  MaybeInitialize();
-  return mCurrentPosition;
 }
 
 } // mozilla namespace

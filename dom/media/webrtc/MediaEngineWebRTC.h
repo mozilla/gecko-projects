@@ -566,6 +566,7 @@ private:
   nsresult
   UpdateSingleSource(const AllocationHandle* aHandle,
                      const NormalizedConstraints& aNetConstraints,
+                     const NormalizedConstraints& aNewConstraint,
                      const MediaEnginePrefs& aPrefs,
                      const nsString& aDeviceId,
                      const char** aOutBadConstraint) override;
@@ -634,7 +635,6 @@ private:
   int32_t mSampleFrequency;
   uint64_t mTotalFrames;
   uint64_t mLastLogFrames;
-  int32_t mPlayoutDelay;
 
   NullTransport *mNullTransport;
 

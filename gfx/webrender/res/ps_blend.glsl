@@ -13,23 +13,23 @@ flat varying mat4 vColorMat;
 #ifdef WR_VERTEX_SHADER
 void main(void) {
     CompositeInstance ci = fetch_composite_instance();
-    AlphaBatchTask dest_task = fetch_alpha_batch_task(ci.render_task_index);
-    AlphaBatchTask src_task = fetch_alpha_batch_task(ci.src_task_index);
+    PictureTask dest_task = fetch_picture_task(ci.render_task_index);
+    PictureTask src_task = fetch_picture_task(ci.src_task_index);
 
-    vec2 dest_origin = dest_task.render_target_origin -
-                       dest_task.screen_space_origin +
-                       src_task.screen_space_origin;
+    vec2 dest_origin = dest_task.common_data.task_rect.p0 -
+                       dest_task.content_origin +
+                       src_task.content_origin;
 
     vec2 local_pos = mix(dest_origin,
-                         dest_origin + src_task.size,
+                         dest_origin + src_task.common_data.task_rect.size,
                          aPosition.xy);
 
     vec2 texture_size = vec2(textureSize(sCacheRGBA8, 0));
-    vec2 st0 = src_task.render_target_origin;
-    vec2 st1 = src_task.render_target_origin + src_task.size;
+    vec2 st0 = src_task.common_data.task_rect.p0;
+    vec2 st1 = src_task.common_data.task_rect.p0 + src_task.common_data.task_rect.size;
 
-    vec2 uv = src_task.render_target_origin + aPosition.xy * src_task.size;
-    vUv = vec3(uv / texture_size, src_task.render_target_layer_index);
+    vec2 uv = src_task.common_data.task_rect.p0 + aPosition.xy * src_task.common_data.task_rect.size;
+    vUv = vec3(uv / texture_size, src_task.common_data.texture_layer_index);
     vUvBounds = vec4(st0 + 0.5, st1 - 0.5) / texture_size.xyxy;
 
     vOp = ci.user_data0;
@@ -90,39 +90,23 @@ void main(void) {
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-vec4 Blur(float radius, vec2 direction) {
-    // TODO(gw): Support blur in WR2!
-    return vec4(1.0);
-}
-
 vec4 Contrast(vec4 Cs, float amount) {
-    return vec4(Cs.rgb * amount - 0.5 * amount + 0.5, 1.0);
+    return vec4(Cs.rgb * amount - 0.5 * amount + 0.5, Cs.a);
 }
 
 vec4 Invert(vec4 Cs, float amount) {
-    Cs.rgb /= Cs.a;
-
-    vec3 color = mix(Cs.rgb, vec3(1.0) - Cs.rgb, amount);
-
-    // Pre-multiply the alpha into the output value.
-    return vec4(color.rgb * Cs.a, Cs.a);
+    return vec4(mix(Cs.rgb, vec3(1.0) - Cs.rgb, amount), Cs.a);
 }
 
 vec4 Brightness(vec4 Cs, float amount) {
-    // Un-premultiply the input.
-    Cs.rgb /= Cs.a;
-
     // Apply the brightness factor.
     // Resulting color needs to be clamped to output range
     // since we are pre-multiplying alpha in the shader.
-    vec3 color = clamp(Cs.rgb * amount, vec3(0.0), vec3(1.0));
-
-    // Pre-multiply the alpha into the output value.
-    return vec4(color.rgb * Cs.a, Cs.a);
+    return vec4(clamp(Cs.rgb * amount, vec3(0.0), vec3(1.0)), Cs.a);
 }
 
 vec4 Opacity(vec4 Cs, float amount) {
-    return Cs * amount;
+    return vec4(Cs.rgb, Cs.a * amount);
 }
 
 void main(void) {
@@ -133,10 +117,12 @@ void main(void) {
         discard;
     }
 
+    // Un-premultiply the input.
+    Cs.rgb /= Cs.a;
+
     switch (vOp) {
         case 0:
-            // Gaussian blur is specially handled:
-            oFragColor = Cs;// Blur(vAmount, vec2(0,0));
+            oFragColor = Cs;
             break;
         case 1:
             oFragColor = Contrast(Cs, vAmount);
@@ -153,5 +139,8 @@ void main(void) {
         default:
             oFragColor = vColorMat * Cs;
     }
+
+    // Pre-multiply the alpha into the output value.
+    oFragColor.rgb *= oFragColor.a;
 }
 #endif

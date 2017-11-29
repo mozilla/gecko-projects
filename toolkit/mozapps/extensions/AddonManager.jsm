@@ -14,6 +14,7 @@ const Cu = Components.utils;
 // wouldn't be reflected in Services.appinfo anymore, as the lazy getter
 // underlying it would have been initialized if we used it here.
 if ("@mozilla.org/xre/app-info;1" in Cc) {
+  // eslint-disable-next-line mozilla/use-services
   let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
   if (runtime.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
     // Refuse to run in child processes.
@@ -622,6 +623,8 @@ var gBrowserUpdated = null;
 /**
  * This is the real manager, kept here rather than in AddonManager to keep its
  * contents hidden from API users.
+ * @class
+ * @lends AddonManager
  */
 var AddonManagerInternal = {
   managerListeners: new Set(),
@@ -720,6 +723,13 @@ var AddonManagerInternal = {
 
   /**
    * Start up a provider, and register its shutdown hook if it has one
+   *
+   * @param {string} aProvider - An add-on provider.
+   * @param {boolean} aAppChanged - Whether or not the app version has changed since last session.
+   * @param {string} aOldAppVersion - Previous application version, if changed.
+   * @param {string} aOldPlatformVersion - Previous platform version, if changed.
+   *
+   * @private
    */
   _startProvider(aProvider, aAppChanged, aOldAppVersion, aOldPlatformVersion) {
     if (!gStarted)
@@ -924,10 +934,8 @@ var AddonManagerInternal = {
   /**
    * Registers a new AddonProvider.
    *
-   * @param  aProvider
-   *         The provider to register
-   * @param  aTypes
-   *         An optional array of add-on types
+   * @param {string} aProvider -The provider to register
+   * @param {string[]} [aTypes] - An optional array of add-on types
    */
   registerProvider(aProvider, aTypes) {
     if (!aProvider || typeof aProvider != "object")
@@ -2195,7 +2203,7 @@ var AddonManagerInternal = {
 
     this.installListeners.delete(aListener);
   },
-  /*
+  /**
    * Adds new or overrides existing UpgradeListener.
    *
    * @param  aInstanceID
@@ -2248,11 +2256,12 @@ var AddonManagerInternal = {
 
   /**
    * Installs a temporary add-on from a local file or directory.
+   *
    * @param  aFile
    *         An nsIFile for the file or directory of the add-on to be
    *         temporarily installed.
-   * @return a Promise that rejects if the add-on is not a valid restartless
-   *         add-on or if the same ID is already temporarily installed.
+   * @returns a Promise that rejects if the add-on is not a valid restartless
+   *          add-on or if the same ID is already temporarily installed.
    */
   installTemporaryAddon(aFile) {
     if (!gStarted)
@@ -2379,11 +2388,10 @@ var AddonManagerInternal = {
   /**
    * Asynchronously gets an add-on with a specific ID.
    *
-   * @param  aID
+   * @type {function}
+   * @param  {string} aID
    *         The ID of the add-on to retrieve
-   * @return {Promise}
-   * @resolves The found Addon or null if no such add-on exists.
-   * @rejects  Never
+   * @returns {Promise} resolves with the found Addon or null if no such add-on exists. Never rejects.
    * @throws if the aID argument is not specified
    */
   getAddonByID(aID) {
@@ -2494,6 +2502,10 @@ var AddonManagerInternal = {
    *
    * @param  aTypes
    *         An optional array of types to retrieve. Each type is a string name
+   *
+   * @resolve {addons: Array, fullData: bool}
+   *          fullData is true if addons contains all the data we have on those
+   *          addons. It is false if addons only contains partial data.
    */
   async getActiveAddons(aTypes) {
     if (!gStarted)
@@ -2504,22 +2516,25 @@ var AddonManagerInternal = {
       throw Components.Exception("aTypes must be an array or null",
                                  Cr.NS_ERROR_INVALID_ARG);
 
-    let addons = [];
+    let addons = [], fullData = true;
 
     for (let provider of this.providers) {
-      let providerAddons;
+      let providerAddons, providerFullData;
       if ("getActiveAddons" in provider) {
-        providerAddons = await callProvider(provider, "getActiveAddons", null, aTypes);
+        ({addons: providerAddons, fullData: providerFullData} = await callProvider(provider, "getActiveAddons", null, aTypes));
       } else {
         providerAddons = await promiseCallProvider(provider, "getAddonsByTypes", aTypes);
         providerAddons = providerAddons.filter(a => a.isActive);
+        providerFullData = true;
       }
 
-      if (providerAddons)
+      if (providerAddons) {
         addons.push(...providerAddons);
+        fullData = fullData && providerFullData;
+      }
     }
 
-    return addons;
+    return {addons, fullData};
   },
 
   /**
@@ -2567,7 +2582,7 @@ var AddonManagerInternal = {
   /**
    * Adds a new AddonManagerListener if the listener is not already registered.
    *
-   * @param  aListener
+   * @param {AddonManagerListener} aListener
    *         The listener to add
    */
   addManagerListener(aListener) {
@@ -2581,7 +2596,7 @@ var AddonManagerInternal = {
   /**
    * Removes an AddonManagerListener if the listener is registered.
    *
-   * @param  aListener
+   * @param {AddonManagerListener} aListener
    *         The listener to remove
    */
   removeManagerListener(aListener) {
@@ -2595,8 +2610,8 @@ var AddonManagerInternal = {
   /**
    * Adds a new AddonListener if the listener is not already registered.
    *
-   * @param  aListener
-   *         The AddonListener to add
+   * @param {AddonManagerListener} aListener
+   *        The AddonListener to add.
    */
   addAddonListener(aListener) {
     if (!aListener || typeof aListener != "object")
@@ -2609,7 +2624,7 @@ var AddonManagerInternal = {
   /**
    * Removes an AddonListener if the listener is registered.
    *
-   * @param  aListener
+   * @param {object}  aListener
    *         The AddonListener to remove
    */
   removeAddonListener(aListener) {
@@ -2623,7 +2638,7 @@ var AddonManagerInternal = {
   /**
    * Adds a new TypeListener if the listener is not already registered.
    *
-   * @param  aListener
+   * @param {TypeListener} aListener
    *         The TypeListener to add
    */
   addTypeListener(aListener) {
@@ -2846,10 +2861,8 @@ var AddonManagerInternal = {
         args.wrappedJSObject = args;
 
         try {
-          Cc["@mozilla.org/base/telemetry;1"].
-                       getService(Ci.nsITelemetry).
-                       getHistogramById("SECURITY_UI").
-                       add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL);
+          Services.telemetry.getHistogramById("SECURITY_UI")
+                  .add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL);
           let parentWindow = null;
           if (browser) {
             // Find the outer browser
@@ -3281,6 +3294,7 @@ this.AddonManagerPrivate = {
 /**
  * This is the public API that UI and developers should be calling. All methods
  * just forward to AddonManagerInternal.
+ * @class
  */
 this.AddonManager = {
   // Constants for the AddonInstall.state property
@@ -3515,10 +3529,12 @@ this.AddonManager = {
     return AppConstants.DEBUG ? AddonManagerInternal : undefined;
   },
 
+  /** Boolean indicating whether AddonManager startup has completed. */
   get isReady() {
     return gStartupComplete && !gShutdownInProgress;
   },
 
+  /** @constructor */
   init() {
     this._stateToString = new Map();
     for (let [name, value] of this._states) {
@@ -3683,7 +3699,6 @@ this.AddonManager = {
   removeUpgradeListener(aInstanceID) {
     return AddonManagerInternal.removeUpgradeListener(aInstanceID);
   },
-
   addAddonListener(aListener) {
     AddonManagerInternal.addAddonListener(aListener);
   },
