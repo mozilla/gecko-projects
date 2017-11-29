@@ -373,9 +373,6 @@ def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
     )
 
     def filter(task):
-        if task.kind in ('release-final-verify', 'release-update-verify',
-                         'release-buildbot-update-verify'):
-            return False
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
@@ -386,7 +383,6 @@ def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
         # TODO: publish to balrog
         # TODO: funsize balrog submission
         # TODO: recompression push-to-releases + balrog
-        # TODO: final verify
         # TODO: checksums
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
@@ -401,9 +397,6 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
     )
 
     def filter(task):
-        if task.kind in ('release-update-verify',
-                         'release-buildbot-update-verify'):
-            return False
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
@@ -414,7 +407,6 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
         # TODO: publish to balrog
         # TODO: funsize balrog submission
         # TODO: recompression push-to-releases + balrog
-        # TODO: final verify
         # TODO: checksums
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
@@ -436,7 +428,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         'release-update-verify', 'release-buildbot-update-verify',
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
-        'release-final-verify',
     ]
 
     def filter(task):
@@ -459,8 +450,7 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
             return True
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('release-update-verify', 'release-buildbot-update-verify',
-                         'release-final-verify', 'partials', 'partials-signing',
+        if task.kind in ('partials', 'partials-signing',
                          'beetmover-repackage', 'release-source',
                          'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n'):
             return True
@@ -471,8 +461,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
 
         # TODO: partner repacks
         # TODO: funsize, all but balrog submission
-        # TODO: bbb update verify
-        # TODO: tc update verify
         # TODO: binary transparency
         # TODO: bouncer sub
         # TODO: snap
@@ -490,9 +478,6 @@ def target_tasks_push_devedition(full_task_graph, parameters, graph_config):
     )
 
     def filter(task):
-        if task.kind in ('release-final-verify', 'release-update-verify',
-                         'release-buildbot-update-verify'):
-            return False
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
@@ -503,7 +488,6 @@ def target_tasks_push_devedition(full_task_graph, parameters, graph_config):
         # TODO: publish to balrog
         # TODO: funsize balrog submission
         # TODO: recompression push-to-releases + balrog
-        # TODO: final verify
         # TODO: checksums
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
@@ -518,9 +502,6 @@ def target_tasks_ship_devedition(full_task_graph, parameters, graph_config):
     )
 
     def filter(task):
-        if task.kind in ('release-final-verify', 'release-update-verify',
-                         'release-buildbot-update-verify'):
-            return False
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
@@ -531,7 +512,6 @@ def target_tasks_ship_devedition(full_task_graph, parameters, graph_config):
         # TODO: publish to balrog
         # TODO: funsize balrog submission
         # TODO: recompression push-to-releases + balrog
-        # TODO: final verify
         # TODO: checksums
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
