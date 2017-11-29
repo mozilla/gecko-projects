@@ -5,12 +5,13 @@
 loader: taskgraph.loader.push_apk:loader
 
 transforms:
-   - taskgraph.transforms.push_apk:transforms
-   - taskgraph.transforms.task:transforms
+    - taskgraph.transforms.push_apk:transforms
+    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-  - build-signing
-  - push-apk-breakpoint
+    - build-signing
+    - google-play-strings
+    - push-apk-breakpoint
 
 jobs:
     push-apk/opt:
@@ -31,6 +32,7 @@ jobs:
             google-play-track: # see transforms
             implementation: push-apk
             commit: # see transforms
+        requires: all-resolved
         scopes: # see transforms
         treeherder:
             symbol: pub(gp)

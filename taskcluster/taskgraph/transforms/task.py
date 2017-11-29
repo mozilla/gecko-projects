@@ -82,6 +82,8 @@ task_description_schema = Schema({
     # method.
     Optional('dependencies'): {basestring: object},
 
+    Optional('requires', default='all-completed'): Any('all-completed', 'all-resolved'),
+
     # expiration and deadline times, relative to task creation, with units
     # (e.g., "14 days").  Defaults are set based on the project.
     Optional('expires-after'): basestring,
@@ -1345,6 +1347,7 @@ def build_task(config, tasks):
             'provisionerId': provisioner_id,
             'workerType': worker_type,
             'routes': routes,
+            'requires': task['requires'],
             'created': {'relative-datestamp': '0 seconds'},
             'deadline': {'relative-datestamp': task['deadline-after']},
             'expires': {'relative-datestamp': task['expires-after']},
