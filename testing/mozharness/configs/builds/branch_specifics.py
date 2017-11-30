@@ -359,7 +359,95 @@ config = {
     'larch': {
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
-    # 'maple': {},
+    'maple': {
+        'enable_release_promotion': 1,
+        'repo_path': 'projects/maple',
+        'update_channel': 'maple',
+        'branch_uses_per_checkin_strategy': True,
+        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
+        'platform_overrides': {
+            'linux': {
+                'mozconfig_variant': 'beta',
+                'force_clobber': True,
+            },
+            'linux64': {
+                'mozconfig_variant': 'beta',
+                'force_clobber': True,
+            },
+            'macosx64': {
+                'mozconfig_variant': 'beta',
+                'force_clobber': True,
+            },
+            'win32': {
+                'mozconfig_variant': 'beta',
+                'force_clobber': True,
+            },
+            'win64': {
+                'mozconfig_variant': 'beta',
+                'force_clobber': True,
+            },
+            'linux-devedition': {
+                "update_channel": "aurora-maple",
+            },
+            'linux64-devedition': {
+                "update_channel": "aurora-maple",
+            },
+            'macosx64-devedition': {
+                "update_channel": "aurora-maple",
+            },
+            'win32-devedition': {
+                "update_channel": "aurora-maple",
+            },
+            'win64-devedition': {
+                "update_channel": "aurora-maple",
+            },
+            'linux-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-asan-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-asan': {
+                'update_channel': 'default',
+            },
+            'linux64-st-an-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-st-an': {
+                'update_channel': 'default',
+            },
+            'linux64-add-on-devel': {
+                'update_channel': 'default',
+            },
+            'macosx64-debug': {
+                'update_channel': 'default',
+            },
+            'macosx64-st-an': {
+                'update_channel': 'default',
+            },
+            'macosx64-st-an-debug': {
+                'update_channel': 'default',
+            },
+            'macosx64-add-on-devel': {
+                'update_channel': 'default',
+            },
+            'win32-debug': {
+                'update_channel': 'default',
+            },
+            'win32-add-on-devel': {
+                'update_channel': 'default',
+            },
+            'win64-debug': {
+                'update_channel': 'default',
+            },
+            'win64-add-on-devel': {
+                'update_channel': 'default',
+            },
+        },
+    },
     'oak': {
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
