@@ -76,9 +76,6 @@ jobs:
                   #  - "{task[tags][createdForUser]}"
                   default:
                      - "release-drivers"
-      routes:
-         - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.email-{channel}
-         - index.releases.v1.{branch}.latest.{product}.latest.email-{channel}
       index:
          product: fennec
          type: release
