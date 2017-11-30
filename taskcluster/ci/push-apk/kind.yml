@@ -34,6 +34,8 @@ jobs:
             commit: # see transforms
         requires: all-resolved
         scopes: # see transforms
+            commit:  # see transforms
+        scopes:  # see transforms
         treeherder:
             symbol: pub(gp)
             platform: Android/opt

@@ -670,11 +670,6 @@ void HTMLMediaElement::ReportLoadError(const char* aMsg,
                                   aParamCount);
 }
 
-static bool IsAutoplayEnabled()
-{
-  return Preferences::GetBool("media.autoplay.enabled");
-}
-
 class HTMLMediaElement::AudioChannelAgentCallback final :
   public nsIAudioChannelAgentCallback
 {
@@ -1979,12 +1974,12 @@ void HTMLMediaElement::DoLoad()
     return;
   }
 
-  // Detect if user has interacted with element so that play will not be
-  // blocked when initiated by a script. This enables sites to capture user
-  // intent to play by calling load() in the click handler of a "catalog
-  // view" of a gallery of videos.
   if (EventStateManager::IsHandlingUserInput()) {
-    mHasUserInteractedLoadOrSeek = true;
+    // Detect if user has interacted with element so that play will not be
+    // blocked when initiated by a script. This enables sites to capture user
+    // intent to play by calling load() in the click handler of a "catalog
+    // view" of a gallery of videos.
+    mIsBlessed = true;
     // Mark the channel as urgent-start when autopaly so that it will play the
     // media from src after loading enough resource.
     if (HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) {
@@ -2439,7 +2434,8 @@ void HTMLMediaElement::UpdatePreloadAction()
   PreloadAction nextAction = PRELOAD_UNDEFINED;
   // If autoplay is set, or we're playing, we should always preload data,
   // as we'll need it to play.
-  if ((IsAutoplayEnabled() && HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) ||
+  if ((AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this)) &&
+       HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) ||
       !mPaused)
   {
     nextAction = HTMLMediaElement::PRELOAD_ENOUGH;
@@ -2757,7 +2753,7 @@ HTMLMediaElement::Seek(double aTime,
   // Detect if user has interacted with element by seeking so that
   // play will not be blocked when initiated by a script.
   if (EventStateManager::IsHandlingUserInput()) {
-    mHasUserInteractedLoadOrSeek = true;
+    mIsBlessed = true;
   }
 
   StopSuspendingAfterFirstFrame();
@@ -4043,7 +4039,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mIsEncrypted(false),
     mWaitingForKey(NOT_WAITING_FOR_KEY),
     mDisableVideo(false),
-    mHasUserInteractedLoadOrSeek(false),
     mFirstFrameLoaded(false),
     mDefaultPlaybackStartPosition(0.0),
     mHasSuspendTaint(false),
@@ -4285,6 +4280,9 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
   AddRemoveSelfReference();
   UpdatePreloadAction();
   UpdateSrcMediaStreamPlaying();
+
+  // once media start playing, we would always allow it to autoplay
+  mIsBlessed = true;
 
   // TODO: If the playback has ended, then the user agent must set
   // seek to the effective start.
@@ -6190,7 +6188,7 @@ bool HTMLMediaElement::CanActivateAutoplay()
   // download is controlled by the script and there is no way to evaluate
   // MediaDecoder::CanPlayThrough().
 
-  if (!IsAutoplayEnabled()) {
+  if (!AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this))) {
     return false;
   }
 
@@ -7136,7 +7134,9 @@ HTMLMediaElement::RemoveMediaKeys()
   LOG(LogLevel::Debug, ("%s", __func__));
   // 5.2.3 Stop using the CDM instance represented by the mediaKeys attribute
   // to decrypt media data and remove the association with the media element.
-  mMediaKeys->Unbind();
+  if (mMediaKeys) {
+    mMediaKeys->Unbind();
+  }
   mMediaKeys = nullptr;
 }
 
