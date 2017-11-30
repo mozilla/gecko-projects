@@ -7,6 +7,7 @@ RUN useradd -d /builds/worker -s /bin/bash -m worker
 RUN apt-get update
 RUN apt-get install --yes git python3-setuptools build-essential libssl-dev libffi-dev python3-dev
 
+WORKDIR /builds/worker/
 RUN git clone https://github.com/mozilla-releng/mozapkpublisher
 WORKDIR /builds/worker/mozapkpublisher
 RUN python3 setup.py develop
