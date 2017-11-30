@@ -41,7 +41,8 @@ validate_jobs_schema_transform = functools.partial(
 transforms.add(fill_labels_tranform)
 transforms.add(validate_jobs_schema_transform)
 
-GOOGLE_PLAY_STRING_FILE = '/work/google_play_strings.json'
+# XXX The folder depends on the one defined in the Dockerfile
+GOOGLE_PLAY_STRING_FILE = '/builds/worker/google_play_strings.json'
 
 
 @transforms.add

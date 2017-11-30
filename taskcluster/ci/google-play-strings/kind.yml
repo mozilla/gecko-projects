@@ -19,7 +19,7 @@ jobs:
         worker:
             implementation: docker-worker
             os: linux
-            docker-image: ubuntu:17.10  # No need to depend on a worker that has Gecko already fetched
+            docker-image: {in-tree: google-play-strings}
             chain-of-trust: true
             max-run-time: 600
             env:
@@ -30,17 +30,6 @@ jobs:
                         mozilla-beta: org.mozilla.firefox_beta
                         mozilla-release: org.mozilla.firefox_beta
                         default: org.mozilla.fennec_aurora  # Fetches strings for mozilla-central
-            command:
-                - bash
-                - -cx
-                - >
-                    mkdir -p /work &&
-                    apt-get update &&
-                    apt-get install --yes git python3-setuptools build-essential libssl-dev libffi-dev python3-dev &&
-                    git clone https://github.com/mozilla-releng/mozapkpublisher &&
-                    cd mozapkpublisher &&
-                    python3 setup.py develop &&
-                    python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
 
         treeherder:
             symbol: pub(gps)
