@@ -315,18 +315,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                   filter_beta_release_tasks(t, parameters,
                                             ignore_kinds=[],
                                             allow_l10n=True)]
-    allow_kinds = [
-        'build', 'build-signing', 'repackage', 'repackage-signing',
-        'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-        'release-update-verify', 'release-buildbot-update-verify',
-        # Disabled for now because of missing scopes.
-        #'release-binary-transparency',
-        'partials', 'partials-signing',
-        'beetmover-repackage', 'release-source',
-        'release-source-signing', 'beetmover-source',
-        'balrog',
-    ]
-
     def filter(task):
         platform = task.attributes.get('build_platform')
 
@@ -336,10 +324,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
 
         if platform and 'devedition' in platform:
             return False
-
-        if task.kind not in allow_kinds:
-            return False
-
 
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
@@ -427,13 +411,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
                   filter_beta_release_tasks(t, parameters,
                                             ignore_kinds=[],
                                             allow_l10n=True)]
-    allow_kinds = [
-        'build', 'build-signing', 'repackage', 'repackage-signing',
-        'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-        'release-update-verify', 'release-buildbot-update-verify',
-        'partials', 'partials-signing',
-        'beetmover-repackage', 'release-source',
-    ]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -443,9 +420,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
             return False
 
         if platform and 'devedition' not in platform:
-            return False
-
-        if task.kind not in allow_kinds:
             return False
 
         # Allow for beta_tasks; these will get optimized out to point to
