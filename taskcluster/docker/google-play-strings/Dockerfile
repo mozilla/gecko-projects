@@ -14,4 +14,5 @@ RUN python3 setup.py develop
 
 RUN chown -R worker:worker /builds/worker
 
-CMD ["python3", "./mozapkpublisher/get_l10n_strings.py", "--package-name", "${PACKAGE_NAME}", "--output-file", "${GOOGLE_PLAY_STRING_FILE}"]
+# Set a default command useful for debugging
+CMD ["/bin/bash", "--login"]

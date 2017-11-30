@@ -41,8 +41,7 @@ validate_jobs_schema_transform = functools.partial(
 transforms.add(fill_labels_tranform)
 transforms.add(validate_jobs_schema_transform)
 
-# XXX The folder depends on the one defined in the Dockerfile
-GOOGLE_PLAY_STRING_FILE = '/builds/worker/google_play_strings.json'
+
 
 
 @transforms.add
@@ -55,12 +54,5 @@ def set_worker_data(config, jobs):
             env, 'PACKAGE_NAME', item_name=job['name'],
             project=config.params['project']
         )
-        env['GOOGLE_PLAY_STRING_FILE'] = GOOGLE_PLAY_STRING_FILE
-
-        worker['artifacts'] = [{
-            'name': 'public/google_play_strings.json',
-            'path': GOOGLE_PLAY_STRING_FILE,
-            'type': 'file',
-        }]
 
         yield job
