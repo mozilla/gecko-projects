@@ -51,7 +51,7 @@ jobs:
          product: fennec
          channel:
             by-project:
-               mozilla-beta: beta
-               mozilla-release: release
-               maple: maple
+               mozilla-beta: beta-cdns
+               mozilla-release: release-cdns
+               maple: maple-cdns
                default: unknown
