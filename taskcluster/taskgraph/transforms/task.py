@@ -495,7 +495,9 @@ task_description_schema = Schema({
         Required('chain', default='TRANSPARENCY.pem'): basestring,
 
         # When None is selected then metadata.owner is going to be used
-        Required('contact', default=None): optionally_keyed_by('project', 'product', Any(None, basestring)),
+        Required('contact', default=None): optionally_keyed_by(
+            'project', 'product', Any(None, basestring)
+        ),
 
         # the maximum time to run, in seconds
         Required('max-run-time', default=600): int,
@@ -971,7 +973,7 @@ def build_scriptworker_signing_payload(config, task, task_def):
 @payload_builder('binary-transparency')
 def build_binary_transparency_payload(config, task, task_def):
     worker = task['worker']
-    release_config=get_release_config(config)
+    release_config = get_release_config(config)
 
     contact = resolve_keyed_by(
         worker, 'contact', 'binary-transparency',
@@ -980,13 +982,16 @@ def build_binary_transparency_payload(config, task, task_def):
     if contact is None:
         contact = task_def['metadata']['owner']
 
+    summary = 'https://archive.mozilla.org/pub/{}/candidates/{}-candidates/' + \
+              'build{}/SHA256SUMMARY'
+
     task_def['payload'] = {
         'version': release_config['version'],
         'chain': worker['chain'],
         'contact': contact,
         'maxRunTime': worker['max-run-time'],
         'stage-product': task['shipping-product'],
-        'summary': 'https://archive.mozilla.org/pub/{}/candidates/{}-candidates/build{}/SHA256SUMMARY'.format(
+        'summary': summary.format(
             task['shipping-product'],
             release_config['version'],
             release_config['build_number'],

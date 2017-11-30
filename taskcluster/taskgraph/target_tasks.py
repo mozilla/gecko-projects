@@ -9,8 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
-from . import GECKO
-
 _target_task_methods = {}
 
 
@@ -315,6 +313,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                   filter_beta_release_tasks(t, parameters,
                                             ignore_kinds=[],
                                             allow_l10n=True)]
+
     def filter(task):
         platform = task.attributes.get('build_platform')
 
