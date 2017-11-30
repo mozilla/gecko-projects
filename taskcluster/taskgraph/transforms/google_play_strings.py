@@ -10,7 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 import functools
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.schema import Schema
+from taskgraph.util.schema import resolve_keyed_by, Schema
 # from taskgraph.util.scriptworker import
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial
 
@@ -27,7 +27,6 @@ google_play_description_schema = Schema({
     Required('job-from'): basestring,
     Required('attributes'): object,
     Required('treeherder'): object,
-    Required('run'): object,
     Required('run-on-projects'): list,
     Required('worker-type'): basestring,
     Required('worker'): object,
@@ -49,9 +48,13 @@ GOOGLE_PLAY_STRING_FILE = '/work/google_play_strings.json'
 def set_worker_data(config, jobs):
     for job in jobs:
         worker = job['worker']
-        # TODO define package name based on project
-        worker.setdefault('env', {})['PACKAGE_NAME'] = 'org.mozilla.fennec_aurora'
-        worker['env']['GOOGLE_PLAY_STRING_FILE'] = GOOGLE_PLAY_STRING_FILE
+
+        env = worker.setdefault('env', {})
+        resolve_keyed_by(
+            env, 'PACKAGE_NAME', item_name=job['name'],
+            project=config.params['project']
+        )
+        env['GOOGLE_PLAY_STRING_FILE'] = GOOGLE_PLAY_STRING_FILE
 
         worker['artifacts'] = [{
             'name': 'public/google_play_strings.json',
