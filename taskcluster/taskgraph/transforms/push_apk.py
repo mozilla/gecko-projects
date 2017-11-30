@@ -96,7 +96,7 @@ def generate_upstream_artifacts(dependencies):
         'taskId': {'task-reference': '<{}>'.format(task_kind)},
         'taskType': 'build',
         'paths': ['public/google_play_strings.json'],
-        # 'optional': True,
+        'optional': True,
     } for task_kind in dependencies.keys()
       if 'google-play-strings' in task_kind
     ]

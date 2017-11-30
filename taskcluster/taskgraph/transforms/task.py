@@ -565,6 +565,9 @@ task_description_schema = Schema({
 
             # Paths to the artifacts to sign
             Required('paths'): [basestring],
+
+            # Artifact is optional to run the task
+            Optional('optional', default=False): bool,
         }],
 
         # "Invalid" is a noop for try and other non-supported branches
