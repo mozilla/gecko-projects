@@ -34,3 +34,5 @@ jobs:
     symbol: I(bm)
   update-verify:
     symbol: I(uv)
+  google-play-strings:
+    symbol: I(gps)
