@@ -58,8 +58,6 @@ jobs:
                         mozilla-release: "release-firefox-win64.cfg"
                         mozilla-esr52: "esr-firefox-win64.cfg"
                         default: "none"
-        extra:
-            product: firefox
 
     firefox-win32:
         description: win32 update verify
@@ -87,8 +85,6 @@ jobs:
                         mozilla-release: "release-firefox-win32.cfg"
                         mozilla-esr52: "esr-firefox-win32.cfg"
                         default: "none"
-        extra:
-            product: firefox
 
     firefox-macosx64:
         description: macosx64 update verify
@@ -116,8 +112,6 @@ jobs:
                         mozilla-release: "release-firefox-macosx64.cfg"
                         mozilla-esr52: "esr-firefox-macosx64.cfg"
                         default: "none"
-        extra:
-            product: firefox
 
     devedition-win64:
         description: win64 update verify
@@ -145,8 +139,6 @@ jobs:
                         mozilla-release: "release-devedition-win64.cfg"
                         mozilla-esr52: "esr-devedition-win64.cfg"
                         default: "none"
-        extra:
-            product: devedition
 
     devedition-win32:
         description: win32 update verify
@@ -174,8 +166,6 @@ jobs:
                         mozilla-release: "release-devedition-win32.cfg"
                         mozilla-esr52: "esr-devedition-win32.cfg"
                         default: "none"
-        extra:
-            product: devedition
 
     devedition-macosx64:
         description: macosx64 update verify
@@ -203,5 +193,3 @@ jobs:
                         mozilla-release: "release-devedition-macosx64.cfg"
                         mozilla-esr52: "esr-devedition-macosx64.cfg"
                         default: "none"
-        extra:
-            product: devedition
