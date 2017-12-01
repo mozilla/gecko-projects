@@ -38,11 +38,11 @@ jobs:
 
             # XXX The folder depends on the one defined in the Dockerfile
             GOOGLE_PLAY_STRING_FILE: /builds/worker/google_play_strings.json
-            command:
-               - bash
-               - -cx
-               - >
-                  python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
+        command:
+           - bash
+           - -cx
+           - >
+              python3 ./mozapkpublisher/get_l10n_strings.py --package-name "${PACKAGE_NAME}" --output-file "${GOOGLE_PLAY_STRING_FILE}"
 
       treeherder:
          symbol: pub(gps)
