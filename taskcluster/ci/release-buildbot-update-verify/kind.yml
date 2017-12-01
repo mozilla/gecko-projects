@@ -113,6 +113,63 @@ jobs:
                         mozilla-esr52: "esr-firefox-macosx64.cfg"
                         default: "none"
 
+    firefox-secondary-win64:
+        description: win64 secondary channel update verify
+        shipping-product: firefox
+        attributes:
+            build_platform: win64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win64
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-win64.cfg"
+                        default: "none"
+
+    firefox-secondary-win32:
+        description: win32 secondary channel update verify
+        shipping-product: firefox
+        attributes:
+            build_platform: win32
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: win32
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-win32.cfg"
+                        default: "none"
+
+    firefox-secondary-macosx64:
+        description: macosx64 secondary channel update verify
+        shipping-product: firefox
+        attributes:
+            build_platform: macosx64
+        run:
+            product: firefox
+        worker:
+            properties:
+                platform: macosx64
+                CHANNEL:
+                    by-project:
+                        mozilla-release: "beta-localtest"
+                        default: "default"
+                VERIFY_CONFIG:
+                    by-project:
+                        mozilla-release: "beta-firefox-macosx64.cfg"
+                        default: "none"
+
     devedition-win64:
         description: win64 update verify
         shipping-product: devedition
