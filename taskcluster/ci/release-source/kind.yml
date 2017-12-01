@@ -11,12 +11,11 @@ transforms:
    - taskgraph.transforms.build:transforms
    - taskgraph.transforms.build_attrs:transforms
    - taskgraph.transforms.build_lints:transforms
-   - taskgraph.transforms.use_toolchains:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
 jobs-from:
-    - source.yml
+   - source.yml
 
 job-template:
    shipping-phase: promote

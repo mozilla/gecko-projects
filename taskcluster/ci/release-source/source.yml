@@ -9,20 +9,11 @@ linux64-source/opt:
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 36000
-        env:
-            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/linux64/releng.manifest"
     run:
         using: mozharness
         actions: [build]
         config:
             - builds/releng_sub_linux_configs/64_source.py
-            - disable_signing.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        tooltool-downloads: public
-        need-xvfb: true
+        options: ["repo={head_repository}", "rev={head_rev}"]
+        script: "mozharness/scripts/fx_source.py"
     run-on-projects: []
-    toolchains:
-        - linux64-clang
-        - linux64-gcc
-        - linux64-rust
-        - linux64-sccache
