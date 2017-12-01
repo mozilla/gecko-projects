@@ -13,5 +13,5 @@ The source code used to build these binaries is specified by the following uniqu
 Instructions for downloading and building this source code can be found here:
 https://developer.mozilla.org/en/Mozilla_Source_Code_%28Mercurial%29
 """,
-    "out_path": "/builds/worker/artifacts/public/build/SOURCE",
+    "out_path": "artifacts/SOURCE",
 }
