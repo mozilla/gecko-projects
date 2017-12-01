@@ -58,7 +58,7 @@ jobs:
       shipping-product: firefox
       run:
          product: firefox
-         buildername: release-{branch}-firefox_bncr_sub
+         buildername: release-{branch}_firefox_bncr_sub
       routes:
          - index.releases.v1.{branch}.latest.firefox.latest.bouncer_submitter
          - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.bouncer_submitter

@@ -495,8 +495,9 @@ task_description_schema = Schema({
         Required('chain', default='TRANSPARENCY.pem'): basestring,
 
         # When None is selected then metadata.owner is going to be used
-        Required('contact', default=None): \
-            optionally_keyed_by('project', 'product', Any(None, basestring)),
+        Required('contact', default=None): optionally_keyed_by(
+            'project', 'product', Any(None, basestring)
+        ),
 
         # the maximum time to run, in seconds
         Required('max-run-time', default=600): int,
@@ -566,6 +567,9 @@ task_description_schema = Schema({
 
             # Paths to the artifacts to sign
             Required('paths'): [basestring],
+
+            # Artifact is optional to run the task
+            Optional('optional', default=False): bool,
         }],
 
         # "Invalid" is a noop for try and other non-supported branches

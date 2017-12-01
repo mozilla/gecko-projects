@@ -22,7 +22,7 @@ def add_command(config, tasks):
         total_chunks = task["extra"]["chunks"]
         release_config = get_release_config(config)
         release_tag = "{}_{}_RELEASE_RUNTIME".format(
-            task["extra"]["product"].upper(),
+            task["shipping-product"].upper(),
             release_config["version"].replace(".", "_")
         )
 

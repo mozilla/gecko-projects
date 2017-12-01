@@ -143,7 +143,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
         env['MOZHARNESS_ACTIONS'] = ' '.join(run['actions'])
 
     if 'options' in run:
-        env['MOZHARNESS_OPTIONS'] = ' '.join(run['options'])
+        env['MOZHARNESS_OPTIONS'] = ' '.join(run['options']).format(**config.params)
 
     if 'config-paths' in run:
         env['MOZHARNESS_CONFIG_PATHS'] = ' '.join(run['config-paths'])

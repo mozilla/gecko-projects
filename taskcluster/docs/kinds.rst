@@ -294,6 +294,10 @@ release-source-signing
 --------------------
 Signs source for the release
 
+release-partner-repack
+----------------------
+Generates customized versions of releases for partners.
+
 repackage
 ---------
 Repackage tasks take a signed output and package them up into something suitable

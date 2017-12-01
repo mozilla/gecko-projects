@@ -52,8 +52,6 @@ jobs:
          - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.mark_as_shipped
       index:
          product: fennec
-      extra:
-         product: fennec
    firefox:
       name: release-firefox_mark_as_shipped
       shipping-product: firefox
@@ -64,6 +62,4 @@ jobs:
          - index.releases.v1.{branch}.latest.firefox.latest.mark_as_shipped
          - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.mark_as_shipped
       index:
-         product: firefox
-      extra:
          product: firefox

@@ -70,8 +70,6 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux64
-      extra:
-         product: firefox
 
    firefox-linux:
       description: linux update verify
@@ -101,8 +99,6 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux
-      extra:
-         product: firefox
 
    devedition-linux64:
       description: linux64 update verify
@@ -132,8 +128,6 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux64-devedition
-      extra:
-         product: devedition
 
    devedition-linux:
       description: linux update verify
@@ -163,5 +157,3 @@ jobs:
          tier: 1
       attributes:
          build_platform: linux-devedition
-      extra:
-         product: devedition

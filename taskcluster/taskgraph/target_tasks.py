@@ -9,7 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
-
 _target_task_methods = {}
 
 
@@ -314,17 +313,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                   filter_beta_release_tasks(t, parameters,
                                             ignore_kinds=[],
                                             allow_l10n=True)]
-    allow_kinds = [
-        'build', 'build-signing', 'repackage', 'repackage-signing',
-        'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-        'release-update-verify', 'release-buildbot-update-verify',
-        # Disabled for now because of missing scopes.
-        # 'release-binary-transparency',
-        'partials', 'partials-signing',
-        'beetmover-repackage', 'release-source',
-        'release-source-signing', 'beetmover-source',
-        'balrog', 'release-snap',
-    ]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -334,9 +322,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
             return False
 
         if platform and 'devedition' in platform:
-            return False
-
-        if task.kind not in allow_kinds:
             return False
 
         # Allow for beta_tasks; these will get optimized out to point to
@@ -358,7 +343,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                 task.attributes.get('shipping_phase') == 'promote':
             return True
 
-        # TODO: partner repacks
         # TODO: funsize, all but balrog submission
         # TODO: bouncer sub
         # TODO: recompression tasks
@@ -424,13 +408,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
                   filter_beta_release_tasks(t, parameters,
                                             ignore_kinds=[],
                                             allow_l10n=True)]
-    allow_kinds = [
-        'build', 'build-signing', 'repackage', 'repackage-signing',
-        'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
-        'release-update-verify', 'release-buildbot-update-verify',
-        'partials', 'partials-signing',
-        'beetmover-repackage', 'release-source', 'release-snap',
-    ]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -440,9 +417,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
             return False
 
         if platform and 'devedition' not in platform:
-            return False
-
-        if task.kind not in allow_kinds:
             return False
 
         # Allow for beta_tasks; these will get optimized out to point to
@@ -463,7 +437,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
                 task.attributes.get('shipping_phase') == 'promote':
             return True
 
-        # TODO: partner repacks
         # TODO: funsize, all but balrog submission
         # TODO: binary transparency
         # TODO: bouncer sub

@@ -20,7 +20,7 @@ def add_command(config, tasks):
     for task in tasks:
         total_chunks = task["extra"]["chunks"]
         platform = task["attributes"]["build_platform"]
-        product = task["extra"]["product"]
+        product = task["shipping-product"]
         buildername = "release-{branch}_" + product + "_" + platform + \
             "_update_verify"
 
