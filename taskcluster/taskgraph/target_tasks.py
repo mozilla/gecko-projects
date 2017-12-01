@@ -343,7 +343,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                 task.attributes.get('shipping_phase') == 'promote':
             return True
 
-        # TODO: partner repacks
         # TODO: funsize, all but balrog submission
         # TODO: bouncer sub
         # TODO: snap
@@ -437,7 +436,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
                 task.attributes.get('shipping_phase') == 'promote':
             return True
 
-        # TODO: partner repacks
         # TODO: funsize, all but balrog submission
         # TODO: binary transparency
         # TODO: bouncer sub
