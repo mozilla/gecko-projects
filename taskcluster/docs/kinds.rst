@@ -238,6 +238,10 @@ release-binary-transparency
 ---------------------------
 Binary transparency to issue a certificate
 
+release-snap
+----------------------
+Building snap application
+
 release-notify-push
 ----------------------
 Notify when a release has been pushed to CDNs.

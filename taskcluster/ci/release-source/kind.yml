@@ -16,7 +16,7 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 jobs-from:
-    - source.yml
+   - source.yml
 
 job-template:
    shipping-phase: promote

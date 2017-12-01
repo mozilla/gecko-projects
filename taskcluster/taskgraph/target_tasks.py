@@ -9,7 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph import try_option_syntax
 from taskgraph.util.attributes import match_run_on_projects
 
-from . import GECKO
 
 _target_task_methods = {}
 
@@ -320,11 +319,11 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'release-update-verify', 'release-buildbot-update-verify',
         # Disabled for now because of missing scopes.
-        #'release-binary-transparency',
+        # 'release-binary-transparency',
         'partials', 'partials-signing',
         'beetmover-repackage', 'release-source',
         'release-source-signing', 'beetmover-source',
-        'balrog',
+        'balrog', 'release-snap',
     ]
 
     def filter(task):
@@ -339,7 +338,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
 
         if task.kind not in allow_kinds:
             return False
-
 
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
@@ -363,7 +361,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         # TODO: partner repacks
         # TODO: funsize, all but balrog submission
         # TODO: bouncer sub
-        # TODO: snap
         # TODO: recompression tasks
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
@@ -432,7 +429,7 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n',
         'release-update-verify', 'release-buildbot-update-verify',
         'partials', 'partials-signing',
-        'beetmover-repackage', 'release-source',
+        'beetmover-repackage', 'release-source', 'release-snap',
     ]
 
     def filter(task):
@@ -457,7 +454,9 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         # TODO add shipping_product / shipping_phase
         if task.kind in ('partials', 'partials-signing',
                          'beetmover-repackage', 'release-source',
-                         'nightly-l10n', 'nightly-l10n-signing', 'repackage-l10n'):
+                         'nightly-l10n', 'nightly-l10n-signing',
+                         'repackage-l10n',
+                         ):
             return True
 
         if task.attributes.get('shipping_product') == 'devedition' and \
@@ -468,7 +467,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         # TODO: funsize, all but balrog submission
         # TODO: binary transparency
         # TODO: bouncer sub
-        # TODO: snap
         # TODO: recompression tasks
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

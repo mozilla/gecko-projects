@@ -56,11 +56,11 @@ notification_schema = Schema({
 })
 
 FULL_TASK_NAME = (
-    "[{task[payload][properties][product]} "
-    "{task[payload][properties][version]} "
-    "build{task[payload][properties][build_number]}/"
-    "{task[payload][sourcestamp][branch]}] "
-    "{task[metadata][name]} task"
+    "[{task[shipping-product]} "
+    "{release_config[version]} "
+    "build{release_config[build_number]}/"
+    "{config[params][project]}] "
+    "{task_def[metadata][name]} task"
 )
 
 # A task description is a general description of a TaskCluster task
@@ -495,7 +495,8 @@ task_description_schema = Schema({
         Required('chain', default='TRANSPARENCY.pem'): basestring,
 
         # When None is selected then metadata.owner is going to be used
-        Required('contact', default=None): optionally_keyed_by('project', 'product', Any(None, basestring)),
+        Required('contact', default=None): \
+            optionally_keyed_by('project', 'product', Any(None, basestring)),
 
         # the maximum time to run, in seconds
         Required('max-run-time', default=600): int,
@@ -968,7 +969,7 @@ def build_scriptworker_signing_payload(config, task, task_def):
 @payload_builder('binary-transparency')
 def build_binary_transparency_payload(config, task, task_def):
     worker = task['worker']
-    release_config=get_release_config(config)
+    release_config = get_release_config(config)
 
     contact = resolve_keyed_by(
         worker, 'contact', 'binary-transparency',
@@ -983,7 +984,10 @@ def build_binary_transparency_payload(config, task, task_def):
         'contact': contact,
         'maxRunTime': worker['max-run-time'],
         'stage-product': task['shipping-product'],
-        'summary': 'https://archive.mozilla.org/pub/{}/candidates/{}-candidates/build{}/SHA256SUMMARY'.format(
+        'summary': (
+            'https://archive.mozilla.org/pub/{}/candidates/'
+            '{}-candidates/build{}/SHA256SUMMARY'
+        ).format(
             task['shipping-product'],
             release_config['version'],
             release_config['build_number'],
@@ -1471,7 +1475,8 @@ def build_task(config, tasks):
                 if v['ids'] is None:
                     continue
                 notifications_kwargs = dict(
-                    task=task_def,
+                    task=task,
+                    task_def=task_def,
                     config=config.__dict__,
                     release_config=get_release_config(config),
                 )

@@ -24,19 +24,18 @@ job-defaults:
       release-promotion: true
    worker:
       properties:
-          tuxedo_server_url:
-             by-project:
-                 mozilla-beta: https://bounceradmin.mozilla.com/api
-                 mozilla-release: https://bounceradmin.mozilla.com/api
-                 maple: https://admin-bouncer.stage.mozaws.net/api/
-                 default: http://localhost/api
+         tuxedo_server_url:
+            by-project:
+               mozilla-beta: https://bounceradmin.mozilla.com/api
+               mozilla-release: https://bounceradmin.mozilla.com/api
+               maple: https://admin-bouncer.stage.mozaws.net/api/
+               default: http://localhost/api
    notifications:
       completed:
          by-project:
             maple:
                - "release-drivers-staging"
             try:
-               #- "{task[tags][createdForUser]}"
             default:
                - "release-drivers"
       failed:
@@ -44,7 +43,6 @@ job-defaults:
             maple:
                - "release-drivers-staging"
             try:
-               #- "{task[tags][createdForUser]}"
             default:
                - "release-drivers"
       exception:
@@ -52,7 +50,6 @@ job-defaults:
             maple:
                - "release-drivers-staging"
             try:
-               #- "{task[tags][createdForUser]}"
             default:
                - "release-drivers"
 

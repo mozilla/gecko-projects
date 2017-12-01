@@ -42,8 +42,6 @@ transforms.add(fill_labels_tranform)
 transforms.add(validate_jobs_schema_transform)
 
 
-
-
 @transforms.add
 def set_worker_data(config, jobs):
     for job in jobs:

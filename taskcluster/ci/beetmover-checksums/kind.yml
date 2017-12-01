@@ -13,8 +13,8 @@ kind-dependencies:
    - checksums-signing
 
 only-for-attributes:
-  - nightly
+   - nightly
 
 job-template:
-  shipping-phase: promote
-  shipping-product: firefox
+   shipping-phase: promote
+   shipping-product: firefox

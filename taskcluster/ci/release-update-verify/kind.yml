@@ -5,163 +5,163 @@
 loader: taskgraph.loader.transform:loader
 
 kind-dependencies:
-    # TODO: this makes us depend on beetmover/balrog for all platforms
-    # does it matter?
-    # TODO: balrog deps don't actually show up until shipping-product
-    # and shipping-phase is set for balrog tasks
-    - post-balrog-dummy
-    - post-beetmover-dummy
+   # TODO: this makes us depend on beetmover/balrog for all platforms
+   # does it matter?
+   # TODO: balrog deps don't actually show up until shipping-product
+   # and shipping-phase is set for balrog tasks
+   - post-balrog-dummy
+   - post-beetmover-dummy
 
 transforms:
-    - taskgraph.transforms.release_deps:transforms
-    - taskgraph.transforms.update_verify:transforms
-    - taskgraph.transforms.task:transforms
+   - taskgraph.transforms.release_deps:transforms
+   - taskgraph.transforms.update_verify:transforms
+   - taskgraph.transforms.task:transforms
 
 job-defaults:
-    name: update-verify
-    run-on-projects: [] # to make sure this never runs as part of CI
-    shipping-phase: promote
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        implementation: docker-worker
-        os: linux
-        docker-image:
-            in-tree: "update-verify"
-        max-run-time: 7200
-        retry-exit-status:
-            - 1
-            - 255
-        env:
-            NO_BBCONFIG: "1"
-            BUILD_TOOLS_REPO:
-                by-project:
-                    jamun: https://hg.mozilla.org/users/stage-ffxbld/tools
-                    maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
-                    default: https://hg.mozilla.org/build/tools
-    extra:
-        chunks: 12
+   name: update-verify
+   run-on-projects: []  # to make sure this never runs as part of CI
+   shipping-phase: promote
+   worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+   worker:
+      implementation: docker-worker
+      os: linux
+      docker-image:
+         in-tree: "update-verify"
+      max-run-time: 7200
+      retry-exit-status:
+         - 1
+         - 255
+      env:
+         NO_BBCONFIG: "1"
+         BUILD_TOOLS_REPO:
+            by-project:
+               jamun: https://hg.mozilla.org/users/stage-ffxbld/tools
+               maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
+               default: https://hg.mozilla.org/build/tools
+   extra:
+      chunks: 12
 
 jobs:
-    firefox-linux64:
-        description: linux64 update verify
-        shipping-product: firefox
-        worker:
-            env:
-                CHANNEL:
-                    by-project:
-                        jamun: "beta-localtest"
-                        maple: "beta-localtest"
-                        mozilla-beta: "beta-localtest"
-                        mozilla-release: "release-localtest"
-                        mozilla-esr52: "esr-localtest"
-                        default: "default"
-                VERIFY_CONFIG:
-                    by-project:
-                        jamun: "beta-firefox-linux64.cfg"
-                        maple: "beta-firefox-linux64.cfg"
-                        mozilla-beta: "beta-firefox-linux64.cfg"
-                        mozilla-release: "release-firefox-linux64.cfg"
-                        mozilla-esr52: "esr-firefox-linux64.cfg"
-                        default: "none"
-        treeherder:
-            symbol: UV
-            platform: linux64/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux64
-        extra:
-            product: firefox
+   firefox-linux64:
+      description: linux64 update verify
+      shipping-product: firefox
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  jamun: "beta-localtest"
+                  maple: "beta-localtest"
+                  mozilla-beta: "beta-localtest"
+                  mozilla-release: "release-localtest"
+                  mozilla-esr52: "esr-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  jamun: "beta-firefox-linux64.cfg"
+                  maple: "beta-firefox-linux64.cfg"
+                  mozilla-beta: "beta-firefox-linux64.cfg"
+                  mozilla-release: "release-firefox-linux64.cfg"
+                  mozilla-esr52: "esr-firefox-linux64.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UV
+         platform: linux64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux64
+      extra:
+         product: firefox
 
-    firefox-linux:
-        description: linux update verify
-        shipping-product: firefox
-        worker:
-            env:
-                CHANNEL:
-                    by-project:
-                        jamun: "beta-localtest"
-                        maple: "beta-localtest"
-                        mozilla-beta: "beta-localtest"
-                        mozilla-release: "release-localtest"
-                        mozilla-esr52: "esr-localtest"
-                        default: "default"
-                VERIFY_CONFIG:
-                    by-project:
-                        jamun: "beta-firefox-linux.cfg"
-                        maple: "beta-firefox-linux.cfg"
-                        mozilla-beta: "beta-firefox-linux.cfg"
-                        mozilla-release: "release-firefox-linux.cfg"
-                        mozilla-esr52: "esr-firefox-linux.cfg"
-                        default: "none"
-        treeherder:
-            symbol: UV
-            platform: linux/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux
-        extra:
-            product: firefox
+   firefox-linux:
+      description: linux update verify
+      shipping-product: firefox
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  jamun: "beta-localtest"
+                  maple: "beta-localtest"
+                  mozilla-beta: "beta-localtest"
+                  mozilla-release: "release-localtest"
+                  mozilla-esr52: "esr-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  jamun: "beta-firefox-linux.cfg"
+                  maple: "beta-firefox-linux.cfg"
+                  mozilla-beta: "beta-firefox-linux.cfg"
+                  mozilla-release: "release-firefox-linux.cfg"
+                  mozilla-esr52: "esr-firefox-linux.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UV
+         platform: linux/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux
+      extra:
+         product: firefox
 
-    devedition-linux64:
-        description: linux64 update verify
-        shipping-product: devedition
-        worker:
-            env:
-                CHANNEL:
-                    by-project:
-                        jamun: "aurora-localtest"
-                        maple: "aurora-localtest"
-                        mozilla-aurora: "aurora-localtest"
-                        mozilla-release: "release-localtest"
-                        mozilla-esr52: "esr-localtest"
-                        default: "default"
-                VERIFY_CONFIG:
-                    by-project:
-                        jamun: "aurora-devedition-linux64.cfg"
-                        maple: "aurora-devedition-linux64.cfg"
-                        mozilla-aurora: "aurora-devedition-linux64.cfg"
-                        mozilla-release: "release-devedition-linux64.cfg"
-                        mozilla-esr52: "esr-devedition-linux64.cfg"
-                        default: "none"
-        treeherder:
-            symbol: UV
-            platform: linux64-devedition/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux64-devedition
-        extra:
-            product: devedition
+   devedition-linux64:
+      description: linux64 update verify
+      shipping-product: devedition
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  jamun: "aurora-localtest"
+                  maple: "aurora-localtest"
+                  mozilla-aurora: "aurora-localtest"
+                  mozilla-release: "release-localtest"
+                  mozilla-esr52: "esr-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  jamun: "aurora-devedition-linux64.cfg"
+                  maple: "aurora-devedition-linux64.cfg"
+                  mozilla-aurora: "aurora-devedition-linux64.cfg"
+                  mozilla-release: "release-devedition-linux64.cfg"
+                  mozilla-esr52: "esr-devedition-linux64.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UV
+         platform: linux64-devedition/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux64-devedition
+      extra:
+         product: devedition
 
-    devedition-linux:
-        description: linux update verify
-        shipping-product: devedition
-        worker:
-            env:
-                CHANNEL:
-                    by-project:
-                        jamun: "aurora-localtest"
-                        maple: "aurora-localtest"
-                        mozilla-aurora: "aurora-localtest"
-                        mozilla-release: "release-localtest"
-                        mozilla-esr52: "esr-localtest"
-                        default: "default"
-                VERIFY_CONFIG:
-                    by-project:
-                        jamun: "aurora-devedition-linux.cfg"
-                        maple: "aurora-devedition-linux.cfg"
-                        mozilla-aurora: "aurora-devedition-linux.cfg"
-                        mozilla-release: "release-devedition-linux.cfg"
-                        mozilla-esr52: "esr-devedition-linux.cfg"
-                        default: "none"
-        treeherder:
-            symbol: UV
-            platform: linux-devedition/opt
-            kind: test
-            tier: 1
-        attributes:
-            build_platform: linux-devedition
-        extra:
-            product: devedition
+   devedition-linux:
+      description: linux update verify
+      shipping-product: devedition
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  jamun: "aurora-localtest"
+                  maple: "aurora-localtest"
+                  mozilla-aurora: "aurora-localtest"
+                  mozilla-release: "release-localtest"
+                  mozilla-esr52: "esr-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  jamun: "aurora-devedition-linux.cfg"
+                  maple: "aurora-devedition-linux.cfg"
+                  mozilla-aurora: "aurora-devedition-linux.cfg"
+                  mozilla-release: "release-devedition-linux.cfg"
+                  mozilla-esr52: "esr-devedition-linux.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UV
+         platform: linux-devedition/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux-devedition
+      extra:
+         product: devedition
