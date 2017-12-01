@@ -13,4 +13,5 @@ tar.bz2: {repo}/archive/{rev}.tar.bz2
 Instructions for downloading and building this source code can be found here:
 https://developer.mozilla.org/en/Mozilla_Source_Code_%28Mercurial%29
 """,
+    "out_path": "public/build/SOURCE",
 }
