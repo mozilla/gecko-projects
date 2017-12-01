@@ -29,6 +29,27 @@ class FxSource(BaseScript):
             "dest": "rev",
             "help": "the revision of the source",
         }],
+        [["--rev"], {
+            "dest": "rev",
+            "help": "the revision of the source",
+        }],
+        [["--disable-mock"], {
+            "dest": "disable_mock",
+            "action": "store_true",
+            "help": "dummy option",
+        }],
+        [["--scm-level"], {
+            "dest": "scm_level",
+            "help": "dummy option",
+        }],
+        [["--branch"], {
+            "dest": "branch",
+            "help": "dummy option",
+        }],
+        [["--build-pool"], {
+            "dest": "build_pool",
+            "help": "dummy option",
+        }],
     ]
 
     def __init__(self):
