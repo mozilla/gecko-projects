@@ -27,7 +27,9 @@ def add_command(config, tasks):
         real_task["worker"]["properties"]["version"] = release_config["version"]
         real_task["worker"]["properties"]["appVersion"] = release_config["appVersion"]
         real_task["worker"]["properties"]["build_number"] = release_config["build_number"]
-        real_task["worker"]["properties"]["partial_versions"] = release_config.get("partial_versions", "")
+        real_task["worker"]["properties"]["partial_versions"] = release_config.get(
+            "partial_versions", ""
+        )
 
         for thing in ("generate_bz2_blob", "balrog_api_root", "channels", "repo_path"):
             thing = "worker.properties.{}".format(thing)
