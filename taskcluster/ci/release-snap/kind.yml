@@ -25,8 +25,8 @@ job-defaults:
    description: Generates snap image
    run-on-projects: []  # to make sure this never runs as part of CI
    shipping-phase: promote
-   scopes:
-      # - secrets:get:project/releng/snapcraft/firefox/edge
+   # scopes:
+   # - secrets:get:project/releng/snapcraft/firefox/edge
    treeherder:
       platform: linux64/opt
       kind: build
