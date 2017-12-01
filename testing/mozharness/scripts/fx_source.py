@@ -25,12 +25,8 @@ class FxSource(BaseScript):
             "dest": "repo",
             "help": "the URL to the source repo",
         }],
-        [["--rev"], {
-            "dest": "rev",
-            "help": "the revision of the source",
-        }],
-        [["--rev"], {
-            "dest": "rev",
+        [["--revision"], {
+            "dest": "revision",
             "help": "the revision of the source",
         }],
         [["--disable-mock"], {

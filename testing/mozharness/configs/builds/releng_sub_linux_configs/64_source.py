@@ -6,9 +6,9 @@ http://www.mozilla.org/MPL/2.0/
 The source code used to build these binaries is specified by the following unique URL:
 {repo}/rev/{revision}
 
-zip: {repo}/archive/{rev}.zip
-tar.gz: {repo}/archive/{rev}.tar.gz
-tar.bz2: {repo}/archive/{rev}.tar.bz2
+    zip: {repo}/archive/{revision}.zip
+    tar.gz: {repo}/archive/{revision}.tar.gz
+    tar.bz2: {repo}/archive/{revision}.tar.bz2
 
 Instructions for downloading and building this source code can be found here:
 https://developer.mozilla.org/en/Mozilla_Source_Code_%28Mercurial%29
