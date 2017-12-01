@@ -270,6 +270,10 @@ release-final-verify
 ---------------------
 Verifies the contents and package of release update MARs.
 
+release-secondary-final-verify
+---------------------
+Verifies the contents and package of release update MARs.
+
 release-update-verify
 ---------------------
 Verifies the contents and package of release update MARs.

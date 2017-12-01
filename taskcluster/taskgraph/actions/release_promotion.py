@@ -63,6 +63,24 @@ PARTIAL_UPDATES_FLAVORS = UPTAKE_MONITORING_PLATFORMS_FLAVORS + (
     'promote_devedition',
 )
 
+DESKTOP_RELEASE_TYPE_FLAVORS = (
+    'promote_firefox',
+    'push_firefox',
+    'ship_firefox',
+    'promote_devedition',
+    'push_devedition',
+    'ship_devedition',
+)
+
+
+VALID_DESKTOP_RELEASE_TYPES = (
+    'beta',
+    'devedition',
+    'esr',
+    'release',
+    'rc',
+)
+
 
 def is_release_promotion_available(parameters):
     return parameters['project'] in RELEASE_PROMOTION_PROJECTS
@@ -187,7 +205,12 @@ def is_release_promotion_available(parameters):
                     ],
                 },
                 'default': [],
-            }
+            },
+
+            'desktop_release_type': {
+                'type': 'string',
+                'default': '',
+            },
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -195,6 +218,7 @@ def is_release_promotion_available(parameters):
 def release_promotion_action(parameters, input, task_group_id, task_id, task):
     release_promotion_flavor = input['release_promotion_flavor']
     release_history = {}
+    desktop_release_type = None
 
     next_version = str(input.get('next_version') or '')
     if release_promotion_flavor in VERSION_BUMP_FLAVORS:
@@ -225,6 +249,12 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 "targets." % ', '.join(UPTAKE_MONITORING_PLATFORMS_FLAVORS)
             )
         os.environ['UPTAKE_MONITORING_PLATFORMS'] = uptake_monitoring_platforms
+
+    if release_promotion_flavor in DESKTOP_RELEASE_TYPE_FLAVORS:
+        desktop_release_type = input.get('desktop_release_type', None)
+        if desktop_release_type not in VALID_DESKTOP_RELEASE_TYPES:
+            raise Exception("`desktop_release_type` must be one of: %s" % \
+                ", ".join(VALID_DESKTOP_RELEASE_TYPES))
 
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
@@ -262,6 +292,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['build_number'] = int(input['build_number'])
     parameters['next_version'] = next_version
     parameters['release_history'] = release_history
+    parameters['desktop_release_type'] = desktop_release_type
 
     # make parameters read-only
     parameters = Parameters(**parameters)

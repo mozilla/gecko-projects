@@ -100,6 +100,48 @@ jobs:
       attributes:
          build_platform: linux
 
+   firefox-secondary-linux64:
+      description: linux64 secondary channel update verify
+      shipping-product: firefox
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  mozilla-release: "beta-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  mozilla-release: "beta-firefox-linux64.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UVS
+         platform: linux64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux64
+
+   firefox-secondary-linux:
+      description: linux secondary channel update verify
+      shipping-product: firefox
+      worker:
+         env:
+            CHANNEL:
+               by-project:
+                  mozilla-release: "beta-localtest"
+                  default: "default"
+            VERIFY_CONFIG:
+               by-project:
+                  mozilla-release: "beta-firefox-linux.cfg"
+                  default: "none"
+      treeherder:
+         symbol: UVS
+         platform: linux/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: linux
+
    devedition-linux64:
       description: linux64 update verify
       shipping-product: devedition

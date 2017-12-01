@@ -330,6 +330,15 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if task.label in beta_tasks:
             return True
 
+        # 'secondary' update/final verify tasks only run for
+        # RCs
+        if parameters.get('desktop_release_type') != 'rc':
+            if task.kind in ('release-buildbot-update-verify',
+                             'release-update-verify',
+                             'release-secondary-final-verify'):
+                if 'secondary' in task.label:
+                    return False
+
         # TODO add shipping_product / shipping_phase
         if task.kind in ('release-binary-transparency',
                          'partials', 'partials-signing', 'beetmover-repackage',
@@ -348,7 +357,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         # TODO: recompression tasks
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
 
 @_target_task('push_firefox')
 def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
