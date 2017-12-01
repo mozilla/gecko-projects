@@ -358,6 +358,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
+
 @_target_task('push_firefox')
 def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to push a build of firefox to cdns.

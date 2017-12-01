@@ -22,6 +22,7 @@ import os
 # constants {{{1
 GECKO = os.path.realpath(os.path.join(__file__, '..', '..', '..', '..'))
 VERSION_PATH = os.path.join(GECKO, "browser", "config", "version_display.txt")
+APP_VERSION_PATH = os.path.join(GECKO, "browser", "config", "version.txt")
 
 """Map signing scope aliases to sets of projects.
 
@@ -438,6 +439,7 @@ def get_release_config(config):
     partial_updates = os.environ.get("PARTIAL_UPDATES", "")
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
                                                  'release-uptake-monitoring',
+                                                 'release-updates-builder',
                                                  ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([
@@ -458,6 +460,9 @@ def get_release_config(config):
     with open(VERSION_PATH, "r") as fh:
         version = fh.readline().rstrip()
     release_config['version'] = version
+    with open(APP_VERSION_PATH, "r") as fh:
+        appVersion = fh.readline().rstrip()
+    release_config['appVersion'] = appVersion
 
     release_config['next_version'] = str(config.params['next_version'])
     release_config['build_number'] = config.params['build_number']

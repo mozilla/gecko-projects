@@ -282,6 +282,10 @@ release-buildbot-update-verify
 ---------------------
 Verifies the contents and package of release update MARs.
 
+release-updates-builder
+-----------------------
+Top level Balrog blob submission & patcher/update verify config updates.
+
 release-uptake-monitoring
 -------------------------
 Run uptake monitoring for releases.

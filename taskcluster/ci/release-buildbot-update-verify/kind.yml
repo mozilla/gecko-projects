@@ -11,6 +11,7 @@ kind-dependencies:
    # and shipping-phase is set for balrog tasks
    - post-balrog-dummy
    - post-beetmover-dummy
+   - release-updates-builder
 
 transforms:
    - taskgraph.transforms.release_deps:transforms

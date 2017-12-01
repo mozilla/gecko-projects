@@ -253,8 +253,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     if release_promotion_flavor in DESKTOP_RELEASE_TYPE_FLAVORS:
         desktop_release_type = input.get('desktop_release_type', None)
         if desktop_release_type not in VALID_DESKTOP_RELEASE_TYPES:
-            raise Exception("`desktop_release_type` must be one of: %s" % \
-                ", ".join(VALID_DESKTOP_RELEASE_TYPES))
+            raise Exception("`desktop_release_type` must be one of: %s" %
+                            ", ".join(VALID_DESKTOP_RELEASE_TYPES))
 
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
