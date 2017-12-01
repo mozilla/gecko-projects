@@ -11,7 +11,7 @@ kind-dependencies:
     # does it matter?
     # TODO: uncomment this when we figure out how to reduce deps
     # to <100
-    #- beetmover-repackage
+    # - beetmover-repackage
     # release-uptake-monitoring will get removed as a dep
     # for secondary channel final verify
     - release-uptake-monitoring
@@ -23,7 +23,7 @@ transforms:
 
 job-defaults:
     name: final-verify
-    run-on-projects: [] # to make sure this never runs as part of CI
+    run-on-projects: []  # to make sure this never runs as part of CI
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         implementation: docker-worker

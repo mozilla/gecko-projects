@@ -30,7 +30,6 @@ job-defaults:
             maple:
                - "release-drivers-staging"
             try:
-               #- "{task[tags][createdForUser]}"
             default:
                - "release-drivers"
       exception:
@@ -38,7 +37,6 @@ job-defaults:
             maple:
                - "release-drivers-staging"
             try:
-               #- "{task[tags][createdForUser]}"
             default:
                - "release-drivers"
 
