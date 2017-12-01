@@ -53,4 +53,7 @@ def set_worker_data(config, jobs):
             project=config.params['project']
         )
 
+        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
+        cot.setdefault('inputs', {})['docker-image'] = {'task-reference': '<docker-image>'}
+
         yield job
