@@ -147,6 +147,7 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
         "host/bin/mbsdiff",
     ],
     'linux64-source': [
+        "SOURCE",
     ],
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
@@ -211,7 +212,6 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.tar.bz2.asc",
     ],
     'linux64-source': [
-        "SOURCE",
         "SOURCE.asc",
     ],
     'android-x86-nightly': ["en-US/target.apk"],
