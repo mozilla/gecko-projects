@@ -318,7 +318,7 @@ win32-add-on-devel/opt:
             - builds/taskcluster_base_win32.py
             - builds/taskcluster_sub_win32/addondevel.py
             - balrog/production.py
-    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
+    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45', 'maple']
     toolchains:
         - win32-clang-cl
         - win32-rust
@@ -348,7 +348,7 @@ win64-add-on-devel/opt:
             - builds/taskcluster_base_win64.py
             - builds/taskcluster_sub_win64/addondevel.py
             - balrog/production.py
-    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
+    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45', 'maple']
     toolchains:
         - win64-clang-cl
         - win64-rust
@@ -588,7 +588,7 @@ win32-devedition-nightly/opt:
             - disable_signing.py
             - taskcluster_nightly.py
         custom-build-variant-cfg: devedition
-    run-on-projects: ['mozilla-beta']
+    run-on-projects: ['mozilla-beta', 'maple']
     toolchains:
         - win32-clang-cl
         - win32-rust
@@ -623,7 +623,7 @@ win64-devedition-nightly/opt:
             - disable_signing.py
             - taskcluster_nightly.py
         custom-build-variant-cfg: devedition
-    run-on-projects: ['mozilla-beta']
+    run-on-projects: ['mozilla-beta', 'maple']
     toolchains:
         - win64-clang-cl
         - win64-rust
