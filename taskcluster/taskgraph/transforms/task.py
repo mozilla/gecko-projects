@@ -1431,8 +1431,8 @@ def build_task(config, tasks):
         attributes = task.get('attributes', {})
         attributes['run_on_projects'] = task.get('run-on-projects', ['all'])
         attributes['always_target'] = task['always-target']
-        attributes['shipping_phase'] = task['shipping-phase']
-        attributes['shipping_product'] = task['shipping-product']
+        attributes.setdefault('shipping_phase', task['shipping-phase'])
+        attributes.setdefault('shipping_product', task['shipping-product'])
 
         # Set MOZ_AUTOMATION on all jobs.
         if task['worker']['implementation'] in (
