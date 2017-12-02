@@ -340,8 +340,7 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                     return False
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('release-binary-transparency',
-                         'partials', 'partials-signing', 'beetmover-repackage',
+        if task.kind in ('partials', 'partials-signing', 'beetmover-repackage',
                          'release-source', 'nightly-l10n', 'nightly-l10n-signing',
                          'release-source-signing', 'beetmover-source',
                          'repackage-l10n', 'balrog',
@@ -435,10 +434,10 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
             return True
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('partials', 'partials-signing',
-                         'beetmover-repackage', 'release-source',
-                         'nightly-l10n', 'nightly-l10n-signing',
-                         'repackage-l10n',
+        if task.kind in ('partials', 'partials-signing', 'beetmover-repackage',
+                         'release-source', 'nightly-l10n', 'nightly-l10n-signing',
+                         'release-source-signing', 'beetmover-source',
+                         'repackage-l10n', 'balrog',
                          ):
             return True
 

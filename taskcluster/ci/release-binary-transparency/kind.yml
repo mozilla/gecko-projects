@@ -16,6 +16,7 @@ job-defaults:
    name: release-binary-transparency
    description: Binary transparency to issue a certificate
    run-on-projects: []
+   shipping-phase: promote
    routes:
       - index.releases.v1.{branch}.latest.{product}.latest.binary_transparency
       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.binary_transparency
