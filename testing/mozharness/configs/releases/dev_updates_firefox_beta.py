@@ -11,8 +11,8 @@ config = {
     "vcs_share_base": "/builds/hg-shared",
     # TODO: use real repo
     "push_dest": "ssh://hg.mozilla.org/users/stage-ffxbld/tools",
-    # jamun repo used for staging beta
-    "shipped-locales-url": "https://hg.mozilla.org/projects/jamun/raw-file/{revision}/browser/locales/shipped-locales",
+    # maple repo used for staging beta
+    "shipped-locales-url": "https://hg.mozilla.org/projects/maple/raw-file/{revision}/browser/locales/shipped-locales",
     "ignore_no_changes": True,
     "ssh_user": "ffxbld",
     "ssh_key": "~/.ssh/ffxbld_rsa",
