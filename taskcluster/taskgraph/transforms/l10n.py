@@ -245,15 +245,6 @@ def setup_nightly_dependency(config, jobs):
             job['dependencies'].update({
                 'repackage-signed': 'repackage-signing-{}'.format(job['name'])
             })
-        # XXX get this from yaml or upstream job
-        # job['shipping_phase'] = 'promote'
-        # job.attributes['shipping_phase'] = 'promote'
-        if 'android' in job['attributes']['build_platform']:
-            job['attributes']['shipping_product'] = 'fennec'
-        elif 'devedition' in job['attributes']['build_platform']:
-            job['attributes']['shipping_product'] = 'devedition'
-        else:
-            job['attributes']['shipping_product'] = 'firefox'
         yield job
 
 

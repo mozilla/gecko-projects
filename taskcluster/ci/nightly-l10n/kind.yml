@@ -39,7 +39,7 @@ job-template:
    locales-per-chunk: 2
    run-on-projects: ['release', 'maple']
    attributes:
-       shipping_phase: promote
+      shipping_phase: promote
    ignore-locales:
       by-build-platform:
          # OSX has a special locale for japanese
@@ -82,6 +82,11 @@ job-template:
       product:
          by-build-platform:
             default: firefox
+            linux32-devedition-nightly: devedition
+            linux64-devedition-nightly: devedition
+            macos64-devedition-nightly: devedition
+            win32-devedition-nightly: devedition
+            win64-devedition-nightly: devedition
             android-api-16-nightly: mobile
       job-name:
          by-build-platform:
@@ -90,11 +95,11 @@ job-template:
             macosx64-nightly: macosx64-opt
             win32-nightly: win32-opt
             win64-nightly: win64-opt
-            linux-devedition-nightly: linux-opt
-            linux64-devedition-nightly: linux64-opt
-            macosx64-devedition-nightly: macosx64-opt
-            win32-devedition-nightly: win32-opt
-            win64-devedition-nightly: win64-opt
+            linux-devedition-nightly: linux-devedition-opt
+            linux64-devedition-nightly: linux64-devedition-opt
+            macosx64-devedition-nightly: macosx64-devedition-opt
+            win32-devedition-nightly: win32-devedition-opt
+            win64-devedition-nightly: win64-devedition-opt
             android-api-16-nightly: android-api-16-opt
    worker-type:
       by-build-platform:
@@ -111,11 +116,11 @@ job-template:
             macosx64-nightly: osx-cross/opt
             win32-nightly: windows2012-32/opt
             win64-nightly: windows2012-64/opt
-            linux64-devedition-nightly: linux64/opt
-            linux-devedition-nightly: linux32/opt
-            macosx64-devedition-nightly: osx-cross/opt
-            win32-devedition-nightly: windows2012-32/opt
-            win64-devedition-nightly: windows2012-64/opt
+            linux64-devedition-nightly: linux64-devedition/opt
+            linux-devedition-nightly: linux32-devedition/opt
+            macosx64-devedition-nightly: osx-cross-devedition/opt
+            win32-devedition-nightly: windows2012-32-devedition/opt
+            win64-devedition-nightly: windows2012-64-devedition/opt
             android-api-16-nightly: android-4-0-armv7-api16/opt
    env:
       by-build-platform:
