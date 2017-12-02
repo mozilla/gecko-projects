@@ -11,7 +11,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 def generate_specifications_of_artifacts_to_sign(
     build_platform, is_nightly=False, keep_locale_template=True, kind=None
 ):
-    if kind == 'release-source':
+    if kind == 'release-source-signing':
         artifacts_specifications = [{
             'artifacts': [
                 'public/build/SOURCE'
