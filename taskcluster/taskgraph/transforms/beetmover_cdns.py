@@ -13,7 +13,6 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.scriptworker import (
     get_beetmover_bucket_scope, get_beetmover_action_scope,
-    get_phase
 )
 from taskgraph.transforms.job import job_description_schema
 from taskgraph.transforms.task import task_description_schema
@@ -79,7 +78,6 @@ def make_beetmover_cdns_description(config, jobs):
 
         bucket_scope = get_beetmover_bucket_scope(config)
         action_scope = get_beetmover_action_scope(config)
-        phase = get_phase(config)
 
         task = {
             'label': label,
@@ -91,7 +89,7 @@ def make_beetmover_cdns_description(config, jobs):
             'attributes': job.get('attributes', {}),
             'run-on-projects': job.get('run-on-projects'),
             'treeherder': treeherder,
-            'shipping-phase': phase,
+            'shipping-phase': job.get('shipping-phase', 'push'),
             'shipping-product': job.get('shipping-product'),
         }
 
