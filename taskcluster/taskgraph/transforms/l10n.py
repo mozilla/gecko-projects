@@ -22,6 +22,7 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.treeherder import split_symbol, join_symbol
 from taskgraph.transforms.job import job_description_schema
+from taskgraph.transforms.task import task_description_schema
 from voluptuous import (
     Any,
     Optional,
@@ -41,6 +42,7 @@ taskref_or_string = Any(
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
 job_description_schema = {str(k): v for k, v in job_description_schema.schema.iteritems()}
+task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 l10n_description_schema = Schema({
     # Name for this job, inferred from the dependent job before validation
@@ -144,6 +146,10 @@ l10n_description_schema = Schema({
     # passed through directly to the job description
     Optional('attributes'): job_description_schema['attributes'],
     Optional('extra'): job_description_schema['extra'],
+
+    # Shipping product and phase
+    Optional('shipping-product'): task_description_schema['shipping-product'],
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
 })
 
 transforms = TransformSequence()
