@@ -148,6 +148,15 @@ BEETMOVER_ACTION_SCOPES = {
     'default': 'project:releng:beetmover:action:push-to-staging',
 }
 
+
+"""Map the beetmover tasks aliases to phases.
+"""
+PHASES = {
+    'all-candidates-tasks': 'promote',
+    'all-push-tasks': 'push',
+    'default': None,
+}
+
 """Map balrog scope aliases to sets of projects.
 
 This is a list of list-pairs, for ordering.
@@ -376,6 +385,12 @@ get_beetmover_action_scope = functools.partial(
     get_scope_from_target_method,
     BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK,
     BEETMOVER_ACTION_SCOPES
+)
+
+get_phase = functools.partial(
+    get_scope_from_target_method,
+    BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK,
+    PHASES
 )
 
 get_balrog_server_scope = functools.partial(

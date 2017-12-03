@@ -14,7 +14,8 @@ from taskgraph.util.partials import (get_balrog_platform_name,
                                      get_partials_artifact_map)
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
-                                         get_beetmover_action_scope)
+                                         get_beetmover_action_scope,
+                                         get_phase)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -234,6 +235,7 @@ def make_task_description(config, jobs):
 
         bucket_scope = get_beetmover_bucket_scope(config)
         action_scope = get_beetmover_action_scope(config)
+        phase = get_phase(config)
 
         task = {
             'label': label,
@@ -244,7 +246,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
-            'shipping-phase': job.get('shipping-phase'),
+            'shipping-phase': job.get('shipping-phase', phase),
             'shipping-product': job.get('shipping-product'),
         }
 

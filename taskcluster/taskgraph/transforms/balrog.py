@@ -11,7 +11,8 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_balrog_server_scope,
-                                         get_balrog_channel_scopes)
+                                         get_balrog_channel_scopes,
+                                         get_phase)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -97,6 +98,7 @@ def make_task_description(config, jobs):
 
         server_scope = get_balrog_server_scope(config)
         channel_scopes = get_balrog_channel_scopes(config)
+        phase = get_phase(config)
 
         task = {
             'label': label,
@@ -111,7 +113,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
-            'shipping-phase': job.get('shipping-phase'),
+            'shipping-phase': job.get('shipping-phase', phase),
             'shipping-product': job.get('shipping-product'),
         }
 
