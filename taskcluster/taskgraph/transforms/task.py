@@ -1431,7 +1431,17 @@ def build_task(config, tasks):
         attributes = task.get('attributes', {})
         attributes['run_on_projects'] = task.get('run-on-projects', ['all'])
         attributes['always_target'] = task['always-target']
-        attributes.setdefault('shipping_phase', task['shipping-phase'])
+        # This logic is here since downstream tasks don't always match their
+        # upstream dependency's shipping_phase.
+        # A basestring task['shipping-phase'] takes precedence, then
+        # an existing attributes['shipping_phase'], then fall back to None.
+        if task.get('shipping-phase') is not None:
+            attributes['shipping_phase'] = task['shipping-phase']
+        else:
+            attributes.setdefault('shipping_phase', None)
+        # shipping_product will always match the upstream task's
+        # shipping_product, so a pre-set existing attributes['shipping_product']
+        # takes precedence over task['shipping-product'].
         attributes.setdefault('shipping_product', task['shipping-product'])
 
         # Set MOZ_AUTOMATION on all jobs.
