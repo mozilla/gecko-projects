@@ -289,7 +289,7 @@ def handle_keyed_by(config, jobs):
 @transforms.add
 def all_locales_attribute(config, jobs):
     for job in jobs:
-        locales_platform = job['attributes']['build_platform'].rstrip("-nightly")
+        locales_platform = job['attributes']['build_platform'].replace('-nightly', '')
         locales_with_changesets = _parse_locales_file(job["locales-file"],
                                                       platform=locales_platform)
         locales_with_changesets = _remove_locales(locales_with_changesets,
@@ -299,6 +299,8 @@ def all_locales_attribute(config, jobs):
         attributes = job.setdefault('attributes', {})
         attributes["all_locales"] = locales
         attributes["all_locales_with_changesets"] = locales_with_changesets
+        if job.get('shipping-product'):
+            attributes["shipping_product"] = job['shipping-product']
         yield job
 
 
