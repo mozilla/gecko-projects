@@ -41,7 +41,9 @@ jobs:
             - bash
             - -cx
             - >
-              exit 1
+              python3 ./mozapkpublisher/get_l10n_strings.py
+              --package-name "${PACKAGE_NAME}"
+              --output-file "${GOOGLE_PLAY_STRING_FILE}"
       treeherder:
          symbol: pub(gps)
          platform: Android/opt
