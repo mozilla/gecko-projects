@@ -341,12 +341,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                 if 'secondary' in task.label:
                     return False
 
-        # TODO add shipping_product / shipping_phase
-        if task.kind in (
-            'release-source', 'release-source-signing', 'beetmover-source',
-        ):
-            return True
-
         if task.attributes.get('shipping_product') == 'firefox' and \
                 task.attributes.get('shipping_phase') == 'promote':
             return True
@@ -433,12 +427,6 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         # At some point this should filter by shipping_phase == 'build' and
         # shipping_product matches.
         if task.label in beta_tasks:
-            return True
-
-        # TODO add shipping_product / shipping_phase
-        if task.kind in (
-            'release-source', 'release-source-signing', 'beetmover-source',
-        ):
             return True
 
         if task.attributes.get('shipping_product') == 'devedition' and \
