@@ -17,3 +17,4 @@ linux64-source/opt:
         options: ["repo={head_repository}", "revision={head_rev}"]
         script: "mozharness/scripts/fx_source.py"
     run-on-projects: []
+    shipping-product: firefox
