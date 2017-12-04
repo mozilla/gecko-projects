@@ -52,7 +52,7 @@ job-defaults:
          - >
            apt-get update &&
            apt-get dist-upgrade -y &&
-           curl -o scripts.tar.bz2 {config_params[base_repository]}/archive/{config_params[head_rev]}.tar.bz2/taskcluster/docker/firefox-snap/ &&
+           curl -o scripts.tar.bz2 {config_params[head_repository]}/archive/{config_params[head_rev]}.tar.bz2/taskcluster/docker/firefox-snap/ &&
            mkdir scripts &&
            tar xvfj scripts.tar.bz2 -C scripts --strip-components 4 &&
            cd scripts &&
