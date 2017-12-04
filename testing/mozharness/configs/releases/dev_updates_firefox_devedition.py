@@ -1,6 +1,6 @@
 
 config = {
-    "log_name": "bump_beta_dev",
+    "log_name": "updates_devedition",
     # TODO: use real repo
     "repo": {
         "repo": "https://hg.mozilla.org/users/asasaki_mozilla.com/tools",
@@ -21,18 +21,18 @@ config = {
     "previous_archive_prefix": "https://archive.mozilla.org/pub",
     "download_domain": "download.mozilla.org",
     "balrog_url": "https://aus4.stage.mozaws.net/",
-    "balrog_username": "balrog-stage-ffxbld.com",
+    "balrog_username": "balrog-stage-ffxbld",
     "update_channels": {
         "beta": {
             "version_regex": r"^(\d+\.\d+(b\d+)?)$",
             "requires_mirrors": True,
             # TODO - when we use a real repo, rename this file # s/MozJamun/Mozbeta/
-            "patcher_config": "mozBeta-branch-patcher2.cfg",
-            "update_verify_channel": "beta-localtest",
+            "patcher_config": "mozDevedition-branch-patcher2.cfg",
+            "update_verify_channel": "aurora-localtest",
             "mar_channel_ids": [],
-            "channel_names": ["beta", "beta-localtest", "beta-cdntest"],
-            "rules_to_update": ["firefox-beta-cdntest", "firefox-beta-localtest"],
-            "publish_rules": [32],
+            "channel_names": ["aurora", "aurora-localtest", "aurora-cdntest"],
+            "rules_to_update": ["devedition-cdntest", "devedition-localtest"],
+            "publish_rules": [10],
         }
     },
     "balrog_use_dummy_suffix": False,
