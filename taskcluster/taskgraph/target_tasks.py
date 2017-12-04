@@ -327,6 +327,8 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
+        # At some point this should filter by shipping_phase == 'build' and
+        # shipping_product matches.
         if task.label in beta_tasks:
             return True
 
@@ -340,11 +342,9 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
                     return False
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('partials', 'partials-signing', 'beetmover-repackage',
-                         'release-source', 'nightly-l10n', 'nightly-l10n-signing',
-                         'release-source-signing', 'beetmover-source',
-                         'repackage-l10n', 'balrog',
-                         ):
+        if task.kind in (
+            'release-source', 'release-source-signing', 'beetmover-source',
+        ):
             return True
 
         if task.attributes.get('shipping_product') == 'firefox' and \
@@ -430,15 +430,15 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         # Allow for beta_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
+        # At some point this should filter by shipping_phase == 'build' and
+        # shipping_product matches.
         if task.label in beta_tasks:
             return True
 
         # TODO add shipping_product / shipping_phase
-        if task.kind in ('partials', 'partials-signing', 'beetmover-repackage',
-                         'release-source', 'nightly-l10n', 'nightly-l10n-signing',
-                         'release-source-signing', 'beetmover-source',
-                         'repackage-l10n', 'balrog',
-                         ):
+        if task.kind in (
+            'release-source', 'release-source-signing', 'beetmover-source',
+        ):
             return True
 
         if task.attributes.get('shipping_product') == 'devedition' and \
