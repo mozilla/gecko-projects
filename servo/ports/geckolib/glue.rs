@@ -6,7 +6,7 @@ use cssparser::{Parser, ParserInput};
 use cssparser::ToCss as ParserToCss;
 use env_logger::LogBuilder;
 use malloc_size_of::MallocSizeOfOps;
-use selectors::Element;
+use selectors::{Element, NthIndexCache};
 use selectors::matching::{MatchingContext, MatchingMode, matches_selector};
 use servo_arc::{Arc, ArcBorrow, RawOffsetArc};
 use std::cell::RefCell;
@@ -121,9 +121,9 @@ use style::properties::{CascadeFlags, ComputedValues, DeclarationSource, Importa
 use style::properties::{LonghandId, LonghandIdSet, PropertyDeclaration, PropertyDeclarationBlock, PropertyId};
 use style::properties::{PropertyDeclarationId, ShorthandId};
 use style::properties::{SourcePropertyDeclaration, StyleBuilder};
+use style::properties::{parse_one_declaration_into, parse_style_attribute};
 use style::properties::animated_properties::AnimationValue;
 use style::properties::animated_properties::compare_property_priority;
-use style::properties::parse_one_declaration_into;
 use style::rule_cache::RuleCacheConditions;
 use style::rule_tree::{CascadeLevel, StrongRuleNode, StyleSource};
 use style::selector_parser::{PseudoElementCascadeType, SelectorImpl};
@@ -2583,8 +2583,13 @@ pub extern "C" fn Servo_ParseStyleAttribute(
     let reporter = ErrorReporter::new(ptr::null_mut(), loader, raw_extra_data);
     let url_data = unsafe { RefPtr::from_ptr_ref(&raw_extra_data) };
     Arc::new(global_style_data.shared_lock.wrap(
-        GeckoElement::parse_style_attribute(value, url_data, quirks_mode.into(), &reporter)))
-        .into_strong()
+        parse_style_attribute(
+            value,
+            url_data,
+            &reporter,
+            quirks_mode.into(),
+        )
+    )).into_strong()
 }
 
 #[no_mangle]
@@ -4478,15 +4483,13 @@ pub extern "C" fn Servo_ProcessInvalidations(
     let mut data = data.as_mut().map(|d| &mut **d);
 
     if let Some(ref mut data) = data {
-        // FIXME(emilio): an nth-index cache could be worth here, even
-        // if temporary?
-        //
-        // Also, ideally we could share them across all the elements?
+        // FIXME(emilio): Ideally we could share the nth-index-cache across all
+        // the elements?
         let result = data.invalidate_style_if_needed(
             element,
             &shared_style_context,
             None,
-            None,
+            &mut NthIndexCache::default(),
         );
 
         if result.has_invalidated_siblings() {

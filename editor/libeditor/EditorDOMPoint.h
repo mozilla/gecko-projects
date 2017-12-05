@@ -112,11 +112,11 @@ public:
                 aPointedNode->AsContent() : nullptr)
     , mIsChildInitialized(false)
   {
+    mIsChildInitialized = aPointedNode && mChild;
     NS_WARNING_ASSERTION(IsSet(),
       "The child is nullptr or doesn't have its parent");
     NS_WARNING_ASSERTION(mChild && mChild->GetParentNode() == mParent,
       "Initializing RangeBoundary with invalid value");
-    mIsChildInitialized = aPointedNode && mChild;
   }
 
   EditorDOMPointBase(nsINode* aContainer,
@@ -431,9 +431,15 @@ public:
       return !mOffset.value();
     }
     if (mIsChildInitialized) {
-      NS_WARNING_ASSERTION(!mOffset.isSome() || !mOffset.value(),
-        "If offset was initialized, mOffset should be 0");
-      return mParent->GetFirstChild() == mChild;
+      if (mParent->GetFirstChild() == mChild) {
+        NS_WARNING_ASSERTION(!mOffset.isSome() || !mOffset.value(),
+          "If mOffset was initialized, it should be 0");
+        return true;
+      }
+      NS_WARNING_ASSERTION(!mOffset.isSome() ||
+                           mParent->GetChildAt(mOffset.value()) == mChild,
+        "If mOffset and mChild are mismatched");
+      return false;
     }
     MOZ_ASSERT(mOffset.isSome());
     return !mOffset.value();
@@ -452,10 +458,16 @@ public:
       return false;
     }
     if (mIsChildInitialized) {
+      if (!mChild) {
+        NS_WARNING_ASSERTION(!mOffset.isSome() ||
+                             mOffset.value() == mParent->Length(),
+          "If mOffset was initialized, it should be length of the container");
+        return true;
+      }
       NS_WARNING_ASSERTION(!mOffset.isSome() ||
-                           mOffset.value() == mParent->Length(),
-        "If offset was initialized, mOffset should be length of the container");
-      return !mChild;
+                           mParent->GetChildAt(mOffset.value()) == mChild,
+        "If mOffset and mChild are mismatched");
+      return false;
     }
     MOZ_ASSERT(mOffset.isSome());
     return mOffset.value() == mParent->Length();
@@ -573,15 +585,17 @@ public:
       return RawRangeBoundary(mParent, mOffset.value());
     }
     if (mIsChildInitialized && mOffset.isSome()) {
-      // If we've already set both child and offset, we should use both of them
-      // to create RangeBoundaryBase instance because the constructor will
-      // validate the relation in debug build.
+      // If we've already set both child and offset, we should create
+      // RangeBoundary with offset after validation.
+#ifdef DEBUG
       if (mChild) {
-        return RawRangeBoundary(mParent, mChild->GetPreviousSibling(),
-                                mOffset.value());
+        MOZ_ASSERT(mParent == mChild->GetParentNode());
+        MOZ_ASSERT(mParent->GetChildAt(mOffset.value()) == mChild);
+      } else {
+        MOZ_ASSERT(mParent->Length() == mOffset.value());
       }
-      return RawRangeBoundary(mParent, mParent->GetLastChild(),
-                              mOffset.value());
+#endif // #ifdef DEBUG
+      return RawRangeBoundary(mParent,  mOffset.value());
     }
     // Otherwise, we should create RangeBoundaryBase only with available
     // information.
@@ -665,6 +679,7 @@ public:
     : mPoint(aPoint)
   {
     MOZ_ASSERT(aPoint.IsSetAndValid());
+    MOZ_ASSERT(mPoint.Container()->IsContainerNode());
     mChild = mPoint.GetChildAtOffset();
   }
 

@@ -20,6 +20,7 @@
 #include "mozilla/webrender/RenderD3D11TextureHostOGL.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
+#include "PaintThread.h"
 
 namespace mozilla {
 
@@ -287,18 +288,37 @@ D3D11TextureData::D3D11TextureData(ID3D11Texture2D* aTexture,
   mHasSynchronization = HasKeyedMutex(aTexture);
 }
 
-D3D11TextureData::~D3D11TextureData()
+static void DestroyDrawTarget(RefPtr<DrawTarget>& aDT, RefPtr<ID3D11Texture2D>& aTexture)
 {
-#ifdef DEBUG
   // An Azure DrawTarget needs to be locked when it gets nullptr'ed as this is
   // when it calls EndDraw. This EndDraw should not execute anything so it
   // shouldn't -really- need the lock but the debug layer chokes on this.
-  if (mDrawTarget) {
-    Lock(OpenMode::OPEN_NONE);
-    mDrawTarget = nullptr;
-    Unlock();
-  }
+#ifdef DEBUG
+  LockD3DTexture(aTexture.get());
 #endif
+  aDT = nullptr;
+#ifdef DEBUG
+  UnlockD3DTexture(aTexture.get());
+#endif
+  aTexture = nullptr;
+}
+
+D3D11TextureData::~D3D11TextureData()
+{
+  if (mDrawTarget) {
+    if (PaintThread::Get() && gfxPrefs::Direct2DDestroyDTOnPaintThread()) {
+      RefPtr<DrawTarget> dt = mDrawTarget;
+      RefPtr<ID3D11Texture2D> tex = mTexture;
+      RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::RunFunction",
+        [dt, tex]() mutable { DestroyDrawTarget(dt, tex); });
+      PaintThread::Get()->Dispatch(task);
+    }
+#ifdef DEBUG
+    else {
+      DestroyDrawTarget(mDrawTarget, mTexture);
+    }
+#endif
+  }
 }
 
 bool
@@ -1085,18 +1105,18 @@ DXGITextureHostD3D11::PushResourceUpdates(wr::ResourceUpdateQueue& aResources,
     case gfx::SurfaceFormat::B8G8R8X8: {
       MOZ_ASSERT(aImageKeys.length() == 1);
 
-      wr::ImageDescriptor descriptor(GetSize(), GetFormat());
+      wr::ImageDescriptor descriptor(mSize, GetFormat());
       auto bufferType = wr::WrExternalImageBufferType::TextureExternalHandle;
       (aResources.*method)(aImageKeys[0], descriptor, aExtID, bufferType, 0);
       break;
     }
     case gfx::SurfaceFormat::NV12: {
       MOZ_ASSERT(aImageKeys.length() == 2);
-      MOZ_ASSERT(GetSize().width % 2 == 0);
-      MOZ_ASSERT(GetSize().height % 2 == 0);
+      MOZ_ASSERT(mSize.width % 2 == 0);
+      MOZ_ASSERT(mSize.height % 2 == 0);
 
-      wr::ImageDescriptor descriptor0(GetSize(), gfx::SurfaceFormat::A8);
-      wr::ImageDescriptor descriptor1(GetSize() / 2, gfx::SurfaceFormat::R8G8);
+      wr::ImageDescriptor descriptor0(mSize, gfx::SurfaceFormat::A8);
+      wr::ImageDescriptor descriptor1(mSize / 2, gfx::SurfaceFormat::R8G8);
       auto bufferType = wr::WrExternalImageBufferType::TextureExternalHandle;
       (aResources.*method)(aImageKeys[0], descriptor0, aExtID, bufferType, 0);
       (aResources.*method)(aImageKeys[1], descriptor1, aExtID, bufferType, 1);
@@ -1145,6 +1165,7 @@ DXGIYCbCrTextureHostD3D11::DXGIYCbCrTextureHostD3D11(TextureFlags aFlags,
   const SurfaceDescriptorDXGIYCbCr& aDescriptor)
   : TextureHost(aFlags)
   , mSize(aDescriptor.size())
+  , mSizeCbCr(aDescriptor.sizeCbCr())
   , mIsLocked(false)
   , mYUVColorSpace(aDescriptor.yUVColorSpace())
 {
@@ -1302,7 +1323,7 @@ void
 DXGIYCbCrTextureHostD3D11::CreateRenderTexture(const wr::ExternalImageId& aExternalImageId)
 {
   RefPtr<wr::RenderTextureHost> texture =
-      new wr::RenderDXGIYCbCrTextureHostOGL(mHandles, mSize);
+      new wr::RenderDXGIYCbCrTextureHostOGL(mHandles, mSize, mSizeCbCr);
 
   wr::RenderThread::Get()->RegisterExternalImage(wr::AsUint64(aExternalImageId), texture.forget());
 }
@@ -1322,17 +1343,17 @@ DXGIYCbCrTextureHostD3D11::PushResourceUpdates(wr::ResourceUpdateQueue& aResourc
 {
   MOZ_ASSERT(mHandles[0] && mHandles[1] && mHandles[2]);
   MOZ_ASSERT(aImageKeys.length() == 3);
-  MOZ_ASSERT(GetSize().width % 2 == 0);
-  MOZ_ASSERT(GetSize().height % 2 == 0);
+  MOZ_ASSERT(mSize.width % 2 == 0);
+  MOZ_ASSERT(mSize.height % 2 == 0);
 
   auto method = aOp == TextureHost::ADD_IMAGE ? &wr::ResourceUpdateQueue::AddExternalImage
                                               : &wr::ResourceUpdateQueue::UpdateExternalImage;
   auto bufferType = wr::WrExternalImageBufferType::TextureExternalHandle;
 
   // y
-  wr::ImageDescriptor descriptor0(GetSize(), gfx::SurfaceFormat::A8);
+  wr::ImageDescriptor descriptor0(mSize, gfx::SurfaceFormat::A8);
   // cb and cr
-  wr::ImageDescriptor descriptor1(GetSize() / 2, gfx::SurfaceFormat::A8);
+  wr::ImageDescriptor descriptor1(mSizeCbCr, gfx::SurfaceFormat::A8);
   (aResources.*method)(aImageKeys[0], descriptor0, aExtID, bufferType, 0);
   (aResources.*method)(aImageKeys[1], descriptor1, aExtID, bufferType, 1);
   (aResources.*method)(aImageKeys[2], descriptor1, aExtID, bufferType, 2);

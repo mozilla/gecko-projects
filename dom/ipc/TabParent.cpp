@@ -171,8 +171,10 @@ TabParent::TabParent(nsIContentParent* aManager,
 #ifdef DEBUG
   , mActiveSupressDisplayportCount(0)
 #endif
-  , mLayerTreeEpoch(0)
+  , mLayerTreeEpoch(1)
   , mPreserveLayers(false)
+  , mRenderLayers(true)
+  , mHasLayers(false)
   , mHasPresented(false)
   , mHasBeforeUnload(false)
   , mIsMouseEnterIntoWidgetEventSuppressed(false)
@@ -1901,7 +1903,7 @@ TabParent::RecvNotifyIMEFocus(const ContentCache& aContentCache,
     return IPC_OK();
   }
 
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget) {
     aResolve(IMENotificationRequests());
     return IPC_OK();
@@ -1923,7 +1925,7 @@ mozilla::ipc::IPCResult
 TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
                                    const IMENotification& aIMENotification)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     return IPC_OK();
   }
@@ -1937,7 +1939,7 @@ TabParent::RecvNotifyIMECompositionUpdate(
              const ContentCache& aContentCache,
              const IMENotification& aIMENotification)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     return IPC_OK();
   }
@@ -1950,7 +1952,7 @@ mozilla::ipc::IPCResult
 TabParent::RecvNotifyIMESelection(const ContentCache& aContentCache,
                                   const IMENotification& aIMENotification)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     return IPC_OK();
   }
@@ -1962,7 +1964,7 @@ TabParent::RecvNotifyIMESelection(const ContentCache& aContentCache,
 mozilla::ipc::IPCResult
 TabParent::RecvUpdateContentCache(const ContentCache& aContentCache)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     return IPC_OK();
   }
@@ -1977,7 +1979,7 @@ TabParent::RecvNotifyIMEMouseButtonEvent(
              bool* aConsumedByIME)
 {
 
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     *aConsumedByIME = false;
     return IPC_OK();
@@ -1991,7 +1993,7 @@ mozilla::ipc::IPCResult
 TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache,
                                        const IMENotification& aIMENotification)
 {
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
   if (!widget || !IMEStateManager::DoesTabParentHaveIMEFocus(this)) {
     return IPC_OK();
   }
@@ -2007,7 +2009,7 @@ TabParent::RecvOnEventNeedingAckHandled(const EventMessage& aMessage)
   // WidgetSelectionEvent.
   // FYI: Don't check if widget is nullptr here because it's more important to
   //      notify mContentCahce of this than handling something in it.
-  nsCOMPtr<nsIWidget> widget = GetWidget();
+  nsCOMPtr<nsIWidget> widget = GetDocWidget();
 
   // While calling OnEventNeedingAckHandled(), TabParent *might* be destroyed
   // since it may send notifications to IME.
@@ -2286,8 +2288,16 @@ TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent)
     case eQueryTextRect:
     case eQueryCaretRect:
     case eQueryEditorRect:
+    {
+      nsCOMPtr<nsIWidget> widget = GetWidget();
+      nsCOMPtr<nsIWidget> docWidget = GetDocWidget();
+      if (widget != docWidget) {
+        aEvent.mReply.mRect +=
+          nsLayoutUtils::WidgetToWidgetOffset(widget, docWidget);
+      }
       aEvent.mReply.mRect -= GetChildProcessOffset();
       break;
+    }
     default:
       break;
   }
@@ -2894,14 +2904,11 @@ TabParent::GetUseAsyncPanZoom(bool* useAsyncPanZoom)
 NS_IMETHODIMP
 TabParent::SetDocShellIsActive(bool isActive)
 {
-  // Increment the epoch so that layer tree updates from previous
-  // SetDocShellIsActive requests are ignored.
-  mLayerTreeEpoch++;
-
   // docshell is consider prerendered only if not active yet
   mIsPrerendered &= !isActive;
   mDocShellIsActive = isActive;
-  Unused << SendSetDocShellIsActive(isActive, mPreserveLayers, mLayerTreeEpoch);
+  SetRenderLayers(isActive);
+  Unused << SendSetDocShellIsActive(isActive);
 
   // update active accessible documents on windows
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
@@ -2924,13 +2931,6 @@ TabParent::SetDocShellIsActive(bool isActive)
   // changing of the process priority.
   ProcessPriorityManager::TabActivityChanged(this, isActive);
 
-  // Ask the child to repaint using the PHangMonitor channel/thread (which may
-  // be less congested).
-  if (isActive) {
-    ContentParent* cp = Manager()->AsContentParent();
-    cp->ForceTabPaint(this, mLayerTreeEpoch);
-  }
-
   return NS_OK;
 }
 
@@ -2945,6 +2945,67 @@ NS_IMETHODIMP
 TabParent::GetIsPrerendered(bool* aIsPrerendered)
 {
   *aIsPrerendered = mIsPrerendered;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::SetRenderLayers(bool aEnabled)
+{
+  if (aEnabled == mRenderLayers) {
+    if (aEnabled == mHasLayers && mPreserveLayers) {
+      // RenderLayers might be called when we've been preserving layers,
+      // and already had layers uploaded. In that case, the MozLayerTreeReady
+      // event will not naturally arrive, which can confuse the front-end
+      // layer. So we fire the event here.
+      RefPtr<TabParent> self = this;
+      bool epoch = mLayerTreeEpoch;
+      bool enabled = aEnabled;
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "dom::TabParent::RenderLayers",
+        [self, epoch, enabled] () {
+          MOZ_ASSERT(NS_IsMainThread());
+          self->LayerTreeUpdate(epoch, enabled);
+        }));
+    }
+
+    return NS_OK;
+  }
+
+  // Preserve layers means that attempts to stop rendering layers
+  // will be ignored.
+  if (!aEnabled && mPreserveLayers) {
+    return NS_OK;
+  }
+
+  mRenderLayers = aEnabled;
+
+  // Increment the epoch so that layer tree updates from previous
+  // RenderLayers requests are ignored.
+  mLayerTreeEpoch++;
+
+  Unused << SendRenderLayers(aEnabled, mLayerTreeEpoch);
+
+  // Ask the child to repaint using the PHangMonitor channel/thread (which may
+  // be less congested).
+  if (aEnabled) {
+    ContentParent* cp = Manager()->AsContentParent();
+    cp->ForceTabPaint(this, mLayerTreeEpoch);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetRenderLayers(bool* aResult)
+{
+  *aResult = mRenderLayers;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetHasLayers(bool* aResult)
+{
+  *aResult = mHasLayers;
   return NS_OK;
 }
 
@@ -3035,35 +3096,6 @@ TabParent::GetHasBeforeUnload(bool* aResult)
   return NS_OK;
 }
 
-class LayerTreeUpdateRunnable final
-  : public mozilla::Runnable
-{
-  uint64_t mLayersId;
-  uint64_t mEpoch;
-  bool mActive;
-
-public:
-  explicit LayerTreeUpdateRunnable(uint64_t aLayersId,
-                                   uint64_t aEpoch,
-                                   bool aActive)
-    : Runnable("dom::LayerTreeUpdateRunnable")
-    , mLayersId(aLayersId)
-    , mEpoch(aEpoch)
-    , mActive(aActive)
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-  }
-
-private:
-  NS_IMETHOD Run() override {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (RefPtr<TabParent> tabParent = TabParent::GetTabParentFromLayersId(mLayersId)) {
-      tabParent->LayerTreeUpdate(mEpoch, mActive);
-    }
-    return NS_OK;
-  }
-};
-
 void
 TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
 {
@@ -3079,6 +3111,8 @@ TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
     NS_WARNING("Could not locate target for layer tree message.");
     return;
   }
+
+  mHasLayers = aActive;
 
   RefPtr<Event> event = NS_NewDOMEvent(mFrameElement, nullptr, nullptr);
   if (aActive) {

@@ -59,8 +59,6 @@ public class LayerSession {
     /* package */ final static int IS_COMPOSITOR_CONTROLLER_OPEN    = 21;
 
     protected class Compositor extends JNIObject {
-        public LayerView layerView;
-
         public boolean isReady() {
             return LayerSession.this.isCompositorReady();
         }
@@ -72,10 +70,6 @@ public class LayerSession {
 
         @WrapForJNI(calledFrom = "ui")
         private void onCompositorDetached() {
-            if (layerView != null) {
-                layerView.clearDrawListeners();
-                layerView = null;
-            }
             // Clear out any pending calls on the UI thread.
             LayerSession.this.onCompositorDetached();
             disposeNative();
@@ -85,7 +79,7 @@ public class LayerSession {
         @Override protected native void disposeNative();
 
         @WrapForJNI(calledFrom = "any", dispatchTo = "gecko")
-        public native void attachToJava(NativePanZoomController npzc);
+        public native void attachNPZC(NativePanZoomController npzc);
 
         @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
         public native void onBoundsChanged(int left, int top, int width, int height);
@@ -124,9 +118,7 @@ public class LayerSession {
 
         @WrapForJNI(calledFrom = "ui")
         private void recvScreenPixels(int width, int height, int[] pixels) {
-            if (layerView != null) {
-                layerView.recvScreenPixels(width, height, pixels);
-            }
+            LayerSession.this.recvScreenPixels(width, height, pixels);
         }
 
         @WrapForJNI(calledFrom = "ui", dispatchTo = "current")
@@ -144,13 +136,33 @@ public class LayerSession {
         private void updateRootFrameMetrics(float scrollX, float scrollY, float zoom) {
             LayerSession.this.onMetricsChanged(scrollX, scrollY, zoom);
         }
+
+        @WrapForJNI(calledFrom = "ui")
+        private void updateOverscrollVelocity(final float x, final float y) {
+            LayerSession.this.updateOverscrollVelocity(x, y);
+        }
+
+        @WrapForJNI(calledFrom = "ui")
+        private void updateOverscrollOffset(final float x, final float y) {
+            LayerSession.this.updateOverscrollOffset(x, y);
+        }
+
+        @WrapForJNI(calledFrom = "ui")
+        private void onSelectionCaretDrag(final boolean dragging) {
+            // Active SelectionCaretDrag requires DynamicToolbarAnimator to be pinned to
+            // avoid unwanted scroll interactions.
+            LayerSession.this.onSelectionCaretDrag(dragging);
+        }
     }
 
     protected final Compositor mCompositor = new Compositor();
 
     // All fields are accessed on UI thread only.
     private GeckoDisplay mDisplay;
+    private NativePanZoomController mNPZC;
+    private OverscrollEdgeEffect mOverscroll;
     private DynamicToolbarAnimator mToolbar;
+    private CompositorController mController;
 
     private boolean mAttachedCompositor;
     private boolean mCalledCreateCompositor;
@@ -176,6 +188,37 @@ public class LayerSession {
     }
 
     /**
+     * Get the NativePanZoomController instance for this session.
+     *
+     * @return NativePanZoomController instance.
+     */
+    public NativePanZoomController getPanZoomController() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mNPZC == null) {
+            mNPZC = new NativePanZoomController(this);
+            if (mAttachedCompositor) {
+                mCompositor.attachNPZC(mNPZC);
+            }
+        }
+        return mNPZC;
+    }
+
+    /**
+     * Get the OverscrollEdgeEffect instance for this session.
+     *
+     * @return OverscrollEdgeEffect instance.
+     */
+    public OverscrollEdgeEffect getOverscrollEdgeEffect() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mOverscroll == null) {
+            mOverscroll = new OverscrollEdgeEffect(this);
+        }
+        return mOverscroll;
+    }
+
+    /**
      * Get the DynamicToolbarAnimator instance for this session.
      *
      * @return DynamicToolbarAnimator instance.
@@ -187,6 +230,23 @@ public class LayerSession {
             mToolbar = new DynamicToolbarAnimator(this);
         }
         return mToolbar;
+    }
+
+    /**
+     * Get the CompositorController instance for this session.
+     *
+     * @return CompositorController instance.
+     */
+    public @NonNull CompositorController getCompositorController() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mController == null) {
+            mController = new CompositorController(this);
+            if (mCompositorReady) {
+                mController.onCompositorReady();
+            }
+        }
+        return mController;
     }
 
     /**
@@ -254,9 +314,9 @@ public class LayerSession {
 
     /**
      * Get the bounds of the client area in client coordinates. The returned top-left
-     * coordinates are always (0, 0). Use the matrix from
-     * #getClientToSurfaceMatrix(Matrix) or #getClientToScreenMatrix(Matrix) to map
-     * these bounds to surface or screen coordinates, respectively.
+     * coordinates are always (0, 0). Use the matrix from {@link
+     * #getClientToSurfaceMatrix(Matrix)} or {@link #getClientToScreenMatrix(Matrix)} to
+     * map these bounds to surface or screen coordinates, respectively.
      *
      * @param rect RectF to be replaced by the client bounds in client coordinates.
      * @see getSurfaceBounds(Rect)
@@ -281,12 +341,22 @@ public class LayerSession {
         rect.set(0, mClientTop - mTop, mWidth, mHeight);
     }
 
+    @WrapForJNI(stubName = "GetCompositor", calledFrom = "ui")
+    private Object getCompositorFromNative() {
+        // Only used by native code.
+        return mCompositorReady ? mCompositor : null;
+    }
+
     /* package */ void onCompositorAttached() {
         if (DEBUG) {
             ThreadUtils.assertOnUiThread();
         }
 
         mAttachedCompositor = true;
+
+        if (mNPZC != null) {
+            mCompositor.attachNPZC(mNPZC);
+        }
 
         if (mSurface != null) {
             // If we have a valid surface, create the compositor now that we're attached.
@@ -298,6 +368,10 @@ public class LayerSession {
     /* package */ void onCompositorDetached() {
         if (DEBUG) {
             ThreadUtils.assertOnUiThread();
+        }
+
+        if (mController != null) {
+            mController.onCompositorDetached();
         }
 
         mAttachedCompositor = false;
@@ -322,24 +396,21 @@ public class LayerSession {
                     @Override
                     public void run() {
                         onCompositorReady();
-                        if (mCompositor.layerView != null) {
-                            mCompositor.layerView.onCompositorReady();
-                        }
                     }
                 });
                 break;
             }
 
             case FIRST_PAINT: {
-                if (mCompositor.layerView != null) {
-                    mCompositor.layerView.setSurfaceBackgroundColor(Color.TRANSPARENT);
+                if (mController != null) {
+                    mController.onFirstPaint();
                 }
                 break;
             }
 
             case LAYERS_UPDATED: {
-                if (mCompositor.layerView != null) {
-                    mCompositor.layerView.notifyDrawListeners();
+                if (mController != null) {
+                    mController.notifyDrawCallbacks();
                 }
                 break;
             }
@@ -365,6 +436,12 @@ public class LayerSession {
         }
     }
 
+    /* package */ void recvScreenPixels(int width, int height, int[] pixels) {
+        if (mController != null) {
+            mController.recvScreenPixels(width, height, pixels);
+        }
+    }
+
     /* package */ boolean isCompositorReady() {
         return mCompositorReady;
     }
@@ -376,6 +453,10 @@ public class LayerSession {
 
         mCompositorReady = true;
 
+        if (mController != null) {
+            mController.onCompositorReady();
+        }
+
         if (mSurface != null) {
             // If we have a valid surface, resume the
             // compositor now that the compositor is ready.
@@ -385,6 +466,43 @@ public class LayerSession {
 
         if (mToolbar != null) {
             mToolbar.onCompositorReady();
+        }
+    }
+
+    /* package */ void updateOverscrollVelocity(final float x, final float y) {
+        if (DEBUG) {
+            ThreadUtils.assertOnUiThread();
+        }
+
+        if (mOverscroll == null) {
+            return;
+        }
+
+        // Multiply the velocity by 1000 to match what was done in JPZ.
+        mOverscroll.setVelocity(x * 1000.0f, OverscrollEdgeEffect.AXIS_X);
+        mOverscroll.setVelocity(y * 1000.0f, OverscrollEdgeEffect.AXIS_Y);
+    }
+
+    /* package */ void updateOverscrollOffset(final float x, final float y) {
+        if (DEBUG) {
+            ThreadUtils.assertOnUiThread();
+        }
+
+        if (mOverscroll == null) {
+            return;
+        }
+
+        mOverscroll.setDistance(x, OverscrollEdgeEffect.AXIS_X);
+        mOverscroll.setDistance(y, OverscrollEdgeEffect.AXIS_Y);
+    }
+
+    /* package */ void onSelectionCaretDrag(final boolean dragging) {
+        if (DEBUG) {
+            ThreadUtils.assertOnUiThread();
+        }
+
+        if (mToolbar != null) {
+            mToolbar.setPinned(dragging, DynamicToolbarAnimator.PinReason.CARET_DRAG);
         }
     }
 
@@ -418,8 +536,8 @@ public class LayerSession {
             mCompositor.onBoundsChanged(mLeft, mClientTop, mWidth, mClientHeight);
         }
 
-        if (mCompositor.layerView != null) {
-            mCompositor.layerView.onSizeChanged(mWidth, mHeight);
+        if (mOverscroll != null) {
+            mOverscroll.setSize(mWidth, mClientHeight);
         }
     }
 

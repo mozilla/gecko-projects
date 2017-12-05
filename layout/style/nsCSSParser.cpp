@@ -3771,6 +3771,11 @@ CSSParserImpl::ParseMediaRule(RuleAppendFunc aAppendFunc, void* aData)
 bool
 CSSParserImpl::ParseMozDocumentRule(RuleAppendFunc aAppendFunc, void* aData)
 {
+  if (mParsingMode == css::eAuthorSheetFeatures &&
+      !StylePrefs::sMozDocumentEnabledInContent) {
+    return false;
+  }
+
   css::DocumentRule::URL *urls = nullptr;
   css::DocumentRule::URL **next = &urls;
 
@@ -13444,13 +13449,6 @@ CSSParserImpl::ParseBorderSide(const nsCSSPropertyID aPropIDs[],
       AppendValue(kBorderColorIDs[index], values[2]);
     }
 
-    static const nsCSSPropertyID kBorderColorsProps[] = {
-      eCSSProperty__moz_border_top_colors,
-      eCSSProperty__moz_border_right_colors,
-      eCSSProperty__moz_border_bottom_colors,
-      eCSSProperty__moz_border_left_colors
-    };
-
     // Set the other properties that the border shorthand sets to their
     // initial values.
     nsCSSValue extraValue;
@@ -13470,9 +13468,6 @@ CSSParserImpl::ParseBorderSide(const nsCSSPropertyID aPropIDs[],
       extraValue.SetNoneValue();
       SetBorderImageInitialValues();
       break;
-    }
-    NS_FOR_CSS_SIDES(side) {
-      AppendValue(kBorderColorsProps[side], extraValue);
     }
   }
   else {

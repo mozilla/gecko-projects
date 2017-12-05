@@ -1993,27 +1993,27 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   nsAutoCStringN<1024> stringPrefs;
 
   size_t prefsLen;
-  ContentPrefs::GetContentPrefs(&prefsLen);
+  ContentPrefs::GetEarlyPrefs(&prefsLen);
 
   for (unsigned int i = 0; i < prefsLen; i++) {
-    MOZ_ASSERT(i == 0 || strcmp(ContentPrefs::GetContentPref(i), ContentPrefs::GetContentPref(i - 1)) > 0);
-    switch (Preferences::GetType(ContentPrefs::GetContentPref(i))) {
+    MOZ_ASSERT(i == 0 || strcmp(ContentPrefs::GetEarlyPref(i), ContentPrefs::GetEarlyPref(i - 1)) > 0);
+    switch (Preferences::GetType(ContentPrefs::GetEarlyPref(i))) {
     case nsIPrefBranch::PREF_INT:
-      intPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetInt(ContentPrefs::GetContentPref(i))));
+      intPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetInt(ContentPrefs::GetEarlyPref(i))));
       break;
     case nsIPrefBranch::PREF_BOOL:
-      boolPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetBool(ContentPrefs::GetContentPref(i))));
+      boolPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetBool(ContentPrefs::GetEarlyPref(i))));
       break;
     case nsIPrefBranch::PREF_STRING: {
       nsAutoCString value;
-      Preferences::GetCString(ContentPrefs::GetContentPref(i), value);
+      Preferences::GetCString(ContentPrefs::GetEarlyPref(i), value);
       stringPrefs.Append(nsPrintfCString("%u:%d;%s|", i, value.Length(), value.get()));
       }
       break;
     case nsIPrefBranch::PREF_INVALID:
       break;
     default:
-      printf("preference type: %x\n", Preferences::GetType(ContentPrefs::GetContentPref(i)));
+      printf("preference type: %x\n", Preferences::GetType(ContentPrefs::GetEarlyPref(i)));
       MOZ_CRASH();
     }
   }
@@ -4487,6 +4487,7 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
                                   nsCOMPtr<nsITabParent>& aNewTabParent,
                                   bool* aWindowIsNew,
                                   nsIPrincipal* aTriggeringPrincipal,
+                                  uint32_t aReferrerPolicy,
                                   bool aLoadURI)
 
 {
@@ -4569,6 +4570,7 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
     params->SetReferrer(NS_ConvertUTF8toUTF16(aBaseURI));
     MOZ_ASSERT(aTriggeringPrincipal, "need a valid triggeringPrincipal");
     params->SetTriggeringPrincipal(aTriggeringPrincipal);
+    params->SetReferrerPolicy(aReferrerPolicy);
 
     nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner;
     if (aLoadURI) {
@@ -4663,6 +4665,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 const nsCString& aBaseURI,
                                 const float& aFullZoom,
                                 const IPC::Principal& aTriggeringPrincipal,
+                                const uint32_t& aReferrerPolicy,
                                 CreateWindowResolver&& aResolve)
 {
   nsresult rv = NS_OK;
@@ -4710,7 +4713,8 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                        uriToLoad, aFeatures, aBaseURI, aFullZoom,
                        nextTabParentId, VoidString(), rv,
                        newRemoteTab, &cwi.windowOpened(),
-                       aTriggeringPrincipal, /* aLoadUri = */ false);
+                       aTriggeringPrincipal, aReferrerPolicy,
+                       /* aLoadUri = */ false);
   if (!ipcResult) {
     return ipcResult;
   }
@@ -4754,7 +4758,8 @@ ContentParent::RecvCreateWindowInDifferentProcess(
   const nsCString& aBaseURI,
   const float& aFullZoom,
   const nsString& aName,
-  const IPC::Principal& aTriggeringPrincipal)
+  const IPC::Principal& aTriggeringPrincipal,
+  const uint32_t& aReferrerPolicy)
 {
   nsCOMPtr<nsITabParent> newRemoteTab;
   bool windowIsNew;
@@ -4766,7 +4771,7 @@ ContentParent::RecvCreateWindowInDifferentProcess(
                        uriToLoad, aFeatures, aBaseURI, aFullZoom,
                        /* aNextTabParentId = */ 0, aName, rv,
                        newRemoteTab, &windowIsNew, aTriggeringPrincipal,
-                       /* aLoadUri = */ true);
+                       aReferrerPolicy, /* aLoadUri = */ true);
   if (!ipcResult) {
     return ipcResult;
   }

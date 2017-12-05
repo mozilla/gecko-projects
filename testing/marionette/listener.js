@@ -14,7 +14,6 @@ const winUtil = content.QueryInterface(Ci.nsIInterfaceRequestor)
 
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://marionette/content/accessibility.js");
@@ -27,7 +26,6 @@ const {
 } = Cu.import("chrome://marionette/content/element.js", {});
 const {
   ElementNotInteractableError,
-  error,
   InsecureCertificateError,
   InvalidArgumentError,
   InvalidElementStateError,
@@ -490,7 +488,7 @@ function dispatch(fn) {
     });
 
     req.then(rv => sendResponse(rv, id), err => sendError(err, id))
-        .catch(error.report);
+        .catch(err => sendError(err, id));
   };
 }
 
@@ -1426,15 +1424,11 @@ function isElementSelected(el) {
 }
 
 async function sendKeysToElement(el, val) {
-  if (el.type == "file") {
-    await interaction.uploadFile(el, val);
-  } else if ((el.type == "date" || el.type == "time") &&
-      Preferences.get("dom.forms.datetime")) {
-    interaction.setFormControlValue(el, val);
-  } else {
-    await interaction.sendKeysToElement(
-        el, val, false, capabilities.get("moz:accessibilityChecks"));
-  }
+  await interaction.sendKeysToElement(
+      el, val,
+      capabilities.get("moz:accessibilityChecks"),
+      capabilities.get("moz:webdriverClick"),
+  );
 }
 
 /** Clear the text of an element. */

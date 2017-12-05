@@ -7,30 +7,40 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
+import org.mozilla.gecko.gfx.NativePanZoomController;
 import org.mozilla.gecko.gfx.GeckoDisplay;
-import org.mozilla.gecko.gfx.LayerView;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Region;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
+import android.util.TypedValue;
+import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.FrameLayout;
 
-public class GeckoView extends LayerView {
+public class GeckoView extends FrameLayout {
     private static final String LOGTAG = "GeckoView";
     private static final boolean DEBUG = false;
 
-    private final Display mDisplay = new Display();
+    private static AccessibilityManager sAccessibilityManager;
+
+    protected final Display mDisplay = new Display();
     protected GeckoSession mSession;
     private boolean mStateSaved;
 
@@ -148,8 +158,6 @@ public class GeckoView extends LayerView {
     }
 
     private void init() {
-        initializeView();
-
         setFocusable(true);
         setFocusableInTouchMode(true);
 
@@ -171,10 +179,16 @@ public class GeckoView extends LayerView {
         mSurfaceView.getHolder().addCallback(mDisplay);
     }
 
-    @Override
-    public void setSurfaceBackgroundColor(final int newColor) {
+    /**
+     * Set a color to cover the display surface while a document is being shown. The color
+     * is automatically cleared once the new document starts painting. Set to
+     * Color.TRANSPARENT to undo the cover.
+     *
+     * @param color Cover color.
+     */
+    public void coverUntilFirstPaint(final int color) {
         if (mSurfaceView != null) {
-            mSurfaceView.setBackgroundColor(newColor);
+            mSurfaceView.setBackgroundColor(color);
         }
     }
 
@@ -189,6 +203,35 @@ public class GeckoView extends LayerView {
         if (session != null) {
             session.addDisplay(mDisplay);
         }
+
+        final Context context = getContext();
+        session.getOverscrollEdgeEffect().setTheme(context);
+        session.getOverscrollEdgeEffect().setInvalidationCallback(new Runnable() {
+            @Override
+            public void run() {
+                if (Build.VERSION.SDK_INT >= 16) {
+                    GeckoView.this.postInvalidateOnAnimation();
+                } else {
+                    GeckoView.this.postInvalidateDelayed(10);
+                }
+            }
+        });
+
+        final DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        final TypedValue outValue = new TypedValue();
+        if (context.getTheme().resolveAttribute(android.R.attr.listPreferredItemHeight,
+                                                outValue, true)) {
+            session.getPanZoomController().setScrollFactor(outValue.getDimension(metrics));
+        } else {
+            session.getPanZoomController().setScrollFactor(0.075f * metrics.densityDpi);
+        }
+
+        session.getCompositorController().setFirstPaintCallback(new Runnable() {
+            @Override
+            public void run() {
+                coverUntilFirstPaint(Color.TRANSPARENT);
+            }
+        });
 
         mSession = session;
     }
@@ -205,6 +248,10 @@ public class GeckoView extends LayerView {
         return mSession.getSettings();
     }
 
+    public NativePanZoomController getPanZoomController() {
+        return mSession.getPanZoomController();
+    }
+
     public DynamicToolbarAnimator getDynamicToolbarAnimator() {
         return mSession.getDynamicToolbarAnimator();
     }
@@ -219,7 +266,6 @@ public class GeckoView extends LayerView {
             mSession.openWindow(getContext().getApplicationContext());
         }
         mSession.attachView(this);
-        attachCompositor(mSession);
 
         super.onAttachedToWindow();
     }
@@ -227,7 +273,6 @@ public class GeckoView extends LayerView {
     @Override
     public void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        super.destroy();
 
         if (mStateSaved) {
             // If we saved state earlier, we don't want to close the window.
@@ -383,8 +428,55 @@ public class GeckoView extends LayerView {
     }
 
     @Override
-    public boolean isIMEEnabled() {
-        return mInputConnectionListener != null &&
-                mInputConnectionListener.isIMEEnabled();
+    public void dispatchDraw(final Canvas canvas) {
+        super.dispatchDraw(canvas);
+
+        if (mSession != null) {
+            mSession.getOverscrollEdgeEffect().draw(canvas);
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(final MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            requestFocus();
+        }
+
+        // NOTE: Treat mouse events as "touch" rather than as "mouse", so mouse can be
+        // used to pan/zoom. Call onMouseEvent() instead for behavior similar to desktop.
+        return mSession != null &&
+               mSession.getPanZoomController().onTouchEvent(event);
+    }
+
+    protected static boolean isAccessibilityEnabled(final Context context) {
+        if (sAccessibilityManager == null) {
+            sAccessibilityManager = (AccessibilityManager)
+                    context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+        }
+        return sAccessibilityManager.isEnabled() &&
+               sAccessibilityManager.isTouchExplorationEnabled();
+    }
+
+    @Override
+    public boolean onHoverEvent(final MotionEvent event) {
+        // If we get a touchscreen hover event, and accessibility is not enabled, don't
+        // send it to Gecko.
+        if (event.getSource() == InputDevice.SOURCE_TOUCHSCREEN &&
+            !isAccessibilityEnabled(getContext())) {
+            return false;
+        }
+
+        return mSession != null &&
+               mSession.getPanZoomController().onMotionEvent(event);
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(final MotionEvent event) {
+        if (AndroidGamepadManager.handleMotionEvent(event)) {
+            return true;
+        }
+
+        return mSession != null &&
+               mSession.getPanZoomController().onMotionEvent(event);
     }
 }

@@ -68,8 +68,8 @@ dictionary RTCAnswerOptions : RTCOfferAnswerOptions {
 };
 
 dictionary RTCOfferOptions : RTCOfferAnswerOptions {
-  long    offerToReceiveVideo;
-  long    offerToReceiveAudio;
+  boolean offerToReceiveVideo;
+  boolean offerToReceiveAudio;
   boolean iceRestart = false;
 };
 
@@ -135,6 +135,16 @@ interface RTCPeerConnection : EventTarget  {
   sequence<RTCRtpReceiver> getReceivers();
   sequence<RTCRtpTransceiver> getTransceivers();
 
+  // test-only: for testing getContributingSources
+  [ChromeOnly]
+  DOMHighResTimeStamp mozGetNowInRtpSourceReferenceTime();
+  // test-only: for testing getContributingSources
+  [ChromeOnly]
+  void mozInsertAudioLevelForContributingSource(RTCRtpReceiver receiver,
+                                                unsigned long source,
+                                                DOMHighResTimeStamp timestamp,
+                                                boolean hasLevel,
+                                                byte level);
   [ChromeOnly]
   void mozAddRIDExtension(RTCRtpReceiver receiver, unsigned short extensionId);
   [ChromeOnly]

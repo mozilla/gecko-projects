@@ -48,8 +48,8 @@
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
-#include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/IDTracker.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/Promise.h"
@@ -7536,9 +7536,8 @@ nsContentUtils::IsContentInsertionPoint(nsIContent* aContent)
   }
 
   // Check if the content is a web components content insertion point.
-  HTMLContentElement* contentElement =
-    HTMLContentElement::FromContent(aContent);
-  return contentElement && contentElement->IsInsertionPoint();
+  // XXX handle <slot>?
+  return false;
 }
 
 // static
@@ -7555,12 +7554,11 @@ nsContentUtils::HasDistributedChildren(nsIContent* aContent)
     return true;
   }
 
-  HTMLContentElement* contentEl = HTMLContentElement::FromContent(aContent);
-  if (contentEl && contentEl->IsInsertionPoint()) {
-    // Children of a content insertion point are distributed to the
-    // content insertion point if the content insertion point does
-    // not match any nodes (fallback content).
-    return contentEl->MatchedNodes().IsEmpty();
+  HTMLSlotElement* slotEl = HTMLSlotElement::FromContent(aContent);
+  if (slotEl && slotEl->GetContainingShadow()) {
+    // Children of a slot are rendered if the slot does not have any assigned
+    // nodes (fallback content).
+    return slotEl->AssignedNodes().IsEmpty();
   }
 
   return false;

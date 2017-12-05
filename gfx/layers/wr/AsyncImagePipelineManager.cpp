@@ -9,6 +9,7 @@
 #include "CompositableHost.h"
 #include "gfxEnv.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/WebRenderImageHost.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -30,6 +31,7 @@ AsyncImagePipelineManager::AsyncImagePipelineManager(already_AddRefed<wr::WebRen
  , mIdNamespace(mApi->GetNamespace())
  , mResourceId(0)
  , mAsyncImageEpoch(0)
+ , mWillGenerateFrame(false)
  , mDestroyed(false)
 {
   MOZ_COUNT_CTOR(AsyncImagePipelineManager);
@@ -46,6 +48,24 @@ AsyncImagePipelineManager::Destroy()
   MOZ_ASSERT(!mDestroyed);
   mApi = nullptr;
   mDestroyed = true;
+}
+
+void
+AsyncImagePipelineManager::SetWillGenerateFrame()
+{
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+
+  mWillGenerateFrame = true;
+}
+
+bool
+AsyncImagePipelineManager::GetAndResetWillGenerateFrame()
+{
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+
+  bool ret = mWillGenerateFrame;
+  mWillGenerateFrame = false;
+  return ret;
 }
 
 void
@@ -270,6 +290,11 @@ AsyncImagePipelineManager::ApplyAsyncImages()
                              (pipeline->mIsChanged || op == Some(TextureHost::ADD_IMAGE)) &&
                              !!pipeline->mCurrentTexture;
 
+    // Request to generate frame if there is an update.
+    if (updateDisplayList || !op.isNothing()) {
+      SetWillGenerateFrame();
+    }
+
     if (!updateDisplayList) {
       // We don't need to update the display list, either because we can't or because
       // the previous one is still up to date.
@@ -328,7 +353,7 @@ AsyncImagePipelineManager::ApplyAsyncImages()
     builder.Finalize(builderContentSize, dl);
     mApi->SetDisplayList(gfx::Color(0.f, 0.f, 0.f, 0.f), epoch, LayerSize(pipeline->mScBounds.Width(), pipeline->mScBounds.Height()),
                          pipelineId, builderContentSize,
-                         dl.dl_desc, dl.dl.inner.data, dl.dl.inner.length,
+                         dl.dl_desc, dl.dl,
                          resourceUpdates);
   }
 }

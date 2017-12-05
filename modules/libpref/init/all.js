@@ -791,6 +791,11 @@ pref("gfx.downloadable_fonts.otl_validation", false);
 pref("gfx.downloadable_fonts.otl_validation", true);
 #endif
 
+// Whether to preserve color bitmap tables in fonts (bypassing OTS).
+// Currently these are supported only on platforms where we use Freetype
+// to render fonts (Linux/Gtk and Android).
+pref("gfx.downloadable_fonts.keep_color_bitmaps", false);
+
 // Whether to preserve OpenType variation tables in fonts (bypassing OTS)
 pref("gfx.downloadable_fonts.keep_variation_tables", false);
 
@@ -1685,6 +1690,10 @@ pref("network.http.referer.XOriginTrimmingPolicy", 0);
 // 0=always send, 1=send iff base domains match, 2=send iff hosts match
 pref("network.http.referer.XOriginPolicy", 0);
 
+// Include an origin header on non-GET and non-HEAD requests regardless of CORS
+// 0=never send, 1=send when same-origin only, 2=always send
+pref("network.http.sendOriginHeader", 0);
+
 // Maximum number of consecutive redirects before aborting.
 pref("network.http.redirection-limit", 20);
 
@@ -2532,6 +2541,11 @@ pref("security.notification_enable_delay", 500);
 pref("security.csp.enable", true);
 pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
+#ifdef EARLY_BETA_OR_EARLIER
+pref("security.csp.enable_violation_events", true);
+#else
+pref("security.csp.enable_violation_events", false);
+#endif
 
 // Default Content Security Policy to apply to signed contents.
 pref("security.signed_content.CSP.default", "script-src 'self'; style-src 'self'");
@@ -2846,6 +2860,13 @@ pref("layout.css.report_errors", true);
 
 // Should the :visited selector ever match (otherwise :link matches instead)?
 pref("layout.css.visited_links_enabled", true);
+
+// Pref to control whether @-moz-document rules are enabled in content pages.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("layout.css.moz-document.content.enabled",  false);
+#else
+pref("layout.css.moz-document.content.enabled",  true);
+#endif
 
 // Override DPI. A value of -1 means use the maximum of 96 and the system DPI.
 // A value of 0 means use the system DPI. A positive value is used as the DPI.
@@ -3622,6 +3643,8 @@ pref("ui.mouse.radius.inputSource.touchOnly", true);
 
 #ifdef XP_WIN
 
+pref("font.name-list.emoji", "Segoe UI Emoji, EmojiOne Mozilla");
+
 pref("font.name-list.serif.ar", "Times New Roman");
 pref("font.name-list.sans-serif.ar", "Segoe UI, Tahoma, Arial");
 pref("font.name-list.monospace.ar", "Courier New");
@@ -3978,6 +4001,8 @@ pref("ui.key.saveLink.shift", false); // true = shift, false = meta
 // enable NSPR logging for module fontInfoLog:5
 // canonical names immediately follow '(fontinit) family:' in the log
 
+pref("font.name-list.emoji", "Apple Color Emoji");
+
 pref("font.name-list.serif.ar", "Al Bayan");
 pref("font.name-list.sans-serif.ar", "Geeza Pro");
 pref("font.name-list.monospace.ar", "Geeza Pro");
@@ -4269,6 +4294,10 @@ pref("print.print_in_color", true);
 
 // font names
 
+// fontconfig doesn't support emoji yet
+// https://lists.freedesktop.org/archives/fontconfig/2016-October/005842.html
+pref("font.name-list.emoji", "EmojiOne Mozilla");
+
 pref("font.name-list.serif.ar", "serif");
 pref("font.name-list.sans-serif.ar", "sans-serif");
 pref("font.name-list.monospace.ar", "monospace");
@@ -4443,6 +4472,8 @@ pref("font.size.fixed.x-western", 12);
 
 #if defined(ANDROID)
 // We use the bundled fonts for Firefox for Android
+
+pref("font.name-list.emoji", "Noto Color Emoji");
 
 pref("font.name-list.serif.ar", "Noto Naskh Arabic, Noto Serif, Droid Serif");
 pref("font.name-list.sans-serif.ar", "Noto Naskh Arabic, Clear Sans, Roboto, Droid Sans");
@@ -4671,6 +4702,13 @@ pref("webgl.force-index-validation", 0);
 pref("webgl.lose-context-on-memory-pressure", false);
 pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.restore-context-when-visible", true);
+#ifdef ANDROID
+pref("webgl.max-contexts", 16);
+pref("webgl.max-contexts-per-principal", 8);
+#else
+pref("webgl.max-contexts", 32);
+pref("webgl.max-contexts-per-principal", 16);
+#endif
 pref("webgl.max-warnings-per-context", 32);
 pref("webgl.enable-draft-extensions", false);
 pref("webgl.enable-privileged-extensions", false);
@@ -4842,6 +4880,10 @@ pref("gfx.direct2d.disabled", false);
 // blacklisting
 pref("gfx.direct2d.force-enabled", false);
 
+// Whether to defer destruction of Direct2D DrawTargets to the paint thread
+// when using OMTP.
+pref("gfx.direct2d.destroy-dt-on-paintthread", true);
+
 pref("gfx.direct3d11.enable-debug-layer", false);
 pref("gfx.direct3d11.break-on-error", false);
 
@@ -4954,6 +4996,8 @@ pref("full-screen-api.unprefix.enabled", false);
 pref("full-screen-api.unprefix.enabled", true);
 #endif
 pref("full-screen-api.allow-trusted-requests-only", true);
+// whether to prevent the top level widget from going fullscreen
+pref("full-screen-api.ignore-widgets", false);
 pref("full-screen-api.pointer-lock.enabled", true);
 // transition duration of fade-to-black and fade-from-black, unit: ms
 #ifndef MOZ_WIDGET_GTK

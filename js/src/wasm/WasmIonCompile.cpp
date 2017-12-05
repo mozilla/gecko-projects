@@ -801,9 +801,7 @@ class FunctionCompiler
         // Fold a constant base into the offset (so the base is 0 in which case
         // the codegen is optimized), if it doesn't wrap or trigger an
         // MWasmAddOffset.
-        if (!access->isAtomic() && !env_.isAsmJS() && // TODO bug 1421244
-            (*base)->isConstant())
-        {
+        if ((*base)->isConstant()) {
             uint32_t basePtr = (*base)->toConstant()->toInt32();
             uint32_t offset = access->offset();
 
@@ -897,6 +895,8 @@ class FunctionCompiler
             checkOffsetAndAlignmentAndBounds(access, &base);
             load = MWasmLoad::New(alloc(), memoryBase, base, *access, ToMIRType(result));
         }
+        if (!load)
+            return nullptr;
         curBlock_->add(load);
         return load;
     }
@@ -917,6 +917,8 @@ class FunctionCompiler
             checkOffsetAndAlignmentAndBounds(access, &base);
             store = MWasmStore::New(alloc(), memoryBase, base, *access, v);
         }
+        if (!store)
+            return;
         curBlock_->add(store);
     }
 
@@ -941,6 +943,8 @@ class FunctionCompiler
         MWasmLoadTls* memoryBase = maybeLoadMemoryBase();
         MInstruction* cas = MWasmCompareExchangeHeap::New(alloc(), bytecodeOffset(), memoryBase,
                                                           base, *access, oldv, newv, tlsPointer_);
+        if (!cas)
+            return nullptr;
         curBlock_->add(cas);
 
         if (isSmallerAccessForI64(result, access)) {
@@ -968,6 +972,8 @@ class FunctionCompiler
         MWasmLoadTls* memoryBase = maybeLoadMemoryBase();
         MInstruction* xchg = MWasmAtomicExchangeHeap::New(alloc(), bytecodeOffset(), memoryBase,
                                                           base, *access, value, tlsPointer_);
+        if (!xchg)
+            return nullptr;
         curBlock_->add(xchg);
 
         if (isSmallerAccessForI64(result, access)) {
@@ -995,6 +1001,8 @@ class FunctionCompiler
         MWasmLoadTls* memoryBase = maybeLoadMemoryBase();
         MInstruction* binop = MWasmAtomicBinopHeap::New(alloc(), bytecodeOffset(), op, memoryBase,
                                                         base, *access, value, tlsPointer_);
+        if (!binop)
+            return nullptr;
         curBlock_->add(binop);
 
         if (isSmallerAccessForI64(result, access)) {

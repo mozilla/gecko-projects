@@ -265,8 +265,7 @@ WebRenderAPI::SetDisplayList(gfx::Color aBgColor,
                              wr::WrPipelineId pipeline_id,
                              const LayoutSize& content_size,
                              wr::BuiltDisplayListDescriptor dl_descriptor,
-                             uint8_t *dl_data,
-                             size_t dl_size,
+                             wr::Vec_u8& dl_data,
                              ResourceUpdateQueue& aResources)
 {
   wr_api_set_display_list(mDocHandle,
@@ -276,8 +275,7 @@ WebRenderAPI::SetDisplayList(gfx::Color aBgColor,
                           pipeline_id,
                           content_size,
                           dl_descriptor,
-                          dl_data,
-                          dl_size,
+                          &dl_data.inner,
                           aResources.Raw());
 }
 
@@ -690,6 +688,7 @@ DisplayListBuilder::~DisplayListBuilder()
 void DisplayListBuilder::Save() { wr_dp_save(mWrState); }
 void DisplayListBuilder::Restore() { wr_dp_restore(mWrState); }
 void DisplayListBuilder::ClearSave() { wr_dp_clear_save(mWrState); }
+void DisplayListBuilder::Dump() { wr_dump_display_list(mWrState); }
 
 void
 DisplayListBuilder::Finalize(wr::LayoutSize& aOutContentSize,

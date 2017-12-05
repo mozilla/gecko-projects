@@ -21,10 +21,12 @@ class nsIContent;
 class nsXBLPrototypeBinding;
 
 namespace mozilla {
+
+class EventChainPreVisitor;
+
 namespace dom {
 
 class Element;
-class HTMLContentElement;
 class ShadowRootStyleSheetList;
 
 class ShadowRoot final : public DocumentFragment,
@@ -72,33 +74,28 @@ public:
   void DistributeAllNodes();
 
 private:
-  /**
-   * Distributes a single explicit child of the pool host to the content
-   * insertion points in this ShadowRoot.
-   *
-   * Returns the insertion point the element is distributed to after this call.
-   *
-   * Note that this doesn't handle distributing the node in the insertion point
-   * parent's shadow root.
-   */
-  const HTMLContentElement* DistributeSingleNode(nsIContent* aContent);
 
   /**
-   * Removes a single explicit child of the pool host from the content
-   * insertion points in this ShadowRoot.
-   *
-   * Returns the old insertion point, if any.
-   *
-   * Note that this doesn't handle removing the node in the returned insertion
-   * point parent's shadow root.
-   */
-  const HTMLContentElement* RemoveDistributedNode(nsIContent* aContent);
-
-  /**
-   * Redistributes a node of the pool, and returns whether the distribution
+   * Try to reassign an element to a slot and returns whether the assignment
    * changed.
    */
-  bool RedistributeElement(Element*);
+  bool MaybeReassignElement(Element* aElement, const nsAttrValue* aOldValue);
+
+  /**
+   * Try to assign aContent to a slot in the shadow tree, returns the assigned
+   * slot if found.
+   */
+  const HTMLSlotElement* AssignSlotFor(nsIContent* aContent);
+
+  /**
+   * Unassign aContent from the assigned slot in the shadow tree, returns the
+   * assigned slot if found.
+   *
+   * Note: slot attribute of aContent may have changed already, so pass slot
+   *       name explicity here.
+   */
+  const HTMLSlotElement* UnassignSlotFor(nsIContent* aContent,
+                                         const nsAString& aSlotName);
 
   /**
    * Called when we redistribute content after insertion points have changed.
@@ -108,8 +105,8 @@ private:
   bool IsPooledNode(nsIContent* aChild) const;
 
 public:
-  void AddInsertionPoint(HTMLContentElement* aInsertionPoint);
-  void RemoveInsertionPoint(HTMLContentElement* aInsertionPoint);
+  void AddSlot(HTMLSlotElement* aSlot);
+  void RemoveSlot(HTMLSlotElement* aSlot);
 
   void SetInsertionPointChanged() { mInsertionPointChanged = true; }
 
@@ -118,9 +115,6 @@ public:
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   static ShadowRoot* FromNode(nsINode* aNode);
-
-  static void RemoveDestInsertionPoint(nsIContent* aInsertionPoint,
-                                       nsTArray<nsIContent*>& aDestInsertionPoints);
 
   // WebIDL methods.
   Element* GetElementById(const nsAString& aElementId);
@@ -141,17 +135,17 @@ public:
     mIsComposedDocParticipant = aIsComposedDocParticipant;
   }
 
+  nsresult GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+
 protected:
   virtual ~ShadowRoot();
 
   ShadowRootMode mMode;
 
-  // An array of content insertion points that are a descendant of the ShadowRoot
-  // sorted in tree order. Insertion points are responsible for notifying
-  // the ShadowRoot when they are removed or added as a descendant. The insertion
-  // points are kept alive by the parent node, thus weak references are held
-  // by the array.
-  nsTArray<HTMLContentElement*> mInsertionPoints;
+  // Map from name of slot to an array of all slots in the shadow DOM with with
+  // the given name. The slots are stored as a weak pointer because the elements
+  // are in the shadow tree and should be kept alive by its parent.
+  nsClassHashtable<nsStringHashKey, nsTArray<mozilla::dom::HTMLSlotElement*>> mSlotMap;
 
   nsTHashtable<nsIdentifierMapEntry> mIdentifierMap;
   nsXBLPrototypeBinding* mProtoBinding;

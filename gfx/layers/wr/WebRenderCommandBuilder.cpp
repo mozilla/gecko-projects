@@ -448,16 +448,21 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
     break;
   }
 
-  if (aHighlight) {
-    aDT->SetTransform(gfx::Matrix());
-    aDT->FillRect(gfx::Rect(0, 0, aImageRect.Width(), aImageRect.Height()), gfx::ColorPattern(aHighlight.value()));
-  }
-  if (aItem->Frame()->PresContext()->GetPaintFlashing() && isInvalidated) {
-    aDT->SetTransform(gfx::Matrix());
-    float r = float(rand()) / RAND_MAX;
-    float g = float(rand()) / RAND_MAX;
-    float b = float(rand()) / RAND_MAX;
-    aDT->FillRect(gfx::Rect(0, 0, aImageRect.Width(), aImageRect.Height()), gfx::ColorPattern(gfx::Color(r, g, b, 0.5)));
+  if (aItem->GetType() != DisplayItemType::TYPE_MASK) {
+    // Apply highlight fills, if the appropriate prefs are set.
+    // We don't do this for masks because we'd be filling the A8 mask surface,
+    // which isn't very useful.
+    if (aHighlight) {
+      aDT->SetTransform(gfx::Matrix());
+      aDT->FillRect(gfx::Rect(0, 0, aImageRect.Width(), aImageRect.Height()), gfx::ColorPattern(aHighlight.value()));
+    }
+    if (aItem->Frame()->PresContext()->GetPaintFlashing() && isInvalidated) {
+      aDT->SetTransform(gfx::Matrix());
+      float r = float(rand()) / RAND_MAX;
+      float g = float(rand()) / RAND_MAX;
+      float b = float(rand()) / RAND_MAX;
+      aDT->FillRect(gfx::Rect(0, 0, aImageRect.Width(), aImageRect.Height()), gfx::ColorPattern(gfx::Color(r, g, b, 0.5)));
+    }
   }
 
   return isInvalidated;
@@ -526,7 +531,7 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
   LayoutDeviceIntPoint offset = RoundedToInt(bounds.TopLeft());
   aImageRect = LayoutDeviceRect(offset, LayoutDeviceSize(RoundedToInt(bounds.Size())));
   LayerRect paintRect = LayerRect(LayerPoint(0, 0), LayerSize(paintSize));
-  nsAutoPtr<nsDisplayItemGeometry> geometry = fallbackData->GetGeometry();
+  nsDisplayItemGeometry* geometry = fallbackData->GetGeometry();
 
   // nsDisplayFilter is rendered via BasicLayerManager which means the invalidate
   // region is unknown until we traverse the displaylist contained by it.
@@ -556,6 +561,10 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
   }
 
   if (needPaint || !fallbackData->GetKey()) {
+    nsAutoPtr<nsDisplayItemGeometry> newGeometry;
+    newGeometry = aItem->AllocateGeometry(aDisplayListBuilder);
+    fallbackData->SetGeometry(Move(newGeometry));
+
     gfx::SurfaceFormat format = aItem->GetType() == DisplayItemType::TYPE_MASK ?
                                                       gfx::SurfaceFormat::A8 : gfx::SurfaceFormat::B8G8R8A8;
     if (useBlobImage) {
@@ -640,13 +649,11 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
       }
     }
 
-    geometry = aItem->AllocateGeometry(aDisplayListBuilder);
     fallbackData->SetScale(scale);
     fallbackData->SetInvalid(false);
   }
 
   // Update current bounds to fallback data
-  fallbackData->SetGeometry(Move(geometry));
   fallbackData->SetBounds(paintBounds);
 
   MOZ_ASSERT(fallbackData->GetKey());
