@@ -21,9 +21,9 @@ job-defaults:
    worker-type: buildbot-bridge/buildbot-bridge
    run:
       using: buildbot
+      release-promotion: true
    worker:
       properties:
-         release_promotion: true
          platforms: "linux,linux64,macosx64,win32,win64"
 
 jobs:

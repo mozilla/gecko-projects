@@ -26,6 +26,7 @@ job-defaults:
    worker-type: buildbot-bridge/buildbot-bridge
    run:
       using: buildbot
+      release-promotion: true
    worker:
       properties:
          NO_BBCONFIG: "1"
