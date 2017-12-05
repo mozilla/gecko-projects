@@ -28,7 +28,6 @@ job-defaults:
          in-tree: "update-verify"
       max-run-time: 7200
       retry-exit-status:
-         - 1
          - 255
       env:
          NO_BBCONFIG: "1"
