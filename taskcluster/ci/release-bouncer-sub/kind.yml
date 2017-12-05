@@ -20,26 +20,43 @@ job-defaults:
       release-promotion: true
    notifications:
       completed:
-         by-project:
-            maple:
-               - "release-drivers-staging"
-            try:
-            default:
-               - "release-drivers"
+         subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         plugins:
+            by-project:
+               mozilla-beta: ["log_collect"]
+               mozilla-release: ["log_collect"]
+               default: []
+
       failed:
-         by-project:
-            maple:
-               - "release-drivers-staging"
-            try:
-            default:
-               - "release-drivers"
+         subject: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         plugins:
+            by-project:
+               mozilla-beta: ["log_collect", "ses"]
+               mozilla-release: ["log_collect", "ses"]
+               default: ["ses"]
+         emails:
+            by-project:
+               mozilla-beta: ["release-automation-notifications@mozilla.com"]
+               mozilla-release: ["release-automation-notifications@mozilla.com"]
+               try: ["{task_def[metadata][owner]}"]
+               default: ["release+tcstaging@mozilla.com"]
+
       exception:
-         by-project:
-            maple:
-               - "release-drivers-staging"
-            try:
-            default:
-               - "release-drivers"
+         subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+         plugins:
+            by-project:
+               mozilla-beta: ["log_collect", "ses"]
+               mozilla-release: ["log_collect", "ses"]
+               default: ["ses"]
+         emails:
+            by-project:
+               mozilla-beta: ["release-automation-notifications@mozilla.com"]
+               mozilla-release: ["release-automation-notifications@mozilla.com"]
+               try: ["{task_def[metadata][owner]}"]
+               default: ["release+tcstaging@mozilla.com"]
 
 jobs:
    fennec:
