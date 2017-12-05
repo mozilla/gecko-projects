@@ -180,6 +180,7 @@ linux64-devedition-nightly/opt:
             - builds/releng_base_linux_64_builds.py
             - disable_signing.py
             - balrog/production.py
+            - taskcluster_nightly.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: public
@@ -441,6 +442,7 @@ linux-devedition-nightly/opt:
             - builds/releng_base_linux_32_builds.py
             - disable_signing.py
             - balrog/production.py
+            - taskcluster_nightly.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: public
