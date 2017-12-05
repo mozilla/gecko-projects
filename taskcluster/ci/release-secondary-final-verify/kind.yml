@@ -7,8 +7,6 @@ loader: taskgraph.loader.transform:loader
 kind-dependencies:
     # TODO: this makes us depend on beetmover/balrog for all platforms
     # does it matter?
-    # TODO: balrog deps don't actually show up until shipping-product
-    # and shipping-phase is set for balrog tasks
     - post-balrog-dummy
     - post-beetmover-dummy
     - release-updates-builder
