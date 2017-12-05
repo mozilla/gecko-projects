@@ -10,16 +10,7 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - build
-   - l10n
-only-for-build-platforms:
-   - linux64/opt
-   - linux64/debug
-   - linux64-nightly/opt
-   - linux-nightly/opt
-   - linux64-devedition-nightly/opt
-   - linux-devedition-nightly/opt
-
+   - post-beetmover-dummy
 
 job-defaults:
    description: Generates snap image
@@ -63,7 +54,7 @@ job-defaults:
          CANDIDATES_DIR:
             by-project:
                maple:
-                  https://net-mozaws-stage-delivery-archive.s3.amazonaws.com/pub/{task[shipping-product]}/candidates
+                  https://net-mozaws-stage-delivery-firefox.s3.amazonaws.com/pub/{task[shipping-product]}/candidates
                default:
                   https://net-mozaws-prod-delivery-firefox.s3.amazonaws.com/pub/{task[shipping-product]}/candidates
          LC_ALL: C.UTF-8
