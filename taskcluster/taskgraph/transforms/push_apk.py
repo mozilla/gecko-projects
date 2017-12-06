@@ -28,23 +28,22 @@ task_description_schema = {str(k): v for k, v in task_description_schema.schema.
 
 
 push_apk_description_schema = Schema({
-    # the dependent task (object) for this beetmover job, used to inform beetmover.
     Required('dependent-tasks'): object,
     Required('name'): basestring,
-    Required('label'): basestring,
-    Required('description'): basestring,
-    Required('job-from'): basestring,
-    Required('attributes'): object,
-    Required('treeherder'): object,
-    Required('run-on-projects'): list,
+    Required('label'): task_description_schema['label'],
+    Required('description'): task_description_schema['description'],
+    Required('job-from'): task_description_schema['job-from'],
+    Required('attributes'): task_description_schema['attributes'],
+    Required('treeherder'): task_description_schema['treeherder'],
+    Required('run-on-projects'): task_description_schema['run-on-projects'],
     Required('worker-type'): optionally_keyed_by('project', basestring),
     Required('worker'): object,
     Required('scopes'): None,
-    Required('requires'): basestring,
+    Required('requires'): task_description_schema['requires'],
     Required('deadline-after'): basestring,
     Required('shipping-phase'): task_description_schema['shipping-phase'],
     Required('shipping-product'): task_description_schema['shipping-product'],
-    Optional('extra'): object,
+    Optional('extra'): task_description_schema['extra'],
 })
 
 validate_jobs_schema_transform = functools.partial(

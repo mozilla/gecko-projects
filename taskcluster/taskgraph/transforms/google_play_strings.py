@@ -10,8 +10,8 @@ from __future__ import absolute_import, print_function, unicode_literals
 import functools
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import resolve_keyed_by, Schema
-# from taskgraph.util.scriptworker import
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial
 
 from voluptuous import Required
@@ -19,16 +19,19 @@ from voluptuous import Required
 
 transforms = TransformSequence()
 
+# Voluptuous uses marker objects as dictionary *keys*, but they are not
+# comparable, so we cast all of the keys back to regular strings
+task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
+
 google_play_description_schema = Schema({
-    # the dependent task (object) for this beetmover job, used to inform beetmover.
     Required('name'): basestring,
-    Required('label'): basestring,
-    Required('description'): basestring,
-    Required('job-from'): basestring,
-    Required('attributes'): object,
-    Required('treeherder'): object,
-    Required('run-on-projects'): list,
-    Required('worker-type'): basestring,
+    Required('label'): task_description_schema['label'],
+    Required('description'): task_description_schema['description'],
+    Required('job-from'): task_description_schema['job-from'],
+    Required('attributes'): task_description_schema['attributes'],
+    Required('treeherder'): task_description_schema['treeherder'],
+    Required('run-on-projects'): task_description_schema['run-on-projects'],
+    Required('worker-type'): task_description_schema['worker-type'],
     Required('worker'): object,
 })
 
