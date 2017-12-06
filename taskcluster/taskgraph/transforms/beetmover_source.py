@@ -4,6 +4,7 @@
 """
 Transform the beetmover-source task to also append `build` as dependency
 """
+from __future__ import absolute_import
 
 from taskgraph.transforms.base import TransformSequence
 
