@@ -1503,9 +1503,13 @@ def build_task(config, tasks):
                             release_config=release_config,
                     )
                     if isinstance(notification_option_value, basestring):
-                        notification[notification_option] = notification_option_value.format(**format_kwargs)
+                        notification[notification_option] = notification_option_value.format(
+                            **format_kwargs
+                        )
                     elif isinstance(notification_option_value, list):
-                        notification[notification_option] = [i.format(**format_kwargs) for i in notification_option_value]
+                        notification[notification_option] = [
+                            i.format(**format_kwargs) for i in notification_option_value
+                        ]
 
                 # change event to correct event
                 if notification_event != 'artifact-created':
