@@ -280,12 +280,19 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
             find_hg_revision_pushlog_id(parameters, revision)
         previous_graph_ids = [find_decision_task(parameters)]
 
-    # Download parameters and full task graph from the first decision task.
+    # Download parameters from the first decision task
     parameters = get_artifact(previous_graph_ids[0], "public/parameters.yml")
-    full_task_graph = get_artifact(previous_graph_ids[0], "public/full-task-graph.json")
-    _, full_task_graph = TaskGraph.from_json(full_task_graph)
+    # Download and combine full task graphs from each of the previous_graph_ids.
+    # Sometimes previous relpro action tasks will add tasks, like partials,
+    # that didn't exist in the first full_task_graph, so combining them is
+    # important.
+    combined_full_task_graph = {}
+    for graph_id in previous_graph_ids:
+        full_task_graph = get_artifact(graph_id, "public/full-task-graph.json")
+        combined_full_task_graph.update(full_task_graph)
+    _, combined_full_task_graph = TaskGraph.from_json(combined_full_task_graph)
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
-        full_task_graph, previous_graph_ids, rebuild_kinds
+        combined_full_task_graph, previous_graph_ids, rebuild_kinds
     )
     parameters['do_not_optimize'] = do_not_optimize
     parameters['target_tasks_method'] = target_tasks_method
