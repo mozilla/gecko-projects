@@ -1584,9 +1584,11 @@ pref("network.protocol-handler.external.moz-icon", false);
 
 // Don't allow  external protocol handlers for common typos
 pref("network.protocol-handler.external.ttp", false);  // http
+pref("network.protocol-handler.external.htp", false);  // http
 pref("network.protocol-handler.external.ttps", false); // https
 pref("network.protocol-handler.external.tps", false);  // https
 pref("network.protocol-handler.external.ps", false);   // https
+pref("network.protocol-handler.external.htps", false); // https
 pref("network.protocol-handler.external.ile", false);  // file
 pref("network.protocol-handler.external.le", false);   // file
 
@@ -2291,6 +2293,7 @@ pref("intl.menuitems.insertseparatorbeforeaccesskeys","chrome://global/locale/in
 pref("intl.charset.detector",               "chrome://global/locale/intl.properties");
 pref("intl.charset.fallback.override",      "");
 pref("intl.charset.fallback.tld",           true);
+pref("intl.charset.fallback.utf8_for_file", false);
 pref("intl.ellipsis",                       "chrome://global-platform/locale/intl.properties");
 pref("intl.locale.matchOS",                 false);
 // this pref allows user to request that all internationalization formatters

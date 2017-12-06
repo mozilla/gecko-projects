@@ -161,7 +161,7 @@ add_task(async function test_createTable() {
   var temp = getTestDB().parent;
   temp.append("test_db_table");
   try {
-    var con = getService().openDatabase(temp);
+    var con = Services.storage.openDatabase(temp);
     con.createTable("a", "");
   } catch (e) {
     if (temp.exists()) {
@@ -205,8 +205,7 @@ add_task(async function test_close_does_not_spin_event_loop() {
 
   // Post the event before we call close, so it would run if the event loop was
   // spun during close.
-  Cc["@mozilla.org/thread-manager;1"].
-    getService(Ci.nsIThreadManager).dispatchToMainThread(event);
+  Services.tm.dispatchToMainThread(event);
 
   // Sanity check, then close the database.  Afterwards, we should not have ran!
   do_check_false(event.ran);
@@ -278,7 +277,7 @@ if (!AppConstants.DEBUG) {
 }
 
 add_task(async function test_clone_optional_param() {
-  let db1 = getService().openUnsharedDatabase(getTestDB());
+  let db1 = Services.storage.openUnsharedDatabase(getTestDB());
   let db2 = db1.clone();
   do_check_true(db2.connectionReady);
 
@@ -426,7 +425,7 @@ add_task(async function test_async_open_with_shared_cache() {
 
 add_task(async function test_clone_trivial_async() {
   do_print("Open connection");
-  let db = getService().openDatabase(getTestDB());
+  let db = Services.storage.openDatabase(getTestDB());
   do_check_true(db instanceof Ci.mozIStorageAsyncConnection);
   do_print("AsyncClone connection");
   let clone = await asyncClone(db, true);
@@ -485,7 +484,7 @@ add_task(async function test_clone_no_optional_param_async() {
 });
 
 add_task(async function test_clone_readonly() {
-  let db1 = getService().openUnsharedDatabase(getTestDB());
+  let db1 = Services.storage.openUnsharedDatabase(getTestDB());
   let db2 = db1.clone(true);
   do_check_true(db2.connectionReady);
 
@@ -505,7 +504,7 @@ add_task(async function test_clone_readonly() {
 });
 
 add_task(async function test_clone_shared_readonly() {
-  let db1 = getService().openDatabase(getTestDB());
+  let db1 = Services.storage.openDatabase(getTestDB());
   let db2 = db1.clone(true);
   do_check_true(db2.connectionReady);
 
@@ -534,14 +533,14 @@ add_task(async function test_close_clone_fails() {
     "openUnsharedDatabase",
   ];
   calls.forEach(function(methodName) {
-    let db = getService()[methodName](getTestDB());
+    let db = Services.storage[methodName](getTestDB());
     db.close();
     expectError(Cr.NS_ERROR_NOT_INITIALIZED, () => db.clone());
   });
 });
 
 add_task(async function test_memory_clone_fails() {
-  let db = getService().openSpecialDatabase("memory");
+  let db = Services.storage.openSpecialDatabase("memory");
   db.close();
   expectError(Cr.NS_ERROR_NOT_INITIALIZED, () => db.clone());
 });
@@ -559,7 +558,7 @@ add_task(async function test_clone_copies_functions() {
   calls.forEach(function(methodName) {
     [true, false].forEach(function(readOnly) {
       functionMethods.forEach(function(functionMethod) {
-        let db1 = getService()[methodName](getTestDB());
+        let db1 = Services.storage[methodName](getTestDB());
         // Create a function for db1.
         db1[functionMethod](FUNC_NAME, 1, {
           onFunctionCall: () => 0,
@@ -605,7 +604,7 @@ add_task(async function test_clone_copies_overridden_functions() {
   calls.forEach(function(methodName) {
     [true, false].forEach(function(readOnly) {
       functionMethods.forEach(function(functionMethod) {
-        let db1 = getService()[methodName](getTestDB());
+        let db1 = Services.storage[methodName](getTestDB());
         // Create a function for db1.
         let func = new test_func();
         db1[functionMethod](FUNC_NAME, 1, func);
@@ -636,7 +635,7 @@ add_task(async function test_clone_copies_pragmas() {
     { name: "ignore_check_constraints", value: 1, copied: false },
   ];
 
-  let db1 = getService().openUnsharedDatabase(getTestDB());
+  let db1 = Services.storage.openUnsharedDatabase(getTestDB());
 
   // Sanity check initial values are different from enforced ones.
   PRAGMAS.forEach(function(pragma) {
@@ -678,7 +677,7 @@ add_task(async function test_readonly_clone_copies_pragmas() {
     { name: "ignore_check_constraints", value: 1, copied: false },
   ];
 
-  let db1 = getService().openUnsharedDatabase(getTestDB());
+  let db1 = Services.storage.openUnsharedDatabase(getTestDB());
 
   // Sanity check initial values are different from enforced ones.
   PRAGMAS.forEach(function(pragma) {
@@ -709,13 +708,13 @@ add_task(async function test_readonly_clone_copies_pragmas() {
 });
 
 add_task(async function test_clone_attach_database() {
-  let db1 = getService().openUnsharedDatabase(getTestDB());
+  let db1 = Services.storage.openUnsharedDatabase(getTestDB());
 
   let c = 0;
   function attachDB(conn, name) {
-    let file = dirSvc.get("ProfD", Ci.nsIFile);
+    let file = Services.dirsvc.get("ProfD", Ci.nsIFile);
     file.append("test_storage_" + (++c) + ".sqlite");
-    let db = getService().openUnsharedDatabase(file);
+    let db = Services.storage.openUnsharedDatabase(file);
     conn.executeSimpleSQL(`ATTACH DATABASE '${db.databaseFile.path}' AS ${name}`);
     db.close();
   }
@@ -751,6 +750,148 @@ add_task(async function test_clone_attach_database() {
   db1.close();
   db2.close();
   db3.close();
+});
+
+add_task(async function test_async_clone_with_temp_trigger_and_table() {
+  do_print("Open connection");
+  let db = Services.storage.openDatabase(getTestDB());
+  do_check_true(db instanceof Ci.mozIStorageAsyncConnection);
+
+  do_print("Set up tables on original connection");
+  let createQueries = [
+    `CREATE TEMP TABLE test_temp(name TEXT)`,
+    `CREATE INDEX test_temp_idx ON test_temp(name)`,
+    `CREATE TEMP TRIGGER test_temp_afterdelete_trigger
+     AFTER DELETE ON test_temp FOR EACH ROW
+     BEGIN
+       INSERT INTO test(name) VALUES(OLD.name);
+     END`];
+  for (let query of createQueries) {
+    let stmt = db.createAsyncStatement(query);
+    await executeAsync(stmt);
+    stmt.finalize();
+  }
+
+  do_print("Create read-write clone with temp tables");
+  let readWriteClone = await asyncClone(db, false);
+  do_check_true(readWriteClone instanceof Ci.mozIStorageAsyncConnection);
+
+  do_print("Insert into temp table on read-write clone");
+  let insertStmt = readWriteClone.createAsyncStatement(`
+    INSERT INTO test_temp(name) VALUES('mak'), ('standard8'), ('markh')`);
+  await executeAsync(insertStmt);
+  insertStmt.finalize();
+
+  do_print("Fire temp trigger on read-write clone");
+  let deleteStmt = readWriteClone.createAsyncStatement(`
+    DELETE FROM test_temp`);
+  await executeAsync(deleteStmt);
+  deleteStmt.finalize();
+
+  do_print("Read from original connection");
+  let names = [];
+  let readStmt = db.createStatement(`SELECT name FROM test`);
+  while (readStmt.executeStep()) {
+    names.push(readStmt.getUTF8String(0));
+  }
+  readStmt.finalize();
+  do_check_true(names.includes("mak"));
+  do_check_true(names.includes("standard8"));
+  do_check_true(names.includes("markh"));
+
+  do_print("Create read-only clone");
+  let readOnlyClone = await asyncClone(db, true);
+  do_check_true(readOnlyClone instanceof Ci.mozIStorageAsyncConnection);
+
+  do_print("Read-only clone shouldn't have temp entities");
+  let badStmt = readOnlyClone.createAsyncStatement(`SELECT 1 FROM test_temp`);
+  await Assert.rejects(executeAsync(badStmt));
+  badStmt.finalize();
+
+  do_print("Clean up");
+  for (let conn of [db, readWriteClone, readOnlyClone]) {
+    await asyncClose(conn);
+  }
+});
+
+add_task(async function test_sync_clone_in_transaction() {
+  do_print("Open connection");
+  let db = Services.storage.openDatabase(getTestDB());
+  do_check_true(db instanceof Ci.mozIStorageAsyncConnection);
+
+  do_print("Begin transaction on main connection");
+  db.beginTransaction();
+
+  do_print("Create temp table and trigger in transaction");
+  let createQueries = [
+    `CREATE TEMP TABLE test_temp(name TEXT)`,
+    `CREATE TEMP TRIGGER test_temp_afterdelete_trigger
+     AFTER DELETE ON test_temp FOR EACH ROW
+     BEGIN
+       INSERT INTO test(name) VALUES(OLD.name);
+     END`,
+  ];
+  for (let query of createQueries) {
+    db.executeSimpleSQL(query);
+  }
+
+  do_print("Clone main connection while transaction is in progress");
+  let clone = db.clone(/* aReadOnly */ false);
+
+  // Dropping the table also drops `test_temp_afterdelete_trigger`.
+  do_print("Drop temp table on main connection");
+  db.executeSimpleSQL(`DROP TABLE test_temp`);
+
+  do_print("Commit transaction");
+  db.commitTransaction();
+
+  do_print("Clone connection should still have temp entities");
+  let readTempStmt = clone.createStatement(`SELECT 1 FROM test_temp`);
+  readTempStmt.execute();
+  readTempStmt.finalize();
+
+  do_print("Clean up");
+
+  db.close();
+  clone.close();
+});
+
+add_task(async function test_sync_clone_with_function() {
+  do_print("Open connection");
+  let db = Services.storage.openDatabase(getTestDB());
+  do_check_true(db instanceof Ci.mozIStorageAsyncConnection);
+
+  do_print("Create SQL function");
+  function storeLastInsertedNameFunc() {
+    this.name = null;
+  }
+  storeLastInsertedNameFunc.prototype = {
+    onFunctionCall(args) {
+      this.name = args.getUTF8String(0);
+    },
+  };
+  let func = new storeLastInsertedNameFunc();
+  db.createFunction("store_last_inserted_name", 1, func);
+
+  do_print("Create temp trigger on main connection");
+  db.executeSimpleSQL(`
+    CREATE TEMP TRIGGER test_afterinsert_trigger
+    AFTER INSERT ON test FOR EACH ROW
+    BEGIN
+      SELECT store_last_inserted_name(NEW.name);
+    END`);
+
+  do_print("Clone main connection");
+  let clone = db.clone(/* aReadOnly */ false);
+
+  do_print("Write to clone");
+  clone.executeSimpleSQL(`INSERT INTO test(name) VALUES('kit')`);
+
+  do_check_eq(func.name, "kit");
+
+  do_print("Clean up");
+  db.close();
+  clone.close();
 });
 
 add_task(async function test_getInterface() {

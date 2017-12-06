@@ -260,10 +260,8 @@ static const DllBlockInfo sWindowsDllBlocklist[] = {
   // Avecto Privilege Guard causes crashes, bug 1385542
   { "pghook.dll", ALL_VERSIONS },
 
-  // Microsoft UI automation causing performance problems on 57+, bug 1420276
-#if defined(MOZ_DEV_EDITION) || defined(RELEASE_OR_BETA)
-  { "uiautomationcore.dll", ALL_VERSIONS },
-#endif // defined(MOZ_DEV_EDITION) || defined(RELEASE_OR_BETA)
+  // Old versions of G DATA BankGuard, bug 1421991
+  { "banksafe64.dll", MAKE_VERSION(1, 2, 15299, 65535) },
 
   { nullptr, 0 }
 };

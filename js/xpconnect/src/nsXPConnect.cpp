@@ -798,8 +798,7 @@ nsXPConnect::EvalInSandboxObject(const nsAString& source, const char* filename,
     } else {
         filenameStr = NS_LITERAL_CSTRING("x-bogus://XPConnect/Sandbox");
     }
-    return EvalInSandbox(cx, sandbox, source, filenameStr, 1,
-                         JSVERSION_DEFAULT, rval);
+    return EvalInSandbox(cx, sandbox, source, filenameStr, 1, rval);
 }
 
 NS_IMETHODIMP
@@ -1130,13 +1129,6 @@ extern "C" {
 JS_EXPORT_API(void) DumpJSStack()
 {
     xpc_DumpJSStack(true, true, false);
-}
-
-JS_EXPORT_API(const char*) PrintJSStack()
-{
-    if (JSContext* cx = nsContentUtils::GetCurrentJSContext())
-        return xpc_PrintJSStack(cx, true, true, false).release();
-    return "There is no JSContext on the stack.\n";
 }
 
 JS_EXPORT_API(void) DumpCompleteHeap()
