@@ -191,7 +191,9 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     'android-api-16-old-id-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'macosx64-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'win32-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
     'win64-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -273,7 +275,13 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.dmg",
         "target.dmg.asc",
     ],
+    'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
+        "target.zip",
+    ],
     'win32-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
+        "target.zip",
+    ],
+    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
         "target.zip",
     ],
     'win64-devedition-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
