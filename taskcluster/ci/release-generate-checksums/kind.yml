@@ -10,7 +10,8 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - beetmover-checksums
+   - beetmover-source
+   - post-beetmover-checksums-dummy
 
 job-defaults:
    description: generates checksums

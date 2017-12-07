@@ -267,8 +267,8 @@ release-bouncer-aliases
 Update Bouncers (download.mozilla.org) "latest" aliases.
 
 release-generate-checksums
-------------------------------
-Update Bouncers (download.mozilla.org) "latest" aliases.
+--------------------------
+Generate the per-release checksums along with the summaries and upload it to S3.
 
 release-final-verify
 ---------------------
@@ -348,3 +348,7 @@ Dummy tasks to handle balrog tasks as dependencies without hitting max-dependenc
 post-beetmover-dummy
 --------------------
 Dummy tasks to handle beetmover tasks as dependencies without hitting max-dependencies.
+
+post-beetmover-checksums-dummy
+------------------------------
+Dummy tasks to handle beetmover-checksums tasks as dependencies without hitting max-dependencies.
