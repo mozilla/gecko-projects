@@ -29,10 +29,20 @@ def tweak_beetmover_source_dependencies_and_upstream_artifacts(config, jobs):
 
         if job['attributes']['shipping_product'] == 'firefox':
             job['dependencies']['build'] = u'build-linux64-nightly/opt'
-            upstream_artifacts = job['worker']['upstream-artifacts']
-            for artifact in upstream_artifacts:
-                if artifact['taskType'] == 'build':
-                    artifact['paths'].append(u'public/build/balrog_props.json')
-                    break
+        elif job['attributes']['shipping_product'] == 'fennec':
+            job['dependencies']['build'] = u'build-android-api-16-nightly/opt'
+        elif job['attributes']['shipping_product'] == 'devedition':
+            job['dependencies']['build'] = u'build-linux64-devedition-nightly/opt'
+        else:
+            raise NotImplemented(
+                "Unknown shipping_product {} for beetmover_source!".format(
+                    job['attributes']['shipping_product']
+                )
+            )
+        upstream_artifacts = job['worker']['upstream-artifacts']
+        for artifact in upstream_artifacts:
+            if artifact['taskType'] == 'build':
+                artifact['paths'].append(u'public/build/balrog_props.json')
+                break
 
         yield job
