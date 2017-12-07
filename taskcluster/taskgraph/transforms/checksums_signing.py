@@ -88,12 +88,16 @@ def make_checksums_signing_description(config, jobs):
         task = {
             'label': label,
             'description': description,
-            'worker-type': _generate_worker_type(signing_cert_scope),
+            # XXX hardcode on maple to get a green graph. DO NOT UPLIFT
+            # 'worker-type': _generate_worker_type(signing_cert_scope),
+            'worker-type': 'scriptworker-prov-v1/depsigning',
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
                        'max-run-time': 3600},
             'scopes': [
-                signing_cert_scope,
+                # XXX hardcode on maple to get a green graph. DO NOT UPLIFT
+                # signing_cert_scope,
+                "project:releng:signing:cert:dep-signing",
                 "project:releng:signing:format:gpg"
             ],
             'dependencies': dependencies,
