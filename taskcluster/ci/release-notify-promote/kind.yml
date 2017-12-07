@@ -60,3 +60,7 @@ jobs:
       shipping-product: firefox
       index:
          product: firefox
+   devedition:
+      shipping-product: devedition
+      index:
+         product: devedition

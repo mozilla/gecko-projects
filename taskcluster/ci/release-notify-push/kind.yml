@@ -51,7 +51,11 @@ job-defaults:
             default: unknown
 
 jobs:
-   fennec:
-      shipping-product: fennec
+   firefox:
+      shipping-product: firefox
       index:
-         product: fennec
+         product: firefox
+   devedition:
+      shipping-product: devedition
+      index:
+         product: devedition

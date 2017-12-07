@@ -57,3 +57,11 @@ jobs:
       shipping-product: fennec
       index:
          product: fennec
+   firefox:
+      shipping-product: firefox
+      index:
+         product: firefox
+   devedition:
+      shipping-product: devedition
+      index:
+         product: devedition
