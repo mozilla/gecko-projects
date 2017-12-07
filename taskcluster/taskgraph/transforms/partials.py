@@ -113,6 +113,17 @@ def make_task_description(config, jobs):
         cot = extra.setdefault('chainOfTrust', {})
         cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
+        mar_channel_id = None
+        if config.params['project'] == 'mozilla-beta':
+            if 'devedition' in label:
+                mar_channel_id = 'firefox-mozilla-aurora'
+            else:
+                mar_channel_id = 'firefox-mozilla-beta'
+        elif config.params['project'] == 'mozilla-release':
+            mar_channel_id = 'firefox-mozilla-release'
+        elif 'esr' in config.params['project']:
+            mar_channel_id = 'firefox-mozilla-esr'
+
         worker = {
             'artifacts': _generate_task_output_files(builds.keys(), locale),
             'implementation': 'docker-worker',
@@ -122,9 +133,11 @@ def make_task_description(config, jobs):
             'chain-of-trust': True,
             'env': {
                 'SHA1_SIGNING_CERT': 'nightly_sha1',
-                'SHA384_SIGNING_CERT': 'nightly_sha384'
+                'SHA384_SIGNING_CERT': 'nightly_sha384',
             }
         }
+        if mar_channel_id:
+            worker['env']['ACCEPTED_MAR_CHANNEL_IDS'] = mar_channel_id,
 
         level = config.params['level']
 
