@@ -23,4 +23,3 @@ only-for-build-platforms:
 
 job-template:
    shipping-phase: promote
-   shipping-product: firefox

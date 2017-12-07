@@ -14,4 +14,3 @@ kind-dependencies:
 
 job-template:
   shipping-phase: promote
-  shipping-product: firefox
