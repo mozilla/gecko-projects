@@ -42,7 +42,8 @@ job-defaults:
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               default: ["release+tcstaging@mozilla.com"]
+               maple: ["release+tcstaging@mozilla.com"]
+               default: []
 
       exception:
          subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
@@ -57,4 +58,5 @@ job-defaults:
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               default: ["release+tcstaging@mozilla.com"]
+               maple: ["release+tcstaging@mozilla.com"]
+               default: []
