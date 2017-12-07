@@ -73,3 +73,23 @@ jobs:
       treeherder-platform: Android/opt
       index:
          product: fennec
+   devedition-push-to-cdns:
+      name: devedition_push_to_cdns
+      product: devedition
+      shipping-product: devedition
+      routes:
+         - index.releases.v1.{branch}.latest.devedition.latest.beetmover_cdns
+         - index.releases.v1.{branch}.{revision}.devedition.{underscore_version}.build{build_number}.beetmover_cdns
+      treeherder-platform: Linux64-devedition/opt
+      index:
+         product: devedition
+   firefox-push-to-cdns:
+      name: firefox_push_to_cdns
+      product: firefox
+      shipping-product: firefox
+      routes:
+         - index.releases.v1.{branch}.latest.firefox.latest.beetmover_cdns
+         - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.beetmover_cdns
+      treeherder-platform: Linux64/opt
+      index:
+         product: firefox

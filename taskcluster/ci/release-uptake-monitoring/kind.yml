@@ -97,3 +97,14 @@ jobs:
          - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.uptake_monitoring
       index:
          product: firefox
+   devedition:
+      name: devedition_release_uptake_monitoring
+      shipping-product: devedition
+      run:
+         product: devedition
+         buildername: release-{branch}-devedition_uptake_monitoring
+      routes:
+         - index.releases.v1.{branch}.latest.devedition.latest.uptake_monitoring
+         - index.releases.v1.{branch}.{revision}.devedition.{underscore_version}.build{build_number}.uptake_monitoring
+      index:
+         product: devedition
