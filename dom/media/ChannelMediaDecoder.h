@@ -18,7 +18,11 @@ namespace mozilla {
 
 class BaseMediaResource;
 
-class ChannelMediaDecoder : public MediaDecoder
+DDLoggedTypeDeclNameAndBase(ChannelMediaDecoder, MediaDecoder);
+
+class ChannelMediaDecoder
+  : public MediaDecoder
+  , public DecoderDoctorLifeLogger<ChannelMediaDecoder>
 {
   // Used to register with MediaResource to receive notifications which will
   // be forwarded to MediaDecoder.
@@ -36,6 +40,8 @@ class ChannelMediaDecoder : public MediaDecoder
     void Disconnect();
 
   private:
+    ~ResourceCallback();
+
     /* MediaResourceCallback functions */
     AbstractThread* AbstractMainThread() const override;
     MediaDecoderOwner* GetMediaOwner() const override;
@@ -44,6 +50,7 @@ class ChannelMediaDecoder : public MediaDecoder
     void NotifyDataEnded(nsresult aStatus) override;
     void NotifyPrincipalChanged() override;
     void NotifySuspendedStatusChanged(bool aSuspendedByCache) override;
+    void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) override;
 
     static void TimerCallback(nsITimer* aTimer, void* aClosure);
 
@@ -114,6 +121,8 @@ private:
   // by the MediaResource read functions.
   void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset);
 
+  void SeekingChanged();
+
   bool CanPlayThroughImpl() override final;
 
   bool IsLiveStream() override final;
@@ -137,6 +146,14 @@ private:
   MediaStatistics GetStatistics(const PlaybackRateInfo& aInfo);
 
   bool ShouldThrottleDownload(const MediaStatistics& aStats);
+
+  WatchManager<ChannelMediaDecoder> mWatchManager;
+
+  // True when seeking or otherwise moving the play position around in
+  // such a manner that progress event data is inaccurate. This is set
+  // during seek and duration operations to prevent the progress indicator
+  // from jumping around. Read/Write on the main thread only.
+  bool mIgnoreProgressData = false;
 
   // Data needed to estimate playback data rate. The timeline used for
   // this estimate is "decode time" (where the "current time" is the

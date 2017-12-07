@@ -17,7 +17,7 @@ interface HTMLMediaElement : HTMLElement {
   readonly attribute MediaError? error;
 
   // network state
-  [CEReactions, NeedsSubjectPrincipal, SetterThrows]
+  [CEReactions, SetterNeedsSubjectPrincipal, SetterThrows]
            attribute DOMString src;
   readonly attribute DOMString currentSrc;
 
@@ -106,6 +106,11 @@ partial interface HTMLMediaElement {
   readonly attribute DOMString mozDebugReaderData;
   [Func="HasDebuggerOrTabsPrivilege", NewObject]
   Promise<DOMString> mozRequestDebugInfo();
+
+  [Func="HasDebuggerOrTabsPrivilege", NewObject]
+  static void mozEnableDebugLog();
+  [Func="HasDebuggerOrTabsPrivilege", NewObject]
+  Promise<DOMString> mozRequestDebugLog();
 
   [Pref="media.test.dumpDebugInfo"]
   Promise<void> mozDumpDebugInfo();

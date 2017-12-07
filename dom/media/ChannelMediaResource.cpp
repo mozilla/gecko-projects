@@ -19,8 +19,8 @@ static const uint32_t HTTP_REQUESTED_RANGE_NOT_SATISFIABLE_CODE = 416;
 
 mozilla::LazyLogModule gMediaResourceLog("MediaResource");
 // Debug logging macro with object pointer and class name.
-#define LOG(msg, ...) MOZ_LOG(gMediaResourceLog, mozilla::LogLevel::Debug, \
-  ("%p " msg, this, ##__VA_ARGS__))
+#define LOG(msg, ...)                                                          \
+  DDMOZ_LOG(gMediaResourceLog, mozilla::LogLevel::Debug, msg, ##__VA_ARGS__)
 
 namespace mozilla {
 
@@ -621,7 +621,12 @@ nsresult ChannelMediaResource::ReadAt(int64_t aOffset,
                                       uint32_t* aBytes)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Don't call on main thread");
-  return mCacheStream.ReadAt(aOffset, aBuffer, aCount, aBytes);
+
+  nsresult rv = mCacheStream.ReadAt(aOffset, aBuffer, aCount, aBytes);
+  if (NS_SUCCEEDED(rv)) {
+    DispatchBytesConsumed(*aBytes, aOffset);
+  }
+  return rv;
 }
 
 void

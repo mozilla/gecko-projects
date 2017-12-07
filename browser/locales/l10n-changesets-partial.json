@@ -1,32 +1,32 @@
 {
     "de": {
         "platforms": [
-            "linux",
-            "linux64",
-            "macosx64",
-            "win32",
-            "win64",
-            "linux-devedition",
-            "linux64-devedition",
-            "macosx64-devedition",
-            "win32-devedition",
+            "linux", 
+            "linux-devedition", 
+            "linux64", 
+            "linux64-devedition", 
+            "macosx64", 
+            "macosx64-devedition", 
+            "win32", 
+            "win32-devedition", 
+            "win64", 
             "win64-devedition"
-        ],
+        ], 
         "revision": "default"
-    },
+    }, 
     "zh-TW": {
         "platforms": [
-            "linux",
-            "linux64",
-            "macosx64",
-            "win32",
-            "win64",
-            "linux-devedition",
-            "linux64-devedition",
-            "macosx64-devedition",
-            "win32-devedition",
+            "linux", 
+            "linux-devedition", 
+            "linux64", 
+            "linux64-devedition", 
+            "macosx64", 
+            "macosx64-devedition", 
+            "win32", 
+            "win32-devedition", 
+            "win64", 
             "win64-devedition"
-        ],
+        ], 
         "revision": "default"
     }
 }

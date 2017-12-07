@@ -442,10 +442,6 @@ public:
 
   MediaError* GetError() const;
 
-  void GetSrc(nsString& aSrc, nsIPrincipal&)
-  {
-    GetSrc(aSrc);
-  }
   void SetSrc(const nsAString& aSrc, nsIPrincipal& aTriggeringPrincipal, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::src, aSrc, aTriggeringPrincipal, aRv);
@@ -634,6 +630,13 @@ public:
   // Returns a promise which will be resolved after collecting debugging
   // data from decoder/reader/MDSM. Used for debugging purposes.
   already_AddRefed<Promise> MozRequestDebugInfo(ErrorResult& aRv);
+
+  // Enables DecoderDoctorLogger logging. Used for debugging purposes.
+  static void MozEnableDebugLog(const GlobalObject&);
+
+  // Returns a promise which will be resolved after collecting debugging
+  // log associated with this element. Used for debugging purposes.
+  already_AddRefed<Promise> MozRequestDebugLog(ErrorResult& aRv);
 
   already_AddRefed<Promise> MozDumpDebugInfo();
 

@@ -22,7 +22,6 @@
 pref("preferences.allow.omt-write", true);
 
 pref("keyword.enabled", false);
-pref("general.useragent.locale", "chrome://global/locale/intl.properties");
 pref("general.useragent.compatMode.firefox", false);
 
 // This pref exists only for testing purposes. In order to disable all
@@ -497,7 +496,7 @@ pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
 pref("media.peerconnection.ice.proxy_only", false);
 
-// These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
+// These values (aec, agc, and noise) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
 // setting (for Xxx = Ec, Agc, or Ns).  Defaults are all set to kXxxDefault here.
 pref("media.peerconnection.turn.disable", false);
@@ -511,7 +510,7 @@ pref("media.getusermedia.noise_enabled", true);
 pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1);
 pref("media.getusermedia.agc_enabled", false);
-pref("media.getusermedia.agc", 1);
+pref("media.getusermedia.agc", 3); // kAgcAdaptiveDigital
 // capture_delay: Adjustments for OS-specific input delay (lower bound)
 // playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
@@ -2189,7 +2188,7 @@ pref("network.auth.subresource-http-auth-allow", 2);
 // false - it is not allowed.
 // If network.auth.subresource-http-auth-allow has values 0 or 1 this pref does not
 // have any effect.
-pref("network.auth.subresource-img-cross-origin-http-auth-allow", true);
+pref("network.auth.subresource-img-cross-origin-http-auth-allow", false);
 
 // This preference controls whether to allow sending default credentials (SSO) to
 // NTLM/Negotiate servers allowed in the "trusted uri" list when navigating them
@@ -2295,7 +2294,6 @@ pref("intl.charset.fallback.override",      "");
 pref("intl.charset.fallback.tld",           true);
 pref("intl.charset.fallback.utf8_for_file", false);
 pref("intl.ellipsis",                       "chrome://global-platform/locale/intl.properties");
-pref("intl.locale.matchOS",                 false);
 // this pref allows user to request that all internationalization formatters
 // like date/time formatting, unit formatting, calendars etc. should use
 // OS locale set instead of the app locale set.
@@ -5157,7 +5155,7 @@ pref("dom.idle-observers-api.fuzz_time.disabled", true);
 // no notifications). The delay is the same for both download and upload, though
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
-pref("network.activity.blipIntervalMilliseconds", 0);
+pref("network.activity.intervalMilliseconds", 0);
 
 // If true, reuse the same global for (almost) everything loaded by the component
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
@@ -5231,6 +5229,20 @@ pref("dom.vr.openvr.enabled", true);
 // See Bug 1310663 (Linux)
 pref("dom.vr.openvr.enabled", false);
 #endif
+// Minimum number of milliseconds that the browser will wait before
+// attempting to poll again for connected VR controllers.  The browser
+// will not attempt to poll for VR controllers until it needs to use them.
+pref("dom.vr.controller.enumerate.interval", 1000);
+// Minimum number of milliseconds that the browser will wait before
+// attempting to poll again for connected VR displays.  The browser
+// will not attempt to poll for VR displays until it needs to use
+// them, such as when detecting a WebVR site.
+pref("dom.vr.display.enumerate.interval", 5000);
+// Minimum number of milliseconds that the VR session will be kept
+// alive after the browser and content no longer are using the
+// hardware.  If a VR multitasking environment, this should be set
+// very low or set to 0.
+pref("dom.vr.inactive.timeout", 5000);
 // Pose prediction reduces latency effects by returning future predicted HMD
 // poses to callers of the WebVR API.  This currently only has an effect for
 // Oculus Rift on SDK 0.8 or greater.

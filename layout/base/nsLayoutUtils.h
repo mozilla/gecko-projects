@@ -2212,6 +2212,9 @@ public:
     return SurfaceFromElement(aElement, aSurfaceFlags, target);
   }
 
+  // There are a bunch of callers of SurfaceFromElement.  Just mark it as
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY for now.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static SurfaceFromElementResult SurfaceFromElement(nsIImageLoadingContent *aElement,
                                                      uint32_t aSurfaceFlags,
                                                      RefPtr<DrawTarget>& aTarget);
@@ -2371,12 +2374,6 @@ public:
    * Checks whether support for the CSS-wide "unset" value is enabled.
    */
   static bool UnsetValueEnabled();
-
-  /**
-   * Checks whether support for the CSS grid-template-{columns,rows} 'subgrid X'
-   * value is enabled.
-   */
-  static bool IsGridTemplateSubgridValueEnabled();
 
   /**
    * Checks whether support for the CSS text-align (and text-align-last)
@@ -3260,14 +3257,14 @@ void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
 class nsSetAttrRunnable : public mozilla::Runnable
 {
 public:
-  nsSetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName,
+  nsSetAttrRunnable(mozilla::dom::Element* aElement, nsAtom* aAttrName,
                     const nsAString& aValue);
-  nsSetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName,
+  nsSetAttrRunnable(mozilla::dom::Element* aElement, nsAtom* aAttrName,
                     int32_t aValue);
 
   NS_DECL_NSIRUNNABLE
 
-  nsCOMPtr<nsIContent> mContent;
+  RefPtr<Element> mElement;
   RefPtr<nsAtom> mAttrName;
   nsAutoString mValue;
 };
@@ -3275,11 +3272,11 @@ public:
 class nsUnsetAttrRunnable : public mozilla::Runnable
 {
 public:
-  nsUnsetAttrRunnable(nsIContent* aContent, nsAtom* aAttrName);
+  nsUnsetAttrRunnable(mozilla::dom::Element* aElement, nsAtom* aAttrName);
 
   NS_DECL_NSIRUNNABLE
 
-  nsCOMPtr<nsIContent> mContent;
+  RefPtr<Element> mElement;
   RefPtr<nsAtom> mAttrName;
 };
 

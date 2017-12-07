@@ -5,17 +5,16 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/U2F.h"
-#include "mozilla/dom/Event.h"
 #include "mozilla/dom/WebCryptoCommon.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/dom/WebAuthnTransactionChild.h"
 #include "nsContentUtils.h"
 #include "nsICryptoHash.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsURLParsers.h"
-#include "U2FTransactionChild.h"
 #include "U2FUtil.h"
 #include "hasht.h"
 
@@ -33,7 +32,6 @@ namespace dom {
 
 static mozilla::LazyLogModule gU2FLog("u2fmanager");
 
-NS_NAMED_LITERAL_STRING(kVisibilityChange, "visibilitychange");
 NS_NAMED_LITERAL_STRING(kFinishEnrollment, "navigator.id.finishEnrollment");
 NS_NAMED_LITERAL_STRING(kGetAssertion, "navigator.id.getAssertion");
 
@@ -160,6 +158,23 @@ EvaluateAppID(nsPIDOMWindowInner* aParent, const nsString& aOrigin,
     return ErrorCode::BAD_REQUEST;
   }
 
+  nsAutoCString appIdHost;
+  if (NS_FAILED(appIdUri->GetAsciiHost(appIdHost))) {
+    return ErrorCode::BAD_REQUEST;
+  }
+
+  // Allow localhost.
+  if (appIdHost.EqualsLiteral("localhost")) {
+    nsAutoCString facetHost;
+    if (NS_FAILED(facetUri->GetAsciiHost(facetHost))) {
+      return ErrorCode::BAD_REQUEST;
+    }
+
+    if (facetHost.EqualsLiteral("localhost")) {
+      return ErrorCode::OK;
+    }
+  }
+
   // Run the HTML5 algorithm to relax the same-origin policy, copied from W3C
   // Web Authentication. See Bug 1244959 comment #8 for context on why we are
   // doing this instead of implementing the external-fetch FacetID logic.
@@ -182,10 +197,6 @@ EvaluateAppID(nsPIDOMWindowInner* aParent, const nsString& aOrigin,
 
   nsAutoCString lowestFacetHost;
   if (NS_FAILED(tldService->GetBaseDomain(facetUri, 0, lowestFacetHost))) {
-    return ErrorCode::BAD_REQUEST;
-  }
-  nsAutoCString appIdHost;
-  if (NS_FAILED(appIdUri->GetAsciiHost(appIdHost))) {
     return ErrorCode::BAD_REQUEST;
   }
 
@@ -278,12 +289,6 @@ ExecuteCallback(T& aResp, Maybe<nsMainThreadPtrHandle<C>>& aCb)
  * U2F JavaScript API Implementation
  **********************************************************************/
 
-U2F::U2F(nsPIDOMWindowInner* aParent)
-  : mParent(aParent)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-}
-
 U2F::~U2F()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -293,9 +298,9 @@ U2F::~U2F()
   }
 
   if (mChild) {
-    RefPtr<U2FTransactionChild> c;
+    RefPtr<WebAuthnTransactionChild> c;
     mChild.swap(c);
-    c->Send__delete__(c);
+    c->Disconnect();
   }
 
   mRegisterCallback.reset();
@@ -437,8 +442,8 @@ U2F::Register(const nsAString& aAppId,
 }
 
 void
-U2F::FinishRegister(const uint64_t& aTransactionId,
-                    nsTArray<uint8_t>& aRegBuffer)
+U2F::FinishMakeCredential(const uint64_t& aTransactionId,
+                          nsTArray<uint8_t>& aRegBuffer)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -566,9 +571,9 @@ U2F::Sign(const nsAString& aAppId,
 }
 
 void
-U2F::FinishSign(const uint64_t& aTransactionId,
-                nsTArray<uint8_t>& aCredentialId,
-                nsTArray<uint8_t>& aSigBuffer)
+U2F::FinishGetAssertion(const uint64_t& aTransactionId,
+                        nsTArray<uint8_t>& aCredentialId,
+                        nsTArray<uint8_t>& aSigBuffer)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -669,105 +674,6 @@ U2F::RequestAborted(const uint64_t& aTransactionId, const nsresult& aError)
   if (mTransaction.isSome() && mTransaction.ref().mId == aTransactionId) {
     RejectTransaction(aError);
   }
-}
-
-/***********************************************************************
- * Event Handling
- **********************************************************************/
-
-void
-U2F::ListenForVisibilityEvents()
-{
-  nsCOMPtr<nsIDocument> doc = mParent->GetExtantDoc();
-  if (NS_WARN_IF(!doc)) {
-    return;
-  }
-
-  nsresult rv = doc->AddSystemEventListener(kVisibilityChange, this,
-                                            /* use capture */ true,
-                                            /* wants untrusted */ false);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-}
-
-void
-U2F::StopListeningForVisibilityEvents()
-{
-  nsCOMPtr<nsIDocument> doc = mParent->GetExtantDoc();
-  if (NS_WARN_IF(!doc)) {
-    return;
-  }
-
-  nsresult rv = doc->RemoveSystemEventListener(kVisibilityChange, this,
-                                               /* use capture */ true);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-}
-
-
-NS_IMETHODIMP
-U2F::HandleEvent(nsIDOMEvent* aEvent)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aEvent);
-
-  nsAutoString type;
-  aEvent->GetType(type);
-  if (!type.Equals(kVisibilityChange)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsCOMPtr<nsIDocument> doc =
-    do_QueryInterface(aEvent->InternalDOMEvent()->GetTarget());
-  if (NS_WARN_IF(!doc)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (doc->Hidden()) {
-    MOZ_LOG(gU2FLog, LogLevel::Debug,
-            ("Visibility change: U2F window is hidden, cancelling job."));
-
-    CancelTransaction(NS_ERROR_ABORT);
-  }
-
-  return NS_OK;
-}
-
-/***********************************************************************
- * IPC Protocol Implementation
- **********************************************************************/
-
-bool
-U2F::MaybeCreateBackgroundActor()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (mChild) {
-    return true;
-  }
-
-  PBackgroundChild* actorChild = BackgroundChild::GetOrCreateForCurrentThread();
-  if (NS_WARN_IF(!actorChild)) {
-    return false;
-  }
-
-  RefPtr<U2FTransactionChild> mgr(new U2FTransactionChild(this));
-  PWebAuthnTransactionChild* constructedMgr =
-    actorChild->SendPWebAuthnTransactionConstructor(mgr);
-
-  if (NS_WARN_IF(!constructedMgr)) {
-    return false;
-  }
-
-  MOZ_ASSERT(constructedMgr == mgr);
-  mChild = mgr.forget();
-
-  return true;
-}
-
-void
-U2F::ActorDestroyed()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  mChild = nullptr;
 }
 
 } // namespace dom

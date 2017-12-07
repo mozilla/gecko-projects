@@ -3442,11 +3442,40 @@ nsDocShell::MaybeCreateInitialClientSource(nsIPrincipal* aPrincipal)
     ClientManager::CreateSource(ClientType::Window,
                                 win->EventTargetFor(TaskCategory::Other),
                                 principal);
+  if (NS_WARN_IF(!mInitialClientSource)) {
+    return;
+  }
 
   // Mark the initial client as execution ready, but owned by the docshell.
   // If the client is actually used this will cause ClientSource to force
   // the creation of the initial about:blank by calling nsDocShell::GetDocument().
   mInitialClientSource->DocShellExecutionReady(this);
+
+  // Next, check to see if the parent is controlled.
+  nsCOMPtr<nsIDocShell> parent = GetParentDocshell();
+  nsPIDOMWindowOuter* parentOuter = parent ? parent->GetWindow() : nullptr;
+  nsPIDOMWindowInner* parentInner =
+    parentOuter ? parentOuter->GetCurrentInnerWindow() : nullptr;
+  if (!parentInner) {
+    return;
+  }
+
+  Maybe<ServiceWorkerDescriptor> controller(parentInner->GetController());
+  if (controller.isNothing()) {
+    return;
+  }
+
+  // If the parent is controlled then propagate that controller to the
+  // initial about:blank client as well.  This will set the controller
+  // in the ClientManagerService in the parent.
+  RefPtr<ClientHandle> handle =
+    ClientManager::CreateHandle(mInitialClientSource->Info(),
+                                parentInner->EventTargetFor(TaskCategory::Other));
+  handle->Control(controller.ref());
+
+  // Also mark the ClientSource as controlled directly in case script
+  // immediately accesses navigator.serviceWorker.controller.
+  mInitialClientSource->SetController(controller.ref());
 }
 
 Maybe<ClientInfo>
@@ -6420,6 +6449,10 @@ nsDocShell::SetIsActive(bool aIsActive)
 
   // Keep track ourselves.
   mIsActive = aIsActive;
+
+  if (TabChild* tc = TabChild::GetFrom(this)) {
+    tc->OnDocShellActivated(aIsActive);
+  }
 
   // Clear prerender flag if necessary.
   if (mIsPrerendered && aIsActive) {
@@ -10502,6 +10535,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     (aFlags & INTERNAL_LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) != 0;
   mURIResultedInDocument = false;  // reset the clock...
 
+  // Note that there is code that relies on this check to stop us entering the
+  // `doShortCircuitedLoad` block below for certain load types.  (For example,
+  // reftest-content.js uses LOAD_FLAGS_BYPASS_CACHE for this purpose.)
   if (aLoadType == LOAD_NORMAL ||
       aLoadType == LOAD_STOP_CONTENT ||
       LOAD_TYPE_HAS_FLAGS(aLoadType, LOAD_FLAGS_REPLACE_HISTORY) ||

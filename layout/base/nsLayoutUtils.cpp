@@ -161,7 +161,6 @@ using namespace mozilla::layout;
 using namespace mozilla::gfx;
 
 #define GRID_ENABLED_PREF_NAME "layout.css.grid.enabled"
-#define GRID_TEMPLATE_SUBGRID_ENABLED_PREF_NAME "layout.css.grid-template-subgrid-value.enabled"
 #define WEBKIT_PREFIXES_ENABLED_PREF_NAME "layout.css.prefixes.webkit"
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
@@ -743,22 +742,6 @@ nsLayoutUtils::UnsetValueEnabled()
   }
 
   return sUnsetValueEnabled;
-}
-
-bool
-nsLayoutUtils::IsGridTemplateSubgridValueEnabled()
-{
-  static bool sGridTemplateSubgridValueEnabled;
-  static bool sGridTemplateSubgridValueEnabledPrefCached = false;
-
-  if (!sGridTemplateSubgridValueEnabledPrefCached) {
-    sGridTemplateSubgridValueEnabledPrefCached = true;
-    Preferences::AddBoolVarCache(&sGridTemplateSubgridValueEnabled,
-                                 GRID_TEMPLATE_SUBGRID_ENABLED_PREF_NAME,
-                                 false);
-  }
-
-  return sGridTemplateSubgridValueEnabled;
 }
 
 bool
@@ -7761,8 +7744,9 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
   if (aSurfaceFlags & SFE_USE_ELEMENT_SIZE_IF_VECTOR &&
       element &&
       imgContainer->GetType() == imgIContainer::TYPE_VECTOR) {
-    imgWidth = element->Width();
-    imgHeight = element->Height();
+    // We're holding a strong ref to "element" via "content".
+    imgWidth = MOZ_KnownLive(element)->Width();
+    imgHeight = MOZ_KnownLive(element)->Height();
   } else {
     rv = imgContainer->GetWidth(&imgWidth);
     nsresult rv2 = imgContainer->GetHeight(&imgHeight);
@@ -8494,47 +8478,47 @@ nsLayoutUtils::PostRestyleEvent(Element* aElement,
   }
 }
 
-nsSetAttrRunnable::nsSetAttrRunnable(nsIContent* aContent,
+nsSetAttrRunnable::nsSetAttrRunnable(Element* aElement,
                                      nsAtom* aAttrName,
                                      const nsAString& aValue)
   : mozilla::Runnable("nsSetAttrRunnable")
-  , mContent(aContent)
+  , mElement(aElement)
   , mAttrName(aAttrName)
   , mValue(aValue)
 {
-  NS_ASSERTION(aContent && aAttrName, "Missing stuff, prepare to crash");
+  NS_ASSERTION(aElement && aAttrName, "Missing stuff, prepare to crash");
 }
 
-nsSetAttrRunnable::nsSetAttrRunnable(nsIContent* aContent,
+nsSetAttrRunnable::nsSetAttrRunnable(Element* aElement,
                                      nsAtom* aAttrName,
                                      int32_t aValue)
   : mozilla::Runnable("nsSetAttrRunnable")
-  , mContent(aContent)
+  , mElement(aElement)
   , mAttrName(aAttrName)
 {
-  NS_ASSERTION(aContent && aAttrName, "Missing stuff, prepare to crash");
+  NS_ASSERTION(aElement && aAttrName, "Missing stuff, prepare to crash");
   mValue.AppendInt(aValue);
 }
 
 NS_IMETHODIMP
 nsSetAttrRunnable::Run()
 {
-  return mContent->SetAttr(kNameSpaceID_None, mAttrName, mValue, true);
+  return mElement->SetAttr(kNameSpaceID_None, mAttrName, mValue, true);
 }
 
-nsUnsetAttrRunnable::nsUnsetAttrRunnable(nsIContent* aContent,
+nsUnsetAttrRunnable::nsUnsetAttrRunnable(Element* aElement,
                                          nsAtom* aAttrName)
   : mozilla::Runnable("nsUnsetAttrRunnable")
-  , mContent(aContent)
+  , mElement(aElement)
   , mAttrName(aAttrName)
 {
-  NS_ASSERTION(aContent && aAttrName, "Missing stuff, prepare to crash");
+  NS_ASSERTION(aElement && aAttrName, "Missing stuff, prepare to crash");
 }
 
 NS_IMETHODIMP
 nsUnsetAttrRunnable::Run()
 {
-  return mContent->UnsetAttr(kNameSpaceID_None, mAttrName, true);
+  return mElement->UnsetAttr(kNameSpaceID_None, mAttrName, true);
 }
 
 /**

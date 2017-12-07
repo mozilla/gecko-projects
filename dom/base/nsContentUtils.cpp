@@ -5058,13 +5058,13 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
     tagName = content->NodeInfo()->QualifiedName();
 
     // see if we need to add xmlns declarations
-    uint32_t count = content->GetAttrCount();
+    uint32_t count = content->AsElement()->GetAttrCount();
     bool setDefaultNamespace = false;
     if (count > 0) {
       uint32_t index;
 
       for (index = 0; index < count; index++) {
-        const BorrowedAttrInfo info = content->GetAttrInfoAt(index);
+        const BorrowedAttrInfo info = content->AsElement()->GetAttrInfoAt(index);
         const nsAttrName* name = info.mName;
         if (name->NamespaceEquals(kNameSpaceID_XMLNS)) {
           info.mValue->ToString(uriStr);
@@ -9138,7 +9138,17 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
 
   uint32_t lifetimePolicy;
   uint32_t behavior;
-  GetCookieBehaviorForPrincipal(aPrincipal, &lifetimePolicy, &behavior);
+
+  // WebExtensions principals always get BEHAVIOR_ACCEPT as cookieBehavior
+  // and ACCEPT_NORMALLY as lifetimePolicy (See Bug 1406675 for rationale).
+  auto policy = BasePrincipal::Cast(aPrincipal)->AddonPolicy();
+
+  if (policy) {
+    behavior = nsICookieService::BEHAVIOR_ACCEPT;
+    lifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
+  } else {
+    GetCookieBehaviorForPrincipal(aPrincipal, &lifetimePolicy, &behavior);
+  }
 
   // Check if we should only allow storage for the session, and record that fact
   if (lifetimePolicy == nsICookieService::ACCEPT_SESSION) {

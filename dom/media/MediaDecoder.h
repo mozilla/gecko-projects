@@ -7,6 +7,7 @@
 #if !defined(MediaDecoder_h_)
 #define MediaDecoder_h_
 
+#include "BackgroundVideoDecodingPermissionObserver.h"
 #include "DecoderDoctorDiagnostics.h"
 #include "MediaContainerType.h"
 #include "MediaDecoderOwner.h"
@@ -80,7 +81,9 @@ struct MOZ_STACK_CLASS MediaDecoderInit
   }
 };
 
-class MediaDecoder
+DDLoggedTypeDeclName(MediaDecoder);
+
+class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder>
 {
 public:
   typedef MozPromise<bool /* aIgnored */, bool /* aIgnored */,
@@ -305,6 +308,8 @@ private:
   bool HasSuspendTaint() const;
 
   void UpdateVideoDecodeMode();
+
+  void SetIsBackgroundVideoDecodingAllowed(bool aAllowed);
 
   /******
    * The following methods must only be called on the main
@@ -641,12 +646,17 @@ protected:
   // We can allow video decoding in background when we match some special
   // conditions, eg. when the cursor is hovering over the tab. This observer is
   // used to listen the related events.
-  class BackgroundVideoDecodingPermissionObserver;
   RefPtr<BackgroundVideoDecodingPermissionObserver> mVideoDecodingOberver;
 
   // True if we want to resume video decoding even the media element is in the
   // background.
   bool mIsBackgroundVideoDecodingAllowed;
+
+  // Current decoding position in the stream. This is where the decoder
+  // is up to consuming the stream. This is not adjusted during decoder
+  // seek operations, but it's updated at the end when we start playing
+  // back again.
+  int64_t mDecoderPosition = 0;
 
 public:
   AbstractCanonical<double>* CanonicalVolume() { return &mVolume; }

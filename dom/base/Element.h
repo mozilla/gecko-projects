@@ -430,6 +430,11 @@ public:
   virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const;
 
+  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker)
+  {
+    return NS_OK;
+  }
+
   inline Directionality GetDirectionality() const {
     if (HasFlag(NODE_HAS_DIRECTION_RTL)) {
       return eDir_RTL;
@@ -697,8 +702,6 @@ public:
   already_AddRefed<mozilla::dom::NodeInfo>
   GetExistingAttrNameFromQName(const nsAString& aStr) const;
 
-  using nsIContent::SetAttr;
-
   /**
    * Helper for SetAttr/SetParsedAttr. This method will return true if aNotify
    * is true or there are mutation listeners that must be triggered, the
@@ -758,9 +761,6 @@ public:
    */
   nsresult SetSingleClassFromParser(nsAtom* aSingleClassName);
 
-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName, nsAtom* aPrefix,
-                           const nsAString& aValue, nsIPrincipal* aSubjectPrincipal,
-                           bool aNotify) override;
   // aParsedValue receives the old value of the attribute. That's useful if
   // either the input or output value of aParsedValue is StoresOwnData.
   nsresult SetParsedAttr(int32_t aNameSpaceID, nsAtom* aName, nsAtom* aPrefix,
@@ -777,19 +777,97 @@ public:
   inline bool AttrValueIs(int32_t aNameSpaceID, nsAtom* aName,
                           nsAtom* aValue,
                           nsCaseTreatment aCaseSensitive) const;
-  virtual int32_t FindAttrValueIn(int32_t aNameSpaceID,
-                                  nsAtom* aName,
-                                  AttrValuesArray* aValues,
-                                  nsCaseTreatment aCaseSensitive) const override;
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsAtom* aAttribute,
-                             bool aNotify) override;
+  int32_t FindAttrValueIn(int32_t aNameSpaceID,
+                          nsAtom* aName,
+                          AttrValuesArray* aValues,
+                          nsCaseTreatment aCaseSensitive) const override;
 
-  virtual const nsAttrName* GetAttrNameAt(uint32_t aIndex) const final override
+  /**
+   * Set attribute values. All attribute values are assumed to have a
+   * canonical string representation that can be used for these
+   * methods. The SetAttr method is assumed to perform a translation
+   * of the canonical form into the underlying content specific
+   * form.
+   *
+   * @param aNameSpaceID the namespace of the attribute
+   * @param aName the name of the attribute
+   * @param aValue the value to set
+   * @param aNotify specifies how whether or not the document should be
+   *        notified of the attribute change.
+   */
+  nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                   const nsAString& aValue, bool aNotify)
+  {
+    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
+  }
+  nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName, nsAtom* aPrefix,
+                   const nsAString& aValue, bool aNotify)
+  {
+    return SetAttr(aNameSpaceID, aName, aPrefix, aValue, nullptr, aNotify);
+  }
+  nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName, const nsAString& aValue,
+                   nsIPrincipal* aTriggeringPrincipal, bool aNotify)
+  {
+    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aTriggeringPrincipal, aNotify);
+  }
+
+  /**
+   * Set attribute values. All attribute values are assumed to have a
+   * canonical String representation that can be used for these
+   * methods. The SetAttr method is assumed to perform a translation
+   * of the canonical form into the underlying content specific
+   * form.
+   *
+   * @param aNameSpaceID the namespace of the attribute
+   * @param aName the name of the attribute
+   * @param aPrefix the prefix of the attribute
+   * @param aValue the value to set
+   * @param aMaybeScriptedPrincipal the principal of the scripted caller responsible
+   *        for setting the attribute, or null if no scripted caller can be
+   *        determined. A null value here does not guarantee that there is no
+   *        scripted caller, but a non-null value does guarantee that a scripted
+   *        caller with the given principal is directly responsible for the
+   *        attribute change.
+   * @param aNotify specifies how whether or not the document should be
+   *        notified of the attribute change.
+   */
+  virtual nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                           nsAtom* aPrefix, const nsAString& aValue,
+                           nsIPrincipal* aMaybeScriptedPrincipal,
+                           bool aNotify);
+
+  /**
+   * Remove an attribute so that it is no longer explicitly specified.
+   *
+   * @param aNameSpaceID the namespace id of the attribute
+   * @param aAttr the name of the attribute to unset
+   * @param aNotify specifies whether or not the document should be
+   * notified of the attribute change
+   */
+  virtual nsresult UnsetAttr(int32_t aNameSpaceID,
+                             nsAtom* aAttribute,
+                             bool aNotify);
+
+  /**
+   * Get the namespace / name / prefix of a given attribute.
+   *
+   * @param   aIndex the index of the attribute name
+   * @returns The name at the given index, or null if the index is
+   *          out-of-bounds.
+   * @note    The document returned by NodeInfo()->GetDocument() (if one is
+   *          present) is *not* necessarily the owner document of the element.
+   * @note    The pointer returned by this function is only valid until the
+   *          next call of either GetAttrNameAt or SetAttr on the element.
+   */
+  const nsAttrName* GetAttrNameAt(uint32_t aIndex) const
   {
     return mAttrsAndChildren.GetSafeAttrNameAt(aIndex);
   }
 
-  virtual BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const final override
+  /**
+   * Gets the attribute info (name and value) for this element at a given index.
+   */
+  BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const
   {
     if (aIndex >= mAttrsAndChildren.AttrCount()) {
       return BorrowedAttrInfo(nullptr, nullptr);
@@ -798,7 +876,12 @@ public:
     return mAttrsAndChildren.AttrInfoAt(aIndex);
   }
 
-  virtual uint32_t GetAttrCount() const final override
+  /**
+   * Get the number of all specified attributes.
+   *
+   * @return the number of attributes
+   */
+  uint32_t GetAttrCount() const
   {
     return mAttrsAndChildren.AttrCount();
   }
@@ -1121,8 +1204,8 @@ public:
   already_AddRefed<Attr> SetAttributeNodeNS(Attr& aNewAttr,
                                             ErrorResult& aError);
 
-  already_AddRefed<DOMRectList> GetClientRects();
-  already_AddRefed<DOMRect> GetBoundingClientRect();
+  MOZ_CAN_RUN_SCRIPT already_AddRefed<DOMRectList> GetClientRects();
+  MOZ_CAN_RUN_SCRIPT already_AddRefed<DOMRect> GetBoundingClientRect();
 
   // Shadow DOM v1
   already_AddRefed<ShadowRoot> AttachShadow(const ShadowRootInit& aInit,
@@ -1145,60 +1228,60 @@ private:
   void ScrollIntoView(const ScrollIntoViewOptions &aOptions);
 public:
   void ScrollIntoView(const BooleanOrScrollIntoViewOptions& aObject);
-  void Scroll(double aXScroll, double aYScroll);
-  void Scroll(const ScrollToOptions& aOptions);
-  void ScrollTo(double aXScroll, double aYScroll);
-  void ScrollTo(const ScrollToOptions& aOptions);
-  void ScrollBy(double aXScrollDif, double aYScrollDif);
-  void ScrollBy(const ScrollToOptions& aOptions);
+  MOZ_CAN_RUN_SCRIPT void Scroll(double aXScroll, double aYScroll);
+  MOZ_CAN_RUN_SCRIPT void Scroll(const ScrollToOptions& aOptions);
+  MOZ_CAN_RUN_SCRIPT void ScrollTo(double aXScroll, double aYScroll);
+  MOZ_CAN_RUN_SCRIPT void ScrollTo(const ScrollToOptions& aOptions);
+  MOZ_CAN_RUN_SCRIPT void ScrollBy(double aXScrollDif, double aYScrollDif);
+  MOZ_CAN_RUN_SCRIPT void ScrollBy(const ScrollToOptions& aOptions);
   /* Scrolls without flushing the layout.
    * aDx is the x offset, aDy the y offset in CSS pixels.
    * Returns true if we actually scrolled.
    */
-  bool ScrollByNoFlush(int32_t aDx, int32_t aDy);
-  int32_t ScrollTop();
-  void SetScrollTop(int32_t aScrollTop);
-  int32_t ScrollLeft();
-  void SetScrollLeft(int32_t aScrollLeft);
-  int32_t ScrollWidth();
-  int32_t ScrollHeight();
-  void MozScrollSnap();
-  int32_t ClientTop()
+  MOZ_CAN_RUN_SCRIPT bool ScrollByNoFlush(int32_t aDx, int32_t aDy);
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollTop();
+  MOZ_CAN_RUN_SCRIPT void SetScrollTop(int32_t aScrollTop);
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollLeft();
+  MOZ_CAN_RUN_SCRIPT void SetScrollLeft(int32_t aScrollLeft);
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollWidth();
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollHeight();
+  MOZ_CAN_RUN_SCRIPT void MozScrollSnap();
+  MOZ_CAN_RUN_SCRIPT int32_t ClientTop()
   {
     return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().y);
   }
-  int32_t ClientLeft()
+  MOZ_CAN_RUN_SCRIPT int32_t ClientLeft()
   {
     return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().x);
   }
-  int32_t ClientWidth()
+  MOZ_CAN_RUN_SCRIPT int32_t ClientWidth()
   {
     return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().Width());
   }
-  int32_t ClientHeight()
+  MOZ_CAN_RUN_SCRIPT int32_t ClientHeight()
   {
     return nsPresContext::AppUnitsToIntCSSPixels(GetClientAreaRect().Height());
   }
-  int32_t ScrollTopMin()
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollTopMin()
   {
     nsIScrollableFrame* sf = GetScrollFrame();
     return sf ?
            nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().y) : 0;
   }
-  int32_t ScrollTopMax()
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollTopMax()
   {
     nsIScrollableFrame* sf = GetScrollFrame();
     return sf ?
            nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().YMost()) :
            0;
   }
-  int32_t ScrollLeftMin()
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollLeftMin()
   {
     nsIScrollableFrame* sf = GetScrollFrame();
     return sf ?
            nsPresContext::AppUnitsToIntCSSPixels(sf->GetScrollRange().x) : 0;
   }
-  int32_t ScrollLeftMax()
+  MOZ_CAN_RUN_SCRIPT int32_t ScrollLeftMax()
   {
     nsIScrollableFrame* sf = GetScrollFrame();
     return sf ?
@@ -1237,10 +1320,6 @@ public:
                                     nsTArray<RefPtr<Animation>>& aAnimations);
 
   NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML);
-  void GetInnerHTML(nsAString& aInnerHTML, nsIPrincipal& aSubjectPrincipal)
-  {
-    GetInnerHTML(aInnerHTML);
-  }
   virtual void SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal& aSubjectPrincipal, ErrorResult& aError);
   void GetOuterHTML(nsAString& aOuterHTML);
   void SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError);
@@ -1470,7 +1549,7 @@ public:
 
   void SetAttr(nsAtom* aAttr, const nsAString& aValue, nsIPrincipal& aTriggeringPrincipal, ErrorResult& aError)
   {
-    aError = nsIContent::SetAttr(kNameSpaceID_None, aAttr, aValue, &aTriggeringPrincipal, true);
+    aError = SetAttr(kNameSpaceID_None, aAttr, aValue, &aTriggeringPrincipal, true);
   }
 
   /**
@@ -1589,6 +1668,7 @@ protected:
    * @param aScroll       Destination of scroll, in CSS pixels
    * @param aOptions      Dictionary of options to be evaluated
    */
+  MOZ_CAN_RUN_SCRIPT
   void Scroll(const CSSIntPoint& aScroll, const ScrollOptions& aOptions);
 
   /**
@@ -1829,8 +1909,9 @@ private:
    * Get this element's client area rect in app units.
    * @return the frame's client area
    */
-  nsRect GetClientAreaRect();
+  MOZ_CAN_RUN_SCRIPT nsRect GetClientAreaRect();
 
+  MOZ_CAN_RUN_SCRIPT
   nsIScrollableFrame* GetScrollFrame(nsIFrame **aStyledFrame = nullptr,
                                      FlushType aFlushType = FlushType::Layout);
 

@@ -8,9 +8,8 @@
 #define mozilla_dom_WebAuthnManager_h
 
 #include "mozilla/MozPromise.h"
-#include "mozilla/dom/Event.h"
 #include "mozilla/dom/PWebAuthnTransaction.h"
-#include "nsIDOMEventListener.h"
+#include "mozilla/dom/WebAuthnManagerBase.h"
 
 /*
  * Content process manager for the WebAuthn protocol. Created on calls to the
@@ -52,24 +51,14 @@ public:
 namespace mozilla {
 namespace dom {
 
-struct Account;
-class ArrayBufferViewOrArrayBuffer;
-struct AssertionOptions;
-class OwningArrayBufferViewOrArrayBuffer;
-struct MakePublicKeyCredentialOptions;
-class Promise;
-class WebAuthnTransactionChild;
-
 class WebAuthnTransaction
 {
 public:
-  WebAuthnTransaction(nsPIDOMWindowInner* aParent,
-                      const RefPtr<Promise>& aPromise,
+  WebAuthnTransaction(const RefPtr<Promise>& aPromise,
                       const nsTArray<uint8_t>& aRpIdHash,
                       const nsCString& aClientData,
                       AbortSignal* aSignal)
-    : mParent(aParent)
-    , mPromise(aPromise)
+    : mPromise(aPromise)
     , mRpIdHash(aRpIdHash)
     , mClientData(aClientData)
     , mSignal(aSignal)
@@ -77,9 +66,6 @@ public:
   {
     MOZ_ASSERT(mId > 0);
   }
-
-  // Parent of the context we're running the transaction in.
-  nsCOMPtr<nsPIDOMWindowInner> mParent;
 
   // JS Promise representing the transaction status.
   RefPtr<Promise> mPromise;
@@ -106,61 +92,58 @@ private:
   }
 };
 
-class WebAuthnManager final : public nsIDOMEventListener
+class WebAuthnManager final : public WebAuthnManagerBase
                             , public AbortFollower
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIDOMEVENTLISTENER
 
-  static WebAuthnManager* GetOrCreate();
-  static WebAuthnManager* Get();
+  explicit WebAuthnManager(nsPIDOMWindowInner* aParent)
+    : WebAuthnManagerBase(aParent)
+  { }
 
   already_AddRefed<Promise>
-  MakeCredential(nsPIDOMWindowInner* aParent,
-                 const MakePublicKeyCredentialOptions& aOptions,
+  MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
                  const Optional<OwningNonNull<AbortSignal>>& aSignal);
 
   already_AddRefed<Promise>
-  GetAssertion(nsPIDOMWindowInner* aParent,
-               const PublicKeyCredentialRequestOptions& aOptions,
+  GetAssertion(const PublicKeyCredentialRequestOptions& aOptions,
                const Optional<OwningNonNull<AbortSignal>>& aSignal);
 
   already_AddRefed<Promise>
-  Store(nsPIDOMWindowInner* aParent, const Credential& aCredential);
+  Store(const Credential& aCredential);
+
+  // WebAuthnManagerBase
 
   void
   FinishMakeCredential(const uint64_t& aTransactionId,
-                       nsTArray<uint8_t>& aRegBuffer);
+                       nsTArray<uint8_t>& aRegBuffer) override;
 
   void
   FinishGetAssertion(const uint64_t& aTransactionId,
                      nsTArray<uint8_t>& aCredentialId,
-                     nsTArray<uint8_t>& aSigBuffer);
+                     nsTArray<uint8_t>& aSigBuffer) override;
 
   void
-  RequestAborted(const uint64_t& aTransactionId, const nsresult& aError);
+  RequestAborted(const uint64_t& aTransactionId,
+                 const nsresult& aError) override;
+
+  // AbortFollower
 
   void Abort() override;
 
-  void ActorDestroyed();
+protected:
+  // Cancels the current transaction (by sending a Cancel message to the
+  // parent) and rejects it by calling RejectTransaction().
+  void CancelTransaction(const nsresult& aError) override;
 
 private:
-  WebAuthnManager();
   virtual ~WebAuthnManager();
 
   // Clears all information we have about the current transaction.
   void ClearTransaction();
   // Rejects the current transaction and calls ClearTransaction().
   void RejectTransaction(const nsresult& aError);
-  // Cancels the current transaction (by sending a Cancel message to the
-  // parent) and rejects it by calling RejectTransaction().
-  void CancelTransaction(const nsresult& aError);
-
-  bool MaybeCreateBackgroundActor();
-
-  // IPC Channel to the parent process.
-  RefPtr<WebAuthnTransactionChild> mChild;
 
   // The current transaction, if any.
   Maybe<WebAuthnTransaction> mTransaction;
