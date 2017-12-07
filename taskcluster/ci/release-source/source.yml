@@ -19,11 +19,11 @@ linux64-source/opt:
     run-on-projects: []
     shipping-product: firefox
 
-android-source/opt:
+linux64-fennec-source/opt:
     description: "Fennec source builder"
     index:
         product: fennec
-        job-name: android-source-opt
+        job-name: linux64-fennec-source-opt
     treeherder:
         platform: android-api-16/opt
         symbol: tc(Src)
@@ -46,7 +46,7 @@ linux64-devedition-source/opt:
         product: devedition
         job-name: linux64-devedition-source-opt
     treeherder:
-        platform: linux64-devedition/opt
+        platform: linux64-devedition-source/opt
         symbol: tc(Src)
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:

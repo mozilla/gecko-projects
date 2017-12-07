@@ -149,6 +149,10 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     ],
     'linux64-source': [
     ],
+    'linux64-devedition-source': [
+    ],
+    'linux64-fennec-source': [
+    ],
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-api-16-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
@@ -217,6 +221,14 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.tar.bz2.asc",
     ],
     'linux64-source': [
+        "SOURCE",
+        "SOURCE.asc",
+    ],
+    'linux64-devedition-source': [
+        "SOURCE",
+        "SOURCE.asc",
+    ],
+    'linux64-fennec-source': [
         "SOURCE",
         "SOURCE.asc",
     ],
