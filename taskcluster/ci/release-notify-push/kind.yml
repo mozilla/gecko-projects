@@ -9,7 +9,7 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - beetmover-checksums
+   - beetmover-cdns
 
 job-defaults:
    name: notify-release-drivers-push
