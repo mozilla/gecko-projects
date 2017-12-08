@@ -65,6 +65,9 @@ job-defaults:
                try: ["{task_def[metadata][owner]}"]
                maple: ["release+tcstaging@mozilla.com"]
                default: []
+   routes:
+      - index.releases.v1.{branch}.latest.{product}.latest.mark_as_shipped
+      - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.mark_as_shipped
 
 jobs:
    fennec:
@@ -73,9 +76,6 @@ jobs:
       run:
          product: fennec
          buildername: release-{branch}-fennec_mark_as_shipped
-      routes:
-         - index.releases.v1.{branch}.latest.fennec.latest.mark_as_shipped
-         - index.releases.v1.{branch}.{revision}.fennec.{underscore_version}.build{build_number}.mark_as_shipped
       index:
          product: fennec
    firefox:
@@ -84,8 +84,13 @@ jobs:
       run:
          product: firefox
          buildername: release-{branch}-firefox_mark_as_shipped
-      routes:
-         - index.releases.v1.{branch}.latest.firefox.latest.mark_as_shipped
-         - index.releases.v1.{branch}.{revision}.firefox.{underscore_version}.build{build_number}.mark_as_shipped
       index:
          product: firefox
+   devedition:
+      name: release-devedition_mark_as_shipped
+      shipping-product: devedition
+      run:
+         product: devedition
+         buildername: release-{branch}-devedition_mark_as_shipped
+      index:
+         product: devedition
