@@ -203,7 +203,7 @@ Beetmover-cdns publishes promoted releases to CDNs. This is part of release prom
 beetmover-source
 -------------------
 
-Beetmover-source publishes release source This is part of release promotion.
+Beetmover-source publishes release source. This is part of release promotion.
 
 checksums-signing
 -----------------
@@ -236,11 +236,12 @@ all at once. They also depend on the breakpoint.
 
 release-binary-transparency
 ---------------------------
-Binary transparency to issue a certificate
+Binary transparency creates a publicly verifiable log of binary shas for downstream
+release auditing. https://wiki.mozilla.org/Security/Binary_Transparency
 
 release-snap
-----------------------
-Building snap application
+------------
+Generate an installer using Ubuntu's Snap format.
 
 release-notify-push
 ----------------------
@@ -343,12 +344,12 @@ Partials-signing takes the partial updates produced in Partials and signs them.
 
 post-balrog-dummy
 --------------------
-Dummy tasks to handle balrog tasks as dependencies without hitting max-dependencies.
+Dummy tasks to consolidate balrog dependencies to avoid taskcluster limits on number of dependencies per task.
 
 post-beetmover-dummy
 --------------------
-Dummy tasks to handle beetmover tasks as dependencies without hitting max-dependencies.
+Dummy tasks to consolidate beetmover dependencies to avoid taskcluster limits on number of dependencies per task.
 
 post-beetmover-checksums-dummy
 ------------------------------
-Dummy tasks to handle beetmover-checksums tasks as dependencies without hitting max-dependencies.
+Dummy tasks to consolidate beetmover-checksums dependencies to avoid taskcluster limits on number of dependencies per task.
