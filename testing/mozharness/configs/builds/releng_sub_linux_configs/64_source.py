@@ -16,6 +16,6 @@ Instructions for downloading and building this source code can be found here:
 https://developer.mozilla.org/en/Mozilla_Source_Code_%28Mercurial%29
 """,
     "out_path": "artifacts/SOURCE",
-    "repo": os.environ("GECKO_HEAD_REPOSITORY"),
-    "revision": os.environ("GECKO_HEAD_REV"),
+    "repo": os.environ.get("GECKO_HEAD_REPOSITORY"),
+    "revision": os.environ.get("GECKO_HEAD_REV"),
 }
