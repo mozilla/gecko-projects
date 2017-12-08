@@ -209,26 +209,26 @@ job-template:
             linux-devedition-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
-               - platform-config=single_locale/linux32.py
+               - platform-config=single_locale/linux_devedition.py
             linux64-devedition-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
-               - platform-config=single_locale/linux64.py
+               - platform-config=single_locale/linux64_devedition.py
             macosx64-devedition-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
-               - platform-config=single_locale/macosx64.py
+               - platform-config=single_locale/macosx64_devedition.py
             win32-devedition-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
-               - platform-config=single_locale/win32.py
+               - platform-config=single_locale/win32_devedition.py
                - config=single_locale/tc_win32.py
                - config=taskcluster_nightly.py
                - revision=$GECKO_HEAD_REV
             win64-devedition-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
-               - platform-config=single_locale/win64.py
+               - platform-config=single_locale/win64_devedition.py
                - config=single_locale/tc_win64.py
                - config=taskcluster_nightly.py
                - revision=$GECKO_HEAD_REV
