@@ -71,15 +71,15 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
-    r'^(linux(|64)|macosx64)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+    r'^(linux(|64)|macosx64)(|-devedition)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
         'host/bin/mar',
         'host/bin/mbsdiff',
     ],
-    r'^win(32|64)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+    r'^win(32|64)(|-devedition)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
         "host/bin/mar.exe",
         "host/bin/mbsdiff.exe",
     ],
-    r'^(linux(|64)|macosx64|win(32|64))-nightly-l10n$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -87,8 +87,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    r'^linux(|64)-nightly(|-l10n)$': ['target.tar.bz2', 'target.tar.bz2.asc'],
-    r'^win(32|64)-nightly(|-l10n)$': ['target.zip'],
+    r'^linux(|64)(|-devedition)-nightly(|-l10n)$': ['target.tar.bz2', 'target.tar.bz2.asc'],
+    r'^win(32|64)(|-devedition)-nightly(|-l10n)$': ['target.zip'],
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -96,16 +96,16 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
-    r'^macosx64-nightly(|-l10n)$': ['target.dmg'],
+    r'^macosx64(|-devedition)-nightly(|-l10n)$': ['target.dmg'],
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
-    r'^(linux(|64)|macosx64)-nightly(|-l10n)$': ['target.complete.mar'],
-    r'^win64-nightly(|-l10n)$': ['target.complete.mar', 'target.installer.exe'],
-    r'^win32-nightly(|-l10n)$': [
+    r'^(linux(|64)|macosx64)(|-devedition)-nightly(|-l10n)$': ['target.complete.mar'],
+    r'^win64(|-devedition)-nightly(|-l10n)$': ['target.complete.mar', 'target.installer.exe'],
+    r'^win32(|-devedition)-nightly(|-l10n)$': [
         'target.complete.mar',
         'target.installer.exe',
         'target.stub-installer.exe'
