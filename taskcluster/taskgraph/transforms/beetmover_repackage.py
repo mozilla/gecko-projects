@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 
 _WINDOWS_BUILD_PLATFORMS = [
     'win64-nightly',
-    'win32-nightly'
+    'win32-nightly',
+    'win64-devedition-nightly',
+    'win32-devedition-nightly',
 ]
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -350,7 +352,10 @@ def is_valid_beetmover_job(job):
 def make_task_worker(config, jobs):
     for job in jobs:
         if not is_valid_beetmover_job(job):
-            raise NotImplementedError("Beetmover_repackage must have five dependencies.")
+            print(job['dependencies'])
+            raise NotImplementedError(
+                "{}: Beetmover_repackage must have five dependencies.".format(job['label'])
+            )
 
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
