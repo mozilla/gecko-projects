@@ -22,6 +22,10 @@ def add_command(config, tasks):
         release_config = get_release_config(config)
         total_chunks = task["extra"]["chunks"]
         platform = task["attributes"]["build_platform"]
+        # We git rid of -devedition (if it exists here) because we're
+        # only using this in the buildername, and buildbot doesn't use
+        # -devedition.
+        platform = platform.replace('-devedition', '')
         product = task["shipping-product"]
         buildername = "release-{branch}_" + product + "_" + platform + \
             "_update_verify"
