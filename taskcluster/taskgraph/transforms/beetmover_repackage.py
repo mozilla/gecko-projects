@@ -71,15 +71,18 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
-    r'^(linux(|64)|macosx64)(|-devedition)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
-        'host/bin/mar',
-        'host/bin/mbsdiff',
-    ],
-    r'^win(32|64)(|-devedition)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
-        "host/bin/mar.exe",
-        "host/bin/mbsdiff.exe",
-    ],
-    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    r'^(linux(|64)|macosx64)(|-devedition)-nightly$':
+        _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+            'host/bin/mar',
+            'host/bin/mbsdiff',
+        ],
+    r'^win(32|64)(|-devedition)-nightly$':
+        _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+            "host/bin/mar.exe",
+            "host/bin/mbsdiff.exe",
+        ],
+    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$':
+        _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
