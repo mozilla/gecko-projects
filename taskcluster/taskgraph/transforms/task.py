@@ -111,6 +111,7 @@ task_description_schema = Schema({
     # added automatically. The following parameters will be substituted in each
     # scope:
     #  {level} -- the scm level of this push
+    #  {project} -- the project of this push
     Optional('scopes'): [basestring],
 
     # Tags
