@@ -14,7 +14,7 @@ linux64-source/opt:
         actions: [build]
         config:
             - builds/releng_sub_linux_configs/64_source.py
-        options: ["repo={head_repository}", "revision={head_rev}"]
+        options: []
         script: "mozharness/scripts/fx_source.py"
     run-on-projects: []
     shipping-product: firefox
@@ -35,7 +35,7 @@ linux64-fennec-source/opt:
         actions: [build]
         config:
             - builds/releng_sub_linux_configs/64_source.py
-        options: ["repo={head_repository}", "revision={head_rev}"]
+        options: []
         script: "mozharness/scripts/fx_source.py"
     run-on-projects: []
     shipping-product: fennec
@@ -56,7 +56,7 @@ linux64-devedition-source/opt:
         actions: [build]
         config:
             - builds/releng_sub_linux_configs/64_source.py
-        options: ["repo={head_repository}", "revision={head_rev}"]
+        options: []
         script: "mozharness/scripts/fx_source.py"
     run-on-projects: []
     shipping-product: devedition
