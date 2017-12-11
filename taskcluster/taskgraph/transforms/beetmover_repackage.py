@@ -437,7 +437,7 @@ def make_partials_artifacts(config, jobs):
         artifact_map = get_partials_artifact_map(
             config.params.get('release_history'), balrog_platform, locale)
         for artifact in artifact_map:
-            _ = {
+            artifact_extra = {
                 'locale': locale,
                 'artifact_name': artifact,
                 'buildid': artifact_map[artifact]['buildid'],
@@ -445,8 +445,8 @@ def make_partials_artifacts(config, jobs):
             }
             for rel_attr in ('previousBuildNumber', 'previousVersion'):
                 if artifact_map[artifact].get(rel_attr):
-                    _[rel_attr] = artifact_map[artifact][rel_attr]
-            extra.append(_)
+                    artifact_extra[rel_attr] = artifact_map[artifact][rel_attr]
+            extra.append(artifact_extra)
 
         job.setdefault('extra', {})
         job['extra']['partials'] = extra
