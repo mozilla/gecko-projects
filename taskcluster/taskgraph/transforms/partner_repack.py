@@ -15,7 +15,7 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def add_command(config, tasks):
+def resolve_properties(config, tasks):
     for task in tasks:
         for property in ("repack_manifests_url", ):
             property = "worker.properties.{}".format(property)
