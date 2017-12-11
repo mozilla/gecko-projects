@@ -309,10 +309,10 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
     of firefox. This should include all non-android mozilla_{beta,release} tasks,
     plus l10n, beetmover, balrog, etc."""
 
-    beta_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
-                  filter_beta_release_tasks(t, parameters,
-                                            ignore_kinds=[],
-                                            allow_l10n=True)]
+    beta_release_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
+                          filter_beta_release_tasks(t, parameters,
+                                                    ignore_kinds=[],
+                                                    allow_l10n=True)]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -324,12 +324,12 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if platform and 'devedition' in platform:
             return False
 
-        # Allow for beta_tasks; these will get optimized out to point to
-        # the previous graph using ``previous_graph_ids`` and
+        # Allow for {beta,release}_tasks; these will get optimized out to point
+        # to the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
         # At some point this should filter by shipping_phase == 'build' and
         # shipping_product matches.
-        if task.label in beta_tasks:
+        if task.label in beta_release_tasks:
             return True
 
         # 'secondary' update/final verify tasks only run for
@@ -406,10 +406,10 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
     of devedition. This should include all non-android mozilla_{beta,release}
     tasks, plus l10n, beetmover, balrog, etc."""
 
-    beta_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
-                  filter_beta_release_tasks(t, parameters,
-                                            ignore_kinds=[],
-                                            allow_l10n=True)]
+    beta_release_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
+                          filter_beta_release_tasks(t, parameters,
+                                                    ignore_kinds=[],
+                                                    allow_l10n=True)]
 
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -421,12 +421,12 @@ def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
         if platform and 'devedition' not in platform:
             return False
 
-        # Allow for beta_tasks; these will get optimized out to point to
+        # Allow for {beta,release}_tasks; these will get optimized out to point to
         # the previous graph using ``previous_graph_ids`` and
         # ``previous_graph_kinds``.
         # At some point this should filter by shipping_phase == 'build' and
         # shipping_product matches.
-        if task.label in beta_tasks:
+        if task.label in beta_release_tasks:
             return True
 
         if task.attributes.get('shipping_product') == 'devedition' and \
