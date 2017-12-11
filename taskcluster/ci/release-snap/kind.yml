@@ -109,9 +109,3 @@ jobs:
          symbol: Snap(BF)
       index:
          product: firefox
-   devedition:
-      shipping-product: devedition
-      treeherder:
-         symbol: Snap(BD)
-      index:
-         product: devedition
