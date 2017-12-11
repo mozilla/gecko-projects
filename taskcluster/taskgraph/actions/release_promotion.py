@@ -285,7 +285,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     # Download and combine full task graphs from each of the previous_graph_ids.
     # Sometimes previous relpro action tasks will add tasks, like partials,
     # that didn't exist in the first full_task_graph, so combining them is
-    # important.
+    # important. The rightmost graph should take precedence in the case of
+    # conflicts.
     combined_full_task_graph = {}
     for graph_id in previous_graph_ids:
         full_task_graph = get_artifact(graph_id, "public/full-task-graph.json")
