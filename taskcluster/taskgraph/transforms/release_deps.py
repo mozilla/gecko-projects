@@ -60,11 +60,8 @@ def add_dependencies(config, jobs):
             if dep_phase and PHASES.index(dep_phase) > PHASES.index(phase):
                 continue
             # Add matching product tasks to deps
-            if _get_product(dep_task.task) == product:
-                dependencies[dep_task.label] = dep_task.label
-            # this is dumb, but i don't know how to get beetmover to set
-            # shipping-product in a way that _get_product recognizes
-            if dep_task.attributes.get('shipping_product') == product:
+            if _get_product(dep_task.task) == product or \
+                    dep_task.attributes.get('shipping_product') == product:
                 dependencies[dep_task.label] = dep_task.label
 
         job.setdefault('dependencies', {}).update(dependencies)
