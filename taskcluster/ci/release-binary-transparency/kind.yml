@@ -5,12 +5,11 @@
 loader: taskgraph.loader.transform:loader
 
 transforms:
-   # - taskgraph.transforms.release_deps:transforms
+   - taskgraph.transforms.release_deps:transforms
    - taskgraph.transforms.task:transforms
 
-# TODO: once release checksums is done
-# kind-dependencies:
-#    - release-checksums
+kind-dependencies:
+   - post-beetmover-checksums-dummy
 
 job-defaults:
    name: release-binary-transparency
