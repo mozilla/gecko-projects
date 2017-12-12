@@ -362,7 +362,7 @@ task_description_schema = Schema({
         # the maximum time to run, in seconds
         Required('max-run-time'): int,
 
-        # the exit status code that indicates the task should be retried
+        # the exit status code(s) that indicates the task should be retried
         Optional('retry-exit-status'): Any(
             int,
             [int],
@@ -739,7 +739,7 @@ def superseder_url(config, task):
 
 
 def verify_index_job_name(index):
-    job_name = index.get('job-name')
+    job_name = index['job-name']
     if job_name not in JOB_NAME_WHITELIST:
         raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
 
