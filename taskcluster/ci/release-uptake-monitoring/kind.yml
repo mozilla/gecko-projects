@@ -81,7 +81,6 @@ jobs:
          buildername: release-{branch}-fennec_uptake_monitoring
       worker:
          properties:
-            # TODO: Calculate "platforms" dynamically
             platforms: "android-api-16, android-x86"
       routes:
          - index.releases.v1.{branch}.latest.fennec.latest.uptake_monitoring
