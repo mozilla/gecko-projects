@@ -32,6 +32,8 @@ google_play_description_schema = Schema({
     Required('treeherder'): task_description_schema['treeherder'],
     Required('run-on-projects'): task_description_schema['run-on-projects'],
     Required('worker-type'): task_description_schema['worker-type'],
+    Required('shipping-phase'): task_description_schema['shipping-phase'],
+    Required('shipping-product'): task_description_schema['shipping-product'],
     Required('worker'): object,
 })
 

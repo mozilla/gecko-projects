@@ -15,8 +15,8 @@ jobs:
          build_type: google_play_strings
          build_platform: android-nightly
          nightly: true
-         shipping_phase: promote
-         shipping_product: fennec
+      shipping-phase: promote
+      shipping-product: fennec
       worker-type: aws-provisioner-v1/taskcluster-generic
       worker:
          implementation: docker-worker

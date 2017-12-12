@@ -1465,7 +1465,15 @@ def build_task(config, tasks):
             attributes.setdefault('shipping_phase', None)
         # shipping_product will always match the upstream task's
         # shipping_product, so a pre-set existing attributes['shipping_product']
-        # takes precedence over task['shipping-product'].
+        # takes precedence over task['shipping-product']. However, make sure
+        # we don't have conflicting values.
+        if task.get('shipping-product') and \
+                attributes.get('shipping_product') not in (None, task['shipping-product']):
+            raise Exception(
+                "{} shipping_product {} doesn't match task shipping-product {}!".format(
+                    task['label'], attributes['shipping_product'], task['shipping-product']
+                )
+            )
         attributes.setdefault('shipping_product', task['shipping-product'])
 
         # Set MOZ_AUTOMATION on all jobs.
