@@ -987,7 +987,6 @@ def build_scriptworker_signing_payload(config, task, task_def):
 
 @payload_builder('binary-transparency')
 def build_binary_transparency_payload(config, task, task_def):
-    worker = task['worker']
     release_config = get_release_config(config)
 
     task_def['payload'] = {
