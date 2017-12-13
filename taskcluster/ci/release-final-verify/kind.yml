@@ -5,8 +5,6 @@
 loader: taskgraph.loader.transform:loader
 
 kind-dependencies:
-   # release-uptake-monitoring will get removed as a dep
-   # for secondary channel final verify
    - release-uptake-monitoring
 
 transforms:
