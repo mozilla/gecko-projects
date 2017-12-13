@@ -11,8 +11,8 @@ transforms:
 
 kind-dependencies:
    - push-apk
-   - release-bouncer-aliases
    - release-balrog-publishing
+   - release-bouncer-aliases
    - release-version-bump
 
 job-defaults:
