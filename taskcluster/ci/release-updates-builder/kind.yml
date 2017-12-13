@@ -78,10 +78,6 @@ jobs:
          buildername: release-{branch}-firefox_updates
       worker:
          properties:
-            # fixme if this is actually used, kill otherwise
-            # revision: ?
-            # fixme if this is actually used - kill me otherwise
-            # script_repo_revision: ?
             generate_bz2_blob:
                by-project:
                   mozilla-release: true
@@ -122,10 +118,6 @@ jobs:
          buildername: release-{branch}-devedition_updates
       worker:
          properties:
-            # fixme if this is actually used, kill otherwise
-            # revision: ?
-            # fixme if this is actually used - kill me otherwise
-            # script_repo_revision: ?
             product: devedition
             balrog_api_root:
                by-project:
