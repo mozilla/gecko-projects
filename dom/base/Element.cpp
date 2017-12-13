@@ -16,6 +16,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/Attr.h"
+#include "mozilla/dom/Flex.h"
 #include "mozilla/dom/Grid.h"
 #include "mozilla/gfx/Matrix.h"
 #include "nsDOMAttributeMap.h"
@@ -27,6 +28,7 @@
 #include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
+#include "nsFlexContainerFrame.h"
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
 #include "nsILinkHandler.h"
@@ -205,18 +207,10 @@ nsIContent::DoGetID() const
 }
 
 const nsAttrValue*
-Element::DoGetClasses() const
+Element::GetSVGAnimatedClass() const
 {
-  MOZ_ASSERT(MayHaveClass(), "Unexpected call");
-  if (IsSVGElement()) {
-    const nsAttrValue* animClass =
-      static_cast<const nsSVGElement*>(this)->GetAnimatedClassName();
-    if (animClass) {
-      return animClass;
-    }
-  }
-
-  return GetParsedAttr(nsGkAtoms::_class);
+  MOZ_ASSERT(MayHaveClass() && IsSVGElement(), "Unexpected call");
+  return static_cast<const nsSVGElement*>(this)->GetAnimatedClassName();
 }
 
 NS_IMETHODIMP
@@ -3715,6 +3709,23 @@ Element::RequestPointerLock(CallerType aCallerType)
   OwnerDoc()->RequestPointerLock(this, aCallerType);
 }
 
+already_AddRefed<Flex>
+Element::GetAsFlexContainer()
+{
+  nsIFrame* frame = GetPrimaryFrame();
+
+  // We need the flex frame to compute additional info, and use
+  // that annotated version of the frame.
+  nsFlexContainerFrame* flexFrame =
+    nsFlexContainerFrame::GetFlexFrameWithComputedInfo(frame);
+
+  if (flexFrame) {
+    RefPtr<Flex> flex = new Flex(this, flexFrame);
+    return flex.forget();
+  }
+  return nullptr;
+}
+
 void
 Element::GetGridFragments(nsTArray<RefPtr<Grid>>& aResult)
 {
@@ -4321,7 +4332,7 @@ IntersectionObserverPropertyDtor(void* aObject, nsAtom* aPropertyName,
     static_cast<IntersectionObserverList*>(aPropertyValue);
   for (auto iter = observers->Iter(); !iter.Done(); iter.Next()) {
     DOMIntersectionObserver* observer = iter.Key();
-    observer->UnlinkElement(*element);
+    observer->UnlinkTarget(*element);
   }
   delete observers;
 }
@@ -4343,7 +4354,7 @@ Element::RegisterIntersectionObserver(DOMIntersectionObserver* aObserver)
   }
 
   observers->LookupForAdd(aObserver).OrInsert([]() {
-    // If element is being observed, value can be:
+    // Value can be:
     //   -2:   Makes sure next calculated threshold always differs, leading to a
     //         notification task being scheduled.
     //   -1:   Non-intersecting.
@@ -4376,7 +4387,7 @@ Element::UnlinkIntersectionObservers()
   }
   for (auto iter = observers->Iter(); !iter.Done(); iter.Next()) {
     DOMIntersectionObserver* observer = iter.Key();
-    observer->UnlinkElement(*this);
+    observer->UnlinkTarget(*this);
   }
   observers->Clear();
 }

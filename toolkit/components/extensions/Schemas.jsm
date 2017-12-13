@@ -1,7 +1,8 @@
+/* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set sts=2 sw=2 et tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 "use strict";
 
 const Ci = Components.interfaces;
@@ -1447,6 +1448,16 @@ class StringType extends Type {
   }
 }
 
+class NullType extends Type {
+  normalize(value, context) {
+    return this.normalizeBase("null", value, context);
+  }
+
+  checkBaseType(baseType) {
+    return baseType == "null";
+  }
+}
+
 let FunctionEntry;
 let Event;
 let SubModuleType;
@@ -2169,7 +2180,8 @@ FunctionEntry = class FunctionEntry extends CallEntry {
     }
 
     return new this(schema, path, schema.name,
-                    Schemas.parseSchema(schema, path,
+                    Schemas.parseSchema(
+                      schema, path,
                       ["name", "unsupported", "returns",
                        "permissions",
                        "allowAmbiguousOptionalArguments"]),
@@ -2361,6 +2373,7 @@ const TYPES = Object.freeze(Object.assign(Object.create(null), {
   boolean: BooleanType,
   function: FunctionType,
   integer: IntegerType,
+  null: NullType,
   number: NumberType,
   object: ObjectType,
   string: StringType,

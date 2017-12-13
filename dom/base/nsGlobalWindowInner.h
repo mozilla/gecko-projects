@@ -112,7 +112,6 @@ class IncrementalRunnable;
 class IntlUtils;
 class Location;
 class MediaQueryList;
-class MozSelfSupport;
 class Navigator;
 class OwningExternalOrWindowProxy;
 class Promise;
@@ -349,6 +348,7 @@ public:
   void SyncStateFromParentWindow();
 
   mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const;
+  mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
   mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const;
 
   virtual nsresult FireDelayedDOMEvents() override;
@@ -889,8 +889,6 @@ public:
 
   bool ShouldResistFingerprinting();
 
-  mozilla::dom::MozSelfSupport* GetMozSelfSupport(mozilla::ErrorResult& aError);
-
   already_AddRefed<nsPIDOMWindowOuter>
   OpenDialog(JSContext* aCx,
              const nsAString& aUrl,
@@ -1164,6 +1162,10 @@ public:
   // Inner windows only.
   void UpdateCanvasFocus(bool aFocusChanged, nsIContent* aNewContent);
 
+  // See PromiseWindowProxy.h for an explanation.
+  void AddPendingPromise(mozilla::dom::Promise* aPromise);
+  void RemovePendingPromise(mozilla::dom::Promise* aPromise);
+
 public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;
 
@@ -1326,8 +1328,6 @@ protected:
   // it wouldn't see the ~External function's declaration.
   nsCOMPtr<nsISupports>         mExternal;
 
-  RefPtr<mozilla::dom::MozSelfSupport> mMozSelfSupport;
-
   RefPtr<mozilla::dom::Storage> mLocalStorage;
   RefPtr<mozilla::dom::Storage> mSessionStorage;
 
@@ -1407,6 +1407,8 @@ protected:
   RefPtr<mozilla::dom::IntlUtils> mIntlUtils;
 
   mozilla::UniquePtr<mozilla::dom::ClientSource> mClientSource;
+
+  nsTArray<RefPtr<mozilla::dom::Promise>> mPendingPromises;
 
   static InnerWindowByIdTable* sInnerWindowsById;
 

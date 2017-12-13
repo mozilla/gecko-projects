@@ -104,6 +104,7 @@ UNIFIED_SOURCES += [
 ]
 
 DIRS += [
+    'rlz',
     'widevine-adapter',
 ]
 
@@ -141,5 +142,5 @@ LOCAL_INCLUDES += [
     '/xpcom/threads',
 ]
 
-if CONFIG['GNU_CXX']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']

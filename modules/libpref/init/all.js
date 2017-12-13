@@ -496,7 +496,7 @@ pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
 pref("media.peerconnection.ice.proxy_only", false);
 
-// These values (aec, agc, and noise) are from media/webrtc/trunk/webrtc/common_types.h
+// These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
 // setting (for Xxx = Ec, Agc, or Ns).  Defaults are all set to kXxxDefault here.
 pref("media.peerconnection.turn.disable", false);
@@ -510,7 +510,7 @@ pref("media.getusermedia.noise_enabled", true);
 pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1);
 pref("media.getusermedia.agc_enabled", false);
-pref("media.getusermedia.agc", 3); // kAgcAdaptiveDigital
+pref("media.getusermedia.agc", 1);
 // capture_delay: Adjustments for OS-specific input delay (lower bound)
 // playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
@@ -877,6 +877,7 @@ pref("gfx.webrender.program-binary", true);
 
 pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.blob-images", false);
+pref("gfx.webrender.hit-test", false);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
@@ -1775,7 +1776,7 @@ pref("network.http.altsvc.enabled", true);
 pref("network.http.altsvc.oe", true);
 
 // Turn on 0RTT data for TLS 1.3
-pref("security.tls.enable_0rtt_data", true);
+pref("security.tls.enable_0rtt_data", false);
 
 // the origin extension impacts h2 coalescing
 pref("network.http.originextension", true);
@@ -2190,6 +2191,11 @@ pref("network.auth.subresource-http-auth-allow", 2);
 // have any effect.
 pref("network.auth.subresource-img-cross-origin-http-auth-allow", false);
 
+// Resources that are triggered by some non-web-content:
+// true - they are allow to present http auth. dialog
+// false - they are not allow to present http auth. dialog.
+pref("network.auth.non-web-content-triggered-resources-http-auth-allow", false);
+
 // This preference controls whether to allow sending default credentials (SSO) to
 // NTLM/Negotiate servers allowed in the "trusted uri" list when navigating them
 // in a Private Browsing window.
@@ -2205,16 +2211,25 @@ pref("network.auth.private-browsing-sso", false);
 // Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
 pref("network.http.throttle.enable", true);
+pref("network.http.throttle.version", 1);
+
+// V1 prefs
 pref("network.http.throttle.suspend-for", 900);
 pref("network.http.throttle.resume-for", 100);
+
+// V2 prefs
+pref("network.http.throttle.read-limit-bytes", 8000);
+pref("network.http.throttle.read-interval-ms", 500);
+
+// Common prefs
 // Delay we resume throttled background responses after the last unthrottled
 // response has finished.  Prevents resuming too soon during an active page load
 // at which sub-resource reqeusts quickly come and go.
-pref("network.http.throttle.resume-background-in", 1000);
+pref("network.http.throttle.hold-time-ms", 800);
 // After the last transaction activation or last data chunk response we only
 // throttle for this period of time.  This prevents comet and unresponsive
 // http requests to engage long-standing throttling.
-pref("network.http.throttle.time-window", 3000);
+pref("network.http.throttle.max-time-ms", 500);
 
 // Give higher priority to requests resulting from a user interaction event
 // like click-to-play, image fancy-box zoom, navigation.
@@ -4968,9 +4983,6 @@ pref("extensions.webcompat-reporter.enabled", false);
 pref("network.buffer.cache.count", 24);
 pref("network.buffer.cache.size",  32768);
 
-// Desktop Notification
-pref("notification.feature.enabled", false);
-
 // Web Notification
 pref("dom.webnotifications.enabled", true);
 pref("dom.webnotifications.serviceworker.enabled", true);
@@ -5208,14 +5220,21 @@ pref("dom.vr.oculus.enabled", false);
 // interface through the Oculus HUD without waiting this duration)
 // If this value is too low, the Oculus Home interface may be visible
 // momentarily during VR link navigation.
-pref("dom.vr.oculus.present.timeout", 10000);
+pref("dom.vr.oculus.present.timeout", 500);
 // Minimum number of milliseconds that the browser will wait before
 // reloading the Oculus OVR library after seeing a "ShouldQuit" flag set.
 // Oculus requests that we shut down and unload the OVR library, by setting
 // a "ShouldQuit" flag.  To ensure that we don't interfere with
 // Oculus software auto-updates, we will not attempt to re-load the
 // OVR library until this timeout has elapsed.
-pref("dom.vr.oculus.quit.timeout", 30000);
+pref("dom.vr.oculus.quit.timeout", 10000);
+// When enabled, Oculus sessions may be created with the ovrInit_Invisible
+// flag if a page is using tracking but not presenting.  When a page
+// begins presenting VR frames, the session will be re-initialized without
+// the flag.  This eliminates the "Firefox not responding" warnings in
+// the headset, but might not be compatible with all versions of the Oculus
+// runtime.
+pref("dom.vr.oculus.invisible.enabled", true);
 // OSVR device
 pref("dom.vr.osvr.enabled", false);
 // OpenVR device
@@ -5834,6 +5853,13 @@ pref("layers.advanced.text-layers", 2);
 // Enable lowercased response header name
 pref("dom.xhr.lowercase_header.enabled", false);
 
+// Control whether clients.openWindow() opens windows in the same process
+// that called the API vs following our normal multi-process selection
+// algorithm.  Restricting openWindow to same process improves service worker
+// web compat in the short term.  Once the SW multi-e10s refactor is complete
+// this can be removed.
+pref("dom.clients.openwindow_favors_same_process", true);
+
 // When a crash happens, whether to include heap regions of the crash context
 // in the minidump. Enabled by default on nightly and aurora.
 #ifdef RELEASE_OR_BETA
@@ -5845,7 +5871,7 @@ pref("toolkit.crashreporter.include_context_heap", true);
 // Open noopener links in a new process
 pref("dom.noopener.newprocess.enabled", true);
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("layers.omtp.enabled", true);
 #else
 pref("layers.omtp.enabled", false);

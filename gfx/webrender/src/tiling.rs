@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BorderRadiusKind, ClipId, ColorF, DeviceIntPoint, ImageKey};
-use api::{DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
-use api::{DocumentLayer, ExternalImageType, FilterOp, FontRenderMode};
+use api::{DeviceIntRect, DeviceIntSize, device_length, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{DocumentLayer, ExternalImageType, FilterOp};
 use api::{ImageFormat, ImageRendering};
 use api::{LayerRect, MixBlendMode, PipelineId};
-use api::{TileOffset, YuvColorSpace, YuvFormat};
+use api::{SubpixelDirection, TileOffset, YuvColorSpace, YuvFormat};
 use api::{LayerToWorldTransform, WorldPixel};
 use border::{BorderCornerInstance, BorderCornerSide};
 use clip::{ClipSource, ClipStore};
@@ -20,7 +20,7 @@ use gpu_types::{BlurDirection, BlurInstance, BrushInstance, BrushImageKind, Clip
 use gpu_types::{CompositePrimitiveInstance, PrimitiveInstance, SimplePrimitiveInstance};
 use gpu_types::{ClipScrollNodeIndex, ClipScrollNodeData};
 use internal_types::{FastHashMap, SourceTexture};
-use internal_types::{BatchTextures};
+use internal_types::{BatchTextures, RenderPassIndex};
 use picture::{PictureCompositeMode, PictureKind, PicturePrimitive, RasterizationSpace};
 use plane_split::{BspSplitter, Polygon, Splitter};
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
@@ -106,21 +106,8 @@ impl AlphaBatchHelpers for PrimitiveStore {
             transform_kind == TransformedRectKind::Complex;
 
         match metadata.prim_kind {
-            PrimitiveKind::TextRun => {
-                let font = &self.cpu_text_runs[metadata.cpu_prim_index.0].font;
-                match font.render_mode {
-                    FontRenderMode::Subpixel => {
-                        if font.bg_color.a != 0 {
-                            BlendMode::SubpixelWithBgColor
-                        } else {
-                            BlendMode::SubpixelConstantTextColor(font.color.into())
-                        }
-                    }
-                    FontRenderMode::Alpha |
-                    FontRenderMode::Mono |
-                    FontRenderMode::Bitmap => BlendMode::PremultipliedAlpha,
-                }
-            },
+            // Can only resolve the TextRun's blend mode once glyphs are fetched.
+            PrimitiveKind::TextRun => BlendMode::PremultipliedAlpha,
             PrimitiveKind::Border |
             PrimitiveKind::Image |
             PrimitiveKind::YuvImage |
@@ -147,9 +134,6 @@ pub struct ScrollbarPrimitive {
 
 #[derive(Debug, Copy, Clone)]
 pub struct RenderTargetIndex(pub usize);
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct RenderPassIndex(isize);
 
 #[derive(Debug)]
 struct DynamicTaskInfo {
@@ -602,6 +586,26 @@ fn add_to_batch(
                         TransformBatchKind::TextRun(glyph_format),
                     );
 
+                    let blend_mode = match glyph_format {
+                        GlyphFormat::Subpixel |
+                        GlyphFormat::TransformedSubpixel => {
+                            if text_cpu.font.bg_color.a != 0 {
+                                BlendMode::SubpixelWithBgColor
+                            } else {
+                                BlendMode::SubpixelConstantTextColor(text_cpu.font.color.into())
+                            }
+                        }
+                        GlyphFormat::Alpha |
+                        GlyphFormat::TransformedAlpha |
+                        GlyphFormat::Bitmap |
+                        GlyphFormat::ColorBitmap => BlendMode::PremultipliedAlpha,
+                    };
+                    let subpx_dir = match glyph_format {
+                        GlyphFormat::Bitmap |
+                        GlyphFormat::ColorBitmap => SubpixelDirection::None,
+                        _ => text_cpu.font.subpx_dir.limit_by(text_cpu.font.render_mode),
+                    };
+
                     let key = BatchKey::new(kind, blend_mode, textures);
                     let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
 
@@ -609,7 +613,7 @@ fn add_to_batch(
                         batch.push(base_instance.build(
                             glyph.index_in_text_run,
                             glyph.uv_rect_address.as_int(),
-                            0,
+                            subpx_dir as u32 as i32,
                         ));
                     }
                 },
@@ -627,7 +631,8 @@ fn add_to_batch(
                     match picture.kind {
                         PictureKind::TextShadow { .. } => {
                             let kind = BatchKind::Brush(
-                                BrushBatchKind::Image(picture.target_kind()),
+                                BrushBatchKind::Image(
+                                    BrushImageSourceKind::from_render_target_kind(picture.target_kind())),
                             );
                             let key = BatchKey::new(kind, blend_mode, textures);
                             let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
@@ -647,7 +652,8 @@ fn add_to_batch(
                         }
                         PictureKind::BoxShadow { radii_kind, .. } => {
                             let kind = BatchKind::Brush(
-                                BrushBatchKind::Image(picture.target_kind()),
+                                BrushBatchKind::Image(
+                                    BrushImageSourceKind::from_render_target_kind(picture.target_kind())),
                             );
                             let key = BatchKey::new(kind, blend_mode, textures);
                             let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
@@ -676,7 +682,7 @@ fn add_to_batch(
                         }
                         PictureKind::Image {
                             composite_mode,
-                            readback_render_task_id,
+                            secondary_render_task_id,
                             is_in_3d_context,
                             reference_frame_id,
                             real_local_rect,
@@ -717,7 +723,7 @@ fn add_to_batch(
                                             let key = BatchKey::new(
                                                 BatchKind::HardwareComposite,
                                                 BlendMode::PremultipliedAlpha,
-                                                BatchTextures::no_texture(),
+                                                BatchTextures::render_target_cache(),
                                             );
                                             let batch = batch_list.get_suitable_batch(key, &item_bounding_rect);
                                             let instance = CompositePrimitiveInstance::new(
@@ -726,6 +732,61 @@ fn add_to_batch(
                                                 RenderTaskAddress(0),
                                                 item_bounding_rect.origin.x,
                                                 item_bounding_rect.origin.y,
+                                                z,
+                                                item_bounding_rect.size.width,
+                                                item_bounding_rect.size.height,
+                                            );
+
+                                            batch.push(PrimitiveInstance::from(instance));
+                                        }
+                                        FilterOp::DropShadow(offset, _, _) => {
+                                            let kind = BatchKind::Brush(
+                                                BrushBatchKind::Image(BrushImageSourceKind::ColorAlphaMask),
+                                            );
+                                            let key = BatchKey::new(kind, blend_mode, textures);
+
+                                            let instance = BrushInstance {
+                                                picture_address: task_address,
+                                                prim_address: prim_cache_address,
+                                                clip_id,
+                                                scroll_id,
+                                                clip_task_address,
+                                                z,
+                                                segment_kind: 0,
+                                                user_data0: cache_task_address.0 as i32,
+                                                user_data1: BrushImageKind::Simple as i32,
+                                            };
+
+                                            {
+                                                let batch = batch_list.get_suitable_batch(key, item_bounding_rect);
+                                                batch.push(PrimitiveInstance::from(instance));
+                                            }
+
+                                            let secondary_id = secondary_render_task_id.expect("no secondary!?");
+                                            let render_task = &render_tasks[secondary_id];
+                                            let secondary_task_address = render_tasks.get_task_address(secondary_id);
+                                            let render_pass_index = render_task.pass_index.expect("no render_pass_index!?");
+                                            let secondary_textures = BatchTextures {
+                                                colors: [
+                                                    SourceTexture::RenderTaskCacheRGBA8(render_pass_index),
+                                                    SourceTexture::Invalid,
+                                                    SourceTexture::Invalid,
+                                                ],
+                                            };
+                                            let key = BatchKey::new(
+                                                BatchKind::HardwareComposite,
+                                                BlendMode::PremultipliedAlpha,
+                                                secondary_textures,
+                                            );
+                                            let batch = batch_list.get_suitable_batch(key, &item_bounding_rect);
+                                            let device_offset_x = device_length(offset.x, ctx.device_pixel_ratio);
+                                            let device_offset_y = device_length(offset.y, ctx.device_pixel_ratio);
+                                            let instance = CompositePrimitiveInstance::new(
+                                                task_address,
+                                                secondary_task_address,
+                                                RenderTaskAddress(0),
+                                                item_bounding_rect.origin.x - device_offset_x.0,
+                                                item_bounding_rect.origin.y - device_offset_y.0,
                                                 z,
                                                 item_bounding_rect.size.width,
                                                 item_bounding_rect.size.height,
@@ -751,6 +812,7 @@ fn add_to_batch(
                                                 FilterOp::Sepia(amount) => (6, amount),
                                                 FilterOp::Brightness(amount) => (7, amount),
                                                 FilterOp::Opacity(_, amount) => (8, amount),
+                                                FilterOp::DropShadow(..) => unreachable!(),
                                             };
 
                                             let amount = (amount * 65535.0).round() as i32;
@@ -772,7 +834,7 @@ fn add_to_batch(
                                     }
                                 }
                                 PictureCompositeMode::MixBlend(mode) => {
-                                    let backdrop_id = readback_render_task_id.expect("no backdrop!?");
+                                    let backdrop_id = secondary_render_task_id.expect("no backdrop!?");
 
                                     let key = BatchKey::new(
                                         BatchKind::Composite {
@@ -805,7 +867,7 @@ fn add_to_batch(
                                     let key = BatchKey::new(
                                         BatchKind::HardwareComposite,
                                         BlendMode::PremultipliedAlpha,
-                                        BatchTextures::no_texture(),
+                                        BatchTextures::render_target_cache(),
                                     );
                                     let batch = batch_list.get_suitable_batch(key, &item_bounding_rect);
                                     let instance = CompositePrimitiveInstance::new(
@@ -1499,16 +1561,22 @@ impl RenderTarget for ColorRenderTarget {
                                                     &text.glyph_keys,
                                                     &mut self.glyph_fetch_buffer,
                                                     gpu_cache,
-                                                    |texture_id, _glyph_format, glyphs| {
+                                                    |texture_id, glyph_format, glyphs| {
                                                         let batch = text_run_cache_prims
                                                             .entry(texture_id)
                                                             .or_insert(Vec::new());
+
+                                                        let subpx_dir = match glyph_format {
+                                                            GlyphFormat::Bitmap |
+                                                            GlyphFormat::ColorBitmap => SubpixelDirection::None,
+                                                            _ => text.font.subpx_dir.limit_by(text.font.render_mode),
+                                                        };
 
                                                         for glyph in glyphs {
                                                             batch.push(instance.build(
                                                                 glyph.index_in_text_run,
                                                                 glyph.uv_rect_address.as_int(),
-                                                                0
+                                                                subpx_dir as u32 as i32,
                                                             ));
                                                         }
                                                     },
@@ -1796,6 +1864,7 @@ impl RenderPass {
         render_tasks: &mut RenderTaskTree,
         deferred_resolves: &mut Vec<DeferredResolve>,
         clip_store: &ClipStore,
+        pass_index: RenderPassIndex,
     ) {
         profile_scope!("RenderPass::build");
 
@@ -1803,6 +1872,7 @@ impl RenderPass {
             RenderPassKind::MainFramebuffer(ref mut target) => {
                 for &task_id in &self.tasks {
                     assert_eq!(render_tasks[task_id].target_kind(), RenderTargetKind::Color);
+                    render_tasks[task_id].pass_index = Some(pass_index);
                     target.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store);
                 }
                 target.build(ctx, gpu_cache, render_tasks, deferred_resolves);
@@ -1812,6 +1882,7 @@ impl RenderPass {
                 for &task_id in &self.tasks {
                     let target_kind = {
                         let task = &mut render_tasks[task_id];
+                        task.pass_index = Some(pass_index);
                         let target_kind = task.target_kind();
 
                         // Find a target to assign this task to, or create a new
@@ -1881,8 +1952,24 @@ pub enum TransformBatchKind {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum BrushImageSourceKind {
+    Alpha,
+    Color,
+    ColorAlphaMask,
+}
+
+impl BrushImageSourceKind {
+    pub fn from_render_target_kind(render_target_kind: RenderTargetKind) -> BrushImageSourceKind {
+        match render_target_kind {
+            RenderTargetKind::Color => BrushImageSourceKind::Color,
+            RenderTargetKind::Alpha => BrushImageSourceKind::Alpha,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum BrushBatchKind {
-    Image(RenderTargetKind),
+    Image(BrushImageSourceKind),
     Solid,
 }
 
@@ -2025,7 +2112,7 @@ fn resolve_image(
                     // This is an external texture - we will add it to
                     // the deferred resolves list to be patched by
                     // the render thread...
-                    let cache_handle = gpu_cache.push_deferred_per_frame_blocks(1);
+                    let cache_handle = gpu_cache.push_deferred_per_frame_blocks(2);
                     deferred_resolves.push(DeferredResolve {
                         image_properties,
                         address: gpu_cache.get_address(&cache_handle),

@@ -235,7 +235,6 @@
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/HashChangeEvent.h"
 #include "mozilla/dom/IntlUtils.h"
-#include "mozilla/dom/MozSelfSupportBinding.h"
 #include "mozilla/dom/PopStateEvent.h"
 #include "mozilla/dom/PopupBlockedEvent.h"
 #include "mozilla/dom/PrimitiveConversions.h"
@@ -260,6 +259,7 @@
 
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
+#include "mozilla/dom/ClientState.h"
 
 // Apple system headers seem to have a check() macro.  <sigh>
 #ifdef check
@@ -1211,8 +1211,6 @@ nsGlobalWindowInner::CleanUp()
 
   mExternal = nullptr;
 
-  mMozSelfSupport = nullptr;
-
   mPerformance = nullptr;
 
 #ifdef MOZ_WEBSPEECH
@@ -1508,13 +1506,14 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExternal)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMozSelfSupport)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIntlUtils)
 
   tmp->TraverseHostObjectURIs(cb);
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeFields.mMessageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeFields.mGroupMessageManagers)
+
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingPromises)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
@@ -1586,7 +1585,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAudioWorklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mExternal)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMozSelfSupport)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mIntlUtils)
 
   tmp->UnlinkHostObjectURIs();
@@ -1608,6 +1606,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
     tmp->DisconnectAndClearGroupMessageManagers();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeFields.mGroupMessageManagers)
   }
+
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingPromises)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -1801,9 +1801,7 @@ nsGlobalWindowInner::EnsureClientSource()
     mClientSource = ClientManager::CreateSource(ClientType::Window,
                                                 EventTargetFor(TaskCategory::Other),
                                                 mDoc->NodePrincipal());
-    if (NS_WARN_IF(!mClientSource)) {
-      return NS_ERROR_FAILURE;
-    }
+    MOZ_DIAGNOSTIC_ASSERT(mClientSource);
     newClientSource = true;
   }
 
@@ -1833,9 +1831,7 @@ nsGlobalWindowInner::EnsureClientSource()
         ClientManager::CreateSource(ClientType::Window,
                                     EventTargetFor(TaskCategory::Other),
                                     mDoc->NodePrincipal());
-      if (NS_WARN_IF(!mClientSource)) {
-        return NS_ERROR_FAILURE;
-      }
+      MOZ_DIAGNOSTIC_ASSERT(mClientSource);
       newClientSource = true;
     }
   }
@@ -2322,6 +2318,12 @@ nsPIDOMWindowInner::GetClientInfo() const
   return Move(nsGlobalWindowInner::Cast(this)->GetClientInfo());
 }
 
+Maybe<ClientState>
+nsPIDOMWindowInner::GetClientState() const
+{
+  return Move(nsGlobalWindowInner::Cast(this)->GetClientState());
+}
+
 Maybe<ServiceWorkerDescriptor>
 nsPIDOMWindowInner::GetController() const
 {
@@ -2587,21 +2589,6 @@ nsGlobalWindowInner::GetContent(JSContext* aCx,
 {
   FORWARD_TO_OUTER_OR_THROW(GetContentOuter,
                             (aCx, aRetval, aCallerType, aError), aError, );
-}
-
-MozSelfSupport*
-nsGlobalWindowInner::GetMozSelfSupport(ErrorResult& aError)
-{
-  if (mMozSelfSupport) {
-    return mMozSelfSupport;
-  }
-
-  // We're called from JS and want to use out existing JSContext (and,
-  // importantly, its compartment!) here.
-  AutoJSContext cx;
-  GlobalObject global(cx, FastGetGlobalJSObject());
-  mMozSelfSupport = MozSelfSupport::Constructor(global, cx, aError);
-  return mMozSelfSupport;
 }
 
 BarProp*
@@ -4947,6 +4934,19 @@ nsGlobalWindowInner::GetIndexedDB(ErrorResult& aError)
   return mIndexedDB;
 }
 
+void
+nsGlobalWindowInner::AddPendingPromise(mozilla::dom::Promise* aPromise)
+{
+  mPendingPromises.AppendElement(aPromise);
+}
+
+void
+nsGlobalWindowInner::RemovePendingPromise(mozilla::dom::Promise* aPromise)
+{
+  DebugOnly<bool> foundIt = mPendingPromises.RemoveElement(aPromise);
+  MOZ_ASSERT(foundIt, "tried to remove a non-existent element from mPendingPromises");
+}
+
 //*****************************************************************************
 // nsGlobalWindowInner::nsIInterfaceRequestor
 //*****************************************************************************
@@ -6164,6 +6164,21 @@ nsGlobalWindowInner::GetClientInfo() const
   return Move(clientInfo);
 }
 
+Maybe<ClientState>
+nsGlobalWindowInner::GetClientState() const
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  Maybe<ClientState> clientState;
+  if (mClientSource) {
+    ClientState state;
+    nsresult rv = mClientSource->SnapshotState(&state);
+    if (NS_SUCCEEDED(rv)) {
+      clientState.emplace(state);
+    }
+  }
+  return Move(clientState);
+}
+
 Maybe<ServiceWorkerDescriptor>
 nsGlobalWindowInner::GetController() const
 {
@@ -6736,6 +6751,9 @@ nsGlobalWindowInner::AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const
     aWindowSizes.mDOMPerformanceResourceEntries =
       mPerformance->SizeOfResourceEntries(aWindowSizes.mState.mMallocSizeOf);
   }
+
+  aWindowSizes.mDOMOtherSize +=
+    mPendingPromises.ShallowSizeOfExcludingThis(aWindowSizes.mState.mMallocSizeOf);
 }
 
 void

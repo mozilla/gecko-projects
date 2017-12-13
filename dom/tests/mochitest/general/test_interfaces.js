@@ -271,10 +271,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DelayNode",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DesktopNotification",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "DesktopNotificationCenter",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "DeviceLightEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DeviceMotionEvent",
@@ -1278,8 +1274,6 @@ var interfaceNamesInGlobalScope =
     {name: "XULElement", xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "XULLabeledControlElement", xbl: true},
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULPopupElement", xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "XULTemplateBuilder", xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!

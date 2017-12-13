@@ -795,8 +795,7 @@ PresShell::PresShell()
   , mNoDelayedKeyEvents(false)
   , mIsDocumentGone(false)
   , mShouldUnsuppressPainting(false)
-  , mAsyncResizeTimerIsActive(false)
-  , mInResize(false)
+  , mResizeEventPending(false)
   , mApproximateFrameVisibilityVisited(false)
   , mNextPaintCompressed(false)
   , mHasCSSBackgroundColor(false)
@@ -1329,16 +1328,13 @@ PresShell::Destroy()
   // Revoke any pending events.  We need to do this and cancel pending reflows
   // before we destroy the frame manager, since apparently frame destruction
   // sometimes spins the event queue when plug-ins are involved(!).
+  if (mResizeEventPending) {
+    rd->RemoveResizeEventFlushObserver(this);
+  }
   rd->RemoveLayoutFlushObserver(this);
 
   if (rd->GetPresContext() == GetPresContext()) {
     rd->RevokeViewManagerFlush();
-  }
-
-  mResizeEvent.Revoke();
-  if (mAsyncResizeTimerIsActive) {
-    mAsyncResizeEventTimer->Cancel();
-    mAsyncResizeTimerIsActive = false;
   }
 
   CancelAllPendingReflows();
@@ -1871,12 +1867,6 @@ PresShell::sPaintSuppressionCallback(nsITimer *aTimer, void* aPresShell)
     self->UnsuppressPainting();
 }
 
-void
-PresShell::AsyncResizeEventCallback(nsITimer* aTimer, void* aPresShell)
-{
-  static_cast<PresShell*>(aPresShell)->FireResizeEvent();
-}
-
 nsresult
 PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight, nscoord aOldWidth,
                         nscoord aOldHeight, ResizeReflowOptions aOptions)
@@ -2031,32 +2021,9 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
     }
   }
 
-  if (!mIsDestroying && !mResizeEvent.IsPending() &&
-      !mAsyncResizeTimerIsActive) {
-    if (mInResize) {
-      if (!mAsyncResizeEventTimer) {
-        mAsyncResizeEventTimer = NS_NewTimer();
-      }
-      if (mAsyncResizeEventTimer) {
-        mAsyncResizeTimerIsActive = true;
-        mAsyncResizeEventTimer->SetTarget(
-            mDocument->EventTargetFor(TaskCategory::Other));
-        mAsyncResizeEventTimer->InitWithNamedFuncCallback(AsyncResizeEventCallback,
-                                                          this, 15,
-                                                          nsITimer::TYPE_ONE_SHOT,
-                                                          "AsyncResizeEventCallback");
-      }
-    } else if (mPresContext->ShouldFireResizeEvent()) {
-      RefPtr<nsRunnableMethod<PresShell>> event = NewRunnableMethod(
-        "PresShell::FireResizeEvent", this, &PresShell::FireResizeEvent);
-      nsresult rv = mDocument->Dispatch(TaskCategory::Other,
-                                        do_AddRef(event));
-      if (NS_SUCCEEDED(rv)) {
-        mResizeEvent = Move(event);
-        SetNeedStyleFlush();
-        mPresContext->WillFireResizeEvent();
-      }
-    }
+  if (!mIsDestroying && !mResizeEventPending) {
+    mResizeEventPending = true;
+    GetPresContext()->RefreshDriver()->AddResizeEventFlushObserver(this);
   }
 
   return NS_OK; //XXX this needs to be real. MMP
@@ -2065,24 +2032,18 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 void
 PresShell::FireResizeEvent()
 {
-  if (mAsyncResizeTimerIsActive) {
-    mAsyncResizeTimerIsActive = false;
-    mAsyncResizeEventTimer->Cancel();
-  }
-  mResizeEvent.Revoke();
-
-  if (mIsDocumentGone)
+  if (mIsDocumentGone) {
     return;
+  }
+
+  mResizeEventPending = false;
 
   //Send resize event from here.
   WidgetEvent event(true, mozilla::eResize);
   nsEventStatus status = nsEventStatus_eIgnore;
 
   if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
-    nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
-    mInResize = true;
     EventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
-    mInResize = false;
   }
 }
 
@@ -4173,13 +4134,6 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     // the function but we might not have done the work yet.
     AutoRestore<bool> guard(mInFlush);
     mInFlush = true;
-
-    if (mResizeEvent.IsPending()) {
-      FireResizeEvent();
-      if (mIsDestroying) {
-        return;
-      }
-    }
 
     // We need to make sure external resource documents are flushed too (for
     // example, svg filters that reference a filter in an external document
@@ -7164,6 +7118,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
           anyTarget = TouchManager::GetAnyCapturedTouchTarget();
         }
 
+        // When handling pointerstart with multiple touch points, frame is
+        // overwritten. Keep the original root frame for hit test.
+        nsIFrame* rootFrame = frame;
         for (int32_t i = touchEvent->mTouches.Length(); i; ) {
           --i;
           dom::Touch* touch = touchEvent->mTouches[i];
@@ -7173,9 +7130,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
             // find the target for this touch
             eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
                                                               touch->mRefPoint,
-                                                              frame);
+                                                              rootFrame);
             nsIFrame* target = FindFrameTargetedByInputEvent(aEvent,
-                                                             frame,
+                                                             rootFrame,
                                                              eventPoint,
                                                              flags);
             if (target && !anyTarget) {

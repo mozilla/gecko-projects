@@ -601,36 +601,36 @@ TC_TREEHERDER_SCHEMA_URL = 'https://github.com/taskcluster/taskcluster-treeherde
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
 V2_ROUTE_TEMPLATES = [
-    "index.gecko.v2.{project}.latest.{product}.{job-name}",
-    "index.gecko.v2.{project}.pushdate.{build_date_long}.{product}.{job-name}",
-    "index.gecko.v2.{project}.pushlog-id.{pushlog_id}.{product}.{job-name}",
-    "index.gecko.v2.{project}.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.latest.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.pushlog-id.{pushlog_id}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}.{job-name}",
 ]
 
 # {central, inbound, autoland} write to a "trunk" index prefix. This facilitates
 # walking of tasks with similar configurations.
 V2_TRUNK_ROUTE_TEMPLATES = [
-    "index.gecko.v2.trunk.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.trunk.revision.{head_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_TEMPLATES = [
-    "index.gecko.v2.{project}.nightly.latest.{product}.{job-name}",
-    "index.gecko.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}.{job-name}",
-    "index.gecko.v2.{project}.nightly.{build_date}.latest.{product}.{job-name}",
-    "index.gecko.v2.{project}.nightly.revision.{head_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.nightly.latest.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}.{job-name}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}.{job-name}",
 ]
 
 V2_NIGHTLY_L10N_TEMPLATES = [
-    "index.gecko.v2.{project}.nightly.latest.{product}-l10n.{job-name}.{locale}",
-    "index.gecko.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
-    "index.gecko.v2.{project}.nightly.{build_date}.latest.{product}-l10n.{job-name}.{locale}",
-    "index.gecko.v2.{project}.nightly.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.nightly.latest.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.{build_date}.latest.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.nightly.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
 ]
 
 V2_L10N_TEMPLATES = [
-    "index.gecko.v2.{project}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",
-    "index.gecko.v2.{project}.pushdate.{build_date_long}.{product}-l10n.{job-name}.{locale}",
-    "index.gecko.v2.{project}.latest.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.revision.{head_rev}.{product}-l10n.{job-name}.{locale}",
+    "index.{trust-domain}.v2.{project}.pushdate.{build_date_long}.{product}-l10n.{job-name}.{locale}",  # noqa - too long
+    "index.{trust-domain}.v2.{project}.latest.{product}-l10n.{job-name}.{locale}",
 ]
 
 # the roots of the treeherder routes, keyed by treeherder environment
@@ -1151,6 +1151,7 @@ def add_generic_index_routes(config, task):
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
+    subs['trust-domain'] = config.graph_config['trust-domain']
 
     project = config.params.get('project')
 
@@ -1180,6 +1181,7 @@ def add_nightly_index_routes(config, task):
     subs['build_date'] = time.strftime("%Y.%m.%d",
                                        time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
+    subs['trust-domain'] = config.graph_config['trust-domain']
 
     for tpl in V2_NIGHTLY_TEMPLATES:
         routes.append(tpl.format(**subs))
@@ -1201,6 +1203,7 @@ def add_release_index_routes(config, task):
     subs['revision'] = subs['head_rev']
     subs['underscore_version'] = release_config['version'].replace('.', '_')
     subs['product'] = index['product']
+    subs['trust-domain'] = config.graph_config['trust-domain']
     subs['branch'] = subs['project']
     if 'channel' in index:
         resolve_keyed_by(
@@ -1235,6 +1238,7 @@ def add_l10n_index_routes(config, task, force_locale=None):
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
+    subs['trust-domain'] = config.graph_config['trust-domain']
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1273,6 +1277,7 @@ def add_nightly_l10n_index_routes(config, task, force_locale=None):
     subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
                                             time.gmtime(config.params['build_date']))
     subs['product'] = index['product']
+    subs['trust-domain'] = config.graph_config['trust-domain']
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
@@ -1299,14 +1304,7 @@ def add_nightly_l10n_index_routes(config, task, force_locale=None):
 @transforms.add
 def add_index_routes(config, tasks):
     for task in tasks:
-        index = task.get('index')
-
-        if not index:
-            yield task
-            continue
-
-        index_type = index.get('type', 'generic')
-        task = index_builders[index_type](config, task)
+        index = task.get('index', {})
 
         # The default behavior is to rank tasks according to their tier
         extra_index = task.setdefault('extra', {}).setdefault('index', {})
@@ -1321,6 +1319,13 @@ def add_index_routes(config, tasks):
             extra_index['rank'] = int(config.params['build_date'])
         else:
             extra_index['rank'] = rank
+
+        if not index:
+            yield task
+            continue
+
+        index_type = index.get('type', 'generic')
+        task = index_builders[index_type](config, task)
 
         del task['index']
         yield task
@@ -1650,6 +1655,7 @@ def check_v2_routes():
         # we use different variables than mozharness
         for mh, tg in [
                 ('{index}', 'index'),
+                ('gecko', '{trust-domain}'),
                 ('{build_product}', '{product}'),
                 ('{build_name}-{build_type}', '{job-name}'),
                 ('{year}.{month}.{day}.{pushdate}', '{build_date_long}'),

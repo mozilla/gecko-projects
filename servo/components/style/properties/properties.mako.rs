@@ -850,11 +850,13 @@ impl ShorthandId {
     /// Finds and returns an appendable value for the given declarations.
     ///
     /// Returns the optional appendable value.
-    pub fn get_shorthand_appendable_value<'a, I>(self,
-                                                 declarations: I)
-                                                 -> Option<AppendableValue<'a, I::IntoIter>>
-        where I: IntoIterator<Item=&'a PropertyDeclaration>,
-              I::IntoIter: Clone,
+    pub fn get_shorthand_appendable_value<'a, I>(
+        self,
+        declarations: I,
+    ) -> Option<AppendableValue<'a, I::IntoIter>>
+    where
+        I: IntoIterator<Item=&'a PropertyDeclaration>,
+        I::IntoIter: Clone,
     {
         let declarations = declarations.into_iter();
 
@@ -862,10 +864,7 @@ impl ShorthandId {
         let mut declarations2 = declarations.clone();
         let mut declarations3 = declarations.clone();
 
-        let first_declaration = match declarations2.next() {
-            Some(declaration) => declaration,
-            None => return None
-        };
+        let first_declaration = declarations2.next()?;
 
         // https://drafts.csswg.org/css-variables/#variables-in-shorthands
         if let Some(css) = first_declaration.with_variables_from_shorthand(self) {
@@ -1809,8 +1808,8 @@ impl SourcePropertyDeclaration {
     }
 
     fn push(&mut self, declaration: PropertyDeclaration) {
-        let over_capacity = self.declarations.push(declaration).is_some();
-        debug_assert!(!over_capacity);
+        let _result = self.declarations.try_push(declaration);
+        debug_assert!(_result.is_ok());
     }
 }
 

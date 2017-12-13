@@ -78,7 +78,7 @@ private:
   bool mIsMounted;
 
   ~VROculusSession();
-  void Uninitialize(bool aUnloadLib);
+  void Uninitialize();
   bool Initialize(ovrInitFlags aFlags);
   bool LoadOvrLib();
   void UnloadOvrLib();
@@ -156,6 +156,7 @@ public:
                      double aDuration,
                      const VRManagerPromise& aPromise);
   void StopVibrateHaptic();
+  void ShutdownVibrateHapticThread();
 
 protected:
   virtual ~VRControllerOculus();

@@ -736,8 +736,8 @@ TextEditRules::WillInsertText(EditAction aAction,
 
   // don't put text in places that can't have it
   NS_ENSURE_STATE(mTextEditor);
-  if (!EditorBase::IsTextNode(atStartOfSelection.Container()) &&
-      !mTextEditor->CanContainTag(*atStartOfSelection.Container(),
+  if (!atStartOfSelection.IsInTextNode() &&
+      !mTextEditor->CanContainTag(*atStartOfSelection.GetContainer(),
                                   *nsGkAtoms::textTagName)) {
     return NS_ERROR_FAILURE;
   }
@@ -756,9 +756,9 @@ TextEditRules::WillInsertText(EditAction aAction,
     // the insertion point.
     int32_t IMESelectionOffset =
       mTextEditor->GetIMESelectionStartOffsetIn(
-                     betterInsertionPoint.Container());
+                     betterInsertionPoint.GetContainer());
     if (IMESelectionOffset >= 0) {
-      betterInsertionPoint.Set(betterInsertionPoint.Container(),
+      betterInsertionPoint.Set(betterInsertionPoint.GetContainer(),
                                IMESelectionOffset);
     }
     rv = mTextEditor->InsertTextImpl(*doc, *outString, betterInsertionPoint);
@@ -782,9 +782,9 @@ TextEditRules::WillInsertText(EditAction aAction,
         !outString->IsEmpty() && outString->Last() == nsCRT::LF;
       aSelection->SetInterlinePosition(endsWithLF);
 
-      MOZ_ASSERT(!pointAfterStringInserted.GetChildAtOffset(),
+      MOZ_ASSERT(!pointAfterStringInserted.GetChild(),
         "After inserting text into a text node, pointAfterStringInserted."
-        "GetChildAtOffset() should be nullptr");
+        "GetChild() should be nullptr");
       IgnoredErrorResult error;
       aSelection->Collapse(pointAfterStringInserted, error);
       if (error.Failed()) {
@@ -871,7 +871,8 @@ TextEditRules::WillSetText(Selection& aSelection,
     if (NS_WARN_IF(!newNode)) {
       return NS_OK;
     }
-    nsresult rv = textEditor->InsertNode(*newNode, *rootElement, 0);
+    nsresult rv =
+      textEditor->InsertNode(*newNode, EditorRawDOMPoint(rootElement, 0));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1375,7 +1376,13 @@ TextEditRules::CreateTrailingBRIfNeeded()
 
   if (!lastChild->IsHTMLElement(nsGkAtoms::br)) {
     AutoTransactionsConserveSelection dontChangeMySelection(mTextEditor);
-    return CreateMozBR(*body, body->Length());
+    EditorRawDOMPoint endOfBody;
+    endOfBody.SetToEndOf(body);
+    RefPtr<Element> brElement = CreateMozBR(endOfBody);
+    if (NS_WARN_IF(!brElement)) {
+      return NS_ERROR_FAILURE;
+    }
+    return NS_OK;
   }
 
   // Check to see if the trailing BR is a former bogus node - this will have
@@ -1448,11 +1455,18 @@ TextEditRules::CreateBogusNodeIfNeeded(Selection* aSelection)
                       kMOZEditorBogusNodeValue, false);
 
   // Put the node in the document.
-  nsresult rv = mTextEditor->InsertNode(*mBogusNode, *body, 0);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    mTextEditor->InsertNode(*mBogusNode, EditorRawDOMPoint(body, 0));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   // Set selection.
-  aSelection->Collapse(body, 0);
+  ErrorResult error;
+  aSelection->Collapse(EditorRawDOMPoint(body, 0), error);
+  if (NS_WARN_IF(error.Failed())) {
+    error.SuppressException();
+  }
   return NS_OK;
 }
 
@@ -1630,33 +1644,37 @@ TextEditRules::FillBufWithPWChars(nsAString* aOutString,
   }
 }
 
-nsresult
-TextEditRules::CreateBRInternal(nsINode& inParent,
-                                int32_t inOffset,
-                                bool aMozBR,
-                                Element** aOutBRElement)
+already_AddRefed<Element>
+TextEditRules::CreateBRInternal(const EditorRawDOMPoint& aPointToInsert,
+                                bool aCreateMozBR)
 {
+  if (NS_WARN_IF(!aPointToInsert.IsSet())) {
+    return nullptr;
+  }
+
   if (NS_WARN_IF(!mTextEditor)) {
-    return NS_ERROR_NOT_AVAILABLE;
+    return nullptr;
   }
   RefPtr<TextEditor> textEditor = mTextEditor;
 
-  RefPtr<Element> brElem = textEditor->CreateBR(&inParent, inOffset);
-  if (NS_WARN_IF(!brElem)) {
-    return NS_ERROR_FAILURE;
+  RefPtr<Element> brElement = textEditor->CreateBR(aPointToInsert);
+  if (NS_WARN_IF(!brElement)) {
+    return nullptr;
   }
 
   // give it special moz attr
-  if (aMozBR) {
-    nsresult rv = textEditor->SetAttribute(brElem, nsGkAtoms::type,
+  if (aCreateMozBR) {
+    // XXX Why do we need to set this attribute with transaction?
+    nsresult rv = textEditor->SetAttribute(brElement, nsGkAtoms::type,
                                            NS_LITERAL_STRING("_moz"));
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      // XXX Don't we need to remove the new <br> element from the DOM tree
+      //     in this case?
+      return nullptr;
+    }
   }
 
-  if (aOutBRElement) {
-    brElem.forget(aOutBRElement);
-  }
-  return NS_OK;
+  return brElement.forget();
 }
 
 NS_IMETHODIMP

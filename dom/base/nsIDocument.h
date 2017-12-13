@@ -1087,10 +1087,6 @@ public:
     return mAnonymousContents;
   }
 
-  static nsresult GenerateDocumentId(nsAString& aId);
-  nsresult GetOrCreateId(nsAString& aId);
-  void SetId(const nsAString& aId);
-
   mozilla::TimeStamp GetPageUnloadingEventTimeStamp() const
   {
     if (!mParentDocument) {
@@ -3256,6 +3252,11 @@ public:
   virtual bool AllowPaymentRequest() const = 0;
   virtual void SetAllowPaymentRequest(bool aAllowPaymentRequest) = 0;
 
+  bool IsWebComponentsEnabled() const
+  {
+    return mIsWebComponentsEnabled;
+  }
+
 protected:
   bool GetUseCounter(mozilla::UseCounter aUseCounter)
   {
@@ -3326,11 +3327,6 @@ protected:
   void HandleRebuildUserFontSet() {
     mPostedFlushUserFontSet = false;
     FlushUserFontSet();
-  }
-
-  const nsString& GetId() const
-  {
-    return mId;
   }
 
   // Update our frame request callback scheduling state, if needed.  This will
@@ -3612,6 +3608,9 @@ protected:
   // True if the encoding menu should be disabled.
   bool mEncodingMenuDisabled : 1;
 
+  // True if dom.webcomponents.enabled pref is set when document is created.
+  bool mIsWebComponentsEnabled : 1;
+
   // Whether <style scoped> support is enabled in this document.
   enum { eScopedStyle_Unknown, eScopedStyle_Disabled, eScopedStyle_Enabled };
   unsigned int mIsScopedStyleEnabled : 2;
@@ -3688,7 +3687,6 @@ protected:
   nsCOMPtr<nsIChannel> mChannel;
 private:
   nsCString mContentType;
-  nsString mId;
 protected:
 
   // The document's security info

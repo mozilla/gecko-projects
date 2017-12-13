@@ -92,7 +92,6 @@ enum class FontRenderMode : uint32_t {
   Mono = 0,
   Alpha = 1,
   Subpixel = 2,
-  Bitmap = 3,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -986,6 +985,8 @@ extern void gfx_critical_note(const char *aMsg);
 extern bool gfx_use_wrench();
 
 extern const char *gfx_wr_resource_path_override();
+
+extern bool is_glcontext_angle(void *aGlcontextPtr);
 
 extern bool is_glcontext_egl(void *aGlcontextPtr);
 

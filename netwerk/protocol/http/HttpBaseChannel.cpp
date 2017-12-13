@@ -161,6 +161,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mClassOfService(0)
   , mPriority(PRIORITY_NORMAL)
   , mRedirectionLimit(gHttpHandler->RedirectionLimit())
+  , mUpgradeToSecure(false)
   , mApplyConversion(true)
   , mIsPending(false)
   , mWasOpened(false)
@@ -202,6 +203,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mFetchCacheMode(nsIHttpChannelInternal::FETCH_CACHE_MODE_DEFAULT)
   , mOnStartRequestCalled(false)
   , mOnStopRequestCalled(false)
+  , mUpgradableToSecure(true)
   , mAfterOnStartRequestBegun(false)
   , mTransferSize(0)
   , mDecodedBodySize(0)
@@ -993,8 +995,10 @@ HttpBaseChannel::EnsureUploadStreamIsCloneableComplete(nsresult aStatus)
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::CloneUploadStream(nsIInputStream** aClonedStream)
+HttpBaseChannel::CloneUploadStream(int64_t* aContentLength,
+                                   nsIInputStream** aClonedStream)
 {
+  NS_ENSURE_ARG_POINTER(aContentLength);
   NS_ENSURE_ARG_POINTER(aClonedStream);
   *aClonedStream = nullptr;
 
@@ -1007,6 +1011,12 @@ HttpBaseChannel::CloneUploadStream(nsIInputStream** aClonedStream)
   NS_ENSURE_SUCCESS(rv, rv);
 
   clonedStream.forget(aClonedStream);
+
+  if (mReqContentLengthDetermined) {
+    *aContentLength = mReqContentLength;
+  } else {
+    *aContentLength = -1;
+  }
 
   return NS_OK;
 }
@@ -2198,6 +2208,20 @@ HttpBaseChannel::RedirectTo(nsIURI *targetURI)
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::UpgradeToSecure()
+{
+  // Upgrades are handled internally between http-on-modify-request and
+  // http-on-before-connect, which means upgrades are only possible during
+  // on-modify, or WebRequest.onBeforeRequest in Web Extensions.  Once we are
+  // past the code path where upgrades are handled, attempting an upgrade
+  // will throw an error.
+  NS_ENSURE_TRUE(mUpgradableToSecure, NS_ERROR_NOT_AVAILABLE);
+
+  mUpgradeToSecure = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetRequestContextID(uint64_t *aRCID)
 {
   NS_ENSURE_ARG_POINTER(aRCID);
@@ -3327,6 +3351,23 @@ HttpBaseChannel::IsReferrerSchemeAllowed(nsIURI *aReferrer)
     return true;
   }
   return false;
+}
+
+/* static */
+void
+HttpBaseChannel::PropagateReferenceIfNeeded(nsIURI* aURI, nsIURI* aRedirectURI)
+{
+  bool hasRef = false;
+  nsresult rv = aRedirectURI->GetHasRef(&hasRef);
+  if (NS_SUCCEEDED(rv) && !hasRef) {
+    nsAutoCString ref;
+    aURI->GetRef(ref);
+    if (!ref.IsEmpty()) {
+      // NOTE: SetRef will fail if mRedirectURI is immutable
+      // (e.g. an about: URI)... Oh well.
+      aRedirectURI->SetRef(ref);
+    }
+  }
 }
 
 bool

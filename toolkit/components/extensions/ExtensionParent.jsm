@@ -1,3 +1,5 @@
+/* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set sts=2 sw=2 et tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -820,7 +822,8 @@ ParentAPIManager = {
         {
           lowPriority,
           recipient: {childId},
-        }).then(result => {
+        })
+        .then(result => {
           return result && result.deserialize(global);
         });
     }
@@ -1260,7 +1263,7 @@ let IconDetails = {
   // If no context is specified, instead of throwing an error, this
   // function simply logs a warning message.
   normalize(details, extension, context = null) {
-    if (!details.imageData && details.path) {
+    if (!details.imageData && details.path != null) {
       // Pick a cache key for the icon paths. If the path is a string,
       // use it directly. Otherwise, stringify the path object.
       let key = details.path;
@@ -1301,7 +1304,7 @@ let IconDetails = {
 
       let baseURI = context ? context.uri : extension.baseURI;
 
-      if (path) {
+      if (path != null) {
         if (typeof path != "object") {
           path = {"19": path};
         }

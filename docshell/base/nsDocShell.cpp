@@ -101,6 +101,7 @@
 #include "nsICookieService.h"
 #include "nsIConsoleReportCollector.h"
 #include "nsObjectLoadingContent.h"
+#include "nsStringStream.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -622,8 +623,8 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
   NS_NAMED_LITERAL_CSTRING(uploadData, "PING");
 
   nsCOMPtr<nsIInputStream> uploadStream;
-  NS_NewPostDataStream(getter_AddRefs(uploadStream), false, uploadData);
-  if (!uploadStream) {
+  rv = NS_NewCStringInputStream(getter_AddRefs(uploadStream), uploadData);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
 
@@ -3442,9 +3443,7 @@ nsDocShell::MaybeCreateInitialClientSource(nsIPrincipal* aPrincipal)
     ClientManager::CreateSource(ClientType::Window,
                                 win->EventTargetFor(TaskCategory::Other),
                                 principal);
-  if (NS_WARN_IF(!mInitialClientSource)) {
-    return;
-  }
+  MOZ_DIAGNOSTIC_ASSERT(mInitialClientSource);
 
   // Mark the initial client as execution ready, but owned by the docshell.
   // If the client is actually used this will cause ClientSource to force
@@ -10535,9 +10534,6 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     (aFlags & INTERNAL_LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) != 0;
   mURIResultedInDocument = false;  // reset the clock...
 
-  // Note that there is code that relies on this check to stop us entering the
-  // `doShortCircuitedLoad` block below for certain load types.  (For example,
-  // reftest-content.js uses LOAD_FLAGS_BYPASS_CACHE for this purpose.)
   if (aLoadType == LOAD_NORMAL ||
       aLoadType == LOAD_STOP_CONTENT ||
       LOAD_TYPE_HAS_FLAGS(aLoadType, LOAD_FLAGS_REPLACE_HISTORY) ||
@@ -15283,18 +15279,13 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
     if (!doc) {
       return NS_ERROR_NOT_AVAILABLE;
     }
-  } else {
-    // For top-level navigations, save a document ID which will be passed to
-    // the FetchEvent as the clientId later on.
-    rv = nsIDocument::GenerateDocumentId(mInterceptedDocumentId);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   bool isReload = mLoadType & LOAD_CMD_RELOAD;
 
   ErrorResult error;
-  swm->DispatchFetchEvent(mOriginAttributes, doc, mInterceptedDocumentId,
-                          aChannel, isReload, isSubresourceLoad, error);
+  swm->DispatchFetchEvent(mOriginAttributes, doc, aChannel, isReload,
+                          isSubresourceLoad, error);
   if (NS_WARN_IF(error.Failed())) {
     return error.StealNSResult();
   }

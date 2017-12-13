@@ -12,15 +12,29 @@
 #include "ClientState.h"
 #include "ClientValidation.h"
 #include "mozilla/dom/ClientIPCTypes.h"
+#include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/dom/MessageEvent.h"
+#include "mozilla/dom/MessageEventBinding.h"
+#include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerScope.h"
+#include "mozilla/dom/ServiceWorkerContainer.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
+#include "mozilla/dom/workers/bindings/ServiceWorker.h"
+#include "nsContentUtils.h"
 #include "nsIDocShell.h"
 #include "nsPIDOMWindow.h"
 
 namespace mozilla {
 namespace dom {
 
+using mozilla::dom::ipc::StructuredCloneData;
+using mozilla::dom::workers::ServiceWorkerInfo;
+using mozilla::dom::workers::ServiceWorkerManager;
+using mozilla::dom::workers::ServiceWorkerRegistrationInfo;
 using mozilla::dom::workers::WorkerPrivate;
 using mozilla::ipc::PrincipalInfo;
+using mozilla::ipc::PrincipalInfoToPrincipal;
 
 void
 ClientSource::Shutdown()
@@ -64,7 +78,9 @@ ClientSource::SnapshotWindowState(ClientState* aStateOut)
   if (!window || !window->IsCurrentInnerWindow() ||
       !window->HasActiveDocument()) {
     *aStateOut = ClientState(ClientWindowState(VisibilityState::Hidden,
-                                               TimeStamp(), false));
+                                               TimeStamp(),
+                                               nsContentUtils::StorageAccess::eDeny,
+                                               false));
     return NS_OK;
   }
 
@@ -80,8 +96,12 @@ ClientSource::SnapshotWindowState(ClientState* aStateOut)
     return rv.StealNSResult();
   }
 
+  nsContentUtils::StorageAccess storage =
+    nsContentUtils::StorageAllowedForDocument(doc);
+
   *aStateOut = ClientState(ClientWindowState(doc->VisibilityState(),
-                                             doc->LastFocusTime(), focused));
+                                             doc->LastFocusTime(), storage,
+                                             focused));
 
   return NS_OK;
 }
@@ -182,6 +202,10 @@ ClientSource::WorkerExecutionReady(WorkerPrivate* aWorkerPrivate)
   MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
 
+  if (IsShutdown()) {
+    return;
+  }
+
   // Its safe to store the WorkerPrivate* here because the ClientSource
   // is explicitly destroyed by WorkerPrivate before exiting its run loop.
   MOZ_DIAGNOSTIC_ASSERT(mOwner.is<Nothing>());
@@ -201,6 +225,10 @@ ClientSource::WindowExecutionReady(nsPIDOMWindowInner* aInnerWindow)
   MOZ_DIAGNOSTIC_ASSERT(aInnerWindow);
   MOZ_DIAGNOSTIC_ASSERT(aInnerWindow->IsCurrentInnerWindow());
   MOZ_DIAGNOSTIC_ASSERT(aInnerWindow->HasActiveDocument());
+
+  if (IsShutdown()) {
+    return NS_OK;
+  }
 
   nsIDocument* doc = aInnerWindow->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
@@ -252,6 +280,10 @@ ClientSource::DocShellExecutionReady(nsIDocShell* aDocShell)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(aDocShell);
+
+  if (IsShutdown()) {
+    return NS_OK;
+  }
 
   nsPIDOMWindowOuter* outer = aDocShell->GetWindow();
   if (NS_WARN_IF(!outer)) {
@@ -306,9 +338,15 @@ ClientSource::WorkerSyncPing(WorkerPrivate* aWorkerPrivate)
 {
   NS_ASSERT_OWNINGTHREAD(ClientSource);
   MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate);
+
+  if (IsShutdown()) {
+    return;
+  }
+
   MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate == mManager->GetWorkerPrivate());
   aWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_DIAGNOSTIC_ASSERT(GetActor());
+
   GetActor()->SendWorkerSyncPing();
 }
 
@@ -323,6 +361,23 @@ ClientSource::SetController(const ServiceWorkerDescriptor& aServiceWorker)
 
   mController.reset();
   mController.emplace(aServiceWorker);
+
+  RefPtr<ServiceWorkerContainer> swc;
+  nsPIDOMWindowInner* window = GetInnerWindow();
+  if (window) {
+    RefPtr<Navigator> navigator =
+      static_cast<Navigator*>(window->GetNavigator());
+    if (navigator) {
+      swc = navigator->ServiceWorker();
+    }
+  }
+
+  // TODO: Also self.navigator.serviceWorker on workers when its exposed there
+
+  if (swc && nsContentUtils::IsSafeToRunScript()) {
+    IgnoredErrorResult ignored;
+    swc->ControllerChanged(ignored);
+  }
 }
 
 RefPtr<ClientOpPromise>
@@ -341,6 +396,216 @@ const Maybe<ServiceWorkerDescriptor>&
 ClientSource::GetController() const
 {
   return mController;
+}
+
+RefPtr<ClientOpPromise>
+ClientSource::Focus(const ClientFocusArgs& aArgs)
+{
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+
+  RefPtr<ClientOpPromise> ref;
+
+  if (mClientInfo.Type() != ClientType::Window) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+                                           __func__);
+    return ref.forget();
+  }
+  nsPIDOMWindowOuter* outer = nullptr;
+
+  nsPIDOMWindowInner* inner = GetInnerWindow();
+  if (inner) {
+    outer = inner->GetOuterWindow();
+  } else {
+    nsIDocShell* docshell = GetDocShell();
+    if (docshell) {
+      outer = docshell->GetWindow();
+    }
+  }
+
+  if (!outer) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                           __func__);
+    return ref.forget();
+  }
+
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv = nsContentUtils::DispatchFocusChromeEvent(outer);
+  if (NS_FAILED(rv)) {
+    ref = ClientOpPromise::CreateAndReject(rv, __func__);
+    return ref.forget();
+  }
+
+  ClientState state;
+  rv = SnapshotState(&state);
+  if (NS_FAILED(rv)) {
+    ref = ClientOpPromise::CreateAndReject(rv, __func__);
+    return ref.forget();
+  }
+
+  ref = ClientOpPromise::CreateAndResolve(state.ToIPC(), __func__);
+  return ref.forget();
+}
+
+RefPtr<ClientOpPromise>
+ClientSource::PostMessage(const ClientPostMessageArgs& aArgs)
+{
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+  RefPtr<ClientOpPromise> ref;
+
+  ServiceWorkerDescriptor source(aArgs.serviceWorker());
+  const PrincipalInfo& principalInfo = source.PrincipalInfo();
+
+  StructuredCloneData clonedData;
+  clonedData.BorrowFromClonedMessageDataForBackgroundChild(aArgs.clonedData());
+
+  // Currently we only support firing these messages on window Clients.
+  // Once we expose ServiceWorkerContainer and the ServiceWorker on Worker
+  // threads then this will need to change.  See bug 1113522.
+  if (mClientInfo.Type() != ClientType::Window) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED, __func__);
+    return ref.forget();
+  }
+
+  MOZ_ASSERT(NS_IsMainThread());
+
+  RefPtr<ServiceWorkerContainer> target;
+  nsCOMPtr<nsIGlobalObject> globalObject;
+
+  // We don't need to force the creation of the about:blank document
+  // here because there is no postMessage listener.  If a listener
+  // was registered then the document will already be created.
+  nsPIDOMWindowInner* window = GetInnerWindow();
+  if (window) {
+    globalObject = do_QueryInterface(window);
+    RefPtr<Navigator> navigator =
+      static_cast<Navigator*>(window->GetNavigator());
+    if (navigator) {
+      target = navigator->ServiceWorker();
+    }
+  }
+
+  if (NS_WARN_IF(!target)) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                           __func__);
+    return ref.forget();
+  }
+
+  // If AutoJSAPI::Init() fails then either global is nullptr or not
+  // in a usable state.
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(globalObject)) {
+    ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
+    return ref.forget();
+  }
+
+  JSContext* cx = jsapi.cx();
+
+  ErrorResult result;
+  JS::Rooted<JS::Value> messageData(cx);
+  clonedData.Read(cx, &messageData, result);
+  if (result.MaybeSetPendingException(cx)) {
+    // We reported the error in the current window context.  Resolve
+    // promise instead of rejecting.
+    ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
+    return ref.forget();
+  }
+
+  RootedDictionary<MessageEventInit> init(cx);
+
+  init.mData = messageData;
+  if (!clonedData.TakeTransferredPortsAsSequence(init.mPorts)) {
+    // Report the error in the current window context and resolve the
+    // promise instead of rejecting.
+    xpc::Throw(cx, NS_ERROR_OUT_OF_MEMORY);
+    ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
+    return ref.forget();
+  }
+
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsIPrincipal> principal =
+    PrincipalInfoToPrincipal(principalInfo, &rv);
+  if (NS_FAILED(rv) || !principal) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+    return ref.forget();
+  }
+
+  nsAutoCString origin;
+  rv = principal->GetOriginNoSuffix(origin);
+  if (NS_SUCCEEDED(rv)) {
+    CopyUTF8toUTF16(origin, init.mOrigin);
+  }
+
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  if (!swm) {
+    // Shutting down. Just don't deliver this message.
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+    return ref.forget();
+  }
+
+  RefPtr<ServiceWorkerRegistrationInfo> reg =
+    swm->GetRegistration(principal, source.Scope());
+  if (reg) {
+    RefPtr<ServiceWorkerInfo> serviceWorker = reg->GetByID(source.Id());
+    if (serviceWorker) {
+      init.mSource.SetValue().SetAsServiceWorker() =
+        serviceWorker->GetOrCreateInstance(GetInnerWindow());
+    }
+  }
+
+  RefPtr<MessageEvent> event =
+    MessageEvent::Constructor(target, NS_LITERAL_STRING("message"), init);
+  event->SetTrusted(true);
+
+  bool preventDefaultCalled = false;
+  rv = target->DispatchEvent(static_cast<dom::Event*>(event.get()),
+                             &preventDefaultCalled);
+  if (NS_FAILED(rv)) {
+    ref = ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+    return ref.forget();
+  }
+
+  ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
+  return ref.forget();
+}
+
+RefPtr<ClientOpPromise>
+ClientSource::Claim(const ClientClaimArgs& aArgs)
+{
+  RefPtr<ClientOpPromise> ref;
+
+  ServiceWorkerDescriptor swd(aArgs.serviceWorker());
+
+  // Today the ServiceWorkerManager maintains its own list of
+  // nsIDocument objects controlled by each service worker.  We
+  // need to try to update that data structure for now.  If we
+  // can't, however, then simply mark the Client as controlled.
+  // In the future this will be enough for the SWM as well since
+  // it will eventually hold ClientHandle objects instead of
+  // nsIDocuments.
+  nsPIDOMWindowInner* innerWindow = GetInnerWindow();
+  nsIDocument* doc = innerWindow ? innerWindow->GetExtantDoc() : nullptr;
+  RefPtr<ServiceWorkerManager> swm = doc ? ServiceWorkerManager::GetInstance()
+                                         : nullptr;
+  if (!swm || !doc) {
+    SetController(swd);
+    ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
+    return ref.forget();
+  }
+
+  RefPtr<ClientOpPromise::Private> outerPromise =
+    new ClientOpPromise::Private(__func__);
+
+  RefPtr<GenericPromise> p = swm->MaybeClaimClient(doc, swd);
+  p->Then(mEventTarget, __func__,
+    [outerPromise] (bool aResult) {
+      outerPromise->Resolve(NS_OK, __func__);
+    }, [outerPromise] (nsresult aResult) {
+      outerPromise->Reject(aResult, __func__);
+    });
+
+  ref = outerPromise;
+  return ref.forget();
 }
 
 RefPtr<ClientOpPromise>
@@ -375,7 +640,18 @@ ClientSource::SnapshotState(ClientState* aStateOut)
     return NS_OK;
   }
 
-  *aStateOut = ClientState(ClientWorkerState());
+  WorkerPrivate* workerPrivate = GetWorkerPrivate();
+  if (!workerPrivate) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
+
+  // Workers only keep a boolean for storage access at the moment.
+  // Map this back to eAllow or eDeny for now.
+  nsContentUtils::StorageAccess storage =
+    workerPrivate->IsStorageAllowed() ? nsContentUtils::StorageAccess::eAllow
+                                      : nsContentUtils::StorageAccess::eDeny;
+
+  *aStateOut = ClientState(ClientWorkerState(storage));
   return NS_OK;
 }
 

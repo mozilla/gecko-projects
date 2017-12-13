@@ -309,18 +309,16 @@ VROculusSession::StopPresentation()
 VROculusSession::~VROculusSession()
 {
   mSubmitThread = nullptr;
-  Uninitialize(true);
+  Uninitialize();
 }
 
 void
-VROculusSession::Uninitialize(bool aUnloadLib)
+VROculusSession::Uninitialize()
 {
   StopRendering();
   StopSession();
   StopLib();
-  if (aUnloadLib) {
-    UnloadOvrLib();
-  }
+  UnloadOvrLib();
 }
 
 void
@@ -366,12 +364,15 @@ VROculusSession::Refresh(bool aForceRefresh)
   }
 
   if (!mRequestTracking) {
-    Uninitialize(true);
+    Uninitialize();
     return;
   }
 
   ovrInitFlags flags = (ovrInitFlags)(ovrInit_RequestVersion | ovrInit_MixedRendering);
   bool bInvisible = true;
+  if (!gfxPrefs::VROculusInvisibleEnabled()) {
+    bInvisible = false;
+  }
   if (mRequestPresentation) {
     bInvisible = false;
   } else if (!mLastPresentationEnd.IsNull()) {
@@ -417,14 +418,14 @@ VROculusSession::Refresh(bool aForceRefresh)
   }
 
   if (mInitFlags != flags) {
-    Uninitialize(false);
+    Uninitialize();
   }
 
   if(!Initialize(flags)) {
     // If we fail to initialize, ensure the Oculus libraries
     // are unloaded, as we can't poll for ovrSessionStatus::ShouldQuit
     // without an active ovrSession.
-    Uninitialize(true);
+    Uninitialize();
   }
 
   if (mSession) {
@@ -434,7 +435,7 @@ VROculusSession::Refresh(bool aForceRefresh)
       mIsMounted = status.HmdMounted;
       if (status.ShouldQuit) {
         mLastShouldQuit = TimeStamp::Now();
-        Uninitialize(true);
+        Uninitialize();
       }
     } else {
       mIsConnected = false;
@@ -1374,6 +1375,7 @@ VRControllerOculus::SetHandTrigger(float aValue)
 
 VRControllerOculus::~VRControllerOculus()
 {
+  ShutdownVibrateHapticThread();
   MOZ_COUNT_DTOR_INHERITED(VRControllerOculus, VRControllerHost);
 }
 
@@ -1514,6 +1516,16 @@ void
 VRControllerOculus::StopVibrateHaptic()
 {
   mIsVibrateStopped = true;
+}
+
+void
+VRControllerOculus::ShutdownVibrateHapticThread()
+{
+  StopVibrateHaptic();
+  if (mVibrateThread) {
+    mVibrateThread->Shutdown();
+    mVibrateThread = nullptr;
+  }
 }
 
 /*static*/ already_AddRefed<VRSystemManagerOculus>
@@ -1983,6 +1995,7 @@ VRSystemManagerOculus::RemoveControllers()
 {
   // controller count is changed, removing the existing gamepads first.
   for (uint32_t i = 0; i < mOculusController.Length(); ++i) {
+    mOculusController[i]->ShutdownVibrateHapticThread();
     RemoveGamepad(i);
   }
 

@@ -500,6 +500,8 @@ extern "C" {
 } extern "C" {
  pub fn Servo_SourceSizeList_Drop ( ptr : RawServoSourceSizeListOwned , ) ; 
 } extern "C" {
+ pub fn Gecko_RecordTraversalStatistics ( total : u32 , parallel : u32 , total_t : u32 , parallel_t : u32 , total_s : u32 , parallel_s : u32 , ) ; 
+} extern "C" {
  pub fn Gecko_IsInDocument ( node : RawGeckoNodeBorrowed , ) -> bool ; 
 } extern "C" {
  pub fn Gecko_FlattenedTreeParentIsParent ( node : RawGeckoNodeBorrowed , ) -> bool ; 
@@ -1595,4 +1597,6 @@ extern "C" {
  pub fn Gecko_ContentList_AppendAll ( aContentList : * mut nsSimpleContentList , aElements : * mut * const RawGeckoElement , aLength : usize , ) ; 
 } extern "C" {
  pub fn Gecko_GetElementsWithId ( aDocument : * const nsIDocument , aId : * mut nsAtom , ) -> * const nsTArray < * mut Element > ; 
+} extern "C" {
+ pub fn Gecko_GetBoolPrefValue ( pref_name : * const :: std :: os :: raw :: c_char , ) -> bool ; 
 }

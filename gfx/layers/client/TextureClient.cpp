@@ -551,7 +551,7 @@ TextureClient::Unlock()
   }
 
   if (mBorrowedDrawTarget) {
-    if (!(mOpenMode & OpenMode::OPEN_ASYNC_WRITE)) {
+    if (!(mOpenMode & OpenMode::OPEN_ASYNC)) {
       if (mOpenMode & OpenMode::OPEN_WRITE) {
         mBorrowedDrawTarget->Flush();
         if (mReadbackSink && !mData->ReadBack(mReadbackSink)) {
@@ -1169,7 +1169,8 @@ TextureClient::CreateFromSurface(KnowsCompositor* aAllocator,
 
   int32_t maxTextureSize = aAllocator->GetMaxTextureSize();
 
-  if (layersBackend == LayersBackend::LAYERS_D3D11 &&
+  if ((layersBackend == LayersBackend::LAYERS_D3D11 ||
+       layersBackend == LayersBackend::LAYERS_WR) &&
     (moz2DBackend == gfx::BackendType::DIRECT2D ||
       moz2DBackend == gfx::BackendType::DIRECT2D1_1 ||
       (!!(aAllocFlags & ALLOC_FOR_OUT_OF_BAND_CONTENT) &&

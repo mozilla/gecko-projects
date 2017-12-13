@@ -68,7 +68,6 @@ pub enum InputType {
     Checkbox,
     Color,
     Date,
-    Datetime,
     DatetimeLocal,
     Email,
     File,
@@ -95,11 +94,11 @@ impl InputType {
     // than the underlying value.
     fn is_textual(&self) -> bool {
         match *self {
-            InputType::Color | InputType::Date | InputType::Datetime
-            | InputType::DatetimeLocal | InputType::Email | InputType::Hidden
-            | InputType::Month | InputType::Number | InputType::Range
-            | InputType::Search | InputType::Tel | InputType::Text
-            | InputType::Time | InputType::Url | InputType::Week => {
+            InputType::Color | InputType::Date | InputType::DatetimeLocal
+            | InputType::Email | InputType::Hidden | InputType::Month
+            | InputType::Number | InputType::Range | InputType::Search
+            | InputType::Tel | InputType::Text | InputType::Time
+            | InputType::Url | InputType::Week => {
                 true
             }
 
@@ -117,7 +116,6 @@ impl InputType {
             InputType::Checkbox => "checkbox",
             InputType::Color => "color",
             InputType::Date => "date",
-            InputType::Datetime => "datetime",
             InputType::DatetimeLocal => "datetime-local",
             InputType::Email => "email",
             InputType::File => "file",
@@ -147,7 +145,6 @@ impl<'a> From<&'a Atom> for InputType {
             atom!("checkbox") => InputType::Checkbox,
             atom!("color") => InputType::Color,
             atom!("date") => InputType::Date,
-            atom!("datetime") => InputType::Datetime,
             atom!("datetime-local") => InputType::DatetimeLocal,
             atom!("email") => InputType::Email,
             atom!("file") => InputType::File,
@@ -286,11 +283,11 @@ impl HTMLInputElement {
                 ValueMode::DefaultOn
             },
 
-            InputType::Color | InputType::Date | InputType::Datetime
-            | InputType::DatetimeLocal | InputType::Email | InputType::Month
-            | InputType::Number | InputType::Password | InputType::Range
-            | InputType::Search | InputType::Tel | InputType::Text
-            | InputType::Time | InputType::Url | InputType::Week => {
+            InputType::Color | InputType::Date | InputType::DatetimeLocal
+            | InputType::Email | InputType::Month | InputType::Number
+            | InputType::Password | InputType::Range | InputType::Search
+            | InputType::Tel | InputType::Text | InputType::Time
+            | InputType::Url | InputType::Week => {
                 ValueMode::Value
             }
 
@@ -407,6 +404,18 @@ impl LayoutHTMLInputElementHelpers for LayoutDom<HTMLInputElement> {
 impl TextControl for HTMLInputElement {
     fn textinput(&self) -> &DomRefCell<TextInput<ScriptToConstellationChan>> {
         &self.textinput
+    }
+
+    // https://html.spec.whatwg.org/multipage/#concept-input-apply
+    fn selection_api_applies(&self) -> bool {
+        match self.input_type() {
+            InputType::Text | InputType::Search | InputType::Url
+            | InputType::Tel | InputType::Password => {
+                true
+            },
+
+            _ => false
+        }
     }
 }
 
@@ -679,38 +688,38 @@ impl HTMLInputElementMethods for HTMLInputElement {
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectionstart
-    fn SelectionStart(&self) -> u32 {
-        self.dom_selection_start()
+    fn GetSelectionStart(&self) -> Option<u32> {
+        self.get_dom_selection_start()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectionstart
-    fn SetSelectionStart(&self, start: u32) {
-        self.set_dom_selection_start(start);
+    fn SetSelectionStart(&self, start: Option<u32>) -> ErrorResult {
+        self.set_dom_selection_start(start)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectionend
-    fn SelectionEnd(&self) -> u32 {
-        self.dom_selection_end()
+    fn GetSelectionEnd(&self) -> Option<u32> {
+        self.get_dom_selection_end()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectionend
-    fn SetSelectionEnd(&self, end: u32) {
+    fn SetSelectionEnd(&self, end: Option<u32>) -> ErrorResult {
         self.set_dom_selection_end(end)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectiondirection
-    fn SelectionDirection(&self) -> DOMString {
-        self.dom_selection_direction()
+    fn GetSelectionDirection(&self) -> Option<DOMString> {
+        self.get_dom_selection_direction()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-selectiondirection
-    fn SetSelectionDirection(&self, direction: DOMString) {
-        self.set_dom_selection_direction(direction);
+    fn SetSelectionDirection(&self, direction: Option<DOMString>) -> ErrorResult {
+        self.set_dom_selection_direction(direction)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea/input-setselectionrange
-    fn SetSelectionRange(&self, start: u32, end: u32, direction: Option<DOMString>) {
-        self.set_dom_selection_range(start, end, direction);
+    fn SetSelectionRange(&self, start: u32, end: u32, direction: Option<DOMString>) -> ErrorResult {
+        self.set_dom_selection_range(start, end, direction)
     }
 
     // Select the files based on filepaths passed in,
@@ -1532,8 +1541,8 @@ impl Activatable for HTMLInputElement {
                     .filter(|input| {
                         input.form_owner() == owner && match input.input_type() {
                             InputType::Text | InputType::Search | InputType::Url | InputType::Tel
-                            | InputType::Email | InputType::Password | InputType::Datetime
-                            | InputType::Date | InputType::Month | InputType::Week | InputType::Time
+                            | InputType::Email | InputType::Password | InputType::Date
+                            | InputType::Month | InputType::Week | InputType::Time
                             | InputType::DatetimeLocal | InputType::Number
                               => true,
                             _ => false

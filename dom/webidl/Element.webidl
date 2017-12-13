@@ -119,7 +119,7 @@ interface Element : Node {
    * called. If retargetToElement is true, then all events are targetted at
    * this element. If false, events can also fire at descendants of this
    * element.
-   * 
+   *
    */
   void setCapture(optional boolean retargetToElement = false);
 
@@ -154,8 +154,17 @@ interface Element : Node {
    */
   boolean scrollByNoFlush(long dx, long dy);
 
-  // Support reporting of Grid properties
+  // Support reporting of Flexbox properties
+  /**
+   * If this element has a display:flex or display:inline-flex style,
+   * this property returns an object with computed values for flex
+   * properties, as well as a property that exposes the flex lines
+   * in this container.
+   */
+  [ChromeOnly, Pure]
+  Flex? getAsFlexContainer();
 
+  // Support reporting of Grid properties
   /**
    * If this element has a display:grid or display:inline-grid style,
    * this property returns an object with computed values for grid
@@ -191,7 +200,7 @@ partial interface Element {
            attribute long scrollLeft;  // scroll on setting
   readonly attribute long scrollWidth;
   readonly attribute long scrollHeight;
-  
+
   void scroll(unrestricted double x, unrestricted double y);
   void scroll(optional ScrollToOptions options);
   void scrollTo(unrestricted double x, unrestricted double y);
@@ -245,19 +254,19 @@ dictionary ShadowRootInit {
 // https://dom.spec.whatwg.org/#element
 partial interface Element {
   // Shadow DOM v1
-  [Throws, Pref="dom.webcomponents.enabled"]
+  [Throws, Func="nsDocument::IsWebComponentsEnabled"]
   ShadowRoot attachShadow(ShadowRootInit shadowRootInitDict);
-  [BinaryName="shadowRootByMode", Pref="dom.webcomponents.enabled"]
+  [BinaryName="shadowRootByMode", Func="nsDocument::IsWebComponentsEnabled"]
   readonly attribute ShadowRoot? shadowRoot;
-  [BinaryName="assignedSlotByMode", Pref="dom.webcomponents.enabled"]
+  [BinaryName="assignedSlotByMode", Func="nsDocument::IsWebComponentsEnabled"]
   readonly attribute HTMLSlotElement? assignedSlot;
-  [CEReactions, Unscopable, SetterThrows, Pref="dom.webcomponents.enabled"]
+  [CEReactions, Unscopable, SetterThrows, Func="nsDocument::IsWebComponentsEnabled"]
            attribute DOMString slot;
 
   // [deprecated] Shadow DOM v0
-  [Throws, Pref="dom.webcomponents.enabled"]
+  [Throws, Func="nsDocument::IsWebComponentsEnabled"]
   ShadowRoot createShadowRoot();
-  [Pref="dom.webcomponents.enabled"]
+  [Func="nsDocument::IsWebComponentsEnabled"]
   NodeList getDestinationInsertionPoints();
 };
 

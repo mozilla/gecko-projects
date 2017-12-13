@@ -111,10 +111,9 @@ public:
                             nsIDOMNode* aNextSiblingOfNewNode) override;
   NS_IMETHOD DidCreateNode(const nsAString& aTag, nsIDOMNode* aNewNode,
                            nsresult aResult) override;
-  NS_IMETHOD WillInsertNode(nsIDOMNode* aNode, nsIDOMNode* aParent,
-                            int32_t aPosition) override;
-  NS_IMETHOD DidInsertNode(nsIDOMNode* aNode, nsIDOMNode* aParent,
-                           int32_t aPosition, nsresult aResult) override;
+  NS_IMETHOD WillInsertNode(nsIDOMNode* aNode,
+                            nsIDOMNode* aNextSiblingOfNewNode) override;
+  NS_IMETHOD DidInsertNode(nsIDOMNode* aNode, nsresult aResult) override;
   NS_IMETHOD WillDeleteNode(nsIDOMNode* aChild) override;
   NS_IMETHOD DidDeleteNode(nsIDOMNode* aChild, nsresult aResult) override;
   NS_IMETHOD WillSplitNode(nsIDOMNode* aExistingRightNode,
@@ -159,8 +158,17 @@ protected:
   nsresult WillLoadHTML(Selection* aSelection, bool* aCancel);
   nsresult WillInsertBreak(Selection& aSelection, bool* aCancel,
                            bool* aHandled);
-  nsresult StandardBreakImpl(nsINode& aNode, int32_t aOffset,
-                             Selection& aSelection);
+
+  /**
+   * InsertBRElement() inserts a <br> element into aInsertToBreak.
+   *
+   * @param aSelection          The selection.
+   * @param aInsertToBreak      The point where new <br> element will be
+   *                            inserted before.
+   */
+  nsresult InsertBRElement(Selection& aSelection,
+                           const EditorDOMPoint& aInsertToBreak);
+
   nsresult DidInsertBreak(Selection* aSelection, nsresult aResult);
   nsresult SplitMailCites(Selection* aSelection, bool* aHandled);
   nsresult WillDeleteSelection(Selection* aSelection,

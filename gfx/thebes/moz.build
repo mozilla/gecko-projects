@@ -217,9 +217,13 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'gfxMacPlatformFontList.mm',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXPORTS.mozilla.gfx += [
+        'PrintTargetEMF.h',
+    ]
     UNIFIED_SOURCES += [
         'D3D11Checks.cpp',
         'DeviceManagerDx.cpp',
+        'PrintTargetEMF.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_SKIA_PDF']:
@@ -268,6 +272,6 @@ LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
 
 DEFINES['GRAPHITE2_STATIC'] = True
 
-if CONFIG['CLANG_CXX']:
+if CONFIG['CC_TYPE'] == 'clang':
     # Suppress warnings from Skia header files.
     SOURCES['gfxPlatform.cpp'].flags += ['-Wno-implicit-fallthrough']

@@ -457,7 +457,6 @@ AS_BIN=$AS
 AR_EXTRACT='$(AR) x'
 AS='$(CC)'
 AS_DASH_C_FLAG='-c'
-DIRENT_INO=d_ino
 MOZ_USER_DIR=".mozilla"
 
 MOZ_FIX_LINK_PATHS="-Wl,-rpath-link,${DIST}/bin -Wl,-rpath-link,${prefix}/lib"
@@ -749,16 +748,6 @@ case "$host" in
     ;;
 esac
 
-dnl ==============================================================
-dnl Get mozilla version from central milestone file
-dnl ==============================================================
-MOZILLA_VERSION=`$PYTHON $srcdir/python/mozbuild/mozbuild/milestone.py --topsrcdir $srcdir`
-MOZILLA_UAVERSION=`$PYTHON $srcdir/python/mozbuild/mozbuild/milestone.py --topsrcdir $srcdir --uaversion`
-MOZILLA_SYMBOLVERSION=`$PYTHON $srcdir/python/mozbuild/mozbuild/milestone.py --topsrcdir $srcdir --symbolversion`
-if test -z "$MOZILLA_VERSION"; then
-  AC_MSG_ERROR([failed to read version info from milestone file])
-fi
-
 dnl Get version of various core apps from the version files.
 FIREFOX_VERSION=`cat $_topsrcdir/browser/config/version.txt`
 FIREFOX_VERSION_DISPLAY=`cat $_topsrcdir/browser/config/version_display.txt`
@@ -770,11 +759,6 @@ fi
 if test -z "$FIREFOX_VERSION_DISPLAY"; then
     AC_MSG_ERROR([FIREFOX_VERSION_DISPLAY is unexpectedly blank.])
 fi
-
-AC_DEFINE_UNQUOTED(MOZILLA_VERSION,"$MOZILLA_VERSION")
-AC_DEFINE_UNQUOTED(MOZILLA_VERSION_U,$MOZILLA_VERSION)
-AC_DEFINE_UNQUOTED(MOZILLA_UAVERSION,"$MOZILLA_UAVERSION")
-AC_SUBST(MOZILLA_SYMBOLVERSION)
 
 MOZ_DOING_LTO(lto_is_enabled)
 
@@ -1039,6 +1023,8 @@ case "$target" in
         # make 'foo == bar;' error out
         CFLAGS="$CFLAGS -we4553"
         CXXFLAGS="$CXXFLAGS -we4553"
+        # Silence VS2017 15.5+ TR1 deprecation warnings hit by older gtest versions
+        CXXFLAGS="$CXXFLAGS -D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING"
         LIBS="$LIBS kernel32.lib user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib secur32.lib"
         MOZ_DEBUG_LDFLAGS='-DEBUG -DEBUGTYPE:CV'
         WARNINGS_AS_ERRORS='-WX'
@@ -1148,10 +1134,6 @@ if test -n "$MOZ_LINKER"; then
   MOZ_LINKER_EXTRACT=1
   AC_CHECK_PROGS(XZ, xz)
 fi
-
-dnl Only one oddball right now (QNX), but this gives us flexibility
-dnl if any other platforms need to override this in the future.
-AC_DEFINE_UNQUOTED(D_INO,$DIRENT_INO)
 
 if test -z "$COMPILE_ENVIRONMENT"; then
     SKIP_COMPILER_CHECKS=1
@@ -1507,32 +1489,6 @@ if test "$ac_cv_pthread_cond_timewait_monotonic_np" != "no"; then
     AC_DEFINE(HAVE_PTHREAD_COND_TIMEDWAIT_MONOTONIC)
 fi
 
-dnl check for wcrtomb/mbrtowc
-dnl =======================================================================
-if test -z "$MACOS_DEPLOYMENT_TARGET" || test "$MACOS_DEPLOYMENT_TARGET" -ge "100300"; then
-AC_LANG_SAVE
-AC_LANG_CPLUSPLUS
-AC_CACHE_CHECK(for wcrtomb,
-    ac_cv_have_wcrtomb,
-    [AC_TRY_LINK([#include <wchar.h>],
-                 [mbstate_t ps={0};wcrtomb(0,'f',&ps);],
-                 ac_cv_have_wcrtomb="yes",
-                 ac_cv_have_wcrtomb="no")])
-if test "$ac_cv_have_wcrtomb" = "yes"; then
-    AC_DEFINE(HAVE_WCRTOMB)
-fi
-AC_CACHE_CHECK(for mbrtowc,
-    ac_cv_have_mbrtowc,
-    [AC_TRY_LINK([#include <wchar.h>],
-                 [mbstate_t ps={0};mbrtowc(0,0,0,&ps);],
-                 ac_cv_have_mbrtowc="yes",
-                 ac_cv_have_mbrtowc="no")])
-if test "$ac_cv_have_mbrtowc" = "yes"; then
-    AC_DEFINE(HAVE_MBRTOWC)
-fi
-AC_LANG_RESTORE
-fi
-
 AC_CACHE_CHECK(
     [for res_ninit()],
     ac_cv_func_res_ninit,
@@ -1562,69 +1518,6 @@ dnl else
 dnl    AC_CHECK_LIB(bind, res_ninit, AC_DEFINE(HAVE_RES_NINIT),
 dnl        AC_CHECK_LIB(resolv, res_ninit, AC_DEFINE(HAVE_RES_NINIT)))
 fi
-
-AC_LANG_CPLUSPLUS
-
-ICONV_LIBS=
-
-case $target_os in
-    darwin*|mingw*)
-        ;;
-    *)
-
-AC_CHECK_LIB(c, iconv, [ICONV_LIBS=],
-    AC_CHECK_LIB(iconv, iconv, [ICONV_LIBS="-liconv"],
-        AC_CHECK_LIB(iconv, libiconv, [ICONV_LIBS="-liconv"])))
-_SAVE_LIBS=$LIBS
-LIBS="$LIBS $ICONV_LIBS"
-AC_CACHE_CHECK(
-    [for iconv()],
-    ac_cv_func_iconv,
-    [AC_TRY_LINK([
-        #include <stdlib.h>
-        #include <iconv.h>
-        ],
-        [
-            iconv_t h = iconv_open("", "");
-            iconv(h, NULL, NULL, NULL, NULL);
-            iconv_close(h);
-        ],
-        [ac_cv_func_iconv=yes],
-        [ac_cv_func_iconv=no]
-        )]
-    )
-if test "$ac_cv_func_iconv" = "yes"; then
-    AC_DEFINE(HAVE_ICONV)
-    LIBICONV="$ICONV_LIBS"
-    AC_CACHE_CHECK(
-        [for iconv() with const input],
-        ac_cv_func_const_iconv,
-        [AC_TRY_COMPILE([
-            #include <stdlib.h>
-            #include <iconv.h>
-            ],
-            [
-                const char *input = "testing";
-                iconv_t h = iconv_open("", "");
-                iconv(h, &input, NULL, NULL, NULL);
-                iconv_close(h);
-            ],
-            [ac_cv_func_const_iconv=yes],
-            [ac_cv_func_const_iconv=no]
-            )]
-        )
-    if test "$ac_cv_func_const_iconv" = "yes"; then
-        AC_DEFINE(HAVE_ICONV_WITH_CONST_INPUT)
-    fi
-fi
-LIBS=$_SAVE_LIBS
-
-    ;;
-esac
-
-AC_SUBST_LIST(ICONV_LIBS)
-
-AM_LANGINFO_CODESET
 
 AC_LANG_C
 
@@ -2572,8 +2465,6 @@ if test -n "$MOZ_WEBRTC"; then
     if test -n "$MOZ_X11"; then
       MOZ_WEBRTC_X11_LIBS="-lXext -lXdamage -lXfixes -lXcomposite"
     fi
-else
-    MOZ_SYNTH_PICO=
 fi
 
 dnl ========================================================
@@ -3966,18 +3857,6 @@ fi
 AC_SUBST(MOZ_DISABLE_STARTUPCACHE)
 
 dnl ========================================================
-dnl = Enable Pico Speech Synthesis
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(synth-pico,
-[  --enable-synth-pico  Set compile flags necessary for compiling Pico Web Speech API ],
-    MOZ_SYNTH_PICO=1,
-    MOZ_SYNTH_PICO= )
-if test -n "$MOZ_SYNTH_PICO"; then
-    AC_DEFINE(MOZ_SYNTH_PICO)
-fi
-AC_SUBST(MOZ_SYNTH_PICO)
-
-dnl ========================================================
 dnl = Enable Support for Time Manager API
 dnl ========================================================
 if test -n "$MOZ_TIME_MANAGER"; then
@@ -4481,7 +4360,6 @@ AC_SUBST(MOZ_PREF_EXTENSIONS)
 AC_SUBST_LIST(MOZ_DEBUG_LDFLAGS)
 AC_SUBST(WARNINGS_AS_ERRORS)
 AC_SUBST_SET(MOZ_EXTENSIONS)
-AC_SUBST(LIBICONV)
 AC_SUBST(MOZ_TOOLKIT_SEARCH)
 AC_SUBST(MOZ_FEEDS)
 
@@ -4539,11 +4417,11 @@ MOZ_ARG_WITH_STRING(macbundlename-prefix,
 
 MOZ_MACBUNDLE_NAME=$MOZ_APP_DISPLAYNAME
 if test "$MOZ_MACBUNDLE_NAME_PREFIX"; then
-  MOZ_MACBUNDLE_NAME="${MOZ_MACBUNDLE_NAME_PREFIX} ${MOZ_MACBUNDLE_NAME}"
+  MOZ_MACBUNDLE_NAME="${MOZ_MACBUNDLE_NAME_PREFIX}${MOZ_MACBUNDLE_NAME}"
 fi
 
 if test "$MOZ_DEBUG"; then
-  MOZ_MACBUNDLE_NAME="${MOZ_MACBUNDLE_NAME} Debug.app"
+  MOZ_MACBUNDLE_NAME="${MOZ_MACBUNDLE_NAME}Debug.app"
 else
   MOZ_MACBUNDLE_NAME=${MOZ_MACBUNDLE_NAME}.app
 fi
@@ -4868,7 +4746,6 @@ AC_SUBST(MOZ_DEVTOOLS)
 AC_SUBST(MOZ_PACKAGE_JSSHELL)
 AC_SUBST(MOZ_FOLD_LIBS)
 AC_SUBST_LIST(MOZ_FOLD_LIBS_FLAGS)
-AC_SUBST(SOCORRO_SYMBOL_UPLOAD_TOKEN_FILE)
 
 AC_SUBST(DMG_TOOL)
 
@@ -4951,8 +4828,6 @@ if test -n "$A11Y_LOG"; then
     AC_DEFINE(A11Y_LOG)
 fi
 
-AC_SUBST(MOZILLA_VERSION)
-
 dnl Spit out some output
 dnl ========================================================
 
@@ -4961,10 +4836,6 @@ _NON_GLOBAL_ACDEFINES="$_NON_GLOBAL_ACDEFINES
 CPP_THROW_NEW
 HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
 HAVE_GETPAGESIZE
-HAVE_ICONV
-HAVE_ICONV_WITH_CONST_INPUT
-HAVE_MBRTOWC
-HAVE_WCRTOMB
 HAVE_STATVFS64
 HAVE_STATVFS
 HAVE_STATFS64

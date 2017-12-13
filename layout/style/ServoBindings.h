@@ -75,6 +75,12 @@ class nsStyleCoord;
 struct nsStyleDisplay;
 class nsXBLBinding;
 
+#ifdef NIGHTLY_BUILD
+const bool GECKO_IS_NIGHTLY = true;
+#else
+const bool GECKO_IS_NIGHTLY = false;
+#endif
+
 namespace mozilla {
   #define STYLE_STRUCT(name_, checkdata_cb_) struct Gecko##name_ {nsStyle##name_ gecko;};
   #include "nsStyleStructList.h"
@@ -142,6 +148,9 @@ struct FontSizePrefs
 };
 
 // DOM Traversal.
+void Gecko_RecordTraversalStatistics(uint32_t total, uint32_t parallel,
+                                     uint32_t total_t, uint32_t parallel_t,
+                                     uint32_t total_s, uint32_t parallel_s);
 bool Gecko_IsInDocument(RawGeckoNodeBorrowed node);
 bool Gecko_FlattenedTreeParentIsParent(RawGeckoNodeBorrowed node);
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
@@ -714,6 +723,10 @@ void Gecko_ContentList_AppendAll(nsSimpleContentList* aContentList,
 const nsTArray<mozilla::dom::Element*>* Gecko_GetElementsWithId(
     const nsIDocument* aDocument,
     nsAtom* aId);
+
+// Check the value of the given bool preference. The pref name needs to
+// be null-terminated.
+bool Gecko_GetBoolPrefValue(const char* pref_name);
 
 } // extern "C"
 
