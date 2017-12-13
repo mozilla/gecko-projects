@@ -54,9 +54,9 @@ job-defaults:
          VERSION: "{release_config[version]}"
          BUILD_NUMBER: "{release_config[build_number]}"
          PUSH_TO_CHANNEL:
-           by-project:
-             mozilla-beta: "edge"
-             default: ""
+            by-project:
+               mozilla-beta: "edge"
+               default: ""
          CANDIDATES_DIR:
             by-project:
                maple:
