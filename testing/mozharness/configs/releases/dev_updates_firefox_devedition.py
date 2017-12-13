@@ -23,7 +23,7 @@ config = {
     "balrog_url": "https://aus4.stage.mozaws.net/",
     "balrog_username": "balrog-stage-ffxbld",
     "update_channels": {
-        "beta": {
+        "aurora": {
             "version_regex": r"^(\d+\.\d+(b\d+)?)$",
             "requires_mirrors": True,
             # TODO - when we use a real repo, rename this file # s/MozJamun/Mozbeta/
@@ -36,4 +36,6 @@ config = {
         }
     },
     "balrog_use_dummy_suffix": False,
+    "stage_product": "devedition",
+    "bouncer_product": "devedition",
 }
