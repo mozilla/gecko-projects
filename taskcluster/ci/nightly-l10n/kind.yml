@@ -82,11 +82,7 @@ job-template:
       product:
          by-build-platform:
             default: firefox
-            linux32-devedition-nightly: devedition
-            linux64-devedition-nightly: devedition
-            macos64-devedition-nightly: devedition
-            win32-devedition-nightly: devedition
-            win64-devedition-nightly: devedition
+            .*-devedition-.*: devedition
             android-api-16-nightly: mobile
       job-name:
          by-build-platform:
