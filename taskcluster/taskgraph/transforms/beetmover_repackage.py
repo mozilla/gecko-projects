@@ -355,7 +355,6 @@ def is_valid_beetmover_job(job):
 def make_task_worker(config, jobs):
     for job in jobs:
         if not is_valid_beetmover_job(job):
-            print(job['dependencies'])
             raise NotImplementedError(
                 "{}: Beetmover_repackage must have five dependencies.".format(job['label'])
             )
