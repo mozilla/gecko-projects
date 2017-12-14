@@ -356,7 +356,7 @@ nsDisplayButtonBorder::Paint(nsDisplayListBuilder* aBuilder,
   nsRect r = nsRect(ToReferenceFrame(), mFrame->GetSize());
 
   // draw the border and background inside the focus and outline borders
-  DrawResult result =
+  ImgDrawResult result =
     mBFR->PaintBorder(aBuilder, pc, *aCtx, mVisibleRect, r);
 
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
@@ -436,7 +436,7 @@ void nsDisplayButtonForeground::Paint(nsDisplayListBuilder* aBuilder,
     nsRect r = nsRect(ToReferenceFrame(), mFrame->GetSize());
 
     // Draw the -moz-focus-inner border
-    DrawResult result =
+    ImgDrawResult result =
       mBFR->PaintInnerFocusBorder(aBuilder, presContext, *aCtx, mVisibleRect, r);
 
     nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
@@ -489,7 +489,7 @@ nsButtonFrameRenderer::DisplayButton(nsDisplayListBuilder* aBuilder,
                                      nsDisplayList* aForeground)
 {
   if (mFrame->StyleEffects()->mBoxShadow) {
-    aBackground->AppendNewToTop(new (aBuilder)
+    aBackground->AppendToTop(new (aBuilder)
       nsDisplayButtonBoxShadowOuter(aBuilder, this));
   }
 
@@ -498,13 +498,13 @@ nsButtonFrameRenderer::DisplayButton(nsDisplayListBuilder* aBuilder,
   nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
     aBuilder, mFrame, buttonRect, aBackground);
 
-  aBackground->AppendNewToTop(new (aBuilder)
+  aBackground->AppendToTop(new (aBuilder)
     nsDisplayButtonBorder(aBuilder, this));
 
   // Only display focus rings if we actually have them. Since at most one
   // button would normally display a focus ring, most buttons won't have them.
   if (mInnerFocusStyle && mInnerFocusStyle->StyleBorder()->HasBorder()) {
-    aForeground->AppendNewToTop(new (aBuilder)
+    aForeground->AppendToTop(new (aBuilder)
       nsDisplayButtonForeground(aBuilder, this));
   }
   return NS_OK;
@@ -523,7 +523,7 @@ nsButtonFrameRenderer::GetButtonInnerFocusRect(const nsRect& aRect, nsRect& aRes
   aResult.Inflate(innerFocusPadding);
 }
 
-DrawResult
+ImgDrawResult
 nsButtonFrameRenderer::PaintInnerFocusBorder(
   nsDisplayListBuilder* aBuilder,
   nsPresContext* aPresContext,
@@ -540,7 +540,7 @@ nsButtonFrameRenderer::PaintInnerFocusBorder(
                          ? PaintBorderFlags::SYNC_DECODE_IMAGES
                          : PaintBorderFlags();
 
-  DrawResult result = DrawResult::SUCCESS;
+  ImgDrawResult result = ImgDrawResult::SUCCESS;
 
   if (mInnerFocusStyle) {
     GetButtonInnerFocusRect(aRect, rect);
@@ -579,7 +579,7 @@ nsButtonFrameRenderer::CreateInnerFocusBorderRenderer(
   return Nothing();
 }
 
-DrawResult
+ImgDrawResult
 nsButtonFrameRenderer::PaintBorder(
   nsDisplayListBuilder* aBuilder,
   nsPresContext* aPresContext,
@@ -598,7 +598,7 @@ nsButtonFrameRenderer::PaintBorder(
   nsCSSRendering::PaintBoxShadowInner(aPresContext, aRenderingContext,
                                       mFrame, buttonRect);
 
-  DrawResult result =
+  ImgDrawResult result =
     nsCSSRendering::PaintBorder(aPresContext, aRenderingContext, mFrame,
                                 aDirtyRect, buttonRect, context, borderFlags);
 

@@ -83,8 +83,6 @@ jobs:
                by-project:
                   mozilla-beta: "beta-firefox-linux.cfg beta-firefox-linux64.cfg beta-firefox-macosx64.cfg beta-firefox-win32.cfg beta-firefox-win64.cfg"
                   default: ""
-      extra:
-         product: firefox
       treeherder:
          platform: linux64/opt
          kind: test

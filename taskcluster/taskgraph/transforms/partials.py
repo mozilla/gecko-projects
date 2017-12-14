@@ -135,6 +135,10 @@ def make_task_description(config, jobs):
             'env': {
                 'SHA1_SIGNING_CERT': 'nightly_sha1',
                 'SHA384_SIGNING_CERT': 'nightly_sha384',
+<<<<<<< working copy
+=======
+                'DATADOG_API_SECRET': 'project/releng/gecko/build/level-3/datadog-api-key'
+>>>>>>> merge rev
             }
         }
         if mar_channel_id:
