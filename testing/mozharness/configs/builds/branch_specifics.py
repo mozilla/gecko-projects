@@ -359,7 +359,25 @@ config = {
     'larch': {
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
-    # 'maple': {},
+    'maple': {
+        'platform_overrides': {
+            'linux-devedition': {
+                "update_channel": "aurora",
+            },
+            'linux64-devedition': {
+                "update_channel": "aurora",
+            },
+            'macosx64-devedition': {
+                "update_channel": "aurora",
+            },
+            'win32-devedition': {
+                "update_channel": "aurora",
+            },
+            'win64-devedition': {
+                "update_channel": "aurora",
+            },
+        },
+    },
     'oak': {
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
