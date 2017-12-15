@@ -33,25 +33,25 @@ buildbot_run_schema = Schema({
 
 
 def _get_balrog_api_root(branch):
-    return 'https://aus4-admin.mozilla.org/api' if branch in ('mozilla-beta', 'mozilla-release') \
-            else 'https://balrog-admin.stage.mozaws.net/api'
-
-
-_BALROG_CHANNEL_PER_HG_BRANCH = {
-    'mozilla-beta': 'beta',
-    'mozilla-release': 'release',
-    'maple': 'beta',
-    'try': 'CANNOT_PUSH_SOMETHING_TO_BALROG_WITH_TRY'
-}
+    if branch in ('mozilla-beta', 'mozilla-release') or branch.startswith('mozilla-esr'):
+        return 'https://aus4-admin.mozilla.org/api'
+    else:
+        return 'https://balrog-admin.stage.mozaws.net/api'
 
 
 def _get_balrog_channel(product, branch):
     if product == 'devedition':
         return 'aurora'
     elif product == 'firefox':
-        return _BALROG_CHANNEL_PER_HG_BRANCH[branch]
-    else:
-        raise ValueError('Unexpected product "{}"'.format(product))
+        if branch in ('mozilla-beta', 'maple'):
+            return 'beta'
+        elif branch == 'mozilla-release':
+            return 'release'
+        elif branch.startswith('mozilla-esr'):
+            return 'esr'
+    # Unsupported channels are filtered out after the task is generated. Then, we must
+    # provide a dummy value for them, otherwise the Decision task breaks.
+    return 'unknown'
 
 
 def bb_release_worker(config, worker, run):
