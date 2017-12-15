@@ -10,7 +10,6 @@
 A script to increase in-tree version number after shipping a release.
 """
 
-from copy import deepcopy
 from distutils.version import StrictVersion
 import os
 import sys
