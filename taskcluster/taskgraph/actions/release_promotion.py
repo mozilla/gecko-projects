@@ -238,7 +238,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
             )
         os.environ['PARTIAL_UPDATES'] = partial_updates
         release_history = populate_release_history(
-            desktop_release_type.title(), parameters['project'], partial_updates=input['partial_updates']
+            desktop_release_type.title(), parameters['project'],
+            partial_updates=input['partial_updates']
         )
 
     if release_promotion_flavor in UPTAKE_MONITORING_PLATFORMS_FLAVORS:
