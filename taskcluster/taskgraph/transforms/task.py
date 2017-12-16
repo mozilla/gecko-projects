@@ -26,7 +26,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema, Schema, optionally_keyed_by, resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
 from voluptuous import Any, Required, Optional, Extra
-from taskgraph import GECKO
+from taskgraph import GECKO, MAX_DEPENDENCIES
 from ..util import docker as dockerutil
 
 from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
@@ -1535,6 +1535,18 @@ def check_task_identifiers(config, tasks):
                 raise Exception(
                     'task {}.{} is not a valid identifier: {}'.format(
                         task['label'], attr, task['task'][attr]))
+        yield task
+
+
+@transforms.add
+def check_task_dependencies(config, tasks):
+    """Ensures that tasks don't have more than 100 dependencies."""
+    for task in tasks:
+        if len(task['dependencies']) > MAX_DEPENDENCIES:
+            raise Exception(
+                    'task {}/{} has too many dependencies ({} > {})'.format(
+                        config.kind, task['label'], len(task['dependencies']),
+                        MAX_DEPENDENCIES))
         yield task
 
 
