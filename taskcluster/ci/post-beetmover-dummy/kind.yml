@@ -11,6 +11,9 @@ transforms:
 kind-dependencies:
    - beetmover-checksums
    - beetmover-repackage
+   # Fennec doesn't have beetmover-{checksums,repackage}, so
+   # also depend on vanilla beetmover.
+   - beetmover
 
 jobs:
    firefox-ship:
