@@ -730,9 +730,15 @@ PlacesController.prototype = {
                                        }, window.top);
     if (performed) {
       // Select the new item.
-      let insertedNodeId = PlacesUtils.bookmarks
-                                      .getIdForItemAt(ip.itemId, await ip.getIndex());
-      this._view.selectItems([insertedNodeId], false);
+      // TODO (Bug 1425555): When we remove places transactions, we might be
+      // able to improve showBookmarkDialog to return the guid direct, and
+      // avoid the fetch.
+      let insertedNode = await PlacesUtils.bookmarks.fetch({
+        parentGuid: ip.guid,
+        index: await ip.getIndex()
+      });
+
+      this._view.selectItems([insertedNode.guid], false);
     }
   },
 
@@ -757,9 +763,8 @@ PlacesController.prototype = {
 
     let txn = PlacesTransactions.NewSeparator({ parentGuid: ip.guid, index });
     let guid = await txn.transact();
-    let itemId = await PlacesUtils.promiseItemId(guid);
     // Select the new item.
-    this._view.selectItems([itemId], false);
+    this._view.selectItems([guid], false);
   },
 
   /**
@@ -1302,10 +1307,7 @@ PlacesController.prototype = {
     let itemsToSelect = [];
     if (PlacesUIUtils.useAsyncTransactions) {
       let doCopy = action == "copy";
-      let guidsToSelect = await handleTransferItems(items, ip, doCopy, this._view);
-
-      let guidsToIdMap = await PlacesUtils.promiseManyItemIds(guidsToSelect);
-      itemsToSelect = Array.from(guidsToIdMap.values());
+      itemsToSelect = await handleTransferItems(items, ip, doCopy, this._view);
     } else {
       let transactions = [];
       let insertionIndex = await ip.getIndex();
@@ -1820,11 +1822,14 @@ function getResultForBatching(viewOrElement) {
  */
 async function handleTransferItems(items, insertionPoint, doCopy, view) {
   let transactions;
+  let itemsCount;
   if (insertionPoint.isTag) {
     let urls = items.filter(item => "uri" in item).map(item => item.uri);
+    itemsCount = urls.length;
     transactions = [PlacesTransactions.Tag({ urls, tag: insertionPoint.tagName })];
   } else {
     let insertionIndex = await insertionPoint.getIndex();
+    itemsCount = items.length;
     transactions = await getTransactionsForTransferItems(
       items, insertionIndex, insertionPoint.guid, doCopy);
   }
@@ -1853,10 +1858,9 @@ async function handleTransferItems(items, insertionPoint, doCopy, view) {
     };
   }
 
-  await PlacesUIUtils.batchUpdatesForNode(resultForBatching,
-    transactions.length, async () => {
-      await PlacesTransactions.batch(batchingItem);
-    });
+  await PlacesUIUtils.batchUpdatesForNode(resultForBatching, itemsCount, async () => {
+    await PlacesTransactions.batch(batchingItem);
+  });
 
   return guidsToSelect;
 }

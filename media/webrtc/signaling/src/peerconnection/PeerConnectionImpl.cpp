@@ -1969,6 +1969,9 @@ public:
     mIceCandidateStats.Construct();
     mCodecStats.Construct();
     mTimestamp.Construct(now);
+    mTrickledIceCandidateStats.Construct();
+    mRawLocalCandidates.Construct();
+    mRawRemoteCandidates.Construct();
   }
 };
 
@@ -2036,6 +2039,7 @@ PeerConnectionImpl::AddIceCandidate(const char* aCandidate, const char* aMid, un
     // the remote SDP.
     if (mSignalingState == PCImplSignalingState::SignalingStable) {
       mMedia->AddIceCandidate(aCandidate, aMid, aLevel);
+      mRawTrickledCandidates.push_back(aCandidate);
     }
     pco->OnAddIceCandidateSuccess(rv);
   } else {
@@ -3339,6 +3343,10 @@ PeerConnectionImpl::BuildStatsQuery_m(
       query->report->mRemoteSdp.Construct(
           NS_ConvertASCIItoUTF16(remoteDescription.c_str()));
       query->report->mOfferer.Construct(mJsepSession->IsOfferer());
+      for (const auto& candidate : mRawTrickledCandidates) {
+        query->report->mRawRemoteCandidates.Value().AppendElement(
+            NS_ConvertASCIItoUTF16(candidate.c_str()), fallible);
+      }
     }
   }
 
@@ -3380,6 +3388,9 @@ static void ToRTCIceCandidateStats(
           NS_ConvertASCIItoUTF16(candidate.local_addr.transport.c_str()));
     }
     report->mIceCandidateStats.Value().AppendElement(cand, fallible);
+    if (candidate.trickled) {
+      report->mTrickledIceCandidateStats.Value().AppendElement(cand, fallible);
+    }
   }
 }
 
@@ -3432,6 +3443,11 @@ static void RecordIceStats_s(
                            transportId,
                            now,
                            report);
+    // add the local candidates unparsed string to a sequence
+    for (const auto& candidate : candidates) {
+      report->mRawLocalCandidates.Value().AppendElement(
+          NS_ConvertASCIItoUTF16(candidate.label.c_str()), fallible);
+    }
   }
   candidates.clear();
 
@@ -3441,6 +3457,11 @@ static void RecordIceStats_s(
                            transportId,
                            now,
                            report);
+    // add the remote candidates unparsed string to a sequence
+    for (const auto& candidate : candidates) {
+      report->mRawRemoteCandidates.Value().AppendElement(
+          NS_ConvertASCIItoUTF16(candidate.label.c_str()), fallible);
+    }
   }
 }
 
@@ -3469,8 +3490,8 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
     // TODO(@@NG):ssrcs handle Conduits having multiple stats at the same level
     // This is pending spec work
     // Gather pipeline stats.
-    switch (mp.direction()) {
-      case MediaPipeline::TRANSMIT: {
+    switch (mp.Direction()) {
+      case MediaPipeline::DirectionType::TRANSMIT: {
         nsString localId = NS_LITERAL_STRING("outbound_rtp_") + idstr;
         nsString remoteId;
         nsString ssrc;
@@ -3527,8 +3548,8 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
           s.mMediaType.Construct(mediaType);
           s.mRemoteId.Construct(remoteId);
           s.mIsRemote = false;
-          s.mPacketsSent.Construct(mp.rtp_packets_sent());
-          s.mBytesSent.Construct(mp.rtp_bytes_sent());
+          s.mPacketsSent.Construct(mp.RtpPacketsSent());
+          s.mBytesSent.Construct(mp.RtpBytesSent());
 
           // Fill in packet type statistics
           webrtc::RtcpPacketTypeCounter counters;
@@ -3568,7 +3589,7 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
         }
         break;
       }
-      case MediaPipeline::RECEIVE: {
+      case MediaPipeline::DirectionType::RECEIVE: {
         nsString localId = NS_LITERAL_STRING("inbound_rtp_") + idstr;
         nsString remoteId;
         nsString ssrc;
@@ -3618,8 +3639,8 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
           s.mRemoteId.Construct(remoteId);
         }
         s.mIsRemote = false;
-        s.mPacketsReceived.Construct(mp.rtp_packets_received());
-        s.mBytesReceived.Construct(mp.rtp_bytes_received());
+        s.mPacketsReceived.Construct(mp.RtpPacketsReceived());
+        s.mBytesReceived.Construct(mp.RtpBytesReceived());
 
         if (query->internalStats && isAudio) {
           int32_t jitterBufferDelay;

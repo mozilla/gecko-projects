@@ -1053,7 +1053,7 @@ nsDisplayListBuilder::EndFrame()
   mFrameToAnimatedGeometryRootMap.Clear();
   mActiveScrolledRoots.Clear();
   FreeClipChains();
-
+  FreeTemporaryItems();
   nsCSSRendering::EndFrameTreesLocked();
 }
 
@@ -1299,9 +1299,6 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
                "All presshells should have been exited");
   NS_ASSERTION(!mCurrentTableItem, "No table item should be active");
 
-  for (nsDisplayItem* i : mTemporaryItems) {
-    i->Destroy(this);
-  }
   for (DisplayItemClipChain* c : mClipChainsToDestroy) {
     c->DisplayItemClipChain::~DisplayItemClipChain();
   }
@@ -1496,6 +1493,19 @@ nsDisplayListBuilder::FreeClipChains()
       ++it;
     }
   }
+}
+
+void
+nsDisplayListBuilder::FreeTemporaryItems()
+{
+  for (nsDisplayItem* i : mTemporaryItems) {
+    // Temporary display items are not added to the frames.
+    MOZ_ASSERT(i->Frame());
+    i->RemoveFrame(i->Frame());
+    i->Destroy(this);
+  }
+
+  mTemporaryItems.Clear();
 }
 
 void
@@ -1850,6 +1860,8 @@ nsDisplayListBuilder::FindAnimatedGeometryRootFrameFor(nsIFrame* aFrame, bool& a
       return cursor;
     cursor = next;
   }
+  // Root frame is always an async agr.
+  aIsAsync = true;
   return cursor;
 }
 
@@ -4549,7 +4561,12 @@ nsDisplayImageContainer::GetContainer(LayerManager* aManager,
     flags |= imgIContainer::FLAG_SYNC_DECODE;
   }
 
-  return image->GetImageContainer(aManager, flags);
+  RefPtr<ImageContainer> container = image->GetImageContainer(aManager, flags);
+  if (!container || !container->HasCurrentImage()) {
+    return nullptr;
+  }
+
+  return container.forget();
 }
 
 bool
@@ -8345,21 +8362,6 @@ nsDisplayTransform::CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder)
   return mAllowAsyncAnimation;
 }
 
-static void
-RecordAnimationFrameSizeTelemetry(nsIFrame* aFrame, const nsSize& overflow)
-{
-  gfxSize scale = nsLayoutUtils::GetTransformToAncestorScale(aFrame);
-  nsSize frameSize = nsSize(overflow.width * scale.width,
-                            overflow.height * scale.height);
-  uint32_t pixelArea = uint32_t(nsPresContext::AppUnitsToIntCSSPixels(frameSize.width))
-                     * nsPresContext::AppUnitsToIntCSSPixels(frameSize.height);
-  if (EffectSet* effects = EffectSet::GetEffectSet(aFrame)) {
-    for (KeyframeEffectReadOnly* effect : *effects) {
-      effect->RecordFrameSizeTelemetry(pixelArea);
-    }
-  }
-}
-
 /* static */ auto
 nsDisplayTransform::ShouldPrerenderTransformedContent(nsDisplayListBuilder* aBuilder,
                                                       nsIFrame* aFrame,
@@ -8406,17 +8408,9 @@ nsDisplayTransform::ShouldPrerenderTransformedContent(nsDisplayListBuilder* aBui
     }
   }
 
-  nsRect overflow = aFrame->GetVisualOverflowRectRelativeToSelf();
-
-  // Record telemetry about the size of the animated content.
-  // Check CanRecordExtended() so we don't do any processing if the
-  // telemetry won't be recorded anyways.
-  if (Telemetry::CanRecordExtended()) {
-    RecordAnimationFrameSizeTelemetry(aFrame, overflow.Size());
-  }
-
   // If the incoming dirty rect already contains the entire overflow area,
   // we are already rendering the entire content.
+  nsRect overflow = aFrame->GetVisualOverflowRectRelativeToSelf();
   if (aDirtyRect->Contains(overflow)) {
     return FullPrerender;
   }
@@ -9129,12 +9123,14 @@ nsDisplayPerspective::nsDisplayPerspective(nsDisplayListBuilder* aBuilder,
   : nsDisplayItem(aBuilder, aPerspectiveFrame)
   , mList(aBuilder, aPerspectiveFrame, aList)
   , mTransformFrame(aTransformFrame)
-  , mIndex(aBuilder->AllocatePerspectiveItemIndex())
+  , mIndex(aBuilder->PerspectiveItemIndex())
 {
   MOZ_ASSERT(mList.GetChildren()->Count() == 1);
   MOZ_ASSERT(mList.GetChildren()->GetTop()->GetType() == DisplayItemType::TYPE_TRANSFORM);
 
-  mTransformFrame->AddDisplayItem(this);
+  if (aBuilder->IsRetainingDisplayList()) {
+    mTransformFrame->AddDisplayItem(this);
+  }
 }
 
 already_AddRefed<Layer>

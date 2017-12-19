@@ -1051,14 +1051,6 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
 
   modifiedFrames->AppendElement(this);
 
-  // TODO: this is a bit of a hack. We are using ModifiedFrameList property to
-  // decide whether we are trying to reuse the display list.
-  if (displayRoot != rootFrame &&
-      !displayRoot->HasProperty(nsIFrame::ModifiedFrameList())) {
-    displayRoot->SetProperty(nsIFrame::ModifiedFrameList(),
-                             new nsTArray<nsIFrame*>());
-  }
-
   MOZ_ASSERT(PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
   SetFrameIsModified(true);
 
@@ -3478,6 +3470,12 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
                !aBuilder->GetIncludeAllOutOfFlows(),
                "It should be held for painting to window");
 
+    if (child->HasPerspective()) {
+      // We need to allocate a perspective index before a potential early
+      // return below.
+      aBuilder->AllocatePerspectiveItemIndex();
+    }
+
     // dirty rect in child-relative coordinates
     nsRect dirty = aBuilder->GetDirtyRect() - child->GetOffsetTo(this);
     nsRect visible = aBuilder->GetVisibleRect() - child->GetOffsetTo(this);
@@ -3579,6 +3577,12 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     }
     pseudoStackingContext = true;
     awayFromCommonPath = true;
+  }
+
+  if (child->HasPerspective()) {
+    // We need to allocate a perspective index before a potential early
+    // return below.
+    aBuilder->AllocatePerspectiveItemIndex();
   }
 
   NS_ASSERTION(!child->IsPlaceholderFrame(),
@@ -5597,7 +5601,7 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     }
   }
   bool isFlexItem = parentFrame && parentFrame->IsFlexContainerFrame() &&
-    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_LEGACY_WEBKIT_BOX) &&
+    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_EMULATING_LEGACY_BOX) &&
     !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   bool isInlineFlexItem = false;
   if (isFlexItem) {
@@ -5828,7 +5832,7 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(gfxContext*          aRenderingConte
   const bool isGridItem = parentFrame && parentFrame->IsGridContainerFrame() &&
     !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   const bool isFlexItem = parentFrame && parentFrame->IsFlexContainerFrame() &&
-    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_LEGACY_WEBKIT_BOX) &&
+    !parentFrame->HasAnyStateBits(NS_STATE_FLEX_IS_EMULATING_LEGACY_BOX) &&
     !HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
   bool isInlineFlexItem = false;
   Maybe<nsStyleCoord> imposedMainSizeStyleCoord;
@@ -6384,20 +6388,16 @@ nsIFrame::ComputeISizeValue(gfxContext*         aRenderingContext,
 }
 
 void
-nsFrame::DidReflow(nsPresContext*           aPresContext,
-                   const ReflowInput*  aReflowInput,
-                   nsDidReflowStatus         aStatus)
+nsFrame::DidReflow(nsPresContext*     aPresContext,
+                   const ReflowInput* aReflowInput)
 {
-  NS_FRAME_TRACE_MSG(NS_FRAME_TRACE_CALLS,
-                     ("nsFrame::DidReflow: aStatus=%d", static_cast<uint32_t>(aStatus)));
+  NS_FRAME_TRACE_MSG(NS_FRAME_TRACE_CALLS, ("nsFrame::DidReflow"));
 
   SVGObserverUtils::InvalidateDirectRenderingObservers(this,
                       SVGObserverUtils::INVALIDATE_REFLOW);
 
-  if (nsDidReflowStatus::FINISHED == aStatus) {
-    RemoveStateBits(NS_FRAME_IN_REFLOW | NS_FRAME_FIRST_REFLOW |
-                    NS_FRAME_IS_DIRTY | NS_FRAME_HAS_DIRTY_CHILDREN);
-  }
+  RemoveStateBits(NS_FRAME_IN_REFLOW | NS_FRAME_FIRST_REFLOW |
+                  NS_FRAME_IS_DIRTY | NS_FRAME_HAS_DIRTY_CHILDREN);
 
   // Notify the percent bsize observer if there is a percent bsize.
   // The observer may be able to initiate another reflow with a computed

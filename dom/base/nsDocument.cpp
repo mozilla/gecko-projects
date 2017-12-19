@@ -2417,15 +2417,17 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
     // XXXbz what does "just fine" mean exactly?  And given that there
     // is no nsDocShell::SetDocument, what is this talking about?
 
-    // Inform the associated request context about this load start so
-    // any of its internal load progress flags gets reset.
-    nsCOMPtr<nsIRequestContextService> rcsvc =
-      do_GetService("@mozilla.org/network/request-context-service;1");
-    if (rcsvc) {
-      nsCOMPtr<nsIRequestContext> rc;
-      rcsvc->GetRequestContextFromLoadGroup(aLoadGroup, getter_AddRefs(rc));
-      if (rc) {
-        rc->BeginLoad();
+    if (IsContentDocument()) {
+      // Inform the associated request context about this load start so
+      // any of its internal load progress flags gets reset.
+      nsCOMPtr<nsIRequestContextService> rcsvc =
+        do_GetService("@mozilla.org/network/request-context-service;1");
+      if (rcsvc) {
+        nsCOMPtr<nsIRequestContext> rc;
+        rcsvc->GetRequestContextFromLoadGroup(aLoadGroup, getter_AddRefs(rc));
+        if (rc) {
+          rc->BeginLoad();
+        }
       }
     }
   }
@@ -5056,6 +5058,24 @@ NotifyActivityChanged(nsISupports *aSupports, void *aUnused)
   }
 }
 
+bool
+nsIDocument::IsTopLevelWindowInactive() const
+{
+  nsCOMPtr<nsIDocShellTreeItem> treeItem = GetDocShell();
+  if (!treeItem) {
+    return false;
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> rootItem;
+  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+  if (!rootItem) {
+    return false;
+  }
+
+  nsCOMPtr<nsPIDOMWindowOuter> domWindow = rootItem->GetWindow();
+  return domWindow && !domWindow->IsActive();
+}
+
 void
 nsIDocument::SetContainer(nsDocShell* aContainer)
 {
@@ -5751,10 +5771,7 @@ nsDocument::ContentStateChanged(nsIContent* aContent, EventStates aStateMask)
 void
 nsDocument::DocumentStatesChanged(EventStates aStateMask)
 {
-  // Invalidate our cached state.
-  mGotDocumentState &= ~aStateMask;
-  mDocumentState &= ~aStateMask;
-
+  UpdateDocumentStates(aStateMask);
   NS_DOCUMENT_NOTIFY_OBSERVERS(DocumentStatesChanged, (this, aStateMask));
 }
 
@@ -8194,8 +8211,8 @@ nsDocument::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   // Load events must not propagate to |window| object, see bug 335251.
   if (aVisitor.mEvent->mMessage != eLoad) {
     nsGlobalWindowOuter* window = nsGlobalWindowOuter::Cast(GetWindow());
-    aVisitor.mParentTarget =
-      window ? window->GetTargetForEventTargetChain() : nullptr;
+    aVisitor.SetParentTarget(
+      window ? window->GetTargetForEventTargetChain() : nullptr, false);
   }
   return NS_OK;
 }
@@ -9875,21 +9892,22 @@ nsDocument::ForgetImagePreload(nsIURI* aURI)
 }
 
 void
-nsIDocument::UpdatePossiblyStaleDocumentState()
+nsIDocument::UpdateDocumentStates(EventStates aChangedStates)
 {
-  if (!mGotDocumentState.HasState(NS_DOCUMENT_STATE_RTL_LOCALE)) {
+  if (aChangedStates.HasState(NS_DOCUMENT_STATE_RTL_LOCALE)) {
     if (IsDocumentRightToLeft()) {
       mDocumentState |= NS_DOCUMENT_STATE_RTL_LOCALE;
+    } else {
+      mDocumentState &= ~NS_DOCUMENT_STATE_RTL_LOCALE;
     }
-    mGotDocumentState |= NS_DOCUMENT_STATE_RTL_LOCALE;
   }
-  if (!mGotDocumentState.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE)) {
-    nsIPresShell* shell = GetShell();
-    if (shell && shell->GetPresContext() &&
-        shell->GetPresContext()->IsTopLevelWindowInactive()) {
+
+  if (aChangedStates.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE)) {
+    if (IsTopLevelWindowInactive()) {
       mDocumentState |= NS_DOCUMENT_STATE_WINDOW_INACTIVE;
+    } else {
+      mDocumentState &= ~NS_DOCUMENT_STATE_WINDOW_INACTIVE;
     }
-    mGotDocumentState |= NS_DOCUMENT_STATE_WINDOW_INACTIVE;
   }
 }
 

@@ -329,7 +329,7 @@
   -moz-appearance: -moz-window-button-close;
 }
 
-@media not all and (-moz-windows-classic) {
+@media (-moz-windows-classic: 0) {
   #titlebar-min {
     margin-inline-end: 2px;
   }
@@ -1167,14 +1167,6 @@ panel[touchmode] .PanelUI-subView #appMenu-zoom-controls > .subviewbutton-iconic
 
 .contentSelectDropdown-ingroup > .menu-iconic-text {
   padding-inline-start: 20px;
-}
-
-#ContentSelectDropdown > menupopup {
-  background-color: -moz-field;
-  -moz-border-top-colors: GrayText;
-  -moz-border-right-colors: GrayText;
-  -moz-border-bottom-colors: GrayText;
-  -moz-border-left-colors: GrayText;
 }
 
 #ContentSelectDropdown > menupopup > menucaption,

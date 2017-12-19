@@ -29,9 +29,6 @@ from voluptuous import Any, Required, Optional, Extra
 from taskgraph import GECKO, MAX_DEPENDENCIES
 from ..util import docker as dockerutil
 
-from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
-
-
 RUN_TASK = os.path.join(GECKO, 'taskcluster', 'docker', 'recipes', 'run-task')
 
 
@@ -147,14 +144,7 @@ task_description_schema = Schema({
     # if omitted, the build will not be indexed.
     Optional('index'): {
         # the name of the product this build produces
-        'product': Any(
-            'firefox',
-            'fennec',
-            'mobile',
-            'static-analysis',
-            'devedition',
-            'source',
-        ),
+        'product': basestring,
 
         # the names to use for this job in the TaskCluster index
         'job-name': basestring,
@@ -598,7 +588,7 @@ TC_TREEHERDER_SCHEMA_URL = 'https://github.com/taskcluster/taskcluster-treeherde
                            'blob/master/schemas/task-treeherder-config.yml'
 
 
-UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
+UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to taskcluster/ci/config.yml"
 
 V2_ROUTE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.latest.{product}.{job-name}",
@@ -728,10 +718,28 @@ def superseder_url(config, task):
     )
 
 
-def verify_index_job_name(index):
-    job_name = index['job-name']
-    if job_name not in JOB_NAME_WHITELIST:
-        raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name))
+JOB_NAME_WHITELIST_ERROR = """\
+The gecko-v2 job name {job_name} is not in the whitelist in `taskcluster/ci/config.yml`.
+If this job runs on Buildbot, please ensure that the job names match between
+Buildbot and TaskCluster, then add the job name to the whitelist.  If this is a
+new job, there is nothing to check -- just add the job to the whitelist.
+"""
+
+UNSUPPORTED_PRODUCT_ERROR = """\
+The gecko-v2 product {product} is not in the list of configured products in
+`taskcluster/ci/config.yml'.
+"""
+
+
+def verify_index(config, index):
+    if 'job-names' in config.graph_config['index']:
+        job_name = index['job-name']
+        if job_name not in config.graph_config['index']['job-names']:
+            raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name=job_name))
+
+    product = index['product']
+    if product not in config.graph_config['index']['products']:
+        raise Exception(UNSUPPORTED_PRODUCT_ERROR.format(product=product))
 
 
 @payload_builder('docker-worker')
@@ -1143,7 +1151,7 @@ def add_generic_index_routes(config, task):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    verify_index_job_name(index)
+    verify_index(config, index)
 
     subs = config.params.copy()
     subs['job-name'] = index['job-name']
@@ -1171,7 +1179,7 @@ def add_nightly_index_routes(config, task):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    verify_index_job_name(index)
+    verify_index(config, index)
 
     subs = config.params.copy()
     subs['job-name'] = index['job-name']
@@ -1230,7 +1238,7 @@ def add_l10n_index_routes(config, task, force_locale=None):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    verify_index_job_name(index)
+    verify_index(config, index)
 
     subs = config.params.copy()
     subs['job-name'] = index['job-name']
@@ -1269,7 +1277,7 @@ def add_nightly_l10n_index_routes(config, task, force_locale=None):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
-    verify_index_job_name(index)
+    verify_index(config, index)
 
     subs = config.params.copy()
     subs['job-name'] = index['job-name']

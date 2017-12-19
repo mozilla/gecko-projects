@@ -887,6 +887,8 @@ pref("gfx.webrender.debug.profiler", false);
 pref("gfx.webrender.debug.gpu-time-queries", false);
 pref("gfx.webrender.debug.gpu-sample-queries", false);
 pref("gfx.webrender.debug.disable-batching", false);
+pref("gfx.webrender.debug.epochs", false);
+pref("gfx.webrender.debug.compact-profiler", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1776,7 +1778,7 @@ pref("network.http.altsvc.enabled", true);
 pref("network.http.altsvc.oe", true);
 
 // Turn on 0RTT data for TLS 1.3
-pref("security.tls.enable_0rtt_data", false);
+pref("security.tls.enable_0rtt_data", true);
 
 // the origin extension impacts h2 coalescing
 pref("network.http.originextension", true);
@@ -2971,6 +2973,13 @@ pref("layout.css.frames-timing.enabled", false);
 pref("layout.css.frames-timing.enabled", true);
 #endif
 
+// Are we emulating -moz-{inline}-box layout using CSS flexbox?
+// (This pref only takes effect in prerelease builds, so we only
+// bother specifying a default in prerelease builds as well.)
+#ifndef RELEASE_OR_BETA
+pref("layout.css.emulate-moz-box-with-flex", false);
+#endif
+
 // Are sets of prefixed properties supported?
 pref("layout.css.prefixes.border-image", true);
 pref("layout.css.prefixes.transforms", true);
@@ -3023,9 +3032,6 @@ pref("layout.css.all-shorthand.enabled", true);
 
 // Is support for CSS overflow-clip-box enabled for non-UA sheets?
 pref("layout.css.overflow-clip-box.enabled", false);
-
-// Is support for CSS grid enabled?
-pref("layout.css.grid.enabled", true);
 
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 pref("layout.css.grid-template-subgrid-value.enabled", false);

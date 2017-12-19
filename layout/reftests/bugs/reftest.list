@@ -1851,7 +1851,7 @@ pref(layout.css.moz-document.content.enabled,false) == 1035091-2.html 1035091-re
 == 1050493-1.html 1050493-1-ref.html
 == 1050788-1.html about:blank
 == 1053035-1-flex.html 1053035-1-ref.html
-test-pref(layout.css.grid.enabled,true) == 1053035-1-grid.html 1053035-1-ref.html
+== 1053035-1-grid.html 1053035-1-ref.html
 == 1059167-1.html 1059167-1-ref.html
 == 1059498-1.html 1059498-1-ref.html
 == 1059498-2.html 1059498-1-ref.html
@@ -2052,3 +2052,4 @@ test-pref(font.size.systemFontScale,200) == 1412743.html 1412743-ref.html
 == 1419820-1.html 1419820-1-ref.html
 == 1420946-1.html 1420946-1-ref.html
 == 1424680.html 1424680-ref.html
+== 1424798-1.html 1424798-ref.html

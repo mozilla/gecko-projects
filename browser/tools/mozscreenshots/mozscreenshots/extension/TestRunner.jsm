@@ -55,11 +55,12 @@ this.TestRunner = {
     let screenshotPath = FileUtils.getFile("TmpD", subDirs).path;
 
     const MOZ_UPLOAD_DIR = env.get("MOZ_UPLOAD_DIR");
-    if (MOZ_UPLOAD_DIR) {
+    const MOZ_SOURCE_REPO = env.get("MOZ_SOURCE_REPO");
+    if (MOZ_UPLOAD_DIR && !MOZ_SOURCE_REPO.includes("/integration/")) {
       screenshotPath = MOZ_UPLOAD_DIR;
     }
 
-    this.mochitestScope.info("Saving screenshots to:", screenshotPath);
+    this.mochitestScope.info(`Saving screenshots to: ${screenshotPath}`);
 
     let screenshotPrefix = Services.appinfo.appBuildID;
     if (jobName) {
@@ -74,7 +75,7 @@ this.TestRunner = {
 
     let sets = this.loadSets(setNames);
 
-    this.mochitestScope.info(sets.length + " sets:", setNames);
+    this.mochitestScope.info(`${sets.length} sets: ${setNames}`);
     this.combos = new LazyProduct(sets);
     this.mochitestScope.info(this.combos.length + " combinations");
 
@@ -205,9 +206,10 @@ this.TestRunner = {
     windowType = windowType || "navigator:browser";
     let browserWindow = Services.wm.getMostRecentWindow(windowType);
     // Scale for high-density displays
-    const scale = browserWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDocShell).QueryInterface(Ci.nsIBaseWindow)
-                        .devicePixelsPerDesktopPixel;
+    const scale = Cc["@mozilla.org/gfx/screenmanager;1"]
+                    .getService(Ci.nsIScreenManager)
+                    .screenForRect(browserWindow.screenX, browserWindow.screenY, 1, 1)
+                    .defaultCSSScaleFactor;
 
     const windowLeft = browserWindow.screenX * scale;
     const windowTop = browserWindow.screenY * scale;
@@ -376,6 +378,9 @@ this.TestRunner = {
         canvas.width = bounds.width;
         canvas.height = bounds.height;
         const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "hotpink";
+        ctx.fillRect(0, 0, bounds.width, bounds.height);
 
         for (const rect of rects) {
           rect.left = Math.max(0, rect.left);
