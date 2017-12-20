@@ -47,6 +47,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-release-branches', set([
         'mozilla-beta',
         'mozilla-release',
+        'birch',
     ])
 ]]
 

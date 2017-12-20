@@ -119,7 +119,7 @@ def make_task_description(config, jobs):
                 mar_channel_id = 'firefox-mozilla-aurora'
             else:
                 mar_channel_id = 'firefox-mozilla-beta'
-        elif config.params['project'] == 'mozilla-release':
+        elif config.params['project'] in ('mozilla-release', 'birch'):
             mar_channel_id = 'firefox-mozilla-release'
         elif 'esr' in config.params['project']:
             mar_channel_id = 'firefox-mozilla-esr'
