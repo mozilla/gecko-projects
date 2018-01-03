@@ -21,6 +21,7 @@ RELEASE_PROJECTS = {
 }
 
 RELEASE_PROMOTION_PROJECTS = {
+    'birch',
     'jamun',
     'maple',
     'try',
