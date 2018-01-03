@@ -164,26 +164,26 @@ public:
    * Register accesskey on the given element. When accesskey is activated then
    * the element will be notified via nsIContent::PerformAccesskey() method.
    *
-   * @param  aContent  the given element
+   * @param  aElement  the given element
    * @param  aKey      accesskey
    */
-  void RegisterAccessKey(nsIContent* aContent, uint32_t aKey);
+  void RegisterAccessKey(dom::Element* aElement, uint32_t aKey);
 
   /**
    * Unregister accesskey for the given element.
    *
-   * @param  aContent  the given element
+   * @param  aElement  the given element
    * @param  aKey      accesskey
    */
-  void UnregisterAccessKey(nsIContent* aContent, uint32_t aKey);
+  void UnregisterAccessKey(dom::Element* aElement, uint32_t aKey);
 
   /**
    * Get accesskey registered on the given element or 0 if there is none.
    *
-   * @param  aContent  the given element (must not be null)
+   * @param  aElement  the given element (must not be null)
    * @return           registered accesskey
    */
-  uint32_t GetRegisteredAccessKey(nsIContent* aContent);
+  uint32_t GetRegisteredAccessKey(dom::Element* aContent);
 
   static void GetAccessKeyLabelPrefix(dom::Element* aElement, nsAString& aPrefix);
 
@@ -314,6 +314,22 @@ public:
   // Returns whether or not a frame can be vertically scrolled with a mouse
   // wheel (as opposed to, say, a selection or touch scroll).
   static bool CanVerticallyScrollFrameWithWheel(nsIFrame* aFrame);
+
+  static void SuppressInputEvents()
+  {
+    MOZ_ASSERT(!sIsInputEventsSuppressed);
+    sIsInputEventsSuppressed = true;
+  }
+
+  static void UnsuppressInputEvents()
+  {
+    sIsInputEventsSuppressed = false;
+  }
+
+  static bool IsInputEventsSuppressed()
+  {
+    return sIsInputEventsSuppressed;
+  }
 
   // Holds the point in screen coords that a mouse event was dispatched to,
   // before we went into pointer lock mode. This is constantly updated while
@@ -1087,6 +1103,8 @@ private:
   // Time at which we began handling the latest user input. Not reset
   // at the end of the input.
   static TimeStamp sLatestUserInputStart;
+
+  static bool sIsInputEventsSuppressed;
 
   RefPtr<OverOutElementsWrapper> mMouseEnterLeaveHelper;
   nsRefPtrHashtable<nsUint32HashKey, OverOutElementsWrapper> mPointersEnterLeaveHelper;

@@ -1090,6 +1090,8 @@ public:
                                   uint32_t aLineNumber = 0,
                                   uint32_t aColumnNumber = 0);
 
+  static void ReportEmptyGetElementByIdArg(const nsIDocument* aDoc);
+
   static void LogMessageToConsole(const char* aMsg);
 
   /**
@@ -1134,6 +1136,14 @@ public:
 
   static bool PrefetchPreloadEnabled(nsIDocShell* aDocShell);
 
+  static void
+  ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                     nsAString& aSourceSpecOut, uint32_t *aLineOut,
+                     uint32_t *aColumnOut, nsString& aMessageOut);
+
+  // Variant on `ExtractErrorValues` with a `nsACString`. This
+  // method is provided for backwards compatibility. Prefer the
+  // faster method above for your code.
   static void
   ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
                      nsACString& aSourceSpecOut, uint32_t *aLineOut,
@@ -2397,11 +2407,6 @@ public:
   }
 
   /**
-   * Return true if this doc is controlled by a ServiceWorker.
-   */
-  static bool IsControlledByServiceWorker(nsIDocument* aDocument);
-
-  /**
    * Fire mutation events for changes caused by parsing directly into a
    * context node.
    *
@@ -2706,18 +2711,6 @@ public:
    * content JS to other logging modules.
    */
   static mozilla::LogModule* DOMDumpLog();
-
-  /**
-   * Returns whether a content is an insertion point for XBL
-   * bindings or web components ShadowRoot. In web components,
-   * this corresponds to a <content> element that participates
-   * in node distribution. In XBL this corresponds to an
-   * <xbl:children> element in anonymous content.
-   *
-   * @param aContent The content to test for being an insertion point.
-   */
-  static bool IsContentInsertionPoint(nsIContent* aContent);
-
 
   /**
    * Returns whether the children of the provided content are

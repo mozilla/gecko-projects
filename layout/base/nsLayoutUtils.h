@@ -2251,8 +2251,8 @@ public:
    *  <body><p contenteditable="true"></p></body>
    *    returns nullptr because <body> isn't editable.
    */
-  static nsIContent*
-    GetEditableRootContentByContentEditable(nsIDocument* aDocument);
+  static mozilla::dom::Element*
+  GetEditableRootContentByContentEditable(nsIDocument* aDocument);
 
   static void AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
                                       nsDisplayList& aList,
@@ -2338,6 +2338,11 @@ public:
    * Checks if we should warn about animations that can't be async
    */
   static bool IsAnimationLoggingEnabled();
+
+  /**
+   * Checks if retained display lists are enabled.
+   */
+  static bool AreRetainedDisplayListsEnabled();
 
   /**
    * Find a suitable scale for a element (aFrame's content) over the course of any

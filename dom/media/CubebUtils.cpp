@@ -50,7 +50,7 @@
 #define MASK_3F3R_LFE   (MASK_3F2_LFE | (1 << AudioConfig::CHANNEL_RCENTER))
 #define MASK_3F4_LFE    (MASK_3F2_LFE | (1 << AudioConfig::CHANNEL_RLS) | (1 << AudioConfig::CHANNEL_RRS))
 
-#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+#if (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)) || defined(XP_MACOSX)
 #define MOZ_CUBEB_REMOTING
 #endif
 
@@ -360,6 +360,21 @@ uint32_t PreferredChannelMap(uint32_t aChannels)
   return kLayoutInfos[sPreferredChannelLayout].mask;
 }
 
+cubeb_channel_layout GetPreferredChannelLayoutOrSMPTE(cubeb* context, uint32_t aChannels)
+{
+  cubeb_channel_layout layout = CUBEB_LAYOUT_UNDEFINED;
+  if (cubeb_get_preferred_channel_layout(context, &layout) != CUBEB_OK) {
+    return layout; //undefined
+  }
+
+  if (kLayoutInfos[layout].channels != aChannels) {
+    AudioConfig::ChannelLayout smpteLayout(aChannels);
+    return ConvertChannelMapToCubebLayout(smpteLayout.Map());
+  }
+
+  return layout;
+}
+
 void InitBrandName()
 {
   if (sBrandName) {
@@ -434,12 +449,14 @@ cubeb* GetCubebContextUnlocked()
   }
 
 #ifdef MOZ_CUBEB_REMOTING
-  if (XRE_IsParentProcess()) {
-    // TODO: Don't use audio IPC when within the same process.
-    MOZ_ASSERT(!sIPCConnection.IsValid());
-    sIPCConnection = CreateAudioIPCConnection();
-  } else {
-    MOZ_DIAGNOSTIC_ASSERT(sIPCConnection.IsValid());
+  if (sCubebSandbox) {
+    if (XRE_IsParentProcess()) {
+      // TODO: Don't use audio IPC when within the same process.
+      MOZ_ASSERT(!sIPCConnection.IsValid());
+      sIPCConnection = CreateAudioIPCConnection();
+    } else {
+      MOZ_DIAGNOSTIC_ASSERT(sIPCConnection.IsValid());
+    }
   }
 
   MOZ_LOG(gCubebLog, LogLevel::Info, ("%s: %s", PREF_CUBEB_SANDBOX, sCubebSandbox ? "true" : "false"));
@@ -541,7 +558,7 @@ void InitLibrary()
     NS_NewRunnableFunction("CubebUtils::InitLibrary", &InitBrandName));
 #endif
 #ifdef MOZ_CUBEB_REMOTING
-  if (XRE_IsContentProcess()) {
+  if (sCubebSandbox && XRE_IsContentProcess()) {
     AbstractThread::MainThread()->Dispatch(
       NS_NewRunnableFunction("CubebUtils::InitLibrary", &InitAudioIPCConnection));
   }

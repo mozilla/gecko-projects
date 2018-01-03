@@ -187,7 +187,7 @@ nsTreeBodyFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
 {
   EnsureView();
 
-  nsIContent* baseElement = GetBaseElement();
+  Element* baseElement = GetBaseElement();
 
   nsSize min(0,0);
   int32_t desiredRows;
@@ -207,8 +207,7 @@ nsTreeBodyFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
     else {
       desiredRows = 1;
     }
-  }
-  else {
+  } else {
     // tree
     nsAutoString rows;
     baseElement->GetAttr(kNameSpaceID_None, nsGkAtoms::rows, rows);
@@ -426,14 +425,15 @@ nsTreeBodyFrame::ReflowFinished()
     ScrollParts parts = GetScrollParts();
     mHorzWidth = CalcHorzWidth(parts);
     if (!mHasFixedRowCount) {
-      mPageLength = mInnerBox.height / mRowHeight;
+      mPageLength =
+        (mRowHeight > 0) ? (mInnerBox.height / mRowHeight) : mRowCount;
     }
 
     int32_t lastPageTopRow = std::max(0, mRowCount - mPageLength);
     if (mTopRowIndex > lastPageTopRow)
       ScrollToRowInternal(parts, lastPageTopRow);
 
-    nsIContent *treeContent = GetBaseElement();
+    Element* treeContent = GetBaseElement();
     if (treeContent &&
         treeContent->AttrValueIs(kNameSpaceID_None,
                                  nsGkAtoms::keepcurrentinview,
@@ -1288,6 +1288,9 @@ nsTreeBodyFrame::GetCoordsForCellItem(int32_t aRow, nsITreeColumn* aCol, const n
 int32_t
 nsTreeBodyFrame::GetRowAt(int32_t aX, int32_t aY)
 {
+  if (mRowHeight <= 0)
+    return -1;
+
   // Now just mod by our total inner box height and add to our top row index.
   int32_t row = (aY/mRowHeight)+mTopRowIndex;
 
@@ -2003,7 +2006,7 @@ nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
     else
       mScratchArray.AppendElement(nsGkAtoms::even);
 
-    nsIContent* baseContent = GetBaseElement();
+    Element* baseContent = GetBaseElement();
     if (baseContent && baseContent->HasAttr(kNameSpaceID_None, nsGkAtoms::editing))
       mScratchArray.AppendElement(nsGkAtoms::editing);
 
@@ -2042,13 +2045,17 @@ nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
     }
 
     // Read special properties from attributes on the column content node
-    if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
-                                    nsGkAtoms::insertbefore,
-                                    nsGkAtoms::_true, eCaseMatters))
+    if (aCol->mContent->IsElement() &&
+        aCol->mContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                                 nsGkAtoms::insertbefore,
+                                                 nsGkAtoms::_true,
+                                                 eCaseMatters))
       mScratchArray.AppendElement(nsGkAtoms::insertbefore);
-    if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
-                                    nsGkAtoms::insertafter,
-                                    nsGkAtoms::_true, eCaseMatters))
+    if (aCol->mContent->IsElement() &&
+        aCol->mContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                                 nsGkAtoms::insertafter,
+                                                 nsGkAtoms::_true,
+                                                 eCaseMatters))
       mScratchArray.AppendElement(nsGkAtoms::insertafter);
   }
 }
@@ -2915,7 +2922,7 @@ nsTreeBodyFrame::PaintTreeBody(gfxContext& aRenderingContext,
                         *drawTarget));
   int32_t oldPageCount = mPageLength;
   if (!mHasFixedRowCount)
-    mPageLength = mInnerBox.height/mRowHeight;
+    mPageLength = (mRowHeight > 0) ? (mInnerBox.height/mRowHeight) : mRowCount;
 
   if (oldPageCount != mPageLength || mHorzWidth != CalcHorzWidth(GetScrollParts())) {
     // Schedule a ResizeReflow that will update our info properly.
@@ -4452,7 +4459,7 @@ nsTreeBodyFrame::ThumbMoved(nsScrollbarFrame* aScrollbar,
   if (parts.mVScrollbar == aScrollbar) {
     nscoord rh = nsPresContext::AppUnitsToIntCSSPixels(mRowHeight);
     nscoord newIndex = nsPresContext::AppUnitsToIntCSSPixels(aNewPos);
-    nscoord newrow = newIndex/rh;
+    nscoord newrow = (rh > 0) ? (newIndex/rh) : 0;
     ScrollInternal(parts, newrow);
   // Horizontal Scrollbar
   } else if (parts.mHScrollbar == aScrollbar) {
@@ -4473,7 +4480,7 @@ nsTreeBodyFrame::GetPseudoStyleContext(nsICSSAnonBoxPseudo* aPseudoElement)
                                      mScratchArray);
 }
 
-nsIContent*
+Element*
 nsTreeBodyFrame::GetBaseElement()
 {
   nsIFrame* parent = GetParent();
@@ -4485,7 +4492,7 @@ nsTreeBodyFrame::GetBaseElement()
       if (ni->Equals(nsGkAtoms::tree, kNameSpaceID_XUL) ||
           (ni->Equals(nsGkAtoms::select) &&
            content->IsHTMLElement()))
-        return content;
+        return content->AsElement();
     }
 
     parent = parent->GetParent();

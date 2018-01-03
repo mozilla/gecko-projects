@@ -38,8 +38,8 @@ function sortWithClones(requests, sorter, a, b) {
 const getFilterFn = createSelector(
   state => state.filters,
   filters => r => {
-    const matchesType = filters.requestFilterTypes.some((enabled, filter) => {
-      return enabled && Filters[filter] && Filters[filter](r);
+    const matchesType = Object.keys(filters.requestFilterTypes).some(filter => {
+      return filters.requestFilterTypes[filter] && Filters[filter] && Filters[filter](r);
     });
     return matchesType && isFreetextMatch(r, filters.requestFilterText);
   }
@@ -48,10 +48,9 @@ const getFilterFn = createSelector(
 const getTypeFilterFn = createSelector(
   state => state.filters,
   filters => r => {
-    const matchesType = filters.requestFilterTypes.some((enabled, filter) => {
-      return enabled && Filters[filter] && Filters[filter](r);
+    return Object.keys(filters.requestFilterTypes).some(filter => {
+      return filters.requestFilterTypes[filter] && Filters[filter] && Filters[filter](r);
     });
-    return matchesType;
   }
 );
 
@@ -130,6 +129,13 @@ const getSelectedRequest = createSelector(
   ({ selectedId, requests }) => selectedId ? requests.get(selectedId) : undefined
 );
 
+const isSelectedRequestVisible = createSelector(
+  state => state.requests,
+  getDisplayedRequests,
+  ({ selectedId }, displayedRequests) =>
+    displayedRequests.some(r => r.id === selectedId)
+);
+
 function getRequestById(state, id) {
   return state.requests.requests.get(id);
 }
@@ -155,4 +161,5 @@ module.exports = {
   getSelectedRequest,
   getSortedRequests,
   getTypeFilteredRequests,
+  isSelectedRequestVisible,
 };

@@ -231,50 +231,6 @@ nsMultiplexInputStream::AppendStream(nsIInputStream* aStream)
 }
 
 NS_IMETHODIMP
-nsMultiplexInputStream::InsertStream(nsIInputStream* aStream, uint32_t aIndex)
-{
-  MutexAutoLock lock(mLock);
-
-  StreamData* streamData = mStreams.InsertElementAt(aIndex);
-  if (NS_WARN_IF(!streamData)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  streamData->Initialize(aStream);
-
-  if (mCurrentStream > aIndex ||
-      (mCurrentStream == aIndex && mStartedReadingCurrent)) {
-    ++mCurrentStream;
-  } else if (mStatus == NS_BASE_STREAM_CLOSED) {
-    // We were closed, but now we have more data to read.
-    mStatus = NS_OK;
-  }
-
-  UpdateQIMap(*streamData, 1);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsMultiplexInputStream::RemoveStream(uint32_t aIndex)
-{
-  MutexAutoLock lock(mLock);
-  if (aIndex >= mStreams.Length()) {
-    return NS_ERROR_FAILURE;
-  }
-
-  UpdateQIMap(mStreams[aIndex], -1);
-
-  mStreams.RemoveElementAt(aIndex);
-  if (mCurrentStream > aIndex) {
-    --mCurrentStream;
-  } else if (mCurrentStream == aIndex) {
-    mStartedReadingCurrent = false;
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsMultiplexInputStream::GetStream(uint32_t aIndex, nsIInputStream** aResult)
 {
   MutexAutoLock lock(mLock);

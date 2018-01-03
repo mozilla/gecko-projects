@@ -13,14 +13,6 @@ for platform in all_platforms:
         'ac_add_options --enable-profiling',
     ]
 
-whitelist['nightly']['linux32'] += [
-    'STRIP_FLAGS="--strip-debug"',
-]
-
-whitelist['nightly']['linux64'] += [
-    'STRIP_FLAGS="--strip-debug"',
-]
-
 whitelist['nightly']['macosx64'] += [
     'if test "${MOZ_UPDATE_CHANNEL}" = "nightly"; then',
     'if test "${MOZ_UPDATE_CHANNEL}" = "nightly-try"; then',

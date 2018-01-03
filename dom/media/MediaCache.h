@@ -218,7 +218,7 @@ public:
   // as the aOriginal stream.
   // Exactly one of InitAsClone or Init must be called before any other method
   // on this class.
-  nsresult InitAsClone(MediaCacheStream* aOriginal);
+  void InitAsClone(MediaCacheStream* aOriginal);
 
   nsIEventTarget* OwnerThread() const;
 
@@ -227,11 +227,10 @@ public:
   // used to create this MediaCacheStream is deleted.
   void Close();
   // This returns true when the stream has been closed.
-  // Must be used on the main thread or while holding the cache lock.
-  bool IsClosed() const { return mClosed; }
+  bool IsClosed(AutoLock&) const { return mClosed; }
   // Returns true when this stream is can be shared by a new resource load.
   // Called on the main thread only.
-  bool IsAvailableForSharing() const { return !mClosed && !mIsPrivateBrowsing; }
+  bool IsAvailableForSharing() const { return !mIsPrivateBrowsing; }
 
   // These callbacks are called on the main thread by the client
   // when data has been received via the channel.
@@ -465,6 +464,9 @@ private:
                                bool aReopenOnError);
 
   void UpdateDownloadStatistics(AutoLock&);
+
+  void CloseInternal(AutoLock&);
+  void InitAsCloneInternal(MediaCacheStream* aOriginal);
 
   // Instance of MediaCache to use with this MediaCacheStream.
   RefPtr<MediaCache> mMediaCache;

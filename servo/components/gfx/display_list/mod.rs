@@ -729,6 +729,7 @@ pub struct GradientDisplayItem {
     ///
     /// Without tiles, the tile will be the same size as the background.
     pub tile: Size2D<Au>,
+    pub tile_spacing: Size2D<Au>,
 }
 
 /// Paints a radial gradient.
@@ -763,6 +764,7 @@ pub struct RadialGradientDisplayItem {
     ///
     /// Without tiles, the tile will be the same size as the background.
     pub tile: Size2D<Au>,
+    pub tile_spacing: Size2D<Au>,
 }
 
 /// A normal border, supporting CSS border styles.
@@ -775,8 +777,6 @@ pub struct NormalBorder {
     pub style: SideOffsets2D<border_style::T>,
 
     /// Border radii.
-    ///
-    /// TODO(pcwalton): Elliptical radii.
     pub radius: BorderRadii<Au>,
 }
 
@@ -845,8 +845,6 @@ pub struct BorderDisplayItem {
 }
 
 /// Information about the border radii.
-///
-/// TODO(pcwalton): Elliptical radii.
 #[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct BorderRadii<T> {
     pub top_left: Size2D<T>,

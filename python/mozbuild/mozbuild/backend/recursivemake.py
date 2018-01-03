@@ -201,7 +201,7 @@ class BackendMakeFile(object):
     actually change. We use FileAvoidWrite to accomplish this.
     """
 
-    def __init__(self, srcdir, objdir, environment, topsrcdir, topobjdir):
+    def __init__(self, srcdir, objdir, environment, topsrcdir, topobjdir, dry_run):
         self.topsrcdir = topsrcdir
         self.srcdir = srcdir
         self.objdir = objdir
@@ -211,7 +211,7 @@ class BackendMakeFile(object):
 
         self.xpt_name = None
 
-        self.fh = FileAvoidWrite(self.name, capture_diff=True)
+        self.fh = FileAvoidWrite(self.name, capture_diff=True, dry_run=dry_run)
         self.fh.write('# THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT EDIT.\n')
         self.fh.write('\n')
 
@@ -433,7 +433,7 @@ class RecursiveMakeBackend(CommonBackend):
         if obj.objdir not in self._backend_files:
             self._backend_files[obj.objdir] = \
                 BackendMakeFile(obj.srcdir, obj.objdir, obj.config,
-                    obj.topsrcdir, self.environment.topobjdir)
+                    obj.topsrcdir, self.environment.topobjdir, self.dry_run)
         return self._backend_files[obj.objdir]
 
     def consume_object(self, obj):
@@ -1405,7 +1405,6 @@ class RecursiveMakeBackend(CommonBackend):
             'dist/xpi-stage',
             '_tests',
             'dist/include',
-            'dist/branding',
         ))
         if not path:
             raise Exception("Cannot install to " + target)
@@ -1417,14 +1416,6 @@ class RecursiveMakeBackend(CommonBackend):
         manifest = path.replace('/', '_')
         install_manifest = self._install_manifests[manifest]
         reltarget = mozpath.relpath(target, path)
-
-        # Also emit the necessary rules to create $(DIST)/branding during
-        # partial tree builds. The locale makefiles rely on this working.
-        if path == 'dist/branding':
-            backend_file.write('NONRECURSIVE_TARGETS += export\n')
-            backend_file.write('NONRECURSIVE_TARGETS_export += branding\n')
-            backend_file.write('NONRECURSIVE_TARGETS_export_branding_DIRECTORY = $(DEPTH)\n')
-            backend_file.write('NONRECURSIVE_TARGETS_export_branding_TARGETS += install-dist/branding\n')
 
         for path, files in files.walk():
             target_var = (mozpath.join(target, path)

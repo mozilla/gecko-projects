@@ -1267,6 +1267,21 @@ screenshots:
     record_in_processes:
       - 'main'
 
+network.http:
+  backup_conn_won:
+    bug_numbers:
+      - 1402811
+    description: >
+      For connection where TFO has not be use, collect telemetry on whether the
+      backup connection or the primary connection was faster.
+    expires: "61"
+    kind: boolean
+    notification_emails:
+      - necko@mozilla.com
+      - ddamjanovic@mozilla.com
+    record_in_processes:
+      - 'main'
+
 idb.type:
   persistent_count:
     bug_numbers:
@@ -1339,6 +1354,21 @@ sw:
     notification_emails:
       - sw-telemetry@mozilla.com
       - ttung@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  alternative_body_used_count:
+    bug_numbers:
+      - 1423623
+    description: >
+      The count of number of synthesize response using alternative body.
+    expires: "61"
+    kind: uint
+    notification_emails:
+      - sw-telemetry@mozilla.com
+      - echuang@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - 'main'

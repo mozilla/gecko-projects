@@ -705,6 +705,14 @@ public:
     return IsMathMLElement() && IsNodeInternal(aFirst, aArgs...);
   }
 
+  bool IsShadowRoot() const
+  {
+    const bool isShadowRoot = IsInShadowTree() && !GetParentNode();
+    MOZ_ASSERT_IF(isShadowRoot,
+                  NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE);
+    return isShadowRoot;
+  }
+
   /**
    * Insert a content node at a particular index.  This method handles calling
    * BindToTree on the child appropriately.
@@ -942,6 +950,8 @@ public:
     return mParent;
   }
 
+  enum FlattenedParentType { eNotForStyle, eForStyle };
+
   /**
    * Returns the node that is the parent of this node in the flattened
    * tree. This differs from the normal parent if the node is filtered
@@ -953,10 +963,10 @@ public:
   inline nsINode* GetFlattenedTreeParentNode() const;
 
   /**
-   * Like GetFlattenedTreeParentNode, but returns null for any native
-   * anonymous content that was generated for ancestor frames of the
-   * root element's primary frame, such as scrollbar elements created
-   * by the root scroll frame.
+   * Like GetFlattenedTreeParentNode, but returns the document for any native
+   * anonymous content that was generated for ancestor frames of the document
+   * element's primary frame, such as scrollbar elements created by the root
+   * scroll frame.
    */
   inline nsINode* GetFlattenedTreeParentNodeForStyle() const;
 
@@ -1112,8 +1122,8 @@ public:
     // putting a DestroySlots function on nsINode
     virtual ~nsSlots();
 
-    void Traverse(nsCycleCollectionTraversalCallback &cb);
-    void Unlink();
+    virtual void Traverse(nsCycleCollectionTraversalCallback&);
+    virtual void Unlink();
 
     /**
      * A list of mutation observers
@@ -1353,10 +1363,10 @@ public:
     GetTextContentInternal(aTextContent, aError);
   }
   void SetTextContent(const nsAString& aTextContent,
-                      nsIPrincipal& aSubjectPrincipal,
+                      nsIPrincipal* aSubjectPrincipal,
                       mozilla::ErrorResult& aError)
   {
-    SetTextContentInternal(aTextContent, &aSubjectPrincipal, aError);
+    SetTextContentInternal(aTextContent, aSubjectPrincipal, aError);
   }
   void SetTextContent(const nsAString& aTextContent,
                       mozilla::ErrorResult& aError)
@@ -1818,7 +1828,7 @@ public:
   void GetNodeName(mozilla::dom::DOMString& aNodeName)
   {
     const nsString& nodeName = NodeName();
-    aNodeName.SetOwnedString(nodeName);
+    aNodeName.SetKnownLiveString(nodeName);
   }
   MOZ_MUST_USE nsresult GetBaseURI(nsAString& aBaseURI) const;
   // Return the base URI for the document.
@@ -1882,7 +1892,7 @@ public:
   void GetLocalName(mozilla::dom::DOMString& aLocalName) const
   {
     const nsString& localName = LocalName();
-    aLocalName.SetOwnedString(localName);
+    aLocalName.SetKnownLiveString(localName);
   }
 
   nsDOMAttributeMap* GetAttributes();

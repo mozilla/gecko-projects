@@ -1017,7 +1017,7 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
             def is_msvc(compiler):
                 return compiler.type == 'msvc'
 
-            imply_option('LINK', linker, reason='LD', when=is_msvc)
+            imply_option('LINKER', linker, reason='LD', when=is_msvc)
 
     return valid_compiler
 
@@ -1339,9 +1339,9 @@ imply_option('RUSTC_OPT_LEVEL', '2', when='--enable-release')
 
 
 @depends('RUSTC_OPT_LEVEL', debug_rust, '--enable-debug-symbols',
-         moz_optimize, host, target)
+         moz_optimize)
 def rust_compiler_flags(opt_level_option, debug_rust, debug_symbols,
-                        moz_optimize, host, target):
+                        moz_optimize):
     optimize = moz_optimize.optimize
 
     # Cargo currently supports only two interesting profiles for building:
@@ -1371,11 +1371,7 @@ def rust_compiler_flags(opt_level_option, debug_rust, debug_symbols,
         debug_assertions = False
 
     if debug_symbols:
-        if host.kernel == 'Linux' and target.kernel == 'Darwin':
-            # hack to work around dsymutil failing on cross-OSX builds (bug 1410148)
-            debug_info = '1'
-        else:
-            debug_info = '2'
+        debug_info = '2'
 
     opts = []
 
@@ -1548,3 +1544,31 @@ def code_coverage(value):
 
 set_config('MOZ_CODE_COVERAGE', code_coverage)
 set_define('MOZ_CODE_COVERAGE', code_coverage)
+
+# Libstdc++ compatibility hacks
+# ==============================================================
+#
+js_option('--enable-stdcxx-compat', env='MOZ_STDCXX_COMPAT',
+          help='Enable compatibility with older libstdc++')
+
+
+@template
+def libstdcxx_version(var, compiler):
+    @depends(compiler, when='--enable-stdcxx-compat')
+    @imports(_from='mozbuild.configure.libstdcxx', _import='find_version')
+    def version(compiler):
+        result = find_version(
+            compiler.wrapper + [compiler.compiler] + compiler.flags)
+        if result:
+            return str(result)
+
+    set_config(var, version)
+    return version
+
+
+add_gcc_flag(
+    '-D_GLIBCXX_USE_CXX11_ABI=0', cxx_compiler,
+    when=libstdcxx_version('MOZ_LIBSTDCXX_TARGET_VERSION', cxx_compiler))
+add_gcc_flag(
+    '-D_GLIBCXX_USE_CXX11_ABI=0', host_cxx_compiler,
+    when=libstdcxx_version('MOZ_LIBSTDCXX_HOST_VERSION', host_cxx_compiler))
