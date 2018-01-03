@@ -1213,6 +1213,25 @@ var gBrowserInit = {
       initBrowser.removeAttribute("blank");
     }
 
+    // Set a sane starting width/height for all resolutions on new profiles.
+    if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
+      // When the fingerprinting resistance is enabled, making sure that we don't
+      // have a maximum window to interfere with generating rounded window dimensions.
+      document.documentElement.setAttribute("sizemode", "normal");
+    } else if (!document.documentElement.hasAttribute("width")) {
+      const TARGET_WIDTH = 1280;
+      const TARGET_HEIGHT = 1040;
+      let width = Math.min(screen.availWidth * .9, TARGET_WIDTH);
+      let height = Math.min(screen.availHeight * .9, TARGET_HEIGHT);
+
+      document.documentElement.setAttribute("width", width);
+      document.documentElement.setAttribute("height", height);
+
+      if (width < TARGET_WIDTH && height < TARGET_HEIGHT) {
+        document.documentElement.setAttribute("sizemode", "maximized");
+      }
+    }
+
     gBrowser.updateBrowserRemoteness(initBrowser, isRemote, {
       remoteType, sameProcessAsFrameLoader
     });
@@ -1275,27 +1294,6 @@ var gBrowserInit = {
       gDragSpaceObserver.init();
     }
 
-    let isResistFingerprintingEnabled = Services.prefs.getBoolPref("privacy.resistFingerprinting");
-
-    // Set a sane starting width/height for all resolutions on new profiles.
-    if (isResistFingerprintingEnabled) {
-      // When the fingerprinting resistance is enabled, making sure that we don't
-      // have a maximum window to interfere with generating rounded window dimensions.
-      document.documentElement.setAttribute("sizemode", "normal");
-    } else if (!document.documentElement.hasAttribute("width")) {
-      const TARGET_WIDTH = 1280;
-      const TARGET_HEIGHT = 1040;
-      let width = Math.min(screen.availWidth * .9, TARGET_WIDTH);
-      let height = Math.min(screen.availHeight * .9, TARGET_HEIGHT);
-
-      document.documentElement.setAttribute("width", width);
-      document.documentElement.setAttribute("height", height);
-
-      if (width < TARGET_WIDTH && height < TARGET_HEIGHT) {
-        document.documentElement.setAttribute("sizemode", "maximized");
-      }
-    }
-
     if (!window.toolbar.visible) {
       // adjust browser UI for popups
       gURLBar.setAttribute("readonly", "true");
@@ -1348,6 +1346,8 @@ var gBrowserInit = {
     this._uriToLoadPromise.then(uriToLoad => {
       if (uriToLoad == "about:home") {
         gBrowser.setIcon(gBrowser.selectedTab, "chrome://branding/content/icon32.png");
+      } else if (uriToLoad == "about:privatebrowsing") {
+        gBrowser.setIcon(gBrowser.selectedTab, "chrome://browser/skin/privatebrowsing/favicon.svg");
       }
     });
 
@@ -6609,7 +6609,7 @@ var CanvasPermissionPromptHelper = {
     let message = gNavigatorBundle.getFormattedString("canvas.siteprompt", [ uri.asciiHost ]);
 
     function setCanvasPermission(aURI, aPerm, aPersistent) {
-      Services.perms.add(aURI, "canvas/extractData", aPerm,
+      Services.perms.add(aURI, "canvas", aPerm,
                           aPersistent ? Ci.nsIPermissionManager.EXPIRE_NEVER
                                       : Ci.nsIPermissionManager.EXPIRE_SESSION);
     }

@@ -11,10 +11,6 @@ Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/engines/bookmarks.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
-Cu.import("resource://testing-common/services/sync/utils.js");
-
-
-initTestLogging("Trace");
 
 async function fetchAllRecordIds() {
   let db = await PlacesUtils.promiseDBConnection();
@@ -38,15 +34,8 @@ async function fetchAllRecordIds() {
   return recordIds;
 }
 add_task(async function setup() {
-  initTestLogging("Trace");
   await generateNewKeys(Service.collectionKeys);
-});
-
-add_task(async function setup() {
   await Service.engineManager.unregister("bookmarks");
-
-  initTestLogging("Trace");
-  generateNewKeys(Service.collectionKeys);
 });
 
 add_task(async function test_delete_invalid_roots_from_server() {
@@ -124,8 +113,8 @@ add_task(async function bad_record_allIDs() {
   let all = await fetchAllRecordIds();
 
   _("All IDs: " + JSON.stringify([...all]));
-  do_check_true(all.has("menu"));
-  do_check_true(all.has("toolbar"));
+  Assert.ok(all.has("menu"));
+  Assert.ok(all.has("toolbar"));
 
   _("Clean up.");
   await PlacesUtils.bookmarks.eraseEverything();
@@ -194,12 +183,12 @@ add_task(async function test_processIncoming_error_orderChildren() {
     // Verify that the bookmark order has been applied.
     folder1_record = await store.createRecord(folder1.guid);
     let new_children = folder1_record.children;
-    do_check_matches(new_children,
+    Assert.deepEqual(new_children,
       [folder1_payload.children[0], folder1_payload.children[1]]);
 
     let localChildIds = await PlacesSyncUtils.bookmarks.fetchChildRecordIds(
       folder1.guid);
-    do_check_matches(localChildIds, [bmk2.guid, bmk1.guid]);
+    Assert.deepEqual(localChildIds, [bmk2.guid, bmk1.guid]);
 
   } finally {
     await store.wipe();
@@ -278,15 +267,15 @@ async function test_restoreOrImport(aReplace) {
       error = ex;
       _("Got error: " + Log.exceptionStr(ex));
     }
-    do_check_true(!error);
+    Assert.ok(!error);
 
     _("Verify that there's only one bookmark on the server, and it's Thunderbird.");
     // Of course, there's also the Bookmarks Toolbar and Bookmarks Menu...
     let wbos = collection.keys(function(id) {
       return ["menu", "toolbar", "mobile", "unfiled", folder1.guid].indexOf(id) == -1;
     });
-    do_check_eq(wbos.length, 1);
-    do_check_eq(wbos[0], bmk2.guid);
+    Assert.equal(wbos.length, 1);
+    Assert.equal(wbos[0], bmk2.guid);
 
     _(`Now ${verb} from a backup.`);
     await bookmarkUtils.importFromFile(backupFilePath, aReplace);
@@ -294,10 +283,10 @@ async function test_restoreOrImport(aReplace) {
     let bookmarksCollection = server.user("foo").collection("bookmarks");
     if (aReplace) {
       _("Verify that we wiped the server.");
-      do_check_true(!bookmarksCollection);
+      Assert.ok(!bookmarksCollection);
     } else {
       _("Verify that we didn't wipe the server.");
-      do_check_true(!!bookmarksCollection);
+      Assert.ok(!!bookmarksCollection);
     }
 
     _("Ensure we have the bookmarks we expect locally.");
@@ -315,9 +304,9 @@ async function test_restoreOrImport(aReplace) {
         bookmarkGuids.set(info.url.href, guid);
       }
     }
-    do_check_true(bookmarkGuids.has("http://getfirefox.com/"));
+    Assert.ok(bookmarkGuids.has("http://getfirefox.com/"));
     if (!aReplace) {
-      do_check_true(bookmarkGuids.has("http://getthunderbird.com/"));
+      Assert.ok(bookmarkGuids.has("http://getthunderbird.com/"));
     }
 
     _("Have the correct number of IDs locally, too.");
@@ -326,7 +315,7 @@ async function test_restoreOrImport(aReplace) {
     if (!aReplace) {
       expectedResults.push("toolbar", folder1.guid, bmk2.guid);
     }
-    do_check_eq(count, expectedResults.length);
+    Assert.equal(count, expectedResults.length);
 
     _("Sync again. This'll wipe bookmarks from the server.");
     try {
@@ -335,7 +324,7 @@ async function test_restoreOrImport(aReplace) {
       error = ex;
       _("Got error: " + Log.exceptionStr(ex));
     }
-    do_check_true(!error);
+    Assert.ok(!error);
 
     _("Verify that there's the right bookmarks on the server.");
     // Of course, there's also the Bookmarks Toolbar and Bookmarks Menu...
@@ -396,18 +385,18 @@ async function test_restoreOrImport(aReplace) {
 }
 
 function doCheckWBOs(WBOs, expected) {
-  do_check_eq(WBOs.length, expected.length);
+  Assert.equal(WBOs.length, expected.length);
   for (let i = 0; i < expected.length; i++) {
     let lhs = WBOs[i];
     let rhs = expected[i];
     if ("id" in rhs) {
-      do_check_eq(lhs.id, rhs.id);
+      Assert.equal(lhs.id, rhs.id);
     }
     if ("bmkUri" in rhs) {
-      do_check_eq(lhs.bmkUri, rhs.bmkUri);
+      Assert.equal(lhs.bmkUri, rhs.bmkUri);
     }
     if ("title" in rhs) {
-      do_check_eq(lhs.title, rhs.title);
+      Assert.equal(lhs.title, rhs.title);
     }
   }
 }
@@ -469,9 +458,9 @@ add_task(async function test_mismatched_types() {
     let oldID = await PlacesUtils.promiseItemId(oldR.id);
     _("Old ID: " + oldID);
     let oldInfo = await PlacesUtils.bookmarks.fetch(oldR.id);
-    do_check_eq(oldInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
-    do_check_false(PlacesUtils.annotations
-                              .itemHasAnnotation(oldID, PlacesUtils.LMANNO_FEEDURI));
+    Assert.equal(oldInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
+    Assert.ok(!PlacesUtils.annotations
+                          .itemHasAnnotation(oldID, PlacesUtils.LMANNO_FEEDURI));
 
     await store.applyIncoming(newR);
     let newID = await PlacesUtils.promiseItemId(newR.id);
@@ -479,9 +468,9 @@ add_task(async function test_mismatched_types() {
 
     _("Applied new. It's a livemark.");
     let newInfo = await PlacesUtils.bookmarks.fetch(newR.id);
-    do_check_eq(newInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
-    do_check_true(PlacesUtils.annotations
-                             .itemHasAnnotation(newID, PlacesUtils.LMANNO_FEEDURI));
+    Assert.equal(newInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
+    Assert.ok(PlacesUtils.annotations
+                         .itemHasAnnotation(newID, PlacesUtils.LMANNO_FEEDURI));
 
   } finally {
     await store.wipe();
@@ -532,8 +521,8 @@ add_task(async function test_bookmark_guidMap_fail() {
   } catch (ex) {
     err = ex;
   }
-  do_check_eq(err.code, Engine.prototype.eEngineAbortApplyIncoming);
-  do_check_eq(err.cause, "Nooo");
+  Assert.equal(err.code, Engine.prototype.eEngineAbortApplyIncoming);
+  Assert.equal(err.cause, "Nooo");
 
   _("We get an error and abort during processIncoming.");
   err = undefined;
@@ -542,7 +531,7 @@ add_task(async function test_bookmark_guidMap_fail() {
   } catch (ex) {
     err = ex;
   }
-  do_check_eq(err, "Nooo");
+  Assert.equal(err, "Nooo");
 
   _("Sync the engine and validate that we didn't put the error code in the wrong place");
   let ping;
@@ -627,13 +616,13 @@ add_task(async function test_misreconciled_root() {
   let toolbarBefore = await store.createRecord("toolbar", "bookmarks");
   let toolbarIDBefore = await PlacesUtils.promiseItemId(
     PlacesUtils.bookmarks.toolbarGuid);
-  do_check_neq(-1, toolbarIDBefore);
+  Assert.notEqual(-1, toolbarIDBefore);
 
   let parentGUIDBefore = toolbarBefore.parentid;
   let parentIDBefore = await PlacesUtils.promiseItemId(
     PlacesSyncUtils.bookmarks.recordIdToGuid(parentGUIDBefore));
-  do_check_neq(-1, parentIDBefore);
-  do_check_eq("string", typeof(parentGUIDBefore));
+  Assert.notEqual(-1, parentIDBefore);
+  Assert.equal("string", typeof(parentGUIDBefore));
 
   _("Current parent: " + parentGUIDBefore + " (" + parentIDBefore + ").");
 
@@ -659,10 +648,10 @@ add_task(async function test_misreconciled_root() {
   let parentGUIDAfter = toolbarAfter.parentid;
   let parentIDAfter = await PlacesUtils.promiseItemId(
     PlacesSyncUtils.bookmarks.recordIdToGuid(parentGUIDAfter));
-  do_check_eq((await PlacesUtils.promiseItemGuid(toolbarIDBefore)),
+  Assert.equal((await PlacesUtils.promiseItemGuid(toolbarIDBefore)),
     PlacesUtils.bookmarks.toolbarGuid);
-  do_check_eq(parentGUIDBefore, parentGUIDAfter);
-  do_check_eq(parentIDBefore, parentIDAfter);
+  Assert.equal(parentGUIDBefore, parentGUIDAfter);
+  Assert.equal(parentIDBefore, parentIDAfter);
 
   await store.wipe();
   await engine.resetClient();

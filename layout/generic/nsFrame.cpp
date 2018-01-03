@@ -690,15 +690,12 @@ nsFrame::Init(nsIContent*       aContent,
   }
   if (disp->mPosition == NS_STYLE_POSITION_STICKY &&
       !aPrevInFlow &&
-      !(mState & NS_FRAME_IS_NONDISPLAY) &&
-      !disp->IsInnerTableStyle()) {
+      !(mState & NS_FRAME_IS_NONDISPLAY)) {
     // Note that we only add first continuations, but we really only
     // want to add first continuation-or-ib-split-siblings.  But since we
     // don't yet know if we're a later part of a block-in-inline split,
     // we'll just add later members of a block-in-inline split here, and
     // then StickyScrollContainer will remove them later.
-    // We don't currently support relative positioning of inner table
-    // elements (bug 35168), so exclude them from sticky positioning too.
     StickyScrollContainer* ssc =
       StickyScrollContainer::GetStickyScrollContainerForFrame(this);
     if (ssc) {
@@ -726,8 +723,7 @@ nsFrame::Init(nsIContent*       aContent,
                  "root frame should always be a container");
   }
 
-  if (PresShell()->AssumeAllFramesVisible() &&
-      TrackingVisibility()) {
+  if (PresShell()->AssumeAllFramesVisible() && TrackingVisibility()) {
     IncApproximateVisibleCount();
   }
 
@@ -1001,9 +997,8 @@ nsIFrame::RemoveDisplayItemDataForDeletion()
 void
 nsIFrame::MarkNeedsDisplayItemRebuild()
 {
-  if (!gfxPrefs::LayoutRetainDisplayList() || !XRE_IsContentProcess() ||
-      IsFrameModified()) {
-    // Skip non-content processes and frames that are already marked modified.
+  if (!nsLayoutUtils::AreRetainedDisplayListsEnabled() || IsFrameModified()) {
+    // Skip frames that are already marked modified.
     return;
   }
 
@@ -1562,6 +1557,9 @@ nsIFrame::IsSVGTransformed(gfx::Matrix *aOwnTransforms,
 bool
 nsIFrame::Extend3DContext(const nsStyleDisplay* aStyleDisplay, mozilla::EffectSet* aEffectSet) const
 {
+  if (!(mState & NS_FRAME_MAY_BE_TRANSFORMED)) {
+    return false;
+  }
   const nsStyleDisplay* disp = StyleDisplayWithOptionalParam(aStyleDisplay);
   if (disp->mTransformStyle != NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D ||
       !IsFrameOfType(nsIFrame::eSupportsCSSTransforms)) {
@@ -3566,8 +3564,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
       return;
     savedOutOfFlowData = nsDisplayListBuilder::GetOutOfFlowData(child);
     if (savedOutOfFlowData) {
-      visible = savedOutOfFlowData->mVisibleRect;
-      dirty = savedOutOfFlowData->mDirtyRect;
+      visible = savedOutOfFlowData->GetVisibleRectForFrame(aBuilder, child, &dirty);
     } else {
       // The out-of-flow frame did not intersect the dirty area. We may still
       // need to traverse into it, since it may contain placeholders we need
@@ -7556,6 +7553,9 @@ GetNearestBlockContainer(nsIFrame* frame)
   // Since the parent of such a block is either a normal block or
   // another such pseudo, this shouldn't cause anything bad to happen.
   // Also the anonymous blocks inside table cells are not containing blocks.
+  //
+  // If we ever start skipping table row groups from being containing blocks,
+  // you need to remove the StickyScrollContainer hack referencing bug 1421660.
   while (frame->IsFrameOfType(nsIFrame::eLineParticipant) ||
          frame->IsBlockWrapper() ||
          // Table rows are not containing blocks either
@@ -7769,7 +7769,7 @@ nsFrame::MakeFrameName(const nsAString& aType, nsAString& aResult) const
     mContent->NodeInfo()->NameAtom()->ToString(buf);
     if (IsSubDocumentFrame()) {
       nsAutoString src;
-      mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::src, src);
+      mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::src, src);
       buf.AppendLiteral(" src=");
       buf.Append(src);
     }
@@ -9986,7 +9986,7 @@ nsIFrame::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
     if (!isFocusable && !aWithMouse && IsScrollFrame() &&
         mContent->IsHTMLElement() &&
         !mContent->IsRootOfNativeAnonymousSubtree() && mContent->GetParent() &&
-        !mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex)) {
+        !mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex)) {
       // Elements with scrollable view are focusable with script & tabbable
       // Otherwise you couldn't scroll them with keyboard, which is
       // an accessibility issue (e.g. Section 508 rules)
@@ -10930,7 +10930,7 @@ nsIFrame::CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder,
 {
   if (GetContent() &&
       GetContent()->IsXULElement() &&
-      GetContent()->HasAttr(kNameSpaceID_None, nsGkAtoms::layer)) {
+      GetContent()->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::layer)) {
     aList->AppendToTop(new (aBuilder)
         nsDisplayOwnLayer(aBuilder, this, aList, aBuilder->CurrentActiveScrolledRoot()));
     if (aCreatedContainerItem) {

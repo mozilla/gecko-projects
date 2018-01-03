@@ -78,6 +78,7 @@
 
 #if defined(XP_WIN)
 #include <windows.h>
+#include "mozilla/WindowsVersion.h"
 #endif
 
 #if defined(XP_MACOSX)
@@ -108,8 +109,11 @@
 #define SAFE_HINT_HEADER_VALUE   "safeHint.enabled"
 #define SECURITY_PREFIX          "security."
 
-#define TCP_FAST_OPEN_ENABLE        "network.tcp.tcp_fastopen_enable"
-#define TCP_FAST_OPEN_FAILURE_LIMIT "network.tcp.tcp_fastopen_consecutive_failure_limit"
+#define TCP_FAST_OPEN_ENABLE         "network.tcp.tcp_fastopen_enable"
+#define TCP_FAST_OPEN_FAILURE_LIMIT  "network.tcp.tcp_fastopen_consecutive_failure_limit"
+#define TCP_FAST_OPEN_STALLS_LIMIT   "network.tcp.tcp_fastopen_http_stalls_limit"
+#define TCP_FAST_OPEN_STALLS_IDLE    "network.tcp.tcp_fastopen_http_check_for_stalls_only_if_idle_for"
+#define TCP_FAST_OPEN_STALLS_TIMEOUT "network.tcp.tcp_fastopen_http_stalls_timeout"
 
 #define UA_PREF(_pref) UA_PREF_PREFIX _pref
 #define HTTP_PREF(_pref) HTTP_PREF_PREFIX _pref
@@ -284,6 +288,10 @@ nsHttpHandler::nsHttpHandler()
     , mUseFastOpen(true)
     , mFastOpenConsecutiveFailureLimit(5)
     , mFastOpenConsecutiveFailureCounter(0)
+    , mFastOpenStallsLimit(3)
+    , mFastOpenStallsCounter(0)
+    , mFastOpenStallsIdleTime(10)
+    , mFastOpenStallsTimeout(20)
     , mActiveTabPriority(true)
     , mProcessId(0)
     , mNextChannelId(1)
@@ -308,6 +316,8 @@ nsHttpHandler::SetFastOpenOSSupport()
     mFastOpenSupported = false;
 #if !defined(XP_WIN) && !defined(XP_LINUX) && !defined(ANDROID) && !defined(HAS_CONNECTX)
     return;
+#elif defined(XP_WIN)
+    mFastOpenSupported = IsWindows10BuildOrLater(16299);
 #else
 
     nsAutoCString version;
@@ -332,10 +342,8 @@ nsHttpHandler::SetFastOpenOSSupport()
 
     if (NS_SUCCEEDED(rv)) {
         // set min version minus 1.
-#ifdef XP_WIN
-        int min_version[] = {10, 0};
-#elif XP_MACOSX
-        int min_version[] = {15, 0};
+#if XP_MACOSX
+        int min_version[] = {17, 3};
 #elif ANDROID
         int min_version[] = {4, 4};
 #elif XP_LINUX
@@ -366,16 +374,6 @@ nsHttpHandler::SetFastOpenOSSupport()
         }
     }
 #endif
-
-#ifdef XP_WIN
-  if (mFastOpenSupported) {
-    // We have some problems with lavasoft software and tcp fast open.
-    if (GetModuleHandleW(L"pmls64.dll") || GetModuleHandleW(L"rlls64.dll")) {
-      mFastOpenSupported = false;
-    }
-  }
-#endif
-
     LOG(("nsHttpHandler::SetFastOpenOSSupport %s supported.\n",
          mFastOpenSupported ? "" : "not"));
 }
@@ -461,6 +459,9 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(SECURITY_PREFIX, this, true);
         prefBranch->AddObserver(TCP_FAST_OPEN_ENABLE, this, true);
         prefBranch->AddObserver(TCP_FAST_OPEN_FAILURE_LIMIT, this, true);
+        prefBranch->AddObserver(TCP_FAST_OPEN_STALLS_LIMIT, this, true);
+        prefBranch->AddObserver(TCP_FAST_OPEN_STALLS_IDLE, this, true);
+        prefBranch->AddObserver(TCP_FAST_OPEN_STALLS_TIMEOUT, this, true);
         PrefsChanged(prefBranch, nullptr);
     }
 
@@ -743,6 +744,20 @@ nsHttpHandler::IncrementFastOpenConsecutiveFailureCounter()
                  "Fast open failed too many times"));
         }
     }
+}
+
+void
+nsHttpHandler::IncrementFastOpenStallsCounter()
+{
+  LOG(("nsHttpHandler::IncrementFastOpenStallsCounter - failed=%d "
+        "failure_limit=%d", mFastOpenStallsCounter, mFastOpenStallsLimit));
+  if (mFastOpenStallsCounter < mFastOpenStallsLimit) {
+    mFastOpenStallsCounter++;
+    if (mFastOpenStallsCounter == mFastOpenStallsLimit) {
+      LOG(("nsHttpHandler::IncrementFastOpenStallsCounter - "
+           "There are too many stalls involving TFO and TLS."));
+    }
+  }
 }
 
 nsresult
@@ -1938,6 +1953,36 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
+    if (PREF_CHANGED(TCP_FAST_OPEN_STALLS_LIMIT)) {
+        rv = prefs->GetIntPref(TCP_FAST_OPEN_STALLS_LIMIT, &val);
+        if (NS_SUCCEEDED(rv)) {
+            if (val < 0) {
+                val = 0;
+            }
+            mFastOpenStallsLimit = val;
+        }
+    }
+
+    if (PREF_CHANGED(TCP_FAST_OPEN_STALLS_TIMEOUT)) {
+        rv = prefs->GetIntPref(TCP_FAST_OPEN_STALLS_TIMEOUT, &val);
+        if (NS_SUCCEEDED(rv)) {
+            if (val < 0) {
+                val = 0;
+            }
+            mFastOpenStallsTimeout = val;
+        }
+    }
+
+    if (PREF_CHANGED(TCP_FAST_OPEN_STALLS_IDLE)) {
+        rv = prefs->GetIntPref(TCP_FAST_OPEN_STALLS_IDLE, &val);
+        if (NS_SUCCEEDED(rv)) {
+            if (val < 0) {
+                val = 0;
+            }
+            mFastOpenStallsIdleTime = val;
+        }
+    }
+
     if (PREF_CHANGED(HTTP_PREF("spdy.hpack-default-buffer"))) {
         rv = prefs->GetIntPref(HTTP_PREF("spdy.default-hpack-buffer"), &val);
         if (NS_SUCCEEDED(rv)) {
@@ -2284,8 +2329,10 @@ nsHttpHandler::Observe(nsISupports *subject,
             Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 1);
         } else if (!mUseFastOpen) {
             Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 2);
-        } else {
+        } else if (mFastOpenConsecutiveFailureCounter >= mFastOpenConsecutiveFailureLimit) {
             Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 3);
+        } else {
+            Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 4);
         }
     } else if (!strcmp(topic, "profile-change-net-restore")) {
         // initialize connection manager

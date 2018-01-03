@@ -150,7 +150,7 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
   }
-  void SetSrc(const nsAString& aSrc, nsIPrincipal& aTriggeringPrincipal, ErrorResult& aError)
+  void SetSrc(const nsAString& aSrc, nsIPrincipal* aTriggeringPrincipal, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::src, aSrc, aTriggeringPrincipal, aError);
   }
@@ -158,7 +158,7 @@ public:
   {
     GetHTMLAttr(nsGkAtoms::srcset, aSrcset);
   }
-  void SetSrcset(const nsAString& aSrcset, nsIPrincipal& aTriggeringPrincipal, ErrorResult& aError)
+  void SetSrcset(const nsAString& aSrcset, nsIPrincipal* aTriggeringPrincipal, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::srcset, aSrcset, aTriggeringPrincipal, aError);
   }
@@ -370,7 +370,7 @@ protected:
   // If the node's srcset/sizes make for an invalid selector, returns
   // false. This does not guarantee the resulting selector matches an image,
   // only that it is valid.
-  bool TryCreateResponsiveSelector(nsIContent *aSourceNode);
+  bool TryCreateResponsiveSelector(Element* aSourceElement);
 
   MOZ_CAN_RUN_SCRIPT CSSIntPoint GetXY();
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -400,7 +400,7 @@ protected:
   RefPtr<ResponsiveImageSelector> mResponsiveSelector;
 
 private:
-  bool SourceElementMatches(nsIContent* aSourceNode);
+  bool SourceElementMatches(Element* aSourceElement);
 
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                     GenericSpecifiedValues* aGenericData);

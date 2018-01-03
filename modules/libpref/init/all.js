@@ -3127,6 +3127,7 @@ pref("layout.display-list.retain", true);
 #else
 pref("layout.display-list.retain", false);
 #endif
+pref("layout.display-list.retain.chrome", false);
 
 // Set the maximum amount of modified frames allowed before doing a full
 // display list rebuild.
@@ -3874,8 +3875,32 @@ pref("plugin.mousewheel.enabled", true);
 // Switch the keyboard layout per window
 pref("intl.keyboard.per_window_layout", false);
 
+// Whether Gecko sets input scope of the URL bar to IS_DEFAULT when black
+// listed IMEs are active.  If you use tablet mode mainly and you want to
+// use touch keyboard for URL when you set focus to the URL bar, you can
+// set this to false.  Then, you'll see, e.g., ".com" key on the keyboard.
+// However, if you set this to false, such IMEs set its open state to "closed"
+// when you set focus to the URL bar.  I.e., input mode is automatically
+// changed to English input mode.
+// Black listed IMEs:
+//   - Microsoft IME for Japanese
+//   - Google Japanese Input
+//   - Microsoft Bopomofo
+//   - Microsoft ChangJie
+//   - Microsoft Phonetic
+//   - Microsoft Quick
+//   - Microsoft New ChangJie
+//   - Microsoft New Phonetic
+//   - Microsoft New Quick
+//   - Microsoft Pinyin
+//   - Microsoft Pinyin New Experience Input Style
+//   - Microsoft Wubi
+//   - Microsoft IME for Korean (except on Win7)
+//   - Microsoft Old Hangul
+pref("intl.ime.hack.set_input_scope_of_url_bar_to_default", true);
+
 #ifdef NS_ENABLE_TSF
-// Enable/Disable TSF support on Vista or later.
+// Enable/Disable TSF support.
 pref("intl.tsf.enable", true);
 
 // Support IMEs implemented with IMM in TSF mode.
@@ -4782,8 +4807,22 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
+#if defined(XP_WIN) || defined(XP_MACOSX)
+pref("network.tcp.tcp_fastopen_enable", true);
+#else
 pref("network.tcp.tcp_fastopen_enable", false);
+#endif
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
+// We are trying to detect stalled tcp connections that use TFO and TLS
+// (bug 1395494).
+// This is only happening if a connection is idle for more than 10s, but we
+// will make this a pref. If tcp_fastopen_http_stalls_limit of stalls are
+// detected the TCP fast open will be disabled.
+// If tcp_fastopen_http_check_for_stalls_only_if_idle_for is set to 0 the
+// check will not be performed.
+pref("network.tcp.tcp_fastopen_http_check_for_stalls_only_if_idle_for", 10);
+pref("network.tcp.tcp_fastopen_http_stalls_limit", 3);
+pref("network.tcp.tcp_fastopen_http_stalls_timeout", 20);
 
 // Whether to disable acceleration for all widgets.
 pref("layers.acceleration.disabled", false);

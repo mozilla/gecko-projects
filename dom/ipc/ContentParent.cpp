@@ -212,9 +212,7 @@
 # include "gfxAndroidPlatform.h"
 #endif
 
-#ifdef MOZ_PERMISSIONS
 # include "nsPermissionManager.h"
-#endif
 
 #ifdef MOZ_WIDGET_ANDROID
 # include "AndroidBridge.h"
@@ -1763,7 +1761,8 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   mIdleListeners.Clear();
 
   MessageLoop::current()->
-    PostTask(NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
+    PostTask(NewRunnableFunction("DelayedDeleteSubprocessRunnable",
+                                 DelayedDeleteSubprocess, mSubprocess));
   mSubprocess = nullptr;
 
   // IPDL rules require actors to live on past ActorDestroy, but it
@@ -3120,7 +3119,8 @@ ContentParent::OnGenerateMinidumpComplete(bool aDumpResult)
 
   // EnsureProcessTerminated has responsibilty for closing otherProcessHandle.
   XRE_GetIOMessageLoop()->PostTask(
-    NewRunnableFunction(&ProcessWatcher::EnsureProcessTerminated,
+    NewRunnableFunction("EnsureProcessTerminatedRunnable",
+                        &ProcessWatcher::EnsureProcessTerminated,
                         otherProcessHandle, /*force=*/true));
 }
 
@@ -5184,7 +5184,6 @@ ContentParent::AboutToLoadHttpFtpWyciwygDocumentForChild(nsIChannel* aChannel)
 nsresult
 ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
 {
-#ifdef MOZ_PERMISSIONS
   // Create the key, and send it down to the content process.
   nsTArray<nsCString> keys =
     nsPermissionManager::GetAllKeysForPrincipal(aPrincipal);
@@ -5192,7 +5191,6 @@ ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
   for (auto& key : keys) {
     EnsurePermissionsByKey(key);
   }
-#endif
 
   return NS_OK;
 }
@@ -5200,7 +5198,6 @@ ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
 void
 ContentParent::EnsurePermissionsByKey(const nsCString& aKey)
 {
-#ifdef MOZ_PERMISSIONS
   // NOTE: Make sure to initialize the permission manager before updating the
   // mActivePermissionKeys list. If the permission manager is being initialized
   // by this call to GetPermissionManager, and we've added the key to
@@ -5221,7 +5218,6 @@ ContentParent::EnsurePermissionsByKey(const nsCString& aKey)
   }
 
   Unused << SendSetPermissionsWithKey(aKey, perms);
-#endif
 }
 
 bool

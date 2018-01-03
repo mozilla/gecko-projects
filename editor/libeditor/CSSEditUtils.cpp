@@ -318,15 +318,6 @@ CSSEditUtils::~CSSEditUtils()
 bool
 CSSEditUtils::IsCSSEditableProperty(nsINode* aNode,
                                     nsAtom* aProperty,
-                                    const nsAString* aAttribute)
-{
-  RefPtr<nsAtom> attribute = aAttribute ? NS_Atomize(*aAttribute) : nullptr;
-  return IsCSSEditableProperty(aNode, aProperty, attribute);
-}
-
-bool
-CSSEditUtils::IsCSSEditableProperty(nsINode* aNode,
-                                    nsAtom* aProperty,
                                     nsAtom* aAttribute)
 {
   MOZ_ASSERT(aNode);
@@ -455,12 +446,15 @@ CSSEditUtils::SetCSSProperty(Element& aElement,
                              bool aSuppressTxn)
 {
   RefPtr<ChangeStyleTransaction> transaction =
-    CreateCSSPropertyTxn(aElement, aProperty, aValue,
-                         ChangeStyleTransaction::eSet);
+    ChangeStyleTransaction::Create(aElement, aProperty, aValue);
   if (aSuppressTxn) {
     return transaction->DoTransaction();
   }
-  return mHTMLEditor->DoTransaction(transaction);
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  RefPtr<HTMLEditor> htmlEditor(mHTMLEditor);
+  return htmlEditor->DoTransaction(transaction);
 }
 
 nsresult
@@ -484,24 +478,15 @@ CSSEditUtils::RemoveCSSProperty(Element& aElement,
                                 bool aSuppressTxn)
 {
   RefPtr<ChangeStyleTransaction> transaction =
-    CreateCSSPropertyTxn(aElement, aProperty, aValue,
-                         ChangeStyleTransaction::eRemove);
+    ChangeStyleTransaction::CreateToRemove(aElement, aProperty, aValue);
   if (aSuppressTxn) {
     return transaction->DoTransaction();
   }
-  return mHTMLEditor->DoTransaction(transaction);
-}
-
-already_AddRefed<ChangeStyleTransaction>
-CSSEditUtils::CreateCSSPropertyTxn(
-                Element& aElement,
-                nsAtom& aAttribute,
-                const nsAString& aValue,
-                ChangeStyleTransaction::EChangeType aChangeType)
-{
-  RefPtr<ChangeStyleTransaction> transaction =
-    new ChangeStyleTransaction(aElement, aAttribute, aValue, aChangeType);
-  return transaction.forget();
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  RefPtr<HTMLEditor> htmlEditor(mHTMLEditor);
+  return htmlEditor->DoTransaction(transaction);
 }
 
 nsresult
@@ -603,7 +588,7 @@ CSSEditUtils::RemoveCSSInlineStyle(nsINode& aNode,
 // on a node
 bool
 CSSEditUtils::IsCSSInvertible(nsAtom& aProperty,
-                              const nsAString* aAttribute)
+                              nsAtom* aAttribute)
 {
   return nsGkAtoms::b == &aProperty;
 }
@@ -1057,7 +1042,7 @@ CSSEditUtils::GetCSSEquivalentToHTMLInlineStyleSet(nsINode* aNode,
 bool
 CSSEditUtils::IsCSSEquivalentToHTMLInlineStyleSet(nsINode* aNode,
                                                   nsAtom* aProperty,
-                                                  const nsAString* aAttribute,
+                                                  nsAtom* aAttribute,
                                                   const nsAString& aValue,
                                                   StyleType aStyleType)
 {

@@ -51,7 +51,7 @@ struct StyleCache final : public PropItem
   }
 
   StyleCache(nsAtom* aTag,
-             const nsAString& aAttr,
+             nsAtom* aAttr,
              const nsAString& aValue)
     : PropItem(aTag, aAttr, aValue)
     , mPresent(false)
@@ -60,7 +60,7 @@ struct StyleCache final : public PropItem
   }
 
   StyleCache(nsAtom* aTag,
-             const nsAString& aAttr)
+             nsAtom* aAttr)
     : PropItem(aTag, aAttr, EmptyString())
     , mPresent(false)
   {
@@ -84,19 +84,22 @@ public:
 
   HTMLEditRules();
 
-  // nsIEditRules methods
-  NS_IMETHOD Init(TextEditor* aTextEditor) override;
-  NS_IMETHOD DetachEditor() override;
-  NS_IMETHOD BeforeEdit(EditAction action,
-                        nsIEditor::EDirection aDirection) override;
-  NS_IMETHOD AfterEdit(EditAction action,
-                       nsIEditor::EDirection aDirection) override;
-  NS_IMETHOD WillDoAction(Selection* aSelection, RulesInfo* aInfo,
-                          bool* aCancel, bool* aHandled) override;
-  NS_IMETHOD DidDoAction(Selection* aSelection, RulesInfo* aInfo,
-                         nsresult aResult) override;
-  NS_IMETHOD_(bool) DocumentIsEmpty() override;
-  NS_IMETHOD DocumentModified() override;
+  // TextEditRules methods
+  virtual nsresult Init(TextEditor* aTextEditor) override;
+  virtual nsresult DetachEditor() override;
+  virtual nsresult BeforeEdit(EditAction aAction,
+                              nsIEditor::EDirection aDirection) override;
+  virtual nsresult AfterEdit(EditAction aAction,
+                             nsIEditor::EDirection aDirection) override;
+  virtual nsresult WillDoAction(Selection* aSelection,
+                                RulesInfo* aInfo,
+                                bool* aCancel,
+                                bool* aHandled) override;
+  virtual nsresult DidDoAction(Selection* aSelection,
+                               RulesInfo* aInfo,
+                               nsresult aResult) override;
+  virtual bool DocumentIsEmpty() override;
+  virtual nsresult DocumentModified() override;
 
   nsresult GetListState(bool* aMixed, bool* aOL, bool* aUL, bool* aDL);
   nsresult GetListItemState(bool* aMixed, bool* aLI, bool* aDT, bool* aDD);
@@ -361,9 +364,19 @@ protected:
                                             nsAtom* aItemType);
 
   nsresult CreateStyleForInsertText(Selection& aSelection, nsIDocument& aDoc);
-  enum class MozBRCounts { yes, no };
-  nsresult IsEmptyBlock(Element& aNode, bool* aOutIsEmptyBlock,
-                        MozBRCounts aMozBRCounts = MozBRCounts::yes);
+
+  /**
+   * IsEmptyBlockElement() returns true if aElement is a block level element
+   * and it doesn't have any visible content.
+   */
+  enum class IgnoreSingleBR
+  {
+    eYes,
+    eNo
+  };
+  bool IsEmptyBlockElement(Element& aElement,
+                           IgnoreSingleBR aIgnoreSingleBR);
+
   nsresult CheckForEmptyBlock(nsINode* aStartNode, Element* aBodyNode,
                               Selection* aSelection,
                               nsIEditor::EDirection aAction, bool* aHandled);

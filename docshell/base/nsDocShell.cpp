@@ -370,13 +370,8 @@ ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback, void* aClosure)
     return;
   }
 
-  RefPtr<nsAtom> pingAtom = NS_Atomize("ping");
-  if (!pingAtom) {
-    return;
-  }
-
   nsAutoString value;
-  aContent->GetAttr(kNameSpaceID_None, pingAtom, value);
+  aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::ping, value);
   if (value.IsEmpty()) {
     return;
   }
@@ -14567,7 +14562,7 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   if (IsElementAnchor(aContent)) {
     MOZ_ASSERT(aContent->IsHTMLElement());
     nsAutoString referrer;
-    aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::rel, referrer);
+    aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::rel, referrer);
     nsWhitespaceTokenizerTemplate<nsContentUtils::IsHTMLWhitespace> tok(referrer);
     while (tok.hasMoreTokens()) {
       const nsAString& token = tok.nextToken();
@@ -15222,7 +15217,7 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceReques
     }
 
     ErrorResult rv;
-    *aShouldIntercept = swm->IsControlled(doc, rv);
+    *aShouldIntercept = doc->GetController().isSome();
     if (NS_WARN_IF(rv.Failed())) {
       return rv.StealNSResult();
     }

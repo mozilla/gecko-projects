@@ -356,90 +356,6 @@ public:
   }
 
   /**
-   * Get the current value of the attribute. This returns a form that is
-   * suitable for passing back into SetAttr.
-   *
-   * @param aNameSpaceID the namespace of the attr
-   * @param aName the name of the attr
-   * @param aResult the value (may legitimately be the empty string) [OUT]
-   * @returns true if the attribute was set (even when set to empty string)
-   *          false when not set.
-   *
-   * FIXME(emilio): Move to Element.
-   */
-  bool GetAttr(int32_t aNameSpaceID, nsAtom* aName,
-               nsAString& aResult) const;
-
-  /**
-   * Determine if an attribute has been set (empty string or otherwise).
-   *
-   * @param aNameSpaceId the namespace id of the attribute
-   * @param aAttr the attribute name
-   * @return whether an attribute exists
-   */
-  bool HasAttr(int32_t aNameSpaceID, nsAtom* aName) const;
-
-  /**
-   * Test whether this content node's given attribute has the given value.  If
-   * the attribute is not set at all, this will return false.
-   *
-   * @param aNameSpaceID The namespace ID of the attribute.  Must not
-   *                     be kNameSpaceID_Unknown.
-   * @param aName The name atom of the attribute.  Must not be null.
-   * @param aValue The value to compare to.
-   * @param aCaseSensitive Whether to do a case-sensitive compare on the value.
-   */
-  bool AttrValueIs(int32_t aNameSpaceID,
-                   nsAtom* aName,
-                   const nsAString& aValue,
-                   nsCaseTreatment aCaseSensitive) const;
-
-  /**
-   * Test whether this content node's given attribute has the given value.  If
-   * the attribute is not set at all, this will return false.
-   *
-   * @param aNameSpaceID The namespace ID of the attribute.  Must not
-   *                     be kNameSpaceID_Unknown.
-   * @param aName The name atom of the attribute.  Must not be null.
-   * @param aValue The value to compare to.  Must not be null.
-   * @param aCaseSensitive Whether to do a case-sensitive compare on the value.
-   */
-  bool AttrValueIs(int32_t aNameSpaceID,
-                   nsAtom* aName,
-                   nsAtom* aValue,
-                   nsCaseTreatment aCaseSensitive) const;
-
-  enum {
-    ATTR_MISSING = -1,
-    ATTR_VALUE_NO_MATCH = -2
-  };
-  /**
-   * Check whether this content node's given attribute has one of a given
-   * list of values. If there is a match, we return the index in the list
-   * of the first matching value. If there was no attribute at all, then
-   * we return ATTR_MISSING. If there was an attribute but it didn't
-   * match, we return ATTR_VALUE_NO_MATCH. A non-negative result always
-   * indicates a match.
-   *
-   * @param aNameSpaceID The namespace ID of the attribute.  Must not
-   *                     be kNameSpaceID_Unknown.
-   * @param aName The name atom of the attribute.  Must not be null.
-   * @param aValues a nullptr-terminated array of pointers to atom values to test
-   *                against.
-   * @param aCaseSensitive Whether to do a case-sensitive compare on the values.
-   * @return ATTR_MISSING, ATTR_VALUE_NO_MATCH or the non-negative index
-   * indicating the first value of aValues that matched
-   */
-  typedef nsStaticAtom* const* const AttrValuesArray;
-  virtual int32_t FindAttrValueIn(int32_t aNameSpaceID,
-                                  nsAtom* aName,
-                                  AttrValuesArray* aValues,
-                                  nsCaseTreatment aCaseSensitive) const
-  {
-    return ATTR_MISSING;
-  }
-
-  /**
    * Get direct access (but read only) to the text in the text content.
    * NOTE: For elements this is *not* the concatenation of all text children,
    * it is simply null;
@@ -591,7 +507,11 @@ public:
    *
    * @return the binding parent
    */
-  virtual nsIContent* GetBindingParent() const = 0;
+  virtual nsIContent* GetBindingParent() const
+  {
+    const nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
+    return slots ? slots->mBindingParent : nullptr;
+  }
 
   /**
    * Gets the current XBL binding that is bound to this element.
@@ -610,35 +530,11 @@ public:
   virtual nsXBLBinding* DoGetXBLBinding() const = 0;
 
   /**
-   * Sets or unsets an XBL binding for this element. Setting a
-   * binding on an element that already has a binding will remove the
-   * old binding.
-   *
-   * @param aBinding The binding to bind to this content. If nullptr is
-   *        provided as the argument, then existing binding will be
-   *        removed.
-   *
-   * @param aOldBindingManager The old binding manager that contains
-   *                           this content if this content was adopted
-   *                           to another document.
-   */
-  virtual void SetXBLBinding(nsXBLBinding* aBinding,
-                             nsBindingManager* aOldBindingManager = nullptr) = 0;
-
-  /**
-   * Sets the ShadowRoot binding for this element. The contents of the
-   * binding is rendered in place of this node's children.
-   *
-   * @param aShadowRoot The ShadowRoot to be bound to this element.
-   */
-  virtual void SetShadowRoot(mozilla::dom::ShadowRoot* aShadowRoot) = 0;
-
-  /**
    * Gets the ShadowRoot binding for this element.
    *
    * @return The ShadowRoot currently bound to this element.
    */
-  inline mozilla::dom::ShadowRoot *GetShadowRoot() const;
+  inline mozilla::dom::ShadowRoot* GetShadowRoot() const;
 
   /**
    * Gets the root of the node tree for this content if it is in a shadow tree.
@@ -647,35 +543,29 @@ public:
    *
    * @return The ShadowRoot that is the root of the node tree.
    */
-  virtual mozilla::dom::ShadowRoot *GetContainingShadow() const = 0;
-
-  /**
-   * Gets an array of destination insertion points where this content
-   * is distributed by web component distribution algorithms.
-   * The array is created if it does not already exist.
-   */
-  virtual nsTArray<nsIContent*> &DestInsertionPoints() = 0;
-
-  /**
-   * Same as DestInsertionPoints except that this method will return
-   * null if the array of destination insertion points does not already
-   * exist.
-   */
-  virtual nsTArray<nsIContent*> *GetExistingDestInsertionPoints() const = 0;
+  mozilla::dom::ShadowRoot* GetContainingShadow() const
+  {
+    const nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
+    return slots ? slots->mContainingShadow.get() : nullptr;
+  }
 
   /**
    * Gets the assigned slot associated with this content.
    *
    * @return The assigned slot element or null.
    */
-  virtual mozilla::dom::HTMLSlotElement* GetAssignedSlot() const = 0;
+  mozilla::dom::HTMLSlotElement* GetAssignedSlot() const
+  {
+    const nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
+    return slots ? slots->mAssignedSlot.get() : nullptr;
+  }
 
   /**
    * Sets the assigned slot associated with this content.
    *
    * @param aSlot The assigned slot.
    */
-  virtual void SetAssignedSlot(mozilla::dom::HTMLSlotElement* aSlot) = 0;
+  void SetAssignedSlot(mozilla::dom::HTMLSlotElement* aSlot);
 
   /**
    * Gets the assigned slot associated with this content based on parent's
@@ -698,24 +588,34 @@ public:
    *
    * @return the insertion parent element.
    */
-  virtual nsIContent* GetXBLInsertionPoint() const = 0;
+  nsIContent* GetXBLInsertionPoint() const
+  {
+    const nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
+    return slots ? slots->mXBLInsertionPoint.get() : nullptr;
+  }
 
   /**
    * Sets the insertion parent element of the XBL binding.
    *
    * @param aContent The insertion parent element.
    */
-  virtual void SetXBLInsertionPoint(nsIContent* aContent) = 0;
+  void SetXBLInsertionPoint(nsIContent* aContent);
 
   /**
    * Same as GetFlattenedTreeParentNode, but returns null if the parent is
    * non-nsIContent.
    */
-  inline nsIContent *GetFlattenedTreeParent() const;
+  inline nsIContent* GetFlattenedTreeParent() const;
 
-  // Helper method, which we leave public so that it's accessible from nsINode.
-  enum FlattenedParentType { eNotForStyle, eForStyle };
-  nsINode* GetFlattenedTreeParentNodeInternal(FlattenedParentType aType) const;
+  /**
+   * Get the flattened tree parent for NAC holding from the document element,
+   * from the point of view of the style system.
+   *
+   * Document-level anonymous content holds from the document element, even
+   * though they should not be treated as such (they should be parented to the
+   * document instead, and shouldn't inherit from the document element).
+   */
+  nsINode* GetFlattenedTreeParentForDocumentElementNAC() const;
 
   /**
    * API to check if this is a link that's traversed in response to user input
@@ -948,16 +848,118 @@ public:
 
 protected:
   /**
+   * Lazily allocated extended slots to avoid
+   * that may only be instantiated when a content object is accessed
+   * through the DOM. Rather than burn actual slots in the content
+   * objects for each of these instance variables, we put them off
+   * in a side structure that's only allocated when the content is
+   * accessed through the DOM.
+   */
+  class nsExtendedContentSlots
+  {
+  public:
+    nsExtendedContentSlots();
+    virtual ~nsExtendedContentSlots();
+
+    virtual void Traverse(nsCycleCollectionTraversalCallback&);
+    virtual void Unlink();
+
+    /**
+     * The nearest enclosing content node with a binding that created us.
+     * @see nsIContent::GetBindingParent
+     */
+    nsIContent* mBindingParent;  // [Weak]
+
+    /**
+     * @see nsIContent::GetXBLInsertionPoint
+     */
+    nsCOMPtr<nsIContent> mXBLInsertionPoint;
+
+    /**
+     * @see nsIContent::GetContainingShadow
+     */
+    RefPtr<mozilla::dom::ShadowRoot> mContainingShadow;
+
+    /**
+     * @see nsIContent::GetAssignedSlot
+     */
+    RefPtr<mozilla::dom::HTMLSlotElement> mAssignedSlot;
+  };
+
+  class nsContentSlots : public nsINode::nsSlots
+  {
+  public:
+    void Traverse(nsCycleCollectionTraversalCallback& aCb) override
+    {
+      nsINode::nsSlots::Traverse(aCb);
+      if (mExtendedSlots) {
+        mExtendedSlots->Traverse(aCb);
+      }
+    }
+
+    void Unlink() override
+    {
+      nsINode::nsSlots::Unlink();
+      if (mExtendedSlots) {
+        mExtendedSlots->Unlink();
+      }
+    }
+
+    mozilla::UniquePtr<nsExtendedContentSlots> mExtendedSlots;
+  };
+
+  // Override from nsINode
+  nsContentSlots* CreateSlots() override
+  {
+    return new nsContentSlots();
+  }
+
+  nsContentSlots* ContentSlots()
+  {
+    return static_cast<nsContentSlots*>(Slots());
+  }
+
+  const nsContentSlots* GetExistingContentSlots() const
+  {
+    return static_cast<nsContentSlots*>(GetExistingSlots());
+  }
+
+  nsContentSlots* GetExistingContentSlots()
+  {
+    return static_cast<nsContentSlots*>(GetExistingSlots());
+  }
+
+  virtual nsExtendedContentSlots* CreateExtendedSlots()
+  {
+    return new nsExtendedContentSlots();
+  }
+
+  const nsExtendedContentSlots* GetExistingExtendedContentSlots() const
+  {
+    const nsContentSlots* slots = GetExistingContentSlots();
+    return slots ? slots->mExtendedSlots.get() : nullptr;
+  }
+
+  nsExtendedContentSlots* GetExistingExtendedContentSlots()
+  {
+    nsContentSlots* slots = GetExistingContentSlots();
+    return slots ? slots->mExtendedSlots.get() : nullptr;
+  }
+
+  nsExtendedContentSlots* ExtendedContentSlots()
+  {
+    nsContentSlots* slots = ContentSlots();
+    if (!slots->mExtendedSlots) {
+      slots->mExtendedSlots.reset(CreateExtendedSlots());
+    }
+    return slots->mExtendedSlots.get();
+  }
+
+  /**
    * Hook for implementing GetID.  This is guaranteed to only be
    * called if HasID() is true.
    */
   nsAtom* DoGetID() const;
-
-  /**
-   * Returns the assigned slot, if it exists, or the direct parent, if it's a
-   * fallback content of a slot.
-   */
-  nsINode* GetFlattenedTreeParentForMaybeAssignedNode() const;
 
 public:
 #ifdef DEBUG

@@ -63,7 +63,7 @@ def docker_worker_run_task(config, job, taskdesc):
     worker = taskdesc['worker'] = job['worker']
     common_setup(config, job, taskdesc)
 
-    if worker.get('caches'):
+    if run.get('cache-dotcache'):
         worker['caches'].append({
             'type': 'persistent',
             'name': 'level-{level}-{project}-dotcache'.format(**config.params),

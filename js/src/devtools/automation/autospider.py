@@ -230,6 +230,10 @@ else:
     env.setdefault('CC', compiler)
     env.setdefault('CXX', cxx)
 
+bindir = os.path.join(OBJDIR, 'dist', 'bin')
+env['LD_LIBRARY_PATH'] = ':'.join(
+    p for p in (bindir, env.get('LD_LIBRARY_PATH')) if p)
+
 rust_dir = os.path.join(DIR.tooltool, 'rustc')
 if os.path.exists(os.path.join(rust_dir, 'bin', 'rustc')):
     env.setdefault('RUSTC', os.path.join(rust_dir, 'bin', 'rustc'))
@@ -270,6 +274,9 @@ if word_bits == 32:
 else:
     if platform.system() == 'Windows':
         CONFIGURE_ARGS += ' --target=x86_64-pc-mingw32 --host=x86_64-pc-mingw32'
+
+if platform.system() == 'Linux':
+    CONFIGURE_ARGS += ' --enable-stdcxx-compat'
 
 # Timeouts.
 ACTIVE_PROCESSES = set()
@@ -367,14 +374,17 @@ if not args.nobuild:
     if use_minidump:
         # Convert symbols to breakpad format.
         hostdir = os.path.join(OBJDIR, "dist", "host", "bin")
-        os.makedirs(hostdir)
+        if not os.path.isdir(hostdir):
+            os.makedirs(hostdir)
         shutil.copy(os.path.join(DIR.tooltool, "breakpad-tools", "dump_syms"),
                     os.path.join(hostdir, 'dump_syms'))
         run_command([
             'make',
             'recurse_syms',
             'MOZ_SOURCE_REPO=file://' + DIR.source,
-            'RUST_TARGET=0', 'RUSTC_COMMIT=0'
+            'RUST_TARGET=0', 'RUSTC_COMMIT=0',
+            'MOZ_CRASHREPORTER=1',
+            'MOZ_AUTOMATION_BUILD_SYMBOLS=1',
         ], check=True)
 
 COMMAND_PREFIX = []

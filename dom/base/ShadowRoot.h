@@ -8,10 +8,9 @@
 #define mozilla_dom_shadowroot_h__
 
 #include "mozilla/dom/DocumentFragment.h"
-#include "mozilla/dom/StyleScope.h"
+#include "mozilla/dom/DocumentOrShadowRoot.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIContentInlines.h"
 #include "nsIdentifierMapEntry.h"
 #include "nsTHashtable.h"
 
@@ -28,10 +27,30 @@ namespace dom {
 class Element;
 
 class ShadowRoot final : public DocumentFragment,
-                         public StyleScope,
+                         public DocumentOrShadowRoot,
                          public nsStubMutationObserver
 {
 public:
+  static ShadowRoot* FromNode(nsINode* aNode)
+  {
+    return aNode->IsShadowRoot() ? static_cast<ShadowRoot*>(aNode) : nullptr;
+  }
+
+  static const ShadowRoot* FromNode(const nsINode* aNode)
+  {
+    return aNode->IsShadowRoot() ? static_cast<const ShadowRoot*>(aNode) : nullptr;
+  }
+
+  static ShadowRoot* FromNodeOrNull(nsINode* aNode)
+  {
+    return aNode ? FromNode(aNode) : nullptr;
+  }
+
+  static const ShadowRoot* FromNodeOrNull(const nsINode* aNode)
+  {
+    return aNode ? FromNode(aNode) : nullptr;
+  }
+
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ShadowRoot,
                                            DocumentFragment)
   NS_DECL_ISUPPORTS_INHERITED
@@ -56,22 +75,14 @@ public:
     return mMode == ShadowRootMode::Closed;
   }
 
-  // StyleScope.
-  nsINode& AsNode() final
-  {
-    return *this;
-  }
-
   // [deprecated] Shadow DOM v0
-  void AddToIdTable(Element* aElement, nsAtom* aId);
-  void RemoveFromIdTable(Element* aElement, nsAtom* aId);
   void InsertSheet(StyleSheet* aSheet, nsIContent* aLinkingContent);
   void RemoveSheet(StyleSheet* aSheet);
   bool ApplyAuthorStyles();
   void SetApplyAuthorStyles(bool aApplyAuthorStyles);
   StyleSheetList* StyleSheets()
   {
-    return &StyleScope::EnsureDOMStyleSheets();
+    return &DocumentOrShadowRoot::EnsureDOMStyleSheets();
   }
 
   /**
@@ -121,17 +132,11 @@ public:
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  static ShadowRoot* FromNode(nsINode* aNode);
+  void AddToIdTable(Element* aElement, nsAtom* aId);
+  void RemoveFromIdTable(Element* aElement, nsAtom* aId);
 
   // WebIDL methods.
-  Element* GetElementById(const nsAString& aElementId);
-  already_AddRefed<nsContentList>
-    GetElementsByTagName(const nsAString& aNamespaceURI);
-  already_AddRefed<nsContentList>
-    GetElementsByTagNameNS(const nsAString& aNamespaceURI,
-                           const nsAString& aLocalName);
-  already_AddRefed<nsContentList>
-    GetElementsByClassName(const nsAString& aClasses);
+  using mozilla::dom::DocumentOrShadowRoot::GetElementById;
   void GetInnerHTML(nsAString& aInnerHTML);
   void SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
   void StyleSheetChanged();
@@ -153,8 +158,6 @@ protected:
   // the given name. The slots are stored as a weak pointer because the elements
   // are in the shadow tree and should be kept alive by its parent.
   nsClassHashtable<nsStringHashKey, nsTArray<mozilla::dom::HTMLSlotElement*>> mSlotMap;
-
-  nsTHashtable<nsIdentifierMapEntry> mIdentifierMap;
   nsXBLPrototypeBinding* mProtoBinding;
 
   // It is necessary to hold a reference to the associated nsXBLBinding

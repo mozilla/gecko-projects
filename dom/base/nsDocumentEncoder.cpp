@@ -110,12 +110,9 @@ protected:
     if (mFlags & SkipInvisibleContent) {
       // Treat the visibility of the ShadowRoot as if it were
       // the host content.
-      nsCOMPtr<nsIContent> content;
-      ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode);
-      if (shadowRoot) {
+      nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+      if (ShadowRoot* shadowRoot = ShadowRoot::FromNodeOrNull(content)) {
         content = shadowRoot->GetHost();
-      } else {
-        content = do_QueryInterface(aNode);
       }
 
       if (content) {
@@ -1409,7 +1406,8 @@ nsHTMLCopyEncoder::SetSelection(nsISelection* aSelection)
       // Wait for Firefox to get fixed to detect pre-formatting correctly,
       // bug 1174452.
       nsAutoString styleVal;
-      if (selContent->GetAttr(kNameSpaceID_None, nsGkAtoms::style, styleVal) &&
+      if (selContent->IsElement() &&
+          selContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::style, styleVal) &&
           styleVal.Find(NS_LITERAL_STRING("pre-wrap")) != kNotFound) {
         mIsTextWidget = true;
         break;

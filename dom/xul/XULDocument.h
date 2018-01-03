@@ -149,6 +149,7 @@ public:
     using nsDocument::CreateElementNS;
     NS_FORWARD_NSIDOMDOCUMENT(XMLDocument::)
     // And explicitly import the things from nsDocument that we just shadowed
+    using mozilla::dom::DocumentOrShadowRoot::GetElementById;
     using nsDocument::GetImplementation;
     using nsDocument::GetTitle;
     using nsDocument::SetTitle;
@@ -156,8 +157,8 @@ public:
     using nsDocument::MozSetImageElement;
     using nsIDocument::GetLocation;
 
-    // nsDocument interface overrides
-    virtual Element* GetElementById(const nsAString & elementId) override;
+    // Helper for StyleScope::GetElementById.
+    Element* GetRefById(const nsAString & elementId);
 
     // nsIDOMXULDocument interface
     NS_DECL_NSIDOMXULDOCUMENT
@@ -297,10 +298,14 @@ protected:
     static LazyLogModule gXULLog;
 
     nsresult
-    Persist(nsIContent* aElement, int32_t aNameSpaceID, nsAtom* aAttribute);
+    Persist(mozilla::dom::Element* aElement,
+            int32_t aNameSpaceID,
+            nsAtom* aAttribute);
     // Just like Persist but ignores the return value so we can use it
     // as a runnable method.
-    void DoPersist(nsIContent* aElement, int32_t aNameSpaceID, nsAtom* aAttribute)
+    void DoPersist(mozilla::dom::Element* aElement,
+                   int32_t aNameSpaceID,
+                   nsAtom* aAttribute)
     {
         Persist(aElement, aNameSpaceID, aAttribute);
     }
@@ -467,7 +472,7 @@ protected:
      * Check if a XUL template builder has already been hooked up.
      */
     static nsresult
-    CheckTemplateBuilderHookup(nsIContent* aElement, bool* aNeedsHookup);
+    CheckTemplateBuilderHookup(mozilla::dom::Element* aElement, bool* aNeedsHookup);
 
     /**
      * Create a XUL template builder on the specified node.

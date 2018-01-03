@@ -6,11 +6,6 @@ VOLUME /builds/worker/workspace
 VOLUME /builds/worker/tooltool-cache
 VOLUME /builds/worker/checkouts
 
-# Add build scripts; these are the entry points from the taskcluster worker, and
-# operate on environment variables
-ADD             bin /builds/worker/bin
-RUN             chmod +x /builds/worker/bin/*
-
 # %include python/mozbuild/mozbuild/action/tooltool.py
 ADD topsrcdir/python/mozbuild/mozbuild/action/tooltool.py /builds/tooltool.py
 ADD topsrcdir/python/mozbuild/mozbuild/action/tooltool.py /setup/tooltool.py
@@ -33,10 +28,16 @@ ADD topsrcdir/taskcluster/docker/recipes/install-cmake.sh /setup/install-cmake.s
 # %include taskcluster/docker/recipes/centos6-build-system-setup.sh
 ADD topsrcdir/taskcluster/docker/recipes/centos6-build-system-setup.sh /setup/system-setup.sh
 
+# %include build/unix/build-gtk3/build-gtk3.sh
+ADD topsrcdir/build/unix/build-gtk3/build-gtk3.sh /setup/build-gtk3.sh
+
 # TODO remove once base image doesn't install Mercurial
 RUN pip uninstall -y Mercurial
 
-RUN bash /setup/system-setup.sh
+# Install expat-devel for fontconfig, part of build-gtk3.
+RUN yum install -y expat-devel.i686 expat-devel.x86_64
+
+RUN bash /setup/build-gtk3.sh && bash /setup/system-setup.sh
 
 # Add wrapper scripts for xvfb allowing tasks to easily retry starting up xvfb
 # %include taskcluster/docker/recipes/xvfb.sh

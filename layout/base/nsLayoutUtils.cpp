@@ -636,6 +636,16 @@ nsLayoutUtils::IsAnimationLoggingEnabled()
 }
 
 bool
+nsLayoutUtils::AreRetainedDisplayListsEnabled()
+{
+  if (XRE_IsContentProcess()) {
+    return gfxPrefs::LayoutRetainDisplayList();
+  } else {
+    return gfxPrefs::LayoutRetainDisplayListChrome();
+  }
+}
+
+bool
 nsLayoutUtils::GPUImageScalingEnabled()
 {
   static bool sGPUImageScalingEnabled;
@@ -1903,8 +1913,11 @@ nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
   }
 
   AutoTArray<nsIFrame*,20> frame1Ancestors;
-  if (aCommonAncestor &&
-      !FillAncestors(aFrame1, aCommonAncestor, &frame1Ancestors)) {
+  // Note that the order of the condition is important. We need to fill the
+  // ancestors even if aCommonAncestor is null, otherwise the code below makes
+  // no sense.
+  if (!FillAncestors(aFrame1, aCommonAncestor, &frame1Ancestors) &&
+      aCommonAncestor) {
     // We reached the root of the frame tree ... if aCommonAncestor was set,
     // it is wrong
     return DoCompareTreePosition(aFrame1, aFrame2,
@@ -3620,9 +3633,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   const bool isForPainting = (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
     aBuilderMode == nsDisplayListBuilderMode::PAINTING;
 
-  // Retained display list builder is currently only used for content processes.
-  const bool retainingEnabled = isForPainting &&
-    gfxPrefs::LayoutRetainDisplayList() && XRE_IsContentProcess();
+  const bool retainingEnabled = isForPainting && AreRetainedDisplayListsEnabled();
 
   RetainedDisplayListBuilder* retainedBuilder =
     GetOrCreateRetainedDisplayListBuilder(aFrame, retainingEnabled, buildCaret);
@@ -7888,7 +7899,7 @@ nsLayoutUtils::SurfaceFromElement(dom::Element* aElement,
 }
 
 /* static */
-nsIContent*
+Element*
 nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
 {
   // If the document is in designMode we should return nullptr.
@@ -7914,7 +7925,7 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
   // Note that the body element could be <frameset> element.
   nsCOMPtr<nsIDOMHTMLElement> body;
   nsresult rv = domHTMLDoc->GetBody(getter_AddRefs(body));
-  nsCOMPtr<nsIContent> content = do_QueryInterface(body);
+  nsCOMPtr<Element> content = do_QueryInterface(body);
   if (NS_SUCCEEDED(rv) && content && content->IsEditable()) {
     return content;
   }

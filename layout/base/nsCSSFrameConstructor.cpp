@@ -1734,7 +1734,7 @@ nsCSSFrameConstructor::CreateGenConTextNode(nsFrameConstructorState& aState,
 
 already_AddRefed<nsIContent>
 nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
-                                              nsIContent*     aParentContent,
+                                              Element* aParentContent,
                                               nsStyleContext* aStyleContext,
                                               uint32_t        aContentIndex)
 {
@@ -1851,8 +1851,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
         return content.forget();
       }
 
-      if (aParentContent->IsHTMLElement() &&
-          aParentContent->NodeInfo()->Equals(nsGkAtoms::input)) {
+      if (aParentContent->IsHTMLElement(nsGkAtoms::input)) {
         if (aParentContent->HasAttr(kNameSpaceID_None, nsGkAtoms::value)) {
           nsCOMPtr<nsIContent> content;
           NS_NewAttributeContent(mDocument->NodeInfoManager(),
@@ -1895,7 +1894,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
 void
 nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aState,
                                                   nsContainerFrame* aParentFrame,
-                                                  nsIContent*      aParentContent,
+                                                  Element* aParentContent,
                                                   nsStyleContext*  aStyleContext,
                                                   CSSPseudoElementType aPseudoElement,
                                                   FrameConstructionItemList& aItems)
@@ -1904,14 +1903,12 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
              aPseudoElement == CSSPseudoElementType::after,
              "unexpected aPseudoElement");
 
-  MOZ_ASSERT(aParentContent->IsElement());
-
   StyleSetHandle styleSet = mPresShell->StyleSet();
 
   // Probe for the existence of the pseudo-element
   RefPtr<nsStyleContext> pseudoStyleContext;
   pseudoStyleContext =
-    styleSet->ProbePseudoElementStyle(aParentContent->AsElement(),
+    styleSet->ProbePseudoElementStyle(aParentContent,
                                       aPseudoElement,
                                       aStyleContext,
                                       aState.mTreeMatchContext);
@@ -3966,7 +3963,7 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
   TreeMatchContext::AutoAncestorPusher
     insertionPointPusher(aState.mTreeMatchContext);
   if (adcp.isSome() && adcp->IsEmpty() && parent &&
-      nsContentUtils::IsContentInsertionPoint(parent)) {
+      parent->IsActiveChildrenElement()) {
     if (aState.mTreeMatchContext->mAncestorFilter.HasFilter()) {
       insertionPointPusher.PushAncestorAndStyleScope(parent);
     } else {
@@ -4227,8 +4224,8 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
   // More icky XUL stuff
   if (aItem.mNameSpaceID == kNameSpaceID_XUL &&
       (aItem.mTag == nsGkAtoms::treechildren || // trees always need titletips
-       content->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext) ||
-       content->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltip))) {
+       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext) ||
+       content->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltip))) {
     nsIRootBox* rootBox = nsIRootBox::GetRootBox(mPresShell);
     if (rootBox) {
       rootBox->AddTooltipSupport(content);
@@ -5126,9 +5123,7 @@ nsCSSFrameConstructor::InitAndRestoreFrame(const nsFrameConstructorState& aState
                                            nsIFrame*                aNewFrame,
                                            bool                     aAllowCounters)
 {
-  NS_PRECONDITION(mUpdateCount != 0,
-                  "Should be in an update while creating frames");
-
+  MOZ_ASSERT(mUpdateCount != 0, "Should be in an update while creating frames");
   MOZ_ASSERT(aNewFrame, "Null frame cannot be initialized");
 
   // Initialize the frame
@@ -6108,8 +6103,9 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     if (aParentFrame) {
       aParentFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
     }
-    CreateGeneratedContentItem(aState, aParentFrame, aContent, styleContext,
-                               CSSPseudoElementType::before, aItems);
+    CreateGeneratedContentItem(aState, aParentFrame, aContent->AsElement(),
+                               styleContext, CSSPseudoElementType::before,
+                               aItems);
 
     FlattenedChildIterator iter(aContent);
     for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
@@ -6141,8 +6137,9 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     }
     aItems.SetParentHasNoXBLChildren(!iter.XBLInvolved());
 
-    CreateGeneratedContentItem(aState, aParentFrame, aContent, styleContext,
-                               CSSPseudoElementType::after, aItems);
+    CreateGeneratedContentItem(aState, aParentFrame, aContent->AsElement(),
+                               styleContext, CSSPseudoElementType::after,
+                               aItems);
     if (canHavePageBreak && display->mBreakAfter) {
       AddPageBreakItem(aContent, aItems);
     }
@@ -7470,8 +7467,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
              !RestyleManager()->IsInStyleRefresh());
 
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
-  NS_PRECONDITION(mUpdateCount != 0,
-                  "Should be in an update while creating frames");
+  MOZ_ASSERT(mUpdateCount != 0, "Should be in an update while creating frames");
 
 #ifdef DEBUG
   if (gNoisyContentUpdates) {
@@ -7874,8 +7870,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
              !RestyleManager()->IsInStyleRefresh());
 
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
-  NS_PRECONDITION(mUpdateCount != 0,
-                  "Should be in an update while creating frames");
+  MOZ_ASSERT(mUpdateCount != 0, "Should be in an update while creating frames");
 
   NS_PRECONDITION(aStartChild, "must always pass a child");
 
@@ -7995,8 +7990,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   // a parent. While its uncommon to change the structure of the default content itself, a label,
   // for example, can be reframed by having its value attribute set or removed.
   if (!parentFrame &&
-      !(aContainer->IsActiveChildrenElement() ||
-        ShadowRoot::FromNode(aContainer))) {
+      !(aContainer->IsActiveChildrenElement() || aContainer->IsShadowRoot())) {
     // We're punting on frame construction because there's no container frame.
     // The Servo-backed style system handles this case like the lazy frame
     // construction case, except when we're already constructing frames, in
@@ -8008,7 +8002,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     return;
   }
 
-  MOZ_ASSERT_IF(ShadowRoot::FromNode(aContainer), !parentFrame);
+  MOZ_ASSERT_IF(aContainer->IsShadowRoot(), !parentFrame);
 
   // Otherwise, we've got parent content. Find its frame.
   NS_ASSERTION(!parentFrame || parentFrame->GetContent() == aContainer ||
@@ -8442,6 +8436,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
   if (!childFrame || childFrame->GetContent() != aChild) {
     // XXXbz the GetContent() != aChild check is needed due to bug 135040.
     // Remove it once that's fixed.
+    childFrame = nullptr;
     UnregisterDisplayNoneStyleFor(aChild, aContainer);
   }
   MOZ_ASSERT(!childFrame || !GetDisplayContentsStyleFor(aChild),
@@ -8910,20 +8905,20 @@ nsCSSFrameConstructor::WillDestroyFrameTree()
 // XXXbz I'd really like this method to go away. Once we have inline-block and
 // I can just use that for sized broken images, that can happen, maybe.
 void
-nsCSSFrameConstructor::GetAlternateTextFor(nsIContent* aContent,
+nsCSSFrameConstructor::GetAlternateTextFor(Element* aElement,
                                            nsAtom* aTag,
                                            nsAString& aAltText)
 {
   // The "alt" attribute specifies alternate text that is rendered
   // when the image can not be displayed.
-  if (aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aAltText)) {
+  if (aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aAltText)) {
     return;
   }
 
   if (nsGkAtoms::input == aTag) {
     // If there's no "alt" attribute, and aContent is an input element, then use
     // the value of the "value" attribute
-    if (aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aAltText)) {
+    if (aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aAltText)) {
       return;
     }
 
@@ -9334,12 +9329,14 @@ nsCSSFrameConstructor::GetInsertionPoint(nsIContent* aContainer,
     }
 
     if (nsContentUtils::HasDistributedChildren(aContainer) ||
-        ShadowRoot::FromNode(aContainer)) {
+        aContainer->IsShadowRoot()) {
       // The container distributes nodes or is a shadow root, use the frame of
       // the flattened tree parent.
       //
       // It may be the case that the node is distributed but not matched to any
       // insertion points, so there is no flattened parent.
+      //
+      // FIXME(emilio): We should be able to use this path all the time.
       nsIContent* flattenedParent = aChild->GetFlattenedTreeParent();
       if (flattenedParent) {
         return InsertionPoint(GetContentInsertionFrameFor(flattenedParent),
@@ -11060,8 +11057,8 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
       styleContext =
         nsFrame::CorrectStyleParentFrame(aFrame, nullptr)->StyleContext();
       // Probe for generated content before
-      CreateGeneratedContentItem(aState, aFrame, aContent, styleContext,
-                                 CSSPseudoElementType::before,
+      CreateGeneratedContentItem(aState, aFrame, aContent->AsElement(),
+                                 styleContext, CSSPseudoElementType::before,
                                  itemsToConstruct);
     }
 
@@ -11115,8 +11112,8 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
 
     if (aCanHaveGeneratedContent) {
       // Probe for generated content after
-      CreateGeneratedContentItem(aState, aFrame, aContent, styleContext,
-                                 CSSPseudoElementType::after,
+      CreateGeneratedContentItem(aState, aFrame, aContent->AsElement(),
+                                 styleContext, CSSPseudoElementType::after,
                                  itemsToConstruct);
     }
   } else {
@@ -12297,8 +12294,8 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
 
   if (!aItemIsWithinSVGText) {
     // Probe for generated content before
-    CreateGeneratedContentItem(aState, nullptr, parentContent, parentStyleContext,
-                               CSSPseudoElementType::before,
+    CreateGeneratedContentItem(aState, nullptr, parentContent->AsElement(),
+                               parentStyleContext, CSSPseudoElementType::before,
                                aParentItem.mChildItems);
   }
 
@@ -12366,7 +12363,8 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
 
   if (!aItemIsWithinSVGText) {
     // Probe for generated content after
-    CreateGeneratedContentItem(aState, nullptr, parentContent, parentStyleContext,
+    CreateGeneratedContentItem(aState, nullptr, parentContent->AsElement(),
+                               parentStyleContext,
                                CSSPseudoElementType::after,
                                aParentItem.mChildItems);
   }
