@@ -97,7 +97,7 @@ def make_checksums_signing_description(config, jobs):
             'scopes': [
                 # DO NOT UPLIFT
                 # signing_cert_scope,
-                "project:releng:signing:cert:dep-signing"
+                "project:releng:signing:cert:dep-signing",
                 "project:releng:signing:format:gpg"
             ],
             'dependencies': dependencies,
