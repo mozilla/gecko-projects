@@ -92,6 +92,7 @@ jobs:
                   default: https://balrog-admin.stage.mozaws.net/api
             channels:
                by-project:
+                  birch: "beta,release"
                   jamun: "beta"
                   maple: "beta"
                   mozilla-beta: "beta"

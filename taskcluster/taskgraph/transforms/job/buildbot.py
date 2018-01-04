@@ -45,7 +45,7 @@ def _get_balrog_channel(product, branch):
     elif product == 'firefox':
         if branch in ('mozilla-beta', 'maple'):
             return 'beta'
-        elif branch == 'mozilla-release':
+        elif branch in ('mozilla-release', 'birch'):
             return 'release'
         elif branch.startswith('mozilla-esr'):
             return 'esr'
