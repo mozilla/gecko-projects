@@ -1060,16 +1060,15 @@ var ChromeHangs = {
   /**
    * Renders raw chrome hang data
    */
-  render: function ChromeHangs_render(payload) {
-    let hangs = payload.chromeHangs;
-    setHasData("chrome-hangs-section", !!hangs);
-    if (!hangs) {
+  render: function ChromeHangs_render(chromeHangs) {
+    setHasData("chrome-hangs-section", !!chromeHangs);
+    if (!chromeHangs) {
       return;
     }
 
-    let stacks = hangs.stacks;
-    let memoryMap = hangs.memoryMap;
-    let durations = hangs.durations;
+    let stacks = chromeHangs.stacks;
+    let memoryMap = chromeHangs.memoryMap;
+    let durations = chromeHangs.durations;
 
     StackRenderer.renderStacks("chrome-hangs", stacks, memoryMap,
                                (index) => this.renderHangHeader(index, durations));
@@ -1281,6 +1280,8 @@ var Search = {
 
   // A list of ids of sections that do not support search.
   blacklist: [
+    "late-writes-section",
+    "chrome-hangs-section",
     "raw-payload-section"
   ],
 
@@ -2053,7 +2054,7 @@ function setupListeners() {
         return;
       }
 
-      ChromeHangs.render(gPingData);
+      ChromeHangs.render(gPingData.payload.chromeHangs);
   });
 
   document.getElementById("captured-stacks-fetch-symbols").addEventListener("click",

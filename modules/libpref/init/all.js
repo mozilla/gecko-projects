@@ -1386,11 +1386,7 @@ pref("privacy.trackingprotection.lower_network_priority", false);
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
-#ifdef NIGHTLY_BUILD
 pref("dom.event.coalesce_mouse_move",       true);
-#else
-pref("dom.event.coalesce_mouse_move",       false);
-#endif
 
 pref("dom.webcomponents.enabled",           false);
 pref("dom.webcomponents.customelements.enabled", false);
@@ -1511,7 +1507,7 @@ pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
 pref("javascript.options.showInConsole", false);
 
-pref("javascript.options.shared_memory", true);
+pref("javascript.options.shared_memory", false);
 
 pref("javascript.options.throw_on_debuggee_would_run", false);
 pref("javascript.options.dump_stack_on_debuggee_would_run", false);
@@ -2559,7 +2555,7 @@ pref("security.notification_enable_delay", 500);
 pref("security.csp.enable", true);
 pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
-#ifdef EARLY_BETA_OR_EARLIER
+#ifdef NIGHTLY_BUILD
 pref("security.csp.enable_violation_events", true);
 #else
 pref("security.csp.enable_violation_events", false);
@@ -5145,7 +5141,7 @@ pref("dom.w3c_touch_events.enabled", 2);
 #endif
 
 // W3C draft pointer events
-#if !defined(ANDROID) && defined(NIGHTLY_BUILD)
+#if !defined(ANDROID)
 pref("dom.w3c_pointer_events.enabled", true);
 #else
 pref("dom.w3c_pointer_events.enabled", false);
@@ -5893,7 +5889,6 @@ pref("layers.advanced.image-layers", 2);
 pref("layers.advanced.outline-layers", 2);
 pref("layers.advanced.solid-color", false);
 pref("layers.advanced.table", false);
-pref("layers.advanced.text-layers", 2);
 
 // Enable lowercased response header name
 pref("dom.xhr.lowercase_header.enabled", false);

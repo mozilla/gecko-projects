@@ -189,7 +189,7 @@ public:
   // Add aStream to the list of streams.
   void OpenStream(AutoLock&, MediaCacheStream* aStream, bool aIsClone = false);
   // Remove aStream from the list of streams.
-  void ReleaseStream(MediaCacheStream* aStream);
+  void ReleaseStream(AutoLock&, MediaCacheStream* aStream);
   // Free all blocks belonging to aStream.
   void ReleaseStreamBlocks(AutoLock&, MediaCacheStream* aStream);
   // Find a cache entry for this data, and write the data into it
@@ -1821,18 +1821,12 @@ MediaCache::OpenStream(AutoLock& aLock,
 }
 
 void
-MediaCache::ReleaseStream(MediaCacheStream* aStream)
+MediaCache::ReleaseStream(AutoLock&, MediaCacheStream* aStream)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
-
-  AutoLock lock(mMonitor);
+  MOZ_ASSERT(OwnerThread()->IsOnCurrentThread());
   LOG("Stream %p closed", aStream);
   mStreams.RemoveElement(aStream);
-
-  // Update MediaCache again for |mStreams| is changed.
-  // We need to re-run Update() to ensure streams reading from the same resource
-  // as the removed stream get a chance to continue reading.
-  QueueUpdate(lock);
+  // The caller needs to call QueueUpdate() to re-run Update().
 }
 
 void
@@ -2330,13 +2324,9 @@ MediaCacheStream::NotifyResume()
 
 MediaCacheStream::~MediaCacheStream()
 {
-  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
-  NS_ASSERTION(!mPinCount, "Unbalanced Pin");
-
-  if (mMediaCache) {
-    NS_ASSERTION(mClosed, "Stream was not closed");
-    mMediaCache->ReleaseStream(this);
-  }
+  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread");
+  MOZ_ASSERT(!mPinCount, "Unbalanced Pin");
+  MOZ_ASSERT(!mMediaCache || mClosed);
 
   uint32_t lengthKb = uint32_t(
     std::min(std::max(mStreamLength, int64_t(0)) / 1024, int64_t(UINT32_MAX)));
@@ -2404,6 +2394,7 @@ MediaCacheStream::CloseInternal(AutoLock& aLock)
 
   mClosed = true;
   mMediaCache->ReleaseStreamBlocks(aLock, this);
+  mMediaCache->ReleaseStream(aLock, this);
   // Wake up any blocked readers
   aLock.NotifyAll();
 
@@ -2414,7 +2405,7 @@ MediaCacheStream::CloseInternal(AutoLock& aLock)
 void
 MediaCacheStream::Pin()
 {
-  // TODO: Assert non-main thread.
+  MOZ_ASSERT(!NS_IsMainThread());
   AutoLock lock(mMediaCache->Monitor());
   ++mPinCount;
   // Queue an Update since we may no longer want to read more into the
@@ -2425,7 +2416,7 @@ MediaCacheStream::Pin()
 void
 MediaCacheStream::Unpin()
 {
-  // TODO: Assert non-main thread.
+  MOZ_ASSERT(!NS_IsMainThread());
   AutoLock lock(mMediaCache->Monitor());
   NS_ASSERTION(mPinCount > 0, "Unbalanced Unpin");
   --mPinCount;
@@ -2915,6 +2906,10 @@ MediaCacheStream::InitAsCloneInternal(MediaCacheStream* aOriginal)
   mIsTransportSeekable = aOriginal->mIsTransportSeekable;
   mDownloadStatistics = aOriginal->mDownloadStatistics;
   mDownloadStatistics.Stop();
+
+  // Notify the client that we have new data so the decoder has a chance to
+  // compute 'canplaythrough' and buffer ranges.
+  mClient->CacheClientNotifyDataReceived();
 
   if (aOriginal->mDidNotifyDataEnded &&
       NS_SUCCEEDED(aOriginal->mNotifyDataEndedStatus)) {

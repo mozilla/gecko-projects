@@ -101,7 +101,7 @@ function startsRightNow(aAnimation) {
 
 function tweakExpectedRestyleCount(aAnimation, aExpectedRestyleCount) {
   // Normally we expect one restyling for each requestAnimationFrame (as
-  // called by observeRestyling) PLUS one for the last frame becasue of bug
+  // called by observeRestyling) PLUS one for the last frame because of bug
   // 1193394.  However, we won't observe that initial restyling unless BOTH of
   // the following two conditions hold:
   //
@@ -363,13 +363,6 @@ waitForAllPaints(() => {
       return;
     }
 
-    /*
-     On Android the opacity animation runs on the compositor even if it is
-     scrolled out of view.  We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
-      return;
-    }
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var div = addDiv(null,
@@ -502,14 +495,6 @@ waitForAllPaints(() => {
       return;
     }
 
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
-      return;
-    }
-
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var div = addDiv(null,
@@ -540,14 +525,6 @@ waitForAllPaints(() => {
 
   add_task(async function restyling_main_thread_animations_in_nested_scrolled_out_element() {
     if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
       return;
     }
 
@@ -602,14 +579,6 @@ waitForAllPaints(() => {
 
   add_task(async function restyling_main_thread_animations_move_out_of_view_by_scrolling() {
     if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
       return;
     }
 
@@ -941,6 +910,11 @@ waitForAllPaints(() => {
 
     div.remove();
 
+    // It's possible that the animation begins at this moment.  If this is the
+    // case, an additional superfluous restyle request that we will check later
+    // can't be observed.
+    const expectedRestyleCount = tweakExpectedRestyleCount(animation, 1);
+
     var markers = await observeStyling(5);
     is(markers.length, 0,
        'Animation on orphaned element should not cause restyles');
@@ -961,10 +935,10 @@ waitForAllPaints(() => {
       // restyle (bug 1388560), we should add a test case that fails if we
       // continue to unnecessarily request a standard restyle.
       //
-      // Bug 1417354: There will be an additional superfluos restyle request
-      // whichi results when we detach an element from the document between
+      // Bug 1417354: There will be an additional superfluous restyle request
+      // which results when we detach an element from the document between
       // the Animation tick and styling, and then re-attach it.
-      is(markers.length, 2,
+      is(markers.length, expectedRestyleCount,
          'We should observe one restyle in the first frame right after ' +
          're-attaching to the document');
     } else {
@@ -1079,14 +1053,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function no_throttling_animations_in_view_svg() {
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
-      return;
-    }
-
     var div = addDiv(null, { style: 'overflow: scroll;' +
                                     'height: 100px; width: 100px;' });
     var svg = addSVGElement(div, 'svg', { viewBox: '-10 -10 0.1 0.1',
@@ -1114,14 +1080,6 @@ waitForAllPaints(() => {
       return;
     }
 
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
-      return;
-    }
-
     var div = addDiv(null, { style: 'overflow: scroll;' +
                                     'height: 100px; width: 100px;' });
     var svg = addSVGElement(div, 'svg', { viewBox: '-10 -10 0.1 0.1',
@@ -1143,14 +1101,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function no_throttling_animations_in_view_css_transform() {
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
-      return;
-    }
-
     var scrollDiv = addDiv(null, { style: 'overflow: scroll; ' +
                                           'height: 100px; width: 100px;' });
     var targetDiv = addDiv(null,
@@ -1172,14 +1122,6 @@ waitForAllPaints(() => {
 
   add_task(async function throttling_animations_out_of_view_css_transform() {
     if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
-    /*
-     On Android throttled animations are left behind on the main thread in some
-     frames, We will fix this in bug 1247800.
-     */
-    if (isAndroid) {
       return;
     }
 

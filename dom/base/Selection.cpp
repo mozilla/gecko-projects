@@ -72,7 +72,6 @@
 #include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 #include "nsViewManager.h"
 
 #include "nsFocusManager.h"
@@ -80,7 +79,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using mozilla::layers::ScrollInputMethod;
 
 //#define DEBUG_TABLE 1
 
@@ -603,7 +601,7 @@ Selection::GetTableCellLocationFromRange(nsRange* aRange,
   if (!content)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIContent> child = content->GetChildAt(aRange->StartOffset());
+  nsCOMPtr<nsIContent> child = content->GetChildAt_Deprecated(aRange->StartOffset());
   if (!child)
     return NS_ERROR_FAILURE;
 
@@ -710,7 +708,7 @@ Selection::GetTableSelectionType(nsIDOMRange* aDOMRange,
   }
   else //check to see if we are selecting a table or row (column and all cells not done yet)
   {
-    nsIContent *child = startNode->GetChildAt(startOffset);
+    nsIContent *child = startNode->GetChildAt_Deprecated(startOffset);
     if (!child)
       return NS_ERROR_FAILURE;
 
@@ -3675,11 +3673,6 @@ Selection::ScrollIntoView(SelectionRegion aRegion,
   }
   if (aFlags & Selection::SCROLL_OVERFLOW_HIDDEN) {
     flags |= nsIPresShell::SCROLL_OVERFLOW_HIDDEN;
-  }
-
-  if (aFlags & Selection::SCROLL_FOR_CARET_MOVE) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollCaretIntoView);
   }
 
   presShell->ScrollFrameRectIntoView(frame, rect, aVertical, aHorizontal,

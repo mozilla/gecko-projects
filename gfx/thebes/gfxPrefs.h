@@ -549,7 +549,6 @@ private:
   DECL_OVERRIDE_PREF(Live, "layers.advanced.outline-layers",          LayersAllowOutlineLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_GFX_PREF(Live, "layers.advanced.solid-color",                  LayersAllowSolidColorLayers, bool, false);
   DECL_GFX_PREF(Live, "layers.advanced.table",                        LayersAllowTable, bool, false);
-  DECL_OVERRIDE_PREF(Live, "layers.advanced.text-layers",             LayersAllowTextLayers, gfxPrefs::OverrideBase_WebRender());
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.separate-event-thread", AsyncPanZoomSeparateEventThread, bool, false);
@@ -747,8 +746,8 @@ private:
   DECL_GFX_PREF(Once, "webgl.force-layers-readback",           WebGLForceLayersReadback, bool, false);
   DECL_GFX_PREF(Live, "webgl.force-index-validation",          WebGLForceIndexValidation, int32_t, 0);
   DECL_GFX_PREF(Live, "webgl.lose-context-on-memory-pressure", WebGLLoseContextOnMemoryPressure, bool, false);
-  DECL_GFX_PREF(Once, "webgl.max-contexts",                    WebGLMaxContexts, uint32_t, 32);
-  DECL_GFX_PREF(Once, "webgl.max-contexts-per-principal",      WebGLMaxContextsPerPrincipal, uint32_t, 16);
+  DECL_GFX_PREF(Live, "webgl.max-contexts",                    WebGLMaxContexts, uint32_t, 32);
+  DECL_GFX_PREF(Live, "webgl.max-contexts-per-principal",      WebGLMaxContextsPerPrincipal, uint32_t, 16);
   DECL_GFX_PREF(Live, "webgl.max-warnings-per-context",        WebGLMaxWarningsPerContext, uint32_t, 32);
   DECL_GFX_PREF(Live, "webgl.min_capability_mode",             WebGLMinCapabilityMode, bool, false);
   DECL_GFX_PREF(Live, "webgl.msaa-force",                      WebGLForceMSAA, bool, false);

@@ -5125,10 +5125,6 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
                                        WebRenderLayerManager* aManager,
                                        nsDisplayListBuilder* aDisplayListBuilder)
 {
-  if (!gfxPrefs::LayersAllowTextLayers()) {
-    return false;
-  }
-
   if (mBounds.IsEmpty()) {
     return true;
   }
@@ -8117,9 +8113,14 @@ ClusterIterator::IsPunctuation()
   // Return true for all Punctuation categories (Unicode general category P?),
   // and also for Symbol categories (S?) except for Modifier Symbol, which is
   // kept together with any adjacent letter/number. (Bug 1066756)
-  uint8_t cat = unicode::GetGeneralCategory(mFrag->CharAt(mCharIndex));
+  uint32_t ch = mFrag->CharAt(mCharIndex);
+  uint8_t cat = unicode::GetGeneralCategory(ch);
   switch (cat) {
     case HB_UNICODE_GENERAL_CATEGORY_CONNECT_PUNCTUATION: /* Pc */
+      if (ch == '_') {
+        return false;
+      }
+      MOZ_FALLTHROUGH;
     case HB_UNICODE_GENERAL_CATEGORY_DASH_PUNCTUATION:    /* Pd */
     case HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION:   /* Pe */
     case HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION:   /* Pf */
