@@ -185,4 +185,7 @@ tasks:
                   taskId: {$eval: 'taskId'}
                   input: {$eval: 'input'}
                   parameters: {$eval: 'parameters'}
+          - $if: 'tasks_for == "cron"'
+            then:
+              cron: {$json: {$eval: 'cron'}}
           - tasks_for: '${tasks_for}'
