@@ -172,10 +172,6 @@ public:
   void ToCString(nsCString& aBuf, int32_t* aTotalContentLength) const;
 #endif
 
-#ifdef DEBUG
-  nsFrameState GetDebugStateBits() const override;
-#endif
-
   ContentOffsets CalcContentOffsetsFromFramePoint(const nsPoint& aPoint) override;
   ContentOffsets GetCharacterOffsetAtFramePoint(const nsPoint& aPoint);
 
@@ -361,6 +357,15 @@ public:
                               uint32_t* aMaxLength,
                               nscoord* aSnappedStartEdge,
                               nscoord* aSnappedEndEdge);
+
+  /**
+   * Return true if this box has some text to display.
+   * It returns false if at least one of these conditions are met:
+   * a. the frame hasn't been reflowed yet
+   * b. GetContentLength() == 0
+   * c. it contains only non-significant white-space
+   */
+  bool HasNonSuppressedText();
 
   /**
    * Object with various callbacks for PaintText() to invoke for different parts

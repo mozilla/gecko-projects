@@ -6,7 +6,7 @@
 
 use construct::FlowConstructor;
 use context::LayoutContext;
-use display_list_builder::DisplayListBuildState;
+use display_list::DisplayListBuildState;
 use flow::{FlowFlags, Flow, GetBaseFlow, ImmutableFlowUtils};
 use script_layout_interface::wrapper_traits::{LayoutNode, ThreadSafeLayoutNode};
 use servo_config::opts;
@@ -280,7 +280,8 @@ impl<'a> PostorderFlowTraversal for AssignBSizes<'a> {
     fn should_process(&self, flow: &mut Flow) -> bool {
         let base = flow.base();
         base.restyle_damage.intersects(ServoRestyleDamage::REFLOW_OUT_OF_FLOW | ServoRestyleDamage::REFLOW) &&
-        // The fragmentation countainer is responsible for calling Flow::fragment recursively
+        // The fragmentation countainer is responsible for calling
+        // Flow::fragment recursively
         !base.flags.contains(FlowFlags::CAN_BE_FRAGMENTED)
     }
 }

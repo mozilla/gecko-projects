@@ -271,6 +271,10 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DelayNode",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    "DesktopNotification",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "DesktopNotificationCenter",
+// IMPORTANT: Do not change this list without review from a DOM peer!
     "DeviceLightEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DeviceMotionEvent",
@@ -503,7 +507,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSelectElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLSlotElement",
+    {name: "HTMLSlotElement", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLSourceElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -839,7 +843,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ScopedCredentialInfo", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ShadowRoot", // Bogus, but the test harness forces it on.  See bug 1159768.
+    {name: "ShadowRoot", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "SharedWorker",
 // IMPORTANT: Do not change this list without review from a DOM peer!

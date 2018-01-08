@@ -28,7 +28,7 @@
 use app_units::Au;
 use block::{BlockFlow, FormattingContextType};
 use context::LayoutContext;
-use display_list_builder::{DisplayListBuildState, StackingContextCollectionState};
+use display_list::{DisplayListBuildState, StackingContextCollectionState};
 use euclid::{Transform3D, Point2D, Vector2D, Rect, Size2D};
 use flex::FlexFlow;
 use floats::{Floats, SpeculatedFloatPlacement};
@@ -992,6 +992,10 @@ impl BaseFlow {
         let mut flags = FlowFlags::empty();
         match style {
             Some(style) => {
+                if style.can_be_fragmented() {
+                    flags.insert(FlowFlags::CAN_BE_FRAGMENTED);
+                }
+
                 match style.get_box().position {
                     Position::Absolute | Position::Fixed => {
                         flags.insert(FlowFlags::IS_ABSOLUTELY_POSITIONED);

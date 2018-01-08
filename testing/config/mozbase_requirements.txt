@@ -1,3 +1,5 @@
+../tools/mozterm
+
 ../mozbase/manifestparser
 ../mozbase/mozcrash
 ../mozbase/mozdebug
@@ -15,5 +17,3 @@
 ../mozbase/mozscreenshot
 ../mozbase/moztest
 ../mozbase/mozversion
-
-../tools/mozterm

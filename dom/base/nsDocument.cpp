@@ -445,14 +445,6 @@ nsIdentifierMapEntry::GetImageIdElement()
 }
 
 void
-nsIdentifierMapEntry::AppendAllIdContent(nsCOMArray<Element>* aElements)
-{
-  for (Element* element : mIdContentList) {
-    aElements->AppendObject(element);
-  }
-}
-
-void
 nsIdentifierMapEntry::AddContentChangeCallback(nsIDocument::IDTargetObserver aCallback,
                                                void* aData, bool aForImage)
 {
@@ -5599,7 +5591,10 @@ nsDocument::DispatchContentLoadedEvents()
     using mozilla::dom::workers::ServiceWorkerManager;
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
     if (swm) {
-      swm->MaybeCheckNavigationUpdate(this);
+      Maybe<ClientInfo> clientInfo = GetClientInfo();
+      if (clientInfo.isSome()) {
+        swm->MaybeCheckNavigationUpdate(clientInfo.ref());
+      }
     }
   }
 
