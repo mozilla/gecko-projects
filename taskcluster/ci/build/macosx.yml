@@ -126,7 +126,7 @@ macosx64-devedition-nightly/opt:
         secrets: true
         tooltool-downloads: internal
         custom-build-variant-cfg: devedition
-    run-on-projects: ['mozilla-beta', 'maple']
+    run-on-projects: ['mozilla-beta']
     toolchains:
         - linux64-cctools-port
         - linux64-clang
@@ -196,7 +196,7 @@ macosx64-add-on-devel/opt:
         secrets: true
         custom-build-variant-cfg: add-on-devel
         tooltool-downloads: internal
-    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45', 'maple']
+    run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
     toolchains:
         - linux64-cctools-port
         - linux64-clang
