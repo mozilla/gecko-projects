@@ -85,7 +85,10 @@ def make_repackage_signing_description(config, jobs):
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [signing_cert_scope, 'project:releng:signing:format:mar_sha384']
+        scopes = [
+            signing_cert_scope, 'project:releng:signing:format:mar_sha384',
+            'project:releng:signing:format:gpg'
+        ]
 
         upstream_artifacts = [{
             "taskId": {"task-reference": "<repackage>"},
@@ -93,7 +96,7 @@ def make_repackage_signing_description(config, jobs):
             "paths": [
                 "public/build/{}target.complete.mar".format(locale_str),
             ],
-            "formats": ["mar_sha384"]
+            "formats": ["mar_sha384", "gpg"]
         }]
         if 'win' in build_platform:
             upstream_artifacts.append({
