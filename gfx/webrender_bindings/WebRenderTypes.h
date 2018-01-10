@@ -66,16 +66,15 @@ inline Maybe<wr::ImageFormat>
 SurfaceFormatToImageFormat(gfx::SurfaceFormat aFormat) {
   switch (aFormat) {
     case gfx::SurfaceFormat::R8G8B8X8:
-      // TODO: use RGBA + opaque flag
     case gfx::SurfaceFormat::R8G8B8A8:
-      return Some(wr::ImageFormat::BGRA8);
+      // WebRender not support RGBA8 and RGBX8. Assert here.
+      MOZ_ASSERT(false);
+      return Nothing();
     case gfx::SurfaceFormat::B8G8R8X8:
       // TODO: WebRender will have a BGRA + opaque flag for this but does not
       // have it yet (cf. issue #732).
     case gfx::SurfaceFormat::B8G8R8A8:
       return Some(wr::ImageFormat::BGRA8);
-    case gfx::SurfaceFormat::B8G8R8:
-      return Some(wr::ImageFormat::RGB8);
     case gfx::SurfaceFormat::A8:
       return Some(wr::ImageFormat::A8);
     case gfx::SurfaceFormat::R8G8:
@@ -94,8 +93,6 @@ ImageFormatToSurfaceFormat(ImageFormat aFormat) {
       return gfx::SurfaceFormat::B8G8R8A8;
     case ImageFormat::A8:
       return gfx::SurfaceFormat::A8;
-    case ImageFormat::RGB8:
-      return gfx::SurfaceFormat::B8G8R8;
     default:
       return gfx::SurfaceFormat::UNKNOWN;
   }

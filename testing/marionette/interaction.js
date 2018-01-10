@@ -32,7 +32,6 @@ const DISABLED_ATTRIBUTE_SUPPORTED_XUL = new Set([
   "CHECKBOX",
   "COLORPICKER",
   "COMMAND",
-  "DATEPICKER",
   "DESCRIPTION",
   "KEY",
   "KEYSET",
@@ -55,7 +54,6 @@ const DISABLED_ATTRIBUTE_SUPPORTED_XUL = new Set([
   "TAB",
   "TABS",
   "TEXTBOX",
-  "TIMEPICKER",
   "TOOLBARBUTTON",
   "TREE",
 ]);
@@ -273,18 +271,20 @@ interaction.selectOption = function(el) {
   event.mousemove(containerEl);
   event.mousedown(containerEl);
   event.focus(containerEl);
-  event.input(containerEl);
 
-  // Clicking <option> in <select> should not be deselected if selected.
-  // However, clicking one in a <select multiple> should toggle
-  // selectedness the way holding down Control works.
-  if (containerEl.multiple) {
-    el.selected = !el.selected;
-  } else if (!el.selected) {
-    el.selected = true;
+  if (!el.disabled) {
+    // Clicking <option> in <select> should not be deselected if selected.
+    // However, clicking one in a <select multiple> should toggle
+    // selectedness the way holding down Control works.
+    if (containerEl.multiple) {
+      el.selected = !el.selected;
+    } else if (!el.selected) {
+      el.selected = true;
+    }
+    event.input(containerEl);
+    event.change(containerEl);
   }
 
-  event.change(containerEl);
   event.mouseup(containerEl);
   event.click(containerEl);
 };

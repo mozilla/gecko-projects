@@ -1336,6 +1336,8 @@ pref("dom.forms.select.customstyling", false);
 pref("dom.forms.select.customstyling", true);
 #endif
 pref("dom.select_popup_in_parent.enabled", false);
+// Bug 1421229 - content-select
+pref("dom.select_popup_in_content.enabled", false);
 
 // Enable Directory API. By default, disabled.
 pref("dom.input.dirpicker", false);
@@ -1392,7 +1394,11 @@ pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
 
 pref("dom.webcomponents.enabled",           false);
+#ifdef NIGHTLY_BUILD
+pref("dom.webcomponents.customelements.enabled", true);
+#else
 pref("dom.webcomponents.customelements.enabled", false);
+#endif
 
 pref("javascript.enabled",                  true);
 pref("javascript.options.strict",           false);
@@ -3088,11 +3094,7 @@ pref("layout.css.column-span.enabled", false);
 pref("layout.css.ruby.intercharacter.enabled", false);
 
 // Is support for overscroll-behavior enabled?
-#ifdef RELEASE_OR_BETA
-pref("layout.css.overscroll-behavior.enabled", false);
-#else
 pref("layout.css.overscroll-behavior.enabled", true);
-#endif
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -5026,9 +5028,6 @@ pref("extensions.webcompat-reporter.enabled", false);
 pref("network.buffer.cache.count", 24);
 pref("network.buffer.cache.size",  32768);
 
-// Desktop Notification
-pref("notification.feature.enabled", false);
-
 // Web Notification
 pref("dom.webnotifications.enabled", true);
 pref("dom.webnotifications.serviceworker.enabled", true);
@@ -5394,7 +5393,7 @@ pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 
 // These tables will never trigger a gethash call.
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-harmful-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256,goog-passwordwhite-proto");
 
 // Number of random entries to send with a gethash request
 pref("urlclassifier.gethashnoise", 4);
@@ -5850,7 +5849,11 @@ pref("prompts.authentication_dialog_abuse_limit", 3);
 pref("dom.IntersectionObserver.enabled", true);
 
 // Whether module scripts (<script type="module">) are enabled for content.
+#ifdef NIGHTLY_BUILD
+pref("dom.moduleScripts.enabled", true);
+#else
 pref("dom.moduleScripts.enabled", false);
+#endif
 
 // Maximum amount of time in milliseconds consecutive setTimeout()/setInterval()
 // callback are allowed to run before yielding the event loop.

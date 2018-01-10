@@ -778,10 +778,6 @@ textbox[resizable="true"] > .textbox-input-box > html|textarea.textbox-textarea 
   -moz-binding: url("chrome://global/content/bindings/textbox.xml#input-box-spell");
 }
 
-textbox[type="timed"] {
-  -moz-binding: url("chrome://global/content/bindings/textbox.xml#timed-textbox");
-}
-
 textbox[type="search"] {
   -moz-binding: url("chrome://global/content/bindings/textbox.xml#search-textbox");
 }
@@ -1029,24 +1025,6 @@ richlistitem {
 
 richlistbox > listheader {
   -moz-box-ordinal-group: 1;
-}
-
-/********** datepicker and timepicker ********/
-
-datepicker {
-  -moz-binding: url('chrome://global/content/bindings/datetimepicker.xml#datepicker');
-}
-
-datepicker[type="popup"] {
-  -moz-binding: url('chrome://global/content/bindings/datetimepicker.xml#datepicker-popup');
-}
-
-datepicker[type="grid"] {
-  -moz-binding: url('chrome://global/content/bindings/datetimepicker.xml#datepicker-grid');
-}
-
-timepicker {
-  -moz-binding: url('chrome://global/content/bindings/datetimepicker.xml#timepicker');
 }
 
 
