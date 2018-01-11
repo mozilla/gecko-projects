@@ -124,11 +124,7 @@ private:
            bool aForcePreflight,
            bool aIsPreflight,
            bool aLoadTriggeredFromExternal,
-           bool aServiceWorkerTaintingSynthesized,
-           bool aForceHSTSPriming,
-           bool aMixedContentWouldBlock,
-           bool aIsHSTSPriming,
-           bool aIsHSTSPrimingUpgrade);
+           bool aServiceWorkerTaintingSynthesized);
   LoadInfo(const LoadInfo& rhs);
 
   NS_IMETHOD GetRedirects(JSContext* aCx, JS::MutableHandle<JS::Value> aRedirects,
@@ -171,6 +167,7 @@ private:
   bool                             mVerifySignedContent;
   bool                             mEnforceSRI;
   bool                             mForceAllowDataURI;
+  bool                             mOriginalFrameSrcLoad;
   bool                             mForceInheritPrincipalDropped;
   uint64_t                         mInnerWindowID;
   uint64_t                         mOuterWindowID;
@@ -190,11 +187,6 @@ private:
   bool                             mIsPreflight;
   bool                             mLoadTriggeredFromExternal;
   bool                             mServiceWorkerTaintingSynthesized;
-
-  bool                             mForceHSTSPriming : 1;
-  bool                             mMixedContentWouldBlock : 1;
-  bool                             mIsHSTSPriming: 1;
-  bool                             mIsHSTSPrimingUpgrade: 1;
 };
 
 } // namespace net
