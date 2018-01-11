@@ -31,7 +31,7 @@ def generate_upstream_artifacts(release_history, platform, locale=None):
         "taskType": 'partials',
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in artifacts],
-        "formats": ["mar_sha384", "gpg"],
+        "formats": ["mar_sha384"],
     }]
 
     return upstream_artifacts
@@ -77,10 +77,7 @@ def make_task_description(config, jobs):
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [
-            signing_cert_scope, 'project:releng:signing:format:mar_sha384',
-            'project:releng:signing:format:gpg',
-        ]
+        scopes = [signing_cert_scope, 'project:releng:signing:format:mar_sha384']
         task = {
             'label': label,
             'description': "{} Partials".format(

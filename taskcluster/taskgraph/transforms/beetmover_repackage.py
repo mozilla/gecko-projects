@@ -110,7 +110,6 @@ UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
     r'^win64(|-devedition)-nightly(|-l10n)$': ['target.complete.mar', 'target.installer.exe'],
     r'^win32(|-devedition)-nightly(|-l10n)$': [
         'target.complete.mar',
-        'target.complete.mar.asc',
         'target.installer.exe',
         'target.stub-installer.exe'
     ],
@@ -314,15 +313,11 @@ def generate_partials_upstream_artifacts(artifacts, platform, locale=None):
     else:
         artifact_prefix = 'public/build/{}'.format(locale)
 
-    paths = []
-    for p in artifacts:
-        paths.append("{}/{}".format(artifact_prefix, p))
-        paths.append("{}/{}.asc".format(artifact_prefix, p))
-
     upstream_artifacts = [{
         'taskId': {'task-reference': '<partials-signing>'},
         'taskType': 'signing',
-        'paths': paths,
+        'paths': ["{}/{}".format(artifact_prefix, p)
+                  for p in artifacts],
         'locale': locale or 'en-US',
     }]
 
