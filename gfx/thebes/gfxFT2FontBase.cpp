@@ -511,31 +511,26 @@ FT_Fixed
 gfxFT2FontBase::GetFTGlyphAdvance(uint16_t aGID)
 {
     gfxFT2LockedFace face(this);
+    MOZ_ASSERT(face.get());
+    if (!face.get()) {
+        // Failed to get the FT_Face? Give up already.
+        return 0;
+    }
     int32_t flags =
         gfxPlatform::GetPlatform()->FontHintingEnabled()
             ? FT_LOAD_ADVANCE_ONLY
             : FT_LOAD_ADVANCE_ONLY | FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING;
-    FT_Fixed advance = 0;
-    // FT_Get_Advance is not reliable with variations until FreeType 2.8.2,
-    // so fall back to calling FT_Load_Glyph and reading the glyph slot's
-    // linearHoriAdvance.
-    // See https://savannah.nongnu.org/bugs/index.php?52683.
-    static uint32_t sFTVersion = 0;
-    if (!sFTVersion) {
-        FT_Int major, minor, patch;
-        FT_Library_Version(face.get()->glyph->library, &major, &minor, &patch);
-        sFTVersion = (major << 16) | (minor << 8) | patch;
+    FT_Error ftError = FT_Load_Glyph(face.get(), aGID, flags);
+    MOZ_ASSERT(!ftError);
+    if (ftError != FT_Err_Ok) {
+        // FT_Face was somehow broken/invalid? Don't try to access glyph slot.
+        return 0;
     }
-    if (sFTVersion < 0x020802 &&
-        (face.get()->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) {
-        mozilla::DebugOnly<FT_Error> ftError =
-            FT_Load_Glyph(face.get(), aGID, flags);
-        MOZ_ASSERT(!ftError);
+    FT_Fixed advance = 0;
+    if (face.get()->face_flags & FT_FACE_FLAG_SCALABLE) {
         advance = face.get()->glyph->linearHoriAdvance;
     } else {
-        mozilla::DebugOnly<FT_Error> ftError =
-            FT_Get_Advance(face.get(), aGID, flags, &advance);
-        MOZ_ASSERT(!ftError);
+        advance = face.get()->glyph->advance.x << 10; // convert 26.6 to 16.16
     }
 
     // If freetype emboldening is being used, and it's not a zero-width glyph,
@@ -548,6 +543,10 @@ gfxFT2FontBase::GetFTGlyphAdvance(uint16_t aGID)
                       face.get()->size->metrics.y_scale) / 24;
         advance += strength;
     }
+
+    // Round the 16.16 fixed-point value to whole pixels for better consistency
+    // with how cairo renders the glyphs.
+    advance = (advance + 0x8000) & 0xffff0000u;
 
     return advance;
 }

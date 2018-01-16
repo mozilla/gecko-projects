@@ -3149,24 +3149,7 @@ var BrowserOnClick = {
       // provide a URL endpoint for these reports.
     }
 
-    let notificationBox = gBrowser.getNotificationBox();
-    let value = "blocked-badware-page";
-
-    let previousNotification = notificationBox.getNotificationWithValue(value);
-    if (previousNotification) {
-      notificationBox.removeNotification(previousNotification);
-    }
-
-    let notification = notificationBox.appendNotification(
-      title,
-      value,
-      "chrome://global/skin/icons/blacklist_favicon.png",
-      notificationBox.PRIORITY_CRITICAL_HIGH,
-      buttons
-    );
-    // Persist the notification until the user removes so it
-    // doesn't get removed on redirects.
-    notification.persistence = -1;
+    SafeBrowsingNotificationBox.show(title, buttons);
   },
 };
 
@@ -4588,6 +4571,8 @@ var XULBrowserWindow = {
 
       BrowserPageActions.onLocationChange();
 
+      SafeBrowsingNotificationBox.onLocationChange(aLocationURI);
+
       gTabletModePageCounter.inc();
 
       // Utility functions for disabling find
@@ -5319,13 +5304,6 @@ nsBrowserAccess.prototype = {
   },
 };
 
-function getTogglableToolbars() {
-  let toolbarNodes = Array.slice(gNavToolbox.childNodes);
-  toolbarNodes = toolbarNodes.concat(gNavToolbox.externalToolbars);
-  toolbarNodes = toolbarNodes.filter(node => node.getAttribute("toolbarname"));
-  return toolbarNodes;
-}
-
 function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   var popup = aEvent.target;
   if (popup != aEvent.currentTarget)
@@ -5340,9 +5318,13 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
 
   var firstMenuItem = aInsertPoint || popup.firstChild;
 
-  let toolbarNodes = getTogglableToolbars();
+  let toolbarNodes = gNavToolbox.childNodes;
 
   for (let toolbar of toolbarNodes) {
+    if (!toolbar.hasAttribute("toolbarname")) {
+      continue;
+    }
+
     let menuItem = document.createElement("menuitem");
     let hidingAttribute = toolbar.getAttribute("type") == "menubar" ?
                           "autohide" : "collapsed";
@@ -8908,6 +8890,53 @@ var AboutPrivateBrowsingListener = {
       msg => {
         TrackingProtection.dontShowIntroPanelAgain();
     });
+  }
+};
+
+const SafeBrowsingNotificationBox = {
+  _currentURIBaseDomain: null,
+  show(title, buttons) {
+    let uri = gBrowser.currentURI;
+
+    // start tracking host so that we know when we leave the domain
+    this._currentURIBaseDomain = Services.eTLD.getBaseDomain(uri);
+
+    let notificationBox = gBrowser.getNotificationBox();
+    let value = "blocked-badware-page";
+
+    let previousNotification = notificationBox.getNotificationWithValue(value);
+    if (previousNotification) {
+      notificationBox.removeNotification(previousNotification);
+    }
+
+    let notification = notificationBox.appendNotification(
+      title,
+      value,
+      "chrome://global/skin/icons/blacklist_favicon.png",
+      notificationBox.PRIORITY_CRITICAL_HIGH,
+      buttons
+    );
+    // Persist the notification until the user removes so it
+    // doesn't get removed on redirects.
+    notification.persistence = -1;
+  },
+  onLocationChange(aLocationURI) {
+    // take this to represent that you haven't visited a bad place
+    if (!this._currentURIBaseDomain) {
+      return;
+    }
+
+    let newURIBaseDomain = Services.eTLD.getBaseDomain(aLocationURI);
+
+    if (newURIBaseDomain !== this._currentURIBaseDomain) {
+      let notificationBox = gBrowser.getNotificationBox();
+      let notification = notificationBox.getNotificationWithValue("blocked-badware-page");
+      if (notification) {
+        notificationBox.removeNotification(notification, false);
+      }
+
+      this._currentURIBaseDomain = null;
+    }
   }
 };
 

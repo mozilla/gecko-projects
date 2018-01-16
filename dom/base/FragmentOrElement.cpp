@@ -51,7 +51,6 @@
 #include "nsIDOMEvent.h"
 #include "nsDOMCID.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMCSSStyleDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsNameSpaceManager.h"
 #include "nsContentList.h"
@@ -1118,6 +1117,15 @@ FragmentOrElement::DoGetXBLBinding() const
   return slots ? slots->mXBLBinding.get() : nullptr;
 }
 
+nsIContent*
+nsIContent::GetContainingShadowHost() const
+{
+  if (mozilla::dom::ShadowRoot* shadow = GetContainingShadow()) {
+    return shadow->GetHost();
+  }
+  return nullptr;
+}
+
 void
 nsIContent::SetAssignedSlot(HTMLSlotElement* aSlot)
 {
@@ -1167,6 +1175,14 @@ FragmentOrElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
   if (oldKid) {
     doRemoveChildAt(aIndex, aNotify, oldKid, mAttrsAndChildren);
   }
+}
+
+void
+FragmentOrElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
+{
+  // Let's keep the node alive.
+  nsCOMPtr<nsIContent> kungFuDeathGrip = aKid;
+  doRemoveChildAt(IndexOf(aKid), aNotify, aKid, mAttrsAndChildren);
 }
 
 void
@@ -2293,10 +2309,9 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
   mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
 
   // Remove childnodes.
-  uint32_t childCount = target->GetChildCount();
   nsAutoMutationBatch mb(target, true, false);
-  for (uint32_t i = 0; i < childCount; ++i) {
-    target->RemoveChildAt_Deprecated(0, true);
+  while (target->HasChildren()) {
+    target->RemoveChildNode(target->GetFirstChild(), true);
   }
   mb.RemovalDone();
 

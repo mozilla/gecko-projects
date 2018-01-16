@@ -2176,7 +2176,7 @@ class BaseCompiler final : public BaseCompilerInterface
     //    register on demand to free up one we need, thus avoiding the
     //    sync.  That type of fix would go into needI32().
 
-    void sync() final {
+    void sync() final override {
         size_t start = 0;
         size_t lim = stk_.length();
 
@@ -3598,7 +3598,7 @@ class BaseCompiler final : public BaseCompilerInterface
             off(off)
         {}
 
-        virtual void generate(MacroAssembler* masm) {
+        virtual void generate(MacroAssembler* masm) override {
             bool isFloat = src.tag == AnyReg::F32;
             FloatRegister fsrc = isFloat ? static_cast<FloatRegister>(src.f32())
                                          : static_cast<FloatRegister>(src.f64());
@@ -3670,7 +3670,7 @@ class BaseCompiler final : public BaseCompilerInterface
             off(off)
         {}
 
-        virtual void generate(MacroAssembler* masm) {
+        virtual void generate(MacroAssembler* masm) override {
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
             if (src.tag == AnyReg::F32)
                 masm->outOfLineWasmTruncateFloat32ToInt64(src.f32(), isUnsigned, off, rejoin());
@@ -3806,15 +3806,6 @@ class BaseCompiler final : public BaseCompilerInterface
         masm.emitSet(Assembler::Equal, dest);
 #endif
     }
-
-    void unreachableTrap()
-    {
-        masm.jump(oldTrap(Trap::Unreachable));
-#ifdef DEBUG
-        masm.breakpoint();
-#endif
-    }
-
 
     MOZ_MUST_USE bool
     supportsRoundInstruction(RoundingMode mode)
@@ -4903,6 +4894,10 @@ class BaseCompiler final : public BaseCompilerInterface
 
     BytecodeOffset bytecodeOffset() const {
         return iter_.bytecodeOffset();
+    }
+
+    void trap(Trap t) const {
+        masm.wasmTrap(t, bytecodeOffset());
     }
 
     OldTrapDesc oldTrap(Trap t) const {
@@ -8533,7 +8528,7 @@ BaseCompiler::emitBody()
           case uint16_t(Op::Unreachable):
             CHECK(iter_.readUnreachable());
             if (!deadCode_) {
-                unreachableTrap();
+                trap(Trap::Unreachable);
                 deadCode_ = true;
             }
             NEXT();

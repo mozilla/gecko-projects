@@ -952,6 +952,9 @@ nsTextControlFrame::SelectAllOrCollapseToEndOfText(bool aSelect)
       if (child->IsHTMLElement(nsGkAtoms::br)) {
         child = child->GetPreviousSibling();
         --numChildren;
+      } else if (child->IsNodeOfType(nsINode::eTEXT) && !child->Length()) {
+        // Editor won't remove text node when empty value.
+        --numChildren;
       }
     }
     if (!aSelect && numChildren) {
@@ -1306,7 +1309,10 @@ nsTextControlFrame::UpdateValueDisplay(bool aNotify,
   }
 
   if (aBeforeEditorInit && value.IsEmpty()) {
-    mRootNode->RemoveChildAt_Deprecated(0, true);
+    nsIContent* node = mRootNode->GetFirstChild();
+    if (node) {
+      mRootNode->RemoveChildNode(node, true);
+    }
     return NS_OK;
   }
 

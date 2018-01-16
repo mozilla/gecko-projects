@@ -10,7 +10,10 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-# from taskgraph.util.scriptworker import get_signing_cert_scope
+from taskgraph.util.scriptworker import (
+    get_signing_cert_scope,
+    get_worker_type_for_scope,
+)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -85,20 +88,19 @@ def make_checksums_signing_description(config, jobs):
             "formats": ["gpg"]
         }]
 
-        # signing_cert_scope = get_signing_cert_scope(config)
+        signing_cert_scope = get_signing_cert_scope(config)
+        # XXX hardcode on maple to get a green graph. DO NOT UPLIFT
+        signing_cert_scope = 'project:releng:signing:cert:dep-signing'
+
         task = {
             'label': label,
             'description': description,
-            # XXX hardcode on maple to get a green graph. DO NOT UPLIFT
-            # 'worker-type': _generate_worker_type(signing_cert_scope),
-            'worker-type': 'scriptworker-prov-v1/depsigning',
+            'worker-type': get_worker_type_for_scope(config, signing_cert_scope),
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
                        'max-run-time': 3600},
             'scopes': [
-                # XXX hardcode on maple to get a green graph. DO NOT UPLIFT
-                # signing_cert_scope,
-                "project:releng:signing:cert:dep-signing",
+                signing_cert_scope,
                 "project:releng:signing:format:gpg"
             ],
             'dependencies': dependencies,
@@ -108,8 +110,3 @@ def make_checksums_signing_description(config, jobs):
         }
 
         yield task
-
-
-def _generate_worker_type(signing_cert_scope):
-    worker_type = 'depsigning' if 'dep-signing' in signing_cert_scope else 'signing-linux-v1'
-    return 'scriptworker-prov-v1/{}'.format(worker_type)

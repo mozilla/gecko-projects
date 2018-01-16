@@ -2714,8 +2714,7 @@ var SessionStoreInternal = {
       if (activePageData.title &&
           activePageData.title != activePageData.url) {
         win.gBrowser.setInitialTabTitle(tab, activePageData.title, { isContentTitle: true });
-      } else if (activePageData.url != "about:blank" &&
-                 activePageData.url != "about:newtab") {
+      } else if (activePageData.url != "about:blank") {
         win.gBrowser.setInitialTabTitle(tab, activePageData.url);
       }
     }
@@ -3899,11 +3898,7 @@ var SessionStoreInternal = {
 
     this.markTabAsRestoring(aTab);
 
-    // We need a new frameloader if we are reloading into a browser with a
-    // grouped session history (as we don't support restoring into browsers
-    // with grouped session histories directly).
-    let newFrameloader =
-      aOptions.newFrameloader || !!browser.frameLoader.groupedSHistory;
+    let newFrameloader = aOptions.newFrameloader;
 
     let isRemotenessUpdate;
     if (aOptions.remoteType !== undefined) {

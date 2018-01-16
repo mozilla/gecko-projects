@@ -74,7 +74,6 @@
 @BINPATH@/@DLL_PREFIX@mozglue@DLL_SUFFIX@
 # This should be MOZ_CHILD_PROCESS_NAME, but that has a "lib/" prefix.
 @BINPATH@/@MOZ_CHILD_PROCESS_NAME@
-@BINPATH@/@MOZ_CHILD_PROCESS_NAME_PIE@
 
 #ifdef MOZ_ANDROID_GOOGLE_VR
 @BINPATH@/@DLL_PREFIX@gvr@DLL_SUFFIX@
@@ -125,7 +124,6 @@
 #endif
 @BINPATH@/components/dom_canvas.xpt
 @BINPATH@/components/dom_core.xpt
-@BINPATH@/components/dom_css.xpt
 @BINPATH@/components/dom_events.xpt
 @BINPATH@/components/dom_file.xpt
 @BINPATH@/components/dom_geolocation.xpt
@@ -143,12 +141,9 @@
 @BINPATH@/components/dom_range.xpt
 @BINPATH@/components/dom_security.xpt
 @BINPATH@/components/dom_sidebar.xpt
-@BINPATH@/components/dom_mobilemessage.xpt
 @BINPATH@/components/dom_storage.xpt
-@BINPATH@/components/dom_stylesheets.xpt
 @BINPATH@/components/dom_system.xpt
 @BINPATH@/components/dom_traversal.xpt
-@BINPATH@/components/dom_tv.xpt
 #ifdef MOZ_WEBSPEECH
 @BINPATH@/components/dom_webspeechrecognition.xpt
 #endif
@@ -262,10 +257,6 @@
 ; JavaScript components
 @BINPATH@/components/ConsoleAPI.manifest
 @BINPATH@/components/ConsoleAPIStorage.js
-@BINPATH@/components/ContactManager.js
-@BINPATH@/components/ContactManager.manifest
-@BINPATH@/components/PhoneNumberService.js
-@BINPATH@/components/PhoneNumberService.manifest
 @BINPATH@/components/NotificationStorage.js
 @BINPATH@/components/NotificationStorage.manifest
 #ifdef MOZ_ANDROID_GCM
@@ -405,9 +396,6 @@
 @BINPATH@/components/PresentationDataChannelSessionTransport.manifest
 @BINPATH@/components/AndroidCastDeviceProvider.manifest
 @BINPATH@/components/AndroidCastDeviceProvider.js
-
-@BINPATH@/components/TVSimulatorService.js
-@BINPATH@/components/TVSimulatorService.manifest
 #endif
 
 @BINPATH@/components/mozIntl.manifest

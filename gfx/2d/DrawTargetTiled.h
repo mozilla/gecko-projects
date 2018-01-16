@@ -193,16 +193,20 @@ public:
     }
   }
 
-  virtual SurfaceType GetType() const { return SurfaceType::TILED; }
-  virtual IntSize GetSize() const {
+  virtual SurfaceType GetType() const override { return SurfaceType::TILED; }
+  virtual IntSize GetSize() const override {
     MOZ_ASSERT(mRect.Width() > 0 && mRect.Height() > 0);
     return IntSize(mRect.XMost(), mRect.YMost());
   }
-  virtual SurfaceFormat GetFormat() const { return mSnapshots[0]->GetFormat(); }
+  virtual SurfaceFormat GetFormat() const override { return mSnapshots[0]->GetFormat(); }
 
-  virtual already_AddRefed<DataSourceSurface> GetDataSurface()
+  virtual already_AddRefed<DataSourceSurface> GetDataSurface() override
   {
     RefPtr<DataSourceSurface> surf = Factory::CreateDataSourceSurface(GetSize(), GetFormat());
+    if (!surf) {
+      gfxCriticalError() << "DrawTargetTiled::GetDataSurface failed to allocate surface";
+      return nullptr;
+    }
 
     DataSourceSurface::MappedSurface mappedSurf;
     if (!surf->Map(DataSourceSurface::MapType::WRITE, &mappedSurf)) {

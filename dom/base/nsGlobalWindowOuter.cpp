@@ -6893,7 +6893,7 @@ nsGlobalWindowOuter::GetComputedStyleHelperOuter(Element& aElt,
     }
   }
 
-  RefPtr<nsComputedDOMStyle> compStyle =
+  RefPtr<nsICSSDeclaration> compStyle =
     NS_NewComputedDOMStyle(&aElt, aPseudoElt, presShell,
                            aDefaultStylesOnly ? nsComputedDOMStyle::eDefaultOnly :
                                                 nsComputedDOMStyle::eAll);
@@ -7600,13 +7600,6 @@ nsGlobalWindowOuter::Orientation(CallerType aCallerType) const
            0 : WindowOrientationObserver::OrientationAngle();
 }
 #endif
-
-bool
-nsGlobalWindowOuter::GetIsPrerendered()
-{
-  nsIDocShell* docShell = GetDocShell();
-  return docShell && docShell->GetIsPrerendered();
-}
 
 void
 nsPIDOMWindowOuter::SetLargeAllocStatus(LargeAllocStatus aStatus)

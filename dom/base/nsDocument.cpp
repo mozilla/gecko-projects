@@ -58,7 +58,6 @@
 #include "mozilla/EventStateManager.h"
 #include "nsIDOMNodeFilter.h"
 
-#include "nsIDOMStyleSheet.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsIDOMDOMImplementation.h"
@@ -237,7 +236,6 @@
 #include "nsITextControlElement.h"
 #include "nsIDOMNSEditableElement.h"
 #include "nsIEditor.h"
-#include "nsIDOMCSSStyleRule.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsISecurityConsoleMessage.h"
@@ -3325,78 +3323,6 @@ nsIDocument::IsScriptTracking(const nsACString& aURL) const
   return mTrackingScripts.Contains(aURL);
 }
 
-bool
-nsIDocument::PrerenderHref(nsIURI* aHref)
-{
-  MOZ_ASSERT(aHref);
-
-  static bool sPrerenderEnabled = false;
-  static bool sPrerenderPrefCached = false;
-  if (!sPrerenderPrefCached) {
-    sPrerenderPrefCached = true;
-    Preferences::AddBoolVarCache(&sPrerenderEnabled,
-                                 "dom.linkPrerender.enabled",
-                                 false);
-  }
-
-  // Check if prerender is enabled
-  if (!sPrerenderEnabled) {
-    return false;
-  }
-
-  nsCOMPtr<nsIURI> referrer = GetDocumentURI();
-  bool urisMatch = false;
-  aHref->EqualsExceptRef(referrer, &urisMatch);
-  if (urisMatch) {
-    // Prerender current document isn't quite meaningful, and we may not be able
-    // to load it out of process.
-    return false;
-  }
-
-  nsCOMPtr<nsIDocShell> docShell = GetDocShell();
-  nsCOMPtr<nsIWebNavigation> webNav = do_QueryInterface(docShell);
-  NS_ENSURE_TRUE(webNav, false);
-
-  bool canGoForward = false;
-  nsresult rv = webNav->GetCanGoForward(&canGoForward);
-  if (NS_FAILED(rv) || canGoForward) {
-    // Skip prerender on history navigation as we don't support it yet.
-    // Remove this check once bug 1323650 is implemented.
-    return false;
-  }
-
-  // Check if the document is in prerender state. We don't prerender in a
-  // prerendered document.
-  if (docShell->GetIsPrerendered()) {
-    return false;
-  }
-
-  // We currently do not support prerendering in documents loaded within the
-  // chrome process.
-  if (!XRE_IsContentProcess()) {
-    return false;
-  }
-
-  // Adopting an prerendered document is similar to performing a load within a
-  // different docshell, as the prerendering must have occurred in a different
-  // docshell.
-  if (!docShell->GetIsOnlyToplevelInTabGroup()) {
-    return false;
-  }
-
-  TabChild* tabChild = TabChild::GetFrom(docShell);
-  NS_ENSURE_TRUE(tabChild, false);
-
-  nsCOMPtr<nsIWebBrowserChrome3> wbc3;
-  tabChild->GetWebBrowserChrome(getter_AddRefs(wbc3));
-  NS_ENSURE_TRUE(wbc3, false);
-
-  rv = wbc3->StartPrerenderingDocument(aHref, referrer, NodePrincipal());
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return true;
-}
-
 NS_IMETHODIMP
 nsDocument::GetApplicationCache(nsIApplicationCache **aApplicationCache)
 {
@@ -3613,21 +3539,9 @@ Element*
 nsIDocument::GetActiveElement()
 {
   // Get the focused element.
-  if (nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow()) {
-    nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
-    nsIContent* focusedContent =
-      nsFocusManager::GetFocusedDescendant(window,
-                                           nsFocusManager::eOnlyCurrentWindow,
-                                           getter_AddRefs(focusedWindow));
-    // be safe and make sure the element is from this document
-    if (focusedContent && focusedContent->OwnerDoc() == this) {
-      if (focusedContent->ChromeOnlyAccess()) {
-        focusedContent = focusedContent->FindFirstNonChromeOnlyAccessContent();
-      }
-      if (focusedContent) {
-        return focusedContent->AsElement();
-      }
-    }
+  Element* focusedElement = GetRetargetedFocusedElement();
+  if (focusedElement) {
+    return focusedElement;
   }
 
   // No focused element anywhere in this document.  Try to get the BODY.
@@ -4488,6 +4402,28 @@ nsDocument::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
 }
 
 void
+nsDocument::RemoveChildNode(nsIContent* aKid, bool aNotify)
+{
+  if (aKid->IsElement()) {
+    // Destroy the link map up front before we mess with the child list.
+    DestroyElementMaps();
+  }
+
+  // Preemptively clear mCachedRootElement, since we may be about to remove it
+  // from our child list, and we don't want to return this maybe-obsolete value
+  // from any GetRootElement() calls that happen inside of doRemoveChildAt().
+  // (NOTE: for this to be useful, doRemoveChildAt() must NOT trigger any
+  // GetRootElement() calls until after it's removed the child from mChildren.
+  // Any call before that point would restore this soon-to-be-obsolete cached
+  // answer, and our clearing here would be fruitless.)
+  mCachedRootElement = nullptr;
+  doRemoveChildAt(IndexOf(aKid), aNotify, aKid, mChildren);
+  MOZ_ASSERT(mCachedRootElement != aKid,
+             "Stale pointer in mCachedRootElement, after we tried to clear it "
+             "(maybe somebody called GetRootElement() too early?)");
+}
+
+void
 nsDocument::EnsureOnDemandBuiltInUASheet(StyleSheet* aSheet)
 {
   if (mOnDemandBuiltInUASheets.Contains(aSheet)) {
@@ -5057,24 +4993,19 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
       }
     }
 
-    using mozilla::dom::workers::ServiceWorkerManager;
-    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    if (swm) {
-      ErrorResult error;
-      if (GetController().isSome()) {
-        imgLoader* loader = nsContentUtils::GetImgLoaderForDocument(this);
-        if (loader) {
-          loader->ClearCacheForControlledDocument(this);
-        }
-
-        // We may become controlled again if this document comes back out
-        // of bfcache.  Clear our state to allow that to happen.  Only
-        // clear this flag if we are actually controlled, though, so pages
-        // that were force reloaded don't become controlled when they
-        // come out of bfcache.
-        mMaybeServiceWorkerControlled = false;
+    ErrorResult error;
+    if (GetController().isSome()) {
+      imgLoader* loader = nsContentUtils::GetImgLoaderForDocument(this);
+      if (loader) {
+        loader->ClearCacheForControlledDocument(this);
       }
-      swm->MaybeStopControlling(this);
+
+      // We may become controlled again if this document comes back out
+      // of bfcache.  Clear our state to allow that to happen.  Only
+      // clear this flag if we are actually controlled, though, so pages
+      // that were force reloaded don't become controlled when they
+      // come out of bfcache.
+      mMaybeServiceWorkerControlled = false;
     }
   }
 
@@ -5194,11 +5125,7 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
       return;
     }
 
-    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-    if (swm) {
-      swm->MaybeStartControlling(this);
-      mMaybeServiceWorkerControlled = true;
-    }
+    mMaybeServiceWorkerControlled = true;
   }
 }
 
@@ -6360,13 +6287,6 @@ nsDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
 }
 
 NS_IMETHODIMP
-nsDocument::GetStyleSheets(nsIDOMStyleSheetList** aStyleSheets)
-{
-  NS_ADDREF(*aStyleSheets = StyleSheets());
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDocument::GetMozSelectedStyleSheetSet(nsAString& aSheetSet)
 {
   nsIDocument::GetSelectedStyleSheetSet(aSheetSet);
@@ -6534,12 +6454,6 @@ nsIDocument::ImportNode(nsINode& aNode, bool aDeep, ErrorResult& rv) const
       break;
     }
     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
-    {
-      if (imported->IsShadowRoot()) {
-        break;
-      }
-      MOZ_FALLTHROUGH;
-    }
     case nsIDOMNode::ATTRIBUTE_NODE:
     case nsIDOMNode::ELEMENT_NODE:
     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
@@ -7540,10 +7454,10 @@ nsDOMAttributeMap::BlastSubtreeToPieces(nsINode *aNode)
     }
   }
 
-  uint32_t count = aNode->GetChildCount();
-  for (uint32_t i = 0; i < count; ++i) {
-    BlastSubtreeToPieces(aNode->GetFirstChild());
-    aNode->RemoveChildAt_Deprecated(0, false);
+  while (aNode->HasChildren()) {
+    nsIContent* node = aNode->GetFirstChild();
+    BlastSubtreeToPieces(node);
+    aNode->RemoveChildNode(node, false);
   }
 }
 
@@ -7741,9 +7655,7 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
       // Remove from parent.
       nsCOMPtr<nsINode> parent = adoptedNode->GetParentNode();
       if (parent) {
-        int32_t idx = parent->IndexOf(adoptedNode);
-        MOZ_ASSERT(idx >= 0);
-        parent->RemoveChildAt_Deprecated(idx, true);
+        parent->RemoveChildNode(adoptedNode->AsContent(), true);
       } else {
         MOZ_ASSERT(!adoptedNode->IsInUncomposedDoc());
 
@@ -12070,7 +11982,7 @@ public:
     , mUserInputOrChromeCaller(aUserInputOrChromeCaller)
   {}
 
-  NS_IMETHOD Run() final;
+  NS_IMETHOD Run() final override;
 
 private:
   nsWeakPtr mElement;
@@ -12373,13 +12285,6 @@ nsDocument::GetVisibilityState() const
   // Otherwise, we're visible.
   if (!IsVisible() || !mWindow || !mWindow->GetOuterWindow() ||
       mWindow->GetOuterWindow()->IsBackground()) {
-
-    // Check if the document is in prerender state.
-    nsCOMPtr<nsIDocShell> docshell = GetDocShell();
-    if (docshell && docshell->GetIsPrerendered()) {
-      return dom::VisibilityState::Prerender;
-    }
-
     return dom::VisibilityState::Hidden;
   }
 
@@ -13287,6 +13192,35 @@ nsIDocument::SetUserHasInteracted(bool aUserHasInteracted)
 void
 nsIDocument::NotifyUserActivation()
 {
+  ActivateByUserGesture();
+  // Activate parent document which has same principle on the parent chain.
+  nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
+  nsCOMPtr<nsIDocument> parent = GetSameTypeParentDocument();
+  while (parent) {
+    parent->MaybeActivateByUserGesture(principal);
+    parent = parent->GetSameTypeParentDocument();
+  }
+}
+
+void
+nsIDocument::MaybeActivateByUserGesture(nsIPrincipal* aPrincipal)
+{
+  bool isEqual = false;
+  nsresult rv = aPrincipal->Equals(NodePrincipal(), &isEqual);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  // If a child frame is actived, it would always activate the top frame and its
+  // parent frames which has same priciple.
+  if (isEqual || IsTopLevelContentDocument()) {
+    ActivateByUserGesture();
+  }
+}
+
+void
+nsIDocument::ActivateByUserGesture()
+{
   if (mUserHasActivatedInteraction) {
     return;
   }
@@ -13316,7 +13250,7 @@ nsIDocument*
 nsIDocument::GetFirstParentDocumentWithSamePrincipal(nsIPrincipal* aPrincipal)
 {
   MOZ_ASSERT(aPrincipal);
-  nsIDocument* parent = GetSameTypeParentDocument(this);
+  nsIDocument* parent = GetSameTypeParentDocument();
   while (parent) {
     bool isEqual = false;
     nsresult rv = aPrincipal->Equals(parent->NodePrincipal(), &isEqual);
@@ -13327,17 +13261,16 @@ nsIDocument::GetFirstParentDocumentWithSamePrincipal(nsIPrincipal* aPrincipal)
     if (isEqual) {
       return parent;
     }
-    parent = GetSameTypeParentDocument(parent);
+    parent = parent->GetSameTypeParentDocument();
   }
   MOZ_ASSERT(!parent);
   return nullptr;
 }
 
 nsIDocument*
-nsIDocument::GetSameTypeParentDocument(const nsIDocument* aDoc)
+nsIDocument::GetSameTypeParentDocument()
 {
-  MOZ_ASSERT(aDoc);
-  nsCOMPtr<nsIDocShellTreeItem> current = aDoc->GetDocShell();
+  nsCOMPtr<nsIDocShellTreeItem> current = GetDocShell();
   if (!current) {
     return nullptr;
   }

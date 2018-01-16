@@ -108,6 +108,13 @@ pref("browser.cache.compression_level", 0);
 // Don't show "Open with" option on download dialog if true.
 pref("browser.download.forbid_open_with", false);
 
+// Remove navigator.registerContentHandler
+#ifdef EARLY_BETA_OR_EARLIER
+pref("dom.registerContentHandler.enabled", false);
+#else
+pref("dom.registerContentHandler.enabled", true);
+#endif
+
 // Whether or not testing features are enabled.
 pref("dom.quotaManager.testing", false);
 
@@ -4279,10 +4286,6 @@ pref("browser.urlbar.clickSelectsAll", false);
 // Leave this at the default, 7, to match mozilla1.0-era user expectations.
 // pref("accessibility.tabfocus", 1);
 
-// Default to using the system filepicker if possible, but allow
-// toggling to use the XUL filepicker
-pref("ui.allow_platform_file_picker", true);
-
 pref("helpers.global_mime_types_file", "/etc/mime.types");
 pref("helpers.global_mailcap_file", "/etc/mailcap");
 pref("helpers.private_mime_types_file", "~/.mime.types");
@@ -4333,10 +4336,6 @@ pref("browser.urlbar.clickSelectsAll", false);
 // 1 focuses text controls, 2 focuses other form elements, 4 adds links.
 // Leave this at the default, 7, to match mozilla1.0-era user expectations.
 // pref("accessibility.tabfocus", 1);
-
-// Default to using the system filepicker if possible, but allow
-// toggling to use the XUL filepicker
-pref("ui.allow_platform_file_picker", true);
 
 pref("helpers.global_mime_types_file", "/etc/mime.types");
 pref("helpers.global_mailcap_file", "/etc/mailcap");
@@ -4487,11 +4486,7 @@ pref("ui.panel.default_level_parent", true);
 
 pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 
-#if MOZ_WIDGET_GTK == 2
-pref("intl.ime.use_simple_context_on_password_field", true);
-#else
 pref("intl.ime.use_simple_context_on_password_field", false);
-#endif
 
 #ifdef MOZ_WIDGET_GTK
 // maximum number of fonts to substitute for a generic
@@ -5236,7 +5231,7 @@ pref("dom.placeholder.show_on_focus", true);
 
 // WebVR is enabled by default in beta and release for Windows and for all
 // platforms in nightly and aurora.
-#if defined(XP_WIN) || defined(XP_MACOSX) || !defined(RELEASE_OR_BETA)
+#if defined(XP_WIN) || !defined(RELEASE_OR_BETA)
 pref("dom.vr.enabled", true);
 #else
 pref("dom.vr.enabled", false);
@@ -5294,7 +5289,7 @@ pref("dom.vr.osvr.enabled", false);
 // We are only enabling WebVR by default on 64-bit builds (Bug 1384459)
 pref("dom.vr.openvr.enabled", false);
 #elif defined(XP_WIN) || defined(XP_MACOSX)
-// We enable WebVR by default for Windows and macOS
+// We enable OpenVR by default for Windows and macOS
 pref("dom.vr.openvr.enabled", true);
 #else
 // See Bug 1310663 (Linux)

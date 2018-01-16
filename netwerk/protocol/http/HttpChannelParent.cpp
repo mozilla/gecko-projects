@@ -265,6 +265,15 @@ HttpChannelParent::CleanupBackgroundChannel()
   }
 }
 
+base::ProcessId
+HttpChannelParent::OtherPid() const
+{
+  if (mIPCClosed) {
+    return 0;
+  }
+  return Manager()->OtherPid();
+}
+
 //-----------------------------------------------------------------------------
 // HttpChannelParent::nsISupports
 //-----------------------------------------------------------------------------
@@ -406,7 +415,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     RefPtr<HttpChannelParent> channel = do_QueryObject(mChannel.get());
     channel->TryInvokeAsyncOpen(mStatus);
@@ -1147,7 +1156,7 @@ public:
   {
   }
 
-  void Run()
+  void Run() override
   {
     mParent->DivertOnDataAvailable(mData, mOffset, mCount);
   }
@@ -1238,7 +1247,8 @@ public:
   {
   }
 
-  void Run() {
+  void Run() override
+  {
     mParent->DivertOnStopRequest(mStatusCode);
   }
 
@@ -1297,7 +1307,8 @@ public:
   {
   }
 
-  void Run() {
+  void Run() override
+  {
     mParent->DivertComplete();
   }
 
@@ -1998,6 +2009,16 @@ HttpChannelParent::ResumeMessageDiversion()
   LOG(("HttpChannelParent::SuspendMessageDiversion [this=%p]", this));
   // This only needs to resumes message queue.
   mEventQ->Resume();
+  return NS_OK;
+}
+
+nsresult
+HttpChannelParent::CancelDiversion()
+{
+  LOG(("HttpChannelParent::CancelDiversion [this=%p]", this));
+  if (!mIPCClosed) {
+    Unused << SendCancelDiversion();
+  }
   return NS_OK;
 }
 

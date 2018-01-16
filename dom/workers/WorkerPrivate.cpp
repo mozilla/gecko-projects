@@ -49,6 +49,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
+#include "mozilla/dom/ClientState.h"
 #include "mozilla/dom/Console.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -1490,7 +1491,7 @@ public:
   { }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->CycleCollectInternal(mCollectChildren);
     return true;
@@ -1507,7 +1508,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->OfflineStatusChangeEventInternal(mIsOffline);
     return true;
@@ -1525,7 +1526,7 @@ public:
   {}
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->MemoryPressureInternal();
     return true;
@@ -1592,7 +1593,7 @@ public:
     : WorkerHolder("SimpleWorkerHolder")
   {}
 
-  virtual bool Notify(Status aStatus) { return true; }
+  virtual bool Notify(Status aStatus) override { return true; }
 };
 
 } /* anonymous namespace */
@@ -5331,6 +5332,24 @@ WorkerPrivate::GetClientInfo() const
   AssertIsOnWorkerThread();
   MOZ_DIAGNOSTIC_ASSERT(mClientSource);
   return mClientSource->Info();
+}
+
+const ClientState
+WorkerPrivate::GetClientState() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  ClientState state;
+  mClientSource->SnapshotState(&state);
+  return Move(state);
+}
+
+const Maybe<ServiceWorkerDescriptor>
+WorkerPrivate::GetController() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  return mClientSource->GetController();
 }
 
 void

@@ -90,7 +90,7 @@ public:
                                uint64_t               topLevelOuterContentWindowId,
                                nsIAsyncInputStream  **responseBody);
 
-    void OnActivated(bool h2) override;
+    void OnActivated() override;
 
     // attributes
     nsHttpResponseHead    *ResponseHead()   { return mHaveAllHeaders ? mResponseHead : nullptr; }
@@ -219,7 +219,7 @@ private:
 
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
-    bool ResponseTimeoutEnabled() const final;
+    bool ResponseTimeoutEnabled() const final override;
 
     void DisableSpdy() override;
     void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
@@ -349,7 +349,6 @@ private:
     bool                            mClosed;
     bool                            mConnected;
     bool                            mActivated;
-    bool                            mActivatedAsH2;
     bool                            mHaveStatusLine;
     bool                            mHaveAllHeaders;
     bool                            mTransactionDone;

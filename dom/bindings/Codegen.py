@@ -1769,6 +1769,23 @@ def JSNativeArguments():
             Argument('JS::Value*', 'vp')]
 
 
+class CGIsInstanceMethod(CGAbstractStaticMethod):
+    """
+    A class for generating the static isInstance method.
+    """
+    def __init__(self, descriptor):
+        assert descriptor.interface.hasInterfacePrototypeObject()
+        CGAbstractStaticMethod.__init__(self, descriptor, "isInstance", "bool",
+                                        JSNativeArguments())
+
+    def definition_body(self):
+        return fill(
+            """
+            return InterfaceIsInstance(cx, argc, vp, prototypes::id::${name},
+                                       PrototypeTraits<prototypes::id::${name}>::Depth);
+            """,
+            name=self.descriptor.name)
+
 class CGClassConstructor(CGAbstractStaticMethod):
     """
     JS-visible constructor for our objects
@@ -2416,6 +2433,18 @@ class MethodDefiner(PropertyDefiner):
             else:
                 self.regular.append(method)
 
+        # Generate the isInstance static method.
+        if (static and
+            (self.descriptor.interface.hasInterfaceObject() and
+             self.descriptor.interface.hasInterfacePrototypeObject())):
+            self.chrome.append({
+                "name": "isInstance",
+                "methodInfo": False,
+                "length": 1,
+                "flags": "JSPROP_ENUMERATE",
+                "condition": MemberCondition(),
+            })
+
         # TODO: Once iterable is implemented, use tiebreak rules instead of
         # failing. Also, may be more tiebreak rules to implement once spec bug
         # is resolved.
@@ -2803,6 +2832,7 @@ class ConstDefiner(PropertyDefiner):
 
 class PropertyArrays():
     def __init__(self, descriptor):
+        self.descriptor = descriptor
         self.staticMethods = MethodDefiner(descriptor, "StaticMethods",
                                            static=True)
         self.staticAttrs = AttrDefiner(descriptor, "StaticAttributes",
@@ -2821,7 +2851,11 @@ class PropertyArrays():
                 "unforgeableMethods", "unforgeableAttrs", "consts"]
 
     def hasChromeOnly(self):
-        return any(getattr(self, a).hasChromeOnly() for a in self.arrayNames())
+        # All interfaces that generate an interface object and interface
+        # prototype object have a chrome only isInstance static method.
+        return ((self.staticMethods.descriptor.interface.hasInterfaceObject() and
+                 self.staticMethods.descriptor.interface.hasInterfacePrototypeObject()) or
+                any(getattr(self, a).hasChromeOnly() for a in self.arrayNames()))
 
     def hasNonChromeOnly(self):
         return any(getattr(self, a).hasNonChromeOnly() for a in self.arrayNames())
@@ -7691,23 +7725,6 @@ class CGPerSignatureCall(CGThing):
         self.isConstructor = isConstructor
         cgThings = []
 
-        # Here, we check if the current getter, setter, method, interface or
-        # inherited interfaces have the UnsafeInPrerendering extended attribute
-        # and if so, we add a check to make sure it is safe.
-        if (idlNode.getExtendedAttribute("UnsafeInPrerendering") or
-            descriptor.interface.getExtendedAttribute("UnsafeInPrerendering") or
-            any(i.getExtendedAttribute("UnsafeInPrerendering")
-                for i in descriptor.interface.getInheritedInterfaces())):
-                cgThings.append(CGGeneric(dedent(
-                    """
-                    if (!mozilla::dom::EnforceNotInPrerendering(cx, obj)) {
-                        // Return false from the JSNative in order to trigger
-                        // an uncatchable exception.
-                        MOZ_ASSERT(!JS_IsExceptionPending(cx));
-                        return false;
-                    }
-                    """)))
-
         deprecated = (idlNode.getExtendedAttribute("Deprecated") or
                       (idlNode.isStatic() and descriptor.interface.getExtendedAttribute("Deprecated")))
         if deprecated:
@@ -11052,19 +11069,6 @@ class ClassMember(ClassItem):
                                    self.name, body)
 
 
-class ClassTypedef(ClassItem):
-    def __init__(self, name, type, visibility="public"):
-        self.type = type
-        ClassItem.__init__(self, name, visibility)
-
-    def declare(self, cgClass):
-        return 'typedef %s %s;\n' % (self.type, self.name)
-
-    def define(self, cgClass):
-        # Only goes in the header
-        return ''
-
-
 class ClassEnum(ClassItem):
     def __init__(self, name, entries, values=None, visibility="public"):
         self.entries = entries
@@ -11103,7 +11107,7 @@ class ClassUnion(ClassItem):
 class CGClass(CGThing):
     def __init__(self, name, bases=[], members=[], constructors=[],
                  destructor=None, methods=[],
-                 typedefs=[], enums=[], unions=[], templateArgs=[],
+                 enums=[], unions=[], templateArgs=[],
                  templateSpecialization=[], isStruct=False,
                  disallowCopyConstruction=False, indent='',
                  decorators='',
@@ -11118,7 +11122,6 @@ class CGClass(CGThing):
         # code wants lists of members.
         self.destructors = [destructor] if destructor else []
         self.methods = methods
-        self.typedefs = typedefs
         self.enums = enums
         self.unions = unions
         self.templateArgs = templateArgs
@@ -11213,7 +11216,7 @@ class CGClass(CGThing):
             disallowedCopyConstructors = []
 
         order = [self.enums, self.unions,
-                 self.typedefs, self.members,
+                 self.members,
                  self.constructors + disallowedCopyConstructors,
                  self.destructors, self.methods]
 
@@ -12759,6 +12762,9 @@ class CGDescriptor(CGThing):
         for n in descriptor.interface.namedConstructors:
             cgThings.append(CGClassConstructor(descriptor, n,
                                                NamedConstructorName(n)))
+        if (descriptor.interface.hasInterfaceObject() and
+            descriptor.interface.hasInterfacePrototypeObject()):
+            cgThings.append(CGIsInstanceMethod(descriptor))
         for m in descriptor.interface.members:
             if m.isMethod() and m.identifier.name == 'queryInterface':
                 continue
@@ -14279,9 +14285,13 @@ class CGBindingRoot(CGThing):
                     # JS-implemented interfaces with an interface object get a
                     # chromeonly _create method.  And interfaces with an
                     # interface object might have a ChromeOnly constructor.
+                    # Also interfaces whose interface prototype object is
+                    # generated (which is most of them) for the isInstance
+                    # method.
                     (desc.interface.hasInterfaceObject() and
                      (desc.interface.isJSImplemented() or
-                      (ctor and isChromeOnly(ctor)))) or
+                      (ctor and isChromeOnly(ctor)) or
+                      desc.interface.hasInterfacePrototypeObject())) or
                     # JS-implemented interfaces with clearable cached
                     # attrs have chromeonly _clearFoo methods.
                     (desc.interface.isJSImplemented() and

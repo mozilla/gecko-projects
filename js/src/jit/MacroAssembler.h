@@ -303,7 +303,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             type_(type)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) override;
     };
 
     /*
@@ -324,7 +324,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             ptr_(ptr)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) override;
     };
 
     mozilla::Maybe<AutoRooter> autoRooter_;
@@ -1398,6 +1398,9 @@ class MacroAssembler : public MacroAssemblerSpecific
   public:
     // ========================================================================
     // wasm support
+
+    CodeOffset illegalInstruction() PER_SHARED_ARCH;
+    void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
 
     // Emit a bounds check against the wasm heap limit, jumping to 'label' if 'cond' holds.
     // Required when WASM_HUGE_MEMORY is not defined.

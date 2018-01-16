@@ -267,7 +267,7 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   wr::LayoutSize contentSize { (float)size.width, (float)size.height };
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
-  wr::IpcResourceUpdateQueue resourceUpdates(WrBridge()->GetShmemAllocator());
+  wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
 
   mWebRenderCommandBuilder.BuildWebRenderCommands(builder,
                                                   resourceUpdates,
@@ -413,7 +413,7 @@ WebRenderLayerManager::AddImageKeyForDiscard(wr::ImageKey key)
 void
 WebRenderLayerManager::DiscardImages()
 {
-  wr::IpcResourceUpdateQueue resources(WrBridge()->GetShmemAllocator());
+  wr::IpcResourceUpdateQueue resources(WrBridge());
   for (const auto& key : mImageKeysToDeleteLater) {
     resources.DeleteImage(key);
   }
@@ -511,25 +511,10 @@ WebRenderLayerManager::DidComposite(uint64_t aTransactionId,
 }
 
 void
-WebRenderLayerManager::ClearLayer(Layer* aLayer)
-{
-  aLayer->ClearCachedResources();
-  if (aLayer->GetMaskLayer()) {
-    aLayer->GetMaskLayer()->ClearCachedResources();
-  }
-  for (size_t i = 0; i < aLayer->GetAncestorMaskLayerCount(); i++) {
-    aLayer->GetAncestorMaskLayerAt(i)->ClearCachedResources();
-  }
-  for (Layer* child = aLayer->GetFirstChild(); child;
-       child = child->GetNextSibling()) {
-    ClearLayer(child);
-  }
-}
-
-void
 WebRenderLayerManager::ClearCachedResources(Layer* aSubtree)
 {
   WrBridge()->BeginClearCachedResources();
+  mWebRenderCommandBuilder.ClearCachedResources();
   DiscardImages();
   WrBridge()->EndClearCachedResources();
 }
