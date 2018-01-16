@@ -41,7 +41,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
                                      nsIURI* aURI,
                                      nsIScriptElement* aElement,
-                                     ValidJSVersion aValidJSVersion,
                                      mozilla::CORSMode aCORSMode,
                                      const SRIMetadata& aIntegrity,
                                      nsIURI* aReferrer,
@@ -49,14 +48,13 @@ ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
   : mKind(aKind)
   , mElement(aElement)
   , mScriptFromHead(false)
-  , mProgress(Progress::Loading)
-  , mDataType(DataType::Unknown)
+  , mProgress(Progress::eLoading)
+  , mDataType(DataType::eUnknown)
+  , mScriptMode(ScriptMode::eBlocking)
   , mIsInline(true)
   , mHasSourceMapURL(false)
-  , mIsDefer(false)
-  , mIsAsync(false)
-  , mPreloadAsAsync(false)
-  , mPreloadAsDefer(false)
+  , mInDeferList(false)
+  , mInAsyncList(false)
   , mIsNonAsyncScriptInserted(false)
   , mIsXSLT(false)
   , mIsCanceled(false)
@@ -66,7 +64,6 @@ ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
   , mScriptText()
   , mScriptBytecode()
   , mBytecodeOffset(0)
-  , mValidJSVersion(aValidJSVersion)
   , mURI(aURI)
   , mLineNo(1)
   , mCORSMode(aCORSMode)
@@ -93,8 +90,8 @@ ScriptLoadRequest::~ScriptLoadRequest()
 void
 ScriptLoadRequest::SetReady()
 {
-  MOZ_ASSERT(mProgress != Progress::Ready);
-  mProgress = Progress::Ready;
+  MOZ_ASSERT(mProgress != Progress::eReady);
+  mProgress = Progress::eReady;
 }
 
 void
@@ -139,6 +136,18 @@ ScriptLoadRequest::AsModuleRequest()
 {
   MOZ_ASSERT(IsModuleRequest());
   return static_cast<ModuleLoadRequest*>(this);
+}
+
+void
+ScriptLoadRequest::SetScriptMode(bool aDeferAttr, bool aAsyncAttr)
+{
+  if (aAsyncAttr) {
+    mScriptMode = ScriptMode::eAsync;
+  } else if (aDeferAttr || IsModuleRequest()) {
+    mScriptMode = ScriptMode::eDeferred;
+  } else {
+    mScriptMode = ScriptMode::eBlocking;
+  }
 }
 
 //////////////////////////////////////////////////////////////

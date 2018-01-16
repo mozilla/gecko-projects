@@ -83,6 +83,7 @@ public:
   MOZ_MUST_USE nsresult SuspendForDiversion() override;
   MOZ_MUST_USE nsresult SuspendMessageDiversion() override;
   MOZ_MUST_USE nsresult ResumeMessageDiversion() override;
+  MOZ_MUST_USE nsresult CancelDiversion() override;
 
   // Calls OnStartRequest for "DivertTo" listener, then notifies child channel
   // that it should divert OnDataAvailable and OnStopRequest calls to this
@@ -118,6 +119,8 @@ public:
   void OnBackgroundParentReady(HttpBackgroundChannelParent* aBgParent);
   // Callback while background channel is destroyed.
   void OnBackgroundParentDestroyed();
+
+  base::ProcessId OtherPid() const override;
 
 protected:
   // used to connect redirected-to channel in parent with just created
@@ -188,8 +191,6 @@ protected:
                                                       const OptionalURIParams& aReferrerURI,
                                                       const OptionalURIParams& apiRedirectUri,
                                                       const OptionalCorsPreflightArgs& aCorsPreflightArgs,
-                                                      const bool& aForceHSTSPriming,
-                                                      const bool& aMixedContentWouldBlock,
                                                       const bool& aChooseAppcache) override;
   virtual mozilla::ipc::IPCResult RecvUpdateAssociatedContentSecurity(const int32_t& broken,
                                                    const int32_t& no) override;

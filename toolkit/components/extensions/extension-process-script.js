@@ -43,6 +43,7 @@ function parseScriptOptions(options) {
     matchAboutBlank: options.match_about_blank,
     frameID: options.frame_id,
     runAt: options.run_at,
+    hasActiveTabPermission: options.hasActiveTabPermission,
 
     matches: new MatchPatternSet(options.matches),
     excludeMatches: new MatchPatternSet(options.exclude_matches || []),
@@ -342,6 +343,8 @@ ExtensionManager = {
         contentScripts: extension.contentScripts.map(parseScriptOptions),
       });
 
+      policy.debugName = `${JSON.stringify(policy.name)} (ID: ${policy.id}, ${policy.getURL()})`;
+
       // Register any existent dinamically registered content script for the extension
       // when a content process is started for the first time (which also cover
       // a content process that crashed and it has been recreated).
@@ -494,6 +497,13 @@ ExtensionProcessScript.prototype = {
   initExtensionDocument(policy, doc) {
     if (DocumentManager.globals.has(getMessageManager(doc.defaultView))) {
       DocumentManager.loadInto(policy, doc.defaultView);
+    }
+  },
+
+  getExtensionChild(id) {
+    let policy = WebExtensionPolicy.getByID(id);
+    if (policy) {
+      return extensions.get(policy);
     }
   },
 

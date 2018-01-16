@@ -1003,7 +1003,7 @@ public:
    */
   virtual void ContentStateChanged(nsIDocument* aDocument,
                                    nsIContent* aContent,
-                                   mozilla::EventStates aStateMask) = 0;
+                                   mozilla::EventStates aStateMask) override = 0;
 
   /**
    * See if reflow verification is enabled. To enable reflow verification add
@@ -1446,8 +1446,7 @@ public:
   virtual nsresult HandleEvent(nsIFrame* aFrame,
                                mozilla::WidgetGUIEvent* aEvent,
                                bool aDontRetargetEvents,
-                               nsEventStatus* aEventStatus,
-                               nsIContent** aTargetContent = nullptr) = 0;
+                               nsEventStatus* aEventStatus) = 0;
   virtual bool ShouldIgnoreInvalidation() = 0;
   /**
    * Notify that we're going to call Paint with PAINT_LAYERS

@@ -250,6 +250,7 @@ const HEADERS = [
   ...RESPONSE_HEADERS
     .map(header => ({
       name: header,
+      boxName: "response-header",
       canFilter: false,
       subMenu: "responseHeaders",
       noLocalization: true
@@ -317,7 +318,6 @@ const general = {
   RESPONSE_HEADERS,
   FILTER_FLAGS,
   FILTER_TAGS,
-  SOURCE_EDITOR_SYNTAX_HIGHLIGHT_MAX_SIZE: 51200, // 50 KB in bytes
   REQUESTS_WATERFALL,
   PANELS,
 };

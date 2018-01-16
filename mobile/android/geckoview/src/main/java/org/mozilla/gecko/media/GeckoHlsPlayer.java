@@ -50,7 +50,7 @@ public class GeckoHlsPlayer implements BaseHlsPlayer, ExoPlayer.EventListener {
     private static final String LOGTAG = "GeckoHlsPlayer";
     private static final DefaultBandwidthMeter BANDWIDTH_METER = new DefaultBandwidthMeter();
     private static final int MAX_TIMELINE_ITEM_LINES = 3;
-    private static final boolean DEBUG = BuildConfig.NIGHTLY_BUILD || BuildConfig.DEBUG_BUILD;
+    private static final boolean DEBUG = !BuildConfig.MOZILLA_OFFICIAL;
 
     private static final AtomicInteger sPlayerId = new AtomicInteger(0);
     /*
@@ -64,7 +64,7 @@ public class GeckoHlsPlayer implements BaseHlsPlayer, ExoPlayer.EventListener {
     private final int mPlayerId;
     private boolean mExoplayerSuspended = false;
 
-    private enum MediaDecoderPlayState{
+    private enum MediaDecoderPlayState {
         PLAY_STATE_PREPARING,
         PLAY_STATE_PAUSED,
         PLAY_STATE_PLAYING

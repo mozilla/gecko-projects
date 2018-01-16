@@ -58,6 +58,7 @@ def run(path, server_config, session_config, timeout=0):
                          "--showlocals",  # display contents of variables in local scope
                          "-p", "no:mozlog",  # use the WPT result recorder
                          "-p", "no:cacheprovider",  # disable state preservation across invocations
+                         "-o=console_output_style=classic",  # disable test progress bar
                          path],
                         plugins=[harness, subtests])
         except Exception as e:
@@ -117,7 +118,7 @@ class SubtestResultRecorder(object):
     def record(self, test, status, message=None, stack=None):
         if stack is not None:
             stack = str(stack)
-        new_result = (test, status, message, stack)
+        new_result = (test.split("::")[-1], status, message, stack)
         self.results.append(new_result)
 
 

@@ -379,6 +379,17 @@ public:
   virtual bool IsValid() const { return true; }
 
   /**
+   * This returns true if it is the same underlying surface data, even if
+   * the objects are different (e.g. indirection due to
+   * DataSourceSurfaceWrapper).
+   */
+  virtual bool Equals(SourceSurface* aOther, bool aSymmetric = true)
+  {
+    return this == aOther ||
+           (aSymmetric && aOther && aOther->Equals(this, false));
+  }
+
+  /**
    * This function will return true if the surface type matches that of a
    * DataSourceSurface and if GetDataSurface will return the same object.
    */
@@ -695,7 +706,7 @@ protected:
 class PathBuilder : public PathSink
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathBuilder)
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(PathBuilder, override)
   /** Finish writing to the path and return a Path object that can be used for
    * drawing. Future use of the builder results in a crash!
    */
@@ -1434,7 +1445,7 @@ protected:
 class DrawTargetCapture : public DrawTarget
 {
 public:
-  virtual bool IsCaptureDT() const { return true; }
+  virtual bool IsCaptureDT() const override { return true; }
 
   /**
    * Returns true if the recording only contains FillGlyph calls with
@@ -1555,14 +1566,15 @@ public:
 #ifdef MOZ_WIDGET_GTK
   static already_AddRefed<ScaledFont>
     CreateScaledFontForFontconfigFont(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern,
-                                      const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize);
+                                      const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
+                                      bool aNeedsOblique = false);
 #endif
 
 #ifdef XP_DARWIN
   static already_AddRefed<ScaledFont>
     CreateScaledFontForMacFont(CGFontRef aCGFont, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
                                const Color& aFontSmoothingBackgroundColor, bool aUseFontSmoothing = true,
-                               bool aApplySyntheticBold = false);
+                               bool aApplySyntheticBold = false, bool aNeedsOblique = false);
 #endif
 
   /**
@@ -1728,6 +1740,7 @@ public:
                                   Float aSize,
                                   bool aUseEmbeddedBitmap,
                                   bool aForceGDIMode,
+                                  bool aNeedsOblique,
                                   IDWriteRenderingParams *aParams,
                                   Float aGamma,
                                   Float aContrast);

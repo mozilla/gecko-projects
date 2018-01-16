@@ -851,6 +851,21 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
   nsQueryFrame::FrameIID id = GetFrameId();
   this->~nsFrame();
 
+#ifdef DEBUG
+  {  
+    nsIFrame* rootFrame = shell->GetRootFrame();
+    MOZ_ASSERT(rootFrame);
+    if (this != rootFrame) {
+      nsTArray<nsIFrame*>* modifiedFrames =
+        rootFrame->GetProperty(nsIFrame::ModifiedFrameList());
+      if (modifiedFrames) {
+        MOZ_ASSERT(!modifiedFrames->Contains(this),
+                   "A dtor added this frame to ModifiedFrameList");
+      }
+    }
+  }
+#endif
+
   // Now that we're totally cleaned out, we need to add ourselves to
   // the presshell's recycler.
   shell->FreeFrame(id, this);
@@ -997,7 +1012,9 @@ nsIFrame::RemoveDisplayItemDataForDeletion()
 void
 nsIFrame::MarkNeedsDisplayItemRebuild()
 {
-  if (!nsLayoutUtils::AreRetainedDisplayListsEnabled() || IsFrameModified()) {
+  if (!nsLayoutUtils::AreRetainedDisplayListsEnabled() ||
+      IsFrameModified() ||
+      HasAnyStateBits(NS_FRAME_IN_POPUP)) {
     // Skip frames that are already marked modified.
     return;
   }
@@ -7811,55 +7828,6 @@ nsIFrame::RootFrameList(nsPresContext* aPresContext, FILE* out, const char* aPre
 }
 #endif
 
-#ifdef DEBUG
-nsFrameState
-nsFrame::GetDebugStateBits() const
-{
-  // We'll ignore these flags for the purposes of comparing frame state:
-  //
-  //   NS_FRAME_EXTERNAL_REFERENCE
-  //     because this is set by the event state manager or the
-  //     caret code when a frame is focused. Depending on whether
-  //     or not the regression tests are run as the focused window
-  //     will make this value vary randomly.
-#define IRRELEVANT_FRAME_STATE_FLAGS NS_FRAME_EXTERNAL_REFERENCE
-
-#define FRAME_STATE_MASK (~(IRRELEVANT_FRAME_STATE_FLAGS))
-
-  return GetStateBits() & FRAME_STATE_MASK;
-}
-
-void
-nsFrame::XMLQuote(nsString& aString)
-{
-  int32_t i, len = aString.Length();
-  for (i = 0; i < len; i++) {
-    char16_t ch = aString.CharAt(i);
-    if (ch == '<') {
-      nsAutoString tmp(NS_LITERAL_STRING("&lt;"));
-      aString.Cut(i, 1);
-      aString.Insert(tmp, i);
-      len += 3;
-      i += 3;
-    }
-    else if (ch == '>') {
-      nsAutoString tmp(NS_LITERAL_STRING("&gt;"));
-      aString.Cut(i, 1);
-      aString.Insert(tmp, i);
-      len += 3;
-      i += 3;
-    }
-    else if (ch == '\"') {
-      nsAutoString tmp(NS_LITERAL_STRING("&quot;"));
-      aString.Cut(i, 1);
-      aString.Insert(tmp, i);
-      len += 5;
-      i += 5;
-    }
-  }
-}
-#endif
-
 bool
 nsIFrame::IsVisibleForPainting(nsDisplayListBuilder* aBuilder) {
   if (!StyleVisibility()->IsVisible())
@@ -9843,7 +9811,7 @@ nsFrame::CorrectStyleParentFrame(nsIFrame* aProspectiveParent,
       return parent;
     }
 
-    parent = parent->GetParent();
+    parent = parent->GetInFlowParent();
   } while (parent);
 
   if (aProspectiveParent->StyleContext()->GetPseudo() ==
@@ -10688,7 +10656,7 @@ nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
                                     ServoRestyleState& aRestyleState)
 {
 #ifdef DEBUG
-  nsIFrame* parent = aChildFrame->GetParent();;
+  nsIFrame* parent = aChildFrame->GetInFlowParent();
   if (aChildFrame->IsTableFrame()) {
     parent = parent->GetParent();
   }
@@ -11016,6 +10984,7 @@ IsFrameScrolledOutOfView(nsIFrame* aTarget,
   nsIScrollableFrame* scrollableFrame =
     nsLayoutUtils::GetNearestScrollableFrame(aParent,
       nsLayoutUtils::SCROLLABLE_SAME_DOC |
+      nsLayoutUtils::SCROLLABLE_FIXEDPOS_FINDS_ROOT |
       nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
   if (!scrollableFrame) {
     return false;

@@ -30,6 +30,7 @@ class nsIRequestContext;
 namespace mozilla { namespace net {
 
 class nsHttpChunkedDecoder;
+class nsHttpHeaderArray;
 class nsHttpRequestHead;
 class nsHttpResponseHead;
 
@@ -89,7 +90,7 @@ public:
                                uint64_t               topLevelOuterContentWindowId,
                                nsIAsyncInputStream  **responseBody);
 
-    void OnActivated(bool h2) override;
+    void OnActivated() override;
 
     // attributes
     nsHttpResponseHead    *ResponseHead()   { return mHaveAllHeaders ? mResponseHead : nullptr; }
@@ -103,6 +104,10 @@ public:
     // Called to take ownership of the response headers; the transaction
     // will drop any reference to the response headers after this call.
     nsHttpResponseHead *TakeResponseHead();
+
+    // Called to take ownership of the trailer headers.
+    // Returning null if there is no trailer.
+    nsHttpHeaderArray *TakeResponseTrailers();
 
     // Provides a thread safe reference of the connection
     // nsHttpTransaction::Connection should only be used on the socket thread
@@ -214,7 +219,7 @@ private:
 
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
-    bool ResponseTimeoutEnabled() const final;
+    bool ResponseTimeoutEnabled() const final override;
 
     void DisableSpdy() override;
     void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
@@ -344,7 +349,6 @@ private:
     bool                            mClosed;
     bool                            mConnected;
     bool                            mActivated;
-    bool                            mActivatedAsH2;
     bool                            mHaveStatusLine;
     bool                            mHaveAllHeaders;
     bool                            mTransactionDone;
@@ -377,6 +381,8 @@ private:
     // protected by nsHttp::GetLock()
     nsHttpResponseHead             *mForTakeResponseHead;
     bool                            mResponseHeadTaken;
+    nsAutoPtr<nsHttpHeaderArray>    mForTakeResponseTrailers;
+    bool                            mResponseTrailersTaken;
 
     // The time when the transaction was submitted to the Connection Manager
     TimeStamp                       mPendingTime;

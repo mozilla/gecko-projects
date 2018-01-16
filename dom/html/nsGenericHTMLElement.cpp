@@ -1544,7 +1544,7 @@ nsGenericHTMLElement::MapBackgroundInto(const nsMappedAttributes* aAttributes,
     return;
 
   if (!aData->PropertyIsSet(eCSSProperty_background_image) &&
-      aData->PresContext()->UseDocumentColors()) {
+      !aData->ShouldIgnoreColors()) {
     // background
     nsAttrValue* value =
       const_cast<nsAttrValue*>(aAttributes->GetAttr(nsGkAtoms::background));
@@ -1562,7 +1562,7 @@ nsGenericHTMLElement::MapBGColorInto(const nsMappedAttributes* aAttributes,
     return;
 
   if (!aData->PropertyIsSet(eCSSProperty_background_color) &&
-      aData->PresContext()->UseDocumentColors()) {
+      !aData->ShouldIgnoreColors()) {
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::bgcolor);
     nscolor color;
     if (value && value->GetColorValue(color)) {
@@ -3086,7 +3086,7 @@ nsGenericHTMLElement::GetInnerText(mozilla::dom::DOMString& aValue,
     }
   }
 
-  nsRange::GetInnerTextNoFlush(aValue, aError, this, 0, this, GetChildCount());
+  nsRange::GetInnerTextNoFlush(aValue, aError, this);
 }
 
 void
@@ -3102,12 +3102,12 @@ nsGenericHTMLElement::SetInnerText(const nsAString& aValue)
     UPDATE_CONTENT_MODEL, true);
   nsAutoMutationBatch mb;
 
-  uint32_t childCount = GetChildCount();
-
   mb.Init(this, true, false);
-  for (uint32_t i = 0; i < childCount; ++i) {
-    RemoveChildAt(0, true);
+
+  while (HasChildren()) {
+    RemoveChildNode(nsINode::GetFirstChild(), true);
   }
+
   mb.RemovalDone();
 
   nsString str;

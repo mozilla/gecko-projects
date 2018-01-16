@@ -37,6 +37,150 @@ function getActiveTab(window) {
   return window.gBrowser.selectedTab;
 }
 
+/* ************* Debugger Helper ***************/
+/*
+ * These methods are used for working with debugger state changes in order
+ * to make it easier to manipulate the ui and test different behavior. These
+ * methods roughly reflect those found in debugger/new/test/mochi/head.js with
+ * a few exceptions. The `dbg` object is not exactly the same, and the methods
+ * have been simplified. We may want to consider unifying them in the future
+ */
+
+const DEBUGGER_POLLING_INTERVAL = 50;
+
+const debuggerHelper = {
+  waitForState(dbg, predicate, msg) {
+    return new Promise(resolve => {
+      dump(`Waiting for state change: ${msg}\n`);
+      if (predicate(dbg.store.getState())) {
+        dump(`Finished waiting for state change: ${msg}\n`);
+        return resolve();
+      }
+
+      const unsubscribe = dbg.store.subscribe(() => {
+        if (predicate(dbg.store.getState())) {
+          dump(`Finished waiting for state change: ${msg}\n`);
+          unsubscribe();
+          resolve();
+        }
+      });
+      return false;
+    });
+  },
+
+  waitForDispatch(dbg, type) {
+    return new Promise(resolve => {
+      dbg.store.dispatch({
+        type: "@@service/waitUntil",
+        predicate: action => {
+          if (action.type === type) {
+            return action.status
+              ? action.status === "done" || action.status === "error"
+              : true;
+          }
+          return false;
+        },
+        run: (dispatch, getState, action) => {
+          resolve(action);
+        }
+      });
+    });
+  },
+
+  async waitUntil(predicate, msg) {
+    dump(`Waiting until: ${msg}\n`);
+    return new Promise(resolve => {
+      const timer = setInterval(() => {
+        if (predicate()) {
+          clearInterval(timer);
+          dump(`Finished Waiting until: ${msg}\n`);
+          resolve();
+        }
+      }, DEBUGGER_POLLING_INTERVAL);
+    });
+  },
+
+  findSource(dbg, url) {
+    const sources = dbg.selectors.getSources(dbg.getState());
+    return sources.find(s => (s.get("url") || "").includes(url));
+  },
+
+  getCM(dbg) {
+    const el = dbg.win.document.querySelector(".CodeMirror");
+    return el.CodeMirror;
+  },
+
+  waitForText(dbg, url, text) {
+    return this.waitUntil(() => {
+      // the welcome box is removed once text is displayed
+      const welcomebox = dbg.win.document.querySelector(".welcomebox");
+      if (welcomebox) {
+        return false;
+      }
+      const cm = this.getCM(dbg);
+      const editorText = cm.doc.getValue();
+      return editorText.includes(text);
+    }, "text is visible");
+  },
+
+  waitForMetaData(dbg) {
+    return this.waitUntil(
+      () => {
+        const state = dbg.store.getState();
+        const source = dbg.selectors.getSelectedSource(state);
+        // wait for metadata -- this involves parsing the file to determine its type.
+        // if the object is empty, the data has not yet loaded
+        const metaData = dbg.selectors.getSourceMetaData(state, source.get("id"));
+        return !!Object.keys(metaData).length;
+      },
+      "has file metadata"
+    );
+  },
+
+  waitForSources(dbg, expectedSources) {
+    const { selectors } = dbg;
+    function countSources(state) {
+      const sources = selectors.getSources(state);
+      return sources.size >= expectedSources;
+    }
+    return this.waitForState(dbg, countSources, "count sources");
+  },
+
+  async createContext(panel) {
+    const { store, selectors, actions } = panel.getVarsForTests();
+
+    return {
+      actions,
+      selectors,
+      getState: store.getState,
+      win: panel.panelWin,
+      store
+    };
+  },
+
+  selectSource(dbg, url) {
+    dump(`Selecting source: ${url}\n`);
+    const line = 1;
+    const source = this.findSource(dbg, url);
+    dbg.actions.selectLocation({ sourceId: source.get("id"), line });
+    return this.waitForState(
+      dbg,
+      state => {
+        const source = dbg.selectors.getSelectedSource(state);
+        const isLoaded = source && source.get("loadedState") === "loaded";
+        if (!isLoaded) {
+          return false;
+        }
+
+        // wait for symbols -- a flat map of all named variables in a file -- to be calculated.
+        // this is a slow process and becomes slower the larger the file is
+        return dbg.selectors.hasSymbols(state, source.toJS());
+      },
+      "selected source"
+    );
+  }
+};
+
 async function garbageCollect() {
   dump("Garbage collect\n");
 
@@ -323,7 +467,7 @@ Damp.prototype = {
 
     test.done();
 
-    await this.closeToolboxAndLog("console.objectexpanded");
+    await this.closeToolboxAndLog("console.objectexpanded", toolbox);
     await this.testTeardown();
   },
 
@@ -480,10 +624,38 @@ async _consoleOpenWithCachedMessagesTest() {
     return Promise.resolve();
   },
 
+  /**
+   * Wait for any pending paint.
+   * The tool may have touched the DOM elements at the very end of the current test.
+   * We should ensure waiting for the reflow related to these changes.
+   */
+  async waitForPendingPaints(toolbox) {
+    let panel = toolbox.getCurrentPanel();
+    // All panels have its own way of exposing their window object...
+    let window = panel.panelWin || panel._frameWindow || panel.panelWindow;
+
+    let utils = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIDOMWindowUtils);
+    window.performance.mark("pending paints.start");
+    while (utils.isMozAfterPaintPending) {
+      await new Promise(done => {
+        window.addEventListener("MozAfterPaint", function listener() {
+          window.performance.mark("pending paint");
+          done();
+        }, { once: true });
+      });
+    }
+    window.performance.measure("pending paints", "pending paints.start");
+  },
+
   async openToolboxAndLog(name, tool, onLoad) {
     dump("Open toolbox on '" + name + "'\n");
     let test = this.runTest(name + ".open.DAMP");
     let toolbox = await this.openToolbox(tool, onLoad);
+    test.done();
+
+    test = this.runTest(name + ".open.settle.DAMP");
+    await this.waitForPendingPaints(toolbox);
     test.done();
 
     // Force freeing memory after toolbox open as it creates a lot of objects
@@ -493,10 +665,9 @@ async _consoleOpenWithCachedMessagesTest() {
     return toolbox;
   },
 
-  async closeToolboxAndLog(name) {
+  async closeToolboxAndLog(name, toolbox) {
+    let { target } = toolbox;
     dump("Close toolbox on '" + name + "'\n");
-    let tab = getActiveTab(getMostRecentBrowserWindow());
-    let target = TargetFactory.forTab(tab);
     await target.client.waitForRequestsToSettle();
 
     let test = this.runTest(name + ".close.DAMP");
@@ -504,10 +675,14 @@ async _consoleOpenWithCachedMessagesTest() {
     test.done();
   },
 
-  async reloadPageAndLog(name, onReload) {
+  async reloadPageAndLog(name, toolbox, onReload) {
     dump("Reload page on '" + name + "'\n");
     let test = this.runTest(name + ".reload.DAMP");
     await this.reloadPage(onReload);
+    test.done();
+
+    test = this.runTest(name + ".reload.settle.DAMP");
+    await this.waitForPendingPaints(toolbox);
     test.done();
   },
 
@@ -534,7 +709,7 @@ async _consoleOpenWithCachedMessagesTest() {
     // Options panel should not do anything on page reload.
     await toolbox.selectTool("options");
 
-    await this.reloadPageAndLog("panelsInBackground");
+    await this.reloadPageAndLog("panelsInBackground", toolbox);
 
     await this.closeToolbox();
     await this.testTeardown();
@@ -548,7 +723,7 @@ async _consoleOpenWithCachedMessagesTest() {
       // Then wait for inspector to be updated
       await inspector.once("inspector-updated");
     };
-    await this.reloadPageAndLog(label + ".inspector", onReload);
+    await this.reloadPageAndLog(label + ".inspector", toolbox, onReload);
   },
 
   async customInspector() {
@@ -556,17 +731,54 @@ async _consoleOpenWithCachedMessagesTest() {
     await this.testSetup(url);
     let toolbox = await this.openToolboxAndLog("custom.inspector", "inspector");
     await this.reloadInspectorAndLog("custom", toolbox);
-    await this.closeToolboxAndLog("custom.inspector");
+    await this.closeToolboxAndLog("custom.inspector", toolbox);
     await this.testTeardown();
   },
 
-  _getToolLoadingTests(url, label, { expectedMessages, expectedSources }) {
+  async openDebuggerAndLog(label, expectedSources, selectedFile, expectedText) {
+   const onLoad = async (toolbox, panel) => {
+    const dbg = await debuggerHelper.createContext(panel);
+    await debuggerHelper.waitForSources(dbg, expectedSources);
+    await debuggerHelper.selectSource(dbg, selectedFile);
+    await debuggerHelper.waitForText(dbg, selectedFile, expectedText);
+    await debuggerHelper.waitForMetaData(dbg);
+   };
+   const toolbox = await this.openToolboxAndLog(label + ".jsdebugger", "jsdebugger", onLoad);
+   return toolbox;
+  },
+
+  async reloadDebuggerAndLog(label, toolbox, expectedSources, selectedFile, expectedText) {
+    const onReload = async () => {
+      const panel = await toolbox.getPanelWhenReady("jsdebugger");
+      const dbg = await debuggerHelper.createContext(panel);
+      await debuggerHelper.waitForDispatch(dbg, "NAVIGATE");
+      await debuggerHelper.waitForSources(dbg, expectedSources);
+      await debuggerHelper.waitForText(dbg, selectedFile, expectedText);
+      await debuggerHelper.waitForMetaData(dbg);
+    };
+    await this.reloadPageAndLog(`${label}.jsdebugger`, toolbox, onReload);
+  },
+
+  async customDebugger() {
+    const label = "custom";
+    const expectedSources = 7;
+    let url = CUSTOM_URL.replace(/\$TOOL/, "debugger/index");
+    await this.testSetup(url);
+    const selectedFile = "App.js";
+    const expectedText = "import React, { Component } from 'react';";
+    const toolbox = await this.openDebuggerAndLog(label, expectedSources, selectedFile, expectedText);
+    await this.reloadDebuggerAndLog(label, toolbox, expectedSources, selectedFile, expectedText);
+    await this.closeToolboxAndLog("custom.jsdebugger", toolbox);
+    await this.testTeardown();
+  },
+
+  _getToolLoadingTests(url, label, { expectedMessages, expectedSources, selectedFile, expectedText }) {
     let tests = {
       async inspector() {
         await this.testSetup(url);
         let toolbox = await this.openToolboxAndLog(label + ".inspector", "inspector");
         await this.reloadInspectorAndLog(label, toolbox);
-        await this.closeToolboxAndLog(label + ".inspector");
+        await this.closeToolboxAndLog(label + ".inspector", toolbox);
         await this.testTeardown();
       },
 
@@ -586,60 +798,32 @@ async _consoleOpenWithCachedMessagesTest() {
             webconsole.hud.ui.on("new-messages", receiveMessages);
           });
         };
-        await this.reloadPageAndLog(label + ".webconsole", onReload);
-        await this.closeToolboxAndLog(label + ".webconsole");
+        await this.reloadPageAndLog(label + ".webconsole", toolbox, onReload);
+        await this.closeToolboxAndLog(label + ".webconsole", toolbox);
         await this.testTeardown();
       },
 
       async debugger() {
         await this.testSetup(url);
-        let onLoad = async function(toolbox, dbg) {
-          await new Promise(done => {
-            let { selectors, store } = dbg.panelWin.getGlobalsForTesting();
-            let unsubscribe;
-            function countSources() {
-              const sources = selectors.getSources(store.getState());
-              if (sources.size >= expectedSources) {
-                unsubscribe();
-                done();
-              }
-            }
-            unsubscribe = store.subscribe(countSources);
-            countSources();
-          });
-        };
-        let toolbox = await this.openToolboxAndLog(label + ".jsdebugger", "jsdebugger", onLoad);
-        let onReload = async function() {
-          await new Promise(done => {
-            let count = 0;
-            let { client } = toolbox.target;
-            let onSource = async (_, actor) => {
-              if (++count >= expectedSources) {
-                client.removeListener("newSource", onSource);
-                done();
-              }
-            };
-            client.addListener("newSource", onSource);
-          });
-        };
-        await this.reloadPageAndLog(label + ".jsdebugger", onReload);
-        await this.closeToolboxAndLog(label + ".jsdebugger");
+        let toolbox = await this.openDebuggerAndLog(label, expectedSources, selectedFile, expectedText);
+        await this.reloadDebuggerAndLog(label, toolbox, expectedSources, selectedFile, expectedText);
+        await this.closeToolboxAndLog(label + ".jsdebugger", toolbox);
         await this.testTeardown();
       },
 
       async styleeditor() {
         await this.testSetup(url);
-        await this.openToolboxAndLog(label + ".styleeditor", "styleeditor");
-        await this.reloadPageAndLog(label + ".styleeditor");
-        await this.closeToolboxAndLog(label + ".styleeditor");
+        const toolbox = await this.openToolboxAndLog(label + ".styleeditor", "styleeditor");
+        await this.reloadPageAndLog(label + ".styleeditor", toolbox);
+        await this.closeToolboxAndLog(label + ".styleeditor", toolbox);
         await this.testTeardown();
       },
 
       async performance() {
         await this.testSetup(url);
-        await this.openToolboxAndLog(label + ".performance", "performance");
-        await this.reloadPageAndLog(label + ".performance");
-        await this.closeToolboxAndLog(label + ".performance");
+        const toolbox = await this.openToolboxAndLog(label + ".performance", "performance");
+        await this.reloadPageAndLog(label + ".performance", toolbox);
+        await this.closeToolboxAndLog(label + ".performance", toolbox);
         await this.testTeardown();
       },
 
@@ -647,20 +831,20 @@ async _consoleOpenWithCachedMessagesTest() {
         await this.testSetup(url);
         const toolbox = await this.openToolboxAndLog(label + ".netmonitor", "netmonitor");
         const requestsDone = this.waitForNetworkRequests(label + ".netmonitor", toolbox);
-        await this.reloadPageAndLog(label + ".netmonitor");
+        await this.reloadPageAndLog(label + ".netmonitor", toolbox);
         await requestsDone;
-        await this.closeToolboxAndLog(label + ".netmonitor");
+        await this.closeToolboxAndLog(label + ".netmonitor", toolbox);
         await this.testTeardown();
       },
 
       async saveAndReadHeapSnapshot() {
         await this.testSetup(url);
-        await this.openToolboxAndLog(label + ".memory", "memory");
-        await this.reloadPageAndLog(label + ".memory");
+        const toolbox = await this.openToolboxAndLog(label + ".memory", "memory");
+        await this.reloadPageAndLog(label + ".memory", toolbox);
         await this.saveHeapSnapshot(label);
         await this.readHeapSnapshot(label);
         await this.takeCensus(label);
-        await this.closeToolboxAndLog(label + ".memory");
+        await this.closeToolboxAndLog(label + ".memory", toolbox);
         await this.testTeardown();
       },
     };
@@ -845,16 +1029,21 @@ async _consoleOpenWithCachedMessagesTest() {
     Object.assign(tests, this._getToolLoadingTests(SIMPLE_URL, "simple", {
       expectedMessages: 1,
       expectedSources: 1,
+      selectedFile: "simple.html",
+      expectedText: "This is a simple page"
     }));
 
     // Run all tests against "complicated" document
     Object.assign(tests, this._getToolLoadingTests(COMPLICATED_URL, "complicated", {
       expectedMessages: 7,
       expectedSources: 14,
+      selectedFile: "ga.js",
+      expectedText: "Math;function ga(a,b){return a.name=b}"
     }));
 
     // Run all tests against a document specific to each tool
     tests["custom.inspector"] = this.customInspector;
+    tests["custom.debugger"] = this.customDebugger;
 
     // Run individual tests covering a very precise tool feature
     tests["console.bulklog"] = this._consoleBulkLoggingTest;

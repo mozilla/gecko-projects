@@ -133,8 +133,7 @@ private:
   // [aStartChild, aEndChild).
   void IssueSingleInsertNofications(nsIContent* aContainer,
                                     nsIContent* aStartChild,
-                                    nsIContent* aEndChild,
-                                    InsertionKind);
+                                    nsIContent* aEndChild);
 
   /**
    * Data that represents an insertion point for some child content.
@@ -142,11 +141,15 @@ private:
   struct InsertionPoint
   {
     InsertionPoint()
-      : mParentFrame(nullptr), mContainer(nullptr), mMultiple(false) {}
-    InsertionPoint(nsContainerFrame* aParentFrame, nsIContent* aContainer,
-                   bool aMultiple = false)
-      : mParentFrame(aParentFrame), mContainer(aContainer),
-        mMultiple(aMultiple) {}
+      : mParentFrame(nullptr)
+      , mContainer(nullptr)
+    {}
+
+    InsertionPoint(nsContainerFrame* aParentFrame, nsIContent* aContainer)
+      : mParentFrame(aParentFrame)
+      , mContainer(aContainer)
+    {}
+
     /**
      * The parent frame to use if the inserted children needs to create
      * frame(s).  May be null, which signals that  we shouldn't try to
@@ -161,12 +164,14 @@ private:
      * It's undefined if mParentFrame is null.
      */
     nsIContent* mContainer;
+
     /**
-     * If true then there are multiple insertion points, which means consumers
-     * should insert children individually into the node's flattened tree parent.
+     * Whether it is required to insert children one-by-one instead of as a
+     * range.
      */
-    bool mMultiple;
+    bool IsMultiple() const;
   };
+
   /**
    * Checks if the children of aContainer in the range [aStartChild, aEndChild)
    * can be inserted/appended to one insertion point together. If so, returns
@@ -176,8 +181,7 @@ private:
    */
   InsertionPoint GetRangeInsertionPoint(nsIContent* aContainer,
                                         nsIContent* aStartChild,
-                                        nsIContent* aEndChild,
-                                        InsertionKind);
+                                        nsIContent* aEndChild);
 
   // Returns true if parent was recreated due to frameset child, false otherwise.
   bool MaybeRecreateForFrameset(nsIFrame* aParentFrame,
@@ -359,9 +363,15 @@ public:
   nsresult ReplicateFixedFrames(nsPageContentFrame* aParentFrame);
 
   /**
-   * Get the XBL insertion point for aChild in aContainer.
+   * Get the insertion point for aChild.
    */
-  InsertionPoint GetInsertionPoint(nsIContent* aContainer, nsIContent* aChild);
+  InsertionPoint GetInsertionPoint(nsIContent* aChild);
+
+  /**
+   * Return the insertion frame of the primary frame of aContent, or its nearest
+   * ancestor that isn't display:contents.
+   */
+  nsContainerFrame* GetContentInsertionFrameFor(nsIContent* aContent);
 
   void CreateListBoxContent(nsContainerFrame* aParentFrame,
                             nsIFrame*         aPrevFrame,
@@ -740,10 +750,6 @@ private:
      an SVG text frame. */
 #define FCDATA_IS_SVG_TEXT 0x80000
   /**
-   * display:contents
-   */
-#define FCDATA_IS_CONTENTS 0x100000
-  /**
    * When FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS is set, this bit says
    * if we should create a grid/flex/columnset container instead of
    * a block wrapper when the styles says so.
@@ -833,16 +839,21 @@ private:
                   const FrameConstructionDataByInt* aDataPtr,
                   uint32_t aDataLength);
 
-  /* A function that takes a tag, content, style context, and array of
-     FrameConstructionDataByTags and finds the appropriate frame construction
-     data to use and returns it.  This can return null if none of the tags
-     match or if the matching tag has a FrameConstructionDataGetter that
-     returns null. */
+  /**
+   * A function that takes a tag, content, style context, and array of
+   * FrameConstructionDataByTags and finds the appropriate frame construction
+   * data to use and returns it.
+   *
+   * This can return null if none of the tags match or if the matching tag has a
+   * FrameConstructionDataGetter that returns null. In the case that the tags
+   * actually match, aTagFound will be true, even if the return value is null.
+   */
   static const FrameConstructionData*
     FindDataByTag(nsAtom* aTag, Element* aElement,
                   nsStyleContext* aStyleContext,
                   const FrameConstructionDataByTag* aDataPtr,
-                  uint32_t aDataLength);
+                  uint32_t aDataLength,
+                  bool* aTagFound = nullptr);
 
   /* A class representing a list of FrameConstructionItems.  Instances of this
      class are only created as AutoFrameConstructionItemList, or as a member
@@ -2180,12 +2191,6 @@ private:
                                     bool* aIsRangeInsertSafe,
                                     nsIContent* aStartSkipChild = nullptr,
                                     nsIContent *aEndSkipChild = nullptr);
-
-  /**
-   * Return the insertion frame of the primary frame of aContent, or its nearest
-   * ancestor that isn't display:contents.
-   */
-  nsContainerFrame* GetContentInsertionFrameFor(nsIContent* aContent);
 
   // see if aContent and aSibling are legitimate siblings due to restrictions
   // imposed by table columns

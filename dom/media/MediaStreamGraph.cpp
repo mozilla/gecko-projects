@@ -30,9 +30,6 @@
 #include "VideoFrameContainer.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/Unused.h"
-#ifdef MOZ_WEBRTC
-#include "AudioOutputObserver.h"
-#endif
 #include "mtransport/runnable_utils.h"
 #include "VideoUtils.h"
 
@@ -1314,6 +1311,11 @@ MediaStreamGraphImpl::UpdateMainThreadState()
 bool
 MediaStreamGraphImpl::OneIteration(GraphTime aStateEnd)
 {
+  // Changes to LIFECYCLE_RUNNING occur before starting or reviving the graph
+  // thread, and so the monitor need not be held to check mLifecycleState.
+  // LIFECYCLE_THREAD_NOT_STARTED is possible when shutting down offline
+  // graphs that have not started.
+  MOZ_DIAGNOSTIC_ASSERT(mLifecycleState <= LIFECYCLE_RUNNING);
   MOZ_ASSERT(OnGraphThread());
   WebCore::DenormalDisabler disabler;
 
@@ -1416,7 +1418,7 @@ public:
     : Runnable("MediaStreamGraphShutDownRunnable")
     , mGraph(aGraph)
   {}
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(mGraph->mDetectedNotRunning && mGraph->mDriver,
@@ -1742,6 +1744,9 @@ MediaStreamGraphImpl::SignalMainThreadCleanup()
   MOZ_ASSERT(mDriver->OnThread());
 
   MonitorAutoLock lock(mMonitor);
+  // LIFECYCLE_THREAD_NOT_STARTED is possible when shutting down offline
+  // graphs that have not started.
+  MOZ_DIAGNOSTIC_ASSERT(mLifecycleState <= LIFECYCLE_RUNNING);
   LOG(LogLevel::Debug,
       ("MediaStreamGraph %p waiting for main thread cleanup", this));
   LifecycleStateRef() =
@@ -3561,9 +3566,6 @@ MediaStreamGraphImpl::MediaStreamGraphImpl(GraphDriverType aDriverRequested,
   , mLatencyLog(AsyncLatencyLogger::Get())
   , mAbstractMainThread(aMainThread)
   , mThreadPool(GetMediaThreadPool(MediaThreadType::MSG_CONTROL))
-#ifdef MOZ_WEBRTC
-  , mFarendObserverRef(nullptr)
-#endif
   , mSelfRef(this)
   , mOutputChannels(std::min<uint32_t>(8, CubebUtils::MaxNumberOfChannels()))
 #ifdef DEBUG

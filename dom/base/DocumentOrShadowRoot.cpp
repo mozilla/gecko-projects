@@ -6,7 +6,8 @@
 
 #include "DocumentOrShadowRoot.h"
 #include "mozilla/dom/StyleSheetList.h"
-#include "XULDocument.h"
+#include "nsDocument.h"
+#include "nsFocusManager.h"
 
 namespace mozilla {
 namespace dom {
@@ -42,11 +43,6 @@ DocumentOrShadowRoot::GetElementById(const nsAString& aElementId)
     if (Element* el = entry->GetIdElement()) {
       return el;
     }
-  }
-
-  if (MOZ_UNLIKELY(mKind == Kind::Document &&
-      static_cast<nsIDocument&>(AsNode()).IsXULDocument())) {
-    return static_cast<XULDocument&>(AsNode()).GetRefById(aElementId);
   }
 
   return nullptr;
@@ -89,6 +85,49 @@ already_AddRefed<nsContentList>
 DocumentOrShadowRoot::GetElementsByClassName(const nsAString& aClasses)
 {
   return nsContentUtils::GetElementsByClassName(&AsNode(), aClasses);
+}
+
+nsIContent*
+DocumentOrShadowRoot::Retarget(nsIContent* aContent) const
+{
+  for (nsIContent* cur = aContent;
+       cur;
+       cur = cur->GetContainingShadowHost()) {
+    if (cur->SubtreeRoot() == &AsNode()) {
+      return cur;
+    }
+  }
+  return nullptr;
+}
+
+Element*
+DocumentOrShadowRoot::GetRetargetedFocusedElement()
+{
+  if (nsCOMPtr<nsPIDOMWindowOuter> window = AsNode().OwnerDoc()->GetWindow()) {
+    nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+    nsIContent* focusedContent =
+      nsFocusManager::GetFocusedDescendant(window,
+                                           nsFocusManager::eOnlyCurrentWindow,
+                                           getter_AddRefs(focusedWindow));
+    // be safe and make sure the element is from this document
+    if (focusedContent && focusedContent->OwnerDoc() == AsNode().OwnerDoc()) {
+      if (focusedContent->ChromeOnlyAccess()) {
+        focusedContent = focusedContent->FindFirstNonChromeOnlyAccessContent();
+      }
+
+      if (focusedContent) {
+        if (!nsDocument::IsWebComponentsEnabled(focusedContent)) {
+          return focusedContent->AsElement();
+        }
+
+        if (nsIContent* retarget = Retarget(focusedContent)) {
+          return retarget->AsElement();
+        }
+      }
+    }
+  }
+
+  return nullptr;
 }
 
 }

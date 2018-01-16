@@ -130,12 +130,13 @@ interface nsIDocShell : nsIDocShellTreeItem
   // Whether the load should be treated as srcdoc load, rather than a URI one.
   const long INTERNAL_LOAD_FLAGS_IS_SRCDOC               = 0x40;
 
+  // Whether this is the load of a frame's original src attribute
+  const long INTERNAL_LOAD_FLAGS_ORIGINAL_FRAME_SRC      = 0x80;
+
   const long INTERNAL_LOAD_FLAGS_NO_OPENER               = 0x100;
 
   // Whether a top-level data URI navigation is allowed for that load
   const long INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI    = 0x200;
-
-  // NB: 0x80 is available.
 
   /**
    * Loads the given URI.  This method is identical to loadURI(...) except
@@ -218,7 +219,6 @@ interface nsIDocShell : nsIDocShellTreeItem
                               in AString aSrcdoc,
                               in nsIDocShell aSourceDocShell,
                               in nsIURI aBaseURI,
-                              in boolean aCheckForPrerender,
                               out nsIDocShell aDocShell,
                               out nsIRequest aRequest);
 
@@ -677,17 +677,6 @@ interface nsIDocShell : nsIDocShellTreeItem
   attribute boolean isActive;
 
   /**
-   * Puts the docshell in prerendering mode. noscript because we want only
-   * native code to be able to put a docshell in prerendering.
-   */
-  [noscript] void SetIsPrerendered();
-
-  /**
-   * Whether this docshell is in prerender mode.
-   */
-  [infallible] readonly attribute boolean isPrerendered;
-
-  /**
    * The ID of the docshell in the session history.
    */
   readonly attribute nsIDPtr historyID;
@@ -1025,7 +1014,7 @@ interface nsIDocShell : nsIDocShellTreeItem
   /**
    * Set when an iframe/frame is added dynamically.
    */
-  attribute boolean createdDynamically;
+  [infallible] attribute boolean createdDynamically;
 
   /**
    * Returns false for mLSHE, true for mOSHE

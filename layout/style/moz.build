@@ -55,7 +55,6 @@ EXPORTS += [
     'nsDOMCSSRGBColor.h',
     'nsICSSDeclaration.h',
     'nsICSSLoaderObserver.h',
-    'nsICSSStyleRuleDOMWrapper.h',
     'nsIStyleRule.h',
     'nsIStyleRuleProcessor.h',
     'nsLayoutStylesheetCache.h',
@@ -81,6 +80,7 @@ EXPORTS += [
 EXPORTS.mozilla += [
     'AnimationCollection.h',
     'BindingStyleRule.h',
+    'CachedInheritingStyles.h',
     'CSSEnabledState.h',
     'CSSStyleSheet.h',
     'CSSVariableDeclarations.h',
@@ -179,6 +179,7 @@ EXPORTS.mozilla.css += [
 UNIFIED_SOURCES += [
     'AnimationCollection.cpp',
     'BindingStyleRule.cpp',
+    'CachedInheritingStyles.cpp',
     'CounterStyleManager.cpp',
     'CSS.cpp',
     'CSSFontFeatureValuesRule.cpp',

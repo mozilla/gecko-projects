@@ -105,11 +105,12 @@ public:
 
   // nsINode methods
   virtual uint32_t GetChildCount() const override;
-  virtual nsIContent *GetChildAt(uint32_t aIndex) const override;
+  virtual nsIContent *GetChildAt_Deprecated(uint32_t aIndex) const override;
   virtual int32_t IndexOf(const nsINode* aPossibleChild) const override;
   virtual nsresult InsertChildAt(nsIContent* aKid, uint32_t aIndex,
                                  bool aNotify) override;
-  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) override;
+  virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) override;
+  virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
   virtual void GetTextContentInternal(nsAString& aTextContent,
                                       mozilla::OOMReporter& aError) override
   {
@@ -145,7 +146,7 @@ public:
   virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
                               bool aNotify) override;
   virtual bool TextIsOnlyWhitespace() override;
-  virtual bool ThreadSafeTextIsOnlyWhitespace() const final;
+  virtual bool ThreadSafeTextIsOnlyWhitespace() const final override;
   virtual bool HasTextForTranslation() override;
   virtual void AppendTextTo(nsAString& aResult) override;
   MOZ_MUST_USE
@@ -232,13 +233,6 @@ protected:
   nsresult SplitText(uint32_t aOffset, nsIDOMText** aReturn);
 
   nsresult GetWholeText(nsAString& aWholeText);
-
-  static int32_t FirstLogicallyAdjacentTextNode(nsIContent* aParent,
-                                                int32_t aIndex);
-
-  static int32_t LastLogicallyAdjacentTextNode(nsIContent* aParent,
-                                               int32_t aIndex,
-                                               uint32_t aCount);
 
   nsresult SetTextInternal(uint32_t aOffset, uint32_t aCount,
                            const char16_t* aBuffer, uint32_t aLength,

@@ -12,7 +12,7 @@ else
 ifeq (,$(filter-out SunOS, $(OS_ARCH)))
    MOZ_PKG_FORMAT  = BZ2
 else
-   ifeq (,$(filter-out gtk2 gtk3 qt, $(MOZ_WIDGET_TOOLKIT)))
+   ifeq (,$(filter-out gtk3 qt, $(MOZ_WIDGET_TOOLKIT)))
       MOZ_PKG_FORMAT  = BZ2
    else
       ifeq (android,$(MOZ_WIDGET_TOOLKIT))
@@ -152,6 +152,7 @@ ifeq ($(MOZ_PKG_FORMAT),RPM)
     $(PYTHON) -m mozbuild.action.preprocessor \
       -DMOZ_APP_NAME=$(MOZ_APP_NAME) \
       -DMOZ_APP_DISPLAYNAME='$(MOZ_APP_DISPLAYNAME)' \
+      -DMOZ_APP_REMOTINGNAME='$(MOZ_APP_REMOTINGNAME)' \
       $(RPM_INCIDENTALS)/mozilla.desktop \
       -o $(RPMBUILD_SOURCEDIR)/$(MOZ_APP_NAME).desktop && \
     rm -rf $(ABS_DIST)/$(TARGET_CPU) && \

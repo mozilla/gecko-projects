@@ -32,7 +32,6 @@ const DISABLED_ATTRIBUTE_SUPPORTED_XUL = new Set([
   "CHECKBOX",
   "COLORPICKER",
   "COMMAND",
-  "DATEPICKER",
   "DESCRIPTION",
   "KEY",
   "KEYSET",
@@ -55,7 +54,6 @@ const DISABLED_ATTRIBUTE_SUPPORTED_XUL = new Set([
   "TAB",
   "TABS",
   "TEXTBOX",
-  "TIMEPICKER",
   "TOOLBARBUTTON",
   "TREE",
 ]);
@@ -273,20 +271,68 @@ interaction.selectOption = function(el) {
   event.mousemove(containerEl);
   event.mousedown(containerEl);
   event.focus(containerEl);
-  event.input(containerEl);
 
-  // Clicking <option> in <select> should not be deselected if selected.
-  // However, clicking one in a <select multiple> should toggle
-  // selectedness the way holding down Control works.
-  if (containerEl.multiple) {
-    el.selected = !el.selected;
-  } else if (!el.selected) {
-    el.selected = true;
+  if (!el.disabled) {
+    // Clicking <option> in <select> should not be deselected if selected.
+    // However, clicking one in a <select multiple> should toggle
+    // selectedness the way holding down Control works.
+    if (containerEl.multiple) {
+      el.selected = !el.selected;
+    } else if (!el.selected) {
+      el.selected = true;
+    }
+    event.input(containerEl);
+    event.change(containerEl);
   }
 
-  event.change(containerEl);
   event.mouseup(containerEl);
   event.click(containerEl);
+};
+
+interaction.clearElement = function(el) {
+  if (element.isDisabled(el)) {
+    throw new InvalidElementStateError(pprint`Element is disabled: ${el}`);
+  }
+  if (element.isReadOnly(el)) {
+    throw new InvalidElementStateError(pprint`Element is read-only: ${el}`);
+  }
+  if (!element.isEditable(el)) {
+    throw new InvalidElementStateError(
+        pprint`Unable to clear element that cannot be edited: ${el}`);
+  }
+
+  if (!element.isInView(el)) {
+    element.scrollIntoView(el);
+  }
+  if (!element.isInView(el)) {
+    throw new ElementNotInteractableError(
+        pprint`Element ${el} could not be scrolled into view`);
+  }
+
+  let attr;
+  if (element.isEditingHost(el)) {
+    attr = "innerHTML";
+  } else {
+    attr = "value";
+  }
+
+  switch (el.type) {
+    case "file":
+      if (el.files.length == 0) {
+        return;
+      }
+      break;
+
+    default:
+      if (el[attr] === "") {
+        return;
+      }
+      break;
+  }
+
+  event.focus(el);
+  el[attr] = "";
+  event.blur(el);
 };
 
 /**

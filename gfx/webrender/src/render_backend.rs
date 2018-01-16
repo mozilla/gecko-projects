@@ -5,9 +5,9 @@
 use api::{ApiMsg, BlobImageRenderer, BuiltDisplayList, DebugCommand, DeviceIntPoint};
 #[cfg(feature = "debugger")]
 use api::{BuiltDisplayListIter, SpecificDisplayItem};
-use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{DevicePixelScale, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::{DocumentId, DocumentLayer, DocumentMsg};
-use api::{IdNamespace, LayerPoint, PipelineId, RenderNotifier};
+use api::{IdNamespace, PipelineId, RenderNotifier};
 use api::channel::{MsgReceiver, PayloadReceiver, PayloadReceiverHelperMethods};
 use api::channel::{PayloadSender, PayloadSenderHelperMethods};
 #[cfg(feature = "debugger")]
@@ -16,13 +16,21 @@ use frame::FrameContext;
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use gpu_cache::GpuCache;
 use internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
+#[cfg(feature = "capture")]
+use internal_types::ExternalCaptureImage;
 use profiler::{BackendProfileCounters, ResourceProfileCounters};
 use rayon::ThreadPool;
 use record::ApiRecordingReceiver;
 use resource_cache::ResourceCache;
+#[cfg(feature = "capture")]
+use resource_cache::PlainResources;
 use scene::Scene;
+#[cfg(feature = "serialize")]
+use serde::{Serialize, Serializer};
 #[cfg(feature = "debugger")]
 use serde_json;
+#[cfg(feature = "capture")]
+use std::path::PathBuf;
 use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -30,11 +38,9 @@ use std::u32;
 use texture_cache::TextureCache;
 use time::precise_time_ns;
 
-struct Document {
-    scene: Scene,
-    frame_ctx: FrameContext,
-    // the `Option` here is only to deal with borrow checker
-    frame_builder: Option<FrameBuilder>,
+
+#[cfg_attr(feature = "capture", derive(Clone, Serialize, Deserialize))]
+struct DocumentView {
     window_size: DeviceUintSize,
     inner_rect: DeviceUintRect,
     layer: DocumentLayer,
@@ -42,6 +48,24 @@ struct Document {
     device_pixel_ratio: f32,
     page_zoom_factor: f32,
     pinch_zoom_factor: f32,
+}
+
+impl DocumentView {
+    fn accumulated_scale_factor(&self) -> DevicePixelScale {
+        DevicePixelScale::new(
+            self.device_pixel_ratio *
+            self.page_zoom_factor *
+            self.pinch_zoom_factor
+        )
+    }
+}
+
+struct Document {
+    scene: Scene,
+    view: DocumentView,
+    frame_ctx: FrameContext,
+    // the `Option` here is only to deal with borrow checker
+    frame_builder: Option<FrameBuilder>,
     // A set of pipelines that the caller has requested be
     // made available as output textures.
     output_pipelines: FastHashSet<PipelineId>,
@@ -68,36 +92,31 @@ impl Document {
         };
         Document {
             scene: Scene::new(),
+            view: DocumentView {
+                window_size,
+                inner_rect: DeviceUintRect::new(DeviceUintPoint::zero(), window_size),
+                layer,
+                pan: DeviceIntPoint::zero(),
+                page_zoom_factor: 1.0,
+                pinch_zoom_factor: 1.0,
+                device_pixel_ratio: default_device_pixel_ratio,
+            },
             frame_ctx: FrameContext::new(config),
             frame_builder: Some(FrameBuilder::empty()),
-            window_size,
-            inner_rect: DeviceUintRect::new(DeviceUintPoint::zero(), window_size),
-            layer,
-            pan: DeviceIntPoint::zero(),
-            page_zoom_factor: 1.0,
-            pinch_zoom_factor: 1.0,
-            device_pixel_ratio: default_device_pixel_ratio,
             render_on_scroll,
             output_pipelines: FastHashSet::default(),
         }
     }
 
-    fn accumulated_scale_factor(&self) -> f32 {
-        self.device_pixel_ratio *
-        self.page_zoom_factor *
-        self.pinch_zoom_factor
-    }
-
     fn build_scene(&mut self, resource_cache: &mut ResourceCache) {
-        let accumulated_scale_factor = self.accumulated_scale_factor();
         // this code is why we have `Option`, which is never `None`
         let frame_builder = self.frame_ctx.create(
             self.frame_builder.take().unwrap(),
             &self.scene,
             resource_cache,
-            self.window_size,
-            self.inner_rect,
-            accumulated_scale_factor,
+            self.view.window_size,
+            self.view.inner_rect,
+            self.view.accumulated_scale_factor(),
             &self.output_pipelines,
         );
         self.frame_builder = Some(frame_builder);
@@ -109,18 +128,15 @@ impl Document {
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
     ) -> RenderedDocument {
-        let accumulated_scale_factor = self.accumulated_scale_factor();
-        let pan = LayerPoint::new(
-            self.pan.x as f32 / accumulated_scale_factor,
-            self.pan.y as f32 / accumulated_scale_factor,
-        );
+        let accumulated_scale_factor = self.view.accumulated_scale_factor();
+        let pan = self.view.pan.to_f32() / accumulated_scale_factor;
         self.frame_ctx.build_rendered_document(
             self.frame_builder.as_mut().unwrap(),
             resource_cache,
             gpu_cache,
             &self.scene.pipelines,
             accumulated_scale_factor,
-            self.layer,
+            self.view.layer,
             pan,
             &mut resource_profile.texture_cache,
             &mut resource_profile.gpu_cache,
@@ -129,16 +145,47 @@ impl Document {
     }
 }
 
-enum DocumentOp {
-    Nop,
-    Built,
-    ScrolledNop,
-    Scrolled(RenderedDocument),
-    Rendered(RenderedDocument),
+struct DocumentOps {
+    scroll: bool,
+    build: bool,
+    render: bool,
+}
+
+impl DocumentOps {
+    fn nop() -> Self {
+        DocumentOps {
+            scroll: false,
+            build: false,
+            render: false,
+        }
+    }
+
+    fn build() -> Self {
+        DocumentOps {
+            build: true,
+            ..DocumentOps::nop()
+        }
+    }
+
+    fn combine(&mut self, other: Self) {
+        self.scroll = self.scroll || other.scroll;
+        self.build = self.build || other.build;
+        self.render = self.render || other.render;
+    }
 }
 
 /// The unique id for WR resource identification.
 static NEXT_NAMESPACE_ID: AtomicUsize = ATOMIC_USIZE_INIT;
+
+#[cfg(feature = "capture")]
+#[derive(Serialize, Deserialize)]
+struct PlainRenderBackend {
+    default_device_pixel_ratio: f32,
+    enable_render_on_scroll: bool,
+    frame_config: FrameBuilderConfig,
+    documents: FastHashMap<DocumentId, DocumentView>,
+    resources: PlainResources,
+}
 
 /// The render backend is responsible for transforming high level display lists into
 /// GPU-friendly work which is then submitted to the renderer in the form of a frame::Frame.
@@ -206,13 +253,14 @@ impl RenderBackend {
         message: DocumentMsg,
         frame_counter: u32,
         profile_counters: &mut BackendProfileCounters,
-    ) -> DocumentOp {
+    ) -> DocumentOps {
         let doc = self.documents.get_mut(&document_id).expect("No document?");
 
         match message {
+            //TODO: move view-related messages in a separate enum?
             DocumentMsg::SetPageZoom(factor) => {
-                doc.page_zoom_factor = factor.get();
-                DocumentOp::Nop
+                doc.view.page_zoom_factor = factor.get();
+                DocumentOps::nop()
             }
             DocumentMsg::EnableFrameOutput(pipeline_id, enable) => {
                 if enable {
@@ -220,25 +268,25 @@ impl RenderBackend {
                 } else {
                     doc.output_pipelines.remove(&pipeline_id);
                 }
-                DocumentOp::Nop
+                DocumentOps::nop()
             }
             DocumentMsg::SetPinchZoom(factor) => {
-                doc.pinch_zoom_factor = factor.get();
-                DocumentOp::Nop
+                doc.view.pinch_zoom_factor = factor.get();
+                DocumentOps::nop()
             }
             DocumentMsg::SetPan(pan) => {
-                doc.pan = pan;
-                DocumentOp::Nop
+                doc.view.pan = pan;
+                DocumentOps::nop()
             }
             DocumentMsg::SetWindowParameters {
                 window_size,
                 inner_rect,
                 device_pixel_ratio,
             } => {
-                doc.window_size = window_size;
-                doc.inner_rect = inner_rect;
-                doc.device_pixel_ratio = device_pixel_ratio;
-                DocumentOp::Nop
+                doc.view.window_size = window_size;
+                doc.view.inner_rect = inner_rect;
+                doc.view.device_pixel_ratio = device_pixel_ratio;
+                DocumentOps::nop()
             }
             DocumentMsg::SetDisplayList {
                 epoch,
@@ -250,10 +298,13 @@ impl RenderBackend {
                 preserve_frame_state,
                 resources,
             } => {
-                profile_scope!("SetDisplayList");
+                // TODO: this will be removed from the SetDisplayList message soon.
+                self.resource_cache.update_resources(
+                    resources,
+                    &mut profile_counters.resources
+                );
 
-                self.resource_cache
-                    .update_resources(resources, &mut profile_counters.resources);
+                profile_scope!("SetDisplayList");
 
                 let mut data;
                 while {
@@ -289,7 +340,6 @@ impl RenderBackend {
                         viewport_size,
                         content_size,
                     );
-                    doc.build_scene(&mut self.resource_cache);
                 }
 
                 if let Some(ref mut ros) = doc.render_on_scroll {
@@ -310,7 +360,22 @@ impl RenderBackend {
                     display_list_len,
                 );
 
-                DocumentOp::Built
+                DocumentOps::build()
+            }
+            DocumentMsg::UpdateResources(updates) => {
+                profile_scope!("UpdateResources");
+
+                self.resource_cache.update_resources(
+                    updates,
+                    &mut profile_counters.resources
+                );
+
+                DocumentOps::nop()
+            }
+            DocumentMsg::UpdateEpoch(pipeline_id, epoch) => {
+                doc.scene.update_epoch(pipeline_id, epoch);
+                doc.frame_ctx.update_epoch(pipeline_id, epoch);
+                DocumentOps::nop()
             }
             DocumentMsg::UpdatePipelineResources { resources, pipeline_id, epoch } => {
                 profile_scope!("UpdateResources");
@@ -321,40 +386,35 @@ impl RenderBackend {
                 doc.scene.update_epoch(pipeline_id, epoch);
                 doc.frame_ctx.update_epoch(pipeline_id, epoch);
 
-                DocumentOp::Nop
+                DocumentOps::nop()
             }
             DocumentMsg::SetRootPipeline(pipeline_id) => {
                 profile_scope!("SetRootPipeline");
 
                 doc.scene.set_root_pipeline_id(pipeline_id);
                 if doc.scene.pipelines.get(&pipeline_id).is_some() {
-                    let _timer = profile_counters.total_time.timer();
-                    doc.build_scene(&mut self.resource_cache);
-                    DocumentOp::Built
+                    DocumentOps::build()
                 } else {
-                    DocumentOp::Nop
+                    DocumentOps::nop()
                 }
             }
             DocumentMsg::RemovePipeline(pipeline_id) => {
                 profile_scope!("RemovePipeline");
 
                 doc.scene.remove_pipeline(pipeline_id);
-                DocumentOp::Nop
+                DocumentOps::nop()
             }
             DocumentMsg::Scroll(delta, cursor, move_phase) => {
                 profile_scope!("Scroll");
                 let _timer = profile_counters.total_time.timer();
 
-                if doc.frame_ctx.scroll(delta, cursor, move_phase) && doc.render_on_scroll == Some(true)
-                {
-                    let frame = doc.render(
-                        &mut self.resource_cache,
-                        &mut self.gpu_cache,
-                        &mut profile_counters.resources,
-                    );
-                    DocumentOp::Scrolled(frame)
-                } else {
-                    DocumentOp::ScrolledNop
+                let should_render = doc.frame_ctx.scroll(delta, cursor, move_phase)
+                    && doc.render_on_scroll == Some(true);
+
+                DocumentOps {
+                    scroll: true,
+                    build: false,
+                    render: should_render,
                 }
             }
             DocumentMsg::HitTest(pipeline_id, point, flags, tx) => {
@@ -365,21 +425,19 @@ impl RenderBackend {
                     .unwrap()
                     .hit_test(cst, pipeline_id, point, flags);
                 tx.send(result).unwrap();
-                DocumentOp::Nop
+                DocumentOps::nop()
             }
             DocumentMsg::ScrollNodeWithId(origin, id, clamp) => {
                 profile_scope!("ScrollNodeWithScrollId");
                 let _timer = profile_counters.total_time.timer();
 
-                if doc.frame_ctx.scroll_node(origin, id, clamp) && doc.render_on_scroll == Some(true) {
-                    let frame = doc.render(
-                        &mut self.resource_cache,
-                        &mut self.gpu_cache,
-                        &mut profile_counters.resources,
-                    );
-                    DocumentOp::Scrolled(frame)
-                } else {
-                    DocumentOp::ScrolledNop
+                let should_render = doc.frame_ctx.scroll_node(origin, id, clamp)
+                    && doc.render_on_scroll == Some(true);
+
+                DocumentOps {
+                    scroll: true,
+                    build: false,
+                    render: should_render,
                 }
             }
             DocumentMsg::TickScrollingBounce => {
@@ -387,44 +445,46 @@ impl RenderBackend {
                 let _timer = profile_counters.total_time.timer();
 
                 doc.frame_ctx.tick_scrolling_bounce_animations();
-                if doc.render_on_scroll == Some(true) {
-                    let frame = doc.render(
-                        &mut self.resource_cache,
-                        &mut self.gpu_cache,
-                        &mut profile_counters.resources,
-                    );
-                    DocumentOp::Scrolled(frame)
-                } else {
-                    DocumentOp::ScrolledNop
+
+                DocumentOps {
+                    scroll: true,
+                    build: false,
+                    render: doc.render_on_scroll == Some(true),
                 }
             }
             DocumentMsg::GetScrollNodeState(tx) => {
                 profile_scope!("GetScrollNodeState");
                 tx.send(doc.frame_ctx.get_scroll_node_state()).unwrap();
-                DocumentOp::Nop
+                DocumentOps::nop()
             }
-            DocumentMsg::GenerateFrame(property_bindings) => {
-                profile_scope!("GenerateFrame");
+            DocumentMsg::UpdateDynamicProperties(property_bindings) => {
+                // Ideally, when there are property bindings present,
+                // we won't need to rebuild the entire frame here.
+                // However, to avoid conflicts with the ongoing work to
+                // refactor how scroll roots + transforms work, this
+                // just rebuilds the frame if there are animated property
+                // bindings present for now.
+                // TODO(gw): Once the scrolling / reference frame changes
+                //           are completed, optimize the internals of
+                //           animated properties to not require a full
+                //           rebuild of the frame!
+                doc.scene.properties.set_properties(property_bindings);
+                DocumentOps::build()
+            }
+            DocumentMsg::GenerateFrame => {
                 let _timer = profile_counters.total_time.timer();
 
-                if let Some(property_bindings) = property_bindings {
-                    doc.scene.properties.set_properties(property_bindings);
-                }
+                let mut op = DocumentOps::nop();
 
                 if let Some(ref mut ros) = doc.render_on_scroll {
                     *ros = true;
                 }
 
                 if doc.scene.root_pipeline_id.is_some() {
-                    let frame = doc.render(
-                        &mut self.resource_cache,
-                        &mut self.gpu_cache,
-                        &mut profile_counters.resources,
-                    );
-                    DocumentOp::Rendered(frame)
-                } else {
-                    DocumentOp::ScrolledNop
+                    op.render = true;
                 }
+
+                op
             }
         }
     }
@@ -488,30 +548,6 @@ impl RenderBackend {
                     );
                     self.documents.insert(document_id, document);
                 }
-                ApiMsg::UpdateDocument(document_id, doc_msg) => match self.process_document(
-                    document_id,
-                    doc_msg,
-                    frame_counter,
-                    &mut profile_counters,
-                ) {
-                    DocumentOp::Nop => {}
-                    DocumentOp::Built => {}
-                    DocumentOp::ScrolledNop => {
-                        self.notify_compositor_of_new_scroll_document(document_id, false);
-                    }
-                    DocumentOp::Scrolled(doc) => {
-                        self.publish_document(document_id, doc, &mut profile_counters);
-                        self.notify_compositor_of_new_scroll_document(document_id, true);
-                    }
-                    DocumentOp::Rendered(doc) => {
-                        frame_counter += 1;
-                        self.publish_document_and_notify_compositor(
-                            document_id,
-                            doc,
-                            &mut profile_counters,
-                        );
-                    }
-                },
                 ApiMsg::DeleteDocument(document_id) => {
                     self.documents.remove(&document_id);
                 }
@@ -550,6 +586,34 @@ impl RenderBackend {
                             let json = self.get_clip_scroll_tree_for_debugger();
                             ResultMsg::DebugOutput(DebugOutput::FetchClipScrollTree(json))
                         }
+                        #[cfg(feature = "capture")]
+                        DebugCommand::SaveCapture(root) => {
+                            let deferred = self.save_capture(&root);
+                            ResultMsg::DebugOutput(DebugOutput::SaveCapture(root, deferred))
+                        },
+                        #[cfg(feature = "capture")]
+                        DebugCommand::LoadCapture(root) => {
+                            NEXT_NAMESPACE_ID.fetch_add(1, Ordering::Relaxed);
+                            frame_counter += 1;
+                            self.load_capture(&root, &mut profile_counters);
+                            ResultMsg::DebugOutput(DebugOutput::LoadCapture)
+                        },
+                        DebugCommand::EnableDualSourceBlending(enable) => {
+                            // Set in the config used for any future documents
+                            // that are created.
+                            self.frame_config
+                                .dual_source_blending_is_enabled = enable;
+
+                            // Set for any existing documents.
+                            for (_, doc) in &mut self.documents {
+                                doc.frame_ctx
+                                   .frame_builder_config
+                                   .dual_source_blending_is_enabled = enable;
+                            }
+
+                            // We don't want to forward this message to the renderer.
+                            continue;
+                        }
                         _ => ResultMsg::DebugCommand(option),
                     };
                     self.result_tx.send(msg).unwrap();
@@ -559,41 +623,70 @@ impl RenderBackend {
                     self.notifier.shut_down();
                     break;
                 }
+                ApiMsg::UpdateDocument(document_id, doc_msgs) => {
+                    self.update_document(
+                        document_id,
+                        doc_msgs,
+                        &mut frame_counter,
+                        &mut profile_counters
+                    )
+                }
             }
         }
     }
 
-    fn publish_document(
+    fn update_document(
         &mut self,
         document_id: DocumentId,
-        document: RenderedDocument,
+        doc_msgs: Vec<DocumentMsg>,
+        frame_counter: &mut u32,
         profile_counters: &mut BackendProfileCounters,
     ) {
-        let pending_update = self.resource_cache.pending_updates();
-        let msg = ResultMsg::PublishDocument(document_id, document, pending_update, profile_counters.clone());
-        self.result_tx.send(msg).unwrap();
-        profile_counters.reset();
+        let mut op = DocumentOps::nop();
+        for doc_msg in doc_msgs {
+            op.combine(
+                self.process_document(
+                    document_id,
+                    doc_msg,
+                    *frame_counter,
+                    profile_counters,
+                )
+            );
+        }
+
+        let doc = self.documents.get_mut(&document_id).unwrap();
+
+        if op.build {
+            profile_scope!("build scene");
+            doc.build_scene(&mut self.resource_cache);
+        }
+
+        if op.render {
+            profile_scope!("generate frame");
+
+            *frame_counter += 1;
+            let rendered_document = doc.render(
+                &mut self.resource_cache,
+                &mut self.gpu_cache,
+                &mut profile_counters.resources,
+            );
+
+            // Publish the frame
+            let pending_update = self.resource_cache.pending_updates();
+            let msg = ResultMsg::PublishDocument(
+                document_id,
+                rendered_document,
+                pending_update,
+                profile_counters.clone()
+            );
+            self.result_tx.send(msg).unwrap();
+            profile_counters.reset();
+        }
+
+        if op.render || op.scroll {
+            self.notifier.new_document_ready(document_id, op.scroll, op.render);
+        }
     }
-
-    fn publish_document_and_notify_compositor(
-        &mut self,
-        document_id: DocumentId,
-        document: RenderedDocument,
-        profile_counters: &mut BackendProfileCounters,
-    ) {
-        self.publish_document(document_id, document, profile_counters);
-
-        self.notifier.new_document_ready(document_id, false, true);
-    }
-
-    fn notify_compositor_of_new_scroll_document(
-        &self,
-        document_id: DocumentId,
-        composite_needed: bool,
-    ) {
-        self.notifier.new_document_ready(document_id, true, composite_needed);
-    }
-
 
     #[cfg(not(feature = "debugger"))]
     fn get_docs_for_debugger(&self) -> String {
@@ -714,6 +807,121 @@ impl ToDebugString for SpecificDisplayItem {
             SpecificDisplayItem::PopStackingContext => String::from("pop_stacking_context"),
             SpecificDisplayItem::PushShadow(..) => String::from("push_shadow"),
             SpecificDisplayItem::PopAllShadows => String::from("pop_all_shadows"),
+        }
+    }
+}
+
+
+#[cfg(feature = "capture")]
+impl RenderBackend {
+    // Note: the mutable `self` is only needed here for resolving blob images
+    fn save_capture(&mut self, root: &PathBuf) -> Vec<ExternalCaptureImage> {
+        use ron::ser::pretty;
+        use std::fs;
+        use std::io::Write;
+
+        info!("capture: saving {}", root.to_string_lossy());
+        let (resources, deferred) = self.resource_cache.save_capture(root);
+
+        for (&id, doc) in &self.documents {
+            info!("\tdocument {:?}", id);
+            let ron = pretty::to_string(&doc.scene).unwrap();
+            let file_name = format!("scene-{}-{}.ron", (id.0).0, id.1);
+            let ron_path = root.clone().join(file_name);
+            let mut file = fs::File::create(ron_path).unwrap();
+            write!(file, "{}\n", ron).unwrap();
+        }
+
+        info!("\tbackend");
+        let serial = PlainRenderBackend {
+            default_device_pixel_ratio: self.default_device_pixel_ratio,
+            enable_render_on_scroll: self.enable_render_on_scroll,
+            frame_config: self.frame_config.clone(),
+            documents: self.documents
+                .iter()
+                .map(|(id, doc)| (*id, doc.view.clone()))
+                .collect(),
+            resources,
+        };
+
+        let ron = pretty::to_string(&serial).unwrap();
+        let ron_path = root.clone().join("backend.ron");
+        let mut file = fs::File::create(ron_path).unwrap();
+        write!(file, "{}\n", ron).unwrap();
+
+        deferred
+    }
+
+    fn load_capture(
+        &mut self,
+        root: &PathBuf,
+        profile_counters: &mut BackendProfileCounters,
+    ) {
+        use ron::de;
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut string = String::new();
+        info!("capture: loading {}", root.to_string_lossy());
+
+        File::open(root.join("backend.ron"))
+            .unwrap()
+            .read_to_string(&mut string)
+            .unwrap();
+        let backend: PlainRenderBackend = de::from_str(&string)
+            .unwrap();
+
+        // Note: it would be great to have RenderBackend to be split
+        // rather explicitly on what's used before and after scene building
+        // so that, for example, we never miss anything in the code below:
+
+        self.resource_cache.load_capture(backend.resources, root);
+        self.gpu_cache = GpuCache::new();
+        self.documents.clear();
+        self.default_device_pixel_ratio = backend.default_device_pixel_ratio;
+        self.frame_config = backend.frame_config;
+        self.enable_render_on_scroll = backend.enable_render_on_scroll;
+
+        for (id, view) in backend.documents {
+            info!("\tdocument {:?}", id);
+            string.clear();
+            let file_name = format!("scene-{}-{}.ron", (id.0).0, id.1);
+            File::open(root.join(file_name))
+                .expect(&format!("Unable to open scene {:?}", id))
+                .read_to_string(&mut string)
+                .unwrap();
+            let scene: Scene = de::from_str(&string)
+                .unwrap();
+
+            let mut doc = Document {
+                scene,
+                view,
+                frame_ctx: FrameContext::new(self.frame_config.clone()),
+                frame_builder: Some(FrameBuilder::empty()),
+                output_pipelines: FastHashSet::default(),
+                render_on_scroll: None,
+            };
+
+            doc.build_scene(&mut self.resource_cache);
+            let render_doc = doc.render(
+                &mut self.resource_cache,
+                &mut self.gpu_cache,
+                &mut profile_counters.resources,
+            );
+
+            let pending_update = self.resource_cache.pending_updates();
+            let msg = ResultMsg::PublishDocument(
+                id,
+                render_doc,
+                pending_update,
+                profile_counters.clone()
+            );
+            self.result_tx.send(msg).unwrap();
+            profile_counters.reset();
+
+            self.notifier.new_document_ready(id, false, true);
+
+            self.documents.insert(id, doc);
         }
     }
 }

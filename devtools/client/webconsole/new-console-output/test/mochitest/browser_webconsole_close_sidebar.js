@@ -48,7 +48,7 @@ add_task(async function () {
   synthesizeKeyShortcut(clearShortcut);
   await waitFor(() => findMessages(hud, "").length == 0);
   sidebar = hud.ui.document.querySelector(".sidebar");
-  ok(!sidebar, "Sidebar hidden after console.clear()");
+  ok(!sidebar, "Sidebar hidden after ctrl-l");
 
   await showSidebar(hud);
 
@@ -60,6 +60,15 @@ add_task(async function () {
   await onSidebarShown;
   sidebar = hud.ui.document.querySelector(".sidebar");
   ok(!sidebar, "Sidebar hidden after clicking on close button");
+
+  await showSidebar(hud);
+
+  info("Send escape to hide sidebar");
+  onSidebarShown = waitForNodeMutation(wrapper, { childList: true });
+  EventUtils.synthesizeKey("VK_ESCAPE", {});
+  await onSidebarShown;
+  sidebar = hud.ui.document.querySelector(".sidebar");
+  ok(!sidebar, "Sidebar hidden after sending esc");
 });
 
 async function showSidebar(hud) {
@@ -78,4 +87,8 @@ async function showSidebar(hud) {
   openInSidebar.click();
   await onSidebarShown;
   await hideContextMenu(hud);
+
+  // Let's wait for the object inside the sidebar to be expanded.
+  await waitFor(() =>
+    wrapper.querySelectorAll(".sidebar .tree-node").length > 1, null, 100);
 }

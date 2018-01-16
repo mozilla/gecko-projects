@@ -60,7 +60,7 @@ struct BaseRect {
   // Emptiness. An empty rect is one that has no area, i.e. its height or width
   // is <= 0.  Zero rect is the one with height and width set to zero.  Note
   // that SetEmpty() may change a rectangle that identified as IsEmpty().
-  MOZ_ALWAYS_INLINE bool IsZero() const { return height == 0 || width == 0; }
+  MOZ_ALWAYS_INLINE bool IsZeroArea() const { return height == 0 || width == 0; }
   MOZ_ALWAYS_INLINE bool IsEmpty() const { return height <= 0 || width <= 0; }
   void SetEmpty() { width = height = 0; }
 
@@ -442,22 +442,18 @@ struct BaseRect {
 
   // Moves one edge of the rect without moving the opposite edge.
   void SetLeftEdge(T aX) {
-    MOZ_ASSERT(aX <= XMost());
     width = XMost() - aX;
     x = aX;
   }
-  void SetRightEdge(T aXMost) { 
-    MOZ_ASSERT(aXMost >= x);
-    width = aXMost - x; 
+  void SetRightEdge(T aXMost) {
+    width = aXMost - x;
   }
   void SetTopEdge(T aY) {
-    MOZ_ASSERT(aY <= YMost());
     height = YMost() - aY;
     y = aY;
   }
-  void SetBottomEdge(T aYMost) { 
-    MOZ_ASSERT(aYMost >= y);
-    height = aYMost - y; 
+  void SetBottomEdge(T aYMost) {
+    height = aYMost - y;
   }
   void Swap() {
     std::swap(x, y);

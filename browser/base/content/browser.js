@@ -1038,12 +1038,12 @@ function _loadURIWithFlags(browser, uri, params) {
 
   let mustChangeProcess = requiredRemoteType != currentRemoteType;
   let newFrameloader = false;
-  if (browser.getAttribute("isPreloadBrowser") == "true" && uri != "about:newtab") {
+  if (browser.getAttribute("preloadedState") === "consumed" && uri != "about:newtab") {
     // Leaving about:newtab from a used to be preloaded browser should run the process
     // selecting algorithm again.
     mustChangeProcess = true;
     newFrameloader = true;
-    browser.removeAttribute("isPreloadBrowser");
+    browser.removeAttribute("preloadedState");
   }
 
   // !requiredRemoteType means we're loading in the parent/this process.
@@ -1125,8 +1125,8 @@ function LoadInOtherProcess(browser, loadOptions, historyIndex = -1) {
 // Called when a docshell has attempted to load a page in an incorrect process.
 // This function is responsible for loading the page in the correct process.
 function RedirectLoad({ target: browser, data }) {
-  if (browser.getAttribute("isPreloadBrowser") == "true") {
-    browser.removeAttribute("isPreloadBrowser");
+  if (browser.getAttribute("preloadedState") === "consumed") {
+    browser.removeAttribute("preloadedState");
     data.loadOptions.newFrameloader = true;
   }
 
@@ -1263,6 +1263,7 @@ var gBrowserInit = {
     mm.loadFrameScript("chrome://browser/content/tab-content.js", true);
     mm.loadFrameScript("chrome://browser/content/content.js", true);
     mm.loadFrameScript("chrome://browser/content/content-UITour.js", true);
+    mm.loadFrameScript("chrome://global/content/content-HybridContentTelemetry.js", true);
     mm.loadFrameScript("chrome://global/content/manifestMessages.js", true);
 
     window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
@@ -3148,24 +3149,7 @@ var BrowserOnClick = {
       // provide a URL endpoint for these reports.
     }
 
-    let notificationBox = gBrowser.getNotificationBox();
-    let value = "blocked-badware-page";
-
-    let previousNotification = notificationBox.getNotificationWithValue(value);
-    if (previousNotification) {
-      notificationBox.removeNotification(previousNotification);
-    }
-
-    let notification = notificationBox.appendNotification(
-      title,
-      value,
-      "chrome://global/skin/icons/blacklist_favicon.png",
-      notificationBox.PRIORITY_CRITICAL_HIGH,
-      buttons
-    );
-    // Persist the notification until the user removes so it
-    // doesn't get removed on redirects.
-    notification.persistence = -1;
+    SafeBrowsingNotificationBox.show(title, buttons);
   },
 };
 
@@ -4587,6 +4571,8 @@ var XULBrowserWindow = {
 
       BrowserPageActions.onLocationChange();
 
+      SafeBrowsingNotificationBox.onLocationChange(aLocationURI);
+
       gTabletModePageCounter.inc();
 
       // Utility functions for disabling find
@@ -5318,13 +5304,6 @@ nsBrowserAccess.prototype = {
   },
 };
 
-function getTogglableToolbars() {
-  let toolbarNodes = Array.slice(gNavToolbox.childNodes);
-  toolbarNodes = toolbarNodes.concat(gNavToolbox.externalToolbars);
-  toolbarNodes = toolbarNodes.filter(node => node.getAttribute("toolbarname"));
-  return toolbarNodes;
-}
-
 function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   var popup = aEvent.target;
   if (popup != aEvent.currentTarget)
@@ -5339,9 +5318,13 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
 
   var firstMenuItem = aInsertPoint || popup.firstChild;
 
-  let toolbarNodes = getTogglableToolbars();
+  let toolbarNodes = gNavToolbox.childNodes;
 
   for (let toolbar of toolbarNodes) {
+    if (!toolbar.hasAttribute("toolbarname")) {
+      continue;
+    }
+
     let menuItem = document.createElement("menuitem");
     let hidingAttribute = toolbar.getAttribute("type") == "menubar" ?
                           "autohide" : "collapsed";
@@ -6052,14 +6035,18 @@ function middleMousePaste(event) {
 function stripUnsafeProtocolOnPaste(pasteData) {
   // Don't allow pasting javascript URIs since we don't support
   // LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL for those.
-  let changed = false;
-  let pasteDataNoJS = pasteData.replace(/\r?\n/g, "")
-                               .replace(/^(?:\W*javascript:)+/i,
-                                        () => {
-                                                changed = true;
-                                                return "";
-                                              });
-  return changed ? pasteDataNoJS : pasteData;
+  while (true) {
+    let scheme = "";
+    try {
+      scheme = Services.io.extractScheme(pasteData);
+    } catch (ex) { }
+    if (scheme != "javascript") {
+      break;
+    }
+
+    pasteData = pasteData.substring(pasteData.indexOf(":") + 1);
+  }
+  return pasteData;
 }
 
 // handleDroppedLink has the following 2 overloads:
@@ -7479,11 +7466,11 @@ var gIdentityHandler = {
 
         // If the organization name starts with an RTL character, then
         // swap the positions of the organization and country code labels.
-        // The Unicode ranges reflect the definition of the UCS2_CHAR_IS_BIDI
+        // The Unicode ranges reflect the definition of the UTF16_CODE_UNIT_IS_BIDI
         // macro in intl/unicharutil/util/nsBidiUtils.h. When bug 218823 gets
         // fixed, this test should be replaced by one adhering to the
         // Unicode Bidirectional Algorithm proper (at the paragraph level).
-        icon_labels_dir = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/.test(icon_label) ?
+        icon_labels_dir = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc\ud802\ud803\ud83a\ud83b]/.test(icon_label) ?
                           "rtl" : "ltr";
       }
     } else if (this._pageExtensionPolicy) {
@@ -8903,6 +8890,53 @@ var AboutPrivateBrowsingListener = {
       msg => {
         TrackingProtection.dontShowIntroPanelAgain();
     });
+  }
+};
+
+const SafeBrowsingNotificationBox = {
+  _currentURIBaseDomain: null,
+  show(title, buttons) {
+    let uri = gBrowser.currentURI;
+
+    // start tracking host so that we know when we leave the domain
+    this._currentURIBaseDomain = Services.eTLD.getBaseDomain(uri);
+
+    let notificationBox = gBrowser.getNotificationBox();
+    let value = "blocked-badware-page";
+
+    let previousNotification = notificationBox.getNotificationWithValue(value);
+    if (previousNotification) {
+      notificationBox.removeNotification(previousNotification);
+    }
+
+    let notification = notificationBox.appendNotification(
+      title,
+      value,
+      "chrome://global/skin/icons/blacklist_favicon.png",
+      notificationBox.PRIORITY_CRITICAL_HIGH,
+      buttons
+    );
+    // Persist the notification until the user removes so it
+    // doesn't get removed on redirects.
+    notification.persistence = -1;
+  },
+  onLocationChange(aLocationURI) {
+    // take this to represent that you haven't visited a bad place
+    if (!this._currentURIBaseDomain) {
+      return;
+    }
+
+    let newURIBaseDomain = Services.eTLD.getBaseDomain(aLocationURI);
+
+    if (newURIBaseDomain !== this._currentURIBaseDomain) {
+      let notificationBox = gBrowser.getNotificationBox();
+      let notification = notificationBox.getNotificationWithValue("blocked-badware-page");
+      if (notification) {
+        notificationBox.removeNotification(notification, false);
+      }
+
+      this._currentURIBaseDomain = null;
+    }
   }
 };
 

@@ -3234,10 +3234,16 @@ nsCSSFrameConstructor::ConstructSelectFrame(nsFrameConstructorState& aState,
     // Notify combobox that it should use the listbox as it's popup
     comboboxFrame->SetDropDown(listFrame);
 
-    NS_ASSERTION(!listFrame->IsAbsPosContainingBlock(),
-                 "Ended up with positioned dropdown list somehow.");
+    if (!nsLayoutUtils::IsContentSelectEnabled()) {
+      // TODO(kuoe0) Remove this assertion when content-select is shipped.
+      NS_ASSERTION(!listFrame->IsAbsPosContainingBlock(),
+                   "Ended up with positioned dropdown list somehow.");
+    }
     NS_ASSERTION(!listFrame->IsFloating(),
                  "Ended up with floating dropdown list somehow.");
+
+    // child frames of combobox frame
+    nsFrameItems childItems;
 
     // Initialize the scroll frame positioned. Note that it is NOT
     // initialized as absolutely positioned.
@@ -3246,15 +3252,17 @@ nsCSSFrameConstructor::ConstructSelectFrame(nsFrameConstructorState& aState,
 
     InitializeSelectFrame(aState, listFrame, scrolledFrame, content,
                           comboboxFrame, listStyle, true,
-                          aItem.mPendingBinding, aFrameItems);
+                          aItem.mPendingBinding, childItems);
 
-    NS_ASSERTION(listFrame->GetView(), "ListFrame's view is nullptr");
+    if (!nsLayoutUtils::IsContentSelectEnabled()) {
+      // TODO(kuoe0) Remove this assertion when content-select is shipped.
+      NS_ASSERTION(listFrame->GetView(), "ListFrame's view is nullptr");
+    }
 
     // Create display and button frames from the combobox's anonymous content.
     // The anonymous content is appended to existing anonymous content for this
     // element (the scrollbars).
-    nsFrameItems childItems;
-
+    //
     // nsComboboxControlFrame needs special frame creation behavior for its first
     // piece of anonymous content, which means that we can't take the normal
     // ProcessChildren path.
@@ -3281,12 +3289,14 @@ nsCSSFrameConstructor::ConstructSelectFrame(nsFrameConstructorState& aState,
 
     comboboxFrame->SetInitialChildList(kPrincipalList, childItems);
 
-    // Initialize the additional popup child list which contains the
-    // dropdown list frame.
-    nsFrameItems popupItems;
-    popupItems.AddChild(listFrame);
-    comboboxFrame->SetInitialChildList(nsIFrame::kSelectPopupList,
-                                       popupItems);
+    if (!nsLayoutUtils::IsContentSelectEnabled()) {
+      // Initialize the additional popup child list which contains the
+      // dropdown list frame.
+      nsFrameItems popupItems;
+      popupItems.AddChild(listFrame);
+      comboboxFrame->SetInitialChildList(nsIFrame::kSelectPopupList,
+                                         popupItems);
+    }
 
     aState.mFrameState = historyState;
     if (aState.mFrameState) {
@@ -3338,7 +3348,7 @@ nsCSSFrameConstructor::InitializeSelectFrame(nsFrameConstructorState& aState,
 
   scrollFrame->Init(aContent, geometricParent, nullptr);
 
-  if (!aBuildCombobox) {
+  if (!aBuildCombobox || nsLayoutUtils::IsContentSelectEnabled()) {
     aState.AddChild(scrollFrame, aFrameItems, aContent, aParentFrame);
   }
 
@@ -3629,13 +3639,20 @@ nsCSSFrameConstructor::FindDataByTag(nsAtom* aTag,
                                      Element* aElement,
                                      nsStyleContext* aStyleContext,
                                      const FrameConstructionDataByTag* aDataPtr,
-                                     uint32_t aDataLength)
+                                     uint32_t aDataLength,
+                                     bool* aTagFound)
 {
+  if (aTagFound) {
+    *aTagFound = false;
+  }
   for (const FrameConstructionDataByTag *curData = aDataPtr,
          *endData = aDataPtr + aDataLength;
        curData != endData;
        ++curData) {
     if (*curData->mTag == aTag) {
+      if (aTagFound) {
+        *aTagFound = true;
+      }
       const FrameConstructionData* data = &curData->mData;
       if (data->mBits & FCDATA_FUNC_IS_DATA_GETTER) {
         return data->mFunc.mDataGetter(aElement, aStyleContext);
@@ -3739,8 +3756,29 @@ nsCSSFrameConstructor::FindHTMLData(Element* aElement,
     COMPLEX_TAG_CREATE(details, &nsCSSFrameConstructor::ConstructDetailsFrame)
   };
 
-  return FindDataByTag(aTag, aElement, aStyleContext, sHTMLData,
-                       ArrayLength(sHTMLData));
+  bool tagFound;
+  const FrameConstructionData* data =
+    FindDataByTag(aTag, aElement, aStyleContext, sHTMLData,
+                  ArrayLength(sHTMLData), &tagFound);
+
+  // https://drafts.csswg.org/css-display/#unbox-html
+  if (tagFound &&
+      MOZ_UNLIKELY(aStyleContext->StyleDisplay()->mDisplay ==
+                   StyleDisplay::Contents)) {
+    // <button>, <legend>, <details> and <fieldset> don’t have any special
+    // behavior; display: contents simply removes their principal box, and their
+    // contents render as normal.
+    if (aTag != nsGkAtoms::button &&
+        aTag != nsGkAtoms::legend &&
+        aTag != nsGkAtoms::details &&
+        aTag != nsGkAtoms::fieldset) {
+      // On the rest of unusual HTML elements, display: contents creates no box.
+      static const FrameConstructionData sSuppressData = SUPPRESS_FCDATA();
+      return &sSuppressData;
+    }
+  }
+
+  return data;
 }
 
 /* static */
@@ -4503,8 +4541,22 @@ nsCSSFrameConstructor::FindXULTagData(Element* aElement,
     SIMPLE_XUL_CREATE(scrollbarbutton, NS_NewScrollbarButtonFrame)
 };
 
-  return FindDataByTag(aTag, aElement, aStyleContext, sXULTagData,
-                       ArrayLength(sXULTagData));
+  bool tagFound;
+  const FrameConstructionData* data =
+    FindDataByTag(aTag, aElement, aStyleContext, sXULTagData,
+                  ArrayLength(sXULTagData), &tagFound);
+
+  // There's no spec that says what display: contents means for special XUL
+  // elements, but we do the same as for HTML "Unusual Elements", i.e. treat it
+  // as display:none.
+  if (tagFound &&
+      MOZ_UNLIKELY(aStyleContext->StyleDisplay()->mDisplay ==
+                   StyleDisplay::Contents)) {
+    static const FrameConstructionData sSuppressData = SUPPRESS_FCDATA();
+    return &sSuppressData;
+  }
+
+  return data;
 }
 
 #ifdef MOZ_XUL
@@ -4977,8 +5029,7 @@ nsCSSFrameConstructor::FindDisplayData(const nsStyleDisplay* aDisplay,
     FCDATA_FOR_DISPLAY(StyleDisplay::RubyTextContainer,
       FCDATA_DECL(FCDATA_DESIRED_PARENT_TYPE_TO_BITS(eTypeRuby),
                   NS_NewRubyTextContainerFrame)),
-    FCDATA_FOR_DISPLAY(StyleDisplay::Contents,
-      FULL_CTOR_FCDATA(FCDATA_IS_CONTENTS, nullptr/*never called*/)),
+    FCDATA_FOR_DISPLAY(StyleDisplay::Contents, UNREACHABLE_FCDATA()),
     FCDATA_FOR_DISPLAY(StyleDisplay::WebkitBox,
       FCDATA_DECL(FCDATA_MAY_NEED_SCROLLFRAME, NS_NewFlexContainerFrame)),
     FCDATA_FOR_DISPLAY(StyleDisplay::WebkitInlineBox,
@@ -5564,6 +5615,23 @@ nsCSSFrameConstructor::FindSVGData(Element* aElement,
     return &sSuppressData;
   }
 
+  // https://drafts.csswg.org/css-display/#unbox-svg
+  if (aStyleContext->StyleDisplay()->mDisplay == StyleDisplay::Contents) {
+    // For root <svg> elements, display: contents behaves as display: none.
+    if (aTag == nsGkAtoms::svg && !parentIsSVG) {
+      return &sSuppressData;
+    }
+
+    // For nested <svg>, <g>, <use> and <tspan> behave normally, but any other
+    // element behaves as display: none as well.
+    if (aTag != nsGkAtoms::g &&
+        aTag != nsGkAtoms::use &&
+        aTag != nsGkAtoms::svg &&
+        aTag != nsGkAtoms::tspan) {
+      return &sSuppressData;
+    }
+  }
+
   if (aTag == nsGkAtoms::svg && !parentIsSVG) {
     // We need outer <svg> elements to have an nsSVGOuterSVGFrame regardless
     // of whether they fail conditional processing attributes, since various
@@ -6082,7 +6150,11 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     AddPageBreakItem(aContent, aItems);
   }
 
-  if (MOZ_UNLIKELY(bits & FCDATA_IS_CONTENTS)) {
+  // FIXME(emilio, https://github.com/w3c/csswg-drafts/issues/2167):
+  //
+  // Figure out what should happen for display: contents in MathML.
+  if (display->mDisplay == StyleDisplay::Contents &&
+      !aContent->IsMathMLElement()) {
     if (!GetDisplayContentsStyleFor(aContent)) {
       MOZ_ASSERT(styleContext->GetPseudo() || !isGeneratedContent,
                  "Should have had pseudo type");
@@ -6169,7 +6241,8 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     aFlags & ITEM_IS_ANONYMOUSCONTENTCREATOR_CONTENT;
   if (isGeneratedContent) {
     // We need to keep this alive until the frame takes ownership.
-    NS_ADDREF(item->mContent);
+    // This corresponds to the Release in ConstructFramesFromItem.
+    item->mContent->AddRef();
   }
   item->mIsRootPopupgroup =
     aNameSpaceID == kNameSpaceID_XUL && aTag == nsGkAtoms::popupgroup &&
@@ -6502,9 +6575,6 @@ FindAppendPrevSibling(nsIFrame* aParentFrame, nsIFrame* aNextSibling)
 
   if (aNextSibling) {
     MOZ_ASSERT(aNextSibling->GetParent() == aParentFrame, "Wrong parent");
-    MOZ_ASSERT(aNextSibling->GetPrevSibling() ||
-               aParentFrame->PrincipalChildList().FirstChild() == aNextSibling,
-               "next sibling must be on the principal child list here");
     return aNextSibling->GetPrevSibling();
   }
 
@@ -7149,21 +7219,22 @@ nsCSSFrameConstructor::CheckBitsForLazyFrameConstruction(nsIContent* aParent)
 //
 // But we disable lazy frame construction for shadow trees... We should fix
 // that, too.
+//
+// NOTE(emilio): The IsXULElement check is pretty unfortunate, but there's tons
+// of browser chrome code that rely on XBL bindings getting synchronously loaded
+// as soon as the elements get inserted in the DOM.
 bool
 nsCSSFrameConstructor::MaybeConstructLazily(Operation aOperation,
                                             nsIContent* aContainer,
                                             nsIContent* aChild)
 {
-  if (mPresShell->GetPresContext()->IsChrome() || !aContainer ||
-      aContainer->IsInNativeAnonymousSubtree() || aContainer->IsXULElement()) {
+  if (!aContainer || aContainer->IsInNativeAnonymousSubtree() ||
+      aContainer->IsXULElement()) {
     return false;
   }
 
   if (aOperation == CONTENTINSERT) {
-    if (aChild->IsRootOfAnonymousSubtree() ||
-        (aChild->HasFlag(NODE_IS_IN_SHADOW_TREE) &&
-         !aChild->IsInNativeAnonymousSubtree()) ||
-        aChild->IsXULElement()) {
+    if (aChild->IsRootOfAnonymousSubtree() || aChild->IsXULElement()) {
       return false;
     }
   } else { // CONTENTAPPEND
@@ -7171,7 +7242,7 @@ nsCSSFrameConstructor::MaybeConstructLazily(Operation aOperation,
                  "operation should be either insert or append");
     for (nsIContent* child = aChild; child; child = child->GetNextSibling()) {
       NS_ASSERTION(!child->IsRootOfAnonymousSubtree(),
-                   "Should be coming through the CONTENTAPPEND case");
+                   "Should be coming through the CONTENTINSERT case");
       if (child->IsXULElement()) {
         return false;
       }
@@ -7252,11 +7323,10 @@ nsCSSFrameConstructor::CreateNeededFrames(
 
   // Scan the children of aContent to see what operations (if any) we need to
   // perform.
-  uint32_t childCount = aContent->GetChildCount();
   bool inRun = false;
   nsIContent* firstChildInRun = nullptr;
-  for (uint32_t i = 0; i < childCount; i++) {
-    nsIContent* child = aContent->GetChildAt(i);
+  for (nsIContent* child = aContent->GetFirstChild();
+       child; child = child->GetNextSibling()) {
     if (child->HasFlag(NODE_NEEDS_FRAME)) {
       NS_ASSERTION(!child->GetPrimaryFrame() ||
                    child->GetPrimaryFrame()->GetContent() != child,
@@ -7328,61 +7398,80 @@ nsCSSFrameConstructor::CreateNeededFrames()
 void
 nsCSSFrameConstructor::IssueSingleInsertNofications(nsIContent* aContainer,
                                                     nsIContent* aStartChild,
-                                                    nsIContent* aEndChild,
-                                                    InsertionKind aInsertionKind)
+                                                    nsIContent* aEndChild)
 {
   for (nsIContent* child = aStartChild;
        child != aEndChild;
        child = child->GetNextSibling()) {
-    if ((child->GetPrimaryFrame() || GetDisplayNoneStyleFor(child) ||
-         GetDisplayContentsStyleFor(child))
-#ifdef MOZ_XUL
-        //  Except listboxes suck, so do NOT skip anything here if
-        //  we plan to notify a listbox.
-        && !MaybeGetListBoxBodyFrame(aContainer, child)
-#endif
-        ) {
-      // Already have a frame or undisplayed entry for this content; a
-      // previous ContentRangeInserted in this loop must have reconstructed
-      // its insertion parent.  Skip it.
-      continue;
-    }
+    // listboxes suck.
+    MOZ_ASSERT(MaybeGetListBoxBodyFrame(aContainer, child) ||
+               (!child->GetPrimaryFrame() &&
+                !GetDisplayNoneStyleFor(child) &&
+                !GetDisplayContentsStyleFor(child)));
+
     // Call ContentRangeInserted with this node.
     ContentRangeInserted(aContainer, child, child->GetNextSibling(),
-                         mTempFrameTreeState, aInsertionKind, nullptr);
+                         mTempFrameTreeState, InsertionKind::Sync, nullptr);
   }
+}
+
+bool
+nsCSSFrameConstructor::InsertionPoint::IsMultiple() const
+{
+  if (!mParentFrame) {
+    return false;
+  }
+
+  // Fieldset frames have multiple normal flow child frame lists so handle it
+  // the same as if it had multiple content insertion points.
+  if (mParentFrame->IsFieldSetFrame()) {
+    return true;
+  }
+
+  // A details frame moves the first summary frame to be its first child, so we
+  // treat it as if it has multiple content insertion points.
+  if (mParentFrame->IsDetailsFrame()) {
+    return true;
+  }
+
+  return false;
 }
 
 nsCSSFrameConstructor::InsertionPoint
 nsCSSFrameConstructor::GetRangeInsertionPoint(nsIContent* aContainer,
                                               nsIContent* aStartChild,
-                                              nsIContent* aEndChild,
-                                              InsertionKind aInsertionKind)
+                                              nsIContent* aEndChild)
 {
-  // See if we have an XBL insertion point. If so, then that's our
-  // real parent frame; if not, then the frame hasn't been built yet
-  // and we just bail.
-  InsertionPoint insertionPoint = GetInsertionPoint(aContainer, nullptr);
-  if (!insertionPoint.mParentFrame && !insertionPoint.mMultiple) {
-    return insertionPoint; // Don't build the frames.
+  MOZ_ASSERT(aStartChild);
+
+  // If the children of the container may be distributed to different insertion
+  // points, insert them separately and bail out, letting ContentInserted handle
+  // the mess.
+  if (aContainer->GetShadowRoot() || aContainer->GetXBLBinding()) {
+    IssueSingleInsertNofications(aContainer, aStartChild, aEndChild);
+    return { };
   }
 
-  if (insertionPoint.mMultiple || aStartChild->GetXBLInsertionPoint()) {
-    // If we have multiple insertion points or if we have an insertion point
-    // and the operation is not a true append or if the insertion point already
-    // has explicit children, then we must fall back.
-    if (insertionPoint.mMultiple || aEndChild ||
-        insertionPoint.mParentFrame->GetContent()->HasChildren()) {
-      // Now comes the fun part.  For each inserted child, make a
-      // ContentInserted call as if it had just gotten inserted and
-      // let ContentInserted handle the mess.
-      IssueSingleInsertNofications(aContainer, aStartChild, aEndChild,
-                                   aInsertionKind);
-      insertionPoint.mParentFrame = nullptr;
+#ifdef DEBUG
+  {
+    nsIContent* expectedParent = aStartChild->GetFlattenedTreeParent();
+    for (nsIContent* child = aStartChild->GetNextSibling(); child;
+         child = child->GetNextSibling()) {
+      MOZ_ASSERT(child->GetFlattenedTreeParent() == expectedParent);
     }
   }
+#endif
 
-  return insertionPoint;
+  // Now the flattened tree parent of all the siblings is the same, just use the
+  // same insertion point and take the fast path, unless it's a multiple
+  // insertion point.
+  InsertionPoint ip = GetInsertionPoint(aStartChild);
+  if (ip.IsMultiple()) {
+    IssueSingleInsertNofications(aContainer, aStartChild, aEndChild);
+    return { };
+  }
+
+  return ip;
 }
 
 bool
@@ -7538,8 +7627,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
 
   LAYOUT_PHASE_TEMP_EXIT();
   InsertionPoint insertion =
-    GetRangeInsertionPoint(aContainer, aFirstNewContent, nullptr,
-                           aInsertionKind);
+    GetRangeInsertionPoint(aContainer, aFirstNewContent, nullptr);
   nsContainerFrame*& parentFrame = insertion.mParentFrame;
   LAYOUT_PHASE_TEMP_REENTER();
   if (!parentFrame) {
@@ -7562,7 +7650,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
 
   if (parentFrame->IsFrameOfType(nsIFrame::eMathML)) {
     LAYOUT_PHASE_TEMP_EXIT();
-    RecreateFramesForContent(parentFrame->GetContent(), aInsertionKind);
+    RecreateFramesForContent(parentFrame->GetContent(), InsertionKind::Async);
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -7720,8 +7808,8 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aContainer,
     // Invalidate now instead of before the WipeContainingBlock call, just in
     // case we do wipe; in that case we don't need to do this walk at all.
     // XXXbz does that matter?  Would it make more sense to save some virtual
-    // GetChildAt calls instead and do this during construction of our
-    // FrameConstructionItemList?
+    // GetChildAt_Deprecated calls instead and do this during construction of
+    // our FrameConstructionItemList?
     InvalidateCanvasIfNeeded(mPresShell, child);
   }
 
@@ -7933,8 +8021,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
       // We don't handle a range insert to a listbox parent, issue single
       // ContertInserted calls for each node inserted.
       LAYOUT_PHASE_TEMP_EXIT();
-      IssueSingleInsertNofications(aContainer, aStartChild, aEndChild,
-                                   aInsertionKind);
+      IssueSingleInsertNofications(aContainer, aStartChild, aEndChild);
       LAYOUT_PHASE_TEMP_REENTER();
       return;
     }
@@ -8025,13 +8112,12 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     // See if we have an XBL insertion point. If so, then that's our
     // real parent frame; if not, then the frame hasn't been built yet
     // and we just bail.
-    insertion = GetInsertionPoint(aContainer, aStartChild);
+    insertion = GetInsertionPoint(aStartChild);
   } else {
     // Get our insertion point. If we need to issue single ContentInserted's
     // GetRangeInsertionPoint will take care of that for us.
     LAYOUT_PHASE_TEMP_EXIT();
-    insertion = GetRangeInsertionPoint(aContainer, aStartChild, aEndChild,
-                                       aInsertionKind);
+    insertion = GetRangeInsertionPoint(aContainer, aStartChild, aEndChild);
     LAYOUT_PHASE_TEMP_REENTER();
   }
 
@@ -8047,8 +8133,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
   if (!isSingleInsert && !isRangeInsertSafe) {
     // must fall back to a single ContertInserted for each child in the range
     LAYOUT_PHASE_TEMP_EXIT();
-    IssueSingleInsertNofications(aContainer, aStartChild, aEndChild,
-                                 aInsertionKind);
+    IssueSingleInsertNofications(aContainer, aStartChild, aEndChild);
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -8075,7 +8160,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     // to locate this legend in the inserted frames and extract it.
     LAYOUT_PHASE_TEMP_EXIT();
     RecreateFramesForContent(insertion.mParentFrame->GetContent(),
-                             aInsertionKind);
+                             InsertionKind::Async);
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -8090,7 +8175,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     // to handle the insertion.
     LAYOUT_PHASE_TEMP_EXIT();
     RecreateFramesForContent(insertion.mParentFrame->GetContent(),
-                             aInsertionKind);
+                             InsertionKind::Async);
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -8102,10 +8187,12 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
     return;
   }
 
+  // FIXME(emilio): This looks terribly inefficient if you insert elements deep
+  // in a MathML subtree.
   if (insertion.mParentFrame->IsFrameOfType(nsIFrame::eMathML)) {
     LAYOUT_PHASE_TEMP_EXIT();
     RecreateFramesForContent(insertion.mParentFrame->GetContent(),
-                             aInsertionKind);
+                             InsertionKind::Async);
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -8186,8 +8273,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
 
         // must fall back to a single ContertInserted for each child in the range
         LAYOUT_PHASE_TEMP_EXIT();
-        IssueSingleInsertNofications(aContainer, aStartChild, aEndChild,
-                                     aInsertionKind);
+        IssueSingleInsertNofications(aContainer, aStartChild, aEndChild);
         LAYOUT_PHASE_TEMP_REENTER();
         return;
       }
@@ -9313,78 +9399,17 @@ nsCSSFrameConstructor::ReplicateFixedFrames(nsPageContentFrame* aParentFrame)
 }
 
 nsCSSFrameConstructor::InsertionPoint
-nsCSSFrameConstructor::GetInsertionPoint(nsIContent* aContainer,
-                                         nsIContent* aChild)
+nsCSSFrameConstructor::GetInsertionPoint(nsIContent* aChild)
 {
-  nsBindingManager* bindingManager = mDocument->BindingManager();
-
-  nsIContent* insertionElement;
-  if (aChild) {
-    // We've got an explicit insertion child. Check to see if it's
-    // anonymous.
-    if (aChild->GetBindingParent() == aContainer) {
-      // This child content is anonymous. Don't use the insertion
-      // point, since that's only for the explicit kids.
-      return InsertionPoint(GetContentInsertionFrameFor(aContainer), aContainer);
-    }
-
-    if (nsContentUtils::HasDistributedChildren(aContainer) ||
-        aContainer->IsShadowRoot()) {
-      // The container distributes nodes or is a shadow root, use the frame of
-      // the flattened tree parent.
-      //
-      // It may be the case that the node is distributed but not matched to any
-      // insertion points, so there is no flattened parent.
-      //
-      // FIXME(emilio): We should be able to use this path all the time.
-      nsIContent* flattenedParent = aChild->GetFlattenedTreeParent();
-      if (flattenedParent) {
-        return InsertionPoint(GetContentInsertionFrameFor(flattenedParent),
-                              flattenedParent);
-      }
-      return InsertionPoint();
-    }
-
-    insertionElement = bindingManager->FindNestedInsertionPoint(aContainer, aChild);
-  } else {
-    if (nsContentUtils::HasDistributedChildren(aContainer)) {
-      // The container distributes nodes to shadow DOM insertion points.
-      // Return with aMultiple set to true to induce callers to insert children
-      // individually into the node's flattened tree parent.
-      return InsertionPoint(nullptr, nullptr, true);
-    }
-
-    bool multiple;
-    insertionElement = bindingManager->FindNestedSingleInsertionPoint(aContainer, &multiple);
-    if (multiple) {
-      return InsertionPoint(nullptr, nullptr, true);
-    }
-  }
-
+  MOZ_ASSERT(aChild);
+  nsIContent* insertionElement = aChild->GetFlattenedTreeParent();
   if (!insertionElement) {
-    // The FindNested{,Single}InsertionPoint methods return null in the case
-    // that there is a binding with anonymous content but no insertion point.
-    // In that case the element doesn't belong in the flattened tree, and we
-    // don't want to render it.
-    return InsertionPoint();
+    // The element doesn't belong in the flattened tree, and thus we don't want
+    // to render it.
+    return { };
   }
 
-  InsertionPoint insertion(GetContentInsertionFrameFor(insertionElement),
-                           insertionElement);
-
-  // Fieldset frames have multiple normal flow child frame lists so handle it
-  // the same as if it had multiple content insertion points.
-  if (insertion.mParentFrame && insertion.mParentFrame->IsFieldSetFrame()) {
-    insertion.mMultiple = true;
-  }
-
-  // A details frame moves the first summary frame to be its first child, so we
-  // treat it as if it has multiple content insertion points.
-  if (insertion.mParentFrame && insertion.mParentFrame->IsDetailsFrame()) {
-    insertion.mMultiple = true;
-  }
-
-  return insertion;
+  return { GetContentInsertionFrameFor(insertionElement), insertionElement };
 }
 
 // Capture state for the frame tree rooted at the frame associated with the
@@ -11090,7 +11115,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
       TreeMatchContext::AutoAncestorPusher ancestorPusher(aState.mTreeMatchContext);
       if (parent != aContent && parent->IsElement()) {
         insertion.mContainer = child->GetFlattenedTreeParent();
-        MOZ_ASSERT(insertion.mContainer == GetInsertionPoint(parent, child).mContainer);
+        MOZ_ASSERT(insertion.mContainer == GetInsertionPoint(child).mContainer);
         if (aState.HasAncestorFilter()) {
           ancestorPusher.PushAncestorAndStyleScope(parent->AsElement());
         } else {

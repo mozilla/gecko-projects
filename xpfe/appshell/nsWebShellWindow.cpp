@@ -91,6 +91,7 @@ static NS_DEFINE_CID(kWindowCID,           NS_WINDOW_CID);
 nsWebShellWindow::nsWebShellWindow(uint32_t aChromeFlags)
   : nsXULWindow(aChromeFlags)
   , mSPTimerLock("nsWebShellWindow.mSPTimerLock")
+  , mWidgetListenerDelegate(this)
 {
 }
 
@@ -126,22 +127,22 @@ nsresult nsWebShellWindow::Initialize(nsIXULWindow* aParent,
   int32_t initialX = 0, initialY = 0;
   nsCOMPtr<nsIBaseWindow> base(do_QueryInterface(aOpener));
   if (base) {
-    rv = base->GetPositionAndSize(&mOpenerScreenRect.x,
-                                  &mOpenerScreenRect.y,
-                                  &mOpenerScreenRect.width,
-                                  &mOpenerScreenRect.height);
+    int32_t x, y, width, height;
+    rv = base->GetPositionAndSize(&x, &y, &width, &height);
     if (NS_FAILED(rv)) {
       mOpenerScreenRect.SetEmpty();
     } else {
       double scale;
       if (NS_SUCCEEDED(base->GetUnscaledDevicePixelsPerCSSPixel(&scale))) {
-        mOpenerScreenRect.x = NSToIntRound(mOpenerScreenRect.x / scale);
-        mOpenerScreenRect.y = NSToIntRound(mOpenerScreenRect.y / scale);
-        mOpenerScreenRect.width = NSToIntRound(mOpenerScreenRect.width / scale);
-        mOpenerScreenRect.height = NSToIntRound(mOpenerScreenRect.height / scale);
+        mOpenerScreenRect.SetRect(NSToIntRound(x / scale),
+                                  NSToIntRound(y / scale),
+                                  NSToIntRound(width / scale),
+                                  NSToIntRound(height / scale));
+      } else {
+        mOpenerScreenRect.SetRect(x, y, width, height);
       }
-      initialX = mOpenerScreenRect.x;
-      initialY = mOpenerScreenRect.y;
+      initialX = mOpenerScreenRect.X();
+      initialY = mOpenerScreenRect.Y();
       ConstrainToOpenerScreen(&initialX, &initialY);
     }
   }
@@ -180,7 +181,7 @@ nsresult nsWebShellWindow::Initialize(nsIXULWindow* aParent,
     mParentWindow = do_GetWeakReference(aParent);
   }
 
-  mWindow->SetWidgetListener(this);
+  mWindow->SetWidgetListener(&mWidgetListenerDelegate);
   rv = mWindow->Create((nsIWidget *)parentWidget, // Parent nsIWidget
                        nullptr,                   // Native parent widget
                        deskRect,                  // Widget dimensions
@@ -207,10 +208,10 @@ nsresult nsWebShellWindow::Initialize(nsIXULWindow* aParent,
   docShellAsItem->SetTreeOwner(mChromeTreeOwner);
   docShellAsItem->SetItemType(nsIDocShellTreeItem::typeChrome);
 
-  r.x = r.y = 0;
+  r.MoveTo(0, 0);
   nsCOMPtr<nsIBaseWindow> docShellAsWin(do_QueryInterface(mDocShell));
   NS_ENSURE_SUCCESS(docShellAsWin->InitWindow(nullptr, mWindow,
-   r.x, r.y, r.width, r.height), NS_ERROR_FAILURE);
+   r.X(), r.Y(), r.Width(), r.Height()), NS_ERROR_FAILURE);
   NS_ENSURE_SUCCESS(docShellAsWin->Create(), NS_ERROR_FAILURE);
 
   // Attach a WebProgress listener.during initialization...
@@ -747,8 +748,8 @@ void nsWebShellWindow::ConstrainToOpenerScreen(int32_t* aX, int32_t* aY)
   nsCOMPtr<nsIScreenManager> screenmgr = do_GetService("@mozilla.org/gfx/screenmanager;1");
   if (screenmgr) {
     nsCOMPtr<nsIScreen> screen;
-    screenmgr->ScreenForRect(mOpenerScreenRect.x, mOpenerScreenRect.y,
-                             mOpenerScreenRect.width, mOpenerScreenRect.height,
+    screenmgr->ScreenForRect(mOpenerScreenRect.X(), mOpenerScreenRect.Y(),
+                             mOpenerScreenRect.Width(), mOpenerScreenRect.Height(),
                              getter_AddRefs(screen));
     if (screen) {
       screen->GetAvailRectDisplayPix(&left, &top, &width, &height);
@@ -781,4 +782,109 @@ NS_IMETHODIMP nsWebShellWindow::Destroy()
     }
   }
   return nsXULWindow::Destroy();
+}
+
+nsIXULWindow*
+nsWebShellWindow::WidgetListenerDelegate::GetXULWindow()
+{
+  return mWebShellWindow->GetXULWindow();
+}
+
+nsIPresShell*
+nsWebShellWindow::WidgetListenerDelegate::GetPresShell()
+{
+  return mWebShellWindow->GetPresShell();
+}
+
+bool
+nsWebShellWindow::WidgetListenerDelegate::WindowMoved(
+  nsIWidget* aWidget, int32_t aX, int32_t aY)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  return holder->WindowMoved(aWidget, aX, aY);
+}
+
+bool
+nsWebShellWindow::WidgetListenerDelegate::WindowResized(
+  nsIWidget* aWidget, int32_t aWidth, int32_t aHeight)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  return holder->WindowResized(aWidget, aWidth, aHeight);
+}
+
+bool
+nsWebShellWindow::WidgetListenerDelegate::RequestWindowClose(nsIWidget* aWidget)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  return holder->RequestWindowClose(aWidget);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::SizeModeChanged(nsSizeMode aSizeMode)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->SizeModeChanged(aSizeMode);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::UIResolutionChanged()
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->UIResolutionChanged();
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::FullscreenWillChange(
+  bool aInFullscreen)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->FullscreenWillChange(aInFullscreen);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::FullscreenChanged(bool aInFullscreen)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->FullscreenChanged(aInFullscreen);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::OcclusionStateChanged(
+  bool aIsFullyOccluded)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->OcclusionStateChanged(aIsFullyOccluded);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::OSToolbarButtonPressed()
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->OSToolbarButtonPressed();
+}
+
+bool
+nsWebShellWindow::WidgetListenerDelegate::ZLevelChanged(
+  bool aImmediate, nsWindowZ *aPlacement, nsIWidget* aRequestBelow,
+  nsIWidget** aActualBelow)
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  return holder->ZLevelChanged(aImmediate,
+                               aPlacement,
+                               aRequestBelow,
+                               aActualBelow);
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::WindowActivated()
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->WindowActivated();
+}
+
+void
+nsWebShellWindow::WidgetListenerDelegate::WindowDeactivated()
+{
+  RefPtr<nsWebShellWindow> holder = mWebShellWindow;
+  holder->WindowDeactivated();
 }

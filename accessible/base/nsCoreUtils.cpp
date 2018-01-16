@@ -226,7 +226,7 @@ nsCoreUtils::GetDOMNodeFromDOMPoint(nsINode *aNode, uint32_t aOffset)
     // is placed immediately after the last child. In this case use the DOM node
     // from the given DOM point is used as result node.
     if (aOffset != childCount)
-      return aNode->GetChildAt(aOffset);
+      return aNode->GetChildAt_Deprecated(aOffset);
   }
 
   return aNode;
@@ -302,7 +302,7 @@ nsCoreUtils::ScrollFrameToPoint(nsIFrame *aScrollableFrame,
   nsPoint point =
     ToAppUnits(aPoint, aFrame->PresContext()->AppUnitsPerDevPixel());
   nsRect frameRect = aFrame->GetScreenRectInAppUnits();
-  nsPoint deltaPoint(point.x - frameRect.x, point.y - frameRect.y);
+  nsPoint deltaPoint = point - frameRect.TopLeft();
 
   nsPoint scrollPoint = scrollableFrame->GetScrollPosition();
   scrollPoint -= deltaPoint;

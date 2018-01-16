@@ -133,7 +133,7 @@ class TableCellAndListItemFunctor final : public BoolDomIterFunctor
 {
 public:
   // Used to build list of all li's, td's & th's iterator covers
-  virtual bool operator()(nsINode* aNode) const
+  virtual bool operator()(nsINode* aNode) const override
   {
     return HTMLEditUtils::IsTableCell(aNode) ||
            HTMLEditUtils::IsListItem(aNode);
@@ -143,7 +143,7 @@ public:
 class BRNodeFunctor final : public BoolDomIterFunctor
 {
 public:
-  virtual bool operator()(nsINode* aNode) const
+  virtual bool operator()(nsINode* aNode) const override
   {
     return aNode->IsHTMLElement(nsGkAtoms::br);
   }
@@ -156,7 +156,7 @@ public:
     : mHTMLEditor(aHTMLEditor)
   {}
 
-  virtual bool operator()(nsINode* aNode) const
+  virtual bool operator()(nsINode* aNode) const override
   {
     if (mHTMLEditor->IsEditable(aNode) &&
         (HTMLEditUtils::IsListItem(aNode) ||
@@ -3732,6 +3732,9 @@ HTMLEditRules::WillMakeList(Selection* aSelection,
       }
       curList =
         htmlEditor->CreateNode(listType, splitCurNodeResult.SplitPoint());
+      if (NS_WARN_IF(!curList)) {
+        return NS_ERROR_FAILURE;
+      }
       // remember our new block for postprocessing
       mNewBlock = curList;
       // curList is now the correct thing to put curNode in
@@ -6116,7 +6119,7 @@ public:
   }
 
   // Used to build list of all nodes iterator covers.
-  virtual bool operator()(nsINode* aNode) const
+  virtual bool operator()(nsINode* aNode) const override
   {
     return !mArray.Contains(aNode);
   }

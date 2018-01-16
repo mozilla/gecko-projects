@@ -1716,7 +1716,7 @@ DebuggerServer.ObjectActorPreviewers.Object = [
   },
 
   function CSSMediaRule({obj, hooks}, grip, rawObj) {
-    if (isWorker || !rawObj || !(rawObj instanceof Ci.nsIDOMCSSMediaRule)) {
+    if (isWorker || !rawObj || obj.class != "CSSMediaRule") {
       return false;
     }
     grip.preview = {
@@ -1727,7 +1727,7 @@ DebuggerServer.ObjectActorPreviewers.Object = [
   },
 
   function CSSStyleRule({obj, hooks}, grip, rawObj) {
-    if (isWorker || !rawObj || !(rawObj instanceof Ci.nsIDOMCSSStyleRule)) {
+    if (isWorker || !rawObj || obj.class != "CSSStyleRule") {
       return false;
     }
     grip.preview = {
@@ -1738,8 +1738,8 @@ DebuggerServer.ObjectActorPreviewers.Object = [
   },
 
   function ObjectWithURL({obj, hooks}, grip, rawObj) {
-    if (isWorker || !rawObj || !(rawObj instanceof Ci.nsIDOMCSSImportRule ||
-                                 rawObj instanceof Ci.nsIDOMCSSStyleSheet ||
+    if (isWorker || !rawObj || !(obj.class == "CSSImportRule" ||
+                                 obj.class == "CSSStyleSheet" ||
                                  obj.class == "Location" ||
                                  rawObj instanceof Ci.nsIDOMWindow)) {
       return false;
@@ -1766,14 +1766,13 @@ DebuggerServer.ObjectActorPreviewers.Object = [
     if (isWorker || !rawObj ||
         obj.class != "DOMStringList" &&
         obj.class != "DOMTokenList" &&
+        obj.class != "CSSRuleList" &&
+        obj.class != "MediaList" &&
+        obj.class != "StyleSheetList" &&
+        obj.class != "CSSValueList" &&
         !(rawObj instanceof Ci.nsIDOMMozNamedAttrMap ||
-          rawObj instanceof Ci.nsIDOMCSSRuleList ||
-          rawObj instanceof Ci.nsIDOMCSSValueList ||
           rawObj instanceof Ci.nsIDOMFileList ||
-          rawObj instanceof Ci.nsIDOMFontFaceList ||
-          rawObj instanceof Ci.nsIDOMMediaList ||
-          rawObj instanceof Ci.nsIDOMNodeList ||
-          rawObj instanceof Ci.nsIDOMStyleSheetList)) {
+          rawObj instanceof Ci.nsIDOMNodeList)) {
       return false;
     }
 
@@ -1803,7 +1802,8 @@ DebuggerServer.ObjectActorPreviewers.Object = [
 
   function CSSStyleDeclaration({obj, hooks}, grip, rawObj) {
     if (isWorker || !rawObj ||
-        !(rawObj instanceof Ci.nsIDOMCSSStyleDeclaration)) {
+        (obj.class != "CSSStyleDeclaration" &&
+         obj.class != "CSS2Properties")) {
       return false;
     }
 
@@ -2260,7 +2260,7 @@ function makeDebuggeeValueIfNeeded(obj, value) {
 }
 
 /**
- * Creates an actor for the specied "very long" string. "Very long" is specified
+ * Creates an actor for the specified "very long" string. "Very long" is specified
  * at the server's discretion.
  *
  * @param string String
@@ -2316,7 +2316,7 @@ LongStringActor.prototype = {
    */
   onRelease: function () {
     // TODO: also check if registeredPool === threadActor.threadLifetimePool
-    // when the web console moves aray from manually releasing pause-scoped
+    // when the web console moves away from manually releasing pause-scoped
     // actors.
     this._releaseActor();
     this.registeredPool.removeActor(this);
@@ -2336,7 +2336,70 @@ LongStringActor.prototype.requestTypes = {
 };
 
 /**
- * Creates an actor for the specied ArrayBuffer.
+ * Creates an actor for the specified symbol.
+ *
+ * @param symbol Symbol
+ *        The symbol.
+ */
+function SymbolActor(symbol) {
+  this.symbol = symbol;
+}
+
+SymbolActor.prototype = {
+  actorPrefix: "symbol",
+
+  rawValue: function () {
+    return this.symbol;
+  },
+
+  destroy: function () {
+    // Because symbolActors is not a weak map, we won't automatically leave
+    // it so we need to manually leave on destroy so that we don't leak
+    // memory.
+    this._releaseActor();
+  },
+
+  /**
+   * Returns a grip for this actor for returning in a protocol message.
+   */
+  grip: function () {
+    let form = {
+      type: "symbol",
+      actor: this.actorID,
+    };
+    let name = getSymbolName(this.symbol);
+    if (name !== undefined) {
+      // Create a grip for the name because it might be a longString.
+      form.name = createValueGrip(name, this.registeredPool);
+    }
+    return form;
+  },
+
+  /**
+   * Handle a request to release this SymbolActor instance.
+   */
+  onRelease: function () {
+    // TODO: also check if registeredPool === threadActor.threadLifetimePool
+    // when the web console moves away from manually releasing pause-scoped
+    // actors.
+    this._releaseActor();
+    this.registeredPool.removeActor(this);
+    return {};
+  },
+
+  _releaseActor: function () {
+    if (this.registeredPool && this.registeredPool.symbolActors) {
+      delete this.registeredPool.symbolActors[this.symbol];
+    }
+  }
+};
+
+SymbolActor.prototype.requestTypes = {
+  "release": SymbolActor.prototype.onRelease
+};
+
+/**
+ * Creates an actor for the specified ArrayBuffer.
  *
  * @param buffer ArrayBuffer
  *        The buffer.
@@ -2433,14 +2496,7 @@ function createValueGrip(value, pool, makeObjectGrip) {
       return makeObjectGrip(value, pool);
 
     case "symbol":
-      let form = {
-        type: "symbol"
-      };
-      let name = getSymbolName(value);
-      if (name !== undefined) {
-        form.name = createValueGrip(name, pool, makeObjectGrip);
-      }
-      return form;
+      return symbolGrip(value, pool);
 
     default:
       assert(false, "Failed to provide a grip for: " + value);
@@ -2486,6 +2542,29 @@ function longStringGrip(str, pool) {
   let actor = new LongStringActor(str);
   pool.addActor(actor);
   pool.longStringActors[str] = actor;
+  return actor.grip();
+}
+
+/**
+ * Create a grip for the given symbol.
+ *
+ * @param sym Symbol
+ *        The symbol we are creating a grip for.
+ * @param pool ActorPool
+ *        The actor pool where the new actor will be added.
+ */
+function symbolGrip(sym, pool) {
+  if (!pool.symbolActors) {
+    pool.symbolActors = Object.create(null);
+  }
+
+  if (sym in pool.symbolActors) {
+    return pool.symbolActors[sym].grip();
+  }
+
+  let actor = new SymbolActor(sym);
+  pool.addActor(actor);
+  pool.symbolActors[sym] = actor;
   return actor.grip();
 }
 
@@ -2594,6 +2673,7 @@ function isArrayIndex(str) {
 exports.ObjectActor = ObjectActor;
 exports.PropertyIteratorActor = PropertyIteratorActor;
 exports.LongStringActor = LongStringActor;
+exports.SymbolActor = SymbolActor;
 exports.createValueGrip = createValueGrip;
 exports.stringIsLong = stringIsLong;
 exports.longStringGrip = longStringGrip;

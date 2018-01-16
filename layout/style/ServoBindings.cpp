@@ -147,12 +147,6 @@ Gecko_RecordTraversalStatistics(uint32_t total, uint32_t parallel,
 #endif
 }
 
-bool
-Gecko_IsInDocument(RawGeckoNodeBorrowed aNode)
-{
-  return aNode->IsInComposedDoc();
-}
-
 /*
  * Does this child count as significant for selector matching?
  *
@@ -846,17 +840,6 @@ Gecko_GetLookAndFeelSystemColor(int32_t aId,
   AutoWriteLock guard(*sServoFFILock);
   LookAndFeel::GetColor(colorId, useStandinsForNativeColors, &result);
   return result;
-}
-
-bool
-Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed aElement,
-                           CSSPseudoClassType aType,
-                           const char16_t* aIdent)
-{
-  EventStates dummyMask; // mask is never read because we pass aDependence=nullptr
-  return nsCSSPseudoClasses::StringPseudoMatches(aElement, aType, aIdent,
-                                                 aElement->OwnerDoc(),
-                                                 dummyMask, nullptr);
 }
 
 bool
@@ -1802,19 +1785,25 @@ Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen,
   }
 }
 
+template <typename StyleType>
+static void
+EnsureStyleAutoArrayLength(StyleType* aArray, size_t aLen)
+{
+  size_t oldLength = aArray->Length();
+
+  aArray->EnsureLengthAtLeast(aLen);
+
+  for (size_t i = oldLength; i < aLen; ++i) {
+    (*aArray)[i].SetInitialValues();
+  }
+}
+
 void
 Gecko_EnsureStyleAnimationArrayLength(void* aArray, size_t aLen)
 {
   auto base =
     static_cast<nsStyleAutoArray<StyleAnimation>*>(aArray);
-
-  size_t oldLength = base->Length();
-
-  base->EnsureLengthAtLeast(aLen);
-
-  for (size_t i = oldLength; i < aLen; ++i) {
-    (*base)[i].SetInitialValues();
-  }
+  EnsureStyleAutoArrayLength(base, aLen);
 }
 
 void
@@ -1822,14 +1811,7 @@ Gecko_EnsureStyleTransitionArrayLength(void* aArray, size_t aLen)
 {
   auto base =
     reinterpret_cast<nsStyleAutoArray<StyleTransition>*>(aArray);
-
-  size_t oldLength = base->Length();
-
-  base->EnsureLengthAtLeast(aLen);
-
-  for (size_t i = oldLength; i < aLen; ++i) {
-    (*base)[i].SetInitialValues();
-  }
+  EnsureStyleAutoArrayLength(base, aLen);
 }
 
 void
@@ -2850,4 +2832,16 @@ Gecko_GetBoolPrefValue(const char* aPrefName)
 {
   MOZ_ASSERT(NS_IsMainThread());
   return Preferences::GetBool(aPrefName);
+}
+
+bool
+Gecko_IsInServoTraversal()
+{
+  return ServoStyleSet::IsInServoTraversal();
+}
+
+bool
+Gecko_IsMainThread()
+{
+  return NS_IsMainThread();
 }

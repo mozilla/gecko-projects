@@ -1732,7 +1732,6 @@
             var aOriginPrincipal;
             var aOpener;
             var aOpenerBrowser;
-            var aIsPrerendered;
             var aCreateLazyBrowser;
             var aNextTabParentId;
             var aFocusUrlBar;
@@ -1760,7 +1759,6 @@
               aOriginPrincipal          = params.originPrincipal;
               aOpener                   = params.opener;
               aOpenerBrowser            = params.openerBrowser;
-              aIsPrerendered            = params.isPrerendered;
               aCreateLazyBrowser        = params.createLazyBrowser;
               aNextTabParentId          = params.nextTabParentId;
               aFocusUrlBar              = params.focusUrlBar;
@@ -1792,7 +1790,6 @@
                                   sameProcessAsFrameLoader: aSameProcessAsFrameLoader,
                                   opener: aOpener,
                                   openerBrowser: aOpenerBrowser,
-                                  isPrerendered: aIsPrerendered,
                                   nextTabParentId: aNextTabParentId,
                                   focusUrlBar: aFocusUrlBar,
                                   name: aName });
@@ -2136,8 +2133,11 @@
             // Also, we do not need to take care of attaching nsIFormFillControllers
             // in the case that the browser is remote, as remote browsers take
             // care of that themselves.
-            if (browser && this.hasAttribute("autocompletepopup")) {
-              browser.setAttribute("autocompletepopup", this.getAttribute("autocompletepopup"));
+            if (browser) {
+              browser.setAttribute("preloadedState", "consumed");
+              if (this.hasAttribute("autocompletepopup")) {
+                browser.setAttribute("autocompletepopup", this.getAttribute("autocompletepopup"));
+              }
             }
 
             return browser;
@@ -2198,7 +2198,7 @@
           <![CDATA[
             // Supported parameters:
             // userContextId, remote, remoteType, isPreloadBrowser,
-            // uriIsAboutBlank, sameProcessAsFrameLoader, isPrerendered
+            // uriIsAboutBlank, sameProcessAsFrameLoader
 
             const NS_XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -2209,10 +2209,6 @@
             b.setAttribute("messagemanagergroup", "browsers");
             b.setAttribute("contextmenu", this.getAttribute("contentcontextmenu"));
             b.setAttribute("tooltip", this.getAttribute("contenttooltip"));
-
-            if (aParams.isPrerendered) {
-              b.setAttribute("prerendered", "true");
-            }
 
             if (aParams.userContextId) {
               b.setAttribute("usercontextid", aParams.userContextId);
@@ -2239,8 +2235,23 @@
               b.setAttribute("autocompletepopup", this.getAttribute("autocompletepopup"));
             }
 
+            /*
+             * This attribute is meant to describe if the browser is the
+             * preloaded browser. There are 2 defined states: "preloaded" or
+             * "consumed". The order of events goes as follows:
+             *   1. The preloaded browser is created and the 'preloadedState'
+             *      attribute for that browser is set to "preloaded".
+             *   2. When a new tab is opened and it is time to show that
+             *      preloaded browser, the 'preloadedState' attribute for that
+             *      browser is set to "consumed"
+             *   3. When we then navigate away from about:newtab, the "consumed"
+             *      browsers will attempt to switch to a new content process,
+             *      therefore the 'preloadedState' attribute is removed from
+             *      that browser altogether
+             * See more details on Bug 1420285.
+             */
             if (aParams.isPreloadBrowser) {
-              b.setAttribute("isPreloadBrowser", "true");
+              b.setAttribute("preloadedState", "preloaded");
             }
 
             if (this.hasAttribute("selectmenulist"))
@@ -2587,7 +2598,6 @@
             var aDisallowInheritPrincipal;
             var aOpener;
             var aOpenerBrowser;
-            var aIsPrerendered;
             var aCreateLazyBrowser;
             var aSkipBackgroundNotify;
             var aNextTabParentId;
@@ -2619,7 +2629,6 @@
               aDisallowInheritPrincipal = params.disallowInheritPrincipal;
               aOpener                   = params.opener;
               aOpenerBrowser            = params.openerBrowser;
-              aIsPrerendered            = params.isPrerendered;
               aCreateLazyBrowser        = params.createLazyBrowser;
               aSkipBackgroundNotify     = params.skipBackgroundNotify;
               aNextTabParentId          = params.nextTabParentId;
@@ -2675,10 +2684,6 @@
                 // Set URL as label so that the tab isn't empty initially.
                 this.setInitialTabTitle(t, aURI, { beforeTabOpen: true });
               }
-            }
-
-            if (aIsPrerendered) {
-              t.setAttribute("hidden", "true");
             }
 
             // Related tab inherits current tab's user context unless a different
@@ -2777,7 +2782,6 @@
                                           userContextId: aUserContextId,
                                           sameProcessAsFrameLoader: aSameProcessAsFrameLoader,
                                           openerWindow: aOpener,
-                                          isPrerendered: aIsPrerendered,
                                           nextTabParentId: aNextTabParentId,
                                           name: aName });
               }
@@ -4377,8 +4381,20 @@
             getTabState(tab) {
               let state = this.tabState.get(tab);
               if (state === undefined) {
-                return this.STATE_UNLOADED;
+                state = this.STATE_UNLOADED;
+
+                if (tab && tab.linkedPanel) {
+                  let b = tab.linkedBrowser;
+                  if (b.renderLayers && b.hasLayers) {
+                    state = this.STATE_LOADED;
+                  } else if (b.renderLayers && !b.hasLayers) {
+                    state = this.STATE_LOADING;
+                  } else if (!b.renderLayers && b.hasLayers) {
+                    state = this.STATE_UNLOADING;
+                  }
+                }
               }
+
               return state;
             },
 
@@ -4397,16 +4413,26 @@
               let {tabParent} = browser.frameLoader;
               if (state == this.STATE_LOADING) {
                 this.assert(!this.minimizedOrFullyOccluded);
-                browser.docShellIsActive = true;
-                if (!tabParent) {
+
+                if (!this.tabbrowser.tabWarmingEnabled) {
+                  browser.docShellIsActive = true;
+                }
+
+                if (tabParent) {
+                  browser.renderLayers = true;
+                } else {
                   this.onLayersReady(browser);
                 }
               } else if (state == this.STATE_UNLOADING) {
                 this.unwarmTab(tab);
+                // Setting the docShell to be inactive will also cause it
+                // to stop rendering layers.
                 browser.docShellIsActive = false;
                 if (!tabParent) {
                   this.onLayersCleared(browser);
                 }
+              } else if (state == this.STATE_LOADED) {
+                this.maybeActivateDocShell(tab);
               }
 
               if (!tab.linkedBrowser.isRemoteBrowser) {
@@ -4431,11 +4457,6 @@
             init() {
               this.log("START");
 
-              // If we minimized the window before the switcher was activated,
-              // we might have set  the preserveLayers flag for the current
-              // browser. Let's clear it.
-              this.tabbrowser.mCurrentBrowser.preserveLayers(false);
-
               window.addEventListener("MozAfterPaint", this);
               window.addEventListener("MozLayerTreeReady", this);
               window.addEventListener("MozLayerTreeCleared", this);
@@ -4445,15 +4466,28 @@
               window.addEventListener("SwapDocShells", this, true);
               window.addEventListener("EndSwapDocShells", this, true);
 
-              let tab = this.requestedTab;
-              let browser = tab.linkedBrowser;
-              let tabIsLoaded = !browser.isRemoteBrowser ||
-                                browser.frameLoader.tabParent.hasPresented;
+              let initialTab = this.requestedTab;
+              let initialBrowser = initialTab.linkedBrowser;
+
+              let tabIsLoaded = !initialBrowser.isRemoteBrowser ||
+                                initialBrowser.frameLoader.tabParent.hasLayers;
+
+              // If we minimized the window before the switcher was activated,
+              // we might have set  the preserveLayers flag for the current
+              // browser. Let's clear it.
+              initialBrowser.preserveLayers(false);
 
               if (!this.minimizedOrFullyOccluded) {
                 this.log("Initial tab is loaded?: " + tabIsLoaded);
-                this.setTabState(tab, tabIsLoaded ? this.STATE_LOADED
-                                                  : this.STATE_LOADING);
+                this.setTabState(initialTab, tabIsLoaded ? this.STATE_LOADED
+                                                         : this.STATE_LOADING);
+              }
+
+              for (let ppBrowser of this.tabbrowser._printPreviewBrowsers) {
+                let ppTab = this.tabbrowser.getTabForBrowser(ppBrowser);
+                let state = ppBrowser.hasLayers ? this.STATE_LOADED
+                                                : this.STATE_LOADING;
+                this.setTabState(ppTab, state);
               }
             },
 
@@ -4622,6 +4656,8 @@
                     } else {
                       this.tabbrowser._adjustFocusAfterTabSwitch(showTab);
                     }
+
+                    this.maybeActivateDocShell(this.requestedTab);
                   }
                 }
 
@@ -4658,6 +4694,29 @@
 
               this.loadTimer = this.setTimer(() => this.onLoadTimeout(), this.TAB_SWITCH_TIMEOUT);
               this.setTabState(this.requestedTab, this.STATE_LOADING);
+            },
+
+            maybeActivateDocShell(tab) {
+              // If we've reached the point where the requested tab has entered
+              // the loaded state, but the DocShell is still not yet active, we
+              // should activate it.
+              let browser = tab.linkedBrowser;
+              let state = this.getTabState(tab);
+              let canCheckDocShellState = !browser.mDestroyed &&
+                                          (browser.docShell ||
+                                           browser.frameLoader.tabParent);
+              if (tab == this.requestedTab &&
+                  canCheckDocShellState &&
+                  state == this.STATE_LOADED &&
+                  !browser.docShellIsActive &&
+                  !this.minimizedOrFullyOccluded) {
+                browser.docShellIsActive = true;
+                this.logState("Set requested tab docshell to active and preserveLayers to false");
+                // If we minimized the window before the switcher was activated,
+                // we might have set the preserveLayers flag for the current
+                // browser. Let's clear it.
+                browser.preserveLayers(false);
+              }
             },
 
             // This function runs before every event. It fixes up the state
@@ -4831,6 +4890,13 @@
             // Fires when the layers become available for a tab.
             onLayersReady(browser) {
               let tab = this.tabbrowser.getTabForBrowser(browser);
+              if (!tab) {
+                // We probably got a layer update from a tab that got before
+                // the switcher was created, or for browser that's not being
+                // tracked by the async tab switcher (like the preloaded about:newtab).
+                return;
+              }
+
               this.logState(`onLayersReady(${tab._tPos}, ${browser.isRemoteBrowser})`);
 
               this.assert(this.getTabState(tab) == this.STATE_LOADING ||
@@ -4912,8 +4978,9 @@
                 }
                 this.loadingTab = null;
               } else {
-                // Do nothing. We'll automatically start loading the requested tab in
-                // postActions.
+                // We're no longer minimized or occluded. This means we might want
+                // to activate the current tab's docShell.
+                this.maybeActivateDocShell(gBrowser.selectedTab);
               }
             },
 
@@ -4976,7 +5043,12 @@
 
             activateBrowserForPrintPreview(browser) {
               let tab = this.tabbrowser.getTabForBrowser(browser);
-              this.setTabState(tab, this.STATE_LOADING);
+              let state = this.getTabState(tab);
+              if (state != this.STATE_LOADING &&
+                  state != this.STATE_LOADED) {
+                this.setTabState(tab, this.STATE_LOADING);
+                this.logState("Activated browser " + this.tinfo(tab) + " for print preview");
+              }
             },
 
             canWarmTab(tab) {
@@ -5738,76 +5810,6 @@
               }
               break;
             }
-
-            case "Prerender:Request": {
-              let sendCancelPrerendering = () => {
-                browser.frameloader.messageManager.
-                  sendAsyncMessage("Prerender:Canceled", { id: data.id });
-              };
-
-              let tab = this.getTabForBrowser(browser);
-              if (!tab) {
-                // No tab?
-                sendCancelPrerendering();
-                break;
-              }
-
-              if (tab.hidden) {
-                // Skip prerender on hidden tab.
-                sendCancelPrerendering();
-                break;
-              }
-
-              if (browser.canGoForward) {
-                // Skip prerender on history navigation as we don't support it
-                // yet. Remove this check once bug 1323650 is implemented.
-                sendCancelPrerendering();
-                break;
-              }
-
-              if (!data.href) {
-                // If we don't have data.href, loadOneTab will load about:blank
-                // which is meaningless for prerendering.
-                sendCancelPrerendering();
-                break;
-              }
-
-              let groupedSHistory = browser.frameLoader.ensureGroupedSHistory();
-
-              let newTab = this.loadOneTab(data.href, {
-                referrerURI: (data.referrer ? makeURI(data.referrer) : null),
-                referrerPolicy: Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
-                postData: null,
-                allowThirdPartyFixup: true,
-                relatedToCurrent: true,
-                isPrerendered: true,
-                triggeringPrincipal: Utils.deserializePrincipal(data.triggeringPrincipal),
-              });
-              let partialSHistory = newTab.linkedBrowser.frameLoader.partialSHistory;
-              groupedSHistory.addPrerenderingPartialSHistory(partialSHistory, data.id);
-              break;
-            }
-
-            case "Prerender:Cancel": {
-              let groupedSHistory = browser.frameLoader.groupedSHistory;
-              if (groupedSHistory) {
-                groupedSHistory.cancelPrerendering(data.id);
-              }
-              break;
-            }
-
-            case "Prerender:Swap": {
-              let frameloader = browser.frameLoader;
-              let groupedSHistory = browser.frameLoader.groupedSHistory;
-              if (groupedSHistory) {
-                groupedSHistory.activatePrerendering(data.id).then(
-                  () => frameloader.messageManager.sendAsyncMessage("Prerender:Swapped", data),
-                  () => frameloader.messageManager.sendAsyncMessage("Prerender:Canceled", data),
-                );
-              }
-              break;
-            }
-
           }
           return undefined;
         ]]></body>
@@ -5973,11 +5975,6 @@
           this._findAsYouType = Services.prefs.getBoolPref("accessibility.typeaheadfind");
           Services.prefs.addObserver("accessibility.typeaheadfind", this);
           messageManager.addMessageListener("Findbar:Keypress", this);
-
-          // Add listeners for prerender messages
-          messageManager.addMessageListener("Prerender:Request", this);
-          messageManager.addMessageListener("Prerender:Cancel", this);
-          messageManager.addMessageListener("Prerender:Swap", this);
 
           XPCOMUtils.defineLazyPreferenceGetter(this, "animationsEnabled",
                                                 "toolkit.cosmeticAnimations.enabled", true);
@@ -7213,7 +7210,6 @@
             event.originalTarget.localName != "box")
           return;
 
-        // See hack note in the tabbrowser-close-tab-button binding
         if (!this._blockDblClick)
           BrowserOpenTab();
 
@@ -7262,8 +7258,7 @@
          * double-clicks the button, the dblclick event will be dispatched
          * with the tabbar as its event target (and explicit/originalTarget),
          * which treats that as a mouse gesture for opening a new tab.
-         * In this context, we're manually blocking the dblclick event
-         * (see tabbrowser-close-tab-button dblclick handler).
+         * In this context, we're manually blocking the dblclick event.
          */
         if (this._blockDblClick) {
           if (!("_clickedTabBarOnce" in this)) {
@@ -7744,35 +7739,6 @@
     </handlers>
   </binding>
 
-  <!-- close-tab-button binding
-       This binding relies on the structure of the tabbrowser binding.
-       Therefore it should only be used as a child of the tab or the tabs
-       element (in both cases, when they are anonymous nodes of <tabbrowser>).
-  -->
-  <binding id="tabbrowser-close-tab-button"
-           extends="chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-image">
-    <handlers>
-      <handler event="click" button="0"><![CDATA[
-        var bindingParent = document.getBindingParent(this);
-        var tabContainer = bindingParent.parentNode;
-        tabContainer.tabbrowser.removeTab(bindingParent, {animate: true,
-                byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
-        // This enables double-click protection for the tab container
-        // (see tabbrowser-tabs 'click' handler).
-        tabContainer._blockDblClick = true;
-      ]]></handler>
-
-      <handler event="dblclick" button="0" phase="capturing">
-        // for the one-close-button case
-        event.stopPropagation();
-      </handler>
-
-      <handler event="dragstart">
-        event.stopPropagation();
-      </handler>
-    </handlers>
-  </binding>
-
   <binding id="tabbrowser-tab" display="xul:hbox"
            extends="chrome://global/content/bindings/tabbox.xml#tab">
     <resources>
@@ -7827,9 +7793,10 @@
                      anonid="soundplaying-icon"
                      class="tab-icon-sound"
                      role="presentation"/>
-          <xul:toolbarbutton anonid="close-button"
-                             xbl:inherits="fadein,pinned,selected=visuallyselected"
-                             class="tab-close-button close-icon"/>
+          <xul:image anonid="close-button"
+                     xbl:inherits="fadein,pinned,selected=visuallyselected"
+                     class="tab-close-button close-icon"
+                     role="presentation"/>
         </xul:hbox>
       </xul:stack>
     </content>
@@ -8151,22 +8118,30 @@
 
     <handlers>
       <handler event="mouseover"><![CDATA[
-        let anonid = event.originalTarget.getAttribute("anonid");
-        if (anonid == "close-button")
+        if (event.originalTarget.getAttribute("anonid") == "close-button") {
           this.mOverCloseButton = true;
+        }
 
         this._mouseenter();
       ]]></handler>
       <handler event="mouseout"><![CDATA[
-        let anonid = event.originalTarget.getAttribute("anonid");
-        if (anonid == "close-button")
+        if (event.originalTarget.getAttribute("anonid") == "close-button") {
           this.mOverCloseButton = false;
+        }
 
         this._mouseleave();
       ]]></handler>
+
       <handler event="dragstart" phase="capturing">
         this.style.MozUserFocus = "";
       </handler>
+
+      <handler event="dragstart"><![CDATA[
+        if (this.mOverCloseButton) {
+          event.stopPropagation();
+        }
+      ]]></handler>
+
       <handler event="mousedown" phase="capturing">
       <![CDATA[
         if (this.selected) {
@@ -8181,21 +8156,33 @@
       <handler event="mouseup">
         this.style.MozUserFocus = "";
       </handler>
-      <handler event="click">
-      <![CDATA[
-        if (event.button != 0) {
+
+      <handler event="click" button="0"><![CDATA[
+        if (this._overPlayingIcon) {
+          this.toggleMuteAudio();
           return;
         }
 
-        if (this._overPlayingIcon) {
-          this.toggleMuteAudio();
+        if (event.originalTarget.getAttribute("anonid") == "close-button") {
+          let tabContainer = this.parentNode;
+          tabContainer.tabbrowser.removeTab(this, {animate: true,
+                  byMouse: event.mozInputSource == MouseEvent.MOZ_SOURCE_MOUSE});
+          // This enables double-click protection for the tab container
+          // (see tabbrowser-tabs 'click' handler).
+          tabContainer._blockDblClick = true;
         }
-      ]]>
-      </handler>
+      ]]></handler>
+
+      <handler event="dblclick" button="0" phase="capturing"><![CDATA[
+        // for the one-close-button case
+        if (event.originalTarget.getAttribute("anonid") == "close-button") {
+          event.stopPropagation();
+        }
+      ]]></handler>
+
       <handler event="animationend">
       <![CDATA[
-        let anonid = event.originalTarget.getAttribute("anonid");
-        if (anonid == "tab-loading-burst") {
+        if (event.originalTarget.getAttribute("anonid") == "tab-loading-burst") {
           this.removeAttribute("bursting");
         }
       ]]>

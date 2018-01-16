@@ -8,8 +8,8 @@ use ServoArc;
 use app_units::{Au, MIN_AU};
 use block::AbsoluteAssignBSizesTraversal;
 use context::LayoutContext;
-use display_list_builder::{DisplayListBuildState, InlineFlowDisplayListBuilding};
-use display_list_builder::StackingContextCollectionState;
+use display_list::{DisplayListBuildState, InlineFlowDisplayListBuilding};
+use display_list::StackingContextCollectionState;
 use euclid::{Point2D, Size2D};
 use floats::{FloatKind, Floats, PlacementInfo};
 use flow::{BaseFlow, Flow, FlowClass, ForceNonfloatedFlag};
@@ -1766,7 +1766,7 @@ pub struct InlineFragmentNodeInfo {
     pub address: OpaqueNode,
     pub style: ServoArc<ComputedValues>,
     pub selected_style: ServoArc<ComputedValues>,
-    pub pseudo: PseudoElementType<()>,
+    pub pseudo: PseudoElementType,
     pub flags: InlineFragmentNodeFlags,
 }
 

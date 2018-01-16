@@ -116,13 +116,6 @@ nsSVGElement::GetSVGClassName(nsISupports** aClassName)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSVGElement::GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
-{
-  NS_ADDREF(*aStyle = Style());
-  return NS_OK;
-}
-
 //----------------------------------------------------------------------
 // nsSVGElement methods
 
@@ -895,11 +888,14 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsAtom* aName,
 }
 
 nsresult
-nsSVGElement::UnsetAttr(int32_t aNamespaceID, nsAtom* aName,
-                        bool aNotify)
+nsSVGElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                            const nsAttrValueOrString* aValue,
+                            bool aNotify)
 {
-  UnsetAttrInternal(aNamespaceID, aName, aNotify);
-  return nsSVGElementBase::UnsetAttr(aNamespaceID, aName, aNotify);
+  if (!aValue) {
+    UnsetAttrInternal(aNamespaceID, aName, aNotify);
+  }
+  return nsSVGElementBase::BeforeSetAttr(aNamespaceID, aName, aValue, aNotify);
 }
 
 nsChangeHint
@@ -2382,12 +2378,12 @@ nsSVGElement::DidAnimateTransformList(int32_t aModType)
                             transformAttr,
                             aModType);
     // When script changes the 'transform' attribute, Element::SetAttrAndNotify
-    // will call nsNodeUtills::AttributeChanged, under which
+    // will call nsNodeUtils::AttributeChanged, under which
     // SVGTransformableElement::GetAttributeChangeHint will be called and an
     // appropriate change event posted to update our frame's overflow rects.
     // The SetAttrAndNotify doesn't happen for transform changes caused by
     // 'animateTransform' though (and sending out the mutation events that
-    // nsNodeUtills::AttributeChanged dispatches would be inappropriate
+    // nsNodeUtils::AttributeChanged dispatches would be inappropriate
     // anyway), so we need to post the change event ourself.
     nsChangeHint changeHint = GetAttributeChangeHint(transformAttr, aModType);
     if (changeHint) {

@@ -578,6 +578,7 @@ static const char* sObserverTopics[] = {
   "child-gc-request",
   "child-cc-request",
   "child-mmu-request",
+  "child-ghost-request",
   "last-pb-context-exited",
   "file-watcher-update",
 #ifdef ACCESSIBILITY
@@ -1136,9 +1137,9 @@ ContentParent::CreateBrowser(const TabContext& aContext,
 
   bool isPreloadBrowser = false;
   nsAutoString isPreloadBrowserStr;
-  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::isPreloadBrowser,
+  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::preloadedState,
                              isPreloadBrowserStr)) {
-    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("true");
+    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("preloaded");
   }
 
   RefPtr<nsIContentParent> constructorSender;
@@ -2848,6 +2849,9 @@ ContentParent::Observe(nsISupports* aSubject,
   else if (!strcmp(aTopic, "child-mmu-request")){
     Unused << SendMinimizeMemoryUsage();
   }
+  else if (!strcmp(aTopic, "child-ghost-request")){
+    Unused << SendUnlinkGhosts();
+  }
   else if (!strcmp(aTopic, "last-pb-context-exited")) {
     Unused << SendLastPrivateDocShellDestroyed();
   }
@@ -3566,14 +3570,14 @@ ContentParent::RecvIsSecureURI(const uint32_t& aType,
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive, const bool& aHSTSPriming,
+ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive,
                                               const OriginAttributes& aOriginAttributes)
 {
   nsCOMPtr<nsIURI> ourURI = DeserializeURI(aURI);
   if (!ourURI) {
     return IPC_FAIL_NO_REASON(this);
   }
-  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive, aHSTSPriming, aOriginAttributes);
+  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive, aOriginAttributes);
   return IPC_OK();
 }
 

@@ -391,8 +391,12 @@ function fillBookmarkTextField(id, text, win, blur = true) {
   let elt = win.document.getElementById(id);
   elt.focus();
   elt.select();
-  for (let c of text.split("")) {
-    EventUtils.synthesizeKey(c, {}, win);
+  if (!text) {
+    EventUtils.synthesizeKey("VK_DELETE", {}, win);
+  } else {
+    for (let c of text.split("")) {
+      EventUtils.synthesizeKey(c, {}, win);
+    }
   }
   if (blur)
     elt.blur();
@@ -444,4 +448,30 @@ function promisePlacesInitComplete() {
     "places-browser-init-complete");
 
   return placesInitCompleteObserved;
+}
+
+// Function copied from browser/base/content/test/general/head.js.
+function promisePopupShown(popup) {
+  return new Promise(resolve => {
+    if (popup.state == "open") {
+      resolve();
+    } else {
+      let onPopupShown = event => {
+        popup.removeEventListener("popupshown", onPopupShown);
+        resolve();
+      };
+      popup.addEventListener("popupshown", onPopupShown);
+    }
+  });
+}
+
+// Function copied from browser/base/content/test/general/head.js.
+function promisePopupHidden(popup) {
+  return new Promise(resolve => {
+    let onPopupHidden = event => {
+      popup.removeEventListener("popuphidden", onPopupHidden);
+      resolve();
+    };
+    popup.addEventListener("popuphidden", onPopupHidden);
+  });
 }

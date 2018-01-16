@@ -14,6 +14,32 @@ Visit the [Servo Project page](https://servo.org/) for news and guides.
 
 ## Setting up your environment
 
+### Rustup.rs
+
+Building servo requires [rustup](https://rustup.rs/), version 1.8.0 or more recent.
+If you have an older version, run `rustup self update`.
+
+To install on Windows, download and run [`rustup-init.exe`](https://win.rustup.rs/)
+then follow the onscreen instructions.
+
+To install on other systems, run:
+
+```sh
+curl https://sh.rustup.rs -sSf | sh
+```
+
+This will also download the current stable version of Rust, which Servo won’t use.
+To skip that step, run instead:
+
+```
+curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain none
+```
+
+See also [Other installation methods](
+https://github.com/rust-lang-nursery/rustup.rs/#other-installation-methods)
+
+### Other dependencies
+
 Please select your operating system:
 * [OS X](#os-x)
 * [Debian-based Linuxes](#on-debian-based-linuxes)
@@ -107,7 +133,7 @@ sudo zypper install libX11-devel libexpat-devel libbz2-devel Mesa-libEGL-devel M
 #### On Arch Linux
 
 ``` sh
-sudo pacman -S --needed base-devel git python2 python2-virtualenv python2-pip mesa cmake bzip2 libxmu glu pkg-config
+sudo pacman -S --needed base-devel git python2 python2-virtualenv python2-pip mesa cmake bzip2 libxmu glu pkg-config clang
 ```
 #### On Gentoo Linux
 
@@ -115,7 +141,11 @@ sudo pacman -S --needed base-devel git python2 python2-virtualenv python2-pip me
 sudo emerge net-misc/curl media-libs/freeglut \
     media-libs/freetype media-libs/mesa dev-util/gperf \
     dev-python/virtualenv dev-python/pip dev-libs/openssl \
-    x11-libs/libXmu media-libs/glu x11-base/xorg-server
+    x11-libs/libXmu media-libs/glu x11-base/xorg-server sys-devel/clang
+```
+with the following environment variable set:
+```sh
+export LIBCLANG_PATH="/usr/lib64/llvm/*/lib64"
 ```
 #### On Windows (MSVC)
 
@@ -138,9 +168,9 @@ list of installed components. It is not on by default. Visual Studio 2017 MUST i
 > If you encountered errors with the environment above, do the following for a workaround:
 > 1.  Download and install [Build Tools for Visual Studio 2017](https://www.visualstudio.com/thank-you-downloading-visual-studio/?sku=BuildTools&rel=15)
 > 2.  Install `python2.7 x86-x64` and `virtualenv`
-> 3.  Run `mach.bat build -d`. 
+> 3.  Run `mach.bat build -d`.
 
->If you have troubles with `x64 type` prompt as `mach.bat` set by default:  
+>If you have troubles with `x64 type` prompt as `mach.bat` set by default:
 > 1. you may need to choose and launch the type manually, such as `x86_x64 Cross Tools Command Prompt for VS 2017` in the Windows menu.)
 > 2. `cd to/the/path/servo`
 > 3. `python mach build -d`
@@ -152,11 +182,9 @@ Pre-installed Android tools are needed. See wiki for
 
 ## The Rust compiler
 
-Servo's build system automatically downloads a Rust compiler to build itself.
-This is normally a specific revision of Rust upstream, but sometimes has a
-backported patch or two.
-If you'd like to know which nightly build of Rust we use, see
-[`rust-toolchain`](https://github.com/servo/servo/blob/master/rust-toolchain).
+Servo's build system uses rustup.rs to automatically download a Rust compiler.
+This is a specific version of Rust Nightly determined by the
+[`rust-toolchain`](https://github.com/servo/servo/blob/master/rust-toolchain) file.
 
 ## Building
 

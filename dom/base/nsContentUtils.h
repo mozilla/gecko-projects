@@ -2287,14 +2287,6 @@ public:
   }
 
   /*
-   * Returns true if user timing API should print to console.
-   */
-  static bool IsUserTimingLoggingEnabled()
-  {
-    return sIsUserTimingLoggingEnabled;
-  }
-
-  /*
    * Returns true if the performance timing APIs are enabled.
    */
   static bool IsResourceTimingEnabled()
@@ -2696,11 +2688,6 @@ public:
   static mozilla::HTMLEditor* GetHTMLEditor(nsPresContext* aPresContext);
 
   /**
-   * Returns true if the browser.dom.window.dump.enabled pref is set.
-   */
-  static bool DOMWindowDumpEnabled();
-
-  /**
    * Returns true if the privacy.donottrackheader.enabled pref is set.
    */
   static bool DoNotTrackEnabled();
@@ -2711,12 +2698,6 @@ public:
    * content JS to other logging modules.
    */
   static mozilla::LogModule* DOMDumpLog();
-
-  /**
-   * Returns whether the children of the provided content are
-   * nodes that are distributed to Shadow DOM insertion points.
-   */
-  static bool HasDistributedChildren(nsIContent* aContent);
 
   /**
    * Returns whether a given header is forbidden for an XHR or fetch
@@ -2924,18 +2905,7 @@ public:
    */
   static mozilla::net::ReferrerPolicy GetReferrerPolicyFromHeader(const nsAString& aHeader);
 
-  static bool PromiseRejectionEventsEnabled(JSContext* aCx, JSObject* aObj);
-
-  static bool PushEnabled(JSContext* aCx, JSObject* aObj);
-
-  static bool StreamsEnabled(JSContext* aCx, JSObject* aObj);
-
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
-
-  static uint32_t CookiesBehavior()
-  {
-    return sCookiesBehavior;
-  }
 
   // The order of these entries matters, as we use std::min for total ordering
   // of permissions. Private Browsing is considered to be more limiting
@@ -2974,6 +2944,14 @@ public:
    * StorageAllowedForWindow(), however, will not work in these cases.
    */
   static StorageAccess StorageAllowedForDocument(nsIDocument* aDoc);
+
+  /*
+   * Checks if storage should be allowed for a new window with the given
+   * principal, load URI, and parent.
+   */
+  static StorageAccess StorageAllowedForNewWindow(nsIPrincipal* aPrincipal,
+                                                  nsIURI* aURI,
+                                                  nsPIDOMWindowInner* aParent);
 
   /*
    * Checks if storage for the given principal is permitted by the user's
@@ -3029,7 +3007,7 @@ public:
    * definition.
    */
   static nsresult NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* aNodeInfo,
-                                      mozilla::dom::FromParser aFromParser, const nsAString* aIs,
+                                      mozilla::dom::FromParser aFromParser, nsAtom* aIsAtom,
                                       mozilla::dom::CustomElementDefinition* aDefinition);
 
   /**
@@ -3352,13 +3330,15 @@ private:
    * Checks if storage for a given principal is permitted by the user's
    * preferences. If aWindow is non-null, its principal must be passed as
    * aPrincipal, and the third-party iframe and sandboxing status of the window
-   * are also checked.
+   * are also checked.  If aURI is non-null, then it is used as the comparison
+   * against aWindow to determine if this is a third-party load.
    *
    * Used in the implementation of StorageAllowedForWindow and
    * StorageAllowedForPrincipal.
    */
   static StorageAccess InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
-                                                          nsPIDOMWindowInner* aWindow);
+                                                          nsPIDOMWindowInner* aWindow,
+                                                          nsIURI* aURI);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
@@ -3413,12 +3393,10 @@ private:
   static bool sIsPerformanceTimingEnabled;
   static bool sIsResourceTimingEnabled;
   static bool sIsPerformanceNavigationTimingEnabled;
-  static bool sIsUserTimingLoggingEnabled;
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
   static bool sIsWebComponentsEnabled;
   static bool sIsCustomElementsEnabled;
-  static bool sDevToolsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;
@@ -3467,9 +3445,6 @@ private:
   // bytecode out of the nsCacheInfoChannel.
   static nsCString* sJSBytecodeMimeType;
 
-#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-  static bool sDOMWindowDumpEnabled;
-#endif
   static bool sDoNotTrackEnabled;
   static mozilla::LazyLogModule sDOMDumpLog;
 

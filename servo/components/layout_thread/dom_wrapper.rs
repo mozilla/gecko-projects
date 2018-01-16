@@ -63,7 +63,6 @@ use std::sync::atomic::Ordering;
 use style::CaseSensitivityExt;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::attr::AttrValue;
-use style::computed_values::display;
 use style::context::SharedStyleContext;
 use style::data::ElementData;
 use style::dom::{DomChildren, LayoutIterator, NodeInfo, OpaqueNode};
@@ -209,16 +208,8 @@ impl<'ln> TNode for ServoLayoutNode<'ln> {
         self.node.downcast().map(ServoLayoutDocument::from_layout_js)
     }
 
-    fn can_be_fragmented(&self) -> bool {
-        unsafe { self.node.get_flag(NodeFlags::CAN_BE_FRAGMENTED) }
-    }
-
     fn is_in_document(&self) -> bool {
         unsafe { self.node.get_flag(NodeFlags::IS_IN_DOC) }
-    }
-
-    unsafe fn set_can_be_fragmented(&self, value: bool) {
-        self.node.set_flag(NodeFlags::CAN_BE_FRAGMENTED, value)
     }
 }
 
@@ -369,6 +360,10 @@ impl<'le> TElement for ServoLayoutElement<'le> {
 
     fn traversal_children(&self) -> LayoutIterator<Self::TraversalChildrenIterator> {
         LayoutIterator(self.as_node().dom_children())
+    }
+
+    fn is_html_element(&self) -> bool {
+        unsafe { self.element.is_html_element() }
     }
 
     fn style_attribute(&self) -> Option<ArcBorrow<StyleLocked<PropertyDeclarationBlock>>> {
@@ -808,7 +803,7 @@ pub struct ServoThreadSafeLayoutNode<'ln> {
 
     /// The pseudo-element type, with (optionally)
     /// a specified display value to override the stylesheet.
-    pseudo: PseudoElementType<Option<display::T>>,
+    pseudo: PseudoElementType,
 }
 
 impl<'a> PartialEq for ServoThreadSafeLayoutNode<'a> {
@@ -930,10 +925,6 @@ impl<'ln> ThreadSafeLayoutNode for ServoThreadSafeLayoutNode<'ln> {
         self.node
     }
 
-    fn can_be_fragmented(&self) -> bool {
-        self.node.can_be_fragmented()
-    }
-
     fn node_text_content(&self) -> String {
         let this = unsafe { self.get_jsmanaged() };
         return this.text_content();
@@ -1002,7 +993,7 @@ impl<ConcreteNode> ThreadSafeLayoutNodeChildrenIterator<ConcreteNode>
                     unsafe { parent.dangerous_first_child() }
                 })
             },
-            PseudoElementType::DetailsContent(_) | PseudoElementType::DetailsSummary(_) => {
+            PseudoElementType::DetailsContent | PseudoElementType::DetailsSummary => {
                 unsafe { parent.dangerous_first_child() }
             },
             _ => None,
@@ -1020,9 +1011,9 @@ impl<ConcreteNode> Iterator for ThreadSafeLayoutNodeChildrenIterator<ConcreteNod
     fn next(&mut self) -> Option<ConcreteNode> {
         use ::selectors::Element;
         match self.parent_node.get_pseudo_element_type() {
-            PseudoElementType::Before(_) | PseudoElementType::After(_) => None,
+            PseudoElementType::Before | PseudoElementType::After => None,
 
-            PseudoElementType::DetailsSummary(_) => {
+            PseudoElementType::DetailsSummary => {
                 let mut current_node = self.current_node.clone();
                 loop {
                     let next_node = if let Some(ref node) = current_node {
@@ -1042,7 +1033,7 @@ impl<ConcreteNode> Iterator for ThreadSafeLayoutNodeChildrenIterator<ConcreteNod
                 }
             }
 
-            PseudoElementType::DetailsContent(_) => {
+            PseudoElementType::DetailsContent => {
                 let node = self.current_node.clone();
                 let node = node.and_then(|node| {
                     if node.is_element() &&
@@ -1061,7 +1052,7 @@ impl<ConcreteNode> Iterator for ThreadSafeLayoutNodeChildrenIterator<ConcreteNod
                 let node = self.current_node.clone();
                 if let Some(ref node) = node {
                     self.current_node = match node.get_pseudo_element_type() {
-                        PseudoElementType::Before(_) => {
+                        PseudoElementType::Before => {
                             self.parent_node.get_details_summary_pseudo()
                                 .or_else(|| unsafe { self.parent_node.dangerous_first_child() })
                                 .or_else(|| self.parent_node.get_after_pseudo())
@@ -1069,11 +1060,9 @@ impl<ConcreteNode> Iterator for ThreadSafeLayoutNodeChildrenIterator<ConcreteNod
                         PseudoElementType::Normal => {
                             unsafe { node.dangerous_next_sibling() }.or_else(|| self.parent_node.get_after_pseudo())
                         },
-                        PseudoElementType::DetailsSummary(_) => self.parent_node.get_details_content_pseudo(),
-                        PseudoElementType::DetailsContent(_) => self.parent_node.get_after_pseudo(),
-                        PseudoElementType::After(_) => {
-                            None
-                        },
+                        PseudoElementType::DetailsSummary => self.parent_node.get_details_content_pseudo(),
+                        PseudoElementType::DetailsContent => self.parent_node.get_after_pseudo(),
+                        PseudoElementType::After => None,
                     };
                 }
                 node
@@ -1091,7 +1080,7 @@ pub struct ServoThreadSafeLayoutElement<'le> {
 
     /// The pseudo-element type, with (optionally)
     /// a specified display value to override the stylesheet.
-    pseudo: PseudoElementType<Option<display::T>>,
+    pseudo: PseudoElementType,
 }
 
 impl<'le> ThreadSafeLayoutElement for ServoThreadSafeLayoutElement<'le> {
@@ -1104,15 +1093,14 @@ impl<'le> ThreadSafeLayoutElement for ServoThreadSafeLayoutElement<'le> {
         }
     }
 
-    fn get_pseudo_element_type(&self) -> PseudoElementType<Option<display::T>> {
+    fn get_pseudo_element_type(&self) -> PseudoElementType {
         self.pseudo
     }
 
-    fn with_pseudo(&self,
-                   pseudo: PseudoElementType<Option<display::T>>) -> Self {
+    fn with_pseudo(&self, pseudo: PseudoElementType) -> Self {
         ServoThreadSafeLayoutElement {
             element: self.element.clone(),
-            pseudo: pseudo,
+            pseudo,
         }
     }
 

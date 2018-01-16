@@ -67,6 +67,7 @@ nsWebBrowser::nsWebBrowser()
   , mIsActive(true)
   , mParentNativeWindow(nullptr)
   , mProgressListener(nullptr)
+  , mWidgetListenerDelegate(this)
   , mBackgroundColor(0)
   , mPersistCurrentState(nsIWebBrowserPersist::PERSIST_STATE_READY)
   , mPersistResult(NS_OK)
@@ -1200,7 +1201,7 @@ nsWebBrowser::Create()
     LayoutDeviceIntRect bounds(mInitInfo->x, mInitInfo->y,
                                mInitInfo->cx, mInitInfo->cy);
 
-    mInternalWidget->SetWidgetListener(this);
+    mInternalWidget->SetWidgetListener(&mWidgetListenerDelegate);
     rv = mInternalWidget->Create(nullptr, mParentNativeWindow, bounds,
                                  &widgetInit);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1427,16 +1428,16 @@ nsWebBrowser::GetPositionAndSize(int32_t* aX, int32_t* aY,
     LayoutDeviceIntRect bounds = mInternalWidget->GetBounds();
 
     if (aX) {
-      *aX = bounds.x;
+      *aX = bounds.X();
     }
     if (aY) {
-      *aY = bounds.y;
+      *aY = bounds.Y();
     }
     if (aCX) {
-      *aCX = bounds.width;
+      *aCX = bounds.Width();
     }
     if (aCY) {
-      *aCY = bounds.height;
+      *aCY = bounds.Height();
     }
     return NS_OK;
   } else {
@@ -1749,12 +1750,12 @@ DrawPaintedLayer(PaintedLayer* aLayer,
 
   ColorPattern color(ToDeviceColor(*static_cast<nscolor*>(aCallbackData)));
   nsIntRect dirtyRect = aRegionToDraw.GetBounds();
-  aDrawTarget.FillRect(
-    Rect(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height), color);
+  aDrawTarget.FillRect( Rect(dirtyRect.X(), dirtyRect.Y(),
+                             dirtyRect.Width(), dirtyRect.Height()), color);
 }
 
 void
-nsWebBrowser::WindowRaised(nsIWidget* aWidget)
+nsWebBrowser::WindowActivated()
 {
 #if defined(DEBUG_smaug)
   nsCOMPtr<nsIDocument> document = mDocShell->GetDocument();
@@ -1767,7 +1768,7 @@ nsWebBrowser::WindowRaised(nsIWidget* aWidget)
 }
 
 void
-nsWebBrowser::WindowLowered(nsIWidget* aWidget)
+nsWebBrowser::WindowDeactivated()
 {
 #if defined(DEBUG_smaug)
   nsCOMPtr<nsIDocument> document = mDocShell->GetDocument();
@@ -1902,4 +1903,26 @@ nsWebBrowser::SetFocusedElement(nsIDOMElement* aFocusedElement)
 {
   nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
   return fm ? fm->SetFocus(aFocusedElement, 0) : NS_OK;
+}
+
+void
+nsWebBrowser::WidgetListenerDelegate::WindowActivated()
+{
+  RefPtr<nsWebBrowser> holder = mWebBrowser;
+  holder->WindowActivated();
+}
+
+void
+nsWebBrowser::WidgetListenerDelegate::WindowDeactivated()
+{
+  RefPtr<nsWebBrowser> holder = mWebBrowser;
+  holder->WindowDeactivated();
+}
+
+bool
+nsWebBrowser::WidgetListenerDelegate::PaintWindow(
+  nsIWidget* aWidget, mozilla::LayoutDeviceIntRegion aRegion)
+{
+  RefPtr<nsWebBrowser> holder = mWebBrowser;
+  return holder->PaintWindow(aWidget, aRegion);
 }

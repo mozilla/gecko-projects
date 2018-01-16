@@ -299,6 +299,10 @@ public:
                         ReportAction aAction = ReportAction::Forget) override;
 
   void
+  FlushReportsToConsoleForServiceWorkerScope(const nsACString& aScope,
+                                             ReportAction aAction = ReportAction::Forget) override;
+
+  void
   FlushConsoleReports(nsIDocument* aDocument,
                       ReportAction aAction = ReportAction::Forget) override;
 
@@ -339,6 +343,7 @@ public:
 
     nsHttpResponseHead * GetResponseHead() const { return mResponseHead; }
     nsHttpRequestHead * GetRequestHead() { return &mRequestHead; }
+    nsHttpHeaderArray * GetResponseTrailers() const { return mResponseTrailers; }
 
     const NetAddr& GetSelfAddr() { return mSelfAddr; }
     const NetAddr& GetPeerAddr() { return mPeerAddr; }
@@ -520,6 +525,7 @@ protected:
   nsCOMPtr<nsIInputStream>          mUploadStream;
   nsCOMPtr<nsIRunnable>             mUploadCloneableCallback;
   nsAutoPtr<nsHttpResponseHead>     mResponseHead;
+  nsAutoPtr<nsHttpHeaderArray>      mResponseTrailers;
   RefPtr<nsHttpConnectionInfo>      mConnectionInfo;
   nsCOMPtr<nsIProxyInfo>            mProxyInfo;
   nsCOMPtr<nsISupports>             mSecurityInfo;

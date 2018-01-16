@@ -126,7 +126,13 @@ static const char* kPreloadPermissions[] = {
   "beacon",
   "fetch",
   "image",
-  "manifest"
+  "manifest",
+
+  // This permission is preloaded to support properly blocking service worker
+  // interception when a user has disabled storage for a specific site.  Once
+  // service worker interception moves to the parent process this should be
+  // removed.  See bug 1428130.
+  "cookie"
 };
 
 // A list of permissions that can have a fallback default permission
@@ -374,7 +380,7 @@ public:
   nsresult
   Insert(const nsACString& aOrigin, const nsCString& aType,
          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
-         int64_t aModificationTime) final
+         int64_t aModificationTime) final override
   {
     nsresult rv = mStmt->BindInt64ByIndex(0, *mID);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -424,7 +430,7 @@ public:
   nsresult
   Insert(const nsACString& aOrigin, const nsCString& aType,
          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
-         int64_t aModificationTime) final
+         int64_t aModificationTime) final override
   {
     nsCOMPtr<nsIPrincipal> principal;
     nsresult rv = GetPrincipalFromOrigin(aOrigin, getter_AddRefs(principal));
@@ -459,7 +465,7 @@ public:
   nsresult
   Insert(const nsACString& aOrigin, const nsCString& aType,
          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
-         int64_t aModificationTime) final
+         int64_t aModificationTime) final override
   {
     // Every time the migration code wants to insert an origin into
     // the database we need to check to see if someone has already
@@ -923,7 +929,10 @@ nsPermissionManager::~nsPermissionManager()
   mPermissionKeyPromiseMap.Clear();
 
   RemoveAllFromMemory();
-  gPermissionManager = nullptr;
+  if (gPermissionManager) {
+    MOZ_ASSERT(gPermissionManager == this);
+    gPermissionManager = nullptr;
+  }
 }
 
 // static
@@ -942,11 +951,12 @@ nsPermissionManager::GetXPCOMSingleton()
   // See bug 209571.
   auto permManager = MakeRefPtr<nsPermissionManager>();
   if (NS_SUCCEEDED(permManager->Init())) {
+    // Note: This is cleared in the nsPermissionManager destructor.
     gPermissionManager = permManager.get();
     return permManager.forget();
   }
 
-  return nullptr;;
+  return nullptr;
 }
 
 nsresult

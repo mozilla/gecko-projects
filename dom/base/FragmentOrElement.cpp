@@ -51,7 +51,6 @@
 #include "nsIDOMEvent.h"
 #include "nsDOMCID.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMCSSStyleDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsNameSpaceManager.h"
 #include "nsContentList.h"
@@ -146,7 +145,7 @@ nsIContent::FindFirstNonChromeOnlyAccessContent() const
        content = content->GetBindingParent()) {
     if (!content->ChromeOnlyAccess()) {
       // Oops, this function signature allows casting const to
-      // non-const.  (Then again, so does GetChildAt(0)->GetParent().)
+      // non-const.  (Then again, so does GetChildAt_Deprecated(0)->GetParent().)
       return const_cast<nsIContent*>(content);
     }
   }
@@ -545,7 +544,7 @@ nsIContent*
 nsAttrChildContentList::Item(uint32_t aIndex)
 {
   if (mNode) {
-    return mNode->GetChildAt(aIndex);
+    return mNode->GetChildAt_Deprecated(aIndex);
   }
 
   return nullptr;
@@ -1118,6 +1117,15 @@ FragmentOrElement::DoGetXBLBinding() const
   return slots ? slots->mXBLBinding.get() : nullptr;
 }
 
+nsIContent*
+nsIContent::GetContainingShadowHost() const
+{
+  if (mozilla::dom::ShadowRoot* shadow = GetContainingShadow()) {
+    return shadow->GetHost();
+  }
+  return nullptr;
+}
+
 void
 nsIContent::SetAssignedSlot(HTMLSlotElement* aSlot)
 {
@@ -1159,14 +1167,22 @@ FragmentOrElement::InsertChildAt(nsIContent* aKid,
 }
 
 void
-FragmentOrElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
+FragmentOrElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
 {
   nsCOMPtr<nsIContent> oldKid = mAttrsAndChildren.GetSafeChildAt(aIndex);
-  NS_ASSERTION(oldKid == GetChildAt(aIndex), "Unexpected child in RemoveChildAt");
+  NS_ASSERTION(oldKid == GetChildAt_Deprecated(aIndex), "Unexpected child in RemoveChildAt_Deprecated");
 
   if (oldKid) {
     doRemoveChildAt(aIndex, aNotify, oldKid, mAttrsAndChildren);
   }
+}
+
+void
+FragmentOrElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
+{
+  // Let's keep the node alive.
+  nsCOMPtr<nsIContent> kungFuDeathGrip = aKid;
+  doRemoveChildAt(IndexOf(aKid), aNotify, aKid, mAttrsAndChildren);
 }
 
 void
@@ -2118,7 +2134,7 @@ FragmentOrElement::GetChildCount() const
 }
 
 nsIContent *
-FragmentOrElement::GetChildAt(uint32_t aIndex) const
+FragmentOrElement::GetChildAt_Deprecated(uint32_t aIndex) const
 {
   return mAttrsAndChildren.GetSafeChildAt(aIndex);
 }
@@ -2293,10 +2309,9 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
   mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
 
   // Remove childnodes.
-  uint32_t childCount = target->GetChildCount();
   nsAutoMutationBatch mb(target, true, false);
-  for (uint32_t i = 0; i < childCount; ++i) {
-    target->RemoveChildAt(0, true);
+  while (target->HasChildren()) {
+    target->RemoveChildNode(target->GetFirstChild(), true);
   }
   mb.RemovalDone();
 

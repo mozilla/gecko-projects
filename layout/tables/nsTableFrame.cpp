@@ -6461,7 +6461,7 @@ nsTableFrame::CalcBCBorders()
     if ((info.mNumTableCols != nextColIndex) &&
         (lastBEndBorders[nextColIndex].rowSpan > 1) &&
         (lastBEndBorders[nextColIndex].rowIndex == info.GetCellEndRowIndex() + 1)) {
-      BCCornerInfo& corner = bEndCorners[info.GetCellEndColIndex() + 1];
+      BCCornerInfo& corner = bEndCorners[nextColIndex];
       if (!IsBlock(LogicalSide(corner.ownerSide))) {
         // not a block-dir owner
         BCCellBorder& thisBorder = lastBEndBorder;
@@ -6473,8 +6473,9 @@ nsTableFrame::CalcBCBorders()
           // new segment
           if (iter.mCellMap) {
             tableCellMap->ResetBStartStart(eLogicalSideBEnd, *iter.mCellMap,
+                                           iter.mRowGroupStart,
                                            info.GetCellEndRowIndex(),
-                                           info.GetCellEndColIndex() + 1);
+                                           nextColIndex);
           }
         }
       }

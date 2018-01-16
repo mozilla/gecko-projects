@@ -171,9 +171,20 @@ HTMLScriptElement::SetText(const nsAString& aValue, ErrorResult& aRv)
 // need to be transfered when modifying
 
 bool
-HTMLScriptElement::GetScriptType(nsAString& type)
+HTMLScriptElement::GetScriptType(nsAString& aType)
 {
-  return GetAttr(kNameSpaceID_None, nsGkAtoms::type, type);
+  nsAutoString type;
+  if (!GetAttr(kNameSpaceID_None, nsGkAtoms::type, type)) {
+    return false;
+  }
+
+  // ASCII whitespace https://infra.spec.whatwg.org/#ascii-whitespace:
+  // U+0009 TAB, U+000A LF, U+000C FF, U+000D CR, or U+0020 SPACE.
+  static const char kASCIIWhitespace[] = "\t\n\f\r ";
+  type.Trim(kASCIIWhitespace);
+
+  aType.Assign(type);
+  return true;
 }
 
 void
@@ -190,11 +201,19 @@ HTMLScriptElement::GetScriptCharset(nsAString& charset)
 }
 
 void
-HTMLScriptElement::FreezeUriAsyncDefer()
+HTMLScriptElement::FreezeExecutionAttrs(nsIDocument* aOwnerDoc)
 {
   if (mFrozen) {
     return;
   }
+
+  MOZ_ASSERT(!mIsModule && !mAsync && !mDefer && !mExternal);
+
+  // Determine whether this is a classic script or a module script.
+  nsAutoString type;
+  GetScriptType(type);
+  mIsModule = aOwnerDoc->ModuleScriptsEnabled() &&
+              !type.IsEmpty() && type.LowerCaseEqualsASCII("module");
 
   // variation of this code in nsSVGScriptElement - check if changes
   // need to be transfered when modifying.  Note that we don't use GetSrc here
@@ -228,13 +247,13 @@ HTMLScriptElement::FreezeUriAsyncDefer()
 
     // At this point mUri will be null for invalid URLs.
     mExternal = true;
-
-    bool async = Async();
-    bool defer = Defer();
-
-    mDefer = !async && defer;
-    mAsync = async;
   }
+
+  bool async = (mExternal || mIsModule) && Async();
+  bool defer = mExternal && Defer();
+
+  mDefer = !async && defer;
+  mAsync = async;
 
   mFrozen = true;
 }

@@ -208,7 +208,7 @@ function waitForSources(dbg, ...sources) {
       }
 
       if (!sourceExists(store.getState())) {
-        return waitForState(dbg, sourceExists);
+        return waitForState(dbg, sourceExists, `source ${url}`);
       }
     })
   );
@@ -280,13 +280,13 @@ function assertNotPaused(dbg) {
  * @static
  */
 function assertPausedLocation(dbg) {
-  const { selectors: { getSelectedSource, getPause }, getState } = dbg;
+  const { selectors: { getSelectedSource, getTopFrame }, getState } = dbg;
 
   ok(isTopFrameSelected(dbg, getState()), "top frame's source is selected");
 
   // Check the pause location
-  const pause = getPause(getState());
-  const pauseLine = pause && pause.frame && pause.frame.location.line;
+  const frame = getTopFrame(getState());
+  const pauseLine = frame && frame.location.line;
   assertDebugLine(dbg, pauseLine);
 
   ok(isVisibleInEditor(dbg, getCM(dbg).display.gutters), "gutter is visible");
@@ -300,9 +300,7 @@ function assertDebugLine(dbg, line) {
     const url = source.get("url");
     ok(
       false,
-      `Looks like the source ${
-        url
-      } is still loading. Try adding waitForLoadedSource in the test.`
+      `Looks like the source ${url} is still loading. Try adding waitForLoadedSource in the test.`
     );
     return;
   }
@@ -313,8 +311,14 @@ function assertDebugLine(dbg, line) {
   );
 
   const debugLine =
-    findElementWithSelector(dbg, ".new-debug-line") ||
-    findElementWithSelector(dbg, ".new-debug-line-error");
+    findElement(dbg, "debugLine") || findElement(dbg, "debugErrorLine");
+
+  is(
+    findAllElements(dbg, "debugLine").length +
+      findAllElements(dbg, "debugErrorLine").length,
+    1,
+    "There is only one line"
+  );
 
   ok(isVisibleInEditor(dbg, debugLine), "debug line is visible");
 
@@ -338,7 +342,7 @@ function assertDebugLine(dbg, line) {
  * @static
  */
 function assertHighlightLocation(dbg, source, line) {
-  const { selectors: { getSelectedSource, getPause }, getState } = dbg;
+  const { selectors: { getSelectedSource }, getState } = dbg;
   source = findSource(dbg, source);
 
   // Check the selected source
@@ -375,8 +379,8 @@ function assertHighlightLocation(dbg, source, line) {
  * @static
  */
 function isPaused(dbg) {
-  const { selectors: { getPause }, getState } = dbg;
-  return !!getPause(getState());
+  const { selectors: { isPaused }, getState } = dbg;
+  return !!isPaused(getState());
 }
 
 async function waitForLoadedObjects(dbg) {
@@ -446,16 +450,11 @@ async function waitForMappedScopes(dbg) {
 }
 
 function isTopFrameSelected(dbg, state) {
-  const pause = dbg.selectors.getPause(state);
-
-  // Make sure we have the paused state.
-  if (!pause) {
-    return false;
-  }
+  const frame = dbg.selectors.getTopFrame(state);
 
   // Make sure the source text is completely loaded for the
   // source we are paused in.
-  const sourceId = pause.frame && pause.frame.location.sourceId;
+  const sourceId = frame.location.sourceId;
   const source = dbg.selectors.getSelectedSource(state);
 
   if (!source) {
@@ -497,6 +496,8 @@ function clearDebuggerPreferences() {
   Services.prefs.clearUserPref("devtools.debugger.pending-selected-location");
   Services.prefs.clearUserPref("devtools.debugger.pending-breakpoints");
   Services.prefs.clearUserPref("devtools.debugger.expressions");
+  Services.prefs.clearUserPref("devtools.debugger.call-stack-visible");
+  Services.prefs.clearUserPref("devtools.debugger.scopes-visible");
 }
 
 /**
@@ -595,13 +596,11 @@ function waitForLoadedSources(dbg) {
  * @static
  */
 function selectSource(dbg, url, line) {
-  info(`Selecting source: ${url}`);
   const source = findSource(dbg, url);
   return dbg.actions.selectLocation({ sourceId: source.id, line });
 }
 
 function closeTab(dbg, url) {
-  info(`Closing tab: ${url}`);
   const source = findSource(dbg, url);
   return dbg.actions.closeTab(source.url);
 }
@@ -615,7 +614,6 @@ function closeTab(dbg, url) {
  * @static
  */
 async function stepOver(dbg) {
-  info("Stepping over");
   await dbg.actions.stepOver();
   return waitForPaused(dbg);
 }
@@ -917,9 +915,7 @@ const selectors = {
   expressionNode: i =>
     `.expressions-list .expression-container:nth-child(${i}) .object-label`,
   expressionValue: i =>
-    `.expressions-list .expression-container:nth-child(${
-      i
-    }) .object-delimiter + *`,
+    `.expressions-list .expression-container:nth-child(${i}) .object-delimiter + *`,
   expressionClose: i =>
     `.expressions-list .expression-container:nth-child(${i}) .close`,
   expressionNodes: ".expressions-list .tree-node",
@@ -935,6 +931,8 @@ const selectors = {
   pauseOnExceptions: ".pause-exceptions",
   breakpoint: ".CodeMirror-code > .new-breakpoint",
   highlightLine: ".CodeMirror-code > .highlight-line",
+  debugLine: ".new-debug-line",
+  debugErrorLine: ".new-debug-line-error",
   codeMirror: ".CodeMirror",
   resume: ".resume.active",
   sourceTabs: ".source-tabs",

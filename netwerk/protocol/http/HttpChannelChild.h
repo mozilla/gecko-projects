@@ -47,6 +47,7 @@ namespace net {
 class HttpBackgroundChannelChild;
 class InterceptedChannelContent;
 class InterceptStreamListener;
+class SyntheticDiversionListener;
 
 class HttpChannelChild final : public PHttpChannelChild
                              , public HttpBaseChannel
@@ -168,6 +169,8 @@ protected:
 
   mozilla::ipc::IPCResult RecvAttachStreamFilter(Endpoint<extensions::PStreamFilterParent>&& aEndpoint) override;
 
+  mozilla::ipc::IPCResult RecvCancelDiversion() override;
+
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   MOZ_MUST_USE bool
@@ -242,7 +245,8 @@ private:
                                  const uint32_t& aCount,
                                  const nsCString& aData);
   void ProcessOnStopRequest(const nsresult& aStatusCode,
-                            const ResourceTimingStruct& aTiming);
+                            const ResourceTimingStruct& aTiming,
+                            const nsHttpHeaderArray& aResponseTrailers);
   void ProcessOnProgress(const int64_t& aProgress, const int64_t& aProgressMax);
   void ProcessOnStatus(const nsresult& aStatus);
   void ProcessFlushedForDiversion();
@@ -415,7 +419,9 @@ private:
                           const uint64_t& offset,
                           const uint32_t& count,
                           const nsCString& data);
-  void OnStopRequest(const nsresult& channelStatus, const ResourceTimingStruct& timing);
+  void OnStopRequest(const nsresult& channelStatus,
+                     const ResourceTimingStruct& timing,
+                     const nsHttpHeaderArray& aResponseTrailers);
   void MaybeDivertOnStop(const nsresult& aChannelStatus);
   void OnProgress(const int64_t& progress, const int64_t& progressMax);
   void OnStatus(const nsresult& status);
@@ -469,6 +475,7 @@ private:
   friend class HttpAsyncAborter<HttpChannelChild>;
   friend class InterceptStreamListener;
   friend class InterceptedChannelContent;
+  friend class SyntheticDiversionListener;
   friend class HttpBackgroundChannelChild;
   friend class NeckoTargetChannelEvent<HttpChannelChild>;
 };

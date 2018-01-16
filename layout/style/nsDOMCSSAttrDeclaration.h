@@ -10,11 +10,13 @@
 #define nsDOMCSSAttributeDeclaration_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/DocGroup.h"
 #include "nsDOMCSSDeclaration.h"
 
 
 namespace mozilla {
 namespace dom {
+class DomGroup;
 class Element;
 } // namespace dom
 } // namespace mozilla
@@ -35,11 +37,11 @@ public:
   virtual void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv,
                                         nsIPrincipal* aSubjectPrincipal) override;
   nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-  GetServoCSSParsingEnvironment(nsIPrincipal* aSubjectPrincipal) const final;
-  NS_IMETHOD GetParentRule(nsIDOMCSSRule **aParent) override;
+  GetServoCSSParsingEnvironment(nsIPrincipal* aSubjectPrincipal) const final override;
+  mozilla::css::Rule* GetParentRule() override;
 
   virtual nsINode* GetParentObject() override;
-  virtual DocGroup* GetDocGroup() const override;
+  virtual mozilla::dom::DocGroup* GetDocGroup() const override;
 
   NS_IMETHOD SetPropertyValue(const nsCSSPropertyID aPropID,
                               const nsAString& aValue,

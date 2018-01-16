@@ -109,7 +109,10 @@ pub enum ConstructionItem {
     /// Inline fragments and associated {ib} splits that have not yet found flows.
     InlineFragments(InlineFragmentsConstructionResult),
     /// Potentially ignorable whitespace.
-    Whitespace(OpaqueNode, PseudoElementType<()>, ServoArc<ComputedValues>, RestyleDamage),
+    ///
+    /// FIXME(emilio): How could whitespace have any PseudoElementType other
+    /// than Normal?
+    Whitespace(OpaqueNode, PseudoElementType, ServoArc<ComputedValues>, RestyleDamage),
     /// TableColumn Fragment
     TableColumnFragment(Fragment),
 }
@@ -257,7 +260,7 @@ impl InlineFragmentsAccumulator {
             fragments: IntermediateInlineFragments::new(),
             enclosing_node: Some(InlineFragmentNodeInfo {
                 address: node.opaque(),
-                pseudo: node.get_pseudo_element_type().strip(),
+                pseudo: node.get_pseudo_element_type(),
                 style: node.style(style_context),
                 selected_style: node.selected_style(),
                 flags: InlineFragmentNodeFlags::FIRST_FRAGMENT_OF_ELEMENT |
@@ -695,7 +698,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                 let specific_fragment_info = SpecificFragmentInfo::UnscannedText(info);
                 fragments.fragments.push_back(Fragment::from_opaque_node_and_style(
                         node.opaque(),
-                        node.get_pseudo_element_type().strip(),
+                        node.get_pseudo_element_type(),
                         style,
                         selected_style,
                         node.restyle_damage(),
@@ -715,7 +718,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                     };
                     fragments.fragments.push_back(Fragment::from_opaque_node_and_style(
                             node.opaque(),
-                            node.get_pseudo_element_type().strip(),
+                            node.get_pseudo_element_type(),
                             style.clone(),
                             selected_style.clone(),
                             node.restyle_damage(),
@@ -851,7 +854,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                 Box::new(UnscannedTextFragmentInfo::new(String::new(), None))
             );
             let fragment = Fragment::from_opaque_node_and_style(node.opaque(),
-                                                                node.get_pseudo_element_type().strip(),
+                                                                node.get_pseudo_element_type(),
                                                                 node_style.clone(),
                                                                 node.selected_style(),
                                                                 node.restyle_damage(),
@@ -898,7 +901,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
         if node.is_ignorable_whitespace(context) {
             return ConstructionResult::ConstructionItem(ConstructionItem::Whitespace(
                 node.opaque(),
-                node.get_pseudo_element_type().strip(),
+                node.get_pseudo_element_type(),
                 context.stylist.style_for_anonymous(
                     &context.guards, &PseudoElement::ServoText, &style),
                 node.restyle_damage()))
@@ -951,7 +954,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
         let fragment_info = SpecificFragmentInfo::InlineBlock(InlineBlockFragmentInfo::new(
                 block_flow));
         let fragment = Fragment::from_opaque_node_and_style(node.opaque(),
-                                                            node.get_pseudo_element_type().strip(),
+                                                            node.get_pseudo_element_type(),
                                                             style,
                                                             node.selected_style(),
                                                             node.restyle_damage(),
@@ -1353,13 +1356,14 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
             return false
         }
 
-        if node.can_be_fragmented() || node.style(self.style_context()).is_multicol() {
-            return false
-        }
-
         let mut set_has_newly_constructed_flow_flag = false;
         let result = {
             let style = node.style(self.style_context());
+
+            if style.can_be_fragmented() || style.is_multicol() {
+                return false
+            }
+
             let damage = node.restyle_damage();
             let mut data = node.mutate_layout_data().unwrap();
 
@@ -1391,7 +1395,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                         if fragment.node != node.opaque() {
                             continue
                         }
-                        if fragment.pseudo != node.get_pseudo_element_type().strip() {
+                        if fragment.pseudo != node.get_pseudo_element_type() {
                             continue
                         }
 
@@ -1461,8 +1465,10 @@ impl<'a, ConcreteThreadSafeLayoutNode> PostorderNodeMutTraversal<ConcreteThreadS
     fn process(&mut self, node: &ConcreteThreadSafeLayoutNode) {
         node.insert_flags(LayoutDataFlags::HAS_NEWLY_CONSTRUCTED_FLOW);
 
+        let style = node.style(self.style_context());
+
         // Bail out if this node has an ancestor with display: none.
-        if node.style(self.style_context()).is_in_display_none_subtree() {
+        if style.is_in_display_none_subtree() {
             self.set_flow_construction_result(node, ConstructionResult::None);
             return;
         }
@@ -1471,20 +1477,13 @@ impl<'a, ConcreteThreadSafeLayoutNode> PostorderNodeMutTraversal<ConcreteThreadS
         let (display, float, positioning) = match node.type_id() {
             None => {
                 // Pseudo-element.
-                let style = node.style(self.style_context());
-                let display = match node.get_pseudo_element_type() {
-                    PseudoElementType::Normal => Display::Inline,
-                    PseudoElementType::Before(maybe_display) |
-                    PseudoElementType::After(maybe_display) |
-                    PseudoElementType::DetailsContent(maybe_display) |
-                    PseudoElementType::DetailsSummary(maybe_display)
-                        => maybe_display.unwrap_or(style.get_box().display),
-                };
-                (display, style.get_box().float, style.get_box().position)
+                (style.get_box().display, style.get_box().float, style.get_box().position)
             }
             Some(LayoutNodeType::Element(_)) => {
-                let style = node.style(self.style_context());
-                let original_display = style.get_box()._servo_display_for_hypothetical_box;
+                let original_display = style.get_box().original_display;
+                // FIXME(emilio, #19771): This munged_display business is pretty
+                // wrong. After we fix this we should be able to unify the
+                // pseudo-element path too.
                 let munged_display = match original_display {
                     Display::Inline | Display::InlineBlock => original_display,
                     _ => style.get_box().display,
@@ -1648,25 +1647,18 @@ impl<ConcreteThreadSafeLayoutNode> NodeUtils for ConcreteThreadSafeLayoutNode
 
     fn construction_result_mut(self, data: &mut LayoutData) -> &mut ConstructionResult {
         match self.get_pseudo_element_type() {
-            PseudoElementType::Before(_) => &mut data.before_flow_construction_result,
-            PseudoElementType::After(_) => &mut data.after_flow_construction_result,
-            PseudoElementType::DetailsSummary(_) => &mut data.details_summary_flow_construction_result,
-            PseudoElementType::DetailsContent(_) => &mut data.details_content_flow_construction_result,
+            PseudoElementType::Before => &mut data.before_flow_construction_result,
+            PseudoElementType::After => &mut data.after_flow_construction_result,
+            PseudoElementType::DetailsSummary => &mut data.details_summary_flow_construction_result,
+            PseudoElementType::DetailsContent => &mut data.details_content_flow_construction_result,
             PseudoElementType::Normal    => &mut data.flow_construction_result,
         }
     }
 
     #[inline(always)]
-    fn set_flow_construction_result(self, mut result: ConstructionResult) {
-        if self.can_be_fragmented() {
-            if let ConstructionResult::Flow(ref mut flow, _) = result {
-                FlowRef::deref_mut(flow).mut_base().flags.insert(FlowFlags::CAN_BE_FRAGMENTED);
-            }
-        }
-
+    fn set_flow_construction_result(self, result: ConstructionResult) {
         let mut layout_data = self.mutate_layout_data().unwrap();
         let dst = self.construction_result_mut(&mut *layout_data);
-
         *dst = result;
     }
 

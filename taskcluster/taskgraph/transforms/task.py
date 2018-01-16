@@ -93,6 +93,8 @@ task_description_schema = Schema({
     # method.
     Optional('dependencies'): {basestring: object},
 
+    Optional('requires'): Any('all-completed', 'all-resolved'),
+
     # expiration and deadline times, relative to task creation, with units
     # (e.g., "14 days").  Defaults are set based on the project.
     Optional('expires-after'): basestring,
@@ -178,7 +180,7 @@ task_description_schema = Schema({
 
     # The `shipping_phase` attribute, defaulting to None. This specifies the
     # release promotion phase that this task belongs to.
-    Required('shipping-phase', default=None): Any(
+    Required('shipping-phase'): Any(
         None,
         'build',
         'promote',
@@ -188,7 +190,7 @@ task_description_schema = Schema({
 
     # The `shipping_product` attribute, defaulting to None. This specifies the
     # release promotion product that this task belongs to.
-    Required('shipping-product', default=None): Any(
+    Required('shipping-product'): Any(
         None,
         'devedition',
         'fennec',
@@ -221,11 +223,11 @@ task_description_schema = Schema({
     # will be candidates for optimization even when `optimize_target_tasks` is
     # False, unless the task was also explicitly chosen by the target_tasks
     # method.
-    Required('always-target', default=False): bool,
+    Required('always-target'): bool,
 
     # Optimization to perform on this task during the optimization phase.
     # Optimizations are defined in taskcluster/taskgraph/optimize.py.
-    Required('optimization', default=None): Any(
+    Required('optimization'): Any(
         # always run this task (default)
         None,
         # search the index for the given index namespaces, and replace this task if found
@@ -250,7 +252,7 @@ task_description_schema = Schema({
     'worker-type': basestring,
 
     # Whether the job should use sccache compiler caching.
-    Required('needs-sccache', default=False): bool,
+    Required('needs-sccache'): bool,
 
     # Send notifications using pulse-notifier[1] service:
     #
@@ -287,13 +289,13 @@ task_description_schema = Schema({
         ),
 
         # worker features that should be enabled
-        Required('relengapi-proxy', default=False): bool,
-        Required('chain-of-trust', default=False): bool,
-        Required('taskcluster-proxy', default=False): bool,
-        Required('allow-ptrace', default=False): bool,
-        Required('loopback-video', default=False): bool,
-        Required('loopback-audio', default=False): bool,
-        Required('docker-in-docker', default=False): bool,  # (aka 'dind')
+        Required('relengapi-proxy'): bool,
+        Required('chain-of-trust'): bool,
+        Required('taskcluster-proxy'): bool,
+        Required('allow-ptrace'): bool,
+        Required('loopback-video'): bool,
+        Required('loopback-audio'): bool,
+        Required('docker-in-docker'): bool,  # (aka 'dind')
 
         # Paths to Docker volumes.
         #
@@ -305,7 +307,7 @@ task_description_schema = Schema({
         # Caches are often mounted to the same path as Docker volumes. In this
         # case, they take precedence over a Docker volume. But a volume still
         # needs to be declared for the path.
-        Optional('volumes', default=[]): [basestring],
+        Optional('volumes'): [basestring],
 
         # caches to set up for the task
         Optional('caches'): [{
@@ -321,7 +323,7 @@ task_description_schema = Schema({
 
             # Whether the cache is not used in untrusted environments
             # (like the Try repo).
-            Optional('skip-untrusted', default=False): bool,
+            Optional('skip-untrusted'): bool,
         }],
 
         # artifacts to extract from the task image after completion
@@ -338,7 +340,7 @@ task_description_schema = Schema({
         }],
 
         # environment variables
-        Required('env', default={}): {basestring: taskref_or_string},
+        Required('env'): {basestring: taskref_or_string},
 
         # the command to run; if not given, docker-worker will default to the
         # command in the docker image
@@ -419,16 +421,16 @@ task_description_schema = Schema({
         }],
 
         # environment variables
-        Required('env', default={}): {basestring: taskref_or_string},
+        Required('env'): {basestring: taskref_or_string},
 
         # the maximum time to run, in seconds
         Required('max-run-time'): int,
 
         # os user groups for test task workers
-        Optional('os-groups', default=[]): [basestring],
+        Optional('os-groups'): [basestring],
 
         # optional features
-        Required('chain-of-trust', default=False): bool,
+        Required('chain-of-trust'): bool,
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -483,7 +485,7 @@ task_description_schema = Schema({
         Required('implementation'): 'scriptworker-signing',
 
         # the maximum time to run, in seconds
-        Required('max-run-time', default=600): int,
+        Required('max-run-time'): int,
 
         # list of artifact URLs for the artifacts that should be signed
         Required('upstream-artifacts'): [{
@@ -505,7 +507,7 @@ task_description_schema = Schema({
         Required('implementation'): 'beetmover',
 
         # the maximum time to run, in seconds
-        Required('max-run-time', default=600): int,
+        Required('max-run-time'): int,
 
         # locale key, if this is a locale beetmover job
         Optional('locale'): basestring,
@@ -528,7 +530,7 @@ task_description_schema = Schema({
         Required('implementation'): 'beetmover-cdns',
 
         # the maximum time to run, in seconds
-        Required('max-run-time', default=600): int,
+        Required('max-run-time'): int,
         Required('product'): basestring,
     }, {
         Required('implementation'): 'balrog',
@@ -555,6 +557,10 @@ task_description_schema = Schema({
         Extra: object,
 
     }, {
+        Required('implementation'): 'always-optimized',
+        Extra: object,
+
+    }, {
         Required('implementation'): 'push-apk',
 
         # list of artifact URLs for the artifacts that should be beetmoved
@@ -567,12 +573,15 @@ task_description_schema = Schema({
 
             # Paths to the artifacts to sign
             Required('paths'): [basestring],
+
+            # Artifact is optional to run the task
+            Optional('optional', default=False): bool,
         }],
 
         # "Invalid" is a noop for try and other non-supported branches
         Required('google-play-track'): Any('production', 'beta', 'alpha', 'rollout', 'invalid'),
-        Required('commit', default=False): bool,
-        Optional('rollout-percentage'): int,
+        Required('commit'): bool,
+        Optional('rollout-percentage'): Any(int, None),
     }),
 })
 
@@ -707,13 +716,6 @@ def superseder_url(config, task):
     )
 
 
-JOB_NAME_WHITELIST_ERROR = """\
-The gecko-v2 job name {job_name} is not in the whitelist in `taskcluster/ci/config.yml`.
-If this job runs on Buildbot, please ensure that the job names match between
-Buildbot and TaskCluster, then add the job name to the whitelist.  If this is a
-new job, there is nothing to check -- just add the job to the whitelist.
-"""
-
 UNSUPPORTED_PRODUCT_ERROR = """\
 The gecko-v2 product {product} is not in the list of configured products in
 `taskcluster/ci/config.yml'.
@@ -721,11 +723,6 @@ The gecko-v2 product {product} is not in the list of configured products in
 
 
 def verify_index(config, index):
-    if 'job-names' in config.graph_config['index']:
-        job_name = index['job-name']
-        if job_name not in config.graph_config['index']['job-names']:
-            raise Exception(JOB_NAME_WHITELIST_ERROR.format(job_name=job_name))
-
     product = index['product']
     if product not in config.graph_config['index']['products']:
         raise Exception(UNSUPPORTED_PRODUCT_ERROR.format(product=product))
@@ -1066,6 +1063,11 @@ def build_invalid_payload(config, task, task_def):
     task_def['payload'] = 'invalid task - should never be created'
 
 
+@payload_builder('always-optimized')
+def build_always_optimized_payload(config, task, task_def):
+    task_def['payload'] = {}
+
+
 @payload_builder('native-engine')
 def build_macosx_engine_payload(config, task, task_def):
     worker = task['worker']
@@ -1116,6 +1118,45 @@ transforms = TransformSequence()
 
 
 @transforms.add
+def set_defaults(config, tasks):
+    for task in tasks:
+        task.setdefault('shipping-phase', None)
+        task.setdefault('shipping-product', None)
+        task.setdefault('always-target', False)
+        task.setdefault('optimization', None)
+        task.setdefault('needs-sccache', False)
+
+        worker = task['worker']
+        if worker['implementation'] in ('docker-worker', 'docker-engine'):
+            worker.setdefault('relengapi-proxy', False)
+            worker.setdefault('chain-of-trust', False)
+            worker.setdefault('taskcluster-proxy', False)
+            worker.setdefault('allow-ptrace', False)
+            worker.setdefault('loopback-video', False)
+            worker.setdefault('loopback-audio', False)
+            worker.setdefault('docker-in-docker', False)
+            worker.setdefault('volumes', [])
+            worker.setdefault('env', {})
+            if 'caches' in worker:
+                for c in worker['caches']:
+                    c.setdefault('skip-untrusted', False)
+        elif worker['implementation'] == 'generic-worker':
+            worker.setdefault('env', {})
+            worker.setdefault('os-groups', [])
+            worker.setdefault('chain-of-trust', False)
+        elif worker['implementation'] == 'scriptworker-signing':
+            worker.setdefault('max-run-time', 600)
+        elif worker['implementation'] == 'beetmover':
+            worker.setdefault('max-run-time', 600)
+        elif worker['implementation'] == 'beetmover-cdns':
+            worker.setdefault('max-run-time', 600)
+        elif worker['implementation'] == 'push-apk':
+            worker.setdefault('commit', False)
+
+        yield task
+
+
+@transforms.add
 def task_name_from_label(config, tasks):
     for task in tasks:
         if 'label' not in task:
@@ -1130,9 +1171,10 @@ def task_name_from_label(config, tasks):
 @transforms.add
 def validate(config, tasks):
     for task in tasks:
-        yield validate_schema(
+        validate_schema(
             task_description_schema, task,
             "In task {!r}:".format(task.get('label', '?no-label?')))
+        yield task
 
 
 @index_builder('generic')
@@ -1421,6 +1463,9 @@ def build_task(config, tasks):
             'tags': tags,
             'priority': task['priority'],
         }
+
+        if task.get('requires', None):
+            task_def['requires'] = task['requires']
 
         if task_th:
             # link back to treeherder in description

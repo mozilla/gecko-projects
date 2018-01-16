@@ -455,6 +455,7 @@ child:
 
     async GarbageCollect();
     async CycleCollect();
+    async UnlinkGhosts();
 
     /**
      * Start accessibility engine in content process.
@@ -743,7 +744,7 @@ parent:
                      OriginAttributes aOriginAttributes)
         returns (bool isSecureURI);
 
-    async AccumulateMixedContentHSTS(URIParams aURI, bool aActive, bool aHasHSTSPriming,
+    async AccumulateMixedContentHSTS(URIParams aURI, bool aActive,
                                      OriginAttributes aOriginAttributes);
 
     nested(inside_cpow) async PHal();

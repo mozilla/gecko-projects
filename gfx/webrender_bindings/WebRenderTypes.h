@@ -66,16 +66,15 @@ inline Maybe<wr::ImageFormat>
 SurfaceFormatToImageFormat(gfx::SurfaceFormat aFormat) {
   switch (aFormat) {
     case gfx::SurfaceFormat::R8G8B8X8:
-      // TODO: use RGBA + opaque flag
     case gfx::SurfaceFormat::R8G8B8A8:
-      return Some(wr::ImageFormat::BGRA8);
+      // WebRender not support RGBA8 and RGBX8. Assert here.
+      MOZ_ASSERT(false);
+      return Nothing();
     case gfx::SurfaceFormat::B8G8R8X8:
       // TODO: WebRender will have a BGRA + opaque flag for this but does not
       // have it yet (cf. issue #732).
     case gfx::SurfaceFormat::B8G8R8A8:
       return Some(wr::ImageFormat::BGRA8);
-    case gfx::SurfaceFormat::B8G8R8:
-      return Some(wr::ImageFormat::RGB8);
     case gfx::SurfaceFormat::A8:
       return Some(wr::ImageFormat::A8);
     case gfx::SurfaceFormat::R8G8:
@@ -94,8 +93,6 @@ ImageFormatToSurfaceFormat(ImageFormat aFormat) {
       return gfx::SurfaceFormat::B8G8R8A8;
     case ImageFormat::A8:
       return gfx::SurfaceFormat::A8;
-    case ImageFormat::RGB8:
-      return gfx::SurfaceFormat::B8G8R8;
     default:
       return gfx::SurfaceFormat::UNKNOWN;
   }
@@ -461,7 +458,7 @@ static inline wr::BorderWidths ToBorderWidths(float top, float right, float bott
 }
 
 static inline wr::NinePatchDescriptor ToNinePatchDescriptor(uint32_t width, uint32_t height,
-                                                            const wr::SideOffsets2D_u32& slice)
+                                                            const wr::SideOffsets2D<uint32_t>& slice)
 {
   NinePatchDescriptor patch;
   patch.width = width;
@@ -470,9 +467,9 @@ static inline wr::NinePatchDescriptor ToNinePatchDescriptor(uint32_t width, uint
   return patch;
 }
 
-static inline wr::SideOffsets2D_u32 ToSideOffsets2D_u32(uint32_t top, uint32_t right, uint32_t bottom, uint32_t left)
+static inline wr::SideOffsets2D<uint32_t> ToSideOffsets2D_u32(uint32_t top, uint32_t right, uint32_t bottom, uint32_t left)
 {
-  SideOffsets2D_u32 offset;
+  SideOffsets2D<uint32_t> offset;
   offset.top = top;
   offset.right = right;
   offset.bottom = bottom;
@@ -480,9 +477,9 @@ static inline wr::SideOffsets2D_u32 ToSideOffsets2D_u32(uint32_t top, uint32_t r
   return offset;
 }
 
-static inline wr::SideOffsets2D_f32 ToSideOffsets2D_f32(float top, float right, float bottom, float left)
+static inline wr::SideOffsets2D<float> ToSideOffsets2D_f32(float top, float right, float bottom, float left)
 {
-  SideOffsets2D_f32 offset;
+  SideOffsets2D<float> offset;
   offset.top = top;
   offset.right = right;
   offset.bottom = bottom;
@@ -559,6 +556,15 @@ static inline wr::WrExternalImage NativeTextureToWrExternalImage(uint32_t aHandl
   };
 }
 
+static inline wr::WrExternalImage InvalidToWrExternalImage()
+{
+  return wr::WrExternalImage {
+    wr::WrExternalImageType::Invalid,
+    0, 0, 0, 0, 0,
+    nullptr, 0
+  };
+}
+
 inline wr::ByteSlice RangeToByteSlice(mozilla::Range<uint8_t> aRange) {
   return wr::ByteSlice { aRange.begin().get(), aRange.length() };
 }
@@ -571,21 +577,29 @@ inline mozilla::Range<uint8_t> MutByteSliceToRange(wr::MutByteSlice aWrSlice) {
   return mozilla::Range<uint8_t>(aWrSlice.buffer, aWrSlice.len);
 }
 
-struct Vec_u8 {
+void Assign_WrVecU8(wr::WrVecU8& aVec, mozilla::ipc::ByteBuf&& aOther);
+
+template<typename T>
+struct Vec;
+
+template<>
+struct Vec<uint8_t> {
   wr::WrVecU8 inner;
-  Vec_u8() {
+  Vec() {
     SetEmpty();
   }
-  Vec_u8(Vec_u8&) = delete;
-  Vec_u8(Vec_u8&& src) {
+  Vec(Vec&) = delete;
+  Vec(Vec&& src) {
     inner = src.inner;
     src.SetEmpty();
   }
 
-  explicit Vec_u8(mozilla::ipc::ByteBuf&& aSrc);
+  explicit Vec(mozilla::ipc::ByteBuf&& aSrc) {
+    Assign_WrVecU8(inner, std::move(aSrc));
+  }
 
-  Vec_u8&
-  operator=(Vec_u8&& src) {
+  Vec&
+  operator=(Vec&& src) {
     inner = src.inner;
     src.SetEmpty();
     return *this;
@@ -612,7 +626,7 @@ struct Vec_u8 {
     wr_vec_u8_push_bytes(&inner, RangeToByteSlice(aBytes));
   }
 
-  ~Vec_u8() {
+  ~Vec() {
     if (inner.data) {
       wr_vec_u8_free(inner);
     }

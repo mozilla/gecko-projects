@@ -1365,6 +1365,12 @@ GfxInfo::GetGfxDriverInfo()
       nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1359416");
 
+    // bug 1419264
+    APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_ADVANCED_LAYERS, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_GREATER_THAN_OR_EQUAL, V(23,21,13,8813),
+      "FEATURE_FAILURE_BUG_1419264", "Windows 10");
   }
   return *mDriverInfo;
 }
@@ -1403,6 +1409,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         !adapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorAMD), nsCaseInsensitiveStringComparator()) &&
         !adapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorATI), nsCaseInsensitiveStringComparator()) &&
         !adapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorMicrosoft), nsCaseInsensitiveStringComparator()) &&
+        !adapterVendorID.Equals(GfxDriverInfo::GetDeviceVendor(VendorParallels), nsCaseInsensitiveStringComparator()) &&
         // FIXME - these special hex values are currently used in xpcshell tests introduced by
         // bug 625160 patch 8/8. Maybe these tests need to be adjusted now that we're only whitelisting
         // intel/ati/nvidia.

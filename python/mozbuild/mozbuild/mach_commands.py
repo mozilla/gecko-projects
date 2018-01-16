@@ -30,6 +30,7 @@ from mach.decorators import (
 from mach.main import Mach
 
 from mozbuild.base import (
+    BuildEnvironmentNotFoundException,
     MachCommandBase,
     MachCommandConditions as conditions,
     MozbuildObject,
@@ -363,6 +364,13 @@ class Clobber(MachCommandBase):
                 cmd = ['find', '.', '-type', 'f', '-name', '*.py[co]', '-delete']
             ret = subprocess.call(cmd, cwd=self.topsrcdir)
         return ret
+
+    @property
+    def substs(self):
+        try:
+            return super(Clobber, self).substs
+        except BuildEnvironmentNotFoundException:
+            return {}
 
 @CommandProvider
 class Logs(MachCommandBase):
@@ -1281,19 +1289,19 @@ class PackageFrontend(MachCommandBase):
             def __init__(self, task_id, artifact_name):
                 cot = cache._download_manager.session.get(
                     get_artifact_url(task_id, 'public/chainOfTrust.json.asc'))
+                cot.raise_for_status()
                 digest = algorithm = None
-                if cot.status_code == 200:
-                    # The file is GPG-signed, but we don't care about validating
-                    # that. Instead of parsing the PGP signature, we just take
-                    # the one line we're interested in, which starts with a `{`.
-                    data = {}
-                    for l in cot.content.splitlines():
-                        if l.startswith('{'):
-                            try:
-                                data = json.loads(l)
-                                break
-                            except Exception:
-                                pass
+                data = {}
+                # The file is GPG-signed, but we don't care about validating
+                # that. Instead of parsing the PGP signature, we just take
+                # the one line we're interested in, which starts with a `{`.
+                for l in cot.content.splitlines():
+                    if l.startswith('{'):
+                        try:
+                            data = json.loads(l)
+                            break
+                        except Exception:
+                            pass
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass

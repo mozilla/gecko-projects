@@ -290,8 +290,6 @@ bool EventStateManager::WheelPrefs::sWheelEventsEnabledOnPlugins = true;
 EventStateManager::DeltaAccumulator*
   EventStateManager::DeltaAccumulator::sInstance = nullptr;
 
-bool EventStateManager::sIsInputEventsSuppressed = false;
-
 EventStateManager::EventStateManager()
   : mLockCursor(0)
   , mLastFrameConsumedSetCursor(false)
@@ -924,15 +922,6 @@ EventStateManager::NotifyTargetUserActivation(WidgetEvent* aEvent,
              aEvent->mMessage == eMouseUp ||
              aEvent->mMessage == eTouchEnd);
   doc->NotifyUserActivation();
-
-  // Activate parent document which has same principle on the parent chain.
-  nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
-  nsCOMPtr<nsIDocument> parent =
-    doc->GetFirstParentDocumentWithSamePrincipal(principal);
-  while (parent) {
-    parent->NotifyUserActivation();
-    parent = parent->GetFirstParentDocumentWithSamePrincipal(principal);
-  }
 }
 
 void
@@ -4749,7 +4738,8 @@ EventStateManager::FireDragEnterOrExit(nsPresContext* aPresContext,
              aMessage == eDragEnter);
   nsEventStatus status = nsEventStatus_eIgnore;
   WidgetDragEvent event(aDragEvent->IsTrusted(), aMessage, aDragEvent->mWidget);
-  event.AssignDragEventData(*aDragEvent, true);
+  event.AssignDragEventData(*aDragEvent, false);
+  event.mRelatedTarget = aRelatedTarget;
   mCurrentTargetContent = aTargetContent;
 
   if (aTargetContent != aRelatedTarget) {

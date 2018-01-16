@@ -1449,10 +1449,10 @@ EditorBase::CreateNode(nsAtom* aTag,
     // Now, aPointToInsert may be invalid.  I.e., GetChild() keeps
     // referring the next sibling of new node but Offset() refers the
     // new node.  Let's make refer the new node.
-    pointToInsert.Set(ret);
+    pointToInsert.Set(ret, offset);
   }
 
-  mRangeUpdater.SelAdjCreateNode(pointToInsert.GetContainer(), offset);
+  mRangeUpdater.SelAdjCreateNode(pointToInsert.AsRaw());
 
   {
     AutoActionListenerArray listeners(mActionListeners);
@@ -1508,8 +1508,7 @@ EditorBase::InsertNode(nsIContent& aContentToInsert,
     InsertNodeTransaction::Create(*this, aContentToInsert, aPointToInsert);
   nsresult rv = DoTransaction(transaction);
 
-  mRangeUpdater.SelAdjInsertNode(aPointToInsert.GetContainer(),
-                                 aPointToInsert.Offset());
+  mRangeUpdater.SelAdjInsertNode(aPointToInsert.AsRaw());
 
   {
     AutoActionListenerArray listeners(mActionListeners);
@@ -1897,7 +1896,10 @@ EditorBase::MoveNode(nsIContent* aNode,
               AssertedCast<uint32_t>(aOffset) <= aParent->Length()));
 
   nsCOMPtr<nsINode> oldParent = aNode->GetParentNode();
-  int32_t oldOffset = oldParent ? oldParent->IndexOf(aNode) : -1;
+  if (NS_WARN_IF(!oldParent)) {
+    return NS_ERROR_FAILURE;
+  }
+  int32_t oldOffset = oldParent->IndexOf(aNode);
 
   if (aOffset == -1) {
     // Magic value meaning "move to end of aParent"
@@ -2624,7 +2626,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
     // aInOutOffset to the preceding text node, if any.
     if (!aPoint.IsStartOfContainer()) {
       if (AsHTMLEditor()) {
-        // Fall back to a slow path that uses GetChildAt() for Thunderbird's
+        // Fall back to a slow path that uses GetChildAt_Deprecated() for Thunderbird's
         // plaintext editor.
         nsIContent* child = aPoint.GetPreviousSiblingOfChild();
         if (child && child->IsNodeOfType(nsINode::eTEXT)) {
@@ -2635,7 +2637,7 @@ EditorBase::FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint)
         }
       } else {
         // If we're in a real plaintext editor, use a fast path that avoids
-        // calling GetChildAt() which may perform a linear search.
+        // calling GetChildAt_Deprecated() which may perform a linear search.
         nsIContent* child = aPoint.GetContainer()->GetLastChild();
         while (child) {
           if (child->IsNodeOfType(nsINode::eTEXT)) {
@@ -4280,7 +4282,7 @@ EditorBase::JoinNodeDeep(nsIContent& aLeftNode,
 
     // Get new left and right nodes, and begin anew
     parentNode = rightNodeToJoin;
-    rightNodeToJoin = parentNode->GetChildAt(length);
+    rightNodeToJoin = parentNode->GetChildAt_Deprecated(length);
     if (rightNodeToJoin) {
       leftNodeToJoin = rightNodeToJoin->GetPreviousSibling();
     } else {
@@ -5351,10 +5353,10 @@ EditorBase::IsModifiableNode(nsINode* aNode)
   return true;
 }
 
-already_AddRefed<nsIContent>
+nsIContent*
 EditorBase::GetFocusedContent()
 {
-  nsCOMPtr<nsIDOMEventTarget> piTarget = GetDOMEventTarget();
+  nsIDOMEventTarget* piTarget = GetDOMEventTarget();
   if (!piTarget) {
     return nullptr;
   }
@@ -5365,20 +5367,20 @@ EditorBase::GetFocusedContent()
   nsIContent* content = fm->GetFocusedContent();
   MOZ_ASSERT((content == piTarget) == SameCOMIdentity(content, piTarget));
 
-  return (content == piTarget) ?
-    piTarget.forget().downcast<nsIContent>() : nullptr;
+  return (content == piTarget) ? content : nullptr;
 }
 
 already_AddRefed<nsIContent>
 EditorBase::GetFocusedContentForIME()
 {
-  return GetFocusedContent();
+  nsCOMPtr<nsIContent> content = GetFocusedContent();
+  return content.forget();
 }
 
 bool
 EditorBase::IsActiveInDOMWindow()
 {
-  nsCOMPtr<nsIDOMEventTarget> piTarget = GetDOMEventTarget();
+  nsIDOMEventTarget* piTarget = GetDOMEventTarget();
   if (!piTarget) {
     return false;
   }
@@ -5410,7 +5412,7 @@ EditorBase::IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent)
   // If this is dispatched by using cordinates but this editor doesn't have
   // focus, we shouldn't handle it.
   if (aGUIEvent->IsUsingCoordinates()) {
-    nsCOMPtr<nsIContent> focusedContent = GetFocusedContent();
+    nsIContent* focusedContent = GetFocusedContent();
     if (!focusedContent) {
       return false;
     }

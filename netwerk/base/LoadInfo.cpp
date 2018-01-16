@@ -61,6 +61,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mVerifySignedContent(false)
   , mEnforceSRI(false)
   , mForceAllowDataURI(false)
+  , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(false)
   , mInnerWindowID(0)
   , mOuterWindowID(0)
@@ -74,10 +75,6 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mIsPreflight(false)
   , mLoadTriggeredFromExternal(false)
   , mServiceWorkerTaintingSynthesized(false)
-  , mForceHSTSPriming(false)
-  , mMixedContentWouldBlock(false)
-  , mIsHSTSPriming(false)
-  , mIsHSTSPrimingUpgrade(false)
 {
   MOZ_ASSERT(mLoadingPrincipal);
   MOZ_ASSERT(mTriggeringPrincipal);
@@ -251,6 +248,7 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
   , mVerifySignedContent(false)
   , mEnforceSRI(false)
   , mForceAllowDataURI(false)
+  , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(false)
   , mInnerWindowID(0)
   , mOuterWindowID(0)
@@ -264,10 +262,6 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
   , mIsPreflight(false)
   , mLoadTriggeredFromExternal(false)
   , mServiceWorkerTaintingSynthesized(false)
-  , mForceHSTSPriming(false)
-  , mMixedContentWouldBlock(false)
-  , mIsHSTSPriming(false)
-  , mIsHSTSPrimingUpgrade(false)
 {
   // Top-level loads are never third-party
   // Grab the information we can out of the window.
@@ -326,6 +320,7 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
   , mVerifySignedContent(rhs.mVerifySignedContent)
   , mEnforceSRI(rhs.mEnforceSRI)
   , mForceAllowDataURI(rhs.mForceAllowDataURI)
+  , mOriginalFrameSrcLoad(rhs.mOriginalFrameSrcLoad)
   , mForceInheritPrincipalDropped(rhs.mForceInheritPrincipalDropped)
   , mInnerWindowID(rhs.mInnerWindowID)
   , mOuterWindowID(rhs.mOuterWindowID)
@@ -346,10 +341,6 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
   , mIsPreflight(rhs.mIsPreflight)
   , mLoadTriggeredFromExternal(rhs.mLoadTriggeredFromExternal)
   , mServiceWorkerTaintingSynthesized(rhs.mServiceWorkerTaintingSynthesized)
-  , mForceHSTSPriming(rhs.mForceHSTSPriming)
-  , mMixedContentWouldBlock(rhs.mMixedContentWouldBlock)
-  , mIsHSTSPriming(rhs.mIsHSTSPriming)
-  , mIsHSTSPrimingUpgrade(rhs.mIsHSTSPrimingUpgrade)
 {
 }
 
@@ -383,11 +374,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
                    bool aForcePreflight,
                    bool aIsPreflight,
                    bool aLoadTriggeredFromExternal,
-                   bool aServiceWorkerTaintingSynthesized,
-                   bool aForceHSTSPriming,
-                   bool aMixedContentWouldBlock,
-                   bool aIsHSTSPriming,
-                   bool aIsHSTSPrimingUpgrade)
+                   bool aServiceWorkerTaintingSynthesized)
   : mLoadingPrincipal(aLoadingPrincipal)
   , mTriggeringPrincipal(aTriggeringPrincipal)
   , mPrincipalToInherit(aPrincipalToInherit)
@@ -399,6 +386,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mVerifySignedContent(aVerifySignedContent)
   , mEnforceSRI(aEnforceSRI)
   , mForceAllowDataURI(aForceAllowDataURI)
+  , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(aForceInheritPrincipalDropped)
   , mInnerWindowID(aInnerWindowID)
   , mOuterWindowID(aOuterWindowID)
@@ -416,10 +404,6 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mIsPreflight(aIsPreflight)
   , mLoadTriggeredFromExternal(aLoadTriggeredFromExternal)
   , mServiceWorkerTaintingSynthesized(aServiceWorkerTaintingSynthesized)
-  , mForceHSTSPriming (aForceHSTSPriming)
-  , mMixedContentWouldBlock(aMixedContentWouldBlock)
-  , mIsHSTSPriming(aIsHSTSPriming)
-  , mIsHSTSPrimingUpgrade(aIsHSTSPrimingUpgrade)
 {
   // Only top level TYPE_DOCUMENT loads can have a null loadingPrincipal
   MOZ_ASSERT(mLoadingPrincipal || aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT);
@@ -787,6 +771,20 @@ LoadInfo::GetForceAllowDataURI(bool* aForceAllowDataURI)
 }
 
 NS_IMETHODIMP
+LoadInfo::SetOriginalFrameSrcLoad(bool aOriginalFrameSrcLoad)
+{
+  mOriginalFrameSrcLoad = aOriginalFrameSrcLoad;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetOriginalFrameSrcLoad(bool* aOriginalFrameSrcLoad)
+{
+  *aOriginalFrameSrcLoad = mOriginalFrameSrcLoad;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 LoadInfo::GetForceInheritPrincipalDropped(bool* aResult)
 {
   *aResult = mForceInheritPrincipalDropped;
@@ -1065,66 +1063,6 @@ LoadInfo::GetServiceWorkerTaintingSynthesized(bool* aServiceWorkerTaintingSynthe
 {
   MOZ_ASSERT(aServiceWorkerTaintingSynthesized);
   *aServiceWorkerTaintingSynthesized = mServiceWorkerTaintingSynthesized;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetForceHSTSPriming(bool* aForceHSTSPriming)
-{
-  *aForceHSTSPriming = mForceHSTSPriming;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetMixedContentWouldBlock(bool *aMixedContentWouldBlock)
-{
-  *aMixedContentWouldBlock = mMixedContentWouldBlock;
-  return NS_OK;
-}
-
-void
-LoadInfo::SetHSTSPriming(bool aMixedContentWouldBlock)
-{
-  mForceHSTSPriming = true;
-  mMixedContentWouldBlock = aMixedContentWouldBlock;
-}
-
-void
-LoadInfo::ClearHSTSPriming()
-{
-  mForceHSTSPriming = false;
-  mMixedContentWouldBlock = false;
-}
-
-NS_IMETHODIMP
-LoadInfo::SetIsHSTSPriming(bool aIsHSTSPriming)
-{
-  MOZ_ASSERT(aIsHSTSPriming);
-  mIsHSTSPriming = aIsHSTSPriming;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetIsHSTSPriming(bool* aIsHSTSPriming)
-{
-  MOZ_ASSERT(aIsHSTSPriming);
-  *aIsHSTSPriming = mIsHSTSPriming;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::SetIsHSTSPrimingUpgrade(bool aIsHSTSPrimingUpgrade)
-{
-  MOZ_ASSERT(aIsHSTSPrimingUpgrade);
-  mIsHSTSPrimingUpgrade = aIsHSTSPrimingUpgrade;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetIsHSTSPrimingUpgrade(bool* aIsHSTSPrimingUpgrade)
-{
-  MOZ_ASSERT(aIsHSTSPrimingUpgrade);
-  *aIsHSTSPrimingUpgrade = mIsHSTSPrimingUpgrade;
   return NS_OK;
 }
 

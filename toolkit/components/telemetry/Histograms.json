@@ -1639,8 +1639,11 @@
     "description": "system fallback font can't be used"
   },
   "SHUTDOWN_OK": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "alert_emails": ["chutten@mozilla.com"],
+    "bug_numbers": [1421688],
+    "releaseChannelCollection": "opt-out",
     "kind": "boolean",
     "description": "Did the browser start after a successful shutdown"
   },
@@ -2441,6 +2444,14 @@
     "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1390881]
   },
+  "NETWORK_HTTP_BACKUP_CONN_WON_1" : {
+    "record_in_processes": ["main"],
+    "expires_in_version": "61",
+    "kind": "boolean",
+    "description": "For connection where TFO has not be use, collect telemetry on whether the backup connection or the primary connection was faster.",
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
+    "bug_numbers": [1426710]
+  },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "62",
@@ -2892,13 +2903,6 @@
     "kind": "enumerated",
     "n_values": 5,
     "description": "HTTP Cache v2 Hit, Reval, Failed-Reval, Miss"
-  },
-  "HTTP_CACHE_MISS_HALFLIFE_EXPERIMENT_2": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 4,
-    "description": "HTTP Cache v2 Miss by half-life value (5 min, 15 min, 1 hour, 6 hours)"
   },
   "HTTP_CACHE_ENTRY_RELOAD_TIME": {
     "record_in_processes": ["main", "content"],
@@ -3934,7 +3938,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": [],
     "bug_numbers": [1361855],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 100,
@@ -5236,6 +5240,8 @@
     "expires_in_version" : "never",
     "kind": "enumerated",
     "n_values": 4,
+    "alert_emails": ["fx-search@mozilla.com"],
+    "bug_numbers": [1053467],
     "description": "The possible types of the 'sizes' attribute for <link rel=icon>. 0: Attribute not specified, 1: 'any', 2: Integer dimensions, 3: Invalid value."
   },
   "LINK_ICON_SIZES_ATTR_DIMENSION": {
@@ -5244,6 +5250,8 @@
     "kind": "linear",
     "high": 513,
     "n_buckets" : 64,
+    "alert_emails": ["fx-search@mozilla.com"],
+    "bug_numbers": [1053467],
     "description": "The width dimension of the 'sizes' attribute for <link rel=icon>."
   },
   "PAGE_METADATA_SIZE": {
@@ -5293,7 +5301,7 @@
   },
   "FENNEC_ORBOT_INSTALLED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "flag",
     "cpp_guard": "ANDROID",
     "description": "Whether or not users have Orbot installed",
@@ -5992,7 +6000,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com"],
     "bug_numbers": [1340842],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 50,
@@ -6002,7 +6010,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com"],
     "bug_numbers": [1340842],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 50,
@@ -6012,7 +6020,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com"],
     "bug_numbers": [1340842],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 50,
@@ -6070,7 +6078,7 @@
   "FX_TAB_SWITCH_TOTAL_E10S_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["mconley@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 20,
@@ -6550,11 +6558,11 @@
   },
   "FX_PREFERENCES_OPENED_VIA": {
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1330315, 1420062],
+    "bug_numbers": [1330315, 1420062, 1427973],
     "alert_emails": ["jaws@mozilla.com"],
     "expires_in_version": "63",
     "kind": "categorical",
-    "labels": ["aboutHome", "aboutTelemetry", "browserMedia", "commandLine", "commandLineLegacy", "ContainersCommand", "contentSearch", "dataReporting", "doorhanger", "devDisconnectedAlert", "experimentsOpenPref", "fxa", "fxaSignedin", "fxaError", "offlineApps", "prefserviceDefaults", "preferencesButton", "paneSync", "storagePressure", "translationInfobar", "UITour", "menubar", "notifOpenSettings", "other", "autofillFooter", "autofillDoorhanger"],
+    "labels": ["aboutHome", "aboutTelemetry", "browserMedia", "commandLine", "commandLineLegacy", "ContainersCommand", "contentSearch", "dataReporting", "doorhanger", "devDisconnectedAlert", "experimentsOpenPref", "fxa", "fxaSignedin", "fxaError", "offlineApps", "prefserviceDefaults", "preferencesButton", "paneSync", "storagePressure", "translationInfobar", "UITour", "menubar", "notifOpenSettings", "other", "autofillFooter", "autofillDoorhanger", "mozscreenshots", "searchChangeSettings"],
     "releaseChannelCollection": "opt-out",
     "description":"Count how the Preferences are opened."
   },
@@ -6562,7 +6570,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["gijs@mozilla.com"],
     "bug_numbers": [1393843],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
                "sendToDevice", "other"],
@@ -6572,7 +6580,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["gijs@mozilla.com"],
     "bug_numbers": [1393843],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
                "sendToDevice", "other"],
@@ -6582,7 +6590,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["gijs@mozilla.com"],
     "bug_numbers": [1393843],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
                "sendToDevice", "other"],
@@ -6592,7 +6600,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["gijs@mozilla.com"],
     "bug_numbers": [1393843],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
                "sendToDevice", "other"],
@@ -6602,7 +6610,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["gijs@mozilla.com"],
     "bug_numbers": [1393843],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
                "sendToDevice", "other"],
@@ -7035,6 +7043,27 @@
     "high": 3000,
     "n_buckets": 10,
     "description": "Time to fetch LocalStorage data before we can expose them as session only data (ms)"
+  },
+  "LOGIN_REPUTATION_LOGIN_WHITELIST_RESULT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dlee@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "enumerated",
+    "bug_numbers": [1422671],
+    "n_values": 3,
+    "description": "Login reputation login whitelist result (0=UNSPECIFIED, 1=SAFE, 2=ERROR)"
+  },
+  "LOGIN_REPUTATION_LOGIN_WHITELIST_LOOKUP_TIME": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dlee@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "exponential",
+    "bug_numbers": [1422671],
+    "high": 5000,
+    "n_buckets": 30,
+    "description": "Time spent per login reputation service lookup local whitelist (ms)"
   },
   "RANGE_CHECKSUM_ERRORS": {
     "record_in_processes": ["main", "content"],
@@ -7804,14 +7833,6 @@
     "kind": "boolean",
     "description": "New tab page is enhanced (showing suggestions)."
   },
-  "NEWTAB_PAGE_LIFE_SPAN": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 1200,
-    "n_buckets": 100,
-    "description": "Life-span of a new tab without suggested tile: time delta between first-visible and unload events (half-seconds)."
-  },
   "NEWTAB_PAGE_PINNED_SITES_COUNT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "default",
@@ -7826,19 +7847,6 @@
     "high": 100,
     "n_buckets": 10,
     "description": "Number of sites blocked from the new tab page."
-  },
-  "NEWTAB_PAGE_SHOWN": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "35",
-    "kind": "boolean",
-    "description": "Number of times about:newtab was shown from opening a new tab or window. *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "NEWTAB_PAGE_SITE_CLICKED": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "35",
-    "kind": "enumerated",
-    "n_values": 10,
-    "description": "Track click count on about:newtab tiles per index (0-8). For non-default row or column configurations all clicks into the '9' bucket. *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
   "BROWSERPROVIDER_XUL_IMPORT_BOOKMARKS": {
     "record_in_processes": ["main", "content"],
@@ -8033,7 +8041,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["fqueze@mozilla.com"],
     "bug_numbers": [1203168],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "enumerated",
     "n_values": 5,
     "releaseChannelCollection": "opt-out",
@@ -8495,7 +8503,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
     "bug_numbers": [1412029],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "categorical",
     "labels": ["toggleToolbox", "toggleToolboxF12", "inspector", "webconsole", "jsdebugger", "netmonitor", "toggleToolbar", "webide", "browserToolbox", "browserConsole", "responsiveDesignMode", "scratchpad", "styleeditor", "performance", "storage", "dom"],
     "description": "Records the key shortcut passed to open the about:devtools page."
@@ -8504,7 +8512,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
     "bug_numbers": [1412029],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "categorical",
     "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine"],
     "description": "Records the reason for opening the about:devtools page."
@@ -8575,26 +8583,17 @@
   },
   "MEDIA_EME_SECURE_CONTEXT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "60",
+    "alert_emails": ["cpearce@mozilla.com", "jacheng@mozilla.com"],
+    "expires_in_version": "63",
     "kind": "boolean",
     "description": "Reports whether a navigator.requestMediaKeySystemAccess() was called in a secure context (i.e. on an origin served over HTTPS) or not.",
     "bug_numbers": [1360438]
   },
-  "VIDEO_CHROMIUM_CDM_MAX_SHMEMS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["cpearce@mozilla.com"],
-    "bug_numbers": [1366639],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 50,
-    "description": "Counts of the maximum number of shared memory buffers used for transferring video frames between the CDM and Gecko processes during playback of DRM'd video. Reported once per CDMVideoDecoder instance, i.e., once per JavaScript SourceBuffer during playback of video using EME."
-  },
   "MEDIA_EME_REQUEST_DEPRECATED_WARNINGS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["cpearce@mozilla.com"],
+    "alert_emails": ["cpearce@mozilla.com", "jacheng@mozilla.com"],
     "bug_numbers": [1368596],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "enumerated",
     "n_values": 10,
     "description": "Counts types of deprecation warnings logged on every successful call to navigator.requestMediaKeySystemAccess(). 0=No warnings logged, 1=MediaEMENoCapabilitiesDeprecatedWarning, 2=MediaEMENoCodecsDeprecatedWarning."
@@ -9423,7 +9422,7 @@
   "MEDIA_RECORDER_RECORDING_DURATION": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["bvandyk@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "exponential",
     "high": 3600,
     "n_buckets": 100,
@@ -9433,7 +9432,7 @@
   "MEDIA_RECORDER_TRACK_ENCODER_INIT_TIMEOUT_TYPE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["bvandyk@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "64",
     "kind": "enumerated",
     "n_values": 4,
     "bug_numbers": [1400757],
@@ -10333,45 +10332,6 @@
     "kind": "enumerated",
     "n_values": 10,
     "description": "How often would blocked mixed content be allowed if HSTS upgrades were allowed? 0=display/no-HSTS, 1=display/HSTS, 2=active/no-HSTS, 3=active/HSTS"
-  },
-  "MIXED_CONTENT_HSTS_PRIMING_2": {
-    "record_in_processes": [ "main" ],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1359987],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 16,
-    "description": "How often would blocked mixed content be allowed if HSTS upgrades were allowed, including how often would we send an HSTS priming request? 0=passive/HSTS, 1=active/HSTS, 2=passive/no priming, 3=passive/priming, 4=active/no priming, 5=active/priming, 6=passive/will HSTS upgrade, 7=active/will HSTS upgrade"
-  },
-  "MIXED_CONTENT_HSTS_PRIMING_RESULT": {
-    "record_in_processes": [ "main" ],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1246540],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 16,
-    "description": "How often do we get back an HSTS priming result which upgrades the connection to HTTPS? 0=cached (no upgrade), 1=cached (do upgrade), 2=cached (blocked), 3=already upgraded, 4=priming succeeded, 5=priming succeeded (block due to pref), 6=priming succeeded (no upgrade due to pref), 7=priming failed (block), 8=priming failed (accept), 9=timeout (block), 10=timeout (accept)"
-  },
-  "MIXED_CONTENT_HSTS_PRIMING_REQUESTS": {
-    "record_in_processes": [ "main" ],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1359987],
-    "expires_in_version": "62",
-    "kind": "enumerated",
-    "n_values": 10,
-    "description": "How often does a request result in HSTS priming? (0=Sent HSTS priming, 1=No priming, 2=Priming skipped due to cached HSTS, 3=Priming skipped due to cached NO HSTS, 4=Priming failed (request error), 5=Priming skipped (missing load info), 6=Priming skipped (already upgraded)"
-  },
-  "HSTS_PRIMING_REQUEST_DURATION": {
-    "record_in_processes": [ "main" ],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1311893, 1359987],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "low": 100,
-    "high": 30000,
-    "n_buckets": 100,
-    "keyed": true,
-    "description": "The amount of time required for HSTS priming requests (ms), keyed by success or failure of the priming request. (success, failure)"
   },
   "HSTS_UPGRADE_SOURCE": {
     "record_in_processes": [ "main" ],
@@ -12303,15 +12263,6 @@
     "releaseChannelCollection": "opt-out",
     "description": "Graphics Crash Reason (...)"
   },
-  "SCROLL_INPUT_METHODS": {
-    "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["botond@mozilla.com"],
-    "bug_numbers": [1238137],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 64,
-    "description": "Count of scroll actions triggered by different input methods. See gfx/layers/apz/util/ScrollInputMethods.h for a list of possible values and their meanings."
-  },
   "TOTAL_SCROLL_Y": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["hkirschner@mozilla.com"],
@@ -13094,7 +13045,7 @@
     "record_in_processes": ["content"],
     "alert_emails": ["mconley@mozilla.com"],
     "bug_numbers": [1313686],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,
@@ -13156,7 +13107,7 @@
   "MAIN_THREAD_RUNNABLE_MS": {
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["wmccloskey@mozilla.com", "farre@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "exponential",
     "keyed": true,
     "high": 10000,
@@ -13176,7 +13127,7 @@
   "BUSY_TAB_ABANDONED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["hkirschner@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "categorical",
     "bug_numbers": [1307689],
     "description": "Records a value each time a tab that is showing the loading throbber is interrupted. Desktop only.",
@@ -13503,8 +13454,8 @@
   },
   "TIME_BETWEEN_UNLABELED_RUNNABLES_MS": {
     "record_in_processes": ["content"],
-    "alert_emails": ["wmccloskey@mozilla.com"],
-    "expires_in_version": "60",
+    "alert_emails": ["wmccloskey@mozilla.com", "farre@mozilla.com"],
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 30,
@@ -13603,7 +13554,7 @@
   "IDLE_RUNNABLE_BUDGET_OVERUSE_MS": {
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "exponential",
     "keyed": true,
     "high": 10000,
@@ -13615,7 +13566,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1353172],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 60000,
@@ -13626,7 +13577,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1297167],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13637,7 +13588,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1297167],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "categorical",
     "labels": ["popupShown", "clearAfterHover", "clearAfterMousedown"],
     "releaseChannelCollection": "opt-out",
@@ -13647,7 +13598,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1356323],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13658,7 +13609,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1353171],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13669,7 +13620,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1297167],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13680,7 +13631,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1371398],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13691,7 +13642,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
     "bug_numbers": [1371398],
-    "expires_in_version": "60",
+    "expires_in_version": "63",
     "kind": "exponential",
     "releaseChannelCollection": "opt-out",
     "high": 50000,
@@ -13879,14 +13830,6 @@
     "n_buckets": 50,
     "description": "Amount of time in milliseconds the main thread spends waiting for the paint thread to complete, if the time was greater than 200us.",
     "bug_numbers": [1386968]
-  },
-  "SCRIPT_LOADED_WITH_VERSION": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["amarchesini@mozilla.com"],
-    "bug_numbers": [1418860],
-    "expires_in_version": "60",
-    "kind": "boolean",
-    "description": "Tracking how often scripts are loaded with a 'valid' version parameter. This telemetry ID helps us to decide if and when remove the support of script versioning."
   },
   "STYLO_PARALLEL_RESTYLE_FRACTION": {
     "record_in_processes": ["content"],

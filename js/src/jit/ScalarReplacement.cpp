@@ -339,24 +339,24 @@ class ObjectMemoryView : public MDefinitionVisitorDefaultNoop
 
   public:
     void visitResumePoint(MResumePoint* rp);
-    void visitObjectState(MObjectState* ins);
-    void visitStoreFixedSlot(MStoreFixedSlot* ins);
-    void visitLoadFixedSlot(MLoadFixedSlot* ins);
-    void visitPostWriteBarrier(MPostWriteBarrier* ins);
-    void visitStoreSlot(MStoreSlot* ins);
-    void visitLoadSlot(MLoadSlot* ins);
-    void visitGuardShape(MGuardShape* ins);
-    void visitGuardObjectGroup(MGuardObjectGroup* ins);
-    void visitGuardUnboxedExpando(MGuardUnboxedExpando* ins);
-    void visitFunctionEnvironment(MFunctionEnvironment* ins);
-    void visitLambda(MLambda* ins);
-    void visitLambdaArrow(MLambdaArrow* ins);
-    void visitStoreUnboxedScalar(MStoreUnboxedScalar* ins);
-    void visitLoadUnboxedScalar(MLoadUnboxedScalar* ins);
-    void visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins);
-    void visitLoadUnboxedObjectOrNull(MLoadUnboxedObjectOrNull* ins);
-    void visitStoreUnboxedString(MStoreUnboxedString* ins);
-    void visitLoadUnboxedString(MLoadUnboxedString* ins);
+    void visitObjectState(MObjectState* ins) override;
+    void visitStoreFixedSlot(MStoreFixedSlot* ins) override;
+    void visitLoadFixedSlot(MLoadFixedSlot* ins) override;
+    void visitPostWriteBarrier(MPostWriteBarrier* ins) override;
+    void visitStoreSlot(MStoreSlot* ins) override;
+    void visitLoadSlot(MLoadSlot* ins) override;
+    void visitGuardShape(MGuardShape* ins) override;
+    void visitGuardObjectGroup(MGuardObjectGroup* ins) override;
+    void visitGuardUnboxedExpando(MGuardUnboxedExpando* ins) override;
+    void visitFunctionEnvironment(MFunctionEnvironment* ins) override;
+    void visitLambda(MLambda* ins) override;
+    void visitLambdaArrow(MLambdaArrow* ins) override;
+    void visitStoreUnboxedScalar(MStoreUnboxedScalar* ins) override;
+    void visitLoadUnboxedScalar(MLoadUnboxedScalar* ins) override;
+    void visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins) override;
+    void visitLoadUnboxedObjectOrNull(MLoadUnboxedObjectOrNull* ins) override;
+    void visitStoreUnboxedString(MStoreUnboxedString* ins) override;
+    void visitLoadUnboxedString(MLoadUnboxedString* ins) override;
 
   private:
     void storeOffset(MInstruction* ins, size_t offset, MDefinition* value);
@@ -456,8 +456,8 @@ ObjectMemoryView::mergeIntoSuccessorState(MBasicBlock* curr, MBasicBlock* succ,
 
         size_t numPreds = succ->numPredecessors();
         for (size_t slot = 0; slot < state_->numSlots(); slot++) {
-            MPhi* phi = MPhi::New(alloc_);
-            if (!phi->reserveLength(numPreds))
+            MPhi* phi = MPhi::New(alloc_.fallible());
+            if (!phi || !phi->reserveLength(numPreds))
                 return false;
 
             // Fill the input of the successors Phi with undefined
@@ -875,8 +875,10 @@ IndexOf(MDefinition* ins, int32_t* res)
 // Returns False if the elements is not escaped and if it is optimizable by
 // ScalarReplacementOfArray.
 static bool
-IsElementEscaped(MElements* def, uint32_t arraySize, bool copyOnWrite)
+IsElementEscaped(MDefinition* def, uint32_t arraySize)
 {
+    MOZ_ASSERT(def->isElements() || def->isConvertElementsToDoubles());
+
     JitSpewDef(JitSpew_Escape, "Check elements\n", def);
     JitSpewIndent spewIndent(JitSpew_Escape);
 
@@ -919,11 +921,6 @@ IsElementEscaped(MElements* def, uint32_t arraySize, bool copyOnWrite)
           case MDefinition::Opcode::StoreElement: {
             MOZ_ASSERT(access->toStoreElement()->elements() == def);
 
-            if (copyOnWrite) {
-                JitSpewDef(JitSpew_Escape, "write to COW\n", access);
-                return true;
-            }
-
             // If we need hole checks, then the array cannot be escaped
             // as the array might refer to the prototype chain to look
             // for properties, thus it might do additional side-effects
@@ -956,11 +953,6 @@ IsElementEscaped(MElements* def, uint32_t arraySize, bool copyOnWrite)
           }
 
           case MDefinition::Opcode::SetInitializedLength:
-            if (copyOnWrite) {
-                JitSpewDef(JitSpew_Escape, "write to COW\n", access);
-                return true;
-            }
-
             MOZ_ASSERT(access->toSetInitializedLength()->elements() == def);
             break;
 
@@ -970,6 +962,14 @@ IsElementEscaped(MElements* def, uint32_t arraySize, bool copyOnWrite)
 
           case MDefinition::Opcode::ArrayLength:
             MOZ_ASSERT(access->toArrayLength()->elements() == def);
+            break;
+
+          case MDefinition::Opcode::ConvertElementsToDoubles:
+            MOZ_ASSERT(access->toConvertElementsToDoubles()->elements() == def);
+            if (IsElementEscaped(access, arraySize)) {
+                JitSpewDef(JitSpew_Escape, "is indirectly escaped by\n", access);
+                return true;
+            }
             break;
 
           default:
@@ -993,24 +993,26 @@ IsOptimizableArrayInstruction(MInstruction* ins)
 // For the moment, this code is dumb as it only supports arrays which are not
 // changing length, with only access with known constants.
 static bool
-IsArrayEscaped(MInstruction* ins)
+IsArrayEscaped(MInstruction* ins, MInstruction* newArray)
 {
     MOZ_ASSERT(ins->type() == MIRType::Object);
-    MOZ_ASSERT(IsOptimizableArrayInstruction(ins));
+    MOZ_ASSERT(IsOptimizableArrayInstruction(ins) ||
+               ins->isMaybeCopyElementsForWrite());
+    MOZ_ASSERT(IsOptimizableArrayInstruction(newArray));
 
     JitSpewDef(JitSpew_Escape, "Check array\n", ins);
     JitSpewIndent spewIndent(JitSpew_Escape);
 
     uint32_t length;
-    if (ins->isNewArray()) {
-        if (!ins->toNewArray()->templateObject()) {
+    if (newArray->isNewArray()) {
+        if (!newArray->toNewArray()->templateObject()) {
             JitSpew(JitSpew_Escape, "No template object defined.");
             return true;
         }
 
-        length = ins->toNewArray()->length();
+        length = newArray->toNewArray()->length();
     } else {
-        length = ins->toNewArrayCopyOnWrite()->templateObject()->length();
+        length = newArray->toNewArrayCopyOnWrite()->templateObject()->length();
     }
 
     if (length >= 16) {
@@ -1037,11 +1039,21 @@ IsArrayEscaped(MInstruction* ins)
           case MDefinition::Opcode::Elements: {
             MElements *elem = def->toElements();
             MOZ_ASSERT(elem->object() == ins);
-            if (IsElementEscaped(elem, length, ins->isNewArrayCopyOnWrite())) {
+            if (IsElementEscaped(elem, length)) {
                 JitSpewDef(JitSpew_Escape, "is indirectly escaped by\n", elem);
                 return true;
             }
 
+            break;
+          }
+
+          case MDefinition::Opcode::MaybeCopyElementsForWrite: {
+            MMaybeCopyElementsForWrite* copied = def->toMaybeCopyElementsForWrite();
+            MOZ_ASSERT(copied->object() == ins);
+            if (IsArrayEscaped(copied, ins)) {
+                JitSpewDef(JitSpew_Escape, "is indirectly escaped by\n", copied);
+                return true;
+            }
             break;
           }
 
@@ -1108,12 +1120,14 @@ class ArrayMemoryView : public MDefinitionVisitorDefaultNoop
 
   public:
     void visitResumePoint(MResumePoint* rp);
-    void visitArrayState(MArrayState* ins);
-    void visitStoreElement(MStoreElement* ins);
-    void visitLoadElement(MLoadElement* ins);
-    void visitSetInitializedLength(MSetInitializedLength* ins);
-    void visitInitializedLength(MInitializedLength* ins);
-    void visitArrayLength(MArrayLength* ins);
+    void visitArrayState(MArrayState* ins) override;
+    void visitStoreElement(MStoreElement* ins) override;
+    void visitLoadElement(MLoadElement* ins) override;
+    void visitSetInitializedLength(MSetInitializedLength* ins) override;
+    void visitInitializedLength(MInitializedLength* ins) override;
+    void visitArrayLength(MArrayLength* ins) override;
+    void visitMaybeCopyElementsForWrite(MMaybeCopyElementsForWrite* ins) override;
+    void visitConvertElementsToDoubles(MConvertElementsToDoubles* ins) override;
 };
 
 const char* ArrayMemoryView::phaseName = "Scalar Replacement of Array";
@@ -1214,8 +1228,8 @@ ArrayMemoryView::mergeIntoSuccessorState(MBasicBlock* curr, MBasicBlock* succ,
 
         size_t numPreds = succ->numPredecessors();
         for (size_t index = 0; index < state_->numElements(); index++) {
-            MPhi* phi = MPhi::New(alloc_);
-            if (!phi->reserveLength(numPreds))
+            MPhi* phi = MPhi::New(alloc_.fallible());
+            if (!phi || !phi->reserveLength(numPreds))
                 return false;
 
             // Fill the input of the successors Phi with undefined
@@ -1406,6 +1420,47 @@ ArrayMemoryView::visitArrayLength(MArrayLength* ins)
     discardInstruction(ins, elements);
 }
 
+void
+ArrayMemoryView::visitMaybeCopyElementsForWrite(MMaybeCopyElementsForWrite* ins)
+{
+    MOZ_ASSERT(ins->numOperands() == 1);
+    MOZ_ASSERT(ins->type() == MIRType::Object);
+
+    // Skip guards on other objects.
+    if (ins->object() != arr_)
+        return;
+
+    // Nothing to do here: RArrayState::recover will copy the elements if
+    // needed.
+
+    // Replace the guard with the array.
+    ins->replaceAllUsesWith(arr_);
+
+    // Remove original instruction.
+    ins->block()->discard(ins);
+}
+
+void
+ArrayMemoryView::visitConvertElementsToDoubles(MConvertElementsToDoubles* ins)
+{
+    MOZ_ASSERT(ins->numOperands() == 1);
+    MOZ_ASSERT(ins->type() == MIRType::Elements);
+
+    // Skip other array objects.
+    MDefinition* elements = ins->elements();
+    if (!isArrayStateElements(elements))
+        return;
+
+    // We don't have to do anything else here: MConvertElementsToDoubles just
+    // exists to allow MLoadELement to use masm.loadDouble (without checking
+    // for int32 elements), but since we're using scalar replacement for the
+    // elements that doesn't matter.
+    ins->replaceAllUsesWith(elements);
+
+    // Remove original instruction.
+    ins->block()->discard(ins);
+}
+
 bool
 ScalarReplacement(MIRGenerator* mir, MIRGraph& graph)
 {
@@ -1428,7 +1483,7 @@ ScalarReplacement(MIRGenerator* mir, MIRGraph& graph)
                 continue;
             }
 
-            if (IsOptimizableArrayInstruction(*ins) && !IsArrayEscaped(*ins)) {
+            if (IsOptimizableArrayInstruction(*ins) && !IsArrayEscaped(*ins, *ins)) {
                 ArrayMemoryView view(graph.alloc(), *ins);
                 if (!replaceArray.run(view))
                     return false;

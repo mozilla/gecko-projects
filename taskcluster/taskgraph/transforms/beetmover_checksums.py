@@ -41,9 +41,10 @@ beetmover_checksums_description_schema = Schema({
 def validate(config, jobs):
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
-        yield validate_schema(
+        validate_schema(
             beetmover_checksums_description_schema, job,
             "In checksums-signing ({!r} kind) task for {!r}:".format(config.kind, label))
+        yield job
 
 
 @transforms.add
@@ -141,15 +142,6 @@ def generate_upstream_artifacts(refs, platform, locale=None):
         "paths": ["public/balrog_props.json"],
         "locale": locale or "en-US",
     }]
-
-    if not locale and "android" in platform:
-        # edge case to support 'multi' locale paths
-        upstream_artifacts.extend([{
-            "taskId": {"task-reference": refs["signing"]},
-            "taskType": "signing",
-            "paths": common_paths,
-            "locale": "multi"
-        }])
 
     return upstream_artifacts
 

@@ -2844,7 +2844,7 @@ MacroAssembler::callWithABINoProfiler(void* fun, MoveOp::Type result, CheckUnsaf
 }
 
 void
-MacroAssembler::callWithABI(wasm::BytecodeOffset callOffset, wasm::SymbolicAddress imm,
+MacroAssembler::callWithABI(wasm::BytecodeOffset bytecode, wasm::SymbolicAddress imm,
                             MoveOp::Type result)
 {
     MOZ_ASSERT(wasm::NeedsBuiltinThunk(imm));
@@ -2861,7 +2861,7 @@ MacroAssembler::callWithABI(wasm::BytecodeOffset callOffset, wasm::SymbolicAddre
     // points when placing arguments.
     loadWasmTlsRegFromFrame();
 
-    call(wasm::CallSiteDesc(callOffset.bytecodeOffset, wasm::CallSite::Symbolic), imm);
+    call(wasm::CallSiteDesc(bytecode.offset, wasm::CallSite::Symbolic), imm);
     callWithABIPost(stackAdjust, result, /* callFromWasm = */ true);
 
     Pop(WasmTlsReg);
@@ -2928,6 +2928,12 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
             MOZ_CRASH("Unsupported type");
         }
     }
+}
+
+void
+MacroAssembler::wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset)
+{
+    append(trap, wasm::TrapSite(illegalInstruction().offset(), bytecodeOffset));
 }
 
 void
@@ -3006,7 +3012,7 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     if (needsBoundsCheck) {
         loadWasmGlobalPtr(callee.tableLengthGlobalDataOffset(), scratch);
 
-        wasm::TrapDesc oobTrap(trapOffset, wasm::Trap::OutOfBounds, framePushed());
+        wasm::OldTrapDesc oobTrap(trapOffset, wasm::Trap::OutOfBounds, framePushed());
         branch32(Assembler::Condition::AboveOrEqual, index, scratch, oobTrap);
     }
 
@@ -3014,7 +3020,7 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     loadWasmGlobalPtr(callee.tableBaseGlobalDataOffset(), scratch);
 
     // Load the callee from the table.
-    wasm::TrapDesc nullTrap(trapOffset, wasm::Trap::IndirectCallToNull, framePushed());
+    wasm::OldTrapDesc nullTrap(trapOffset, wasm::Trap::IndirectCallToNull, framePushed());
     if (callee.wasmTableIsExternal()) {
         static_assert(sizeof(wasm::ExternalTableElem) == 8 || sizeof(wasm::ExternalTableElem) == 16,
                       "elements of external tables are two words");
@@ -3040,21 +3046,21 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
 }
 
 void
-MacroAssembler::wasmEmitTrapOutOfLineCode()
+MacroAssembler::wasmEmitOldTrapOutOfLineCode()
 {
-    for (const wasm::TrapSite& site : trapSites()) {
+    for (const wasm::OldTrapSite& site : oldTrapSites()) {
         // Trap out-of-line codes are created for two kinds of trap sites:
         //  - jumps, which are bound directly to the trap out-of-line path
         //  - memory accesses, which can fault and then have control transferred
         //    to the out-of-line path directly via signal handler setting pc
         switch (site.kind) {
-          case wasm::TrapSite::Jump: {
+          case wasm::OldTrapSite::Jump: {
             RepatchLabel jump;
             jump.use(site.codeOffset);
             bind(&jump);
             break;
           }
-          case wasm::TrapSite::MemoryAccess: {
+          case wasm::OldTrapSite::MemoryAccess: {
             append(wasm::MemoryAccess(site.codeOffset, currentOffset()));
             break;
           }
@@ -3072,7 +3078,7 @@ MacroAssembler::wasmEmitTrapOutOfLineCode()
             // directly to the trap exit stub. This takes advantage of the fact
             // that there is already a CallSite for call_indirect and the
             // current pre-prologue stack/register state.
-            append(wasm::TrapFarJump(site.trap, farJumpWithPatch()));
+            append(wasm::OldTrapFarJump(site.trap, farJumpWithPatch()));
         } else {
             // Inherit the frame depth of the trap site. This value is captured
             // by the wasm::CallSite to allow unwinding this frame.
@@ -3098,7 +3104,7 @@ MacroAssembler::wasmEmitTrapOutOfLineCode()
             // trap-handling function. The frame iterator knows to skip the trap
             // exit's frame so that unwinding begins at the frame and offset of
             // the trapping instruction.
-            wasm::CallSiteDesc desc(site.bytecodeOffset, wasm::CallSiteDesc::TrapExit);
+            wasm::CallSiteDesc desc(site.offset, wasm::CallSiteDesc::OldTrapExit);
             call(desc, site.trap);
         }
 
@@ -3113,7 +3119,7 @@ MacroAssembler::wasmEmitTrapOutOfLineCode()
     // iterator to find the right CodeRange while walking the stack.
     breakpoint();
 
-    trapSites().clear();
+    oldTrapSites().clear();
 }
 
 void
@@ -3243,7 +3249,122 @@ MacroAssembler::emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register tem
     branchTestPtr(Assembler::NonZero, temp2, temp1, noBarrier);
 }
 
+// ========================================================================
+// JS atomic operations.
+
+template<typename T>
+static void
+CompareExchangeJS(MacroAssembler& masm, Scalar::Type arrayType, const Synchronization& sync,
+                  const T& mem, Register oldval, Register newval, Register temp, AnyRegister output)
+{
+    if (arrayType == Scalar::Uint32) {
+        masm.compareExchange(arrayType, sync, mem, oldval, newval, temp);
+        masm.convertUInt32ToDouble(temp, output.fpu());
+    } else {
+        masm.compareExchange(arrayType, sync, mem, oldval, newval, output.gpr());
+    }
+}
+
+void
+MacroAssembler::compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
+                                  const Address& mem, Register oldval, Register newval,
+                                  Register temp, AnyRegister output)
+{
+    CompareExchangeJS(*this, arrayType, sync, mem, oldval, newval, temp, output);
+}
+
+void
+MacroAssembler::compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
+                                  const BaseIndex& mem, Register oldval, Register newval,
+                                  Register temp, AnyRegister output)
+{
+    CompareExchangeJS(*this, arrayType, sync, mem, oldval, newval, temp, output);
+}
+
+template<typename T>
+static void
+AtomicExchangeJS(MacroAssembler& masm, Scalar::Type arrayType, const Synchronization& sync,
+                 const T& mem, Register value, Register temp, AnyRegister output)
+{
+    if (arrayType == Scalar::Uint32) {
+        masm.atomicExchange(arrayType, sync, mem, value, temp);
+        masm.convertUInt32ToDouble(temp, output.fpu());
+    } else {
+        masm.atomicExchange(arrayType, sync, mem, value, output.gpr());
+    }
+}
+
+void
+MacroAssembler::atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
+                                 const Address& mem, Register value, Register temp,
+                                 AnyRegister output)
+{
+    AtomicExchangeJS(*this, arrayType, sync, mem, value, temp, output);
+}
+
+void
+MacroAssembler::atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
+                                 const BaseIndex& mem, Register value, Register temp,
+                                 AnyRegister output)
+{
+    AtomicExchangeJS(*this, arrayType, sync, mem, value, temp, output);
+}
+
+template<typename T>
+static void
+AtomicFetchOpJS(MacroAssembler& masm, Scalar::Type arrayType, const Synchronization& sync,
+                AtomicOp op, Register value, const T& mem, Register temp1, Register temp2,
+                AnyRegister output)
+{
+    if (arrayType == Scalar::Uint32) {
+        masm.atomicFetchOp(arrayType, sync, op, value, mem, temp2, temp1);
+        masm.convertUInt32ToDouble(temp1, output.fpu());
+    } else {
+        masm.atomicFetchOp(arrayType, sync, op, value, mem, temp1, output.gpr());
+    }
+}
+
+void
+MacroAssembler::atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                                Register value, const Address& mem, Register temp1, Register temp2,
+                                AnyRegister output)
+{
+    AtomicFetchOpJS(*this, arrayType, sync, op, value, mem, temp1, temp2, output);
+}
+
+void
+MacroAssembler::atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                                Register value, const BaseIndex& mem, Register temp1, Register temp2,
+                                AnyRegister output)
+{
+    AtomicFetchOpJS(*this, arrayType, sync, op, value, mem, temp1, temp2, output);
+}
+
+void
+MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                                 Register value, const BaseIndex& mem, Register temp)
+{
+    atomicEffectOp(arrayType, sync, op, value, mem, temp);
+}
+
+void
+MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                                 Register value, const Address& mem, Register temp)
+{
+    atomicEffectOp(arrayType, sync, op, value, mem, temp);
+}
+
 //}}} check_macroassembler_style
+
+void
+MacroAssembler::memoryBarrierBefore(const Synchronization& sync) {
+    memoryBarrier(sync.barrierBefore);
+}
+
+void
+MacroAssembler::memoryBarrierAfter(const Synchronization& sync) {
+    memoryBarrier(sync.barrierAfter);
+}
 
 void
 MacroAssembler::loadWasmTlsRegFromFrame(Register dest)

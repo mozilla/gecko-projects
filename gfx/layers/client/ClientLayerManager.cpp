@@ -226,9 +226,6 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
   // Wait for any previous async paints to complete before starting to paint again.
   GetCompositorBridgeChild()->FlushAsyncPaints();
-  if (PaintThread::Get()) {
-    PaintThread::Get()->BeginLayerTransaction();
-  }
 
   MOZ_ASSERT(mForwarder, "ClientLayerManager::BeginTransaction without forwarder");
   if (!mForwarder->IPCOpen()) {
@@ -448,6 +445,12 @@ ClientLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
 
   if (!mRoot || !mForwarder->IPCOpen()) {
     return false;
+  }
+
+  if (mTransactionIncomplete) {
+    // If the previous transaction was incomplete then we may have buffer operations
+    // running on the paint thread that haven't finished yet
+    GetCompositorBridgeChild()->FlushAsyncPaints();
   }
 
   if (!EndTransactionInternal(nullptr, nullptr, aFlags)) {

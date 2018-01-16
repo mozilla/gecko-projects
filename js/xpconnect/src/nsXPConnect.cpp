@@ -23,6 +23,7 @@
 
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/Promise.h"
 
@@ -110,6 +111,7 @@ nsXPConnect::~nsXPConnect()
 
     delete gPrimaryContext;
 
+    MOZ_ASSERT(gSelf == this);
     gSelf = nullptr;
     gOnceAliveNowDead = true;
 }
@@ -269,7 +271,7 @@ xpc::ErrorBase::AppendErrorDetailsTo(nsCString& error)
 void
 xpc::ErrorNote::LogToStderr()
 {
-    if (!nsContentUtils::DOMWindowDumpEnabled())
+    if (!DOMPrefs::DumpEnabled())
         return;
 
     nsAutoCString error;
@@ -283,7 +285,7 @@ xpc::ErrorNote::LogToStderr()
 void
 xpc::ErrorReport::LogToStderr()
 {
-    if (!nsContentUtils::DOMWindowDumpEnabled())
+    if (!DOMPrefs::DumpEnabled())
         return;
 
     nsAutoCString error;

@@ -46,39 +46,6 @@ class nsIObjectOutputStream;
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
 
-class nsRefMapEntry : public nsStringHashKey
-{
-public:
-  explicit nsRefMapEntry(const nsAString& aKey) :
-    nsStringHashKey(&aKey)
-  {
-  }
-  explicit nsRefMapEntry(const nsAString* aKey) :
-    nsStringHashKey(aKey)
-  {
-  }
-  nsRefMapEntry(const nsRefMapEntry& aOther) :
-    nsStringHashKey(&aOther.GetKey())
-  {
-    NS_ERROR("Should never be called");
-  }
-
-  mozilla::dom::Element* GetFirstElement();
-  void AppendAll(nsCOMArray<mozilla::dom::Element>* aElements);
-  /**
-   * @return true if aElement was added, false if we failed due to OOM
-   */
-  bool AddElement(mozilla::dom::Element* aElement);
-  /**
-   * @return true if aElement was removed and it was the last content for
-   * this ref, so this entry should be removed from the map
-   */
-  bool RemoveElement(mozilla::dom::Element* aElement);
-
-private:
-  nsTArray<mozilla::dom::Element*> mRefContentList;
-};
-
 /**
  * The XUL document class
  */
@@ -122,18 +89,10 @@ public:
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
     NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
-    NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTEWILLCHANGE
 
     // nsIXULDocument interface
-    virtual void GetElementsForID(const nsAString& aID,
-                                  nsCOMArray<mozilla::dom::Element>& aElements) override;
-
     NS_IMETHOD AddSubtreeToDocument(nsIContent* aContent) override;
     NS_IMETHOD RemoveSubtreeFromDocument(nsIContent* aContent) override;
-    NS_IMETHOD SetTemplateBuilderFor(nsIContent* aContent,
-                                     nsIXULTemplateBuilder* aBuilder) override;
-    NS_IMETHOD GetTemplateBuilderFor(nsIContent* aContent,
-                                     nsIXULTemplateBuilder** aResult) override;
     NS_IMETHOD OnPrototypeLoadDone(bool aResumeWalk) override;
     bool OnDocumentParserError() override;
 
@@ -156,9 +115,6 @@ public:
     using nsDocument::GetLastStyleSheetSet;
     using nsDocument::MozSetImageElement;
     using nsIDocument::GetLocation;
-
-    // Helper for StyleScope::GetElementById.
-    Element* GetRefById(const nsAString & elementId);
 
     // nsIDOMXULDocument interface
     NS_DECL_NSIDOMXULDOCUMENT
@@ -236,11 +192,6 @@ protected:
 
     nsresult Init(void) override;
     nsresult StartLayout(void);
-
-    nsresult
-    AddElementToRefMap(Element* aElement);
-    void
-    RemoveElementFromRefMap(Element* aElement);
 
     nsresult GetViewportSize(int32_t* aWidth, int32_t* aHeight);
 
@@ -322,9 +273,6 @@ protected:
 
     XULDocument*             mNextSrcLoadWaiter;  // [OWNER] but not COMPtr
 
-    // Tracks elements with a 'ref' attribute, or an 'id' attribute where
-    // the element's namespace has no registered ID attribute name.
-    nsTHashtable<nsRefMapEntry> mRefMap;
     nsCOMPtr<nsIXULStore>       mLocalStore;
     bool                        mApplyingPersistedAttrs;
     bool                        mIsWritingFastLoad;
@@ -351,12 +299,6 @@ protected:
     nsTArray<RefPtr<StyleSheet>> mOverlaySheets;
 
     nsCOMPtr<nsIDOMXULCommandDispatcher>     mCommandDispatcher; // [OWNER] of the focus tracker
-
-    // Maintains the template builders that have been attached to
-    // content elements
-    typedef nsInterfaceHashtable<nsISupportsHashKey, nsIXULTemplateBuilder>
-        BuilderTable;
-    BuilderTable* mTemplateBuilderTable;
 
     uint32_t mPendingSheets;
 
@@ -469,18 +411,6 @@ protected:
     size_t mOffThreadCompileStringLength;
 
     /**
-     * Check if a XUL template builder has already been hooked up.
-     */
-    static nsresult
-    CheckTemplateBuilderHookup(mozilla::dom::Element* aElement, bool* aNeedsHookup);
-
-    /**
-     * Create a XUL template builder on the specified node.
-     */
-    static nsresult
-    CreateTemplateBuilder(Element* aElement);
-
-    /**
      * Add the current prototype's style sheets (currently it's just
      * style overlays from the chrome registry) to the document.
      */
@@ -566,21 +496,6 @@ protected:
     };
 
     friend class OverlayForwardReference;
-
-    class TemplateBuilderHookup : public nsForwardReference
-    {
-    protected:
-        nsCOMPtr<Element> mElement; // [OWNER]
-
-    public:
-        explicit TemplateBuilderHookup(Element* aElement)
-            : mElement(aElement) {}
-
-        virtual Phase GetPhase() override { return eHookup; }
-        virtual Result Resolve() override;
-    };
-
-    friend class TemplateBuilderHookup;
 
     // The out params of FindBroadcaster only have values that make sense when
     // the method returns NS_FINDBROADCASTER_FOUND.  In all other cases, the

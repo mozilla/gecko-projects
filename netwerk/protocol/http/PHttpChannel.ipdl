@@ -47,7 +47,6 @@ parent:
                         OptionalURIParams referrerUri,
                         OptionalURIParams apiRedirectTo,
                         OptionalCorsPreflightArgs corsPreflightArgs,
-                        bool forceHSTSPriming, bool mixedContentWouldBlock,
                         bool chooseAppcache);
 
   // For document loads we keep this protocol open after child's
@@ -149,6 +148,9 @@ child:
   async LogBlockedCORSRequest(nsString message);
 
   async AttachStreamFilter(Endpoint<PStreamFilterParent> aEndpoint);
+
+  // See ADivertableParentChannel::CancelDiversion
+  async CancelDiversion();
 
 both:
   // After receiving this message, the parent also calls

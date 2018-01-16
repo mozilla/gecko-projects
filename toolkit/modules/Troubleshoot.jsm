@@ -289,6 +289,27 @@ var dataProviders = {
     });
   },
 
+  securitySoftware: function securitySoftware(done) {
+    let data = {};
+
+    let sysInfo = Cc["@mozilla.org/system-info;1"].
+                  getService(Ci.nsIPropertyBag2);
+
+    const keys = ["registeredAntiVirus", "registeredAntiSpyware",
+                  "registeredFirewall"];
+    for (let key of keys) {
+      let prop = "";
+      try {
+        prop = sysInfo.getProperty(key);
+      } catch (e) {
+      }
+
+      data[key] = prop;
+    }
+
+    done(data);
+  },
+
   features: function features(done) {
     AddonManager.getAddonsByTypes(["extension"], function(features) {
       features = features.filter(f => f.isSystem);
@@ -528,7 +549,9 @@ var dataProviders = {
 
         // Eagerly free resources.
         let loseExt = gl.getExtension("WEBGL_lose_context");
-        loseExt.loseContext();
+        if (loseExt) {
+             loseExt.loseContext();
+        }
     }
 
     GetWebGLInfo(data, "webgl1", "webgl");

@@ -12,6 +12,7 @@
 #include "mozilla/dom/Clients.h"
 #include "mozilla/dom/Console.h"
 #include "mozilla/dom/DedicatedWorkerGlobalScopeBinding.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/IDBFactory.h"
@@ -371,7 +372,7 @@ WorkerGlobalScope::Dump(const Optional<nsAString>& aString) const
   }
 
 #if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-  if (!mWorkerPrivate->DumpEnabled()) {
+  if (!DOMPrefs::DumpEnabled()) {
     return;
   }
 #endif
@@ -480,7 +481,7 @@ WorkerGlobalScope::CreateImageBitmap(JSContext* aCx,
                                      const Sequence<ChannelPixelLayout>& aLayout,
                                      ErrorResult& aRv)
 {
-  if (!ImageBitmap::ExtensionsEnabled(aCx)) {
+  if (!DOMPrefs::ImageBitmapExtensionsEnabled()) {
     aRv.Throw(NS_ERROR_TYPE_ERR);
     return nullptr;
   }
@@ -512,6 +513,28 @@ AbstractThread*
 WorkerGlobalScope::AbstractMainThreadFor(TaskCategory aCategory)
 {
   MOZ_CRASH("AbstractMainThreadFor not supported for workers.");
+}
+
+Maybe<ClientInfo>
+WorkerGlobalScope::GetClientInfo() const
+{
+  Maybe<ClientInfo> info;
+  info.emplace(mWorkerPrivate->GetClientInfo());
+  return Move(info);
+}
+
+Maybe<ClientState>
+WorkerGlobalScope::GetClientState() const
+{
+  Maybe<ClientState> state;
+  state.emplace(mWorkerPrivate->GetClientState());
+  return Move(state);
+}
+
+Maybe<ServiceWorkerDescriptor>
+WorkerGlobalScope::GetController() const
+{
+  return mWorkerPrivate->GetController();
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate,

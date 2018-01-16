@@ -850,10 +850,11 @@ nsFocusManager::ContentRemoved(nsIDocument* aDocument, nsIContent* aContent)
   if (!window)
     return NS_OK;
 
-  // if the content is currently focused in the window, or is an ancestor
-  // of the currently focused element, reset the focus within that window.
+  // if the content is currently focused in the window, or is an
+  // shadow-including inclusive ancestor of the currently focused element,
+  // reset the focus within that window.
   nsIContent* content = window->GetFocusedNode();
-  if (content && nsContentUtils::ContentIsDescendantOf(content, aContent)) {
+  if (content && nsContentUtils::ContentIsHostIncludingDescendantOf(content, aContent)) {
     bool shouldShowFocusRing = window->ShouldShowFocusRing();
     window->SetFocusedNode(nullptr);
 
@@ -2555,7 +2556,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
 
       startContent = do_QueryInterface(startNode);
       if (startContent && startContent->IsElement()) {
-        childContent = startContent->GetChildAt(startOffset);
+        childContent = startContent->GetChildAt_Deprecated(startOffset);
         if (childContent) {
           startContent = childContent;
         }
@@ -2565,7 +2566,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
       if (endContent && endContent->IsElement()) {
         uint32_t endOffset = 0;
         domRange->GetEndOffset(&endOffset);
-        childContent = endContent->GetChildAt(endOffset);
+        childContent = endContent->GetChildAt_Deprecated(endOffset);
         if (childContent) {
           endContent = childContent;
         }
@@ -3382,9 +3383,10 @@ nsFocusManager::GetNextTabbableMapArea(bool aForward,
       index = aForward ? -1 : (int32_t)count;
     }
 
-    // GetChildAt will return nullptr if our index < 0 or index >= count
+    // GetChildAt_Deprecated will return nullptr if our index < 0 or index >=
+    // count
     nsCOMPtr<nsIContent> areaContent;
-    while ((areaContent = mapContent->GetChildAt(aForward ? ++index : --index)) != nullptr) {
+    while ((areaContent = mapContent->GetChildAt_Deprecated(aForward ? ++index : --index)) != nullptr) {
       if (areaContent->IsFocusable(&tabIndex) && tabIndex == aCurrentTabIndex) {
         return areaContent;
       }

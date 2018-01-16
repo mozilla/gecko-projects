@@ -29,16 +29,14 @@ NS_IMPL_RELEASE_INHERITED(ModuleLoadRequest, ScriptLoadRequest)
 
 ModuleLoadRequest::ModuleLoadRequest(nsIURI* aURI,
                                      nsIScriptElement* aElement,
-                                     ValidJSVersion aValidJSVersion,
                                      CORSMode aCORSMode,
                                      const SRIMetadata& aIntegrity,
                                      nsIURI* aReferrer,
                                      mozilla::net::ReferrerPolicy aReferrerPolicy,
                                      ScriptLoader* aLoader)
-  : ScriptLoadRequest(ScriptKind::Module,
+  : ScriptLoadRequest(ScriptKind::eModule,
                       aURI,
                       aElement,
-                      aValidJSVersion,
                       aCORSMode,
                       aIntegrity,
                       aReferrer,
@@ -52,10 +50,9 @@ ModuleLoadRequest::ModuleLoadRequest(nsIURI* aURI,
 
 ModuleLoadRequest::ModuleLoadRequest(nsIURI* aURI,
                                      ModuleLoadRequest* aParent)
-  : ScriptLoadRequest(ScriptKind::Module,
+  : ScriptLoadRequest(ScriptKind::eModule,
                       aURI,
                       aParent->mElement,
-                      aParent->mValidJSVersion,
                       aParent->mCORSMode,
                       SRIMetadata(),
                       aParent->mURI,
@@ -68,6 +65,7 @@ ModuleLoadRequest::ModuleLoadRequest(nsIURI* aURI,
 
   mTriggeringPrincipal = aParent->mTriggeringPrincipal;
   mIsInline = false;
+  mScriptMode = aParent->mScriptMode;
 }
 
 void
@@ -75,7 +73,7 @@ ModuleLoadRequest::Cancel()
 {
   ScriptLoadRequest::Cancel();
   mModuleScript = nullptr;
-  mProgress = ScriptLoadRequest::Progress::Ready;
+  mProgress = ScriptLoadRequest::Progress::eReady;
   CancelImports();
   mReady.RejectIfExists(NS_ERROR_DOM_ABORT_ERR, __func__);
 }

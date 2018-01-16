@@ -51,7 +51,6 @@
 #include "nsXULCommandDispatcher.h"
 #include "nsXULElement.h"
 #include "mozilla/Logging.h"
-#include "rdf.h"
 #include "nsIFrame.h"
 #include "nsXBLService.h"
 #include "nsCExternalHandlerService.h"
@@ -59,6 +58,7 @@
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsContentList.h"
+#include "nsISimpleEnumerator.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsNodeInfoManager.h"
@@ -95,8 +95,6 @@
 #include "xpcpublic.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
-#include "nsXULTemplateBuilder.h"
-#include "nsXULTreeBuilder.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -151,36 +149,6 @@ struct BroadcasterMapEntry : public PLDHashEntryHdr
     nsTArray<BroadcastListener*> mListeners;  // [OWNING] of BroadcastListener objects
 };
 
-Element*
-nsRefMapEntry::GetFirstElement()
-{
-    return mRefContentList.SafeElementAt(0);
-}
-
-void
-nsRefMapEntry::AppendAll(nsCOMArray<Element>* aElements)
-{
-    for (size_t i = 0; i < mRefContentList.Length(); ++i) {
-        aElements->AppendObject(mRefContentList[i]);
-    }
-}
-
-bool
-nsRefMapEntry::AddElement(Element* aElement)
-{
-    if (mRefContentList.Contains(aElement)) {
-        return true;
-    }
-    return mRefContentList.AppendElement(aElement);
-}
-
-bool
-nsRefMapEntry::RemoveElement(Element* aElement)
-{
-    mRefContentList.RemoveElement(aElement);
-    return mRefContentList.IsEmpty();
-}
-
 //----------------------------------------------------------------------
 //
 // ctors & dtors
@@ -197,7 +165,6 @@ XULDocument::XULDocument(void)
       mDocumentLoaded(false),
       mStillWalking(false),
       mRestrictPersistence(false),
-      mTemplateBuilderTable(nullptr),
       mPendingSheets(0),
       mDocLWTheme(Doc_Theme_Uninitialized),
       mState(eState_Master),
@@ -236,8 +203,6 @@ XULDocument::~XULDocument()
 
     // Destroy our broadcaster map.
     delete mBroadcasterMap;
-
-    delete mTemplateBuilderTable;
 
     Preferences::UnregisterCallback(XULDocument::DirectionChanged,
                                     "intl.uidirection", this);
@@ -285,19 +250,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XULDocument, XMLDocument)
     // XXX tmp->mForwardReferences?
     // XXX tmp->mContextStack?
 
-    // An element will only have a template builder as long as it's in the
-    // document, so we'll traverse the table here instead of from the element.
-    if (tmp->mTemplateBuilderTable) {
-        for (auto iter = tmp->mTemplateBuilderTable->Iter();
-             !iter.Done();
-             iter.Next()) {
-            NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mTemplateBuilderTable key");
-            cb.NoteXPCOMChild(iter.Key());
-            NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mTemplateBuilderTable value");
-            cb.NoteXPCOMChild(iter.UserData());
-        }
-    }
-
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentPrototype)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMasterPrototype)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCommandDispatcher)
@@ -323,9 +275,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XULDocument, XMLDocument)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(XULDocument, XMLDocument)
-    delete tmp->mTemplateBuilderTable;
-    tmp->mTemplateBuilderTable = nullptr;
-
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mCommandDispatcher)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocalStore)
     //XXX We should probably unlink all the objects we traverse.
@@ -632,11 +581,10 @@ ClearBroadcasterMapEntry(PLDHashTable* aTable, PLDHashEntryHdr* aEntry)
 static bool
 CanBroadcast(int32_t aNameSpaceID, nsAtom* aAttribute)
 {
-    // Don't push changes to the |id|, |ref|, |persist|, |command| or
+    // Don't push changes to the |id|, |persist|, |command| or
     // |observes| attribute.
     if (aNameSpaceID == kNameSpaceID_None) {
         if ((aAttribute == nsGkAtoms::id) ||
-            (aAttribute == nsGkAtoms::ref) ||
             (aAttribute == nsGkAtoms::persist) ||
             (aAttribute == nsGkAtoms::command) ||
             (aAttribute == nsGkAtoms::observes)) {
@@ -912,24 +860,6 @@ XULDocument::ExecuteOnBroadcastHandlerFor(Element* aBroadcaster,
     return NS_OK;
 }
 
-void
-XULDocument::AttributeWillChange(nsIDocument* aDocument,
-                                 Element* aElement, int32_t aNameSpaceID,
-                                 nsAtom* aAttribute, int32_t aModType,
-                                 const nsAttrValue* aNewValue)
-{
-    MOZ_ASSERT(aElement, "Null content!");
-    NS_PRECONDITION(aAttribute, "Must have an attribute that's changing!");
-
-    // XXXbz check aNameSpaceID, dammit!
-    // See if we need to update our ref map.
-    if (aAttribute == nsGkAtoms::ref) {
-        // Might not need this, but be safe for now.
-        nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
-        RemoveElementFromRefMap(aElement);
-    }
-}
-
 static bool
 ShouldPersistAttribute(Element* aElement, nsAtom* aAttribute)
 {
@@ -962,12 +892,6 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
 
     // Might not need this, but be safe for now.
     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
-
-    // XXXbz check aNameSpaceID, dammit!
-    // See if we need to update our ref map.
-    if (aAttribute == nsGkAtoms::ref) {
-        AddElementToRefMap(aElement);
-    }
 
     // Synchronize broadcast listeners
     if (mBroadcasterMap &&
@@ -1095,22 +1019,6 @@ XULDocument::ContentRemoved(nsIDocument* aDocument,
 //
 // nsIXULDocument interface
 //
-
-void
-XULDocument::GetElementsForID(const nsAString& aID,
-                              nsCOMArray<Element>& aElements)
-{
-    aElements.Clear();
-
-    nsIdentifierMapEntry *entry = mIdentifierMap.GetEntry(aID);
-    if (entry) {
-        entry->AppendAllIdContent(&aElements);
-    }
-    nsRefMapEntry *refEntry = mRefMap.GetEntry(aID);
-    if (refEntry) {
-        refEntry->AppendAll(&aElements);
-    }
-}
 
 nsresult
 XULDocument::AddForwardReference(nsForwardReference* aRef)
@@ -1598,17 +1506,6 @@ XULDocument::GetCommandDispatcher(nsIDOMXULCommandDispatcher** aTracker)
     return NS_OK;
 }
 
-Element*
-XULDocument::GetRefById(const nsAString& aID)
-{
-    if (nsRefMapEntry* refEntry = mRefMap.GetEntry(aID)) {
-        MOZ_ASSERT(refEntry->GetFirstElement());
-        return refEntry->GetFirstElement();
-    }
-
-    return nullptr;
-}
-
 nsresult
 XULDocument::AddElementToDocumentPre(Element* aElement)
 {
@@ -1616,17 +1513,14 @@ XULDocument::AddElementToDocumentPre(Element* aElement)
     // to the XUL Document.
     nsresult rv;
 
-    // 1. Add the element to the resource-to-element map. Also add it to
-    // the id map, since it seems this can be called when creating
-    // elements from prototypes.
+    // 1. Add the element to the id map, since it seems this can be
+    // called when creating elements from prototypes.
     nsAtom* id = aElement->GetID();
     if (id) {
         // FIXME: Shouldn't BindToTree take care of this?
         nsAutoScriptBlocker scriptBlocker;
         AddToIdTable(aElement, id);
     }
-    rv = AddElementToRefMap(aElement);
-    if (NS_FAILED(rv)) return rv;
 
     // 2. If the element is a 'command updater' (i.e., has a
     // "commandupdater='true'" attribute), then add the element to the
@@ -1665,26 +1559,6 @@ XULDocument::AddElementToDocumentPost(Element* aElement)
     if (aElement->NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
         // Create our XUL key listener and hook it up.
         nsXBLService::AttachGlobalKeyHandler(aElement);
-    }
-
-    // See if we need to attach a XUL template to this node
-    bool needsHookup;
-    nsresult rv = CheckTemplateBuilderHookup(aElement, &needsHookup);
-    if (NS_FAILED(rv))
-        return rv;
-
-    if (needsHookup) {
-        if (mResolutionPhase == nsForwardReference::eDone) {
-            rv = CreateTemplateBuilder(aElement);
-            if (NS_FAILED(rv))
-                return rv;
-        }
-        else {
-            TemplateBuilderHookup* hookup = new TemplateBuilderHookup(aElement);
-            rv = AddForwardReference(hookup);
-            if (NS_FAILED(rv))
-                return rv;
-        }
     }
 
     return NS_OK;
@@ -1747,10 +1621,8 @@ XULDocument::RemoveSubtreeFromDocument(nsIContent* aContent)
             return rv;
     }
 
-    // 2. Remove the element from the resource-to-element map.
-    // Also remove it from the id map, since we added it in
+    // Remove the element from the id map, since we added it in
     // AddElementToDocumentPre().
-    RemoveElementFromRefMap(aElement);
     nsAtom* id = aElement->GetID();
     if (id) {
         // FIXME: Shouldn't UnbindFromTree take care of this?
@@ -1782,80 +1654,6 @@ XULDocument::RemoveSubtreeFromDocument(nsIContent* aContent)
     }
 
     return NS_OK;
-}
-
-NS_IMETHODIMP
-XULDocument::SetTemplateBuilderFor(nsIContent* aContent,
-                                   nsIXULTemplateBuilder* aBuilder)
-{
-    if (! mTemplateBuilderTable) {
-        if (!aBuilder) {
-            return NS_OK;
-        }
-        mTemplateBuilderTable = new BuilderTable;
-    }
-
-    if (aBuilder) {
-        mTemplateBuilderTable->Put(aContent, aBuilder);
-    }
-    else {
-        mTemplateBuilderTable->Remove(aContent);
-    }
-
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-XULDocument::GetTemplateBuilderFor(nsIContent* aContent,
-                                   nsIXULTemplateBuilder** aResult)
-{
-    if (mTemplateBuilderTable) {
-        mTemplateBuilderTable->Get(aContent, aResult);
-    }
-    else
-        *aResult = nullptr;
-
-    return NS_OK;
-}
-
-static void
-GetRefMapAttribute(Element* aElement, nsAutoString* aValue)
-{
-    aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ref, *aValue);
-}
-
-nsresult
-XULDocument::AddElementToRefMap(Element* aElement)
-{
-    // Look at the element's 'ref' attribute, and if set,
-    // add an entry in the resource-to-element map to the element.
-    nsAutoString value;
-    GetRefMapAttribute(aElement, &value);
-    if (!value.IsEmpty()) {
-        nsRefMapEntry *entry = mRefMap.PutEntry(value);
-        if (!entry)
-            return NS_ERROR_OUT_OF_MEMORY;
-        if (!entry->AddElement(aElement))
-            return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    return NS_OK;
-}
-
-void
-XULDocument::RemoveElementFromRefMap(Element* aElement)
-{
-    // Remove the element from the resource-to-element map.
-    nsAutoString value;
-    GetRefMapAttribute(aElement, &value);
-    if (!value.IsEmpty()) {
-        nsRefMapEntry *entry = mRefMap.GetEntry(value);
-        if (!entry)
-            return;
-        if (entry->RemoveElement(aElement)) {
-            mRefMap.RemoveEntry(entry);
-        }
-    }
 }
 
 //----------------------------------------------------------------------
@@ -2082,9 +1880,19 @@ XULDocument::ApplyPersistentAttributesInternal()
             continue;
         }
 
-        // This will clear the array if there are no elements.
-        GetElementsForID(id, elements);
-        if (!elements.Count()) {
+        nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(id);
+        if (!entry) {
+            continue;
+        }
+
+        // We want to hold strong refs to the elements while applying
+        // persistent attributes, just in case.
+        elements.Clear();
+        elements.SetCapacity(entry->GetIdElements().Length());
+        for (Element* element : entry->GetIdElements()) {
+            elements.AppendObject(element);
+        }
+        if (elements.IsEmpty()) {
             continue;
         }
 
@@ -2311,9 +2119,6 @@ XULDocument::PrepareToWalk()
         if (NS_FAILED(rv)) return rv;
 
         rv = AppendChildTo(root, false);
-        if (NS_FAILED(rv)) return rv;
-
-        rv = AddElementToRefMap(root);
         if (NS_FAILED(rv)) return rv;
 
         // Block onload until we've finished building the complete
@@ -3631,95 +3436,6 @@ XULDocument::AddAttributes(nsXULPrototypeElement* aPrototype,
 
 
 nsresult
-XULDocument::CheckTemplateBuilderHookup(Element* aElement,
-                                        bool* aNeedsHookup)
-{
-    // See if the element already has a `database' attribute. If it
-    // does, then the template builder has already been created.
-    //
-    // XXX This approach will crash and burn (well, maybe not _that_
-    // bad) if aElement is not a XUL element.
-    //
-    // XXXvarga Do we still want to support non XUL content?
-    RefPtr<nsXULElement> xulElement = nsXULElement::FromContent(aElement);
-    if (xulElement) {
-        nsCOMPtr<nsIRDFCompositeDataSource> ds = xulElement->GetDatabase();
-        if (ds) {
-            *aNeedsHookup = false;
-            return NS_OK;
-        }
-    }
-
-    // Check aElement for a 'datasources' attribute, if it has
-    // one a XUL template builder needs to be hooked up.
-    *aNeedsHookup = aElement->HasAttr(kNameSpaceID_None,
-                                      nsGkAtoms::datasources);
-    return NS_OK;
-}
-
-/* static */ nsresult
-XULDocument::CreateTemplateBuilder(Element* aElement)
-{
-    // Check if need to construct a tree builder or content builder.
-    bool isTreeBuilder = false;
-
-    // return successful if the element is not is a document, as an inline
-    // script could have removed it
-    nsIDocument* document = aElement->GetUncomposedDoc();
-    NS_ENSURE_TRUE(document, NS_OK);
-
-    int32_t nameSpaceID;
-    nsAtom* baseTag = document->BindingManager()->
-      ResolveTag(aElement, &nameSpaceID);
-
-    if ((nameSpaceID == kNameSpaceID_XUL) && (baseTag == nsGkAtoms::tree)) {
-        // By default, we build content for a tree and then we attach
-        // the tree content view. However, if the `dont-build-content'
-        // flag is set, then we we'll attach a tree builder which
-        // directly implements the tree view.
-
-        nsAutoString flags;
-        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::flags, flags);
-        if (flags.Find(NS_LITERAL_STRING("dont-build-content")) >= 0) {
-            isTreeBuilder = true;
-        }
-    }
-
-    if (isTreeBuilder) {
-        // Create and initialize a tree builder.
-        RefPtr<nsXULTreeBuilder> builder = new nsXULTreeBuilder(aElement);
-        nsresult rv = builder->Init();
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        // Create a <treechildren> if one isn't there already.
-        // XXXvarga what about attributes?
-        RefPtr<Element> bodyContent;
-        nsXULContentUtils::FindChildByTag(aElement, kNameSpaceID_XUL,
-                                          nsGkAtoms::treechildren,
-                                          getter_AddRefs(bodyContent));
-
-        if (!bodyContent) {
-            bodyContent =
-                document->CreateElem(nsDependentAtomString(nsGkAtoms::treechildren),
-                                     nullptr, kNameSpaceID_XUL);
-
-            aElement->AppendChildTo(bodyContent, false);
-        }
-    }
-    else {
-        // Create and initialize a content builder.
-        nsCOMPtr<nsIXULTemplateBuilder> builder;
-        nsresult rv = NS_NewXULContentBuilder(aElement, getter_AddRefs(builder));
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        builder->CreateContents(aElement, false);
-    }
-
-    return NS_OK;
-}
-
-
-nsresult
 XULDocument::AddPrototypeSheets()
 {
     nsresult rv;
@@ -3949,13 +3665,13 @@ XULDocument::OverlayForwardReference::Merge(Element* aTargetElement,
                 // non-null ID.
                 rv = Merge(elementInDocument, currContent->AsElement(), aNotify);
                 if (NS_FAILED(rv)) return rv;
-                aOverlayElement->RemoveChildAt(0, false);
+                aOverlayElement->RemoveChildAt_Deprecated(0, false);
 
                 continue;
             }
         }
 
-        aOverlayElement->RemoveChildAt(0, false);
+        aOverlayElement->RemoveChildAt_Deprecated(0, false);
 
         rv = InsertElement(aTargetElement, currContent, aNotify);
         if (NS_FAILED(rv)) return rv;
@@ -4033,30 +3749,6 @@ XULDocument::BroadcasterHookup::~BroadcasterHookup()
                 broadcasteridC.get()));
     }
 }
-
-
-//----------------------------------------------------------------------
-//
-// XULDocument::TemplateBuilderHookup
-//
-
-nsForwardReference::Result
-XULDocument::TemplateBuilderHookup::Resolve()
-{
-    bool needsHookup;
-    nsresult rv = CheckTemplateBuilderHookup(mElement, &needsHookup);
-    if (NS_FAILED(rv))
-        return eResolve_Error;
-
-    if (needsHookup) {
-        rv = CreateTemplateBuilder(mElement);
-        if (NS_FAILED(rv))
-            return eResolve_Error;
-    }
-
-    return eResolve_Succeeded;
-}
-
 
 //----------------------------------------------------------------------
 
@@ -4339,7 +4031,7 @@ XULDocument::RemoveElement(nsINode* aParent, nsINode* aChild)
 {
     int32_t nodeOffset = aParent->IndexOf(aChild);
 
-    aParent->RemoveChildAt(nodeOffset, true);
+    aParent->RemoveChildAt_Deprecated(nodeOffset, true);
     return NS_OK;
 }
 

@@ -428,7 +428,7 @@ where
 
             // Compute the primary rule node.
             stylist.push_applicable_declarations(
-                &self.element,
+                self.element,
                 implemented_pseudo.as_ref(),
                 self.element.style_attribute(),
                 self.element.get_smil_override(),
@@ -502,7 +502,7 @@ where
         // NB: We handle animation rules for ::before and ::after when
         // traversing them.
         stylist.push_applicable_declarations(
-            &self.element,
+            self.element,
             Some(pseudo_element),
             None,
             None,
@@ -597,7 +597,12 @@ where
         self.context
             .thread_local
             .rule_cache
-            .insert_if_possible(&values, pseudo, &conditions);
+            .insert_if_possible(
+                &self.context.shared.guards,
+                &values,
+                pseudo,
+                &conditions
+            );
 
         values
     }

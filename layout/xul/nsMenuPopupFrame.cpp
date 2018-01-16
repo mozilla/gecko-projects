@@ -2090,12 +2090,8 @@ nsMenuPopupFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent, bool& doAction
   doAction = false;
 
   // Enumerate over our list of frames.
-  auto insertion = PresShell()->
-    FrameConstructor()->GetInsertionPoint(GetContent(), nullptr);
-  nsContainerFrame* immediateParent = insertion.mParentFrame;
-  if (!immediateParent)
-    immediateParent = this;
-
+  nsContainerFrame* immediateParent =
+    nsXULPopupManager::ImmediateParentFrame(this);
   uint32_t matchCount = 0, matchShortcutCount = 0;
   bool foundActive = false;
   nsMenuFrame* frameBefore = nullptr;
@@ -2303,14 +2299,6 @@ nsMenuPopupFrame::AttributeChanged(int32_t aNameSpaceID,
 
   if (aAttribute == nsGkAtoms::left || aAttribute == nsGkAtoms::top)
     MoveToAttributePosition();
-
-#ifndef MOZ_GTK2
-  if (aAttribute == nsGkAtoms::noautohide) {
-    nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
-    if (pm)
-      pm->EnableRollup(mContent, !IsNoAutoHide());
-  }
-#endif
 
   if (aAttribute == nsGkAtoms::remote) {
     // When the remote attribute changes, we need to create a new widget to

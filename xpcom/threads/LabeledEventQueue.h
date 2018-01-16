@@ -36,18 +36,18 @@ public:
 
   void PutEvent(already_AddRefed<nsIRunnable>&& aEvent,
                 EventPriority aPriority,
-                const MutexAutoLock& aProofOfLock) final;
+                const MutexAutoLock& aProofOfLock) final override;
   already_AddRefed<nsIRunnable> GetEvent(EventPriority* aPriority,
-                                         const MutexAutoLock& aProofOfLock) final;
+                                         const MutexAutoLock& aProofOfLock) final override;
 
-  bool IsEmpty(const MutexAutoLock& aProofOfLock) final;
-  size_t Count(const MutexAutoLock& aProofOfLock) const final;
-  bool HasReadyEvent(const MutexAutoLock& aProofOfLock) final;
+  bool IsEmpty(const MutexAutoLock& aProofOfLock) final override;
+  size_t Count(const MutexAutoLock& aProofOfLock) const final override;
+  bool HasReadyEvent(const MutexAutoLock& aProofOfLock) final override;
 
-  void EnableInputEventPrioritization(const MutexAutoLock& aProofOfLock) final {}
-  void FlushInputEventPrioritization(const MutexAutoLock& aProofOfLock) final {}
-  void SuspendInputEventPrioritization(const MutexAutoLock& aProofOfLock) final {}
-  void ResumeInputEventPrioritization(const MutexAutoLock& aProofOfLock) final {}
+  void EnableInputEventPrioritization(const MutexAutoLock& aProofOfLock) final override {}
+  void FlushInputEventPrioritization(const MutexAutoLock& aProofOfLock) final override {}
+  void SuspendInputEventPrioritization(const MutexAutoLock& aProofOfLock) final override {}
+  void ResumeInputEventPrioritization(const MutexAutoLock& aProofOfLock) final override {}
 
 private:
 
@@ -137,11 +137,11 @@ private:
   EpochQueue mEpochs;
   size_t mNumEvents = 0;
 
-  // Number of SchedulerGroups that must be processed before we prioritize an
-  // active tab. This field is designed to guarantee a 1:1 interleaving between
+  // Number of SchedulerGroups that must be processed before we prioritize a
+  // visible tab. This field is designed to guarantee a 1:1 interleaving between
   // foreground and background SchedulerGroups. For details, see its usage in
   // LabeledEventQueue.cpp.
-  int64_t mAvoidActiveTabCount = 0;
+  int64_t mAvoidVisibleTabCount = 0;
   EventPriority mPriority;
 };
 

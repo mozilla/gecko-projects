@@ -413,6 +413,8 @@ ChannelMediaDecoder::DownloadProgressed()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
 
+  GetOwner()->DownloadProgressed();
+
   using StatsPromise = MozPromise<MediaStatistics, bool, true>;
   InvokeAsync(GetStateMachine()->OwnerThread(),
               __func__,
@@ -437,8 +439,8 @@ ChannelMediaDecoder::DownloadProgressed()
         mCanPlayThrough = aStats.CanPlayThrough();
         GetStateMachine()->DispatchCanPlayThrough(mCanPlayThrough);
         mResource->ThrottleReadahead(ShouldThrottleDownload(aStats));
-        AbstractThread::AutoEnter context(AbstractMainThread());
-        GetOwner()->DownloadProgressed();
+        // Update readyState since mCanPlayThrough might have changed.
+        GetOwner()->UpdateReadyState();
       },
       []() { MOZ_ASSERT_UNREACHABLE("Promise not resolved"); });
 }
@@ -576,29 +578,6 @@ ChannelMediaDecoder::Resume()
   if (mResource) {
     mResource->Resume();
   }
-}
-
-void
-ChannelMediaDecoder::PinForSeek()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!mResource || mPinnedForSeek) {
-    return;
-  }
-  mPinnedForSeek = true;
-  mResource->Pin();
-}
-
-void
-ChannelMediaDecoder::UnpinForSeek()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-  if (!mResource || !mPinnedForSeek) {
-    return;
-  }
-  mPinnedForSeek = false;
-  mResource->Unpin();
 }
 
 void

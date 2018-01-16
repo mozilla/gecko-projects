@@ -255,7 +255,7 @@ public:
   }
   ~nsMediaEvent() {}
 
-  NS_IMETHOD Run() = 0;
+  NS_IMETHOD Run() override = 0;
 
 protected:
   bool IsCancelled() {
@@ -1584,6 +1584,11 @@ HTMLMediaElement::MozRequestDebugInfo(ErrorResult& aRv)
 
   nsAutoString result;
   GetMozDebugReaderData(result);
+
+  if (mVideoFrameContainer) {
+    result.AppendPrintf("Compositor dropped frame(including when element's invisible): %u\n",
+                        mVideoFrameContainer->GetDroppedImageCount());
+  }
 
   if (mMediaKeys) {
     nsString EMEInfo;
@@ -5274,7 +5279,7 @@ public:
   explicit MediaStreamTracksAvailableCallback(HTMLMediaElement* aElement):
       OnTracksAvailableCallback(), mElement(aElement)
     {}
-  virtual void NotifyTracksAvailable(DOMMediaStream* aStream)
+  virtual void NotifyTracksAvailable(DOMMediaStream* aStream) override
   {
     NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
@@ -8081,3 +8086,6 @@ HTMLMediaElement::ReportCanPlayTelemetry()
 
 } // namespace dom
 } // namespace mozilla
+
+#undef LOG
+#undef LOG_EVENT

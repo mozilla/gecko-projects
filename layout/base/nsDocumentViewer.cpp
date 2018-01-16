@@ -1675,7 +1675,6 @@ nsDocumentViewer::Destroy()
   // We also keep the viewer from being cached in session history, since
   // we require all documents there to be sanitized.
   if (mDestroyRefCount != 0) {
-    --mDestroyRefCount;
     return NS_OK;
   }
 
@@ -4193,15 +4192,6 @@ nsDocumentViewer::GetCurrentPrintSettings(nsIPrintSettings * *aCurrentPrintSetti
   return mPrintJob->GetCurrentPrintSettings(aCurrentPrintSettings);
 }
 
-
-NS_IMETHODIMP
-nsDocumentViewer::GetCurrentChildDOMWindow(mozIDOMWindowProxy** aCurrentChildDOMWindow)
-{
-  NS_ENSURE_ARG_POINTER(aCurrentChildDOMWindow);
-  *aCurrentChildDOMWindow = nullptr;
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
 NS_IMETHODIMP
 nsDocumentViewer::Cancel()
 {
@@ -4479,6 +4469,12 @@ void
 nsDocumentViewer::IncrementDestroyRefCount()
 {
   ++mDestroyRefCount;
+}
+
+void
+nsDocumentViewer::DecrementDestroyRefCount()
+{
+  --mDestroyRefCount;
 }
 
 //------------------------------------------------------------

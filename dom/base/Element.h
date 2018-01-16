@@ -914,10 +914,10 @@ public:
    * @param aNotify specifies how whether or not the document should be
    *        notified of the attribute change.
    */
-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName,
-                           nsAtom* aPrefix, const nsAString& aValue,
-                           nsIPrincipal* aMaybeScriptedPrincipal,
-                           bool aNotify);
+  nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                   nsAtom* aPrefix, const nsAString& aValue,
+                   nsIPrincipal* aMaybeScriptedPrincipal,
+                   bool aNotify);
 
   /**
    * Remove an attribute so that it is no longer explicitly specified.
@@ -927,9 +927,7 @@ public:
    * @param aNotify specifies whether or not the document should be
    * notified of the attribute change
    */
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID,
-                             nsAtom* aAttribute,
-                             bool aNotify);
+  nsresult UnsetAttr(int32_t aNameSpaceID, nsAtom* aAttribute, bool aNotify);
 
   /**
    * Get the namespace / name / prefix of a given attribute.

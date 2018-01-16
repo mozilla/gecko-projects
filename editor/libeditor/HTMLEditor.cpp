@@ -32,7 +32,6 @@
 #include "nsIInlineSpellChecker.h"
 
 #include "mozilla/css/Loader.h"
-#include "nsIDOMStyleSheet.h"
 
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
@@ -2894,7 +2893,8 @@ HTMLEditor::EnableStyleSheet(const nsAString& aURL,
   nsCOMPtr<nsIDocument> document = GetDocument();
   sheet->SetAssociatedDocument(document, StyleSheet::NotOwnedByDocument);
 
-  return sheet->SetDisabled(!aEnable);
+  sheet->SetDisabled(!aEnable);
+  return NS_OK;
 }
 
 bool
@@ -3265,74 +3265,6 @@ bool
 HTMLEditor::IsModifiableNode(nsINode* aNode)
 {
   return !aNode || aNode->IsEditable();
-}
-
-static nsresult
-SetSelectionAroundHeadChildren(Selection* aSelection,
-                               nsCOMPtr<nsIDocument>& aDocument)
-{
-  MOZ_ASSERT(aDocument);
-
-  // Set selection around <head> node
-  dom::Element* headNode = aDocument->GetHeadElement();
-  NS_ENSURE_STATE(headNode);
-
-  // Collapse selection to before first child of the head,
-  nsresult rv = aSelection->Collapse(headNode, 0);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Then extend it to just after.
-  uint32_t childCount = headNode->GetChildCount();
-  return aSelection->Extend(headNode, childCount + 1);
-}
-
-NS_IMETHODIMP
-HTMLEditor::GetHeadContentsAsHTML(nsAString& aOutputString)
-{
-  RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
-
-  // Save current selection
-  AutoSelectionRestorer selectionRestorer(selection, this);
-
-  nsCOMPtr<nsIDocument> document = GetDocument();
-  if (NS_WARN_IF(!document)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  nsresult rv = SetSelectionAroundHeadChildren(selection, document);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = OutputToString(NS_LITERAL_STRING("text/html"),
-                      nsIDocumentEncoder::OutputSelectionOnly,
-                      aOutputString);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  // Selection always includes <body></body>,
-  //  so terminate there
-  nsReadingIterator<char16_t> findIter,endFindIter;
-  aOutputString.BeginReading(findIter);
-  aOutputString.EndReading(endFindIter);
-  //counting on our parser to always lower case!!!
-  if (CaseInsensitiveFindInReadable(NS_LITERAL_STRING("<body"),
-                                    findIter, endFindIter)) {
-    nsReadingIterator<char16_t> beginIter;
-    aOutputString.BeginReading(beginIter);
-    int32_t offset = Distance(beginIter, findIter);//get the distance
-
-    nsWritingIterator<char16_t> writeIter;
-    aOutputString.BeginWriting(writeIter);
-    // Ensure the string ends in a newline
-    char16_t newline ('\n');
-    findIter.advance(-1);
-    if (!offset || (offset > 0 && (*findIter) != newline)) {
-      writeIter.advance(offset);
-      *writeIter = newline;
-      aOutputString.Truncate(offset+1);
-    }
-  }
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -4601,7 +4533,7 @@ HTMLEditor::GetReturnInParagraphCreatesNewParagraph(bool* aCreatesNewParagraph)
   return NS_OK;
 }
 
-already_AddRefed<nsIContent>
+nsIContent*
 HTMLEditor::GetFocusedContent()
 {
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
@@ -4617,8 +4549,7 @@ HTMLEditor::GetFocusedContent()
   if (!focusedContent) {
     // in designMode, nobody gets focus in most cases.
     if (inDesignMode && OurWindowHasFocus()) {
-      nsCOMPtr<nsIContent> rootContent = document->GetRootElement();
-      return rootContent.forget();
+      return document->GetRootElement();
     }
     return nullptr;
   }
@@ -4626,7 +4557,7 @@ HTMLEditor::GetFocusedContent()
   if (inDesignMode) {
     return OurWindowHasFocus() &&
       nsContentUtils::ContentIsDescendantOf(focusedContent, document) ?
-        focusedContent.forget() : nullptr;
+        focusedContent.get() : nullptr;
   }
 
   // We're HTML editor for contenteditable
@@ -4638,7 +4569,7 @@ HTMLEditor::GetFocusedContent()
     return nullptr;
   }
   // If our window is focused, we're focused.
-  return OurWindowHasFocus() ? focusedContent.forget() : nullptr;
+  return OurWindowHasFocus() ? focusedContent.get() : nullptr;
 }
 
 already_AddRefed<nsIContent>
@@ -4724,7 +4655,7 @@ HTMLEditor::GetActiveEditingHost()
   return content->GetEditingHost();
 }
 
-already_AddRefed<EventTarget>
+EventTarget*
 HTMLEditor::GetDOMEventTarget()
 {
   // Don't use getDocument here, because we have no way of knowing
@@ -4732,7 +4663,7 @@ HTMLEditor::GetDOMEventTarget()
   // ourselves, if it exists.
   MOZ_ASSERT(IsInitialized(), "The HTMLEditor has not been initialized yet");
   nsCOMPtr<mozilla::dom::EventTarget> target = GetDocument();
-  return target.forget();
+  return target;
 }
 
 bool

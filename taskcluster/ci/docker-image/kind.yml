@@ -4,6 +4,9 @@
 
 loader: taskgraph.loader.transform:loader
 
+kind-dependencies:
+  - packages
+
 transforms:
   - taskgraph.transforms.docker_image:transforms
   - taskgraph.transforms.task:transforms
@@ -20,6 +23,34 @@ jobs:
     symbol: I(db)
   valgrind-build:
     symbol: I(vb)
+  toolchain-build:
+    symbol: I(toolchain)
+    packages:
+      - deb7-cmake
+      - deb7-git
+      - deb7-mercurial
+      - deb7-ninja
+      - deb7-python
+  debian7-amd64-build:
+    symbol: I(deb7)
+    definition: debian7-build
+    packages:
+      - deb7-git
+      - deb7-mercurial
+      - deb7-python
+      - deb7-valgrind
+    args:
+      ARCH: amd64
+  debian7-i386-build:
+    symbol: I(deb7-32)
+    definition: debian7-build
+    packages:
+      - deb7-git
+      - deb7-mercurial
+      - deb7-python
+      - deb7-valgrind
+    args:
+      ARCH: i386
   lint:
     symbol: I(lnt)
   android-build:
@@ -28,9 +59,13 @@ jobs:
     symbol: I(idx)
   funsize-update-generator:
     symbol: I(pg)
+  google-play-strings:
+    symbol: I(gps)
   funsize-balrog-submitter:
     symbol: I(fbs)
   beet-mover:
     symbol: I(bm)
   update-verify:
     symbol: I(uv)
+  diffoscope:
+    symbol: I(diff)

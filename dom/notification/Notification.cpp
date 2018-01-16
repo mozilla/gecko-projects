@@ -19,6 +19,7 @@
 #include "mozilla/dom/AppNotificationServiceOptionsBinding.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/NotificationEvent.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/Promise.h"
@@ -93,7 +94,7 @@ public:
                     const nsAString& aIcon,
                     const nsAString& aData,
                     const nsAString& aBehavior,
-                    const nsAString& aServiceWorkerRegistrationScope) final
+                    const nsAString& aServiceWorkerRegistrationScope) final override
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(!aID.IsEmpty());
@@ -146,7 +147,7 @@ public:
     MOZ_ASSERT(aPromise);
   }
 
-  NS_IMETHOD Done() final
+  NS_IMETHOD Done() final override
   {
     ErrorResult result;
     AutoTArray<RefPtr<Notification>, 5> notifications;
@@ -893,39 +894,22 @@ NotificationTask::Run()
   return NS_OK;
 }
 
-bool
-Notification::RequireInteractionEnabled(JSContext* aCx, JSObject* aOjb)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.webnotifications.requireinteraction.enabled", false);
-  }
-
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  return workerPrivate->DOMWorkerNotificationRIEnabled();
-}
-
 // static
 bool
 Notification::PrefEnabled(JSContext* aCx, JSObject* aObj)
 {
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.webnotifications.enabled", false);
+  if (!NS_IsMainThread()) {
+    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+    if (!workerPrivate) {
+      return false;
+    }
+
+    if (workerPrivate->IsServiceWorker()) {
+      return DOMPrefs::NotificationEnabledInServiceWorkers();
+    }
   }
 
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  if (workerPrivate->IsServiceWorker()) {
-    return workerPrivate->DOMServiceWorkerNotificationEnabled();
-  }
-
-  return workerPrivate->DOMWorkerNotificationEnabled();
+  return DOMPrefs::NotificationEnabled();
 }
 
 // static
@@ -1633,7 +1617,7 @@ namespace {
     nsAString& mBuffer; // This struct must not outlive this buffer
     explicit StringWriteFunc(nsAString& buffer) : mBuffer(buffer) {}
 
-    void Write(const char* aStr)
+    void Write(const char* aStr) override
     {
       mBuffer.Append(NS_ConvertUTF8toUTF16(aStr));
     }
@@ -1740,7 +1724,7 @@ Notification::ShowInternal()
   bool inPrivateBrowsing = IsInPrivateBrowsing();
 
   bool requireInteraction = mRequireInteraction;
-  if (!Preferences::GetBool("dom.webnotifications.requireinteraction.enabled", false)) {
+  if (!DOMPrefs::NotificationRIEnabled()) {
     requireInteraction = false;
   }
 
@@ -2106,7 +2090,7 @@ public:
     MOZ_ASSERT(aProxy);
   }
 
-  NS_IMETHOD Done() final
+  NS_IMETHOD Done() final override
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(mPromiseProxy, "Was Done() called twice?");

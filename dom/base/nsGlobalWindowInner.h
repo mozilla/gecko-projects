@@ -37,6 +37,7 @@
 #include "nsSize.h"
 #include "mozilla/FlushType.h"
 #include "prclist.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -347,9 +348,9 @@ public:
   virtual bool IsFrozen() const override;
   void SyncStateFromParentWindow();
 
-  mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const;
+  mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const override;
   mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
-  mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const;
+  mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const override;
 
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
@@ -1165,8 +1166,6 @@ public:
 
   void FireOfflineStatusEventIfChanged();
 
-  bool GetIsPrerendered();
-
 public:
   // Inner windows only.
   nsresult ScheduleNextIdleObserverCallback();
@@ -1240,7 +1239,7 @@ protected:
   nsresult GetComputedStyleHelper(nsIDOMElement* aElt,
                                   const nsAString& aPseudoElt,
                                   bool aDefaultStylesOnly,
-                                  nsIDOMCSSStyleDeclaration** aReturn);
+                                  nsICSSDeclaration** aReturn);
 
   nsGlobalWindowInner* InnerForSetTimeoutOrInterval(mozilla::ErrorResult& aError);
 

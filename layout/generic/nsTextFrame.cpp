@@ -3169,18 +3169,18 @@ public:
 
   void InitializeForMeasure();
 
-  void GetSpacing(Range aRange, Spacing* aSpacing) const;
-  gfxFloat GetHyphenWidth() const;
-  void GetHyphenationBreaks(Range aRange, HyphenType* aBreakBefore) const;
-  StyleHyphens GetHyphensOption() const {
+  void GetSpacing(Range aRange, Spacing* aSpacing) const override;
+  gfxFloat GetHyphenWidth() const override;
+  void GetHyphenationBreaks(Range aRange, HyphenType* aBreakBefore) const override;
+  StyleHyphens GetHyphensOption() const override {
     return mTextStyle->mHyphens;
   }
 
-  already_AddRefed<DrawTarget> GetDrawTarget() const {
+  already_AddRefed<DrawTarget> GetDrawTarget() const override {
     return CreateReferenceDrawTarget(GetFrame());
   }
 
-  uint32_t GetAppUnitsPerDevUnit() const {
+  uint32_t GetAppUnitsPerDevUnit() const override {
     return mTextRun->GetAppUnitsPerDevUnit();
   }
 
@@ -5125,10 +5125,6 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
                                        WebRenderLayerManager* aManager,
                                        nsDisplayListBuilder* aDisplayListBuilder)
 {
-  if (!gfxPrefs::LayersAllowTextLayers()) {
-    return false;
-  }
-
   if (mBounds.IsEmpty()) {
     return true;
   }
@@ -8117,9 +8113,14 @@ ClusterIterator::IsPunctuation()
   // Return true for all Punctuation categories (Unicode general category P?),
   // and also for Symbol categories (S?) except for Modifier Symbol, which is
   // kept together with any adjacent letter/number. (Bug 1066756)
-  uint8_t cat = unicode::GetGeneralCategory(mFrag->CharAt(mCharIndex));
+  uint32_t ch = mFrag->CharAt(mCharIndex);
+  uint8_t cat = unicode::GetGeneralCategory(ch);
   switch (cat) {
     case HB_UNICODE_GENERAL_CATEGORY_CONNECT_PUNCTUATION: /* Pc */
+      if (ch == '_') {
+        return false;
+      }
+      MOZ_FALLTHROUGH;
     case HB_UNICODE_GENERAL_CATEGORY_DASH_PUNCTUATION:    /* Pd */
     case HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION:   /* Pe */
     case HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION:   /* Pf */
@@ -10260,16 +10261,6 @@ nsTextFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 }
 #endif
 
-#ifdef DEBUG
-nsFrameState
-nsTextFrame::GetDebugStateBits() const
-{
-  // mask out our emptystate flags; those are just caches
-  return nsFrame::GetDebugStateBits() &
-    ~(TEXT_WHITESPACE_FLAGS | TEXT_REFLOW_FLAGS);
-}
-#endif
-
 void
 nsTextFrame::AdjustOffsetsForBidi(int32_t aStart, int32_t aEnd)
 {
@@ -10409,4 +10400,19 @@ nsTextFrame::CountGraphemeClusters() const
   nsAutoString content;
   frag->AppendTo(content, GetContentOffset(), GetContentLength());
   return unicode::CountGraphemeClusters(content.Data(), content.Length());
+}
+
+bool
+nsTextFrame::HasNonSuppressedText()
+{
+  if (HasAnyStateBits(TEXT_ISNOT_ONLY_WHITESPACE)) {
+    return true;
+  }
+
+  if (!GetTextRun(nsTextFrame::eInflated)) {
+    return false;
+  }
+
+  TrimmedOffsets offsets = GetTrimmedOffsets(mContent->GetText(), false);
+  return offsets.mLength != 0;
 }

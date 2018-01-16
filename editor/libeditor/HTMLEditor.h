@@ -109,10 +109,10 @@ public:
   NS_IMETHOD BeginningOfDocument() override;
   virtual nsresult HandleKeyPressEvent(
                      WidgetKeyboardEvent* aKeyboardEvent) override;
-  virtual already_AddRefed<nsIContent> GetFocusedContent() override;
+  virtual nsIContent* GetFocusedContent() override;
   virtual already_AddRefed<nsIContent> GetFocusedContentForIME() override;
   virtual bool IsActiveInDOMWindow() override;
-  virtual already_AddRefed<dom::EventTarget> GetDOMEventTarget() override;
+  virtual dom::EventTarget* GetDOMEventTarget() override;
   virtual Element* GetEditorRoot() override;
   virtual already_AddRefed<nsIContent> FindSelectionRoot(
                                          nsINode *aNode) override;
@@ -129,8 +129,6 @@ public:
                                             bool aSuppressTransaction) override;
   using EditorBase::RemoveAttributeOrEquivalent;
   using EditorBase::SetAttributeOrEquivalent;
-
-  nsresult MouseMove(nsIDOMMouseEvent* aMouseEvent);
 
   // nsStubMutationObserver overrides
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
@@ -443,6 +441,30 @@ public:
   {
     mDefaultParagraphSeparator = aSep;
   }
+
+  /**
+   * event callback when a mouse button is pressed
+   * @param aX      [IN] horizontal position of the pointer
+   * @param aY      [IN] vertical position of the pointer
+   * @param aTarget [IN] the element triggering the event
+   * @param aMouseEvent [IN] the event
+   */
+  nsresult OnMouseDown(int32_t aX, int32_t aY, nsIDOMElement* aTarget,
+                       nsIDOMEvent* aMouseEvent);
+
+  /**
+   * event callback when a mouse button is released
+   * @param aX      [IN] horizontal position of the pointer
+   * @param aY      [IN] vertical position of the pointer
+   * @param aTarget [IN] the element triggering the event
+   */
+  nsresult OnMouseUp(int32_t aX, int32_t aY, nsIDOMElement* aTarget);
+
+  /**
+   * event callback when the mouse pointer is moved
+   * @param aMouseEvent [IN] the event
+   */
+  nsresult OnMouseMove(nsIDOMMouseEvent* aMouseEvent);
 
 protected:
   class BlobReader final : public nsIEditorBlobListener

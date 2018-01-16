@@ -243,20 +243,18 @@ ContentClient::BeginPaint(PaintedLayer* aLayer,
       bufferFlags |= BUFFER_COMPONENT_ALPHA;
     }
 
-    RefPtr<RotatedBuffer> newBuffer;
-    if (Factory::ReasonableSurfaceSize(IntSize(dest.mBufferRect.Width(), dest.mBufferRect.Height()))) {
-      newBuffer = CreateBuffer(result.mContentType, dest.mBufferRect, bufferFlags);
+    RefPtr<RotatedBuffer> newBuffer = CreateBuffer(result.mContentType,
+                                                   dest.mBufferRect,
+                                                   bufferFlags);
 
-      if (!newBuffer) {
+    if (!newBuffer) {
+      if (Factory::ReasonableSurfaceSize(IntSize(dest.mBufferRect.Width(), dest.mBufferRect.Height()))) {
         gfxCriticalNote << "Failed buffer for "
                         << dest.mBufferRect.X() << ", "
                         << dest.mBufferRect.Y() << ", "
                         << dest.mBufferRect.Width() << ", "
                         << dest.mBufferRect.Height();
       }
-    }
-
-    if (!newBuffer) {
       Clear();
       return result;
     }
@@ -641,7 +639,7 @@ public:
     }
   }
 
-  virtual void ProcessReadback(gfx::DataSourceSurface *aSourceSurface)
+  virtual void ProcessReadback(gfx::DataSourceSurface *aSourceSurface) override
   {
     SourceRotatedBuffer rotBuffer(aSourceSurface, nullptr, mBufferRect, mBufferRotation);
 

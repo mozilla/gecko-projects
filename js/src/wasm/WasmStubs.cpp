@@ -533,7 +533,7 @@ GenerateImportFunction(jit::MacroAssembler& masm, const FuncImport& fi, SigIdDes
 
     GenerateFunctionEpilogue(masm, framePushed, offsets);
 
-    masm.wasmEmitTrapOutOfLineCode();
+    masm.wasmEmitOldTrapOutOfLineCode();
 
     return FinishOffsets(masm, offsets);
 }
@@ -1001,12 +1001,35 @@ wasm::GenerateBuiltinThunk(MacroAssembler& masm, ABIFunctionType abiType, ExitRe
     return FinishOffsets(masm, offsets);
 }
 
-// Generate a stub that calls into ReportTrap with the right trap reason.
+// Generate a stub which calls WasmReportTrap() and can be executed by having
+// the signal handler redirect PC from any trapping instruction.
+static bool
+GenerateTrapExit(MacroAssembler& masm, Label* throwLabel, Offsets* offsets)
+{
+    masm.haltingAlign(CodeAlignment);
+
+    offsets->begin = masm.currentOffset();
+
+    // We know that StackPointer is word-aligned, but not necessarily
+    // stack-aligned, so we need to align it dynamically.
+    masm.andToStackPtr(Imm32(~(ABIStackAlignment - 1)));
+    if (ShadowStackSpace)
+        masm.subFromStackPtr(Imm32(ShadowStackSpace));
+
+    masm.assertStackAlignment(ABIStackAlignment);
+    masm.call(SymbolicAddress::ReportTrap);
+
+    masm.jump(throwLabel);
+
+    return FinishOffsets(masm, offsets);
+}
+
+// Generate a stub that calls into WasmOldReportTrap with the right trap reason.
 // This stub is called with ABIStackAlignment by a trap out-of-line path. An
 // exit prologue/epilogue is used so that stack unwinding picks up the
 // current JitActivation. Unwinding will begin at the caller of this trap exit.
 static bool
-GenerateTrapExit(MacroAssembler& masm, Trap trap, Label* throwLabel, CallableOffsets* offsets)
+GenerateOldTrapExit(MacroAssembler& masm, Trap trap, Label* throwLabel, CallableOffsets* offsets)
 {
     masm.haltingAlign(CodeAlignment);
 
@@ -1028,7 +1051,7 @@ GenerateTrapExit(MacroAssembler& masm, Trap trap, Label* throwLabel, CallableOff
     MOZ_ASSERT(i.done());
 
     masm.assertStackAlignment(ABIStackAlignment);
-    masm.call(SymbolicAddress::ReportTrap);
+    masm.call(SymbolicAddress::OldReportTrap);
 
     masm.jump(throwLabel);
 
@@ -1368,11 +1391,30 @@ wasm::GenerateStubs(const ModuleEnvironment& env, const FuncImportVector& import
     }
 
     for (Trap trap : MakeEnumeratedRange(Trap::Limit)) {
-        CallableOffsets offsets;
-        if (!GenerateTrapExit(masm, trap, &throwLabel, &offsets))
-            return false;
-        if (!code->codeRanges.emplaceBack(trap, offsets))
-            return false;
+        switch (trap) {
+          case Trap::Unreachable:
+            break;
+          // The TODO list of "old" traps to convert to new traps:
+          case Trap::IntegerOverflow:
+          case Trap::InvalidConversionToInteger:
+          case Trap::IntegerDivideByZero:
+          case Trap::OutOfBounds:
+          case Trap::UnalignedAccess:
+          case Trap::IndirectCallToNull:
+          case Trap::IndirectCallBadSig:
+          case Trap::ImpreciseSimdConversion:
+          case Trap::StackOverflow:
+          case Trap::ThrowReported: {
+            CallableOffsets offsets;
+            if (!GenerateOldTrapExit(masm, trap, &throwLabel, &offsets))
+                return false;
+            if (!code->codeRanges.emplaceBack(trap, offsets))
+                return false;
+            break;
+          }
+          case Trap::Limit:
+            MOZ_CRASH("impossible");
+        }
     }
 
     Offsets offsets;
@@ -1385,6 +1427,11 @@ wasm::GenerateStubs(const ModuleEnvironment& env, const FuncImportVector& import
     if (!GenerateUnalignedExit(masm, &throwLabel, &offsets))
         return false;
     if (!code->codeRanges.emplaceBack(CodeRange::UnalignedExit, offsets))
+        return false;
+
+    if (!GenerateTrapExit(masm, &throwLabel, &offsets))
+        return false;
+    if (!code->codeRanges.emplaceBack(CodeRange::TrapExit, offsets))
         return false;
 
     if (!GenerateInterruptExit(masm, &throwLabel, &offsets))

@@ -6,12 +6,6 @@ skip include test/jstests.list
 
 skip script non262/String/normalize-generateddata-input.js # input data for other test
 
-# Skip intl402 tests when Intl isn't available.
-skip-if(!this.hasOwnProperty('Intl')) include test262/intl402/jstests.list
-
-# Skip built-ins/Simd tests when SIMD isn't available.
-skip-if(!this.hasOwnProperty('SIMD')) include test262/built-ins/Simd/jstests.list
-
 # Times out on arm and cgc builds.
 slow script test262/built-ins/decodeURI/S15.1.3.1_A2.5_T1.js
 slow script test262/built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js
@@ -40,6 +34,20 @@ skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/
 skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/toLowerCase/special_casing_conditional.js
 skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js
 skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/toLocaleLowerCase/special_casing_conditional.js
+
+# Skip intl402 tests when Intl isn't available.
+skip-if(!this.hasOwnProperty("Intl")) include test262/intl402/jstests.list
+
+# Skip built-ins/Simd tests when SIMD isn't available.
+skip-if(!this.hasOwnProperty("SIMD")) include test262/built-ins/Simd/jstests.list
+
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1415303
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script non262/SIMD/load-sab-buffer-compat.js
+skip-if(!this.hasOwnProperty("Atomics")) include test262/built-ins/Atomics/jstests.list
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) include test262/built-ins/SharedArrayBuffer/jstests.list
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/ArrayBuffer/prototype/byteLength/this-is-sharedarraybuffer.js
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/ArrayBuffer/prototype/slice/this-is-sharedarraybuffer.js
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/TypedArrays/internals/Get/indexed-value-sab.js
 
 
 #####################################
@@ -75,17 +83,6 @@ skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-func-
 skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-lex.js
 skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-var-err.js
 
-# Defines a restricted property on the WindowProxy object.
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-354-13.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-360-7.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-531-13.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-531-17.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-538-7.js
-
-# Fails because window has a "name" property on WindowProxy.
-skip-if(!xulRuntime.shell) script test262/language/expressions/object/method-definition/generator-name-prop-symbol.js
-skip-if(!xulRuntime.shell) script test262/language/expressions/object/method-definition/name-name-prop-symbol.js
-
 
 ##################################################
 # Test262 tests skipped due to SpiderMonkey bugs #
@@ -119,10 +116,13 @@ skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/detached-b
 skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/tonumber-value-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/Get/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/Get/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/Get/infinity-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/enumerate-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/HasProperty/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/HasProperty/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/HasProperty/infinity-with-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/Set/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/Set/detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/Set/tonumber-value-detached-buffer.js
@@ -426,12 +426,8 @@ skip-if(!xulRuntime.shell) script test262/built-ins/Atomics/wake/wake-one.js
 skip-if(!xulRuntime.shell) script test262/built-ins/Atomics/wake/wake-all-on-loc.js
 
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1346081
-skip script test262/intl402/NumberFormat/prototype/format/11.3.2_TRP.js
-skip script test262/intl402/NumberFormat/prototype/format/11.3.2_TRF.js
-
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1340304
-skip-if(!xulRuntime.shell) script test262/language/module-code/instn-iee-err-circular.js
-skip-if(!xulRuntime.shell) script test262/language/module-code/instn-iee-err-circular-as.js
+skip script test262/intl402/NumberFormat/prototype/format/format-fraction-digits.js
+skip script test262/intl402/NumberFormat/prototype/format/format-significant-digits.js
 
 # Hoisted block-level function named "arguments" not initialized with undefined per B.3.3.1
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1339123
@@ -460,6 +456,9 @@ skip script test262/language/expressions/object/method-definition/async-gen-yiel
 skip script test262/language/expressions/class/async-gen-method-yield-star-sync-next.js
 skip script test262/language/expressions/class/async-gen-method-static-yield-star-sync-next.js
 
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1321616
+skip script test262/annexB/built-ins/Function/createdynfn-html-close-comment-params.js
+
 
 ###########################################################
 # Tests disabled due to issues in test262 importer script #
@@ -473,7 +472,5 @@ skip script test262/harness/detachArrayBuffer.js
 # Tests disabled due to invalid test expectations  #
 ####################################################
 
-# https://github.com/tc39/test262/issues/1370
-skip script test262/language/expressions/bitwise-or/bigint-non-primitive.js
-skip script test262/language/expressions/bitwise-and/bigint-non-primitive.js
-skip script test262/language/expressions/bitwise-xor/bigint-non-primitive.js
+# assert.compareArray doesn't perform deep-equality comparison.
+skip script test262/built-ins/Array/prototype/flatMap/depth-always-one.js

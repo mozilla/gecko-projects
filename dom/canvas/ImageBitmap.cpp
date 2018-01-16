@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/ImageBitmap.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/StructuredCloneTags.h"
@@ -224,28 +225,28 @@ CreateImageFromRawData(const gfx::IntSize& aSize,
   }
 
   // Convert RGBA to BGRA
-  DataSourceSurface::MappedSurface rgbaMap;
   RefPtr<DataSourceSurface> rgbaDataSurface = rgbaSurface->GetDataSurface();
-  if (NS_WARN_IF(!rgbaDataSurface->Map(DataSourceSurface::MapType::READ, &rgbaMap))) {
+  DataSourceSurface::ScopedMap rgbaMap(rgbaDataSurface, DataSourceSurface::READ);
+  if (NS_WARN_IF(!rgbaMap.IsMapped())) {
     return nullptr;
   }
 
   RefPtr<DataSourceSurface> bgraDataSurface =
     Factory::CreateDataSourceSurfaceWithStride(rgbaDataSurface->GetSize(),
                                                SurfaceFormat::B8G8R8A8,
-                                               rgbaMap.mStride);
-
-  DataSourceSurface::MappedSurface bgraMap;
-  if (NS_WARN_IF(!bgraDataSurface->Map(DataSourceSurface::MapType::WRITE, &bgraMap))) {
+                                               rgbaMap.GetStride());
+  if (NS_WARN_IF(!bgraDataSurface)) {
     return nullptr;
   }
 
-  SwizzleData(rgbaMap.mData, rgbaMap.mStride, SurfaceFormat::R8G8B8A8,
-              bgraMap.mData, bgraMap.mStride, SurfaceFormat::B8G8R8A8,
-              bgraDataSurface->GetSize());
+  DataSourceSurface::ScopedMap bgraMap(bgraDataSurface, DataSourceSurface::WRITE);
+  if (NS_WARN_IF(!bgraMap.IsMapped())) {
+    return nullptr;
+  }
 
-  rgbaDataSurface->Unmap();
-  bgraDataSurface->Unmap();
+  SwizzleData(rgbaMap.GetData(), rgbaMap.GetStride(), SurfaceFormat::R8G8B8A8,
+              bgraMap.GetData(), bgraMap.GetStride(), SurfaceFormat::B8G8R8A8,
+              bgraDataSurface->GetSize());
 
   // Create an Image from the BGRA SourceSurface.
   RefPtr<layers::Image> image = CreateImageFromSurface(bgraDataSurface);
@@ -480,6 +481,9 @@ ConvertColorFormatIfNeeded(RefPtr<SourceSurface> aSurface)
     Factory::CreateDataSourceSurfaceWithStride(dstSize,
                                                SurfaceFormat::B8G8R8A8,
                                                dstStride);
+  if (NS_WARN_IF(!dstDataSurface)) {
+    return nullptr;
+  }
 
   RefPtr<DataSourceSurface> srcDataSurface = aSurface->GetDataSurface();
   if (NS_WARN_IF(!srcDataSurface)) {
@@ -1428,22 +1432,12 @@ ImageBitmap::WriteStructuredClone(JSStructuredCloneWriter* aWriter,
                                                  map.GetStride(),
                                                  true);
   }
-  MOZ_ASSERT(dstDataSurface);
+  if (NS_WARN_IF(!dstDataSurface)) {
+    return false;
+  }
   Factory::CopyDataSourceSurface(snapshot, dstDataSurface);
   aClonedSurfaces.AppendElement(dstDataSurface);
   return true;
-}
-
-/*static*/ bool
-ImageBitmap::ExtensionsEnabled(JSContext* aCx, JSObject*)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("canvas.imagebitmap_extensions.enabled");
-  } else {
-    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-    MOZ_ASSERT(workerPrivate);
-    return workerPrivate->ImageBitmapExtensionsEnabled();
-  }
 }
 
 // ImageBitmap extensions.

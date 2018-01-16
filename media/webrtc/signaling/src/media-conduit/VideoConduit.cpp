@@ -246,7 +246,6 @@ WebrtcVideoConduit::WebrtcVideoConduit(RefPtr<WebRtcCallWrapper> aCall,
   , mEngineReceiving(false)
   , mCapId(-1)
   , mCodecMutex("VideoConduit codec db")
-  , mInReconfig(false)
   , mRecvStream(nullptr)
   , mSendStream(nullptr)
   , mLastWidth(0)
@@ -636,22 +635,6 @@ WebrtcVideoConduit::VideoStreamFactory::CreateEncoderStreams(int width, int heig
     simulcastEncoding = mConduit->mCurSendCodecConfig->mSimulcastEncodings[idx];
     MOZ_ASSERT(simulcastEncoding.constraints.scaleDownBy >= 1.0);
 
-    // leave vector temporal_layer_thresholds_bps empty for non-simulcast
-    if (config.number_of_streams > 1) {
-      // Oddly, though this is a 'bps' array, nothing really looks at the
-      // values, just the size of the array to know the number of temporal
-      // layers.
-      video_stream.temporal_layer_thresholds_bps.resize(2);
-      // XXX Note: in simulcast.cc in upstream code, the array value is
-      // 3(-1) for all streams, though it's in an array, except for screencasts,
-      // which use 1 (i.e 2 layers).
-
-      // XXX Bug 1390215 investigate using more of
-      // simulcast.cc:GetSimulcastConfig() or our own algorithm to replace it
-    } else {
-      video_stream.temporal_layer_thresholds_bps.clear();
-    }
-
     // Calculate these first
     video_stream.max_bitrate_bps = MinIgnoreZero(simulcastEncoding.constraints.maxBr,
                                                  kDefaultMaxBitrate_bps);
@@ -680,6 +663,28 @@ WebrtcVideoConduit::VideoStreamFactory::CreateEncoderStreams(int width, int heig
 
     video_stream.max_qp = kQpMax;
     video_stream.SetRid(simulcastEncoding.rid);
+
+    // leave vector temporal_layer_thresholds_bps empty for non-simulcast
+    video_stream.temporal_layer_thresholds_bps.clear();
+    if (config.number_of_streams > 1) {
+      // XXX Note: in simulcast.cc in upstream code, the array value is
+      // 3(-1) for all streams, though it's in an array, except for screencasts,
+      // which use 1 (i.e 2 layers).
+
+      // Oddly, though this is a 'bps' array, nothing really looks at the
+      // values for normal video, just the size of the array to know the
+      // number of temporal layers.
+      // For VideoEncoderConfig::ContentType::kScreen, though, in
+      // video_codec_initializer.cc it uses [0] to set the target bitrate
+      // for the screenshare.
+      if (mConduit->mCodecMode == webrtc::VideoCodecMode::kScreensharing) {
+        video_stream.temporal_layer_thresholds_bps.push_back(video_stream.target_bitrate_bps);
+      } else {
+        video_stream.temporal_layer_thresholds_bps.resize(2);
+      }
+      // XXX Bug 1390215 investigate using more of
+      // simulcast.cc:GetSimulcastConfig() or our own algorithm to replace it
+    }
 
     if (mConduit->mCurSendCodecConfig->mName == "H264") {
       if (mConduit->mCurSendCodecConfig->mEncodingConstraints.maxMbps > 0) {
@@ -808,6 +813,11 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
   // Recreating on PayloadType change may be overkill, but is safe.
   if (mSendStream) {
     if (!RequiresNewSendStream(*codecConfig)) {
+      {
+        MutexAutoLock lock(mCodecMutex);
+        mCurSendCodecConfig->mEncodingConstraints = codecConfig->mEncodingConstraints;
+        mCurSendCodecConfig->mSimulcastEncodings = codecConfig->mSimulcastEncodings;
+      }
       mSendStream->ReconfigureVideoEncoder(mEncoderConfig.CopyConfig());
       return kMediaConduitNoError;
     }
@@ -1398,6 +1408,11 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       mRecvStreamConfig.rtp.ulpfec.ulpfec_payload_type = ulpfec_payload_type;
       mRecvStreamConfig.rtp.ulpfec.red_payload_type = red_payload_type;
       mRecvStreamConfig.rtp.ulpfec.red_rtx_payload_type = -1;
+    } else {
+      // Reset to defaults
+      mRecvStreamConfig.rtp.ulpfec.ulpfec_payload_type = -1;
+      mRecvStreamConfig.rtp.ulpfec.red_payload_type = -1;
+      mRecvStreamConfig.rtp.ulpfec.red_rtx_payload_type = -1;
     }
 
     // SetRemoteSSRC should have populated this already
@@ -1687,12 +1702,9 @@ WebrtcVideoConduit::SelectBitrates(
 
 // XXX we need to figure out how to feed back changes in preferred capture
 // resolution to the getUserMedia source.
-// Returns boolean if we've submitted an async change (and took ownership
-// of *frame's data)
-bool
+void
 WebrtcVideoConduit::SelectSendResolution(unsigned short width,
-                                         unsigned short height,
-                                         const webrtc::VideoFrame* frame) // may be null
+                                         unsigned short height)
 {
   mCodecMutex.AssertCurrentThreadOwns();
   // XXX This will do bandwidth-resolution adaptation as well - bug 877954
@@ -1721,10 +1733,8 @@ WebrtcVideoConduit::SelectSendResolution(unsigned short width,
     }
   }
 
-  // Adapt to getUserMedia resolution changes
-  // check if we need to reconfigure the sending resolution.
+  // Update on resolution changes
   // NOTE: mSendingWidth != mLastWidth, because of maxwidth/height/etc above
-  bool changed = false;
   if (mSendingWidth != width || mSendingHeight != height) {
     CSFLogDebug(LOGTAG, "%s: resolution changing to %ux%u (from %ux%u)",
                 __FUNCTION__, width, height, mSendingWidth, mSendingHeight);
@@ -1733,7 +1743,6 @@ WebrtcVideoConduit::SelectSendResolution(unsigned short width,
     // keep using the old size in the encoder.
     mSendingWidth = width;
     mSendingHeight = height;
-    changed = true;
   }
 
   unsigned int framerate = SelectSendFrameRate(mCurSendCodecConfig,
@@ -1744,72 +1753,7 @@ WebrtcVideoConduit::SelectSendResolution(unsigned short width,
     CSFLogDebug(LOGTAG, "%s: framerate changing to %u (from %u)",
                 __FUNCTION__, framerate, mSendingFramerate);
     mSendingFramerate = framerate;
-    changed = true;
   }
-
-  if (changed) {
-    // On a resolution change, bounce this to the correct thread to
-    // re-configure (same as used for Init().  Do *not* block the calling
-    // thread since that may be the MSG thread.
-
-    // MUST run on the same thread as Init()/etc
-    if (!NS_IsMainThread()) {
-      // Note: on *initial* config (first frame), best would be to drop
-      // frames until the config is done, then encode the most recent frame
-      // provided and continue from there.  We don't do this, but we do drop
-      // all frames while in the process of a reconfig and then encode the
-      // frame that started the reconfig, which is close.  There may be
-      // barely perceptible glitch in the video due to the dropped frame(s).
-      mInReconfig = true;
-
-      // We can't pass a UniquePtr<> or unique_ptr<> to a lambda directly
-      webrtc::VideoFrame* new_frame = nullptr;
-      if (frame) {
-        // the internal buffer pointer is refcounted, so we don't have 2 copies here
-        new_frame = new webrtc::VideoFrame(*frame);
-      }
-      RefPtr<WebrtcVideoConduit> self(this);
-      RefPtr<Runnable> webrtc_runnable =
-        media::NewRunnableFrom([self, width, height, new_frame]() -> nsresult {
-            UniquePtr<webrtc::VideoFrame> local_frame(new_frame); // Simplify cleanup
-
-            MutexAutoLock lock(self->mCodecMutex);
-            return self->ReconfigureSendCodec(width, height, new_frame);
-          });
-      // new_frame now owned by lambda
-      CSFLogDebug(LOGTAG, "%s: proxying lambda to WebRTC thread for reconfig (width %u/%u, height %u/%u",
-                  __FUNCTION__, width, mLastWidth, height, mLastHeight);
-      NS_DispatchToMainThread(webrtc_runnable.forget());
-      if (new_frame) {
-        return true; // queued it
-      }
-    } else {
-      // already on the right thread
-      ReconfigureSendCodec(width, height, frame);
-    }
-  }
-  return false;
-}
-
-nsresult
-WebrtcVideoConduit::ReconfigureSendCodec(unsigned short width,
-                                         unsigned short height,
-                                         const webrtc::VideoFrame* frame)
-{
-  mCodecMutex.AssertCurrentThreadOwns();
-
-  // Test in case the stream hasn't started yet!  We could get a frame in
-  // before we get around to StartTransmitting(), and that would dispatch a
-  // runnable to call this.
-  mInReconfig = false;
-  if (mSendStream) {
-    mSendStream->ReconfigureVideoEncoder(mEncoderConfig.CopyConfig());
-    if (frame) {
-      mVideoBroadcaster.OnFrame(*frame);
-      CSFLogDebug(LOGTAG, "%s Inserted a frame from reconfig lambda", __FUNCTION__);
-    }
-  }
-  return NS_OK;
 }
 
 unsigned int
@@ -1953,24 +1897,22 @@ WebrtcVideoConduit::SendVideoFrame(const webrtc::VideoFrame& frame)
   // broken cameras, include Logitech c920's IIRC.
 
   CSFLogVerbose(LOGTAG, "%s (send SSRC %u (0x%x))", __FUNCTION__,
-              mSendStreamConfig.rtp.ssrcs.front(), mSendStreamConfig.rtp.ssrcs.front());
+                mSendStreamConfig.rtp.ssrcs.front(), mSendStreamConfig.rtp.ssrcs.front());
   // See if we need to recalculate what we're sending.
   // Don't compute mSendingWidth/Height, since those may not be the same as the input.
   {
-    MutexAutoLock lock(mCodecMutex);
-    if (mInReconfig) {
-      // Waiting for it to finish
-      return kMediaConduitNoError;
-    }
+    // mLastWidth/Height starts at 0, so we'll never call SelectSendResolution with a 0 size.
+    // We in some cases set them back to 0 to force SelectSendResolution to be called again.
     if (frame.width() != mLastWidth || frame.height() != mLastHeight) {
       CSFLogVerbose(LOGTAG, "%s: call SelectSendResolution with %ux%u",
                     __FUNCTION__, frame.width(), frame.height());
-      if (SelectSendResolution(frame.width(), frame.height(), &frame)) {
-        // SelectSendResolution took ownership of the data in i420_frame.
-        // Submit the frame after reconfig is done
-        return kMediaConduitNoError;
-      }
+      MOZ_ASSERT(frame.width() != 0 && frame.height() != 0);
+      // Note coverity will flag this since it thinks they can be 0
+
+      MutexAutoLock lock(mCodecMutex);
+      SelectSendResolution(frame.width(), frame.height());
     }
+
     // adapt input video to wants of sink
     if (!mVideoBroadcaster.frame_wanted()) {
       return kMediaConduitNoError;

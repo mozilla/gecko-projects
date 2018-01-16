@@ -21,6 +21,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/ClientHandle.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ServiceWorkerCommon.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
@@ -103,24 +104,20 @@ public:
 
   nsTObserverArray<ServiceWorkerRegistrationListener*> mServiceWorkerRegistrationListeners;
 
-  nsRefPtrHashtable<nsISupportsHashKey, ServiceWorkerRegistrationInfo> mControlledDocuments;
+  struct ControlledClientData
+  {
+    RefPtr<ClientHandle> mClientHandle;
+    RefPtr<ServiceWorkerRegistrationInfo> mRegistrationInfo;
 
-  // Track all documents that have attempted to register a service worker for a
-  // given scope.
-  typedef nsTArray<nsCOMPtr<nsIWeakReference>> WeakDocumentList;
-  nsClassHashtable<nsCStringHashKey, WeakDocumentList> mRegisteringDocuments;
+    ControlledClientData(ClientHandle* aClientHandle,
+                         ServiceWorkerRegistrationInfo* aRegistrationInfo)
+      : mClientHandle(aClientHandle)
+      , mRegistrationInfo(aRegistrationInfo)
+    {
+    }
+  };
 
-  // Track all intercepted navigation channels for a given scope.  Channels are
-  // placed in the appropriate list before dispatch the FetchEvent to the worker
-  // thread and removed once FetchEvent processing dispatches back to the main
-  // thread.
-  //
-  // Note: Its safe to use weak references here because a RAII-style callback
-  //       is registered with the channel before its added to this list.  We
-  //       are guaranteed the callback will fire before and remove the ref
-  //       from this list before the channel is destroyed.
-  typedef nsTArray<nsIInterceptedChannel*> InterceptionList;
-  nsClassHashtable<nsCStringHashKey, InterceptionList> mNavigationInterceptions;
+  nsClassHashtable<nsIDHashKey, ControlledClientData> mControlledClients;
 
   bool
   IsAvailable(nsIPrincipal* aPrincipal, nsIURI* aURI);
@@ -249,10 +246,6 @@ public:
                                 uint32_t aLineNumber = 0,
                                 uint32_t aColumnNumber = 0);
 
-  void
-  FlushReportsToAllClients(const nsACString& aScope,
-                           nsIConsoleReportCollector* aReporter);
-
   // Always consumes the error by reporting to consoles of all controlled
   // documents.
   void
@@ -304,7 +297,7 @@ public:
                                   ServiceWorkerRegistrationListener* aListener);
 
   void
-  MaybeCheckNavigationUpdate(nsIDocument* aDoc);
+  MaybeCheckNavigationUpdate(const ClientInfo& aClientInfo);
 
   nsresult
   SendPushEvent(const nsACString& aOriginAttributes,
@@ -328,6 +321,13 @@ private:
   void
   Init(ServiceWorkerRegistrar* aRegistrar);
 
+  RefPtr<GenericPromise>
+  StartControllingClient(const ClientInfo& aClientInfo,
+                         ServiceWorkerRegistrationInfo* aRegistrationInfo);
+
+  void
+  StopControllingClient(const ClientInfo& aClientInfo);
+
   void
   MaybeStartShutdown();
 
@@ -349,8 +349,8 @@ private:
   Update(ServiceWorkerRegistrationInfo* aRegistration);
 
   nsresult
-  GetDocumentRegistration(nsIDocument* aDoc,
-                          ServiceWorkerRegistrationInfo** aRegistrationInfo);
+  GetClientRegistration(const ClientInfo& aClientInfo,
+                        ServiceWorkerRegistrationInfo** aRegistrationInfo);
 
   nsresult
   GetServiceWorkerForScope(nsPIDOMWindowInner* aWindow,
@@ -375,12 +375,8 @@ private:
   void
   NotifyServiceWorkerRegistrationRemoved(ServiceWorkerRegistrationInfo* aRegistration);
 
-  RefPtr<GenericPromise>
-  StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
-                            nsIDocument* aDoc);
-
   void
-  StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration);
+  StopControllingRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetServiceWorkerRegistrationInfo(nsPIDOMWindowInner* aWindow);
@@ -464,19 +460,6 @@ private:
 
   void
   NotifyListenersOnUnregister(nsIServiceWorkerRegistrationInfo* aRegistration);
-
-  void
-  AddRegisteringDocument(const nsACString& aScope, nsIDocument* aDoc);
-
-  class InterceptionReleaseHandle;
-
-  void
-  AddNavigationInterception(const nsACString& aScope,
-                            nsIInterceptedChannel* aChannel);
-
-  void
-  RemoveNavigationInterception(const nsACString& aScope,
-                               nsIInterceptedChannel* aChannel);
 
   void
   ScheduleUpdateTimer(nsIPrincipal* aPrincipal, const nsACString& aScope);

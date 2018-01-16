@@ -49,6 +49,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
+#include "mozilla/dom/ClientState.h"
 #include "mozilla/dom/Console.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -1377,28 +1378,6 @@ private:
   }
 };
 
-class UpdatePreferenceRunnable final : public WorkerControlRunnable
-{
-  WorkerPreference mPref;
-  bool mValue;
-
-public:
-  UpdatePreferenceRunnable(WorkerPrivate* aWorkerPrivate,
-                           WorkerPreference aPref,
-                           bool aValue)
-    : WorkerControlRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount),
-      mPref(aPref),
-      mValue(aValue)
-  { }
-
-  virtual bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
-  {
-    aWorkerPrivate->UpdatePreferenceInternal(mPref, mValue);
-    return true;
-  }
-};
-
 class UpdateLanguagesRunnable final : public WorkerRunnable
 {
   nsTArray<nsString> mLanguages;
@@ -1512,7 +1491,7 @@ public:
   { }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->CycleCollectInternal(mCollectChildren);
     return true;
@@ -1529,7 +1508,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->OfflineStatusChangeEventInternal(mIsOffline);
     return true;
@@ -1547,7 +1526,7 @@ public:
   {}
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->MemoryPressureInternal();
     return true;
@@ -1614,7 +1593,7 @@ public:
     : WorkerHolder("SimpleWorkerHolder")
   {}
 
-  virtual bool Notify(Status aStatus) { return true; }
+  virtual bool Notify(Status aStatus) override { return true; }
 };
 
 } /* anonymous namespace */
@@ -2000,7 +1979,6 @@ WorkerLoadInfo::SetPrincipalFromChannel(nsIChannel* aChannel)
   return SetPrincipalOnMainThread(principal, loadGroup);
 }
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 bool
 WorkerLoadInfo::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
 {
@@ -2030,6 +2008,7 @@ WorkerLoadInfo::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
   return false;
 }
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 bool
 WorkerLoadInfo::PrincipalIsValid() const
 {
@@ -3514,20 +3493,6 @@ WorkerPrivateParent<Derived>::UpdateContextOptions(
 
 template <class Derived>
 void
-WorkerPrivateParent<Derived>::UpdatePreference(WorkerPreference aPref, bool aValue)
-{
-  AssertIsOnParentThread();
-  MOZ_ASSERT(aPref >= 0 && aPref < WORKERPREF_COUNT);
-
-  RefPtr<UpdatePreferenceRunnable> runnable =
-    new UpdatePreferenceRunnable(ParentAsWorkerPrivate(), aPref, aValue);
-  if (!runnable->Dispatch()) {
-    NS_WARNING("Failed to update worker preferences!");
-  }
-}
-
-template <class Derived>
-void
 WorkerPrivateParent<Derived>::UpdateLanguages(const nsTArray<nsString>& aLanguages)
 {
   AssertIsOnParentThread();
@@ -4000,7 +3965,6 @@ WorkerPrivateParent<Derived>::SetPrincipalFromChannel(nsIChannel* aChannel)
   return mLoadInfo.SetPrincipalFromChannel(aChannel);
 }
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 template <class Derived>
 bool
 WorkerPrivateParent<Derived>::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
@@ -4008,6 +3972,7 @@ WorkerPrivateParent<Derived>::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
   return mLoadInfo.FinalChannelPrincipalIsValid(aChannel);
 }
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 template <class Derived>
 bool
 WorkerPrivateParent<Derived>::PrincipalURIMatchesScriptURL()
@@ -4540,12 +4505,10 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
 {
   if (aParent) {
     aParent->AssertIsOnWorkerThread();
-    aParent->GetAllPreferences(mPreferences);
     mOnLine = aParent->OnLine();
   }
   else {
     AssertIsOnMainThread();
-    RuntimeService::GetDefaultPreferences(mPreferences);
     mOnLine = !NS_IsOffline();
   }
 
@@ -5040,8 +5003,7 @@ WorkerPrivate::OverrideLoadInfoLoadGroup(WorkerLoadInfo& aLoadInfo,
                                          nsIPrincipal* aPrincipal)
 {
   MOZ_ASSERT(!aLoadInfo.mInterfaceRequestor);
-  MOZ_ASSERT(aLoadInfo.mPrincipal == aPrincipal /* service workers */ ||
-             aLoadInfo.mLoadingPrincipal == aPrincipal /* any other worker type */);
+  MOZ_ASSERT(aLoadInfo.mLoadingPrincipal == aPrincipal);
 
   aLoadInfo.mInterfaceRequestor =
     new WorkerLoadInfo::InterfaceRequestor(aPrincipal, aLoadInfo.mLoadGroup);
@@ -5370,6 +5332,24 @@ WorkerPrivate::GetClientInfo() const
   AssertIsOnWorkerThread();
   MOZ_DIAGNOSTIC_ASSERT(mClientSource);
   return mClientSource->Info();
+}
+
+const ClientState
+WorkerPrivate::GetClientState() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  ClientState state;
+  mClientSource->SnapshotState(&state);
+  return Move(state);
+}
+
+const Maybe<ServiceWorkerDescriptor>
+WorkerPrivate::GetController() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  return mClientSource->GetController();
 }
 
 void
@@ -6860,19 +6840,6 @@ WorkerPrivate::UpdateLanguagesInternal(const nsTArray<nsString>& aLanguages)
 
   for (uint32_t index = 0; index < mChildWorkers.Length(); index++) {
     mChildWorkers[index]->UpdateLanguages(aLanguages);
-  }
-}
-
-void
-WorkerPrivate::UpdatePreferenceInternal(WorkerPreference aPref, bool aValue)
-{
-  AssertIsOnWorkerThread();
-  MOZ_ASSERT(aPref >= 0 && aPref < WORKERPREF_COUNT);
-
-  mPreferences[aPref] = aValue;
-
-  for (uint32_t index = 0; index < mChildWorkers.Length(); index++) {
-    mChildWorkers[index]->UpdatePreference(aPref, aValue);
   }
 }
 

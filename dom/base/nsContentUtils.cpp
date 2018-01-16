@@ -292,11 +292,9 @@ bool nsContentUtils::sIsFrameTimingPrefEnabled = false;
 bool nsContentUtils::sIsPerformanceTimingEnabled = false;
 bool nsContentUtils::sIsResourceTimingEnabled = false;
 bool nsContentUtils::sIsPerformanceNavigationTimingEnabled = false;
-bool nsContentUtils::sIsUserTimingLoggingEnabled = false;
 bool nsContentUtils::sIsFormAutofillAutocompleteEnabled = false;
 bool nsContentUtils::sIsWebComponentsEnabled = false;
 bool nsContentUtils::sIsCustomElementsEnabled = false;
-bool nsContentUtils::sDevToolsEnabled = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
 bool nsContentUtils::sUseActivityCursor = false;
 bool nsContentUtils::sAnimationsAPICoreEnabled = false;
@@ -333,10 +331,6 @@ nsHtml5StringParser* nsContentUtils::sHTMLFragmentParser = nullptr;
 nsIParser* nsContentUtils::sXMLFragmentParser = nullptr;
 nsIFragmentContentSink* nsContentUtils::sXMLFragmentSink = nullptr;
 bool nsContentUtils::sFragmentParsingActive = false;
-
-#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-bool nsContentUtils::sDOMWindowDumpEnabled;
-#endif
 
 bool nsContentUtils::sDoNotTrackEnabled = false;
 
@@ -653,9 +647,6 @@ nsContentUtils::Init()
   Preferences::AddBoolVarCache(&sIsPerformanceNavigationTimingEnabled,
                                "dom.enable_performance_navigation_timing", true);
 
-  Preferences::AddBoolVarCache(&sIsUserTimingLoggingEnabled,
-                               "dom.performance.enable_user_timing_logging", false);
-
   Preferences::AddBoolVarCache(&sIsFrameTimingPrefEnabled,
                                "dom.enable_frame_timing", false);
 
@@ -667,9 +658,6 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sIsCustomElementsEnabled,
                                "dom.webcomponents.customelements.enabled", false);
-
-  Preferences::AddBoolVarCache(&sDevToolsEnabled,
-                               "devtools.enabled");
 
   Preferences::AddIntVarCache(&sPrivacyMaxInnerWidth,
                               "privacy.window.maxInnerWidth",
@@ -693,11 +681,6 @@ nsContentUtils::Init()
   Preferences::AddUintVarCache(&sCookiesBehavior,
                                "network.cookie.cookieBehavior",
                                nsICookieService::BEHAVIOR_ACCEPT);
-
-#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-  Preferences::AddBoolVarCache(&sDOMWindowDumpEnabled,
-                               "browser.dom.window.dump.enabled");
-#endif
 
   Preferences::AddBoolVarCache(&sDoNotTrackEnabled,
                                "privacy.donottrackheader.enabled", false);
@@ -2364,17 +2347,7 @@ nsContentUtils::IsCallerChrome()
 bool
 nsContentUtils::ShouldResistFingerprinting()
 {
-  if (NS_IsMainThread()) {
-    return nsRFPService::IsResistFingerprintingEnabled();
-  }
-
-  workers::WorkerPrivate* workerPrivate = workers::GetCurrentThreadWorkerPrivate();
-  if (NS_WARN_IF(!workerPrivate)) {
-    return false;
-  }
-  workerPrivate->AssertIsOnWorkerThread();
-
-  return workerPrivate->ResistFingerprintingEnabled();
+  return DOMPrefs::ResistFingerprintingEnabled();
 }
 
 bool
@@ -5306,7 +5279,7 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
     uint32_t removeIndex = 0;
 
     for (uint32_t i = 0; i < childCount; ++i) {
-      nsIContent* child = aContent->GetChildAt(removeIndex);
+      nsIContent* child = aContent->GetChildAt_Deprecated(removeIndex);
       if (removeIndex == 0 && child && child->IsNodeOfType(nsINode::eTEXT)) {
         nsresult rv = child->SetText(aValue, true);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -5314,7 +5287,7 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
         removeIndex = 1;
       }
       else {
-        aContent->RemoveChildAt(removeIndex, true);
+        aContent->RemoveChildAt_Deprecated(removeIndex, true);
       }
     }
 
@@ -5325,7 +5298,7 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
   else {
     mb.Init(aContent, true, false);
     for (uint32_t i = 0; i < childCount; ++i) {
-      aContent->RemoveChildAt(0, true);
+      aContent->RemoveChildAt_Deprecated(0, true);
     }
   }
   mb.RemovalDone();
@@ -7507,30 +7480,6 @@ nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
 
 // static
 bool
-nsContentUtils::HasDistributedChildren(nsIContent* aContent)
-{
-  if (!aContent || !nsDocument::IsWebComponentsEnabled(aContent)) {
-    return false;
-  }
-
-  if (aContent->GetShadowRoot()) {
-    // Children of a shadow root host are distributed
-    // to content insertion points in the shadow root.
-    return true;
-  }
-
-  HTMLSlotElement* slotEl = HTMLSlotElement::FromContent(aContent);
-  if (slotEl && slotEl->GetContainingShadow()) {
-    // Children of a slot are rendered if the slot does not have any assigned
-    // nodes (fallback content).
-    return slotEl->AssignedNodes().IsEmpty();
-  }
-
-  return false;
-}
-
-// static
-bool
 nsContentUtils::IsForbiddenRequestHeader(const nsACString& aHeader)
 {
   if (IsForbiddenSystemRequestHeader(aHeader)) {
@@ -7584,19 +7533,6 @@ nsContentUtils::IsAllowedNonCorsContentType(const nsACString& aHeaderValue)
   return contentType.LowerCaseEqualsLiteral("text/plain") ||
          contentType.LowerCaseEqualsLiteral("application/x-www-form-urlencoded") ||
          contentType.LowerCaseEqualsLiteral("multipart/form-data");
-}
-
-bool
-nsContentUtils::DOMWindowDumpEnabled()
-{
-#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-  // In optimized builds we check a pref that controls if we should
-  // enable output from dump() or not, in debug builds it's always
-  // enabled.
-  return nsContentUtils::sDOMWindowDumpEnabled;
-#else
-  return true;
-#endif
 }
 
 bool
@@ -8913,63 +8849,6 @@ nsContentUtils::GetReferrerPolicyFromHeader(const nsAString& aHeader)
 
 // static
 bool
-nsContentUtils::PromiseRejectionEventsEnabled(JSContext* aCx, JSObject* aObj)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.promise_rejection_events.enabled", false);
-  }
-
-  using namespace workers;
-
-  // Otherwise, check the pref via the WorkerPrivate
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  return workerPrivate->PromiseRejectionEventsEnabled();
-}
-
-// static
-bool
-nsContentUtils::PushEnabled(JSContext* aCx, JSObject* aObj)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.push.enabled", false);
-  }
-
-  using namespace workers;
-
-  // Otherwise, check the pref via the WorkerPrivate
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  return workerPrivate->PushEnabled();
-}
-
-// static
-bool
-nsContentUtils::StreamsEnabled(JSContext* aCx, JSObject* aObj)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("dom.streams.enabled", false);
-  }
-
-  using namespace workers;
-
-  // Otherwise, check the pref via the WorkerPrivate
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  return workerPrivate->StreamsEnabled();
-}
-
-// static
-bool
 nsContentUtils::IsNonSubresourceRequest(nsIChannel* aChannel)
 {
   nsLoadFlags loadFlags = 0;
@@ -8993,7 +8872,7 @@ nsContentUtils::StorageAllowedForWindow(nsPIDOMWindowInner* aWindow)
 {
   if (nsIDocument* document = aWindow->GetExtantDoc()) {
     nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
-    return InternalStorageAllowedForPrincipal(principal, aWindow);
+    return InternalStorageAllowedForPrincipal(principal, aWindow, nullptr);
   }
 
   return StorageAccess::eDeny;
@@ -9007,7 +8886,7 @@ nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
 
   if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
     nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
-    return InternalStorageAllowedForPrincipal(principal, inner);
+    return InternalStorageAllowedForPrincipal(principal, inner, nullptr);
   }
 
   return StorageAccess::eDeny;
@@ -9015,9 +8894,22 @@ nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
 
 // static, public
 nsContentUtils::StorageAccess
+nsContentUtils::StorageAllowedForNewWindow(nsIPrincipal* aPrincipal,
+                                           nsIURI* aURI,
+                                           nsPIDOMWindowInner* aParent)
+{
+  MOZ_ASSERT(aPrincipal);
+  MOZ_ASSERT(aURI);
+  // parent may be nullptr
+
+  return InternalStorageAllowedForPrincipal(aPrincipal, aParent, aURI);
+}
+
+// static, public
+nsContentUtils::StorageAccess
 nsContentUtils::StorageAllowedForPrincipal(nsIPrincipal* aPrincipal)
 {
-  return InternalStorageAllowedForPrincipal(aPrincipal, nullptr);
+  return InternalStorageAllowedForPrincipal(aPrincipal, nullptr, nullptr);
 }
 
 // static, private
@@ -9076,7 +8968,8 @@ nsContentUtils::GetCookieBehaviorForPrincipal(nsIPrincipal* aPrincipal,
 // static, private
 nsContentUtils::StorageAccess
 nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
-                                                   nsPIDOMWindowInner* aWindow)
+                                                   nsPIDOMWindowInner* aWindow,
+                                                   nsIURI* aURI)
 {
   MOZ_ASSERT(aPrincipal);
 
@@ -9146,9 +9039,11 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   // affected, which is desireable due to the lack of automated testing for about:
   // URIs with these preferences set, and the importance of the correct functioning
   // of these URIs even with custom preferences.
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
-  if (NS_SUCCEEDED(rv) && uri) {
+  nsCOMPtr<nsIURI> uri = aURI;
+  if (!uri) {
+    Unused << aPrincipal->GetURI(getter_AddRefs(uri));
+  }
+  if (uri) {
     bool isAbout = false;
     MOZ_ALWAYS_SUCCEEDS(uri->SchemeIs("about", &isAbout));
     if (isAbout) {
@@ -9170,7 +9065,7 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
 
     bool thirdPartyWindow = false;
     if (NS_SUCCEEDED(thirdPartyUtil->IsThirdPartyWindow(
-          aWindow->GetOuterWindow(), nullptr, &thirdPartyWindow)) && thirdPartyWindow) {
+          aWindow->GetOuterWindow(), aURI, &thirdPartyWindow)) && thirdPartyWindow) {
       // XXX For non-cookie forms of storage, we handle BEHAVIOR_LIMIT_FOREIGN by
       // simply rejecting the request to use the storage. In the future, if we
       // change the meaning of BEHAVIOR_LIMIT_FOREIGN to be one which makes sense
@@ -10077,7 +9972,7 @@ DoCustomElementCreate(Element** aElement, nsIDocument* aDoc, NodeInfo* aNodeInfo
 
 /* static */ nsresult
 nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* aNodeInfo,
-                                    FromParser aFromParser, const nsAString* aIs,
+                                    FromParser aFromParser, nsAtom* aIsAtom,
                                     mozilla::dom::CustomElementDefinition* aDefinition)
 {
   RefPtr<mozilla::dom::NodeInfo> nodeInfo = aNodeInfo;
@@ -10086,9 +9981,6 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
              "Can only create XUL or XHTML elements.");
 
   nsAtom *name = nodeInfo->NameAtom();
-  RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
-  RefPtr<nsAtom> typeAtom = aIs ? NS_Atomize(*aIs) : tagAtom;
-
   int32_t tag = eHTMLTag_unknown;
   bool isCustomElementName = false;
   if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
@@ -10098,7 +9990,14 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
   } else {
     isCustomElementName = nsContentUtils::IsCustomElementName(name);
   }
-  bool isCustomElement = isCustomElementName || aIs;
+
+  RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
+  RefPtr<nsAtom> typeAtom;
+  bool isCustomElement = isCustomElementName || aIsAtom;
+  if (isCustomElement) {
+    typeAtom = isCustomElementName ? tagAtom.get() : aIsAtom;
+  }
+
   MOZ_ASSERT_IF(aDefinition, isCustomElement);
 
   // https://dom.spec.whatwg.org/#concept-create-element
@@ -11111,21 +11010,6 @@ nsContentUtils::ExtractErrorValues(JSContext* aCx,
 }
 
 #undef EXTRACT_EXN_VALUES
-
-/* static */ bool
-nsContentUtils::DevToolsEnabled(JSContext* aCx)
-{
-  if (NS_IsMainThread()) {
-    return sDevToolsEnabled;
-  }
-
-  workers::WorkerPrivate* workerPrivate = workers::GetWorkerPrivateFromContext(aCx);
-  if (!workerPrivate) {
-    return false;
-  }
-
-  return workerPrivate->DevToolsEnabled();
-}
 
 /* static */ bool
 nsContentUtils::ContentIsLink(nsIContent* aContent)

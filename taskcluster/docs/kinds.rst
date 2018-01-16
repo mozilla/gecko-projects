@@ -217,6 +217,11 @@ Beetmover, takes specific artifact checksums and pushes it to a location outside
 of Taskcluster's task artifacts (archive.mozilla.org as one place) and in the
 process determines the final location and "pretty" names it (version product name)
 
+google-play-strings
+-------------------
+Download strings to display on Google Play from https://l10n.mozilla-community.org/stores_l10n/.
+Artifact is then used by push-apk.
+
 push-apk-breakpoint
 -------------------
 Decides whether or not APKs should be published onto Google Play Store. Jobs of this
@@ -348,3 +353,13 @@ Dummy tasks to consolidate beetmover dependencies to avoid taskcluster limits on
 post-beetmover-checksums-dummy
 ------------------------------
 Dummy tasks to consolidate beetmover-checksums dependencies to avoid taskcluster limits on number of dependencies per task.
+
+packages
+--------
+Tasks used to build packages for use in docker images.
+
+diffoscope
+----------
+Tasks used to compare pairs of Firefox builds using https://diffoscope.org/.
+As of writing, this is mainly meant to be used in try builds, by editing
+taskcluster/ci/diffoscope/kind.yml for your needs.

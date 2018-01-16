@@ -106,6 +106,13 @@ pub struct SelectorMap<T: 'static> {
     pub count: usize,
 }
 
+impl<T: 'static> Default for SelectorMap<T> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // FIXME(Manishearth) the 'static bound can be removed when
 // our HashMap fork (hashglobe) is able to use NonZero,
 // or when stdlib gets fallible collections
@@ -148,8 +155,8 @@ impl SelectorMap<Rule> {
     /// Sort the Rules at the end to maintain cascading order.
     pub fn get_all_matching_rules<E, F>(
         &self,
-        element: &E,
-        rule_hash_target: &E,
+        element: E,
+        rule_hash_target: E,
         matching_rules_list: &mut ApplicableDeclarationList,
         context: &mut MatchingContext<E::Impl>,
         quirks_mode: QuirksMode,
@@ -210,7 +217,7 @@ impl SelectorMap<Rule> {
 
     /// Adds rules in `rules` that match `element` to the `matching_rules` list.
     fn get_matching_rules<E, F>(
-        element: &E,
+        element: E,
         rules: &[Rule],
         matching_rules: &mut ApplicableDeclarationList,
         context: &mut MatchingContext<E::Impl>,
@@ -225,7 +232,7 @@ impl SelectorMap<Rule> {
             if matches_selector(&rule.selector,
                                 0,
                                 Some(&rule.hashes),
-                                element,
+                                &element,
                                 context,
                                 flags_setter) {
                 matching_rules.push(

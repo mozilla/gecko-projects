@@ -300,10 +300,6 @@ impl ComputedValuesInner {
         !self.get_box().gecko.mBinding.mRawPtr.is_null()
     }
 
-    // FIXME(bholley): Implement this properly.
-    #[inline]
-    pub fn is_multicol(&self) -> bool { false }
-
     pub fn to_declaration_block(&self, property: PropertyDeclarationId) -> PropertyDeclarationBlock {
         let value = match property {
             % for prop in data.longhands:
@@ -441,7 +437,7 @@ def set_gecko_property(ffi_name, expr):
             ${keyword.casted_constant_name(value, cast_type)} => Keyword::${to_camel_case(value)},
             % endfor
             % if keyword.gecko_inexhaustive:
-            x => panic!("Found unexpected value in style struct for ${ident} property: {:?}", x),
+            _ => panic!("Found unexpected value in style struct for ${ident} property"),
             % endif
         }
         % else:
@@ -450,7 +446,7 @@ def set_gecko_property(ffi_name, expr):
             structs::${keyword.gecko_constant(value)} => Keyword::${to_camel_case(value)},
             % endfor
             % if keyword.gecko_inexhaustive:
-            x => panic!("Found unexpected value in style struct for ${ident} property: {:?}", x),
+            _ => panic!("Found unexpected value in style struct for ${ident} property"),
             % endif
         }
         % endif
@@ -602,8 +598,7 @@ def set_gecko_property(ffi_name, expr):
             CoordDataValue::Calc(calc) =>
                 SvgLengthOrPercentageOrNumber::LengthOrPercentage(
                     LengthOrPercentage::Calc(calc.into())),
-            _ => unreachable!("Unexpected coordinate {:?} in ${ident}",
-                              self.gecko.${gecko_ffi_name}.as_value()),
+            _ => unreachable!("Unexpected coordinate in ${ident}"),
         };
         SVGLength::Length(length.into())
     }
@@ -1261,7 +1256,7 @@ fn clone_single_transform_function(
             % for servo, gecko, format in transform_functions:
                 ${computed_operation_arm(servo, gecko, format)}
             % endfor
-            _ => panic!("{:?} is not an acceptable transform function", transform_function),
+            _ => panic!("unacceptable transform function"),
         }
     }
 }
@@ -2381,7 +2376,7 @@ fn static_assert() {
             % endfor
             structs::${border_style_keyword.gecko_constant('auto')} => OutlineStyle::Auto,
             % if border_style_keyword.gecko_inexhaustive:
-            x => panic!("Found unexpected value in style struct for outline_style property: {:?}", x),
+            _ => panic!("Found unexpected value in style struct for outline_style property"),
             % endif
         }
     }
@@ -2904,8 +2899,8 @@ fn static_assert() {
                         ${value}_list.push(CustomIdent(ident));
                     },
                 % endfor
-                x => {
-                    panic!("Found unexpected value for font-variant-alternates: {:?}", x);
+                _ => {
+                    panic!("Found unexpected value for font-variant-alternates");
                 }
             }
         }
@@ -2948,8 +2943,8 @@ fn static_assert() {
         let count = other.gecko.m${type.capitalize()}${gecko_ffi_name}Count;
         self.gecko.m${type.capitalize()}${gecko_ffi_name}Count = count;
 
-        let iter = self.gecko.m${type.capitalize()}s.iter_mut().zip(
-            other.gecko.m${type.capitalize()}s.iter().take(count as usize).cycle()
+        let iter = self.gecko.m${type.capitalize()}s.iter_mut().take(count as usize).zip(
+            other.gecko.m${type.capitalize()}s.iter()
         );
 
         for (ours, others) in iter {
@@ -2982,7 +2977,7 @@ fn static_assert() {
         self.gecko.m${type.capitalize()}s.ensure_len(input_len);
 
         self.gecko.m${type.capitalize()}${gecko_ffi_name}Count = input_len as u32;
-        for (gecko, servo) in self.gecko.m${type.capitalize()}s.iter_mut().zip(v.cycle()) {
+        for (gecko, servo) in self.gecko.m${type.capitalize()}s.iter_mut().take(input_len as usize).zip(v) {
             gecko.m${gecko_ffi_name} = servo.seconds() * 1000.;
         }
     }
@@ -3007,7 +3002,7 @@ fn static_assert() {
         self.gecko.m${type.capitalize()}s.ensure_len(input_len);
 
         self.gecko.m${type.capitalize()}TimingFunctionCount = input_len as u32;
-        for (gecko, servo) in self.gecko.m${type.capitalize()}s.iter_mut().zip(v.cycle()) {
+        for (gecko, servo) in self.gecko.m${type.capitalize()}s.iter_mut().take(input_len as usize).zip(v) {
             gecko.mTimingFunction = servo.into();
         }
     }
@@ -3064,7 +3059,7 @@ fn static_assert() {
 
         self.gecko.mAnimation${gecko_ffi_name}Count = input_len as u32;
 
-        for (gecko, servo) in self.gecko.mAnimations.iter_mut().zip(v.cycle()) {
+        for (gecko, servo) in self.gecko.mAnimations.iter_mut().take(input_len as usize).zip(v) {
             let result = match servo {
                 % for value in keyword.gecko_values():
                     Keyword::${to_camel_case(value)} =>
@@ -3082,7 +3077,7 @@ fn static_assert() {
             % for value in keyword.gecko_values():
                 structs::${keyword.gecko_constant(value)} => Keyword::${to_camel_case(value)},
             % endfor
-            x => panic!("Found unexpected value for animation-${ident}: {:?}", x),
+            _ => panic!("Found unexpected value for animation-${ident}"),
         }
     }
     ${impl_animation_count(ident, gecko_ffi_name)}
@@ -3118,33 +3113,23 @@ fn static_assert() {
                                             gecko_enum_prefix="StyleDisplay",
                                             gecko_strip_moz_prefix=False) %>
 
-    pub fn set_display(&mut self, v: longhands::display::computed_value::T) {
+    fn match_display_keyword(
+        v: longhands::display::computed_value::T
+    ) -> structs::root::mozilla::StyleDisplay {
         use properties::longhands::display::computed_value::T as Keyword;
         // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
-        let result = match v {
+        match v {
             % for value in display_keyword.values_for('gecko'):
                 Keyword::${to_camel_case(value)} =>
                     structs::${display_keyword.gecko_constant(value)},
             % endfor
-        };
-        self.gecko.mDisplay = result;
-        self.gecko.mOriginalDisplay = result;
+        }
     }
 
-    /// Set the display value from the style adjustment code. This is pretty
-    /// much like set_display, but without touching the mOriginalDisplay field,
-    /// which we want to keep.
-    pub fn set_adjusted_display(&mut self,
-                                v: longhands::display::computed_value::T,
-                                _is_item_or_root: bool) {
-        use properties::longhands::display::computed_value::T as Keyword;
-        let result = match v {
-            % for value in display_keyword.values_for('gecko'):
-                Keyword::${to_camel_case(value)} =>
-                    structs::${display_keyword.gecko_constant(value)},
-            % endfor
-        };
+    pub fn set_display(&mut self, v: longhands::display::computed_value::T) {
+        let result = Self::match_display_keyword(v);
         self.gecko.mDisplay = result;
+        self.gecko.mOriginalDisplay = result;
     }
 
     pub fn copy_display_from(&mut self, other: &Self) {
@@ -3154,6 +3139,14 @@ fn static_assert() {
 
     pub fn reset_display(&mut self, other: &Self) {
         self.copy_display_from(other)
+    }
+
+    pub fn set_adjusted_display(
+        &mut self,
+        v: longhands::display::computed_value::T,
+        _is_item_or_root: bool
+    ) {
+        self.gecko.mDisplay = Self::match_display_keyword(v);
     }
 
     <%call expr="impl_keyword_clone('display', 'mDisplay', display_keyword)"></%call>
@@ -3298,7 +3291,8 @@ fn static_assert() {
 
     pub fn transition_combined_duration_at(&self, index: usize) -> f32 {
         // https://drafts.csswg.org/css-transitions/#transition-combined-duration
-        self.gecko.mTransitions[index].mDuration.max(0.0) + self.gecko.mTransitions[index].mDelay
+        self.gecko.mTransitions[index % self.gecko.mTransitionDurationCount as usize].mDuration.max(0.0)
+            + self.gecko.mTransitions[index % self.gecko.mTransitionDelayCount as usize].mDelay
     }
 
     pub fn set_transition_property<I>(&mut self, v: I)
@@ -3332,7 +3326,7 @@ fn static_assert() {
         use gecko_bindings::structs::nsCSSPropertyID::eCSSPropertyExtra_all_properties;
         if self.gecko.mTransitionPropertyCount == 1 &&
             self.gecko.mTransitions[0].mProperty == eCSSPropertyExtra_all_properties &&
-            self.gecko.mTransitions[0].mDuration.max(0.0) + self.gecko.mTransitions[0].mDelay <= 0.0f32 {
+            self.transition_combined_duration_at(0) <= 0.0f32 {
             return false;
         }
 
@@ -3389,7 +3383,15 @@ fn static_assert() {
     ${impl_transition_count('property', 'Property')}
 
     pub fn animations_equals(&self, other: &Self) -> bool {
-        unsafe { bindings::Gecko_StyleAnimationsEquals(&self.gecko.mAnimations, &other.gecko.mAnimations) }
+        return self.gecko.mAnimationNameCount == other.gecko.mAnimationNameCount
+            && self.gecko.mAnimationDelayCount == other.gecko.mAnimationDelayCount
+            && self.gecko.mAnimationDirectionCount == other.gecko.mAnimationDirectionCount
+            && self.gecko.mAnimationDurationCount == other.gecko.mAnimationDurationCount
+            && self.gecko.mAnimationFillModeCount == other.gecko.mAnimationFillModeCount
+            && self.gecko.mAnimationIterationCountCount == other.gecko.mAnimationIterationCountCount
+            && self.gecko.mAnimationPlayStateCount == other.gecko.mAnimationPlayStateCount
+            && self.gecko.mAnimationTimingFunctionCount == other.gecko.mAnimationTimingFunctionCount
+            && unsafe { bindings::Gecko_StyleAnimationsEquals(&self.gecko.mAnimations, &other.gecko.mAnimations) }
     }
 
     pub fn set_animation_name<I>(&mut self, v: I)
@@ -3456,7 +3458,7 @@ fn static_assert() {
         self.gecko.mAnimations.ensure_len(input_len);
 
         self.gecko.mAnimationIterationCountCount = input_len as u32;
-        for (gecko, servo) in self.gecko.mAnimations.iter_mut().zip(v.cycle()) {
+        for (gecko, servo) in self.gecko.mAnimations.iter_mut().take(input_len as usize).zip(v) {
             match servo {
                 AnimationIterationCount::Number(n) => gecko.mIterationCount = n,
                 AnimationIterationCount::Infinite => gecko.mIterationCount = f32::INFINITY,
@@ -3807,7 +3809,7 @@ fn static_assert() {
                         % endif
                             => Keyword::${to_camel_case(value)},
                         % endfor
-                        x => panic!("Found unexpected value in style struct for ${ident} property: {:?}", x),
+                        _ => panic!("Found unexpected value in style struct for ${ident} property"),
                     }
                 }).collect()
         )
@@ -3857,7 +3859,7 @@ fn static_assert() {
                 StyleImageLayerRepeat::Space => RepeatKeyword::Space,
                 StyleImageLayerRepeat::Round => RepeatKeyword::Round,
                 StyleImageLayerRepeat::NoRepeat => RepeatKeyword::NoRepeat,
-                x => panic!("Found unexpected value in style struct for ${shorthand}_repeat property: {:?}", x),
+                _ => panic!("Found unexpected value in style struct for ${shorthand}_repeat property"),
             }
         }
 
@@ -4607,7 +4609,8 @@ fn static_assert() {
 
     pub fn clone_image_orientation(&self) -> longhands::image_orientation::computed_value::T {
         use gecko_bindings::structs::nsStyleImageOrientation_Angles;
-        use properties::longhands::image_orientation::computed_value::{Orientation, T};
+        use properties::longhands::image_orientation::computed_value::T;
+        use values::computed::Orientation;
 
         let gecko_orientation = self.gecko.mImageOrientation.mOrientation;
         if gecko_orientation & structs::nsStyleImageOrientation_Bits_FROM_IMAGE_MASK as u8 != 0 {
@@ -4834,7 +4837,7 @@ fn static_assert() {
                 structs::NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE => ShapeKeyword::DoubleCircle,
                 structs::NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE => ShapeKeyword::Triangle,
                 structs::NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME => ShapeKeyword::Sesame,
-                x => panic!("Unexpected value in style struct for text-emphasis-style property: {:?}", x)
+                _ => panic!("Unexpected value in style struct for text-emphasis-style property")
             };
 
         T::Keyword(KeywordValue {
@@ -4942,7 +4945,7 @@ fn static_assert() {
                 structs::NS_STYLE_TEXT_OVERFLOW_ELLIPSIS => TextOverflowSide::Ellipsis,
                 structs::NS_STYLE_TEXT_OVERFLOW_STRING =>
                     TextOverflowSide::String(side.mString.to_string().into_boxed_str()),
-                x => panic!("Found unexpected value in style struct for text_overflow property: {:?}", x),
+                _ => panic!("Found unexpected value in style struct for text_overflow property"),
             }
         }
 
@@ -5252,16 +5255,16 @@ clip-path
 
         self.gecko.mContextPropsBits = 0;
         for (gecko, servo) in self.gecko.mContextProps.iter_mut().zip(v) {
-            if servo.0 == atom!("fill") {
+            if (servo.0).0 == atom!("fill") {
                 self.gecko.mContextPropsBits |= structs::NS_STYLE_CONTEXT_PROPERTY_FILL as u8;
-            } else if servo.0 == atom!("stroke") {
+            } else if (servo.0).0 == atom!("stroke") {
                 self.gecko.mContextPropsBits |= structs::NS_STYLE_CONTEXT_PROPERTY_STROKE as u8;
-            } else if servo.0 == atom!("fill-opacity") {
+            } else if (servo.0).0 == atom!("fill-opacity") {
                 self.gecko.mContextPropsBits |= structs::NS_STYLE_CONTEXT_PROPERTY_FILL_OPACITY as u8;
-            } else if servo.0 == atom!("stroke-opacity") {
+            } else if (servo.0).0 == atom!("stroke-opacity") {
                 self.gecko.mContextPropsBits |= structs::NS_STYLE_CONTEXT_PROPERTY_STROKE_OPACITY as u8;
             }
-            gecko.mRawPtr = servo.0.into_addrefed();
+            gecko.mRawPtr = (servo.0).0.into_addrefed();
         }
     }
 
@@ -5425,7 +5428,7 @@ clip-path
             structs::NS_STYLE_CURSOR_ALL_SCROLL => Keyword::Cursor(Cursor::AllScroll),
             structs::NS_STYLE_CURSOR_ZOOM_IN => Keyword::Cursor(Cursor::ZoomIn),
             structs::NS_STYLE_CURSOR_ZOOM_OUT => Keyword::Cursor(Cursor::ZoomOut),
-            x => panic!("Found unexpected value in style struct for cursor property: {:?}", x),
+            _ => panic!("Found unexpected value in style struct for cursor property"),
         };
 
         let images = self.gecko.mCursorImages.iter().map(|gecko_cursor_image| {
@@ -5688,7 +5691,7 @@ clip-path
                             )
                         }
                     },
-                    x => panic!("Found unexpected value in style struct for content property: {:?}", x),
+                    _ => panic!("Found unexpected value in style struct for content property"),
                 }
             }).collect()
         )

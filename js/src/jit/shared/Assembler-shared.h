@@ -735,22 +735,19 @@ class MemoryAccessDesc
     uint32_t align_;
     Scalar::Type type_;
     unsigned numSimdElems_;
-    jit::MemoryBarrierBits barrierBefore_;
-    jit::MemoryBarrierBits barrierAfter_;
+    jit::Synchronization sync_;
     mozilla::Maybe<wasm::BytecodeOffset> trapOffset_;
 
   public:
     explicit MemoryAccessDesc(Scalar::Type type, uint32_t align, uint32_t offset,
                               const mozilla::Maybe<BytecodeOffset>& trapOffset,
                               unsigned numSimdElems = 0,
-                              jit::MemoryBarrierBits barrierBefore = jit::MembarNobits,
-                              jit::MemoryBarrierBits barrierAfter = jit::MembarNobits)
+                              const jit::Synchronization& sync = jit::Synchronization::None())
       : offset_(offset),
         align_(align),
         type_(type),
         numSimdElems_(numSimdElems),
-        barrierBefore_(barrierBefore),
-        barrierAfter_(barrierAfter),
+        sync_(sync),
         trapOffset_(trapOffset)
     {
         MOZ_ASSERT(Scalar::isSimdType(type) == (numSimdElems > 0));
@@ -769,11 +766,10 @@ class MemoryAccessDesc
                : Scalar::byteSize(type());
     }
     unsigned numSimdElems() const { MOZ_ASSERT(isSimd()); return numSimdElems_; }
-    jit::MemoryBarrierBits barrierBefore() const { return barrierBefore_; }
-    jit::MemoryBarrierBits barrierAfter() const { return barrierAfter_; }
+    const jit::Synchronization& sync() const { return sync_; }
     bool hasTrap() const { return !!trapOffset_; }
     BytecodeOffset trapOffset() const { return *trapOffset_; }
-    bool isAtomic() const { return (barrierBefore_ | barrierAfter_) != jit::MembarNobits; }
+    bool isAtomic() const { return !sync_.isNone(); }
     bool isSimd() const { return Scalar::isSimdType(type_); }
     bool isPlainAsmJS() const { return !hasTrap(); }
 
@@ -815,47 +811,47 @@ struct CallFarJump
 
 typedef Vector<CallFarJump, 0, SystemAllocPolicy> CallFarJumpVector;
 
-// The TrapDesc struct describes a wasm trap that is about to be emitted. This
+// The OldTrapDesc struct describes a wasm trap that is about to be emitted. This
 // includes the logical wasm bytecode offset to report, the kind of instruction
 // causing the trap, and the stack depth right before control is transferred to
 // the trap out-of-line path.
 
-struct TrapDesc : BytecodeOffset
+struct OldTrapDesc : BytecodeOffset
 {
     enum Kind { Jump, MemoryAccess };
     Kind kind;
     Trap trap;
     uint32_t framePushed;
 
-    TrapDesc(BytecodeOffset offset, Trap trap, uint32_t framePushed, Kind kind = Jump)
+    OldTrapDesc(BytecodeOffset offset, Trap trap, uint32_t framePushed, Kind kind = Jump)
       : BytecodeOffset(offset), kind(kind), trap(trap), framePushed(framePushed)
     {}
 };
 
-// A TrapSite captures all relevant information at the point of emitting the
+// An OldTrapSite captures all relevant information at the point of emitting the
 // in-line trapping instruction for the purpose of generating the out-of-line
 // trap code (at the end of the function).
 
-struct TrapSite : TrapDesc
+struct OldTrapSite : OldTrapDesc
 {
     uint32_t codeOffset;
 
-    TrapSite(TrapDesc trap, uint32_t codeOffset)
-      : TrapDesc(trap), codeOffset(codeOffset)
+    OldTrapSite(OldTrapDesc trap, uint32_t codeOffset)
+      : OldTrapDesc(trap), codeOffset(codeOffset)
     {}
 };
 
-typedef Vector<TrapSite, 0, SystemAllocPolicy> TrapSiteVector;
+typedef Vector<OldTrapSite, 0, SystemAllocPolicy> OldTrapSiteVector;
 
-// A TrapFarJump records the offset of a jump that needs to be patched to a trap
+// An OldTrapFarJump records the offset of a jump that needs to be patched to a trap
 // exit at the end of the module when trap exits are emitted.
 
-struct TrapFarJump
+struct OldTrapFarJump
 {
     Trap trap;
     jit::CodeOffset jump;
 
-    TrapFarJump(Trap trap, jit::CodeOffset jump)
+    OldTrapFarJump(Trap trap, jit::CodeOffset jump)
       : trap(trap), jump(jump)
     {}
 
@@ -864,7 +860,7 @@ struct TrapFarJump
     }
 };
 
-typedef Vector<TrapFarJump, 0, SystemAllocPolicy> TrapFarJumpVector;
+typedef Vector<OldTrapFarJump, 0, SystemAllocPolicy> OldTrapFarJumpVector;
 
 } // namespace wasm
 
@@ -875,8 +871,9 @@ class AssemblerShared
 {
     wasm::CallSiteVector callSites_;
     wasm::CallSiteTargetVector callSiteTargets_;
-    wasm::TrapSiteVector trapSites_;
-    wasm::TrapFarJumpVector trapFarJumps_;
+    wasm::TrapSiteVectorArray trapSites_;
+    wasm::OldTrapSiteVector oldTrapSites_;
+    wasm::OldTrapFarJumpVector oldTrapFarJumps_;
     wasm::CallFarJumpVector callFarJumps_;
     wasm::MemoryAccessVector memoryAccesses_;
     wasm::SymbolicAccessVector symbolicAccesses_;
@@ -934,11 +931,14 @@ class AssemblerShared
         enoughMemory_ &= callSites_.emplaceBack(desc, retAddr.offset());
         enoughMemory_ &= callSiteTargets_.emplaceBack(mozilla::Forward<Args>(args)...);
     }
-    void append(wasm::TrapSite trapSite) {
-        enoughMemory_ &= trapSites_.append(trapSite);
+    void append(wasm::Trap trap, wasm::TrapSite site) {
+        enoughMemory_ &= trapSites_[trap].append(site);
     }
-    void append(wasm::TrapFarJump jmp) {
-        enoughMemory_ &= trapFarJumps_.append(jmp);
+    void append(wasm::OldTrapSite trapSite) {
+        enoughMemory_ &= oldTrapSites_.append(trapSite);
+    }
+    void append(wasm::OldTrapFarJump jmp) {
+        enoughMemory_ &= oldTrapFarJumps_.append(jmp);
     }
     void append(wasm::CallFarJump jmp) {
         enoughMemory_ &= callFarJumps_.append(jmp);
@@ -949,11 +949,11 @@ class AssemblerShared
     void append(const wasm::MemoryAccessDesc& access, size_t codeOffset, size_t framePushed) {
         if (access.hasTrap()) {
             // If a memory access is trapping (wasm, SIMD.js, Atomics), create a
-            // TrapSite now which will generate a trap out-of-line path at the end
+            // OldTrapSite now which will generate a trap out-of-line path at the end
             // of the function which will *then* append a MemoryAccess.
-            wasm::TrapDesc trap(access.trapOffset(), wasm::Trap::OutOfBounds, framePushed,
-                                wasm::TrapSite::MemoryAccess);
-            append(wasm::TrapSite(trap, codeOffset));
+            wasm::OldTrapDesc trap(access.trapOffset(), wasm::Trap::OutOfBounds, framePushed,
+                                   wasm::OldTrapSite::MemoryAccess);
+            append(wasm::OldTrapSite(trap, codeOffset));
         } else {
             // Otherwise, this is a plain asm.js access. On WASM_HUGE_MEMORY
             // platforms, asm.js uses signal handlers to remove bounds checks
@@ -970,8 +970,9 @@ class AssemblerShared
 
     wasm::CallSiteVector& callSites() { return callSites_; }
     wasm::CallSiteTargetVector& callSiteTargets() { return callSiteTargets_; }
-    wasm::TrapSiteVector& trapSites() { return trapSites_; }
-    wasm::TrapFarJumpVector& trapFarJumps() { return trapFarJumps_; }
+    wasm::TrapSiteVectorArray& trapSites() { return trapSites_; }
+    wasm::OldTrapSiteVector& oldTrapSites() { return oldTrapSites_; }
+    wasm::OldTrapFarJumpVector& oldTrapFarJumps() { return oldTrapFarJumps_; }
     wasm::CallFarJumpVector& callFarJumps() { return callFarJumps_; }
     wasm::MemoryAccessVector& memoryAccesses() { return memoryAccesses_; }
     wasm::SymbolicAccessVector& symbolicAccesses() { return symbolicAccesses_; }

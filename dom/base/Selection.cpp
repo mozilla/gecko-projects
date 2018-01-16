@@ -72,7 +72,6 @@
 #include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 #include "nsViewManager.h"
 
 #include "nsFocusManager.h"
@@ -80,7 +79,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using mozilla::layers::ScrollInputMethod;
 
 //#define DEBUG_TABLE 1
 
@@ -599,11 +597,7 @@ Selection::GetTableCellLocationFromRange(nsRange* aRange,
   // Get the child content (the cell) pointed to by starting node of range
   // We do minimal checking since GetTableSelectionType assures
   //   us that this really is a table cell
-  nsCOMPtr<nsIContent> content = do_QueryInterface(aRange->GetStartContainer());
-  if (!content)
-    return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsIContent> child = content->GetChildAt(aRange->StartOffset());
+  nsCOMPtr<nsIContent> child = aRange->GetChildAtStartOffset();
   if (!child)
     return NS_ERROR_FAILURE;
 
@@ -690,12 +684,12 @@ Selection::GetTableSelectionType(nsIDOMRange* aDOMRange,
   // Not a single selected node
   if (startNode != endNode) return NS_OK;
 
-  int32_t startOffset = range->StartOffset();
-  int32_t endOffset = range->EndOffset();
+  nsIContent* child = range->GetChildAtStartOffset();
 
   // Not a single selected node
-  if ((endOffset - startOffset) != 1)
+  if (!child || child != range->GetChildAtEndOffset()) {
     return NS_OK;
+  }
 
   nsIContent* startContent = static_cast<nsIContent*>(startNode);
   if (!(startNode->IsElement() && startContent->IsHTMLElement())) {
@@ -710,10 +704,6 @@ Selection::GetTableSelectionType(nsIDOMRange* aDOMRange,
   }
   else //check to see if we are selecting a table or row (column and all cells not done yet)
   {
-    nsIContent *child = startNode->GetChildAt(startOffset);
-    if (!child)
-      return NS_ERROR_FAILURE;
-
     if (child->IsHTMLElement(nsGkAtoms::table))
       *aTableSelectionType = nsISelectionPrivate::TABLESELECTION_TABLE;
     else if (child->IsHTMLElement(nsGkAtoms::tr))
@@ -825,8 +815,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Selection)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsISelection)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(Selection)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(Selection)
+NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_ADDREF(Selection)
+NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_RELEASE(Selection)
 
 const RangeBoundary&
 Selection::AnchorRef()
@@ -3675,11 +3665,6 @@ Selection::ScrollIntoView(SelectionRegion aRegion,
   }
   if (aFlags & Selection::SCROLL_OVERFLOW_HIDDEN) {
     flags |= nsIPresShell::SCROLL_OVERFLOW_HIDDEN;
-  }
-
-  if (aFlags & Selection::SCROLL_FOR_CARET_MOVE) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollCaretIntoView);
   }
 
   presShell->ScrollFrameRectIntoView(frame, rect, aVertical, aHorizontal,

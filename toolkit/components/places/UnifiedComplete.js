@@ -50,7 +50,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
   ["maxHistoricalSearchSuggestions", 0],
   ["usepreloadedtopurls.enabled", true],
   ["usepreloadedtopurls.expire_days", 14],
-  ["matchBuckets", "general:5,suggestion:Infinity"],
+  ["matchBuckets", "suggestion:4,general:Infinity"],
   ["matchBucketsSearch", ""],
   ["insertMethod", INSERTMETHOD.MERGE_RELATED],
 ]);
@@ -329,6 +329,9 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 XPCOMUtils.defineLazyServiceGetter(this, "textURIService",
                                    "@mozilla.org/intl/texttosuburi;1",
                                    "nsITextToSubURI");
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "syncUsernamePref",
+                                      "services.sync.username");
 
 function setTimeout(callback, ms) {
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -1680,6 +1683,10 @@ Search.prototype = {
   },
 
   async _matchRemoteTabs() {
+    // Bail out early for non-sync users.
+    if (!syncUsernamePref) {
+      return;
+    }
     let matches = await PlacesRemoteTabsAutocompleteProvider.getMatches(this._originalSearchString);
     for (let {url, title, icon, deviceName} of matches) {
       // It's rare that Sync supplies the icon for the page (but if it does, it

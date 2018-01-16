@@ -25,9 +25,11 @@ namespace gfx {
 ScaledFontFontconfig::ScaledFontFontconfig(cairo_scaled_font_t* aScaledFont,
                                            FcPattern* aPattern,
                                            const RefPtr<UnscaledFont>& aUnscaledFont,
-                                           Float aSize)
-  : ScaledFontBase(aUnscaledFont, aSize),
-    mPattern(aPattern)
+                                           Float aSize,
+                                           bool aNeedsOblique)
+  : ScaledFontBase(aUnscaledFont, aSize)
+  , mPattern(aPattern)
+  , mNeedsOblique(aNeedsOblique)
 {
   SetCairoScaledFont(aScaledFont);
   FcPatternReference(aPattern);
@@ -248,6 +250,10 @@ ScaledFontFontconfig::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* a
   platformOptions.lcd_filter = wr::FontLCDFilter::Legacy;
   platformOptions.hinting = wr::FontHinting::Normal;
 
+  if (mNeedsOblique) {
+    options.flags |= wr::FontInstanceFlags::SYNTHETIC_ITALICS;
+  }
+
   FcBool autohint;
   if (FcPatternGetBool(mPattern, FC_AUTOHINT, 0, &autohint) == FcResultMatch && autohint) {
     options.flags |= wr::FontInstanceFlags::FORCE_AUTOHINT;
@@ -397,7 +403,7 @@ ScaledFontFontconfig::CreateFromInstanceData(const InstanceData& aInstanceData,
   FcPatternAddDouble(pattern, FC_PIXEL_SIZE, aSize);
   aInstanceData.SetupPattern(pattern);
 
-  cairo_font_face_t* font = cairo_ft_font_face_create_for_pattern(pattern);
+  cairo_font_face_t* font = cairo_ft_font_face_create_for_pattern(pattern, nullptr, 0);
   if (cairo_font_face_status(font) != CAIRO_STATUS_SUCCESS) {
     gfxWarning() << "Failed creating Cairo font face for Fontconfig pattern";
     FcPatternDestroy(pattern);

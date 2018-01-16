@@ -290,8 +290,7 @@ protected:
     // the elements of the Tuple into the final function call.
     auto copiedArgs = MakeTuple(Forward<Ts>(aArgs)...);
 
-    // keep mMaster in a local object because mMaster will become invalid after
-    // the current state object is deleted.
+    // Copy mMaster which will reset to null.
     auto master = mMaster;
 
     auto* s = new S(master);
@@ -302,6 +301,14 @@ protected:
     SLOG("change state to: %s", ToStateStr(s->GetState()));
 
     Exit();
+
+    // Delete the old state asynchronously to avoid UAF if the caller tries to
+    // access its members after SetState() returns.
+    master->OwnerThread()->DispatchDirectTask(
+      NS_NewRunnableFunction("MDSM::StateObject::DeleteOldState",
+                             [toDelete = Move(master->mStateObj)](){}));
+    // Also reset mMaster to catch potentail UAF.
+    mMaster = nullptr;
 
     master->mStateObj.reset(s);
     return CallEnterMemberFunction(s, copiedArgs,
@@ -403,6 +410,7 @@ public:
     // Calculate the position to seek to when exiting dormant.
     auto t = mMaster->mMediaSink->IsStarted()
       ? mMaster->GetClock() : mMaster->GetMediaTime();
+    Reader()->AdjustByLooping(t);
     mPendingSeek.mTarget.emplace(t, SeekTarget::Accurate);
     // SeekJob asserts |mTarget.IsValid() == !mPromise.IsEmpty()| so we
     // need to create the promise even it is not used at all.
@@ -3903,7 +3911,7 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void operator()(void* aObject)
+  virtual void operator()(void* aObject) override
   {
     const VideoData* v = static_cast<const VideoData*>(aObject);
     mSize += v->SizeOfIncludingThis(MallocSizeOf);
@@ -3922,7 +3930,7 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void operator()(void* aObject)
+  virtual void operator()(void* aObject) override
   {
     const AudioData* audioData = static_cast<const AudioData*>(aObject);
     mSize += audioData->SizeOfIncludingThis(MallocSizeOf);

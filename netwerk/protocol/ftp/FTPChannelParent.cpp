@@ -254,7 +254,7 @@ public:
   {
   }
 
-  void Run()
+  void Run() override
   {
     mParent->DivertOnDataAvailable(mData, mOffset, mCount);
   }
@@ -341,7 +341,8 @@ public:
   {
   }
 
-  void Run() {
+  void Run() override
+  {
     mParent->DivertOnStopRequest(mStatusCode);
   }
 
@@ -399,7 +400,8 @@ public:
   {
   }
 
-  void Run() {
+  void Run() override
+  {
     mParent->DivertComplete();
   }
 
@@ -737,6 +739,15 @@ FTPChannelParent::ResumeMessageDiversion()
   return NS_OK;
 }
 
+nsresult
+FTPChannelParent::CancelDiversion()
+{
+  // Only HTTP channels can have child-process-sourced-data that's long-lived
+  // so this isn't currently relevant for FTP channels and there is nothing to
+  // do.
+  return NS_OK;
+}
+
 void
 FTPChannelParent::DivertTo(nsIStreamListener *aListener)
 {
@@ -921,4 +932,3 @@ FTPChannelParent::SetErrorMsg(const char *aMsg, bool aUseUTF8)
 //---------------------
 } // namespace net
 } // namespace mozilla
-

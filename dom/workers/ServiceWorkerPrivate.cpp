@@ -27,6 +27,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/Client.h"
 #include "mozilla/dom/ClientIPCTypes.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/InternalHeaders.h"
@@ -608,7 +609,7 @@ public:
   }
 
   void
-  PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate, bool aRunResult)
+  PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate, bool aRunResult) override
   {
     // Sub-class PreRun() or WorkerRun() methods could clear our mRegistration.
     if (mRegistration) {
@@ -1883,6 +1884,7 @@ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   if (NS_WARN_IF(!info.mPrincipal)) {
     return NS_ERROR_FAILURE;
   }
+  info.mLoadingPrincipal = info.mPrincipal;
 
   nsContentUtils::StorageAccess access =
     nsContentUtils::StorageAllowedForPrincipal(info.mPrincipal);
@@ -1957,7 +1959,7 @@ ServiceWorkerPrivate::TerminateWorker()
   mIdleWorkerTimer->Cancel();
   mIdleKeepAliveToken = nullptr;
   if (mWorkerPrivate) {
-    if (Preferences::GetBool("dom.serviceWorkers.testing.enabled")) {
+    if (DOMPrefs::ServiceWorkersTestingEnabled()) {
       nsCOMPtr<nsIObserverService> os = services::GetObserverService();
       if (os) {
         os->NotifyObservers(nullptr, "service-worker-shutdown", nullptr);

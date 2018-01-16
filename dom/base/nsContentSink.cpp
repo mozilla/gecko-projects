@@ -730,14 +730,6 @@ nsContentSink::ProcessLinkFromHeader(const nsAString& aAnchor, const nsAString& 
       PrefetchPreloadHref(aHref, mDocument, linkTypes, aAs, aType, aMedia);
     }
 
-    if (linkTypes & nsStyleLinkElement::ePRERENDER) {
-      nsCOMPtr<nsIURI> href;
-      nsresult rv = NS_NewURI(getter_AddRefs(href), aHref);
-      if (NS_SUCCEEDED(rv)) {
-        mDocument->PrerenderHref(href);
-      }
-    }
-
     if (!aHref.IsEmpty() && (linkTypes & nsStyleLinkElement::eDNS_PREFETCH)) {
       PrefetchDNS(aHref);
     }
@@ -1301,7 +1293,7 @@ nsContentSink::NotifyAppend(nsIContent* aContainer, uint32_t aStartIndex)
     // Scope so we call EndUpdate before we decrease mInNotification
     MOZ_AUTO_DOC_UPDATE(mDocument, UPDATE_CONTENT_MODEL, !mBeganUpdate);
     nsNodeUtils::ContentAppended(aContainer,
-                                 aContainer->GetChildAt(aStartIndex));
+                                 aContainer->GetChildAt_Deprecated(aStartIndex));
     mLastNotificationTime = PR_Now();
   }
 

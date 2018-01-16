@@ -131,7 +131,11 @@ pref("app.update.log", false);
 pref("app.update.backgroundMaxErrors", 10);
 
 // Whether or not app updates are enabled
+#ifdef MOZ_UPDATER
 pref("app.update.enabled", true);
+#else
+pref("app.update.enabled", false);
+#endif
 
 // Whether or not to use the doorhanger application update UI.
 pref("app.update.doorhanger", true);
@@ -523,8 +527,6 @@ pref("general.warnOnAboutConfig",                 false);
 // applications, but without it there isn't a really good way to prevent chrome
 // spoofing, see bug 337344
 pref("dom.disable_window_open_feature.location",  true);
-// prevent JS from setting status messages
-pref("dom.disable_window_status_change",          true);
 // allow JS to move and resize existing windows
 pref("dom.disable_window_move_resize",            false);
 // prevent JS from monkeying with window focus, etc
@@ -1222,6 +1224,8 @@ pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true);
 pref("services.sync.prefs.sync.privacy.resistFingerprinting", true);
+pref("services.sync.prefs.sync.privacy.reduceTimerPrecision", true);
+pref("services.sync.prefs.sync.privacy.resistFingerprinting.reduceTimerPrecision.microseconds", true);
 pref("services.sync.prefs.sync.security.OCSP.enabled", true);
 pref("services.sync.prefs.sync.security.OCSP.require", true);
 pref("services.sync.prefs.sync.security.default_personal_cert", true);
@@ -1523,6 +1527,8 @@ pref("toolkit.telemetry.newProfilePing.enabled", true);
 pref("toolkit.telemetry.updatePing.enabled", true);
 // Enables sending 'bhr' pings when the browser hangs.
 pref("toolkit.telemetry.bhrPing.enabled", true);
+// Enables using Hybrid Content Telemetry from Mozilla privileged pages.
+pref("toolkit.telemetry.hybridContent.enabled", true);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", true);

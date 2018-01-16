@@ -88,7 +88,6 @@
 #include "nsDataHashtable.h"
 #include "nsTableWrapperFrame.h"
 #include "nsTextFrame.h"
-#include "nsFontFaceList.h"
 #include "nsFontInflationData.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGUtils.h"
@@ -133,6 +132,7 @@
 #include "nsDeckFrame.h"
 #include "nsIEffectiveTLDService.h" // for IsInStyloBlocklist
 #include "mozilla/StylePrefs.h"
+#include "mozilla/dom/InspectorFontFace.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -164,6 +164,7 @@ using namespace mozilla::gfx;
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
 #define INTERCHARACTER_RUBY_ENABLED_PREF_NAME "layout.css.ruby.intercharacter.enabled"
+#define CONTENT_SELECT_ENABLED_PREF_NAME "dom.select_popup_in_content.enabled"
 
 // The time in number of frames that we estimate for a refresh driver
 // to be quiescent
@@ -740,6 +741,22 @@ nsLayoutUtils::IsInterCharacterRubyEnabled()
   return sInterCharacterRubyEnabled;
 }
 
+bool
+nsLayoutUtils::IsContentSelectEnabled()
+{
+  static bool sContentSelectEnabled;
+  static bool sContentSelectEnabledPrefCached = false;
+
+  if (!sContentSelectEnabledPrefCached) {
+    sContentSelectEnabledPrefCached = true;
+    Preferences::AddBoolVarCache(&sContentSelectEnabled,
+                                 CONTENT_SELECT_ENABLED_PREF_NAME,
+                                 false);
+  }
+
+  return sContentSelectEnabled;
+}
+
 void
 nsLayoutUtils::UnionChildOverflow(nsIFrame* aFrame,
                                   nsOverflowAreas& aOverflowAreas,
@@ -1099,7 +1116,10 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
       int32_t budget = maxHeightScreenPx - screenRect.height;
       // Scale the margins down to fit into the budget if necessary, maintaining
       // their relative ratio.
-      float scale = std::min(1.0f, float(budget) / margins.TopBottom());
+      float scale = 1.0f;
+      if (float(budget) < margins.TopBottom()) {
+        scale = float(budget) / margins.TopBottom();
+      }
       float top = margins.top * scale;
       float bottom = margins.bottom * scale;
       screenRect.y -= top;
@@ -1107,7 +1127,10 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
     }
     if (screenRect.width < maxWidthScreenPx) {
       int32_t budget = maxWidthScreenPx - screenRect.width;
-      float scale = std::min(1.0f, float(budget) / margins.LeftRight());
+      float scale = 1.0f;
+      if (float(budget) < margins.LeftRight()) {
+        scale = float(budget) / margins.LeftRight();
+      }
       float left = margins.left * scale;
       float right = margins.right * scale;
       screenRect.x -= left;
@@ -1702,7 +1725,7 @@ nsLayoutUtils::GetFloatFromPlaceholder(nsIFrame* aFrame) {
   if (aFrame->GetStateBits() & PLACEHOLDER_FOR_FLOAT) {
     nsIFrame *outOfFlowFrame =
       nsPlaceholderFrame::GetRealFrameForPlaceholder(aFrame);
-    NS_ASSERTION(outOfFlowFrame->IsFloating(),
+    NS_ASSERTION(outOfFlowFrame && outOfFlowFrame->IsFloating(),
                  "How did that happen?");
     return outOfFlowFrame;
   }
@@ -1913,11 +1936,8 @@ nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
   }
 
   AutoTArray<nsIFrame*,20> frame1Ancestors;
-  // Note that the order of the condition is important. We need to fill the
-  // ancestors even if aCommonAncestor is null, otherwise the code below makes
-  // no sense.
-  if (!FillAncestors(aFrame1, aCommonAncestor, &frame1Ancestors) &&
-      aCommonAncestor) {
+  if (aCommonAncestor &&
+      !FillAncestors(aFrame1, aCommonAncestor, &frame1Ancestors)) {
     // We reached the root of the frame tree ... if aCommonAncestor was set,
     // it is wrong
     return DoCompareTreePosition(aFrame1, aFrame2,
@@ -3633,7 +3653,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   const bool isForPainting = (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
     aBuilderMode == nsDisplayListBuilderMode::PAINTING;
 
-  const bool retainingEnabled = isForPainting && AreRetainedDisplayListsEnabled();
+  // Only allow retaining for painting when preffed on, and for root frames (since
+  // the modified frame tracking is per-root-frame).
+  const bool retainingEnabled =
+    isForPainting && AreRetainedDisplayListsEnabled() && !aFrame->GetParent();
 
   RetainedDisplayListBuilder* retainedBuilder =
     GetOrCreateRetainedDisplayListBuilder(aFrame, retainingEnabled, buildCaret);
@@ -7411,7 +7434,8 @@ static bool IsPopupFrame(nsIFrame* aFrame)
 {
   // aFrame is a popup it's the list control frame dropdown for a combobox.
   LayoutFrameType frameType = aFrame->Type();
-  if (frameType == LayoutFrameType::ListControl) {
+  if (!nsLayoutUtils::IsContentSelectEnabled() &&
+      frameType == LayoutFrameType::ListControl) {
     nsListControlFrame* lcf = static_cast<nsListControlFrame*>(aFrame);
     return lcf->IsInDropDownMode();
   }
@@ -7993,14 +8017,15 @@ nsLayoutUtils::AssertTreeOnlyEmptyNextInFlows(nsIFrame *aSubtreeRoot)
 #endif
 
 static void
-GetFontFacesForFramesInner(nsIFrame* aFrame, nsFontFaceList* aFontFaceList)
+GetFontFacesForFramesInner(nsIFrame* aFrame,
+                           nsLayoutUtils::UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
   if (aFrame->IsTextFrame()) {
     if (!aFrame->GetPrevContinuation()) {
       nsLayoutUtils::GetFontFacesForText(aFrame, 0, INT32_MAX, true,
-                                         aFontFaceList);
+                                         aFontFaces);
     }
     return;
   }
@@ -8012,32 +8037,56 @@ GetFontFacesForFramesInner(nsIFrame* aFrame, nsFontFaceList* aFontFaceList)
     for (nsFrameList::Enumerator e(children); !e.AtEnd(); e.Next()) {
       nsIFrame* child = e.get();
       child = nsPlaceholderFrame::GetRealFrameFor(child);
-      GetFontFacesForFramesInner(child, aFontFaceList);
+      GetFontFacesForFramesInner(child, aFontFaces);
     }
   }
 }
 
-/* static */
-nsresult
+/* static */ nsresult
 nsLayoutUtils::GetFontFacesForFrames(nsIFrame* aFrame,
-                                     nsFontFaceList* aFontFaceList)
+                                     UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
   while (aFrame) {
-    GetFontFacesForFramesInner(aFrame, aFontFaceList);
+    GetFontFacesForFramesInner(aFrame, aFontFaces);
     aFrame = GetNextContinuationOrIBSplitSibling(aFrame);
   }
 
   return NS_OK;
 }
 
-/* static */
-nsresult
+static void
+AddFontsFromTextRun(gfxTextRun* aTextRun,
+                    uint32_t aOffset,
+                    uint32_t aLength,
+                    nsLayoutUtils::UsedFontFaceTable& aFontFaces)
+{
+  gfxTextRun::Range range(aOffset, aOffset + aLength);
+  gfxTextRun::GlyphRunIterator iter(aTextRun, range);
+  while (iter.NextRun()) {
+    gfxFontEntry *fe = iter.GetGlyphRun()->mFont->GetFontEntry();
+    // if we have already listed this face, just make sure the match type is
+    // recorded
+    InspectorFontFace* existingFace = aFontFaces.Get(fe);
+    if (existingFace) {
+      existingFace->AddMatchType(iter.GetGlyphRun()->mMatchType);
+    } else {
+      // A new font entry we haven't seen before
+      InspectorFontFace* ff =
+        new InspectorFontFace(fe, aTextRun->GetFontGroup(),
+                              iter.GetGlyphRun()->mMatchType);
+      aFontFaces.Put(fe, ff);
+    }
+  }
+}
+
+/* static */ nsresult
 nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
-                                   int32_t aStartOffset, int32_t aEndOffset,
+                                   int32_t aStartOffset,
+                                   int32_t aEndOffset,
                                    bool aFollowContinuations,
-                                   nsFontFaceList* aFontFaceList)
+                                   UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
@@ -8072,7 +8121,7 @@ nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
 
     uint32_t skipStart = iter.ConvertOriginalToSkipped(fstart);
     uint32_t skipEnd = iter.ConvertOriginalToSkipped(fend);
-    aFontFaceList->AddFontsFromTextRun(textRun, skipStart, skipEnd - skipStart);
+    AddFontsFromTextRun(textRun, skipStart, skipEnd - skipStart, aFontFaces);
     curr = next;
   } while (aFollowContinuations && curr);
 

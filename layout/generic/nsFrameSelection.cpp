@@ -81,14 +81,12 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 
 #include "nsFocusManager.h"
 #include "nsPIDOMWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using mozilla::layers::ScrollInputMethod;
 
 //#define DEBUG_TABLE 1
 
@@ -1639,7 +1637,7 @@ nsFrameSelection::GetFrameForNodeOffset(nsIContent*        aNode,
       }
 
       if (childIndex > 0 || numChildren > 0) {
-        nsCOMPtr<nsIContent> childNode = theNode->GetChildAt(childIndex);
+        nsCOMPtr<nsIContent> childNode = theNode->GetChildAt_Deprecated(childIndex);
 
         if (!childNode) {
           break;
@@ -1680,7 +1678,7 @@ nsFrameSelection::GetFrameForNodeOffset(nsIContent*        aNode,
               aHint == CARET_ASSOCIATE_BEFORE ? childIndex - 1 : childIndex + 1;
 
             if (newChildIndex >= 0 && newChildIndex < numChildren) {
-              nsCOMPtr<nsIContent> newChildNode = aNode->GetChildAt(newChildIndex);
+              nsCOMPtr<nsIContent> newChildNode = aNode->GetChildAt_Deprecated(newChildIndex);
               if (!newChildNode) {
                 return nullptr;
               }
@@ -1796,8 +1794,6 @@ nsFrameSelection::CommonPageMove(bool aForward,
     return;
 
   // scroll one page
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-      (uint32_t) ScrollInputMethod::MainThreadScrollPage);
   aScrollableFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                              nsIScrollableFrame::PAGES,
                              nsIScrollableFrame::SMOOTH);
@@ -2065,7 +2061,7 @@ GetFirstSelectedContent(nsRange* aRange)
   NS_PRECONDITION(aRange->GetStartContainer()->IsElement(),
                   "Unexpected parent");
 
-  return aRange->GetStartContainer()->GetChildAt(aRange->StartOffset());
+  return aRange->GetChildAtStartOffset();
 }
 
 // Table selection support.
@@ -2088,7 +2084,7 @@ nsFrameSelection::HandleTableSelection(nsINode* aParentContent,
 
   nsresult result = NS_OK;
 
-  nsIContent *childContent = aParentContent->GetChildAt(aContentOffset);
+  nsIContent *childContent = aParentContent->GetChildAt_Deprecated(aContentOffset);
 
   // When doing table selection, always set the direction to next so
   // we can be sure that anchorNode's offset always points to the
@@ -2350,7 +2346,7 @@ printf("HandleTableSelection: Unselecting mUnselectCellOnMouseUp; rangeCount=%d\
 
           int32_t offset = range->StartOffset();
           // Be sure previous selection is a table cell
-          nsIContent* child = container->GetChildAt(offset);
+          nsIContent* child = range->GetChildAtStartOffset();
           if (child && IsCell(child)) {
             previousCellParent = container;
           }
@@ -2695,14 +2691,7 @@ nsFrameSelection::GetFirstCellNodeInRange(nsRange *aRange) const
 {
   if (!aRange) return nullptr;
 
-  nsINode* startContainer = aRange->GetStartContainer();
-  if (!startContainer) {
-    return nullptr;
-  }
-
-  int32_t offset = aRange->StartOffset();
-
-  nsIContent* childContent = startContainer->GetChildAt(offset);
+  nsIContent* childContent = aRange->GetChildAtStartOffset();
   if (!childContent)
     return nullptr;
   // Don't return node if not a cell

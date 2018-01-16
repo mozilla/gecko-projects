@@ -515,9 +515,6 @@ XRE_InitChildProcess(int aArgc,
 #ifdef MOZ_X11
   XInitThreads();
 #endif
-#if MOZ_WIDGET_GTK == 2
-  XRE_GlibInit();
-#endif
 #ifdef MOZ_WIDGET_GTK
   // Setting the name here avoids the need to pass this through to gtk_init().
   g_set_prgname(aArgv[0]);
@@ -531,7 +528,8 @@ XRE_InitChildProcess(int aArgc,
       printf_stderr("Could not allow ptrace from any process.\n");
     }
 #endif
-    printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
+    printf_stderr("\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
+                  XRE_ChildProcessTypeToString(XRE_GetProcessType()),
                   base::GetCurrentProcId());
     sleep(GetDebugChildPauseTime());
   }
@@ -541,7 +539,8 @@ XRE_InitChildProcess(int aArgc,
                   "Invoking NS_DebugBreak() to debug child process",
                   nullptr, __FILE__, __LINE__);
   } else if (PR_GetEnv("MOZ_DEBUG_CHILD_PAUSE")) {
-    printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
+    printf_stderr("\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
+                  XRE_ChildProcessTypeToString(XRE_GetProcessType()),
                   base::GetCurrentProcId());
     ::Sleep(GetDebugChildPauseTime());
   }
@@ -975,7 +974,7 @@ XRE_ShutdownTestShell()
 void
 XRE_InstallX11ErrorHandler()
 {
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
   InstallGdkErrorHandler();
 #else
   InstallX11ErrorHandler();

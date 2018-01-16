@@ -57,6 +57,7 @@
 #include "FrameLayerBuilder.h"
 #include "nsISelectionController.h"
 #include "nsISelection.h"
+#include "nsIURIMutator.h"
 
 #include "imgIContainer.h"
 #include "imgLoader.h"
@@ -101,7 +102,7 @@ using namespace mozilla::layers;
 #define ALIGN_UNSET uint8_t(-1)
 
 // static icon information
-nsImageFrame::IconLoad* nsImageFrame::gIconLoad = nullptr;
+StaticRefPtr<nsImageFrame::IconLoad> nsImageFrame::gIconLoad;
 
 // cached IO service for loading icons
 nsIIOService* nsImageFrame::sIOService;
@@ -2109,7 +2110,9 @@ nsImageFrame::HandleEvent(nsPresContext* aPresContext,
           NS_ENSURE_SUCCESS(rv, rv);
 
           spec += nsPrintfCString("?%d,%d", p.x, p.y);
-          rv = uri->SetSpec(spec);
+          rv = NS_MutateURI(uri)
+                 .SetSpec(spec)
+                 .Finalize(uri);
           NS_ENSURE_SUCCESS(rv, rv);
 
           bool clicked = false;
@@ -2355,7 +2358,6 @@ nsresult nsImageFrame::LoadIcons(nsPresContext *aPresContext)
   NS_NAMED_LITERAL_STRING(brokenSrc,"resource://gre-resources/broken-image.png");
 
   gIconLoad = new IconLoad();
-  NS_ADDREF(gIconLoad);
 
   nsresult rv;
   // create a loader and load the images

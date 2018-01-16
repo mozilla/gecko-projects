@@ -19,6 +19,7 @@ const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabl
 const CREDITCARDS_USED_STATUS_PREF = "extensions.formautofill.creditCards.used";
 const AUTOFILL_CREDITCARDS_AVAILABLE_PREF = "extensions.formautofill.creditCards.available";
 const ENABLED_AUTOFILL_CREDITCARDS_PREF = "extensions.formautofill.creditCards.enabled";
+const DEFAULT_REGION_PREF = "browser.search.region";
 const SUPPORTED_COUNTRIES_PREF = "extensions.formautofill.supportedCountries";
 const MANAGE_ADDRESSES_KEYWORDS = ["manageAddressesTitle", "addNewAddressTitle"];
 const EDIT_ADDRESS_KEYWORDS = [
@@ -31,6 +32,10 @@ const FIELD_STATES = {
   NORMAL: "NORMAL",
   AUTO_FILLED: "AUTO_FILLED",
   PREVIEW: "PREVIEW",
+};
+const SECTION_TYPES = {
+  ADDRESS: "address",
+  CREDIT_CARD: "creditCard",
 };
 
 // The maximum length of data to be saved in a single field for preventing DoS
@@ -179,6 +184,7 @@ this.FormAutofillUtils = {
   EDIT_CREDITCARD_KEYWORDS,
   MAX_FIELD_VALUE_LENGTH,
   FIELD_STATES,
+  SECTION_TYPES,
 
   _fieldNameInfo: {
     "name": "name",
@@ -838,10 +844,6 @@ this.FormAutofillUtils = {
   },
 };
 
-XPCOMUtils.defineLazyGetter(this.FormAutofillUtils, "DEFAULT_REGION", () => {
-  return Services.prefs.getCharPref("browser.search.region", "US");
-});
-
 this.log = null;
 this.FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
 
@@ -853,6 +855,8 @@ XPCOMUtils.defineLazyGetter(FormAutofillUtils, "brandBundle", function() {
   return Services.strings.createBundle("chrome://branding/locale/brand.properties");
 });
 
+XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
+                                      "DEFAULT_REGION", DEFAULT_REGION_PREF, "US");
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,
                                       "isAutofillAddressesEnabled", ENABLED_AUTOFILL_ADDRESSES_PREF);
 XPCOMUtils.defineLazyPreferenceGetter(this.FormAutofillUtils,

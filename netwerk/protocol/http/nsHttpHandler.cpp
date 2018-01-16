@@ -318,6 +318,13 @@ nsHttpHandler::SetFastOpenOSSupport()
     return;
 #elif defined(XP_WIN)
     mFastOpenSupported = IsWindows10BuildOrLater(16299);
+
+    if (mFastOpenSupported) {
+        // We have some problems with lavasoft software and tcp fast open.
+        if (GetModuleHandleW(L"pmls64.dll") || GetModuleHandleW(L"rlls64.dll")) {
+            mFastOpenSupported = false;
+        }
+    }
 #else
 
     nsAutoCString version;
@@ -1754,6 +1761,10 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
     if (PREF_CHANGED(HTTP_PREF("tailing.delay-max"))) {
         Unused << prefs->GetIntPref(HTTP_PREF("tailing.delay-max"), &val);
         mTailDelayMax = (uint32_t)clamped(val, 0, 60000);
+    }
+    if (PREF_CHANGED(HTTP_PREF("tailing.total-max"))) {
+        Unused << prefs->GetIntPref(HTTP_PREF("tailing.total-max"), &val);
+        mTailTotalMax = (uint32_t)clamped(val, 0, 60000);
     }
 
     if (PREF_CHANGED(HTTP_PREF("focused_window_transaction_ratio"))) {

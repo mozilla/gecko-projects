@@ -242,7 +242,7 @@ public:
                             ScriptLoadRequest* aRequest,
                             nsresult aChannelStatus,
                             nsresult aSRIStatus,
-                            mozilla::dom::SRICheckDataVerifier* aSRIDataVerifier);
+                            SRICheckDataVerifier* aSRIDataVerifier);
 
   /**
    * Returns wether any request is queued, and not executed yet.
@@ -342,7 +342,6 @@ private:
   ScriptLoadRequest* CreateLoadRequest(ScriptKind aKind,
                                        nsIURI* aURI,
                                        nsIScriptElement* aElement,
-                                       ValidJSVersion aValidJSVersion,
                                        mozilla::CORSMode aCORSMode,
                                        const SRIMetadata& aIntegrity,
                                        mozilla::net::ReferrerPolicy aReferrerPolicy);
@@ -357,6 +356,20 @@ private:
    */
   void ContinueParserAsync(ScriptLoadRequest* aParserBlockingRequest);
 
+
+  bool ProcessExternalScript(nsIScriptElement* aElement,
+                             ScriptKind aScriptKind,
+                             nsAutoString aTypeAttr,
+                             nsIContent* aScriptContent);
+
+  bool ProcessInlineScript(nsIScriptElement* aElement,
+                           ScriptKind aScriptKind);
+
+  ScriptLoadRequest* LookupPreloadRequest(nsIScriptElement* aElement,
+                                          ScriptKind aScriptKind);
+
+  void GetSRIMetadata(const nsAString& aIntegrityAttr,
+                      SRIMetadata *aMetadataOut);
 
   /**
    * Helper function to check the content policy for a given request.
@@ -378,6 +391,8 @@ private:
    * success, as this error code is used to abort the input stream.
    */
   nsresult RestartLoad(ScriptLoadRequest* aRequest);
+
+  void HandleLoadError(ScriptLoadRequest *aRequest, nsresult aResult);
 
   /**
    * Process any pending requests asynchronously (i.e. off an event) if there
@@ -412,6 +427,16 @@ private:
   {
     return mEnabled && !mBlockerCount;
   }
+
+  nsresult VerifySRI(ScriptLoadRequest *aRequest,
+                     nsIIncrementalStreamLoader* aLoader,
+                     nsresult aSRIStatus,
+                     SRICheckDataVerifier* aSRIDataVerifier) const;
+
+  nsresult SaveSRIHash(ScriptLoadRequest *aRequest,
+                       SRICheckDataVerifier* aSRIDataVerifier) const;
+
+  void ReportErrorToConsole(ScriptLoadRequest *aRequest, nsresult aResult) const;
 
   nsresult AttemptAsyncScriptCompile(ScriptLoadRequest* aRequest);
   nsresult ProcessRequest(ScriptLoadRequest* aRequest);
@@ -458,14 +483,13 @@ private:
                                 nsresult aStatus);
 
   void AddDeferRequest(ScriptLoadRequest* aRequest);
+  void AddAsyncRequest(ScriptLoadRequest* aRequest);
   bool MaybeRemovedDeferRequests();
 
   void MaybeMoveToLoadedList(ScriptLoadRequest* aRequest);
 
   JS::SourceBufferHolder GetScriptSource(ScriptLoadRequest* aRequest,
                                          nsAutoString& inlineData);
-
-  bool ModuleScriptsEnabled();
 
   void SetModuleFetchStarted(ModuleLoadRequest *aRequest);
   void SetModuleFetchFinishedAndResumeWaitingRequests(ModuleLoadRequest* aRequest,

@@ -221,6 +221,18 @@ ARCHIVE_FILES = {
             'dest': 'tools/wptserve',
         },
         {
+            'source': buildconfig.topsrcdir,
+            'base': 'python/mozterm',
+            'pattern': '**',
+            'dest': 'tools/mozterm',
+        },
+        {
+            'source': buildconfig.topsrcdir,
+            'base': 'third_party/python/six',
+            'pattern': '**',
+            'dest': 'tools/six',
+        },
+        {
             'source': buildconfig.topobjdir,
             'base': '',
             'pattern': 'mozinfo.json',

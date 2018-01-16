@@ -2752,7 +2752,7 @@ PaintedLayerDataNode::FindPaintedLayerFor(const nsIntRect& aVisibleRect,
       }
       if (data.mBackfaceHidden == aBackfaceHidden &&
           data.mASR == aASR &&
-          DisplayItemClipChain::Equal(data.mClipChain, aClipChain)) {
+          data.mClipChain == aClipChain) {
         lowestUsableLayer = &data;
       }
       // Also check whether the event-regions intersect the visible rect,
@@ -5454,10 +5454,11 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
         EffectCompositor::HasAnimationsForCompositor(
           aContainerFrame, eCSSProperty_transform)) {
       nsSize displaySize = ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
-      // compute scale using the animation on the container (ignoring
-      // its ancestors)
+      // compute scale using the animation on the container, taking ancestors in to account
+      nsSize scaledVisibleSize = nsSize(aVisibleRect.Width() * aIncomingScale.mXScale,
+                                        aVisibleRect.Height() * aIncomingScale.mYScale);
       scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(
-                aContainerFrame, aVisibleRect.Size(),
+                aContainerFrame, scaledVisibleSize,
                 displaySize);
       // multiply by the scale inherited from ancestors--we use a uniform
       // scale factor to prevent blurring when the layer is rotated.

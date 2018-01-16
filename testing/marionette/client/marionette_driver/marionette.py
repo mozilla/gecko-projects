@@ -653,6 +653,9 @@ class Marionette(object):
         if self.instance:
             # stop application and, if applicable, stop emulator
             self.instance.close(clean=True)
+            if self.instance.unresponsive_count >= 3:
+                raise errors.UnresponsiveInstanceException(
+                    "Application clean-up has failed >2 consecutive times.")
 
     def __del__(self):
         self.cleanup()
@@ -817,7 +820,7 @@ class Marionette(object):
                 else:
                     message = 'Process has been unexpectedly closed (Exit code: {returncode})'
 
-                self.delete_session(send_request=False, reset_session_id=True)
+                self.delete_session(send_request=False)
 
             message += ' (Reason: {reason})'
 
@@ -1086,8 +1089,7 @@ class Marionette(object):
             else:
                 cause = self._request_in_app_shutdown()
 
-            # Ensure to explicitely mark the session as deleted
-            self.delete_session(send_request=False, reset_session_id=True)
+            self.delete_session(send_request=False)
 
             # Give the application some time to shutdown
             returncode = self.instance.runner.wait(timeout=self.DEFAULT_SHUTDOWN_TIMEOUT)
@@ -1100,7 +1102,7 @@ class Marionette(object):
                 raise IOError(message.format(self.DEFAULT_SHUTDOWN_TIMEOUT))
 
         else:
-            self.delete_session(reset_session_id=True)
+            self.delete_session()
             self.instance.close(clean=clean)
 
         if cause not in (None, "shutdown"):
@@ -1141,8 +1143,7 @@ class Marionette(object):
             else:
                 cause = self._request_in_app_shutdown("eRestart")
 
-            # Ensure to explicitely mark the session as deleted
-            self.delete_session(send_request=False, reset_session_id=True)
+            self.delete_session(send_request=False)
 
             try:
                 timeout = self.DEFAULT_SHUTDOWN_TIMEOUT + self.DEFAULT_STARTUP_TIMEOUT
@@ -1252,25 +1253,21 @@ class Marionette(object):
     def test_name(self, test_name):
         self._test_name = test_name
 
-    def delete_session(self, send_request=True, reset_session_id=False):
+    def delete_session(self, send_request=True):
         """Close the current session and disconnect from the server.
 
         :param send_request: Optional, if `True` a request to close the session on
             the server side will be sent. Use `False` in case of eg. in_app restart()
             or quit(), which trigger a deletion themselves. Defaults to `True`.
-        :param reset_session_id: Optional, if `True` the current session id will
-            be reset, which will require an explicit call to :func:`start_session`
-            before the test can continue. Defaults to `False`.
         """
         try:
             if send_request:
                 self._send_message("deleteSession")
         finally:
-            if reset_session_id:
-                self.session_id = None
-            self.session = None
             self.process_id = None
             self.profile = None
+            self.session = None
+            self.session_id = None
             self.window = None
 
             if self.client is not None:

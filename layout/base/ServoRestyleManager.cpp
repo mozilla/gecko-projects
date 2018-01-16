@@ -107,7 +107,9 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
       // Handle :-moz-table and :-moz-inline-table.
       parent = IsAnonBox(*tableFrame) ? parent->GetParent() : tableFrame;
     } else {
-      parent = parent->GetParent();
+      // We get the in-flow parent here so that we can handle the OOF anonymous
+      // boxed to get the correct parent.
+      parent = parent->GetInFlowParent();
     }
     parent = FirstContinuationOrPartOfIBSplit(parent);
   }
@@ -909,7 +911,6 @@ ServoRestyleManager::ProcessPostTraversal(
 
     if (styleFrame) {
       UpdateAdditionalStyleContexts(styleFrame, aRestyleState);
-      styleFrame->UpdateStyleOfOwnedAnonBoxes(childrenRestyleState);
     }
 
     if (!aElement->GetParent()) {
@@ -973,6 +974,10 @@ ServoRestyleManager::ProcessPostTraversal(
     childrenRestyleState.ProcessWrapperRestyles(styleFrame);
 
     if (wasRestyled) {
+      // Make sure to update anon boxes and pseudo bits after updating text,
+      // otherwise we could clobber first-letter styles from
+      // ProcessPostTraversalForText, for example.
+      styleFrame->UpdateStyleOfOwnedAnonBoxes(childrenRestyleState);
       UpdateFramePseudoElementStyles(styleFrame, childrenRestyleState);
     } else if (traverseElementChildren &&
                styleFrame->IsFrameOfType(nsIFrame::eBlockFrame)) {

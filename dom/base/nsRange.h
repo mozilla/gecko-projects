@@ -33,6 +33,7 @@ class DocGroup;
 class DocumentFragment;
 class DOMRect;
 class DOMRectList;
+class InspectorFontFace;
 class Selection;
 } // namespace dom
 } // namespace mozilla
@@ -280,7 +281,8 @@ public:
     return parentNode;
   }
 
-  NS_IMETHOD GetUsedFontFaces(nsIDOMFontFaceList** aResult);
+  nsresult GetUsedFontFaces(
+      nsTArray<nsAutoPtr<mozilla::dom::InspectorFontFace>>& aResult);
 
   // nsIMutationObserver methods
   NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
@@ -363,10 +365,7 @@ public:
 
   static void GetInnerTextNoFlush(mozilla::dom::DOMString& aValue,
                                   mozilla::ErrorResult& aError,
-                                  nsIContent* aStartContainer,
-                                  uint32_t aStartOffset,
-                                  nsIContent* aEndContainer,
-                                  uint32_t aEndOffset);
+                                  nsIContent* aContainer);
 
   nsINode* GetParentObject() const { return mOwner; }
   virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override final;

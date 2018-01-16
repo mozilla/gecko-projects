@@ -34,7 +34,6 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.SiteIdentity;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.toolbar.SecurityModeUtil;
-import org.mozilla.gecko.toolbar.CustomTabsSecurityPopup;
 import org.mozilla.gecko.util.ColorUtil;
 
 /**
@@ -188,7 +187,7 @@ public class ActionBarPresenter {
         @SuppressWarnings("deprecation")
         final Drawable icon = mActionBar.getThemedContext()
                 .getResources()
-                .getDrawable(R.drawable.ic_close_light);
+                .getDrawable(R.drawable.close);
 
         Drawable wrapped = DrawableCompat.wrap(icon);
         DrawableCompat.setTint(wrapped, mTextPrimaryColor);

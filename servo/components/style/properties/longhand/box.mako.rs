@@ -20,8 +20,6 @@ ${helpers.predefined_type(
     initial_specified_value="specified::Display::inline()",
     animation_value_type="discrete",
     needs_context=False,
-    custom_cascade= product == 'servo',
-    custom_cascade_function="specified::Display::cascade_property_custom",
     flags="APPLIES_TO_PLACEHOLDER",
     spec="https://drafts.csswg.org/css-display/#propdef-display",
 )}
@@ -160,27 +158,6 @@ ${helpers.single_keyword("position", "static absolute relative fixed sticky",
         }
     }
 </%helpers:single_keyword_computed>
-
-<%helpers:longhand name="-servo-display-for-hypothetical-box"
-                   animation_value_type="none"
-                   derived_from="display"
-                   products="servo"
-                   spec="Internal (not web-exposed)">
-    pub use super::display::{SpecifiedValue, get_initial_value};
-    pub use super::display::{parse};
-
-    pub mod computed_value {
-        pub type T = super::SpecifiedValue;
-    }
-
-    #[inline]
-    pub fn derive_from_display(context: &mut Context) {
-        let d = context.style().get_box().clone_display();
-        context.builder.set__servo_display_for_hypothetical_box(d);
-    }
-
-</%helpers:longhand>
-
 
 ${helpers.predefined_type(
     "vertical-align",
@@ -389,7 +366,7 @@ ${helpers.predefined_type("scroll-snap-destination",
                           "computed::Position::zero()",
                           products="gecko",
                           gecko_pref="layout.css.scroll-snap.enabled",
-                          boxed="True",
+                          boxed=True,
                           spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
                           animation_value_type="discrete")}
 
@@ -505,7 +482,7 @@ ${helpers.predefined_type("perspective",
 ${helpers.predefined_type("perspective-origin",
                           "position::Position",
                           "computed::position::Position::center()",
-                          boxed="True",
+                          boxed=True,
                           extra_prefixes="moz webkit",
                           spec="https://drafts.csswg.org/css-transforms-2/#perspective-origin-property",
                           animation_value_type="ComputedValue")}
@@ -543,100 +520,14 @@ ${helpers.predefined_type("transform-origin",
                           boxed=True,
                           spec="https://drafts.csswg.org/css-transforms/#transform-origin-property")}
 
-// FIXME: `size` and `content` values are not implemented and `strict` is implemented
-// like `content`(layout style paint) in gecko. We should implement `size` and `content`,
-// also update the glue once they are implemented in gecko.
-<%helpers:longhand name="contain" animation_value_type="discrete" products="gecko"
-                   flags="FIXPOS_CB"
-                   gecko_pref="layout.css.contain.enabled",
-                   spec="https://drafts.csswg.org/css-contain/#contain-property">
-    use std::fmt;
-    use style_traits::ToCss;
-
-    pub mod computed_value {
-        pub type T = super::SpecifiedValue;
-    }
-
-    bitflags! {
-        #[derive(MallocSizeOf, ToComputedValue)]
-        pub struct SpecifiedValue: u8 {
-            const LAYOUT = 0x01;
-            const STYLE = 0x02;
-            const PAINT = 0x04;
-            const STRICT = 0x8;
-            const STRICT_BITS = SpecifiedValue::LAYOUT.bits | SpecifiedValue::STYLE.bits | SpecifiedValue::PAINT.bits;
-        }
-    }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            if self.is_empty() {
-                return dest.write_str("none")
-            }
-            if self.contains(SpecifiedValue::STRICT) {
-                return dest.write_str("strict")
-            }
-
-            let mut has_any = false;
-            macro_rules! maybe_write_value {
-                ($ident:path => $str:expr) => {
-                    if self.contains($ident) {
-                        if has_any {
-                            dest.write_str(" ")?;
-                        }
-                        has_any = true;
-                        dest.write_str($str)?;
-                    }
-                }
-            }
-            maybe_write_value!(SpecifiedValue::LAYOUT => "layout");
-            maybe_write_value!(SpecifiedValue::STYLE => "style");
-            maybe_write_value!(SpecifiedValue::PAINT => "paint");
-
-            debug_assert!(has_any);
-            Ok(())
-        }
-    }
-
-    #[inline]
-    pub fn get_initial_value() -> computed_value::T {
-        computed_value::T::empty()
-    }
-
-    /// none | strict | content | [ size || layout || style || paint ]
-    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<SpecifiedValue, ParseError<'i>> {
-        let mut result = SpecifiedValue::empty();
-
-        if input.try(|input| input.expect_ident_matching("none")).is_ok() {
-            return Ok(result)
-        }
-        if input.try(|input| input.expect_ident_matching("strict")).is_ok() {
-            result.insert(SpecifiedValue::STRICT | SpecifiedValue::STRICT_BITS);
-            return Ok(result)
-        }
-
-        while let Ok(name) = input.try(|i| i.expect_ident_cloned()) {
-            let flag = match_ignore_ascii_case! { &name,
-                "layout" => Some(SpecifiedValue::LAYOUT),
-                "style" => Some(SpecifiedValue::STYLE),
-                "paint" => Some(SpecifiedValue::PAINT),
-                _ => None
-            };
-            let flag = match flag {
-                Some(flag) if !result.contains(flag) => flag,
-                _ => return Err(input.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-            };
-            result.insert(flag);
-        }
-
-        if !result.is_empty() {
-            Ok(result)
-        } else {
-            Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
-        }
-    }
-</%helpers:longhand>
+${helpers.predefined_type("contain",
+                          "Contain",
+                          "specified::Contain::empty()",
+                          animation_value_type="discrete",
+                          products="gecko",
+                          flags="FIXPOS_CB",
+                          gecko_pref="layout.css.contain.enabled",
+                          spec="https://drafts.csswg.org/css-contain/#contain-property")}
 
 // Non-standard
 ${helpers.single_keyword("-moz-appearance",
@@ -675,7 +566,7 @@ ${helpers.single_keyword("-moz-appearance",
 
 ${helpers.predefined_type("-moz-binding", "UrlOrNone", "Either::Second(None_)",
                           products="gecko",
-                          boxed="True" if product == "gecko" else "False",
+                          boxed= product == "gecko",
                           animation_value_type="none",
                           gecko_ffi_name="mBinding",
                           spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-binding)")}

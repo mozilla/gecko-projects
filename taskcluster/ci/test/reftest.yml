@@ -64,6 +64,7 @@ jsreftest:
             windows10-64-ccov/debug: 5
             linux64-ccov/.*: 5
             linux64-qr/.*: 4
+            linux32/debug: 5
             macosx.*: 2
             default: 3
     e10s:
@@ -75,10 +76,6 @@ jsreftest:
         by-test-platform:
             android.*: 7200
             default: 3600
-    when:
-        files-changed:
-            - js/src/**
-            - js/public/**
     tier:
         by-test-platform:
             linux64-qr/.*: 1

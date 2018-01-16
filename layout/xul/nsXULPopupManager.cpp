@@ -18,7 +18,6 @@
 #include "nsIXULDocument.h"
 #include "nsIDOMXULDocument.h"
 #include "nsIDOMXULCommandDispatcher.h"
-#include "nsIXULTemplateBuilder.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsGlobalWindow.h"
 #include "nsLayoutUtils.h"
@@ -702,23 +701,6 @@ nsXULPopupManager::ShowMenu(nsIContent *aMenu,
                             bool aSelectFirstItem,
                             bool aAsynchronous)
 {
-  // generate any template content first. Otherwise, the menupopup may not
-  // have been created yet.
-  if (aMenu) {
-    nsIContent* element = aMenu;
-    do {
-      RefPtr<nsXULElement> xulelem = nsXULElement::FromContent(element);
-      if (xulelem) {
-        nsCOMPtr<nsIXULTemplateBuilder> builder = xulelem->GetBuilder();
-        if (builder) {
-          builder->CreateContents(aMenu->AsElement(), true);
-          break;
-        }
-      }
-      element = element->GetParent();
-    } while (element);
-  }
-
   nsMenuFrame* menuFrame = do_QueryFrame(aMenu->GetPrimaryFrame());
   if (!menuFrame || !menuFrame->IsMenu())
     return;
@@ -2151,7 +2133,7 @@ nsXULPopupManager::HandleShortcutNavigation(nsIDOMKeyEvent* aKeyEvent,
   }
 
   if (mActiveMenuBar) {
-    nsMenuFrame* result = mActiveMenuBar->FindMenuWithShortcut(aKeyEvent);
+    nsMenuFrame* result = mActiveMenuBar->FindMenuWithShortcut(aKeyEvent, false);
     if (result) {
       mActiveMenuBar->SetActive(true);
       result->OpenMenu(true);
@@ -2451,19 +2433,32 @@ nsXULPopupManager::HandleKeyboardEventWithKeyCode(
   return true;
 }
 
+nsContainerFrame*
+nsXULPopupManager::ImmediateParentFrame(nsContainerFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame && aFrame->GetContent());
+
+  bool multiple = false; // Unused
+  nsIContent* insertionPoint =
+    aFrame->GetContent()->OwnerDoc()->BindingManager()->
+      FindNestedSingleInsertionPoint(aFrame->GetContent(), &multiple);
+
+  nsCSSFrameConstructor* fc = aFrame->PresContext()->FrameConstructor();
+  nsContainerFrame* insertionFrame =
+    insertionPoint
+      ? fc->GetContentInsertionFrameFor(insertionPoint)
+      : nullptr;
+
+  return insertionFrame ? insertionFrame : aFrame;
+}
+
 nsMenuFrame*
 nsXULPopupManager::GetNextMenuItem(nsContainerFrame* aParent,
                                    nsMenuFrame* aStart,
                                    bool aIsPopup,
                                    bool aWrap)
 {
-  nsPresContext* presContext = aParent->PresContext();
-  auto insertion = presContext->PresShell()->
-    FrameConstructor()->GetInsertionPoint(aParent->GetContent(), nullptr);
-  nsContainerFrame* immediateParent = insertion.mParentFrame;
-  if (!immediateParent)
-    immediateParent = aParent;
-
+  nsContainerFrame* immediateParent = ImmediateParentFrame(aParent);
   nsIFrame* currFrame = nullptr;
   if (aStart) {
     if (aStart->GetNextSibling())
@@ -2523,13 +2518,7 @@ nsXULPopupManager::GetPreviousMenuItem(nsContainerFrame* aParent,
                                        bool aIsPopup,
                                        bool aWrap)
 {
-  nsPresContext* presContext = aParent->PresContext();
-  auto insertion = presContext->PresShell()->
-    FrameConstructor()->GetInsertionPoint(aParent->GetContent(), nullptr);
-  nsContainerFrame* immediateParent = insertion.mParentFrame;
-  if (!immediateParent)
-    immediateParent = aParent;
-
+  nsContainerFrame* immediateParent = ImmediateParentFrame(aParent);
   const nsFrameList& frames(immediateParent->PrincipalChildList());
 
   nsIFrame* currFrame = nullptr;

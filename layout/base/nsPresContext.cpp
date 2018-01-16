@@ -1293,9 +1293,9 @@ void nsPresContext::SetImgAnimations(nsIContent *aParent, uint16_t aMode)
     SetImgAnimModeOnImgReq(imgReq, aMode);
   }
 
-  uint32_t count = aParent->GetChildCount();
-  for (uint32_t i = 0; i < count; ++i) {
-    SetImgAnimations(aParent->GetChildAt(i), aMode);
+  for (nsIContent* childContent = aParent->GetFirstChild();
+       childContent; childContent = childContent->GetNextSibling()) {
+    SetImgAnimations(childContent, aMode);
   }
 }
 
@@ -2355,7 +2355,7 @@ public:
   }
   virtual ~CounterStyleCleaner() {}
 
-  void DidRefresh() final
+  void DidRefresh() final override
   {
     mRefreshDriver->RemovePostRefreshObserver(this);
     mCounterStyleManager->CleanRetiredStyles();

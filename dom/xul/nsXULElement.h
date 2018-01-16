@@ -22,10 +22,7 @@
 #include "nsIDOMElement.h"
 #include "nsIDOMXULElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
-#include "nsIRDFCompositeDataSource.h"
-#include "nsIRDFResource.h"
 #include "nsIURI.h"
-#include "nsIXULTemplateBuilder.h"
 #include "nsLayoutCID.h"
 #include "nsAttrAndChildArray.h"
 #include "nsGkAtoms.h"
@@ -333,12 +330,11 @@ public:
 
 // XUL element specific bits
 enum {
-  XUL_ELEMENT_TEMPLATE_GENERATED =        XUL_ELEMENT_FLAG_BIT(0),
-  XUL_ELEMENT_HAS_CONTENTMENU_LISTENER =  XUL_ELEMENT_FLAG_BIT(1),
-  XUL_ELEMENT_HAS_POPUP_LISTENER =        XUL_ELEMENT_FLAG_BIT(2)
+  XUL_ELEMENT_HAS_CONTENTMENU_LISTENER =  XUL_ELEMENT_FLAG_BIT(0),
+  XUL_ELEMENT_HAS_POPUP_LISTENER =        XUL_ELEMENT_FLAG_BIT(1)
 };
 
-ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 3);
+ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 2);
 
 #undef XUL_ELEMENT_FLAG_BIT
 
@@ -370,7 +366,8 @@ public:
                                 nsIContent* aBindingParent,
                                 bool aCompileEventHandlers) override;
     virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
-    virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) override;
+    virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) override;
+    virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
     virtual void DestroyContent() override;
 
 #ifdef DEBUG
@@ -384,7 +381,7 @@ public:
                                   bool aIsTrustedEvent) override;
     void ClickWithInputSource(uint16_t aInputSource, bool aIsTrustedEvent);
 
-    nsIContent* GetBindingParent() const final
+    nsIContent* GetBindingParent() const final override
     {
       return mBindingParent;
     }
@@ -396,15 +393,6 @@ public:
     virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                                 int32_t aModType) const override;
     NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
-
-    // XUL element methods
-    /**
-     * The template-generated flag is used to indicate that a
-     * template-generated element has already had its children generated.
-     */
-    void SetTemplateGenerated() { SetFlags(XUL_ELEMENT_TEMPLATE_GENERATED); }
-    void ClearTemplateGenerated() { UnsetFlags(XUL_ELEMENT_TEMPLATE_GENERATED); }
-    bool GetTemplateGenerated() { return HasFlag(XUL_ELEMENT_TEMPLATE_GENERATED); }
 
     // nsIDOMNode
     NS_FORWARD_NSIDOMNODE_TO_NSINODE
@@ -424,7 +412,6 @@ public:
 
     nsresult GetFrameLoaderXPCOM(nsIFrameLoader** aFrameLoader);
     void PresetOpenerWindow(mozIDOMWindowProxy* aWindow, ErrorResult& aRv);
-    nsresult SetIsPrerendered();
 
     virtual void RecompileScriptEventListeners() override;
 
@@ -636,22 +623,6 @@ public:
     {
         SetXULAttr(nsGkAtoms::top, aValue, rv);
     }
-    void GetDatasources(DOMString& aValue) const
-    {
-        GetXULAttr(nsGkAtoms::datasources, aValue);
-    }
-    void SetDatasources(const nsAString& aValue, mozilla::ErrorResult& rv)
-    {
-        SetXULAttr(nsGkAtoms::datasources, aValue, rv);
-    }
-    void GetRef(DOMString& aValue) const
-    {
-        GetXULAttr(nsGkAtoms::ref, aValue);
-    }
-    void SetRef(const nsAString& aValue, mozilla::ErrorResult& rv)
-    {
-        SetXULAttr(nsGkAtoms::ref, aValue, rv);
-    }
     void GetTooltipText(DOMString& aValue) const
     {
         GetXULAttr(nsGkAtoms::tooltiptext, aValue);
@@ -684,9 +655,6 @@ public:
     {
         SetXULBoolAttr(nsGkAtoms::allowevents, aAllowEvents);
     }
-    already_AddRefed<nsIRDFCompositeDataSource> GetDatabase();
-    already_AddRefed<nsIXULTemplateBuilder> GetBuilder();
-    already_AddRefed<nsIRDFResource> GetResource(mozilla::ErrorResult& rv);
     nsIControllers* GetControllers(mozilla::ErrorResult& rv);
     // Note: this can only fail if the do_CreateInstance for the boxobject
     // contact fails for some reason.

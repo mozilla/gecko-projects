@@ -59,7 +59,6 @@
 #include "mozilla/layers/DirectionUtils.h"   // for GetAxis{Start,End,Length,Scale}
 #include "mozilla/layers/LayerTransactionParent.h" // for LayerTransactionParent
 #include "mozilla/layers/MetricsSharingController.h" // for MetricsSharingController
-#include "mozilla/layers/ScrollInputMethods.h" // for ScrollInputMethod
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "mozilla/Unused.h"             // for unused
 #include "mozilla/FloatingPoint.h"      // for FuzzyEquals*
@@ -366,6 +365,23 @@ typedef GenericFlingAnimation FlingAnimation;
  * When APZ is scrolling and sending repaint requests to the main thread, often
  * the main thread doesn't actually need to do a repaint. This pref allows the
  * main thread to skip doing those repaints in cases where it doesn't need to.
+ *
+ * \li\b apz.pinch_lock.mode
+ * The preferred pinch locking style. See PinchLockMode for possible values.
+ *
+ * \li\b apz.pinch_lock.scroll_lock_threshold
+ * Pinch locking is triggered if the user scrolls more than this distance
+ * and pinches less than apz.pinch_lock.span_lock_threshold.\n
+ * Units: (real-world, i.e. screen) inches
+ *
+ * \li\b apz.pinch_lock.span_breakout_threshold
+ * Distance in inches the user must pinch before lock can be broken.\n
+ * Units: (real-world, i.e. screen) inches measured between two touch points
+ *
+ * \li\b apz.pinch_lock.span_lock_threshold
+ * Pinch locking is triggered if the user pinches less than this distance
+ * and scrolls more than apz.pinch_lock.scroll_lock_threshold.\n
+ * Units: (real-world, i.e. screen) inches measured between two touch points
  *
  * \li\b apz.popups.enabled
  * Determines whether APZ is used for XUL popup widgets with remote content.
@@ -760,6 +776,7 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
      mX(this),
      mY(this),
      mPanDirRestricted(false),
+     mPinchLocked(false),
      mZoomConstraints(false, false,
         mFrameMetrics.GetDevPixelsPerCSSPixel() * kViewportMinScale / ParentLayerToScreenScale(1),
         mFrameMetrics.GetDevPixelsPerCSSPixel() * kViewportMaxScale / ParentLayerToScreenScale(1)),
@@ -865,6 +882,11 @@ AsyncPanZoomController::GetSecondTapTolerance()
   return static_cast<AxisLockMode>(gfxPrefs::APZAxisLockMode());
 }
 
+/* static */AsyncPanZoomController::PinchLockMode AsyncPanZoomController::GetPinchLockMode()
+{
+  return static_cast<PinchLockMode>(gfxPrefs::APZPinchLockMode());
+}
+
 bool
 AsyncPanZoomController::ArePointerEventsConsumable(TouchBlockState* aBlock, uint32_t aTouchPoints) {
   if (aTouchPoints == 0) {
@@ -929,9 +951,6 @@ nsEventStatus AsyncPanZoomController::HandleDragEvent(const MouseInput& aEvent,
   const ScrollThumbData& thumbData = node->GetScrollThumbData();
   MOZ_ASSERT(thumbData.mDirection.isSome());
   ScrollDirection direction = *thumbData.mDirection;
-
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-      (uint32_t) ScrollInputMethod::ApzScrollbarDrag);
 
   bool isMouseAwayFromThumb = false;
   if (int snapMultiplier = gfxPrefs::SliderSnapMultiplier()) {
@@ -1332,6 +1351,7 @@ nsEventStatus AsyncPanZoomController::OnTouchCancel(const MultiTouchInput& aEven
 nsEventStatus AsyncPanZoomController::OnScaleBegin(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale-begin in state %d\n", this, mState);
 
+  mPinchLocked = false;
   mPinchPaintTimerSet = false;
   // Note that there may not be a touch block at this point, if we received the
   // PinchGestureEvent directly from widget code without any touch events.
@@ -1373,9 +1393,26 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
     return nsEventStatus_eConsumeNoDefault;
   }
 
+  ParentLayerCoord spanDistance = fabsf(aEvent.mPreviousSpan - aEvent.mCurrentSpan);
+  ParentLayerPoint focusPoint, focusChange;
+  {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+
+    focusPoint = aEvent.mLocalFocusPoint - mFrameMetrics.GetCompositionBounds().TopLeft();
+    focusChange = mLastZoomFocus - focusPoint;
+    mLastZoomFocus = focusPoint;
+  }
+
+  HandlePinchLocking(
+    ToScreenCoordinates(ParentLayerPoint(0, spanDistance), focusPoint).Length(),
+    ToScreenCoordinates(focusChange, focusPoint));
+  bool allowZoom = mZoomConstraints.mAllowZoom && !mPinchLocked;
+
   // If zooming is not allowed, this is a two-finger pan.
   // Tracking panning distance and velocity.
-  if (!mZoomConstraints.mAllowZoom) {
+  // UpdateWithTouchAtDevicePoint() acquires the tree lock, so
+  // it cannot be called while the mRecursiveMutex lock is held.
+  if (!allowZoom) {
     mX.UpdateWithTouchAtDevicePoint(aEvent.mLocalFocusPoint.x, 0, aEvent.mTime);
     mY.UpdateWithTouchAtDevicePoint(aEvent.mLocalFocusPoint.y, 0, aEvent.mTime);
   }
@@ -1401,11 +1438,8 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
 
     CSSToParentLayerScale userZoom = mFrameMetrics.GetZoom().ToScaleFactor();
-    ParentLayerPoint focusPoint = aEvent.mLocalFocusPoint - mFrameMetrics.GetCompositionBounds().TopLeft();
     CSSPoint cssFocusPoint = focusPoint / mFrameMetrics.GetZoom();
 
-    ParentLayerPoint focusChange = mLastZoomFocus - focusPoint;
-    mLastZoomFocus = focusPoint;
     // If displacing by the change in focus point will take us off page bounds,
     // then reduce the displacement such that it doesn't.
     focusChange.x -= mX.DisplacementWillOverscrollAmount(focusChange.x);
@@ -1443,12 +1477,9 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
       realMaxZoom = realMinZoom;
     }
 
-    bool doScale = (spanRatio > 1.0 && userZoom < realMaxZoom) ||
-                   (spanRatio < 1.0 && userZoom > realMinZoom);
-
-    if (!mZoomConstraints.mAllowZoom) {
-      doScale = false;
-    }
+    bool doScale = allowZoom && (
+                   (spanRatio > 1.0 && userZoom < realMaxZoom) ||
+                   (spanRatio < 1.0 && userZoom > realMinZoom));
 
     if (doScale) {
       spanRatio = clamped(spanRatio,
@@ -1741,40 +1772,9 @@ AsyncPanZoomController::GetScrollWheelDelta(const ScrollWheelInput& aEvent) cons
   return delta;
 }
 
-static
-void ReportKeyboardScrollAction(const KeyboardScrollAction& aAction)
-{
-  ScrollInputMethod scrollMethod;
-
-  switch (aAction.mType) {
-    case KeyboardScrollAction::eScrollLine: {
-      scrollMethod = ScrollInputMethod::ApzScrollLine;
-      break;
-    }
-    case KeyboardScrollAction::eScrollCharacter: {
-      scrollMethod = ScrollInputMethod::ApzScrollCharacter;
-      break;
-    }
-    case KeyboardScrollAction::eScrollPage: {
-      scrollMethod = ScrollInputMethod::ApzScrollPage;
-      break;
-    }
-    case KeyboardScrollAction::eScrollComplete: {
-      scrollMethod = ScrollInputMethod::ApzCompleteScroll;
-      break;
-    }
-  }
-
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-      (uint32_t)scrollMethod);
-}
-
 nsEventStatus
 AsyncPanZoomController::OnKeyboard(const KeyboardInput& aEvent)
 {
-  // Report the type of scroll action to telemetry
-  ReportKeyboardScrollAction(aEvent.mAction);
-
   // Mark that this APZC has async key scrolled
   mTestHasAsyncKeyScrolled = true;
 
@@ -2010,24 +2010,6 @@ void AsyncPanZoomController::DoDelayedRequestContentRepaint()
   mPinchPaintTimerSet = false;
 }
 
-static ScrollInputMethod
-ScrollInputMethodForWheelDeltaType(ScrollWheelInput::ScrollDeltaType aDeltaType)
-{
-  switch (aDeltaType) {
-    case ScrollWheelInput::SCROLLDELTA_LINE: {
-      return ScrollInputMethod::ApzWheelLine;
-    }
-    case ScrollWheelInput::SCROLLDELTA_PAGE: {
-      return ScrollInputMethod::ApzWheelPage;
-    }
-    case ScrollWheelInput::SCROLLDELTA_PIXEL: {
-      return ScrollInputMethod::ApzWheelPixel;
-    }
-  }
-  MOZ_ASSERT_UNREACHABLE("Invalid value");
-  return ScrollInputMethod::ApzWheelLine;
-}
-
 static void
 AdjustDeltaForAllowedScrollDirections(
     ParentLayerPoint& aDelta,
@@ -2067,10 +2049,6 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(const ScrollWheelInput& aEve
     // Avoid spurious state changes and unnecessary work
     return nsEventStatus_eIgnore;
   }
-
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-      (uint32_t) ScrollInputMethodForWheelDeltaType(aEvent.mDeltaType));
-
 
   switch (aEvent.mScrollMode) {
     case ScrollWheelInput::SCROLLMODE_INSTANT: {
@@ -2274,9 +2252,6 @@ nsEventStatus AsyncPanZoomController::OnPan(const PanGestureInput& aEvent, bool 
   mY.UpdateWithTouchAtDevicePoint(aEvent.mLocalPanStartPoint.y, logicalPanDisplacement.y, aEvent.mTime);
 
   HandlePanningUpdate(physicalPanDisplacement);
-
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-      (uint32_t) ScrollInputMethod::ApzPanGesture);
 
   ScreenPoint panDistance(fabs(physicalPanDisplacement.x), fabs(physicalPanDisplacement.y));
   OverscrollHandoffState handoffState(
@@ -2661,6 +2636,24 @@ void AsyncPanZoomController::HandlePanningUpdate(const ScreenPoint& aPanDistance
   }
 }
 
+void AsyncPanZoomController::HandlePinchLocking(ScreenCoord spanDistance, ScreenPoint focusChange) {
+  if (mPinchLocked) {
+    if (GetPinchLockMode() == PINCH_STICKY) {
+      ScreenCoord spanBreakoutThreshold = gfxPrefs::APZPinchLockSpanBreakoutThreshold() * APZCTreeManager::GetDPI();
+      mPinchLocked = !(spanDistance > spanBreakoutThreshold);
+    }
+  } else {
+    if (GetPinchLockMode() != PINCH_FREE) {
+      ScreenCoord spanLockThreshold = gfxPrefs::APZPinchLockSpanLockThreshold() * APZCTreeManager::GetDPI();
+      ScreenCoord scrollLockThreshold = gfxPrefs::APZPinchLockScrollLockThreshold() * APZCTreeManager::GetDPI();
+
+      if (spanDistance < spanLockThreshold && focusChange.Length() > scrollLockThreshold) {
+        mPinchLocked = true;
+      }
+    }
+  }
+}
+
 nsEventStatus
 AsyncPanZoomController::StartPanning(const ParentLayerPoint& aStartPoint) {
   RecursiveMutexAutoLock lock(mRecursiveMutex);
@@ -3006,8 +2999,6 @@ void AsyncPanZoomController::TrackTouch(const MultiTouchInput& aEvent) {
   UpdateWithTouchAtDevicePoint(aEvent);
 
   if (prevTouchPoint != touchPoint) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::ApzTouch);
     MOZ_ASSERT(GetCurrentTouchBlock());
     OverscrollHandoffState handoffState(
         *GetCurrentTouchBlock()->GetOverscrollHandoffChain(),

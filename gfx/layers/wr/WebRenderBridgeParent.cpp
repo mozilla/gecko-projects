@@ -266,20 +266,9 @@ WebRenderBridgeParent::Destroy()
   ClearResources();
 }
 
-void
-WebRenderBridgeParent::DeallocShmems(nsTArray<ipc::Shmem>& aShmems)
-{
-  if (IPCOpen()) {
-    for (auto& shm : aShmems) {
-      DeallocShmem(shm);
-    }
-  }
-  aShmems.Clear();
-}
-
 bool
 WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResourceUpdates,
-                                       const nsTArray<ipc::Shmem>& aSmallShmems,
+                                       const nsTArray<RefCountedShmem>& aSmallShmems,
                                        const nsTArray<ipc::Shmem>& aLargeShmems,
                                        wr::ResourceUpdateQueue& aUpdates)
 {
@@ -289,7 +278,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
     switch (cmd.type()) {
       case OpUpdateResource::TOpAddImage: {
         const auto& op = cmd.get_OpAddImage();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -298,7 +287,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpUpdateImage: {
         const auto& op = cmd.get_OpUpdateImage();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -307,7 +296,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpAddBlobImage: {
         const auto& op = cmd.get_OpAddBlobImage();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -316,7 +305,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpUpdateBlobImage: {
         const auto& op = cmd.get_OpUpdateBlobImage();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -332,7 +321,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpAddRawFont: {
         const auto& op = cmd.get_OpAddRawFont();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -341,7 +330,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpAddFontDescriptor: {
         const auto& op = cmd.get_OpAddFontDescriptor();
-        wr::Vec_u8 bytes;
+        wr::Vec<uint8_t> bytes;
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
@@ -350,7 +339,7 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
       }
       case OpUpdateResource::TOpAddFontInstance: {
         const auto& op = cmd.get_OpAddFontInstance();
-        wr::Vec_u8 variations;
+        wr::Vec<uint8_t> variations;
         if (!reader.Read(op.variations(), variations)) {
             return false;
         }
@@ -408,13 +397,13 @@ WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey
 
     RefPtr<WebRenderImageHost> host = mExternalImageIds.Get(wr::AsUint64(aExtId));
     if (!host) {
-      NS_ERROR("CompositableHost does not exist");
+      gfxCriticalNote << "CompositableHost does not exist for extId:" << wr::AsUint64(aExtId);
       return false;
     }
     if (!gfxEnv::EnableWebRenderRecording()) {
       TextureHost* texture = host->GetAsTextureHostForComposite();
       if (!texture) {
-        NS_ERROR("TextureHost does not exist");
+        gfxCriticalNote << "TextureHost does not exist for extId:" << wr::AsUint64(aExtId);
         return false;
       }
       WebRenderTextureHost* wrTexture = texture->AsWebRenderTextureHost();
@@ -428,19 +417,19 @@ WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey
   }
 
   if (!dSurf) {
-    NS_ERROR("TextureHost does not return DataSourceSurface");
+    gfxCriticalNote << "TextureHost does not return DataSourceSurface for extId:" << wr::AsUint64(aExtId);
     return false;
   }
 
   DataSourceSurface::MappedSurface map;
   if (!dSurf->Map(gfx::DataSourceSurface::MapType::READ, &map)) {
-    NS_ERROR("DataSourceSurface failed to map");
+    gfxCriticalNote << "DataSourceSurface failed to map for Image for extId:" << wr::AsUint64(aExtId);
     return false;
   }
 
   IntSize size = dSurf->GetSize();
   wr::ImageDescriptor descriptor(size, map.mStride, dSurf->GetFormat());
-  wr::Vec_u8 data;
+  wr::Vec<uint8_t> data;
   data.PushBytes(Range<uint8_t>(map.mData, size.height * map.mStride));
   aResources.AddImage(keys[0], descriptor, data);
   dSurf->Unmap();
@@ -450,26 +439,27 @@ WebRenderBridgeParent::AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey
 
 mozilla::ipc::IPCResult
 WebRenderBridgeParent::RecvUpdateResources(nsTArray<OpUpdateResource>&& aResourceUpdates,
-                                           nsTArray<ipc::Shmem>&& aSmallShmems,
+                                           nsTArray<RefCountedShmem>&& aSmallShmems,
                                            nsTArray<ipc::Shmem>&& aLargeShmems)
 {
   if (mDestroyed) {
-    DeallocShmems(aSmallShmems);
-    DeallocShmems(aLargeShmems);
     return IPC_OK();
   }
 
   wr::ResourceUpdateQueue updates;
 
   if (!UpdateResources(aResourceUpdates, aSmallShmems, aLargeShmems, updates)) {
-    DeallocShmems(aSmallShmems);
-    DeallocShmems(aLargeShmems);
+    wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
+    wr::IpcResourceUpdateQueue::ReleaseShmems(this, aLargeShmems);
     IPC_FAIL(this, "Invalid WebRender resource data shmem or address.");
   }
 
-  mApi->UpdateResources(updates);
-  DeallocShmems(aSmallShmems);
-  DeallocShmems(aLargeShmems);
+  wr::TransactionBuilder txn;
+  txn.UpdateResources(updates);
+  mApi->SendTransaction(txn);
+
+  wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
+  wr::IpcResourceUpdateQueue::ReleaseShmems(this, aLargeShmems);
   return IPC_OK();
 }
 
@@ -577,7 +567,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
                                           const wr::BuiltDisplayListDescriptor& dlDesc,
                                           const WebRenderScrollData& aScrollData,
                                           nsTArray<OpUpdateResource>&& aResourceUpdates,
-                                          nsTArray<ipc::Shmem>&& aSmallShmems,
+                                          nsTArray<RefCountedShmem>&& aSmallShmems,
                                           nsTArray<ipc::Shmem>&& aLargeShmems,
                                           const wr::IdNamespace& aIdNamespace,
                                           const TimeStamp& aTxnStartTime,
@@ -587,8 +577,6 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     for (const auto& op : aToDestroy) {
       DestroyActor(op);
     }
-    DeallocShmems(aSmallShmems);
-    DeallocShmems(aLargeShmems);
     return IPC_OK();
   }
 
@@ -603,6 +591,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   uint32_t wrEpoch = GetNextWrEpoch();
 
   mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
+
   ProcessWebRenderParentCommands(aCommands);
 
   wr::ResourceUpdateQueue resources;
@@ -610,8 +599,10 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     return IPC_FAIL(this, "Failed to deserialize resource updates");
   }
 
+  wr::TransactionBuilder txn;
+  txn.UpdateResources(resources);
 
-  wr::Vec_u8 dlData(Move(dl));
+  wr::Vec<uint8_t> dlData(Move(dl));
 
   // If id namespaces do not match, it means the command is obsolete, probably
   // because the tab just moved to a new window.
@@ -619,13 +610,14 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   if (mIdNamespace == aIdNamespace) {
     if (mWidget) {
       LayoutDeviceIntSize size = mWidget->GetClientSize();
-      mApi->SetWindowParameters(size);
+      txn.SetWindowParameters(size);
     }
     gfx::Color clearColor(0.f, 0.f, 0.f, 0.f);
-    mApi->SetDisplayList(clearColor, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
-                        mPipelineId, aContentSize,
-                        dlDesc, dlData,
-                        resources);
+    txn.SetDisplayList(clearColor, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
+                       mPipelineId, aContentSize,
+                       dlDesc, dlData);
+
+    mApi->SendTransaction(txn);
 
     ScheduleGenerateFrame();
 
@@ -646,8 +638,8 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
   }
 
-  DeallocShmems(aSmallShmems);
-  DeallocShmems(aLargeShmems);
+  wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
+  wr::IpcResourceUpdateQueue::ReleaseShmems(this, aLargeShmems);
   return IPC_OK();
 }
 
@@ -686,12 +678,11 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
   UpdateAPZ(false);
 
   if (!aCommands.IsEmpty()) {
+    wr::TransactionBuilder txn;
     uint32_t wrEpoch = GetNextWrEpoch();
-    // Send empty UpdatePipelineResources to WebRender just to notify a new epoch.
-    // The epoch is used to know a timing of calling DidComposite().
-    // This is much simpler than tracking an epoch of AsyncImagePipeline.
-    wr::ResourceUpdateQueue resourceUpdates;
-    mApi->UpdatePipelineResources(resourceUpdates, mPipelineId, wr::NewEpoch(wrEpoch));
+    txn.UpdateEpoch(mPipelineId, wr::NewEpoch(wrEpoch));
+    mApi->SendTransaction(txn);
+
     HoldPendingTransactionId(wrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
   } else {
     bool sendDidComposite = false;
@@ -706,6 +697,7 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
       mCompositorBridge->DidComposite(wr::AsUint64(mPipelineId), now, now);
     }
   }
+
   return IPC_OK();
 }
 
@@ -883,10 +875,13 @@ WebRenderBridgeParent::RecvRemovePipelineIdForCompositable(const wr::PipelineId&
     return IPC_OK();
   }
 
+  wr::TransactionBuilder txn;
+
   wrHost->ClearWrBridge();
-  mAsyncImageManager->RemoveAsyncImagePipeline(aPipelineId);
+  mAsyncImageManager->RemoveAsyncImagePipeline(aPipelineId, txn);
+  txn.RemovePipeline(aPipelineId);
+  mApi->SendTransaction(txn);
   mAsyncCompositables.Remove(wr::AsUint64(aPipelineId));
-  mApi->RemovePipeline(aPipelineId);
   return IPC_OK();
 }
 
@@ -954,7 +949,9 @@ WebRenderBridgeParent::RecvClearCachedResources()
   mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), false);
 
   // Clear resources
-  mApi->ClearDisplayList(wr::NewEpoch(GetNextWrEpoch()), mPipelineId);
+  wr::TransactionBuilder txn;
+  txn.ClearDisplayList(wr::NewEpoch(GetNextWrEpoch()), mPipelineId);
+  mApi->SendTransaction(txn);
   // Schedule generate frame to clean up Pipeline
   ScheduleGenerateFrame();
   // Remove animations.
@@ -1243,11 +1240,15 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
   mApi->SetFrameStartTime(startTime);
 #endif
 
+  wr::TransactionBuilder txn;
+
   if (!transformArray.IsEmpty() || !opacityArray.IsEmpty()) {
-    mApi->GenerateFrame(opacityArray, transformArray);
-  } else {
-    mApi->GenerateFrame();
+    txn.UpdateDynamicProperties(opacityArray, transformArray);
   }
+
+  txn.GenerateFrame();
+
+  mApi->SendTransaction(txn);
 }
 
 void
@@ -1387,7 +1388,10 @@ WebRenderBridgeParent::ClearResources()
   }
 
   uint32_t wrEpoch = GetNextWrEpoch();
-  mApi->ClearDisplayList(wr::NewEpoch(wrEpoch), mPipelineId);
+
+  wr::TransactionBuilder txn;
+  txn.ClearDisplayList(wr::NewEpoch(wrEpoch), mPipelineId);
+
   // Schedule generate frame to clean up Pipeline
   ScheduleGenerateFrame();
   // WrFontKeys and WrImageKeys are deleted during WebRenderAPI destruction.
@@ -1399,12 +1403,14 @@ WebRenderBridgeParent::ClearResources()
     wr::PipelineId pipelineId = wr::AsPipelineId(iter.Key());
     RefPtr<WebRenderImageHost> host = iter.Data();
     host->ClearWrBridge();
-    mAsyncImageManager->RemoveAsyncImagePipeline(pipelineId);
+    mAsyncImageManager->RemoveAsyncImagePipeline(pipelineId, txn);
   }
   mAsyncCompositables.Clear();
 
   mAsyncImageManager->RemovePipeline(mPipelineId, wr::NewEpoch(wrEpoch));
-  mApi->RemovePipeline(mPipelineId);
+  txn.RemovePipeline(mPipelineId);
+
+  mApi->SendTransaction(txn);
 
   for (std::unordered_set<uint64_t>::iterator iter = mActiveAnimations.begin(); iter != mActiveAnimations.end(); iter++) {
     mAnimStorage->ClearById(*iter);

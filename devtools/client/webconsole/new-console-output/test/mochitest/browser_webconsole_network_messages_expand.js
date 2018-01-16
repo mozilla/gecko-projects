@@ -10,6 +10,8 @@ const TEST_URI = TEST_PATH + TEST_FILE;
 const NET_PREF = "devtools.webconsole.filter.net";
 const XHR_PREF = "devtools.webconsole.filter.netxhr";
 
+requestLongerTimeout(2);
+
 Services.prefs.setBoolPref(NET_PREF, false);
 Services.prefs.setBoolPref(XHR_PREF, true);
 registerCleanupFunction(() => {
@@ -145,6 +147,7 @@ async function openRequestBeforeUpdates(target, hud, tab) {
 // Panel testing helpers
 
 async function testNetworkMessage(toolbox, messageNode) {
+  await testStatusInfo(messageNode);
   await testHeaders(messageNode);
   await testCookies(messageNode);
   await testParams(messageNode);
@@ -152,6 +155,13 @@ async function testNetworkMessage(toolbox, messageNode) {
   await testTimings(messageNode);
   await testStackTrace(messageNode);
   await waitForLazyRequests(toolbox);
+}
+
+// Status Info
+
+function testStatusInfo(messageNode) {
+  let statusInfo = messageNode.querySelector(".status-info");
+  ok(statusInfo, "Status info is not empty");
 }
 
 // Headers

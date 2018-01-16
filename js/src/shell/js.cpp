@@ -181,7 +181,7 @@ static const size_t gMaxStackSize = 128 * sizeof(size_t) * 1024;
  */
 static const double MAX_TIMEOUT_SECONDS = 1800.0;
 
-// SharedArrayBuffer and Atomics are enabled by default (tracking Firefox).
+// Not necessarily in sync with the browser
 #define SHARED_MEMORY_DEFAULT 1
 
 // Code to support GCOV code coverage measurements on standalone shell
@@ -848,7 +848,8 @@ DrainJobQueue(JSContext* cx, unsigned argc, Value* vp)
 
 static void
 ForwardingPromiseRejectionTrackerCallback(JSContext* cx, JS::HandleObject promise,
-                                          PromiseRejectionHandlingState state, void* data)
+                                          JS::PromiseRejectionHandlingState state,
+                                          void* data)
 {
     RootedValue callback(cx, GetShellContext(cx)->promiseRejectionTrackerCallback);
     if (callback.isNull()) {
@@ -3754,15 +3755,12 @@ EvalInThread(JSContext* cx, unsigned argc, Value* vp, bool cooperative)
         CooperativeBeginWait(cx);
     }
 
-    auto thread = js_new<Thread>(Thread::Options().setStackSize(gMaxStackSize + 128 * 1024));
-    if (!thread || !thread->init(WorkerMain, input)) {
-        ReportOutOfMemory(cx);
-        if (cooperative) {
-            cooperationState->numThreads--;
-            CooperativeYield();
-            CooperativeEndWait(cx);
-        }
-        return false;
+    Thread* thread;
+    {
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        thread = js_new<Thread>(Thread::Options().setStackSize(gMaxStackSize + 128 * 1024));
+        if (!thread || !thread->init(WorkerMain, input))
+            oomUnsafe.crash("EvalInThread");
     }
 
     if (cooperative) {
@@ -5325,7 +5323,8 @@ class ShellSourceHook: public SourceHook {
   public:
     ShellSourceHook(JSContext* cx, JSFunction& fun) : fun(cx, &fun) {}
 
-    bool load(JSContext* cx, const char* filename, char16_t** src, size_t* length) {
+    bool load(JSContext* cx, const char* filename, char16_t** src,
+              size_t* length) override {
         RootedString str(cx, JS_NewStringCopyZ(cx, filename));
         if (!str)
             return false;
@@ -5558,6 +5557,16 @@ IsUnboxedObject(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     args.rval().setBoolean(args.get(0).isObject() &&
                            args[0].toObject().is<UnboxedPlainObject>());
+    return true;
+}
+
+static bool
+HasCopyOnWriteElements(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setBoolean(args.get(0).isObject() &&
+                           args[0].toObject().isNative() &&
+                           args[0].toObject().as<NativeObject>().denseElementsAreCopyOnWrite());
     return true;
 }
 
@@ -7054,6 +7063,10 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
     JS_FN_HELP("isUnboxedObject", IsUnboxedObject, 1, 0,
 "isUnboxedObject(o)",
 "  Return true iff the object is an unboxed object."),
+
+    JS_FN_HELP("hasCopyOnWriteElements", HasCopyOnWriteElements, 1, 0,
+"hasCopyOnWriteElements(o)",
+"  Return true iff the object has copy-on-write dense elements."),
 
     JS_FN_HELP("stackPointerInfo", StackPointerInfo, 0, 0,
 "stackPointerInfo()",
