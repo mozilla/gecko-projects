@@ -211,6 +211,11 @@ def is_release_promotion_available(parameters):
                 'type': 'string',
                 'default': '',
             },
+
+            'release_eta': {
+                'type': 'string',
+                'default': '',
+            },
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -260,6 +265,9 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 )
             os.environ['UPTAKE_MONITORING_PLATFORMS'] = uptake_monitoring_platforms
 
+    if release_eta:
+        os.environ['RELEASE_ETA'] = release_eta
+
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
     target_tasks_method = input.get(
@@ -272,6 +280,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     do_not_optimize = input.get(
         'do_not_optimize', promotion_config.get('do_not_optimize', [])
     )
+    release_eta = input.get('release_eta', '')
 
     # make parameters read-write
     parameters = dict(parameters)
