@@ -96,7 +96,7 @@ enum class FontRenderMode : uint32_t {
 
 enum class ImageFormat : uint32_t {
   Invalid = 0,
-  A8 = 1,
+  R8 = 1,
   BGRA8 = 3,
   RGBAF32 = 4,
   RG8 = 5,
@@ -710,9 +710,11 @@ struct GlyphInstance {
 
 struct GlyphOptions {
   FontRenderMode render_mode;
+  FontInstanceFlags flags;
 
   bool operator==(const GlyphOptions& aOther) const {
-    return render_mode == aOther.render_mode;
+    return render_mode == aOther.render_mode &&
+           flags == aOther.flags;
   }
 };
 
@@ -1501,13 +1503,6 @@ void wr_resource_updates_update_image(ResourceUpdates *aResources,
 WR_FUNC;
 
 WR_INLINE
-void wr_scroll_layer_with_id(DocumentHandle *aDh,
-                             WrPipelineId aPipelineId,
-                             uint64_t aScrollId,
-                             LayoutPoint aNewScrollOrigin)
-WR_FUNC;
-
-WR_INLINE
 void wr_set_item_tag(WrState *aState,
                      uint64_t aScrollId,
                      uint16_t aHitInfo)
@@ -1560,6 +1555,13 @@ WR_FUNC;
 WR_INLINE
 void wr_transaction_remove_pipeline(Transaction *aTxn,
                                     WrPipelineId aPipelineId)
+WR_FUNC;
+
+WR_INLINE
+void wr_transaction_scroll_layer(Transaction *aTxn,
+                                 WrPipelineId aPipelineId,
+                                 uint64_t aScrollId,
+                                 LayoutPoint aNewScrollOrigin)
 WR_FUNC;
 
 WR_INLINE

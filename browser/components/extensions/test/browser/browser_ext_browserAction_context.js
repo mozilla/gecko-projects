@@ -21,6 +21,10 @@ async function runTests(options) {
       browser.test.assertEq(String(expecting.badgeBackgroundColor),
                             String(badgeBackgroundColor),
                             "expected value from getBadgeBackgroundColor");
+
+      let enabled = await browser.browserAction.isEnabled({tabId});
+      browser.test.assertEq(!expecting.disabled, enabled,
+                            "expected value from isEnabled");
     }
 
     let expectDefaults = expecting => {
@@ -285,7 +289,7 @@ add_task(async function testTabSwitchContext() {
           browser.test.log("Switch back to tab 2. Expect former value, unaffected by changes to defaults in previous step.");
           await browser.tabs.update(tabs[1], {active: true});
 
-          await expectDefaults(details[3]);
+          await expectDefaults(details[4]);
           expect(details[2]);
         },
         expect => {
@@ -490,11 +494,6 @@ add_task(async function testPropertyRemoval() {
          "popup": "",
          "title": "",
          "badge": "",
-         "badgeBackgroundColor": [0x11, 0x11, 0x11, 0xFF]},
-        {"icon": contextUri,
-         "popup": "",
-         "title": "",
-         "badge": "",
          "badgeBackgroundColor": [0x22, 0x22, 0x22, 0xFF]},
         {"icon": browser.runtime.getURL("i3.png"),
          "popup": browser.runtime.getURL("p3.html"),
@@ -537,16 +536,13 @@ add_task(async function testPropertyRemoval() {
           browser.browserAction.setPopup({tabId, popup: ""});
           browser.browserAction.setTitle({tabId, title: ""});
           browser.browserAction.setBadgeText({tabId, text: ""});
-          browser.browserAction.setBadgeBackgroundColor({tabId, color: ""});
+          await browser.test.assertRejects(
+            browser.browserAction.setBadgeBackgroundColor({tabId, color: ""}),
+            /^Invalid badge background color: ""$/,
+            "Expected invalid badge background color error"
+          );
           await expectGlobals(details[1]);
           expect(details[3]);
-        },
-        async expect => {
-          browser.test.log("The invalid color removed tab bgcolor, restore previous tab bgcolor.");
-          let tabId = tabs[0];
-          browser.browserAction.setBadgeBackgroundColor({tabId, color: "#222"});
-          await expectGlobals(details[1]);
-          expect(details[4]);
         },
         async expect => {
           browser.test.log("Remove tab values, expect global values.");
@@ -566,8 +562,8 @@ add_task(async function testPropertyRemoval() {
           browser.browserAction.setTitle({title: "t3"});
           browser.browserAction.setBadgeText({text: "b3"});
           browser.browserAction.setBadgeBackgroundColor({color: "#333"});
-          await expectGlobals(details[5]);
-          expect(details[5]);
+          await expectGlobals(details[4]);
+          expect(details[4]);
         },
         async expect => {
           browser.test.log("Remove global values, expect defaults.");

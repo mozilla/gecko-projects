@@ -9,9 +9,11 @@
 #include <time.h>
 
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/TextEvents.h"
 
 #include "nsCOMPtr.h"
 #include "nsCoord.h"
@@ -34,6 +36,10 @@
 using namespace mozilla;
 using namespace std;
 
+#ifdef DEBUG
+static mozilla::LazyLogModule gResistFingerprintingLog("nsResistFingerprinting");
+#endif
+
 #define RESIST_FINGERPRINTING_PREF "privacy.resistFingerprinting"
 #define RFP_TIMER_PREF "privacy.reduceTimerPrecision"
 #define RFP_TIMER_VALUE_PREF "privacy.resistFingerprinting.reduceTimerPrecision.microseconds"
@@ -46,6 +52,9 @@ using namespace std;
 #define RFP_TARGET_VIDEO_RES_DEFAULT 480
 #define PROFILE_INITIALIZED_TOPIC "profile-initial-state"
 
+#define RFP_DEFAULT_SPOOFING_KEYBOARD_LANG KeyboardLang::EN
+#define RFP_DEFAULT_SPOOFING_KEYBOARD_REGION KeyboardRegion::US
+
 NS_IMPL_ISUPPORTS(nsRFPService, nsIObserver)
 
 static StaticRefPtr<nsRFPService> sRFPService;
@@ -56,6 +65,8 @@ Atomic<uint32_t, ReleaseAcquire> sResolutionUSec;
 static uint32_t sVideoFramesPerSec;
 static uint32_t sVideoDroppedRatio;
 static uint32_t sTargetVideoRes;
+nsDataHashtable<KeyboardHashKey, const SpoofingKeyboardCode*>*
+  nsRFPService::sSpoofingKeyboardCodes = nullptr;
 
 /* static */
 nsRFPService*
@@ -100,7 +111,13 @@ nsRFPService::ReduceTimePrecisionAsMSecs(double aTime)
     return aTime;
   }
   const double resolutionMSec = sResolutionUSec / 1000.0;
-  return floor(aTime / resolutionMSec) * resolutionMSec;
+  double ret = floor(aTime / resolutionMSec) * resolutionMSec;
+#if defined(DEBUG)
+  MOZ_LOG(gResistFingerprintingLog, LogLevel::Verbose,
+    ("Given: %.*f, Rounding with %.*f, Intermediate: %.*f, Got: %.*f",
+      DBL_DIG-1, aTime, DBL_DIG-1, resolutionMSec, DBL_DIG-1, floor(aTime / resolutionMSec), DBL_DIG-1, ret));
+#endif
+  return ret;
 }
 
 /* static */
@@ -110,7 +127,14 @@ nsRFPService::ReduceTimePrecisionAsUSecs(double aTime)
   if (!IsTimerPrecisionReductionEnabled()) {
     return aTime;
   }
-  return floor(aTime / sResolutionUSec) * sResolutionUSec;
+  double ret = floor(aTime / sResolutionUSec) * sResolutionUSec;
+#if defined(DEBUG)
+  double tmp_sResolutionUSec = sResolutionUSec;
+  MOZ_LOG(gResistFingerprintingLog, LogLevel::Verbose,
+    ("Given: %.*f, Rounding with %.*f, Intermediate: %.*f, Got: %.*f",
+      DBL_DIG-1, aTime, DBL_DIG-1, tmp_sResolutionUSec, DBL_DIG-1, floor(aTime / tmp_sResolutionUSec), DBL_DIG-1, ret));
+#endif
+  return ret;
 }
 
 /* static */
@@ -131,10 +155,22 @@ nsRFPService::ReduceTimePrecisionAsSecs(double aTime)
     // The resolution is smaller than one sec.  Use the reciprocal to avoid
     // floating point error.
     const double resolutionSecReciprocal = 1000000.0 / sResolutionUSec;
-    return floor(aTime * resolutionSecReciprocal) / resolutionSecReciprocal;
+    double ret = floor(aTime * resolutionSecReciprocal) / resolutionSecReciprocal;
+#if defined(DEBUG)
+  MOZ_LOG(gResistFingerprintingLog, LogLevel::Verbose,
+    ("Given: %.*f, Reciprocal Rounding with %.*f, Intermediate: %.*f, Got: %.*f",
+      DBL_DIG-1, aTime, DBL_DIG-1, resolutionSecReciprocal, DBL_DIG-1, floor(aTime * resolutionSecReciprocal), DBL_DIG-1, ret));
+#endif
+    return ret;
   }
   const double resolutionSec = sResolutionUSec / 1000000.0;
-  return floor(aTime / resolutionSec) * resolutionSec;
+  double ret = floor(aTime / resolutionSec) * resolutionSec;
+#if defined(DEBUG)
+  MOZ_LOG(gResistFingerprintingLog, LogLevel::Verbose,
+    ("Given: %.*f, Rounding with %.*f, Intermediate: %.*f, Got: %.*f",
+      DBL_DIG-1, aTime, DBL_DIG-1, resolutionSec, DBL_DIG-1, floor(aTime / resolutionSec), DBL_DIG-1, ret));
+#endif
+  return ret;
 }
 
 /* static */
@@ -372,6 +408,230 @@ nsRFPService::StartShutdown()
       prefs->RemoveObserver(RFP_TIMER_VALUE_PREF, this);
     }
   }
+}
+
+/* static */
+void
+nsRFPService::MaybeCreateSpoofingKeyCodes(const KeyboardLangs aLang,
+                                          const KeyboardRegions aRegion)
+{
+  if (!sSpoofingKeyboardCodes) {
+    sSpoofingKeyboardCodes =
+      new nsDataHashtable<KeyboardHashKey, const SpoofingKeyboardCode*>();
+  }
+
+  if (KeyboardLang::EN == aLang) {
+    switch (aRegion) {
+      case KeyboardRegion::US:
+        MaybeCreateSpoofingKeyCodesForEnUS();
+        break;
+    }
+  }
+}
+
+/* static */
+void
+nsRFPService::MaybeCreateSpoofingKeyCodesForEnUS()
+{
+  MOZ_ASSERT(sSpoofingKeyboardCodes);
+
+  static bool sInitialized = false;
+  const KeyboardLangs lang = KeyboardLang::EN;
+  const KeyboardRegions reg = KeyboardRegion::US;
+
+  if (sInitialized) {
+    return;
+  }
+
+  static const SpoofingKeyboardInfo spoofingKeyboardInfoTable[] = {
+#define KEY(key_, _codeNameIdx, _keyCode, _modifier) \
+    { KEY_NAME_INDEX_USE_STRING, NS_LITERAL_STRING(key_), \
+      { CODE_NAME_INDEX_##_codeNameIdx, _keyCode, _modifier } },
+#define CONTROL(keyNameIdx_, _codeNameIdx, _keyCode) \
+    { KEY_NAME_INDEX_##keyNameIdx_, EmptyString(), \
+      { CODE_NAME_INDEX_##_codeNameIdx, _keyCode, MODIFIER_NONE } },
+#include "KeyCodeConsensus_En_US.h"
+#undef CONTROL
+#undef KEY
+  };
+
+  for (const auto& keyboardInfo : spoofingKeyboardInfoTable) {
+    KeyboardHashKey key(lang, reg,
+                        keyboardInfo.mKeyIdx,
+                        keyboardInfo.mKey);
+    MOZ_ASSERT(!sSpoofingKeyboardCodes->Lookup(key),
+               "Double-defining key code; fix your KeyCodeConsensus file");
+    sSpoofingKeyboardCodes->Put(key, &keyboardInfo.mSpoofingCode);
+  }
+
+  sInitialized = true;
+}
+
+/* static */
+void
+nsRFPService::GetKeyboardLangAndRegion(const nsAString& aLanguage,
+                                       KeyboardLangs& aLocale,
+                                       KeyboardRegions& aRegion)
+{
+  nsAutoString langStr;
+  nsAutoString regionStr;
+  uint32_t partNum = 0;
+
+  for (const nsAString& part : aLanguage.Split('-')) {
+    if (partNum == 0) {
+      langStr = part;
+    } else {
+      regionStr = part;
+      break;
+    }
+
+    partNum++;
+  }
+
+  // We test each language here as well as the region. There are some cases that
+  // only the language is given, we will use the default region code when this
+  // happens. The default region should depend on the given language.
+  if (langStr.EqualsLiteral(RFP_KEYBOARD_LANG_STRING_EN)) {
+    aLocale = KeyboardLang::EN;
+    // Give default values first.
+    aRegion = KeyboardRegion::US;
+
+    if (regionStr.EqualsLiteral(RFP_KEYBOARD_REGION_STRING_US)) {
+      aRegion = KeyboardRegion::US;
+    }
+  } else {
+    // There is no spoofed keyboard locale for the given language. We use the
+    // default one in this case.
+    aLocale = RFP_DEFAULT_SPOOFING_KEYBOARD_LANG;
+    aRegion = RFP_DEFAULT_SPOOFING_KEYBOARD_REGION;
+  }
+}
+
+/* static */
+bool
+nsRFPService::GetSpoofedKeyCodeInfo(const nsIDocument* aDoc,
+                                    const WidgetKeyboardEvent* aKeyboardEvent,
+                                    SpoofingKeyboardCode& aOut)
+{
+  MOZ_ASSERT(aKeyboardEvent);
+
+  KeyboardLangs keyboardLang = RFP_DEFAULT_SPOOFING_KEYBOARD_LANG;
+  KeyboardRegions keyboardRegion = RFP_DEFAULT_SPOOFING_KEYBOARD_REGION;
+  // If the document is given, we use the content language which is get from the
+  // document. Otherwise, we use the default one.
+  if (aDoc) {
+    nsAutoString language;
+    aDoc->GetContentLanguage(language);
+
+    // If the content-langauge is not given, we try to get langauge from the HTML
+    // lang attribute.
+    if (language.IsEmpty()) {
+      Element* elm = aDoc->GetHtmlElement();
+
+      if (elm) {
+        elm->GetLang(language);
+      }
+    }
+
+    // If two or more languages are given, per HTML5 spec, we should consider
+    // it as 'unknown'. So we use the default one.
+    if (!language.IsEmpty() &&
+        !language.Contains(char16_t(','))) {
+      language.StripWhitespace();
+      GetKeyboardLangAndRegion(language, keyboardLang,
+                               keyboardRegion);
+    }
+  }
+
+  MaybeCreateSpoofingKeyCodes(keyboardLang, keyboardRegion);
+
+  KeyNameIndex keyIdx = aKeyboardEvent->mKeyNameIndex;
+  nsAutoString keyName;
+
+  if (keyIdx == KEY_NAME_INDEX_USE_STRING) {
+    keyName = aKeyboardEvent->mKeyValue;
+  }
+
+  KeyboardHashKey key(keyboardLang, keyboardRegion, keyIdx, keyName);
+  const SpoofingKeyboardCode* keyboardCode = sSpoofingKeyboardCodes->Get(key);
+
+  if (keyboardCode) {
+    aOut = *keyboardCode;
+    return true;
+  }
+
+  return false;
+}
+
+/* static */
+bool
+nsRFPService::GetSpoofedModifierStates(const nsIDocument* aDoc,
+                                       const WidgetKeyboardEvent* aKeyboardEvent,
+                                       const Modifiers aModifier,
+                                       bool& aOut)
+{
+  MOZ_ASSERT(aKeyboardEvent);
+
+  // For modifier or control keys, we don't need to hide its modifier states.
+  if (aKeyboardEvent->mKeyNameIndex != KEY_NAME_INDEX_USE_STRING) {
+    return false;
+  }
+
+  // We will spoof the modifer state for Alt, Shift, AltGraph and Control.
+  if (aModifier & (MODIFIER_ALT | MODIFIER_SHIFT | MODIFIER_ALTGRAPH | MODIFIER_CONTROL)) {
+    SpoofingKeyboardCode keyCodeInfo;
+
+    if (GetSpoofedKeyCodeInfo(aDoc, aKeyboardEvent, keyCodeInfo)) {
+      aOut = keyCodeInfo.mModifierStates & aModifier;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* static */
+bool
+nsRFPService::GetSpoofedCode(const nsIDocument* aDoc,
+                             const WidgetKeyboardEvent* aKeyboardEvent,
+                             nsAString& aOut)
+{
+  MOZ_ASSERT(aKeyboardEvent);
+
+  SpoofingKeyboardCode keyCodeInfo;
+
+  if (!GetSpoofedKeyCodeInfo(aDoc, aKeyboardEvent, keyCodeInfo)) {
+    return false;
+  }
+
+  WidgetKeyboardEvent::GetDOMCodeName(keyCodeInfo.mCode, aOut);
+
+  // We need to change the 'Left' with 'Right' if the location indicates
+  // it's a right key.
+  if (aKeyboardEvent->mLocation == nsIDOMKeyEvent::DOM_KEY_LOCATION_RIGHT &&
+      StringEndsWith(aOut, NS_LITERAL_STRING("Left"))) {
+    aOut.ReplaceLiteral(aOut.Length() - 4, 4, u"Right");
+  }
+
+  return true;
+}
+
+/* static */
+bool
+nsRFPService::GetSpoofedKeyCode(const nsIDocument* aDoc,
+                                const WidgetKeyboardEvent* aKeyboardEvent,
+                                uint32_t& aOut)
+{
+  MOZ_ASSERT(aKeyboardEvent);
+
+  SpoofingKeyboardCode keyCodeInfo;
+
+  if (GetSpoofedKeyCodeInfo(aDoc, aKeyboardEvent, keyCodeInfo)) {
+    aOut = keyCodeInfo.mKeyCode;
+    return true;
+  }
+
+  return false;
 }
 
 NS_IMETHODIMP

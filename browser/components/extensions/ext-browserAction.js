@@ -30,6 +30,10 @@ var {
   StartupCache,
 } = ExtensionParent;
 
+var {
+  ExtensionError,
+} = ExtensionUtils;
+
 Cu.importGlobalProperties(["InspectorUtils"]);
 
 const POPUP_PRELOAD_TIMEOUT_MS = 200;
@@ -607,6 +611,11 @@ this.browserAction = class extends ExtensionAPI {
           browserAction.setProperty(tab, "enabled", false);
         },
 
+        isEnabled: function(details) {
+          let tab = getTab(details.tabId);
+          return browserAction.getProperty(tab, "enabled");
+        },
+
         setTitle: function(details) {
           let tab = getTab(details.tabId);
 
@@ -670,8 +679,11 @@ this.browserAction = class extends ExtensionAPI {
         setBadgeBackgroundColor: function(details) {
           let tab = getTab(details.tabId);
           let color = details.color;
-          if (!Array.isArray(color)) {
+          if (typeof color == "string") {
             let col = InspectorUtils.colorToRGBA(color);
+            if (!col) {
+              throw new ExtensionError(`Invalid badge background color: "${color}"`);
+            }
             color = col && [col.r, col.g, col.b, Math.round(col.a * 255)];
           }
           browserAction.setProperty(tab, "badgeBackgroundColor", color);
