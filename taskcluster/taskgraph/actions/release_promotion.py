@@ -211,6 +211,11 @@ def is_release_promotion_available(parameters):
                 'type': 'string',
                 'default': '',
             },
+
+            'release_eta': {
+                'type': 'string',
+                'default': '',
+            },
         },
         "required": ['release_promotion_flavor', 'build_number'],
     }
@@ -259,6 +264,10 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                     "targets." % ', '.join(UPTAKE_MONITORING_PLATFORMS_FLAVORS)
                 )
             os.environ['UPTAKE_MONITORING_PLATFORMS'] = uptake_monitoring_platforms
+
+    release_eta = input.get('release_eta', '')
+    if release_eta:
+        os.environ['RELEASE_ETA'] = release_eta
 
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
