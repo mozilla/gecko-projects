@@ -265,6 +265,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
                 )
             os.environ['UPTAKE_MONITORING_PLATFORMS'] = uptake_monitoring_platforms
 
+    release_eta = input.get('release_eta', '')
     if release_eta:
         os.environ['RELEASE_ETA'] = release_eta
 
@@ -280,7 +281,6 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     do_not_optimize = input.get(
         'do_not_optimize', promotion_config.get('do_not_optimize', [])
     )
-    release_eta = input.get('release_eta', '')
 
     # make parameters read-write
     parameters = dict(parameters)
