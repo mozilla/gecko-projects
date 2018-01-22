@@ -454,8 +454,7 @@ class ContextMenu {
       return true;
     }
 
-    let request = aTarget.QueryInterface(Ci.nsIImageLoadingContent)
-                         .getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
+    let request = aTarget.getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
 
     if (!request) {
       return true;
@@ -692,7 +691,7 @@ class ContextMenu {
     context.target = cleanTarget;
 
     if (context.link) {
-      context.link = { href: context.link.href };
+      context.link = { href: context.linkURL };
     }
 
     delete context.linkURI;

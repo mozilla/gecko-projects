@@ -2882,8 +2882,6 @@ function PageProxyClickHandler(aEvent) {
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED   = 2;
 const TLS_ERROR_REPORT_TELEMETRY_AUTO_UNCHECKED = 3;
-const TLS_ERROR_REPORT_TELEMETRY_MANUAL_SEND    = 4;
-const TLS_ERROR_REPORT_TELEMETRY_AUTO_SEND      = 5;
 
 const PREF_SSL_IMPACT_ROOTS = ["security.tls.version.", "security.ssl3."];
 
@@ -6593,7 +6591,13 @@ var CanvasPermissionPromptHelper = {
       return;
     }
 
-    let message = gNavigatorBundle.getFormattedString("canvas.siteprompt", [ uri.asciiHost ]);
+    let message = {};
+    let header = gNavigatorBundle.getFormattedString("canvas.siteprompt", ["<>"], 1);
+
+    header = header.split("<>");
+    message.start = header[0];
+    message.host = uri.asciiHost;
+    message.end = header[1];
 
     function setCanvasPermission(aURI, aPerm, aPersistent) {
       Services.perms.add(aURI, "canvas", aPerm,

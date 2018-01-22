@@ -1224,7 +1224,11 @@ JS_GetClassObject(JSContext* cx, JSProtoKey key, MutableHandleObject objp)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    return GetBuiltinConstructor(cx, key, objp);
+    JSObject* obj = GlobalObject::getOrCreateConstructor(cx, key);
+    if (!obj)
+        return false;
+    objp.set(obj);
+    return true;
 }
 
 JS_PUBLIC_API(bool)
@@ -1232,7 +1236,11 @@ JS_GetClassPrototype(JSContext* cx, JSProtoKey key, MutableHandleObject objp)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    return GetBuiltinPrototype(cx, key, objp);
+    JSObject* proto = GlobalObject::getOrCreatePrototype(cx, key);
+    if (!proto)
+        return false;
+    objp.set(proto);
+    return true;
 }
 
 namespace JS {
@@ -7222,6 +7230,9 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         break;
       case JSJITCOMPILER_SIMULATOR_ALWAYS_INTERRUPT:
         jit::JitOptions.simulatorAlwaysInterrupt = !!value;
+        break;
+      case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
+        jit::JitOptions.spectreIndexMasking = !!value;
         break;
       case JSJITCOMPILER_ASMJS_ATOMICS_ENABLE:
         jit::JitOptions.asmJSAtomicsEnable = !!value;

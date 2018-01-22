@@ -275,6 +275,28 @@ InspectorUtils::GetRuleColumn(GlobalObject& aGlobal, css::Rule& aRule)
 InspectorUtils::GetRelativeRuleLine(GlobalObject& aGlobal, css::Rule& aRule)
 {
   uint32_t lineNumber = aRule.GetLineNumber();
+
+  // If aRule was parsed along with its stylesheet, then it will
+  // have an absolute lineNumber that we need to remap to its
+  // containing node. But if aRule was added via CSSOM after parsing,
+  // then it has a sort-of relative line number already:
+  // Gecko gives all rules a 0 lineNumber.
+  // Servo gives the first line of a rule a 0 lineNumber, and then
+  //   counts up from there.
+
+  // The Servo behavior is arguably more correct, but harder to
+  // interpret for purposes of deciding whether a lineNumber is
+  // relative or absolute.
+
+  // Since most of the time, inserted rules are single line and
+  // therefore have 0 lineNumbers in both Gecko and Servo, we use
+  // that to detect that a lineNumber is already relative.
+
+  // There is one ugly edge case that we avoid: if an inserted rule
+  // is multi-line, then Servo will give it 0+ lineNumbers. If we
+  // do relative number mapping on those line numbers, we could get
+  // negative underflow. So we check for underflow and instead report
+  // a 0 lineNumber.
   StyleSheet* sheet = aRule.GetStyleSheet();
   if (sheet && lineNumber != 0) {
     nsINode* owningNode = sheet->GetOwnerNode();
@@ -282,12 +304,25 @@ InspectorUtils::GetRelativeRuleLine(GlobalObject& aGlobal, css::Rule& aRule)
       nsCOMPtr<nsIStyleSheetLinkingElement> link =
         do_QueryInterface(owningNode);
       if (link) {
-        lineNumber -= link->GetLineNumber() - 1;
+        // Check for underflow, which is one indication that we're
+        // trying to remap an already relative lineNumber.
+        uint32_t linkLineIndex0 = link->GetLineNumber() - 1;
+        if (linkLineIndex0 > lineNumber ) {
+          lineNumber = 0;
+        } else {
+          lineNumber -= linkLineIndex0;
+        }
       }
     }
   }
 
   return lineNumber;
+}
+
+/* static */ bool
+InspectorUtils::HasRulesModifiedByCSSOM(GlobalObject& aGlobal, StyleSheet& aSheet)
+{
+  return aSheet.HasModifiedRules();
 }
 
 /* static */ CSSLexer*
@@ -420,14 +455,17 @@ static void GetKeywordsForProperty(const nsCSSPropertyID aProperty,
   const nsCSSProps::KTableEntry* keywordTable =
     nsCSSProps::kKeywordTableTable[aProperty];
   if (keywordTable) {
-    for (size_t i = 0; keywordTable[i].mKeyword != eCSSKeyword_UNKNOWN; ++i) {
+    for (size_t i = 0; !keywordTable[i].IsSentinel(); ++i) {
       nsCSSKeyword word = keywordTable[i].mKeyword;
 
       // These are extra -moz values which are added while rebuilding
       // the properties db. These values are not relevant and are not
       // documented on MDN, so filter these out
+      // eCSSKeyword_UNKNOWN is ignored because it indicates an
+      // invalid entry; but can still be seen in a table, see bug 1430616.
       if (word != eCSSKeyword__moz_zoom_in && word != eCSSKeyword__moz_zoom_out &&
-          word != eCSSKeyword__moz_grab && word != eCSSKeyword__moz_grabbing) {
+          word != eCSSKeyword__moz_grab && word != eCSSKeyword__moz_grabbing &&
+          word != eCSSKeyword_UNKNOWN) {
           InsertNoDuplicates(aArray,
                   NS_ConvertASCIItoUTF16(nsCSSKeywords::GetStringValue(word)));
       }

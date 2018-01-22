@@ -144,19 +144,6 @@ treechildren::-moz-tree-drop-feedback {
   margin-inline-start: 5px;
 }
 
-/* ::::: tree progress meter ::::: */
-
-treechildren::-moz-tree-progressmeter {
-  margin: 2px 4px;
-  border: 1px solid;
-  border-color: ThreeDShadow ThreeDHighlight ThreeDHighlight ThreeDShadow;
-}
-
-treechildren::-moz-tree-cell-text(progressmeter) {
-  margin: 2px 4px;
-  -moz-appearance: progressbar;
-}
-
 /* ::::: tree columns ::::: */
 
 treecol,
@@ -220,17 +207,6 @@ treechildren::-moz-tree-twisty(Name, separator) {
 
 treechildren::-moz-tree-indentation {
   width: 16px;
-}
-
-/* ::::: gridline style ::::: */
-
-treechildren.gridlines::-moz-tree-cell {
-  border-inline-end: 1px solid GrayText;
-  border-bottom: 1px solid GrayText;
-}
-
-treechildren.gridlines::-moz-tree-row {
-  border: none;
 }
 
 /* ::::: editable tree ::::: */

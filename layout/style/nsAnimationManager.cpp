@@ -29,6 +29,7 @@
 #include "nsDOMMutationObserver.h"
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
+#include "nsRFPService.h"
 #include <algorithm> // std::stable_sort
 #include <math.h>
 
@@ -41,16 +42,6 @@ using mozilla::dom::KeyframeEffectReadOnly;
 using mozilla::dom::CSSAnimation;
 
 typedef mozilla::ComputedTiming::AnimationPhase AnimationPhase;
-
-namespace {
-
-struct AnimationEventParams {
-  EventMessage mMessage;
-  StickyTimeDuration mElapsedTime;
-  TimeStamp mTimeStamp;
-};
-
-} // anonymous namespace
 
 ////////////////////////// CSSAnimation ////////////////////////////
 
@@ -174,7 +165,7 @@ CSSAnimation::HasLowerCompositeOrderThan(const CSSAnimation& aOther) const
 }
 
 void
-CSSAnimation::QueueEvents(StickyTimeDuration aActiveTime)
+CSSAnimation::QueueEvents(const StickyTimeDuration& aActiveTime)
 {
   // If the animation is pending, we ignore animation events until we finish
   // pending.
@@ -198,20 +189,12 @@ CSSAnimation::QueueEvents(StickyTimeDuration aActiveTime)
     return;
   }
 
-  dom::Element* owningElement;
-  CSSPseudoElementType owningPseudoType;
-  mOwningElement.GetElement(owningElement, owningPseudoType);
-  MOZ_ASSERT(owningElement, "Owning element should be set");
-
-  // Get the nsAnimationManager so we can queue events on it
-  nsPresContext* presContext =
-    nsContentUtils::GetContextForContent(owningElement);
+  nsPresContext* presContext = mOwningElement.GetPresContext();
   if (!presContext) {
     return;
   }
-  nsAnimationManager* manager = presContext->AnimationManager();
 
-  const StickyTimeDuration zeroDuration;
+  static constexpr StickyTimeDuration zeroDuration = StickyTimeDuration();
   uint64_t currentIteration = 0;
   ComputedTiming::AnimationPhase currentPhase;
   StickyTimeDuration intervalStartTime;
@@ -250,76 +233,73 @@ CSSAnimation::QueueEvents(StickyTimeDuration aActiveTime)
   TimeStamp endTimeStamp       = ElapsedTimeToTimeStamp(intervalEndTime);
   TimeStamp iterationTimeStamp = ElapsedTimeToTimeStamp(iterationStartTime);
 
-  AutoTArray<AnimationEventParams, 2> events;
+  AutoTArray<AnimationEventInfo, 2> events;
+
+  auto appendAnimationEvent = [&](EventMessage aMessage,
+                                  const StickyTimeDuration& aElapsedTime,
+                                  const TimeStamp& aTimeStamp) {
+    double elapsedTime = aElapsedTime.ToSeconds();
+    if (aMessage == eAnimationCancel) {
+      elapsedTime = nsRFPService::ReduceTimePrecisionAsSecs(elapsedTime);
+    }
+    events.AppendElement(AnimationEventInfo(mOwningElement.Target(),
+                                            aMessage,
+                                            mAnimationName,
+                                            elapsedTime,
+                                            aTimeStamp,
+                                            this));
+  };
 
   // Handle cancel event first
   if ((mPreviousPhase != AnimationPhase::Idle &&
        mPreviousPhase != AnimationPhase::After) &&
       currentPhase == AnimationPhase::Idle) {
     TimeStamp activeTimeStamp = ElapsedTimeToTimeStamp(aActiveTime);
-    events.AppendElement(AnimationEventParams{ eAnimationCancel,
-                                               aActiveTime,
-                                               activeTimeStamp });
+    appendAnimationEvent(eAnimationCancel, aActiveTime, activeTimeStamp);
   }
 
   switch (mPreviousPhase) {
     case AnimationPhase::Idle:
     case AnimationPhase::Before:
       if (currentPhase == AnimationPhase::Active) {
-        events.AppendElement(AnimationEventParams{ eAnimationStart,
-                                                   intervalStartTime,
-                                                   startTimeStamp });
+        appendAnimationEvent(eAnimationStart,
+                             intervalStartTime,
+                             startTimeStamp);
       } else if (currentPhase == AnimationPhase::After) {
-        events.AppendElement(AnimationEventParams{ eAnimationStart,
-                                                   intervalStartTime,
-                                                   startTimeStamp });
-        events.AppendElement(AnimationEventParams{ eAnimationEnd,
-                                                   intervalEndTime,
-                                                   endTimeStamp });
+        appendAnimationEvent(eAnimationStart,
+                             intervalStartTime,
+                             startTimeStamp);
+        appendAnimationEvent(eAnimationEnd, intervalEndTime, endTimeStamp);
       }
       break;
     case AnimationPhase::Active:
       if (currentPhase == AnimationPhase::Before) {
-        events.AppendElement(AnimationEventParams{ eAnimationEnd,
-                                                   intervalStartTime,
-                                                   startTimeStamp });
+        appendAnimationEvent(eAnimationEnd, intervalStartTime, startTimeStamp);
       } else if (currentPhase == AnimationPhase::Active) {
         // The currentIteration must have changed or element we would have
         // returned early above.
         MOZ_ASSERT(currentIteration != mPreviousIteration);
-        events.AppendElement(AnimationEventParams{ eAnimationIteration,
-                                                   iterationStartTime,
-                                                   iterationTimeStamp });
+        appendAnimationEvent(eAnimationIteration,
+                             iterationStartTime,
+                             iterationTimeStamp);
       } else if (currentPhase == AnimationPhase::After) {
-        events.AppendElement(AnimationEventParams{ eAnimationEnd,
-                                                   intervalEndTime,
-                                                   endTimeStamp });
+        appendAnimationEvent(eAnimationEnd, intervalEndTime, endTimeStamp);
       }
       break;
     case AnimationPhase::After:
       if (currentPhase == AnimationPhase::Before) {
-        events.AppendElement(AnimationEventParams{ eAnimationStart,
-                                                   intervalEndTime,
-                                                   startTimeStamp});
-        events.AppendElement(AnimationEventParams{ eAnimationEnd,
-                                                   intervalStartTime,
-                                                   endTimeStamp });
+        appendAnimationEvent(eAnimationStart, intervalEndTime, startTimeStamp);
+        appendAnimationEvent(eAnimationEnd, intervalStartTime, endTimeStamp);
       } else if (currentPhase == AnimationPhase::Active) {
-        events.AppendElement(AnimationEventParams{ eAnimationStart,
-                                                   intervalEndTime,
-                                                   endTimeStamp });
+        appendAnimationEvent(eAnimationStart, intervalEndTime, endTimeStamp);
       }
       break;
   }
   mPreviousPhase = currentPhase;
   mPreviousIteration = currentIteration;
 
-  for (const AnimationEventParams& event : events){
-    manager->QueueEvent(
-               AnimationEventInfo(owningElement, owningPseudoType,
-                                  event.mMessage, mAnimationName,
-                                  event.mElapsedTime, event.mTimeStamp,
-                                  this));
+  if (!events.IsEmpty()) {
+    presContext->AnimationManager()->QueueEvents(Move(events));
   }
 }
 

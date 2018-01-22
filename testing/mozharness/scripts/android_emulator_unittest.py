@@ -23,7 +23,6 @@ from mozprocess import ProcessHandler
 
 from mozharness.base.log import FATAL
 from mozharness.base.script import BaseScript, PreScriptAction, PostScriptAction
-from mozharness.base.vcs.vcsbase import VCSMixin
 from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.buildbot import TBPL_RETRY, EXIT_STATUS_DICT
 from mozharness.mozilla.mozbase import MozbaseMixin
@@ -31,20 +30,13 @@ from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_opt
 from mozharness.mozilla.testing.unittest import EmulatorMixin
 
 
-class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin, BaseScript,
+class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, BaseScript,
                           MozbaseMixin):
     config_options = [[
         ["--test-suite"],
         {"action": "store",
          "dest": "test_suite",
          "default": None
-         }
-    ], [
-        ["--adb-path"],
-        {"action": "store",
-         "dest": "adb_path",
-         "default": None,
-         "help": "Path to adb",
          }
     ], [
         ["--total-chunk"],
@@ -63,15 +55,6 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
     ]] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(blobupload_config_options)
 
-    error_list = [
-    ]
-
-    virtualenv_requirements = [
-    ]
-
-    virtualenv_modules = [
-    ]
-
     app_name = None
 
     def __init__(self, require_config_file=False):
@@ -87,18 +70,10 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
                          'install',
                          'run-tests',
                          ],
-            default_actions=['clobber',
-                             'start-emulator',
-                             'download-and-extract',
-                             'create-virtualenv',
-                             'verify-emulator',
-                             'install',
-                             'run-tests',
-                             ],
             require_config_file=require_config_file,
             config={
-                'virtualenv_modules': self.virtualenv_modules,
-                'virtualenv_requirements': self.virtualenv_requirements,
+                'virtualenv_modules': [],
+                'virtualenv_requirements': [],
                 'require_test_zip': True,
                 # IP address of the host as seen from the emulator
                 'remote_webserver': '10.0.2.2',
@@ -197,8 +172,10 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
 
         # Write a default ddms.cfg to avoid unwanted prompts
         avd_home_dir = self.abs_dirs['abs_avds_dir']
-        with open(os.path.join(avd_home_dir, "ddms.cfg"), 'w') as f:
+        DDMS_FILE = os.path.join(avd_home_dir, "ddms.cfg")
+        with open(DDMS_FILE, 'w') as f:
             f.write("pingOptIn=false\npingId=0\n")
+        self.info("wrote dummy %s" % DDMS_FILE)
 
         # Delete emulator auth file, so it doesn't prompt
         AUTH_FILE = os.path.join(os.path.expanduser('~'), '.emulator_console_auth_token')
@@ -209,25 +186,29 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
             except:
                 self.warning("failed to remove %s" % AUTH_FILE)
 
-        # Set environment variables to help emulator find the AVD.
-        # In newer versions of the emulator, ANDROID_AVD_HOME should
-        # point to the 'avd' directory.
-        # For older versions of the emulator, ANDROID_SDK_HOME should
-        # point to the directory containing the '.android' directory
-        # containing the 'avd' directory.
-        env['ANDROID_AVD_HOME'] = os.path.join(avd_home_dir, 'avd')
-        env['ANDROID_SDK_HOME'] = os.path.abspath(os.path.join(avd_home_dir, '..'))
+        avd_path = os.path.join(avd_home_dir, 'avd')
+        if os.path.exists(avd_path):
+            env['ANDROID_AVD_HOME'] = avd_path
+            self.info("Found avds at %s" % avd_path)
+        else:
+            self.warning("AVDs missing? Not found at %s" % avd_path)
 
-        command = [
-            "emulator", "-avd", self.emulator["name"],
-            "-port", str(self.emulator["emulator_port"]),
-        ]
+        if "deprecated_sdk_path" in self.config:
+            sdk_path = os.path.abspath(os.path.join(avd_home_dir, '..'))
+        else:
+            sdk_path = os.path.join(self.abs_dirs['abs_work_dir'], 'android-sdk-linux')
+        if os.path.exists(sdk_path):
+            env['ANDROID_SDK_HOME'] = sdk_path
+            self.info("Found sdk at %s" % sdk_path)
+        else:
+            self.warning("Android sdk missing? Not found at %s" % sdk_path)
+
+        command = ["emulator", "-avd", self.emulator["name"]]
         if "emulator_extra_args" in self.config:
             command += self.config["emulator_extra_args"].split()
 
         tmp_file = tempfile.NamedTemporaryFile(mode='w')
         tmp_stdout = open(tmp_file.name, 'w')
-        self.info("Created temp file %s." % tmp_file.name)
         self.info("Trying to start the emulator with this command: %s" % ' '.join(command))
         proc = subprocess.Popen(command, stdout=tmp_stdout, stderr=tmp_stdout, env=env)
         return {
@@ -445,8 +426,6 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
             'remote_webserver': c['remote_webserver'],
             'xre_path': self.xre_path,
             'utility_path': self.xre_path,
-            'http_port': self.emulator['http_port'],
-            'ssl_port': self.emulator['ssl_port'],
             'certs_path': os.path.join(dirs['abs_work_dir'], 'tests/certs'),
             # TestingMixin._download_and_extract_symbols() will set
             # self.symbols_path when downloading/extracting.
@@ -463,23 +442,28 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
                 self.config.get('marionette_test_manifest', '')
             ),
         }
+
+        user_paths = os.environ.get('MOZHARNESS_TEST_PATHS')
         for option in self.config["suite_definitions"][self.test_suite]["options"]:
             opt = option.split('=')[0]
             # override configured chunk options with script args, if specified
-            if opt == '--this-chunk' and self.this_chunk is not None:
-                continue
-            if opt == '--total-chunks' and self.total_chunks is not None:
-                continue
+            if opt in ('--this-chunk', '--total-chunks'):
+                if user_paths or getattr(self, opt.replace('-', '_').strip('_'), None) is not None:
+                    continue
+
             if '%(app)' in option:
                 # only query package name if requested
                 cmd.extend([option % {'app': self._query_package_name()}])
             else:
                 cmd.extend([option % str_format_values])
 
-        if self.this_chunk is not None:
-            cmd.extend(['--this-chunk', self.this_chunk])
-        if self.total_chunks is not None:
-            cmd.extend(['--total-chunks', self.total_chunks])
+        if user_paths:
+            cmd.extend(user_paths.split(':'))
+        else:
+            if self.this_chunk is not None:
+                cmd.extend(['--this-chunk', self.this_chunk])
+            if self.total_chunks is not None:
+                cmd.extend(['--total-chunks', self.total_chunks])
 
         try_options, try_tests = self.try_args(self.test_suite)
         cmd.extend(try_options)
@@ -503,10 +487,6 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
             # probably taskcluster
             repo = os.environ['GECKO_HEAD_REPOSITORY']
             revision = os.environ['GECKO_HEAD_REV']
-        elif self.buildbot_config and 'properties' in self.buildbot_config:
-            # probably buildbot
-            repo = 'https://hg.mozilla.org/%s' % self.buildbot_config['properties']['repo_path']
-            revision = self.buildbot_config['properties']['revision']
         else:
             # something unexpected!
             repo = 'https://hg.mozilla.org/mozilla-central'
@@ -548,10 +528,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         c = self.config
         dirs = self.query_abs_dirs()
 
-        # FIXME
-        # Clobbering and re-unpacking would not be needed if we had a way to
-        # check whether the unpacked content already present match the
-        # contents of the tar ball
+        # Always start with a clean AVD: AVD includes Android images
+        # which can be stateful.
         self.rmtree(dirs['abs_avds_dir'])
         self.mkdir_p(dirs['abs_avds_dir'])
         if 'avd_url' in c:
@@ -786,11 +764,6 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         """
         self.start_time = datetime.datetime.now()
         max_verify_time = datetime.timedelta(minutes=60)
-        aliases = {
-            'reftest-debug': 'reftest',
-            'jsreftest-debug': 'jsreftest',
-            'crashtest-debug': 'crashtest',
-        }
 
         verify_args = []
         suites = self._query_suites()
@@ -833,13 +806,12 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
                           subprocess.list2cmdline(final_cmd)))
                 self.info("##### %s log begins" % self.test_suite)
 
-                # TinderBoxPrintRe does not know about the '-debug' categories
-                suite_category = aliases.get(self.test_suite, self.test_suite)
+                suite_category = self.test_suite
                 parser = self.get_test_output_parser(
                     suite_category,
                     config=self.config,
                     log_obj=self.log_obj,
-                    error_list=self.error_list)
+                    error_list=[])
                 self.run_command(final_cmd, cwd=cwd, env=env, output_parser=parser)
                 tbpl_status, log_level = parser.evaluate_parser(0)
                 parser.append_tinderboxprint_line(self.test_suite)

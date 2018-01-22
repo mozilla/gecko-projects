@@ -1334,18 +1334,10 @@ class PackageFrontend(MachCommandBase):
                          'should be determined in the decision task.')
                 return 1
             from taskgraph.optimize import IndexSearch
-            params = {
-                'message': '',
-                'project': '',
-                'level': os.environ.get('MOZ_SCM_LEVEL', '3'),
-                'base_repository': '',
-                'head_repository': '',
-                'head_rev': '',
-                'moz_build_date': '',
-                'build_date': 0,
-                'pushlog_id': 0,
-                'owner': '',
-            }
+            from taskgraph.parameters import Parameters
+            params = Parameters(
+                level=os.environ.get('MOZ_SCM_LEVEL', '3'),
+                strict=False)
 
             # TODO: move to the taskcluster package
             def tasks(kind_name):

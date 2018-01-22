@@ -218,7 +218,7 @@ public:
       const TimeDuration& aStartTime,
       double aPlaybackRate);
 
-  void MaybeQueueCancelEvent(StickyTimeDuration aActiveTime) override {
+  void MaybeQueueCancelEvent(const StickyTimeDuration& aActiveTime) override {
     QueueEvents(aActiveTime);
   }
 
@@ -233,7 +233,7 @@ protected:
   void UpdateTiming(SeekFlag aSeekFlag,
                     SyncNotifyFlag aSyncNotifyFlag) override;
 
-  void QueueEvents(StickyTimeDuration activeTime = StickyTimeDuration());
+  void QueueEvents(const StickyTimeDuration& activeTime = StickyTimeDuration());
 
 
   enum class TransitionPhase;
@@ -307,14 +307,13 @@ struct TransitionEventInfo {
   InternalTransitionEvent mEvent;
   TimeStamp mTimeStamp;
 
-  TransitionEventInfo(dom::Element* aElement,
-                      CSSPseudoElementType aPseudoType,
+  TransitionEventInfo(const NonOwningAnimationTarget& aTarget,
                       EventMessage aMessage,
                       nsCSSPropertyID aProperty,
-                      StickyTimeDuration aDuration,
+                      double aElapsedTime,
                       const TimeStamp& aTimeStamp,
                       dom::Animation* aAnimation)
-    : mElement(aElement)
+    : mElement(aTarget.mElement)
     , mAnimation(aAnimation)
     , mEvent(true, aMessage)
     , mTimeStamp(aTimeStamp)
@@ -322,9 +321,10 @@ struct TransitionEventInfo {
     // XXX Looks like nobody initialize WidgetEvent::time
     mEvent.mPropertyName =
       NS_ConvertUTF8toUTF16(nsCSSProps::GetStringValue(aProperty));
-    mEvent.mElapsedTime = aDuration.ToSeconds();
+    mEvent.mElapsedTime = aElapsedTime;
     mEvent.mPseudoElement =
-      AnimationCollection<dom::CSSTransition>::PseudoTypeAsString(aPseudoType);
+      AnimationCollection<dom::CSSTransition>::PseudoTypeAsString(
+        aTarget.mPseudoType);
   }
 
   // InternalTransitionEvent doesn't support copy-construction, so we need
@@ -342,11 +342,13 @@ struct TransitionEventInfo {
 } // namespace mozilla
 
 class nsTransitionManager final
-  : public mozilla::CommonAnimationManager<mozilla::dom::CSSTransition>
+  : public mozilla::CommonAnimationManager<mozilla::dom::CSSTransition,
+                                           mozilla::TransitionEventInfo>
 {
 public:
   explicit nsTransitionManager(nsPresContext *aPresContext)
-    : mozilla::CommonAnimationManager<mozilla::dom::CSSTransition>(aPresContext)
+    : mozilla::CommonAnimationManager<mozilla::dom::CSSTransition,
+                                      mozilla::TransitionEventInfo>(aPresContext)
     , mInAnimationOnlyStyleUpdate(false)
   {
   }
@@ -404,19 +406,11 @@ public:
     return mInAnimationOnlyStyleUpdate;
   }
 
-  void QueueEvent(mozilla::TransitionEventInfo&& aEventInfo)
-  {
-    mEventDispatcher.QueueEvent(
-      mozilla::Forward<mozilla::TransitionEventInfo>(aEventInfo));
-  }
-
   void DispatchEvents()
   {
     RefPtr<nsTransitionManager> kungFuDeathGrip(this);
     mEventDispatcher.DispatchEvents(mPresContext);
   }
-  void SortEvents()      { mEventDispatcher.SortEvents(); }
-  void ClearEventQueue() { mEventDispatcher.ClearEventQueue(); }
 
 protected:
   virtual ~nsTransitionManager() {}
@@ -450,9 +444,6 @@ protected:
                                nsCSSPropertyIDSet* aWhichStarted);
 
   bool mInAnimationOnlyStyleUpdate;
-
-  mozilla::DelayedEventDispatcher<mozilla::TransitionEventInfo>
-      mEventDispatcher;
 };
 
 #endif /* !defined(nsTransitionManager_h_) */

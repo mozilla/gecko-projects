@@ -50,7 +50,7 @@ def make_repackage_signing_description(config, jobs):
         attributes = dep_job.attributes
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc-rs(N)')
+        treeherder.setdefault('symbol', 'rs(N)')
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
@@ -73,13 +73,14 @@ def make_repackage_signing_description(config, jobs):
         signing_dependencies = dep_job.dependencies
         # This is so we get the build task etc in our dependencies to
         # have better beetmover support.
-        dependencies.update(signing_dependencies)
+        dependencies.update({k: v for k, v in signing_dependencies.items()
+                             if k != 'docker-image'})
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['repackage_type'] = 'repackage-signing'
 
         locale_str = ""
         if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'tc-rs({})'.format(dep_job.attributes.get('locale'))
+            treeherder['symbol'] = 'rs({})'.format(dep_job.attributes.get('locale'))
             attributes['locale'] = dep_job.attributes.get('locale')
             locale_str = "{}/".format(dep_job.attributes.get('locale'))
 

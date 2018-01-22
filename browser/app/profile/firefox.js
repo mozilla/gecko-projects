@@ -1709,7 +1709,7 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
 pref("extensions.formautofill.available", "on");
 pref("extensions.formautofill.creditCards.available", true);
 #elif MOZ_UPDATE_CHANNEL == release
-pref("extensions.formautofill.available", "staged-rollout");
+pref("extensions.formautofill.available", "detect");
 pref("extensions.formautofill.creditCards.available", false);
 #else
 pref("extensions.formautofill.available", "detect");
@@ -1730,7 +1730,13 @@ pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.section.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
 // Comma separated list of countries Form Autofill supports
+#ifdef MOZ_UPDATE_CHANNEL == release
+pref("extensions.formautofill.supportedCountries", "US");
+pref("extensions.formautofill.supportRTL", false);
+#else
 pref("extensions.formautofill.supportedCountries", "US,CA,DE");
+pref("extensions.formautofill.supportRTL", true);
+#endif
 
 // Whether or not to restore a session with lazy-browser tabs.
 pref("browser.sessionstore.restore_tabs_lazily", true);

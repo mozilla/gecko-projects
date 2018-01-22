@@ -2,14 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{LayerRect, LayerToWorldTransform};
+use api::{LayerToWorldTransform};
 use gpu_cache::GpuCacheAddress;
+use prim_store::EdgeAaSegmentMask;
 use render_task::RenderTaskAddress;
 
 // Contains type that must exactly match the same structures declared in GLSL.
 
 #[repr(i32)]
 #[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub enum BlurDirection {
     Horizontal = 0,
     Vertical,
@@ -17,17 +19,18 @@ pub enum BlurDirection {
 
 #[derive(Debug)]
 #[repr(C)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct BlurInstance {
     pub task_address: RenderTaskAddress,
     pub src_task_address: RenderTaskAddress,
     pub blur_direction: BlurDirection,
-    pub region: LayerRect,
 }
 
 /// A clipping primitive drawn into the clipping mask.
 /// Could be an image or a rectangle, which defines the
 /// way `address` is treated.
 #[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 #[repr(C)]
 pub struct ClipMaskInstance {
     pub render_task_address: RenderTaskAddress,
@@ -39,6 +42,7 @@ pub struct ClipMaskInstance {
 
 // 32 bytes per instance should be enough for anyone!
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct PrimitiveInstance {
     data: [i32; 8],
 }
@@ -60,7 +64,7 @@ impl SimplePrimitiveInstance {
         clip_chain_rect_index: ClipChainRectIndex,
         scroll_id: ClipScrollNodeIndex,
         z_sort_index: i32,
-    ) -> SimplePrimitiveInstance {
+    ) -> Self {
         SimplePrimitiveInstance {
             specific_prim_address,
             task_address,
@@ -108,7 +112,7 @@ impl CompositePrimitiveInstance {
         z: i32,
         data2: i32,
         data3: i32,
-    ) -> CompositePrimitiveInstance {
+    ) -> Self {
         CompositePrimitiveInstance {
             task_address,
             src_task_address,
@@ -123,7 +127,7 @@ impl CompositePrimitiveInstance {
 }
 
 impl From<CompositePrimitiveInstance> for PrimitiveInstance {
-    fn from(instance: CompositePrimitiveInstance) -> PrimitiveInstance {
+    fn from(instance: CompositePrimitiveInstance) -> Self {
         PrimitiveInstance {
             data: [
                 instance.task_address.0 as i32,
@@ -155,12 +159,13 @@ pub struct BrushInstance {
     pub clip_task_address: RenderTaskAddress,
     pub z: i32,
     pub segment_index: i32,
+    pub edge_flags: EdgeAaSegmentMask,
     pub user_data0: i32,
     pub user_data1: i32,
 }
 
 impl From<BrushInstance> for PrimitiveInstance {
-    fn from(instance: BrushInstance) -> PrimitiveInstance {
+    fn from(instance: BrushInstance) -> Self {
         PrimitiveInstance {
             data: [
                 instance.picture_address.0 as i32,
@@ -168,7 +173,7 @@ impl From<BrushInstance> for PrimitiveInstance {
                 ((instance.clip_chain_rect_index.0 as i32) << 16) | instance.scroll_id.0 as i32,
                 instance.clip_task_address.0 as i32,
                 instance.z,
-                instance.segment_index,
+                instance.segment_index | ((instance.edge_flags.bits() as i32) << 16),
                 instance.user_data0,
                 instance.user_data1,
             ]
@@ -188,10 +193,12 @@ pub enum BrushImageKind {
 }
 
 #[derive(Copy, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 #[repr(C)]
 pub struct ClipScrollNodeIndex(pub u32);
 
 #[derive(Debug)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 #[repr(C)]
 pub struct ClipScrollNodeData {
     pub transform: LayerToWorldTransform,
@@ -200,7 +207,7 @@ pub struct ClipScrollNodeData {
 }
 
 impl ClipScrollNodeData {
-    pub fn invalid() -> ClipScrollNodeData {
+    pub fn invalid() -> Self {
         ClipScrollNodeData {
             transform: LayerToWorldTransform::identity(),
             transform_kind: 0.0,
@@ -214,6 +221,7 @@ impl ClipScrollNodeData {
 pub struct ClipChainRectIndex(pub usize);
 
 #[derive(Copy, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 #[repr(C)]
 pub enum PictureType {
     Image = 1,

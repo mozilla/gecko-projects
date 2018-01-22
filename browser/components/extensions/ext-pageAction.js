@@ -41,7 +41,7 @@ this.pageAction = class extends ExtensionAPI {
     this.tabManager = extension.tabManager;
 
     // If <all_urls> is present, the default is to show the page action.
-    let show = options.show_matches && options.show_matches.includes("<all_urls>");
+    let show = !!options.show_matches && options.show_matches.includes("<all_urls>");
     let showMatches = new MatchPatternSet(options.show_matches || []);
     let hideMatches = new MatchPatternSet(options.hide_matches || []);
 
@@ -272,11 +272,14 @@ this.pageAction = class extends ExtensionAPI {
           pageAction.setProperty(tab, "show", false);
         },
 
+        isShown(details) {
+          let tab = tabTracker.getTab(details.tabId);
+          return pageAction.getProperty(tab, "show");
+        },
+
         setTitle(details) {
           let tab = tabTracker.getTab(details.tabId);
-
-          // Clear the tab-specific title when given a null string.
-          pageAction.setProperty(tab, "title", details.title || null);
+          pageAction.setProperty(tab, "title", details.title);
         },
 
         getTitle(details) {
@@ -290,6 +293,9 @@ this.pageAction = class extends ExtensionAPI {
           let tab = tabTracker.getTab(details.tabId);
 
           let icon = IconDetails.normalize(details, extension, context);
+          if (!Object.keys(icon).length) {
+            icon = null;
+          }
           pageAction.setProperty(tab, "icon", icon);
         },
 

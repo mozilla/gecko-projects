@@ -48,7 +48,7 @@ dnl ========================================================
 MOZJPEG=62
 MOZPNG=10634
 NSPR_VERSION=4
-NSPR_MINVER=4.17
+NSPR_MINVER=4.18
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -508,28 +508,10 @@ fi
 dnl ========================================================
 dnl Add optional and non-optional hardening flags
 dnl ========================================================
-CFLAGS="$CFLAGS $HARDENING_CFLAGS"
-CPPFLAGS="$CPPFLAGS $HARDENING_CFLAGS"
-CXXFLAGS="$CXXFLAGS $HARDENING_CFLAGS"
 
-dnl In at least glibc-2.25, _FORTIFY_SOURCE requires compiling
-dnl with optimization (Bug 1417452)
-if test -n "$MOZ_OPTIMIZE"; then
-   if test "$GNU_CC" -o -n "${CLANG_CC}${CLANG_CL}"; then
-      case $OS_TARGET in
-         Android)
-            dnl FORTIFY_SOURCE is not supported on Android on the
-            dnl top-level old-configure.in at this time.
-            dnl See Bug 1415595
-            ;;
-         *)
-            CFLAGS="$CFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2"
-            CPPFLAGS="$CPPFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2"
-            CXXFLAGS="$CXXFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2"
-            ;;
-      esac
-   fi
-fi
+CFLAGS="$CFLAGS $MOZ_HARDENING_CFLAGS"
+CPPFLAGS="$CPPFLAGS $MOZ_HARDENING_CFLAGS"
+CXXFLAGS="$CXXFLAGS $MOZ_HARDENING_CFLAGS"
 
 dnl ========================================================
 dnl GNU specific defaults
@@ -1823,7 +1805,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.34, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.35, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -n "$MOZ_SYSTEM_NSS"; then
@@ -2133,7 +2115,7 @@ dnl ========================================================
 
 case "$MOZ_BUILD_APP" in
 mobile/android)
-    MOZ_ANDROID_SDK(23, 23, 26.0.2, 26.0.0 26.0.0-dev 25.3.2 25.3.1)
+    MOZ_ANDROID_SDK(23, 23, 25.0.3, 26.0.0 26.0.0-dev 25.3.2 25.3.1)
     ;;
 esac
 

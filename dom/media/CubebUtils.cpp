@@ -73,7 +73,7 @@ namespace {
 void* sServerHandle = nullptr;
 
 // Initialized during early startup, protected by sMutex.
-ipc::FileDescriptor sIPCConnection;
+StaticAutoPtr<ipc::FileDescriptor> sIPCConnection;
 
 static bool
 StartSoundServer()
@@ -204,6 +204,7 @@ static const uint32_t CUBEB_NORMAL_LATENCY_MS = 100;
 static const uint32_t CUBEB_NORMAL_LATENCY_FRAMES = 1024;
 
 namespace CubebUtils {
+cubeb* GetCubebContextUnlocked();
 
 void PrefChanged(const char* aPref, void* aClosure)
 {
@@ -405,12 +406,12 @@ void InitAudioIPCConnection()
   MOZ_ASSERT(NS_IsMainThread());
   auto contentChild = dom::ContentChild::GetSingleton();
   auto promise = contentChild->SendCreateAudioIPCConnection();
-  promise->Then(AbstractThread::GetCurrent(),
+  promise->Then(AbstractThread::MainThread(),
                 __func__,
                 [](ipc::FileDescriptor aFD) {
                   StaticMutexAutoLock lock(sMutex);
-                  MOZ_ASSERT(!sIPCConnection.IsValid());
-                  sIPCConnection = aFD;
+                  MOZ_ASSERT(!sIPCConnection);
+                  sIPCConnection = new ipc::FileDescriptor(aFD);
                 },
                 [](mozilla::ipc::ResponseRejectReason aReason) {
                   MOZ_LOG(gCubebLog, LogLevel::Error, ("SendCreateAudioIPCConnection failed: %d",
@@ -452,10 +453,10 @@ cubeb* GetCubebContextUnlocked()
   if (sCubebSandbox) {
     if (XRE_IsParentProcess()) {
       // TODO: Don't use audio IPC when within the same process.
-      MOZ_ASSERT(!sIPCConnection.IsValid());
-      sIPCConnection = CreateAudioIPCConnection();
+      MOZ_ASSERT(!sIPCConnection);
+      sIPCConnection = new ipc::FileDescriptor(CreateAudioIPCConnection());
     } else {
-      MOZ_DIAGNOSTIC_ASSERT(sIPCConnection.IsValid());
+      MOZ_DIAGNOSTIC_ASSERT(sIPCConnection);
     }
   }
 
@@ -463,19 +464,14 @@ cubeb* GetCubebContextUnlocked()
 
   int rv = sCubebSandbox
     ? audioipc_client_init(&sCubebContext, sBrandName,
-                           sIPCConnection.ClonePlatformHandle().release())
+                           sIPCConnection->ClonePlatformHandle().release())
     : cubeb_init(&sCubebContext, sBrandName, sCubebBackendName.get());
+  sIPCConnection = nullptr;
 #else // !MOZ_CUBEB_REMOTING
   int rv = cubeb_init(&sCubebContext, sBrandName, sCubebBackendName.get());
 #endif // MOZ_CUBEB_REMOTING
   NS_WARNING_ASSERTION(rv == CUBEB_OK, "Could not get a cubeb context.");
   sCubebState = (rv == CUBEB_OK) ? CubebState::Initialized : CubebState::Uninitialized;
-
-  if (MOZ_LOG_TEST(gCubebLog, LogLevel::Verbose)) {
-    cubeb_set_log_callback(CUBEB_LOG_VERBOSE, CubebLogCallback);
-  } else if (MOZ_LOG_TEST(gCubebLog, LogLevel::Error)) {
-    cubeb_set_log_callback(CUBEB_LOG_NORMAL, CubebLogCallback);
-  }
 
   return sCubebContext;
 }
@@ -548,10 +544,15 @@ void InitLibrary()
   Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_LATENCY_MSG);
   Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_BACKEND);
   Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_SANDBOX);
+  if (MOZ_LOG_TEST(gCubebLog, LogLevel::Verbose)) {
+    cubeb_set_log_callback(CUBEB_LOG_VERBOSE, CubebLogCallback);
+  } else if (MOZ_LOG_TEST(gCubebLog, LogLevel::Error)) {
+    cubeb_set_log_callback(CUBEB_LOG_NORMAL, CubebLogCallback);
+  }
   // We don't want to call the callback on startup, because the pref is the
   // empty string by default ("", which means "logging disabled"). Because the
   // logging can be enabled via environment variables (MOZ_LOG="module:5"),
-  // calling this callback on init would immediately re-disble the logging.
+  // calling this callback on init would immediately re-disable the logging.
   Preferences::RegisterCallback(PrefChanged, PREF_CUBEB_LOGGING_LEVEL);
 #ifndef MOZ_WIDGET_ANDROID
   AbstractThread::MainThread()->Dispatch(
@@ -559,8 +560,7 @@ void InitLibrary()
 #endif
 #ifdef MOZ_CUBEB_REMOTING
   if (sCubebSandbox && XRE_IsContentProcess()) {
-    AbstractThread::MainThread()->Dispatch(
-      NS_NewRunnableFunction("CubebUtils::InitLibrary", &InitAudioIPCConnection));
+    InitAudioIPCConnection();
   }
 #endif
 }
@@ -585,7 +585,7 @@ void ShutdownLibrary()
   sCubebState = CubebState::Shutdown;
 
 #ifdef MOZ_CUBEB_REMOTING
-  sIPCConnection = ipc::FileDescriptor();
+  sIPCConnection = nullptr;
   ShutdownSoundServer();
 #endif
 }

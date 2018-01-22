@@ -1019,6 +1019,11 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
     return;
   }
 
+  if (Type() == LayoutFrameType::Placeholder) {
+    // Do not mark placeholder frames modified.
+    return;
+  }
+
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
   MOZ_ASSERT(displayRoot);
 
@@ -1602,7 +1607,7 @@ bool
 nsIFrame::Combines3DTransformWithAncestors(const nsStyleDisplay* aStyleDisplay) const
 {
   MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-  nsIFrame* parent = GetFlattenedTreeParentPrimaryFrame();
+  nsIFrame* parent = GetInFlowParent();
   if (!parent || !parent->Extend3DContext()) {
     return false;
   }
@@ -2583,9 +2588,9 @@ FrameParticipatesIn3DContext(nsIFrame* aAncestor, nsIFrame* aDescendant) {
   MOZ_ASSERT(aAncestor != aDescendant);
   MOZ_ASSERT(aAncestor->Extend3DContext());
   nsIFrame* frame;
-  for (frame = aDescendant->GetFlattenedTreeParentPrimaryFrame();
+  for (frame = aDescendant->GetInFlowParent();
        frame && aAncestor != frame;
-       frame = frame->GetFlattenedTreeParentPrimaryFrame()) {
+       frame = frame->GetInFlowParent()) {
     if (!frame->Extend3DContext()) {
       return false;
     }
@@ -6799,16 +6804,6 @@ nsIFrame::GetNearestWidget(nsPoint& aOffset) const
   return widget;
 }
 
-nsIFrame*
-nsIFrame::GetFlattenedTreeParentPrimaryFrame() const
-{
-  if (!GetContent()) {
-    return nullptr;
-  }
-  nsIContent* parent = GetContent()->GetFlattenedTreeParent();
-  return parent ? parent->GetPrimaryFrame() : nullptr;
-}
-
 Matrix4x4
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                              nsIFrame** aOutAncestor,
@@ -7232,6 +7227,13 @@ nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
 
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
   InvalidateRenderingObservers(displayRoot, this);
+
+  // Check if frame supports WebRender's async update
+  if ((aFlags & UPDATE_IS_ASYNC) &&
+      WebRenderUserData::SupportsAsyncUpdate(this)) {
+    // WebRender does not use layer, then return nullptr.
+    return nullptr;
+  }
 
   // If the layer is being updated asynchronously, and it's being forwarded
   // to a compositor, then we don't need to invalidate.

@@ -29,6 +29,7 @@ pub const MAX_BLUR_RADIUS : f32 = 300.;
 pub const MASK_CORNER_PADDING: f32 = 4.0;
 
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct BoxShadowCacheKey {
     pub width: Au,
     pub height: Au,
@@ -83,6 +84,9 @@ impl FrameBuilder {
             .inflate(spread_amount, spread_amount);
 
         if blur_radius == 0.0 {
+            if box_offset.x == 0.0 && box_offset.y == 0.0 && spread_amount == 0.0 {
+                return;
+            }
             let mut clips = Vec::new();
 
             let fast_info = match clip_mode {
@@ -211,12 +215,14 @@ impl FrameBuilder {
                         // as a simple blit.
                         if width > prim_info.rect.size.width || height > prim_info.rect.size.height {
                             image_kind = BrushImageKind::Simple;
-                            width = prim_info.rect.size.width;
-                            height = prim_info.rect.size.height;
+                            width = prim_info.rect.size.width + spread_amount * 2.0;
+                            height = prim_info.rect.size.height + spread_amount * 2.0;
                         }
 
-                        let clip_rect = LayerRect::new(LayerPoint::zero(),
-                                                       LayerSize::new(width, height));
+                        let clip_rect = LayerRect::new(
+                            LayerPoint::zero(),
+                            LayerSize::new(width, height)
+                        );
 
                         brush_prim = BrushPrimitive::new(
                             BrushKind::Mask {
@@ -242,7 +248,6 @@ impl FrameBuilder {
                     let mut pic_prim = PicturePrimitive::new_box_shadow(
                         blur_radius,
                         *color,
-                        Vec::new(),
                         clip_mode,
                         image_kind,
                         cache_key,
@@ -253,12 +258,6 @@ impl FrameBuilder {
                         clip_and_scroll
                     );
 
-                    // TODO(gw): Right now, we always use a clip out
-                    //           mask for outset shadows. We can make this
-                    //           much more efficient when we have proper
-                    //           segment logic, by avoiding drawing
-                    //           most of the pixels inside and just
-                    //           clipping out along the edges.
                     extra_clips.push(ClipSource::new_rounded_rect(
                         prim_info.rect,
                         border_radius,
@@ -301,7 +300,7 @@ impl FrameBuilder {
                         inflate_size *= 2.0;
                     }
 
-                    let brush_rect = brush_rect.inflate(inflate_size, inflate_size);
+                    let brush_rect = brush_rect.inflate(inflate_size + box_offset.x.abs(), inflate_size + box_offset.y.abs());
                     let brush_prim = BrushPrimitive::new(
                         BrushKind::Mask {
                             clip_mode: brush_clip_mode,
@@ -321,7 +320,6 @@ impl FrameBuilder {
                     let mut pic_prim = PicturePrimitive::new_box_shadow(
                         blur_radius,
                         *color,
-                        Vec::new(),
                         BoxShadowClipMode::Inset,
                         // TODO(gw): Make use of optimization for inset.
                         BrushImageKind::NinePatch,
@@ -337,7 +335,7 @@ impl FrameBuilder {
                     // rect to account for the inflate above. This
                     // extra edge will be clipped by the local clip
                     // rect set below.
-                    let pic_rect = prim_info.rect.inflate(inflate_size, inflate_size);
+                    let pic_rect = prim_info.rect.inflate(inflate_size + box_offset.x.abs(), inflate_size + box_offset.y.abs());
                     let pic_info = LayerPrimitiveInfo::with_clip_rect(
                         pic_rect,
                         prim_info.rect

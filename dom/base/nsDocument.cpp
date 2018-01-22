@@ -1482,6 +1482,7 @@ nsIDocument::nsIDocument()
     mBufferingCSPViolations(false),
     mAllowPaymentRequest(false),
     mEncodingMenuDisabled(false),
+    mIsSVGGlyphsDocument(false),
     mIsScopedStyleEnabled(eScopedStyle_Unknown),
     mCompatMode(eCompatibility_FullStandards),
     mReadyState(ReadyState::READYSTATE_UNINITIALIZED),
@@ -1526,7 +1527,7 @@ nsIDocument::nsIDocument()
 
   // Set this when document is created and value stays the same for the lifetime
   // of the document.
-  mIsWebComponentsEnabled = nsContentUtils::IsWebComponentsEnabled();
+  mIsShadowDOMEnabled = nsContentUtils::IsShadowDOMEnabled();
 }
 
 nsDocument::nsDocument(const char* aContentType)
@@ -2668,7 +2669,7 @@ nsDocument::IsSynthesized() {
 }
 
 bool
-nsDocument::IsWebComponentsEnabled(JSContext* aCx, JSObject* aObject)
+nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject)
 {
   JS::Rooted<JSObject*> obj(aCx, aObject);
 
@@ -2682,13 +2683,13 @@ nsDocument::IsWebComponentsEnabled(JSContext* aCx, JSObject* aObject)
     return false;
   }
 
-  return doc->IsWebComponentsEnabled();
+  return doc->IsShadowDOMEnabled();
 }
 
 bool
-nsDocument::IsWebComponentsEnabled(const nsINode* aNode)
+nsDocument::IsShadowDOMEnabled(const nsINode* aNode)
 {
-  return aNode->OwnerDoc()->IsWebComponentsEnabled();
+  return aNode->OwnerDoc()->IsShadowDOMEnabled();
 }
 
 nsresult
@@ -4024,10 +4025,9 @@ nsDocument::CreateShell(nsPresContext* aContext, nsViewManager* aViewManager,
   }
 
   RefPtr<PresShell> shell = new PresShell;
-  shell->Init(this, aContext, aViewManager, aStyleSet);
-
   // Note: we don't hold a ref to the shell (it holds a ref to us)
   mPresShell = shell;
+  shell->Init(this, aContext, aViewManager, aStyleSet);
 
   // Make sure to never paint if we belong to an invisible DocShell.
   nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
@@ -6132,15 +6132,6 @@ nsIDocument::CreateProcessingInstruction(const nsAString& aTarget,
   return pi.forget();
 }
 
-NS_IMETHODIMP
-nsDocument::CreateAttribute(const nsAString& aName,
-                            nsIDOMAttr** aReturn)
-{
-  ErrorResult rv;
-  *aReturn = nsIDocument::CreateAttribute(aName, rv).take();
-  return rv.StealNSResult();
-}
-
 already_AddRefed<Attr>
 nsIDocument::CreateAttribute(const nsAString& aName, ErrorResult& rv)
 {
@@ -6174,17 +6165,6 @@ nsIDocument::CreateAttribute(const nsAString& aName, ErrorResult& rv)
   RefPtr<Attr> attribute = new Attr(nullptr, nodeInfo.forget(),
                                     EmptyString());
   return attribute.forget();
-}
-
-NS_IMETHODIMP
-nsDocument::CreateAttributeNS(const nsAString & aNamespaceURI,
-                              const nsAString & aQualifiedName,
-                              nsIDOMAttr **aResult)
-{
-  ErrorResult rv;
-  *aResult =
-    nsIDocument::CreateAttributeNS(aNamespaceURI, aQualifiedName, rv).take();
-  return rv.StealNSResult();
 }
 
 already_AddRefed<Attr>

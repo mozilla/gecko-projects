@@ -959,7 +959,7 @@ PresShell::Init(nsIDocument* aDocument,
   // calling Init, since various subroutines need to find the style set off
   // the PresContext during initialization.
   mStyleSet = aStyleSet;
-  mStyleSet->Init(aPresContext, mDocument->BindingManager());
+  mStyleSet->Init(aPresContext);
 
   // Notify our prescontext that it now has a compatibility mode.  Note that
   // this MUST happen after we set up our style set but before we create any
@@ -1772,10 +1772,8 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
 
   if (!rootFrame) {
     nsAutoScriptBlocker scriptBlocker;
-    mFrameConstructor->BeginUpdate();
     rootFrame = mFrameConstructor->ConstructRootFrame();
     mFrameConstructor->SetRootFrame(rootFrame);
-    mFrameConstructor->EndUpdate();
   }
 
   NS_ENSURE_STATE(!mHaveShutDown);
@@ -1811,8 +1809,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
   if (root) {
     {
       nsAutoCauseReflowNotifier reflowNotifier(this);
-      mFrameConstructor->BeginUpdate();
-
       // Have the style sheet processor construct frame for the root
       // content object down
       mFrameConstructor->ContentInserted(
@@ -1822,8 +1818,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
       // Something in mFrameConstructor->ContentInserted may have caused
       // Destroy() to get called, bug 337586.
       NS_ENSURE_STATE(!mHaveShutDown);
-
-      mFrameConstructor->EndUpdate();
     }
 
     // nsAutoCauseReflowNotifier (which sets up a script blocker) going out of
@@ -1954,13 +1948,11 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 
   WritingMode wm = rootFrame->GetWritingMode();
   const bool shrinkToFit = aOptions == ResizeReflowOptions::eBSizeLimit;
-  NS_PRECONDITION(shrinkToFit ||
-                  (wm.IsVertical() ? aWidth : aHeight) !=
-                    NS_UNCONSTRAINEDSIZE,
-                  "unconstrained bsize only usable with eBSizeLimit");
-  NS_PRECONDITION((wm.IsVertical() ? aHeight : aWidth) !=
-                    NS_UNCONSTRAINEDSIZE,
-                  "unconstrained isize not allowed");
+  MOZ_ASSERT(shrinkToFit ||
+             (wm.IsVertical() ? aWidth : aHeight) != NS_UNCONSTRAINEDSIZE,
+             "unconstrained bsize only usable with eBSizeLimit");
+  MOZ_ASSERT((wm.IsVertical() ? aHeight : aWidth) != NS_UNCONSTRAINEDSIZE,
+             "unconstrained isize not allowed");
   bool isBSizeChanging = wm.IsVertical() ? aOldWidth != aWidth
                                          : aOldHeight != aHeight;
   nscoord targetWidth = aWidth;
@@ -1975,20 +1967,36 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
     isBSizeChanging = true;
   }
 
-  mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
+  const bool suppressingResizeReflow =
+    GetPresContext()->SuppressingResizeReflow();
 
   RefPtr<nsViewManager> viewManager = mViewManager;
   nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
 
-  if (!GetPresContext()->SuppressingResizeReflow()) {
-    // Have to make sure that the content notifications are flushed before we
-    // start messing with the frame model; otherwise we can get content doubling.
-    mDocument->FlushPendingNotifications(FlushType::ContentAndNotify);
+  if (!suppressingResizeReflow && shrinkToFit) {
+    // Make sure that style is flushed before setting the pres context
+    // VisibleArea if we're shrinking to fit.
+    //
+    // Otherwise we may end up with bogus viewport units resolved against the
+    // unconstrained bsize, or restyling the whole document resolving viewport
+    // units against targetWidth, which may end up doing wasteful work.
+    mDocument->FlushPendingNotifications(FlushType::Frames);
+  }
 
-    // Make sure style is up to date
-    {
-      nsAutoScriptBlocker scriptBlocker;
-      mPresContext->RestyleManager()->ProcessPendingRestyles();
+  if (!mIsDestroying) {
+    mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
+  }
+
+  if (!mIsDestroying && !suppressingResizeReflow) {
+    if (!shrinkToFit) {
+      // Flush styles _now_ (with the correct visible area) if not computing the
+      // shrink-to-fit size.
+      //
+      // We've asserted above that sizes are not unconstrained, so this is going
+      // to be the final size, which means that we'll get the (correct) final
+      // styles now, and avoid a further potentially-wasteful full recascade on
+      // the next flush.
+      mDocument->FlushPendingNotifications(FlushType::Frames);
     }
 
     rootFrame = mFrameConstructor->GetRootFrame();
@@ -2521,8 +2529,6 @@ PresShell::BeginUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
 #ifdef DEBUG
   mUpdateCount++;
 #endif
-  mFrameConstructor->BeginUpdate();
-
   if (aUpdateType & UPDATE_STYLE)
     mStyleSet->BeginUpdate();
 }
@@ -2541,8 +2547,6 @@ PresShell::EndUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
       RestyleForCSSRuleChanges();
     }
   }
-
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -2936,11 +2940,7 @@ PresShell::DestroyFramesForAndRestyle(Element* aElement)
   // Mark ourselves as not safe to flush while we're doing frame destruction.
   ++mChangeNestCount;
 
-  nsCSSFrameConstructor* fc = FrameConstructor();
-  fc->BeginUpdate();
-  bool didReconstruct = fc->DestroyFramesFor(aElement);
-  fc->EndUpdate();
-
+  const bool didReconstruct = FrameConstructor()->DestroyFramesFor(aElement);
   if (aElement->IsStyledByServo()) {
     if (aElement->GetFlattenedTreeParentNode()) {
       // The element is still in the flat tree, but their children may not be
@@ -4547,9 +4547,7 @@ void
 PresShell::NotifyCounterStylesAreDirty()
 {
   nsAutoCauseReflowNotifier reflowNotifier(this);
-  mFrameConstructor->BeginUpdate();
   mFrameConstructor->NotifyCounterStylesAreDirty();
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -4576,10 +4574,8 @@ PresShell::ReconstructFrames()
   }
 
   nsAutoCauseReflowNotifier crNotifier(this);
-  mFrameConstructor->BeginUpdate();
   mFrameConstructor->ReconstructDocElementHierarchy(nsCSSFrameConstructor::InsertionKind::Sync);
   VERIFY_STYLE_TREE;
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -7980,6 +7976,10 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
     }
   }
   if (eventTarget) {
+    if (aEvent->IsBlockedForFingerprintingResistance()) {
+      aEvent->mFlags.mOnlySystemGroupDispatchInContent = true;
+    }
+
     if (aEvent->mClass == eCompositionEventClass) {
       IMEStateManager::DispatchCompositionEvent(eventTarget, mPresContext,
                                                 aEvent->AsCompositionEvent(),
@@ -8795,16 +8795,12 @@ PresShell::WillDoReflow()
 
   mPresContext->FlushFontFeatureValues();
 
-  mFrameConstructor->BeginUpdate();
-
   mLastReflowStart = GetPerformanceNow();
 }
 
 void
 PresShell::DidDoReflow(bool aInterruptible)
 {
-  mFrameConstructor->EndUpdate();
-
   HandlePostedReflowCallbacks(aInterruptible);
 
   nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();

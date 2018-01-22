@@ -105,6 +105,7 @@ class TsBase(Test):
         'xperf_stackwalk',
         'tpmozafterpaint',
         'fnbpaint',
+        'tphero',
         'profile',
         'firstpaint',
         'userready',
@@ -148,7 +149,7 @@ class ts_paint(TsBase):
 
 @register_test()
 class ts_paint_webext(ts_paint):
-    webextensions = '${talos}/webextensions/dummy/dummy-signed.xpi'
+    webextensions = '${talos}/webextensions/dummy/dummy.xpi'
     preferences = {'xpinstall.signatures.required': False}
 
 
@@ -240,9 +241,9 @@ class PageloaderTest(Test):
     cycles = None
     timeout = None
     keys = ['tpmanifest', 'tpcycles', 'tppagecycles', 'tprender', 'tpchrome',
-            'tpmozafterpaint', 'fnbpaint', 'tploadnocache', 'firstpaint', 'userready',
-            'testeventmap', 'base_vs_ref', 'mainthread', 'resolution', 'cycles',
-            'gecko_profile', 'gecko_profile_interval', 'gecko_profile_entries',
+            'tpmozafterpaint', 'fnbpaint', 'tphero', 'tploadnocache', 'firstpaint',
+            'userready', 'testeventmap', 'base_vs_ref', 'mainthread', 'resolution',
+            'cycles', 'gecko_profile', 'gecko_profile_interval', 'gecko_profile_entries',
             'tptimeout', 'win_counters', 'w7_counters', 'linux_counters', 'mac_counters',
             'tpscrolltest', 'xperf_counters', 'timeout', 'responsiveness',
             'profile_path', 'xperf_providers', 'xperf_user_providers', 'xperf_stackwalk',
@@ -569,7 +570,7 @@ class tp5o(PageloaderTest):
 
 @register_test()
 class tp5o_webext(tp5o):
-    webextensions = '${talos}/webextensions/dummy/dummy-signed.xpi'
+    webextensions = '${talos}/webextensions/dummy/dummy.xpi'
     preferences = {'xpinstall.signatures.required': False}
 
 
@@ -656,25 +657,6 @@ class basic_compositor_video(PageloaderTest):
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = 'ms/frame'
     lower_is_better = True
-
-
-@register_test()
-class tcanvasmark(PageloaderTest):
-    """
-    CanvasMark benchmark v0.6
-    """
-    tpmanifest = '${talos}/tests/canvasmark/canvasmark.manifest'
-    win_counters = w7_counters = linux_counters = mac_counters = None
-    tpcycles = 5
-    tppagecycles = 1
-    timeout = 900
-    gecko_profile_interval = 10
-    gecko_profile_entries = 2500000
-    tpmozafterpaint = False
-    preferences = {'dom.send_after_paint_to_content': False}
-    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
-    unit = 'score'
-    lower_is_better = False
 
 
 class dromaeo(PageloaderTest):
@@ -844,6 +826,21 @@ class speedometer(PageloaderTest):
 
 
 @register_test()
+class stylebench(PageloaderTest):
+    """
+    StyleBench benchmark used by many browser vendors (from webkit)
+    """
+    tpmanifest = '${talos}/tests/stylebench/stylebench.manifest'
+    tpcycles = 1
+    tppagecycles = 5
+    tpmozafterpaint = False
+    tpchrome = False
+    format_pagename = False
+    lower_is_better = False
+    unit = 'score'
+
+
+@register_test()
 class perf_reftest(PageloaderTest):
     """
     Style perf-reftest a set of tests where the result is the difference of base vs ref pages
@@ -884,6 +881,7 @@ class tp6_google(QuantumPageloadTest):
     Quantum Pageload Test - Google
     """
     tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_google.manifest'
+    tphero = True
 
 
 @register_test()

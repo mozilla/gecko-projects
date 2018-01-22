@@ -1259,24 +1259,22 @@
   },
   "GPU_PROCESS_LAUNCH_TIME_MS_2" : {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com"],
-    "expires_in_version": "never",
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","msreckovic@mozilla.com"],
+    "expires_in_version": "66",
     "bug_numbers": [1297790, 1317796],
     "kind": "exponential",
     "high": 64000,
     "n_buckets": 100,
-    "releaseChannelCollection": "opt-out",
     "description": "GPU process launch time in milliseconds"
   },
   "GPU_PROCESS_INITIALIZATION_TIME_MS" : {
     "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["danderson@mozilla.com"],
-    "expires_in_version": "never",
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","msreckovic@mozilla.com"],
+    "expires_in_version": "66",
     "bug_numbers": [1324095],
     "kind": "exponential",
     "high": 64000,
     "n_buckets": 100,
-    "releaseChannelCollection": "opt-out",
     "description": "GPU process initialization (excluding XPCOM and fork time) time in milliseconds"
   },
   "GPU_PROCESS_CRASH_FALLBACKS": {
@@ -3894,20 +3892,20 @@
   },
   "PREDICTOR_PREFETCH_DECISION_REASON": {
     "record_in_processes": ["main"],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "enumerated",
     "n_values": 15,
     "alert_emails": ["hurley@mozilla.com"],
-    "bug_numbers": [1409542],
+    "bug_numbers": [1409542, 1430322],
     "description": "Why the predictor determined a particular resource was eligible for future prefetch (or not). See PrefetchDecisionReason in Predictor.cpp for value meanings"
   },
   "PREDICTOR_PREFETCH_IGNORE_REASON": {
     "record_in_processes": ["main"],
-    "expires_in_version": "60",
+    "expires_in_version": "65",
     "kind": "enumerated",
     "n_values": 15,
     "alert_emails": ["hurley@mozilla.com"],
-    "bug_numbers": [1409542],
+    "bug_numbers": [1409542, 1430322],
     "description": "Why the predictor determined a particular resource that was marked eligible for prefetch should not be prefetched. See PrefetchIgnoreReason in Predictor.cpp for value meanings"
   },
   "HTTPCONNMGR_TOTAL_SPECULATIVE_CONN": {
@@ -6548,11 +6546,11 @@
   },
   "FX_PREFERENCES_CATEGORY_OPENED_V2": {
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1335907],
+    "bug_numbers": [1335907, 1425173],
     "alert_emails": ["jaws@mozilla.com"],
-    "expires_in_version": "59",
+    "expires_in_version": "66",
     "kind": "categorical",
-    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced"],
+    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced", "search"],
     "releaseChannelCollection": "opt-out",
     "description": "Count how often each preference category is opened."
   },
@@ -8499,6 +8497,16 @@
     "n_buckets": 1000,
     "description": "The time (in milliseconds) that it took to display a selected source to the user."
   },
+  "DEVTOOLS_DEBUGGER_LOAD_SOURCE_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
+    "bug_numbers": [1429047],
+    "expires_in_version": "66",
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 100,
+    "description": "The time (in milliseconds) that it took to load a source for the user."
+  },
   "DEVTOOLS_ABOUT_DEVTOOLS_OPENED_KEY": {
     "record_in_processes": ["main"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"],
@@ -8588,6 +8596,14 @@
     "kind": "boolean",
     "description": "Reports whether a navigator.requestMediaKeySystemAccess() was called in a secure context (i.e. on an origin served over HTTPS) or not.",
     "bug_numbers": [1360438]
+  },
+  "MEDIA_MKV_CANPLAY_REQUESTED": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["ayang@mozilla.com"],
+    "expires_in_version": "65",
+    "kind": "boolean",
+    "description": "Reports a true value when a page requests canPlayType for a matroska media type.",
+    "bug_numbers": [1429986]
   },
   "MEDIA_EME_REQUEST_DEPRECATED_WARNINGS": {
     "record_in_processes": ["main", "content"],
@@ -9442,7 +9458,7 @@
     "record_in_processes": ["main"],
     "bug_numbers": [1378863],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "apoirot@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "categorical",
     "labels": ["KeyShortcut", "SystemMenu", "HamburgerMenu", "ContextMenu", "CommandLine"],
     "releaseChannelCollection": "opt-out",
@@ -10261,21 +10277,21 @@
     "description": "How many times has view source in an external editor been opened, and did it succeed?"
   },
   "BROWSER_IS_USER_DEFAULT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "The result of the startup default desktop browser check."
   },
   "BROWSER_IS_USER_DEFAULT_ERROR": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "True if the browser was unable to determine if the browser was set as default."
   },
   "BROWSER_SET_DEFAULT_DIALOG_PROMPT_RAWCOUNT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 250,
@@ -10284,14 +10300,14 @@
     "description": "The number of times that a profile has seen the 'Set Default Browser' dialog."
   },
   "BROWSER_SET_DEFAULT_ALWAYS_CHECK": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "True if the profile has `browser.shell.checkDefaultBrowser` set to true."
   },
   "BROWSER_SET_DEFAULT_RESULT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 4,
@@ -10299,14 +10315,14 @@
     "description": "Result of the Set Default Browser dialog (0=Use Firefox + 'Always perform check' unchecked, 1=Use Firefox + 'Always perform check' checked, 2=Not Now + 'Always perform check' unchecked, 3=Not Now + 'Always perform check' checked)"
   },
   "BROWSER_SET_DEFAULT_ERROR": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "True if the browser was unable to set Firefox as the default browser"
   },
   "BROWSER_IS_ASSIST_DEFAULT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "The result of the default browser check for assist intent."
@@ -12138,7 +12154,7 @@
   },
   "PERMISSIONS_REMIGRATION_COMPARISON": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["michael@thelayzells.com"],
+    "alert_emails": ["nika@thelayzells.com"],
     "expires_in_version": "44",
     "kind": "enumerated",
     "n_values": 10,
@@ -12146,7 +12162,7 @@
   },
   "PERMISSIONS_MIGRATION_7_ERROR": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["michael@thelayzells.com"],
+    "alert_emails": ["nika@thelayzells.com"],
     "expires_in_version": "44",
     "kind": "boolean",
     "description": "Was there an error while performing the v7 permissions DB migration?"
@@ -12242,7 +12258,7 @@
   "D3D11_SYNC_HANDLE_FAILURE": {
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["gfx-telemetry-alerts@mozilla.com","bschouten@mozilla.com","danderson@mozilla.com","msreckovic@mozilla.com","ashughes@mozilla.com"],
-    "expires_in_version": "60",
+    "expires_in_version": "66",
     "releaseChannelCollection": "opt-out",
     "kind": "count",
     "description": "Number of times the D3D11 compositor failed to get a texture sync handle."
@@ -12427,12 +12443,21 @@
   },
   "PLUGIN_DRAWING_MODEL": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","msreckovic@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "bug_numbers": [1229961],
     "n_values": 12,
     "description": "Plugin drawing model. 0 when windowed, otherwise NPDrawingModel + 1."
+  },
+  "DOM_SCRIPT_KIND": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["jcoppeard@mozilla.com"],
+    "expires_in_version": "63",
+    "kind": "categorical",
+    "bug_numbers": [1430145],
+    "labels": ["ClassicScript", "ModuleScript"],
+    "description": "Record the kind of every script loaded in a document."
   },
   "DOM_SCRIPT_SRC_ENCODING": {
     "record_in_processes": ["main", "content"],
@@ -12586,6 +12611,15 @@
     "bug_numbers": [1362114],
     "description": "Number of script tags evaluated per document."
   },
+  "DOM_SCRIPT_PRELOAD_RESULT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["jcoppeard@mozilla.com"],
+    "expires_in_version": "63",
+    "kind": "categorical",
+    "bug_numbers": [1430145],
+    "labels": ["Used", "RejectedByPolicy", "RequestMismatch", "LoadError", "NotUsed"],
+    "description": "Whether a preloaded script was used or the reason it was not used."
+  },
   "VIDEO_FASTSEEK_USED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["cpearce@mozilla.com", "tkuo@mozilla.com"],
@@ -12606,7 +12640,7 @@
   },
   "MEDIA_DECODER_BACKEND_USED": {
     "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["danderson@mozilla.com"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","msreckovic@mozilla.com"],
     "bug_numbers": [1259695],
     "expires_in_version": "never",
     "kind": "enumerated",
@@ -13000,9 +13034,9 @@
   },
   "CONTENT_PAINT_TIME": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
+    "alert_emails": ["mwoodrow@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1309442],
-    "expires_in_version": "60",
+    "expires_in_version": "66",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,
@@ -13010,9 +13044,9 @@
   },
   "CONTENT_LARGE_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
+    "alert_emails": ["mwoodrow@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1309442],
-    "expires_in_version": "60",
+    "expires_in_version": "66",
     "keyed": true,
     "kind": "linear",
     "high": 100,
@@ -13217,9 +13251,9 @@
   },
   "IPC_SYNC_MESSAGE_MANAGER_LATENCY_MS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["michael@thelayzells.com"],
+    "alert_emails": ["nika@thelayzells.com"],
     "bug_numbers": [1348113],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "exponential",
     "low": 32,
     "high": 750,
@@ -13541,9 +13575,9 @@
   },
   "IPC_SYNC_RECEIVE_MS": {
     "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["michael@thelayzells.com"],
+    "alert_emails": ["nika@thelayzells.com"],
     "bug_numbers": [1365719],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "exponential",
     "low": 32,
     "high": 750,
@@ -13651,9 +13685,9 @@
   },
   "NOTIFY_OBSERVERS_LATENCY_MS": {
     "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["michael@thelayzells.com"],
+    "alert_emails": ["nika@thelayzells.com"],
     "bug_numbers": [1368524],
-    "expires_in_version": "60",
+    "expires_in_version": "70",
     "kind": "exponential",
     "low": 3,
     "high": 512,
@@ -13823,8 +13857,8 @@
   },
   "GFX_OMTP_PAINT_WAIT_TIME": {
     "record_in_processes": ["content"],
-    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","danderson@mozilla.com"],
-    "expires_in_version": "61",
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","rhunt@mozilla.com"],
+    "expires_in_version": "66",
     "kind": "exponential",
     "high": 200,
     "n_buckets": 50,

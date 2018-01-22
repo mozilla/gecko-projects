@@ -21,9 +21,10 @@ use internal_types::{FastHashMap, FastHashSet, RenderedDocument};
 use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
 use resource_cache::{FontInstanceMap,ResourceCache, TiledImageMap};
 use scene::{Scene, StackingContextHelpers, ScenePipeline, SceneProperties};
-use tiling::CompositeOps;
+use tiling::{CompositeOps, Frame};
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Eq, Ord)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct FrameId(pub u32);
 
 static DEFAULT_SCROLLBAR_COLOR: ColorF = ColorF {
@@ -71,6 +72,24 @@ impl<'a> FlattenContext<'a> {
             .expect("No display list?")
             .display_list
             .get(complex_clips)
+            .collect()
+    }
+
+    fn get_clip_chain_items(
+        &self,
+        pipeline_id: PipelineId,
+        items: ItemRange<ClipId>,
+    ) -> Vec<ClipId> {
+        if items.is_empty() {
+            return vec![];
+        }
+
+        self.scene
+            .pipelines
+            .get(&pipeline_id)
+            .expect("No display list?")
+            .display_list
+            .get(items)
             .collect()
     }
 
@@ -405,6 +424,7 @@ impl<'a> FlattenContext<'a> {
                             None,
                             info.image_key,
                             info.image_rendering,
+                            info.alpha_type,
                             None,
                         );
                     }
@@ -558,6 +578,10 @@ impl<'a> FlattenContext<'a> {
                     clip_region,
                 );
             }
+            SpecificDisplayItem::ClipChain(ref info) => {
+                let items = self.get_clip_chain_items(pipeline_id, item.clip_chain_items());
+                self.clip_scroll_tree.add_clip_chain_descriptor(info.id, info.parent, items);
+            },
             SpecificDisplayItem::ScrollFrame(ref info) => {
                 let complex_clips = self.get_complex_clips(pipeline_id, item.complex_clip().0);
                 let clip_region = ClipRegion::create_for_clip_node(
@@ -915,6 +939,7 @@ impl<'a> FlattenContext<'a> {
                 None,
                 info.image_key,
                 info.image_rendering,
+                info.alpha_type,
                 Some(tile_offset),
             );
         }
@@ -1071,6 +1096,11 @@ impl FrameContext {
         self.pipeline_epoch_map.insert(pipeline_id, epoch);
     }
 
+    pub fn make_rendered_document(&self, frame: Frame) -> RenderedDocument {
+        let nodes_bouncing_back = self.clip_scroll_tree.collect_nodes_bouncing_back();
+        RenderedDocument::new(self.pipeline_epoch_map.clone(), nodes_bouncing_back, frame)
+    }
+
     pub fn build_rendered_document(
         &mut self,
         frame_builder: &mut FrameBuilder,
@@ -1098,8 +1128,6 @@ impl FrameContext {
             gpu_cache_profile,
             scene_properties,
         );
-
-        let nodes_bouncing_back = self.clip_scroll_tree.collect_nodes_bouncing_back();
-        RenderedDocument::new(self.pipeline_epoch_map.clone(), nodes_bouncing_back, frame)
+        self.make_rendered_document(frame)
     }
 }

@@ -14,16 +14,15 @@ use gpu_cache::{GpuCache, GpuCacheUpdateList};
 use gpu_types::{BlurDirection, BlurInstance, BrushInstance, ClipChainRectIndex};
 use gpu_types::{ClipScrollNodeData, ClipScrollNodeIndex};
 use gpu_types::{PrimitiveInstance};
-use internal_types::{FastHashMap, RenderPassIndex};
+use internal_types::{FastHashMap, RenderPassIndex, SourceTexture};
 use picture::{PictureKind};
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveStore};
-use prim_store::{BrushMaskKind, BrushKind, DeferredResolve};
+use prim_store::{BrushMaskKind, BrushKind, DeferredResolve, EdgeAaSegmentMask};
 use profiler::FrameProfileCounters;
-use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKey, RenderTaskKind};
+use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKind};
 use render_task::{BlurTask, ClearMode, RenderTaskLocation, RenderTaskTree};
 use resource_cache::{ResourceCache};
 use std::{cmp, usize, f32, i32};
-use std::collections::hash_map::Entry;
 use texture_allocator::GuillotineAllocator;
 
 const MIN_TARGET_SIZE: u32 = 2048;
@@ -36,13 +35,8 @@ pub struct ScrollbarPrimitive {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct RenderTargetIndex(pub usize);
-
-#[derive(Debug)]
-struct DynamicTaskInfo {
-    task_id: RenderTaskId,
-    rect: DeviceIntRect,
-}
 
 pub struct RenderTargetContext<'a> {
     pub device_pixel_scale: DevicePixelScale,
@@ -53,6 +47,7 @@ pub struct RenderTargetContext<'a> {
     pub use_dual_source_blending: bool,
 }
 
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 struct TextureAllocator {
     // TODO(gw): Replace this with a simpler allocator for
     // render target allocation - this use case doesn't need
@@ -118,16 +113,19 @@ pub trait RenderTarget {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub enum RenderTargetKind {
     Color, // RGBA32
     Alpha, // R8
 }
 
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct RenderTargetList<T> {
     screen_size: DeviceIntSize,
     pub format: ImageFormat,
     pub max_size: DeviceUintSize,
     pub targets: Vec<T>,
+    #[cfg_attr(feature = "capture", serde(skip))]
     pub texture: Option<Texture>,
 }
 
@@ -201,23 +199,42 @@ impl<T: RenderTarget> RenderTargetList<T> {
     pub fn needs_depth(&self) -> bool {
         self.targets.iter().any(|target| target.needs_depth())
     }
+
+    pub fn check_ready(&self) {
+        match self.texture {
+            Some(ref t) => {
+                assert_eq!(t.get_dimensions(), self.max_size);
+                assert_eq!(t.get_format(), self.format);
+                assert_eq!(t.get_render_target_layer_count(), self.targets.len());
+                assert_eq!(t.get_layer_count() as usize, self.targets.len());
+                assert_eq!(t.has_depth(), t.get_rt_info().unwrap().has_depth);
+                assert_eq!(t.has_depth(), self.needs_depth());
+            }
+            None => {
+                assert!(self.targets.is_empty())
+            }
+        }
+    }
 }
 
 /// Frame output information for a given pipeline ID.
 /// Storing the task ID allows the renderer to find
 /// the target rect within the render target that this
 /// pipeline exists at.
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct FrameOutput {
     pub task_id: RenderTaskId,
     pub pipeline_id: PipelineId,
 }
 
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct ScalingInfo {
     pub src_task_id: RenderTaskId,
     pub dest_task_id: RenderTaskId,
 }
 
 /// A render target represents a number of rendering operations on a surface.
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct ColorRenderTarget {
     pub alpha_batcher: AlphaBatcher,
     // List of blur operations to apply for this render target.
@@ -282,9 +299,6 @@ impl RenderTarget for ColorRenderTarget {
         let task = &render_tasks[task_id];
 
         match task.kind {
-            RenderTaskKind::Alias(..) => {
-                panic!("BUG: add_task() called on invalidated task");
-            }
             RenderTaskKind::VerticalBlur(ref info) => {
                 info.add_instances(
                     &mut self.vertical_blurs,
@@ -355,6 +369,7 @@ impl RenderTarget for ColorRenderTarget {
     }
 }
 
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
     pub brush_mask_corners: Vec<PrimitiveInstance>,
@@ -409,9 +424,6 @@ impl RenderTarget for AlphaRenderTarget {
         }
 
         match task.kind {
-            RenderTaskKind::Alias(..) => {
-                panic!("BUG: add_task() called on invalidated task");
-            }
             RenderTaskKind::Readback(..) => {
                 panic!("Should not be added to alpha target!");
             }
@@ -465,13 +477,16 @@ impl RenderTarget for AlphaRenderTarget {
                                             clip_task_address: RenderTaskAddress(0),
                                             z: 0,
                                             segment_index: 0,
+                                            edge_flags: EdgeAaSegmentMask::empty(),
                                             user_data0: 0,
                                             user_data1: 0,
                                         };
                                         let brush = &ctx.prim_store.cpu_brushes[sub_metadata.cpu_prim_index.0];
                                         let batch = match brush.kind {
                                             BrushKind::Solid { .. } |
-                                            BrushKind::Clear => {
+                                            BrushKind::Clear |
+                                            BrushKind::Picture |
+                                            BrushKind::Line { .. } => {
                                                 unreachable!("bug: unexpected brush here");
                                             }
                                             BrushKind::Mask { ref kind, .. } => {
@@ -525,12 +540,56 @@ impl RenderTarget for AlphaRenderTarget {
     }
 }
 
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+pub struct TextureCacheRenderTarget {
+    pub horizontal_blurs: Vec<BlurInstance>,
+}
 
+impl TextureCacheRenderTarget {
+    fn new(
+        _size: Option<DeviceUintSize>,
+        _screen_size: DeviceIntSize,
+    ) -> Self {
+        TextureCacheRenderTarget {
+            horizontal_blurs: Vec::new(),
+        }
+    }
+
+    fn add_task(
+        &mut self,
+        task_id: RenderTaskId,
+        render_tasks: &RenderTaskTree,
+    ) {
+        let task = &render_tasks[task_id];
+
+        match task.kind {
+            RenderTaskKind::HorizontalBlur(ref info) => {
+                info.add_instances(
+                    &mut self.horizontal_blurs,
+                    task_id,
+                    task.children[0],
+                    BlurDirection::Horizontal,
+                    render_tasks,
+                );
+            }
+            RenderTaskKind::VerticalBlur(..) |
+            RenderTaskKind::Picture(..) |
+            RenderTaskKind::CacheMask(..) |
+            RenderTaskKind::Readback(..) |
+            RenderTaskKind::Scaling(..) => {
+                panic!("BUG: unexpected task kind for texture cache target");
+            }
+        }
+    }
+}
+
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub enum RenderPassKind {
     MainFramebuffer(ColorRenderTarget),
     OffScreen {
         alpha: RenderTargetList<AlphaRenderTarget>,
         color: RenderTargetList<ColorRenderTarget>,
+        texture_cache: FastHashMap<(SourceTexture, i32), TextureCacheRenderTarget>,
     },
 }
 
@@ -539,10 +598,10 @@ pub enum RenderPassKind {
 ///
 /// A render pass can have several render targets if there wasn't enough space in one
 /// target to do all of the rendering for that pass.
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct RenderPass {
     pub kind: RenderPassKind,
     tasks: Vec<RenderTaskId>,
-    dynamic_tasks: FastHashMap<RenderTaskKey, DynamicTaskInfo>,
 }
 
 impl RenderPass {
@@ -551,7 +610,6 @@ impl RenderPass {
         RenderPass {
             kind: RenderPassKind::MainFramebuffer(target),
             tasks: vec![],
-            dynamic_tasks: FastHashMap::default(),
         }
     }
 
@@ -559,10 +617,10 @@ impl RenderPass {
         RenderPass {
             kind: RenderPassKind::OffScreen {
                 color: RenderTargetList::new(screen_size, ImageFormat::BGRA8),
-                alpha: RenderTargetList::new(screen_size, ImageFormat::A8),
+                alpha: RenderTargetList::new(screen_size, ImageFormat::R8),
+                texture_cache: FastHashMap::default(),
             },
             tasks: vec![],
-            dynamic_tasks: FastHashMap::default(),
         }
     }
 
@@ -572,7 +630,7 @@ impl RenderPass {
         size: DeviceIntSize,
         target_kind: RenderTargetKind,
     ) {
-        if let RenderPassKind::OffScreen { ref mut color, ref mut alpha } = self.kind {
+        if let RenderPassKind::OffScreen { ref mut color, ref mut alpha, .. } = self.kind {
             let max_size = match target_kind {
                 RenderTargetKind::Color => &mut color.max_size,
                 RenderTargetKind::Alpha => &mut alpha.max_size,
@@ -604,10 +662,10 @@ impl RenderPass {
                 }
                 target.build(ctx, gpu_cache, render_tasks, deferred_resolves);
             }
-            RenderPassKind::OffScreen { ref mut color, ref mut alpha } => {
+            RenderPassKind::OffScreen { ref mut color, ref mut alpha, ref mut texture_cache } => {
                 // Step through each task, adding to batches as appropriate.
                 for &task_id in &self.tasks {
-                    let target_kind = {
+                    let (target_kind, texture_target) = {
                         let task = &mut render_tasks[task_id];
                         task.pass_index = Some(pass_index);
                         let target_kind = task.target_kind();
@@ -615,22 +673,16 @@ impl RenderPass {
                         // Find a target to assign this task to, or create a new
                         // one if required.
                         match task.location {
-                            RenderTaskLocation::Fixed => {}
+                            RenderTaskLocation::TextureCache(texture_id, layer, _) => {
+                                // TODO(gw): When we support caching color items, we will
+                                //           need to calculate that here to get the
+                                //           correct target kind.
+                                (RenderTargetKind::Alpha, Some((texture_id, layer)))
+                            }
+                            RenderTaskLocation::Fixed => {
+                                (RenderTargetKind::Color, None)
+                            }
                             RenderTaskLocation::Dynamic(ref mut origin, size) => {
-                                let dynamic_entry = match task.cache_key {
-                                    // See if this task is a duplicate.
-                                    // If so, just skip adding it!
-                                    Some(cache_key) => match self.dynamic_tasks.entry(cache_key) {
-                                        Entry::Occupied(entry) => {
-                                            debug_assert_eq!(entry.get().rect.size, size);
-                                            task.kind = RenderTaskKind::Alias(entry.get().task_id);
-                                            continue;
-                                        },
-                                        Entry::Vacant(entry) => Some(entry),
-                                    },
-                                    None => None,
-                                };
-
                                 let alloc_size = DeviceUintSize::new(size.width as u32, size.height as u32);
                                 let (alloc_origin, target_index) =  match target_kind {
                                     RenderTargetKind::Color => color.allocate(alloc_size),
@@ -638,23 +690,26 @@ impl RenderPass {
                                 };
                                 *origin = Some((alloc_origin.to_i32(), target_index));
 
-                                // If this task is cacheable / sharable, store it in the task hash
-                                // for this pass.
-                                if let Some(entry) = dynamic_entry {
-                                    entry.insert(DynamicTaskInfo {
-                                        task_id,
-                                        rect: DeviceIntRect::new(alloc_origin.to_i32(), size),
-                                    });
-                                }
+                                (target_kind, None)
                             }
                         }
-
-                        target_kind
                     };
 
-                    match target_kind {
-                        RenderTargetKind::Color => color.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
-                        RenderTargetKind::Alpha => alpha.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
+                    match texture_target {
+                        Some(texture_target) => {
+                            let texture = texture_cache
+                                .entry(texture_target)
+                                .or_insert(
+                                    TextureCacheRenderTarget::new(None, DeviceIntSize::zero())
+                                );
+                            texture.add_task(task_id, render_tasks);
+                        }
+                        None => {
+                            match target_kind {
+                                RenderTargetKind::Color => color.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
+                                RenderTargetKind::Alpha => alpha.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
+                            }
+                        }
                     }
                 }
 
@@ -689,6 +744,7 @@ impl CompositeOps {
 
 /// A rendering-oriented representation of frame::Frame built by the render backend
 /// and presented to the renderer.
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct Frame {
     pub window_size: DeviceUintSize,
     pub inner_rect: DeviceUintRect,
@@ -696,6 +752,7 @@ pub struct Frame {
     pub layer: DocumentLayer,
     pub device_pixel_ratio: f32,
     pub passes: Vec<RenderPass>,
+    #[cfg_attr(feature = "capture", serde(default = "FrameProfileCounters::new", skip))]
     pub profile_counters: FrameProfileCounters,
 
     pub node_data: Vec<ClipScrollNodeData>,
@@ -704,13 +761,31 @@ pub struct Frame {
 
     // List of updates that need to be pushed to the
     // gpu resource cache.
+    #[cfg_attr(feature = "capture", serde(skip))]
     pub gpu_cache_updates: Option<GpuCacheUpdateList>,
 
     // List of textures that we don't know about yet
     // from the backend thread. The render thread
     // will use a callback to resolve these and
     // patch the data structures.
+    #[cfg_attr(feature = "capture", serde(skip))]
     pub deferred_resolves: Vec<DeferredResolve>,
+
+    // True if this frame contains any render tasks
+    // that write to the texture cache.
+    pub has_texture_cache_tasks: bool,
+
+    // True if this frame has been drawn by the
+    // renderer.
+    pub has_been_rendered: bool,
+}
+
+impl Frame {
+    // This frame must be flushed if it writes to the
+    // texture cache, and hasn't been drawn yet.
+    pub fn must_be_drawn(&self) -> bool {
+        self.has_texture_cache_tasks && !self.has_been_rendered
+    }
 }
 
 impl BlurTask {
@@ -726,18 +801,8 @@ impl BlurTask {
             task_address: render_tasks.get_task_address(task_id),
             src_task_address: render_tasks.get_task_address(source_task_id),
             blur_direction,
-            region: LayerRect::zero(),
         };
 
-        if self.regions.is_empty() {
-            instances.push(instance);
-        } else {
-            for region in &self.regions {
-                instances.push(BlurInstance {
-                    region: *region,
-                    ..instance
-                });
-            }
-        }
+        instances.push(instance);
     }
 }

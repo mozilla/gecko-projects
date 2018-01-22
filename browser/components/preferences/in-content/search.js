@@ -71,7 +71,7 @@ var gSearchPane = {
       document.getElementById("showSearchSuggestionsFirstCheckbox");
 
     pref.on("change", () => {
-      this.syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
+      this._syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
     });
     this._syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
 
@@ -630,7 +630,6 @@ EngineView.prototype = {
   getParentIndex(index) { return -1; },
   hasNextSibling(parentIndex, index) { return false; },
   getLevel(index) { return 0; },
-  getProgressMode(index, column) { },
   getCellValue(index, column) {
     if (column.id == "engineShown")
       return this._engineStore.engines[index].shown;

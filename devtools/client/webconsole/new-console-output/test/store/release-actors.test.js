@@ -24,12 +24,15 @@ describe("Release actor enhancer:", () => {
       const logLimit = 100;
       let releasedActors = [];
       const { dispatch, getState } = setupStore([], {
-        proxy: {
-          releaseActor: (actor) => {
-            releasedActors.push(actor);
+        storeOptions: {logLimit},
+        hud: {
+          proxy: {
+            releaseActor: (actor) => {
+              releasedActors.push(actor);
+            }
           }
         }
-      }, { logLimit });
+      });
 
       // Add a log message.
       dispatch(actions.messagesAdd([
@@ -63,28 +66,31 @@ describe("Release actor enhancer:", () => {
       const logLimit = 100;
       let releasedActors = [];
       const { dispatch, getState } = setupStore([], {
-        proxy: {
-          releaseActor: (actor) => {
-            releasedActors.push(actor);
+        storeOptions: {logLimit},
+        hud: {
+          proxy: {
+            releaseActor: (actor) => {
+              releasedActors.push(actor);
+            }
           }
         }
-      }, { logLimit });
+      });
 
       // Add a log message.
-      dispatch(actions.messageAdd(
-        stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])")));
+      dispatch(actions.messagesAdd([
+        stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])")]));
 
       const firstMessage = getFirstMessage(getState());
       const firstMessageActor = firstMessage.parameters[1].actor;
 
       // Add an evaluation result message (see Bug 1408321).
       const evaluationResultPacket = stubPackets.get("new Date(0)");
-      dispatch(actions.messageAdd(evaluationResultPacket));
+      dispatch(actions.messagesAdd([evaluationResultPacket]));
       const secondMessageActor = evaluationResultPacket.result.actor;
 
       // Add an assertion message.
       const assertPacket = stubPackets.get("console.assert(false, {message: 'foobar'})");
-      dispatch(actions.messageAdd(assertPacket));
+      dispatch(actions.messagesAdd([assertPacket]));
       const thirdMessageActor = assertPacket.message.arguments[0].actor;
 
       // Add ${logLimit} messages so we prune the ones we added before.
@@ -109,9 +115,11 @@ describe("Release actor enhancer:", () => {
     it("properly releases backend actors after clear", () => {
       let releasedActors = [];
       const { dispatch, getState } = setupStore([], {
-        proxy: {
-          releaseActor: (actor) => {
-            releasedActors.push(actor);
+        hud: {
+          proxy: {
+            releaseActor: (actor) => {
+              releasedActors.push(actor);
+            }
           }
         }
       });

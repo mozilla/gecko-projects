@@ -154,6 +154,10 @@ public:
 
   void UpdateResources(ResourceUpdateQueue& aUpdates);
 
+  void UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
+                            const layers::FrameMetrics::ViewID& aScrollId,
+                            const wr::LayoutPoint& aScrollPosition);
+
   bool IsEmpty() const;
 
   Transaction* Raw() { return mTxn; }
@@ -179,9 +183,6 @@ public:
 
   wr::WindowId GetId() const { return mId; }
 
-  void UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
-                            const layers::FrameMetrics::ViewID& aScrollId,
-                            const wr::LayoutPoint& aScrollPosition);
   bool HitTest(const wr::WorldPoint& aPoint,
                wr::WrPipelineId& aOutPipelineId,
                layers::FrameMetrics::ViewID& aOutScrollId,
@@ -323,7 +324,8 @@ public:
                  const wr::LayoutRect& aClip,
                  bool aIsBackfaceVisible,
                  wr::ImageRendering aFilter,
-                 wr::ImageKey aImage);
+                 wr::ImageKey aImage,
+                 bool aPremultipliedAlpha = true);
 
   void PushImage(const wr::LayoutRect& aBounds,
                  const wr::LayoutRect& aClip,
@@ -331,7 +333,8 @@ public:
                  const wr::LayoutSize& aStretchSize,
                  const wr::LayoutSize& aTileSpacing,
                  wr::ImageRendering aFilter,
-                 wr::ImageKey aImage);
+                 wr::ImageKey aImage,
+                 bool aPremultipliedAlpha = true);
 
   void PushYCbCrPlanarImage(const wr::LayoutRect& aBounds,
                             const wr::LayoutRect& aClip,

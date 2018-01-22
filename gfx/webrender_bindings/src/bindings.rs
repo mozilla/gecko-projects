@@ -547,7 +547,7 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
     renderer.read_pixels_into(DeviceUintRect::new(
                                 DeviceUintPoint::new(0, 0),
                                 DeviceUintSize::new(width, height)),
-                              ReadPixelsFormat::Bgra8,
+                              ReadPixelsFormat::Standard(ImageFormat::BGRA8),
                               &mut slice);
 }
 
@@ -950,6 +950,18 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     }
 
     txn.update_dynamic_properties(properties);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_scroll_layer(
+    txn: &mut Transaction,
+    pipeline_id: WrPipelineId,
+    scroll_id: u64,
+    new_scroll_origin: LayoutPoint
+) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let clip_id = ClipId::new(scroll_id, pipeline_id);
+    txn.scroll_node_with_id(new_scroll_origin, clip_id, ScrollClamping::NoClamping);
 }
 
 #[no_mangle]
@@ -1526,16 +1538,6 @@ pub extern "C" fn wr_dp_pop_scroll_layer(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_scroll_layer_with_id(dh: &mut DocumentHandle,
-                                          pipeline_id: WrPipelineId,
-                                          scroll_id: u64,
-                                          new_scroll_origin: LayoutPoint) {
-    assert!(unsafe { is_in_compositor_thread() });
-    let clip_id = ClipId::new(scroll_id, pipeline_id);
-    dh.api.scroll_node_with_id(dh.document_id, new_scroll_origin, clip_id, ScrollClamping::NoClamping);
-}
-
-#[no_mangle]
 pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
                                                   scroll_id: u64,
                                                   clip_id: *const u64) {
@@ -1596,18 +1598,25 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    stretch_size: LayoutSize,
                                    tile_spacing: LayoutSize,
                                    image_rendering: ImageRendering,
-                                   key: WrImageKey) {
+                                   key: WrImageKey,
+                                   premultiplied_alpha: bool) {
     debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
     prim_info.is_backface_visible = is_backface_visible;
     prim_info.tag = state.current_tag;
+    let alpha_type = if premultiplied_alpha {
+        AlphaType::PremultipliedAlpha
+    } else {
+        AlphaType::Alpha
+    };
     state.frame_builder
          .dl_builder
          .push_image(&prim_info,
                      stretch_size,
                      tile_spacing,
                      image_rendering,
+                     alpha_type,
                      key);
 }
 
@@ -2046,6 +2055,7 @@ pub extern "C" fn wr_add_ref_arc(arc: &ArcVecU8) -> *const VecU8 {
     Arc::into_raw(arc.clone())
 }
 
+/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_dec_ref_arc(arc: *const VecU8) {
     Arc::from_raw(arc);

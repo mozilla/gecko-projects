@@ -25,6 +25,9 @@ SimpleTest.finish = function finish() {
   from { opacity: 1; }
   to { opacity: 0; }
 }
+@keyframes opacity-without-end-value {
+  from { opacity: 0; }
+}
 @keyframes background-color {
   from { background-color: red; }
   to { background-color: blue; }
@@ -32,6 +35,10 @@ SimpleTest.finish = function finish() {
 @keyframes rotate {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+@keyframes move-in {
+  from { transform: translate(120%, 120%); }
+  to { transform: translate(0%, 0%); }
 }
 div {
   /* Element needs geometry to be eligible for layerization */
@@ -132,8 +139,6 @@ var omtaEnabled = isOMTAEnabled();
 
 var isAndroid = !!navigator.userAgent.includes("Android");
 var isServo = isStyledByServo();
-var offscreenThrottlingEnabled =
-  SpecialPowers.getBoolPref('dom.animations.offscreen-throttling');
 var hasConformantPromiseHandling;
 
 function add_task_if_omta_enabled(test) {
@@ -321,10 +326,6 @@ waitForAllPaints(() => {
   });
 
   add_task_if_omta_enabled(async function no_restyling_compositor_animations_out_of_view_element() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var div = addDiv(null,
       { style: 'animation: opacity 100s; transform: translateY(-400px);' });
     var animation = div.getAnimations()[0];
@@ -341,10 +342,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function no_restyling_main_thread_animations_out_of_view_element() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var div = addDiv(null,
       { style: 'animation: background-color 100s; transform: translateY(-400px);' });
     var animation = div.getAnimations()[0];
@@ -359,10 +356,6 @@ waitForAllPaints(() => {
   });
 
   add_task_if_omta_enabled(async function no_restyling_compositor_animations_in_scrolled_out_element() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var div = addDiv(null,
@@ -382,12 +375,29 @@ waitForAllPaints(() => {
   });
 
   add_task(
+    async function no_restyling_missing_keyframe_opacity_animations_on_scrolled_out_element() {
+      var parentElement = addDiv(null,
+        { style: 'overflow-y: scroll; height: 20px;' });
+      var div = addDiv(null,
+        { style: 'animation: opacity-without-end-value 100s; ' +
+                 'position: relative; top: 100px;' });
+      parentElement.appendChild(div);
+      var animation = div.getAnimations()[0];
+      await animation.ready;
+
+      var markers = await observeStyling(5);
+
+      is(markers.length, 0,
+         'Opacity animations on scrolled out elements should never cause ' +
+         'restyles even if the animation has missing keyframes');
+
+      await ensureElementRemoval(parentElement);
+    }
+  );
+
+  add_task(
     async function restyling_transform_animations_in_scrolled_out_element() {
       if (hasConformantPromiseHandling) {
-        return;
-      }
-
-      if (!offscreenThrottlingEnabled) {
         return;
       }
 
@@ -442,10 +452,6 @@ waitForAllPaints(() => {
         return;
       }
 
-      if (!offscreenThrottlingEnabled) {
-        return;
-      }
-
       await SpecialPowers.pushPrefEnv({ set: [["ui.showHideScrollbars", 1]] });
 
       // Make sure we start from the state right after requestAnimationFrame.
@@ -490,11 +496,106 @@ waitForAllPaints(() => {
     }
   );
 
-  add_task(async function restyling_main_thread_animations_in_scrolled_out_element() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
+  add_task(
+    async function restyling_out_of_view_transform_animations_in_another_element() {
+      if (hasConformantPromiseHandling) {
+        return;
+      }
 
+      // Skip this test on Android since this test have been failing
+      // intermittently.
+      // Bug 1413817: We should audit this test still fails once we have the
+      // conformant Promise micro task.
+      if (isAndroid) {
+        return;
+      }
+
+      var parentElement = addDiv(null,
+        { style: 'overflow: hidden;' });
+      var div = addDiv(null,
+        { style: 'animation: move-in 100s;' });
+      parentElement.appendChild(div);
+      var animation = div.getAnimations()[0];
+      var timeAtStart = document.timeline.currentTime;
+
+      ok(!animation.isRunningOnCompositor,
+         'The transform animation on out of view element ' +
+         'is not running on the compositor');
+
+      var markers;
+      var now;
+      while (true) {
+        markers = await observeStyling(1);
+        // Check restyle markers until 200ms is elapsed.
+        now = document.timeline.currentTime;
+        if ((now - timeAtStart) >= 200) {
+          break;
+        }
+
+        is(markers.length, 0,
+           'Transform animation running on out of view element ' +
+           'should be throttled until 200ms is elapsed');
+      }
+
+      is(markers.length, 1,
+         'Transform animation running on out of view element ' +
+         'should be unthrottled after around 200ms have elapsed. now: ' +
+         now + ' start time: ' + timeAtStart);
+
+      await ensureElementRemoval(parentElement);
+    }
+  );
+
+  add_task(
+    async function restyling_out_of_view_transform_animations_in_another_element() {
+      if (!hasConformantPromiseHandling) {
+        return;
+      }
+
+      // Make sure we start from the state right after requestAnimationFrame.
+      await waitForFrame();
+
+      var parentElement = addDiv(null,
+        { style: 'overflow: hidden;' });
+      var div = addDiv(null,
+        { style: 'animation: move-in 100s;' });
+      parentElement.appendChild(div);
+      var animation = div.getAnimations()[0];
+      var timeAtStart = document.timeline.currentTime;
+
+      ok(!animation.isRunningOnCompositor,
+         'The transform animation on out of view element ' +
+         'is not running on the compositor');
+
+      var markers;
+      var now;
+      while (true) {
+        now = document.timeline.currentTime;
+        if ((now - timeAtStart) >= 200) {
+          // If the current time has elapsed over 200ms since the animation was
+          // created, it means that the animation should have already
+          // unthrottled in this tick, let's see what we observe in this tick's
+          // restyling process.
+          markers = await observeStyling(1);
+          break;
+        }
+
+        markers = await observeStyling(1);
+        is(markers.length, 0,
+           'Transform animation running on out of view element ' +
+           'should be throttled until 200ms is elapsed');
+      }
+
+      is(markers.length, 1,
+         'Transform animation running on out of view element ' +
+         'should be unthrottled after around 200ms have elapsed. now: ' +
+         now + ' start time: ' + timeAtStart);
+
+      await ensureElementRemoval(parentElement);
+    }
+  );
+
+  add_task(async function restyling_main_thread_animations_in_scrolled_out_element() {
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var div = addDiv(null,
@@ -524,10 +625,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_main_thread_animations_in_nested_scrolled_out_element() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var grandParent = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var parentElement = addDiv(null,
@@ -578,10 +675,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_main_thread_animations_move_out_of_view_by_scrolling() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 200px;' });
     var div = addDiv(null,
@@ -609,10 +702,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_main_thread_animations_moved_in_view_by_resizing() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var parentElement = addDiv(null,
       { style: 'overflow-y: scroll; height: 20px;' });
     var div = addDiv(null,
@@ -993,13 +1082,27 @@ waitForAllPaints(() => {
     }
   );
 
-  // Tests that additive animations don't throttle at all.
-  add_task(async function no_throttling_animations_out_of_view_element() {
-    if (!offscreenThrottlingEnabled ||
-        !SpecialPowers.getBoolPref('dom.animations-api.core.enabled')) {
-      return;
-    }
+  add_task(
+    async function no_throttling_additive_animations_out_of_view_element() {
+      var div = addDiv(null, { style: 'transform: translateY(-400px);' });
+      var animation =
+        div.animate([{ visibility: 'visible' }],
+                    { duration: 100 * MS_PER_SEC, composite: 'add' });
 
+      await animation.ready;
+
+      const expectedRestyleCount = tweakExpectedRestyleCount(animation, 5);
+      var markers = await observeStyling(5);
+
+      is(markers.length, expectedRestyleCount,
+         'Additive animation has no keyframe whose offset is 0 or 1 in an ' +
+         'out-of-view element should not be throttled');
+      await ensureElementRemoval(div);
+    }
+  );
+
+  // Tests that missing keyframes animations don't throttle at all.
+  add_task(async function no_throttling_animations_out_of_view_element() {
     var div = addDiv(null, { style: 'transform: translateY(-400px);' });
     var animation =
       div.animate([{ visibility: 'visible' }], 100 * MS_PER_SEC);
@@ -1015,13 +1118,29 @@ waitForAllPaints(() => {
     await ensureElementRemoval(div);
   });
 
+  // Tests that missing keyframes animation on scrolled out element that the
+  // animation is not able to be throttled.
+  add_task(
+    async function no_throttling_missing_keyframe_animations_out_of_view_element() {
+      var div =
+        addDiv(null, { style: 'transform: translateY(-400px);' +
+                              'visibility: collapse;' });
+      var animation =
+        div.animate([{ visibility: 'visible' }], 100 * MS_PER_SEC);
+      await animation.ready;
+
+      const expectedRestyleCount = tweakExpectedRestyleCount(animation, 5);
+      var markers = await observeStyling(5);
+      is(markers.length, expectedRestyleCount,
+         'visibility animation has no keyframe whose offset is 0 or 1 in an ' +
+         'out-of-view element and produces change hint other than paint-only ' +
+         'change hint should not be throttled');
+      await ensureElementRemoval(div);
+    }
+  );
+
   // Counter part of the above test.
   add_task(async function no_restyling_discrete_animations_out_of_view_element() {
-    if (!offscreenThrottlingEnabled ||
-        !SpecialPowers.getBoolPref('dom.animations-api.core.enabled')) {
-      return;
-    }
-
     var div = addDiv(null, { style: 'transform: translateY(-400px);' });
     var animation =
       div.animate({ visibility: ['visible', 'hidden'] }, 100 * MS_PER_SEC);
@@ -1076,10 +1195,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function throttling_animations_out_of_view_svg() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var div = addDiv(null, { style: 'overflow: scroll;' +
                                     'height: 100px; width: 100px;' });
     var svg = addSVGElement(div, 'svg', { viewBox: '-10 -10 0.1 0.1',
@@ -1121,10 +1236,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function throttling_animations_out_of_view_css_transform() {
-    if (!offscreenThrottlingEnabled) {
-      return;
-    }
-
     var scrollDiv = addDiv(null, { style: 'overflow: scroll;' +
                                           'height: 100px; width: 100px;' });
     var targetDiv = addDiv(null,
@@ -1145,10 +1256,6 @@ waitForAllPaints(() => {
 
   add_task(
     async function throttling_animations_in_out_of_view_position_absolute_element() {
-      if (!offscreenThrottlingEnabled) {
-        return;
-      }
-
       var parentDiv = addDiv(null,
                              { style: 'position: absolute; top: -1000px;' });
       var targetDiv = addDiv(null,
@@ -1169,10 +1276,6 @@ waitForAllPaints(() => {
 
   add_task(
     async function throttling_animations_on_out_of_view_position_absolute_element() {
-      if (!offscreenThrottlingEnabled) {
-        return;
-      }
-
       var div = addDiv(null,
                        { style: 'animation: background-color 100s; ' +
                                 'position: absolute; top: -1000px;' });
@@ -1191,10 +1294,6 @@ waitForAllPaints(() => {
 
   add_task(
     async function throttling_animations_in_out_of_view_position_fixed_element() {
-      if (!offscreenThrottlingEnabled) {
-        return;
-      }
-
       var parentDiv = addDiv(null,
                              { style: 'position: fixed; top: -1000px;' });
       var targetDiv = addDiv(null,
@@ -1215,10 +1314,6 @@ waitForAllPaints(() => {
 
   add_task(
     async function throttling_animations_on_out_of_view_position_fixed_element() {
-      if (!offscreenThrottlingEnabled) {
-        return;
-      }
-
       var div = addDiv(null,
                        { style: 'animation: background-color 100s; ' +
                                 'position: fixed; top: -1000px;' });
