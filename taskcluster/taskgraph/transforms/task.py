@@ -449,7 +449,6 @@ task_description_schema = Schema({
             Optional('release_promotion'): bool,
             Optional('generate_bz2_blob'): bool,
             Optional('tuxedo_server_url'): optionally_keyed_by('project', basestring),
-            Optional('release_eta'): basestring,
             Extra: taskref_or_string,  # additional properties are allowed
         },
     }, {
