@@ -7,10 +7,7 @@ Add from parameters.yml into Balrog publishing tasks.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import os
-
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.scriptworker import get_release_config
 
 transforms = TransformSequence()
 
