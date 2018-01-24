@@ -131,7 +131,7 @@ EdgeTypedURLMigrator.prototype = {
       places.push({
         uri,
         visits: [{ transitionType: Ci.nsINavHistoryService.TRANSITION_TYPED,
-                   visitDate}]
+                   visitDate}],
       });
     }
 
@@ -145,7 +145,7 @@ EdgeTypedURLMigrator.prototype = {
       ignoreResults: true,
       handleCompletion(updatedCount) {
         aCallback(updatedCount > 0);
-      }
+      },
     });
   },
 };
@@ -181,7 +181,7 @@ EdgeReadingListMigrator.prototype = {
       let columns = [
         {name: "URL", type: "string"},
         {name: "Title", type: "string"},
-        {name: "AddedDate", type: "date"}
+        {name: "AddedDate", type: "date"},
       ];
 
       // Later versions have an IsDeleted column:
@@ -284,7 +284,7 @@ EdgeBookmarksMigrator.prototype = {
       {name: "IsFolder", type: "boolean"},
       {name: "IsDeleted", type: "boolean"},
       {name: "ParentId", type: "guid"},
-      {name: "ItemId", type: "guid"}
+      {name: "ItemId", type: "guid"},
     ];
     let filterFn = row => {
       if (row.IsDeleted) {
@@ -395,7 +395,8 @@ EdgeProfileMigrator.prototype.getLastUsedDate = function() {
       typedURLs = MSMigrationUtils.getTypedURLs(kEdgeRegistryRoot);
     } catch (ex) {}
     let times = [0, ...typedURLs.values()];
-    resolve(Math.max.apply(Math, times));
+    // dates is an array of PRTimes, which are in microseconds - convert to milliseconds
+    resolve(Math.max.apply(Math, times) / 1000);
   }));
   return Promise.all(datePromises).then(dates => {
     return new Date(Math.max.apply(Math, dates));

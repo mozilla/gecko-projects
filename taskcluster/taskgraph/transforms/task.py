@@ -590,7 +590,8 @@ TC_TREEHERDER_SCHEMA_URL = 'https://github.com/taskcluster/taskcluster-treeherde
                            'blob/master/schemas/task-treeherder-config.yml'
 
 
-UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to taskcluster/ci/config.yml"
+UNKNOWN_GROUP_NAME = "Treeherder group {} (from {}) has no name; " \
+                     "add it to taskcluster/ci/config.yml"
 
 V2_ROUTE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.latest.{product}.{job-name}",
@@ -831,17 +832,16 @@ def build_docker_worker_payload(config, task, task_def):
             }
         payload['artifacts'] = artifacts
 
+    run_task = payload.get('command', [''])[0].endswith('run-task')
+
     if isinstance(worker.get('docker-image'), basestring):
         out_of_tree_image = worker['docker-image']
+        run_task = run_task or out_of_tree_image.startswith(
+            'taskcluster/image_builder')
     else:
         out_of_tree_image = None
-
-    run_task = any([
-        payload.get('command', [''])[0].endswith('run-task'),
-        # image_builder is special and doesn't get detected like other tasks.
-        # It uses run-task so it needs our cache manipulations.
-        (out_of_tree_image or '').startswith('taskcluster/image_builder'),
-    ])
+        image = worker.get('docker-image', {}).get('in-tree')
+        run_task = run_task or image == 'image_builder'
 
     if 'caches' in worker:
         caches = {}
@@ -866,15 +866,22 @@ def build_docker_worker_payload(config, task, task_def):
         # the run-task content into the cache name. However, doing so preserves
         # the mechanism whereby changing run-task results in new caches
         # everywhere.
+
+        # As an additional mechanism to force the use of different caches, the
+        # string literal in the variable below can be changed. This is
+        # preferred to changing run-task because it doesn't require images
+        # to be rebuilt.
+        cache_version = 'v1'
+
         if run_task:
-            suffix = '-%s' % _run_task_suffix()
+            suffix = '-%s-%s' % (cache_version, _run_task_suffix())
 
             if out_of_tree_image:
                 name_hash = hashlib.sha256(out_of_tree_image).hexdigest()
                 suffix += name_hash[0:12]
 
         else:
-            suffix = ''
+            suffix = '-%s' % cache_version
 
         skip_untrusted = config.params.is_try() or level == 1
 
@@ -1397,7 +1404,8 @@ def build_task(config, tasks):
             if groupSymbol != '?':
                 treeherder['groupSymbol'] = groupSymbol
                 if groupSymbol not in group_names:
-                    raise Exception(UNKNOWN_GROUP_NAME.format(groupSymbol))
+                    path = os.path.join(config.path, task.get('job-from', ''))
+                    raise Exception(UNKNOWN_GROUP_NAME.format(groupSymbol, path))
                 treeherder['groupName'] = group_names[groupSymbol]
             treeherder['symbol'] = symbol
             if len(symbol) > 25 or len(groupSymbol) > 25:

@@ -15,12 +15,13 @@ use properties::{ComputedValues, LonghandId, StyleBuilder};
 use rule_cache::RuleCacheConditions;
 #[cfg(feature = "servo")]
 use servo_url::ServoUrl;
-use std::{f32, fmt};
 use std::cell::RefCell;
+use std::f32;
+use std::fmt::{self, Write};
 #[cfg(feature = "servo")]
 use std::sync::Arc;
-use style_traits::ToCss;
-use style_traits::cursor::Cursor;
+use style_traits::{CssWriter, ToCss};
+use style_traits::cursor::CursorKind;
 use super::{CSSFloat, CSSInteger};
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
@@ -61,6 +62,9 @@ pub use self::list::ListStyleType;
 pub use self::outline::OutlineStyle;
 pub use self::percentage::Percentage;
 pub use self::position::{Position, GridAutoFlow, GridTemplateAreas};
+pub use self::pointing::Cursor;
+#[cfg(feature = "gecko")]
+pub use self::pointing::CursorImage;
 pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind};
 pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::svg::MozContextProperties;
@@ -90,6 +94,7 @@ pub mod length;
 pub mod list;
 pub mod outline;
 pub mod percentage;
+pub mod pointing;
 pub mod position;
 pub mod rect;
 pub mod svg;
@@ -404,7 +409,7 @@ trivial_to_computed_value!(u16);
 trivial_to_computed_value!(u32);
 trivial_to_computed_value!(Atom);
 trivial_to_computed_value!(BorderStyle);
-trivial_to_computed_value!(Cursor);
+trivial_to_computed_value!(CursorKind);
 trivial_to_computed_value!(Namespace);
 trivial_to_computed_value!(String);
 trivial_to_computed_value!(Box<str>);
@@ -527,7 +532,10 @@ pub struct ClipRect {
 }
 
 impl ToCss for ClipRect {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
         dest.write_str("rect(")?;
         if let Some(top) = self.top {
             top.to_css(dest)?;
@@ -623,7 +631,10 @@ impl ComputedUrl {
 
 #[cfg(feature = "servo")]
 impl ToCss for ComputedUrl {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
         let string = match *self {
             ComputedUrl::Valid(ref url) => url.as_str(),
             ComputedUrl::Invalid(ref invalid_string) => invalid_string,

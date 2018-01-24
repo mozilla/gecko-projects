@@ -34,6 +34,7 @@ from voluptuous import (
     Any,
     Optional,
     Required,
+    Exclusive,
 )
 
 import copy
@@ -379,9 +380,13 @@ test_description_schema = Schema({
     Optional('product'): basestring,
 
     # conditional files to determine when these tests should be run
-    Optional('when'): Any({
+    Exclusive(Optional('when'), 'optimization'): Any({
         Optional('files-changed'): [basestring],
     }),
+
+    # The SCHEDULES component for this task; this defaults to the suite
+    # (not including the flavor) but can be overridden here.
+    Exclusive(Optional('schedules-component'), 'optimization'): basestring,
 
     Optional('worker-type'): optionally_keyed_by(
         'test-platform',
@@ -981,6 +986,7 @@ def make_job_description(config, tests):
         jobdesc['description'] = test['description']
         jobdesc['attributes'] = attributes
         jobdesc['dependencies'] = {'build': build_label}
+        jobdesc['job-from'] = test['job-from']
 
         if test['mozharness']['requires-signed-builds'] is True:
             jobdesc['dependencies']['build-signing'] = test['build-signing-label']
@@ -1007,7 +1013,7 @@ def make_job_description(config, tests):
             'platform': test.get('treeherder-machine-platform', test['build-platform']),
         }
 
-        suite = attributes['unittest_suite']
+        suite = test.get('schedules-component', attributes['unittest_suite'])
         if suite in INCLUSIVE_COMPONENTS:
             # if this is an "inclusive" test, then all files which might
             # cause it to run are annotated with SCHEDULES in moz.build,

@@ -8,8 +8,10 @@ job-defaults:
         config:
             by-test-platform:
                 android-4.2-x86/opt:
+                    - android/android_common.py
                     - android/androidx86.py
                 android.*:
+                    - android/android_common.py
                     - android/androidarm_4_3.py
                 linux.*:
                     - unittests/linux_unittest.py
@@ -31,7 +33,7 @@ xpcshell:
         by-test-platform:
             linux64-jsdcov/opt: xpcshell/xpcshell-coverage
             default: xpcshell
-    treeherder-symbol: tc-X(X)
+    treeherder-symbol: X(X)
     run-on-projects:
         by-test-platform:
             .*-qr/.*: ['mozilla-central', 'try']

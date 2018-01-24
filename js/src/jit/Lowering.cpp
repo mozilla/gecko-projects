@@ -450,6 +450,17 @@ LIRGenerator::visitComputeThis(MComputeThis* ins)
 }
 
 void
+LIRGenerator::visitImplicitThis(MImplicitThis* ins)
+{
+    MDefinition* env = ins->envChain();
+    MOZ_ASSERT(env->type() == MIRType::Object);
+
+    LImplicitThis* lir = new(alloc()) LImplicitThis(useRegisterAtStart(env));
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
 LIRGenerator::visitArrowNewTarget(MArrowNewTarget* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType::Value);
@@ -2170,14 +2181,14 @@ LIRGenerator::visitToFloat32(MToFloat32* convert)
 }
 
 void
-LIRGenerator::visitToInt32(MToInt32* convert)
+LIRGenerator::visitToNumberInt32(MToNumberInt32* convert)
 {
     MDefinition* opd = convert->input();
 
     switch (opd->type()) {
       case MIRType::Value:
       {
-        LValueToInt32* lir =
+        auto* lir =
             new(alloc()) LValueToInt32(useBox(opd), tempDouble(), temp(), LValueToInt32::NORMAL);
         assignSnapshot(lir, Bailout_NonPrimitiveInput);
         define(lir, convert);
@@ -3116,6 +3127,26 @@ LIRGenerator::visitBoundsCheck(MBoundsCheck* ins)
     }
     assignSnapshot(check, Bailout_BoundsCheck);
     add(check, ins);
+}
+
+void
+LIRGenerator::visitSpectreMaskIndex(MSpectreMaskIndex* ins)
+{
+    MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->length()->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->type() == MIRType::Int32);
+
+    // On 64-bit platforms, the length must be in a register, so
+    // MacroAssembler::maskIndex can emit more efficient code.
+#if JS_BITS_PER_WORD == 64
+    LAllocation lengthUse = useRegister(ins->length());
+#else
+    LAllocation lengthUse = useAny(ins->length());
+#endif
+
+    LSpectreMaskIndex* lir =
+        new(alloc()) LSpectreMaskIndex(useRegisterOrConstant(ins->index()), lengthUse);
+    define(lir, ins);
 }
 
 void

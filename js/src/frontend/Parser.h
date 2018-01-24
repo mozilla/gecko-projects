@@ -291,7 +291,7 @@ class ParserBase
     bool checkOptionsCalled:1;
 #endif
 
-    /* Unexpected end of input, i.e. TOK_EOF not at top-level. */
+    /* Unexpected end of input, i.e. Eof not at top-level. */
     bool isUnexpectedEOF_:1;
 
     /* AwaitHandling */ uint8_t awaitHandling_:2;
@@ -304,8 +304,7 @@ class ParserBase
     template<class, typename> friend class AutoAwaitIsKeyword;
 
     ParserBase(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
-               const char16_t* chars, size_t length, bool foldConstants,
-               UsedNameTracker& usedNames);
+               bool foldConstants, UsedNameTracker& usedNames);
     ~ParserBase();
 
     bool checkOptions();
@@ -384,7 +383,7 @@ class ParserBase
     enum InvokedPrediction { PredictUninvoked = false, PredictInvoked = true };
     enum ForInitLocation { InForInit, NotInForInit };
 
-    // While on a |let| TOK_NAME token, examine |next| (which must already be
+    // While on a |let| Name token, examine |next| (which must already be
     // gotten).  Indicate whether |next|, the next token already gotten with
     // modifier TokenStream::None, continues a LexicalDeclaration.
     bool nextTokenContinuesLetDeclaration(TokenKind next);
@@ -469,8 +468,8 @@ class PerHandlerParser
 
   protected:
     PerHandlerParser(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
-                     const char16_t* chars, size_t length, bool foldConstants,
-                     UsedNameTracker& usedNames, LazyScript* lazyOuterFunction);
+                     bool foldConstants, UsedNameTracker& usedNames,
+                     LazyScript* lazyOuterFunction);
 
     static Node null() { return ParseHandler::null(); }
 
@@ -543,8 +542,15 @@ class PerHandlerParser
     inline void clearAbortedSyntaxParse();
 
   public:
+    void prepareNodeForMutation(Node node) { handler.prepareNodeForMutation(node); }
+    void freeTree(Node node) { handler.freeTree(node); }
+
     bool isValidSimpleAssignmentTarget(Node node,
                                        FunctionCallBehavior behavior = ForbidAssignmentToFunctionCalls);
+
+    Node newPropertyAccess(Node expr, PropertyName* key, uint32_t end) {
+        return handler.newPropertyAccess(expr, key, end);
+    }
 
     FunctionBox* newFunctionBox(Node fn, JSFunction* fun, uint32_t toStringStart,
                                 Directives directives, GeneratorKind generatorKind,
@@ -642,6 +648,9 @@ template <class ParseHandler, typename CharT>
 class GeneralParser
   : public PerHandlerParser<ParseHandler>
 {
+  public:
+    using TokenStream = TokenStreamSpecific<CharT, ParserAnyCharsAccess<GeneralParser>>;
+
   private:
     using Base = PerHandlerParser<ParseHandler>;
     using FinalParser = Parser<ParseHandler, CharT>;
@@ -651,6 +660,7 @@ class GeneralParser
 
   protected:
     using Modifier = TokenStreamShared::Modifier;
+    using Position = typename TokenStream::Position;
 
     using Base::PredictUninvoked;
     using Base::PredictInvoked;
@@ -860,11 +870,7 @@ class GeneralParser
     }
 
   public:
-    using TokenStream = TokenStreamSpecific<CharT, ParserAnyCharsAccess<GeneralParser>>;
     TokenStream tokenStream;
-
-    void prepareNodeForMutation(Node node) { handler.prepareNodeForMutation(node); }
-    void freeTree(Node node) { handler.freeTree(node); }
 
   public:
     GeneralParser(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
@@ -1158,7 +1164,7 @@ class GeneralParser
     bool checkBindingIdentifier(PropertyName* ident,
                                 uint32_t offset,
                                 YieldHandling yieldHandling,
-                                TokenKind hint = TokenKind::TOK_LIMIT);
+                                TokenKind hint = TokenKind::Limit);
 
     PropertyName* labelOrIdentifierReference(YieldHandling yieldHandling);
 
@@ -1233,7 +1239,7 @@ class GeneralParser
 
     bool checkLabelOrIdentifierReference(PropertyName* ident, uint32_t offset,
                                          YieldHandling yieldHandling,
-                                         TokenKind hint = TokenKind::TOK_LIMIT);
+                                         TokenKind hint = TokenKind::Limit);
 
     Node statementList(YieldHandling yieldHandling);
 
@@ -1273,6 +1279,8 @@ class Parser<SyntaxParseHandler, CharT> final
 
     // Inherited types, listed here to have non-dependent names.
     using typename Base::Modifier;
+    using typename Base::Position;
+    using typename Base::TokenStream;
 
     // Inherited functions, listed here to have non-dependent names.
 
@@ -1378,6 +1386,8 @@ class Parser<FullParseHandler, CharT> final
 
     // Inherited types, listed here to have non-dependent names.
     using typename Base::Modifier;
+    using typename Base::Position;
+    using typename Base::TokenStream;
 
     // Inherited functions, listed here to have non-dependent names.
 

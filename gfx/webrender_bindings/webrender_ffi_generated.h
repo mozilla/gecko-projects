@@ -95,7 +95,6 @@ enum class FontRenderMode : uint32_t {
 };
 
 enum class ImageFormat : uint32_t {
-  Invalid = 0,
   R8 = 1,
   BGRA8 = 3,
   RGBAF32 = 4,
@@ -1022,7 +1021,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dec_ref_arc(const VecU8 *aArc)
-WR_FUNC;
+WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 void wr_dp_clear_save(WrState *aState)
@@ -1178,7 +1177,8 @@ void wr_dp_push_image(WrState *aState,
                       LayoutSize aStretchSize,
                       LayoutSize aTileSpacing,
                       ImageRendering aImageRendering,
-                      WrImageKey aKey)
+                      WrImageKey aKey,
+                      bool aPremultipliedAlpha)
 WR_FUNC;
 
 WR_INLINE

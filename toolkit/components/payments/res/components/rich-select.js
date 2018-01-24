@@ -24,12 +24,20 @@ class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
 
     this.addEventListener("blur", this);
     this.addEventListener("click", this);
-    this.addEventListener("keypress", this);
+    this.addEventListener("keydown", this);
   }
 
   connectedCallback() {
     this.setAttribute("tabindex", "0");
     this.render();
+
+    this._mutationObserver = new MutationObserver(() => {
+      this.render();
+    });
+    this._mutationObserver.observe(this, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   get popupBox() {
@@ -50,8 +58,8 @@ class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
         this.onClick(event);
         break;
       }
-      case "keypress": {
-        this.onKeyPress(event);
+      case "keydown": {
+        this.onKeyDown(event);
         break;
       }
     }
@@ -70,7 +78,7 @@ class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
     }
   }
 
-  onKeyPress(event) {
+  onKeyDown(event) {
     if (event.key == " ") {
       this.open = !this.open;
     } else if (event.key == "ArrowDown") {
@@ -140,14 +148,13 @@ class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
       selectedChild.selected = true;
     }
 
-    if (!this._optionsAreEquivalent(this._selectedChild, selectedChild)) {
-      let selectedClone = this.querySelector(":scope > .rich-select-selected-clone");
+    let selectedClone = this.querySelector(":scope > .rich-select-selected-clone");
+    if (!this._optionsAreEquivalent(selectedClone, selectedChild)) {
       if (selectedClone) {
         selectedClone.remove();
       }
 
       if (selectedChild) {
-        this._selectedChild = selectedChild;
         selectedClone = selectedChild.cloneNode(false);
         selectedClone.removeAttribute("id");
         selectedClone.classList.add("rich-select-selected-clone");

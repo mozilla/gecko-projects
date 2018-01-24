@@ -6,7 +6,6 @@
 #include "txXPathTreeWalker.h"
 #include "nsAtom.h"
 #include "nsIAttribute.h"
-#include "nsIDOMAttr.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMElement.h"
@@ -577,7 +576,7 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
                 return node < otherNode ? -1 : 1;
             }
 
-            return parent->IndexOf(node) < parent->IndexOf(otherNode) ?
+            return parent->ComputeIndexOf(node) < parent->ComputeIndexOf(otherNode) ?
                    -1 : 1;
         }
 
@@ -614,8 +613,8 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
                 return node < otherNode ? -1 : 1;
             }
 
-            int32_t index = parent->IndexOf(node);
-            int32_t otherIndex = parent->IndexOf(otherNode);
+            int32_t index = parent->ComputeIndexOf(node);
+            int32_t otherIndex = parent->ComputeIndexOf(otherNode);
             NS_ASSERTION(index != otherIndex && index >= 0 && otherIndex >= 0,
                          "invalid index in compareTreePosition");
 

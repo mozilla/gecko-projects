@@ -915,9 +915,6 @@ pref("browser.sessionstore.max_write_failures", 5);
 // allow META refresh by default
 pref("accessibility.blockautorefresh", false);
 
-// Whether useAsyncTransactions is enabled or not.
-pref("browser.places.useAsyncTransactions", true);
-
 // Whether history is enabled or not.
 pref("places.history.enabled", true);
 
@@ -1730,7 +1727,13 @@ pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.section.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
 // Comma separated list of countries Form Autofill supports
+#ifdef MOZ_UPDATE_CHANNEL == release
+pref("extensions.formautofill.supportedCountries", "US");
+pref("extensions.formautofill.supportRTL", false);
+#else
 pref("extensions.formautofill.supportedCountries", "US,CA,DE");
+pref("extensions.formautofill.supportRTL", true);
+#endif
 
 // Whether or not to restore a session with lazy-browser tabs.
 pref("browser.sessionstore.restore_tabs_lazily", true);

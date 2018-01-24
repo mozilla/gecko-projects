@@ -104,6 +104,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitSetArgumentsObjectArg(MSetArgumentsObjectArg* ins) override;
     void visitReturnFromCtor(MReturnFromCtor* ins) override;
     void visitComputeThis(MComputeThis* ins) override;
+    void visitImplicitThis(MImplicitThis* ins) override;
     void visitCall(MCall* call) override;
     void visitApplyArgs(MApplyArgs* apply) override;
     void visitApplyArray(MApplyArray* apply) override;
@@ -169,7 +170,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitOsrArgumentsObject(MOsrArgumentsObject* object) override;
     void visitToDouble(MToDouble* convert) override;
     void visitToFloat32(MToFloat32* convert) override;
-    void visitToInt32(MToInt32* convert) override;
+    void visitToNumberInt32(MToNumberInt32* convert) override;
     void visitTruncateToInt32(MTruncateToInt32* truncate) override;
     void visitWasmTruncateToInt32(MWasmTruncateToInt32* truncate) override;
     void visitWrapInt64ToInt32(MWrapInt64ToInt32* ins) override;
@@ -228,6 +229,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNot(MNot* ins) override;
     void visitBoundsCheck(MBoundsCheck* ins) override;
     void visitBoundsCheckLower(MBoundsCheckLower* ins) override;
+    void visitSpectreMaskIndex(MSpectreMaskIndex* ins) override;
     void visitLoadElement(MLoadElement* ins) override;
     void visitLoadElementHole(MLoadElementHole* ins) override;
     void visitLoadUnboxedObjectOrNull(MLoadUnboxedObjectOrNull* ins) override;

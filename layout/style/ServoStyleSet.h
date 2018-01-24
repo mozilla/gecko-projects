@@ -132,7 +132,7 @@ public:
   CreateXBLServoStyleSet(nsPresContext* aPresContext,
                          const nsTArray<RefPtr<ServoStyleSheet>>& aNewSheets);
 
-  void Init(nsPresContext* aPresContext, nsBindingManager* aBindingManager);
+  void Init(nsPresContext* aPresContext);
   void BeginShutdown() {}
   void Shutdown();
 
@@ -145,6 +145,9 @@ public:
   // All the relevant changes are handled in RuleAdded / RuleRemoved / etc, and
   // the relevant AppendSheet / RemoveSheet...
   void RecordStyleSheetChange(ServoStyleSheet*, StyleSheet::ChangeType) {}
+
+  // Runs style invalidation due to document state changes.
+  void InvalidateStyleForDocumentStateChanges(EventStates aStatesChanged);
 
   void RecordShadowStyleChange(dom::ShadowRoot* aShadowRoot) {
     // FIXME(emilio): When we properly support shadow dom we'll need to do
@@ -600,13 +603,27 @@ private:
 
   const Kind mKind;
 
-  // Nullptr if this is an XBL style set, or if we've been already detached from
-  // our shell.
-  nsPresContext* MOZ_NON_OWNING_REF mPresContext = nullptr;
+  // The owner document of this style set. Null if this is an XBL style set.
+  //
+  // TODO(emilio): This should become a DocumentOrShadowRoot, and be owned by it
+  // directly instead of the shell, eventually.
+  nsIDocument* mDocument;
+
+  const nsPresContext* GetPresContext() const {
+    return const_cast<ServoStyleSet*>(this)->GetPresContext();
+  }
+
+  /**
+   * Return the associated pres context if we're the master style set and we
+   * have an associated pres shell.
+   */
+  nsPresContext* GetPresContext();
 
   // Because XBL style set could be used by multiple PresContext, we need to
   // store the last PresContext pointer which uses this XBL styleset for
   // computing medium rule changes.
+  //
+  // FIXME(emilio): This is a hack, and is broken. See bug 1406875.
   void* MOZ_NON_OWNING_REF mLastPresContextUsesXBLStyleSet = nullptr;
 
   UniquePtr<RawServoStyleSet> mRawSet;
@@ -634,9 +651,6 @@ private:
   // Map from raw Servo style rule to Gecko's wrapper object.
   // Constructed lazily when requested by devtools.
   UniquePtr<ServoStyleRuleMap> mStyleRuleMap;
-
-  // This can be null if we are used to hold XBL style sheets.
-  RefPtr<nsBindingManager> mBindingManager;
 
   static ServoStyleSet* sInServoTraversal;
 };

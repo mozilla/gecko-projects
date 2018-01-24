@@ -1522,6 +1522,40 @@ gfxFont::SupportsSubSuperscript(uint32_t aSubSuperscript,
 }
 
 bool
+gfxFont::FeatureWillHandleChar(Script aRunScript, uint32_t aFeature,
+                               uint32_t aUnicode)
+{
+    if (!SupportsFeature(aRunScript, aFeature)) {
+        return false;
+    }
+
+    // xxx - for graphite, don't really know how to sniff lookups so bail
+    if (mGraphiteShaper && gfxPlatform::GetPlatform()->UseGraphiteShaping()) {
+        return true;
+    }
+
+    if (!mHarfBuzzShaper) {
+        mHarfBuzzShaper = MakeUnique<gfxHarfBuzzShaper>(this);
+    }
+    gfxHarfBuzzShaper* shaper =
+        static_cast<gfxHarfBuzzShaper*>(mHarfBuzzShaper.get());
+    if (!shaper->Initialize()) {
+        return false;
+    }
+
+    // get the hbset containing input glyphs for the feature
+    const hb_set_t *inputGlyphs =
+        mFontEntry->InputsForOpenTypeFeature(aRunScript, aFeature);
+
+    if (aUnicode == 0xa0) {
+        aUnicode = ' ';
+    }
+
+    hb_codepoint_t gid = shaper->GetNominalGlyph(aUnicode);
+    return hb_set_has(inputGlyphs, gid);
+}
+
+bool
 gfxFont::HasFeatureSet(uint32_t aFeature, bool& aFeatureOn)
 {
     aFeatureOn = false;
@@ -1995,9 +2029,18 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
     float advance = aDetails->mAdvance;
     if (aRunParams.drawMode != DrawMode::GLYPH_PATH && advance > 0) {
         auto* textDrawer = aRunParams.context->GetTextDrawer();
+        const Matrix* matPtr = nullptr;
+        Matrix mat;
         if (textDrawer) {
-            textDrawer->FoundUnsupportedFeature();
-            return false;
+            // Generate an orientation matrix for the current writing mode
+            wr::FontInstanceFlags flags = textDrawer->GetWRGlyphFlags();
+            if (flags.bits & wr::FontInstanceFlags::TRANSPOSE) {
+                std::swap(mat._11, mat._12);
+                std::swap(mat._21, mat._22);
+            }
+            mat.PostScale(flags.bits & wr::FontInstanceFlags::FLIP_X ? -1.0f : 1.0f,
+                          flags.bits & wr::FontInstanceFlags::FLIP_Y ? -1.0f : 1.0f);
+            matPtr = &mat;
         }
 
         Point pt(Float(ToDeviceUnits(aPt.x, aRunParams.devPerApp)),
@@ -2005,7 +2048,8 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         Float advanceDevUnits =
             Float(ToDeviceUnits(advance, aRunParams.devPerApp));
         Float height = GetMetrics(eHorizontal).maxAscent;
-        Rect glyphRect = aFontParams.isVerticalFont ?
+        // Horizontally center if drawing vertically upright with no sideways transform.
+        Rect glyphRect = aFontParams.isVerticalFont && !mat.HasNonAxisAlignedTransform() ?
             Rect(pt.x - height / 2, pt.y,
                  height, advanceDevUnits) :
             Rect(pt.x, pt.y - height,
@@ -2015,7 +2059,7 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         // of the drawTarget's transform, we need to undo
         // this before drawing the hexbox. (Bug 983985)
         gfxContextMatrixAutoSaveRestore matrixRestore;
-        if (aFontParams.needsOblique && !textDrawer) {
+        if (aFontParams.needsOblique && !aFontParams.isVerticalFont && !textDrawer) {
             matrixRestore.SetContext(aRunParams.context);
             gfx::Matrix mat =
                 aRunParams.context->CurrentMatrix().
@@ -2028,7 +2072,7 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         gfxFontMissingGlyphs::DrawMissingGlyph(
             aDetails->mGlyphID, glyphRect, *aRunParams.dt,
             PatternFromState(aRunParams.context),
-            1.0 / aRunParams.devPerApp);
+            1.0 / aRunParams.devPerApp, matPtr);
     }
     return true;
 }

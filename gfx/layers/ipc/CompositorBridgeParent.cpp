@@ -1288,12 +1288,19 @@ bool
 CompositorBridgeParent::SetTestSampleTime(const uint64_t& aId,
                                           const TimeStamp& aTime)
 {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+
   if (aTime.IsNull()) {
     return false;
   }
 
   mIsTesting = true;
   mTestTime = aTime;
+
+  if (mWrBridge) {
+    mWrBridge->FlushRendering(/*aIsSync*/ false);
+    return true;
+  }
 
   bool testComposite = mCompositionManager &&
                        mCompositorScheduler->NeedsComposite();
@@ -1483,6 +1490,19 @@ CompositorBridgeParent::NewCompositor(const nsTArray<LayersBackend>& aBackendHin
 #endif
     }
     nsCString failureReason;
+
+    // Some software GPU emulation implementations will happily try to create
+    // unreasonably big surfaces and then fail in awful ways.
+    // Let's at least limit this to the default max texture size we use for content,
+    // anything larger than that will fail to render on the content side anyway.
+    // We can revisit this value and make it even tighter if need be.
+    const int max_fb_size = 32767;
+    const LayoutDeviceIntSize size = mWidget->GetClientSize();
+    if (size.width > max_fb_size || size.height > max_fb_size) {
+      failureReason = "FEATURE_FAILURE_MAX_FRAMEBUFFER_SIZE";
+      return nullptr;
+    }
+
     MOZ_ASSERT(!gfxVars::UseWebRender() || aBackendHints[i] == LayersBackend::LAYERS_BASIC);
     if (compositor && compositor->Initialize(&failureReason)) {
       if (failureReason.IsEmpty()){
@@ -2066,12 +2086,34 @@ UpdateIndirectTree(uint64_t aId, Layer* aRoot, const TargetConfig& aTargetConfig
 /* static */ CompositorBridgeParent::LayerTreeState*
 CompositorBridgeParent::GetIndirectShadowTree(uint64_t aId)
 {
+  // Only the compositor thread should use this method variant, however it is
+  // safe to be called on the main thread during APZ gtests.
+  APZThreadUtils::AssertOnCompositorThread();
+
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   LayerTreeMap::iterator cit = sIndirectLayerTrees.find(aId);
   if (sIndirectLayerTrees.end() == cit) {
     return nullptr;
   }
   return &cit->second;
+}
+
+/* static */ bool
+CompositorBridgeParent::CallWithIndirectShadowTree(uint64_t aId,
+                                                   const std::function<void(CompositorBridgeParent::LayerTreeState&)>& aFunc)
+{
+  // Note that this does not make things universally threadsafe just because the
+  // sIndirectLayerTreesLock mutex is held. This is because the compositor
+  // thread can mutate the LayerTreeState outside the lock. It does however
+  // ensure that the *storage* for the LayerTreeState remains stable, since we
+  // should always hold the lock when adding/removing entries to the map.
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  LayerTreeMap::iterator cit = sIndirectLayerTrees.find(aId);
+  if (sIndirectLayerTrees.end() == cit) {
+    return false;
+  }
+  aFunc(cit->second);
+  return true;
 }
 
 static CompositorBridgeParent::LayerTreeState*

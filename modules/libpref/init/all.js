@@ -502,6 +502,7 @@ pref("media.peerconnection.ice.trickle_grace_period", 5000);
 pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
 pref("media.peerconnection.ice.proxy_only", false);
+pref("media.peerconnection.rtpsourcesapi.enabled", true);
 
 // These values (aec, agc, and noise) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
@@ -1289,14 +1290,10 @@ pref("dom.min_timeout_value", 4);
 pref("dom.min_background_timeout_value", 1000);
 // Timeout clamp in ms for tracking timeouts we clamp
 // Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
-#ifdef NIGHTLY_BUILD
-pref("dom.min_tracking_timeout_value", 10000);
-#else
 pref("dom.min_tracking_timeout_value", 4);
-#endif
 // And for background windows
 // Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
-pref("dom.min_tracking_background_timeout_value", 10000);
+pref("dom.min_tracking_background_timeout_value", 4);
 // Delay in ms from document load until we start throttling background timeouts.
 pref("dom.timeout.throttling_delay", 30000);
 
@@ -1536,6 +1533,9 @@ pref("javascript.options.shared_memory", false);
 pref("javascript.options.throw_on_debuggee_would_run", false);
 pref("javascript.options.dump_stack_on_debuggee_would_run", false);
 
+// Spectre security vulnerability mitigations.
+pref("javascript.options.spectre.index_masking", false);
+
 // Streams API
 pref("javascript.options.streams", false);
 
@@ -1699,10 +1699,14 @@ pref("network.http.accept.default", "text/html,application/xhtml+xml,application
 // Prefs allowing granular control of referers
 // 0=don't send any, 1=send only on clicks, 2=send on image requests as well
 pref("network.http.sendRefererHeader",      2);
-// Set the default Referrer Policy to be used unless overriden by the site
+// Set the default Referrer Policy; to be used unless overriden by the site
 // 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
 // 3=no-referrer-when-downgrade
-pref("network.http.referer.userControlPolicy", 3);
+pref("network.http.referer.defaultPolicy", 3);
+// Set the Private Browsing Default Referrer Policy;
+// to be used unless overriden by the site;
+// values are identical to defaultPolicy above
+pref("network.http.referer.defaultPolicy.pbmode", 2);
 // false=real referer, true=spoof referer (use target URI as referer)
 pref("network.http.referer.spoofSource", false);
 // false=allow onion referer, true=hide onion referer (use empty referer)
@@ -2884,6 +2888,10 @@ pref("bidi.browser.ui", false);
 pref("layout.word_select.eat_space_to_next_word", false);
 pref("layout.word_select.stop_at_punctuation", true);
 
+// Whether underscore should be treated as a word-breaking character for
+// word selection/arrow-key movement purposes.
+pref("layout.word_select.stop_at_underscore", false);
+
 // controls caret style and word-delete during text selection
 // 0 = use platform default
 // 1 = caret moves and blinks as when there is no selection; word
@@ -3335,8 +3343,12 @@ pref("dom.ipc.processCount.file", 1);
 // WebExtensions only support a single extension process.
 pref("dom.ipc.processCount.extension", 1);
 
-// Don't use a native event loop in the content process.
+// Whether a native event loop should be used in the content process.
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+pref("dom.ipc.useNativeEventProcessing.content", false);
+#else
 pref("dom.ipc.useNativeEventProcessing.content", true);
+#endif
 
 // Quantum DOM scheduling:
 pref("dom.ipc.scheduler", false);
@@ -4813,11 +4825,14 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if !defined(EARLY_BETA_OR_EARLIER)
+pref("network.tcp.tcp_fastopen_enable", false);
+#elif  defined(XP_WIN) || defined(XP_MACOSX)
 pref("network.tcp.tcp_fastopen_enable", true);
 #else
 pref("network.tcp.tcp_fastopen_enable", false);
 #endif
+
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 // We are trying to detect stalled tcp connections that use TFO and TLS
 // (bug 1395494).
@@ -5022,6 +5037,9 @@ pref("extensions.webextensions.remote", false);
 // purposes only. Setting this to false will break moz-extension URI loading
 // unless other process sandboxing and extension remoting prefs are changed.
 pref("extensions.webextensions.protocol.remote", true);
+
+// Disable tab hiding API by default.
+pref("extensions.webextensions.tabhide.enabled", false);
 
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");

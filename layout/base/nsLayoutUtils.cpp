@@ -1862,8 +1862,8 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
     return 0;
   }
 
-  int32_t index1 = parent->IndexOf(content1Ancestor);
-  int32_t index2 = parent->IndexOf(content2Ancestor);
+  int32_t index1 = parent->ComputeIndexOf(content1Ancestor);
+  int32_t index2 = parent->ComputeIndexOf(content2Ancestor);
   if (index1 < 0 || index2 < 0) {
     // one of them must be anonymous; we can't determine the order
     return 0;
@@ -2707,7 +2707,9 @@ nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
   ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aFlags);
   while (parent && parent != aAncestor &&
     (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
-      (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
+      (!parent->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+       !parent->IsStackingContext() &&
+       !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }

@@ -71,7 +71,7 @@ var gSearchPane = {
       document.getElementById("showSearchSuggestionsFirstCheckbox");
 
     pref.on("change", () => {
-      this.syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
+      this._syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
     });
     this._syncFromShowSearchSuggestionsFirstPref(checkbox, pref);
 
@@ -88,9 +88,8 @@ var gSearchPane = {
     }
     // The pref has a value.  If the first bucket in the pref is search
     // suggestions, then check the checkbox.
-    let bucketPair = pref.value.split(",")[0];
-    let bucketName = bucketPair.split(":")[0];
-    checkbox.checked = bucketName == "suggestion";
+    let buckets = PlacesUtils.convertMatchBucketsStringToArray(pref.value);
+    checkbox.checked = buckets[0] && buckets[0][0] == "suggestion";
   },
 
   _syncToShowSearchSuggestionsFirstPref(checked, pref) {
@@ -630,7 +629,6 @@ EngineView.prototype = {
   getParentIndex(index) { return -1; },
   hasNextSibling(parentIndex, index) { return false; },
   getLevel(index) { return 0; },
-  getProgressMode(index, column) { },
   getCellValue(index, column) {
     if (column.id == "engineShown")
       return this._engineStore.engines[index].shown;

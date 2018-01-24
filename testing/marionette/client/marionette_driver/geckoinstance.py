@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/
 
+from __future__ import absolute_import
+
 import os
 import sys
 import tempfile
@@ -15,8 +17,7 @@ import mozversion
 from mozdevice import DMError
 from mozprofile import Profile
 from mozrunner import Runner, FennecEmulatorRunner
-
-import errors
+from six import reraise
 
 
 class GeckoInstance(object):
@@ -126,7 +127,15 @@ class GeckoInstance(object):
 
         self.marionette_host = host
         self.marionette_port = port
+        # Alternative to default temporary directory
+        self.workspace = workspace
         self.addons = addons
+        # Check if it is a Profile object or a path to profile
+        self.profile = None
+        if isinstance(profile, Profile):
+            self.profile = profile
+        else:
+            self.profile_path = profile
         self.prefs = prefs
         self.required_prefs = deepcopy(self.required_prefs)
         if prefs:
@@ -136,13 +145,8 @@ class GeckoInstance(object):
         self._gecko_log = None
         self.verbose = verbose
         self.headless = headless
-
         # keep track of errors to decide whether instance is unresponsive
         self.unresponsive_count = 0
-
-        # Alternative to default temporary directory
-        self.workspace = workspace
-        self.profile = profile
 
     @property
     def gecko_log(self):
@@ -164,87 +168,42 @@ class GeckoInstance(object):
         self._gecko_log = path
         return self._gecko_log
 
-    @property
-    def profile(self):
-        return self._profile
-
-    @profile.setter
-    def profile(self, value):
-        self._update_profile(value)
-
-    def _update_profile(self, profile=None, profile_name=None):
-        """Check if the profile has to be created, or replaced
-
-        :param profile: A Profile instance to be used.
-        :param name: Profile name to be used in the path.
-        """
-        if self.runner and self.runner.is_running():
-            raise errors.MarionetteException("The used profile can only be updated "
-                                             "when the instance is not running")
-
-        if isinstance(profile, Profile):
-            # Only replace the profile if it is not the current one
-            if hasattr(self, "_profile") and profile is self._profile:
-                return
-
-        else:
-            profile_args = self.profile_args
-            profile_path = profile
-
-            # If a path to a profile is given then clone it
-            if isinstance(profile_path, basestring):
-                profile_args["path_from"] = profile_path
-                profile_args["path_to"] = tempfile.mkdtemp(
-                    suffix=".{}".format(profile_name or os.path.basename(profile_path)),
-                    dir=self.workspace)
-                # The target must not exist yet
-                os.rmdir(profile_args["path_to"])
-
-                profile = Profile.clone(**profile_args)
-
-            # Otherwise create a new profile
-            else:
-                profile_args["profile"] = tempfile.mkdtemp(
-                    suffix=".{}".format(profile_name or "mozrunner"),
-                    dir=self.workspace)
-                profile = Profile(**profile_args)
-                profile.create_new = True
-
-        if hasattr(self, "_profile") and self._profile:
-            self._profile.cleanup()
-        self._profile = profile
-
-    def switch_profile(self, profile_name=None, clone_from=None):
-        if isinstance(clone_from, Profile):
-            clone_from = clone_from.profile
-
-        self._update_profile(clone_from, profile_name=profile_name)
-
-    @property
-    def profile_args(self):
-        args = {"preferences": deepcopy(self.required_prefs)}
-        args["preferences"]["marionette.defaultPrefs.port"] = self.marionette_port
-
+    def _update_profile(self):
+        profile_args = {"preferences": deepcopy(self.required_prefs)}
+        profile_args["preferences"]["marionette.defaultPrefs.port"] = self.marionette_port
         if self.prefs:
-            args["preferences"].update(self.prefs)
-
+            profile_args["preferences"].update(self.prefs)
         if self.verbose:
             level = "TRACE" if self.verbose >= 2 else "DEBUG"
-            args["preferences"]["marionette.logging"] = level
-
+            profile_args["preferences"]["marionette.logging"] = level
         if "-jsdebugger" in self.app_args:
-            args["preferences"].update({
+            profile_args["preferences"].update({
                 "devtools.browsertoolbox.panel": "jsdebugger",
                 "devtools.debugger.remote-enabled": True,
                 "devtools.chrome.enabled": True,
                 "devtools.debugger.prompt-connection": False,
                 "marionette.debugging.clicktostart": True,
             })
-
         if self.addons:
-            args["addons"] = self.addons
+            profile_args["addons"] = self.addons
 
-        return args
+        if hasattr(self, "profile_path") and self.profile is None:
+            if not self.profile_path:
+                if self.workspace:
+                    profile_args["profile"] = tempfile.mkdtemp(
+                        suffix=".mozrunner-{:.0f}".format(time.time()),
+                        dir=self.workspace)
+                self.profile = Profile(**profile_args)
+            else:
+                profile_args["path_from"] = self.profile_path
+                profile_name = "{}-{:.0f}".format(
+                    os.path.basename(self.profile_path),
+                    time.time()
+                )
+                if self.workspace:
+                    profile_args["path_to"] = os.path.join(self.workspace,
+                                                           profile_name)
+                self.profile = Profile.clone(**profile_args)
 
     @classmethod
     def create(cls, app=None, *args, **kwargs):
@@ -257,12 +216,12 @@ class GeckoInstance(object):
         except (IOError, KeyError):
             exc, val, tb = sys.exc_info()
             msg = 'Application "{0}" unknown (should be one of {1})'
-            raise NotImplementedError, msg.format(app, apps.keys()), tb
+            reraise(NotImplementedError, msg.format(app, apps.keys()), tb)
 
         return instance_class(*args, **kwargs)
 
     def start(self):
-        self._update_profile(self.profile)
+        self._update_profile()
         self.runner = self.runner_class(**self._get_runner_args())
         self.runner.start()
 
@@ -323,12 +282,12 @@ class GeckoInstance(object):
         :param prefs: Dictionary of preference names and values.
         :param clean: If True, reset the profile before starting.
         """
+        self.close(clean=clean)
+
         if prefs:
             self.prefs = prefs
         else:
             self.prefs = None
-
-        self.close(clean=clean)
         self.start()
 
 
@@ -391,7 +350,7 @@ class FennecInstance(GeckoInstance):
         return self._package_name
 
     def start(self):
-        self._update_profile(self.profile)
+        self._update_profile()
         self.runner = self.runner_class(**self._get_runner_args())
         try:
             if self.connect_to_running_emulator:
@@ -400,7 +359,7 @@ class FennecInstance(GeckoInstance):
         except Exception as e:
             exc, val, tb = sys.exc_info()
             message = "Error possibly due to runner or device args: {}"
-            raise exc, message.format(e.message), tb
+            reraise(exc, message.format(e.message), tb)
         # gecko_log comes from logcat when running with device/emulator
         logcat_args = {
             "filterspec": "Gecko",

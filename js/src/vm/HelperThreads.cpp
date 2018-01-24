@@ -502,7 +502,9 @@ ScriptParseTask::parse(JSContext* cx)
     SourceBufferHolder srcBuf(range.begin().get(), range.length(), SourceBufferHolder::NoOwnership);
     Rooted<ScriptSourceObject*> sourceObject(cx);
 
-    JSScript* script = frontend::CompileGlobalScript(cx, alloc, ScopeKind::Global,
+    ScopeKind scopeKind = options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
+
+    JSScript* script = frontend::CompileGlobalScript(cx, alloc, scopeKind,
                                                      options, srcBuf,
                                                      /* sourceObjectOut = */ &sourceObject.get());
     if (script)
@@ -1190,12 +1192,7 @@ GlobalHelperThreadState::maxParseThreads() const
 {
     if (IsHelperThreadSimulatingOOM(js::THREAD_TYPE_PARSE))
         return 1;
-
-    // Don't allow simultaneous off thread parses, to reduce contention on the
-    // atoms table. Note that wasm compilation depends on this to avoid
-    // stalling the helper thread, as off thread parse tasks can trigger and
-    // block on other off thread wasm compilation tasks.
-    return 1;
+    return cpuCount;
 }
 
 size_t
@@ -1769,7 +1766,8 @@ GlobalHelperThreadState::mergeParseTaskCompartment(JSContext* cx, ParseTask* par
             if (key != JSProto_Null) {
                 MOZ_ASSERT(key == JSProto_Object || key == JSProto_Array ||
                            key == JSProto_Function || key == JSProto_RegExp);
-                newProto = GetBuiltinPrototypePure(global, key);
+                newProto = global->maybeGetPrototype(key);
+                MOZ_ASSERT(newProto);
             } else if (protoObj == parseTaskGenFunctionProto) {
                 newProto = global->getGeneratorFunctionPrototype();
             } else if (protoObj == moduleProto) {

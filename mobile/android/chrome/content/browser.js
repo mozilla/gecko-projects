@@ -126,6 +126,7 @@ var lazilyLoadedBrowserScripts = [
   ["Linkifier", "chrome://browser/content/Linkify.js"],
   ["CastingApps", "chrome://browser/content/CastingApps.js"],
   ["RemoteDebugger", "chrome://browser/content/RemoteDebugger.js"],
+  ["gViewSourceUtils", "chrome://global/content/viewSourceUtils.js"],
 ];
 if (!AppConstants.RELEASE_OR_BETA) {
   lazilyLoadedBrowserScripts.push(
@@ -367,6 +368,7 @@ var BrowserApp = {
       "Tab:Closed",
       "Tab:Move",
       "Tab:OpenUri",
+      "Tab:ViewSource",
     ]);
 
     GlobalEventDispatcher.registerListener(this, [
@@ -1435,6 +1437,27 @@ var BrowserApp = {
     aTab.browser.dispatchEvent(evt);
   },
 
+  viewSourceForTab(aTab) {
+    let browser = aTab.browser;
+    let outerWindowID = browser.outerWindowID;
+    let url = browser.currentURI.spec;
+    let args = { browser, outerWindowID, URL: url };
+
+    // `viewSourceInBrowser` will load the source content from the page
+    // descriptor for the tab (when possible) or fallback to the network if
+    // that fails.  Either way, the view source module will manage the tab's
+    // location, so use "about:blank" here to avoid unnecessary redundant
+    // requests.
+    let tab = this.addTab("about:blank", {
+      selected: true,
+      parentId: aTab.id,
+      isPrivate: PrivateBrowsingUtils.isBrowserPrivate(aTab.browser)
+    });
+    args.viewSourceBrowser = tab.browser;
+
+    gViewSourceUtils.viewSourceInBrowser(args);
+  },
+
   quit: function quit(aClear = { sanitize: {}, dontSaveSession: false }) {
     // Notify all windows that an application quit has been requested.
     let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"].createInstance(Ci.nsISupportsPRBool);
@@ -1690,7 +1713,11 @@ var BrowserApp = {
 
       case "FormHistory:Init": {
         // Force creation/upgrade of formhistory.sqlite
-        FormHistory.count({});
+        FormHistory.count({}, {
+          handleCompletion() {
+            GlobalEventDispatcher.sendRequest({ type: "FormHistory:Ready" });
+          },
+        });
         GlobalEventDispatcher.unregisterListener(this, event);
         break;
       }
@@ -1943,6 +1970,10 @@ var BrowserApp = {
 
       case "Tab:Move":
         this._handleTabMove(data.fromTabId, data.fromPosition, data.toTabId, data.toPosition);
+        break;
+
+      case "Tab:ViewSource":
+        this.viewSourceForTab(this.getTabForId(data.tabId));
         break;
     }
   },
@@ -2691,6 +2722,44 @@ var NativeWindow = {
       return this.defaultContext = Strings.browser.GetStringFromName("browser.menu.context.default");
     },
 
+    get nonLinkContext() {
+      return "";
+    },
+
+    /* Gets menuitems for an arbitrary node
+     * Parameters:
+     *   element - The element to look at. If this element has a contextmenu attribute, the
+     *             corresponding contextmenu will be used.
+     */
+    _getHTMLContextMenuItemsForElement: function(element) {
+      let htmlMenu = element.contextMenu;
+      if (!htmlMenu) {
+        return [];
+      }
+
+      htmlMenu.sendShowEvent();
+
+      return this._getHTMLContextMenuItemsForMenu(htmlMenu, element);
+    },
+
+    /* Add a menuitem for an HTML <menu> node
+     * Parameters:
+     *   menu - The <menu> element to iterate through for menuitems
+     *   target - The target element these context menu items are attached to
+     */
+    _getHTMLContextMenuItemsForMenu: function(menu, target) {
+      let items = [];
+      for (let i = 0; i < menu.childNodes.length; i++) {
+        let elt = menu.childNodes[i];
+        if (!elt.label)
+          continue;
+
+        items.push(new HTMLContextMenuItem(elt, target));
+      }
+
+      return items;
+    },
+
     // Searches the current list of menuitems to show for any that match this id
     _findMenuItem: function(aId) {
       if (!this.menus) {
@@ -2719,6 +2788,20 @@ var NativeWindow = {
       return false;
     },
 
+    // Returns true if there are any link-related context menu items
+    _shouldPreventDefault: function() {
+      for (let context in this.menus) {
+        if (context === this.nonLinkContext) {
+          continue;
+        }
+        let menu = this.menus[context];
+        if (menu.length > 0) {
+          return true;
+        }
+      }
+      return false;
+    },
+
     /* Returns a label to be shown in a tabbed ui if there are multiple "contexts". For instance, if this
      * is an image inside an <a> tag, we may have a "link" context and an "image" one.
      */
@@ -2728,7 +2811,10 @@ var NativeWindow = {
         try {
           let uri = this.makeURI(this._getLinkURL(element));
           return Strings.browser.GetStringFromName("browser.menu.context." + uri.scheme);
-        } catch(ex) { }
+        } catch(ex) {
+          // Fallback to the default
+          return this.defaultContext;
+        }
       }
 
       // Otherwise we try the nodeName
@@ -2736,8 +2822,7 @@ var NativeWindow = {
         return Strings.browser.GetStringFromName("browser.menu.context." + element.nodeName.toLowerCase());
       } catch(ex) { }
 
-      // Fallback to the default
-      return this.defaultContext;
+      return this.nonLinkContext;
     },
 
     // Adds context menu items added through the add-on api
@@ -2785,8 +2870,10 @@ var NativeWindow = {
       if (this._shouldShow()) {
         BrowserEventHandler._cancelTapHighlight();
 
-        // Consume / preventDefault the event, and show the contextmenu.
-        event.preventDefault();
+        if (this._shouldPreventDefault()) {
+          // Consume / preventDefault the event.
+          event.preventDefault();
+        }
         this._innerShow(this._target, event.clientX, event.clientY);
         this._target = null;
 
@@ -2854,8 +2941,14 @@ var NativeWindow = {
       while (element) {
         let context = this._getContextType(element);
 
-        // Check for any context menu items registered in the ui.
-        let items = this._getNativeContextMenuItems(element, x, y);
+        // First check for any html5 context menus that might exist...
+        var items = this._getHTMLContextMenuItemsForElement(element);
+        if (items.length > 0) {
+          this._addMenuItems(items, context);
+        }
+
+        // then check for any context menu items registered in the ui.
+        items = this._getNativeContextMenuItems(element, x, y);
         if (items.length > 0) {
           this._addMenuItems(items, context);
         }
@@ -6689,3 +6782,79 @@ ContextMenuItem.prototype = {
     };
   }
 }
+
+function HTMLContextMenuItem(elt, target) {
+  ContextMenuItem.call(this, { });
+
+  this.menuElementRef = Cu.getWeakReference(elt);
+  this.targetElementRef = Cu.getWeakReference(target);
+}
+
+HTMLContextMenuItem.prototype = Object.create(ContextMenuItem.prototype, {
+  order: {
+    value: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER
+  },
+
+  matches: {
+    value: function(target) {
+      let t = this.targetElementRef.get();
+      return t === target;
+    },
+  },
+
+  callback: {
+    value: function(target) {
+      let elt = this.menuElementRef.get();
+      if (!elt) {
+        return;
+      }
+
+      // If this is a menu item, show a new context menu with the submenu in it
+      if (elt instanceof HTMLMenuElement) {
+        try {
+          NativeWindow.contextmenus.menus = {};
+
+          let elt = this.menuElementRef.get();
+          let target = this.targetElementRef.get();
+          if (!elt) {
+            return;
+          }
+
+          var items = NativeWindow.contextmenus._getHTMLContextMenuItemsForMenu(elt, target);
+          // This menu will always only have one context, but we still make sure its the "right" one.
+          var context = NativeWindow.contextmenus._getContextType(target);
+          if (items.length > 0) {
+            NativeWindow.contextmenus._addMenuItems(items, context);
+          }
+
+        } catch(ex) {
+          Cu.reportError(ex);
+        }
+      } else {
+        // otherwise just click the menu item
+        elt.click();
+      }
+    },
+  },
+
+  getValue: {
+    value: function(target) {
+      let elt = this.menuElementRef.get();
+      if (!elt) {
+        return null;
+      }
+
+      if (elt.hasAttribute("hidden")) {
+        return null;
+      }
+
+      return {
+        id: this.id,
+        icon: elt.icon,
+        label: elt.label,
+        disabled: elt.disabled,
+        menu: elt instanceof HTMLMenuElement
+      };
+    }
+  },
+});

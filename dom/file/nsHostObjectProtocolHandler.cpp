@@ -892,15 +892,20 @@ nsHostObjectProtocolHandler::NewURI(const nsACString& aSpec,
 
   DataInfo* info = GetDataInfo(aSpec);
 
-  RefPtr<nsHostObjectURI> uri;
+  nsCOMPtr<nsIPrincipal> principal;
+  RefPtr<mozilla::dom::BlobImpl> blob;
   if (info && info->mObjectType == DataInfo::eBlobImpl) {
     MOZ_ASSERT(info->mBlobImpl);
-    uri = new nsHostObjectURI(info->mPrincipal, info->mBlobImpl);
-  } else {
-    uri = new nsHostObjectURI(nullptr, nullptr);
+    principal = info->mPrincipal;
+    blob = info->mBlobImpl;
   }
 
-  rv = uri->SetSpec(aSpec);
+  nsCOMPtr<nsIURI> uri;
+  rv = NS_MutateURI(new nsHostObjectURI::Mutator())
+         .SetSpec(aSpec)
+         .Apply<nsIBlobURIMutator>(&nsIBlobURIMutator::SetBlobImpl, blob)
+         .Apply<nsIPrincipalURIMutator>(&nsIPrincipalURIMutator::SetPrincipal, principal)
+         .Finalize(uri);
   NS_ENSURE_SUCCESS(rv, rv);
 
   NS_TryToSetImmutable(uri);
@@ -1120,21 +1125,23 @@ nsFontTableProtocolHandler::NewURI(const nsACString& aSpec,
                                    nsIURI *aBaseURI,
                                    nsIURI **aResult)
 {
-  RefPtr<nsIURI> uri;
+  nsresult rv;
+  nsCOMPtr<nsIURI> uri;
 
   // Either you got here via a ref or a fonttable: uri
   if (aSpec.Length() && aSpec.CharAt(0) == '#') {
-    nsresult rv = aBaseURI->CloneIgnoringRef(getter_AddRefs(uri));
+    rv = NS_MutateURI(aBaseURI)
+           .SetRef(aSpec)
+           .Finalize(uri);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    uri->SetRef(aSpec);
   } else {
     // Relative URIs (other than #ref) are not meaningful within the
     // fonttable: scheme.
     // If aSpec is a relative URI -other- than a bare #ref,
     // this will leave uri empty, and we'll return a failure code below.
-    uri = new mozilla::net::nsSimpleURI();
-    nsresult rv = uri->SetSpec(aSpec);
+    rv = NS_MutateURI(new mozilla::net::nsSimpleURI::Mutator())
+           .SetSpec(aSpec)
+           .Finalize(uri);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

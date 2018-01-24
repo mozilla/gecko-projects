@@ -1862,13 +1862,13 @@ IonBuilder::inlineStrCharCodeAt(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MInstruction* index = MToInt32::New(alloc(), callInfo.getArg(0));
+    MInstruction* index = MToNumberInt32::New(alloc(), callInfo.getArg(0));
     current->add(index);
 
     MStringLength* length = MStringLength::New(alloc(), callInfo.thisArg());
     current->add(length);
 
-    index = addBoundsCheck(index, length);
+    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
 
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), callInfo.thisArg(), index);
     current->add(charCode);
@@ -1972,13 +1972,13 @@ IonBuilder::inlineStrCharAt(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MInstruction* index = MToInt32::New(alloc(), callInfo.getArg(0));
+    MInstruction* index = MToNumberInt32::New(alloc(), callInfo.getArg(0));
     current->add(index);
 
     MStringLength* length = MStringLength::New(alloc(), callInfo.thisArg());
     current->add(length);
 
-    index = addBoundsCheck(index, length);
+    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
 
     // String.charAt(x) = String.fromCharCode(String.charCodeAt(x))
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), callInfo.thisArg(), index);
@@ -3142,7 +3142,7 @@ IonBuilder::inlineToInteger(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MToInt32* toInt32 = MToInt32::New(alloc(), callInfo.getArg(0));
+    auto* toInt32 = MToNumberInt32::New(alloc(), callInfo.getArg(0));
     current->add(toInt32);
     current->push(toInt32);
     return InliningStatus_Inlined;
@@ -3269,7 +3269,7 @@ IonBuilder::inlineAtomicsCompareExchange(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index);
+    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3305,7 +3305,7 @@ IonBuilder::inlineAtomicsExchange(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index);
+    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3337,7 +3337,7 @@ IonBuilder::inlineAtomicsLoad(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index);
+    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3389,7 +3389,7 @@ IonBuilder::inlineAtomicsStore(CallInfo& callInfo)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index);
+    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsStore);
 
     if (requiresCheck)
         addSharedTypedArrayGuard(callInfo.getArg(0));
@@ -3433,7 +3433,7 @@ IonBuilder::inlineAtomicsBinop(CallInfo& callInfo, InlinableNative target)
 
     MInstruction* elements;
     MDefinition* index;
-    atomicsCheckBounds(callInfo, &elements, &index);
+    atomicsCheckBounds(callInfo, &elements, &index, BoundsCheckKind::IsLoad);
 
     AtomicOp k = AtomicFetchAddOp;
     switch (target) {
@@ -3530,14 +3530,15 @@ IonBuilder::atomicsMeetsPreconditions(CallInfo& callInfo, Scalar::Type* arrayTyp
 }
 
 void
-IonBuilder::atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index)
+IonBuilder::atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index,
+                               BoundsCheckKind kind)
 {
     // Perform bounds checking and extract the elements vector.
     MDefinition* obj = callInfo.getArg(0);
     MInstruction* length = nullptr;
     *index = callInfo.getArg(1);
     *elements = nullptr;
-    addTypedArrayLengthAndData(obj, DoBoundsCheck, index, &length, elements);
+    addTypedArrayLengthAndData(obj, DoBoundsCheck, index, &length, elements, kind);
 }
 
 IonBuilder::InliningResult
@@ -4251,7 +4252,8 @@ SimdTypeToArrayElementType(SimdType type)
 
 bool
 IonBuilder::prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType, MInstruction** elements,
-                                    MDefinition** index, Scalar::Type* arrayType)
+                                    MDefinition** index, Scalar::Type* arrayType,
+                                    BoundsCheckKind boundsCheckKind)
 {
     MDefinition* array = callInfo.getArg(0);
     *index = callInfo.getArg(1);
@@ -4259,7 +4261,7 @@ IonBuilder::prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType, M
     if (!ElementAccessIsTypedArray(constraints(), array, *index, arrayType))
         return false;
 
-    MInstruction* indexAsInt32 = MToInt32::New(alloc(), *index);
+    MInstruction* indexAsInt32 = MToNumberInt32::New(alloc(), *index);
     current->add(indexAsInt32);
     *index = indexAsInt32;
 
@@ -4281,15 +4283,13 @@ IonBuilder::prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType, M
     }
 
     MInstruction* length;
-    addTypedArrayLengthAndData(array, SkipBoundsCheck, index, &length, elements);
+    addTypedArrayLengthAndData(array, SkipBoundsCheck, index, &length, elements, boundsCheckKind);
 
     // It can be that the index is out of bounds, while the added index for the
     // bounds check is in bounds, so we actually need two bounds checks here.
-    MInstruction* positiveCheck = MBoundsCheck::New(alloc(), *index, length);
-    current->add(positiveCheck);
+    *index = addBoundsCheck(*index, length, boundsCheckKind);
 
-    MInstruction* fullCheck = MBoundsCheck::New(alloc(), indexForBoundsCheck, length);
-    current->add(fullCheck);
+    addBoundsCheck(indexForBoundsCheck, length, BoundsCheckKind::UnusedIndex);
     return true;
 }
 
@@ -4305,8 +4305,11 @@ IonBuilder::inlineSimdLoad(CallInfo& callInfo, JSNative native, SimdType type, u
     MDefinition* index = nullptr;
     MInstruction* elements = nullptr;
     Scalar::Type arrayType;
-    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType))
+    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType,
+                                 BoundsCheckKind::IsLoad))
+    {
         return InliningStatus_NotInlined;
+    }
 
     MLoadUnboxedScalar* load = MLoadUnboxedScalar::New(alloc(), elements, index, arrayType);
     load->setResultType(SimdTypeToMIRType(type));
@@ -4327,8 +4330,11 @@ IonBuilder::inlineSimdStore(CallInfo& callInfo, JSNative native, SimdType type, 
     MDefinition* index = nullptr;
     MInstruction* elements = nullptr;
     Scalar::Type arrayType;
-    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType))
+    if (!prepareForSimdLoadStore(callInfo, elemType, &elements, &index, &arrayType,
+                                 BoundsCheckKind::IsStore))
+    {
         return InliningStatus_NotInlined;
+    }
 
     MDefinition* valueToWrite = unboxSimd(callInfo.getArg(2), type);
     MStoreUnboxedScalar* store = MStoreUnboxedScalar::New(alloc(), elements, index,

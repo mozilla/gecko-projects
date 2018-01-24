@@ -302,9 +302,16 @@ var gSearchResultsPane = {
           strings.getFormattedString("searchResults.sorryMessageUnix", [this.query]);
         let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "preferences";
         let brandName = document.getElementById("bundleBrand").getString("brandShortName");
-        // eslint-disable-next-line no-unsanitized/property
-        document.getElementById("need-help").innerHTML =
-          strings.getFormattedString("searchResults.needHelp2", [helpUrl, brandName]);
+        let helpString = strings.getString("searchResults.needHelp3");
+        let helpContainer = document.getElementById("need-help");
+        let link = document.createElement("label");
+        link.className = "text-link";
+        link.setAttribute("href", helpUrl);
+        link.textContent = strings.getFormattedString("searchResults.needHelpSupportLink", [brandName]);
+
+        helpContainer.innerHTML = "";
+        let fragment = BrowserUtils.getLocalizedFragment(document, helpString, link);
+        helpContainer.appendChild(fragment);
       } else {
         // Creating tooltips for all the instances found
         for (let anchorNode of this.listSearchTooltips) {

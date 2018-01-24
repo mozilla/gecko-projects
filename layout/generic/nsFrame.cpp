@@ -1019,6 +1019,11 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
     return;
   }
 
+  if (Type() == LayoutFrameType::Placeholder) {
+    // Do not mark placeholder frames modified.
+    return;
+  }
+
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
   MOZ_ASSERT(displayRoot);
 
@@ -2260,7 +2265,7 @@ nsFrame::DisplaySelectionOverlay(nsDisplayListBuilder*   aBuilder,
   int32_t offset = 0;
   if (newContent) {
     // XXXbz there has GOT to be a better way of determining this!
-    offset = newContent->IndexOf(mContent);
+    offset = newContent->ComputeIndexOf(mContent);
   }
 
   //look up to see what selection(s) are on this frame
@@ -3999,7 +4004,7 @@ nsFrame::GetDataForTableSelection(const nsFrameSelection* aFrameSelection,
   nsCOMPtr<nsIContent> parentContent = tableOrCellContent->GetParent();
   if (!parentContent) return NS_ERROR_FAILURE;
 
-  int32_t offset = parentContent->IndexOf(tableOrCellContent);
+  int32_t offset = parentContent->ComputeIndexOf(tableOrCellContent);
   // Not likely?
   if (offset < 0) return NS_ERROR_FAILURE;
 
@@ -4734,7 +4739,7 @@ static FrameContentRange GetRangeForFrame(nsIFrame* aFrame) {
   }
   if (type == LayoutFrameType::Br) {
     parent = content->GetParent();
-    int32_t beginOffset = parent->IndexOf(content);
+    int32_t beginOffset = parent->ComputeIndexOf(content);
     return FrameContentRange(parent, beginOffset, beginOffset);
   }
   // Loop to deal with anonymous content, which has no index; this loop
@@ -4742,7 +4747,7 @@ static FrameContentRange GetRangeForFrame(nsIFrame* aFrame) {
   do {
     parent  = content->GetParent();
     if (parent) {
-      int32_t beginOffset = parent->IndexOf(content);
+      int32_t beginOffset = parent->ComputeIndexOf(content);
       if (beginOffset >= 0)
         return FrameContentRange(parent, beginOffset, beginOffset + 1);
       content = parent;
@@ -7223,6 +7228,13 @@ nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
   InvalidateRenderingObservers(displayRoot, this);
 
+  // Check if frame supports WebRender's async update
+  if ((aFlags & UPDATE_IS_ASYNC) &&
+      WebRenderUserData::SupportsAsyncUpdate(this)) {
+    // WebRender does not use layer, then return nullptr.
+    return nullptr;
+  }
+
   // If the layer is being updated asynchronously, and it's being forwarded
   // to a compositor, then we don't need to invalidate.
   if ((aFlags & UPDATE_IS_ASYNC) && layer && layer->SupportsAsyncUpdate()) {
@@ -7609,7 +7621,7 @@ int32_t nsFrame::ContentIndexInContainer(const nsIFrame* aFrame)
   if (content) {
     nsIContent* parentContent = content->GetParent();
     if (parentContent) {
-      result = parentContent->IndexOf(content);
+      result = parentContent->ComputeIndexOf(content);
     }
   }
 
@@ -7953,7 +7965,7 @@ nsFrame::GetPointFromOffset(int32_t inOffset, nsPoint* outPoint)
   {
     nsIContent* newContent = mContent->GetParent();
     if (newContent){
-      int32_t newOffset = newContent->IndexOf(mContent);
+      int32_t newOffset = newContent->ComputeIndexOf(mContent);
 
       // Find the direction of the frame from the EmbeddingLevelProperty,
       // which is the resolved bidi level set in
@@ -8162,7 +8174,7 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
                 if (parent)
                 {
                   aPos->mResultContent = parent;
-                  aPos->mContentOffset = parent->IndexOf(content);
+                  aPos->mContentOffset = parent->ComputeIndexOf(content);
                   aPos->mAttach = CARET_ASSOCIATE_BEFORE;
                   if ((point.x - offset.x+ tempRect.x)>tempRect.width)
                   {
@@ -8313,7 +8325,7 @@ FindBlockFrameOrBR(nsIFrame* aFrame, nsDirection aDirection)
     // to avoid crashing here.
     NS_ASSERTION(result.mContent, "Unexpected orphan content");
     if (result.mContent)
-      result.mOffset = result.mContent->IndexOf(content) +
+      result.mOffset = result.mContent->ComputeIndexOf(content) +
         (aDirection == eDirPrevious ? 1 : 0);
     return result;
   }
