@@ -811,20 +811,23 @@ nsNavHistory::GetUpdateRequirements(const nsCOMArray<nsNavHistoryQuery>& aQuerie
   for (i = 0; i < aQueries.Count(); i ++) {
     nsNavHistoryQuery* query = aQueries[i];
 
+    bool hasSearchTerms = !query->SearchTerms().IsEmpty();
     if (query->Folders().Length() > 0 ||
         query->OnlyBookmarked() ||
-        query->Tags().Length() > 0) {
+        query->Tags().Length() > 0 ||
+        (aOptions->QueryType() == nsINavHistoryQueryOptions::QUERY_TYPE_BOOKMARKS &&
+         hasSearchTerms)) {
       return QUERYUPDATE_COMPLEX_WITH_BOOKMARKS;
     }
 
     // Note: we don't currently have any complex non-bookmarked items, but these
     // are expected to be added. Put detection of these items here.
-    if (!query->SearchTerms().IsEmpty() ||
+    if (hasSearchTerms ||
         !query->Domain().IsVoid() ||
         query->Uri() != nullptr)
       nonTimeBasedItems = true;
 
-    if (! query->Domain().IsVoid())
+    if (!query->Domain().IsVoid())
       domainBasedItems = true;
   }
 
@@ -2750,43 +2753,6 @@ nsNavHistory::MarkPageAsFollowedLink(nsIURI *aURI)
 
   if (mRecentLink.Count() > RECENT_EVENT_QUEUE_MAX_LENGTH)
     ExpireNonrecentEvents(&mRecentLink);
-
-  return NS_OK;
-}
-
-
-NS_IMETHODIMP
-nsNavHistory::GetPageTitle(nsIURI* aURI, nsAString& aTitle)
-{
-  PLACES_WARN_DEPRECATED();
-
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-  NS_ENSURE_ARG(aURI);
-
-  aTitle.Truncate(0);
-
-  nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
-    "SELECT id, url, title, rev_host, visit_count, guid "
-    "FROM moz_places "
-    "WHERE url_hash = hash(:page_url) AND url = :page_url "
-  );
-  NS_ENSURE_STATE(stmt);
-  mozStorageStatementScoper scoper(stmt);
-
-  nsresult rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), aURI);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool hasResults = false;
-  rv = stmt->ExecuteStep(&hasResults);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (!hasResults) {
-    aTitle.SetIsVoid(true);
-    return NS_OK; // Not found, return a void string.
-  }
-
-  rv = stmt->GetString(2, aTitle);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }

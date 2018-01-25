@@ -66,6 +66,26 @@ using mozilla::FloatingPoint;
 // Some convenient short-cuts are used to avoid repeating the same list of
 // architectures on each method declaration, such as PER_ARCH and
 // PER_SHARED_ARCH.
+//
+// Functions that are architecture-agnostic and are the same for all
+// architectures, that it's necessary to define inline *in this header* to
+// avoid used-before-defined warnings/errors that would occur if the
+// definitions were in MacroAssembler-inl.h, should use the OOL_IN_HEADER
+// marker at end of the declaration:
+//
+//   inline uint32_t framePushed() const OOL_IN_HEADER;
+//
+// Such functions should then be defined immediately after MacroAssembler's
+// definition, for example like so:
+//
+//   //{{{ check_macroassembler_style
+//   inline uint32_t
+//   MacroAssembler::framePushed() const
+//   {
+//       return framePushed_;
+//   }
+//   ////}}} check_macroassembler_style
+
 
 # define ALL_ARCH mips32, mips64, arm, arm64, x86, x64
 # define ALL_SHARED_ARCH arm, arm64, x86_shared, mips_shared
@@ -177,7 +197,7 @@ using mozilla::FloatingPoint;
 
 # define PER_ARCH DEFINED_ON(ALL_ARCH)
 # define PER_SHARED_ARCH DEFINED_ON(ALL_SHARED_ARCH)
-
+# define OOL_IN_HEADER
 
 #if MOZ_LITTLE_ENDIAN
 #define IMM32_16ADJ(X) X << 16
@@ -401,7 +421,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         return size();
     }
 
-    //{{{ check_macroassembler_style
+    //{{{ check_macroassembler_decl_style
   public:
     // ===============================================================
     // MacroAssembler high-level usage.
@@ -415,14 +435,14 @@ class MacroAssembler : public MacroAssemblerSpecific
     // ===============================================================
     // Frame manipulation functions.
 
-    inline uint32_t framePushed() const;
-    inline void setFramePushed(uint32_t framePushed);
-    inline void adjustFrame(int32_t value);
+    inline uint32_t framePushed() const OOL_IN_HEADER;
+    inline void setFramePushed(uint32_t framePushed) OOL_IN_HEADER;
+    inline void adjustFrame(int32_t value) OOL_IN_HEADER;
 
     // Adjust the frame, to account for implicit modification of the stack
     // pointer, such that callee can remove arguments on the behalf of the
     // caller.
-    inline void implicitPop(uint32_t bytes);
+    inline void implicitPop(uint32_t bytes) OOL_IN_HEADER;
 
   private:
     // This field is used to statically (at compilation time) emulate a frame
@@ -1397,6 +1417,25 @@ class MacroAssembler : public MacroAssemblerSpecific
 
   public:
     // ========================================================================
+    // Convert floating point.
+
+    // temp required on x86 and x64; must be undefined on mips64.
+    void convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+    void convertInt64ToFloat32(Register64 src, FloatRegister dest)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+    bool convertUInt64ToDoubleNeedsTemp() PER_ARCH;
+
+    // temp required when convertUInt64ToDoubleNeedsTemp() returns true.
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp) PER_ARCH;
+
+    void convertInt64ToDouble(Register64 src, FloatRegister dest)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+  public:
+    // ========================================================================
     // wasm support
 
     CodeOffset illegalInstruction() PER_SHARED_ARCH;
@@ -1486,9 +1525,22 @@ class MacroAssembler : public MacroAssemblerSpecific
                                              wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
 
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                   Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
     void outOfLineWasmTruncateDoubleToInt64(FloatRegister input, bool isUnsigned,
                                             wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
+
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                     Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
     void outOfLineWasmTruncateFloat32ToInt64(FloatRegister input, bool isUnsigned,
                                              wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
@@ -1735,7 +1787,7 @@ class MacroAssembler : public MacroAssemblerSpecific
                           Imm32 value, const BaseIndex& mem, Register temp)
         DEFINED_ON(x86_shared);
 
-    //}}} check_macroassembler_style
+    //}}} check_macroassembler_decl_style
   public:
 
     // Emits a test of a value against all types in a TypeSet. A scratch
@@ -1853,7 +1905,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             moveDouble(ReturnDoubleReg, reg);
     }
 
-    inline void storeCallResultValue(AnyRegister dest);
+    inline void storeCallResultValue(AnyRegister dest, JSValueType type);
 
     void storeCallResultValue(ValueOperand dest) {
 #if defined(JS_NUNBOX32)
@@ -1977,16 +2029,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     template <typename T>
     void storeUnboxedProperty(T address, JSValueType type,
                               const ConstantOrRegister& value, Label* failure);
-
-    template <typename T>
-    Register extractString(const T& source, Register scratch) {
-        return extractObject(source, scratch);
-    }
-
-    template <typename T>
-    Register extractSymbol(const T& source, Register scratch) {
-        return extractObject(source, scratch);
-    }
 
     void debugAssertIsObject(const ValueOperand& val);
 
@@ -2292,8 +2334,11 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     enum IntConversionBehavior {
+        // These two try to convert the input to an int32 using ToNumber and
+        // will fail if the resulting int32 isn't strictly equal to the input.
         IntConversion_Normal,
         IntConversion_NegativeZeroCheck,
+        // These two will convert the input to an int32 with loss of precision.
         IntConversion_Truncate,
         IntConversion_ClampToUint8,
     };
@@ -2335,9 +2380,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     void convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister temp, Register output,
                                   Label* fail, IntConversionBehavior behavior);
 
-    //
-    // Convenience functions for converting values to int32.
-    //
+    // This carries over the MToNumberInt32 operation on the ValueOperand
+    // input; see comment at the top of this class.
     void convertValueToInt32(ValueOperand value, MDefinition* input,
                              FloatRegister temp, Register output, Label* fail,
                              bool negativeZeroCheck,
@@ -2350,9 +2394,8 @@ class MacroAssembler : public MacroAssemblerSpecific
                           conversion);
     }
 
-    //
-    // Convenience functions for truncating values to int32.
-    //
+    // This carries over the MTruncateToInt32 operation on the ValueOperand
+    // input; see the comment at the top of this class.
     void truncateValueToInt32(ValueOperand value, MDefinition* input,
                               Label* handleStringEntry, Label* handleStringRejoin,
                               Label* truncateDoubleSlow,
@@ -2427,6 +2470,35 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void assertStackAlignment(uint32_t alignment, int32_t offset = 0);
 };
+
+//{{{ check_macroassembler_style
+inline uint32_t
+MacroAssembler::framePushed() const
+{
+    return framePushed_;
+}
+
+inline void
+MacroAssembler::setFramePushed(uint32_t framePushed)
+{
+    framePushed_ = framePushed;
+}
+
+inline void
+MacroAssembler::adjustFrame(int32_t value)
+{
+    MOZ_ASSERT_IF(value < 0, framePushed_ >= uint32_t(-value));
+    setFramePushed(framePushed_ + value);
+}
+
+inline void
+MacroAssembler::implicitPop(uint32_t bytes)
+{
+    MOZ_ASSERT(bytes % sizeof(intptr_t) == 0);
+    MOZ_ASSERT(bytes <= INT32_MAX);
+    adjustFrame(-int32_t(bytes));
+}
+//}}} check_macroassembler_style
 
 static inline Assembler::DoubleCondition
 JSOpToDoubleCondition(JSOp op)

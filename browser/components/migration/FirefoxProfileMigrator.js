@@ -61,11 +61,9 @@ function sorter(a, b) {
   return a.id.toLocaleLowerCase().localeCompare(b.id.toLocaleLowerCase());
 }
 
-Object.defineProperty(FirefoxProfileMigrator.prototype, "sourceProfiles", {
-  get() {
-    return [...this._getAllProfiles().keys()].map(x => ({id: x, name: x})).sort(sorter);
-  }
-});
+FirefoxProfileMigrator.prototype.getSourceProfiles = function() {
+  return [...this._getAllProfiles().keys()].map(x => ({id: x, name: x})).sort(sorter);
+};
 
 FirefoxProfileMigrator.prototype._getFileObject = function(dir, fileName) {
   let file = dir.clone();
@@ -122,7 +120,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
           file.copyTo(currentProfileDir, "");
         }
         aCallback(true);
-      }
+      },
     };
   };
 
@@ -181,7 +179,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
           }, function() {
             aCallback(false);
           });
-        }
+        },
       };
     }
   }
@@ -214,7 +212,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
         return;
       }
       aCallback(true);
-    }
+    },
   };
 
   // Telemetry related migrations.
@@ -232,7 +230,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
         () => aCallback(true),
         () => aCallback(false)
       );
-    }
+    },
   };
   let telemetry = {
     name: "telemetry", // name is used only by tests...
@@ -283,7 +281,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
       }
 
       aCallback(true);
-    }
+    },
   };
 
   return [places, cookies, passwords, formData, dictionary, bookmarksBackups,
@@ -291,7 +289,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
 };
 
 Object.defineProperty(FirefoxProfileMigrator.prototype, "startupOnlyMigrator", {
-  get: () => true
+  get: () => true,
 });
 
 

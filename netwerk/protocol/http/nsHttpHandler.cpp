@@ -16,8 +16,6 @@
 #include "nsHttpAuthCache.h"
 #include "nsStandardURL.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMNavigator.h"
-#include "nsIMozNavigatorNetwork.h"
 #include "nsINetworkProperties.h"
 #include "nsIHttpChannel.h"
 #include "nsIStandardURL.h"
@@ -69,6 +67,7 @@
 #include "mozilla/BasePrincipal.h"
 
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/Navigator.h"
 
 #include "nsNSSComponent.h"
 
@@ -137,16 +136,12 @@ NewURI(const nsACString &aSpec,
        int32_t aDefaultPort,
        nsIURI **aURI)
 {
-    RefPtr<nsStandardURL> url = new nsStandardURL();
-
-    nsresult rv = url->Init(nsIStandardURL::URLTYPE_AUTHORITY,
-                            aDefaultPort, aSpec, aCharset, aBaseURI);
-    if (NS_FAILED(rv)) {
-        return rv;
-    }
-
-    url.forget(aURI);
-    return NS_OK;
+    return NS_MutateURI(new nsStandardURL::Mutator())
+             .Apply<nsIStandardURLMutator>(&nsIStandardURLMutator::Init,
+                                           nsIStandardURL::URLTYPE_AUTHORITY,
+                                           aDefaultPort, nsCString(aSpec), aCharset, aBaseURI,
+                                           nullptr)
+             .Finalize(aURI);
 }
 
 #ifdef ANDROID
@@ -2655,14 +2650,12 @@ nsHttpHandler::TickleWifi(nsIInterfaceRequestor *cb)
     if (!piWindow)
         return;
 
-    nsCOMPtr<nsIDOMNavigator> domNavigator = piWindow->GetNavigator();
-    nsCOMPtr<nsIMozNavigatorNetwork> networkNavigator =
-        do_QueryInterface(domNavigator);
-    if (!networkNavigator)
+    RefPtr<dom::Navigator> navigator = piWindow->GetNavigator();
+    if (!navigator)
         return;
 
-    nsCOMPtr<nsINetworkProperties> networkProperties;
-    networkNavigator->GetProperties(getter_AddRefs(networkProperties));
+    nsCOMPtr<nsINetworkProperties> networkProperties =
+        navigator->GetNetworkProperties();
     if (!networkProperties)
         return;
 

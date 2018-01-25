@@ -314,6 +314,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['next_version'] = next_version
     parameters['release_history'] = release_history
     parameters['desktop_release_type'] = desktop_release_type
+    parameters['release_eta'] = input.get('release_eta', '')
 
     # make parameters read-only
     parameters = Parameters(**parameters)

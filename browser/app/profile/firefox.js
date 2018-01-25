@@ -915,9 +915,6 @@ pref("browser.sessionstore.max_write_failures", 5);
 // allow META refresh by default
 pref("accessibility.blockautorefresh", false);
 
-// Whether useAsyncTransactions is enabled or not.
-pref("browser.places.useAsyncTransactions", true);
-
 // Whether history is enabled or not.
 pref("places.history.enabled", true);
 
@@ -1096,6 +1093,7 @@ pref("security.sandbox.content.level", 3);
 // 1 -> "content sandbox using seccomp-bpf when available"
 // 2 -> "seccomp-bpf + write file broker"
 // 3 -> "seccomp-bpf + read/write file brokering"
+// 4 -> all of the above + network/socket restrictions
 // Content sandboxing on Linux is currently in the stage of
 // 'just getting it enabled', which includes a very permissive whitelist. We
 // enable seccomp-bpf on nightly to see if everything is running, or if we need
@@ -1107,7 +1105,7 @@ pref("security.sandbox.content.level", 3);
 //
 // This setting may not be required anymore once we decide to permanently
 // enable the content sandbox.
-pref("security.sandbox.content.level", 3);
+pref("security.sandbox.content.level", 4);
 pref("security.sandbox.content.write_path_whitelist", "");
 pref("security.sandbox.content.read_path_whitelist", "");
 pref("security.sandbox.content.syscall_whitelist", "");
@@ -1186,6 +1184,7 @@ pref("services.sync.prefs.sync.browser.tabs.loadInBackground", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnClose", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnOpen", true);
 pref("services.sync.prefs.sync.browser.urlbar.autocomplete.enabled", true);
+pref("services.sync.prefs.sync.browser.urlbar.matchBuckets", true);
 pref("services.sync.prefs.sync.browser.urlbar.maxRichResults", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.bookmark", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.history", true);
@@ -1340,6 +1339,10 @@ pref("security.insecure_field_warning.contextual.enabled", true);
 // Show degraded UI for http pages; disabled for now
 pref("security.insecure_connection_icon.enabled", false);
 pref("security.insecure_connection_icon.pbmode.enabled", false);
+
+// Show "Not Secure" text for http pages; disabled for now
+pref("security.insecure_connection_text.enabled", false);
+pref("security.insecure_connection_text.pbmode.enabled", false);
 
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);

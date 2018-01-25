@@ -131,7 +131,7 @@ EdgeTypedURLMigrator.prototype = {
       places.push({
         uri,
         visits: [{ transitionType: Ci.nsINavHistoryService.TRANSITION_TYPED,
-                   visitDate}]
+                   visitDate}],
       });
     }
 
@@ -145,7 +145,7 @@ EdgeTypedURLMigrator.prototype = {
       ignoreResults: true,
       handleCompletion(updatedCount) {
         aCallback(updatedCount > 0);
-      }
+      },
     });
   },
 };
@@ -181,7 +181,7 @@ EdgeReadingListMigrator.prototype = {
       let columns = [
         {name: "URL", type: "string"},
         {name: "Title", type: "string"},
-        {name: "AddedDate", type: "date"}
+        {name: "AddedDate", type: "date"},
       ];
 
       // Later versions have an IsDeleted column:
@@ -284,7 +284,7 @@ EdgeBookmarksMigrator.prototype = {
       {name: "IsFolder", type: "boolean"},
       {name: "IsDeleted", type: "boolean"},
       {name: "ParentId", type: "guid"},
-      {name: "ItemId", type: "guid"}
+      {name: "ItemId", type: "guid"},
     ];
     let filterFn = row => {
       if (row.IsDeleted) {
@@ -374,10 +374,11 @@ EdgeProfileMigrator.prototype.getResources = function() {
   return resources.filter(r => r.exists);
 };
 
-EdgeProfileMigrator.prototype.getLastUsedDate = function() {
+EdgeProfileMigrator.prototype.getLastUsedDate = async function() {
   // Don't do this if we don't have a single profile (see the comment for
   // sourceProfiles) or if we can't find the database file:
-  if (this.sourceProfiles !== null || !gEdgeDatabase) {
+  let sourceProfiles = await this.getSourceProfiles();
+  if (sourceProfiles !== null || !gEdgeDatabase) {
     return Promise.resolve(new Date(0));
   }
   let logFilePath = OS.Path.join(gEdgeDatabase.parent.path, "LogFiles", "edb.log");
@@ -408,10 +409,10 @@ EdgeProfileMigrator.prototype.getLastUsedDate = function() {
  * - |[]| to indicate "There are no profiles" (on <=win8.1) which will avoid using this migrator.
  * See MigrationUtils.jsm for slightly more info on how sourceProfiles is used.
  */
-EdgeProfileMigrator.prototype.__defineGetter__("sourceProfiles", function() {
+EdgeProfileMigrator.prototype.getSourceProfiles = function() {
   let isWin10OrHigher = AppConstants.isPlatformAndVersionAtLeast("win", "10");
   return isWin10OrHigher ? null : [];
-});
+};
 
 EdgeProfileMigrator.prototype.__defineGetter__("sourceLocked", function() {
   // There is an exclusive lock on some databases. Assume they are locked for now.

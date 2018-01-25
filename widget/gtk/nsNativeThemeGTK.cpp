@@ -1170,6 +1170,33 @@ nsNativeThemeGTK::DrawWidgetBackground(gfxContext* aContext,
   return NS_OK;
 }
 
+bool
+nsNativeThemeGTK::CreateWebRenderCommandsForWidget(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                   mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                                   const mozilla::layers::StackingContextHelper& aSc,
+                                                   mozilla::layers::WebRenderLayerManager* aManager,
+                                                   nsIFrame* aFrame,
+                                                   uint8_t aWidgetType,
+                                                   const nsRect& aRect)
+{
+  nsPresContext* presContext = aFrame->PresContext();
+  wr::LayoutRect bounds = aSc.ToRelativeLayoutRect(
+    LayoutDeviceRect::FromAppUnits(aRect, presContext->AppUnitsPerDevPixel()));
+
+  switch (aWidgetType) {
+  case NS_THEME_WINDOW:
+  case NS_THEME_DIALOG:
+    aBuilder.PushRect(bounds, bounds, true,
+                      wr::ToColorF(Color::FromABGR(
+                        LookAndFeel::GetColor(LookAndFeel::eColorID_WindowBackground,
+                                              NS_RGBA(0, 0, 0, 0)))));
+    return true;
+
+  default:
+    return false;
+  }
+}
+
 WidgetNodeType
 nsNativeThemeGTK::NativeThemeToGtkTheme(uint8_t aWidgetType, nsIFrame* aFrame)
 {
@@ -1548,6 +1575,16 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
       *aIsOverridable = false;
     }
     break;
+  case NS_THEME_WINDOW_BUTTON_CLOSE:
+  case NS_THEME_WINDOW_BUTTON_MINIMIZE:
+  case NS_THEME_WINDOW_BUTTON_MAXIMIZE:
+  case NS_THEME_WINDOW_BUTTON_RESTORE:
+    {
+      const ToolbarButtonGTKMetrics* metrics = GetToolbarButtonMetrics();
+      aResult->width = metrics->minSizeWithBorderMargin.width;
+      aResult->height = metrics->minSizeWithBorderMargin.height;
+      break;
+    }
   case NS_THEME_CHECKBOX_CONTAINER:
   case NS_THEME_RADIO_CONTAINER:
   case NS_THEME_CHECKBOX_LABEL:
@@ -1556,10 +1593,6 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
   case NS_THEME_MENULIST:
   case NS_THEME_TOOLBARBUTTON:
   case NS_THEME_TREEHEADERCELL:
-  case NS_THEME_WINDOW_BUTTON_CLOSE:
-  case NS_THEME_WINDOW_BUTTON_MINIMIZE:
-  case NS_THEME_WINDOW_BUTTON_MAXIMIZE:
-  case NS_THEME_WINDOW_BUTTON_RESTORE:
     {
       if (aWidgetType == NS_THEME_MENULIST) {
         // Include the arrow size.

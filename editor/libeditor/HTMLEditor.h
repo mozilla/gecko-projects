@@ -50,6 +50,7 @@ class HTMLEditorEventListener;
 class HTMLEditRules;
 class TypeInState;
 class WSRunObject;
+enum class EditAction : int32_t;
 struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
@@ -156,7 +157,7 @@ public:
 
   nsresult GetCSSBackgroundColorState(bool* aMixed, nsAString& aOutColor,
                                       bool aBlockLevel);
-  NS_IMETHOD GetHTMLBackgroundColorState(bool* aMixed, nsAString& outColor);
+  nsresult GetHTMLBackgroundColorState(bool* aMixed, nsAString& outColor);
 
   // nsIEditorStyleSheets methods
   NS_DECL_NSIEDITORSTYLESHEETS
@@ -466,6 +467,13 @@ public:
    */
   nsresult OnMouseMove(nsIDOMMouseEvent* aMouseEvent);
 
+  /**
+   * Modifies the table containing the selection according to the
+   * activation of an inline table editing UI element
+   * @param aUIAnonymousElement [IN] the inline table editing UI element
+   */
+  nsresult DoInlineTableEditingAction(Element& aUIAnonymousElement);
+
 protected:
   class BlobReader final : public nsIEditorBlobListener
   {
@@ -530,27 +538,27 @@ protected:
    * of course)
    * This doesn't change or use the current selection.
    */
-  NS_IMETHOD InsertCell(nsIDOMElement* aCell, int32_t aRowSpan,
-                        int32_t aColSpan, bool aAfter, bool aIsHeader,
-                        nsIDOMElement** aNewCell);
+  nsresult InsertCell(nsIDOMElement* aCell, int32_t aRowSpan,
+                      int32_t aColSpan, bool aAfter, bool aIsHeader,
+                      nsIDOMElement** aNewCell);
 
   /**
    * Helpers that don't touch the selection or do batch transactions.
    */
-  NS_IMETHOD DeleteRow(nsIDOMElement* aTable, int32_t aRowIndex);
-  NS_IMETHOD DeleteColumn(nsIDOMElement* aTable, int32_t aColIndex);
-  NS_IMETHOD DeleteCellContents(nsIDOMElement* aCell);
+  nsresult DeleteRow(nsIDOMElement* aTable, int32_t aRowIndex);
+  nsresult DeleteColumn(nsIDOMElement* aTable, int32_t aColIndex);
+  nsresult DeleteCellContents(nsIDOMElement* aCell);
 
   /**
    * Move all contents from aCellToMerge into aTargetCell (append at end).
    */
-  NS_IMETHOD MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
-                        nsCOMPtr<nsIDOMElement> aCellToMerge,
-                        bool aDeleteCellToMerge);
+  nsresult MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
+                      nsCOMPtr<nsIDOMElement> aCellToMerge,
+                      bool aDeleteCellToMerge);
 
   nsresult DeleteTable2(nsIDOMElement* aTable, Selection* aSelection);
-  NS_IMETHOD SetColSpan(nsIDOMElement* aCell, int32_t aColSpan);
-  NS_IMETHOD SetRowSpan(nsIDOMElement* aCell, int32_t aRowSpan);
+  nsresult SetColSpan(nsIDOMElement* aCell, int32_t aColSpan);
+  nsresult SetRowSpan(nsIDOMElement* aCell, int32_t aRowSpan);
 
   /**
    * Helper used to get nsTableWrapperFrame for a table.
@@ -588,18 +596,18 @@ protected:
                           int32_t* aCellOffset, int32_t* aRowIndex,
                           int32_t* aColIndex);
 
-  NS_IMETHOD GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex,
-                            int32_t aColIndex, int32_t& aActualRowSpan,
-                            int32_t& aActualColSpan);
+  nsresult GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex,
+                          int32_t aColIndex, int32_t& aActualRowSpan,
+                          int32_t& aActualColSpan);
 
-  NS_IMETHOD SplitCellIntoColumns(nsIDOMElement* aTable, int32_t aRowIndex,
-                                  int32_t aColIndex, int32_t aColSpanLeft,
-                                  int32_t aColSpanRight,
-                                  nsIDOMElement** aNewCell);
+  nsresult SplitCellIntoColumns(nsIDOMElement* aTable, int32_t aRowIndex,
+                                int32_t aColIndex, int32_t aColSpanLeft,
+                                int32_t aColSpanRight,
+                                nsIDOMElement** aNewCell);
 
-  NS_IMETHOD SplitCellIntoRows(nsIDOMElement* aTable, int32_t aRowIndex,
-                               int32_t aColIndex, int32_t aRowSpanAbove,
-                               int32_t aRowSpanBelow, nsIDOMElement** aNewCell);
+  nsresult SplitCellIntoRows(nsIDOMElement* aTable, int32_t aRowIndex,
+                             int32_t aColIndex, int32_t aRowSpanAbove,
+                             int32_t aRowSpanBelow, nsIDOMElement** aNewCell);
 
   nsresult CopyCellBackgroundColor(nsIDOMElement* destCell,
                                    nsIDOMElement* sourceCell);
@@ -607,10 +615,10 @@ protected:
   /**
    * Reduce rowspan/colspan when cells span into nonexistent rows/columns.
    */
-  NS_IMETHOD FixBadRowSpan(nsIDOMElement* aTable, int32_t aRowIndex,
-                           int32_t& aNewRowCount);
-  NS_IMETHOD FixBadColSpan(nsIDOMElement* aTable, int32_t aColIndex,
-                           int32_t& aNewColCount);
+  nsresult FixBadRowSpan(nsIDOMElement* aTable, int32_t aRowIndex,
+                         int32_t& aNewRowCount);
+  nsresult FixBadColSpan(nsIDOMElement* aTable, int32_t aColIndex,
+                         int32_t& aNewColCount);
 
   /**
    * Fallback method: Call this after using ClearSelection() and you
@@ -652,7 +660,7 @@ protected:
                                   nsAString* outValue = nullptr);
 
   // Methods for handling plaintext quotations
-  NS_IMETHOD PasteAsPlaintextQuotation(int32_t aSelectionType);
+  nsresult PasteAsPlaintextQuotation(int32_t aSelectionType);
 
   /**
    * Insert a string as quoted text, replacing the selected text (if any).
@@ -663,9 +671,9 @@ protected:
    * @return aNodeInserted  The node spanning the insertion, if applicable.
    *                        If aAddCites is false, this will be null.
    */
-  NS_IMETHOD InsertAsPlaintextQuotation(const nsAString& aQuotedText,
-                                        bool aAddCites,
-                                        nsIDOMNode** aNodeInserted);
+  nsresult InsertAsPlaintextQuotation(const nsAString& aQuotedText,
+                                      bool aAddCites,
+                                      nsIDOMNode** aNodeInserted);
 
   nsresult InsertObject(const nsACString& aType, nsISupports* aObject,
                         bool aIsSafe,
@@ -1138,7 +1146,16 @@ protected:
   ManualNACPtr mRemoveRowButton;
   ManualNACPtr mAddRowAfterButton;
 
+  /**
+   * Shows inline table editing UI around a table cell
+   * @param aCell [IN] a DOM Element being a table cell, td or th
+   */
   nsresult ShowInlineTableEditingUI(Element* aCell);
+
+  /**
+   * Hide all inline table editing UI
+   */
+  nsresult HideInlineTableEditingUI();
 
   void AddMouseClickListener(Element* aElement);
   void RemoveMouseClickListener(Element* aElement);

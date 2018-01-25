@@ -96,29 +96,6 @@ MacroAssemblerARM::convertUInt32ToDouble(Register src, FloatRegister dest_)
 
 static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
 
-bool
-MacroAssemblerARMCompat::convertUInt64ToDoubleNeedsTemp()
-{
-    return false;
-}
-
-void
-MacroAssemblerARMCompat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
-{
-    MOZ_ASSERT(temp == Register::Invalid());
-    ScratchDoubleScope scratchDouble(asMasm());
-
-    convertUInt32ToDouble(src.high, dest);
-    {
-        ScratchRegisterScope scratch(asMasm());
-        movePtr(ImmPtr(&TO_DOUBLE_HIGH_SCALE), scratch);
-        ma_vldr(Operand(Address(scratch, 0)).toVFPAddr(), scratchDouble);
-    }
-    asMasm().mulDouble(scratchDouble, dest);
-    convertUInt32ToDouble(src.low, scratchDouble);
-    asMasm().addDouble(scratchDouble, dest);
-}
-
 void
 MacroAssemblerARM::convertUInt32ToFloat32(Register src, FloatRegister dest_)
 {
@@ -3040,21 +3017,21 @@ MacroAssemblerARMCompat::testGCThing(Condition cond, const BaseIndex& address)
 
 // Unboxing code.
 void
-MacroAssemblerARMCompat::unboxNonDouble(const ValueOperand& operand, Register dest)
+MacroAssemblerARMCompat::unboxNonDouble(const ValueOperand& operand, Register dest, JSValueType)
 {
     if (operand.payloadReg() != dest)
         ma_mov(operand.payloadReg(), dest);
 }
 
 void
-MacroAssemblerARMCompat::unboxNonDouble(const Address& src, Register dest)
+MacroAssemblerARMCompat::unboxNonDouble(const Address& src, Register dest, JSValueType)
 {
     ScratchRegisterScope scratch(asMasm());
     ma_ldr(ToPayload(src), dest, scratch);
 }
 
 void
-MacroAssemblerARMCompat::unboxNonDouble(const BaseIndex& src, Register dest)
+MacroAssemblerARMCompat::unboxNonDouble(const BaseIndex& src, Register dest, JSValueType)
 {
     ScratchRegisterScope scratch(asMasm());
     SecondScratchRegisterScope scratch2(asMasm());
@@ -3079,7 +3056,7 @@ MacroAssemblerARMCompat::unboxDouble(const Address& src, FloatRegister dest)
 }
 
 void
-MacroAssemblerARMCompat::unboxValue(const ValueOperand& src, AnyRegister dest)
+MacroAssemblerARMCompat::unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType type)
 {
     if (dest.isFloat()) {
         Label notInt32, end;
@@ -4152,7 +4129,7 @@ CodeOffsetJump
 MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label, Condition cond, Label* documentation)
 {
     ARMBuffer::PoolEntry pe;
-    BufferOffset bo = as_BranchPool(0xdeadbeef, label, &pe, cond, documentation);
+    BufferOffset bo = as_BranchPool(0xdeadbeef, label, refLabel(documentation), &pe, cond);
     // Fill in a new CodeOffset with both the load and the pool entry that the
     // instruction loads from.
     CodeOffsetJump ret(bo.getOffset(), pe.index());
@@ -5620,6 +5597,31 @@ MacroAssembler::atomicFetchOp64(const Synchronization& sync, AtomicOp op, Regist
     AtomicFetchOp64(*this, sync, op, value, mem, temp, output);
 }
 
+// ========================================================================
+// Convert floating point.
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    ScratchDoubleScope scratchDouble(*this);
+
+    convertUInt32ToDouble(src.high, dest);
+    {
+        ScratchRegisterScope scratch(*this);
+        movePtr(ImmPtr(&TO_DOUBLE_HIGH_SCALE), scratch);
+        ma_vldr(Operand(Address(scratch, 0)).toVFPAddr(), scratchDouble);
+    }
+    mulDouble(scratchDouble, dest);
+    convertUInt32ToDouble(src.low, scratchDouble);
+    addDouble(scratchDouble, dest);
+}
 
 //}}} check_macroassembler_style
 

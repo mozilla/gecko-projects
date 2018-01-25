@@ -1805,7 +1805,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.35, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.36, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -n "$MOZ_SYSTEM_NSS"; then
@@ -4381,7 +4381,7 @@ dnl Mac bundle identifier (based on MOZ_APP_DISPLAYNAME)
 # If the MOZ_MACBUNDLE_ID is defined in the configure.sh, use it
 # Otherwise, use MOZ_APP_DISPLAYNAME
 if test -z "$MOZ_MACBUNDLE_ID"; then
-   MOZ_MACBUNDLE_ID=`echo $MOZ_APP_DISPLAYNAME | tr '[A-Z]' '[a-z]'`
+   MOZ_MACBUNDLE_ID=`echo $MOZ_APP_DISPLAYNAME | tr 'A-Z' 'a-z' | tr -d '[[:blank:]]'`
 fi
 MOZ_MACBUNDLE_ID=${MOZ_DISTRIBUTION_ID}.${MOZ_MACBUNDLE_ID}
 if test "$MOZ_DEBUG"; then

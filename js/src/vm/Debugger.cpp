@@ -22,6 +22,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/Parser.h"
+#include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "gc/Policy.h"
 #include "jit/BaselineDebugModeOSR.h"
@@ -7121,6 +7122,12 @@ class DebuggerSourceGetURLMatcher
         return Nothing();
     }
     ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
+        if (wasmInstance->instance().metadata().baseURL) {
+            JSString* str = NewStringCopyZ<CanGC>(cx_, wasmInstance->instance().metadata().baseURL.get());
+            if (!str)
+                return Nothing();
+            return Some(str);
+        }
         if (JSString* str = wasmInstance->instance().debug().debugDisplayURL(cx_))
             return Some(str);
         return Nothing();

@@ -18,6 +18,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Base64.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
 #include "mozilla/EditorUtils.h"
 #include "mozilla/OwningNonNull.h"
@@ -1641,7 +1642,7 @@ HTMLEditor::PasteAsCitedQuotation(const nsAString& aCitation,
 /**
  * Paste a plaintext quotation.
  */
-NS_IMETHODIMP
+nsresult
 HTMLEditor::PasteAsPlaintextQuotation(int32_t aSelectionType)
 {
   // Get Clipboard Service
@@ -1798,7 +1799,7 @@ HTMLEditor::InsertAsQuotation(const nsAString& aQuotedText,
 // This differs from its corresponding method in TextEditor
 // in that here, quoted material is enclosed in a <pre> tag
 // in order to preserve the original line wrapping.
-NS_IMETHODIMP
+nsresult
 HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
                                        bool aAddCites,
                                        nsIDOMNode** aNodeInserted)
