@@ -626,11 +626,6 @@ V2_L10N_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.latest.{product}-l10n.{job-name}.{locale}",
 ]
 
-RELEASE_TEMPLATES = [
-    "index.releases.v1.{branch}.latest.{product}.{job-name}",
-    "index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.{job-name}",
-]
-
 # the roots of the treeherder routes
 TREEHERDER_ROUTE_ROOT = 'tc-treeherder'
 
@@ -1245,7 +1240,7 @@ def add_nightly_index_routes(config, task):
 
 @index_builder('release')
 def add_release_index_routes(config, task):
-    index = task.get('index', {})
+    index = task.get('index')
     routes = []
     release_config = get_release_config(config)
 
@@ -1253,8 +1248,7 @@ def add_release_index_routes(config, task):
     subs['build_number'] = str(release_config['build_number'])
     subs['revision'] = subs['head_rev']
     subs['underscore_version'] = release_config['version'].replace('.', '_')
-    subs['product'] = task.get('shipping-product') or task.get('attributes', {}).get('shipping_product') \
-                      or index.get('product')
+    subs['product'] = index['product']
     subs['trust-domain'] = config.graph_config['trust-domain']
     subs['branch'] = subs['project']
     if 'channel' in index:
@@ -1262,17 +1256,9 @@ def add_release_index_routes(config, task):
             index, 'channel', item_name=task['label'], project=config.params['project']
         )
         subs['channel'] = index['channel']
-    # / chars are not allowed in indexes
-    subs['job-name'] = task['label'].replace('/', '-')
 
     for rt in task.get('routes', []):
         routes.append(rt.format(**subs))
-
-    # Append default release routes when the normal 2 aren't present, so that we get
-    # notifications via pulse-notify, and logs in the index
-    if len(filter(lambda r: r.startswith('index.releases.v1'), routes)) < 2:
-        for rt in RELEASE_TEMPLATES:
-            routes.append(rt.format(**subs))
 
     task['routes'] = routes
 
@@ -1379,12 +1365,6 @@ def add_index_routes(config, tasks):
             extra_index['rank'] = int(config.params['build_date'])
         else:
             extra_index['rank'] = rank
-
-        # Some release jobs are also part of nightly graphs, and should have release routes set
-        # when used in release case (where target_task_method corresponds to an action name)
-        if task.get('attributes', {}).get('shipping_phase') in ('promote', 'push', 'ship') and \
-                config.params['target_tasks_method'].startswith(('promote', 'push', 'ship')):
-            task = index_builders['release'](config, task)
 
         if not index:
             yield task
