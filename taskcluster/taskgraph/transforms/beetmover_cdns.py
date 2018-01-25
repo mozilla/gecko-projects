@@ -88,6 +88,8 @@ def make_beetmover_cdns_description(config, jobs):
             'scopes': [bucket_scope, action_scope],
             'product': job['product'],
             'dependencies': job['dependencies'],
+            'index': job.get('index'),
+            'routes': job.get('routes'),
             'attributes': job.get('attributes', {}),
             'run-on-projects': job.get('run-on-projects'),
             'treeherder': treeherder,
