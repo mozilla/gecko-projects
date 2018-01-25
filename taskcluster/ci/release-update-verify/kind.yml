@@ -19,6 +19,8 @@ job-defaults:
    run-on-projects: []  # to make sure this never runs as part of CI
    shipping-phase: promote
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+   index:
+      type: release
    worker:
       implementation: docker-worker
       os: linux
