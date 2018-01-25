@@ -11,7 +11,8 @@ transforms:
 kind-dependencies:
    - balrog
 
-job-defaults:
+jobs:
+   firefox:
       name: post-balrog-dummy
       description: Dummy task to deal with max_dependencies
       run-on-projects: []
@@ -27,12 +28,20 @@ job-defaults:
             - /bin/bash
             - -c
             - echo "Dummy task"
-      index:
-         type: release
-
-jobs:
-   firefox:
-      shipping-product: firefox
 
    devedition:
+      name: post-balrog-dummy
+      description: Dummy task to deal with max_dependencies
+      run-on-projects: []
+      shipping-phase: promote
       shipping-product: devedition
+      worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+      worker:
+         implementation: docker-worker
+         os: linux
+         docker-image: "ubuntu:16.10"
+         max-run-time: 600
+         command:
+            - /bin/bash
+            - -c
+            - echo "Dummy task"

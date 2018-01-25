@@ -28,8 +28,6 @@ jobs:
             - /bin/bash
             - -c
             - echo "Dummy task"
-      index:
-         type: release
    devedition-promote:
       name: post-beetmover-checksums-dummy
       description: Dummy task to deal with max_dependencies
@@ -46,8 +44,6 @@ jobs:
             - /bin/bash
             - -c
             - echo "Dummy task"
-      index:
-         type: release
    fennec-promote:
       name: post-beetmover-checksums-dummy
       description: Dummy task to deal with max_dependencies
@@ -64,5 +60,3 @@ jobs:
             - /bin/bash
             - -c
             - echo "Dummy task"
-      index:
-         type: release
