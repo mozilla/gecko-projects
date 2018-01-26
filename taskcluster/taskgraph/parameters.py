@@ -33,10 +33,14 @@ def get_contents(path):
     return contents
 
 
+get_version = functools.partial(get_contents, VERSION_PATH)
+get_app_version = functools.partial(get_contents, APP_VERSION_PATH)
+
+
 # Please keep this list sorted and in sync with taskcluster/docs/parameters.rst
 # Parameters are of the form: {name: default}
 PARAMETERS = {
-    'app_version': get_contents(APP_VERSION_PATH),
+    'app_version': get_app_version(),
     'base_repository': 'https://hg.mozilla.org/mozilla-unified',
     'build_date': lambda: int(time.time()),
     'build_number': 1,
@@ -63,7 +67,7 @@ PARAMETERS = {
     'try_mode': None,
     'try_options': None,
     'try_task_config': None,
-    'version': get_contents(VERSION_PATH),
+    'version': get_version(),
 }
 
 COMM_PARAMETERS = {
