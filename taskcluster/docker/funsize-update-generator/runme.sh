@@ -51,9 +51,11 @@ if [ ! -z "$FILENAME_TEMPLATE" ]; then
     EXTRA_PARAMS="--filename-template $FILENAME_TEMPLATE $EXTRA_PARAMS"
 fi
 
+# EXTRA_PARAMS is optional
+# shellcheck disable=SC2086
 /home/worker/bin/funsize.py \
     --artifacts-dir "$ARTIFACTS_DIR" \
     --task-definition /home/worker/task.json \
     --sha1-signing-cert "/home/worker/keys/${SHA1_SIGNING_CERT}.pubkey" \
     --sha384-signing-cert "/home/worker/keys/${SHA384_SIGNING_CERT}.pubkey" \
-    "$EXTRA_PARAMS"
+    $EXTRA_PARAMS

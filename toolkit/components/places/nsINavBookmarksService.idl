@@ -606,24 +606,9 @@ interface nsINavBookmarksService : nsISupports
                     [optional] in unsigned short aSource);
 
   /**
-   * Change the bookmarked URI for a bookmark.
-   * This changes which "place" the bookmark points at,
-   * which means all annotations, etc are carried along.
-   */
-  void changeBookmarkURI(in long long aItemId,
-                         in nsIURI aNewURI,
-                         [optional] in unsigned short aSource);
-
-  /**
    * Get the parent folder's id for an item.
    */
   long long getFolderIdForItem(in long long aItemId);
-
-  /**
-   * Returns the list of bookmark ids that contain the given URI.
-   */
-  void getBookmarkIdsForURI(in nsIURI aURI, [optional] out unsigned long count,
-                            [array, retval, size_is(count)] out long long bookmarks);
 
   /**
    * Associates the given keyword with the given bookmark.
