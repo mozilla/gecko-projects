@@ -6,6 +6,7 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import functools
 import json
 import time
 import yaml
@@ -14,7 +15,7 @@ from datetime import datetime
 from mozbuild.util import ReadOnlyDict, memoize
 from mozversioncontrol import get_repository_object
 
-from . import GECKO
+from . import APP_VERSION_PATH, GECKO, VERSION_PATH
 
 
 class ParameterMismatch(Exception):
@@ -26,9 +27,16 @@ def get_head_ref():
     return get_repository_object(GECKO).head_ref
 
 
+def get_contents(path):
+    with open(path, "r") as fh:
+        contents = fh.readline().rstrip()
+    return contents
+
+
 # Please keep this list sorted and in sync with taskcluster/docs/parameters.rst
 # Parameters are of the form: {name: default}
 PARAMETERS = {
+    'app_version': get_contents(APP_VERSION_PATH),
     'base_repository': 'https://hg.mozilla.org/mozilla-unified',
     'build_date': lambda: int(time.time()),
     'build_number': 1,
@@ -55,6 +63,7 @@ PARAMETERS = {
     'try_mode': None,
     'try_options': None,
     'try_task_config': None,
+    'version': get_contents(VERSION_PATH),
 }
 
 COMM_PARAMETERS = {
