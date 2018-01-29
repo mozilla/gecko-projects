@@ -143,18 +143,6 @@ function synthesizeClickOnSelectedTreeCell(aTree, aOptions) {
 }
 
 /**
- * Asynchronously check a url is visited.
- *
- * @param aURI The URI.
- * @return {Promise}
- * @resolves When the check has been added successfully.
- * @rejects JavaScript exception.
- */
- function promiseIsURIVisited(aURI) {
-   return PlacesUtils.history.hasVisits(aURI);
- }
-
-/**
  * Makes the specified toolbar visible or invisible and returns a Promise object
  * that is resolved when the toolbar has completed any animations associated
  * with hiding or showing the toolbar.
@@ -468,4 +456,15 @@ function promisePopupHidden(popup) {
     };
     popup.addEventListener("popuphidden", onPopupHidden);
   });
+}
+
+// Identify a bookmark node in the Bookmarks Toolbar by its guid.
+function getToolbarNodeForItemGuid(itemGuid) {
+  let children = document.getElementById("PlacesToolbarItems").childNodes;
+  for (let child of children) {
+    if (itemGuid === child._placesNode.bookmarkGuid) {
+      return child;
+    }
+  }
+  return null;
 }
