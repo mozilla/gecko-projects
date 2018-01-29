@@ -1070,7 +1070,7 @@ def build_push_apk_breakpoint_payload(config, task, task_def):
 
 
 @payload_builder('shipit')
-def build_push_apk_payload(config, task, task_def):
+def build_ship_it_payload(config, task, task_def):
     worker = task['worker']
 
     task_def['payload'] = {
