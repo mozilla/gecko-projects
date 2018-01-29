@@ -18,18 +18,18 @@ kind-dependencies:
 job-defaults:
    description: mark release as shipped in Ship-It
    worker-type:
-       by-project:
-           mozilla-central: scriptworker-prov-v1/shipit-v1
-           mozilla-beta: scriptworker-prov-v1/shipit-v1
-           mozilla-release: scriptworker-prov-v1/shipit-v1
-           default: scriptworker-prov-v1/shipit-dev
+      by-project:
+         mozilla-central: scriptworker-prov-v1/shipit-v1
+         mozilla-beta: scriptworker-prov-v1/shipit-v1
+         mozilla-release: scriptworker-prov-v1/shipit-v1
+         default: scriptworker-prov-v1/shipit-dev
    worker:
       implementation: shipit
    scopes:
-       by-project:
-           mozilla-beta: ['project:releng:scriptworker:ship-it:production']
-           mozilla-release: ['project:releng:scriptworker:ship-it:production']
-           default: ['project:releng:scriptworker:ship-it:staging']
+      by-project:
+         mozilla-beta: ['project:releng:scriptworker:ship-it:production']
+         mozilla-release: ['project:releng:scriptworker:ship-it:production']
+         default: ['project:releng:scriptworker:ship-it:staging']
    run-on-projects: []
    shipping-phase: ship
    index:
