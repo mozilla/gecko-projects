@@ -84,6 +84,11 @@ jobs:
                mozilla-esr52: esr
                mozilla-esr59: esr
                default: unknown
+         rc-channels:
+            by-project:
+               birch: beta
+               mozilla-release: beta
+               default: unknown
       index:
          product: firefox
    devedition:
