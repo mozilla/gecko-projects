@@ -84,7 +84,15 @@ jobs:
                mozilla-esr52: esr
                mozilla-esr59: esr
                default: unknown
-         rc-channels:
+      index:
+         product: firefox
+   firefox-secondary-rc:
+      name: release-firefox_schedule_publishing_in_balrog
+      shipping-product: firefox
+      run:
+         product: firefox
+         buildername: release-{branch}-firefox_schedule_publishing_in_balrog
+         channels:
             by-project:
                birch: beta
                mozilla-release: beta

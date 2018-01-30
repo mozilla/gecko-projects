@@ -381,6 +381,14 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
                 task.attributes.get('shipping_phase') == 'ship':
             return True
 
+        is_rc = (parameters.get('desktop_release_type') == 'rc')
+        if task.kind in ('release-balrog-publishing', ):
+            # Only run 'secondary-rc' in rc release types
+            if 'secondary' in task.label:
+                return is_rc
+            else:
+                return not is_rc
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 

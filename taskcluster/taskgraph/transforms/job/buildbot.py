@@ -29,7 +29,6 @@ buildbot_run_schema = Schema({
     Required('product'): Any('firefox', 'mobile', 'fennec', 'devedition', 'thunderbird'),
 
     Optional('channels'): optionally_keyed_by('project', basestring),
-    Optional('rc-channels'): optionally_keyed_by('project', basestring),
 
     Optional('release-promotion'): bool,
 
@@ -58,12 +57,8 @@ def bb_release_worker(config, worker, run):
         'revision': revision,
     })
 
-    channels_var = 'channels'
-    if config.params.get('desktop_release_type') == 'rc':
-        channels_var = 'rc-channels'
-
-    if channels_var in run:
-        release_props['channels'] = run[channels_var]
+    if 'channels' in run:
+        release_props['channels'] = run['channels']
         resolve_keyed_by(release_props, 'channels', 'channels', **config.params)
 
     if product in ('devedition', 'firefox'):
