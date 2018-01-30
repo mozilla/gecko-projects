@@ -46,11 +46,6 @@ RELEASE_PROMOTION_CONFIG = {
         'product': 'firefox',
         'desktop_release_type': 'rc',
     },
-    'push_firefox_rc': {
-        'target_tasks_method': 'push_firefox',
-        'product': 'firefox',
-        'desktop_release_type': 'rc',
-    },
     'ship_firefox_rc': {
         'target_tasks_method': 'ship_firefox',
         'product': 'firefox',
