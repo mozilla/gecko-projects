@@ -31,6 +31,4 @@ def make_task_description(config, jobs):
             build_number=release_config['build_number']
         )
 
-        job['label'] = job['name']
-        del job['name']
         yield job
