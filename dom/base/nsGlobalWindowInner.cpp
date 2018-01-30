@@ -82,7 +82,7 @@
 #include "nsContentCID.h"
 #include "nsLayoutStatics.h"
 #include "nsCCUncollectableMarker.h"
-#include "mozilla/dom/workers/Workers.h"
+#include "mozilla/dom/workers/WorkerCommon.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "nsJSPrincipals.h"
 #include "mozilla/Attributes.h"
@@ -228,7 +228,6 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "prrng.h"
 #include "nsSandboxFlags.h"
-#include "TimeChangeObserver.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
@@ -6870,18 +6869,6 @@ nsGlobalWindowInner::IsVRContentPresenting() const
     }
   }
   return false;
-}
-
-void
-nsGlobalWindowInner::EnableTimeChangeNotifications()
-{
-  mozilla::time::AddWindowListener(this);
-}
-
-void
-nsGlobalWindowInner::DisableTimeChangeNotifications()
-{
-  mozilla::time::RemoveWindowListener(this);
 }
 
 void

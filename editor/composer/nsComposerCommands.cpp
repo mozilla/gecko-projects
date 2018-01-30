@@ -8,7 +8,9 @@
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/EditorBase.h"         // for EditorBase
+#include "mozilla/ErrorResult.h"
 #include "mozilla/HTMLEditor.h"         // for HTMLEditor
+#include "mozilla/dom/Element.h"
 #include "nsAString.h"
 #include "nsCOMPtr.h"                   // for nsCOMPtr, do_QueryInterface, etc
 #include "nsComponentManagerUtils.h"    // for do_CreateInstance
@@ -29,6 +31,8 @@
 #include "nsStringFwd.h"                // for nsString
 
 class nsISupports;
+using mozilla::dom::Element;
+using mozilla::ErrorResult;
 
 //prototype
 nsresult GetListState(mozilla::HTMLEditor* aHTMLEditor,
@@ -1041,19 +1045,10 @@ nsAbsolutePositioningCommand::GetCurrentState(mozilla::HTMLEditor* aHTMLEditor,
     return NS_OK;
   }
 
-  nsCOMPtr<nsINode> container;
-  nsresult rv =
-    aHTMLEditor->GetAbsolutelyPositionedSelectionContainer(
-                   getter_AddRefs(container));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoString outStateString;
-  if (container) {
-    outStateString.AssignLiteral("absolute");
-  }
-
-  aParams->SetBooleanValue(STATE_MIXED,false);
-  aParams->SetCStringValue(STATE_ATTRIBUTE, NS_ConvertUTF16toUTF8(outStateString).get());
+  RefPtr<Element> container =
+    aHTMLEditor->GetAbsolutelyPositionedSelectionContainer();
+  aParams->SetBooleanValue(STATE_MIXED,  false);
+  aParams->SetCStringValue(STATE_ATTRIBUTE, container ? "absolute" : "");
   return NS_OK;
 }
 
@@ -1064,12 +1059,8 @@ nsAbsolutePositioningCommand::ToggleState(mozilla::HTMLEditor* aHTMLEditor)
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsCOMPtr<nsINode> container;
-  nsresult rv =
-    aHTMLEditor->GetAbsolutelyPositionedSelectionContainer(
-                   getter_AddRefs(container));
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  RefPtr<Element> container =
+    aHTMLEditor->GetAbsolutelyPositionedSelectionContainer();
   return aHTMLEditor->AbsolutePositionSelection(!container);
 }
 
@@ -1530,8 +1521,12 @@ nsInsertTagCommand::DoCommandParams(const char *aCommandName,
                                              getter_AddRefs(domElem));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = domElem->SetAttribute(attributeType, attrib);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<Element> elem = do_QueryInterface(domElem);
+  ErrorResult err;
+  elem->SetAttribute(attributeType, attrib, err);
+  if (NS_WARN_IF(err.Failed())) {
+    return err.StealNSResult();
+  }
 
   // do actual insertion
   if (mTagName == nsGkAtoms::a) {

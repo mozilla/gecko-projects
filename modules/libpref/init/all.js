@@ -635,13 +635,11 @@ pref("media.decoder.skip-to-next-key-frame.enabled", true);
 // "verbose", "normal" and "" (log disabled).
 pref("media.cubeb.logging_level", "");
 
-#ifdef NIGHTLY_BUILD
 // Cubeb sandbox (remoting) control
-#ifdef XP_MACOSX
-pref("media.cubeb.sandbox", false);
-#else
+#ifdef XP_LINUX
 pref("media.cubeb.sandbox", true);
-#endif
+#else
+pref("media.cubeb.sandbox", false);
 #endif
 
 // Set to true to force demux/decode warnings to be treated as errors.
@@ -5806,9 +5804,6 @@ pref("media.block-autoplay-until-in-foreground", true);
 // Is Stylo CSS support built and enabled?
 // Only define these prefs if Stylo support is actually built in.
 #ifdef MOZ_STYLO
-// XXX: We should flip this pref to true once the blocked_domains is non-empty.
-pref("layout.css.stylo-blocklist.enabled", false);
-pref("layout.css.stylo-blocklist.blocked_domains", "");
 #ifdef MOZ_STYLO_ENABLE
 pref("layout.css.servo.enabled", true);
 #else

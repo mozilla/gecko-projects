@@ -237,7 +237,7 @@ public:
   {
     return mIsAbsolutelyPositioningEnabled;
   }
-  nsresult GetAbsolutelyPositionedSelectionContainer(nsINode** aContainer);
+  already_AddRefed<Element> GetAbsolutelyPositionedSelectionContainer();
   Element* GetPositionedElement() const
   {
     return mAbsolutelyPositionedObject;
@@ -530,7 +530,7 @@ protected:
 
   bool ShouldReplaceRootElement();
   void NotifyRootChanged();
-  nsresult GetBodyElement(nsIDOMHTMLElement** aBody);
+  Element* GetBodyElement();
 
   /**
    * Get the focused node of this editor.
@@ -726,14 +726,14 @@ protected:
   nsresult ParseCFHTML(nsCString& aCfhtml, char16_t** aStuffToPaste,
                        char16_t** aCfcontext);
 
-  bool IsInLink(nsIDOMNode* aNode, nsCOMPtr<nsIDOMNode>* outLink = nullptr);
+  bool IsInLink(nsINode* aNode, nsCOMPtr<nsINode>* outLink = nullptr);
   nsresult StripFormattingNodes(nsIContent& aNode, bool aOnlyList = false);
   nsresult CreateDOMFragmentFromPaste(const nsAString& aInputString,
                                       const nsAString& aContextStr,
                                       const nsAString& aInfoStr,
-                                      nsCOMPtr<nsIDOMNode>* outFragNode,
-                                      nsCOMPtr<nsIDOMNode>* outStartNode,
-                                      nsCOMPtr<nsIDOMNode>* outEndNode,
+                                      nsCOMPtr<nsINode>* outFragNode,
+                                      nsCOMPtr<nsINode>* outStartNode,
+                                      nsCOMPtr<nsINode>* outEndNode,
                                       int32_t* outStartOffset,
                                       int32_t* outEndOffset,
                                       bool aTrustedInput);
@@ -993,6 +993,12 @@ protected:
                                   int32_t aRow, int32_t aCol,
                                   int32_t aDirection, bool aSelected);
 
+  /**
+   * A more C++-friendly version of nsIHTMLEditor::GetSelectedElement
+   * that just returns null on errors.
+   */
+  already_AddRefed<dom::Element> GetSelectedElement(const nsAString& aTagName);
+
 protected:
   RefPtr<TypeInState> mTypeInState;
   RefPtr<ComposerCommandsUpdater> mComposerCommandsUpdater;
@@ -1104,6 +1110,12 @@ protected:
 
   nsresult SetAllResizersPosition();
 
+  /**
+   * Shows active resizers around an element's frame
+   * @param aResizedElement [IN] a DOM Element
+   */
+  nsresult ShowResizers(Element& aResizedElement);
+
   ManualNACPtr CreateResizer(int16_t aLocation, nsIContent& aParentContent);
   void SetAnonymousElementPosition(int32_t aX, int32_t aY,
                                    Element* aResizer);
@@ -1147,6 +1159,15 @@ protected:
 
   int32_t mGridSize;
 
+  /**
+   * shows a grabber attached to an arbitrary element. The grabber is an image
+   * positioned on the left hand side of the top border of the element. Draggin
+   * and dropping it allows to change the element's absolute position in the
+   * document. See chrome://editor/content/images/grabber.gif
+   * @param aElement [IN] the element
+   */
+  nsresult ShowGrabberOnElement(Element& aElement);
+
   ManualNACPtr CreateGrabber(nsIContent& aParentContent);
   nsresult StartMoving(nsIDOMElement* aHandle);
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
@@ -1154,8 +1175,8 @@ protected:
   void SnapToGrid(int32_t& newX, int32_t& newY);
   nsresult GrabberClicked();
   nsresult EndMoving();
-  nsresult CheckPositionedElementBGandFG(nsIDOMElement* aElement,
-                                         nsAString& aReturn);
+  nsresult GetTemporaryStyleForFocusedPositionedElement(Element& aElement,
+                                                        nsAString& aReturn);
 
   // inline table editing
   RefPtr<Element> mInlineEditedCell;

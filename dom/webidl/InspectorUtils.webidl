@@ -101,6 +101,22 @@ dictionary InspectorVariationAxis {
   required float defaultValue;
 };
 
+dictionary InspectorVariationValue {
+  required DOMString axis;
+  required float value;
+};
+
+dictionary InspectorVariationInstance {
+  required DOMString name;
+  required sequence<InspectorVariationValue> values;
+};
+
+dictionary InspectorFontFeature {
+  required DOMString tag;
+  required DOMString script;
+  required DOMString languageSystem;
+};
+
 [ChromeOnly]
 interface InspectorFontFace {
   // An indication of how we found this font during font-matching.
@@ -115,7 +131,9 @@ interface InspectorFontFace {
                                               // (not necessarily the actual name that was used,
                                               // due to aliases, generics, localized names, etc)
 
-  [NewObject] sequence<InspectorVariationAxis> getVariationAxes();
+  [NewObject,Throws] sequence<InspectorVariationAxis> getVariationAxes();
+  [NewObject,Throws] sequence<InspectorVariationInstance> getVariationInstances();
+  [NewObject,Throws] sequence<InspectorFontFeature> getFeatures();
 
   // meaningful only when the font is a user font defined using @font-face
   readonly attribute CSSFontFaceRule? rule; // null if no associated @font-face rule

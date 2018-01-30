@@ -6884,8 +6884,16 @@ nsWindow::GetCSDSupportLevel() {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else if (strstr(currentDesktop, "Pantheon") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
+        } else if (strstr(currentDesktop, "LXQt") != nullptr) {
+            sCSDSupportLevel = CSD_SUPPORT_FULL;
         } else {
+// Release or beta builds are not supposed to be broken
+// so disable titlebar rendering on untested/unknown systems.
+#if defined(RELEASE_OR_BETA)
+            sCSDSupportLevel = CSD_SUPPORT_NONE;
+#else
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
+#endif
         }
     } else {
         sCSDSupportLevel = CSD_SUPPORT_NONE;

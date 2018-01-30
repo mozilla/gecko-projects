@@ -41,7 +41,7 @@ class ShellcheckProcess(ProcessHandlerMixin):
         try:
             data = json.loads(line)
         except JSONDecodeError as e:
-            print('Unable to load shellcheck output: {}'.format(e))
+            print('Unable to load shellcheck output ({}): {}'.format(e, line))
             return
 
         for entry in data:
@@ -155,7 +155,7 @@ def lint(paths, config, **lintargs):
 
     files = find_shell_scripts(config, paths)
 
-    base_command = [binary, '-x', '-f', 'json']
+    base_command = [binary, '-f', 'json']
     if config.get('excludecodes'):
         base_command.extend(['-e', ','.join(config.get('excludecodes'))])
 

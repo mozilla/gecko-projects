@@ -57,7 +57,6 @@
 #include "mozilla/dom/PPresentationParent.h"
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
-#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/dom/URLClassifierParent.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/extensions/StreamFilterParent.h"
@@ -590,8 +589,7 @@ static const char* sObserverTopics[] = {
   "cacheservice:empty-cache",
   "intl:app-locales-changed",
   "intl:requested-locales-changed",
-  "cookie-changed",
-  "private-cookie-changed",
+  "non-js-cookie-changed",
 };
 
 // PreallocateProcess is called by the PreallocatedProcessManager.
@@ -627,8 +625,6 @@ ContentParent::StartUp()
 
   // Note: This reporter measures all ContentParents.
   RegisterStrongMemoryReporter(new ContentParentsMemoryReporter());
-
-  mozilla::dom::time::InitializeDateCacheCleaner();
 
   BackgroundChild::Startup();
   ClientManager::Startup();
@@ -2945,8 +2941,7 @@ ContentParent::Observe(nsISupports* aSubject,
     LocaleService::GetInstance()->GetRequestedLocales(requestedLocales);
     Unused << SendUpdateRequestedLocales(requestedLocales);
   }
-  else if (!strcmp(aTopic, "cookie-changed") ||
-           !strcmp(aTopic, "private-cookie-changed")) {
+  else if (!strcmp(aTopic, "non-js-cookie-changed")) {
     if (!aData) {
       return NS_ERROR_UNEXPECTED;
     }

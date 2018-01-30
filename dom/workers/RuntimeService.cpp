@@ -69,11 +69,14 @@
 #include "Principal.h"
 #include "SharedWorker.h"
 #include "WorkerDebuggerManager.h"
+#include "WorkerLoadInfo.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
 #include "WorkerThread.h"
 #include "prsystem.h"
+
+#define WORKERS_SHUTDOWN_TOPIC "web-workers-shutdown"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -2166,8 +2169,8 @@ RuntimeService::CrashIfHanging()
   nsCString msg;
 
   // A: active Workers | S: active ServiceWorkers | Q: queued Workers
-  msg.AppendPrintf("Workers Hanging - A:%d|S:%d|Q:%d", activeWorkers,
-                   activeServiceWorkers, inactiveWorkers);
+  msg.AppendPrintf("Workers Hanging - %d|A:%d|S:%d|Q:%d", mShuttingDown ? 1 : 0,
+                   activeWorkers, activeServiceWorkers, inactiveWorkers);
 
   // For each thread, let's print some data to know what is going wrong.
   for (uint32_t i = 0; i < workers.Length(); ++i) {
