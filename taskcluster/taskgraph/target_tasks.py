@@ -369,24 +369,30 @@ def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
 def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to ship firefox.
     Previous build deps will be optimized out via action task."""
-    filtered_for_candidates = target_tasks_push_firefox(
-        full_task_graph, parameters, graph_config,
-    )
+    is_rc = (parameters.get('desktop_release_type') == 'rc')
+    if is_rc:
+        filtered_for_candidates = target_tasks_promote_firefox(
+            full_task_graph, parameters, graph_config,
+        )
+    else:
+        filtered_for_candidates = target_tasks_push_firefox(
+            full_task_graph, parameters, graph_config,
+        )
 
     def filter(task):
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
-        if task.attributes.get('shipping_product') == 'firefox' and \
-                task.attributes.get('shipping_phase') == 'ship':
-            return True
+        if task.attributes.get('shipping_product') != 'firefox' or \
+                task.attributes.get('shipping_phase') != 'ship':
+            return False
 
-        is_rc = (parameters.get('desktop_release_type') == 'rc')
-        if task.kind in ('release-balrog-publishing', ):
-            # Only run 'secondary-rc' in rc release types
-            if 'secondary' in task.label:
+        if task.kind in (
+            'release-secondary-balrog-publishing',
+            'release-secondary-notify-ship',
+        ):
                 return is_rc
-            else:
+        else:
                 return not is_rc
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

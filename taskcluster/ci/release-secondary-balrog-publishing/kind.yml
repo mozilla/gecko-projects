@@ -11,7 +11,9 @@ transforms:
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-   - release-uptake-monitoring
+   - post-balrog-dummy
+   - post-beetmover-dummy
+   - release-updates-builder
 
 job-defaults:
    description: Schedule publishing in balrog
@@ -69,7 +71,7 @@ job-defaults:
       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.schedule_publishing_in_balrog
 
 jobs:
-   firefox:
+   firefox-secondary-rc:
       name: release-firefox_schedule_publishing_in_balrog
       shipping-product: firefox
       run:
@@ -77,21 +79,8 @@ jobs:
          buildername: release-{branch}-firefox_schedule_publishing_in_balrog
          channels:
             by-project:
-               birch: release
-               maple: beta
-               mozilla-beta: beta
-               mozilla-release: release
-               mozilla-esr52: esr
-               mozilla-esr59: esr
+               birch: beta
+               mozilla-release: beta
                default: unknown
       index:
          product: firefox
-   devedition:
-      name: release-devedition_schedule_publishing_in_balrog
-      shipping-product: devedition
-      run:
-         product: devedition
-         buildername: release-{branch}-devedition_schedule_publishing_in_balrog
-         channels: aurora
-      index:
-         product: devedition
