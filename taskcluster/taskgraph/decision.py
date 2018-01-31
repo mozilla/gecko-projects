@@ -199,8 +199,8 @@ def get_decision_parameters(options):
     parameters['existing_tasks'] = {}
     parameters['do_not_optimize'] = []
     parameters['build_number'] = 1
-    parameters['version'] = get_version(),
-    parameters['app_version'] = get_app_version(),
+    parameters['version'] = get_version()
+    parameters['app_version'] = get_app_version()
     parameters['next_version'] = None
     parameters['desktop_release_type'] = ''
     parameters['release_eta'] = ''
