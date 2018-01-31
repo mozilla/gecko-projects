@@ -22,6 +22,7 @@ job-defaults:
          mozilla-central: scriptworker-prov-v1/shipit-v1
          mozilla-beta: scriptworker-prov-v1/shipit-v1
          mozilla-release: scriptworker-prov-v1/shipit-v1
+         maple: scriptworker-prov-v1/shipit-v1
          default: scriptworker-prov-v1/shipit-dev
    worker:
       implementation: shipit
