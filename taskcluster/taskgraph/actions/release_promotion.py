@@ -78,6 +78,7 @@ UPTAKE_MONITORING_PLATFORMS_FLAVORS = (
 
 PARTIAL_UPDATES_FLAVORS = UPTAKE_MONITORING_PLATFORMS_FLAVORS + (
     'promote_firefox',
+    'promote_firefox_rc',
     'promote_devedition',
 )
 
