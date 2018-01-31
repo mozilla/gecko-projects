@@ -70,12 +70,12 @@ module.exports = {
     },
     "files": "**/*.jsm",
     "rules": {
-      "mozilla/mark-exported-symbols-as-used": "error"
-      // "no-unused-vars": ["error", {
-      //   "args": "none",
-      //   "vars": "all",
-      //   "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
-      // }]
+      "mozilla/mark-exported-symbols-as-used": "error",
+      "no-unused-vars": ["error", {
+        "args": "none",
+        "vars": "all",
+        "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+      }]
     }
   }],
 
@@ -169,6 +169,7 @@ module.exports = {
     "mozilla/no-import-into-var-and-global": "error",
     "mozilla/no-useless-parameters": "error",
     "mozilla/no-useless-removeEventListener": "error",
+    "mozilla/use-chromeutils-import": "error",
     "mozilla/use-default-preference-values": "error",
     "mozilla/use-ownerGlobal": "error",
     "mozilla/use-services": "error",

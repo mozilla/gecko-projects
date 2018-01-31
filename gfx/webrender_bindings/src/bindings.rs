@@ -481,7 +481,7 @@ impl RenderNotifier for CppNotifier {
         unsafe {
             if scrolled {
                 wr_notifier_new_scroll_frame_ready(self.window_id, composite_needed);
-            } else {
+            } else if composite_needed {
                 wr_notifier_new_frame_ready(self.window_id);
             }
         }
@@ -1163,10 +1163,20 @@ pub extern "C" fn wr_api_capture(
     path: *const c_char,
     bits_raw: u32,
 ) {
+    use std::fs::File;
+    use std::io::Write;
+
     let cstr = unsafe { CStr::from_ptr(path) };
     let path = PathBuf::from(&*cstr.to_string_lossy());
+    let revision_path = path.join("wr.txt");
     let bits = CaptureBits::from_bits(bits_raw as _).unwrap();
     dh.api.save_capture(path, bits);
+
+    let revision = include_bytes!("../revision.txt");
+    File::create(revision_path)
+        .unwrap()
+        .write(revision)
+        .unwrap();
 }
 
 #[cfg(target_os = "windows")]

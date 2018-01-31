@@ -31,7 +31,6 @@ public:
 
   css::Rule* GetParentRule() final override;
   nsINode* GetParentObject() final override;
-  mozilla::dom::DocGroup* GetDocGroup() const final override;
 
 protected:
   DeclarationBlock* GetCSSDeclaration(Operation aOperation) final override;
@@ -83,7 +82,7 @@ public:
 
   // WebIDL interface
   uint16_t Type() const final override;
-  void GetCssTextImpl(nsAString& aCssText) const final override;
+  void GetCssText(nsAString& aCssText) const final override;
   void GetSelectorText(nsAString& aSelectorText) final override;
   void SetSelectorText(const nsAString& aSelectorText) final override;
   nsICSSDeclaration* Style() final override;

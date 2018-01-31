@@ -4,25 +4,25 @@
 "use strict";
 
 const {utils: Cu} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
 // common case to avoid the overhead of wrapping and detecting lazy loading.
-const {actionCreators: ac, actionTypes: at} = Cu.import("resource://activity-stream/common/Actions.jsm", {});
-const {DefaultPrefs} = Cu.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
-const {ManualMigration} = Cu.import("resource://activity-stream/lib/ManualMigration.jsm", {});
-const {NewTabInit} = Cu.import("resource://activity-stream/lib/NewTabInit.jsm", {});
-const {SectionsFeed} = Cu.import("resource://activity-stream/lib/SectionsManager.jsm", {});
-const {PlacesFeed} = Cu.import("resource://activity-stream/lib/PlacesFeed.jsm", {});
-const {PrefsFeed} = Cu.import("resource://activity-stream/lib/PrefsFeed.jsm", {});
-const {Store} = Cu.import("resource://activity-stream/lib/Store.jsm", {});
-const {SnippetsFeed} = Cu.import("resource://activity-stream/lib/SnippetsFeed.jsm", {});
-const {SystemTickFeed} = Cu.import("resource://activity-stream/lib/SystemTickFeed.jsm", {});
-const {TelemetryFeed} = Cu.import("resource://activity-stream/lib/TelemetryFeed.jsm", {});
-const {FaviconFeed} = Cu.import("resource://activity-stream/lib/FaviconFeed.jsm", {});
-const {TopSitesFeed} = Cu.import("resource://activity-stream/lib/TopSitesFeed.jsm", {});
-const {TopStoriesFeed} = Cu.import("resource://activity-stream/lib/TopStoriesFeed.jsm", {});
-const {HighlightsFeed} = Cu.import("resource://activity-stream/lib/HighlightsFeed.jsm", {});
+const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {DefaultPrefs} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
+const {ManualMigration} = ChromeUtils.import("resource://activity-stream/lib/ManualMigration.jsm", {});
+const {NewTabInit} = ChromeUtils.import("resource://activity-stream/lib/NewTabInit.jsm", {});
+const {SectionsFeed} = ChromeUtils.import("resource://activity-stream/lib/SectionsManager.jsm", {});
+const {PlacesFeed} = ChromeUtils.import("resource://activity-stream/lib/PlacesFeed.jsm", {});
+const {PrefsFeed} = ChromeUtils.import("resource://activity-stream/lib/PrefsFeed.jsm", {});
+const {Store} = ChromeUtils.import("resource://activity-stream/lib/Store.jsm", {});
+const {SnippetsFeed} = ChromeUtils.import("resource://activity-stream/lib/SnippetsFeed.jsm", {});
+const {SystemTickFeed} = ChromeUtils.import("resource://activity-stream/lib/SystemTickFeed.jsm", {});
+const {TelemetryFeed} = ChromeUtils.import("resource://activity-stream/lib/TelemetryFeed.jsm", {});
+const {FaviconFeed} = ChromeUtils.import("resource://activity-stream/lib/FaviconFeed.jsm", {});
+const {TopSitesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopSitesFeed.jsm", {});
+const {TopStoriesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopStoriesFeed.jsm", {});
+const {HighlightsFeed} = ChromeUtils.import("resource://activity-stream/lib/HighlightsFeed.jsm", {});
 
 const DEFAULT_SITES = new Map([
   // This first item is the global list fallback for any unexpected geos
@@ -58,9 +58,9 @@ const PREFS_CONFIG = new Map([
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
       stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
-      stories_referrer: "http://getpocket.com/recommendations",
+      stories_referrer: "https://getpocket.com/recommendations",
       info_link: "https://www.mozilla.org/privacy/firefox/#pocketstories",
-      disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more.php",
+      disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       show_spocs: false,
       personalized: true
@@ -244,6 +244,7 @@ this.ActivityStream = class ActivityStream {
     this.feeds = FEEDS_CONFIG;
     this._defaultPrefs = new DefaultPrefs(PREFS_CONFIG);
   }
+
   init() {
     try {
       this._updateDynamicPrefs();
@@ -266,6 +267,7 @@ this.ActivityStream = class ActivityStream {
       throw e;
     }
   }
+
   uninit() {
     if (this.geo === "") {
       Services.prefs.removeObserver(GEO_PREF, this);
@@ -274,6 +276,7 @@ this.ActivityStream = class ActivityStream {
     this.store.uninit();
     this.initialized = false;
   }
+
   uninstall(reason) {
     if (reason === REASON_ADDON_UNINSTALL) {
       // This resets all prefs in the config to their default values,
@@ -282,6 +285,7 @@ this.ActivityStream = class ActivityStream {
       this._defaultPrefs.reset();
     }
   }
+
   _updateDynamicPrefs() {
     // Save the geo pref if we have it
     if (Services.prefs.prefHasUserValue(GEO_PREF)) {
@@ -315,6 +319,7 @@ this.ActivityStream = class ActivityStream {
       prefConfig.value = newValue;
     }
   }
+
   observe(subject, topic, data) {
     switch (topic) {
       case "nsPref:changed":

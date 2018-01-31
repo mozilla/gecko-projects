@@ -38,22 +38,22 @@
 
 var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://services-sync/addonutils.js");
-Cu.import("resource://services-sync/addonsreconciler.js");
-Cu.import("resource://services-sync/engines.js");
-Cu.import("resource://services-sync/record.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-sync/collection_validator.js");
-Cu.import("resource://services-common/async.js");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://services-sync/addonutils.js");
+ChromeUtils.import("resource://services-sync/addonsreconciler.js");
+ChromeUtils.import("resource://services-sync/engines.js");
+ChromeUtils.import("resource://services-sync/record.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://services-sync/collection_validator.js");
+ChromeUtils.import("resource://services-common/async.js");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
-                                  "resource://gre/modules/addons/AddonRepository.jsm");
+ChromeUtils.defineModuleGetter(this, "AddonManager",
+                               "resource://gre/modules/AddonManager.jsm");
+ChromeUtils.defineModuleGetter(this, "AddonRepository",
+                               "resource://gre/modules/addons/AddonRepository.jsm");
 
 this.EXPORTED_SYMBOLS = ["AddonsEngine", "AddonValidator"];
 
@@ -578,16 +578,6 @@ AddonsStore.prototype = {
     // TODO Address the edge case and come up with more robust heuristics.
     if (addon.foreignInstall) {
       this._log.debug(addon.id + " not syncable: is foreign install.");
-      return false;
-    }
-
-    // Ignore hotfix extensions (bug 741670). The pref may not be defined.
-    // XXX - note that addon.isSyncable will be false for hotfix addons, so
-    // this check isn't strictly necessary - except for Sync tests which aren't
-    // setup to create a "real" hotfix addon. This can be removed once those
-    // tests are fixed (but keeping it doesn't hurt either)
-    if (this._extensionsPrefs.get("hotfix.id", null) == addon.id) {
-      this._log.debug(addon.id + " not syncable: is a hotfix.");
       return false;
     }
 

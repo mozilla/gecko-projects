@@ -6,11 +6,11 @@
 
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/narrate/VoiceSelect.jsm");
-Cu.import("resource://gre/modules/narrate/Narrator.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AsyncPrefs.jsm");
-Cu.import("resource://gre/modules/TelemetryStopwatch.jsm");
+ChromeUtils.import("resource://gre/modules/narrate/VoiceSelect.jsm");
+ChromeUtils.import("resource://gre/modules/narrate/Narrator.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AsyncPrefs.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 
 this.EXPORTED_SYMBOLS = ["NarrateControls"];
 
@@ -165,8 +165,7 @@ NarrateControls.prototype = {
       let win = this._win;
       let voicePrefs = this._getVoicePref();
       let selectedVoice = voicePrefs[language || "default"];
-      let comparer = win.Intl ?
-        (new Intl.Collator()).compare : (a, b) => a.localeCompare(b);
+      let comparer = (new Services.intl.Collator()).compare;
       let filter = !Services.prefs.getBoolPref("narrate.filter-voices");
       let options = win.speechSynthesis.getVoices().filter(v => {
         return filter || !language || v.lang.split("-")[0] == language;

@@ -63,9 +63,12 @@ public:
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsComputedDOMStyle,
                                                                    nsICSSDeclaration)
 
-  NS_DECL_NSICSSDECLARATION
-
   NS_DECL_NSIDOMCSSSTYLEDECLARATION_HELPER
+  nsresult GetPropertyValue(const nsCSSPropertyID aPropID,
+                            nsAString& aValue) override;
+  nsresult SetPropertyValue(const nsCSSPropertyID aPropID,
+                            const nsAString& aValue,
+                            nsIPrincipal* aSubjectPrincipal) override;
   virtual already_AddRefed<CSSValue>
   GetPropertyCSSValue(const nsAString& aProp, mozilla::ErrorResult& aRv)
     override;
@@ -91,11 +94,6 @@ public:
   virtual nsINode *GetParentObject() override
   {
     return mContent;
-  }
-
-  virtual mozilla::dom::DocGroup* GetDocGroup() const override
-  {
-    return mContent ? mContent->GetDocGroup() : nullptr;
   }
 
   static already_AddRefed<nsStyleContext>
@@ -506,6 +504,9 @@ private:
   already_AddRefed<CSSValue> DoGetPageBreakInside();
   already_AddRefed<CSSValue> DoGetTouchAction();
   already_AddRefed<CSSValue> DoGetTransform();
+  already_AddRefed<CSSValue> DoGetTranslate();
+  already_AddRefed<CSSValue> DoGetRotate();
+  already_AddRefed<CSSValue> DoGetScale();
   already_AddRefed<CSSValue> DoGetTransformBox();
   already_AddRefed<CSSValue> DoGetTransformOrigin();
   already_AddRefed<CSSValue> DoGetPerspective();

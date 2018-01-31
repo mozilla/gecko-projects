@@ -405,7 +405,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsComputedDOMStyle)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsComputedDOMStyle)
 
-NS_IMETHODIMP
+nsresult
 nsComputedDOMStyle::GetPropertyValue(const nsCSSPropertyID aPropID,
                                      nsAString& aValue)
 {
@@ -417,7 +417,7 @@ nsComputedDOMStyle::GetPropertyValue(const nsCSSPropertyID aPropID,
     aValue);
 }
 
-NS_IMETHODIMP
+nsresult
 nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
                                      const nsAString& aValue,
                                      nsIPrincipal* aSubjectPrincipal)
@@ -425,26 +425,23 @@ nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
 
-NS_IMETHODIMP
+void
 nsComputedDOMStyle::GetCssText(nsAString& aCssText)
 {
   aCssText.Truncate();
-
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsComputedDOMStyle::SetCssText(const nsAString& aCssText,
-                               nsIPrincipal* aSubjectPrincipal)
+                               nsIPrincipal* aSubjectPrincipal,
+                               ErrorResult& aRv)
 {
-  return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+  aRv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
 }
 
-NS_IMETHODIMP
-nsComputedDOMStyle::GetLength(uint32_t* aLength)
+uint32_t
+nsComputedDOMStyle::Length()
 {
-  NS_PRECONDITION(aLength, "Null aLength!  Prepare to die!");
-
   uint32_t length = GetComputedStyleMap()->Length();
 
   // Make sure we have up to date style so that we can include custom
@@ -456,11 +453,9 @@ nsComputedDOMStyle::GetLength(uint32_t* aLength)
       : StyleVariables()->mVariables.Count();
   }
 
-  *aLength = length;
-
   ClearCurrentStyleSources();
 
-  return NS_OK;
+  return length;
 }
 
 css::Rule*
@@ -1190,13 +1185,11 @@ nsComputedDOMStyle::RemoveProperty(const nsAString& aPropertyName,
 }
 
 
-NS_IMETHODIMP
+void
 nsComputedDOMStyle::GetPropertyPriority(const nsAString& aPropertyName,
                                         nsAString& aReturn)
 {
   aReturn.Truncate();
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1725,6 +1718,213 @@ nsComputedDOMStyle::DoGetTransformBox()
       nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mTransformBox,
                                      nsCSSProps::kTransformBoxKTable));
   return val.forget();
+}
+
+static already_AddRefed<CSSValue>
+ReadIndividualTransformValue(nsCSSValueSharedList* aList,
+                             const std::function<void(const nsCSSValue::Array*,
+                                                      nsString&)>& aCallback)
+{
+  if (!aList) {
+    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+    val->SetIdent(eCSSKeyword_none);
+    return val.forget();
+  }
+
+  nsAutoString result;
+  const nsCSSValue::Array* data = aList->mHead->mValue.GetArrayValue();
+  aCallback(data, result);
+
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  val->SetString(result);
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetTranslate()
+{
+  typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
+
+  RefPtr<nsComputedDOMStyle> self(this);
+  return ReadIndividualTransformValue(StyleDisplay()->mSpecifiedTranslate,
+    [self](const nsCSSValue::Array* aData, nsString& aResult) {
+      GeckoStyleContext* contextIfGecko =
+        self->mStyleContext ? self->mStyleContext->GetAsGecko() : nullptr;
+      TransformReferenceBox refBox(self->mInnerFrame, nsSize(0, 0));
+      RuleNodeCacheConditions dummy;
+
+      // Even though the spec doesn't say to resolve percentage values, Blink
+      // and Edge do and so until that is clarified we do as well:
+      //
+      // https://github.com/w3c/csswg-drafts/issues/2124
+      switch (nsStyleTransformMatrix::TransformFunctionOf(aData)) {
+        /* translate : <length-percentage> */
+        case eCSSKeyword_translatex: {
+          NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+          float tx = ProcessTranslatePart(aData->Item(1),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          &TransformReferenceBox::Width);
+          aResult.AppendFloat(tx);
+          aResult.AppendLiteral("px");
+          break;
+        }
+        /* translate : <length-percentage> <length-percentage> */
+        case eCSSKeyword_translate: {
+          NS_PRECONDITION(aData->Count() == 3, "Invalid array!");
+          float tx = ProcessTranslatePart(aData->Item(1),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          &TransformReferenceBox::Width);
+          aResult.AppendFloat(tx);
+          aResult.AppendLiteral("px");
+
+          float ty = ProcessTranslatePart(aData->Item(2),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          &TransformReferenceBox::Height);
+          if (ty != 0) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(ty);
+            aResult.AppendLiteral("px");
+          }
+          break;
+        }
+        /* translate : <length-percentage> <length-percentage> <length>*/
+        case eCSSKeyword_translate3d: {
+          NS_PRECONDITION(aData->Count() == 4, "Invalid array!");
+          float tx = ProcessTranslatePart(aData->Item(1),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          &TransformReferenceBox::Width);
+          aResult.AppendFloat(tx);
+          aResult.AppendLiteral("px");
+
+          float ty = ProcessTranslatePart(aData->Item(2),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          &TransformReferenceBox::Height);
+
+          float tz = ProcessTranslatePart(aData->Item(3),
+                                          contextIfGecko,
+                                          self->mStyleContext->PresContext(),
+                                          dummy,
+                                          &refBox,
+                                          nullptr);
+          if (ty != 0. || tz != 0.) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(ty);
+            aResult.AppendLiteral("px");
+          }
+          if (tz != 0.) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(tz);
+            aResult.AppendLiteral("px");
+          }
+
+          break;
+        }
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unexpected CSS keyword.");
+      }
+    });
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetScale()
+{
+  return ReadIndividualTransformValue(StyleDisplay()->mSpecifiedScale,
+    [](const nsCSSValue::Array* aData, nsString& aResult) {
+      switch (nsStyleTransformMatrix::TransformFunctionOf(aData)) {
+        /* scale : <number> */
+        case eCSSKeyword_scalex:
+          NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+          aResult.AppendFloat(aData->Item(1).GetFloatValue());
+          break;
+        /* scale : <number> <number>*/
+        case eCSSKeyword_scale: {
+          NS_PRECONDITION(aData->Count() == 3, "Invalid array!");
+          aResult.AppendFloat(aData->Item(1).GetFloatValue());
+
+          float sy = aData->Item(2).GetFloatValue();
+          if (sy != 1.) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(sy);
+          }
+          break;
+        }
+        /* scale : <number> <number> <number> */
+        case eCSSKeyword_scale3d: {
+          NS_PRECONDITION(aData->Count() == 4, "Invalid array!");
+          aResult.AppendFloat(aData->Item(1).GetFloatValue());
+
+          float sy = aData->Item(2).GetFloatValue();
+          float sz = aData->Item(3).GetFloatValue();
+
+          if (sy != 1. || sz != 1.) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(sy);
+          }
+          if (sz != 1.) {
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(sz);
+          }
+          break;
+        }
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unexpected CSS keyword.");
+      }
+    });
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetRotate()
+{
+  return ReadIndividualTransformValue(StyleDisplay()->mSpecifiedRotate,
+    [](const nsCSSValue::Array* aData, nsString& aResult) {
+
+      switch (nsStyleTransformMatrix::TransformFunctionOf(aData)) {
+        /* rotate : <angle> */
+        case eCSSKeyword_rotate: {
+          NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+          float theta = aData->Item(1).GetAngleValueInDegrees();
+          aResult.AppendFloat(theta);
+          aResult.AppendLiteral("deg");
+          break;
+        }
+        /* rotate : <number> <number> <number> <angle> */
+        case eCSSKeyword_rotate3d: {
+          NS_PRECONDITION(aData->Count() == 5, "Invalid array!");
+          float rx = aData->Item(1).GetFloatValue();
+          float ry = aData->Item(2).GetFloatValue();
+          float rz = aData->Item(3).GetFloatValue();
+          if (rx != 0. || ry != 0. || rz != 1.) {
+            aResult.AppendFloat(rx);
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(ry);
+            aResult.AppendLiteral(" ");
+            aResult.AppendFloat(rz);
+            aResult.AppendLiteral(" ");
+          }
+          float theta = aData->Item(4).GetAngleValueInDegrees();
+          aResult.AppendFloat(theta);
+          aResult.AppendLiteral("deg");
+          break;
+        }
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unexpected CSS keyword.");
+      }
+    });
 }
 
 /* static */ already_AddRefed<nsROCSSPrimitiveValue>

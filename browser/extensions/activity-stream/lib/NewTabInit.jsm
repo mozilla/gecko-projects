@@ -5,7 +5,7 @@
 
 const {utils: Cu} = Components;
 
-const {actionCreators: ac, actionTypes: at} = Cu.import("resource://activity-stream/common/Actions.jsm", {});
+const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
 
 /**
  * NewTabInit - A placeholder for now. This will send a copy of the state to all
@@ -15,6 +15,7 @@ this.NewTabInit = class NewTabInit {
   constructor() {
     this._repliedEarlyTabs = new Map();
   }
+
   reply(target) {
     // Skip this reply if we already replied to an early tab
     if (this._repliedEarlyTabs.get(target)) {
@@ -30,6 +31,7 @@ this.NewTabInit = class NewTabInit {
       this._repliedEarlyTabs.set(target, true);
     }
   }
+
   onAction(action) {
     switch (action.type) {
       case at.NEW_TAB_STATE_REQUEST:

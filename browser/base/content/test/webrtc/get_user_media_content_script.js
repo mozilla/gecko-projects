@@ -3,7 +3,7 @@
 
 /* eslint-env mozilla/frame-script */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "MediaManagerService",
                                    "@mozilla.org/mediaManagerService;1",
                                    "nsIMediaManagerService");
@@ -65,29 +65,30 @@ addMessageListener("Test:ExpectNoObserverCalled", data => {
 });
 
 function _getMediaCaptureState() {
-  let hasVideo = {};
-  let hasAudio = {};
+  let hasCamera = {};
+  let hasMicrophone = {};
   let hasScreenShare = {};
   let hasWindowShare = {};
   let hasAppShare = {};
   let hasBrowserShare = {};
-  MediaManagerService.mediaCaptureWindowState(content, hasVideo, hasAudio,
+  MediaManagerService.mediaCaptureWindowState(content,
+                                              hasCamera, hasMicrophone,
                                               hasScreenShare, hasWindowShare,
                                               hasAppShare, hasBrowserShare);
   let result = {};
 
-  if (hasVideo.value)
+  if (hasCamera.value != MediaManagerService.STATE_NOCAPTURE)
     result.video = true;
-  if (hasAudio.value)
+  if (hasMicrophone.value != MediaManagerService.STATE_NOCAPTURE)
     result.audio = true;
 
-  if (hasScreenShare.value)
+  if (hasScreenShare.value != MediaManagerService.STATE_NOCAPTURE)
     result.screen = "Screen";
-  else if (hasWindowShare.value)
+  else if (hasWindowShare.value != MediaManagerService.STATE_NOCAPTURE)
     result.screen = "Window";
-  else if (hasAppShare.value)
+  else if (hasAppShare.value != MediaManagerService.STATE_NOCAPTURE)
     result.screen = "Application";
-  else if (hasBrowserShare.value)
+  else if (hasBrowserShare.value != MediaManagerService.STATE_NOCAPTURE)
     result.screen = "Browser";
 
   return result;

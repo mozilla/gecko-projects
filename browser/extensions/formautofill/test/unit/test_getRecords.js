@@ -4,9 +4,9 @@
 
 "use strict";
 
-let {FormAutofillParent} = Cu.import("resource://formautofill/FormAutofillParent.jsm", {});
-Cu.import("resource://formautofill/MasterPassword.jsm");
-Cu.import("resource://formautofill/ProfileStorage.jsm");
+let {FormAutofillParent} = ChromeUtils.import("resource://formautofill/FormAutofillParent.jsm", {});
+ChromeUtils.import("resource://formautofill/MasterPassword.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm");
 
 const TEST_ADDRESS_1 = {
   "given-name": "Timothy",
@@ -262,4 +262,3 @@ add_task(async function test_getRecords_creditCards() {
     mock.verify();
   }
 });
-

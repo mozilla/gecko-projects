@@ -5,10 +5,10 @@
 
 const {utils: Cu} = Components;
 
-const {actionCreators: ac, actionTypes: at} = Cu.import("resource://activity-stream/common/Actions.jsm", {});
-const {Prefs} = Cu.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
-const {PrerenderData} = Cu.import("resource://activity-stream/common/PrerenderData.jsm", {});
-Cu.import("resource://gre/modules/Services.jsm");
+const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {Prefs} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamPrefs.jsm", {});
+const {PrerenderData} = ChromeUtils.import("resource://activity-stream/common/PrerenderData.jsm", {});
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const ONBOARDING_FINISHED_PREF = "browser.onboarding.notification.finished";
 
@@ -71,9 +71,11 @@ this.PrefsFeed = class PrefsFeed {
     this._setPrerenderPref();
     this._initOnboardingPref();
   }
+
   removeListeners() {
     this._prefs.ignoreBranch(this);
   }
+
   onAction(action) {
     switch (action.type) {
       case at.INIT:

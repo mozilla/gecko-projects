@@ -7,7 +7,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 this.EXPORTED_SYMBOLS = ["WebrtcUI"];
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   DoorHanger: "resource://gre/modules/Prompt.jsm",
@@ -105,11 +105,11 @@ var WebrtcUI = {
       let audioActive = false;
       for (let i = 0; i < count; i++) {
         let win = windows.queryElementAt(i, Ci.nsIDOMWindow);
-        let hasAudio = {};
-        let hasVideo = {};
-        MediaManagerService.mediaCaptureWindowState(win, hasVideo, hasAudio);
-        if (hasVideo.value) cameraActive = true;
-        if (hasAudio.value) audioActive = true;
+        let hasCamera = {};
+        let hasMicrophone = {};
+        MediaManagerService.mediaCaptureWindowState(win, hasCamera, hasMicrophone);
+        if (hasCamera.value != MediaManagerService.STATE_NOCAPTURE) cameraActive = true;
+        if (hasMicrophone.value != MediaManagerService.STATE_NOCAPTURE) audioActive = true;
       }
 
       if (cameraActive && audioActive) {

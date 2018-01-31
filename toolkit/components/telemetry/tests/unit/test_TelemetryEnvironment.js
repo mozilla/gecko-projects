@@ -1,31 +1,31 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-const {AddonManager, AddonManagerPrivate} = Cu.import("resource://gre/modules/AddonManager.jsm", {});
-Cu.import("resource://gre/modules/TelemetryEnvironment.jsm", this);
-Cu.import("resource://gre/modules/ObjectUtils.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm", this);
-Cu.import("resource://gre/modules/PromiseUtils.jsm", this);
-Cu.import("resource://gre/modules/Timer.jsm", this);
-Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://testing-common/AddonManagerTesting.jsm");
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://testing-common/MockRegistrar.jsm", this);
-Cu.import("resource://gre/modules/FileUtils.jsm");
+const {AddonManager, AddonManagerPrivate} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
+ChromeUtils.import("resource://gre/modules/TelemetryEnvironment.jsm", this);
+ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm", this);
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
+ChromeUtils.import("resource://testing-common/AddonManagerTesting.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://testing-common/MockRegistrar.jsm", this);
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 
 // AttributionCode is only needed for Firefox
-XPCOMUtils.defineLazyModuleGetter(this, "AttributionCode",
-                                  "resource:///modules/AttributionCode.jsm");
+ChromeUtils.defineModuleGetter(this, "AttributionCode",
+                               "resource:///modules/AttributionCode.jsm");
 
 // Lazy load |LightweightThemeManager|.
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
+ChromeUtils.defineModuleGetter(this, "LightweightThemeManager",
+                               "resource://gre/modules/LightweightThemeManager.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
-                                  "resource://gre/modules/ProfileAge.jsm");
+ChromeUtils.defineModuleGetter(this, "ProfileAge",
+                               "resource://gre/modules/ProfileAge.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionTestUtils",
-                                  "resource://testing-common/ExtensionXPCShellUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ExtensionTestUtils",
+                               "resource://testing-common/ExtensionXPCShellUtils.jsm");
 
 // The webserver hosting the addons.
 var gHttpServer = null;
@@ -38,7 +38,6 @@ const PLATFORM_VERSION = "1.9.2";
 const APP_VERSION = "1";
 const APP_ID = "xpcshell@tests.mozilla.org";
 const APP_NAME = "XPCShell";
-const APP_HOTFIX_VERSION = "2.3.4a";
 
 const DISTRIBUTION_ID = "distributor-id";
 const DISTRIBUTION_VERSION = "4.5.6b";
@@ -391,10 +390,8 @@ function checkBuildSection(data) {
     Assert.equal(data.build[f], expectedInfo[f], f + " must have the correct value.");
   }
 
-  // Make sure architecture and hotfixVersion are in the environment.
+  // Make sure architecture is in the environment.
   Assert.ok(checkString(data.build.architecture));
-  Assert.ok(checkString(data.build.hotfixVersion));
-  Assert.equal(data.build.hotfixVersion, APP_HOTFIX_VERSION);
 
   if (gIsMac) {
     let macUtils = Cc["@mozilla.org/xpcom/mac-utils;1"].getService(Ci.nsIMacUtils);
@@ -909,9 +906,6 @@ add_task(async function setup() {
   gDataRoot = gHttpRoot + "data/";
   gHttpServer.registerDirectory("/data/", do_get_cwd());
   registerCleanupFunction(() => gHttpServer.stop(() => {}));
-
-  // Spoof the the hotfixVersion
-  Preferences.set("extensions.hotfix.lastVersion", APP_HOTFIX_VERSION);
 
   // Allow non-multiprocessCompatible extensions
   Preferences.set("extensions.allow-non-mpc-extensions", true);

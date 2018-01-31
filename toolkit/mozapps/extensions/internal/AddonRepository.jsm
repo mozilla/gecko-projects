@@ -9,7 +9,7 @@ const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
@@ -57,7 +57,7 @@ const BLANK_DB = function() {
 
 const TOOLKIT_ID     = "toolkit@mozilla.org";
 
-Cu.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.repository";
 
 // Create a new logger for use by the Addons Repository
@@ -589,9 +589,6 @@ this.AddonRepository = {
 
   async _repopulateCacheInternal(aSendPerformance, aTimeout) {
     let allAddons = await AddonManager.getAllAddons();
-
-    // Filter the hotfix out of our list of add-ons
-    allAddons = allAddons.filter(a => a.id != AddonManager.hotfixID);
 
     // Completely remove cache if caching is not enabled
     if (!this.cacheEnabled) {
