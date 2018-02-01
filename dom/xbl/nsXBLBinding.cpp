@@ -20,7 +20,7 @@
 #include "nsContentUtils.h"
 #include "ChildIterator.h"
 #ifdef MOZ_XUL
-#include "nsIXULDocument.h"
+#include "XULDocument.h"
 #endif
 #include "nsIXMLContentSink.h"
 #include "nsContentCID.h"
@@ -230,9 +230,10 @@ nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
     // To make XUL templates work (and other goodies that happen when
     // an element is added to a XUL document), we need to notify the
     // XUL document using its special API.
-    nsCOMPtr<nsIXULDocument> xuldoc(do_QueryInterface(doc));
-    if (xuldoc)
+    XULDocument* xuldoc = doc ? doc->AsXULDocument() : nullptr;
+    if (xuldoc) {
       xuldoc->AddSubtreeToDocument(child);
+    }
 #endif
   }
 }
@@ -246,8 +247,7 @@ nsXBLBinding::UnbindAnonymousContent(nsIDocument* aDocument,
   // Hold a strong ref while doing this, just in case.
   nsCOMPtr<nsIContent> anonParent = aAnonParent;
 #ifdef MOZ_XUL
-  nsCOMPtr<nsIXULDocument> xuldoc =
-    do_QueryInterface(aDocument);
+  XULDocument* xuldoc = aDocument ? aDocument->AsXULDocument() : nullptr;
 #endif
   for (nsIContent* child = aAnonParent->GetFirstChild();
        child;
@@ -825,6 +825,7 @@ nsXBLBinding::InheritsStyle() const
   return true;
 }
 
+#ifdef MOZ_OLD_STYLE
 void
 nsXBLBinding::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData)
 {
@@ -835,6 +836,7 @@ nsXBLBinding::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData)
   if (rules)
     (*aFunc)(rules, aData);
 }
+#endif
 
 ServoStyleSet*
 nsXBLBinding::GetServoStyleSet() const

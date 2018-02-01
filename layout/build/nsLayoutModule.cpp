@@ -41,7 +41,9 @@
 #include "nsPlainTextSerializer.h"
 #include "nsXMLContentSerializer.h"
 #include "nsXHTMLContentSerializer.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleNode.h"
+#endif
 #include "nsContentAreaDragDrop.h"
 #include "nsBox.h"
 #include "nsIFrameTraversal.h"
@@ -144,7 +146,7 @@ class nsIDocumentLoaderFactory;
 #include "inDeepTreeWalker.h"
 
 #ifdef MOZ_XUL
-#include "nsIXULDocument.h"
+#include "XULDocument.h"
 #include "nsIXULSortService.h"
 #endif
 
@@ -431,7 +433,7 @@ MAKE_CTOR(CreatePlainTextSerializer,      nsIContentSerializer,        NS_NewPla
 MAKE_CTOR(CreateContentPolicy,            nsIContentPolicy,            NS_NewContentPolicy)
 #ifdef MOZ_XUL
 MAKE_CTOR(CreateXULSortService,           nsIXULSortService,           NS_NewXULSortService)
-MAKE_CTOR(CreateXULDocument,              nsIXULDocument,              NS_NewXULDocument)
+MAKE_CTOR(CreateXULDocument,              nsIDocument,                 NS_NewXULDocument)
 // NS_NewXULControllers
 #endif
 MAKE_CTOR(CreateContentDLF,               nsIDocumentLoaderFactory,    NS_NewContentDocumentLoaderFactory)
@@ -960,7 +962,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { "@mozilla.org/xul/xul-controllers;1", &kNS_XULCONTROLLERS_CID },
 #ifdef MOZ_XUL
   { "@mozilla.org/xul/xul-sort-service;1", &kNS_XULSORTSERVICE_CID },
-  { "@mozilla.org/xul/xul-document;1", &kNS_XULDOCUMENT_CID },
 #endif
   { CONTENT_DLF_CONTRACTID, &kNS_CONTENT_DOCUMENT_LOADER_FACTORY_CID },
   { NS_JSPROTOCOLHANDLER_CONTRACTID, &kNS_JSPROTOCOLHANDLER_CID },

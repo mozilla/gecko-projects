@@ -25,7 +25,6 @@
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMDocument.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIProtocolHandler.h"
@@ -40,7 +39,9 @@
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsCSSParser.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/css/ImportRule.h"
+#endif
 #include "nsThreadUtils.h"
 #include "nsGkAtoms.h"
 #include "nsIThreadInternal.h"
@@ -399,10 +400,7 @@ Loader::Loader(nsIDocument* aDocument)
   // We can just use the preferred set, since there are no sheets in the
   // document yet (if there are, how did they get there? _we_ load the sheets!)
   // and hence the selected set makes no sense at this time.
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(mDocument);
-  if (domDoc) {
-    domDoc->GetPreferredStyleSheetSet(mPreferredSheet);
-  }
+  mDocument->GetPreferredStyleSheetSet(mPreferredSheet);
 }
 
 Loader::~Loader()
@@ -432,12 +430,11 @@ nsresult
 Loader::SetPreferredSheet(const nsAString& aTitle)
 {
 #ifdef DEBUG
-  nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(mDocument);
-  if (doc) {
+  if (mDocument) {
     nsAutoString currentPreferred;
-    doc->GetLastStyleSheetSet(currentPreferred);
+    mDocument->GetLastStyleSheetSet(currentPreferred);
     if (DOMStringIsNull(currentPreferred)) {
-      doc->GetPreferredStyleSheetSet(currentPreferred);
+      mDocument->GetPreferredStyleSheetSet(currentPreferred);
     }
     NS_ASSERTION(currentPreferred.Equals(aTitle),
                  "Unexpected argument to SetPreferredSheet");
@@ -1118,7 +1115,11 @@ Loader::CreateSheet(nsIURI* aURI,
     }
 
     if (GetStyleBackendType() == StyleBackendType::Gecko) {
+#ifdef MOZ_OLD_STYLE
       *aSheet = new CSSStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
     } else {
       *aSheet = new ServoStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
     }
@@ -1161,7 +1162,11 @@ Loader::PrepareSheet(StyleSheet* aSheet,
   aSheet->SetEnabled(!aIsAlternate);
 
   if (aSheet->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
     aSheet->AsGecko()->SetScopeElement(aScopeElement);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   } else {
     if (aScopeElement) {
       NS_WARNING("stylo: scoped style sheets not supported");
@@ -1275,7 +1280,11 @@ Loader::InsertChildSheet(StyleSheet* aSheet,
   // cloned off of top-level sheets which were disabled
   aSheet->SetEnabled(true);
   if (aGeckoParentRule) {
+#ifdef MOZ_OLD_STYLE
     aGeckoParentRule->SetSheet(aSheet->AsGecko()); // This sets the ownerRule on the sheet
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
   aParentSheet->PrependStyleSheet(aSheet);
 
@@ -1689,12 +1698,16 @@ Loader::ParseSheet(const nsAString& aUTF16,
   nsresult rv;
 
   if (aLoadData->mSheet->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
     nsCSSParser parser(this, aLoadData->mSheet->AsGecko());
     rv = parser.ParseSheet(aUTF16,
                            sheetURI,
                            baseURI,
                            aLoadData->mSheet->Principal(),
                            aLoadData->mLineNumber);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   } else {
     rv = aLoadData->mSheet->AsServo()->ParseSheet(
       this,
@@ -2203,7 +2216,11 @@ Loader::LoadChildSheet(StyleSheet* aParentSheet,
   StyleSheetState state;
   if (aReusableSheets && aReusableSheets->FindReusableStyleSheet(aURL, sheet)) {
     if (aParentSheet->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
       aGeckoParentRule->SetSheet(sheet->AsGecko());
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
     }
     state = eSheetComplete;
   } else {
