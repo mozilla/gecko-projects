@@ -62,6 +62,7 @@ use values::computed::{NonNegativeLength, ToComputedValue, Percentage};
 use values::computed::font::{FontSize, SingleFontFamily};
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
 use values::computed::outline::OutlineStyle;
+use values::generics::transform::TransformStyle;
 use computed_values::border_style;
 
 pub mod style_structs {
@@ -1426,29 +1427,21 @@ impl Clone for ${style_struct.gecko_struct_name} {
     }
 </%def>
 
-<%def name="impl_font_settings(ident, tag_type)">
+<%def name="impl_font_settings(ident, tag_type, value_type, gecko_value_type)">
     <%
     gecko_ffi_name = to_camel_case_lower(ident)
     %>
 
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        use values::generics::FontSettings;
-
         let current_settings = &mut self.gecko.mFont.${gecko_ffi_name};
         current_settings.clear_pod();
 
-        match v {
-            FontSettings::Normal => (), // do nothing, length is already 0
+        unsafe { current_settings.set_len_pod(v.0.len() as u32) };
 
-            FontSettings::Tag(other_settings) => {
-                unsafe { current_settings.set_len_pod(other_settings.len() as u32) };
-
-                for (current, other) in current_settings.iter_mut().zip(other_settings) {
-                    current.mTag = other.tag;
-                    current.mValue = other.value.0;
-                }
-            }
-        };
+        for (current, other) in current_settings.iter_mut().zip(v.0.iter()) {
+            current.mTag = other.tag.0;
+            current.mValue = other.value as ${gecko_value_type};
+        }
     }
 
     pub fn copy_${ident}_from(&mut self, other: &Self) {
@@ -1470,20 +1463,17 @@ impl Clone for ${style_struct.gecko_struct_name} {
     }
 
     pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        use values::generics::{FontSettings, FontSettingTag, ${tag_type}} ;
+        use values::generics::font::{FontSettings, ${tag_type}};
+        use values::specified::font::FontTag;
 
-        if self.gecko.mFont.${gecko_ffi_name}.len() == 0 {
-            FontSettings::Normal
-        } else {
-            FontSettings::Tag(
-                self.gecko.mFont.${gecko_ffi_name}.iter().map(|gecko_font_setting| {
-                    FontSettingTag {
-                        tag: gecko_font_setting.mTag,
-                        value: ${tag_type}(gecko_font_setting.mValue),
-                    }
-                }).collect()
-            )
-        }
+        FontSettings(
+            self.gecko.mFont.${gecko_ffi_name}.iter().map(|gecko_font_setting| {
+                ${tag_type} {
+                    tag: FontTag(gecko_font_setting.mTag),
+                    value: gecko_font_setting.mValue as ${value_type},
+                }
+            }).collect::<Vec<_>>().into_boxed_slice()
+        )
     }
 </%def>
 
@@ -1712,13 +1702,13 @@ fn static_assert() {
     %>
 
     pub fn set_border_image_repeat(&mut self, v: longhands::border_image_repeat::computed_value::T) {
-        use properties::longhands::border_image_repeat::computed_value::RepeatKeyword;
+        use values::specified::border::BorderImageRepeatKeyword;
         use gecko_bindings::structs::StyleBorderImageRepeat;
 
         % for i, side in enumerate(["H", "V"]):
             self.gecko.mBorderImageRepeat${side} = match v.${i} {
                 % for keyword in border_image_repeat_keywords:
-                RepeatKeyword::${keyword} => StyleBorderImageRepeat::${keyword},
+                BorderImageRepeatKeyword::${keyword} => StyleBorderImageRepeat::${keyword},
                 % endfor
             };
         % endfor
@@ -1734,13 +1724,13 @@ fn static_assert() {
     }
 
     pub fn clone_border_image_repeat(&self) -> longhands::border_image_repeat::computed_value::T {
-        use properties::longhands::border_image_repeat::computed_value::RepeatKeyword;
+        use values::specified::border::BorderImageRepeatKeyword;
         use gecko_bindings::structs::StyleBorderImageRepeat;
 
         % for side in ["H", "V"]:
         let servo_${side.lower()} = match self.gecko.mBorderImageRepeat${side} {
             % for keyword in border_image_repeat_keywords:
-            StyleBorderImageRepeat::${keyword} => RepeatKeyword::${keyword},
+            StyleBorderImageRepeat::${keyword} => BorderImageRepeatKeyword::${keyword},
             % endfor
         };
         % endfor
@@ -2337,8 +2327,10 @@ fn static_assert() {
 <%self:impl_trait style_struct_name="Font"
     skip_longhands="${skip_font_longhands}">
 
-    <% impl_font_settings("font_feature_settings", "FontSettingTagInt") %>
-    <% impl_font_settings("font_variation_settings", "FontSettingTagFloat") %>
+    // Negative numbers are invalid at parse time, but <integer> is still an
+    // i32.
+    <% impl_font_settings("font_feature_settings", "FeatureTagValue", "i32", "u32") %>
+    <% impl_font_settings("font_variation_settings", "VariationValue", "f32", "f32") %>
 
     pub fn fixup_none_generic(&mut self, device: &Device) {
         self.gecko.mFont.systemFont = false;
@@ -3345,6 +3337,25 @@ fn static_assert() {
         self.copy_transition_property_from(other)
     }
 
+    // Hand-written because the Mako helpers transform `Preserve3d` into `PRESERVE3D`.
+    pub fn set_transform_style(&mut self, v: TransformStyle) {
+        self.gecko.mTransformStyle = match v {
+            TransformStyle::Flat => structs::NS_STYLE_TRANSFORM_STYLE_FLAT as u8,
+            TransformStyle::Preserve3d => structs::NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D as u8,
+        };
+    }
+
+    // Hand-written because the Mako helpers transform `Preserve3d` into `PRESERVE3D`.
+    pub fn clone_transform_style(&self) -> TransformStyle {
+        match self.gecko.mTransformStyle as u32 {
+            structs::NS_STYLE_TRANSFORM_STYLE_FLAT => TransformStyle::Flat,
+            structs::NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D => TransformStyle::Preserve3d,
+            _ => panic!("illegal transform style"),
+        }
+    }
+
+    ${impl_simple_copy('transform_style', 'mTransformStyle')}
+
     ${impl_transition_count('property', 'Property')}
 
     pub fn animations_equals(&self, other: &Self) -> bool {
@@ -3796,16 +3807,16 @@ fn static_assert() {
     %>
 
     <%self:simple_image_array_property name="repeat" shorthand="${shorthand}" field_name="mRepeat">
-        use values::specified::background::RepeatKeyword;
+        use values::specified::background::BackgroundRepeatKeyword;
         use gecko_bindings::structs::nsStyleImageLayers_Repeat;
         use gecko_bindings::structs::StyleImageLayerRepeat;
 
-        fn to_ns(repeat: RepeatKeyword) -> StyleImageLayerRepeat {
+        fn to_ns(repeat: BackgroundRepeatKeyword) -> StyleImageLayerRepeat {
             match repeat {
-                RepeatKeyword::Repeat => StyleImageLayerRepeat::Repeat,
-                RepeatKeyword::Space => StyleImageLayerRepeat::Space,
-                RepeatKeyword::Round => StyleImageLayerRepeat::Round,
-                RepeatKeyword::NoRepeat => StyleImageLayerRepeat::NoRepeat,
+                BackgroundRepeatKeyword::Repeat => StyleImageLayerRepeat::Repeat,
+                BackgroundRepeatKeyword::Space => StyleImageLayerRepeat::Space,
+                BackgroundRepeatKeyword::Round => StyleImageLayerRepeat::Round,
+                BackgroundRepeatKeyword::NoRepeat => StyleImageLayerRepeat::NoRepeat,
             }
         }
 
@@ -3819,15 +3830,15 @@ fn static_assert() {
 
     pub fn clone_${shorthand}_repeat(&self) -> longhands::${shorthand}_repeat::computed_value::T {
         use properties::longhands::${shorthand}_repeat::single_value::computed_value::T;
-        use values::specified::background::RepeatKeyword;
+        use values::specified::background::BackgroundRepeatKeyword;
         use gecko_bindings::structs::StyleImageLayerRepeat;
 
-        fn to_servo(repeat: StyleImageLayerRepeat) -> RepeatKeyword {
+        fn to_servo(repeat: StyleImageLayerRepeat) -> BackgroundRepeatKeyword {
             match repeat {
-                StyleImageLayerRepeat::Repeat => RepeatKeyword::Repeat,
-                StyleImageLayerRepeat::Space => RepeatKeyword::Space,
-                StyleImageLayerRepeat::Round => RepeatKeyword::Round,
-                StyleImageLayerRepeat::NoRepeat => RepeatKeyword::NoRepeat,
+                StyleImageLayerRepeat::Repeat => BackgroundRepeatKeyword::Repeat,
+                StyleImageLayerRepeat::Space => BackgroundRepeatKeyword::Space,
+                StyleImageLayerRepeat::Round => BackgroundRepeatKeyword::Round,
+                StyleImageLayerRepeat::NoRepeat => BackgroundRepeatKeyword::NoRepeat,
                 _ => panic!("Found unexpected value in style struct for ${shorthand}_repeat property"),
             }
         }
@@ -5081,7 +5092,7 @@ fn static_assert() {
                             coord.0.to_gecko_style_coord(&mut shape.mCoordinates[2 * i]);
                             coord.1.to_gecko_style_coord(&mut shape.mCoordinates[2 * i + 1]);
                         }
-                        shape.mFillRule = if poly.fill == FillRule::EvenOdd {
+                        shape.mFillRule = if poly.fill == FillRule::Evenodd {
                             StyleFillRule::Evenodd
                         } else {
                             StyleFillRule::Nonzero
@@ -5664,11 +5675,14 @@ clip-path
     }
 
     % for counter_property in ["Increment", "Reset"]:
-        pub fn set_counter_${counter_property.lower()}(&mut self, v: longhands::counter_increment::computed_value::T) {
+        pub fn set_counter_${counter_property.lower()}(
+            &mut self,
+            v: longhands::counter_${counter_property.lower()}::computed_value::T
+        ) {
             unsafe {
                 bindings::Gecko_ClearAndResizeCounter${counter_property}s(&mut self.gecko,
-                                                                      v.0.len() as u32);
-                for (i, (name, value)) in v.0.into_iter().enumerate() {
+                                                                      v.get_values().len() as u32);
+                for (i, &(ref name, value)) in v.get_values().into_iter().enumerate() {
                     self.gecko.m${counter_property}s[i].mCounter.assign(name.0.as_slice());
                     self.gecko.m${counter_property}s[i].mValue = value;
                 }
@@ -5685,11 +5699,13 @@ clip-path
             self.copy_counter_${counter_property.lower()}_from(other)
         }
 
-        pub fn clone_counter_${counter_property.lower()}(&self) -> longhands::counter_increment::computed_value::T {
+        pub fn clone_counter_${counter_property.lower()}(
+            &self
+        ) -> longhands::counter_${counter_property.lower()}::computed_value::T {
             use values::CustomIdent;
             use gecko_string_cache::Atom;
 
-            longhands::counter_increment::computed_value::T(
+            longhands::counter_${counter_property.lower()}::computed_value::T::new(
                 self.gecko.m${counter_property}s.iter().map(|ref gecko_counter| {
                     (CustomIdent(Atom::from(gecko_counter.mCounter.to_string())), gecko_counter.mValue)
                 }).collect()

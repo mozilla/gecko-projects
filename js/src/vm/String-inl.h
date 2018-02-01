@@ -109,7 +109,7 @@ MOZ_ALWAYS_INLINE void
 JSRope::init(JSContext* cx, JSString* left, JSString* right, size_t length)
 {
     d.u1.length = length;
-    d.u1.flags = ROPE_FLAGS;
+    d.u1.flags = INIT_ROPE_FLAGS;
     if (left->hasLatin1Chars() && right->hasLatin1Chars())
         d.u1.flags |= LATIN1_CHARS_BIT;
     d.s.u2.left = left;
@@ -206,7 +206,7 @@ MOZ_ALWAYS_INLINE void
 JSFlatString::init(const char16_t* chars, size_t length)
 {
     d.u1.length = length;
-    d.u1.flags = FLAT_BIT;
+    d.u1.flags = LINEAR_BIT;
     d.s.u2.nonInlineCharsTwoByte = chars;
 }
 
@@ -214,7 +214,7 @@ MOZ_ALWAYS_INLINE void
 JSFlatString::init(const JS::Latin1Char* chars, size_t length)
 {
     d.u1.length = length;
-    d.u1.flags = FLAT_BIT | LATIN1_CHARS_BIT;
+    d.u1.flags = LINEAR_BIT | LATIN1_CHARS_BIT;
     d.s.u2.nonInlineCharsLatin1 = chars;
 }
 
@@ -379,9 +379,9 @@ inline void
 JSFatInlineString::finalize(js::FreeOp* fop)
 {
     MOZ_ASSERT(getAllocKind() == js::gc::AllocKind::FAT_INLINE_STRING);
+    MOZ_ASSERT(isInline());
 
-    if (!isInline())
-        fop->free_(nonInlineCharsRaw());
+    // Nothing to do.
 }
 
 inline void
@@ -389,11 +389,19 @@ JSAtom::finalize(js::FreeOp* fop)
 {
     MOZ_ASSERT(JSString::isAtom());
     MOZ_ASSERT(JSString::isFlat());
-    MOZ_ASSERT(getAllocKind() == js::gc::AllocKind::ATOM ||
-               getAllocKind() == js::gc::AllocKind::FAT_INLINE_ATOM);
+    MOZ_ASSERT(getAllocKind() == js::gc::AllocKind::ATOM);
 
     if (!isInline())
         fop->free_(nonInlineCharsRaw());
+}
+
+inline void
+js::FatInlineAtom::finalize(js::FreeOp* fop)
+{
+    MOZ_ASSERT(JSString::isAtom());
+    MOZ_ASSERT(getAllocKind() == js::gc::AllocKind::FAT_INLINE_ATOM);
+
+    // Nothing to do.
 }
 
 inline void

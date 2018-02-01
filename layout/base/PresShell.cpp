@@ -40,6 +40,7 @@
 #include "nsPresContext.h"
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
+#include "nsIPresShellInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h" // for Event::GetEventPopupControlState()
 #include "mozilla/dom/PointerEventHandler.h"
@@ -4595,11 +4596,12 @@ nsIPresShell::RestyleForCSSRuleChanges()
     return;
   }
 
-  mDocument->RebuildUserFontSet();
+  EnsureStyleFlush();
+  mDocument->MarkUserFontSetDirty();
 
   if (mPresContext) {
-    mPresContext->RebuildCounterStyles();
-    mPresContext->RebuildFontFeatureValues();
+    mPresContext->MarkCounterStylesDirty();
+    mPresContext->MarkFontFeatureValuesDirty();
   }
 
   if (!mDidInitialize) {
@@ -8385,8 +8387,7 @@ PresShell::GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
       RefPtr<nsXULElement> xulElement =
         nsXULElement::FromContent(focusedContent);
       if (xulElement) {
-        IgnoredErrorResult ignored;
-        nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(ignored);
+        nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
         nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
         // Tree view special case (tree items have no frames)
         // Get the focused row and add its coordinates, which are already in pixels

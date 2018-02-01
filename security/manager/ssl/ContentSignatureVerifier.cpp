@@ -42,16 +42,6 @@ static LazyLogModule gCSVerifierPRLog("ContentSignatureVerifier");
 // Content-Signature prefix
 const nsLiteralCString kPREFIX = NS_LITERAL_CSTRING("Content-Signature:\x00");
 
-ContentSignatureVerifier::~ContentSignatureVerifier()
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-  destructorSafeDestroyNSSReference();
-  shutdown(ShutdownCalledFrom::Object);
-}
-
 NS_IMETHODIMP
 ContentSignatureVerifier::VerifyContentSignature(
   const nsACString& aData, const nsACString& aCSHeader,
@@ -65,6 +55,9 @@ ContentSignatureVerifier::VerifyContentSignature(
     if (rv == NS_ERROR_INVALID_SIGNATURE) {
       return NS_OK;
     }
+    // This failure can have many different reasons but we don't treat it as
+    // invalid signature.
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 3);
     return rv;
   }
 
@@ -78,8 +71,7 @@ IsNewLine(char16_t c)
 }
 
 nsresult
-ReadChainIntoCertList(const nsACString& aCertChain, CERTCertList* aCertList,
-                      const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+ReadChainIntoCertList(const nsACString& aCertChain, CERTCertList* aCertList)
 {
   bool inBlock = false;
   bool certFound = false;
@@ -145,18 +137,13 @@ ContentSignatureVerifier::CreateContextInternal(const nsACString& aData,
                                                 const nsACString& aName)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    CSVerifier_LOG(("CSVerifier: nss is already shutdown\n"));
-    return NS_ERROR_FAILURE;
-  }
 
   UniqueCERTCertList certCertList(CERT_NewCertList());
   if (!certCertList) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  nsresult rv = ReadChainIntoCertList(aCertChain, certCertList.get(), locker);
+  nsresult rv = ReadChainIntoCertList(aCertChain, certCertList.get());
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -191,7 +178,17 @@ ContentSignatureVerifier::CreateContextInternal(const nsACString& aData,
       return NS_ERROR_FAILURE;
     }
     // otherwise, assume the signature was invalid
-    CSVerifier_LOG(("CSVerifier: The supplied chain is bad\n"));
+    if (result == mozilla::pkix::Result::ERROR_EXPIRED_CERTIFICATE) {
+      Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 4);
+    } else if (result ==
+               mozilla::pkix::Result::ERROR_NOT_YET_VALID_CERTIFICATE) {
+      Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 5);
+    } else {
+      // Building cert chain failed for some other reason.
+      Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 6);
+    }
+    CSVerifier_LOG(("CSVerifier: The supplied chain is bad (%s)\n",
+                    MapResultToName(result)));
     return NS_ERROR_INVALID_SIGNATURE;
   }
 
@@ -208,6 +205,8 @@ ContentSignatureVerifier::CreateContextInternal(const nsACString& aData,
   BRNameMatchingPolicy nameMatchingPolicy(BRNameMatchingPolicy::Mode::Enforce);
   result = CheckCertHostname(certDER, hostnameInput, nameMatchingPolicy);
   if (result != Success) {
+    // EE cert isnot valid for the given host name.
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 7);
     return NS_ERROR_INVALID_SIGNATURE;
   }
 
@@ -215,6 +214,7 @@ ContentSignatureVerifier::CreateContextInternal(const nsACString& aData,
 
   // in case we were not able to extract a key
   if (!mKey) {
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 8);
     CSVerifier_LOG(("CSVerifier: unable to extract a key\n"));
     return NS_ERROR_INVALID_SIGNATURE;
   }
@@ -253,19 +253,23 @@ ContentSignatureVerifier::CreateContextInternal(const nsACString& aData,
   mCx = UniqueVFYContext(
     VFY_CreateContext(mKey.get(), &signatureItem, oid, nullptr));
   if (!mCx) {
+    // Creating context failed.
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 9);
     return NS_ERROR_INVALID_SIGNATURE;
   }
 
   if (VFY_Begin(mCx.get()) != SECSuccess) {
+    // Creating context failed.
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 9);
     return NS_ERROR_INVALID_SIGNATURE;
   }
 
-  rv = UpdateInternal(kPREFIX, locker);
+  rv = UpdateInternal(kPREFIX);
   if (NS_FAILED(rv)) {
     return rv;
   }
   // add data if we got any
-  return UpdateInternal(aData, locker);
+  return UpdateInternal(aData);
 }
 
 nsresult
@@ -371,8 +375,7 @@ ContentSignatureVerifier::CreateContext(const nsACString& aData,
 }
 
 nsresult
-ContentSignatureVerifier::UpdateInternal(
-  const nsACString& aData, const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+ContentSignatureVerifier::UpdateInternal(const nsACString& aData)
 {
   if (!aData.IsEmpty()) {
     if (VFY_Update(mCx.get(), (const unsigned char*)nsPromiseFlatCString(aData).get(),
@@ -390,11 +393,6 @@ NS_IMETHODIMP
 ContentSignatureVerifier::Update(const nsACString& aData)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    CSVerifier_LOG(("CSVerifier: nss is already shutdown\n"));
-    return NS_ERROR_FAILURE;
-  }
 
   // If we didn't create the context yet, bail!
   if (!mHasCertChain) {
@@ -404,7 +402,7 @@ ContentSignatureVerifier::Update(const nsACString& aData)
     return NS_ERROR_FAILURE;
   }
 
-  return UpdateInternal(aData, locker);
+  return UpdateInternal(aData);
 }
 
 /**
@@ -415,21 +413,23 @@ ContentSignatureVerifier::End(bool* _retval)
 {
   NS_ENSURE_ARG(_retval);
   MOZ_ASSERT(NS_IsMainThread());
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    CSVerifier_LOG(("CSVerifier: nss is already shutdown\n"));
-    return NS_ERROR_FAILURE;
-  }
 
   // If we didn't create the context yet, bail!
   if (!mHasCertChain) {
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 2);
     MOZ_ASSERT_UNREACHABLE(
       "Someone called ContentSignatureVerifier::End before "
       "downloading the cert chain.");
     return NS_ERROR_FAILURE;
   }
 
-  *_retval = (VFY_End(mCx.get()) == SECSuccess);
+  bool result = (VFY_End(mCx.get()) == SECSuccess);
+  if (result) {
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 0);
+  } else {
+    Accumulate(Telemetry::CONTENT_SIGNATURE_VERIFICATION_STATUS, 1);
+  }
+  *_retval = result;
 
   return NS_OK;
 }

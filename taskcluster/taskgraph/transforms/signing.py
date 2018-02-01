@@ -11,6 +11,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (
+    add_scope_prefix,
     get_signing_cert_scope_per_platform,
     get_worker_type_for_scope,
 )
@@ -97,7 +98,9 @@ def make_task_description(config, jobs):
             for f in artifacts['formats']:
                 formats.add(f)  # Add each format only once
         for format in formats:
-            signing_format_scopes.append("project:releng:signing:format:{}".format(format))
+            signing_format_scopes.append(
+                add_scope_prefix(config, 'signing:format:{}'.format(format))
+            )
 
         treeherder = job.get('treeherder', {})
         is_nightly = dep_job.attributes.get('nightly', False)
@@ -111,7 +114,7 @@ def make_task_description(config, jobs):
             dep_th_platform, build_platform, build_type
         ))
 
-        treeherder.setdefault('tier', 1)
+        treeherder.setdefault('tier', 1 if '-ccov' not in build_platform else 2)
         treeherder.setdefault('kind', 'build')
 
         label = job['label']
@@ -155,7 +158,12 @@ def make_task_description(config, jobs):
 
 
 def _generate_treeherder_platform(dep_th_platform, build_platform, build_type):
-    actual_build_type = 'pgo' if '-pgo' in build_platform else build_type
+    if '-pgo' in build_platform:
+        actual_build_type = 'pgo'
+    elif '-ccov' in build_platform:
+        actual_build_type = 'ccov'
+    else:
+        actual_build_type = build_type
     return '{}/{}'.format(dep_th_platform, actual_build_type)
 
 
