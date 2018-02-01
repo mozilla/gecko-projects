@@ -371,10 +371,13 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
     Previous build deps will be optimized out via action task."""
     is_rc = (parameters.get('desktop_release_type') == 'rc')
     if is_rc:
+        # ship_firefox_rc runs after `promote` rather than `push`; include
+        # all promote tasks.
         filtered_for_candidates = target_tasks_promote_firefox(
             full_task_graph, parameters, graph_config,
         )
     else:
+        # ship_firefox runs after `push`; include all push tasks.
         filtered_for_candidates = target_tasks_push_firefox(
             full_task_graph, parameters, graph_config,
         )
