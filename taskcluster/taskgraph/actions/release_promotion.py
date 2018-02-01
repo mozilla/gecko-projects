@@ -226,7 +226,6 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
     release_history = {}
     product = promotion_config['product']
-    desktop_release_type = promotion_config.get('desktop_release_type', '')
 
     next_version = str(input.get('next_version') or '')
     if release_promotion_flavor in VERSION_BUMP_FLAVORS:
@@ -306,7 +305,7 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     parameters['build_number'] = int(input['build_number'])
     parameters['next_version'] = next_version
     parameters['release_history'] = release_history
-    parameters['desktop_release_type'] = desktop_release_type
+    parameters['desktop_release_type'] = promotion_config.get('desktop_release_type', '')
     parameters['release_eta'] = input.get('release_eta', '')
     if input['version']:
         parameters['version'] = input['version']
