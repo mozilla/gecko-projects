@@ -19,7 +19,7 @@ class FreeBSDBootstrapper(BaseBootstrapper):
             'gmake',
             'gtar',
             'mercurial',
-            'node',
+            'npm',
             'pkgconf',
             'py%s%s-sqlite3' % sys.version_info[0:2],
             'rust',
@@ -32,7 +32,7 @@ class FreeBSDBootstrapper(BaseBootstrapper):
             'gconf2',
             'gtk2',
             'gtk3',
-            'llvm40',
+            'mesa-dri',  # depends on llvm*
             'pulseaudio',
             'v4l_compat',
             'yasm',

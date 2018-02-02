@@ -21,7 +21,7 @@ android-api-16/debug:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -39,6 +39,7 @@ android-api-16/debug:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -73,7 +74,7 @@ android-x86/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -91,6 +92,7 @@ android-x86/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -130,7 +132,7 @@ android-x86-nightly/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -149,6 +151,7 @@ android-x86-nightly/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -178,7 +181,7 @@ android-api-16/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -196,6 +199,7 @@ android-api-16/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -245,6 +249,7 @@ android-api-16-without-google-play-services/opt:
     run-on-projects: ['mozilla-central']
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -279,7 +284,7 @@ android-api-16-nightly/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -298,6 +303,7 @@ android-api-16-nightly/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -332,7 +338,7 @@ android-x86-old-id/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -351,6 +357,7 @@ android-x86-old-id/opt:
     run-on-projects: ['mozilla-central']
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -388,7 +395,7 @@ android-x86-old-id-nightly/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -408,6 +415,7 @@ android-x86-old-id-nightly/opt:
     run-on-projects: ['mozilla-central']
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -437,7 +445,7 @@ android-api-16-old-id/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -456,6 +464,7 @@ android-api-16-old-id/opt:
     run-on-projects: ['mozilla-central']
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -488,7 +497,7 @@ android-api-16-old-id-nightly/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -508,6 +517,7 @@ android-api-16-old-id-nightly/opt:
     run-on-projects: ['mozilla-central']
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -537,7 +547,7 @@ android-api-16-gradle/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -554,6 +564,7 @@ android-api-16-gradle/opt:
         custom-build-variant-cfg: api-16-gradle
         tooltool-downloads: internal
     toolchains:
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -583,7 +594,7 @@ android-aarch64/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -601,6 +612,7 @@ android-aarch64/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android
@@ -635,7 +647,7 @@ android-aarch64-nightly/opt:
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
               type: directory
             - name: public/build/geckoview_example.apk
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/officialWithGeckoBinariesNoMinApi/debug/geckoview_example-official-withGeckoBinaries-noMinApi-debug.apk
               type: file
             - name: public/build
               path: /builds/worker/artifacts/
@@ -654,6 +666,7 @@ android-aarch64-nightly/opt:
         tooltool-downloads: internal
     toolchains:
         - android-gradle-dependencies
+        - android-ndk-linux
         - android-sdk-linux
         - linux64-clang
         - linux64-rust-android

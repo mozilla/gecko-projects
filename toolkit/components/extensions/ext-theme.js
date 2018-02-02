@@ -2,10 +2,10 @@
 
 /* global windowTracker, EventManager, EventEmitter */
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
+ChromeUtils.defineModuleGetter(this, "LightweightThemeManager",
+                               "resource://gre/modules/LightweightThemeManager.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "gThemesEnabled", () => {
   return Services.prefs.getBoolPref("extensions.webextensions.themes.enabled");
@@ -129,6 +129,9 @@ class Theme {
         case "frame":
           this.lwtStyles.accentcolor = cssColor;
           break;
+        case "frame_inactive":
+          this.lwtStyles.accentcolorInactive = cssColor;
+          break;
         case "textcolor":
         case "background_tab_text":
           this.lwtStyles.textcolor = cssColor;
@@ -139,6 +142,12 @@ class Theme {
         case "toolbar_text":
         case "bookmark_text":
           this.lwtStyles.toolbar_text = cssColor;
+          break;
+        case "icons":
+          this.lwtStyles.icon_color = cssColor;
+          break;
+        case "icons_attention":
+          this.lwtStyles.icon_attention_color = cssColor;
           break;
         case "tab_text":
         case "toolbar_field":
@@ -274,6 +283,7 @@ class Theme {
     let lwtStyles = {
       headerURL: "",
       accentcolor: "",
+      accentcolorInactive: "",
       additionalBackgrounds: "",
       backgroundsAlignment: "",
       backgroundsTiling: "",

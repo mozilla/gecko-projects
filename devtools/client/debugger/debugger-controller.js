@@ -157,10 +157,10 @@ var {Task} = require("devtools/shared/task");
 
 XPCOMUtils.defineConstant(this, "EVENTS", EVENTS);
 
-XPCOMUtils.defineLazyModuleGetter(this, "Parser",
+ChromeUtils.defineModuleGetter(this, "Parser",
   "resource://devtools/shared/Parser.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
+ChromeUtils.defineModuleGetter(this, "ShortcutUtils",
   "resource://gre/modules/ShortcutUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
@@ -211,7 +211,7 @@ var DebuggerController = {
     let store = createStore((state, action) => {
       if (action.seqId &&
          (action.status === "done" || action.status === "error") &&
-         state && state.asyncRequests.indexOf(action.seqId) === -1) {
+         state && !state.asyncRequests.includes(action.seqId)) {
         return state;
       }
       return reducer(state, action);

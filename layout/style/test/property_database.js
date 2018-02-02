@@ -5093,10 +5093,10 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
-    other_values: [ "start", "end", "flex-start", "flex-end", "center", "left",
-                    "right", "space-between", "space-around", "space-evenly",
-                    "first baseline", "last baseline", "baseline", "stretch", "start safe",
-                    "unsafe end", "unsafe end stretch", "end safe space-evenly" ],
+    other_values: [ "start", "end", "flex-start", "flex-end", "center",
+                    "space-between", "space-around", "space-evenly",
+                    "first baseline", "last baseline", "baseline", "stretch", "safe start",
+                    "unsafe end", "safe end" ],
     invalid_values: [ "none", "5", "self-end", "safe", "normal unsafe", "unsafe safe",
                       "safe baseline", "baseline unsafe", "baseline end", "end normal",
                       "safe end unsafe start", "safe end unsafe", "normal safe start",
@@ -5108,10 +5108,9 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
-    // Can't test 'left'/'right' here since that computes to 'start' for blocks.
     other_values: [ "end", "flex-start", "flex-end", "self-start", "self-end",
                     "center", "stretch", "first baseline", "last baseline", "baseline",
-                    "unsafe left", "start", "center unsafe", "safe right", "center safe" ],
+                    "start", "unsafe center", "safe center" ],
     invalid_values: [ "space-between", "abc", "5%", "legacy", "legacy end",
                       "end legacy", "unsafe", "unsafe baseline", "normal unsafe",
                       "safe left unsafe", "safe stretch", "end end", "auto" ]
@@ -5122,8 +5121,8 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
     other_values: [ "normal", "start", "flex-start", "flex-end", "center", "stretch",
-                    "first baseline", "last baseline", "baseline", "right safe",
-                    "unsafe center", "self-start", "self-end safe" ],
+                    "first baseline", "last baseline", "baseline",
+                    "unsafe center", "self-start", "safe self-end" ],
     invalid_values: [ "space-between", "abc", "30px", "stretch safe", "safe" ]
   },
   "justify-content": {
@@ -5133,8 +5132,7 @@ var gCSSProperties = {
     initial_values: [ "normal" ],
     other_values: [ "start", "end", "flex-start", "flex-end", "center", "left",
                     "right", "space-between", "space-around", "space-evenly",
-                    "first baseline", "last baseline", "baseline", "stretch", "start safe",
-                    "unsafe end", "unsafe end stretch", "end safe space-evenly" ],
+                    "stretch", "safe start", "unsafe end", "safe end" ],
     invalid_values: [ "30px", "5%", "self-end", "safe", "normal unsafe", "unsafe safe",
                       "safe baseline", "baseline unsafe", "baseline end", "normal end",
                       "safe end unsafe start", "safe end unsafe", "normal safe start",
@@ -5147,10 +5145,10 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto", "normal" ],
     other_values: [ "end", "flex-start", "flex-end", "self-start", "self-end",
-                    "center", "left", "right", "first baseline", "last baseline",
-                    "baseline", "stretch", "start", "legacy left", "right legacy",
-                    "legacy center", "unsafe right", "left unsafe", "safe right",
-                    "center safe" ],
+                    "center", "left", "right", "stretch", "start",
+                    "legacy left", "right legacy", "legacy center",
+                    "unsafe right", "unsafe left", "safe right",
+                    "safe center" ],
     invalid_values: [ "space-between", "abc", "30px", "legacy", "legacy start",
                       "end legacy", "legacy baseline", "legacy legacy", "unsafe",
                       "safe legacy left", "legacy left safe", "legacy safe left",
@@ -5163,9 +5161,9 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
     other_values: [ "normal", "start", "end", "flex-start", "flex-end", "self-start",
-                    "self-end", "center", "left", "right", "baseline", "first baseline",
-                    "last baseline", "stretch", "left unsafe", "unsafe right",
-                    "safe right", "center safe" ],
+                    "self-end", "center", "left", "right", "stretch", "unsafe left",
+                    "baseline", "last baseline", "first baseline",
+                    "unsafe right", "safe right", "safe center" ],
     invalid_values: [ "space-between", "abc", "30px", "none", "first", "last",
                       "legacy left", "right legacy", "baseline first", "baseline last" ]
   },
@@ -5175,9 +5173,9 @@ var gCSSProperties = {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "align-content", "justify-content" ],
     initial_values: [ "normal" ],
-    other_values: [ "normal start", "end baseline", "end end",
+    other_values: [ "normal start", "baseline end", "end end",
                     "space-between flex-end", "last baseline start",
-                    "space-evenly", "flex-start", "end", "left" ],
+                    "space-evenly", "flex-start", "end" ],
     invalid_values: [ "none", "center safe", "unsafe start", "right / end" ]
   },
   "place-items": {
@@ -5186,9 +5184,8 @@ var gCSSProperties = {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "align-items", "justify-items" ],
     initial_values: [ "normal" ],
-    other_values: [ "normal center", "end baseline", "end auto",
-                    "end", "right", "baseline", "start last baseline",
-                    "left flex-end", "last baseline start", "stretch" ],
+    other_values: [ "normal center", "baseline end", "end auto",
+                    "end", "flex-end left", "last baseline start", "stretch" ],
     invalid_values: [ "space-between", "start space-evenly", "none", "end/end",
                       "center safe", "auto start", "end legacy left" ]
   },
@@ -5198,9 +5195,10 @@ var gCSSProperties = {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "align-self", "justify-self" ],
     initial_values: [ "auto" ],
-    other_values: [ "normal start", "end first baseline", "end auto",
-                    "end", "right", "normal", "baseline", "start baseline",
-                    "left self-end", "last baseline start", "stretch" ],
+    other_values: [ "normal start", "first baseline end", "end auto",
+                    "end", "normal", "baseline start", "baseline",
+                    "start baseline", "self-end left", "last baseline start",
+                    "stretch" ],
     invalid_values: [ "space-between", "start space-evenly", "none", "end safe",
                       "auto legacy left", "legacy left", "auto/auto" ]
   },
@@ -6289,6 +6287,59 @@ function get_computed_value(cs, property)
   if (info.get_computed)
     return info.get_computed(cs, property);
   return cs.getPropertyValue(property);
+}
+
+if (SpecialPowers.DOMWindowUtils.isStyledByServo &&
+    IsCSSPropertyPrefEnabled("layout.css.individual-transform.enabled")) {
+  gCSSProperties.rotate = {
+    domProp: "rotate",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "45deg", "45grad", "72rad", "0.25turn", ".57rad",
+                    "0 0 0 0rad", "0 0 1 45deg", "0 0 1 0rad",
+                    /* valid calc() values */
+                    "calc(1) 0 0 calc(45deg + 5rad)",
+                    "0 1 0 calc(400grad + 1rad)",
+                    "calc(0.5turn + 10deg)"],
+    invalid_values: [ "0", "7", "0, 0, 1, 45deg", "0 0 45deg", "0 0 20rad",
+                      "0 0 0 0",
+                      /* invalid calc() values */
+                      "0.5 1 0 calc(45deg + 10)", "calc(0.5turn + 10%)"],
+  };
+
+  gCSSProperties.translate = {
+    domProp: "translate",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    prerequisites: { "width": "10px", "height": "10px", "display": "block" },
+    initial_values: [ "none" ],
+    other_values: [ "-4px", "3px", "4em", "50%", "4px 5px 6px",
+                    "4px 5px", "50% 5px 6px", "50% 10% 6em",
+                    /* valid calc() values */
+                    "calc(5px + 10%)",
+                    "calc(0.25 * 5px + 10% / 3)",
+                    "calc(5px - 10% * 3)",
+                    "calc(5px - 3 * 10%) 50px",
+                    "-50px calc(5px - 10% * 3)"],
+    invalid_values: [ "1", "-moz-min(5px,10%)", "4px, 5px, 6px",
+                      "3px 4px 1px 7px", "4px 5px 10%",
+                      /* invalid calc() values */
+                      "10px calc(min(5px,10%))",
+                      "calc(max(5px,10%) 10%)", "calc(nonsense)"],
+  };
+  gCSSProperties.scale = {
+    domProp: "scale",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "10", "10 20", "10 20 30", "0 2.0",
+                     /* valid calc() values */
+                     "calc(1 + 2)", "calc(10) calc(20) 30"],
+    invalid_values: ["150%", "10px", "10deg", "10, 20, 30",
+                      /* invalid calc() values */
+                      "calc(1 + 20%)",  "10 calc(1 + 10px)"],
+  };
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.touch_action.enabled")) {

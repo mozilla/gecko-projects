@@ -12,6 +12,7 @@
 #include "mozilla/net/HttpChannelParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/IntegerPrintfMacros.h"
@@ -142,6 +143,7 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.initialRwin(), a.blockAuthPrompt(),
                        a.suspendAfterSynthesizeResponse(),
                        a.allowStaleCacheContent(), a.contentTypeHint(),
+                       a.corsMode(), a.redirectMode(), a.fetchCacheMode(),
                        a.channelId(), a.contentWindowId(), a.preferredAlternativeType(),
                        a.topLevelOuterContentWindowId(),
                        a.launchServiceWorkerStart(),
@@ -480,6 +482,9 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const bool&                aSuspendAfterSynthesizeResponse,
                                  const bool&                aAllowStaleCacheContent,
                                  const nsCString&           aContentTypeHint,
+                                 const uint32_t&            aCorsMode,
+                                 const uint32_t&            aRedirectMode,
+                                 const uint32_t&            aFetchCacheMode,
                                  const uint64_t&            aChannelId,
                                  const uint64_t&            aContentWindowId,
                                  const nsCString&           aPreferredAlternativeType,
@@ -526,7 +531,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
 
   nsCOMPtr<nsIChannel> channel;
   rv = NS_NewChannelInternal(getter_AddRefs(channel), uri, loadInfo,
-                             nullptr, nullptr, aLoadFlags, ios);
+                             nullptr, nullptr, nullptr, aLoadFlags, ios);
   if (NS_FAILED(rv)) {
     return SendFailedAsyncOpen(rv);
   }
@@ -535,6 +540,11 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   if (NS_FAILED(rv)) {
     return SendFailedAsyncOpen(rv);
   }
+
+  // Set attributes needed to create a FetchEvent from this channel.
+  httpChannel->SetCorsMode(aCorsMode);
+  httpChannel->SetRedirectMode(aRedirectMode);
+  httpChannel->SetFetchCacheMode(aFetchCacheMode);
 
   // Set the channelId allocated in child to the parent instance
   httpChannel->SetChannelId(aChannelId);
@@ -666,7 +676,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
       rv = httpChannel->OverrideSecurityInfo(secInfo);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
-  } else {
+  } else if (!ServiceWorkerParentInterceptEnabled()) {
     nsLoadFlags newLoadFlags;
     httpChannel->GetLoadFlags(&newLoadFlags);
     newLoadFlags |= nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
@@ -1481,9 +1491,12 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
     }
   }
 
-  nsCOMPtr<nsIEncodedChannel> encodedChannel = do_QueryInterface(aRequest);
-  if (encodedChannel)
-    encodedChannel->SetApplyConversion(false);
+  // Propagate whether or not conversion should occur from the parent-side
+  // channel to the child-side channel.  Then disable the parent-side
+  // conversion so that it only occurs in the child.
+  bool applyConversion = true;
+  Unused << chan->GetApplyConversion(&applyConversion);
+  chan->SetApplyConversion(false);
 
   // Keep the cache entry for future use in RecvSetCacheTokenCachedCharset().
   // It could be already released by nsHttpChannel at that time.
@@ -1523,6 +1536,23 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
 
   int64_t altDataLen = chan->GetAltDataLength();
 
+  // Maybe pass back the ServiceWorkerDescriptor controller for this channel.
+  // For subresource loads the controller is already known when the channel
+  // is first open and comes down to us via the LoadInfo.  For non-subresource
+  // loads, however, the controller is selected based on the URL by the
+  // ServiceWorkerManager.  In these cases we need to communicate the controller
+  // back to the child process so the resulting window/worker can set its
+  // navigator.serviceWorker.controller correctly immediately.
+  OptionalIPCServiceWorkerDescriptor ipcController = void_t();
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  Unused << chan->GetLoadInfo(getter_AddRefs(loadInfo));
+  if (loadInfo) {
+    const Maybe<ServiceWorkerDescriptor>& controller = loadInfo->GetController();
+    if (controller.isSome()) {
+      ipcController = controller.ref().ToIPC();
+    }
+  }
+
   // !!! We need to lock headers and please don't forget to unlock them !!!
   requestHead->Enter();
   nsresult rv = NS_OK;
@@ -1540,7 +1570,9 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           redirectCount,
                           cacheKeyValue,
                           altDataType,
-                          altDataLen))
+                          altDataLen,
+                          ipcController,
+                          applyConversion))
   {
     rv = NS_ERROR_UNEXPECTED;
   }

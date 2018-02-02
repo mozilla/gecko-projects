@@ -5,8 +5,8 @@
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function PrivateBrowsingTrackingProtectionWhitelist() {
   // The list of URIs explicitly excluded from tracking protection.
@@ -30,7 +30,7 @@ PrivateBrowsingTrackingProtectionWhitelist.prototype = {
    *        The URI to add to the list.
    */
   addToAllowList(uri) {
-    if (this._allowlist.indexOf(uri.spec) === -1) {
+    if (!this._allowlist.includes(uri.spec)) {
       this._allowlist.push(uri.spec);
     }
   },
@@ -55,7 +55,7 @@ PrivateBrowsingTrackingProtectionWhitelist.prototype = {
    *        The URI to add to the list.
    */
   existsInAllowList(uri) {
-    return this._allowlist.indexOf(uri.spec) !== -1;
+    return this._allowlist.includes(uri.spec);
   },
 
   observe(subject, topic, data) {

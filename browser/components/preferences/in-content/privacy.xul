@@ -559,6 +559,8 @@
   </vbox>
 </groupbox>
 
+<!-- Firefox Data Collection and Use -->
+#ifdef MOZ_DATA_REPORTING
 <hbox id="dataCollectionCategory"
       class="subcategory"
       hidden="true"
@@ -566,8 +568,6 @@
   <label class="header-name" flex="1">&dataCollection.label;</label>
 </hbox>
 
-<!-- Firefox Data Collection and Use -->
-#ifdef MOZ_DATA_REPORTING
 <groupbox id="dataCollectionGroup" data-category="panePrivacy" hidden="true">
   <caption class="search-header" hidden="true"><label>&dataCollection.label;</label></caption>
 
@@ -620,11 +620,9 @@
            class="learnMore text-link">&enableSafeBrowsingLearnMore.label;</label>
   </hbox>
   <vbox class="indent">
-#ifdef MOZILLA_OFFICIAL
     <checkbox id="blockDownloads"
               label="&blockDownloads.label;"
               accesskey="&blockDownloads.accesskey;" />
-#endif
     <checkbox id="blockUncommonUnwanted"
               label="&blockUncommonAndUnwanted.label;"
               accesskey="&blockUncommonAndUnwanted.accesskey;" />
@@ -672,12 +670,10 @@
                                 &certmgr.tab.others2;
                                 &certmgr.tab.websites3;
                                 &certmgr.tab.ca;
-                                &certmgr.tab.orphan2;
                                 &certmgr.mine2;
                                 &certmgr.others2;
                                 &certmgr.websites3;
                                 &certmgr.cas2;
-                                &certmgr.orphans2;
                                 &certmgr.certname;
                                 &certmgr.tokenname;
                                 &certmgr.view2.label;

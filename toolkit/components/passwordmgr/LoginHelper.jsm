@@ -20,8 +20,8 @@ this.EXPORTED_SYMBOLS = [
 
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 // LoginHelper
 
@@ -44,7 +44,7 @@ this.LoginHelper = {
     };
 
     // Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
-    let ConsoleAPI = Cu.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
+    let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
     let consoleOptions = {
       maxLogLevel: getMaxLogLevel(),
       prefix: aLogPrefix,
@@ -79,9 +79,9 @@ this.LoginHelper = {
     // invalid for any field stored as plaintext, and a hostname made of a
     // single dot cannot be stored in the legacy format.
     if (aHostname == "." ||
-        aHostname.indexOf("\r") != -1 ||
-        aHostname.indexOf("\n") != -1 ||
-        aHostname.indexOf("\0") != -1) {
+        aHostname.includes("\r") ||
+        aHostname.includes("\n") ||
+        aHostname.includes("\0")) {
       throw new Error("Invalid hostname");
     }
   },
@@ -95,11 +95,11 @@ this.LoginHelper = {
    */
   checkLoginValues(aLogin) {
     function badCharacterPresent(l, c) {
-      return ((l.formSubmitURL && l.formSubmitURL.indexOf(c) != -1) ||
-              (l.httpRealm && l.httpRealm.indexOf(c) != -1) ||
-                                  l.hostname.indexOf(c) != -1 ||
-                                  l.usernameField.indexOf(c) != -1 ||
-                                  l.passwordField.indexOf(c) != -1);
+      return ((l.formSubmitURL && l.formSubmitURL.includes(c)) ||
+              (l.httpRealm && l.httpRealm.includes(c)) ||
+                                  l.hostname.includes(c) ||
+                                  l.usernameField.includes(c) ||
+                                  l.passwordField.includes(c));
     }
 
     // Nulls are invalid, as they don't round-trip well.
@@ -112,8 +112,8 @@ this.LoginHelper = {
     // values, but nsISecretDecoderRing doesn't use nsStrings, so the
     // nulls cause truncation. Check for them here just to avoid
     // unexpected round-trip surprises.
-    if (aLogin.username.indexOf("\0") != -1 ||
-        aLogin.password.indexOf("\0") != -1) {
+    if (aLogin.username.includes("\0") ||
+        aLogin.password.includes("\0")) {
       throw new Error("login values can't contain nulls");
     }
 
@@ -132,7 +132,7 @@ this.LoginHelper = {
     // A hostname with "\ \(" won't roundtrip.
     // eg host="foo (", realm="bar" --> "foo ( (bar)"
     // vs host="foo", realm=" (bar" --> "foo ( (bar)"
-    if (aLogin.hostname.indexOf(" (") != -1) {
+    if (aLogin.hostname.includes(" (")) {
       throw new Error("bad parens in hostname");
     }
   },
@@ -205,6 +205,51 @@ this.LoginHelper = {
         // newURI will throw for some values e.g. chrome://FirefoxAccounts
         return false;
       }
+    }
+
+    return false;
+  },
+
+  /**
+   * Helper to check if there are any duplicates of the existing login. If the
+   * duplicates need to have the password updated, this performs that update.
+   *
+   * @param {nsILoginInfo} aLogin - The login to search for.
+   * @return {boolean} - true if duplicates exist, otherwise false.
+   */
+  checkForDuplicatesAndMaybeUpdate(aLogin) {
+    // While here we're passing formSubmitURL and httpRealm, they could be empty/null and get
+    // ignored in that case, leading to multiple logins for the same username.
+    let existingLogins = Services.logins.findLogins({}, aLogin.hostname,
+                                                    aLogin.formSubmitURL,
+                                                    aLogin.httpRealm);
+    // Check for an existing login that matches *including* the password.
+    // If such a login exists, we do not need to add a new login.
+    if (existingLogins.some(l => aLogin.matches(l, false /* ignorePassword */))) {
+      return true;
+    }
+    // Now check for a login with the same username, where it may be that we have an
+    // updated password.
+    let foundMatchingLogin = false;
+    for (let existingLogin of existingLogins) {
+      if (aLogin.username == existingLogin.username) {
+        foundMatchingLogin = true;
+        existingLogin.QueryInterface(Ci.nsILoginMetaInfo);
+        if (aLogin.password != existingLogin.password &
+           aLogin.timePasswordChanged > existingLogin.timePasswordChanged) {
+          // if a login with the same username and different password already exists and it's older
+          // than the current one, update its password and timestamp.
+          let propBag = Cc["@mozilla.org/hash-property-bag;1"].
+                        createInstance(Ci.nsIWritablePropertyBag);
+          propBag.setProperty("password", aLogin.password);
+          propBag.setProperty("timePasswordChanged", aLogin.timePasswordChanged);
+          Services.logins.modifyLogin(existingLogin, propBag);
+        }
+      }
+    }
+    // if the new login is an update or is older than an exiting login, don't add it.
+    if (foundMatchingLogin) {
+      return true;
     }
 
     return false;
@@ -571,40 +616,85 @@ this.LoginHelper = {
     login.timeLastUsed = loginData.timeLastUsed || loginData.timeCreated;
     login.timePasswordChanged = loginData.timePasswordChanged || loginData.timeCreated;
     login.timesUsed = loginData.timesUsed || 1;
-    // While here we're passing formSubmitURL and httpRealm, they could be empty/null and get
-    // ignored in that case, leading to multiple logins for the same username.
-    let existingLogins = Services.logins.findLogins({}, login.hostname,
-                                                    login.formSubmitURL,
-                                                    login.httpRealm);
-    // Check for an existing login that matches *including* the password.
-    // If such a login exists, we do not need to add a new login.
-    if (existingLogins.some(l => login.matches(l, false /* ignorePassword */))) {
-      return null;
-    }
-    // Now check for a login with the same username, where it may be that we have an
-    // updated password.
-    let foundMatchingLogin = false;
-    for (let existingLogin of existingLogins) {
-      if (login.username == existingLogin.username) {
-        foundMatchingLogin = true;
-        existingLogin.QueryInterface(Ci.nsILoginMetaInfo);
-        if (login.password != existingLogin.password &
-           login.timePasswordChanged > existingLogin.timePasswordChanged) {
-          // if a login with the same username and different password already exists and it's older
-          // than the current one, update its password and timestamp.
-          let propBag = Cc["@mozilla.org/hash-property-bag;1"].
-                        createInstance(Ci.nsIWritablePropertyBag);
-          propBag.setProperty("password", login.password);
-          propBag.setProperty("timePasswordChanged", login.timePasswordChanged);
-          Services.logins.modifyLogin(existingLogin, propBag);
-        }
-      }
-    }
-    // if the new login is an update or is older than an exiting login, don't add it.
-    if (foundMatchingLogin) {
+    if (this.checkForDuplicatesAndMaybeUpdate(login)) {
       return null;
     }
     return Services.logins.addLogin(login);
+  },
+
+  /**
+   * Equivalent to maybeImportLogin, except asynchronous and for multiple logins.
+   * @param {Object[]} loginDatas - For each login, the data that needs to be added.
+   * @returns {nsILoginInfo[]} the newly added logins, filtered if no login was added.
+   */
+  async maybeImportLogins(loginDatas) {
+    let loginsToAdd = [];
+    let loginMap = new Map();
+    for (let loginData of loginDatas) {
+      // create a new login
+      let login = Cc["@mozilla.org/login-manager/loginInfo;1"].createInstance(Ci.nsILoginInfo);
+      login.init(loginData.hostname,
+                 loginData.formSubmitURL || (typeof(loginData.httpRealm) == "string" ? null : ""),
+                 typeof(loginData.httpRealm) == "string" ? loginData.httpRealm : null,
+                 loginData.username,
+                 loginData.password,
+                 loginData.usernameElement || "",
+                 loginData.passwordElement || "");
+
+      login.QueryInterface(Ci.nsILoginMetaInfo);
+      login.timeCreated = loginData.timeCreated;
+      login.timeLastUsed = loginData.timeLastUsed || loginData.timeCreated;
+      login.timePasswordChanged = loginData.timePasswordChanged || loginData.timeCreated;
+      login.timesUsed = loginData.timesUsed || 1;
+
+      try {
+        // Ensure we only send checked logins through, since the validation is optimized
+        // out from the bulk APIs below us.
+        this.checkLoginValues(login);
+      } catch (e) {
+        Cu.reportError(e);
+        continue;
+      }
+
+      // First, we need to check the logins that we've already decided to add, to
+      // see if this is a duplicate. This should mirror the logic inside
+      // checkForDuplicatesAndMaybeUpdate, but only for the array of logins we're
+      // adding.
+      let newLogins = loginMap.get(login.hostname) || [];
+      if (!newLogins) {
+        loginMap.set(login.hostname, newLogins);
+      } else {
+        if (newLogins.some(l => login.matches(l, false /* ignorePassword */))) {
+          continue;
+        }
+        let foundMatchingNewLogin = false;
+        for (let newLogin of newLogins) {
+          if (login.username == newLogin.username) {
+            foundMatchingNewLogin = true;
+            newLogin.QueryInterface(Ci.nsILoginMetaInfo);
+            if (login.password != newLogin.password &
+                login.timePasswordChanged > newLogin.timePasswordChanged) {
+              // if a login with the same username and different password already exists and it's older
+              // than the current one, update its password and timestamp.
+              newLogin.password = login.password;
+              newLogin.timePasswordChanged = login.timePasswordChanged;
+            }
+          }
+        }
+
+        if (foundMatchingNewLogin) {
+          continue;
+        }
+      }
+
+      if (this.checkForDuplicatesAndMaybeUpdate(login)) {
+        continue;
+      }
+
+      newLogins.push(login);
+      loginsToAdd.push(login);
+    }
+    return Services.logins.addLogins(loginsToAdd);
   },
 
   /**
@@ -657,7 +747,7 @@ this.LoginHelper = {
   },
 
   removeLegacySignonFiles() {
-    const {Constants, Path, File} = Cu.import("resource://gre/modules/osfile.jsm").OS;
+    const {Constants, Path, File} = ChromeUtils.import("resource://gre/modules/osfile.jsm").OS;
 
     const profileDir = Constants.Path.profileDir;
     const defaultSignonFilePrefs = new Map([

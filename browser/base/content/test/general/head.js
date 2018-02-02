@@ -1,10 +1,10 @@
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesTestUtils",
+ChromeUtils.defineModuleGetter(this, "PlacesTestUtils",
   "resource://testing-common/PlacesTestUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabCrashHandler",
+ChromeUtils.defineModuleGetter(this, "TabCrashHandler",
   "resource:///modules/ContentCrashHandlers.jsm");
 
 /**
@@ -273,24 +273,6 @@ function waitForAsyncUpdates(aCallback, aScope, aArguments) {
   commit.finalize();
 }
 
-/**
- * Asynchronously check a url is visited.
-
- * @param aURI The URI.
- * @param aExpectedValue The expected value.
- * @return {Promise}
- * @resolves When the check has been added successfully.
- * @rejects JavaScript exception.
- */
-function promiseIsURIVisited(aURI, aExpectedValue) {
-  return new Promise(resolve => {
-    PlacesUtils.asyncHistory.isURIVisited(aURI, function(unused, aIsVisited) {
-      resolve(aIsVisited);
-    });
-
-  });
-}
-
 function whenNewTabLoaded(aWindow, aCallback) {
   aWindow.BrowserOpenTab();
 
@@ -322,23 +304,12 @@ function promiseTabLoaded(aTab) {
  * @param aShouldBeCleared
  *        True if each visit to the URI should be cleared, false otherwise
  */
-function promiseHistoryClearedState(aURIs, aShouldBeCleared) {
-  return new Promise(resolve => {
-    let callbackCount = 0;
-    let niceStr = aShouldBeCleared ? "no longer" : "still";
-    function callbackDone() {
-      if (++callbackCount == aURIs.length)
-        resolve();
-    }
-    aURIs.forEach(function(aURI) {
-      PlacesUtils.asyncHistory.isURIVisited(aURI, function(uri, isVisited) {
-        is(isVisited, !aShouldBeCleared,
-           "history visit " + uri.spec + " should " + niceStr + " exist");
-        callbackDone();
-      });
-    });
-
-  });
+async function promiseHistoryClearedState(aURIs, aShouldBeCleared) {
+  for (let uri of aURIs) {
+    let visited = await PlacesUtils.history.hasVisits(uri);
+    Assert.equal(visited, !aShouldBeCleared,
+      `history visit ${uri.spec} should ${aShouldBeCleared ? "no longer" : "still"} exist`);
+  }
 }
 
 var FullZoomHelper = {
@@ -497,7 +468,7 @@ function is_hidden(element) {
   if (style.visibility != "visible")
     return true;
   if (style.display == "-moz-popup")
-    return ["hiding", "closed"].indexOf(element.state) != -1;
+    return ["hiding", "closed"].includes(element.state);
 
   // Hiding a parent element will hide all its children
   if (element.parentNode != element.ownerDocument)

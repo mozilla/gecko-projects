@@ -16,7 +16,10 @@ const paymentSrv = Cc["@mozilla.org/dom/payments/payment-request-service;1"]
                      .getService(Ci.nsIPaymentRequestService);
 const paymentUISrv = Cc["@mozilla.org/dom/payments/payment-ui-service;1"]
                      .getService().wrappedJSObject;
-const {PaymentTestUtils: PTU} = Cu.import("resource://testing-common/PaymentTestUtils.jsm", {});
+const {profileStorage} = ChromeUtils.import(
+  "resource://formautofill/FormAutofillStorage.jsm", {});
+const {PaymentTestUtils: PTU} = ChromeUtils.import(
+  "resource://testing-common/PaymentTestUtils.jsm", {});
 
 function getPaymentRequests() {
   let requestsEnum = paymentSrv.enumerate();
@@ -110,7 +113,7 @@ function withNewDialogFrame(requestId, taskFn) {
 
   let args = {
     gBrowser,
-    url: `chrome://payments/content/paymentDialog.xhtml?requestId=${requestId}`,
+    url: `chrome://payments/content/paymentDialogWrapper.xhtml?requestId=${requestId}`,
   };
   return BrowserTestUtils.withNewTab(args, dialogTabTask);
 }
@@ -160,7 +163,10 @@ async function spawnInDialogForMerchantTask(merchantTaskFn, dialogTaskFn, taskAr
 }
 
 add_task(async function setup_head() {
-  SimpleTest.registerCleanupFunction(function cleanup() {
+  await profileStorage.initialize();
+  registerCleanupFunction(function cleanup() {
     paymentSrv.cleanup();
+    profileStorage.addresses._nukeAllRecords();
+    profileStorage.creditCards._nukeAllRecords();
   });
 });

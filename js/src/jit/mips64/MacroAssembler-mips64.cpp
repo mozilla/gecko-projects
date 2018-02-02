@@ -75,20 +75,6 @@ MacroAssemblerMIPS64Compat::convertUInt32ToDouble(Register src, FloatRegister de
 }
 
 void
-MacroAssemblerMIPS64Compat::convertInt64ToDouble(Register src, FloatRegister dest)
-{
-    as_dmtc1(src, dest);
-    as_cvtdl(dest, dest);
-}
-
-void
-MacroAssemblerMIPS64Compat::convertInt64ToFloat32(Register src, FloatRegister dest)
-{
-    as_dmtc1(src, dest);
-    as_cvtsl(dest, dest);
-}
-
-void
 MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register src, FloatRegister dest)
 {
     Label positive, done;
@@ -110,42 +96,6 @@ MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register src, FloatRegister de
     as_cvtdl(dest, dest);
 
     bind(&done);
-}
-
-void
-MacroAssemblerMIPS64Compat::convertUInt64ToFloat32(Register src, FloatRegister dest)
-{
-    Label positive, done;
-    ma_b(src, src, &positive, NotSigned, ShortJump);
-
-    MOZ_ASSERT(src!= ScratchRegister);
-    MOZ_ASSERT(src!= SecondScratchReg);
-
-    ma_and(ScratchRegister, src, Imm32(1));
-    ma_dsrl(SecondScratchReg, src, Imm32(1));
-    ma_or(ScratchRegister, SecondScratchReg);
-    as_dmtc1(ScratchRegister, dest);
-    as_cvtsl(dest, dest);
-    asMasm().addFloat32(dest, dest);
-    ma_b(&done, ShortJump);
-
-    bind(&positive);
-    as_dmtc1(src, dest);
-    as_cvtsl(dest, dest);
-
-    bind(&done);
-}
-
-bool
-MacroAssemblerMIPS64Compat::convertUInt64ToDoubleNeedsTemp()
-{
-    return false;
-}
-
-void
-MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
-{
-    convertUInt64ToDouble(src.reg, dest);
 }
 
 void
@@ -1482,28 +1432,6 @@ MacroAssemblerMIPS64Compat::testUndefinedSet(Condition cond, const ValueOperand&
     ma_cmp_set(dest, SecondScratchReg, ImmTag(JSVAL_TAG_UNDEFINED), cond);
 }
 
-// unboxing code
-void
-MacroAssemblerMIPS64Compat::unboxNonDouble(const ValueOperand& operand, Register dest)
-{
-    ma_dext(dest, operand.valueReg(), Imm32(0), Imm32(JSVAL_TAG_SHIFT));
-}
-
-void
-MacroAssemblerMIPS64Compat::unboxNonDouble(const Address& src, Register dest)
-{
-    loadPtr(Address(src.base, src.offset), dest);
-    ma_dext(dest, dest, Imm32(0), Imm32(JSVAL_TAG_SHIFT));
-}
-
-void
-MacroAssemblerMIPS64Compat::unboxNonDouble(const BaseIndex& src, Register dest)
-{
-    computeScaledAddress(src, SecondScratchReg);
-    loadPtr(Address(SecondScratchReg, src.offset), dest);
-    ma_dext(dest, dest, Imm32(0), Imm32(JSVAL_TAG_SHIFT));
-}
-
 void
 MacroAssemblerMIPS64Compat::unboxInt32(const ValueOperand& operand, Register dest)
 {
@@ -1569,53 +1497,59 @@ MacroAssemblerMIPS64Compat::unboxDouble(const Address& src, FloatRegister dest)
 void
 MacroAssemblerMIPS64Compat::unboxString(const ValueOperand& operand, Register dest)
 {
-    unboxNonDouble(operand, dest);
+    unboxNonDouble(operand, dest, JSVAL_TYPE_STRING);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxString(Register src, Register dest)
 {
-    ma_dext(dest, src, Imm32(0), Imm32(JSVAL_TAG_SHIFT));
+    unboxNonDouble(src, dest, JSVAL_TYPE_STRING);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxString(const Address& src, Register dest)
 {
-    unboxNonDouble(src, dest);
+    unboxNonDouble(src, dest, JSVAL_TYPE_STRING);
+}
+
+void
+MacroAssemblerMIPS64Compat::unboxSymbol(const ValueOperand& operand, Register dest)
+{
+    unboxNonDouble(operand, dest, JSVAL_TYPE_SYMBOL);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxSymbol(Register src, Register dest)
 {
-    ma_dext(dest, src, Imm32(0), Imm32(JSVAL_TAG_SHIFT));
+    unboxNonDouble(src, dest, JSVAL_TYPE_SYMBOL);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxSymbol(const Address& src, Register dest)
 {
-    unboxNonDouble(src, dest);
+    unboxNonDouble(src, dest, JSVAL_TYPE_SYMBOL);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxObject(const ValueOperand& src, Register dest)
 {
-    unboxNonDouble(src, dest);
+    unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxObject(Register src, Register dest)
 {
-    ma_dext(dest, src, Imm32(0), Imm32(JSVAL_TAG_SHIFT));
+    unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
 }
 
 void
 MacroAssemblerMIPS64Compat::unboxObject(const Address& src, Register dest)
 {
-    unboxNonDouble(src, dest);
+    unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
 }
 
 void
-MacroAssemblerMIPS64Compat::unboxValue(const ValueOperand& src, AnyRegister dest)
+MacroAssemblerMIPS64Compat::unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType type)
 {
     if (dest.isFloat()) {
         Label notInt32, end;
@@ -1626,7 +1560,7 @@ MacroAssemblerMIPS64Compat::unboxValue(const ValueOperand& src, AnyRegister dest
         unboxDouble(src, dest.fpu());
         bind(&end);
     } else {
-        unboxNonDouble(src, dest.gpr());
+        unboxNonDouble(src, dest.gpr(), type);
     }
 }
 
@@ -2602,6 +2536,63 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     moveFromFloat32(ScratchDoubleReg, output);
     ma_b(ScratchRegister, Imm32(0), oolEntry, Assembler::NotEqual);
 
+}
+
+// ========================================================================
+// Convert floating point.
+
+void
+MacroAssembler::convertInt64ToDouble(Register64 src, FloatRegister dest)
+{
+    as_dmtc1(src.reg, dest);
+    as_cvtdl(dest, dest);
+}
+
+void
+MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest)
+{
+    as_dmtc1(src.reg, dest);
+    as_cvtsl(dest, dest);
+}
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    MacroAssemblerSpecific::convertUInt64ToDouble(src.reg, dest);
+}
+
+void
+MacroAssembler::convertUInt64ToFloat32(Register64 src_, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+
+    Register src = src_.reg;
+    Label positive, done;
+    ma_b(src, src, &positive, NotSigned, ShortJump);
+
+    MOZ_ASSERT(src!= ScratchRegister);
+    MOZ_ASSERT(src!= SecondScratchReg);
+
+    ma_and(ScratchRegister, src, Imm32(1));
+    ma_dsrl(SecondScratchReg, src, Imm32(1));
+    ma_or(ScratchRegister, SecondScratchReg);
+    as_dmtc1(ScratchRegister, dest);
+    as_cvtsl(dest, dest);
+    addFloat32(dest, dest);
+    ma_b(&done, ShortJump);
+
+    bind(&positive);
+    as_dmtc1(src, dest);
+    as_cvtsl(dest, dest);
+
+    bind(&done);
 }
 
 //}}} check_macroassembler_style

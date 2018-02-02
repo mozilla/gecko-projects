@@ -34,36 +34,6 @@ namespace jit {
 
 //{{{ check_macroassembler_style
 // ===============================================================
-// Frame manipulation functions.
-
-uint32_t
-MacroAssembler::framePushed() const
-{
-    return framePushed_;
-}
-
-void
-MacroAssembler::setFramePushed(uint32_t framePushed)
-{
-    framePushed_ = framePushed;
-}
-
-void
-MacroAssembler::adjustFrame(int32_t value)
-{
-    MOZ_ASSERT_IF(value < 0, framePushed_ >= uint32_t(-value));
-    setFramePushed(framePushed_ + value);
-}
-
-void
-MacroAssembler::implicitPop(uint32_t bytes)
-{
-    MOZ_ASSERT(bytes % sizeof(intptr_t) == 0);
-    MOZ_ASSERT(bytes <= INT32_MAX);
-    adjustFrame(-int32_t(bytes));
-}
-
-// ===============================================================
 // Stack manipulation functions.
 
 CodeOffset
@@ -427,8 +397,7 @@ void
 MacroAssembler::branchIfRope(Register str, Label* label)
 {
     Address flags(str, JSString::offsetOfFlags());
-    static_assert(JSString::ROPE_FLAGS == 0, "Rope type flags must be 0");
-    branchTest32(Assembler::Zero, flags, Imm32(JSString::TYPE_FLAGS_MASK), label);
+    branchTest32(Assembler::Zero, flags, Imm32(JSString::LINEAR_BIT), label);
 }
 
 void
@@ -438,8 +407,7 @@ MacroAssembler::branchIfRopeOrExternal(Register str, Register temp, Label* label
     move32(Imm32(JSString::TYPE_FLAGS_MASK), temp);
     and32(flags, temp);
 
-    static_assert(JSString::ROPE_FLAGS == 0, "Rope type flags must be 0");
-    branchTest32(Assembler::Zero, temp, temp, label);
+    branchTest32(Assembler::Zero, temp, Imm32(JSString::LINEAR_BIT), label);
 
     branch32(Assembler::Equal, temp, Imm32(JSString::EXTERNAL_FLAGS), label);
 }
@@ -448,8 +416,7 @@ void
 MacroAssembler::branchIfNotRope(Register str, Label* label)
 {
     Address flags(str, JSString::offsetOfFlags());
-    static_assert(JSString::ROPE_FLAGS == 0, "Rope type flags must be 0");
-    branchTest32(Assembler::NonZero, flags, Imm32(JSString::TYPE_FLAGS_MASK), label);
+    branchTest32(Assembler::NonZero, flags, Imm32(JSString::LINEAR_BIT), label);
 }
 
 void
@@ -841,9 +808,9 @@ MacroAssembler::storeCallInt32Result(Register reg)
 }
 
 void
-MacroAssembler::storeCallResultValue(AnyRegister dest)
+MacroAssembler::storeCallResultValue(AnyRegister dest, JSValueType type)
 {
-    unboxValue(JSReturnOperand, dest);
+    unboxValue(JSReturnOperand, dest, type);
 }
 
 void
@@ -852,7 +819,7 @@ MacroAssembler::storeCallResultValue(TypedOrValueRegister dest)
     if (dest.hasValue())
         storeCallResultValue(dest.valueReg());
     else
-        storeCallResultValue(dest.typedReg());
+        storeCallResultValue(dest.typedReg(), ValueTypeFromMIRType(dest.type()));
 }
 
 } // namespace jit

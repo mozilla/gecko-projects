@@ -53,6 +53,7 @@ class TabGroup;
 class Element;
 class Navigator;
 class Performance;
+class ServiceWorker;
 class ServiceWorkerDescriptor;
 class ServiceWorkerRegistration;
 class Timeout;
@@ -123,10 +124,12 @@ enum class LargeAllocStatus : uint8_t
 } // namespace dom
 } // namespace mozilla
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_PIDOMWINDOWINNER_IID \
 { 0x775dabc9, 0x8f43, 0x4277, \
   { 0x9a, 0xdb, 0xf1, 0x99, 0x0d, 0x77, 0xcf, 0xfb } }
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_PIDOMWINDOWOUTER_IID \
   { 0x769693d4, 0xb009, 0x4fe2, \
   { 0xaf, 0x18, 0x7d, 0xc8, 0xdf, 0x74, 0x96, 0xdf } }
@@ -331,6 +334,9 @@ public:
   mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const;
   mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
   mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const;
+
+  RefPtr<mozilla::dom::ServiceWorker>
+  GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor);
 
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
@@ -555,9 +561,6 @@ public:
   virtual void EnableOrientationChangeListener() = 0;
   virtual void DisableOrientationChangeListener() = 0;
 #endif
-
-  virtual void EnableTimeChangeNotifications() = 0;
-  virtual void DisableTimeChangeNotifications() = 0;
 
   /**
    * Tell this window that there is an observer for gamepad input

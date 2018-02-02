@@ -1,6 +1,6 @@
 "use strict";
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const COOKIES_URL = "chrome://browser/content/preferences/cookies.xul";
 
@@ -38,7 +38,7 @@ add_task(async function testDeleteCookie() {
     EventUtils.synthesizeKey("VK_DELETE", {});
   }
 
-  await waitForCondition(() => tree.view.rowCount == 0);
+  await TestUtils.waitForCondition(() => tree.view.rowCount == 0);
 
   // eslint-disable-next-line mozilla/no-cpows-in-tests
   is_element_visible(content.gSubDialog._dialogs[0]._box,

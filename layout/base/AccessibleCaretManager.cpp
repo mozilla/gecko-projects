@@ -11,6 +11,7 @@
 #include "AccessibleCaretLogger.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/IMEStateManager.h"
@@ -122,6 +123,11 @@ AccessibleCaretManager::AccessibleCaretManager(nsIPresShell* aPresShell)
   }
 }
 
+AccessibleCaretManager::~AccessibleCaretManager()
+{
+  MOZ_RELEASE_ASSERT(!mFlushingLayout, "Going away in FlushLayout? Bad!");
+}
+
 void
 AccessibleCaretManager::Terminate()
 {
@@ -217,8 +223,7 @@ AccessibleCaretManager::HideCarets()
 void
 AccessibleCaretManager::UpdateCarets(const UpdateCaretsHintSet& aHint)
 {
-  FlushLayout();
-  if (IsTerminated()) {
+  if (!FlushLayout()) {
     return;
   }
 
@@ -385,8 +390,7 @@ AccessibleCaretManager::UpdateCaretsForSelectionMode(const UpdateCaretsHintSet& 
   if (firstCaretResult == PositionChangedResult::Changed ||
       secondCaretResult == PositionChangedResult::Changed) {
     // Flush layout to make the carets intersection correct.
-    FlushLayout();
-    if (IsTerminated()) {
+    if (!FlushLayout()) {
       return;
     }
   }
@@ -1025,12 +1029,19 @@ AccessibleCaretManager::ClearMaintainedSelection() const
   }
 }
 
-void
-AccessibleCaretManager::FlushLayout() const
+bool
+AccessibleCaretManager::FlushLayout()
 {
   if (mPresShell) {
-    mPresShell->FlushPendingNotifications(FlushType::Layout);
+    AutoRestore<bool> flushing(mFlushingLayout);
+    mFlushingLayout = true;
+
+    if (nsIDocument* doc = mPresShell->GetDocument()) {
+      doc->FlushPendingNotifications(FlushType::Layout);
+    }
   }
+
+  return !IsTerminated();
 }
 
 nsIFrame*
@@ -1078,7 +1089,7 @@ AccessibleCaretManager::GetFrameForFirstRangeStartOrLastRangeEnd(
   if (!startFrame) {
     ErrorResult err;
     RefPtr<TreeWalker> walker = mPresShell->GetDocument()->CreateTreeWalker(
-      *startNode, nsIDOMNodeFilter::SHOW_ALL, nullptr, err);
+      *startNode, dom::NodeFilterBinding::SHOW_ALL, nullptr, err);
 
     if (!walker) {
       return nullptr;
@@ -1402,14 +1413,9 @@ AccessibleCaretManager::StopSelectionAutoScrollTimer() const
 }
 
 void
-AccessibleCaretManager::DispatchCaretStateChangedEvent(CaretChangedReason aReason) const
+AccessibleCaretManager::DispatchCaretStateChangedEvent(CaretChangedReason aReason)
 {
-  if (!mPresShell) {
-    return;
-  }
-
-  FlushLayout();
-  if (IsTerminated()) {
+  if (!FlushLayout()) {
     return;
   }
 

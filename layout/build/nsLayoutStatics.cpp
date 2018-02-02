@@ -33,15 +33,18 @@
 #include "nsGkAtoms.h"
 #include "nsImageFrame.h"
 #include "nsLayoutStylesheetCache.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/RuleProcessorCache.h"
-#include "ContentPrincipal.h"
+#endif
 #include "nsRange.h"
 #include "nsRegion.h"
 #include "nsRepeatService.h"
 #include "nsFloatManager.h"
 #include "nsSprocketLayout.h"
 #include "nsStackLayout.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsStyleSet.h"
+#endif
 #include "nsTextControlFrame.h"
 #include "nsXBLService.h"
 #include "txMozillaXSLTProcessor.h"
@@ -106,7 +109,6 @@
 #include "nsCookieService.h"
 #include "nsApplicationCacheService.h"
 #include "mozilla/dom/CustomElementRegistry.h"
-#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/dom/HTMLVideoElement.h"
@@ -122,6 +124,7 @@
 #include "mozilla/dom/U2FTokenManager.h"
 #include "mozilla/dom/PointerEventHandler.h"
 #include "nsHostObjectProtocolHandler.h"
+#include "nsThreadManager.h"
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -260,7 +263,6 @@ nsLayoutStatics::Initialize()
   nsLayoutUtils::Initialize();
   PointerEventHandler::InitializeStatics();
   TouchManager::InitializeStatics();
-  ContentPrincipal::InitializeStatics();
 
   nsCORSListenerProxy::Startup();
 
@@ -289,7 +291,9 @@ nsLayoutStatics::Initialize()
   ServiceWorkerRegistrar::Initialize();
 
 #ifdef DEBUG
+#ifdef MOZ_OLD_STYLE
   GeckoStyleContext::Initialize();
+#endif
   mozilla::LayerAnimationInfo::Initialize();
 #endif
 
@@ -321,6 +325,8 @@ nsLayoutStatics::Initialize()
     mozilla::dom::DOMPrefs::Initialize();
   }
 
+  nsThreadManager::InitializeShutdownObserver();
+
   return NS_OK;
 }
 
@@ -347,7 +353,9 @@ nsLayoutStatics::Shutdown()
   Attr::Shutdown();
   EventListenerManager::Shutdown();
   IMEStateManager::Shutdown();
+#ifdef MOZ_OLD_STYLE
   nsCSSParser::Shutdown();
+#endif
   nsMediaFeatures::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
   nsCSSRendering::Shutdown();
@@ -385,7 +393,9 @@ nsLayoutStatics::Shutdown()
   nsAttrValue::Shutdown();
   nsContentUtils::Shutdown();
   nsLayoutStylesheetCache::Shutdown();
+#ifdef MOZ_OLD_STYLE
   RuleProcessorCache::Shutdown();
+#endif
 
   ShutdownJSEnvironment();
   nsGlobalWindowInner::ShutDown();

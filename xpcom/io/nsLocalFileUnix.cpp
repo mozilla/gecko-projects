@@ -10,6 +10,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Sprintf.h"
 
 #include <sys/types.h>
@@ -591,11 +592,26 @@ nsLocalFile::SetNativeLeafName(const nsACString& aLeafName)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsLocalFile::GetNativePath(nsACString& aResult)
+nsCString
+nsLocalFile::NativePath()
 {
-  aResult = mPath;
+  return mPath;
+}
+
+nsresult
+nsIFile::GetNativePath(nsACString& aResult)
+{
+  aResult = NativePath();
   return NS_OK;
+}
+
+nsCString
+nsIFile::HumanReadablePath()
+{
+  nsCString path;
+  DebugOnly<nsresult> rv = GetNativePath(path);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  return path;
 }
 
 nsresult
@@ -2183,20 +2199,6 @@ NS_NewLocalFile(const nsAString& aPath, bool aFollowLinks, nsIFile** aResult)
     return rv;
   }
   return NS_NewNativeLocalFile(buf, aFollowLinks, aResult);
-}
-
-//-----------------------------------------------------------------------------
-// global init/shutdown
-//-----------------------------------------------------------------------------
-
-void
-nsLocalFile::GlobalInit()
-{
-}
-
-void
-nsLocalFile::GlobalShutdown()
-{
 }
 
 // nsILocalFileMac

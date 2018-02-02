@@ -41,7 +41,7 @@ crashtest:
             default: 1
     e10s:
         by-test-platform:
-            windows10-64/debug: both
+            linux32/debug: both
             default: true
     tier:
         by-test-platform:
@@ -72,7 +72,6 @@ jsreftest:
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
-            windows10-64/debug: both
             default: true
     max-run-time:
         by-test-platform:
@@ -108,7 +107,7 @@ reftest:
             default: 8
     e10s:
         by-test-platform:
-            windows10-64/debug: both
+            linux32/debug: both
             default: true
     max-run-time:
         by-test-platform:
@@ -135,7 +134,6 @@ reftest-gpu:
     run-on-projects:
         by-test-platform:
             windows10.*: []
-            windows8-64.*: []
             default: built-projects
     instance-size: default
     virtualization: virtual-with-gpu
@@ -149,20 +147,17 @@ reftest-no-accel:
     suite: reftest/reftest-no-accel
     treeherder-symbol: R(Ru)
     virtualization: virtual-with-gpu
-    worker-type:
+    run-on-projects:
         by-test-platform:
-            windows10-64.*: buildbot-bridge/buildbot-bridge
-            default: null
+            windows10.*: []
+            default: built-projects
     chunks:
         by-test-platform:
             macosx.*: 1
-            windows10-64.*/debug: 2
-            windows10-64.*/opt: 1
             default: 8
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
-            windows10-64/debug: both
             default: true
     mozharness:
         chunked:

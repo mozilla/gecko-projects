@@ -734,7 +734,7 @@ class ZoneList
 
     void append(Zone* zone);
     void transferFrom(ZoneList& other);
-    void removeFront();
+    Zone* removeFront();
     void clear();
 
   private:
@@ -1115,7 +1115,7 @@ class GCRuntime
     IncrementalProgress endSweepingSweepGroup(FreeOp* fop, SliceBudget& budget);
     IncrementalProgress performSweepActions(SliceBudget& sliceBudget, AutoLockForExclusiveAccess& lock);
     IncrementalProgress sweepTypeInformation(FreeOp* fop, SliceBudget& budget, Zone* zone);
-    IncrementalProgress mergeSweptObjectArenas(FreeOp* fop, SliceBudget& budget, Zone* zone);
+    IncrementalProgress releaseSweptEmptyArenas(FreeOp* fop, SliceBudget& budget, Zone* zone);
     void startSweepingAtomsTable();
     IncrementalProgress sweepAtomsTable(FreeOp* fop, SliceBudget& budget);
     IncrementalProgress sweepWeakCaches(FreeOp* fop, SliceBudget& budget);

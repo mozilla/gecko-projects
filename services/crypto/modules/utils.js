@@ -6,9 +6,9 @@ var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
 this.EXPORTED_SYMBOLS = ["CryptoUtils"];
 
-Cu.import("resource://services-common/observers.js");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://services-common/observers.js");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 this.CryptoUtils = {
   xor: function xor(a, b) {
@@ -56,7 +56,10 @@ this.CryptoUtils = {
    */
   digestBytes: function digestBytes(message, hasher) {
     // No UTF-8 encoding for you, sunshine.
-    let bytes = Array.prototype.slice.call(message).map(b => b.charCodeAt(0));
+    let bytes = new Uint8Array(message.length);
+    for (let i = 0; i < message.length; ++i) {
+      bytes[i] = message.charCodeAt(i) & 0xff;
+    }
     hasher.update(bytes, bytes.length);
     let result = hasher.finish(false);
     if (hasher instanceof Ci.nsICryptoHMAC) {

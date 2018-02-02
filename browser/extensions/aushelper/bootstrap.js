@@ -34,7 +34,7 @@ const WEBSENSE_REG_OPEN_ERROR = 1;
 const WEBSENSE_REG_READ_ERROR = 2;
 const WEBSENSE_ALREADY_MODIFIED = 4;
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function startup() {
   if (Services.appinfo.OS != "WINNT") {
@@ -75,7 +75,7 @@ function startup() {
   let cpuIDMatch = false;
   try {
     let cpuID = wrk.readStringValue("Identifier");
-    if (cpuID.toLowerCase().indexOf("family 6 model 61 stepping 4") != -1) {
+    if (cpuID.toLowerCase().includes("family 6 model 61 stepping 4")) {
       cpuIDMatch = true;
     }
   } catch (e) {
@@ -103,7 +103,7 @@ function startup() {
             hexVal.unshift(c);
           }
           cpuRevMatch = false;
-          if (microCodeVersions.indexOf(parseInt(hexVal.join(""))) != -1) {
+          if (microCodeVersions.includes(parseInt(hexVal.join("")))) {
             cpuRevMatch = true;
           }
           break;

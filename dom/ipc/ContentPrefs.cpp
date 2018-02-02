@@ -153,6 +153,7 @@ const char* mozilla::dom::ContentPrefs::gEarlyPrefs[] = {
   "layout.css.grid-template-subgrid-value.enabled",
   "layout.css.grid.enabled",
   "layout.css.image-orientation.enabled",
+  "layout.css.individual-transform.enabled",
   "layout.css.initial-letter.enabled",
   "layout.css.isolation.enabled",
   "layout.css.mix-blend-mode.enabled",
@@ -178,10 +179,6 @@ const char* mozilla::dom::ContentPrefs::gEarlyPrefs[] = {
   "layout.css.servo.enabled",
 #endif
   "layout.css.shape-outside.enabled",
-#ifdef MOZ_STYLO
-  "layout.css.stylo-blocklist.blocked_domains",
-  "layout.css.stylo-blocklist.enabled",
-#endif
   "layout.css.text-align-unsafe-value.enabled",
   "layout.css.text-combine-upright-digits.enabled",
   "layout.css.text-combine-upright.enabled",
@@ -310,7 +307,6 @@ const char* mozilla::dom::ContentPrefs::gEarlyPrefs[] = {
   "security.sandbox.logging.enabled",
   "security.sandbox.mac.track.violations",
   "security.sandbox.windows.log.stackTraceDepth",
-  "signed.applets.codebase_principal_support",
   "svg.disabled",
   "svg.display-lists.hit-testing.enabled",
   "svg.display-lists.painting.enabled",

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
+#include "domstubs.idl"
 
 /**
  * nsIDOMWindowUtils is intended for infrequently-used methods related
@@ -27,7 +28,6 @@ struct nsRect;
 [ref] native nsConstRect(const nsRect);
 native nscolor(nscolor);
 [ptr] native gfxContext(gfxContext);
-typedef unsigned long long nsViewID;
 
 interface nsIArray;
 interface nsICycleCollectorListener;
@@ -1981,18 +1981,10 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute boolean isStyledByServo;
 
   /**
-   * Add a domain to the existing stylo blocklist.
-   *
-   * This calls nsLayoutUtils::AddToStyloBlocklist().
+   * Capture the contents of the current WebRender frame and
+   * save them to a folder relative to the current working directory.
    */
-  void addToStyloBlocklist(in ACString aBlockedDomain);
-
-  /**
-   * Remove a domain from the existing stylo blocklist.
-   *
-   * This calls nsLayoutUtils::RemoveFromStyloBlocklist().
-   */
-  void removeFromStyloBlocklist(in ACString aBlockedDomain);
+  void wrCapture();
 
   // These consts are only for testing purposes.
   const long DEFAULT_MOUSE_POINTER_ID = 0;

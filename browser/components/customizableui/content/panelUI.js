@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-XPCOMUtils.defineLazyModuleGetter(this, "AppMenuNotifications",
-                                  "resource://gre/modules/AppMenuNotifications.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NewTabUtils",
-                                  "resource://gre/modules/NewTabUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ScrollbarSampler",
-                                  "resource:///modules/ScrollbarSampler.jsm");
+ChromeUtils.defineModuleGetter(this, "AppMenuNotifications",
+                               "resource://gre/modules/AppMenuNotifications.jsm");
+ChromeUtils.defineModuleGetter(this, "NewTabUtils",
+                               "resource://gre/modules/NewTabUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ScrollbarSampler",
+                               "resource:///modules/ScrollbarSampler.jsm");
 
 /**
  * Maintains the state and dispatches events for the main menu panel.
@@ -161,19 +161,6 @@ const PanelUI = {
     CustomizableUI.removeListener(this);
     this._overlayScrollListenerBoundFn = null;
     this.libraryView.removeEventListener("ViewShowing", this);
-  },
-
-  /**
-   * Customize mode extracts the mainView and puts it somewhere else while the
-   * user customizes. Upon completion, this function can be called to put the
-   * panel back to where it belongs in normal browsing mode.
-   *
-   * @param aMainView
-   *        The mainView node to put back into place.
-   */
-  setMainView(aMainView) {
-    this._ensureEventListenersAdded();
-    this.multiView.setMainView(aMainView);
   },
 
   /**

@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Components.utils.import("resource://gre/modules/Promise.jsm");
+ChromeUtils.import("resource://gre/modules/Promise.jsm", this);
 
 const kDefaultWait = 2000;
 
@@ -139,27 +139,6 @@ function openPreferencesViaOpenPreferencesAPI(aPane, aOptions) {
       }, { once: true });
     }, { capture: true, once: true });
 
-  });
-}
-
-function waitForCondition(aConditionFn, aMaxTries = 50, aCheckInterval = 100) {
-  return new Promise((resolve, reject) => {
-    function tryNow() {
-      tries++;
-      let rv = aConditionFn();
-      if (rv) {
-        resolve(rv);
-      } else if (tries < aMaxTries) {
-        tryAgain();
-      } else {
-        reject("Condition timed out: " + aConditionFn.toSource());
-      }
-    }
-    function tryAgain() {
-      setTimeout(tryNow, aCheckInterval);
-    }
-    let tries = 0;
-    tryAgain();
   });
 }
 

@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ClipId, DevicePoint, DeviceUintRect, DocumentId, Epoch};
+use api::{ClipId, DeviceUintRect, DocumentId, Epoch};
 use api::{ExternalImageData, ExternalImageId};
 use api::{ImageFormat, PipelineId};
 use api::DebugCommand;
 use device::TextureFilter;
+use gpu_cache::GpuCacheUpdateList;
 use fxhash::FxHasher;
 use profiler::BackendProfileCounters;
 use std::{usize, i32};
@@ -18,6 +19,8 @@ use std::sync::Arc;
 
 #[cfg(feature = "capture")]
 use capture::{CaptureConfig, ExternalCaptureImage};
+#[cfg(feature = "replay")]
+use capture::PlainExternalImage;
 use tiling;
 
 pub type FastHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -33,11 +36,13 @@ pub type FastHashSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 // map from cache texture ID to native texture.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct CacheTextureId(pub usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderPassIndex(pub usize);
 
 // Represents the source for a texture.
@@ -47,7 +52,8 @@ pub struct RenderPassIndex(pub usize);
 // native texture ID.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum SourceTexture {
     Invalid,
     TextureCache(CacheTextureId),
@@ -64,7 +70,8 @@ pub const ORTHO_NEAR_PLANE: f32 = -1000000.0;
 pub const ORTHO_FAR_PLANE: f32 = 1000000.0;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTargetInfo {
     pub has_depth: bool,
 }
@@ -153,28 +160,36 @@ pub enum DebugOutput {
     FetchClipScrollTree(String),
     #[cfg(feature = "capture")]
     SaveCapture(CaptureConfig, Vec<ExternalCaptureImage>),
-    #[cfg(feature = "capture")]
-    LoadCapture(PathBuf),
+    #[cfg(feature = "replay")]
+    LoadCapture(PathBuf, Vec<PlainExternalImage>),
 }
 
 pub enum ResultMsg {
     DebugCommand(DebugCommand),
     DebugOutput(DebugOutput),
     RefreshShader(PathBuf),
+    UpdateGpuCache(GpuCacheUpdateList),
+    UpdateResources {
+        updates: TextureUpdateList,
+        cancel_rendering: bool,
+    },
     PublishDocument(
         DocumentId,
         RenderedDocument,
         TextureUpdateList,
         BackendProfileCounters,
     ),
-    UpdateResources {
-        updates: TextureUpdateList,
-        cancel_rendering: bool,
-    },
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct UvRect {
-    pub uv0: DevicePoint,
-    pub uv1: DevicePoint,
+#[derive(Clone, Debug)]
+pub struct ResourceCacheError {
+    description: String,
+}
+
+impl ResourceCacheError {
+    pub fn new(description: String) -> ResourceCacheError {
+        ResourceCacheError {
+            description,
+        }
+    }
 }

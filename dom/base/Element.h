@@ -57,7 +57,7 @@ struct nsRect;
 class nsFocusManager;
 class nsGlobalWindowInner;
 class nsGlobalWindowOuter;
-class nsICSSDeclaration;
+class nsDOMCSSAttributeDeclaration;
 class nsISMILAttr;
 class nsDocument;
 class nsDOMStringMap;
@@ -204,7 +204,7 @@ public:
     FragmentOrElement(aNodeInfo),
     mState(NS_EVENT_STATE_MOZ_READONLY)
   {
-    MOZ_ASSERT(mNodeInfo->NodeType() == nsIDOMNode::ELEMENT_NODE,
+    MOZ_ASSERT(mNodeInfo->NodeType() == ELEMENT_NODE,
                "Bad NodeType in aNodeInfo");
     SetIsElement();
   }
@@ -414,7 +414,7 @@ public:
    * Note: This method is analogous to the 'GetStyle' method in
    * nsGenericHTMLElement and nsStyledElement.
    */
-  nsICSSDeclaration* GetSMILOverrideStyle();
+  nsDOMCSSAttributeDeclaration* GetSMILOverrideStyle();
 
   /**
    * Returns if the element is labelable as per HTML specification.
@@ -454,10 +454,12 @@ public:
   virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const;
 
+#ifdef MOZ_OLD_STYLE
   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker)
   {
     return NS_OK;
   }
+#endif
 
   inline Directionality GetDirectionality() const {
     if (HasFlag(NODE_HAS_DIRECTION_RTL)) {
@@ -1116,7 +1118,7 @@ public:
 
   void GetAttributeNames(nsTArray<nsString>& aResult);
 
-  void GetAttribute(const nsAString& aName, nsString& aReturn)
+  void GetAttribute(const nsAString& aName, nsAString& aReturn)
   {
     DOMString str;
     GetAttribute(aName, str);
@@ -1418,6 +1420,7 @@ public:
 
   NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML);
   virtual void SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError);
+  void UnsafeSetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
   void GetOuterHTML(nsAString& aOuterHTML);
   void SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError);
   void InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
@@ -2193,34 +2196,4 @@ _elementName::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,   \
     return SetBoolAttr(nsGkAtoms::_atom, aValue);                     \
   }
 
-#define NS_FORWARD_NSIDOMELEMENT_TO_GENERIC                                   \
-typedef mozilla::dom::Element Element;                                        \
-NS_IMETHOD GetTagName(nsAString& aTagName) final override                     \
-{                                                                             \
-  Element::GetTagName(aTagName);                                              \
-  return NS_OK;                                                               \
-}                                                                             \
-using Element::GetAttribute;                                                  \
-NS_IMETHOD GetAttribute(const nsAString& name, nsAString& _retval) final      \
-  override                                                                    \
-{                                                                             \
-  nsString attr;                                                              \
-  GetAttribute(name, attr);                                                   \
-  _retval = attr;                                                             \
-  return NS_OK;                                                               \
-}                                                                             \
-NS_IMETHOD SetAttribute(const nsAString& name,                                \
-                        const nsAString& value) override                      \
-{                                                                             \
-  mozilla::ErrorResult rv;                                                    \
-  Element::SetAttribute(name, value, nullptr, rv);                            \
-  return rv.StealNSResult();                                                  \
-}                                                                             \
-using Element::HasAttribute;                                                  \
-NS_IMETHOD HasAttribute(const nsAString& name,                                \
-                           bool* _retval) final override                      \
-{                                                                             \
-  *_retval = HasAttribute(name);                                              \
-  return NS_OK;                                                               \
-}
 #endif // mozilla_dom_Element_h__

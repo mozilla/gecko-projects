@@ -49,7 +49,7 @@ Attr::Attr(nsDOMAttributeMap *aAttrMap,
   : nsIAttribute(aAttrMap, aNodeInfo), mValue(aValue)
 {
   MOZ_ASSERT(mNodeInfo, "We must get a nodeinfo here!");
-  MOZ_ASSERT(mNodeInfo->NodeType() == nsIDOMNode::ATTRIBUTE_NODE,
+  MOZ_ASSERT(mNodeInfo->NodeType() == ATTRIBUTE_NODE,
              "Wrong nodeType");
 
   // We don't add a reference to our content. It will tell us
@@ -144,8 +144,7 @@ Attr::SetOwnerDocument(nsIDocument* aDocument)
   RefPtr<mozilla::dom::NodeInfo> newNodeInfo;
   newNodeInfo = aDocument->NodeInfoManager()->
     GetNodeInfo(mNodeInfo->NameAtom(), mNodeInfo->GetPrefixAtom(),
-                mNodeInfo->NamespaceID(),
-                nsIDOMNode::ATTRIBUTE_NODE);
+                mNodeInfo->NamespaceID(), ATTRIBUTE_NODE);
   NS_ASSERTION(newNodeInfo, "GetNodeInfo lies");
   mNodeInfo.swap(newNodeInfo);
 
@@ -282,6 +281,13 @@ int32_t
 Attr::ComputeIndexOf(const nsINode* aPossibleChild) const
 {
   return -1;
+}
+
+nsresult
+Attr::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                        bool aNotify)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsresult

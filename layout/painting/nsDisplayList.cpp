@@ -76,7 +76,9 @@
 #include "LayersLogging.h"
 #include "FrameLayerBuilder.h"
 #include "mozilla/EventStateManager.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/GeckoRestyleManager.h"
+#endif
 #include "nsCaret.h"
 #include "nsISelection.h"
 #include "nsDOMTokenList.h"
@@ -174,9 +176,12 @@ static void AddTransformFunctions(const nsCSSValueList* aList,
     return;
   }
 
-  GeckoStyleContext* contextIfGecko = aContext
-                                      ? aContext->GetAsGecko()
-                                      : nullptr;
+  GeckoStyleContext* contextIfGecko =
+#ifdef MOZ_OLD_STYLE
+    aContext ? aContext->GetAsGecko() : nullptr;
+#else
+    nullptr;
+#endif
 
   for (const nsCSSValueList* curr = aList; curr; curr = curr->mNext) {
     const nsCSSValue& currElem = curr->mValue;
@@ -480,9 +485,13 @@ SetAnimatable(nsCSSPropertyID aProperty,
         Servo_AnimationValue_GetTransform(aAnimationValue.mServo, &list);
         AddTransformFunctions(list, aFrame, aRefBox, aAnimatable);
       } else {
+#ifdef MOZ_OLD_STYLE
         nsCSSValueSharedList* list =
           aAnimationValue.mGecko.GetCSSValueSharedListValue();
         AddTransformFunctions(list, aFrame, aRefBox, aAnimatable);
+#else
+        MOZ_CRASH("old style system disabled");
+#endif
       }
       break;
     }
@@ -1742,7 +1751,7 @@ nsDisplayListBuilder::IsAnimatedGeometryRoot(nsIFrame* aFrame,
     nsIScrollableFrame* sf = do_QueryFrame(parent);
     if (sf->GetScrolledFrame() == aFrame) {
       if (sf->IsScrollingActive(this)) {
-        aIsAsync = aIsAsync || sf->MayBeAsynchronouslyScrolled();
+        aIsAsync = aIsAsync || sf->IsMaybeAsynchronouslyScrolled();
         result = AGR_YES;
       } else {
         result = AGR_MAYBE;
@@ -1949,14 +1958,11 @@ nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame)
     return;
   }
 
+  mozilla::gfx::IntRect rect(transformedDevPixelBorderBoxInt.ToUnknownRect());
   if (styleUI->mWindowDragging == StyleWindowDragging::Drag) {
-    mWindowDraggingFrames.emplace_back(aFrame);
-    mWindowDraggingRects.AppendElement(
-      nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
+    mRetainedWindowDraggingRegion.Add(aFrame, rect);
   } else {
-    mWindowNoDraggingFrames.emplace_back(aFrame);
-    mWindowNoDraggingRects.AppendElement(
-      nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
+    mRetainedWindowNoDraggingRegion.Add(aFrame, rect);
   }
 }
 
@@ -1969,56 +1975,65 @@ nsDisplayListBuilder::GetWindowDraggingRegion() const
     return result;
   }
 
-  LayoutDeviceIntRegion dragRegion((mozilla::gfx::ArrayView<pixman_box32_t>(mWindowDraggingRects)));
-  LayoutDeviceIntRegion noDragRegion((mozilla::gfx::ArrayView<pixman_box32_t>(mWindowNoDraggingRects)));
+  LayoutDeviceIntRegion dragRegion =
+    mRetainedWindowDraggingRegion.ToLayoutDeviceIntRegion();
+
+  LayoutDeviceIntRegion noDragRegion =
+    mRetainedWindowNoDraggingRegion.ToLayoutDeviceIntRegion();
 
   result.Sub(dragRegion, noDragRegion);
   return result;
 }
 
-void
-nsDisplayListBuilder::RemoveModifiedWindowDraggingRegion()
+/**
+ * Removes modified frames and rects from |aRegion|.
+ */
+static void
+RemoveModifiedFramesAndRects(nsDisplayListBuilder::WeakFrameRegion& aRegion)
 {
-  uint32_t i = 0;
-  uint32_t length = mWindowDraggingFrames.size();
-  while (i < length) {
-    if (!mWindowDraggingFrames[i].IsAlive() ||
-        mWindowDraggingFrames[i]->IsFrameModified()) {
-      // Swap the modified frame to the end of the vector so that
-      // we can remove them all at the end in one go.
-      mWindowDraggingFrames[i] = mWindowDraggingFrames[length - 1];
-      mWindowDraggingRects[i] = mWindowDraggingRects[length - 1];
-      length--;
-    } else {
-      i++;
-    }
-  }
-  mWindowDraggingFrames.resize(length);
-  mWindowDraggingRects.SetLength(length);
+  std::vector<WeakFrame>& frames = aRegion.mFrames;
+  nsTArray<pixman_box32_t>& rects = aRegion.mRects;
 
-  i = 0;
-  length = mWindowNoDraggingFrames.size();
-  while (i < length) {
-    if (!mWindowNoDraggingFrames[i].IsAlive() ||
-        mWindowNoDraggingFrames[i]->IsFrameModified()) {
-      mWindowNoDraggingFrames[i] = mWindowNoDraggingFrames[length - 1];
-      mWindowNoDraggingRects[i] = mWindowNoDraggingRects[length - 1];
+  MOZ_ASSERT(frames.size() == rects.Length());
+
+  uint32_t i = 0;
+  uint32_t length = frames.size();
+
+  while(i < length) {
+    WeakFrame& frame = frames[i];
+
+    if (!frame.IsAlive() || frame->IsFrameModified()) {
+      // To avoid O(n) shifts in the array, move the last element of the array
+      // to the current position and decrease the array length. Moving WeakFrame
+      // inside of the array causes a new WeakFrame to be created and registered
+      // with PresShell. We could avoid this by, for example, using a wrapper
+      // class for WeakFrame, or by storing raw  WeakFrame pointers.
+      frames[i] = frames[length - 1];
+      rects[i] = rects[length - 1];
       length--;
     } else {
       i++;
     }
   }
-  mWindowNoDraggingFrames.resize(length);
-  mWindowNoDraggingRects.SetLength(length);
+
+  frames.resize(length);
+  rects.TruncateLength(length);
 }
 
 void
-nsDisplayListBuilder::ClearWindowDraggingRegion()
+nsDisplayListBuilder::RemoveModifiedWindowRegions()
 {
-  mWindowDraggingFrames.clear();
-  mWindowDraggingRects.Clear();
-  mWindowNoDraggingFrames.clear();
-  mWindowNoDraggingRects.Clear();
+  RemoveModifiedFramesAndRects(mRetainedWindowDraggingRegion);
+  RemoveModifiedFramesAndRects(mRetainedWindowNoDraggingRegion);
+  RemoveModifiedFramesAndRects(mWindowExcludeGlassRegion);
+}
+
+void
+nsDisplayListBuilder::ClearRetainedWindowRegions()
+{
+  mRetainedWindowDraggingRegion.Clear();
+  mRetainedWindowNoDraggingRegion.Clear();
+  mWindowExcludeGlassRegion.Clear();
 }
 
 const uint32_t gWillChangeAreaMultiplier = 3;
@@ -2451,6 +2466,18 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
           return nullptr;
         }
       }
+    }
+
+    // Windowed plugins are not supported with WebRender enabled.
+    // But PluginGeometry needs to be updated to show plugin.
+    // Windowed plugins are going to be removed by Bug 1296400.
+    nsRootPresContext* rootPresContext = presContext->GetRootPresContext();
+    if (rootPresContext && XRE_IsContentProcess()) {
+      if (aBuilder->WillComputePluginGeometry()) {
+        rootPresContext->ComputePluginGeometryUpdates(aBuilder->RootReferenceFrame(), aBuilder, this);
+      }
+      // This must be called even if PluginGeometryUpdates were not computed.
+      rootPresContext->CollectPluginGeometryUpdates(layerManager);
     }
 
     WebRenderLayerManager* wrManager = static_cast<WebRenderLayerManager*>(layerManager.get());
@@ -2937,6 +2964,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mForceNotVisible(aBuilder->IsBuildingInvisibleItems())
   , mDisableSubpixelAA(false)
   , mReusedItem(false)
+  , mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden())
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
 #endif
@@ -4481,7 +4509,7 @@ nsDisplayImageContainer::ConfigureLayer(ImageLayer* aLayer,
   if (imageWidth > 0 && imageHeight > 0) {
     // We're actually using the ImageContainer. Let our frame know that it
     // should consider itself to have painted successfully.
-    nsDisplayBackgroundGeometry::UpdateDrawResult(this, ImgDrawResult::SUCCESS);
+    UpdateDrawResult(ImgDrawResult::SUCCESS);
   }
 
   // XXX(seth): Right now we ignore aParameters.Scale() and
@@ -7514,7 +7542,7 @@ nsDisplayStickyPosition::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
     // will never be asynchronously scrolled. Instead we will always position
     // the sticky items correctly on the gecko side and WR will never need to
     // adjust their position itself.
-    if (!stickyScrollContainer->ScrollFrame()->MayBeAsynchronouslyScrolled()) {
+    if (!stickyScrollContainer->ScrollFrame()->IsMaybeAsynchronouslyScrolled()) {
       stickyScrollContainer = nullptr;
     }
   }
@@ -8109,7 +8137,7 @@ nsDisplayTransform::FrameTransformProperties::FrameTransformProperties(const nsI
                                                                        float aAppUnitsPerPixel,
                                                                        const nsRect* aBoundsOverride)
   : mFrame(aFrame)
-  , mTransformList(aFrame->StyleDisplay()->mSpecifiedTransform)
+  , mTransformList(aFrame->StyleDisplay()->GetCombinedTransform())
   , mToTransformOrigin(GetDeltaToTransformOrigin(aFrame, aAppUnitsPerPixel, aBoundsOverride))
 {
 }

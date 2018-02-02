@@ -13,9 +13,9 @@ this.EXPORTED_SYMBOLS = ["XPIProvider", "XPIInternal"];
 
 /* globals WebExtensionPolicy */
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/AddonManager.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonRepository: "resource://gre/modules/addons/AddonRepository.jsm",
@@ -98,7 +98,6 @@ const PREF_ALLOW_NON_MPC              = "extensions.allow-non-mpc-extensions";
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
 
-const PREF_EM_HOTFIX_ID               = "extensions.hotfix.id";
 const PREF_EM_LAST_APP_BUILD_ID       = "extensions.lastAppBuildId";
 
 // Specify a list of valid built-in add-ons to load.
@@ -155,7 +154,7 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
-XPCOMUtils.defineConstant(this, "DB_SCHEMA", 23);
+XPCOMUtils.defineConstant(this, "DB_SCHEMA", 24);
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
@@ -272,7 +271,7 @@ var gGlobalScope = this;
  */
 var gIDTest = /^(\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}|[a-z0-9-\._]*\@[a-z0-9-\._]+)$/i;
 
-Cu.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.xpi";
 
 // Create a new logger for use by all objects in this Addons XPI Provider module
@@ -300,7 +299,7 @@ function loadLazyObjects() {
   let uri = "resource://gre/modules/addons/XPIProviderUtils.js";
   let scope = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), {
     sandboxName: uri,
-    wantGlobalProperties: ["TextDecoder"],
+    wantGlobalProperties: ["ChromeUtils", "TextDecoder"],
   });
 
   Object.assign(scope, {
@@ -407,10 +406,7 @@ function getRelativePath(file, dir) {
 }
 
 /**
- * Converts the given opaque descriptor string into an ordinary path
- * string. In practice, the path string is always exactly equal to the
- * descriptor string, but theoretically may not have been on some legacy
- * systems.
+ * Converts the given opaque descriptor string into an ordinary path string.
  *
  * @param {string} descriptor
  *        The opaque descriptor string to convert.
@@ -2237,7 +2233,7 @@ this.XPIProvider = {
             // Eventually set INSTALLED reason when a bootstrap addon
             // is dropped in profile folder and automatically installed
             if (AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_INSTALLED)
-                            .indexOf(addon.id) !== -1)
+                            .includes(addon.id))
               reason = BOOTSTRAP_REASONS.ADDON_INSTALL;
             this.callBootstrapMethod(addon, addon.file, "startup", reason);
           } catch (e) {
@@ -2465,7 +2461,7 @@ this.XPIProvider = {
     if (startupChanges.length > 0) {
     let addons = XPIDatabase.getAddons();
       for (let addon of addons) {
-        if ((startupChanges.indexOf(addon.id) != -1) &&
+        if ((startupChanges.includes(addon.id)) &&
             (addon.permissions() & AddonManager.PERM_CAN_UPGRADE) &&
             (!addon.isCompatible || isDisabledLegacy(addon))) {
           logger.debug("shouldForceUpdateCheck: can upgrade disabled add-on " + addon.id);
@@ -2790,7 +2786,7 @@ this.XPIProvider = {
     } catch (e) { }
 
     let TelemetrySession =
-      Cu.import("resource://gre/modules/TelemetrySession.jsm", {}).TelemetrySession;
+      ChromeUtils.import("resource://gre/modules/TelemetrySession.jsm", {}).TelemetrySession;
     TelemetrySession.setAddOns(data);
   },
 
@@ -3427,7 +3423,7 @@ this.XPIProvider = {
 
     let requireSecureOrigin = Services.prefs.getBoolPref(PREF_INSTALL_REQUIRESECUREORIGIN, true);
     let safeSchemes = ["https", "chrome", "file"];
-    if (requireSecureOrigin && safeSchemes.indexOf(uri.scheme) == -1)
+    if (requireSecureOrigin && !safeSchemes.includes(uri.scheme))
       return false;
 
     return true;
@@ -3626,7 +3622,7 @@ this.XPIProvider = {
     // WebExtension themes are installed as disabled, fix that here.
     addon.userDisabled = false;
 
-    addon = XPIDatabase.addAddonMetadata(addon, file.persistentDescriptor);
+    addon = XPIDatabase.addAddonMetadata(addon, file.path);
 
     XPIStates.addAddon(addon);
     XPIDatabase.saveChanges();
@@ -4237,6 +4233,7 @@ this.XPIProvider = {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: aFile.path,
                                     addonId: aId,
+                                    wantGlobalProperties: ["ChromeUtils"],
                                     metadata: { addonID: aId } });
       logger.error("Attempted to load bootstrap scope from missing directory " + aFile.path);
       return;
@@ -4256,6 +4253,7 @@ this.XPIProvider = {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: uri,
                                     addonId: aId,
+                                    wantGlobalProperties: ["ChromeUtils"],
                                     metadata: { addonID: aId, URI: uri } });
 
       try {
@@ -5597,14 +5595,10 @@ AddonWrapper.prototype = {
     return addon._installLocation.isSystem;
   },
 
-  // Returns true if Firefox Sync should sync this addon. Only non-hotfixes
-  // directly in the profile are considered syncable.
+  // Returns true if Firefox Sync should sync this addon. Only addons
+  // in the profile install location are considered syncable.
   get isSyncable() {
     let addon = addonFor(this);
-    let hotfixID = Services.prefs.getStringPref(PREF_EM_HOTFIX_ID, undefined);
-    if (hotfixID && hotfixID == addon.id) {
-      return false;
-    }
     return (addon._installLocation.name == KEY_APP_PROFILE);
   },
 
@@ -6079,7 +6073,7 @@ class DirectoryInstallLocation {
    *        The ID of the addon
    */
   isLinkedAddon(aId) {
-    return this._linkedAddons.indexOf(aId) != -1;
+    return this._linkedAddons.includes(aId);
   }
 }
 

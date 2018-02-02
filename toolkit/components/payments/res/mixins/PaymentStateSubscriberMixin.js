@@ -14,6 +14,7 @@
  * State of the payment request dialog.
  */
 let requestStore = new PaymentsStore({
+  orderDetailsShowing: false,
   request: {
     tabId: null,
     topLevelPrincipal: {URI: {displayHost: null}},
@@ -21,7 +22,7 @@ let requestStore = new PaymentsStore({
     paymentMethods: [],
     paymentDetails: {
       id: null,
-      totalItem: {label: null, amount: {currency: null, value: null}},
+      totalItem: {label: null, amount: {currency: null, value: 0}},
       displayItems: [],
       shippingOptions: [],
       modifiers: null,
@@ -35,8 +36,10 @@ let requestStore = new PaymentsStore({
       shippingType: "shipping",
     },
   },
-  savedAddresses: [],
-  savedBasicCards: [],
+  selectedPaymentCard: null,
+  selectedShippingAddress: null,
+  savedAddresses: {},
+  savedBasicCards: {},
 });
 
 

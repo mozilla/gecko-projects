@@ -222,8 +222,8 @@
 #if defined(XP_LINUX) && !defined(ANDROID)
 #include "mozilla/SandboxInfo.h"
 #elif defined(XP_WIN)
-#include "SandboxBroker.h"
-#include "SandboxPermissions.h"
+#include "sandboxBroker.h"
+#include "sandboxPermissions.h"
 #endif
 #endif
 
@@ -5053,6 +5053,12 @@ bool
 XRE_IsContentProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_Content;
+}
+
+bool
+XRE_IsPluginProcess()
+{
+  return XRE_GetProcessType() == GeckoProcessType_Plugin;
 }
 
 bool

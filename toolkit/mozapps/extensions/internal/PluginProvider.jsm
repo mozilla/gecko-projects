@@ -12,15 +12,15 @@ const Cu = Components.utils;
 
 this.EXPORTED_SYMBOLS = [];
 
-Cu.import("resource://gre/modules/AddonManager.jsm");
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 /* globals AddonManagerPrivate*/
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const URI_EXTENSION_STRINGS  = "chrome://mozapps/locale/extensions/extensions.properties";
 const LIST_UPDATED_TOPIC     = "plugins-list-updated";
 const FLASH_MIME_TYPE        = "application/x-shockwave-flash";
 
-Cu.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.plugins";
 
 // Create a new logger for use by the Addons Plugin Provider
@@ -118,7 +118,7 @@ var PluginProvider = {
    *         A callback to pass an array of Addons to
    */
   getAddonsByTypes(aTypes, aCallback) {
-    if (aTypes && aTypes.indexOf("plugin") < 0) {
+    if (aTypes && !aTypes.includes("plugin")) {
       aCallback([]);
       return;
     }

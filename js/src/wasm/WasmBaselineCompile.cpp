@@ -207,11 +207,6 @@ static const Register RabaldrScratchI32 = ebx;
 #endif
 
 #ifdef JS_CODEGEN_ARM
-// We need a temp for funcPtrCall.  It can't be any of the
-// WasmTableCall registers, an argument register, or a scratch
-// register, and probably should not be ReturnReg.
-static const Register FuncPtrCallTemp = CallTempReg1;
-
 // We use our own scratch register, because the macro assembler uses
 // the regular scratch register(s) pretty liberally.  We could
 // work around that in several cases but the mess does not seem
@@ -990,7 +985,7 @@ class BaseStackFrame
     CodeOffset stackAddOffset_;
 
     // The stack pointer, cached for brevity.
-    Register sp_;
+    RegisterOrSP sp_;
 
   public:
 
@@ -1182,13 +1177,13 @@ class BaseStackFrame
     // generally tmp0 and tmp1 must be something else.
 
     void allocStack(Register tmp0, Register tmp1, Label* stackOverflowLabel) {
-        stackAddOffset_ = masm.add32ToPtrWithPatch(sp_, tmp0);
-        masm.wasmEmitStackCheck(tmp0, tmp1, stackOverflowLabel);
+        stackAddOffset_ = masm.sub32FromStackPtrWithPatch(tmp0);
+        masm.wasmEmitStackCheck(RegisterOrSP(tmp0), tmp1, stackOverflowLabel);
     }
 
     void patchAllocStack() {
-        masm.patchAdd32ToPtr(stackAddOffset_,
-                             Imm32(-int32_t(maxStackHeight_ - localSize_)));
+        masm.patchSub32FromStackPtr(stackAddOffset_,
+                                    Imm32(int32_t(maxStackHeight_ - localSize_)));
     }
 
     // Very large frames are implausible, probably an attack.
@@ -3748,36 +3743,29 @@ class BaseCompiler final : public BaseCompilerInterface
 
 #ifndef RABALDR_I64_TO_FLOAT_CALLOUT
     RegI32 needConvertI64ToFloatTemp(ValType to, bool isUnsigned) {
-# if defined(JS_CODEGEN_X86)
-        bool needs = isUnsigned &&
-                     ((to == ValType::F64 && AssemblerX86Shared::HasSSE3()) ||
-                      to == ValType::F32);
-# else
-        bool needs = isUnsigned;
+        bool needs = false;
+        if (to == ValType::F64) {
+            needs = isUnsigned && masm.convertUInt64ToDoubleNeedsTemp();
+        } else {
+# if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+            needs = true;
 # endif
+        }
         return needs ? needI32() : RegI32::Invalid();
     }
 
     void convertI64ToF32(RegI64 src, bool isUnsigned, RegF32 dest, RegI32 temp) {
-# if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
         if (isUnsigned)
             masm.convertUInt64ToFloat32(src, dest, temp);
         else
             masm.convertInt64ToFloat32(src, dest);
-# else
-        MOZ_CRASH("BaseCompiler platform hook: convertI64ToF32");
-# endif
     }
 
     void convertI64ToF64(RegI64 src, bool isUnsigned, RegF64 dest, RegI32 temp) {
-# if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
         if (isUnsigned)
             masm.convertUInt64ToDouble(src, dest, temp);
         else
             masm.convertInt64ToDouble(src, dest);
-# else
-        MOZ_CRASH("BaseCompiler platform hook: convertI64ToF64");
-# endif
     }
 #endif // RABALDR_I64_TO_FLOAT_CALLOUT
 

@@ -378,12 +378,6 @@ public:
   virtual void SetPrincipal(nsIPrincipal *aPrincipal) override;
 
   /**
-   * Get the Content-Type of this document.
-   */
-  // NS_IMETHOD GetContentType(nsAString& aContentType);
-  // Already declared in nsIDOMDocument
-
-  /**
    * Set the Content-Type of this document.
    */
   virtual void SetContentType(const nsAString& aContentType) override;
@@ -557,6 +551,8 @@ public:
   virtual nsIContent *GetChildAt_Deprecated(uint32_t aIndex) const override;
   virtual int32_t ComputeIndexOf(const nsINode* aPossibleChild) const override;
   virtual uint32_t GetChildCount() const override;
+  virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                                     bool aNotify) override;
   virtual nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
                                             bool aNotify) override;
   virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) override;
@@ -618,6 +614,10 @@ public:
   virtual void UpdateIntersectionObservations() override;
   virtual void ScheduleIntersectionObserverNotification() override;
   virtual void NotifyIntersectionObservers() override;
+  virtual bool HasIntersectionObservers() const override
+  {
+    return !mIntersectionObservers.IsEmpty();
+  }
 
   virtual void NotifyLayerManagerRecreated() override;
 
@@ -635,9 +635,6 @@ private:
   void SendToConsole(nsCOMArray<nsISecurityConsoleMessage>& aMessages);
 
 public:
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE_OVERRIDABLE
-
   // nsIDOMDocument
   NS_DECL_NSIDOMDOCUMENT
 
@@ -676,6 +673,9 @@ public:
 
   virtual void EnumerateSubDocuments(nsSubDocEnumFunc aCallback,
                                                  void *aData) override;
+  virtual void CollectDescendantDocuments(
+    nsTArray<nsCOMPtr<nsIDocument>>& aDescendants,
+    nsDocTestFunc aCallback) const override;
 
   virtual bool CanSavePresentation(nsIRequest *aNewRequest) override;
   virtual void Destroy() override;
@@ -953,7 +953,7 @@ public:
     GetImplementation(mozilla::ErrorResult& rv) override;
 
   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) override;
-  virtual void GetLastStyleSheetSet(nsString& aSheetSet) override;
+  virtual void GetLastStyleSheetSet(nsAString& aSheetSet) override;
   virtual mozilla::dom::DOMStringList* StyleSheetSets() override;
   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) override;
   virtual already_AddRefed<Element> CreateElement(const nsAString& aTagName,
@@ -1029,7 +1029,7 @@ protected:
 
 public:
   // Get our title
-  virtual void GetTitle(nsString& aTitle) override;
+  virtual void GetTitle(nsAString& aTitle) override;
   // Set our title
   virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv) override;
 

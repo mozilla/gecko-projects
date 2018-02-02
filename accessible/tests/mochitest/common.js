@@ -46,9 +46,7 @@ const nsIObserverService = Components.interfaces.nsIObserverService;
 
 const nsIDOMDocument = Components.interfaces.nsIDOMDocument;
 const nsIDOMEvent = Components.interfaces.nsIDOMEvent;
-const nsIDOMHTMLDocument = Components.interfaces.nsIDOMHTMLDocument;
 const nsIDOMNode = Components.interfaces.nsIDOMNode;
-const nsIDOMHTMLElement = Components.interfaces.nsIDOMHTMLElement;
 const nsIDOMWindow = Components.interfaces.nsIDOMWindow;
 const nsIDOMXULElement = Components.interfaces.nsIDOMXULElement;
 
@@ -57,10 +55,10 @@ const nsIPropertyElement = Components.interfaces.nsIPropertyElement;
 // //////////////////////////////////////////////////////////////////////////////
 // OS detect
 
-const MAC = (navigator.platform.indexOf("Mac") != -1);
-const LINUX = (navigator.platform.indexOf("Linux") != -1);
-const SOLARIS = (navigator.platform.indexOf("SunOS") != -1);
-const WIN = (navigator.platform.indexOf("Win") != -1);
+const MAC = (navigator.platform.includes("Mac"));
+const LINUX = (navigator.platform.includes("Linux"));
+const SOLARIS = (navigator.platform.includes("SunOS"));
+const WIN = (navigator.platform.includes("Win"));
 
 // //////////////////////////////////////////////////////////////////////////////
 // Application detect
@@ -91,7 +89,7 @@ const MAX_TRIM_LENGTH = 100;
 /**
  * Services to determine if e10s is enabled.
  */
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 /**
  * nsIAccessibilityService service.

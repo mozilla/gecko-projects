@@ -52,11 +52,6 @@ pref("extensions.getAddons.themes.browseURL", "https://addons.mozilla.org/%LOCAL
 
 pref("extensions.update.autoUpdateDefault", true);
 
-pref("extensions.hotfix.id", "firefox-hotfix@mozilla.org");
-pref("extensions.hotfix.cert.checkAttributes", true);
-pref("extensions.hotfix.certs.1.sha1Fingerprint", "91:53:98:0C:C1:86:DF:47:8F:35:22:9E:11:C9:A7:31:04:49:A1:AA");
-pref("extensions.hotfix.certs.2.sha1Fingerprint", "39:E7:2B:7A:5B:CF:37:78:F9:5D:4A:E0:53:2D:2F:3D:68:53:C5:60");
-
 // Check AUS for system add-on updates.
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 
@@ -1093,6 +1088,7 @@ pref("security.sandbox.content.level", 3);
 // 1 -> "content sandbox using seccomp-bpf when available"
 // 2 -> "seccomp-bpf + write file broker"
 // 3 -> "seccomp-bpf + read/write file brokering"
+// 4 -> all of the above + network/socket restrictions
 // Content sandboxing on Linux is currently in the stage of
 // 'just getting it enabled', which includes a very permissive whitelist. We
 // enable seccomp-bpf on nightly to see if everything is running, or if we need
@@ -1104,19 +1100,17 @@ pref("security.sandbox.content.level", 3);
 //
 // This setting may not be required anymore once we decide to permanently
 // enable the content sandbox.
-pref("security.sandbox.content.level", 3);
+pref("security.sandbox.content.level", 4);
 pref("security.sandbox.content.write_path_whitelist", "");
 pref("security.sandbox.content.read_path_whitelist", "");
 pref("security.sandbox.content.syscall_whitelist", "");
 #endif
 
-#if defined(XP_MACOSX) || defined(XP_WIN)
 #if defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // ID (a UUID when set by gecko) that is used to form the name of a
 // sandbox-writable temporary directory to be used by content processes
 // when a temporary writable file is required in a level 1 sandbox.
 pref("security.sandbox.content.tempDirSuffix", "");
-#endif
 #endif
 
 #if defined(MOZ_SANDBOX)
@@ -1183,6 +1177,7 @@ pref("services.sync.prefs.sync.browser.tabs.loadInBackground", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnClose", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnOpen", true);
 pref("services.sync.prefs.sync.browser.urlbar.autocomplete.enabled", true);
+pref("services.sync.prefs.sync.browser.urlbar.matchBuckets", true);
 pref("services.sync.prefs.sync.browser.urlbar.maxRichResults", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.bookmark", true);
 pref("services.sync.prefs.sync.browser.urlbar.suggest.history", true);
@@ -1336,7 +1331,16 @@ pref("security.insecure_field_warning.contextual.enabled", true);
 
 // Show degraded UI for http pages; disabled for now
 pref("security.insecure_connection_icon.enabled", false);
+// Show degraded UI for http pages in private mode only for Nightly: Bug 1434626
+#if defined(NIGHTLY_BUILD)
+pref("security.insecure_connection_icon.pbmode.enabled", true);
+#else
 pref("security.insecure_connection_icon.pbmode.enabled", false);
+#endif
+
+// Show "Not Secure" text for http pages; disabled for now
+pref("security.insecure_connection_text.enabled", false);
+pref("security.insecure_connection_text.pbmode.enabled", false);
 
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
@@ -1727,7 +1731,7 @@ pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.section.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
 // Comma separated list of countries Form Autofill supports
-#ifdef MOZ_UPDATE_CHANNEL == release
+#if MOZ_UPDATE_CHANNEL == release
 pref("extensions.formautofill.supportedCountries", "US");
 pref("extensions.formautofill.supportRTL", false);
 #else
@@ -1758,3 +1762,6 @@ pref("browser.onboarding.updatetour", "performance,library,screenshots,singlesea
 
 // Preference that allows individual users to disable Screenshots.
 pref("extensions.screenshots.disabled", false);
+// Preference that allows individual users to leave Screenshots enabled, but
+// disable uploading to the server.
+pref("extensions.screenshots.upload-disabled", false);

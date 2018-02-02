@@ -81,14 +81,8 @@ RendererOGL::GetExternalImageHandler()
   };
 }
 
-void
-RendererOGL::Update()
-{
-  wr_renderer_update(mRenderer);
-}
-
 bool
-RendererOGL::Render()
+RendererOGL::UpdateAndRender()
 {
   uint32_t flags = gfx::gfxVars::WebRenderDebugFlags();
 
@@ -117,7 +111,9 @@ RendererOGL::Render()
     return false;
   }
 
-  auto size = mCompositor->GetClientSize();
+  wr_renderer_update(mRenderer);
+
+  auto size = mCompositor->GetBufferSize();
 
   if (!wr_renderer_render(mRenderer, size.width, size.height)) {
     NotifyWebRenderError(WebRenderError::RENDER);

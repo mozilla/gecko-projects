@@ -22,6 +22,8 @@ public:
 
   static nsThreadManager& get();
 
+  static void InitializeShutdownObserver();
+
   nsresult Init();
 
   // Shutdown all threads.  This function should only be called on the main
@@ -37,8 +39,12 @@ public:
   void UnregisterCurrentThread(nsThread& aThread);
 
   // Returns the current thread.  Returns null if OOM or if ThreadManager isn't
-  // initialized.
+  // initialized.  Creates the nsThread if one does not exist yet.
   nsThread* GetCurrentThread();
+
+  // Returns true iff the currently running thread has an nsThread associated
+  // with it (ie; whether this is a thread that we can dispatch runnables to).
+  bool IsNSThread() const;
 
   // CreateCurrentThread sets up an nsThread for the current thread. It uses the
   // event queue and main thread flags passed in. It should only be called once
@@ -74,6 +80,10 @@ private:
     , mHighestNumberOfThreads(1)
   {
   }
+
+  nsresult
+  SpinEventLoopUntilInternal(nsINestedEventLoopCondition* aCondition,
+                             bool aCheckingShutdown);
 
   nsRefPtrHashtable<nsPtrHashKey<PRThread>, nsThread> mThreadsByPRThread;
   unsigned            mCurThreadIndex;  // thread-local-storage index

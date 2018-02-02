@@ -41,27 +41,23 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-                                  "resource://gre/modules/PluralForm.jsm");
+ChromeUtils.defineModuleGetter(this, "PluralForm",
+                               "resource://gre/modules/PluralForm.jsm");
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 var localeNumberFormatCache = new Map();
 function getLocaleNumberFormat(fractionDigits) {
-  // Backward compatibility: don't use localized digits
-  let locale = Intl.NumberFormat().resolvedOptions().locale +
-               "-u-nu-latn";
-  let key = locale + "_" + fractionDigits;
-  if (!localeNumberFormatCache.has(key)) {
-    localeNumberFormatCache.set(key,
-      Intl.NumberFormat(locale,
+  if (!localeNumberFormatCache.has(fractionDigits)) {
+    localeNumberFormatCache.set(fractionDigits,
+      new Services.intl.NumberFormat(undefined,
                         { maximumFractionDigits: fractionDigits,
                           minimumFractionDigits: fractionDigits }));
   }
-  return localeNumberFormatCache.get(key);
+  return localeNumberFormatCache.get(fractionDigits);
 }
 
 const kDownloadProperties =

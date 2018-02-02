@@ -23,20 +23,20 @@ this.EXPORTED_SYMBOLS = [
 
 var {utils: Cu} = Components;
 
-Cu.import("resource://services-sync/status.js");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://services-crypto/utils.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-sync/browserid_identity.js");
-Cu.import("resource://testing-common/services/common/logging.js");
-Cu.import("resource://testing-common/services/sync/fakeservices.js");
-Cu.import("resource://gre/modules/FxAccounts.jsm");
-Cu.import("resource://gre/modules/FxAccountsClient.jsm");
-Cu.import("resource://gre/modules/FxAccountsCommon.js");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://services-sync/status.js");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://services-crypto/utils.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-sync/browserid_identity.js");
+ChromeUtils.import("resource://testing-common/services/common/logging.js");
+ChromeUtils.import("resource://testing-common/services/sync/fakeservices.js");
+ChromeUtils.import("resource://gre/modules/FxAccounts.jsm");
+ChromeUtils.import("resource://gre/modules/FxAccountsClient.jsm");
+ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // and grab non-exported stuff via a backstage pass.
-const {AccountState} = Cu.import("resource://gre/modules/FxAccounts.jsm", {});
+const {AccountState} = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", {});
 
 // A mock "storage manager" for FxAccounts that doesn't actually write anywhere.
 function MockFxaStorageManager() {
@@ -117,9 +117,11 @@ this.makeIdentityConfig = function(overrides) {
     fxaccount: {
       user: {
         assertion: "assertion",
-        email: "email",
-        kA: "kA",
-        kB: "kB",
+        email: "foo",
+        kSync: "a".repeat(128),
+        kXCS: "a".repeat(32),
+        kExtSync: "a".repeat(128),
+        kExtKbHash: "a".repeat(32),
         sessionToken: "sessionToken",
         uid: "a".repeat(32),
         verified: true,
@@ -191,9 +193,9 @@ this.configureFxAccountIdentity = function(authService,
   fxa.internal._fxAccountsClient = mockFxAClient;
 
   let mockTSC = { // TokenServerClient
-    getTokenFromBrowserIDAssertion(uri, assertion, cb) {
+    async getTokenFromBrowserIDAssertion(uri, assertion) {
       config.fxaccount.token.uid = config.username;
-      cb(null, config.fxaccount.token);
+      return config.fxaccount.token;
     },
   };
   authService._fxaService = fxa;
@@ -207,7 +209,7 @@ this.configureFxAccountIdentity = function(authService,
 this.configureIdentity = async function(identityOverrides, server) {
   let config = makeIdentityConfig(identityOverrides, server);
   let ns = {};
-  Cu.import("resource://services-sync/service.js", ns);
+  ChromeUtils.import("resource://services-sync/service.js", ns);
 
   // If a server was specified, ensure FxA has a correct cluster URL available.
   if (server && !config.fxaccount.token.endpoint) {
@@ -240,7 +242,7 @@ function syncTestLogging(level = "Trace") {
 
 this.SyncTestingInfrastructure = async function(server, username) {
   let ns = {};
-  Cu.import("resource://services-sync/service.js", ns);
+  ChromeUtils.import("resource://services-sync/service.js", ns);
 
   let config = makeIdentityConfig({ username });
   await configureIdentity(config, server);

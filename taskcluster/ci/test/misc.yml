@@ -5,6 +5,7 @@ geckoview:
     instance-size: xlarge
     loopback-video: true
     e10s: false
+    target: geckoview_example.apk
     mozharness:
         script: android_emulator_unittest.py
         no-read-buildbot-config: true
@@ -70,7 +71,9 @@ test-verify:
         by-test-platform:
             # do not run on ccov; see also the enable_code_coverage transform
             linux64-ccov/.*: []
-            default: built-projects
+            windows10-64-ccov/debug: []
+            # do not run on beta or release: usually just confirms earlier results
+            default: ['trunk', 'try']
     tier:
         by-test-platform:
             windows10-64-asan.*: 3

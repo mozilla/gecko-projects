@@ -31,7 +31,8 @@
 #include "nsHttpChannel.h"
 
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/workers/Workers.h"
+#include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/Unused.h"
@@ -325,13 +326,17 @@ NS_IMPL_ISUPPORTS(FetchDriver,
                   nsIStreamListener, nsIChannelEventSink, nsIInterfaceRequestor,
                   nsIThreadRetargetableStreamListener)
 
-FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal,
-                         nsILoadGroup* aLoadGroup, nsIEventTarget* aMainThreadEventTarget,
+FetchDriver::FetchDriver(InternalRequest* aRequest,
+                         nsIPrincipal* aPrincipal,
+                         nsILoadGroup* aLoadGroup,
+                         nsIEventTarget* aMainThreadEventTarget,
+                         PerformanceStorage* aPerformanceStorage,
                          bool aIsTrackingFetch)
   : mPrincipal(aPrincipal)
   , mLoadGroup(aLoadGroup)
   , mRequest(aRequest)
   , mMainThreadEventTarget(aMainThreadEventTarget)
+  , mPerformanceStorage(aPerformanceStorage)
   , mNeedToObserveOnDataAvailable(false)
   , mIsTrackingFetch(aIsTrackingFetch)
 #ifdef DEBUG
@@ -516,6 +521,20 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
                        mDocument,
                        secFlags,
                        mRequest->ContentPolicyType(),
+                       nullptr, /* aPerformanceStorage */
+                       mLoadGroup,
+                       nullptr, /* aCallbacks */
+                       loadFlags,
+                       ios);
+  } else if (mClientInfo.isSome()) {
+    rv = NS_NewChannel(getter_AddRefs(chan),
+                       uri,
+                       mPrincipal,
+                       mClientInfo.ref(),
+                       mController,
+                       secFlags,
+                       mRequest->ContentPolicyType(),
+                       mPerformanceStorage,
                        mLoadGroup,
                        nullptr, /* aCallbacks */
                        loadFlags,
@@ -526,6 +545,7 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
                        mPrincipal,
                        secFlags,
                        mRequest->ContentPolicyType(),
+                       mPerformanceStorage,
                        mLoadGroup,
                        nullptr, /* aCallbacks */
                        loadFlags,
@@ -610,6 +630,12 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = internalChan->SetIntegrityMetadata(mRequest->GetIntegrity());
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    // Set the initiator type
+    nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChan));
+    if (timedChannel) {
+      timedChannel->SetInitiatorType(NS_LITERAL_STRING("fetch"));
+    }
   }
 
   // Step 5. Proxy authentication will be handled by Necko.
@@ -1327,6 +1353,20 @@ FetchDriver::SetDocument(nsIDocument* aDocument)
   // Cannot set document after Fetch() has been called.
   MOZ_ASSERT(!mFetchCalled);
   mDocument = aDocument;
+}
+
+void
+FetchDriver::SetClientInfo(const ClientInfo& aClientInfo)
+{
+  MOZ_ASSERT(!mFetchCalled);
+  mClientInfo.emplace(aClientInfo);
+}
+
+void
+FetchDriver::SetController(const Maybe<ServiceWorkerDescriptor>& aController)
+{
+  MOZ_ASSERT(!mFetchCalled);
+  mController = aController;
 }
 
 void

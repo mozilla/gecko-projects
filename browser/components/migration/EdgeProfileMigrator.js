@@ -6,16 +6,16 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource:///modules/MigrationUtils.jsm");
-Cu.import("resource:///modules/MSMigrationUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ESEDBReader",
-                                  "resource:///modules/ESEDBReader.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource:///modules/MigrationUtils.jsm");
+ChromeUtils.import("resource:///modules/MSMigrationUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
+                               "resource://gre/modules/PlacesUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ESEDBReader",
+                               "resource:///modules/ESEDBReader.jsm");
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -116,7 +116,7 @@ EdgeTypedURLMigrator.prototype = {
       let uri;
       try {
         uri = Services.io.newURI(urlString);
-        if (["http", "https", "ftp"].indexOf(uri.scheme) == -1) {
+        if (!["http", "https", "ftp"].includes(uri.scheme)) {
           continue;
         }
       } catch (ex) {
@@ -374,10 +374,11 @@ EdgeProfileMigrator.prototype.getResources = function() {
   return resources.filter(r => r.exists);
 };
 
-EdgeProfileMigrator.prototype.getLastUsedDate = function() {
+EdgeProfileMigrator.prototype.getLastUsedDate = async function() {
   // Don't do this if we don't have a single profile (see the comment for
   // sourceProfiles) or if we can't find the database file:
-  if (this.sourceProfiles !== null || !gEdgeDatabase) {
+  let sourceProfiles = await this.getSourceProfiles();
+  if (sourceProfiles !== null || !gEdgeDatabase) {
     return Promise.resolve(new Date(0));
   }
   let logFilePath = OS.Path.join(gEdgeDatabase.parent.path, "LogFiles", "edb.log");
@@ -408,10 +409,10 @@ EdgeProfileMigrator.prototype.getLastUsedDate = function() {
  * - |[]| to indicate "There are no profiles" (on <=win8.1) which will avoid using this migrator.
  * See MigrationUtils.jsm for slightly more info on how sourceProfiles is used.
  */
-EdgeProfileMigrator.prototype.__defineGetter__("sourceProfiles", function() {
+EdgeProfileMigrator.prototype.getSourceProfiles = function() {
   let isWin10OrHigher = AppConstants.isPlatformAndVersionAtLeast("win", "10");
   return isWin10OrHigher ? null : [];
-});
+};
 
 EdgeProfileMigrator.prototype.__defineGetter__("sourceLocked", function() {
   // There is an exclusive lock on some databases. Assume they are locked for now.

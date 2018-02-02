@@ -9,66 +9,66 @@ var Ci = Components.interfaces;
 var Cu = Components.utils;
 var Cr = Components.results;
 
-Cu.import("resource://gre/modules/AddonManager.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/DelayedInit.jsm");
-Cu.import("resource://gre/modules/Messaging.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/TelemetryController.jsm");
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/DelayedInit.jsm");
+ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 
 if (AppConstants.ACCESSIBILITY) {
-  XPCOMUtils.defineLazyModuleGetter(this, "AccessFu",
-                                    "resource://gre/modules/accessibility/AccessFu.jsm");
+  ChromeUtils.defineModuleGetter(this, "AccessFu",
+                                 "resource://gre/modules/accessibility/AccessFu.jsm");
 }
 
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncPrefs",
-                                  "resource://gre/modules/AsyncPrefs.jsm");
+ChromeUtils.defineModuleGetter(this, "AsyncPrefs",
+                               "resource://gre/modules/AsyncPrefs.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Manifests",
-                                  "resource://gre/modules/Manifest.jsm");
+ChromeUtils.defineModuleGetter(this, "Manifests",
+                               "resource://gre/modules/Manifest.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-                                  "resource://gre/modules/FileUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "FileUtils",
+                               "resource://gre/modules/FileUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry",
-                                  "resource://gre/modules/UITelemetry.jsm");
+ChromeUtils.defineModuleGetter(this, "UITelemetry",
+                               "resource://gre/modules/UITelemetry.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-                                  "resource://gre/modules/PluralForm.jsm");
+ChromeUtils.defineModuleGetter(this, "PluralForm",
+                               "resource://gre/modules/PluralForm.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
-                                  "resource://gre/modules/Downloads.jsm");
+ChromeUtils.defineModuleGetter(this, "Downloads",
+                               "resource://gre/modules/Downloads.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "UserAgentOverrides",
-                                  "resource://gre/modules/UserAgentOverrides.jsm");
+ChromeUtils.defineModuleGetter(this, "UserAgentOverrides",
+                               "resource://gre/modules/UserAgentOverrides.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
-                                  "resource://gre/modules/SafeBrowsing.jsm");
+ChromeUtils.defineModuleGetter(this, "SafeBrowsing",
+                               "resource://gre/modules/SafeBrowsing.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
-                                  "resource://gre/modules/BrowserUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "BrowserUtils",
+                               "resource://gre/modules/BrowserUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Sanitizer",
-                                  "resource://gre/modules/Sanitizer.jsm");
+ChromeUtils.defineModuleGetter(this, "Sanitizer",
+                               "resource://gre/modules/Sanitizer.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Prompt",
-                                  "resource://gre/modules/Prompt.jsm");
+ChromeUtils.defineModuleGetter(this, "Prompt",
+                               "resource://gre/modules/Prompt.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "HelperApps",
-                                  "resource://gre/modules/HelperApps.jsm");
+ChromeUtils.defineModuleGetter(this, "HelperApps",
+                               "resource://gre/modules/HelperApps.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "SSLExceptions",
-                                  "resource://gre/modules/SSLExceptions.jsm");
+ChromeUtils.defineModuleGetter(this, "SSLExceptions",
+                               "resource://gre/modules/SSLExceptions.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
+ChromeUtils.defineModuleGetter(this, "FormHistory",
+                               "resource://gre/modules/FormHistory.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
                                    "@mozilla.org/uuid-generator;1",
@@ -80,42 +80,42 @@ if (AppConstants.MOZ_ENABLE_PROFILER_SPS) {
                                      "nsIProfiler");
 }
 
-XPCOMUtils.defineLazyModuleGetter(this, "SimpleServiceDiscovery",
-                                  "resource://gre/modules/SimpleServiceDiscovery.jsm");
+ChromeUtils.defineModuleGetter(this, "SimpleServiceDiscovery",
+                               "resource://gre/modules/SimpleServiceDiscovery.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
-                                  "resource://gre/modules/CharsetMenu.jsm");
+ChromeUtils.defineModuleGetter(this, "CharsetMenu",
+                               "resource://gre/modules/CharsetMenu.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetErrorHelper",
-                                  "resource://gre/modules/NetErrorHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "NetErrorHelper",
+                               "resource://gre/modules/NetErrorHelper.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PermissionsUtils",
-                                  "resource://gre/modules/PermissionsUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PermissionsUtils",
+                               "resource://gre/modules/PermissionsUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
+ChromeUtils.defineModuleGetter(this, "Preferences",
+                               "resource://gre/modules/Preferences.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "SharedPreferences",
-                                  "resource://gre/modules/SharedPreferences.jsm");
+ChromeUtils.defineModuleGetter(this, "SharedPreferences",
+                               "resource://gre/modules/SharedPreferences.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Notifications",
-                                  "resource://gre/modules/Notifications.jsm");
+ChromeUtils.defineModuleGetter(this, "Notifications",
+                               "resource://gre/modules/Notifications.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
+ChromeUtils.defineModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+ChromeUtils.defineModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "RuntimePermissions", "resource://gre/modules/RuntimePermissions.jsm");
+ChromeUtils.defineModuleGetter(this, "RuntimePermissions", "resource://gre/modules/RuntimePermissions.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "WebsiteMetadata", "resource://gre/modules/WebsiteMetadata.jsm");
+ChromeUtils.defineModuleGetter(this, "WebsiteMetadata", "resource://gre/modules/WebsiteMetadata.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
+ChromeUtils.defineModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
   "@mozilla.org/gfx/fontenumerator;1",
   "nsIFontEnumerator");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Utils", "resource://gre/modules/sessionstore/Utils.jsm");
+ChromeUtils.defineModuleGetter(this, "Utils", "resource://gre/modules/sessionstore/Utils.jsm");
 
 var GlobalEventDispatcher = EventDispatcher.instance;
 var WindowEventDispatcher = EventDispatcher.for(window);
@@ -242,7 +242,7 @@ lazilyLoadedObserverScripts.forEach(function (aScript) {
   XPCOMUtils.defineLazyGetter(window, name, function() {
     let sandbox = {};
     if (script.endsWith(".jsm")) {
-      Cu.import(script, sandbox);
+      ChromeUtils.import(script, sandbox);
     } else {
       Services.scriptloader.loadSubScript(script, sandbox);
     }
@@ -285,8 +285,8 @@ XPCOMUtils.defineLazyGetter(this, "ContentAreaUtils", function() {
   return ContentAreaUtils;
 });
 
-XPCOMUtils.defineLazyModuleGetter(this, "Rect", "resource://gre/modules/Geometry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Point", "resource://gre/modules/Geometry.jsm");
+ChromeUtils.defineModuleGetter(this, "Rect", "resource://gre/modules/Geometry.jsm");
+ChromeUtils.defineModuleGetter(this, "Point", "resource://gre/modules/Geometry.jsm");
 
 function resolveGeckoURI(aURI) {
   if (!aURI)
@@ -515,7 +515,7 @@ var BrowserApp = {
     // fxa-content-server messages.
     if (ParentalControls.isAllowed(ParentalControls.MODIFY_ACCOUNTS)) {
       console.log("browser.js: loading Firefox Accounts WebChannel");
-      Cu.import("resource://gre/modules/FxAccountsWebChannel.jsm");
+      ChromeUtils.import("resource://gre/modules/FxAccountsWebChannel.jsm");
       EnsureFxAccountsWebChannel();
     } else {
       console.log("browser.js: not loading Firefox Accounts WebChannel; this profile cannot connect to Firefox Accounts.");
@@ -525,7 +525,7 @@ var BrowserApp = {
     GlobalEventDispatcher.sendRequest({ type: "Gecko:Ready" });
 
     this.deck.addEventListener("DOMContentLoaded", function() {
-      InitLater(() => Cu.import("resource://gre/modules/NotificationDB.jsm"));
+      InitLater(() => ChromeUtils.import("resource://gre/modules/NotificationDB.jsm"));
 
       InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished"));
       InitLater(() => GlobalEventDispatcher.sendRequest({ type: "Gecko:DelayedStartup" }));
@@ -579,6 +579,19 @@ var BrowserApp = {
     // context menu to automatically accommodate locale changes without
     // having to be rebuilt.
     let stringGetter = name => () => Strings.browser.GetStringFromName(name);
+
+    function videoClassifier(aTarget) {
+      if (aTarget.readyState == aTarget.HAVE_NOTHING) {
+        // We don't know if the height/width of the video,
+        // show a generic string.
+        return "Media";
+      } else if (aTarget.videoWidth == 0 || aTarget.videoHeight == 0) {
+        // If a video element is zero width or height, it's essentially
+        // an HTMLAudioElement.
+        return "Audio";
+      }
+      return "Video";
+    }
 
     // TODO: These should eventually move into more appropriate classes
     NativeWindow.contextmenus.add(stringGetter("contextmenu.openInNewTab"),
@@ -779,7 +792,11 @@ var BrowserApp = {
       });
 
     NativeWindow.contextmenus.add({
-      label: stringGetter("contextmenu.shareMedia"),
+      label: function(aTarget) {
+        return Strings.browser.GetStringFromName(
+          `contextmenu.share${videoClassifier(aTarget)}2`
+        );
+      },
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1,
       selector: NativeWindow.contextmenus._disableRestricted(
         "SHARE", NativeWindow.contextmenus.videoContext()),
@@ -789,7 +806,7 @@ var BrowserApp = {
         return {
           title: title,
           uri: url,
-          type: "video/*",
+          type: videoClassifier(aElement) === "Audio" ? "audio/*" : "video/*",
         };
       },
       icon: "drawable://ic_menu_share",
@@ -896,16 +913,9 @@ var BrowserApp = {
     NativeWindow.contextmenus.add(
       function(aTarget) {
         if (aTarget instanceof HTMLVideoElement) {
-          if (aTarget.readyState == aTarget.HAVE_NOTHING) {
-            // We don't know if the height/width of the video,
-            // show a generic string.
-            return Strings.browser.GetStringFromName("contextmenu.saveMedia");
-          } else if (aTarget.videoWidth == 0 || aTarget.videoHeight == 0) {
-            // If a video element is zero width or height, its essentially
-            // an HTMLAudioElement.
-            return Strings.browser.GetStringFromName("contextmenu.saveAudio");
-          }
-          return Strings.browser.GetStringFromName("contextmenu.saveVideo");
+          return Strings.browser.GetStringFromName(
+            `contextmenu.save${videoClassifier(aTarget)}`
+          );
         } else if (aTarget instanceof HTMLAudioElement) {
           return Strings.browser.GetStringFromName("contextmenu.saveAudio");
         }
@@ -922,12 +932,7 @@ var BrowserApp = {
 
         let filePickerTitleKey;
         if (aTarget instanceof HTMLVideoElement) {
-          if (aTarget.readyState == aTarget.HAVE_NOTHING) {
-            filePickerTitleKey = "SaveMediaTitle";
-          } else if (aTarget.videoWidth == 0 || aTarget.videoHeight == 0) {
-            filePickerTitleKey = "SaveAudioTitle";
-          }
-          filePickerTitleKey = "SaveVideoTitle";
+          filePickerTitleKey = `Save${videoClassifier(aTarget)}Title`;
         } else {
           filePickerTitleKey = "SaveAudioTitle";
         }
@@ -3181,8 +3186,8 @@ var NativeWindow = {
   }
 };
 
-XPCOMUtils.defineLazyModuleGetter(this, "PageActions",
-                                  "resource://gre/modules/PageActions.jsm");
+ChromeUtils.defineModuleGetter(this, "PageActions",
+                               "resource://gre/modules/PageActions.jsm");
 
 // These alias to the old, deprecated NativeWindow interfaces
 [
@@ -3196,7 +3201,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "PageActions",
     Cu.reportError(err);
 
     let sandbox = {};
-    Cu.import(script, sandbox);
+    ChromeUtils.import(script, sandbox);
     return sandbox[exprt];
   });
 });
@@ -3204,7 +3209,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "PageActions",
 var LightWeightThemeWebInstaller = {
   init: function sh_init() {
     let temp = {};
-    Cu.import("resource://gre/modules/LightweightThemeConsumer.jsm", temp);
+    ChromeUtils.import("resource://gre/modules/LightweightThemeConsumer.jsm", temp);
     let theme = new temp.LightweightThemeConsumer(document);
     BrowserApp.deck.addEventListener("InstallBrowserTheme", this, false, true);
     BrowserApp.deck.addEventListener("PreviewBrowserTheme", this, false, true);
@@ -3247,7 +3252,7 @@ var LightWeightThemeWebInstaller = {
 
   get _manager () {
     let temp = {};
-    Cu.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
+    ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
     delete this._manager;
     return this._manager = temp.LightweightThemeManager;
   },
@@ -4238,14 +4243,14 @@ Tab.prototype = {
 
         // Sanitize rel link
         let list = this.sanitizeRelString(target.rel);
-        if (list.indexOf("[icon]") != -1) {
+        if (list.includes("[icon]")) {
           jsonMessage = this.makeFaviconMessage(target);
-        } else if (list.indexOf("[apple-touch-icon]") != -1 ||
-            list.indexOf("[apple-touch-icon-precomposed]") != -1) {
+        } else if (list.includes("[apple-touch-icon]") ||
+            list.includes("[apple-touch-icon-precomposed]")) {
           jsonMessage = this.makeFaviconMessage(target);
           jsonMessage['type'] = 'Link:Touchicon';
           this.addMetadata("touchIconList", jsonMessage.href, jsonMessage.size);
-        } else if (list.indexOf("[alternate]") != -1 && aEvent.type == "DOMLinkAdded") {
+        } else if (list.includes("[alternate]") && aEvent.type == "DOMLinkAdded") {
           let type = target.type.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
           let isFeed = (type == "application/rss+xml" || type == "application/atom+xml");
 
@@ -4253,9 +4258,9 @@ Tab.prototype = {
             return;
 
           jsonMessage = this.makeFeedMessage(target, type);
-        } else if (list.indexOf("[search]") != -1 && aEvent.type == "DOMLinkAdded") {
+        } else if (list.includes("[search]") && aEvent.type == "DOMLinkAdded") {
           this.sendOpenSearchMessage(target);
-        } else if (list.indexOf("[manifest]") != -1 &&
+        } else if (list.includes("[manifest]") &&
                    aEvent.type == "DOMLinkAdded"){
           this.makeManifestMessage(target);
           return;
@@ -6638,7 +6643,7 @@ var Tabs = {
         }
         break;
       case "network:link-status-changed":
-        if (["down", "unknown", "up"].indexOf(aData) == -1) {
+        if (!["down", "unknown", "up"].includes(aData)) {
           return;
         }
         this.useCache = (aData === "down");

@@ -46,11 +46,13 @@
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
 #include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/ServiceWorkerInterceptController.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/ToJSValue.h"
 
-#include "mozilla/dom/workers/ServiceWorkerManager.h"
 
 #include "mozilla/net/ReferrerPolicy.h"
 
@@ -227,7 +229,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using mozilla::dom::workers::ServiceWorkerManager;
 
 // Threshold value in ms for META refresh based redirects
 #define REFRESH_REDIRECT_TIMER 15000
@@ -459,6 +460,13 @@ nsDocShell::Init()
   rv = mContentListener->Init();
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // If parent intercept is not enabled then we must forward to
+  // the network controller from docshell.  We also enable if we're
+  // in the parent process in order to support non-e10s configurations.
+  if (!ServiceWorkerParentInterceptEnabled() || XRE_IsParentProcess()) {
+    mInterceptController = new ServiceWorkerInterceptController();
+  }
+
   // We want to hold a strong ref to the loadgroup, so it better hold a weak
   // ref to us...  use an InterfaceRequestorProxy to do this.
   nsCOMPtr<nsIInterfaceRequestor> proxy =
@@ -520,7 +528,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocShell)
   NS_INTERFACE_MAP_ENTRY(nsILinkHandler)
   NS_INTERFACE_MAP_ENTRY(nsIClipboardCommands)
   NS_INTERFACE_MAP_ENTRY(nsIDOMStorageManager)
-  NS_INTERFACE_MAP_ENTRY(nsINetworkInterceptController)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsINetworkInterceptController,
+                                     mInterceptController)
   NS_INTERFACE_MAP_ENTRY(nsIDeprecationWarner)
 NS_INTERFACE_MAP_END_INHERITING(nsDocLoader)
 
@@ -545,7 +554,9 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     return mScriptGlobal->QueryInterface(aIID, aSink);
   } else if (aIID.Equals(NS_GET_IID(nsIDOMDocument)) &&
              NS_SUCCEEDED(EnsureContentViewer())) {
-    mContentViewer->GetDOMDocument((nsIDOMDocument**)aSink);
+    nsCOMPtr<nsIDOMDocument> doc =
+      do_QueryInterface(mContentViewer->GetDocument());
+    doc.forget(aSink);
     return *aSink ? NS_OK : NS_NOINTERFACE;
   } else if (aIID.Equals(NS_GET_IID(nsIDocument)) &&
              NS_SUCCEEDED(EnsureContentViewer())) {
@@ -563,19 +574,18 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
       return NS_ERROR_NO_INTERFACE;
     }
 
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    contentViewer->GetDOMDocument(getter_AddRefs(domDoc));
-    NS_ASSERTION(domDoc, "Should have a document.");
-    if (!domDoc) {
+    nsCOMPtr<nsIDocument> doc = contentViewer->GetDocument();
+    NS_ASSERTION(doc, "Should have a document.");
+    if (!doc) {
       return NS_ERROR_NO_INTERFACE;
     }
 
 #if defined(DEBUG)
     MOZ_LOG(gDocShellLog, LogLevel::Debug,
            ("nsDocShell[%p]: returning app cache container %p",
-            this, domDoc.get()));
+            this, doc.get()));
 #endif
-    return domDoc->QueryInterface(aIID, aSink);
+    return doc->QueryInterface(aIID, aSink);
   } else if (aIID.Equals(NS_GET_IID(nsIPrompt)) &&
              NS_SUCCEEDED(EnsureScriptEnvironment())) {
     nsresult rv;
@@ -5189,7 +5199,12 @@ nsDocShell::GetDocument(nsIDOMDocument** aDocument)
   NS_ENSURE_ARG_POINTER(aDocument);
   NS_ENSURE_SUCCESS(EnsureContentViewer(), NS_ERROR_FAILURE);
 
-  return mContentViewer->GetDOMDocument(aDocument);
+  nsIDocument* doc = mContentViewer->GetDocument();
+  if (!doc) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  return CallQueryInterface(doc, aDocument);
 }
 
 NS_IMETHODIMP
@@ -7972,9 +7987,7 @@ nsDocShell::BeginRestore(nsIContentViewer* aContentViewer, bool aTop)
   // the document's channel to the loadgroup to initiate stateChange
   // notifications.
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  aContentViewer->GetDOMDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+  nsCOMPtr<nsIDocument> doc = aContentViewer->GetDocument();
   if (doc) {
     nsIChannel* channel = doc->GetChannel();
     if (channel) {
@@ -8194,9 +8207,7 @@ nsDocShell::RestoreFromHistory()
     // at the time we initiated the new load.  We need to check whether
     // it's still safe to do so, since there may have been DOM mutations
     // or new requests initiated.
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    viewer->GetDOMDocument(getter_AddRefs(domDoc));
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+    nsCOMPtr<nsIDocument> doc = viewer->GetDocument();
     nsIRequest* request = nullptr;
     if (doc) {
       request = doc->GetChannel();
@@ -8372,8 +8383,7 @@ nsDocShell::RestoreFromHistory()
   bool sticky;
   mLSHE->GetSticky(&sticky);
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  mContentViewer->GetDOMDocument(getter_AddRefs(domDoc));
+  nsCOMPtr<nsIDocument> document = mContentViewer->GetDocument();
 
   nsCOMArray<nsIDocShellTreeItem> childShells;
   int32_t i = 0;
@@ -8453,7 +8463,6 @@ nsDocShell::RestoreFromHistory()
     newCv->SetAuthorStyleDisabled(styleDisabled);
   }
 
-  nsCOMPtr<nsIDocument> document = do_QueryInterface(domDoc);
   if (document) {
     RefPtr<nsDocShell> parent = GetParentDocshell();
     if (parent) {
@@ -8711,9 +8720,7 @@ nsDocShell::CreateContentViewer(const nsACString& aContentType,
     // at the time we initiated the new load.  We need to check whether
     // it's still safe to do so, since there may have been DOM mutations
     // or new requests initiated.
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    viewer->GetDOMDocument(getter_AddRefs(domDoc));
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+    nsCOMPtr<nsIDocument> doc = viewer->GetDocument();
     mSavingOldViewer = CanSavePresentation(mLoadType, aRequest, doc);
   }
 
@@ -10668,10 +10675,16 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     return rv;
   }
 
+  // Document loads should set the reload flag on the channel so that it
+  // can be exposed on the service worker FetchEvent.
+  rv = loadInfo->SetIsDocshellReload(mLoadType & LOAD_CMD_RELOAD);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   if (!isSrcdoc) {
     rv = NS_NewChannelInternal(getter_AddRefs(channel),
                                aURI,
                                loadInfo,
+                               nullptr,   // PerformanceStorage
                                nullptr,   // loadGroup
                                static_cast<nsIInterfaceRequestor*>(this),
                                loadFlags);
@@ -14246,83 +14259,17 @@ nsDocShell::MaybeNotifyKeywordSearchLoading(const nsString& aProvider,
 }
 
 NS_IMETHODIMP
-nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceRequest,
+nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, nsIChannel* aChannel,
                                       bool* aShouldIntercept)
 {
-  *aShouldIntercept = false;
-
-  // For subresource requests we base our decision solely on the client's
-  // controller value.  Any settings that would have blocked service worker
-  // access should have been set before the initial navigation created the
-  // window.
-  if (!aIsNonSubresourceRequest) {
-    nsCOMPtr<nsIDocument> doc = GetDocument();
-    if (!doc) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-
-    ErrorResult rv;
-    *aShouldIntercept = doc->GetController().isSome();
-    if (NS_WARN_IF(rv.Failed())) {
-      return rv.StealNSResult();
-    }
-
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal =
-    BasePrincipal::CreateCodebasePrincipal(aURI, mOriginAttributes);
-
-  // For navigations, first check to see if we are allowed to control a
-  // window with the given URL.
-  if (!ServiceWorkerAllowedToControlWindow(principal, aURI)) {
-    return NS_OK;
-  }
-
-  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-  if (!swm) {
-    return NS_OK;
-  }
-
-  // We're allowed to control a window, so check with the ServiceWorkerManager
-  // for a matching service worker.
-  *aShouldIntercept = swm->IsAvailable(principal, aURI);
-  return NS_OK;
+  return mInterceptController->ShouldPrepareForIntercept(aURI, aChannel,
+                                                         aShouldIntercept);
 }
 
 NS_IMETHODIMP
 nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 {
-  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-  if (!swm) {
-    aChannel->CancelInterception(NS_ERROR_INTERCEPTION_FAILED);
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIChannel> channel;
-  nsresult rv = aChannel->GetChannel(getter_AddRefs(channel));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIDocument> doc;
-
-  bool isSubresourceLoad = !nsContentUtils::IsNonSubresourceRequest(channel);
-  if (isSubresourceLoad) {
-    doc = GetDocument();
-    if (!doc) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-  }
-
-  bool isReload = mLoadType & LOAD_CMD_RELOAD;
-
-  ErrorResult error;
-  swm->DispatchFetchEvent(mOriginAttributes, doc, aChannel, isReload,
-                          isSubresourceLoad, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return error.StealNSResult();
-  }
-
-  return NS_OK;
+  return mInterceptController->ChannelIntercepted(aChannel);
 }
 
 bool

@@ -6,11 +6,11 @@ use api::{ClipId, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::{DevicePixelScale, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::{DocumentLayer, FilterOp, ImageFormat};
 use api::{LayerRect, MixBlendMode, PipelineId};
-use batch::{AlphaBatcher, ClipBatcher};
+use batch::{AlphaBatcher, ClipBatcher, resolve_image};
 use clip::{ClipStore};
 use clip_scroll_tree::{ClipScrollTree};
-use device::Texture;
-use gpu_cache::{GpuCache, GpuCacheUpdateList};
+use device::{FrameId, Texture};
+use gpu_cache::{GpuCache};
 use gpu_types::{BlurDirection, BlurInstance, BrushInstance, ClipChainRectIndex};
 use gpu_types::{ClipScrollNodeData, ClipScrollNodeIndex};
 use gpu_types::{PrimitiveInstance};
@@ -19,7 +19,7 @@ use picture::{PictureKind};
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveStore};
 use prim_store::{BrushMaskKind, BrushKind, DeferredResolve, EdgeAaSegmentMask};
 use profiler::FrameProfileCounters;
-use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKind};
+use render_task::{BlitSource, RenderTaskAddress, RenderTaskId, RenderTaskKind};
 use render_task::{BlurTask, ClearMode, RenderTaskLocation, RenderTaskTree};
 use resource_cache::{ResourceCache};
 use std::{cmp, usize, f32, i32};
@@ -35,19 +35,21 @@ pub struct ScrollbarPrimitive {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTargetIndex(pub usize);
 
 pub struct RenderTargetContext<'a> {
     pub device_pixel_scale: DevicePixelScale,
     pub prim_store: &'a PrimitiveStore,
     pub resource_cache: &'a ResourceCache,
-    pub node_data: &'a [ClipScrollNodeData],
     pub clip_scroll_tree: &'a ClipScrollTree,
     pub use_dual_source_blending: bool,
+    pub node_data: &'a [ClipScrollNodeData],
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 struct TextureAllocator {
     // TODO(gw): Replace this with a simpler allocator for
     // render target allocation - this use case doesn't need
@@ -100,32 +102,42 @@ pub trait RenderTarget {
         _deferred_resolves: &mut Vec<DeferredResolve>,
     ) {
     }
+    // TODO(gw): It's a bit odd that we need the deferred resolves and mutable
+    //           GPU cache here. They are typically used by the build step
+    //           above. They are used for the blit jobs to allow resolve_image
+    //           to be called. It's a bit of extra overhead to store the image
+    //           key here and the resolve them in the build step separately.
+    //           BUT: if/when we add more texture cache target jobs, we might
+    //           want to tidy this up.
     fn add_task(
         &mut self,
         task_id: RenderTaskId,
         ctx: &RenderTargetContext,
-        gpu_cache: &GpuCache,
+        gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskTree,
         clip_store: &ClipStore,
+        deferred_resolves: &mut Vec<DeferredResolve>,
     );
     fn used_rect(&self) -> DeviceIntRect;
     fn needs_depth(&self) -> bool;
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum RenderTargetKind {
     Color, // RGBA32
     Alpha, // R8
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTargetList<T> {
     screen_size: DeviceIntSize,
     pub format: ImageFormat,
     pub max_size: DeviceUintSize,
     pub targets: Vec<T>,
-    #[cfg_attr(feature = "capture", serde(skip))]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub texture: Option<Texture>,
 }
 
@@ -159,9 +171,10 @@ impl<T: RenderTarget> RenderTargetList<T> {
         &mut self,
         task_id: RenderTaskId,
         ctx: &RenderTargetContext,
-        gpu_cache: &GpuCache,
+        gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
         clip_store: &ClipStore,
+        deferred_resolves: &mut Vec<DeferredResolve>,
     ) {
         self.targets.last_mut().unwrap().add_task(
             task_id,
@@ -169,6 +182,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
             gpu_cache,
             render_tasks,
             clip_store,
+            deferred_resolves,
         );
     }
 
@@ -185,7 +199,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
             None => {
                 let mut new_target = T::new(Some(self.max_size), self.screen_size);
                 let origin = new_target.allocate(alloc_size).expect(&format!(
-                    "Each render task must allocate <= size of one target! ({:?})",
+                    "Each render task must allocate <= size of one target! ({})",
                     alloc_size
                 ));
                 self.targets.push(new_target);
@@ -221,20 +235,39 @@ impl<T: RenderTarget> RenderTargetList<T> {
 /// Storing the task ID allows the renderer to find
 /// the target rect within the render target that this
 /// pipeline exists at.
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FrameOutput {
     pub task_id: RenderTaskId,
     pub pipeline_id: PipelineId,
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ScalingInfo {
     pub src_task_id: RenderTaskId,
     pub dest_task_id: RenderTaskId,
 }
 
+// Defines where the source data for a blit job can be found.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub enum BlitJobSource {
+    Texture(SourceTexture, i32, DeviceIntRect),
+    RenderTask(RenderTaskId),
+}
+
+// Information required to do a blit from a source to a target.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct BlitJob {
+    pub source: BlitJobSource,
+    pub target_rect: DeviceIntRect,
+}
+
 /// A render target represents a number of rendering operations on a surface.
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ColorRenderTarget {
     pub alpha_batcher: AlphaBatcher,
     // List of blur operations to apply for this render target.
@@ -242,6 +275,7 @@ pub struct ColorRenderTarget {
     pub horizontal_blurs: Vec<BlurInstance>,
     pub readbacks: Vec<DeviceIntRect>,
     pub scalings: Vec<ScalingInfo>,
+    pub blits: Vec<BlitJob>,
     // List of frame buffer outputs for this render target.
     pub outputs: Vec<FrameOutput>,
     allocator: Option<TextureAllocator>,
@@ -266,6 +300,7 @@ impl RenderTarget for ColorRenderTarget {
             horizontal_blurs: Vec::new(),
             readbacks: Vec::new(),
             scalings: Vec::new(),
+            blits: Vec::new(),
             allocator: size.map(TextureAllocator::new),
             outputs: Vec::new(),
             alpha_tasks: Vec::new(),
@@ -292,9 +327,10 @@ impl RenderTarget for ColorRenderTarget {
         &mut self,
         task_id: RenderTaskId,
         ctx: &RenderTargetContext,
-        _: &GpuCache,
+        gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskTree,
         _: &ClipStore,
+        deferred_resolves: &mut Vec<DeferredResolve>,
     ) {
         let task = &render_tasks[task_id];
 
@@ -354,6 +390,51 @@ impl RenderTarget for ColorRenderTarget {
                     dest_task_id: task_id,
                 });
             }
+            RenderTaskKind::Blit(ref task_info) => {
+                match task_info.source {
+                    BlitSource::Image { key } => {
+                        // Get the cache item for the source texture.
+                        let cache_item = resolve_image(
+                            key.image_key,
+                            key.image_rendering,
+                            key.tile_offset,
+                            ctx.resource_cache,
+                            gpu_cache,
+                            deferred_resolves,
+                        );
+
+                        // Work out a source rect to copy from the texture, depending on whether
+                        // a sub-rect is present or not.
+                        // TODO(gw): We have much type confusion below - f32, i32 and u32 for
+                        //           various representations of the texel rects. We should make
+                        //           this consistent!
+                        let source_rect = key.texel_rect.map_or(cache_item.uv_rect.to_i32(), |sub_rect| {
+                            DeviceIntRect::new(
+                                DeviceIntPoint::new(
+                                    cache_item.uv_rect.origin.x as i32 + sub_rect.origin.x,
+                                    cache_item.uv_rect.origin.y as i32 + sub_rect.origin.y,
+                                ),
+                                sub_rect.size,
+                            )
+                        });
+
+                        // Store the blit job for the renderer to execute, including
+                        // the allocated destination rect within this target.
+                        let (target_rect, _) = task.get_target_rect();
+                        self.blits.push(BlitJob {
+                            source: BlitJobSource::Texture(
+                                cache_item.texture_id,
+                                cache_item.texture_layer,
+                                source_rect,
+                            ),
+                            target_rect,
+                        });
+                    }
+                    BlitSource::RenderTask { .. } => {
+                        panic!("BUG: render task blit jobs to render tasks not supported");
+                    }
+                }
+            }
         }
     }
 
@@ -369,7 +450,8 @@ impl RenderTarget for ColorRenderTarget {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
     pub brush_mask_corners: Vec<PrimitiveInstance>,
@@ -407,9 +489,10 @@ impl RenderTarget for AlphaRenderTarget {
         &mut self,
         task_id: RenderTaskId,
         ctx: &RenderTargetContext,
-        gpu_cache: &GpuCache,
+        gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskTree,
         clip_store: &ClipStore,
+        _: &mut Vec<DeferredResolve>,
     ) {
         let task = &render_tasks[task_id];
 
@@ -424,8 +507,9 @@ impl RenderTarget for AlphaRenderTarget {
         }
 
         match task.kind {
-            RenderTaskKind::Readback(..) => {
-                panic!("Should not be added to alpha target!");
+            RenderTaskKind::Readback(..) |
+            RenderTaskKind::Blit(..) => {
+                panic!("BUG: should not be added to alpha target!");
             }
             RenderTaskKind::VerticalBlur(ref info) => {
                 info.add_instances(
@@ -540,9 +624,11 @@ impl RenderTarget for AlphaRenderTarget {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct TextureCacheRenderTarget {
     pub horizontal_blurs: Vec<BlurInstance>,
+    pub blits: Vec<BlitJob>,
 }
 
 impl TextureCacheRenderTarget {
@@ -552,6 +638,7 @@ impl TextureCacheRenderTarget {
     ) -> Self {
         TextureCacheRenderTarget {
             horizontal_blurs: Vec::new(),
+            blits: Vec::new(),
         }
     }
 
@@ -572,6 +659,24 @@ impl TextureCacheRenderTarget {
                     render_tasks,
                 );
             }
+            RenderTaskKind::Blit(ref task_info) => {
+                match task_info.source {
+                    BlitSource::Image { .. } => {
+                        // reading/writing from the texture cache at the same time
+                        // is undefined behavior.
+                        panic!("bug: a single blit cannot be to/from texture cache");
+                    }
+                    BlitSource::RenderTask { task_id } => {
+                        // Add a blit job to copy from an existing render
+                        // task to this target.
+                        let (target_rect, _) = task.get_target_rect();
+                        self.blits.push(BlitJob {
+                            source: BlitJobSource::RenderTask(task_id),
+                            target_rect,
+                        });
+                    }
+                }
+            }
             RenderTaskKind::VerticalBlur(..) |
             RenderTaskKind::Picture(..) |
             RenderTaskKind::CacheMask(..) |
@@ -583,7 +688,8 @@ impl TextureCacheRenderTarget {
     }
 }
 
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum RenderPassKind {
     MainFramebuffer(ColorRenderTarget),
     OffScreen {
@@ -598,7 +704,8 @@ pub enum RenderPassKind {
 ///
 /// A render pass can have several render targets if there wasn't enough space in one
 /// target to do all of the rendering for that pass.
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderPass {
     pub kind: RenderPassKind,
     tasks: Vec<RenderTaskId>,
@@ -658,7 +765,14 @@ impl RenderPass {
                 for &task_id in &self.tasks {
                     assert_eq!(render_tasks[task_id].target_kind(), RenderTargetKind::Color);
                     render_tasks[task_id].pass_index = Some(pass_index);
-                    target.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store);
+                    target.add_task(
+                        task_id,
+                        ctx,
+                        gpu_cache,
+                        render_tasks,
+                        clip_store,
+                        deferred_resolves,
+                    );
                 }
                 target.build(ctx, gpu_cache, render_tasks, deferred_resolves);
             }
@@ -706,8 +820,22 @@ impl RenderPass {
                         }
                         None => {
                             match target_kind {
-                                RenderTargetKind::Color => color.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
-                                RenderTargetKind::Alpha => alpha.add_task(task_id, ctx, gpu_cache, render_tasks, clip_store),
+                                RenderTargetKind::Color => color.add_task(
+                                    task_id,
+                                    ctx,
+                                    gpu_cache,
+                                    render_tasks,
+                                    clip_store,
+                                    deferred_resolves,
+                                ),
+                                RenderTargetKind::Alpha => alpha.add_task(
+                                    task_id,
+                                    ctx,
+                                    gpu_cache,
+                                    render_tasks,
+                                    clip_store,
+                                    deferred_resolves,
+                                ),
                             }
                         }
                     }
@@ -744,39 +872,38 @@ impl CompositeOps {
 
 /// A rendering-oriented representation of frame::Frame built by the render backend
 /// and presented to the renderer.
-#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct Frame {
+    //TODO: share the fields with DocumentView struct
     pub window_size: DeviceUintSize,
     pub inner_rect: DeviceUintRect,
     pub background_color: Option<ColorF>,
     pub layer: DocumentLayer,
     pub device_pixel_ratio: f32,
     pub passes: Vec<RenderPass>,
-    #[cfg_attr(feature = "capture", serde(default = "FrameProfileCounters::new", skip))]
+    #[cfg_attr(any(feature = "capture", feature = "replay"), serde(default = "FrameProfileCounters::new", skip))]
     pub profile_counters: FrameProfileCounters,
 
     pub node_data: Vec<ClipScrollNodeData>,
     pub clip_chain_local_clip_rects: Vec<LayerRect>,
     pub render_tasks: RenderTaskTree,
 
-    // List of updates that need to be pushed to the
-    // gpu resource cache.
-    #[cfg_attr(feature = "capture", serde(skip))]
-    pub gpu_cache_updates: Option<GpuCacheUpdateList>,
+    /// The GPU cache frame that the contents of Self depend on
+    pub gpu_cache_frame_id: FrameId,
 
-    // List of textures that we don't know about yet
-    // from the backend thread. The render thread
-    // will use a callback to resolve these and
-    // patch the data structures.
-    #[cfg_attr(feature = "capture", serde(skip))]
+    /// List of textures that we don't know about yet
+    /// from the backend thread. The render thread
+    /// will use a callback to resolve these and
+    /// patch the data structures.
     pub deferred_resolves: Vec<DeferredResolve>,
 
-    // True if this frame contains any render tasks
-    // that write to the texture cache.
+    /// True if this frame contains any render tasks
+    /// that write to the texture cache.
     pub has_texture_cache_tasks: bool,
 
-    // True if this frame has been drawn by the
-    // renderer.
+    /// True if this frame has been drawn by the
+    /// renderer.
     pub has_been_rendered: bool,
 }
 

@@ -10,34 +10,34 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cr = Components.results;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 try {
   // AddonManager.jsm doesn't allow itself to be imported in the child
   // process. We're used in the child process (for now), so guard against
   // this.
-  Components.utils.import("resource://gre/modules/AddonManager.jsm");
+  ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
   /* globals AddonManagerPrivate*/
 } catch (e) {
 }
 
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-                                  "resource://gre/modules/FileUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ServiceRequest",
-                                  "resource://gre/modules/ServiceRequest.jsm");
+ChromeUtils.defineModuleGetter(this, "FileUtils",
+                               "resource://gre/modules/FileUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "UpdateUtils",
+                               "resource://gre/modules/UpdateUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "OS",
+                               "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(this, "ServiceRequest",
+                               "resource://gre/modules/ServiceRequest.jsm");
 
 // The blocklist updater is the new system in charge of fetching remote data
 // securely and efficiently. It will replace the current XML-based system.
 // See Bug 1257565 and Bug 1252456.
 const BlocklistUpdater = {};
-XPCOMUtils.defineLazyModuleGetter(BlocklistUpdater, "checkVersions",
-                                  "resource://services-common/blocklist-updater.js");
+ChromeUtils.defineModuleGetter(BlocklistUpdater, "checkVersions",
+                               "resource://services-common/blocklist-updater.js");
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 const KEY_PROFILEDIR                  = "ProfD";
@@ -47,6 +47,7 @@ const PREF_BLOCKLIST_LASTUPDATETIME   = "app.update.lastUpdateTime.blocklist-bac
 const PREF_BLOCKLIST_URL              = "extensions.blocklist.url";
 const PREF_BLOCKLIST_ITEM_URL         = "extensions.blocklist.itemURL";
 const PREF_BLOCKLIST_ENABLED          = "extensions.blocklist.enabled";
+const PREF_BLOCKLIST_LAST_MODIFIED    = "extensions.blocklist.lastModified";
 const PREF_BLOCKLIST_LEVEL            = "extensions.blocklist.level";
 const PREF_BLOCKLIST_PINGCOUNTTOTAL   = "extensions.blocklist.pingCountTotal";
 const PREF_BLOCKLIST_PINGCOUNTVERSION = "extensions.blocklist.pingCountVersion";
@@ -141,7 +142,7 @@ XPCOMUtils.defineLazyGetter(this, "gOSVersion", function() {
 // shared code for suppressing bad cert dialogs
 XPCOMUtils.defineLazyGetter(this, "gCertUtils", function() {
   let temp = { };
-  Components.utils.import("resource://gre/modules/CertUtils.jsm", temp);
+  ChromeUtils.import("resource://gre/modules/CertUtils.jsm", temp);
   return temp;
 });
 
@@ -180,13 +181,13 @@ function restartApp() {
 function matchesOSABI(blocklistElement) {
   if (blocklistElement.hasAttribute("os")) {
     var choices = blocklistElement.getAttribute("os").split(",");
-    if (choices.length > 0 && choices.indexOf(gApp.OS) < 0)
+    if (choices.length > 0 && !choices.includes(gApp.OS))
       return false;
   }
 
   if (blocklistElement.hasAttribute("xpcomabi")) {
     choices = blocklistElement.getAttribute("xpcomabi").split(",");
-    if (choices.length > 0 && choices.indexOf(gApp.XPCOMABI) < 0)
+    if (choices.length > 0 && !choices.includes(gApp.XPCOMABI))
       return false;
   }
 
@@ -579,7 +580,15 @@ Blocklist.prototype = {
     request.open("GET", uri.spec, true);
     request.channel.notificationCallbacks = new gCertUtils.BadCertHandler();
     request.overrideMimeType("text/xml");
-    request.setRequestHeader("Cache-Control", "no-cache");
+
+    // The server will return a `304 Not Modified` response if the blocklist was
+    // not changed since last check.
+    const lastModified = Services.prefs.getCharPref(PREF_BLOCKLIST_LAST_MODIFIED, "");
+    if (lastModified) {
+      request.setRequestHeader("If-Modified-Since", lastModified);
+    } else {
+      request.setRequestHeader("Cache-Control", "no-cache");
+    }
 
     request.addEventListener("error", event => this.onXMLError(event));
     request.addEventListener("load", event => this.onXMLLoad(event));
@@ -607,12 +616,22 @@ Blocklist.prototype = {
       LOG("Blocklist::onXMLLoad: " + e);
       return;
     }
+
+    if (request.status == 304) {
+      LOG("Blocklist::onXMLLoad: up to date.");
+      return;
+    }
+
     let responseXML = request.responseXML;
     if (!responseXML || responseXML.documentElement.namespaceURI == XMLURI_PARSE_ERROR ||
         (request.status != 200 && request.status != 0)) {
       LOG("Blocklist::onXMLLoad: there was an error during load");
       return;
     }
+
+    // Save current blocklist timestamp to pref.
+    const lastModified = request.getResponseHeader("Last-Modified") || "";
+    Services.prefs.setCharPref(PREF_BLOCKLIST_LAST_MODIFIED, lastModified);
 
     var oldAddonEntries = this._addonEntries;
     var oldPluginEntries = this._pluginEntries;
@@ -1111,12 +1130,18 @@ Blocklist.prototype = {
     if (!toolkitVersion)
       toolkitVersion = gApp.platformVersion;
 
+    const pluginProperties = {
+      description: plugin.description,
+      filename: plugin.filename,
+      name: plugin.name,
+      version: plugin.version,
+    };
     for (var blockEntry of pluginEntries) {
       var matchFailed = false;
       for (var name in blockEntry.matches) {
-        if (!(name in plugin) ||
-            typeof(plugin[name]) != "string" ||
-            !blockEntry.matches[name].test(plugin[name])) {
+        let pluginProperty = pluginProperties[name];
+        if (typeof(pluginProperty) !== "string" ||
+            !blockEntry.matches[name].test(pluginProperty)) {
           matchFailed = true;
           break;
         }
@@ -1126,7 +1151,7 @@ Blocklist.prototype = {
         continue;
 
       for (let blockEntryVersion of blockEntry.versions) {
-        if (blockEntryVersion.includesItem(plugin.version, appVersion,
+        if (blockEntryVersion.includesItem(pluginProperties.version, appVersion,
                                            toolkitVersion)) {
           return {entry: blockEntry, version: blockEntryVersion};
         }

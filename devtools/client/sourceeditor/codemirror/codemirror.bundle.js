@@ -6815,11 +6815,11 @@ var CodeMirror =
 	}
 
 	var keyNames = {
-	  3: "Enter", 8: "Backspace", 9: "Tab", 13: "Enter", 16: "Shift", 17: "Ctrl", 18: "Alt",
+	  3: "Pause", 8: "Backspace", 9: "Tab", 13: "Enter", 16: "Shift", 17: "Ctrl", 18: "Alt",
 	  19: "Pause", 20: "CapsLock", 27: "Esc", 32: "Space", 33: "PageUp", 34: "PageDown", 35: "End",
 	  36: "Home", 37: "Left", 38: "Up", 39: "Right", 40: "Down", 44: "PrintScrn", 45: "Insert",
 	  46: "Delete", 59: ";", 61: "=", 91: "Mod", 92: "Mod", 93: "Mod",
-	  106: "*", 107: "=", 109: "-", 110: ".", 111: "/", 127: "Delete",
+	  106: "*", 107: "=", 109: "-", 110: ".", 111: "/", 127: "Delete", 145: "ScrollLock",
 	  173: "-", 186: ";", 187: "=", 188: ",", 189: "-", 190: ".", 191: "/", 192: "`", 219: "[", 220: "\\",
 	  221: "]", 222: "'", 63232: "Up", 63233: "Down", 63234: "Left", 63235: "Right", 63272: "Delete",
 	  63273: "Home", 63275: "End", 63276: "PageUp", 63277: "PageDown", 63302: "Insert"
@@ -6966,6 +6966,9 @@ var CodeMirror =
 	  if (presto && event.keyCode == 34 && event["char"]) { return false }
 	  var name = keyNames[event.keyCode]
 	  if (name == null || event.altGraphKey) { return false }
+	  // Ctrl-ScrollLock has keyCode 3, same as Ctrl-Pause,
+	  // so we'll use event.code when available (Chrome 48+, FF 38+, Safari 10.1+)
+	  if (event.keyCode == 3 && event.code) { name = event.code }
 	  return addModifierNames(name, event, noShift)
 	}
 
@@ -7848,6 +7851,7 @@ var CodeMirror =
 	    clearCaches(cm)
 	    regChange(cm)
 	  }, true)
+
 	  option("lineSeparator", null, function (cm, val) {
 	    cm.doc.lineSep = val
 	    if (!val) { return }
@@ -8254,7 +8258,7 @@ var CodeMirror =
 
 	  var paste = cm.state.pasteIncoming || origin == "paste"
 	  var textLines = splitLinesAuto(inserted), multiPaste = null
-	  // When pasing N lines into N selections, insert one line per selection
+	  // When pasting N lines into N selections, insert one line per selection
 	  if (paste && sel.ranges.length > 1) {
 	    if (lastCopied && lastCopied.text.join("\n") == inserted) {
 	      if (sel.ranges.length % lastCopied.text.length == 0) {
@@ -9888,7 +9892,7 @@ var CodeMirror =
 
 	addLegacyProps(CodeMirror)
 
-	CodeMirror.version = "5.32.0"
+	CodeMirror.version = "5.34.0"
 
 	return CodeMirror;
 
@@ -10570,18 +10574,23 @@ var CodeMirror =
 	    }
 	  }
 
-	  var currentlyHighlighted = null;
 	  function doMatchBrackets(cm) {
 	    cm.operation(function() {
-	      if (currentlyHighlighted) {currentlyHighlighted(); currentlyHighlighted = null;}
-	      currentlyHighlighted = matchBrackets(cm, false, cm.state.matchBrackets);
+	      if (cm.state.matchBrackets.currentlyHighlighted) {
+	        cm.state.matchBrackets.currentlyHighlighted();
+	        cm.state.matchBrackets.currentlyHighlighted = null;
+	      }
+	      cm.state.matchBrackets.currentlyHighlighted = matchBrackets(cm, false, cm.state.matchBrackets);
 	    });
 	  }
 
 	  CodeMirror.defineOption("matchBrackets", false, function(cm, val, old) {
 	    if (old && old != CodeMirror.Init) {
 	      cm.off("cursorActivity", doMatchBrackets);
-	      if (currentlyHighlighted) {currentlyHighlighted(); currentlyHighlighted = null;}
+	      if (cm.state.matchBrackets && cm.state.matchBrackets.currentlyHighlighted) {
+	        cm.state.matchBrackets.currentlyHighlighted();
+	        cm.state.matchBrackets.currentlyHighlighted = null;
+	      }
 	    }
 	    if (val) {
 	      cm.state.matchBrackets = typeof val == "object" ? val : {};
@@ -10743,8 +10752,8 @@ var CodeMirror =
 	        else
 	          curType = "skip";
 	      } else if (identical && cur.ch > 1 && triples.indexOf(ch) >= 0 &&
-	                 cm.getRange(Pos(cur.line, cur.ch - 2), cur) == ch + ch &&
-	                 (cur.ch <= 2 || cm.getRange(Pos(cur.line, cur.ch - 3), Pos(cur.line, cur.ch - 2)) != ch)) {
+	                 cm.getRange(Pos(cur.line, cur.ch - 2), cur) == ch + ch) {
+	        if (cur.ch > 2 && /\bstring/.test(cm.getTokenTypeAt(Pos(cur.line, cur.ch - 2)))) return CodeMirror.Pass;
 	        curType = "addFour";
 	      } else if (identical) {
 	        var prev = cur.ch == 0 ? " " : cm.getRange(Pos(cur.line, cur.ch - 1), cur)
@@ -11055,7 +11064,7 @@ var CodeMirror =
 	    var A = kw("keyword a"), B = kw("keyword b"), C = kw("keyword c"), D = kw("keyword d");
 	    var operator = kw("operator"), atom = {type: "atom", style: "atom"};
 
-	    var jsKeywords = {
+	    return {
 	      "if": kw("if"), "while": A, "with": A, "else": B, "do": B, "try": B, "finally": B,
 	      "return": D, "break": D, "continue": D, "new": kw("new"), "delete": C, "void": C, "throw": C,
 	      "debugger": kw("debugger"), "var": kw("var"), "const": kw("var"), "let": kw("var"),
@@ -11067,33 +11076,6 @@ var CodeMirror =
 	      "yield": C, "export": kw("export"), "import": kw("import"), "extends": C,
 	      "await": C
 	    };
-
-	    // Extend the 'normal' keywords with the TypeScript language extensions
-	    if (isTS) {
-	      var type = {type: "variable", style: "type"};
-	      var tsKeywords = {
-	        // object-like things
-	        "interface": kw("class"),
-	        "implements": C,
-	        "namespace": C,
-
-	        // scope modifiers
-	        "public": kw("modifier"),
-	        "private": kw("modifier"),
-	        "protected": kw("modifier"),
-	        "abstract": kw("modifier"),
-	        "readonly": kw("modifier"),
-
-	        // types
-	        "string": type, "number": type, "boolean": type, "any": type
-	      };
-
-	      for (var attr in tsKeywords) {
-	        jsKeywords[attr] = tsKeywords[attr];
-	      }
-	    }
-
-	    return jsKeywords;
 	  }();
 
 	  var isOperatorChar = /[+\-*&%=<>!?|~^@]/;
@@ -11339,6 +11321,10 @@ var CodeMirror =
 	    }
 	  }
 
+	  function isModifier(name) {
+	    return name == "public" || name == "private" || name == "protected" || name == "abstract" || name == "readonly"
+	  }
+
 	  // Combinators
 
 	  var defaultVars = {name: "this", next: {name: "arguments"}};
@@ -11395,16 +11381,19 @@ var CodeMirror =
 	    }
 	    if (type == "function") return cont(functiondef);
 	    if (type == "for") return cont(pushlex("form"), forspec, statement, poplex);
+	    if (type == "class" || (isTS && value == "interface")) { cx.marked = "keyword"; return cont(pushlex("form"), className, poplex); }
 	    if (type == "variable") {
-	      if (isTS && value == "type") {
-	        cx.marked = "keyword"
-	        return cont(typeexpr, expect("operator"), typeexpr, expect(";"));
-	      } else if (isTS && value == "declare") {
+	      if (isTS && value == "declare") {
 	        cx.marked = "keyword"
 	        return cont(statement)
-	      } else if (isTS && (value == "module" || value == "enum") && cx.stream.match(/^\s*\w/, false)) {
+	      } else if (isTS && (value == "module" || value == "enum" || value == "type") && cx.stream.match(/^\s*\w/, false)) {
 	        cx.marked = "keyword"
-	        return cont(pushlex("form"), pattern, expect("{"), pushlex("}"), block, poplex, poplex)
+	        if (value == "enum") return cont(enumdef);
+	        else if (value == "type") return cont(typeexpr, expect("operator"), typeexpr, expect(";"));
+	        else return cont(pushlex("form"), pattern, expect("{"), pushlex("}"), block, poplex, poplex)
+	      } else if (isTS && value == "namespace") {
+	        cx.marked = "keyword"
+	        return cont(pushlex("form"), expression, block, poplex)
 	      } else {
 	        return cont(pushlex("stat"), maybelabel);
 	      }
@@ -11415,24 +11404,23 @@ var CodeMirror =
 	    if (type == "default") return cont(expect(":"));
 	    if (type == "catch") return cont(pushlex("form"), pushcontext, expect("("), funarg, expect(")"),
 	                                     statement, poplex, popcontext);
-	    if (type == "class") return cont(pushlex("form"), className, poplex);
 	    if (type == "export") return cont(pushlex("stat"), afterExport, poplex);
 	    if (type == "import") return cont(pushlex("stat"), afterImport, poplex);
 	    if (type == "async") return cont(statement)
 	    if (value == "@") return cont(expression, statement)
 	    return pass(pushlex("stat"), expression, expect(";"), poplex);
 	  }
-	  function expression(type) {
-	    return expressionInner(type, false);
+	  function expression(type, value) {
+	    return expressionInner(type, value, false);
 	  }
-	  function expressionNoComma(type) {
-	    return expressionInner(type, true);
+	  function expressionNoComma(type, value) {
+	    return expressionInner(type, value, true);
 	  }
 	  function parenExpr(type) {
 	    if (type != "(") return pass()
 	    return cont(pushlex(")"), expression, expect(")"), poplex)
 	  }
-	  function expressionInner(type, noComma) {
+	  function expressionInner(type, value, noComma) {
 	    if (cx.state.fatArrowAt == cx.stream.start) {
 	      var body = noComma ? arrowBodyNoComma : arrowBody;
 	      if (type == "(") return cont(pushcontext, pushlex(")"), commasep(funarg, ")"), poplex, expect("=>"), body, popcontext);
@@ -11442,7 +11430,7 @@ var CodeMirror =
 	    var maybeop = noComma ? maybeoperatorNoComma : maybeoperatorComma;
 	    if (atomicTypes.hasOwnProperty(type)) return cont(maybeop);
 	    if (type == "function") return cont(functiondef, maybeop);
-	    if (type == "class") return cont(pushlex("form"), classExpression, poplex);
+	    if (type == "class" || (isTS && value == "interface")) { cx.marked = "keyword"; return cont(pushlex("form"), classExpression, poplex); }
 	    if (type == "keyword c" || type == "async") return cont(noComma ? expressionNoComma : expression);
 	    if (type == "(") return cont(pushlex(")"), maybeexpression, expect(")"), poplex, maybeop);
 	    if (type == "operator" || type == "spread") return cont(noComma ? expressionNoComma : expression);
@@ -11540,10 +11528,11 @@ var CodeMirror =
 	      return cont(afterprop);
 	    } else if (type == "jsonld-keyword") {
 	      return cont(afterprop);
-	    } else if (type == "modifier") {
+	    } else if (isTS && isModifier(value)) {
+	      cx.marked = "keyword"
 	      return cont(objprop)
 	    } else if (type == "[") {
-	      return cont(expression, expect("]"), afterprop);
+	      return cont(expression, maybetype, expect("]"), afterprop);
 	    } else if (type == "spread") {
 	      return cont(expressionNoComma, afterprop);
 	    } else if (value == "*") {
@@ -11645,7 +11634,7 @@ var CodeMirror =
 	    if (value == "<") return cont(pushlex(">"), commasep(typeexpr, ">"), poplex, afterType)
 	    if (value == "|" || type == ".") return cont(typeexpr)
 	    if (type == "[") return cont(expect("]"), afterType)
-	    if (value == "extends") return cont(typeexpr)
+	    if (value == "extends" || value == "implements") { cx.marked = "keyword"; return cont(typeexpr) }
 	  }
 	  function maybeTypeArgs(_, value) {
 	    if (value == "<") return cont(pushlex(">"), commasep(typeexpr, ">"), poplex, afterType)
@@ -11656,11 +11645,12 @@ var CodeMirror =
 	  function maybeTypeDefault(_, value) {
 	    if (value == "=") return cont(typeexpr)
 	  }
-	  function vardef() {
+	  function vardef(_, value) {
+	    if (value == "enum") {cx.marked = "keyword"; return cont(enumdef)}
 	    return pass(pattern, maybetype, maybeAssign, vardefCont);
 	  }
 	  function pattern(type, value) {
-	    if (type == "modifier") return cont(pattern)
+	    if (isTS && isModifier(value)) { cx.marked = "keyword"; return cont(pattern) }
 	    if (type == "variable") { register(value); return cont(); }
 	    if (type == "spread") return cont(pattern);
 	    if (type == "[") return contCommasep(pattern, "]");
@@ -11714,7 +11704,8 @@ var CodeMirror =
 	  }
 	  function funarg(type, value) {
 	    if (value == "@") cont(expression, funarg)
-	    if (type == "spread" || type == "modifier") return cont(funarg);
+	    if (type == "spread") return cont(funarg);
+	    if (isTS && isModifier(value)) { cx.marked = "keyword"; return cont(funarg); }
 	    return pass(pattern, maybetype, maybeAssign);
 	  }
 	  function classExpression(type, value) {
@@ -11727,14 +11718,16 @@ var CodeMirror =
 	  }
 	  function classNameAfter(type, value) {
 	    if (value == "<") return cont(pushlex(">"), commasep(typeparam, ">"), poplex, classNameAfter)
-	    if (value == "extends" || value == "implements" || (isTS && type == ","))
+	    if (value == "extends" || value == "implements" || (isTS && type == ",")) {
+	      if (value == "implements") cx.marked = "keyword";
 	      return cont(isTS ? typeexpr : expression, classNameAfter);
+	    }
 	    if (type == "{") return cont(pushlex("}"), classBody, poplex);
 	  }
 	  function classBody(type, value) {
-	    if (type == "modifier" || type == "async" ||
+	    if (type == "async" ||
 	        (type == "variable" &&
-	         (value == "static" || value == "get" || value == "set") &&
+	         (value == "static" || value == "get" || value == "set" || (isTS && isModifier(value))) &&
 	         cx.stream.match(/^\s+[\w$\xa1-\uffff]/, false))) {
 	      cx.marked = "keyword";
 	      return cont(classBody);
@@ -11744,7 +11737,7 @@ var CodeMirror =
 	      return cont(isTS ? classfield : functiondef, classBody);
 	    }
 	    if (type == "[")
-	      return cont(expression, expect("]"), isTS ? classfield : functiondef, classBody)
+	      return cont(expression, maybetype, expect("]"), isTS ? classfield : functiondef, classBody)
 	    if (value == "*") {
 	      cx.marked = "keyword";
 	      return cont(classBody);
@@ -11791,6 +11784,12 @@ var CodeMirror =
 	  function arrayLiteral(type) {
 	    if (type == "]") return cont();
 	    return pass(commasep(expressionNoComma, "]"));
+	  }
+	  function enumdef() {
+	    return pass(pushlex("form"), pattern, expect("{"), pushlex("}"), commasep(enummember, "}"), poplex, poplex)
+	  }
+	  function enummember() {
+	    return pass(pattern, maybeAssign);
 	  }
 
 	  function isContinuedStatement(state, textAfter) {
@@ -11962,6 +11961,7 @@ var CodeMirror =
 	  doNotIndent: {},
 	  allowUnquoted: false,
 	  allowMissing: false,
+	  allowMissingTagName: false,
 	  caseFold: false
 	}
 
@@ -12136,6 +12136,9 @@ var CodeMirror =
 	      state.tagName = stream.current();
 	      setStyle = "tag";
 	      return attrState;
+	    } else if (config.allowMissingTagName && type == "endTag") {
+	      setStyle = "tag bracket";
+	      return attrState(type, stream, state);
 	    } else {
 	      setStyle = "error";
 	      return tagNameState;
@@ -12154,6 +12157,9 @@ var CodeMirror =
 	        setStyle = "tag error";
 	        return closeStateErr;
 	      }
+	    } else if (config.allowMissingTagName && type == "endTag") {
+	      setStyle = "tag bracket";
+	      return closeState(type, stream, state);
 	    } else {
 	      setStyle = "error";
 	      return closeStateErr;
@@ -12387,9 +12393,9 @@ var CodeMirror =
 	      return ret("qualifier", "qualifier");
 	    } else if (/[:;{}\[\]\(\)]/.test(ch)) {
 	      return ret(null, ch);
-	    } else if ((ch == "u" && stream.match(/rl(-prefix)?\(/)) ||
-	               (ch == "d" && stream.match("omain(")) ||
-	               (ch == "r" && stream.match("egexp("))) {
+	    } else if (((ch == "u" || ch == "U") && stream.match(/rl(-prefix)?\(/i)) ||
+	               ((ch == "d" || ch == "D") && stream.match("omain(", true, true)) ||
+	               ((ch == "r" || ch == "R") && stream.match("egexp(", true, true))) {
 	      stream.backUp(1);
 	      state.tokenize = tokenParenthesized;
 	      return ret("property", "word");
@@ -12472,16 +12478,16 @@ var CodeMirror =
 	      return pushContext(state, stream, "block");
 	    } else if (type == "}" && state.context.prev) {
 	      return popContext(state);
-	    } else if (supportsAtComponent && /@component/.test(type)) {
+	    } else if (supportsAtComponent && /@component/i.test(type)) {
 	      return pushContext(state, stream, "atComponentBlock");
-	    } else if (/^@(-moz-)?document$/.test(type)) {
+	    } else if (/^@(-moz-)?document$/i.test(type)) {
 	      return pushContext(state, stream, "documentTypes");
-	    } else if (/^@(media|supports|(-moz-)?document|import)$/.test(type)) {
+	    } else if (/^@(media|supports|(-moz-)?document|import)$/i.test(type)) {
 	      return pushContext(state, stream, "atBlock");
-	    } else if (/^@(font-face|counter-style)/.test(type)) {
+	    } else if (/^@(font-face|counter-style)/i.test(type)) {
 	      state.stateArg = type;
 	      return "restricted_atBlock_before";
-	    } else if (/^@(-(moz|ms|o|webkit)-)?keyframes$/.test(type)) {
+	    } else if (/^@(-(moz|ms|o|webkit)-)?keyframes$/i.test(type)) {
 	      return "keyframes";
 	    } else if (type && type.charAt(0) == "@") {
 	      return pushContext(state, stream, "at");
@@ -13103,7 +13109,7 @@ var CodeMirror =
 	      },
 	      "@": function(stream) {
 	        if (stream.eat("{")) return [null, "interpolation"];
-	        if (stream.match(/^(charset|document|font-face|import|(-(moz|ms|o|webkit)-)?keyframes|media|namespace|page|supports)\b/, false)) return false;
+	        if (stream.match(/^(charset|document|font-face|import|(-(moz|ms|o|webkit)-)?keyframes|media|namespace|page|supports)\b/i, false)) return false;
 	        stream.eatWhile(/[\w\\\-]/);
 	        if (stream.match(/^\s*:/, false))
 	          return ["variable-2", "variable-definition"];
@@ -13332,7 +13338,7 @@ var CodeMirror =
 	  }
 
 	  CodeMirror.defineMode("jsx", function(config, modeConfig) {
-	    var xmlMode = CodeMirror.getMode(config, {name: "xml", allowMissing: true, multilineTagIndentPastTag: false})
+	    var xmlMode = CodeMirror.getMode(config, {name: "xml", allowMissing: true, multilineTagIndentPastTag: false, allowMissingTagName: true})
 	    var jsMode = CodeMirror.getMode(config, modeConfig && modeConfig.base || "javascript")
 
 	    function flatXMLIndent(state) {
@@ -14525,6 +14531,27 @@ var CodeMirror =
 	    return "string";
 	  }
 
+	  function tokenNestedComment(depth) {
+	    return function (stream, state) {
+	      var ch
+	      while (ch = stream.next()) {
+	        if (ch == "*" && stream.eat("/")) {
+	          if (depth == 1) {
+	            state.tokenize = null
+	            break
+	          } else {
+	            state.tokenize = tokenNestedComment(depth - 1)
+	            return state.tokenize(stream, state)
+	          }
+	        } else if (ch == "/" && stream.eat("*")) {
+	          state.tokenize = tokenNestedComment(depth + 1)
+	          return state.tokenize(stream, state)
+	        }
+	      }
+	      return "comment"
+	    }
+	  }
+
 	  def("text/x-scala", {
 	    name: "clike",
 	    keywords: words(
@@ -14580,6 +14607,12 @@ var CodeMirror =
 	        } else {
 	          return false
 	        }
+	      },
+
+	      "/": function(stream, state) {
+	        if (!stream.eat("*")) return false
+	        state.tokenize = tokenNestedComment(1)
+	        return state.tokenize(stream, state)
 	      }
 	    },
 	    modeProps: {closeBrackets: {triples: '"'}}
@@ -14614,7 +14647,7 @@ var CodeMirror =
 	      "file import where by get set abstract enum open inner override private public internal " +
 	      "protected catch finally out final vararg reified dynamic companion constructor init " +
 	      "sealed field property receiver param sparam lateinit data inline noinline tailrec " +
-	      "external annotation crossinline const operator infix suspend"
+	      "external annotation crossinline const operator infix suspend actual expect"
 	    ),
 	    types: words(
 	      /* package java.lang */
@@ -14626,7 +14659,7 @@ var CodeMirror =
 	    intendSwitch: false,
 	    indentStatements: false,
 	    multiLineStrings: true,
-	    number: /^(?:0x[a-f\d_]+|0b[01_]+|(?:[\d_]+\.?\d*|\.\d+)(?:e[-+]?[\d_]+)?)(u|ll?|l|f)?/i,
+	    number: /^(?:0x[a-f\d_]+|0b[01_]+|(?:[\d_]+(\.\d+)?|\.\d+)(?:e[-+]?[\d_]+)?)(u|ll?|l|f)?/i,
 	    blockKeywords: words("catch class do else finally for if where try while enum"),
 	    defKeywords: words("class val var object interface fun"),
 	    atoms: words("true false null this"),
@@ -18211,25 +18244,32 @@ var CodeMirror =
 	      incrementNumberToken: function(cm, actionArgs) {
 	        var cur = cm.getCursor();
 	        var lineStr = cm.getLine(cur.line);
-	        var re = /-?\d+/g;
+	        var re = /(-?)(?:(0x)([\da-f]+)|(0b|0|)(\d+))/gi;
 	        var match;
 	        var start;
 	        var end;
 	        var numberStr;
-	        var token;
 	        while ((match = re.exec(lineStr)) !== null) {
-	          token = match[0];
 	          start = match.index;
-	          end = start + token.length;
+	          end = start + match[0].length;
 	          if (cur.ch < end)break;
 	        }
 	        if (!actionArgs.backtrack && (end <= cur.ch))return;
-	        if (token) {
+	        if (match) {
+	          var baseStr = match[2] || match[4]
+	          var digits = match[3] || match[5]
 	          var increment = actionArgs.increase ? 1 : -1;
-	          var number = parseInt(token) + (increment * actionArgs.repeat);
+	          var base = {'0b': 2, '0': 8, '': 10, '0x': 16}[baseStr.toLowerCase()];
+	          var number = parseInt(match[1] + digits, base) + (increment * actionArgs.repeat);
+	          numberStr = number.toString(base);
+	          var zeroPadding = baseStr ? new Array(digits.length - numberStr.length + 1 + match[1].length).join('0') : ''
+	          if (numberStr.charAt(0) === '-') {
+	            numberStr = '-' + baseStr + zeroPadding + numberStr.substr(1);
+	          } else {
+	            numberStr = baseStr + zeroPadding + numberStr;
+	          }
 	          var from = Pos(cur.line, start);
 	          var to = Pos(cur.line, end);
-	          numberStr = number.toString();
 	          cm.replaceRange(numberStr, from, to);
 	        } else {
 	          return;
@@ -20975,9 +21015,15 @@ var CodeMirror =
 	        var closing = cm.scanForBracket(pos, 1);
 	        if (!closing) return false;
 	        if (closing.ch == mirror.charAt(mirror.indexOf(opening.ch) + 1)) {
-	          newRanges.push({anchor: Pos(opening.pos.line, opening.pos.ch + 1),
-	                          head: closing.pos});
-	          break;
+	          var startPos = Pos(opening.pos.line, opening.pos.ch + 1);
+	          if (CodeMirror.cmpPos(startPos, range.from()) == 0 &&
+	              CodeMirror.cmpPos(closing.pos, range.to()) == 0) {
+	            opening = cm.scanForBracket(opening.pos, -1);
+	            if (!opening) return false;
+	          } else {
+	            newRanges.push({anchor: startPos, head: closing.pos});
+	            break;
+	          }
 	        }
 	        pos = Pos(closing.pos.line, closing.pos.ch + 1);
 	      }
@@ -21168,7 +21214,7 @@ var CodeMirror =
 	    var marks = cm.state.sublimeBookmarks || (cm.state.sublimeBookmarks = []);
 	    for (var i = 0; i < ranges.length; i++) {
 	      var from = ranges[i].from(), to = ranges[i].to();
-	      var found = cm.findMarks(from, to);
+	      var found = ranges[i].empty() ? cm.findMarksAt(from) : cm.findMarks(from, to);
 	      for (var j = 0; j < found.length; j++) {
 	        if (found[j].sublimeBookmark) {
 	          found[j].clear();
@@ -21300,27 +21346,6 @@ var CodeMirror =
 	    cm.scrollTo(null, (pos.top + pos.bottom) / 2 - cm.getScrollInfo().clientHeight / 2);
 	  };
 
-	  cmds.selectLinesUpward = function(cm) {
-	    cm.operation(function() {
-	      var ranges = cm.listSelections();
-	      for (var i = 0; i < ranges.length; i++) {
-	        var range = ranges[i];
-	        if (range.head.line > cm.firstLine())
-	          cm.addSelection(Pos(range.head.line - 1, range.head.ch));
-	      }
-	    });
-	  };
-	  cmds.selectLinesDownward = function(cm) {
-	    cm.operation(function() {
-	      var ranges = cm.listSelections();
-	      for (var i = 0; i < ranges.length; i++) {
-	        var range = ranges[i];
-	        if (range.head.line < cm.lastLine())
-	          cm.addSelection(Pos(range.head.line + 1, range.head.ch));
-	      }
-	    });
-	  };
-
 	  function getTarget(cm) {
 	    var from = cm.getCursor("from"), to = cm.getCursor("to");
 	    if (CodeMirror.cmpPos(from, to) == 0) {
@@ -21382,8 +21407,6 @@ var CodeMirror =
 	    "Cmd-Enter": "insertLineAfter",
 	    "Shift-Cmd-Enter": "insertLineBefore",
 	    "Cmd-D": "selectNextOccurrence",
-	    "Shift-Cmd-Up": "addCursorToPrevLine",
-	    "Shift-Cmd-Down": "addCursorToNextLine",
 	    "Shift-Cmd-Space": "selectScope",
 	    "Shift-Cmd-M": "selectBetweenBrackets",
 	    "Cmd-M": "goToBracket",
@@ -21413,8 +21436,8 @@ var CodeMirror =
 	    "Cmd-K Cmd-Backspace": "delLineLeft",
 	    "Cmd-K Cmd-0": "unfoldAll",
 	    "Cmd-K Cmd-J": "unfoldAll",
-	    "Ctrl-Shift-Up": "selectLinesUpward",
-	    "Ctrl-Shift-Down": "selectLinesDownward",
+	    "Ctrl-Shift-Up": "addCursorToPrevLine",
+	    "Ctrl-Shift-Down": "addCursorToNextLine",
 	    "Cmd-F3": "findUnder",
 	    "Shift-Cmd-F3": "findUnderPrevious",
 	    "Alt-F3": "findAllUnder",
@@ -21444,8 +21467,6 @@ var CodeMirror =
 	    "Ctrl-Enter": "insertLineAfter",
 	    "Shift-Ctrl-Enter": "insertLineBefore",
 	    "Ctrl-D": "selectNextOccurrence",
-	    "Alt-CtrlUp": "addCursorToPrevLine",
-	    "Alt-CtrlDown": "addCursorToNextLine",
 	    "Shift-Ctrl-Space": "selectScope",
 	    "Shift-Ctrl-M": "selectBetweenBrackets",
 	    "Ctrl-M": "goToBracket",
@@ -21475,8 +21496,8 @@ var CodeMirror =
 	    "Ctrl-K Ctrl-Backspace": "delLineLeft",
 	    "Ctrl-K Ctrl-0": "unfoldAll",
 	    "Ctrl-K Ctrl-J": "unfoldAll",
-	    "Ctrl-Alt-Up": "selectLinesUpward",
-	    "Ctrl-Alt-Down": "selectLinesDownward",
+	    "Ctrl-Alt-Up": "addCursorToPrevLine",
+	    "Ctrl-Alt-Down": "addCursorToNextLine",
 	    "Ctrl-F3": "findUnder",
 	    "Shift-Ctrl-F3": "findUnderPrevious",
 	    "Alt-F3": "findAllUnder",
@@ -21974,7 +21995,7 @@ var CodeMirror =
 	    var iter = new Iter(cm, start.line, 0);
 	    for (;;) {
 	      var openTag = toNextTag(iter), end;
-	      if (!openTag || iter.line != start.line || !(end = toTagEnd(iter))) return;
+	      if (!openTag || !(end = toTagEnd(iter)) || iter.line != start.line) return;
 	      if (!openTag[1] && end != "selfClose") {
 	        var startPos = Pos(iter.line, iter.ch);
 	        var endPos = findMatchingClose(iter, openTag[2]);

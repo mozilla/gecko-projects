@@ -8,12 +8,12 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
-                                  "resource://gre/modules/BrowserUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
-                                  "resource://gre/modules/DeferredTask.jsm");
+ChromeUtils.defineModuleGetter(this, "BrowserUtils",
+                               "resource://gre/modules/BrowserUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "DeferredTask",
+                               "resource://gre/modules/DeferredTask.jsm");
 
 Cu.importGlobalProperties(["InspectorUtils"]);
 
@@ -365,7 +365,7 @@ this.SelectContentHelper.prototype = {
         }
         break;
       case "transitionend":
-        if (SUPPORTED_PROPERTIES.indexOf(event.propertyName) != -1) {
+        if (SUPPORTED_PROPERTIES.includes(event.propertyName)) {
           this._updateTimer.arm();
         }
         break;

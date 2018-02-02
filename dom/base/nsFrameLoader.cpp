@@ -20,7 +20,6 @@
 #include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsPIDOMWindow.h"
 #include "nsIWebNavigation.h"
 #include "nsIWebProgress.h"
@@ -43,13 +42,13 @@
 #include "nsError.h"
 #include "nsISHistory.h"
 #include "nsISHistoryInternal.h"
-#include "nsIDOMHTMLDocument.h"
 #include "nsIXULWindow.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsISHistory.h"
 #include "NullPrincipal.h"
 #include "nsIScriptError.h"
 #include "nsGlobalWindow.h"
+#include "nsHTMLDocument.h"
 #include "nsPIWindowRoot.h"
 #include "nsLayoutUtils.h"
 #include "nsMappedAttributes.h"
@@ -898,20 +897,23 @@ nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   // https://bugzilla.mozilla.org/show_bug.cgi?id=284245
   presShell = mDocShell->GetPresShell();
   if (presShell) {
-    nsCOMPtr<nsIDOMHTMLDocument> doc =
-      do_QueryInterface(presShell->GetDocument());
+    nsIDocument* doc = presShell->GetDocument();
+    nsHTMLDocument* htmlDoc = doc ? doc->AsHTMLDocument() : nullptr;
 
-    if (doc) {
+    if (htmlDoc) {
       nsAutoString designMode;
-      doc->GetDesignMode(designMode);
+      htmlDoc->GetDesignMode(designMode);
 
       if (designMode.EqualsLiteral("on")) {
         // Hold on to the editor object to let the document reattach to the
         // same editor object, instead of creating a new one.
         RefPtr<HTMLEditor> htmlEditor = mDocShell->GetHTMLEditor();
         Unused << htmlEditor;
-        doc->SetDesignMode(NS_LITERAL_STRING("off"));
-        doc->SetDesignMode(NS_LITERAL_STRING("on"));
+        htmlDoc->SetDesignMode(NS_LITERAL_STRING("off"), Nothing(),
+                               IgnoreErrors());
+
+        htmlDoc->SetDesignMode(NS_LITERAL_STRING("on"), Nothing(),
+                               IgnoreErrors());
       } else {
         // Re-initialize the presentation for contenteditable documents
         bool editable = false,
@@ -2979,9 +2981,8 @@ nsFrameLoader::CreateStaticClone(nsIFrameLoader* aDest)
   NS_ENSURE_STATE(doc);
 
   nsCOMPtr<nsIDocument> clonedDoc = doc->CreateStaticClone(dest->mDocShell);
-  nsCOMPtr<nsIDOMDocument> clonedDOMDoc = do_QueryInterface(clonedDoc);
 
-  viewer->SetDOMDocument(clonedDOMDoc);
+  viewer->SetDocument(clonedDoc);
   return NS_OK;
 }
 

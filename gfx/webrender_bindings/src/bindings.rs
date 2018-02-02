@@ -28,8 +28,31 @@ use core_foundation::string::CFString;
 #[cfg(target_os = "macos")]
 use core_graphics::font::CGFont;
 
-/// cbindgen:field-names=[mNamespace, mHandle]
-type WrExternalImageBufferType = ExternalImageType;
+#[repr(C)]
+pub enum WrExternalImageBufferType {
+    TextureHandle = 0,
+    TextureRectHandle = 1,
+    TextureArrayHandle = 2,
+    TextureExternalHandle = 3,
+    ExternalBuffer = 4,
+}
+
+impl WrExternalImageBufferType {
+    fn to_wr(self) -> ExternalImageType {
+        match self {
+            WrExternalImageBufferType::TextureHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Default),
+            WrExternalImageBufferType::TextureRectHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Rect),
+            WrExternalImageBufferType::TextureArrayHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Array),
+            WrExternalImageBufferType::TextureExternalHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::External),
+            WrExternalImageBufferType::ExternalBuffer =>
+                ExternalImageType::Buffer,
+        }
+    }
+}
 
 /// cbindgen:field-names=[mHandle]
 /// cbindgen:derive-lt=true
@@ -77,8 +100,7 @@ pub struct DocumentHandle {
 }
 
 impl DocumentHandle {
-    pub fn new(api: RenderApi, size: DeviceUintSize) -> DocumentHandle {
-        let layer = 0; //TODO
+    pub fn new(api: RenderApi, size: DeviceUintSize, layer: i8) -> DocumentHandle {
         let doc = api.add_document(size, layer);
         DocumentHandle {
             api: api,
@@ -306,34 +328,12 @@ impl ExternalImageHandler for WrExternalImageHandler {
             channel_index: u8)
             -> ExternalImage {
         let image = (self.lock_func)(self.external_image_obj, id.into(), channel_index);
-
-        match image.image_type {
-            WrExternalImageType::NativeTexture => {
-                ExternalImage {
-                    u0: image.u0,
-                    v0: image.v0,
-                    u1: image.u1,
-                    v1: image.v1,
-                    source: ExternalImageSource::NativeTexture(image.handle),
-                }
-            },
-            WrExternalImageType::RawData => {
-                ExternalImage {
-                    u0: image.u0,
-                    v0: image.v0,
-                    u1: image.u1,
-                    v1: image.v1,
-                    source: ExternalImageSource::RawData(make_slice(image.buff, image.size)),
-                }
-            },
-            WrExternalImageType::Invalid => {
-                ExternalImage {
-                    u0: image.u0,
-                    v0: image.v0,
-                    u1: image.u1,
-                    v1: image.v1,
-                    source: ExternalImageSource::Invalid,
-                }
+        ExternalImage {
+            uv: TexelRect::new(image.u0, image.v0, image.u1, image.v1),
+            source: match image.image_type {
+                WrExternalImageType::NativeTexture => ExternalImageSource::NativeTexture(image.handle),
+                WrExternalImageType::RawData => ExternalImageSource::RawData(make_slice(image.buff, image.size)),
+                WrExternalImageType::Invalid => ExternalImageSource::Invalid,
             },
         }
     }
@@ -481,7 +481,7 @@ impl RenderNotifier for CppNotifier {
         unsafe {
             if scrolled {
                 wr_notifier_new_scroll_frame_ready(self.window_id, composite_needed);
-            } else {
+            } else if composite_needed {
                 wr_notifier_new_frame_ready(self.window_id);
             }
         }
@@ -781,16 +781,41 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         *out_max_texture_size = renderer.get_max_texture_size();
     }
     let window_size = DeviceUintSize::new(window_width, window_height);
+    let layer = 0;
     *out_handle = Box::into_raw(Box::new(
-            DocumentHandle::new(sender.create_api(), window_size)));
+            DocumentHandle::new(sender.create_api(), window_size, layer)));
     *out_renderer = Box::into_raw(Box::new(renderer));
 
     return true;
 }
 
 #[no_mangle]
-pub extern "C" fn wr_api_clone(dh: &mut DocumentHandle,
-                                      out_handle: &mut *mut DocumentHandle) {
+pub extern "C" fn wr_api_create_document(
+    root_dh: &mut DocumentHandle,
+    out_handle: &mut *mut DocumentHandle,
+    doc_size: DeviceUintSize,
+    layer: i8,
+) {
+    assert!(unsafe { is_in_compositor_thread() });
+
+    *out_handle = Box::into_raw(Box::new(DocumentHandle::new(
+        root_dh.api.clone_sender().create_api(),
+        doc_size,
+        layer
+    )));
+}
+
+/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_delete_document(dh: &mut DocumentHandle) {
+    dh.api.delete_document(dh.document_id);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_clone(
+    dh: &mut DocumentHandle,
+    out_handle: &mut *mut DocumentHandle
+) {
     assert!(unsafe { is_in_compositor_thread() });
 
     let handle = DocumentHandle {
@@ -803,11 +828,13 @@ pub extern "C" fn wr_api_clone(dh: &mut DocumentHandle,
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_delete(dh: *mut DocumentHandle) {
-    let handle = Box::from_raw(dh);
-    if handle.document_id.0 == handle.api.get_namespace_id() {
-        handle.api.delete_document(handle.document_id);
-        handle.api.shut_down();
-    }
+    let _ = Box::from_raw(dh);
+}
+
+/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_shut_down(dh: &mut DocumentHandle) {
+    dh.api.shut_down();
 }
 
 #[no_mangle]
@@ -887,19 +914,21 @@ pub extern "C" fn wr_transaction_update_resources(
     txn: &mut Transaction,
     resource_updates: &mut ResourceUpdates
 ) {
+    if resource_updates.updates.is_empty() {
+        return;
+    }
     txn.update_resources(mem::replace(resource_updates, ResourceUpdates::new()));
 }
 
 #[no_mangle]
 pub extern "C" fn wr_transaction_set_window_parameters(
     txn: &mut Transaction,
-    window_width: i32,
-    window_height: i32,
+    window_size: &DeviceUintSize,
+    doc_rect: &DeviceUintRect,
 ) {
-    let size = DeviceUintSize::new(window_width as u32, window_height as u32);
     txn.set_window_parameters(
-        size,
-        DeviceUintRect::new(DeviceUintPoint::new(0, 0), size),
+        *window_size,
+        *doc_rect,
         1.0,
     );
 }
@@ -960,8 +989,8 @@ pub extern "C" fn wr_transaction_scroll_layer(
     new_scroll_origin: LayoutPoint
 ) {
     assert!(unsafe { is_in_compositor_thread() });
-    let clip_id = ClipId::new(scroll_id, pipeline_id);
-    txn.scroll_node_with_id(new_scroll_origin, clip_id, ScrollClamping::NoClamping);
+    let scroll_id = IdType::ExternalScrollId(ExternalScrollId(scroll_id, pipeline_id));
+    txn.scroll_node_with_id(new_scroll_origin, scroll_id, ScrollClamping::NoClamping);
 }
 
 #[no_mangle]
@@ -1010,7 +1039,7 @@ pub extern "C" fn wr_resource_updates_add_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index: channel_index,
-                image_type: buffer_type,
+                image_type: buffer_type.to_wr(),
             }
         ),
         None
@@ -1048,7 +1077,7 @@ pub extern "C" fn wr_resource_updates_update_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index,
-                image_type,
+                image_type: image_type.to_wr(),
             }
         ),
         None
@@ -1126,6 +1155,28 @@ pub extern "C" fn wr_resource_updates_add_raw_font(
     index: u32
 ) {
     resources.add_raw_font(key, bytes.flush_into_vec(), index);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_capture(
+    dh: &mut DocumentHandle,
+    path: *const c_char,
+    bits_raw: u32,
+) {
+    use std::fs::File;
+    use std::io::Write;
+
+    let cstr = unsafe { CStr::from_ptr(path) };
+    let path = PathBuf::from(&*cstr.to_string_lossy());
+    let revision_path = path.join("wr.txt");
+    let bits = CaptureBits::from_bits(bits_raw as _).unwrap();
+    dh.api.save_capture(path, bits);
+
+    let revision = include_bytes!("../revision.txt");
+    File::create(revision_path)
+        .unwrap()
+        .write(revision)
+        .unwrap();
 }
 
 #[cfg(target_os = "windows")]
@@ -1407,11 +1458,11 @@ fn make_scroll_info(state: &mut WrState,
     if let Some(&sid) = scroll_id {
         if let Some(&cid) = clip_id {
             Some(ClipAndScrollInfo::new(
-                ClipId::new(sid, state.pipeline_id),
+                ClipId::Clip(sid, state.pipeline_id),
                 ClipId::Clip(cid, state.pipeline_id)))
         } else {
             Some(ClipAndScrollInfo::simple(
-                ClipId::new(sid, state.pipeline_id)))
+                ClipId::Clip(sid, state.pipeline_id)))
         }
     } else if let Some(&cid) = clip_id {
         Some(ClipAndScrollInfo::simple(
@@ -1441,10 +1492,10 @@ pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
     let mask : Option<ImageMask> = unsafe { mask.as_ref() }.map(|x| x.into());
 
     let clip_id = if info.is_some() {
-        state.frame_builder.dl_builder.define_clip_with_parent(None,
+        state.frame_builder.dl_builder.define_clip_with_parent(
             info.unwrap().scroll_node_id, clip_rect, complex_iter, mask)
     } else {
-        state.frame_builder.dl_builder.define_clip(None, clip_rect, complex_iter, mask)
+        state.frame_builder.dl_builder.define_clip(clip_rect, complex_iter, mask)
     };
     // return the u64 id value from inside the ClipId::Clip(..)
     match clip_id {
@@ -1482,7 +1533,7 @@ pub extern "C" fn wr_dp_define_sticky_frame(state: &mut WrState,
                                             -> u64 {
     assert!(unsafe { is_in_main_thread() });
     let clip_id = state.frame_builder.dl_builder.define_sticky_frame(
-        None, content_rect, SideOffsets2D::new(
+        content_rect, SideOffsets2D::new(
             unsafe { top_margin.as_ref() }.cloned(),
             unsafe { right_margin.as_ref() }.cloned(),
             unsafe { bottom_margin.as_ref() }.cloned(),
@@ -1504,30 +1555,49 @@ pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
                                             ancestor_scroll_id: *const u64,
                                             ancestor_clip_id: *const u64,
                                             content_rect: LayoutRect,
-                                            clip_rect: LayoutRect) {
+                                            clip_rect: LayoutRect)
+                                            -> u64 {
     assert!(unsafe { is_in_main_thread() });
 
     let info = make_scroll_info(state,
                                 unsafe { ancestor_scroll_id.as_ref() },
                                 unsafe { ancestor_clip_id.as_ref() });
 
-    let clip_id = ClipId::new(scroll_id, state.pipeline_id);
-    if info.is_some() {
+    let new_id = if info.is_some() {
         state.frame_builder.dl_builder.define_scroll_frame_with_parent(
-            Some(clip_id), info.unwrap().scroll_node_id, content_rect,
-            clip_rect, vec![], None, ScrollSensitivity::Script);
+            info.unwrap().scroll_node_id,
+            Some(ExternalScrollId(scroll_id, state.pipeline_id)),
+            content_rect,
+            clip_rect,
+            vec![],
+            None,
+            ScrollSensitivity::Script
+        )
     } else {
         state.frame_builder.dl_builder.define_scroll_frame(
-            Some(clip_id), content_rect, clip_rect, vec![], None,
-            ScrollSensitivity::Script);
+            Some(ExternalScrollId(scroll_id, state.pipeline_id)),
+            content_rect,
+            clip_rect,
+            vec![],
+            None,
+            ScrollSensitivity::Script
+        )
     };
+
+    match new_id {
+        ClipId::Clip(id, pipeline_id) => {
+            assert!(pipeline_id == state.pipeline_id);
+            id
+        },
+        _ => panic!("Got unexpected clip id type"),
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
                                           scroll_id: u64) {
     debug_assert!(unsafe { is_in_main_thread() });
-    let clip_id = ClipId::new(scroll_id, state.pipeline_id);
+    let clip_id = ClipId::Clip(scroll_id, state.pipeline_id);
     state.frame_builder.dl_builder.push_clip_id(clip_id);
 }
 

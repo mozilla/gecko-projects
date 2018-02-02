@@ -232,7 +232,8 @@ public:
    *
    * Strategy is one of the three strategies described at the top of this file.
    *
-   * The result list is ordered according to the order of the requested locales.
+   * The result list is canonicalized and ordered according to the order
+   * of the requested locales.
    *
    * (See mozILocaleService.idl for a JS-callable version of this.)
    */
@@ -247,56 +248,12 @@ public:
    */
   bool IsAppLocaleRTL();
 
-  static bool LanguagesMatch(const nsCString& aRequested,
-                             const nsCString& aAvailable);
+  static bool LanguagesMatch(const nsACString& aRequested,
+                             const nsACString& aAvailable);
 
   bool IsServer();
 
 private:
-  /**
-   * Locale object, a BCP47-style tag decomposed into subtags for
-   * matching purposes.
-   *
-   * If constructed with aRange = true, any missing subtags will be
-   * set to "*".
-   */
-  class Locale
-  {
-  public:
-    Locale(const nsCString& aLocale, bool aRange);
-
-    bool Matches(const Locale& aLocale) const;
-    bool LanguageMatches(const Locale& aLocale) const;
-
-    void SetVariantRange();
-    void SetRegionRange();
-
-    // returns false if nothing changed
-    bool AddLikelySubtags();
-    bool AddLikelySubtagsWithoutRegion();
-
-    const nsCString& AsString() const {
-      return mLocaleStr;
-    }
-
-    bool operator== (const Locale& aOther) {
-      const auto& cmp = nsCaseInsensitiveCStringComparator();
-      return mLanguage.Equals(aOther.mLanguage, cmp) &&
-             mScript.Equals(aOther.mScript, cmp) &&
-             mRegion.Equals(aOther.mRegion, cmp) &&
-             mVariant.Equals(aOther.mVariant, cmp);
-    }
-
-  private:
-    const nsCString& mLocaleStr;
-    nsCString mLanguage;
-    nsCString mScript;
-    nsCString mRegion;
-    nsCString mVariant;
-
-    bool AddLikelySubtagsForLocale(const nsACString& aLocale);
-  };
-
   void FilterMatches(const nsTArray<nsCString>& aRequested,
                      const nsTArray<nsCString>& aAvailable,
                      LangNegStrategy aStrategy,

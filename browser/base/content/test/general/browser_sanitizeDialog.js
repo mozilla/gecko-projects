@@ -17,17 +17,15 @@
  * browser/base/content/test/general/browser_sanitize-timespans.js.
  */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-var {LoadContextInfo} = Cu.import("resource://gre/modules/LoadContextInfo.jsm", {});
-
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
-                                  "resource://gre/modules/Downloads.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Timer",
-                                  "resource://gre/modules/Timer.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesTestUtils",
-                                  "resource://testing-common/PlacesTestUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "FormHistory",
+                               "resource://gre/modules/FormHistory.jsm");
+ChromeUtils.defineModuleGetter(this, "Downloads",
+                               "resource://gre/modules/Downloads.jsm");
+ChromeUtils.defineModuleGetter(this, "Timer",
+                               "resource://gre/modules/Timer.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesTestUtils",
+                               "resource://testing-common/PlacesTestUtils.jsm");
 
 var tempScope = {};
 Services.scriptloader.loadSubScript("chrome://browser/content/sanitize.js", tempScope);
@@ -553,9 +551,9 @@ add_task(async function test_offline_cache() {
   // Store something to the offline cache
   var appcacheserv = Cc["@mozilla.org/network/application-cache-service;1"]
                      .getService(Ci.nsIApplicationCacheService);
-  var appcachegroupid = appcacheserv.buildGroupIDForInfo(makeURI(URL + "/manifest"), LoadContextInfo.default);
+  var appcachegroupid = appcacheserv.buildGroupIDForInfo(makeURI(URL + "/manifest"), Services.loadContextInfo.default);
   var appcache = appcacheserv.createApplicationCache(appcachegroupid);
-  var storage = Services.cache2.appCacheStorage(LoadContextInfo.default, appcache);
+  var storage = Services.cache2.appCacheStorage(Services.loadContextInfo.default, appcache);
 
   // Open the dialog
   let wh = new WindowHelper();

@@ -4782,8 +4782,7 @@ BaselineCompiler::emit_JSOP_RESUME()
         masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
         masm.loadJSContext(scratchReg);
         masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()), scratchReg);
-        masm.storePtr(masm.getStackPointer(),
-                      Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
+        masm.storeStackPtr(Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
         masm.bind(&skip);
     }
 
@@ -4800,8 +4799,9 @@ BaselineCompiler::emit_JSOP_RESUME()
 
     // Store the arguments object if there is one.
     Label noArgsObj;
-    masm.unboxObject(Address(genObj, GeneratorObject::offsetOfArgsObjSlot()), scratch2);
-    masm.branchTestPtr(Assembler::Zero, scratch2, scratch2, &noArgsObj);
+    Address argsObjSlot(genObj, GeneratorObject::offsetOfArgsObjSlot());
+    masm.branchTestUndefined(Assembler::Equal, argsObjSlot, &noArgsObj);
+    masm.unboxObject(argsObjSlot, scratch2);
     {
         masm.storePtr(scratch2, frame.addressOfArgsObj());
         masm.or32(Imm32(BaselineFrame::HAS_ARGS_OBJ), frame.addressOfFlags());

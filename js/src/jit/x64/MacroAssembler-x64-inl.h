@@ -250,18 +250,17 @@ MacroAssembler::add64(Imm64 imm, Register64 dest)
 }
 
 CodeOffset
-MacroAssembler::add32ToPtrWithPatch(Register src, Register dest)
+MacroAssembler::sub32FromStackPtrWithPatch(Register dest)
 {
-    if (src != dest)
-        movePtr(src, dest);
+    moveStackPtrTo(dest);
     addqWithPatch(Imm32(0), dest);
     return CodeOffset(currentOffset());
 }
 
 void
-MacroAssembler::patchAdd32ToPtr(CodeOffset offset, Imm32 imm)
+MacroAssembler::patchSub32FromStackPtr(CodeOffset offset, Imm32 imm)
 {
-    patchAddq(offset, imm.value);
+    patchAddq(offset, -imm.value);
 }
 
 void
@@ -890,7 +889,7 @@ MacroAssemblerX64::incrementInt32Value(const Address& addr)
 }
 
 void
-MacroAssemblerX64::unboxValue(const ValueOperand& src, AnyRegister dest)
+MacroAssemblerX64::unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType type)
 {
     if (dest.isFloat()) {
         Label notInt32, end;
@@ -901,7 +900,7 @@ MacroAssemblerX64::unboxValue(const ValueOperand& src, AnyRegister dest)
         unboxDouble(src, dest.fpu());
         bind(&end);
     } else {
-        unboxNonDouble(src, dest.gpr());
+        unboxNonDouble(src, dest.gpr(), type);
     }
 }
 

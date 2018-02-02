@@ -39,8 +39,8 @@
 #include "mozilla/dom/PLoginReputationChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/PushNotifier.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/dom/TabGroup.h"
-#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/URLClassifierChild.h"
 #include "mozilla/gfx/gfxVars.h"
@@ -211,7 +211,6 @@
 #include "nsIPrincipal.h"
 #include "DomainPolicy.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
-#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/ipc/CrashReporterClient.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "mozilla/widget/PuppetBidiKeyboard.h"
@@ -1222,9 +1221,6 @@ ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
   nsCOMPtr<nsIURI> ucsURL = DeserializeURI(aXPCOMInit.userContentSheetURL());
   nsLayoutStylesheetCache::SetUserContentCSSURL(ucsURL);
 
-  // This will register cross-process observer.
-  mozilla::dom::time::InitializeDateCacheCleaner();
-
   GfxInfoBase::SetFeatureStatus(aXPCOMInit.gfxFeatureStatus());
 
   DataStorage::SetCachedStorageEntries(aXPCOMInit.dataStorage());
@@ -1590,6 +1586,7 @@ StartMacOSContentSandbox()
   info.appBinaryPath.assign(appBinaryPath.get());
   info.appDir.assign(appDir.get());
   info.appTempDir.assign(tempDirPath.get());
+  info.hasAudio = !Preferences::GetBool("media.cubeb.sandbox");
 
   // These paths are used to whitelist certain directories used by the testing
   // system. They should not be considered a public API, and are only intended
@@ -1666,39 +1663,14 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
 #if defined(MOZ_CONTENT_SANDBOX)
   bool sandboxEnabled = true;
 #if defined(XP_LINUX)
-  // Otherwise, sandboxing is best-effort.
+  // On Linux, we have to support systems that can't use any sandboxing.
   if (!SandboxInfo::Get().CanSandboxContent()) {
     sandboxEnabled = false;
   }
 
   if (sandboxEnabled) {
-    int brokerFd = -1;
-    if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
-      auto fd = aBroker.get_FileDescriptor().ClonePlatformHandle();
-      brokerFd = fd.release();
-      // brokerFd < 0 means to allow direct filesystem access, so
-      // make absolutely sure that doesn't happen if the parent
-      // didn't intend it.
-      MOZ_RELEASE_ASSERT(brokerFd >= 0);
-    }
-    // Allow user overrides of seccomp-bpf syscall filtering
-    std::vector<int> syscallWhitelist;
-    nsAutoCString extraSyscalls;
-    nsresult rv =
-      Preferences::GetCString("security.sandbox.content.syscall_whitelist",
-                              extraSyscalls);
-    if (NS_SUCCEEDED(rv)) {
-      for (const nsACString& callNrString : extraSyscalls.Split(',')) {
-        int callNr = PromiseFlatCString(callNrString).ToInteger(&rv);
-        if (NS_SUCCEEDED(rv)) {
-          syscallWhitelist.push_back(callNr);
-        }
-      }
-    }
-    ContentChild* cc = ContentChild::GetSingleton();
-    bool isFileProcess = cc->GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE);
-    sandboxEnabled = SetContentProcessSandbox(brokerFd, isFileProcess,
-                                              syscallWhitelist);
+    sandboxEnabled =
+      SetContentProcessSandbox(ContentProcessSandboxParams::ForThisProcess(aBroker));
   }
 #elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
@@ -2962,6 +2934,19 @@ ContentChild::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
 mozilla::ipc::IPCResult
 ContentChild::RecvShutdown()
 {
+  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(static_cast<nsIContentChild*>(this),
+                          "content-child-will-shutdown", nullptr);
+  }
+
+  ShutdownInternal();
+  return IPC_OK();
+}
+
+void
+ContentChild::ShutdownInternal()
+{
   // If we receive the shutdown message from within a nested event loop, we want
   // to wait for that event loop to finish. Otherwise we could prematurely
   // terminate an "unload" or "pagehide" event handler (which might be doing a
@@ -2981,9 +2966,10 @@ ContentChild::RecvShutdown()
     // then.
     MessageLoop::current()->PostDelayedTask(
       NewRunnableMethod(
-        "dom::ContentChild::RecvShutdown", this, &ContentChild::RecvShutdown),
+        "dom::ContentChild::RecvShutdown", this,
+        &ContentChild::ShutdownInternal),
       100);
-    return IPC_OK();
+    return;
   }
 
   mShuttingDown = true;
@@ -3030,8 +3016,6 @@ ContentChild::RecvShutdown()
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
                                      sent ? NS_LITERAL_CSTRING("SendFinishShutdown (sent)")
                                           : NS_LITERAL_CSTRING("SendFinishShutdown (failed)"));
-
-  return IPC_OK();
 }
 
 PBrowserOrId

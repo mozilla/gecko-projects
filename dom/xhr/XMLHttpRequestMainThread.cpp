@@ -320,6 +320,14 @@ XMLHttpRequestMainThread::InitParameters(bool aAnon, bool aSystem)
 }
 
 void
+XMLHttpRequestMainThread::SetClientInfoAndController(const ClientInfo& aClientInfo,
+                                                     const Maybe<ServiceWorkerDescriptor>& aController)
+{
+  mClientInfo.emplace(aClientInfo);
+  mController = aController;
+}
+
+void
 XMLHttpRequestMainThread::ResetResponse()
 {
   mResponseXML = nullptr;
@@ -2500,6 +2508,19 @@ XMLHttpRequestMainThread::CreateChannel()
                        responsibleDocument,
                        secFlags,
                        nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
+                       nullptr, // aPerformanceStorage
+                       loadGroup,
+                       nullptr,   // aCallbacks
+                       loadFlags);
+  } else if (mClientInfo.isSome()) {
+    rv = NS_NewChannel(getter_AddRefs(mChannel),
+                       mRequestURL,
+                       mPrincipal,
+                       mClientInfo.ref(),
+                       mController,
+                       secFlags,
+                       nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
+                       mPerformanceStorage, // aPerformanceStorage
                        loadGroup,
                        nullptr,   // aCallbacks
                        loadFlags);
@@ -2510,6 +2531,7 @@ XMLHttpRequestMainThread::CreateChannel()
                        mPrincipal,
                        secFlags,
                        nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
+                       mPerformanceStorage, // aPerformanceStorage
                        loadGroup,
                        nullptr,   // aCallbacks
                        loadFlags);

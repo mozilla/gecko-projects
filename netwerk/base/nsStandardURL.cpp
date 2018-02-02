@@ -2226,7 +2226,13 @@ nsStandardURL::SetPathQueryRef(const nsACString &input)
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(nsStandardURL::Mutator, nsIURISetters, nsIURIMutator)
+// When updating this also update SubstitutingURL::Mutator
+NS_IMPL_ISUPPORTS(nsStandardURL::Mutator,
+                  nsIURISetters,
+                  nsIURIMutator,
+                  nsIStandardURLMutator,
+                  nsIURLMutator,
+                  nsIFileURLMutator)
 
 NS_IMETHODIMP
 nsStandardURL::Mutate(nsIURIMutator** aMutator)
@@ -3240,10 +3246,8 @@ nsStandardURL::GetFile(nsIFile **result)
         return rv;
 
     if (LOG_ENABLED()) {
-        nsAutoCString path;
-        mFile->GetNativePath(path);
         LOG(("nsStandardURL::GetFile [this=%p spec=%s resulting_path=%s]\n",
-            this, mSpec.get(), path.get()));
+            this, mSpec.get(), mFile->HumanReadablePath().get()));
     }
 
     // clone the file, so the caller can modify it.
@@ -3294,7 +3298,7 @@ nsStandardURL::SetFile(nsIFile *file)
 // nsStandardURL::nsIStandardURL
 //----------------------------------------------------------------------------
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::Init(uint32_t urlType,
                     int32_t defaultPort,
                     const nsACString &spec,
@@ -3351,7 +3355,7 @@ nsStandardURL::Init(uint32_t urlType,
     return SetSpecWithEncoding(buf, encoding);
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::SetDefaultPort(int32_t aNewDefaultPort)
 {
     ENSURE_MUTABLE();

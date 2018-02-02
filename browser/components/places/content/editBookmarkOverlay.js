@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const LAST_USED_ANNO = "bookmarkPropertiesDialog/folderLastUsed";
 const MAX_FOLDER_ITEM_IN_MENU_LIST = 5;
@@ -234,7 +234,7 @@ var gEditItemOverlay = {
       (rowId, isAppropriateForInput, nameInHiddenRows = null) => {
         let visible = isAppropriateForInput;
         if (visible && "hiddenRows" in aInfo && nameInHiddenRows)
-          visible &= aInfo.hiddenRows.indexOf(nameInHiddenRows) == -1;
+          visible &= !aInfo.hiddenRows.includes(nameInHiddenRows);
         if (visible)
           visibleRows.add(rowId);
         return !(this._element(rowId).collapsed = !visible);
@@ -506,7 +506,8 @@ var gEditItemOverlay = {
         (this._paneInfo.isURI || this._paneInfo.bulkTagging)) {
       this._updateTags().then(
         anyChanges => {
-          if (anyChanges)
+          // Check _paneInfo here as we might be closing the dialog.
+          if (anyChanges && this._paneInfo)
             this._mayUpdateFirstEditField("tagsField");
         }, Components.utils.reportError);
     }

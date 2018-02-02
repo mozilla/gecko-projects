@@ -16,7 +16,7 @@ const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 // This gives us >=2^30 unique timer IDs, enough for 1 per ms for 12.4 days.
 var gNextId = 1; // setTimeout and setInterval must return a positive integer
@@ -25,6 +25,9 @@ var gTimerTable = new Map(); // int -> nsITimer
 
 function _setTimeoutOrIsInterval(aCallback, aMilliseconds, aIsInterval,
                                  aTarget, aArgs) {
+  if (typeof aCallback !== "function") {
+    throw new Error(`callback is not a function in ${aIsInterval ? "setInterval" : "setTimeout"}`);
+  }
   let id = gNextId++;
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
 

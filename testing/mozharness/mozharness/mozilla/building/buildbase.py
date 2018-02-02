@@ -235,7 +235,7 @@ class MozconfigPathError(Exception):
     There was an error getting a mozconfig path from a mozharness config.
     """
 
-def _get_mozconfig_path(script, config, dirs):
+def get_mozconfig_path(script, config, dirs):
     """
     Get the path to the mozconfig file to use from a mozharness config.
 
@@ -1127,7 +1127,7 @@ or run without that action (ie: --no-{action})"
         dirs = self.query_abs_dirs()
 
         try:
-            abs_mozconfig_path = _get_mozconfig_path(
+            abs_mozconfig_path = get_mozconfig_path(
                 script=self, config=self.config, dirs=dirs)
         except MozconfigPathError as e:
             self.fatal(e.message)
@@ -2000,7 +2000,8 @@ or run without that action (ie: --no-{action})"
             yield filter_alert({
                 "name": "installer size",
                 "value": installer_size,
-                "alertThreshold": 1.0,
+                "alertChangeType": "absolute",
+                "alertThreshold": (100 * 1024),
                 "subtests": size_measurements
             })
 

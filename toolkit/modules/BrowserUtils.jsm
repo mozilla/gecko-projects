@@ -9,9 +9,9 @@ this.EXPORTED_SYMBOLS = [ "BrowserUtils" ];
 
 const {interfaces: Ci, utils: Cu, classes: Cc} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
 
 Cu.importGlobalProperties(["URL"]);
@@ -313,7 +313,7 @@ this.BrowserUtils = {
     // The HTML spec says that rel should be split on spaces before looking
     // for particular rel values.
     let values = rel.split(/[ \t\r\n\f]/);
-    return values.indexOf("noreferrer") != -1;
+    return values.includes("noreferrer");
   },
 
   /**

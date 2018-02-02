@@ -9,6 +9,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/LookAndFeel.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/TypedEnumBits.h"
 #include "nsBoundingMetrics.h"
@@ -23,7 +24,9 @@
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
 #include "nsGkAtoms.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleNode.h"
+#endif
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
 #include "Units.h"
@@ -2518,8 +2521,10 @@ public:
   // or disabled at compile-time. However, we provide the additional capability
   // to disable it dynamically in stylo-enabled builds via a pref.
   static bool StyloEnabled() {
-#ifdef MOZ_STYLO
+#if defined(MOZ_STYLO) && defined(MOZ_OLD_STYLE)
     return sStyloEnabled && StyloSupportedInCurrentProcess();
+#elif defined(MOZ_STYLO)
+    return true;
 #else
     return false;
 #endif
@@ -2582,35 +2587,11 @@ public:
 
 #ifdef MOZ_STYLO
   /**
-   * Return whether stylo should be used for a given document URI and
-   * principal.
+   * Return whether stylo should be used for a given document principal.
    */
-  static bool ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal);
-
-  /**
-   * Principal-based blocklist for stylo.
-   * Check if aPrincipal is blocked by stylo's blocklist and should fallback to
-   * use Gecko's style backend. Note that using a document's principal rather
-   * than the document URI will let us piggy-back off the existing principal
-   * relationships and symmetries.
-   */
-  static bool IsInStyloBlocklist(nsIPrincipal* aPrincipal);
-
-  /**
-   * Add aBlockedDomain to the existing stylo blocklist, i.e., sStyloBlocklist.
-   * This function is exposed to nsDOMWindowUtils and only for testing purpose.
-   * So, NEVER use this in any other cases.
-   */
-  static void AddToStyloBlocklist(const nsACString& aBlockedDomain);
-
-  /**
-   * Remove aBlockedDomain from the existing stylo blocklist, i.e., sStyloBlocklist.
-   * This function is exposed to nsDOMWindowUtils and only for testing purpose.
-   * So, NEVER use this in any other cases.
-   */
-  static void RemoveFromStyloBlocklist(const nsACString& aBlockedDomain);
+  static bool ShouldUseStylo(nsIPrincipal* aPrincipal);
 #else
-  static bool ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal) {
+  static bool ShouldUseStylo(nsIPrincipal* aPrincipal) {
     return false;
   }
 #endif
@@ -3134,8 +3115,6 @@ private:
   static bool sTextCombineUprightDigitsEnabled;
 #ifdef MOZ_STYLO
   static bool sStyloEnabled;
-  static bool sStyloBlocklistEnabled;
-  static nsTArray<nsCString>* sStyloBlocklist;
 #endif
   static uint32_t sIdlePeriodDeadlineLimit;
   static uint32_t sQuiescentFramesBeforeIdlePeriod;

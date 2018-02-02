@@ -31,23 +31,28 @@
 #include "nsLanguageAtomService.h"
 #include "mozilla/LookAndFeel.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIDOMHTMLDocument.h"
 #include "nsHTMLDocument.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsIWeakReferenceUtils.h"
 #include "nsThreadUtils.h"
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/GeckoRestyleManager.h"
+#endif
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
 #include "SurfaceCacheUtils.h"
 #include "nsMediaFeatures.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleNode.h"
+#endif
 #include "gfxPlatform.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsCSSRules.h"
+#endif
 #include "nsFontFaceLoader.h"
+#include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EventListenerManager.h"
 #include "prenv.h"
@@ -157,14 +162,25 @@ nsPresContext::MakeColorPref(const nsString& aColor)
     ? mShell->StyleSet()->GetAsServo()
     : nullptr;
 
-  if (servoStyleSet) {
+  bool useServoParser =
+#ifdef MOZ_OLD_STYLE
+    servoStyleSet;
+#else
+    true;
+#endif
+
+  if (useServoParser) {
     ok = ServoCSSParser::ComputeColor(servoStyleSet, NS_RGB(0, 0, 0), aColor,
                                       &result);
   } else {
+#ifdef MOZ_OLD_STYLE
     nsCSSParser parser;
     nsCSSValue value;
     ok = parser.ParseColorString(aColor, nullptr, 0, value) &&
          nsRuleNode::ComputeColor(value, this, nullptr, result);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 
   if (!ok) {
@@ -298,9 +314,7 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mUsesExChUnits(false),
     mPendingViewportChange(false),
     mCounterStylesDirty(true),
-    mPostedFlushCounterStyles(false),
     mFontFeatureValuesDirty(true),
-    mPostedFlushFontFeatureValues(false),
     mSuppressResizeReflow(false),
     mIsVisual(false),
     mFireAfterPaintEvents(false),
@@ -442,8 +456,7 @@ nsPresContext::LastRelease()
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsPresContext)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnimationManager);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransitionManager);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnimationEventDispatcher);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
   // NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mDeviceContext); // not xpcom
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEffectCompositor);
@@ -457,8 +470,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsPresContext)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnimationManager);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransitionManager);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnimationEventDispatcher);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDeviceContext); // worth bothering?
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mEffectCompositor);
@@ -888,6 +900,7 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   mEventManager = new mozilla::EventStateManager();
 
+  mAnimationEventDispatcher = new mozilla::AnimationEventDispatcher(this);
   mEffectCompositor = new mozilla::EffectCompositor(this);
   mTransitionManager = new nsTransitionManager(this);
   mAnimationManager = new nsAnimationManager(this);
@@ -1013,7 +1026,11 @@ nsPresContext::AttachShell(nsIPresShell* aShell, StyleBackendType aBackendType)
   if (aBackendType == StyleBackendType::Servo) {
     mRestyleManager = new ServoRestyleManager(this);
   } else {
+#ifdef MOZ_OLD_STYLE
     mRestyleManager = new GeckoRestyleManager(this);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 
   // Since CounterStyleManager is also the name of a method of
@@ -1066,6 +1083,10 @@ nsPresContext::DetachShell()
 
   mShell = nullptr;
 
+  if (mAnimationEventDispatcher) {
+    mAnimationEventDispatcher->Disconnect();
+    mAnimationEventDispatcher = nullptr;
+  }
   if (mEffectCompositor) {
     mEffectCompositor->Disconnect();
     mEffectCompositor = nullptr;
@@ -2048,12 +2069,23 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint,
 
   mUsesRootEMUnits = false;
   mUsesExChUnits = false;
-  if (nsStyleSet* styleSet = mShell->StyleSet()->GetAsGecko()) {
-    styleSet->SetUsesViewportUnits(false);
+  if (mShell->StyleSet()->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    mShell->StyleSet()->AsGecko()->SetUsesViewportUnits(false);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
-  mDocument->RebuildUserFontSet();
-  RebuildCounterStyles();
-  RebuildFontFeatureValues();
+
+  // TODO(emilio): It's unclear to me why would these three calls below be
+  // needed. In particular, RebuildAllStyleData doesn't rebuild rules or
+  // specified style information and such (note the comment in
+  // ServoRestyleManager::RebuildAllStyleData re. the funny semantics), so I
+  // don't know why should we rebuild the user font set / counter styles /
+  // etc...
+  mDocument->MarkUserFontSetDirty();
+  MarkCounterStylesDirty();
+  MarkFontFeatureValuesDirty();
 
   RestyleManager()->RebuildAllStyleData(aExtraHint, aRestyleHint);
 }
@@ -2271,11 +2303,16 @@ bool
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
                                        uint32_t aRuleTypeMask) const
 {
-  if (auto* geckoStyleContext = aFrame->StyleContext()->GetAsGecko()) {
+  if (aFrame->StyleContext()->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    auto* geckoStyleContext = aFrame->StyleContext()->AsGecko();
     return
       nsRuleNode::HasAuthorSpecifiedRules(geckoStyleContext,
                                           aRuleTypeMask,
                                           UseDocumentColors());
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
   Element* elem = aFrame->GetContent()->AsElement();
 
@@ -2394,27 +2431,14 @@ nsPresContext::FlushCounterStyles()
 }
 
 void
-nsPresContext::RebuildCounterStyles()
+nsPresContext::MarkCounterStylesDirty()
 {
   if (mCounterStyleManager->IsInitial()) {
-    // Still in its initial state, no need to reset.
+    // Still in its initial state, no need to touch anything.
     return;
   }
 
   mCounterStylesDirty = true;
-  if (mShell) {
-    mShell->SetNeedStyleFlush();
-  }
-  if (!mPostedFlushCounterStyles) {
-    nsCOMPtr<nsIRunnable> ev =
-      NewRunnableMethod("nsPresContext::HandleRebuildCounterStyles",
-                        this, &nsPresContext::HandleRebuildCounterStyles);
-    nsresult rv =
-      Document()->Dispatch(TaskCategory::Other, ev.forget());
-    if (NS_SUCCEEDED(rv)) {
-      mPostedFlushCounterStyles = true;
-    }
-  }
 }
 
 void
@@ -2791,15 +2815,18 @@ nsPresContext::HasCachedStyleData()
     return false;
   }
 
-  nsStyleSet* styleSet = mShell->StyleSet()->GetAsGecko();
-  if (!styleSet) {
-    // XXXheycam ServoStyleSets do not use the rule tree, so just assume for now
-    // that we need to restyle when e.g. dppx changes assuming we're sufficiently
-    // bootstrapped.
-    return mShell->DidInitialize();
+  if (mShell->StyleSet()->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    return mShell->StyleSet()->AsGecko()->HasCachedStyleData();
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 
-  return styleSet->HasCachedStyleData();
+  // XXXheycam ServoStyleSets do not use the rule tree, so just assume for now
+  // that we need to restyle when e.g. dppx changes assuming we're sufficiently
+  // bootstrapped.
+  return mShell->DidInitialize();
 }
 
 already_AddRefed<nsITimer>
@@ -3151,28 +3178,6 @@ nsPresContext::FlushFontFeatureValues()
     StyleSetHandle styleSet = mShell->StyleSet();
     mFontFeatureValuesLookup = styleSet->BuildFontFeatureValueSet();
     mFontFeatureValuesDirty = false;
-  }
-}
-
-void
-nsPresContext::RebuildFontFeatureValues()
-{
-  if (!mShell) {
-    return; // we've been torn down
-  }
-
-  mFontFeatureValuesDirty = true;
-  mShell->SetNeedStyleFlush();
-
-  if (!mPostedFlushFontFeatureValues) {
-    nsCOMPtr<nsIRunnable> ev =
-      NewRunnableMethod("nsPresContext::HandleRebuildFontFeatureValues",
-                        this, &nsPresContext::HandleRebuildFontFeatureValues);
-    nsresult rv =
-      Document()->Dispatch(TaskCategory::Other, ev.forget());
-    if (NS_SUCCEEDED(rv)) {
-      mPostedFlushFontFeatureValues = true;
-    }
   }
 }
 

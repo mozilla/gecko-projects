@@ -50,7 +50,7 @@ NS_IMPL_ISUPPORTS(WebAuthnManager, nsIDOMEventListener);
 
 static nsresult
 AssembleClientData(const nsAString& aOrigin, const CryptoBuffer& aChallenge,
-                   /* out */ nsACString& aJsonOut)
+                   const nsAString& aType, /* out */ nsACString& aJsonOut)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -61,6 +61,7 @@ AssembleClientData(const nsAString& aOrigin, const CryptoBuffer& aChallenge,
   }
 
   CollectedClientData clientDataObject;
+  clientDataObject.mType.Assign(aType);
   clientDataObject.mChallenge.Assign(challengeBase64);
   clientDataObject.mOrigin.Assign(aOrigin);
   clientDataObject.mHashAlgorithm.AssignLiteral(u"SHA-256");
@@ -343,7 +344,8 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
   }
 
   nsAutoCString clientDataJSON;
-  srv = AssembleClientData(origin, challenge, clientDataJSON);
+  srv = AssembleClientData(origin, challenge,
+                           NS_LITERAL_STRING("webauthn.create"), clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
@@ -380,6 +382,7 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
 
   const auto& selection = aOptions.mAuthenticatorSelection;
   const auto& attachment = selection.mAuthenticatorAttachment;
+  const AttestationConveyancePreference& attestation = aOptions.mAttestation;
 
   // Does the RP require attachment == "platform"?
   bool requirePlatformAttachment =
@@ -388,6 +391,15 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
   // Does the RP require user verification?
   bool requireUserVerification =
     selection.mUserVerification == UserVerificationRequirement::Required;
+
+  // Does the RP desire direct attestation? Indirect attestation is not
+  // implemented, and thus is equivilent to None.
+  bool requestDirectAttestation =
+    attestation == AttestationConveyancePreference::Direct;
+
+  // In Bug 1430150, if requestDirectAttestation is true, we will need to prompt
+  // the user for permission to proceed. For now, we ignore it.
+  Unused << requestDirectAttestation;
 
   // Create and forward authenticator selection criteria.
   WebAuthnAuthenticatorSelection authSelection(selection.mRequireResidentKey,
@@ -508,7 +520,8 @@ WebAuthnManager::GetAssertion(const PublicKeyCredentialRequestOptions& aOptions,
   }
 
   nsAutoCString clientDataJSON;
-  srv = AssembleClientData(origin, challenge, clientDataJSON);
+  srv = AssembleClientData(origin, challenge, NS_LITERAL_STRING("webauthn.get"),
+                           clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();

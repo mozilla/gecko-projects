@@ -8,16 +8,16 @@ var Cc = Components.classes;
 var Ci = Components.interfaces;
 var Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://services-sync/engines.js");
-Cu.import("resource://services-sync/record.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-sync/collection_validator.js");
-Cu.import("resource://services-common/async.js");
-Cu.import("resource://gre/modules/Log.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://services-sync/engines.js");
+ChromeUtils.import("resource://services-sync/record.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://services-sync/collection_validator.js");
+ChromeUtils.import("resource://services-common/async.js");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.defineModuleGetter(this, "FormHistory",
+                               "resource://gre/modules/FormHistory.jsm");
 
 const FORMS_TTL = 3 * 365 * 24 * 60 * 60; // Three years in seconds.
 
@@ -221,16 +221,15 @@ FormTracker.prototype = {
     Ci.nsIObserver,
     Ci.nsISupportsWeakReference]),
 
-  startTracking() {
-    Svc.Obs.add("satchel-storage-changed", this);
+  onStart() {
+    Svc.Obs.add("satchel-storage-changed", this.asyncObserver);
   },
 
-  stopTracking() {
-    Svc.Obs.remove("satchel-storage-changed", this);
+  onStop() {
+    Svc.Obs.remove("satchel-storage-changed", this.asyncObserver);
   },
 
-  observe(subject, topic, data) {
-    Tracker.prototype.observe.call(this, subject, topic, data);
+  async observe(subject, topic, data) {
     if (this.ignoreAll) {
       return;
     }
@@ -238,14 +237,15 @@ FormTracker.prototype = {
       case "satchel-storage-changed":
         if (data == "formhistory-add" || data == "formhistory-remove") {
           let guid = subject.QueryInterface(Ci.nsISupportsString).toString();
-          this.trackEntry(guid);
+          await this.trackEntry(guid);
         }
         break;
     }
   },
 
-  trackEntry(guid) {
-    if (this.addChangedID(guid)) {
+  async trackEntry(guid) {
+    const added = await this.addChangedID(guid);
+    if (added) {
       this.score += SCORE_INCREMENT_MEDIUM;
     }
   },

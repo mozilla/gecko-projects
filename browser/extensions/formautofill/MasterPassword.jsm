@@ -15,8 +15,8 @@ this.EXPORTED_SYMBOLS = [
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "cryptoSDR",
                                    "@mozilla.org/login-manager/crypto/SDR;1",
@@ -114,7 +114,7 @@ this.MasterPassword = {
    * Decrypts cipherText synchronously. "ensureLoggedIn()" needs to be called
    * outside in case another dialog is showing.
    *
-   * NOTE: This method will be removed soon once the ProfileStorage APIs are
+   * NOTE: This method will be removed soon once the FormAutofillStorage APIs are
    *       refactored to be async functions (bug 1399367). Please use async
    *       version instead.
    *
@@ -147,7 +147,7 @@ this.MasterPassword = {
    * Encrypts plainText synchronously. "ensureLoggedIn()" needs to be called
    * outside in case another dialog is showing.
    *
-   * NOTE: This method will be removed soon once the ProfileStorage APIs are
+   * NOTE: This method will be removed soon once the FormAutofillStorage APIs are
    *       refactored to be async functions (bug 1399367). Please use async
    *       version instead.
    *
@@ -216,7 +216,7 @@ this.MasterPassword = {
 };
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let ConsoleAPI = Cu.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
+  let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
   return new ConsoleAPI({
     maxLogLevelPref: "masterPassword.loglevel",
     prefix: "Master Password",

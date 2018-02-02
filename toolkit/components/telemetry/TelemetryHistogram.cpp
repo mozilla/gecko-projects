@@ -383,6 +383,10 @@ void
 internal_ClearHistogramById(HistogramID histogramId, ProcessID processId, SessionType sessionType)
 {
   size_t index = internal_HistogramStorageIndex(histogramId, processId, sessionType);
+  if (gHistogramStorage[index] == gExpiredHistogram) {
+    // We keep gExpiredHistogram until TelemetryHistogram::DeInitializeGlobalState
+    return;
+  }
   delete gHistogramStorage[index];
   gHistogramStorage[index] = nullptr;
 }
@@ -1736,9 +1740,19 @@ void TelemetryHistogram::InitializeGlobalState(bool canRecordBase,
   // declaration point further up in this file.
 
   // Populate the static histogram name->id cache.
-  // Note that the histogram names are statically allocated.
+  // Note that the histogram names come from a static table so we can wrap them
+  // in a literal string to avoid allocations when it gets copied.
   for (uint32_t i = 0; i < HistogramCount; i++) {
-    gNameToHistogramIDMap.Put(nsDependentCString(gHistogramInfos[i].name()), HistogramID(i));
+    auto name = gHistogramInfos[i].name();
+
+    // Make sure the name pointer is in a valid region. See bug 1428612.
+    MOZ_DIAGNOSTIC_ASSERT(name >= gHistogramStringTable);
+    MOZ_DIAGNOSTIC_ASSERT(
+        uintptr_t(name) < (uintptr_t(gHistogramStringTable) + sizeof(gHistogramStringTable)));
+
+    nsCString wrappedName;
+    wrappedName.AssignLiteral(name, strlen(name));
+    gNameToHistogramIDMap.Put(wrappedName, HistogramID(i));
   }
 
 #ifdef DEBUG
@@ -2034,6 +2048,39 @@ TelemetryHistogram::AccumulateCategorical(HistogramID aId,
     return;
   }
   internal_Accumulate(aId, labelId);
+}
+
+void
+TelemetryHistogram::AccumulateCategorical(HistogramID aId, const nsTArray<nsCString>& aLabels)
+{
+  if (NS_WARN_IF(!internal_IsHistogramEnumId(aId))) {
+    MOZ_ASSERT_UNREACHABLE("Histogram usage requires valid ids.");
+    return;
+  }
+
+  if (!internal_CanRecordBase()) {
+    return;
+  }
+
+  // We use two loops, one for getting label_ids and another one for actually accumulating
+  // the values. This ensures that in the case of an invalid label in the array, no values
+  // are accumulated. In any call to this API, either all or (in case of error) none of the
+  // values will be accumulated.
+
+  nsTArray<uint32_t> intSamples(aLabels.Length());
+  for (const nsCString& label: aLabels){
+    uint32_t labelId = 0;
+    if (NS_FAILED(gHistogramInfos[aId].label_id(label.get(), &labelId))) {
+      return;
+    }
+    intSamples.AppendElement(labelId);
+  }
+
+  StaticMutexAutoLock locker(gTelemetryHistogramMutex);
+
+  for (uint32_t sample: intSamples){
+    internal_Accumulate(aId, sample);
+  }
 }
 
 void

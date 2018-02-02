@@ -11,7 +11,6 @@
 #include "nsIDOMAnimationEvent.h"
 #include "nsIDOMBeforeUnloadEvent.h"
 #include "nsIDOMCanvasRenderingContext2D.h"
-#include "nsIDOMCDATASection.h"
 #include "nsIDOMCharacterData.h"
 #include "nsIDOMClientRect.h"
 #include "nsIDOMClientRectList.h"
@@ -39,8 +38,6 @@
 #include "nsIDOMFormData.h"
 #include "nsIDOMGeoPositionError.h"
 #include "nsIDOMHistory.h"
-#include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMHTMLMediaElement.h"
@@ -49,7 +46,6 @@
 #include "nsIDOMMouseScrollEvent.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeIterator.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMNotifyPaintEvent.h"
 #include "nsIDOMNSEvent.h"
@@ -63,12 +59,10 @@
 #include "nsIDOMSerializer.h"
 #include "nsIDOMSimpleGestureEvent.h"
 #include "nsIDOMSVGElement.h"
-#include "nsIDOMSVGLength.h"
 #include "nsIDOMText.h"
 #include "nsIDOMTimeEvent.h"
 #include "nsIDOMTimeRanges.h"
 #include "nsIDOMTransitionEvent.h"
-#include "nsIDOMTreeWalker.h"
 #include "nsIDOMUIEvent.h"
 #include "nsIDOMValidityState.h"
 #include "nsIDOMWheelEvent.h"
@@ -76,7 +70,6 @@
 #include "nsIDOMXPathEvaluator.h"
 #include "nsIDOMXPathResult.h"
 #include "nsIDOMXULCommandEvent.h"
-#include "nsIDOMXULDocument.h"
 #include "nsIDOMXULElement.h"
 #include "nsIFrameLoader.h"
 #include "nsIListBoxObject.h"
@@ -90,7 +83,6 @@
 #include "mozilla/dom/AnimationEventBinding.h"
 #include "mozilla/dom/BeforeUnloadEventBinding.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
-#include "mozilla/dom/CDATASectionBinding.h"
 #include "mozilla/dom/CharacterDataBinding.h"
 #include "mozilla/dom/DOMRectBinding.h"
 #include "mozilla/dom/DOMRectListBinding.h"
@@ -128,8 +120,6 @@
 #include "mozilla/dom/HTMLAnchorElementBinding.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
 #include "mozilla/dom/HTMLButtonElementBinding.h"
-#include "mozilla/dom/HTMLDocumentBinding.h"
-#include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/HTMLFormElementBinding.h"
 #include "mozilla/dom/HTMLFrameSetElementBinding.h"
 #include "mozilla/dom/HTMLHtmlElementBinding.h"
@@ -143,7 +133,6 @@
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/MouseScrollEventBinding.h"
 #include "mozilla/dom/MutationEventBinding.h"
-#include "mozilla/dom/NodeIteratorBinding.h"
 #include "mozilla/dom/NodeListBinding.h"
 #include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/NotifyPaintEventBinding.h"
@@ -163,13 +152,11 @@
 #include "mozilla/dom/StyleSheetBinding.h"
 #include "mozilla/dom/StyleSheetListBinding.h"
 #include "mozilla/dom/SVGElementBinding.h"
-#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/TextBinding.h"
 #include "mozilla/dom/TimeEventBinding.h"
 #include "mozilla/dom/TimeRangesBinding.h"
 #include "mozilla/dom/TransitionEventBinding.h"
 #include "mozilla/dom/TreeBoxObjectBinding.h"
-#include "mozilla/dom/TreeWalkerBinding.h"
 #include "mozilla/dom/UIEventBinding.h"
 #include "mozilla/dom/ValidityStateBinding.h"
 #include "mozilla/dom/WheelEventBinding.h"
@@ -241,7 +228,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(AnimationEvent),
   DEFINE_SHIM(BeforeUnloadEvent),
   DEFINE_SHIM(CanvasRenderingContext2D),
-  DEFINE_SHIM(CDATASection),
   DEFINE_SHIM(CharacterData),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMClientRect, DOMRectReadOnly),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMClientRectList, DOMRectList),
@@ -271,8 +257,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIFrameLoader, FrameLoader),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMGeoPositionError, PositionError),
   DEFINE_SHIM(History),
-  DEFINE_SHIM(HTMLDocument),
-  DEFINE_SHIM(HTMLElement),
   DEFINE_SHIM(HTMLFormElement),
   DEFINE_SHIM(HTMLInputElement),
   DEFINE_SHIM(HTMLMediaElement),
@@ -282,7 +266,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(MouseEvent),
   DEFINE_SHIM(MouseScrollEvent),
   DEFINE_SHIM(MutationEvent),
-  DEFINE_SHIM(NodeIterator),
   DEFINE_SHIM(NodeList),
   DEFINE_SHIM(Node),
   DEFINE_SHIM(NotifyPaintEvent),
@@ -298,13 +281,11 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMSerializer, XMLSerializer),
   DEFINE_SHIM(SimpleGestureEvent),
   DEFINE_SHIM(SVGElement),
-  DEFINE_SHIM(SVGLength),
   DEFINE_SHIM(Text),
   DEFINE_SHIM(TimeEvent),
   DEFINE_SHIM(TimeRanges),
   DEFINE_SHIM(TransitionEvent),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsITreeBoxObject, TreeBoxObject),
-  DEFINE_SHIM(TreeWalker),
   DEFINE_SHIM(UIEvent),
   DEFINE_SHIM(ValidityState),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIWebBrowserPersistable, FrameLoader),
@@ -315,7 +296,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(XPathEvaluator),
   DEFINE_SHIM(XPathResult),
   DEFINE_SHIM(XULCommandEvent),
-  DEFINE_SHIM(XULDocument),
   DEFINE_SHIM(XULElement),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsISelection, Selection),
 };

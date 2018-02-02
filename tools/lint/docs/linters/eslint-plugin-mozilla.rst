@@ -71,8 +71,8 @@ can be used instead.
 balanced-listeners
 ------------------
 
-Checks that for every occurence of 'addEventListener' or 'on' there is an
-occurence of 'removeEventListener' or 'off' with the same event name.
+Checks that for every occurrence of 'addEventListener' or 'on' there is an
+occurrence of 'removeEventListener' or 'off' with the same event name.
 
 import-browser-window-globals
 -----------------------------
@@ -256,6 +256,13 @@ object is assigned to another variable e.g.:
    var b = gBrowser;
    b.content // Would not be detected as a CPOW.
 
+use-chromeutils-import
+----------------------
+
+Require use of ``ChromeUtils.import`` and ``ChromeUtils.defineModuleGetter``
+rather than ``Components.utils.import`` and
+``XPCOMUtils.defineLazyModuleGetter``.
+
 use-default-preference-values
 ---------------
 
@@ -266,6 +273,11 @@ use-ownerGlobal
 ---------------
 
 Require .ownerGlobal instead of .ownerDocument.defaultView.
+
+use-includes-instead-of-indexOf
+-------------------------------
+
+Use .includes instead of .indexOf to check if something is in an array or string.
 
 use-services
 ------------

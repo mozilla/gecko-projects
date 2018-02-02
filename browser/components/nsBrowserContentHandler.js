@@ -2,24 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "HeadlessShell",
-                                  "resource:///modules/HeadlessShell.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LaterRun",
-                                  "resource:///modules/LaterRun.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
-                                  "resource:///modules/RecentWindow.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ShellService",
-                                  "resource:///modules/ShellService.jsm");
+ChromeUtils.defineModuleGetter(this, "HeadlessShell",
+                               "resource:///modules/HeadlessShell.jsm");
+ChromeUtils.defineModuleGetter(this, "LaterRun",
+                               "resource:///modules/LaterRun.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "RecentWindow",
+                               "resource:///modules/RecentWindow.jsm");
+ChromeUtils.defineModuleGetter(this, "ShellService",
+                               "resource:///modules/ShellService.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "WindowsUIUtils",
                                    "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdatePing",
-                                  "resource://gre/modules/UpdatePing.jsm");
+ChromeUtils.defineModuleGetter(this, "UpdatePing",
+                               "resource://gre/modules/UpdatePing.jsm");
 
 const nsISupports            = Components.interfaces.nsISupports;
 
@@ -167,7 +167,7 @@ function getPostUpdateOverridePage(defaultOverridePage) {
 
   // The existence of silent or the non-existence of showURL in the actions both
   // mean that an override page should not be displayed.
-  if (actions.indexOf("silent") != -1 || actions.indexOf("showURL") == -1)
+  if (actions.includes("silent") || !actions.includes("showURL"))
     return "";
 
   return update.getProperty("openURL") || defaultOverridePage;

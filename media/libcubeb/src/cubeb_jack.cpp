@@ -231,9 +231,10 @@ load_jack_lib(cubeb * context)
   return CUBEB_OK;
 }
 
-static void
+static int
 cbjack_connect_ports (cubeb_stream * stream)
 {
+  int r = CUBEB_ERROR;
   const char ** phys_in_ports = api_jack_get_ports (stream->context->jack_client,
                                                    NULL, NULL,
                                                    JackPortIsInput
@@ -243,7 +244,7 @@ cbjack_connect_ports (cubeb_stream * stream)
                                                     JackPortIsOutput
                                                     | JackPortIsPhysical);
 
- if (*phys_in_ports == NULL) {
+ if (phys_in_ports == NULL || *phys_in_ports == NULL) {
     goto skipplayback;
   }
 
@@ -253,9 +254,10 @@ cbjack_connect_ports (cubeb_stream * stream)
 
     api_jack_connect (stream->context->jack_client, src_port, phys_in_ports[c]);
   }
+  r = CUBEB_OK;
 
 skipplayback:
-  if (*phys_out_ports == NULL) {
+  if (phys_out_ports == NULL || *phys_out_ports == NULL) {
     goto end;
   }
   // Connect inputs to capture
@@ -264,9 +266,15 @@ skipplayback:
 
     api_jack_connect (stream->context->jack_client, phys_out_ports[c], src_port);
   }
+  r = CUBEB_OK;
 end:
-  api_jack_free(phys_out_ports);
-  api_jack_free(phys_in_ports);
+  if (phys_out_ports) {
+    api_jack_free(phys_out_ports);
+  }
+  if (phys_in_ports) {
+    api_jack_free(phys_in_ports);
+  }
+  return r;
 }
 
 static int
@@ -735,6 +743,12 @@ cbjack_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_
   if (input_device || output_device)
     return CUBEB_ERROR_NOT_SUPPORTED;
 
+  // Loopback is unsupported
+  if ((input_stream_params && (input_stream_params->prefs & CUBEB_STREAM_PREF_LOOPBACK)) ||
+      (output_stream_params && (output_stream_params->prefs & CUBEB_STREAM_PREF_LOOPBACK))) {
+    return CUBEB_ERROR_NOT_SUPPORTED;
+  }
+
   *stream = NULL;
 
   // Find a free stream.
@@ -866,7 +880,11 @@ cbjack_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_
     }
   }
 
-  cbjack_connect_ports(stm);
+  if (cbjack_connect_ports(stm) != CUBEB_OK) {
+    pthread_mutex_unlock(&stm->mutex);
+    cbjack_stream_destroy(stm);
+    return CUBEB_ERROR;
+  }
 
   *stream = stm;
 

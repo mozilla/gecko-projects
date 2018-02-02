@@ -36,7 +36,9 @@
 #include "nsISupportsPrimitives.h"
 #include "nsMappedAttributes.h"
 #include "nsNetUtil.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleData.h"
+#endif
 #include "nsStyleConsts.h"
 #include "nsThreadUtils.h"
 #include "nsVideoFrame.h"
@@ -327,6 +329,7 @@ HTMLTrackElement::LoadResource()
                      static_cast<Element*>(this),
                      secFlags,
                      nsIContentPolicy::TYPE_INTERNAL_TRACK,
+                     nullptr, // PerformanceStorage
                      loadGroup,
                      nullptr,   // aCallbacks
                      nsIRequest::LOAD_NORMAL | nsIChannel::LOAD_CLASSIFY_URI);

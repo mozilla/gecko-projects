@@ -36,9 +36,7 @@ for stlfile in ['jsarray.*', 'jsbool*', 'jsdate.*', 'jsnum.*', 'json.*', 'jsstr.
     with Files(stlfile):
         BUG_COMPONENT = component_stl
 
-with Files('builtin/Intl*'):
-    BUG_COMPONENT = component_intl
-with Files('builtin/make_intl_data.py'):
+with Files('builtin/intl/*'):
     BUG_COMPONENT = component_intl
 
 
@@ -159,7 +157,14 @@ UNIFIED_SOURCES += [
     'builtin/AtomicsObject.cpp',
     'builtin/DataViewObject.cpp',
     'builtin/Eval.cpp',
-    'builtin/Intl.cpp',
+    'builtin/intl/Collator.cpp',
+    'builtin/intl/CommonFunctions.cpp',
+    'builtin/intl/DateTimeFormat.cpp',
+    'builtin/intl/IntlObject.cpp',
+    'builtin/intl/NumberFormat.cpp',
+    'builtin/intl/PluralRules.cpp',
+    'builtin/intl/RelativeTimeFormat.cpp',
+    'builtin/intl/SharedIntlData.cpp',
     'builtin/MapObject.cpp',
     'builtin/ModuleObject.cpp',
     'builtin/Object.cpp',
@@ -272,6 +277,7 @@ UNIFIED_SOURCES += [
     'jit/shared/Assembler-shared.cpp',
     'jit/shared/BaselineCompiler-shared.cpp',
     'jit/shared/CodeGenerator-shared.cpp',
+    'jit/shared/Disassembler-shared.cpp',
     'jit/shared/Lowering-shared.cpp',
     'jit/SharedIC.cpp',
     'jit/Sink.cpp',
@@ -652,6 +658,11 @@ if CONFIG['NIGHTLY_BUILD']:
     DEFINES['ENABLE_SIMD'] = True
     DEFINES['ENABLE_WASM_SIGNEXTEND_OPS'] = True
     DEFINES['ENABLE_WASM_THREAD_OPS'] = True
+    # An experiment we want to run on Nightly: Can we change the JS
+    # representation of an exported global from the global's value
+    # to an instance of WebAssembly.Global without breaking existing
+    # wasm content?
+    DEFINES['ENABLE_WASM_GLOBAL'] = True
 
 if CONFIG['JS_BUILD_BINAST']:
     # Using SOURCES as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
@@ -732,9 +743,15 @@ selfhosted.inputs = [
     'builtin/Error.js',
     'builtin/Function.js',
     'builtin/Generator.js',
-    'builtin/Intl.js',
-    'builtin/IntlCurrency.js',
-    'builtin/IntlData.js',
+    'builtin/intl/Collator.js',
+    'builtin/intl/CommonFunctions.js',
+    'builtin/intl/CurrencyDataGenerated.js',
+    'builtin/intl/DateTimeFormat.js',
+    'builtin/intl/IntlObject.js',
+    'builtin/intl/LangTagMappingsGenerated.js',
+    'builtin/intl/NumberFormat.js',
+    'builtin/intl/PluralRules.js',
+    'builtin/intl/RelativeTimeFormat.js',
     'builtin/Iterator.js',
     'builtin/Map.js',
     'builtin/Module.js',

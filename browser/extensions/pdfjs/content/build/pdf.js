@@ -1577,7 +1577,7 @@ class SimpleXMLParser {
     return { documentElement: nodes.pop() };
   }
   _decodeXML(text) {
-    if (text.indexOf('&') < 0) {
+    if (!text.includes('&')) {
       return text;
     }
     return text.replace(/&(#(x[0-9a-f]+|\d+)|\w+);/gi, function (all, entityName, number) {
@@ -1718,9 +1718,6 @@ function isExternalLinkTargetSet() {
 class StatTimer {
   constructor(enable = true) {
     this.enabled = !!enable;
-    this.reset();
-  }
-  reset() {
     this.started = Object.create(null);
     this.times = [];
   }
@@ -1769,7 +1766,6 @@ class DummyStatTimer {
   constructor() {
     (0, _util.unreachable)('Cannot initialize DummyStatTimer.');
   }
-  static reset() {}
   static time(name) {}
   static timeEnd(name) {}
   static toString() {
@@ -1932,7 +1928,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
   if (worker.destroyed) {
     return Promise.reject(new Error('Worker was destroyed'));
   }
-  let apiVersion = '2.0.288';
+  let apiVersion = '2.0.303';
   source.disableRange = (0, _dom_utils.getDefaultSetting)('disableRange');
   source.disableAutoFetch = (0, _dom_utils.getDefaultSetting)('disableAutoFetch');
   source.disableStream = (0, _dom_utils.getDefaultSetting)('disableStream');
@@ -2319,8 +2315,8 @@ var PDFPageProxy = function PDFPageProxyClosure() {
       }, this);
       this.objs.clear();
       this.annotationsPromise = null;
-      if (resetStats) {
-        this._stats.reset();
+      if (resetStats && this._stats instanceof _dom_utils.StatTimer) {
+        this._stats = new _dom_utils.StatTimer();
       }
       this.pendingCleanup = false;
     },
@@ -2369,7 +2365,7 @@ class LoopbackPort {
       var result;
       var buffer;
       if ((buffer = value.buffer) && (0, _util.isArrayBuffer)(buffer)) {
-        var transferable = transfers && transfers.indexOf(buffer) >= 0;
+        var transferable = transfers && transfers.includes(buffer);
         if (value === buffer) {
           result = value;
         } else if (transferable) {
@@ -3227,8 +3223,8 @@ var InternalRenderTask = function InternalRenderTaskClosure() {
 }();
 var version, build;
 {
-  exports.version = version = '2.0.288';
-  exports.build = build = 'f0216484';
+  exports.version = version = '2.0.303';
+  exports.build = build = '55e3f97a';
 }
 exports.getDocument = getDocument;
 exports.LoopbackPort = LoopbackPort;
@@ -3684,7 +3680,7 @@ class ChoiceWidgetAnnotationElement extends WidgetAnnotationElement {
       let optionElement = document.createElement('option');
       optionElement.textContent = option.displayValue;
       optionElement.value = option.exportValue;
-      if (this.data.fieldValue.indexOf(option.displayValue) >= 0) {
+      if (this.data.fieldValue.includes(option.displayValue)) {
         optionElement.setAttribute('selected', true);
       }
       selectElement.appendChild(optionElement);
@@ -3701,7 +3697,7 @@ class PopupAnnotationElement extends AnnotationElement {
   render() {
     const IGNORE_TYPES = ['Line', 'Square', 'Circle', 'PolyLine', 'Polygon'];
     this.container.className = 'popupAnnotation';
-    if (IGNORE_TYPES.indexOf(this.data.parentType) >= 0) {
+    if (IGNORE_TYPES.includes(this.data.parentType)) {
       return this.container;
     }
     let selector = '[data-annotation-id="' + this.data.parentId + '"]';
@@ -4621,8 +4617,8 @@ exports.SVGGraphics = SVGGraphics;
 "use strict";
 
 
-var pdfjsVersion = '2.0.288';
-var pdfjsBuild = 'f0216484';
+var pdfjsVersion = '2.0.303';
+var pdfjsBuild = '55e3f97a';
 var pdfjsSharedUtil = __w_pdfjs_require__(0);
 var pdfjsDisplayGlobal = __w_pdfjs_require__(12);
 var pdfjsDisplayAPI = __w_pdfjs_require__(3);
@@ -7744,8 +7740,8 @@ if (!_global_scope2.default.PDFJS) {
 }
 var PDFJS = _global_scope2.default.PDFJS;
 {
-  PDFJS.version = '2.0.288';
-  PDFJS.build = 'f0216484';
+  PDFJS.version = '2.0.303';
+  PDFJS.build = '55e3f97a';
 }
 PDFJS.pdfBug = false;
 if (PDFJS.verbosity !== undefined) {

@@ -36,9 +36,11 @@
 #include "gfxContext.h"
 #include "gfxPrefs.h"
 #include "gfxUserFontSet.h"
+#include "nsContentList.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
+#include "nsIPresShellInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h" // for Event::GetEventPopupControlState()
 #include "mozilla/dom/PointerEventHandler.h"
@@ -72,7 +74,6 @@
 #include "nsIMozBrowserFrame.h"
 #include "nsCaret.h"
 #include "AccessibleCaretEventHub.h"
-#include "nsIDOMHTMLDocument.h"
 #include "nsFrameManager.h"
 #include "nsXPCOM.h"
 #include "nsILayoutHistoryState.h"
@@ -170,7 +171,6 @@
 #include "ChildIterator.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsIDragSession.h"
 #include "nsIFrameInlines.h"
 #include "mozilla/gfx/2D.h"
@@ -179,13 +179,16 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/FocusTarget.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsStyleSet.h"
+#endif
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/ImageTracker.h"
 #include "nsIDocShellTreeOwner.h"
+#include "nsBindingManager.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -603,8 +606,12 @@ VerifyStyleTree(nsPresContext* aPresContext, nsFrameManager* aFrameManager)
       NS_ERROR("stylo: cannot verify style tree with a ServoRestyleManager");
       return;
     }
+#ifdef MOZ_OLD_STYLE
     nsIFrame* rootFrame = aFrameManager->GetRootFrame();
     aPresContext->RestyleManager()->AsGecko()->DebugVerifyStyleTree(rootFrame);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
 }
 #define VERIFY_STYLE_TREE ::VerifyStyleTree(mPresContext, mFrameConstructor)
@@ -1362,8 +1369,7 @@ PresShell::Destroy()
   }
 
   if (mPresContext) {
-    mPresContext->AnimationManager()->ClearEventQueue();
-    mPresContext->TransitionManager()->ClearEventQueue();
+    rd->CancelPendingAnimationEvents(mPresContext->AnimationEventDispatcher());
   }
 
   // Revoke any pending events.  We need to do this and cancel pending reflows
@@ -1828,6 +1834,9 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     // (Do this in a script runner, since our caller might have a script
     // blocker on the stack.)
     nsContentUtils::AddScriptRunner(new XBLConstructorRunner(mDocument));
+
+    // XBLConstructorRunner might destroy us.
+    NS_ENSURE_STATE(!mHaveShutDown);
   }
 
   NS_ASSERTION(rootFrame, "How did that happen?");
@@ -3077,7 +3086,6 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
   nsresult rv = NS_OK;
   nsCOMPtr<nsIContent> content;
 
@@ -3087,7 +3095,7 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
   }
 
   // Search for an anchor element with a matching "name" attribute
-  if (!content && htmlDoc) {
+  if (!content && mDocument->IsHTMLDocument()) {
     // Find a matching list of named nodes
     nsCOMPtr<nsIDOMNodeList> list = mDocument->GetElementsByName(aAnchorName);
     if (list) {
@@ -3112,31 +3120,27 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
   }
 
   // Search for anchor in the HTML namespace with a matching name
-  if (!content && !htmlDoc)
+  if (!content && !mDocument->IsHTMLDocument())
   {
-    nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(mDocument);
-    nsCOMPtr<nsIDOMNodeList> list;
     NS_NAMED_LITERAL_STRING(nameSpace, "http://www.w3.org/1999/xhtml");
     // Get the list of anchor elements
-    rv = doc->GetElementsByTagNameNS(nameSpace, NS_LITERAL_STRING("a"), getter_AddRefs(list));
-    if (NS_SUCCEEDED(rv) && list) {
-      uint32_t i;
-      // Loop through the named nodes looking for the first anchor
-      for (i = 0; true; i++) {
-        nsCOMPtr<nsIDOMNode> node;
-        rv = list->Item(i, getter_AddRefs(node));
-        if (!node) { // End of list
-          break;
-        }
-        // Compare the name attribute
-        nsCOMPtr<nsIDOMElement> element = do_QueryInterface(node);
-        nsAutoString value;
-        if (element && NS_SUCCEEDED(element->GetAttribute(NS_LITERAL_STRING("name"), value))) {
-          if (value.Equals(aAnchorName)) {
-            content = do_QueryInterface(element);
-            break;
-          }
-        }
+    nsCOMPtr<nsINodeList> list =
+      mDocument->GetElementsByTagNameNS(nameSpace, NS_LITERAL_STRING("a"));
+    // Loop through the anchors looking for the first one with the given name.
+    for (uint32_t i = 0; true; i++) {
+      nsIContent* node = list->Item(i);
+      if (!node) { // End of list
+        break;
+      }
+
+      // Compare the name attribute
+      if (node->IsElement() &&
+          node->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                         nsGkAtoms::name,
+                                         aAnchorName,
+                                         eCaseMatters)) {
+        content = node;
+        break;
       }
     }
   }
@@ -4062,8 +4066,9 @@ PresShell::HandlePostedReflowCallbacks(bool aInterruptible)
 bool
 nsIPresShell::IsSafeToFlush() const
 {
-  // Not safe if we are reflowing or in the middle of frame construction
-  if (mIsReflowing || mChangeNestCount) {
+  // Not safe if we are getting torn down, reflowing, or in the middle of frame
+  // construction.
+  if (mIsReflowing || mChangeNestCount || mIsDestroying) {
     return false;
   }
 
@@ -4123,10 +4128,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
                                    GRAPHICS, flushTypeNames[flushType]);
 #endif
 
+
 #ifdef ACCESSIBILITY
 #ifdef DEBUG
-  nsAccessibilityService* accService = GetAccService();
-  if (accService) {
+  if (nsAccessibilityService* accService = GetAccService()) {
     NS_ASSERTION(!accService->IsProcessingRefreshDriverNotification(),
                  "Flush during accessible tree update!");
   }
@@ -4151,12 +4156,16 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     isSafeToFlush = isSafeToFlush && nsContentUtils::IsSafeToRunScript();
   }
 
-  NS_ASSERTION(!isSafeToFlush || mViewManager, "Must have view manager");
+  MOZ_DIAGNOSTIC_ASSERT(!mIsDestroying || !isSafeToFlush);
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mViewManager);
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mDocument->HasShellOrBFCacheEntry());
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mDocument->GetShell() == this);
+
   // Make sure the view manager stays alive.
   RefPtr<nsViewManager> viewManager = mViewManager;
   bool didStyleFlush = false;
   bool didLayoutFlush = false;
-  if (isSafeToFlush && viewManager) {
+  if (isSafeToFlush) {
     // Record that we are in a flush, so that our optimization in
     // nsDocument::FlushPendingNotifications doesn't skip any re-entrant
     // calls to us.  Otherwise, we might miss some needed flushes, since
@@ -4347,16 +4356,22 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument, EventStates aStateMask)
   if (mDidInitialize) {
     if (mStyleSet->IsServo()) {
       mStyleSet->AsServo()->InvalidateStyleForDocumentStateChanges(aStateMask);
-    } else if (Element* rootElement = aDocument->GetRootElement()) {
-      const bool needRestyle =
-        mStyleSet->AsGecko()->HasDocumentStateDependentStyle(
-          rootElement, aStateMask);
-      if (needRestyle) {
-        mPresContext->RestyleManager()->PostRestyleEvent(rootElement,
-                                                         eRestyle_Subtree,
-                                                         nsChangeHint(0));
-        VERIFY_STYLE_TREE;
+    } else {
+#ifdef MOZ_OLD_STYLE
+      if (Element* rootElement = aDocument->GetRootElement()) {
+        const bool needRestyle =
+          mStyleSet->AsGecko()->HasDocumentStateDependentStyle(
+            rootElement, aStateMask);
+        if (needRestyle) {
+          mPresContext->RestyleManager()->PostRestyleEvent(rootElement,
+                                                           eRestyle_Subtree,
+                                                           nsChangeHint(0));
+          VERIFY_STYLE_TREE;
+        }
       }
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
     }
   }
 
@@ -4581,11 +4596,12 @@ nsIPresShell::RestyleForCSSRuleChanges()
     return;
   }
 
-  mDocument->RebuildUserFontSet();
+  EnsureStyleFlush();
+  mDocument->MarkUserFontSetDirty();
 
   if (mPresContext) {
-    mPresContext->RebuildCounterStyles();
-    mPresContext->RebuildFontFeatureValues();
+    mPresContext->MarkCounterStylesDirty();
+    mPresContext->MarkFontFeatureValuesDirty();
   }
 
   if (!mDidInitialize) {
@@ -4940,7 +4956,7 @@ PresShell::CreateRangePaintInfo(nsIDOMRange* aRange,
       frame->BuildDisplayListForStackingContext(&info->mBuilder, &info->mList);
     }
   };
-  if (startContainer->NodeType() == nsIDOMNode::TEXT_NODE) {
+  if (startContainer->NodeType() == nsINode::TEXT_NODE) {
     BuildDisplayListForNode(startContainer);
   }
   for (; !iter->IsDone(); iter->Next()) {
@@ -4948,7 +4964,7 @@ PresShell::CreateRangePaintInfo(nsIDOMRange* aRange,
     BuildDisplayListForNode(node);
   }
   if (endContainer != startContainer &&
-      endContainer->NodeType() == nsIDOMNode::TEXT_NODE) {
+      endContainer->NodeType() == nsINode::TEXT_NODE) {
     BuildDisplayListForNode(endContainer);
   }
 
@@ -8371,8 +8387,7 @@ PresShell::GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
       RefPtr<nsXULElement> xulElement =
         nsXULElement::FromContent(focusedContent);
       if (xulElement) {
-        IgnoredErrorResult ignored;
-        nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(ignored);
+        nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
         nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
         // Tree view special case (tree items have no frames)
         // Get the focused row and add its coordinates, which are already in pixels
@@ -9726,6 +9741,7 @@ CopySheetsIntoClone(StyleSetHandle aSet, StyleSetHandle aClone)
   }
 }
 
+#ifdef MOZ_OLD_STYLE
 nsStyleSet*
 PresShell::CloneStyleSet(nsStyleSet* aSet)
 {
@@ -9733,6 +9749,7 @@ PresShell::CloneStyleSet(nsStyleSet* aSet)
   CopySheetsIntoClone(aSet, clone);
   return clone;
 }
+#endif
 
 ServoStyleSet*
 PresShell::CloneStyleSet(ServoStyleSet* aSet)
@@ -9795,19 +9812,27 @@ PresShell::VerifyIncrementalReflow()
 
   // Create a new presentation shell to view the document. Use the
   // exact same style information that this document has.
+#ifdef MOZ_OLD_STYLE
   nsAutoPtr<nsStyleSet> newGeckoSet;
+#endif
   nsAutoPtr<ServoStyleSet> newServoSet;
   StyleSetHandle newSet;
   if (mStyleSet->IsServo()) {
     newServoSet = CloneStyleSet(mStyleSet->AsServo());
     newSet = newServoSet;
   } else {
+#ifdef MOZ_OLD_STYLE
     newGeckoSet = CloneStyleSet(mStyleSet->AsGecko());
     newSet = newGeckoSet;
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
   nsCOMPtr<nsIPresShell> sh = mDocument->CreateShell(cx, vm, newSet);
   NS_ENSURE_TRUE(sh, false);
+#ifdef MOZ_OLD_STYLE
   newGeckoSet.forget();
+#endif
   newServoSet.forget();
   // Note that after we create the shell, we must make sure to destroy it
   sh->SetVerifyReflowEnable(false); // turn off verify reflow while we're reflowing the test frame tree
@@ -10638,12 +10663,14 @@ PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const
     mApproximatelyVisibleFrames.ShallowSizeOfExcludingThis(mallocSizeOf) +
     mFramesToDirty.ShallowSizeOfExcludingThis(mallocSizeOf);
 
-  if (nsStyleSet* styleSet = StyleSet()->GetAsGecko()) {
-    styleSet->AddSizeOfIncludingThis(aSizes);
-  } else if (ServoStyleSet* styleSet = StyleSet()->GetAsServo()) {
-    styleSet->AddSizeOfIncludingThis(aSizes);
+  if (StyleSet()->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    StyleSet()->AsGecko()->AddSizeOfIncludingThis(aSizes);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   } else {
-    MOZ_CRASH();
+    StyleSet()->AsServo()->AddSizeOfIncludingThis(aSizes);
   }
 
   aSizes.mLayoutTextRunsSize += SizeOfTextRuns(mallocSizeOf);
@@ -10844,10 +10871,15 @@ nsIPresShell::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
                                                       bool* aRetVal)
 {
   *aRetVal = false;
-  if (nsStyleSet* styleSet = mStyleSet->GetAsGecko()) {
+  if (mStyleSet->IsGecko()) {
+#ifdef MOZ_OLD_STYLE
+    nsStyleSet* styleSet = mStyleSet->AsGecko();
     // ServoStyleSets do not have rule processors.
     SheetType type = ToSheetType(aSheetType);
     *aRetVal = styleSet->HasRuleProcessorUsedByMultipleStyleSets(type);
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   }
   return NS_OK;
 }

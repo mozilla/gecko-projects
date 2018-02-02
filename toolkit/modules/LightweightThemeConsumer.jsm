@@ -6,14 +6,15 @@ this.EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
 const {utils: Cu, interfaces: Ci, classes: Cc} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
+ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
 const kCSSVarsMap = new Map([
+  ["--lwt-accent-color-inactive", "accentcolorInactive"],
   ["--lwt-background-alignment", "backgroundsAlignment"],
   ["--lwt-background-tiling", "backgroundsTiling"],
   ["--lwt-tab-text", "tab_text"],
@@ -25,6 +26,8 @@ const kCSSVarsMap = new Map([
   ["--tabs-border-color", "toolbar_top_separator"],
   ["--toolbox-border-bottom-color", "toolbar_bottom_separator"],
   ["--urlbar-separator-color", "toolbar_vertical_separator"],
+  ["--lwt-toolbarbutton-icon-fill", "icon_color"],
+  ["--lwt-toolbarbutton-icon-fill-attention", "icon_attention_color"],
 ]);
 
 this.LightweightThemeConsumer =
@@ -39,7 +42,7 @@ this.LightweightThemeConsumer =
   Services.obs.addObserver(this, "lightweight-theme-styling-update");
 
   var temp = {};
-  Cu.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
+  ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
   this._update(temp.LightweightThemeManager.currentThemeForDisplay);
   this._win.addEventListener("resize", this);
 };

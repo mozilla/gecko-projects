@@ -54,6 +54,7 @@ dictionary MakePublicKeyCredentialOptions {
     unsigned long                                timeout;
     sequence<PublicKeyCredentialDescriptor>      excludeCredentials = [];
     AuthenticatorSelectionCriteria               authenticatorSelection;
+    AttestationConveyancePreference              attestation = "none";
     // Extensions are not supported yet.
     // AuthenticationExtensions                  extensions; // Add in Bug 1406458
 };
@@ -83,6 +84,12 @@ enum AuthenticatorAttachment {
     "cross-platform"  // Cross-platform attachment
 };
 
+enum AttestationConveyancePreference {
+    "none",
+    "indirect",
+    "direct"
+};
+
 enum UserVerificationRequirement {
     "required",
     "preferred",
@@ -102,6 +109,7 @@ dictionary PublicKeyCredentialRequestOptions {
 typedef record<DOMString, any>       AuthenticationExtensions;
 
 dictionary CollectedClientData {
+    required DOMString           type;
     required DOMString           challenge;
     required DOMString           origin;
     required DOMString           hashAlgorithm;

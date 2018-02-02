@@ -6,11 +6,11 @@
 
 const { utils: Cu, interfaces: Ci, classes: Cc, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "NetUtil",
+                               "resource://gre/modules/NetUtil.jsm");
 
 function MainProcessSingleton() {}
 MainProcessSingleton.prototype = {
@@ -32,10 +32,10 @@ MainProcessSingleton.prototype = {
       // Make sure the URLs are HTTP, HTTPS, or FTP.
       let isWeb = ["https", "http", "ftp"];
 
-      if (isWeb.indexOf(engineURL.scheme) < 0)
+      if (!isWeb.includes(engineURL.scheme))
         throw "Unsupported search engine URL: " + engineURL;
 
-      if (iconURL && isWeb.indexOf(iconURL.scheme) < 0)
+      if (iconURL && !isWeb.includes(iconURL.scheme))
         throw "Unsupported search icon URL: " + iconURL;
     } catch (ex) {
       Cu.reportError("Invalid argument passed to window.external.AddSearchProvider: " + ex);

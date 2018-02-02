@@ -5,15 +5,15 @@
 
 const nsICookie = Components.interfaces.nsICookie;
 
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
-Components.utils.import("resource://gre/modules/PluralForm.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/PluralForm.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "SiteDataManager",
-                                  "resource:///modules/SiteDataManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource://gre/modules/ContextualIdentityService.jsm");
+ChromeUtils.defineModuleGetter(this, "SiteDataManager",
+                               "resource:///modules/SiteDataManager.jsm");
+ChromeUtils.defineModuleGetter(this, "ContextualIdentityService",
+                               "resource://gre/modules/ContextualIdentityService.jsm");
 
 var gCookiesWindow = {
   _hosts: {},
@@ -830,9 +830,9 @@ var gCookiesWindow = {
   },
 
   _cookieMatchesFilter(aCookie) {
-    return aCookie.rawHost.indexOf(this._view._filterValue) != -1 ||
-           aCookie.name.indexOf(this._view._filterValue) != -1 ||
-           aCookie.value.indexOf(this._view._filterValue) != -1;
+    return aCookie.rawHost.includes(this._view._filterValue) ||
+           aCookie.name.includes(this._view._filterValue) ||
+           aCookie.value.includes(this._view._filterValue);
   },
 
   _filterCookies(aFilterValue) {

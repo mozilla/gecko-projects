@@ -1,6 +1,6 @@
 let {utils: Cu, classes: Cc, interfaces: Ci } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 let cs = Cc["@mozilla.org/cookieService;1"].getService(Ci.nsICookieService);
 
 var observer = {
@@ -8,6 +8,7 @@ var observer = {
     if (topic == "cookie-changed") {
       let cookie = subject.QueryInterface(Ci.nsICookie2);
       sendAsyncMessage("cookieName", cookie.name + "=" + cookie.value);
+      sendAsyncMessage("cookieOperation", data);
     }
   }
 };

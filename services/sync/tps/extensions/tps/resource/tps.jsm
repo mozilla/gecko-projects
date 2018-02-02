@@ -14,37 +14,37 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 var module = this;
 
 // Global modules
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/PlacesUtils.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
-Cu.import("resource://gre/modules/PromiseUtils.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
-Cu.import("resource://services-common/async.js");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-sync/main.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-sync/telemetry.js");
-Cu.import("resource://services-sync/bookmark_validator.js");
-Cu.import("resource://services-sync/engines/passwords.js");
-Cu.import("resource://services-sync/engines/forms.js");
-Cu.import("resource://services-sync/engines/addons.js");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/PlacesUtils.jsm");
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+ChromeUtils.import("resource://services-common/async.js");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://services-sync/main.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-sync/telemetry.js");
+ChromeUtils.import("resource://services-sync/bookmark_validator.js");
+ChromeUtils.import("resource://services-sync/engines/passwords.js");
+ChromeUtils.import("resource://services-sync/engines/forms.js");
+ChromeUtils.import("resource://services-sync/engines/addons.js");
 // TPS modules
-Cu.import("resource://tps/logger.jsm");
+ChromeUtils.import("resource://tps/logger.jsm");
 
 // Module wrappers for tests
-Cu.import("resource://tps/modules/addons.jsm");
-Cu.import("resource://tps/modules/bookmarks.jsm");
-Cu.import("resource://tps/modules/forms.jsm");
-Cu.import("resource://tps/modules/history.jsm");
-Cu.import("resource://tps/modules/passwords.jsm");
-Cu.import("resource://tps/modules/prefs.jsm");
-Cu.import("resource://tps/modules/tabs.jsm");
-Cu.import("resource://tps/modules/windows.jsm");
+ChromeUtils.import("resource://tps/modules/addons.jsm");
+ChromeUtils.import("resource://tps/modules/bookmarks.jsm");
+ChromeUtils.import("resource://tps/modules/forms.jsm");
+ChromeUtils.import("resource://tps/modules/history.jsm");
+ChromeUtils.import("resource://tps/modules/passwords.jsm");
+ChromeUtils.import("resource://tps/modules/prefs.jsm");
+ChromeUtils.import("resource://tps/modules/tabs.jsm");
+ChromeUtils.import("resource://tps/modules/windows.jsm");
 
 var hh = Cc["@mozilla.org/network/protocol;1?name=http"]
          .getService(Ci.nsIHttpProtocolHandler);
@@ -58,8 +58,8 @@ XPCOMUtils.defineLazyGetter(this, "gTextDecoder", () => {
   return new TextDecoder();
 });
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "NetUtil",
+                               "resource://gre/modules/NetUtil.jsm");
 
 // Options for wiping data during a sync
 const SYNC_RESET_CLIENT = "resetClient";
@@ -98,8 +98,8 @@ const OBSERVER_TOPICS = ["fxaccounts:onlogin",
                          "private-browsing",
                          "profile-before-change",
                          "sessionstore-windows-restored",
-                         "weave:engine:start-tracking",
-                         "weave:engine:stop-tracking",
+                         "weave:service:tracking-started",
+                         "weave:service:tracking-stopped",
                          "weave:service:login:error",
                          "weave:service:setup-complete",
                          "weave:service:sync:finish",
@@ -146,7 +146,7 @@ var TPS = {
     }, this);
 
     /* global Authentication */
-    Cu.import("resource://tps/auth/fxaccounts.jsm", module);
+    ChromeUtils.import("resource://tps/auth/fxaccounts.jsm", module);
   },
 
   DumpError(msg, exc = null) {
@@ -247,11 +247,11 @@ var TPS = {
           this._syncActive = true;
           break;
 
-        case "weave:engine:start-tracking":
+        case "weave:service:tracking-started":
           this._isTracking = true;
           break;
 
-        case "weave:engine:stop-tracking":
+        case "weave:service:tracking-stopped":
           this._isTracking = false;
           break;
       }
@@ -484,19 +484,19 @@ var TPS = {
       let addon = new Addon(this, entry);
       switch (action) {
         case ACTION_ADD:
-          addon.install();
+          await addon.install();
           break;
         case ACTION_DELETE:
-          addon.uninstall();
+          await addon.uninstall();
           break;
         case ACTION_VERIFY:
-          Logger.AssertTrue(addon.find(state), "addon " + addon.id + " not found");
+          Logger.AssertTrue((await addon.find(state)), "addon " + addon.id + " not found");
           break;
         case ACTION_VERIFY_NOT:
-          Logger.AssertFalse(addon.find(state), "addon " + addon.id + " is present, but it shouldn't be");
+          Logger.AssertFalse((await addon.find(state)), "addon " + addon.id + " is present, but it shouldn't be");
           break;
         case ACTION_SET_ENABLED:
-          Logger.AssertTrue(addon.setEnabled(state), "addon " + addon.id + " not found");
+          Logger.AssertTrue((await addon.setEnabled(state)), "addon " + addon.id + " not found");
           break;
         default:
           throw new Error("Unknown action for add-on: " + action);
@@ -634,7 +634,7 @@ var TPS = {
       for (let {name, count} of problemData.getSummary()) {
         // Exclude mobile showing up on the server hackily so that we don't
         // report it every time, see bug 1273234 and 1274394 for more information.
-        if (name === "serverUnexpected" && problemData.serverUnexpected.indexOf("mobile") >= 0) {
+        if (name === "serverUnexpected" && problemData.serverUnexpected.includes("mobile")) {
           --count;
         }
         if (count) {
@@ -814,7 +814,7 @@ var TPS = {
       let ajvFile = this._getFileRelativeToSourceRoot(testFile, "testing/modules/ajv-4.1.1.js");
       let ajvURL = fileProtocolHandler.getURLSpecFromFile(ajvFile);
       let ns = {};
-      Cu.import(ajvURL, ns);
+      ChromeUtils.import(ajvURL, ns);
       let ajv = new ns.Ajv({ async: "co*" });
       this.pingValidator = ajv.compile(schema);
     } catch (e) {
@@ -926,7 +926,7 @@ var TPS = {
         for (let engine of Weave.Service.engineManager.getEnabled()) {
           if (!(engine.name in names)) {
             Logger.logInfo("Unregistering unused engine: " + engine.name);
-            Weave.Service.engineManager.unregister(engine);
+            await Weave.Service.engineManager.unregister(engine);
           }
         }
       }
@@ -1099,7 +1099,7 @@ var TPS = {
    */
   async waitForTracking() {
     if (!this._isTracking) {
-      await this.waitForEvent("weave:engine:start-tracking");
+      await this.waitForEvent("weave:service:tracking-started");
     }
   },
 

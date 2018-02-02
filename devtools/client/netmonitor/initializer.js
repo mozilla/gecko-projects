@@ -8,7 +8,7 @@
  * This script is the entry point of Network monitor panel.
  * See README.md for more information.
  */
-const { BrowserLoader } = Components.utils.import(
+const { BrowserLoader } = ChromeUtils.import(
   "resource://devtools/client/shared/browser-loader.js", {});
 
 const require = window.windowRequire = BrowserLoader({
@@ -85,7 +85,12 @@ window.Netmonitor = {
    */
   getHar() {
     let { HarExporter } = require("devtools/client/netmonitor/src/har/har-exporter");
-    let { getLongString, getTabTarget, requestData } = connector;
+    let {
+      getLongString,
+      getTabTarget,
+      getTimingMarker,
+      requestData,
+    } = connector;
     let { form: { title, url } } = getTabTarget();
     let state = store.getState();
 
@@ -93,6 +98,7 @@ window.Netmonitor = {
       getString: getLongString,
       items: getSortedRequests(state),
       requestData,
+      getTimingMarker,
       title: title || url,
     };
 

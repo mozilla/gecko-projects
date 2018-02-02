@@ -17,6 +17,9 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
+#include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/WorkletGlobalScope.h"
 #include "mozilla/Maybe.h"
 #include "nsCycleCollectionParticipant.h"
@@ -25,9 +28,6 @@
 #include "nsGlobalWindow.h"
 #include "nsJSUtils.h"
 #include "nsNetUtil.h"
-#include "WorkerPrivate.h"
-#include "WorkerRunnable.h"
-#include "WorkerScope.h"
 #include "xpcpublic.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
@@ -1357,6 +1357,11 @@ Console::MethodInternal(JSContext* aCx, MethodName aMethodName,
   // function.
   if (aMethodName == MethodTrace) {
     MaybeExecuteDumpFunctionForTrace(aCx, stack);
+  } else if ((aMethodName == MethodTime ||
+              aMethodName == MethodTimeEnd) &&
+             !aData.IsEmpty()) {
+    MaybeExecuteDumpFunctionForTime(aCx, aMethodName, aMethodString,
+                                    monotonicTimer, aData[0]);
   } else {
     MaybeExecuteDumpFunction(aCx, aMethodString, aData);
   }
@@ -2569,7 +2574,7 @@ Console::MonotonicTimer(JSContext* aCx, MethodName aMethodName,
     // people can do nasty timing attacks with it.  See similar code in the
     // worker Performance implementation.
     const double maxResolutionMs = 0.005;
-    return nsRFPService::ReduceTimePrecisionAsMSecs(
+    *aTimeStamp = nsRFPService::ReduceTimePrecisionAsMSecs(
       floor(duration / maxResolutionMs) * maxResolutionMs);
     return true;
   }
@@ -2626,6 +2631,46 @@ Console::MaybeExecuteDumpFunction(JSContext* aCx,
 
     message.Append(string);
   }
+
+  message.AppendLiteral("\n");
+  ExecuteDumpFunction(message);
+}
+
+void
+Console::MaybeExecuteDumpFunctionForTime(JSContext* aCx,
+                                         MethodName aMethodName,
+                                         const nsAString& aMethodString,
+                                         uint64_t aMonotonicTimer,
+                                         const JS::Value& aData)
+{
+  if (!mDumpFunction && !mDumpToStdout) {
+    return;
+  }
+
+  nsAutoString message;
+  message.AssignLiteral("console.");
+  message.Append(aMethodString);
+  message.AppendLiteral(": ");
+
+  if (!mPrefix.IsEmpty()) {
+    message.Append(mPrefix);
+    message.AppendLiteral(": ");
+  }
+
+  JS::Rooted<JS::Value> v(aCx, aData);
+  JS::Rooted<JSString*> jsString(aCx, JS_ValueToSource(aCx, v));
+  if (!jsString) {
+    return;
+  }
+
+  nsAutoJSString string;
+  if (NS_WARN_IF(!string.init(aCx, jsString))) {
+    return;
+  }
+
+  message.Append(string);
+  message.AppendLiteral(" @ ");
+  message.AppendInt(aMonotonicTimer);
 
   message.AppendLiteral("\n");
   ExecuteDumpFunction(message);
@@ -2690,8 +2735,7 @@ void
 Console::ExecuteDumpFunction(const nsAString& aMessage)
 {
   if (mDumpFunction) {
-    IgnoredErrorResult rv;
-    mDumpFunction->Call(aMessage, rv);
+    mDumpFunction->Call(aMessage);
     return;
   }
 

@@ -25,6 +25,10 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
+#include "mozilla/dom/WorkerScope.h"
 
 #include "nsAlertsUtils.h"
 #include "nsComponentManagerUtils.h"
@@ -53,10 +57,6 @@
 #include "nsThreadUtils.h"
 #include "nsToolkitCompsCID.h"
 #include "nsXULAppAPI.h"
-#include "ServiceWorkerManager.h"
-#include "WorkerPrivate.h"
-#include "WorkerRunnable.h"
-#include "WorkerScope.h"
 
 namespace mozilla {
 namespace dom {
@@ -2425,7 +2425,7 @@ class CloseNotificationRunnable final
 };
 
 bool
-NotificationWorkerHolder::Notify(Status aStatus)
+NotificationWorkerHolder::Notify(WorkerStatus aStatus)
 {
   if (aStatus >= Canceling) {
     // CloseNotificationRunnable blocks the worker by pushing a sync event loop

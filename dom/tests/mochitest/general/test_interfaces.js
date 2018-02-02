@@ -145,11 +145,11 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "AudioStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AuthenticatorAssertionResponse", nightly: true},
+    {name: "AuthenticatorAssertionResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AuthenticatorAttestationResponse", nightly: true},
+    {name: "AuthenticatorAttestationResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AuthenticatorResponse", nightly: true},
+    {name: "AuthenticatorResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "BarProp", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -207,9 +207,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ConvolverNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Credential", nightly: true},
+    {name: "Credential"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CredentialsContainer", nightly: true},
+    {name: "CredentialsContainer"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Crypto", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -783,7 +783,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ProgressEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PublicKeyCredential", nightly: true},
+    {name: "PublicKeyCredential"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "PushManager", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1353,7 +1353,7 @@ function runTest(isXBLScope) {
     // An interface name should start with an upper case character.
     // However, we have a couple of legacy interfaces that start with 'moz', so
     // we want to allow those until we can remove them.
-    if (!/^[A-Z]/.test(name) && legacyMozPrefixedInterfaces.indexOf(name) < 0) {
+    if (!/^[A-Z]/.test(name) && !legacyMozPrefixedInterfaces.includes(name)) {
       continue;
     }
     ok(interfaceMap[name],

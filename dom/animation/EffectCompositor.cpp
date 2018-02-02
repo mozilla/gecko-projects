@@ -18,7 +18,9 @@
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/EffectSet.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/GeckoStyleContext.h"
+#endif
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
@@ -26,7 +28,6 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/TypeTraits.h" // For Forward<>
-#include "nsComputedDOMStyle.h" // nsComputedDOMStyle::GetPresShellForContent
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSPropertyIDSet.h"
@@ -35,8 +36,10 @@
 #include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
 #include "nsLayoutUtils.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleNode.h" // For nsRuleNode::ComputePropertiesOverridingAnimation
 #include "nsRuleProcessorData.h" // For ElementRuleProcessorData etc.
+#endif
 #include "nsStyleContextInlines.h"
 #include "nsTArray.h"
 #include "PendingAnimationTracker.h"
@@ -263,7 +266,7 @@ EffectCompositor::RequestRestyle(dom::Element* aElement,
 
   // Ignore animations on orphaned elements and elements in documents without
   // a pres shell (e.g. XMLHttpRequest responseXML documents).
-  if (!nsComputedDOMStyle::GetPresShellForContent(aElement)) {
+  if (!nsContentUtils::GetPresShellForContent(aElement)) {
     return;
   }
 
@@ -384,6 +387,7 @@ EffectCompositor::UpdateEffectProperties(StyleType* aStyleType,
   }
 }
 
+#ifdef MOZ_OLD_STYLE
 void
 EffectCompositor::MaybeUpdateAnimationRule(dom::Element* aElement,
                                            CSSPseudoElementType aPseudoType,
@@ -457,6 +461,7 @@ EffectCompositor::GetAnimationRule(dom::Element* aElement,
 
   return effectSet->AnimationRule(aCascadeLevel);
 }
+#endif
 
 namespace {
   class EffectCompositeOrderComparator {
@@ -491,7 +496,7 @@ EffectCompositor::GetServoAnimationRule(
   MOZ_ASSERT(mPresContext && mPresContext->IsDynamic(),
              "Should not be in print preview");
   // Gecko_GetAnimationRule should have already checked this
-  MOZ_ASSERT(nsComputedDOMStyle::GetPresShellForContent(aElement),
+  MOZ_ASSERT(nsContentUtils::GetPresShellForContent(aElement),
              "Should not be trying to run animations on elements in documents"
              " without a pres shell (e.g. XMLHttpRequest documents)");
 
@@ -571,6 +576,7 @@ EffectCompositor::HasThrottledStyleUpdates() const
   return false;
 }
 
+#ifdef MOZ_OLD_STYLE
 void
 EffectCompositor::AddStyleUpdatesTo(RestyleTracker& aTracker)
 {
@@ -622,6 +628,7 @@ EffectCompositor::AddStyleUpdatesTo(RestyleTracker& aTracker)
     // Note: mElement pointers in elementsToRestyle might now dangle
   }
 }
+#endif
 
 /* static */ bool
 EffectCompositor::HasAnimationsForCompositor(const nsIFrame* aFrame,
@@ -714,6 +721,7 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame)
   return result;
 }
 
+#ifdef MOZ_OLD_STYLE
 /* static */ void
 EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
                                        CSSPseudoElementType aPseudoType,
@@ -753,6 +761,7 @@ EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
   MOZ_ASSERT(effects == EffectSet::GetEffectSet(aElement, aPseudoType),
              "EffectSet should not change while composing style");
 }
+#endif
 
 /* static */ nsCSSPropertyIDSet
 EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
@@ -769,6 +778,7 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
 
   Element* elementToRestyle = GetElementToRestyle(aElement, aPseudoType);
   if (aBackendType == StyleBackendType::Gecko && !aStyleContext) {
+#ifdef MOZ_OLD_STYLE
     if (elementToRestyle) {
       nsIFrame* frame = elementToRestyle->GetPrimaryFrame();
       if (frame) {
@@ -779,6 +789,9 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
     if (!aStyleContext) {
       return result;
     }
+#else
+    MOZ_CRASH("old style system disabled");
+#endif
   } else if (aBackendType == StyleBackendType::Servo && !elementToRestyle) {
     return result;
   }
@@ -814,9 +827,13 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
                                                &result);
       break;
     case StyleBackendType::Gecko:
+#ifdef MOZ_OLD_STYLE
       nsRuleNode::ComputePropertiesOverridingAnimation(propertiesToTrack,
                                                        aStyleContext->AsGecko(),
                                                        result);
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
       break;
 
     default:
@@ -980,7 +997,7 @@ EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mPresContext->RestyleManager()->IsServo());
-  MOZ_ASSERT(!aRoot || nsComputedDOMStyle::GetPresShellForContent(aRoot),
+  MOZ_ASSERT(!aRoot || nsContentUtils::GetPresShellForContent(aRoot),
              "Traversal root, if provided, should be bound to a display "
              "document");
 
@@ -1027,7 +1044,7 @@ EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
     // We will drop them from mElementsToRestyle at the end of the next full
     // document restyle (at the end of this function) but for consistency with
     // how we treat such elements in RequestRestyle, we just ignore them here.
-    if (!nsComputedDOMStyle::GetPresShellForContent(target.mElement)) {
+    if (!nsContentUtils::GetPresShellForContent(target.mElement)) {
       return returnTarget;
     }
 
@@ -1133,7 +1150,7 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
   // If |aElement|'s document does not have a pres shell, e.g. it is document
   // without a browsing context such as we might get from an XMLHttpRequest, we
   // should not run animations on it.
-  if (!nsComputedDOMStyle::GetPresShellForContent(aElement)) {
+  if (!nsContentUtils::GetPresShellForContent(aElement)) {
     return false;
   }
 
@@ -1192,6 +1209,7 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
   return found;
 }
 
+#ifdef MOZ_OLD_STYLE
 // ---------------------------------------------------------
 //
 // Nested class: AnimationStyleRuleProcessor
@@ -1306,6 +1324,7 @@ EffectCompositor::UpdateEffectProperties(
   GeckoStyleContext* aStyleContext,
   Element* aElement,
   CSSPseudoElementType aPseudoType);
+#endif
 
 template
 void

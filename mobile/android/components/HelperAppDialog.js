@@ -17,7 +17,7 @@ const OMA_DRM_RIGHTS_MIME = "application/vnd.oma.drm.rights+wbxml";
 const PREF_BD_USEDOWNLOADDIR = "browser.download.useDownloadDir";
 const URI_GENERIC_ICON_DOWNLOAD = "drawable://alert_download";
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   Downloads: "resource://gre/modules/Downloads.jsm",
@@ -128,7 +128,7 @@ HelperAppLauncherDialog.prototype = {
       OMA_DRM_MESSAGE_MIME,
       OMA_DRM_CONTENT_MIME,
       OMA_DRM_RIGHTS_MIME
-    ].indexOf(mimeType) != -1;
+    ].includes(mimeType);
   },
 
   show: function hald_show(aLauncher, aContext, aReason) {
@@ -143,9 +143,9 @@ HelperAppLauncherDialog.prototype = {
           let hasPermission = yield RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE);
           if (hasPermission) {
             this._downloadWithAndroidDownloadManager(aLauncher);
-            aLauncher.cancel(Cr.NS_BINDING_ABORTED);
           }
         } finally {
+          aLauncher.cancel(Cr.NS_BINDING_ABORTED);
         }
       }.bind(this)).catch(Cu.reportError);
       return;
@@ -226,6 +226,7 @@ HelperAppLauncherDialog.prototype = {
       doubleTapButton: newButtonOrder ? 1 : 0
     }, (data) => {
       if (data.button < 0) {
+        aLauncher.cancel(Cr.NS_BINDING_ABORTED);
         return;
       }
 

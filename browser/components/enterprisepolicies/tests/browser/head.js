@@ -4,8 +4,23 @@
 
 "use strict";
 
-async function setupPolicyEngineWithJson(jsonName, customSchema) {
-  let filePath = getTestFilePath(jsonName ? jsonName : "non-existing-file.json");
+ChromeUtils.defineModuleGetter(this, "FileTestUtils",
+                               "resource://testing-common/FileTestUtils.jsm");
+
+async function setupPolicyEngineWithJson(json, customSchema) {
+  let filePath;
+  if (typeof(json) == "object") {
+    filePath = FileTestUtils.getTempFile("policies.json").path;
+
+    // This file gets automatically deleted by FileTestUtils
+    // at the end of the test run.
+    await OS.File.writeAtomic(filePath, JSON.stringify(json), {
+      encoding: "utf-8",
+    });
+  } else {
+    filePath = getTestFilePath(json ? json : "non-existing-file.json");
+  }
+
   Services.prefs.setStringPref("browser.policies.alternatePath", filePath);
 
   let resolve = null;
@@ -20,7 +35,7 @@ async function setupPolicyEngineWithJson(jsonName, customSchema) {
   Cu.unload("resource:///modules/policies/schema.jsm");
 
   if (customSchema) {
-    let schemaModule = Cu.import("resource:///modules/policies/schema.jsm", {});
+    let schemaModule = ChromeUtils.import("resource:///modules/policies/schema.jsm", {});
     schemaModule.schema = customSchema;
   }
 

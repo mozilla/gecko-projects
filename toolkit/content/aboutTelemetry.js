@@ -8,19 +8,19 @@ var Ci = Components.interfaces;
 var Cc = Components.classes;
 var Cu = Components.utils;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/TelemetryTimestamps.jsm");
-Cu.import("resource://gre/modules/TelemetryController.jsm");
-Cu.import("resource://gre/modules/TelemetryArchive.jsm");
-Cu.import("resource://gre/modules/TelemetryUtils.jsm");
-Cu.import("resource://gre/modules/TelemetryLog.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryLog.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+                               "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(this, "Preferences",
+                               "resource://gre/modules/Preferences.jsm");
 
 const Telemetry = Services.telemetry;
 const bundle = Services.strings.createBundle(
@@ -99,7 +99,7 @@ function explodeObject(obj) {
 function filterObject(obj, filterOut) {
   let ret = {};
   for (let k of Object.keys(obj)) {
-    if (filterOut.indexOf(k) == -1) {
+    if (!filterOut.includes(k)) {
       ret[k] = obj[k];
     }
   }
@@ -190,7 +190,7 @@ var Settings = {
     for (let el of elements) {
       el.addEventListener("click", function() {
         if (AppConstants.platform == "android") {
-          Cu.import("resource://gre/modules/Messaging.jsm");
+          ChromeUtils.import("resource://gre/modules/Messaging.jsm");
           EventDispatcher.instance.sendRequest({
             type: "Settings:Show",
             resource: "preferences_privacy",
@@ -1288,7 +1288,7 @@ var Search = {
   // Pass if: all non-empty array items match (case-sensitive)
   isPassText(subject, filter) {
     for (let item of filter) {
-      if (item.length && subject.indexOf(item) < 0) {
+      if (item.length && !subject.includes(item)) {
         return false; // mismatch and not a spurious space
       }
     }
@@ -2219,10 +2219,10 @@ var HistogramSection = {
     }
 
     let hasData = Array.from(hgramsSelect.options).some((option) => {
-      if (option == "parent") {
+      let value = option.getAttribute("value");
+      if (value == "parent") {
         return Object.keys(aPayload.histograms).length > 0;
       }
-      let value = option.getAttribute("value");
       let histos = aPayload.processes[value].histograms;
       return histos && Object.keys(histos).length > 0;
     });
@@ -2253,10 +2253,10 @@ var KeyedHistogramSection = {
     }
 
     let hasData = Array.from(keyedHgramsSelect.options).some((option) => {
-      if (option == "parent") {
+      let value = option.getAttribute("value");
+      if (value == "parent") {
         return Object.keys(aPayload.keyedHistograms).length > 0;
       }
-      let value = option.getAttribute("value");
       let keyedHistos = aPayload.processes[value].keyedHistograms;
       return keyedHistos && Object.keys(keyedHistos).length > 0;
     });

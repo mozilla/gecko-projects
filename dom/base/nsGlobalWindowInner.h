@@ -351,6 +351,15 @@ public:
   mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
   mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const override;
 
+  virtual RefPtr<mozilla::dom::ServiceWorker>
+  GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor) override;
+
+  virtual void
+  AddServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker) override;
+
+  virtual void
+  RemoveServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker) override;
+
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
   virtual nsresult FireDelayedDOMEvents() override;
@@ -389,6 +398,8 @@ public:
   already_AddRefed<nsPIDOMWindowOuter> IndexedGetter(uint32_t aIndex);
 
   static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
+
+  static bool OfflineCacheAllowedForContext(JSContext* /* unused */, JSObject* aObj);
 
   static bool IsRequestIdleCallbackEnabled(JSContext* aCx, JSObject* /* unused */);
 
@@ -488,9 +499,6 @@ public:
   virtual void EnableOrientationChangeListener() override;
   virtual void DisableOrientationChangeListener() override;
 #endif
-
-  virtual void EnableTimeChangeNotifications() override;
-  virtual void DisableTimeChangeNotifications() override;
 
   bool IsClosedOrClosing() {
     return mCleanedUp;
@@ -1444,6 +1452,10 @@ protected:
   RefPtr<mozilla::dom::IntlUtils> mIntlUtils;
 
   mozilla::UniquePtr<mozilla::dom::ClientSource> mClientSource;
+
+  // Weak references added by AddServiceWorker() and cleared by
+  // RemoveServiceWorker() when the ServiceWorker is destroyed.
+  nsTArray<mozilla::dom::ServiceWorker*> mServiceWorkerList;
 
   nsTArray<RefPtr<mozilla::dom::Promise>> mPendingPromises;
 

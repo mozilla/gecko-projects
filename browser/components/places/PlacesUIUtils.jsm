@@ -7,9 +7,9 @@ this.EXPORTED_SYMBOLS = ["PlacesUIUtils"];
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
@@ -255,14 +255,6 @@ this.PlacesUIUtils = {
 
   getString: function PUIU_getString(key) {
     return bundle.GetStringFromName(key);
-  },
-
-  get _copyableAnnotations() {
-    return [
-      this.DESCRIPTION_ANNO,
-      this.LOAD_IN_SIDEBAR_ANNO,
-      PlacesUtils.READ_ONLY_ANNO,
-    ];
   },
 
   /**
@@ -1211,19 +1203,6 @@ this.PlacesUIUtils = {
         return parent;
       }
     });
-  },
-
-  /**
-   * Shortcut for calling promiseNodeLikeFromFetchInfo on the result of
-   * Bookmarks.fetch for the given guid/info object.
-   *
-   * @see promiseNodeLikeFromFetchInfo above and Bookmarks.fetch in Bookmarks.jsm.
-   */
-  async fetchNodeLike(aGuidOrInfo) {
-    let info = await PlacesUtils.bookmarks.fetch(aGuidOrInfo);
-    if (!info)
-      return null;
-    return this.promiseNodeLikeFromFetchInfo(info);
   },
 
   /**

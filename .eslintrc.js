@@ -28,9 +28,6 @@ module.exports = {
     // XXX Bug 1421969. These files/directories are still being fixed,
     // so turn off mozilla/use-services for them for now.
     "files": [
-      // Browser: Bug 1421379
-      "browser/extensions/shield-recipe-client/test/browser/head.js",
-      "browser/modules/offlineAppCache.jsm",
       "devtools/**",
       "extensions/pref/**",
       "mobile/android/**",
@@ -38,6 +35,24 @@ module.exports = {
     ],
     "rules": {
       "mozilla/use-services": "off",
+    }
+  }, {
+    // XXX Bug 1434446. These directories have jsm files still being fixed, so
+    // turn off global no-unused-vars checking for them.
+    "files": [
+      "accessible/**/*.jsm",
+      "browser/components/**/*.jsm",
+      "browser/extensions/**/*.jsm",
+      "services/sync/**/*.jsm",
+      "toolkit/**/*.jsm",
+    ],
+    "rules": {
+      "mozilla/mark-exported-symbols-as-used": "error",
+      "no-unused-vars": ["error", {
+        "args": "none",
+        "vars": "local",
+        "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+      }]
     }
   }]
 };

@@ -377,7 +377,7 @@ ObjectActor.prototype = {
         // avoid providing safeGetterValues from prototypes if property |name|
         // is already defined as an own property.
         if (name in safeGetterValues ||
-            (obj != this.obj && ownProperties.indexOf(name) !== -1)) {
+            (obj != this.obj && ownProperties.includes(name))) {
           continue;
         }
 
@@ -1853,11 +1853,15 @@ DebuggerServer.ObjectActorPreviewers.Object = [
         }
       }
     } else if (rawObj instanceof Ci.nsIDOMElement) {
-      // Add preview for DOM element attributes.
-      if (rawObj instanceof Ci.nsIDOMHTMLElement) {
+      // For HTML elements (in an HTML document, at least), the nodeName is an
+      // uppercased version of the actual element name.  Check for HTML
+      // elements, that is elements in the HTML namespace, and lowercase the
+      // nodeName in that case.
+      if (rawObj.namespaceURI == "http://www.w3.org/1999/xhtml") {
         preview.nodeName = preview.nodeName.toLowerCase();
       }
 
+      // Add preview for DOM element attributes.
       preview.attributes = {};
       preview.attributesLength = rawObj.attributes.length;
       for (let attr of rawObj.attributes) {

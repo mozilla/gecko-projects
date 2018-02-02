@@ -34,6 +34,7 @@
 #include "mozilla/EditorUtils.h"        // for AutoRules, etc.
 #include "mozilla/EditTransactionBase.h" // for EditTransactionBase
 #include "mozilla/FlushType.h"          // for FlushType::Frames
+#include "mozilla/IMEContentObserver.h" // for IMEContentObserver
 #include "mozilla/IMEStateManager.h"    // for IMEStateManager
 #include "mozilla/mozalloc.h"           // for operator new, etc.
 #include "mozilla/mozInlineSpellChecker.h" // for mozInlineSpellChecker
@@ -43,6 +44,7 @@
 #include "mozilla/dom/Selection.h"      // for Selection, etc.
 #include "mozilla/Services.h"           // for GetObserverService
 #include "mozilla/TextComposition.h"    // for TextComposition
+#include "mozilla/TextInputListener.h"  // for TextInputListener
 #include "mozilla/TextServicesDocument.h" // for TextServicesDocument
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"        // for Element, nsINode::AsElement
@@ -62,6 +64,7 @@
 #include "nsError.h"                    // for NS_OK, etc.
 #include "nsFocusManager.h"             // for nsFocusManager
 #include "nsFrameSelection.h"           // for nsFrameSelection
+#include "nsGenericHTMLElement.h"       // for nsGenericHTMLElement
 #include "nsGkAtoms.h"                  // for nsGkAtoms, nsGkAtoms::dir
 #include "nsIAbsorbingTransaction.h"    // for nsIAbsorbingTransaction
 #include "nsAtom.h"                    // for nsAtom
@@ -72,7 +75,6 @@
 #include "nsIDOMEvent.h"                // for nsIDOMEvent
 #include "nsIDOMEventListener.h"        // for nsIDOMEventListener
 #include "nsIDOMEventTarget.h"          // for nsIDOMEventTarget
-#include "nsIDOMHTMLElement.h"          // for nsIDOMHTMLElement
 #include "nsIDOMMouseEvent.h"           // for nsIDOMMouseEvent
 #include "nsIDOMNode.h"                 // for nsIDOMNode, etc.
 #include "nsIDOMNodeList.h"             // for nsIDOMNodeList
@@ -112,10 +114,6 @@
 
 class nsIOutputStream;
 class nsITransferable;
-
-#ifdef DEBUG
-#include "nsIDOMHTMLDocument.h"         // for nsIDOMHTMLDocument
-#endif
 
 namespace mozilla {
 
@@ -167,8 +165,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(EditorBase)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootElement)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionController)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK(mIMEContentObserver)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mInlineSpellChecker)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTextServicesDocument)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK(mTextInputListener)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTxnMgr)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mActionListeners)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEditorObservers)
@@ -190,8 +190,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(EditorBase)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRootElement)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionController)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIMEContentObserver)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInlineSpellChecker)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTextServicesDocument)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTextInputListener)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTxnMgr)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mActionListeners)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEditorObservers)
@@ -204,6 +206,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(EditorBase)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(EditorBase)
+ NS_INTERFACE_MAP_ENTRY(nsISelectionListener)
  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
  NS_INTERFACE_MAP_ENTRY(nsIEditor)
  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIEditor)
@@ -277,6 +280,11 @@ EditorBase::Init(nsIDOMDocument* aDOMDocument,
 
   MOZ_ASSERT(IsInitialized());
 
+  Selection* selection = GetSelection();
+  if (selection) {
+    selection->AddSelectionListener(this);
+  }
+
   // Make sure that the editor will be destroyed properly
   mDidPreDestroy = false;
   // Make sure that the ediotr will be created properly
@@ -341,6 +349,22 @@ EditorBase::PostCreate()
   IMEStateManager::OnEditorInitialized(*this);
 
   return NS_OK;
+}
+
+void
+EditorBase::SetTextInputListener(TextInputListener* aTextInputListener)
+{
+  MOZ_ASSERT(!mTextInputListener || !aTextInputListener ||
+             mTextInputListener == aTextInputListener);
+  mTextInputListener = aTextInputListener;
+}
+
+void
+EditorBase::SetIMEContentObserver(IMEContentObserver* aIMEContentObserver)
+{
+  MOZ_ASSERT(!mIMEContentObserver || !aIMEContentObserver ||
+             mIMEContentObserver == aIMEContentObserver);
+  mIMEContentObserver = aIMEContentObserver;
 }
 
 void
@@ -423,7 +447,7 @@ EditorBase::GetDesiredSpellCheckState()
     return false;
   }
 
-  nsCOMPtr<nsIDOMHTMLElement> element = do_QueryInterface(content);
+  auto element = nsGenericHTMLElement::FromContent(content);
   if (!element) {
     return false;
   }
@@ -436,10 +460,7 @@ EditorBase::GetDesiredSpellCheckState()
     return doc && doc->IsEditingOn();
   }
 
-  bool enable;
-  element->GetSpellcheck(&enable);
-
-  return enable;
+  return element->Spellcheck();
 }
 
 NS_IMETHODIMP
@@ -447,6 +468,11 @@ EditorBase::PreDestroy(bool aDestroyingFrames)
 {
   if (mDidPreDestroy)
     return NS_OK;
+
+  Selection* selection = GetSelection();
+  if (selection) {
+    selection->RemoveSelectionListener(this);
+  }
 
   IMEStateManager::OnEditorDestroying(*this);
 
@@ -471,6 +497,7 @@ EditorBase::PreDestroy(bool aDestroyingFrames)
   mDocStateListeners.Clear();
   mInlineSpellChecker = nullptr;
   mTextServicesDocument = nullptr;
+  mTextInputListener = nullptr;
   mSpellcheckCheckboxState = eTriUnset;
   mRootElement = nullptr;
 
@@ -1111,7 +1138,7 @@ EditorBase::BeginningOfDocument()
     return selection->Collapse(rootElement, 0);
   }
 
-  if (firstNode->NodeType() == nsIDOMNode::TEXT_NODE) {
+  if (firstNode->NodeType() == nsINode::TEXT_NODE) {
     // If firstNode is text, set selection to beginning of the text node.
     return selection->Collapse(firstNode, 0);
   }
@@ -1293,14 +1320,14 @@ EditorBase::GetAttributeValue(nsIDOMElement* aElement,
   if (!aElement) {
     return NS_OK;
   }
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
   nsAutoString value;
-  nsresult rv = aElement->GetAttribute(aAttribute, value);
-  NS_ENSURE_SUCCESS(rv, rv);
+  element->GetAttribute(aAttribute, value);
   if (!DOMStringIsNull(value)) {
     *aResultIsSet = true;
     aResultValue = value;
   }
-  return rv;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2073,6 +2100,8 @@ EditorBase::AddEditorObserver(nsIEditorObserver* aObserver)
   // Make sure the listener isn't already on the list
   if (!mEditorObservers.Contains(aObserver)) {
     mEditorObservers.AppendElement(*aObserver);
+    NS_WARNING_ASSERTION(mEditorObservers.Length() != 1,
+      "nsIEditorObserver installed, this editor becomes slower");
   }
 
   return NS_OK;
@@ -2083,7 +2112,36 @@ EditorBase::RemoveEditorObserver(nsIEditorObserver* aObserver)
 {
   NS_ENSURE_TRUE(aObserver, NS_ERROR_FAILURE);
 
+  NS_WARNING_ASSERTION(mEditorObservers.Length() != 1,
+    "All nsIEditorObservers have been removed, this editor becomes faster");
   mEditorObservers.RemoveElement(aObserver);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+EditorBase::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
+                                   nsISelection* aSelection,
+                                   int16_t aReason)
+{
+  if (NS_WARN_IF(!aDOMDocument) || NS_WARN_IF(!aSelection)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  RefPtr<Selection> selection = aSelection->AsSelection();
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (mTextInputListener) {
+    RefPtr<TextInputListener> textInputListener = mTextInputListener;
+    textInputListener->OnSelectionChange(*selection, aReason);
+  }
+
+  if (mIMEContentObserver) {
+    RefPtr<IMEContentObserver> observer = mIMEContentObserver;
+    observer->OnSelectionChange(*selection);
+  }
 
   return NS_OK;
 }
@@ -2141,13 +2199,26 @@ private:
 void
 EditorBase::NotifyEditorObservers(NotificationForEditorObservers aNotification)
 {
-  // Copy the observers since EditAction()s can modify mEditorObservers.
-  AutoEditorObserverArray observers(mEditorObservers);
   switch (aNotification) {
     case eNotifyEditorObserversOfEnd:
       mIsInEditAction = false;
-      for (auto& observer : observers) {
-        observer->EditAction();
+
+      if (mTextInputListener) {
+        RefPtr<TextInputListener> listener = mTextInputListener;
+        listener->OnEditActionHandled();
+      }
+
+      if (mIMEContentObserver) {
+        RefPtr<IMEContentObserver> observer = mIMEContentObserver;
+        observer->OnEditActionHandled();
+      }
+
+      if (!mEditorObservers.IsEmpty()) {
+        // Copy the observers since EditAction()s can modify mEditorObservers.
+        AutoEditorObserverArray observers(mEditorObservers);
+        for (auto& observer : observers) {
+          observer->EditAction();
+        }
       }
 
       if (!mDispatchInputEvent) {
@@ -2160,14 +2231,19 @@ EditorBase::NotifyEditorObservers(NotificationForEditorObservers aNotification)
       if (NS_WARN_IF(mIsInEditAction)) {
         break;
       }
+
       mIsInEditAction = true;
-      for (auto& observer : observers) {
+
+      if (mIMEContentObserver) {
+        RefPtr<IMEContentObserver> observer = mIMEContentObserver;
         observer->BeforeEditAction();
       }
       break;
     case eNotifyEditorObserversOfCancel:
       mIsInEditAction = false;
-      for (auto& observer : observers) {
+
+      if (mIMEContentObserver) {
+        RefPtr<IMEContentObserver> observer = mIMEContentObserver;
         observer->CancelEditAction();
       }
       break;
@@ -2307,15 +2383,9 @@ EditorBase::DebugDumpContent()
   if (NS_WARN_IF(!document)) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  nsCOMPtr<nsIDOMHTMLDocument> domHTMLDocument = do_QueryInterface(document);
-  if (NS_WARN_IF(!domHTMLDocument)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  nsCOMPtr<nsIDOMHTMLElement> bodyElement;
-  domHTMLDocument->GetBody(getter_AddRefs(bodyElement));
-  nsCOMPtr<nsIContent> content = do_QueryInterface(bodyElement);
-  if (content) {
-    content->List();
+  Element* body = document->GetBody();
+  if (body) {
+    body->List();
   }
 #endif
   return NS_OK;
@@ -3477,9 +3547,9 @@ EditorBase::GetNodeLocation(nsIDOMNode* aChild,
   NS_ENSURE_TRUE(aChild && outOffset, nullptr);
   *outOffset = -1;
 
-  nsCOMPtr<nsIDOMNode> parent;
+  nsCOMPtr<nsINode> child = do_QueryInterface(aChild);
+  nsCOMPtr<nsIDOMNode> parent = do_QueryInterface(child->GetParentNode());
 
-  MOZ_ALWAYS_SUCCEEDS(aChild->GetParentNode(getter_AddRefs(parent)));
   if (parent) {
     *outOffset = GetChildOffset(aChild, parent);
   }
@@ -3769,8 +3839,8 @@ EditorBase::CanContain(nsINode& aParent,
                        nsIContent& aChild) const
 {
   switch (aParent.NodeType()) {
-    case nsIDOMNode::ELEMENT_NODE:
-    case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+    case nsINode::ELEMENT_NODE:
+    case nsINode::DOCUMENT_FRAGMENT_NODE:
       return TagCanContain(*aParent.NodeInfo()->NameAtom(), aChild);
   }
   return false;
@@ -3781,8 +3851,8 @@ EditorBase::CanContainTag(nsINode& aParent,
                           nsAtom& aChildTag) const
 {
   switch (aParent.NodeType()) {
-    case nsIDOMNode::ELEMENT_NODE:
-    case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+    case nsINode::ELEMENT_NODE:
+    case nsINode::DOCUMENT_FRAGMENT_NODE:
       return TagCanContainTag(*aParent.NodeInfo()->NameAtom(), aChildTag);
   }
   return false;
@@ -3793,9 +3863,9 @@ EditorBase::TagCanContain(nsAtom& aParentTag,
                           nsIContent& aChild) const
 {
   switch (aChild.NodeType()) {
-    case nsIDOMNode::TEXT_NODE:
-    case nsIDOMNode::ELEMENT_NODE:
-    case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+    case nsINode::TEXT_NODE:
+    case nsINode::ELEMENT_NODE:
+    case nsINode::DOCUMENT_FRAGMENT_NODE:
       return TagCanContainTag(aParentTag, *aChild.NodeInfo()->NameAtom());
   }
   return false;
@@ -3976,9 +4046,8 @@ EditorBase::IsTextNode(nsIDOMNode* aNode)
     return false;
   }
 
-  uint16_t nodeType;
-  aNode->GetNodeType(&nodeType);
-  return (nodeType == nsIDOMNode::TEXT_NODE);
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  return IsTextNode(node);
 }
 
 // static
@@ -4233,11 +4302,11 @@ EditorBase::SplitNodeDeep(nsIContent& aMostAncestorToSplit,
          !atStartOfRightNode.GetContainerAsText()) ||
         (!atStartOfRightNode.IsStartOfContainer() &&
          !atStartOfRightNode.IsEndOfContainer())) {
-      IgnoredErrorResult error;
+      ErrorResult error;
       nsCOMPtr<nsIContent> newLeftNode =
         SplitNode(atStartOfRightNode.AsRaw(), error);
       if (NS_WARN_IF(error.Failed())) {
-        return SplitNodeResult(NS_ERROR_FAILURE);
+        return SplitNodeResult(error.StealNSResult());
       }
 
       if (currentRightNode == &aMostAncestorToSplit) {
@@ -4901,16 +4970,15 @@ EditorBase::AppendNodeToSelectionAsRange(nsIDOMNode* aNode)
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDOMNode> parentNode;
-  nsresult rv = aNode->GetParentNode(getter_AddRefs(parentNode));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  nsCOMPtr<nsIDOMNode> parentNode = do_QueryInterface(node->GetParentNode());
   NS_ENSURE_TRUE(parentNode, NS_ERROR_NULL_POINTER);
 
   int32_t offset = GetChildOffset(aNode, parentNode);
 
   RefPtr<nsRange> range;
-  rv = CreateRange(parentNode, offset, parentNode, offset + 1,
-                   getter_AddRefs(range));
+  nsresult rv = CreateRange(parentNode, offset, parentNode, offset + 1,
+                            getter_AddRefs(range));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(range, NS_ERROR_NULL_POINTER);
 
@@ -5082,7 +5150,7 @@ EditorBase::InitializeSelection(nsIDOMEventTarget* aFocusEventTarget)
   }
 
   bool isTargetDoc =
-    targetNode->NodeType() == nsIDOMNode::DOCUMENT_NODE &&
+    targetNode->NodeType() == nsINode::DOCUMENT_NODE &&
     targetNode->HasFlag(NODE_IS_EDITABLE);
 
   RefPtr<Selection> selection = GetSelection();
@@ -5345,50 +5413,6 @@ EditorBase::SwitchTextDirectionTo(uint32_t aDirection)
     FireInputEvent();
   }
 }
-
-#if DEBUG_JOE
-void
-EditorBase::DumpNode(nsIDOMNode* aNode,
-                     int32_t indent)
-{
-  for (int32_t i = 0; i < indent; i++) {
-    printf("  ");
-  }
-
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aNode);
-  nsCOMPtr<nsIDOMDocumentFragment> docfrag = do_QueryInterface(aNode);
-
-  if (element || docfrag) {
-    if (element) {
-      nsAutoString tag;
-      element->GetTagName(tag);
-      printf("<%s>\n", NS_LossyConvertUTF16toASCII(tag).get());
-    } else {
-      printf("<document fragment>\n");
-    }
-    nsCOMPtr<nsIDOMNodeList> childList;
-    aNode->GetChildNodes(getter_AddRefs(childList));
-    NS_ENSURE_TRUE(childList, NS_ERROR_NULL_POINTER);
-    uint32_t numChildren;
-    childList->GetLength(&numChildren);
-    nsCOMPtr<nsIDOMNode> child, tmp;
-    aNode->GetFirstChild(getter_AddRefs(child));
-    for (uint32_t i = 0; i < numChildren; i++) {
-      DumpNode(child, indent + 1);
-      child->GetNextSibling(getter_AddRefs(tmp));
-      child = tmp;
-    }
-  } else if (IsTextNode(aNode)) {
-    nsCOMPtr<nsIDOMCharacterData> textNode = do_QueryInterface(aNode);
-    nsAutoString str;
-    textNode->GetData(str);
-    nsAutoCString cstr;
-    LossyCopyUTF16toASCII(str, cstr);
-    cstr.ReplaceChar('\n', ' ');
-    printf("<textnode> %s\n", cstr.get());
-  }
-}
-#endif
 
 bool
 EditorBase::IsModifiableNode(nsIDOMNode* aNode)

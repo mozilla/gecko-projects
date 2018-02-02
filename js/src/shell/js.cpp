@@ -271,6 +271,7 @@ NewOffThreadJob(JSContext* cx, ScriptKind kind, OffThreadJob::Source&& source)
         return nullptr;
 
     if (!sc->offThreadJobs.append(job.get())) {
+        job->cancel();
         JS_ReportErrorASCII(cx, "OOM adding off-thread job");
         return nullptr;
     }
@@ -370,13 +371,28 @@ DeleteOffThreadJob(JSContext* cx, OffThreadJob* job)
 }
 
 static void
-CancelAllOffThreadJobs(JSContext* cx)
+CancelOffThreadJobsForContext(JSContext* cx)
 {
     // Parse jobs may be blocked waiting on GC.
     gc::FinishGC(cx);
 
-    CancelOffThreadParses(cx->runtime());
+    // Wait for jobs belonging to this context.
+    ShellContext* sc = GetShellContext(cx);
+    while (!sc->offThreadJobs.empty()) {
+        OffThreadJob* job = sc->offThreadJobs.popCopy();
+        job->waitUntilDone(cx);
+        js_delete(job);
+    }
+}
 
+static void
+CancelOffThreadJobsForRuntime(JSContext* cx)
+{
+    // Parse jobs may be blocked waiting on GC.
+    gc::FinishGC(cx);
+
+    // Cancel jobs belonging to this runtime.
+    CancelOffThreadParses(cx->runtime());
     ShellContext* sc = GetShellContext(cx);
     while (!sc->offThreadJobs.empty())
         js_delete(sc->offThreadJobs.popCopy());
@@ -3680,7 +3696,7 @@ WorkerMain(void* arg)
         return;
 
     auto guard = mozilla::MakeScopeExit([&] {
-        CancelAllOffThreadJobs(cx);
+        CancelOffThreadJobsForContext(cx);
         JS_DestroyContext(cx);
         js_delete(sc);
         if (input->siblingContext) {
@@ -5926,6 +5942,23 @@ BufferStreamMain(BufferStreamJob* job)
 }
 
 static bool
+EnsureLatin1CharsLinearString(JSContext* cx, HandleValue value, JS::MutableHandle<JSLinearString*> result)
+{
+    if (!value.isString()) {
+        result.set(nullptr);
+        return true;
+    }
+    RootedString str(cx, value.toString());
+    if (!str->isLinear() || !str->hasLatin1Chars()) {
+        JS_ReportErrorASCII(cx, "only latin1 chars and linear strings are expected");
+        return false;
+    }
+    result.set(&str->asLinear());
+    MOZ_ASSERT(result->hasLatin1Chars());
+    return true;
+}
+
+static bool
 ConsumeBufferSource(JSContext* cx, JS::HandleObject obj, JS::MimeType, JS::StreamConsumer* consumer)
 {
     SharedMem<uint8_t*> dataPointer;
@@ -5933,6 +5966,30 @@ ConsumeBufferSource(JSContext* cx, JS::HandleObject obj, JS::MimeType, JS::Strea
     if (!IsBufferSource(obj, &dataPointer, &byteLength)) {
         JS_ReportErrorASCII(cx, "shell streaming consumes a buffer source (buffer or view)");
         return false;
+    }
+
+    {
+        RootedValue url(cx);
+        if (!JS_GetProperty(cx, obj, "url", &url))
+            return false;
+        RootedLinearString urlStr(cx);
+        if (!EnsureLatin1CharsLinearString(cx, url, &urlStr))
+            return false;
+
+        RootedValue mapUrl(cx);
+        if (!JS_GetProperty(cx, obj, "sourceMappingURL", &mapUrl))
+            return false;
+        RootedLinearString mapUrlStr(cx);
+        if (!EnsureLatin1CharsLinearString(cx, mapUrl, &mapUrlStr))
+            return false;
+
+        JS::AutoCheckCannotGC nogc;
+        consumer->noteResponseURLs(urlStr
+                                   ? reinterpret_cast<const char*>(urlStr->latin1Chars(nogc))
+                                   : nullptr,
+                                   mapUrlStr
+                                   ? reinterpret_cast<const char*>(mapUrlStr->latin1Chars(nogc))
+                                   : nullptr);
     }
 
     auto job = cx->make_unique<BufferStreamJob>(consumer);
@@ -8904,9 +8961,7 @@ main(int argc, char** argv, char** envp)
 
     int result;
 
-#ifdef HAVE_SETLOCALE
     setlocale(LC_ALL, "");
-#endif
 
     // Special-case stdout and stderr. We bump their refcounts to prevent them
     // from getting closed and then having some printf fail somewhere.
@@ -9267,7 +9322,7 @@ main(int argc, char** argv, char** envp)
 
     DestructSharedArrayBufferMailbox();
 
-    CancelAllOffThreadJobs(cx);
+    CancelOffThreadJobsForRuntime(cx);
 
     JS_DestroyContext(cx);
     return result;

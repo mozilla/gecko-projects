@@ -1449,6 +1449,8 @@ OutlineTypedObject::createUnattachedWithClass(JSContext* cx,
     MOZ_ASSERT(clasp == &OutlineTransparentTypedObject::class_ ||
                clasp == &OutlineOpaqueTypedObject::class_);
 
+    AutoSetNewObjectMetadata metadata(cx);
+
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, clasp,
                                                              TaggedProto(&descr->typedProto()),
                                                              descr));
@@ -1604,7 +1606,7 @@ OutlineTypedObject::obj_trace(JSTracer* trc, JSObject* object)
 {
     OutlineTypedObject& typedObj = object->as<OutlineTypedObject>();
 
-    TraceEdge(trc, &typedObj.shape_, "OutlineTypedObject_shape");
+    TraceEdge(trc, typedObj.shapePtr(), "OutlineTypedObject_shape");
 
     if (!typedObj.owner_)
         return;
@@ -2116,7 +2118,7 @@ InlineTypedObject::obj_trace(JSTracer* trc, JSObject* object)
 {
     InlineTypedObject& typedObj = object->as<InlineTypedObject>();
 
-    TraceEdge(trc, &typedObj.shape_, "InlineTypedObject_shape");
+    TraceEdge(trc, typedObj.shapePtr(), "InlineTypedObject_shape");
 
     // Inline transparent objects do not have references and do not need more
     // tracing. If there is an entry in the compartment's LazyArrayBufferTable,
@@ -2225,7 +2227,7 @@ const ObjectOps TypedObject::objectOps_ = {
     nullptr, /* thisValue */
 };
 
-#define DEFINE_TYPEDOBJ_CLASS(Name, Trace, Moved, flag)   \
+#define DEFINE_TYPEDOBJ_CLASS(Name, Trace, Moved)        \
     static const ClassOps Name##ClassOps = {             \
         nullptr,        /* addProperty */                \
         nullptr,        /* delProperty */                \
@@ -2245,7 +2247,8 @@ const ObjectOps TypedObject::objectOps_ = {
     };                                                   \
     const Class Name::class_ = {                         \
         # Name,                                          \
-        Class::NON_NATIVE | flag,                        \
+        Class::NON_NATIVE |                              \
+            JSCLASS_DELAY_METADATA_BUILDER,              \
         &Name##ClassOps,                                 \
         JS_NULL_CLASS_SPEC,                              \
         &Name##ClassExt,                                 \
@@ -2254,20 +2257,16 @@ const ObjectOps TypedObject::objectOps_ = {
 
 DEFINE_TYPEDOBJ_CLASS(OutlineTransparentTypedObject,
                       OutlineTypedObject::obj_trace,
-                      nullptr,
-                      0);
+                      nullptr);
 DEFINE_TYPEDOBJ_CLASS(OutlineOpaqueTypedObject,
                       OutlineTypedObject::obj_trace,
-                      nullptr,
-                      0);
+                      nullptr);
 DEFINE_TYPEDOBJ_CLASS(InlineTransparentTypedObject,
                       InlineTypedObject::obj_trace,
-                      InlineTypedObject::obj_moved,
-                      JSCLASS_DELAY_METADATA_BUILDER);
+                      InlineTypedObject::obj_moved);
 DEFINE_TYPEDOBJ_CLASS(InlineOpaqueTypedObject,
                       InlineTypedObject::obj_trace,
-                      InlineTypedObject::obj_moved,
-                      JSCLASS_DELAY_METADATA_BUILDER);
+                      InlineTypedObject::obj_moved);
 
 static int32_t
 LengthForType(TypeDescr& descr)
@@ -2410,15 +2409,11 @@ TypedObject::create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap h
         return cx->alreadyReportedOOM();
 
     TypedObject* tobj = static_cast<TypedObject*>(obj);
-    tobj->group_.init(group);
+    tobj->initGroup(group);
     tobj->initShape(shape);
 
-    tobj->setInitialElementsMaybeNonNative(js::emptyObjectElements);
-
-    if (clasp->shouldDelayMetadataBuilder())
-        cx->compartment()->setObjectPendingMetadata(cx, tobj);
-    else
-        tobj = SetNewObjectMetadata(cx, tobj);
+    MOZ_ASSERT(clasp->shouldDelayMetadataBuilder());
+    cx->compartment()->setObjectPendingMetadata(cx, tobj);
 
     js::gc::TraceCreateObject(tobj);
 

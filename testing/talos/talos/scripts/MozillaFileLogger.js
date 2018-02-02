@@ -34,11 +34,6 @@ function dumpLog(msg) {
 
 netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
 
-if (Cc === undefined) {
-  var Cc = Components.classes;
-  var Ci = Components.interfaces;
-}
-
 const FOSTREAM_CID = "@mozilla.org/network/file-output-stream;1";
 const LF_CID = "@mozilla.org/file/local;1";
 
@@ -89,7 +84,7 @@ MozFileLogger.getLogCallback = function() {
     if (MozFileLogger._foStream)
       MozFileLogger._foStream.write(data, data.length);
 
-    if (data.indexOf("SimpleTest FINISH") >= 0) {
+    if (data.includes("SimpleTest FINISH")) {
       MozFileLogger.close();
     }
   };

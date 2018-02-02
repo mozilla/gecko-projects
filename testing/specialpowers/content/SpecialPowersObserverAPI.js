@@ -4,7 +4,7 @@
 
 "use strict";
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionData: "resource://gre/modules/Extension.jsm",
@@ -300,7 +300,7 @@ SpecialPowersObserverAPI.prototype = {
     while (enumerator.hasMoreElements()) {
       try {
         let observer = enumerator.getNext().QueryInterface(Ci.nsIObserver);
-        if (observers.indexOf(observer) == -1) {
+        if (!observers.includes(observer)) {
           observers.push(observer);
         }
       } catch (e) { }
@@ -485,10 +485,8 @@ SpecialPowersObserverAPI.prototype = {
         // and addMessageListener in order to communicate with
         // the mochitest.
         let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-        let sandboxOptions = aMessage.json.sandboxOptions;
-        if (!sandboxOptions) {
-          sandboxOptions = {};
-        }
+        let sandboxOptions = Object.assign({wantGlobalProperties: ["ChromeUtils"]},
+                                           aMessage.json.sandboxOptions);
         let sb = Components.utils.Sandbox(systemPrincipal, sandboxOptions);
         let mm = aMessage.target.frameLoader
                          .messageManager;
@@ -545,7 +543,7 @@ SpecialPowersObserverAPI.prototype = {
       case "SPImportInMainProcess": {
         var message = { hadError: false, errorMessage: null };
         try {
-          Components.utils.import(aMessage.data);
+          ChromeUtils.import(aMessage.data);
         } catch (e) {
           message.hadError = true;
           message.errorMessage = e.toString();

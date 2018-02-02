@@ -9,16 +9,16 @@ const Cc = Components.classes;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/RemoteWebProgress.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/RemoteWebProgress.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Prefetcher",
-                                  "resource://gre/modules/Prefetcher.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "CompatWarning",
-                                  "resource://gre/modules/CompatWarning.jsm");
+ChromeUtils.defineModuleGetter(this, "NetUtil",
+                               "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "Prefetcher",
+                               "resource://gre/modules/Prefetcher.jsm");
+ChromeUtils.defineModuleGetter(this, "CompatWarning",
+                               "resource://gre/modules/CompatWarning.jsm");
 
 Cu.permitCPOWsInScope(this);
 
@@ -384,7 +384,7 @@ var ObserverInterposition = new Interposition("ObserverInterposition");
 
 ObserverInterposition.methods.addObserver =
   function(addon, target, observer, topic, ownsWeak) {
-    if (TOPIC_WHITELIST.indexOf(topic) >= 0) {
+    if (TOPIC_WHITELIST.includes(topic)) {
       CompatWarning.warn(`${topic} observer should be added from the child process only.`,
                          addon, CompatWarning.warnings.observers);
 
@@ -396,7 +396,7 @@ ObserverInterposition.methods.addObserver =
 
 ObserverInterposition.methods.removeObserver =
   function(addon, target, observer, topic) {
-    if (TOPIC_WHITELIST.indexOf(topic) >= 0) {
+    if (TOPIC_WHITELIST.includes(topic)) {
       ObserverParent.removeObserver(addon, observer, topic);
     }
 
@@ -1064,7 +1064,7 @@ var RemoteAddonsParent = {
     Services.ppmm.initialProcessData.remoteAddonsParentInitted = true;
 
     Services.ppmm.loadProcessScript("data:,new " + function() {
-      Components.utils.import("resource://gre/modules/RemoteAddonsChild.jsm");
+      ChromeUtils.import("resource://gre/modules/RemoteAddonsChild.jsm");
     }, true);
 
     this.globalToBrowser = new WeakMap();

@@ -16,13 +16,13 @@ var Ci = Components.interfaces;
 var Cc = Components.classes;
 var Cu = Components.utils;
 
-Cu.import("chrome://specialpowers/content/MockFilePicker.jsm");
-Cu.import("chrome://specialpowers/content/MockColorPicker.jsm");
-Cu.import("chrome://specialpowers/content/MockPermissionPrompt.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("chrome://specialpowers/content/MockFilePicker.jsm");
+ChromeUtils.import("chrome://specialpowers/content/MockColorPicker.jsm");
+ChromeUtils.import("chrome://specialpowers/content/MockPermissionPrompt.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 // We're loaded with "this" not set to the global in some cases, so we
 // have to play some games to get at the global object here.  Normally
@@ -100,7 +100,7 @@ function isObjectOrArray(obj) {
                       "Uint32Array", "Float32Array", "Float64Array",
                       "Uint8ClampedArray"];
   let className = Cu.getClassName(obj, true);
-  return arrayClasses.indexOf(className) != -1;
+  return arrayClasses.includes(className);
 }
 
 // In general, we want Xray wrappers for content DOM objects, because waiving
@@ -1447,7 +1447,7 @@ SpecialPowersAPI.prototype = {
   },
   get formHistory() {
     let tmp = {};
-    Cu.import("resource://gre/modules/FormHistory.jsm", tmp);
+    ChromeUtils.import("resource://gre/modules/FormHistory.jsm", tmp);
     return wrapPrivileged(tmp.FormHistory);
   },
   getFormFillController(window) {
@@ -2195,7 +2195,7 @@ SpecialPowersAPI.prototype = {
     let walker = Cc["@mozilla.org/inspector/deep-tree-walker;1"].
                  createInstance(Ci.inIDeepTreeWalker);
     walker.showAnonymousContent = showAnonymousContent;
-    walker.init(node.ownerDocument, Ci.nsIDOMNodeFilter.SHOW_ALL);
+    walker.init(node.ownerDocument, 0xFFFFFFFF /* NodeFilter.SHOW_ALL */);
     walker.currentNode = node;
     return {
       get firstChild() {

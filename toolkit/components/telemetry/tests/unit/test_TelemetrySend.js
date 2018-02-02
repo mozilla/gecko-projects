@@ -6,20 +6,20 @@
 
 "use strict";
 
-Cu.import("resource://gre/modules/TelemetryController.jsm", this);
-Cu.import("resource://testing-common/ContentTaskUtils.jsm", this);
-Cu.import("resource://testing-common/MockRegistrar.jsm", this);
-Cu.import("resource://gre/modules/TelemetrySession.jsm", this);
-Cu.import("resource://gre/modules/TelemetrySend.jsm", this);
-Cu.import("resource://gre/modules/TelemetryStorage.jsm", this);
-Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
-Cu.import("resource://gre/modules/Services.jsm", this);
-Cu.import("resource://gre/modules/osfile.jsm", this);
-Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryController.jsm", this);
+ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
+ChromeUtils.import("resource://testing-common/MockRegistrar.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetrySession.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryStorage.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/Services.jsm", this);
+ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
-Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryHealthPing",
+ChromeUtils.defineModuleGetter(this, "TelemetryHealthPing",
   "resource://gre/modules/TelemetryHealthPing.jsm");
 
 const MS_IN_A_MINUTE = 60 * 1000;
@@ -361,6 +361,22 @@ add_task(async function test_discardBigPings() {
   Assert.equal(histogramValueCount(histSendTimeSuccess.snapshot()), 2, "Should have recorded send success time.");
   Assert.greaterOrEqual(histSendTimeSuccess.snapshot().sum, 0, "Should have recorded send success time.");
   Assert.equal(histogramValueCount(histSendTimeFail.snapshot()), 0, "Should not have recorded send failure time.");
+});
+
+add_task(async function test_largeButWithinLimit() {
+  const TEST_PING_TYPE = "test-ping-type";
+
+  let histSuccess = Telemetry.getHistogramById("TELEMETRY_SUCCESS");
+  histSuccess.clear();
+
+  // Generate a 900KB string and a large payload that is still within the 1MB limit.
+  const LARGE_PAYLOAD = {"data": generateRandomString(900 * 1024)};
+
+  await TelemetryController.submitExternalPing(TEST_PING_TYPE, LARGE_PAYLOAD);
+  await TelemetrySend.testWaitOnOutgoingPings();
+  await PingServer.promiseNextPing();
+
+  Assert.deepEqual(histSuccess.snapshot().counts, [0, 1, 0], "Should have sent large ping.");
 });
 
 add_task(async function test_evictedOnServerErrors() {

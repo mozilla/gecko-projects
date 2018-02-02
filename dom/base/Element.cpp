@@ -112,14 +112,12 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
 #include "nsCSSRuleProcessor.h"
 #include "nsRuleProcessorData.h"
+#endif
 #include "nsTextNode.h"
-
-#ifdef MOZ_XUL
-#include "nsIXULDocument.h"
-#endif /* MOZ_XUL */
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsCCUncollectableMarker.h"
@@ -1252,7 +1250,7 @@ Element::AttachShadowInternal(bool aClosed, ErrorResult& aError)
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfo->NodeInfoManager()->GetNodeInfo(
     nsGkAtoms::documentFragmentNodeName, nullptr, kNameSpaceID_None,
-    nsIDOMNode::DOCUMENT_FRAGMENT_NODE);
+    DOCUMENT_FRAGMENT_NODE);
 
   RefPtr<nsXBLDocumentInfo> docInfo = new nsXBLDocumentInfo(OwnerDoc());
 
@@ -1433,7 +1431,7 @@ Element::SetAttributeNS(const nsAString& aNamespaceURI,
   aError =
     nsContentUtils::GetNodeInfoFromQName(aNamespaceURI, aQualifiedName,
                                          mNodeInfo->NodeInfoManager(),
-                                         nsIDOMNode::ATTRIBUTE_NODE,
+                                         ATTRIBUTE_NODE,
                                          getter_AddRefs(ni));
   if (aError.Failed()) {
     return;
@@ -2119,7 +2117,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   }
 }
 
-nsICSSDeclaration*
+nsDOMCSSAttributeDeclaration*
 Element::GetSMILOverrideStyle()
 {
   Element::nsExtendedDOMSlots* slots = ExtendedDOMSlots();
@@ -2245,8 +2243,7 @@ Element::GetExistingAttrNameFromQName(const nsAString& aStr) const
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   if (name->IsAtom()) {
     nodeInfo = mNodeInfo->NodeInfoManager()->
-      GetNodeInfo(name->Atom(), nullptr, kNameSpaceID_None,
-                  nsIDOMNode::ATTRIBUTE_NODE);
+      GetNodeInfo(name->Atom(), nullptr, kNameSpaceID_None, ATTRIBUTE_NODE);
   }
   else {
     nodeInfo = name->NodeInfo();
@@ -2709,7 +2706,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     RefPtr<mozilla::dom::NodeInfo> ni;
     ni = mNodeInfo->NodeInfoManager()->GetNodeInfo(aName, aPrefix,
                                                    aNamespaceID,
-                                                   nsIDOMNode::ATTRIBUTE_NODE);
+                                                   ATTRIBUTE_NODE);
 
     rv = mAttrsAndChildren.SetAndSwapAttr(ni, aParsedValue, &oldValueSet);
   }
@@ -3543,6 +3540,7 @@ Element::Closest(const nsAString& aSelector, ErrorResult& aResult)
       return const_cast<Element*>(Servo_SelectorList_Closest(this, aList));
     },
     [&](nsCSSSelectorList* aList) -> Element* {
+#ifdef MOZ_OLD_STYLE
       if (!aList) {
         // Either we failed (and aError already has the exception), or this
         // is a pseudo-element-only selector that matches nothing.
@@ -3563,6 +3561,9 @@ Element::Closest(const nsAString& aSelector, ErrorResult& aResult)
         }
       }
       return nullptr;
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
     }
   );
 }
@@ -3580,6 +3581,7 @@ Element::Matches(const nsAString& aSelector, ErrorResult& aError)
       return Servo_SelectorList_Matches(this, aList);
     },
     [&](nsCSSSelectorList* aList) {
+#ifdef MOZ_OLD_STYLE
       if (!aList) {
         // Either we failed (and aError already has the exception), or this
         // is a pseudo-element-only selector that matches nothing.
@@ -3593,6 +3595,9 @@ Element::Matches(const nsAString& aSelector, ErrorResult& aError)
       matchingContext.AddScopeElement(this);
       return nsCSSRuleProcessor::SelectorListMatches(this, matchingContext,
                                                      aList);
+#else
+      MOZ_CRASH("old style system disabled");
+#endif
     }
   );
 }
@@ -3928,6 +3933,12 @@ Element::SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal* aSubjectPrincip
 }
 
 void
+Element::UnsafeSetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
+{
+  SetInnerHTMLInternal(aInnerHTML, aError, true);
+}
+
+void
 Element::GetOuterHTML(nsAString& aOuterHTML)
 {
   GetMarkup(true, aOuterHTML);
@@ -3941,7 +3952,7 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
     return;
   }
 
-  if (parent->NodeType() == nsIDOMNode::DOCUMENT_NODE) {
+  if (parent->NodeType() == DOCUMENT_NODE) {
     aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
     return;
   }
@@ -3953,7 +3964,7 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
       localName = parent->NodeInfo()->NameAtom();
       namespaceID = parent->NodeInfo()->NamespaceID();
     } else {
-      NS_ASSERTION(parent->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE,
+      NS_ASSERTION(parent->NodeType() == DOCUMENT_FRAGMENT_NODE,
         "How come the parent isn't a document, a fragment or an element?");
       localName = nsGkAtoms::body;
       namespaceID = kNameSpaceID_XHTML;
@@ -3975,13 +3986,13 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
   if (parent->IsElement()) {
     context = parent;
   } else {
-    NS_ASSERTION(parent->NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE,
+    NS_ASSERTION(parent->NodeType() == DOCUMENT_FRAGMENT_NODE,
       "How come the parent isn't a document, a fragment or an element?");
     RefPtr<mozilla::dom::NodeInfo> info =
       OwnerDoc()->NodeInfoManager()->GetNodeInfo(nsGkAtoms::body,
                                                  nullptr,
                                                  kNameSpaceID_XHTML,
-                                                 nsIDOMNode::ELEMENT_NODE);
+                                                 ELEMENT_NODE);
     context = NS_NewHTMLBodyElement(info.forget(), FROM_PARSER_FRAGMENT);
   }
 
@@ -4662,7 +4673,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     !parent->IsElement() ||
     !PropagateBits(parent->AsElement(), aBits, existingRoot);
 
-  uint32_t existingBits = existingRoot ? doc->GetServoRestyleRootDirtyBits() : 0;
+  uint32_t existingBits = doc->GetServoRestyleRootDirtyBits();
   if (!reachedDocRoot || existingRoot == doc) {
       // We're a descendant of the existing root. All that's left to do is to
       // make sure the bit we propagated is also registered on the root.

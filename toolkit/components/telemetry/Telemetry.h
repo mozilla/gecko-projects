@@ -121,6 +121,30 @@ void AccumulateCategorical(E enumValue) {
 };
 
 /**
+ * Adds an array of samples to categorical histograms defined in TelemetryHistogramEnums.h
+ * This is the typesafe - and preferred - way to use the categorical histograms
+ * by passing values from the corresponding Telemetry::LABELS_* enums.
+ *
+ * @param enumValues - Array of labels from Telemetry::LABELS_* enums.
+ */
+template<class E>
+void
+AccumulateCategorical(const nsTArray<E>& enumValues)
+{
+  static_assert(IsCategoricalLabelEnum<E>::value,
+                "Only categorical label enum types are supported.");
+  nsTArray<uint32_t> intSamples(enumValues.Length());
+
+  for (E aValue: enumValues){
+    intSamples.AppendElement(static_cast<uint32_t>(aValue));
+  }
+
+  HistogramID categoricalId = static_cast<HistogramID>(CategoricalLabelId<E>::value);
+
+  Accumulate(categoricalId, intSamples);
+}
+
+/**
  * Adds sample to a keyed categorical histogram defined in TelemetryHistogramEnums.h
  * This is the typesafe - and preferred - way to use the keyed categorical histograms
  * by passing values from the corresponding Telemetry::LABELS_* enum.
@@ -138,6 +162,29 @@ void AccumulateCategoricalKeyed(const nsCString& key, E enumValue) {
 };
 
 /**
+ * Adds an array of samples to a keyed categorical histogram defined in TelemetryHistogramEnums.h.
+ * This is the typesafe - and preferred - way to use the keyed categorical histograms
+ * by passing values from the corresponding Telemetry::LABELS_*enum.
+ *
+ * @param key - the string key
+ * @param enumValue - Label value from one of the Telemetry::LABELS_* enums.
+ */
+template<class E>
+void AccumulateCategoricalKeyed(const nsCString& key, const nsTArray<E>& enumValues) {
+    static_assert(IsCategoricalLabelEnum<E>::value,
+                  "Only categorical label enum types are supported.");
+    nsTArray<uint32_t> intSamples(enumValues.Length());
+
+    for (E aValue: enumValues){
+      intSamples.AppendElement(static_cast<uint32_t>(aValue));
+    }
+
+    Accumulate(static_cast<HistogramID>(CategoricalLabelId<E>::value),
+               key,
+               intSamples);
+};
+
+/**
  * Adds sample to a categorical histogram defined in TelemetryHistogramEnums.h
  * This string will be matched against the labels defined in Histograms.json.
  * If the string does not match a label defined for the histogram, nothing will
@@ -147,6 +194,14 @@ void AccumulateCategoricalKeyed(const nsCString& key, E enumValue) {
  * @param label - A string label value that is defined in Histograms.json for this histogram.
  */
 void AccumulateCategorical(HistogramID id, const nsCString& label);
+
+/**
+ * Adds an array of samples to a categorical histogram defined in Histograms.json
+ *
+ * @param id - The histogram id
+ * @param labels - The array of labels to accumulate
+ */
+void AccumulateCategorical(HistogramID id, const nsTArray<nsCString>& labels);
 
 /**
  * Adds time delta in milliseconds to a histogram defined in TelemetryHistogramEnums.h
@@ -184,9 +239,17 @@ template<>
 struct AccumulateDelta_impl<Millisecond>
 {
   static void compute(HistogramID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, 0);
+      return;
+    }
     Accumulate(id, static_cast<uint32_t>((end - start).ToMilliseconds()));
   }
   static void compute(HistogramID id, const nsCString& key, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, key, 0);
+      return;
+    }
     Accumulate(id, key, static_cast<uint32_t>((end - start).ToMilliseconds()));
   }
 };
@@ -195,9 +258,17 @@ template<>
 struct AccumulateDelta_impl<Microsecond>
 {
   static void compute(HistogramID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, 0);
+      return;
+    }
     Accumulate(id, static_cast<uint32_t>((end - start).ToMicroseconds()));
   }
   static void compute(HistogramID id, const nsCString& key, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, key, 0);
+      return;
+    }
     Accumulate(id, key, static_cast<uint32_t>((end - start).ToMicroseconds()));
   }
 };

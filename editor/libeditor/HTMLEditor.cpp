@@ -5,6 +5,7 @@
 
 #include "mozilla/HTMLEditor.h"
 
+#include "mozilla/ComposerCommandsUpdater.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
@@ -29,7 +30,6 @@
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsISelectionController.h"
-#include "nsIDOMHTMLDocument.h"
 #include "nsILinkHandler.h"
 #include "nsIInlineSpellChecker.h"
 
@@ -40,6 +40,7 @@
 #include "nsIMutableArray.h"
 #include "nsContentUtils.h"
 #include "nsIDocumentEncoder.h"
+#include "nsGenericHTMLElement.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsFocusManager.h"
@@ -140,24 +141,7 @@ HTMLEditor::~HTMLEditor()
     mRules->AsHTMLEditRules()->EndListeningToEditActions();
   }
 
-  //the autopointers will clear themselves up.
-  //but we need to also remove the listeners or we have a leak
-  RefPtr<Selection> selection = GetSelection();
-  // if we don't get the selection, just skip this
-  if (selection) {
-    nsCOMPtr<nsISelectionListener>listener;
-    listener = do_QueryInterface(mTypeInState);
-    if (listener) {
-      selection->RemoveSelectionListener(listener);
-    }
-    listener = do_QueryInterface(mSelectionListenerP);
-    if (listener) {
-      selection->RemoveSelectionListener(listener);
-    }
-  }
-
   mTypeInState = nullptr;
-  mSelectionListenerP = nullptr;
 
   if (mLinkHandler && IsInitialized()) {
     nsCOMPtr<nsIPresShell> ps = GetPresShell();
@@ -190,6 +174,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLEditor)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTypeInState)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mComposerCommandsUpdater)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStyleSheets)
 
   tmp->HideAnonymousEditingUIs();
@@ -199,6 +184,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTypeInState)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mComposerCommandsUpdater)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTopLeftHandle)
@@ -214,7 +200,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResizingInfo)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResizedObject)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMouseMotionListenerP)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionListenerP)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResizeEventListenerP)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAbsolutelyPositionedObject)
@@ -299,25 +284,9 @@ HTMLEditor::Init(nsIDOMDocument* aDoc,
     // init the type-in state
     mTypeInState = new TypeInState();
 
-    // init the selection listener for image resizing
-    mSelectionListenerP = new ResizerSelectionListener(*this);
-
     if (!IsInteractionAllowed()) {
       // ignore any errors from this in case the file is missing
       AddOverrideStyleSheet(NS_LITERAL_STRING("resource://gre/res/EditorOverride.css"));
-    }
-
-    RefPtr<Selection> selection = GetSelection();
-    if (selection) {
-      nsCOMPtr<nsISelectionListener>listener;
-      listener = do_QueryInterface(mTypeInState);
-      if (listener) {
-        selection->AddSelectionListener(listener);
-      }
-      listener = do_QueryInterface(mSelectionListenerP);
-      if (listener) {
-        selection->AddSelectionListener(listener);
-      }
     }
   }
   NS_ENSURE_SUCCESS(rulesRv, rulesRv);
@@ -348,27 +317,64 @@ HTMLEditor::PreDestroy(bool aDestroyingFrames)
   return TextEditor::PreDestroy(aDestroyingFrames);
 }
 
+NS_IMETHODIMP
+HTMLEditor::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
+                                   nsISelection* aSelection,
+                                   int16_t aReason)
+{
+  if (NS_WARN_IF(!aDOMDocument) || NS_WARN_IF(!aSelection)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  RefPtr<Selection> selection = aSelection->AsSelection();
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (mTypeInState) {
+    RefPtr<TypeInState> typeInState = mTypeInState;
+    typeInState->OnSelectionChange(*selection);
+
+    // We used a class which derived from nsISelectionListener to call
+    // HTMLEditor::CheckSelectionStateForAnonymousButtons().  The lifetime of
+    // the class was exactly same as mTypeInState.  So, call it only when
+    // mTypeInState is not nullptr.
+    if ((aReason & (nsISelectionListener::MOUSEDOWN_REASON |
+                    nsISelectionListener::KEYPRESS_REASON |
+                    nsISelectionListener::SELECTALL_REASON)) && aSelection) {
+      // the selection changed and we need to check if we have to
+      // hide and/or redisplay resizing handles
+      // FYI: This is an XPCOM method.  So, the caller, Selection, guarantees
+      //      the lifetime of this instance.  So, don't need to grab this with
+      //      local variable.
+      CheckSelectionStateForAnonymousButtons(selection);
+    }
+  }
+
+  if (mComposerCommandsUpdater) {
+    RefPtr<ComposerCommandsUpdater> updater = mComposerCommandsUpdater;
+    updater->OnSelectionChange();
+  }
+
+  return EditorBase::NotifySelectionChanged(aDOMDocument, aSelection, aReason);
+}
+
 void
 HTMLEditor::UpdateRootElement()
 {
   // Use the HTML documents body element as the editor root if we didn't
   // get a root element during initialization.
 
-  nsCOMPtr<nsIDOMElement> rootElement;
-  nsCOMPtr<nsIDOMHTMLElement> bodyElement;
-  GetBodyElement(getter_AddRefs(bodyElement));
-  if (bodyElement) {
-    rootElement = bodyElement;
-  } else {
-    // If there is no HTML body element,
-    // we should use the document root element instead.
-    nsCOMPtr<nsIDOMDocument> domDocument = GetDOMDocument();
-    if (domDocument) {
-      domDocument->GetDocumentElement(getter_AddRefs(rootElement));
+  mRootElement = GetBodyElement();
+  if (!mRootElement) {
+    nsCOMPtr<nsIDocument> doc = GetDocument();
+    if (doc) {
+      // If there is no HTML body element,
+      // we should use the document root element instead.
+      mRootElement = doc->GetDocumentElement();
     }
+    // else leave it null, for lack of anything better.
   }
-
-  mRootElement = do_QueryInterface(rootElement);
 }
 
 already_AddRefed<nsIContent>
@@ -666,8 +672,7 @@ HTMLEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent)
       return TypedText(NS_LITERAL_STRING("\t"), eTypedText);
     }
     case NS_VK_RETURN:
-      if (aKeyboardEvent->IsControl() || aKeyboardEvent->IsAlt() ||
-          aKeyboardEvent->IsMeta() || aKeyboardEvent->IsOS()) {
+      if (!aKeyboardEvent->IsInputtingLineBreak()) {
         return NS_OK;
       }
       aKeyboardEvent->PreventDefault(); // consumed
@@ -679,11 +684,7 @@ HTMLEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent)
       return TypedText(EmptyString(), eTypedBreak);
   }
 
-  // NOTE: On some keyboard layout, some characters are inputted with Control
-  // key or Alt key, but at that time, widget sets FALSE to these keys.
-  if (!aKeyboardEvent->mCharCode || aKeyboardEvent->IsControl() ||
-      aKeyboardEvent->IsAlt() || aKeyboardEvent->IsMeta() ||
-      aKeyboardEvent->IsOS()) {
+  if (!aKeyboardEvent->IsInputtingText()) {
     // we don't PreventDefault() here or keybindings like control-x won't work
     return NS_OK;
   }
@@ -1424,8 +1425,6 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
   NS_ENSURE_TRUE(element, NS_ERROR_NULL_POINTER);
 
-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aElement);
-
   CommitComposition();
   AutoPlaceholderBatch beginBatching(this);
   AutoRules beginRulesSniffing(this, EditAction::insertElement,
@@ -1465,7 +1464,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
       // Named Anchor is a special case,
       // We collapse to insert element BEFORE the selection
       // For all other tags, we insert AFTER the selection
-      if (HTMLEditUtils::IsNamedAnchor(node)) {
+      if (HTMLEditUtils::IsNamedAnchor(element)) {
         selection->CollapseToStart();
       } else {
         selection->CollapseToEnd();
@@ -1495,7 +1494,7 @@ HTMLEditor::InsertElementAtSelection(nsIDOMElement* aElement,
       }
       // check for inserting a whole table at the end of a block. If so insert
       // a br after it.
-      if (HTMLEditUtils::IsTable(node) &&
+      if (HTMLEditUtils::IsTable(element) &&
           IsLastEditableChild(element)) {
         DebugOnly<bool> advanced = insertedPoint.AdvanceOffset();
         NS_WARNING_ASSERTION(advanced,
@@ -1622,9 +1621,7 @@ HTMLEditor::SetCaretAfterElement(nsIDOMElement* aElement)
 
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMNode>parent;
-  nsresult rv = aElement->GetParentNode(getter_AddRefs(parent));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsINode> parent = element->GetParentNode();
   NS_ENSURE_TRUE(parent, NS_ERROR_NULL_POINTER);
   // Collapse selection to just after desired element,
   EditorRawDOMPoint afterElement(element);
@@ -1773,7 +1770,7 @@ HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 HTMLEditor::GetHTMLBackgroundColorState(bool* aMixed,
                                         nsAString& aOutColor)
 {
@@ -2330,7 +2327,7 @@ HTMLEditor::GetElementOrParentByTagName(const nsAString& aTagName,
 
 NS_IMETHODIMP
 HTMLEditor::GetSelectedElement(const nsAString& aTagName,
-                               nsIDOMElement** aReturn)
+                               nsISupports** aReturn)
 {
   NS_ENSURE_TRUE(aReturn , NS_ERROR_NULL_POINTER);
 
@@ -2341,7 +2338,6 @@ HTMLEditor::GetSelectedElement(const nsAString& aTagName,
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
-  bool bNodeFound = false;
   bool isCollapsed = selection->Collapsed();
 
   nsAutoString domTagName;
@@ -2352,7 +2348,6 @@ HTMLEditor::GetSelectedElement(const nsAString& aTagName,
   bool isLinkTag = IsLinkTag(TagName);
   bool isNamedAnchorTag = IsNamedAnchorTag(TagName);
 
-  nsCOMPtr<nsIDOMElement> selectedElement;
   RefPtr<nsRange> range = selection->GetRangeAt(0);
   NS_ENSURE_STATE(range);
 
@@ -2367,138 +2362,139 @@ HTMLEditor::GetSelectedElement(const nsAString& aTagName,
       startNode && endNode && startNode->GetNextSibling() == endNode) {
     nsCOMPtr<nsINode> selectedNode = startNode;
     if (selectedNode) {
-      selectedNode->AsDOMNode()->GetNodeName(domTagName);
+      domTagName = selectedNode->NodeName();
       ToLowerCase(domTagName);
 
       // Test for appropriate node type requested
       if (anyTag || (TagName == domTagName) ||
           (isLinkTag && HTMLEditUtils::IsLink(selectedNode)) ||
           (isNamedAnchorTag && HTMLEditUtils::IsNamedAnchor(selectedNode))) {
-        bNodeFound = true;
-        selectedElement = do_QueryInterface(selectedNode);
+        selectedNode.forget(aReturn);
+        return NS_OK;
       }
     }
   }
 
-  if (!bNodeFound) {
-    if (isLinkTag) {
-      // Link tag is a special case - we return the anchor node
-      //  found for any selection that is totally within a link,
-      //  included a collapsed selection (just a caret in a link)
-      const RangeBoundary& anchor = selection->AnchorRef();
-      const RangeBoundary& focus = selection->FocusRef();
-      // Link node must be the same for both ends of selection
-      if (anchor.IsSet()) {
-        nsCOMPtr<nsIDOMElement> parentLinkOfAnchor;
-        nsresult rv =
-          GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
-                                      anchor.Container()->AsDOMNode(),
-                                      getter_AddRefs(parentLinkOfAnchor));
-        // XXX: ERROR_HANDLING  can parentLinkOfAnchor be null?
-        if (NS_SUCCEEDED(rv) && parentLinkOfAnchor) {
-          if (isCollapsed) {
-            // We have just a caret in the link
+  bool bNodeFound = false;
+  nsCOMPtr<Element> selectedElement;
+  if (isLinkTag) {
+    // Link tag is a special case - we return the anchor node
+    //  found for any selection that is totally within a link,
+    //  included a collapsed selection (just a caret in a link)
+    const RangeBoundary& anchor = selection->AnchorRef();
+    const RangeBoundary& focus = selection->FocusRef();
+    // Link node must be the same for both ends of selection
+    if (anchor.IsSet()) {
+      nsCOMPtr<nsIDOMElement> parentLinkOfAnchor;
+      nsresult rv =
+        GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
+                                    anchor.Container()->AsDOMNode(),
+                                    getter_AddRefs(parentLinkOfAnchor));
+      // XXX: ERROR_HANDLING  can parentLinkOfAnchor be null?
+      if (NS_SUCCEEDED(rv) && parentLinkOfAnchor) {
+        if (isCollapsed) {
+          // We have just a caret in the link
+          bNodeFound = true;
+        } else if (focus.IsSet()) {
+          // Link node must be the same for both ends of selection.
+          nsCOMPtr<nsIDOMElement> parentLinkOfFocus;
+          rv = GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
+                                           focus.Container()->AsDOMNode(),
+                                           getter_AddRefs(parentLinkOfFocus));
+          if (NS_SUCCEEDED(rv) && parentLinkOfFocus == parentLinkOfAnchor) {
             bNodeFound = true;
-          } else if (focus.IsSet()) {
-            // Link node must be the same for both ends of selection.
-            nsCOMPtr<nsIDOMElement> parentLinkOfFocus;
-            rv = GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
-                                             focus.Container()->AsDOMNode(),
-                                             getter_AddRefs(parentLinkOfFocus));
-            if (NS_SUCCEEDED(rv) && parentLinkOfFocus == parentLinkOfAnchor) {
-              bNodeFound = true;
-            }
           }
+        }
 
-          // We found a link node parent
+        // We found a link node parent
+        if (bNodeFound) {
+          // GetElementOrParentByTagName addref'd this, so we don't need to do it here
+          parentLinkOfAnchor.forget(aReturn);
+          return NS_OK;
+        }
+      } else if (anchor.GetChildAtOffset() && focus.GetChildAtOffset()) {
+        // Check if link node is the only thing selected
+        if (HTMLEditUtils::IsLink(anchor.GetChildAtOffset()) &&
+            anchor.Container() == focus.Container() &&
+            focus.GetChildAtOffset() ==
+              anchor.GetChildAtOffset()->GetNextSibling()) {
+          selectedElement = do_QueryInterface(anchor.GetChildAtOffset());
+          bNodeFound = true;
+        }
+      }
+    }
+  }
+
+  if (!isCollapsed) {
+    RefPtr<nsRange> currange = selection->GetRangeAt(0);
+    if (currange) {
+      nsresult rv;
+      nsCOMPtr<nsIContentIterator> iter =
+        do_CreateInstance("@mozilla.org/content/post-content-iterator;1",
+                          &rv);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      iter->Init(currange);
+      // loop through the content iterator for each content node
+      while (!iter->IsDone()) {
+        // Query interface to cast nsIContent to nsIDOMNode
+        //  then get tagType to compare to  aTagName
+        // Clone node of each desired type and append it to the aDomFrag
+        nsINode* currentNode = iter->GetCurrentNode();
+        selectedElement = do_QueryInterface(currentNode);
+        if (selectedElement) {
+          // If we already found a node, then we have another element,
+          //  thus there's not just one element selected
           if (bNodeFound) {
-            // GetElementOrParentByTagName addref'd this, so we don't need to do it here
-            parentLinkOfAnchor.forget(aReturn);
-            return NS_OK;
+            bNodeFound = false;
+            break;
           }
-        } else if (anchor.GetChildAtOffset() && focus.GetChildAtOffset()) {
-          // Check if link node is the only thing selected
-          if (HTMLEditUtils::IsLink(anchor.GetChildAtOffset()) &&
-              anchor.Container() == focus.Container() &&
-              focus.GetChildAtOffset() ==
-                anchor.GetChildAtOffset()->GetNextSibling()) {
-            selectedElement = do_QueryInterface(anchor.GetChildAtOffset());
+
+          domTagName = currentNode->NodeName();
+          ToLowerCase(domTagName);
+
+          if (anyTag) {
+            // Get name of first selected element
+            selectedElement->GetTagName(TagName);
+            ToLowerCase(TagName);
+            anyTag = false;
+          }
+
+          // The "A" tag is a pain,
+          //  used for both link(href is set) and "Named Anchor"
+          if ((isLinkTag &&
+               HTMLEditUtils::IsLink(selectedElement)) ||
+              (isNamedAnchorTag &&
+               HTMLEditUtils::IsNamedAnchor(selectedElement))) {
+            bNodeFound = true;
+          } else if (TagName == domTagName) { // All other tag names are handled here
             bNodeFound = true;
           }
-        }
-      }
-    }
-
-    if (!isCollapsed) {
-      RefPtr<nsRange> currange = selection->GetRangeAt(0);
-      if (currange) {
-        nsresult rv;
-        nsCOMPtr<nsIContentIterator> iter =
-          do_CreateInstance("@mozilla.org/content/post-content-iterator;1",
-                            &rv);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        iter->Init(currange);
-        // loop through the content iterator for each content node
-        while (!iter->IsDone()) {
-          // Query interface to cast nsIContent to nsIDOMNode
-          //  then get tagType to compare to  aTagName
-          // Clone node of each desired type and append it to the aDomFrag
-          selectedElement = do_QueryInterface(iter->GetCurrentNode());
-          if (selectedElement) {
-            // If we already found a node, then we have another element,
-            //  thus there's not just one element selected
-            if (bNodeFound) {
-              bNodeFound = false;
-              break;
-            }
-
-            selectedElement->GetNodeName(domTagName);
-            ToLowerCase(domTagName);
-
-            if (anyTag) {
-              // Get name of first selected element
-              selectedElement->GetTagName(TagName);
-              ToLowerCase(TagName);
-              anyTag = false;
-            }
-
-            // The "A" tag is a pain,
-            //  used for both link(href is set) and "Named Anchor"
-            nsCOMPtr<nsIDOMNode> selectedNode = do_QueryInterface(selectedElement);
-            if ((isLinkTag &&
-                 HTMLEditUtils::IsLink(selectedNode)) ||
-                (isNamedAnchorTag &&
-                 HTMLEditUtils::IsNamedAnchor(selectedNode))) {
-              bNodeFound = true;
-            } else if (TagName == domTagName) { // All other tag names are handled here
-              bNodeFound = true;
-            }
-            if (!bNodeFound) {
-              // Check if node we have is really part of the selection???
-              break;
-            }
+          if (!bNodeFound) {
+            // Check if node we have is really part of the selection???
+            break;
           }
-          iter->Next();
         }
-      } else {
-        // Should never get here?
-        isCollapsed = true;
-        NS_WARNING("isCollapsed was FALSE, but no elements found in selection\n");
+        iter->Next();
       }
+    } else {
+      // Should never get here?
+      isCollapsed = true;
+      NS_WARNING("isCollapsed was FALSE, but no elements found in selection\n");
     }
   }
 
-  if (!bNodeFound) {
-    return NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND;
-  }
-
-  *aReturn = selectedElement;
-  if (selectedElement) {
-    // Getters must addref
-    NS_ADDREF(*aReturn);
-  }
+  selectedElement.forget(aReturn);
   return NS_OK;
+}
+
+already_AddRefed<Element>
+HTMLEditor::GetSelectedElement(const nsAString& aTagName)
+{
+  nsCOMPtr<nsISupports> domElement;
+  GetSelectedElement(aTagName, getter_AddRefs(domElement));
+  nsCOMPtr<Element> element = do_QueryInterface(domElement);
+  return element.forget();
 }
 
 already_AddRefed<Element>
@@ -2912,7 +2908,11 @@ HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL)
     NS_ERROR("stylo: ServoStyleSheets can't be disabled yet");
     return true;
   }
+#ifdef MOZ_OLD_STYLE
   sheet->AsGecko()->SetDisabled(false);
+#else
+  MOZ_CRASH("old style system disabled");
+#endif
   return true;
 }
 
@@ -3081,8 +3081,7 @@ HTMLEditor::DeleteSelectionImpl(EDirection aAction,
 nsresult
 HTMLEditor::DeleteNode(nsINode* aNode)
 {
-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
-  return DeleteNode(node);
+  return DeleteNode(aNode->AsDOMNode());
 }
 
 NS_IMETHODIMP
@@ -3539,7 +3538,7 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
 {
   NS_ENSURE_TRUE(aInRange, NS_ERROR_NULL_POINTER);
   AutoTransactionsConserveSelection dontChangeMySelection(this);
-  nsTArray<nsCOMPtr<nsIDOMNode> > textNodes;
+  nsTArray<nsCOMPtr<nsINode>> textNodes;
   // we can't actually do anything during iteration, so store the text nodes in an array
   // don't bother ref counting them because we know we can hold them for the
   // lifetime of this method
@@ -3555,10 +3554,9 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
 
   while (!iter->IsDone()) {
     nsINode* node = iter->GetCurrentNode();
-    if (node->NodeType() == nsIDOMNode::TEXT_NODE &&
-        IsEditable(static_cast<nsIContent*>(node))) {
-      nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(node);
-      textNodes.AppendElement(domNode);
+    if (node->NodeType() == nsINode::TEXT_NODE &&
+        IsEditable(node->AsContent())) {
+      textNodes.AppendElement(node);
     }
 
     iter->Next();
@@ -3568,20 +3566,17 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
   // NOTE: assumption that JoinNodes keeps the righthand node
   while (textNodes.Length() > 1) {
     // we assume a textNodes entry can't be nullptr
-    nsIDOMNode *leftTextNode = textNodes[0];
-    nsIDOMNode *rightTextNode = textNodes[1];
+    nsINode* leftTextNode = textNodes[0];
+    nsINode* rightTextNode = textNodes[1];
     NS_ASSERTION(leftTextNode && rightTextNode,"left or rightTextNode null in CollapseAdjacentTextNodes");
 
     // get the prev sibling of the right node, and see if its leftTextNode
-    nsCOMPtr<nsIDOMNode> prevSibOfRightNode;
-    rv = rightTextNode->GetPreviousSibling(getter_AddRefs(prevSibOfRightNode));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsINode> prevSibOfRightNode = rightTextNode->GetPreviousSibling();
     if (prevSibOfRightNode && prevSibOfRightNode == leftTextNode) {
-      nsCOMPtr<nsIDOMNode> parent;
-      rv = rightTextNode->GetParentNode(getter_AddRefs(parent));
-      NS_ENSURE_SUCCESS(rv, rv);
+      nsCOMPtr<nsINode> parent = rightTextNode->GetParentNode();
       NS_ENSURE_TRUE(parent, NS_ERROR_NULL_POINTER);
-      rv = JoinNodes(leftTextNode, rightTextNode, parent);
+      rv = JoinNodes(leftTextNode->AsDOMNode(), rightTextNode->AsDOMNode(),
+                     parent->AsDOMNode());
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
@@ -4462,13 +4457,8 @@ HTMLEditor::GetSelectionContainer()
       int32_t endOffset = range->EndOffset();
 
       if (startContainer == endContainer && startOffset + 1 == endOffset) {
-        nsCOMPtr<nsIDOMElement> focusElement;
-        nsresult rv = GetSelectedElement(EmptyString(),
-                                         getter_AddRefs(focusElement));
-        NS_ENSURE_SUCCESS(rv, nullptr);
-        if (focusElement) {
-          focusNode = do_QueryInterface(focusElement);
-        }
+        MOZ_ASSERT(!focusNode, "How did it get set already?");
+        focusNode = GetSelectedElement(EmptyString());
       }
       if (!focusNode) {
         focusNode = range->GetCommonAncestor();
@@ -4672,9 +4662,7 @@ HTMLEditor::ShouldReplaceRootElement()
 
   // If we temporary set document root element to mRootElement, but there is
   // body element now, we should replace the root element by the body element.
-  nsCOMPtr<nsIDOMHTMLElement> docBody;
-  GetBodyElement(getter_AddRefs(docBody));
-  return !SameCOMIdentity(docBody, mRootElement);
+  return mRootElement != GetBodyElement();
 }
 
 void
@@ -4709,19 +4697,15 @@ HTMLEditor::NotifyRootChanged()
   SyncRealTimeSpell();
 }
 
-nsresult
-HTMLEditor::GetBodyElement(nsIDOMHTMLElement** aBody)
+Element*
+HTMLEditor::GetBodyElement()
 {
   MOZ_ASSERT(IsInitialized(), "The HTMLEditor hasn't been initialized yet");
   nsCOMPtr<nsIDocument> document = GetDocument();
   if (NS_WARN_IF(!document)) {
-    return NS_ERROR_NOT_INITIALIZED;
+    return nullptr;
   }
-  nsCOMPtr<nsIDOMHTMLDocument> domHTMLDocument = do_QueryInterface(document);
-  if (!domHTMLDocument) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  return domHTMLDocument->GetBody(aBody);
+  return document->GetBody();
 }
 
 already_AddRefed<nsINode>

@@ -82,7 +82,7 @@
 #include "nsContentCID.h"
 #include "nsLayoutStatics.h"
 #include "nsCCUncollectableMarker.h"
-#include "mozilla/dom/workers/Workers.h"
+#include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "nsJSPrincipals.h"
 #include "mozilla/Attributes.h"
@@ -182,10 +182,6 @@
 #include "nsNetCID.h"
 #include "nsIArray.h"
 
-// XXX An unfortunate dependency exists here (two XUL files).
-#include "nsIDOMXULDocument.h"
-#include "nsIDOMXULCommandDispatcher.h"
-
 #include "nsBindingManager.h"
 #include "nsXBLService.h"
 
@@ -228,7 +224,6 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "prrng.h"
 #include "nsSandboxFlags.h"
-#include "TimeChangeObserver.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
@@ -247,6 +242,7 @@
 #include "mozilla/dom/NavigatorBinding.h"
 #include "mozilla/dom/ImageBitmap.h"
 #include "mozilla/dom/ImageBitmapBinding.h"
+#include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerRegistration.h"
 #include "mozilla/dom/U2F.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
@@ -1750,11 +1746,14 @@ nsGlobalWindowInner::EnsureClientSource()
 
   bool newClientSource = false;
 
-  // Get the load info for the document if we performed a load.  Be careful
-  // not to look at about:blank or about:srcdoc loads, though. They will have
-  // a channel and loadinfo, but their loadinfo will never be controlled.  This
-  // would in turn inadvertantly trigger the logic below to clear the inherited
-  // controller.
+  // Get the load info for the document if we performed a load.  Be careful not
+  // to look at local URLs, though. Local URLs are those that have a scheme of:
+  //  * about:
+  //  * data:
+  //  * blob:
+  // We also do an additional check here so that we only treat about:blank
+  // and about:srcdoc as local URLs.  Other internal firefox about: URLs should
+  // not be treated this way.
   nsCOMPtr<nsILoadInfo> loadInfo;
   nsCOMPtr<nsIChannel> channel = mDoc->GetChannel();
   if (channel) {
@@ -1770,6 +1769,12 @@ nsGlobalWindowInner::EnsureClientSource()
       nsCString spec = uri->GetSpecOrDefault();
       ignoreLoadInfo = spec.EqualsLiteral("about:blank") ||
                        spec.EqualsLiteral("about:srcdoc");
+    } else {
+      // Its not an about: URL, so now check for our other URL types.
+      bool isData = false;
+      bool isBlob = false;
+      ignoreLoadInfo = (NS_SUCCEEDED(uri->SchemeIs("data", &isData)) && isData) ||
+                       (NS_SUCCEEDED(uri->SchemeIs("blob", &isBlob)) && isBlob);
     }
 
     if (!ignoreLoadInfo) {
@@ -2387,6 +2392,12 @@ nsPIDOMWindowInner::GetController() const
   return Move(nsGlobalWindowInner::Cast(this)->GetController());
 }
 
+RefPtr<mozilla::dom::ServiceWorker>
+nsPIDOMWindowInner::GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor)
+{
+  return Move(nsGlobalWindowInner::Cast(this)->GetOrCreateServiceWorker(aDescriptor));
+}
+
 void
 nsPIDOMWindowInner::NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope)
 {
@@ -2960,6 +2971,13 @@ nsGlobalWindowInner::IsPrivilegedChromeWindow(JSContext* aCx, JSObject* aObj)
   // For now, have to deal with XPConnect objects here.
   return xpc::WindowOrNull(aObj)->IsChromeWindow() &&
          nsContentUtils::ObjectPrincipal(aObj) == nsContentUtils::GetSystemPrincipal();
+}
+
+/* static */ bool
+nsGlobalWindowInner::OfflineCacheAllowedForContext(JSContext* aCx, JSObject* aObj)
+{
+  return IsSecureContextOrObjectIsFromSecureContext(aCx, aObj) ||
+         Preferences::GetBool("browser.cache.offline.insecure.enable");
 }
 
 /* static */ bool
@@ -6363,6 +6381,39 @@ nsGlobalWindowInner::GetController() const
   return Move(controller);
 }
 
+RefPtr<ServiceWorker>
+nsGlobalWindowInner::GetOrCreateServiceWorker(const ServiceWorkerDescriptor& aDescriptor)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  RefPtr<ServiceWorker> ref;
+  for (auto sw : mServiceWorkerList) {
+    if (sw->MatchesDescriptor(aDescriptor)) {
+      ref = sw;
+      return ref.forget();
+    }
+  }
+  ref = ServiceWorker::Create(this, aDescriptor);
+  return ref.forget();
+}
+
+void
+nsGlobalWindowInner::AddServiceWorker(ServiceWorker* aServiceWorker)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_DIAGNOSTIC_ASSERT(aServiceWorker);
+  MOZ_ASSERT(!mServiceWorkerList.Contains(aServiceWorker));
+  mServiceWorkerList.AppendElement(aServiceWorker);
+}
+
+void
+nsGlobalWindowInner::RemoveServiceWorker(ServiceWorker* aServiceWorker)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_DIAGNOSTIC_ASSERT(aServiceWorker);
+  MOZ_ASSERT(mServiceWorkerList.Contains(aServiceWorker));
+  mServiceWorkerList.RemoveElement(aServiceWorker);
+}
+
 nsresult
 nsGlobalWindowInner::FireDelayedDOMEvents()
 {
@@ -6861,18 +6912,6 @@ nsGlobalWindowInner::IsVRContentPresenting() const
     }
   }
   return false;
-}
-
-void
-nsGlobalWindowInner::EnableTimeChangeNotifications()
-{
-  mozilla::time::AddWindowListener(this);
-}
-
-void
-nsGlobalWindowInner::DisableTimeChangeNotifications()
-{
-  mozilla::time::RemoveWindowListener(this);
 }
 
 void

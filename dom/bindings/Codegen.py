@@ -2706,8 +2706,15 @@ class AttrDefiner(PropertyDefiner):
                           not isNonExposedNavigatorObjectGetter(m, descriptor)]
         else:
             attributes = []
-        self.chrome = [m for m in attributes if isChromeOnly(m)]
-        self.regular = [m for m in attributes if not isChromeOnly(m)]
+
+        attributes = [
+            {"name": name, "attr": attr}
+            for attr in attributes
+            for name in [attr.identifier.name] + attr.bindingAliases
+        ]
+
+        self.chrome = [m for m in attributes if isChromeOnly(m["attr"])]
+        self.regular = [m for m in attributes if not isChromeOnly(m["attr"])]
         self.static = static
         self.unforgeable = unforgeable
 
@@ -2723,6 +2730,9 @@ class AttrDefiner(PropertyDefiner):
     def generateArray(self, array, name):
         if len(array) == 0:
             return ""
+
+        def condition(m, d):
+            return PropertyDefiner.getControllingCondition(m["attr"], d)
 
         def flags(attr):
             unforgeable = " | JSPROP_PERMANENT" if self.unforgeable else ""
@@ -2791,16 +2801,16 @@ class AttrDefiner(PropertyDefiner):
             return "%s, %s" % \
                    (accessor, jitinfo)
 
-        def specData(attr):
-            return (attr.identifier.name, flags(attr), getter(attr),
-                    setter(attr))
+        def specData(entry):
+            name, attr = entry["name"], entry["attr"]
+            return (name, flags(attr), getter(attr), setter(attr))
 
         return self.generatePrefableArray(
             array, name,
             lambda fields: '  { "%s", %s, %s, %s }' % fields,
             '  { nullptr, 0, nullptr, nullptr, nullptr, nullptr }',
             'JSPropertySpec',
-            PropertyDefiner.getControllingCondition, specData)
+            condition, specData)
 
 
 class ConstDefiner(PropertyDefiner):
@@ -15881,7 +15891,7 @@ class CGCallback(CGClass):
         argsWithoutRv.insert(0, Argument("const T&",  "thisVal"))
 
         argnamesWithoutThisAndRv = [arg.name for arg in argsWithoutThisAndRv]
-        argnamesWithoutThisAndRv.insert(rvIndex, "rv");
+        argnamesWithoutThisAndRv.insert(rvIndex, "IgnoreErrors()");
         # If we just leave things like that, and have no actual arguments in the
         # IDL, we will end up trying to call the templated "without rv" overload
         # with "rv" as the thisVal.  That's no good.  So explicitly append the
@@ -15892,7 +15902,7 @@ class CGCallback(CGClass):
         argnamesWithoutRv = [arg.name for arg in argsWithoutRv]
         # Note that we need to insert at rvIndex + 1, since we inserted a
         # thisVal arg at the start.
-        argnamesWithoutRv.insert(rvIndex + 1, "rv")
+        argnamesWithoutRv.insert(rvIndex + 1, "IgnoreErrors()")
 
         errorReturn = method.getDefaultRetval()
 
@@ -15936,14 +15946,12 @@ class CGCallback(CGClass):
             callArgs=", ".join(argnamesWithoutThis))
         bodyWithThisWithoutRv = fill(
             """
-            IgnoredErrorResult rv;
             return ${methodName}(${callArgs});
             """,
             methodName=method.name,
             callArgs=", ".join(argnamesWithoutRv))
         bodyWithoutThisAndRv = fill(
             """
-            IgnoredErrorResult rv;
             return ${methodName}(${callArgs});
             """,
             methodName=method.name,

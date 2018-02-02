@@ -16,12 +16,19 @@
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_IGLOBALOBJECT_IID \
 { 0x11afa8be, 0xd997, 0x4e07, \
 { 0xa6, 0xa3, 0x6f, 0x87, 0x2e, 0xc3, 0xee, 0x7f } }
 
 class nsCycleCollectionTraversalCallback;
 class nsIPrincipal;
+
+namespace mozilla {
+namespace dom {
+class ServiceWorker;
+} // namespace dom
+} // namespace mozilla
 
 class nsIGlobalObject : public nsISupports,
                         public mozilla::dom::DispatcherTrait
@@ -84,6 +91,21 @@ public:
 
   virtual mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor>
   GetController() const;
+
+  // Get the DOM object for the given descriptor or attempt to create one.
+  // Creation can still fail and return nullptr during shutdown, etc.
+  virtual RefPtr<mozilla::dom::ServiceWorker>
+  GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor);
+
+  // These methods allow the ServiceWorker instances to note their existence
+  // so that the global can use weak references to them.  The global should
+  // not hold a strong reference to the ServiceWorker.
+  virtual void
+  AddServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker);
+
+  // This method must be called by the ServiceWorker before it is destroyed.
+  virtual void
+  RemoveServiceWorker(mozilla::dom::ServiceWorker* aServiceWorker);
 
 protected:
   virtual ~nsIGlobalObject();

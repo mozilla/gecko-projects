@@ -77,25 +77,6 @@ MacroAssemblerMIPSCompat::convertUInt32ToDouble(Register src, FloatRegister dest
     as_addd(dest, dest, SecondScratchDoubleReg);
 }
 
-static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
-
-bool
-MacroAssemblerMIPSCompat::convertUInt64ToDoubleNeedsTemp()
-{
-    return false;
-}
-
-void
-MacroAssemblerMIPSCompat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
-{
-    MOZ_ASSERT(temp == Register::Invalid());
-    convertUInt32ToDouble(src.high, dest);
-    loadConstantDouble(TO_DOUBLE_HIGH_SCALE, ScratchDoubleReg);
-    asMasm().mulDouble(ScratchDoubleReg, dest);
-    convertUInt32ToDouble(src.low, ScratchDoubleReg);
-    asMasm().addDouble(ScratchDoubleReg, dest);
-}
-
 void
 MacroAssemblerMIPSCompat::convertUInt32ToFloat32(Register src, FloatRegister dest)
 {
@@ -1283,20 +1264,20 @@ MacroAssemblerMIPSCompat::testUndefinedSet(Condition cond, const ValueOperand& v
 
 // unboxing code
 void
-MacroAssemblerMIPSCompat::unboxNonDouble(const ValueOperand& operand, Register dest)
+MacroAssemblerMIPSCompat::unboxNonDouble(const ValueOperand& operand, Register dest, JSValueType)
 {
     if (operand.payloadReg() != dest)
         ma_move(dest, operand.payloadReg());
 }
 
 void
-MacroAssemblerMIPSCompat::unboxNonDouble(const Address& src, Register dest)
+MacroAssemblerMIPSCompat::unboxNonDouble(const Address& src, Register dest, JSValueType)
 {
     ma_lw(dest, Address(src.base, src.offset + PAYLOAD_OFFSET));
 }
 
 void
-MacroAssemblerMIPSCompat::unboxNonDouble(const BaseIndex& src, Register dest)
+MacroAssemblerMIPSCompat::unboxNonDouble(const BaseIndex& src, Register dest, JSValueType)
 {
     computeScaledAddress(src, SecondScratchReg);
     ma_lw(dest, Address(SecondScratchReg, src.offset + PAYLOAD_OFFSET));
@@ -1367,7 +1348,7 @@ MacroAssemblerMIPSCompat::unboxObject(const Address& src, Register dest)
 }
 
 void
-MacroAssemblerMIPSCompat::unboxValue(const ValueOperand& src, AnyRegister dest)
+MacroAssemblerMIPSCompat::unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType)
 {
     if (dest.isFloat()) {
         Label notInt32, end;
@@ -2504,6 +2485,28 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     as_truncws(ScratchDoubleReg, input);
     moveFromFloat32(ScratchDoubleReg, output);
     bind(&done);
+}
+
+// ========================================================================
+// Convert floating point.
+
+static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    convertUInt32ToDouble(src.high, dest);
+    loadConstantDouble(TO_DOUBLE_HIGH_SCALE, ScratchDoubleReg);
+    mulDouble(ScratchDoubleReg, dest);
+    convertUInt32ToDouble(src.low, ScratchDoubleReg);
+    addDouble(ScratchDoubleReg, dest);
 }
 
 //}}} check_macroassembler_style

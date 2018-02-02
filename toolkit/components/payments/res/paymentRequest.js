@@ -10,7 +10,7 @@
 
 "use strict";
 
-let PaymentRequest = {
+var paymentRequest = {
   domReadyPromise: null,
 
   init() {
@@ -73,19 +73,28 @@ let PaymentRequest = {
         this.onShowPaymentRequest(detail);
         break;
       }
+      case "updateState": {
+        document.querySelector("payment-dialog").setStateFromParent(detail);
+        break;
+      }
     }
   },
 
   onPaymentRequestLoad(requestId) {
     window.addEventListener("unload", this, {once: true});
     this.sendMessageToChrome("paymentDialogReady");
+
+    // Automatically show the debugging console if loaded with a truthy `debug` query parameter.
+    if (new URLSearchParams(location.search).get("debug")) {
+      document.getElementById("debugging-console").hidden = false;
+    }
   },
 
   async onShowPaymentRequest(detail) {
     // Handle getting called before the DOM is ready.
     await this.domReadyPromise;
 
-    document.querySelector("payment-dialog").setLoadingState({
+    document.querySelector("payment-dialog").setStateFromParent({
       request: detail.request,
       savedAddresses: detail.savedAddresses,
       savedBasicCards: detail.savedBasicCards,
@@ -100,10 +109,14 @@ let PaymentRequest = {
     this.sendMessageToChrome("pay", data);
   },
 
+  changeShippingAddress(data) {
+    this.sendMessageToChrome("changeShippingAddress", data);
+  },
+
   onPaymentRequestUnload() {
     // remove listeners that may be used multiple times here
     window.removeEventListener("paymentChromeToContent", this);
   },
 };
 
-PaymentRequest.init();
+paymentRequest.init();

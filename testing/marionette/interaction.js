@@ -6,20 +6,20 @@
 
 const {utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 
-Cu.import("chrome://marionette/content/accessibility.js");
-Cu.import("chrome://marionette/content/atom.js");
-Cu.import("chrome://marionette/content/element.js");
+ChromeUtils.import("chrome://marionette/content/accessibility.js");
+ChromeUtils.import("chrome://marionette/content/atom.js");
+ChromeUtils.import("chrome://marionette/content/element.js");
 const {
   ElementClickInterceptedError,
   ElementNotInteractableError,
   InvalidArgumentError,
   InvalidElementStateError,
-} = Cu.import("chrome://marionette/content/error.js", {});
-Cu.import("chrome://marionette/content/event.js");
-const {pprint} = Cu.import("chrome://marionette/content/format.js", {});
-const {TimedPromise} = Cu.import("chrome://marionette/content/sync.js", {});
+} = ChromeUtils.import("chrome://marionette/content/error.js", {});
+ChromeUtils.import("chrome://marionette/content/event.js");
+const {pprint} = ChromeUtils.import("chrome://marionette/content/format.js", {});
+const {TimedPromise} = ChromeUtils.import("chrome://marionette/content/sync.js", {});
 
 Cu.importGlobalProperties(["File"]);
 
@@ -270,7 +270,7 @@ interaction.selectOption = function(el) {
   event.mouseover(containerEl);
   event.mousemove(containerEl);
   event.mousedown(containerEl);
-  event.focus(containerEl);
+  containerEl.focus();
 
   if (!el.disabled) {
     // Clicking <option> in <select> should not be deselected if selected.
@@ -287,6 +287,7 @@ interaction.selectOption = function(el) {
 
   event.mouseup(containerEl);
   event.click(containerEl);
+  containerEl.blur();
 };
 
 /**
@@ -340,9 +341,10 @@ function clearContentEditableElement(el) {
   if (el.innerHTML === "") {
     return;
   }
-  event.focus(el);
+  el.focus();
   el.innerHTML = "";
-  event.blur(el);
+  event.change(el);
+  el.blur();
 }
 
 function clearResettableElement(el) {
@@ -365,9 +367,10 @@ function clearResettableElement(el) {
     return;
   }
 
-  event.focus(el);
+  el.focus();
   el.value = "";
-  event.blur(el);
+  event.change(el);
+  el.blur();
 }
 
 /**
@@ -411,21 +414,30 @@ interaction.flushEventLoop = async function(el) {
 };
 
 /**
- * Focus element and, if a textual input field and no previous selection
- * state exists, move the caret to the end of the input field.
+ * If <var>el<var> is a textual form control and no previous
+ * selection state exists, move the caret to the end of the form control.
  *
- * @param {Element} element
- *     Element to focus.
+ * The element has to be a <code>&lt;input type=text&gt;</code>
+ * or <code>&lt;textarea&gt;</code> element for the cursor to move
+ * be moved.
+ *
+ * @param {Element} el
+ *     Element to potential move the caret in.
  */
-interaction.focusElement = function(el) {
-  let t = el.type;
-  if (t && (t == "text" || t == "textarea")) {
+interaction.moveCaretToEnd = function(el) {
+  if (!element.isDOMElement(el)) {
+    return;
+  }
+
+  let isTextarea = el.localName == "textarea";
+  let isInputText = el.localName == "input" && el.type == "text";
+
+  if (isTextarea || isInputText) {
     if (el.selectionEnd == 0) {
       let len = el.value.length;
       el.setSelectionRange(len, len);
     }
   }
-  el.focus();
 };
 
 /**
@@ -451,7 +463,6 @@ interaction.isKeyboardInteractable = function(el) {
   }
 
   el.focus();
-
   return el === win.document.activeElement;
 };
 
@@ -484,13 +495,14 @@ interaction.uploadFile = async function(el, path) {
   event.mouseover(el);
   event.mousemove(el);
   event.mousedown(el);
-  event.focus(el);
+  el.focus();
   event.mouseup(el);
   event.click(el);
 
   el.mozSetFileArray(fs);
 
   event.change(el);
+  el.blur();
 };
 
 /**
@@ -556,7 +568,8 @@ async function webdriverSendKeysToElement(el, value, a11y) {
   let acc = await a11y.getAccessible(el, true);
   a11y.assertActionable(acc, el);
 
-  interaction.focusElement(el);
+  el.focus();
+  interaction.moveCaretToEnd(el);
 
   if (el.type == "file") {
     await interaction.uploadFile(el, value);
@@ -566,6 +579,8 @@ async function webdriverSendKeysToElement(el, value, a11y) {
   } else {
     event.sendKeysToElement(value, el, win);
   }
+
+  el.blur();
 }
 
 async function legacySendKeysToElement(el, value, a11y) {
@@ -589,7 +604,8 @@ async function legacySendKeysToElement(el, value, a11y) {
     let acc = await a11y.getAccessible(el, true);
     a11y.assertActionable(acc, el);
 
-    interaction.focusElement(el);
+    interaction.moveCaretToEnd(el);
+    el.focus();
     event.sendKeysToElement(value, el, win);
   }
 }

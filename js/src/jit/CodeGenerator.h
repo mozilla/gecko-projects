@@ -284,6 +284,11 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitIsNullOrLikeUndefinedT(LIsNullOrLikeUndefinedT* lir) override;
     void visitIsNullOrLikeUndefinedAndBranchV(LIsNullOrLikeUndefinedAndBranchV* lir) override;
     void visitIsNullOrLikeUndefinedAndBranchT(LIsNullOrLikeUndefinedAndBranchT* lir) override;
+    void emitSameValue(FloatRegister left, FloatRegister right, FloatRegister temp,
+                       Register output);
+    void visitSameValueD(LSameValueD* lir) override;
+    void visitSameValueV(LSameValueV* lir) override;
+    void visitSameValueVM(LSameValueVM* lir) override;
     void emitConcat(LInstruction* lir, Register lhs, Register rhs, Register output);
     void visitConcat(LConcat* lir) override;
     void visitCharCodeAt(LCharCodeAt* lir) override;
@@ -371,7 +376,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitInArray(LInArray* ins) override;
     void visitInstanceOfO(LInstanceOfO* ins) override;
     void visitInstanceOfV(LInstanceOfV* ins) override;
-    void visitCallInstanceOf(LCallInstanceOf* ins) override;
+    void visitInstanceOfCache(LInstanceOfCache* ins) override;
     void visitGetDOMProperty(LGetDOMProperty* lir) override;
     void visitGetDOMMemberV(LGetDOMMemberV* lir) override;
     void visitGetDOMMemberT(LGetDOMMemberT* lir) override;

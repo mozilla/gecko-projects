@@ -39,6 +39,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 #include "GeckoProfiler.h"
+#include "VTuneProfiler.h"
 #include "GeckoProfilerReporter.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "mozilla/AutoProfilerLabel.h"
@@ -102,7 +103,7 @@
 #endif
 
 // Android builds use the ARM Exception Handling ABI to unwind.
-#if defined(GP_PLAT_arm_android)
+#if defined(GP_PLAT_arm_linux) || defined(GP_PLAT_arm_android)
 # define HAVE_NATIVE_UNWIND
 # define USE_EHABI_STACKWALK
 # include "EHABIStackWalk.h"
@@ -1125,7 +1126,7 @@ DoLULBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
   startRegs.xip = lul::TaggedUWord(mc->gregs[REG_RIP]);
   startRegs.xsp = lul::TaggedUWord(mc->gregs[REG_RSP]);
   startRegs.xbp = lul::TaggedUWord(mc->gregs[REG_RBP]);
-#elif defined(GP_PLAT_arm_android)
+#elif defined(GP_PLAT_arm_linux) || defined(GP_PLAT_arm_android)
   startRegs.r15 = lul::TaggedUWord(mc->arm_pc);
   startRegs.r14 = lul::TaggedUWord(mc->arm_lr);
   startRegs.r13 = lul::TaggedUWord(mc->arm_sp);
@@ -1181,7 +1182,7 @@ DoLULBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
 #if defined(GP_PLAT_amd64_linux)
     uintptr_t rEDZONE_SIZE = 128;
     uintptr_t start = startRegs.xsp.Value() - rEDZONE_SIZE;
-#elif defined(GP_PLAT_arm_android)
+#elif defined(GP_PLAT_arm_linux) || defined(GP_PLAT_arm_android)
     uintptr_t rEDZONE_SIZE = 0;
     uintptr_t start = startRegs.r13.Value() - rEDZONE_SIZE;
 #elif defined(GP_PLAT_x86_linux) || defined(GP_PLAT_x86_android)
@@ -1453,7 +1454,7 @@ StreamTaskTracer(PSLockRef aLock, SpliceableJSONWriter& aWriter)
 
 static void
 StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
-                         const TimeStamp& aShutdownTime)
+                         bool aIsShuttingDown)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
 
@@ -1469,7 +1470,7 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
   // Write the shutdownTime field. Unlike startTime, shutdownTime is not an
   // absolute time stamp: It's relative to startTime. This is consistent with
   // all other (non-"startTime") times anywhere in the profile JSON.
-  if (aShutdownTime) {
+  if (aIsShuttingDown) {
     aWriter.DoubleProperty("shutdownTime", profiler_time());
   } else {
     aWriter.NullProperty("shutdownTime");
@@ -1660,8 +1661,7 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
   // Put meta data
   aWriter.StartObjectProperty("meta");
   {
-    StreamMetaJSCustomObject(aLock, aWriter,
-                             aIsShuttingDown ? TimeStamp::Now() : TimeStamp());
+    StreamMetaJSCustomObject(aLock, aWriter, aIsShuttingDown);
   }
   aWriter.EndObject();
 
@@ -2003,10 +2003,7 @@ SamplerThread::Run()
             }
           }
 
-          // We only track responsiveness for the main thread.
-          if (info->IsMainThread()) {
-            info->GetThreadResponsiveness()->Update();
-          }
+          info->GetThreadResponsiveness()->Update();
 
           // We only get the memory measurements once for all live threads.
           int64_t rssMemory = 0;
@@ -2182,12 +2179,16 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
 
   MOZ_RELEASE_ASSERT(!FindLiveThreadInfo(aLock));
 
+  VTUNE_REGISTER_THREAD(aName);
+
   if (!TLSInfo::Init(aLock)) {
     return;
   }
 
   ThreadInfo* info = new ThreadInfo(aName, Thread::GetCurrentId(),
-                                    NS_IsMainThread(), aStackTop);
+                                    NS_IsMainThread(),
+                                    NS_GetCurrentThreadNoCreate(),
+                                    aStackTop);
   TLSInfo::SetInfo(aLock, info);
 
   if (ActivePS::Exists(aLock) && ActivePS::ShouldProfileThread(aLock, info)) {
@@ -2296,6 +2297,8 @@ void
 profiler_init(void* aStackTop)
 {
   LOG("profiler_init");
+
+  VTUNE_INIT();
 
   MOZ_RELEASE_ASSERT(!CorePS::Exists());
 
@@ -2444,6 +2447,8 @@ void
 profiler_shutdown()
 {
   LOG("profiler_shutdown");
+
+  VTUNE_SHUTDOWN();
 
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(CorePS::Exists());
@@ -3329,6 +3334,8 @@ profiler_tracing(const char* aCategory, const char* aMarkerName,
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
+  VTUNE_TRACING(aMarkerName, aKind);
+
   // This function is hot enough that we use RacyFeatures, notActivePS.
   if (!RacyFeatures::IsActiveWithoutPrivacy()) {
     return;
@@ -3343,6 +3350,8 @@ profiler_tracing(const char* aCategory, const char* aMarkerName,
                  TracingKind aKind, UniqueProfilerBacktrace aCause)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
+
+  VTUNE_TRACING(aMarkerName, aKind);
 
   // This function is hot enough that we use RacyFeatures, notActivePS.
   if (!RacyFeatures::IsActiveWithoutPrivacy()) {

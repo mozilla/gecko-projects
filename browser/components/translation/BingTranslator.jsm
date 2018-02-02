@@ -8,11 +8,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 this.EXPORTED_SYMBOLS = [ "BingTranslator" ];
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/PromiseUtils.jsm");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://gre/modules/Http.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://gre/modules/Http.jsm");
 
 // The maximum amount of net data allowed per request on Bing's API.
 const MAX_REQUEST_DATA = 5000; // Documentation says 10000 but anywhere
@@ -132,7 +132,7 @@ this.BingTranslator.prototype = {
    */
   _chunkFailed(aError) {
     if (aError instanceof Ci.nsIXMLHttpRequest &&
-        [400, 401].indexOf(aError.status) != -1) {
+        [400, 401].includes(aError.status)) {
       let body = aError.responseText;
       if (body && body.includes("TranslateApiException") &&
           (body.includes("balance") || body.includes("active state")))

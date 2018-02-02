@@ -28,6 +28,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsFocusManager.h"
+#include "nsGenericHTMLElement.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "nsIDocument.h"
@@ -39,7 +40,6 @@
 #include "nsIFormControl.h"
 #include "nsIComboboxControlFrame.h"
 #include "nsIScrollableFrame.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsIDOMXULControlElement.h"
 #include "nsNameSpaceManager.h"
 #include "nsIBaseWindow.h"
@@ -76,7 +76,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsITimer.h"
 #include "nsFontMetrics.h"
-#include "nsIDOMXULDocument.h"
 #include "nsIDragService.h"
 #include "nsIDragSession.h"
 #include "mozilla/dom/DataTransfer.h"
@@ -991,9 +990,7 @@ IsAccessKeyTarget(nsIContent* aContent, nsIFrame* aFrame, nsAString& aKey)
       !contentKey.Equals(aKey, nsCaseInsensitiveStringComparator()))
     return false;
 
-  nsCOMPtr<nsIDOMXULDocument> xulDoc =
-    do_QueryInterface(aContent->OwnerDoc());
-  if (!xulDoc && !aContent->IsXULElement())
+  if (!aContent->OwnerDoc()->IsXULDocument() && !aContent->IsXULElement())
     return true;
 
     // For XUL we do visibility checks.
@@ -1991,16 +1988,13 @@ EventStateManager::DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow
   // found, just use the clicked node.
   if (!*aSelection) {
     while (dragContent) {
-      nsCOMPtr<nsIDOMHTMLElement> htmlElement = do_QueryInterface(dragContent);
-      if (htmlElement) {
-        bool draggable = false;
-        htmlElement->GetDraggable(&draggable);
-        if (draggable)
+      if (auto htmlElement = nsGenericHTMLElement::FromContent(dragContent)) {
+        if (htmlElement->Draggable()) {
           break;
+        }
       }
       else {
-        nsCOMPtr<nsIDOMXULElement> xulElement = do_QueryInterface(dragContent);
-        if (xulElement) {
+        if (dragContent->IsXULElement()) {
           // All XUL elements are draggable, so if a XUL element is
           // encountered, stop looking for draggable nodes and just use the
           // original clicked node instead.
@@ -4326,9 +4320,10 @@ EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
   // content associated with our subdocument.
   EnsureDocument(mPresContext);
   if (nsIDocument *parentDoc = mDocument->GetParentDocument()) {
-    if (nsIContent *docContent = parentDoc->FindContentForSubDocument(mDocument)) {
+    if (nsCOMPtr<nsIContent> docContent =
+          parentDoc->FindContentForSubDocument(mDocument)) {
       if (nsIPresShell *parentShell = parentDoc->GetShell()) {
-        EventStateManager* parentESM =
+        RefPtr<EventStateManager> parentESM =
           parentShell->GetPresContext()->EventStateManager();
         parentESM->NotifyMouseOver(aMouseEvent, docContent);
       }

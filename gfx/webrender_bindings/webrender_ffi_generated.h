@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.3.3 */
+/* Generated with cbindgen:0.4.0 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -49,16 +49,6 @@ enum class ClipMode {
 enum class ExtendMode : uint32_t {
   Clamp = 0,
   Repeat = 1,
-
-  Sentinel /* this must be last for serialization purposes. */
-};
-
-enum class ExternalImageType : uint32_t {
-  Texture2DHandle = 0,
-  Texture2DArrayHandle = 1,
-  TextureRectHandle = 2,
-  TextureExternalHandle = 3,
-  ExternalBuffer = 4,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -204,6 +194,16 @@ enum class WrAnimationType : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class WrExternalImageBufferType {
+  TextureHandle = 0,
+  TextureRectHandle = 1,
+  TextureArrayHandle = 2,
+  TextureExternalHandle = 3,
+  ExternalBuffer = 4,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class WrExternalImageType : uint32_t {
   RawData = 0,
   NativeTexture = 1,
@@ -324,6 +324,8 @@ struct TypedSize2D {
            height == aOther.height;
   }
 };
+
+using DeviceUintSize = TypedSize2D<uint32_t, DevicePixel>;
 
 using LayerSize = TypedSize2D<float, LayerPixel>;
 
@@ -843,8 +845,6 @@ struct WrImageDescriptor {
   }
 };
 
-using WrExternalImageBufferType = ExternalImageType;
-
 // Represents RGBA screen colors with one byte per channel.
 //
 // If the alpha value `a` is 255 the color is opaque.
@@ -978,12 +978,29 @@ const VecU8 *wr_add_ref_arc(const ArcVecU8 *aArc)
 WR_FUNC;
 
 WR_INLINE
+void wr_api_capture(DocumentHandle *aDh,
+                    const char *aPath,
+                    uint32_t aBitsRaw)
+WR_FUNC;
+
+WR_INLINE
 void wr_api_clone(DocumentHandle *aDh,
                   DocumentHandle **aOutHandle)
 WR_FUNC;
 
 WR_INLINE
+void wr_api_create_document(DocumentHandle *aRootDh,
+                            DocumentHandle **aOutHandle,
+                            DeviceUintSize aDocSize,
+                            int8_t aLayer)
+WR_FUNC;
+
+WR_INLINE
 void wr_api_delete(DocumentHandle *aDh)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+void wr_api_delete_document(DocumentHandle *aDh)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
@@ -1016,6 +1033,10 @@ void wr_api_send_transaction(DocumentHandle *aDh,
 WR_FUNC;
 
 WR_INLINE
+void wr_api_shut_down(DocumentHandle *aDh)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
 void wr_clear_item_tag(WrState *aState)
 WR_FUNC;
 
@@ -1038,12 +1059,12 @@ uint64_t wr_dp_define_clip(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
-void wr_dp_define_scroll_layer(WrState *aState,
-                               uint64_t aScrollId,
-                               const uint64_t *aAncestorScrollId,
-                               const uint64_t *aAncestorClipId,
-                               LayoutRect aContentRect,
-                               LayoutRect aClipRect)
+uint64_t wr_dp_define_scroll_layer(WrState *aState,
+                                   uint64_t aScrollId,
+                                   const uint64_t *aAncestorScrollId,
+                                   const uint64_t *aAncestorClipId,
+                                   LayoutRect aContentRect,
+                                   LayoutRect aClipRect)
 WR_FUNC;
 
 WR_INLINE
@@ -1583,8 +1604,8 @@ WR_FUNC;
 
 WR_INLINE
 void wr_transaction_set_window_parameters(Transaction *aTxn,
-                                          int32_t aWindowWidth,
-                                          int32_t aWindowHeight)
+                                          const DeviceUintSize *aWindowSize,
+                                          const DeviceUintRect *aDocRect)
 WR_FUNC;
 
 WR_INLINE

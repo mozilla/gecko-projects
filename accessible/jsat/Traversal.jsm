@@ -11,15 +11,15 @@ const Cu = Components.utils;
 
 this.EXPORTED_SYMBOLS = ["TraversalRules", "TraversalHelper"]; // jshint ignore:line
 
-Cu.import("resource://gre/modules/accessibility/Utils.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Roles", // jshint ignore:line
+ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "Roles", // jshint ignore:line
   "resource://gre/modules/accessibility/Constants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Filters", // jshint ignore:line
+ChromeUtils.defineModuleGetter(this, "Filters", // jshint ignore:line
   "resource://gre/modules/accessibility/Constants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "States", // jshint ignore:line
+ChromeUtils.defineModuleGetter(this, "States", // jshint ignore:line
   "resource://gre/modules/accessibility/Constants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Prefilters", // jshint ignore:line
+ChromeUtils.defineModuleGetter(this, "Prefilters", // jshint ignore:line
   "resource://gre/modules/accessibility/Constants.jsm");
 
 var gSkipEmptyImages = new PrefCache("accessibility.accessfu.skip_empty_images");
@@ -28,10 +28,10 @@ function BaseTraversalRule(aRoles, aMatchFunc, aPreFilter, aContainerRule) {
   this._explicitMatchRoles = new Set(aRoles);
   this._matchRoles = aRoles;
   if (aRoles.length) {
-    if (aRoles.indexOf(Roles.LABEL) < 0) {
+    if (!aRoles.includes(Roles.LABEL)) {
       this._matchRoles.push(Roles.LABEL);
     }
-    if (aRoles.indexOf(Roles.INTERNAL_FRAME) < 0) {
+    if (!aRoles.includes(Roles.INTERNAL_FRAME)) {
       // Used for traversing in to child OOP frames.
       this._matchRoles.push(Roles.INTERNAL_FRAME);
     }
@@ -122,7 +122,7 @@ var gSimpleMatchFunc = function gSimpleMatchFunc(aAccessible) {
     for (let child = acc.firstChild; child; child = child.nextSibling) {
       // text leafs inherit the actionCount of any ancestor that has a click
       // listener.
-      if ([Roles.TEXT_LEAF, Roles.STATICTEXT].indexOf(child.role) >= 0) {
+      if ([Roles.TEXT_LEAF, Roles.STATICTEXT].includes(child.role)) {
         continue;
       }
       if (Utils.visibleChildCount(child) > 0 || child.actionCount > 0) {

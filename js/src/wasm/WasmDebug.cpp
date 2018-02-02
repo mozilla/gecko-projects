@@ -21,6 +21,7 @@
 #include "mozilla/BinarySearch.h"
 
 #include "ds/Sort.h"
+#include "gc/FreeOp.h"
 #include "jit/ExecutableAllocator.h"
 #include "jit/MacroAssembler.h"
 #include "vm/Debugger.h"
@@ -577,7 +578,7 @@ DebugState::getGlobal(Instance& instance, uint32_t globalIndex, MutableHandleVal
         return true;
     }
 
-    uint8_t* globalData = instance.globalSegment().globalData();
+    uint8_t* globalData = instance.globalData();
     void* dataPtr = globalData + global.offset();
     switch (global.type()) {
       case ValType::I32: {
@@ -680,7 +681,17 @@ DebugState::getSourceMappingURL(JSContext* cx, MutableHandleString result) const
         if (!str)
             return false;
         result.set(str);
-        break;
+        return true;
+    }
+
+    // Check presence of "SourceMap:" HTTP response header.
+    char* sourceMapURL = metadata().sourceMapURL.get();
+    if (sourceMapURL && strlen(sourceMapURL)) {
+        UTF8Chars utf8Chars(sourceMapURL, strlen(sourceMapURL));
+        JSString* str = JS_NewStringCopyUTF8N(cx, utf8Chars);
+        if (!str)
+            return false;
+        result.set(str);
     }
     return true;
 }

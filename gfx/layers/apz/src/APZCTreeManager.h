@@ -18,7 +18,7 @@
 #include "mozilla/layers/IAPZCTreeManager.h" // for IAPZCTreeManager
 #include "mozilla/layers/KeyboardMap.h" // for KeyboardMap
 #include "mozilla/layers/FocusState.h"  // for FocusState
-#include "mozilla/Mutex.h"              // for Mutex
+#include "mozilla/RecursiveMutex.h"     // for RecursiveMutex
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/TimeStamp.h"          // for mozilla::TimeStamp
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -267,6 +267,13 @@ public:
    * for the different touch points. In the case where the touch point has no
    * target, or the target is not a scrollable frame, the target's |mScrollId|
    * should be set to FrameMetrics::NULL_SCROLL_ID.
+   * Note: For mouse events that start a scrollbar drag, both SetTargetAPZC()
+   *       and StartScrollbarDrag() will be called, and the calls may happen
+   *       in either order. That's fine - whichever arrives first will confirm
+   *       the block, and StartScrollbarDrag() will fill in the drag metrics.
+   *       If the block is confirmed before we have drag metrics, some events
+   *       in the drag block may be handled as no-ops until the drag metrics
+   *       arrive.
    */
   void SetTargetAPZC(
       uint64_t aInputBlockId,
@@ -642,7 +649,7 @@ private:
    * is considered part of the APZC tree management state.
    * Finally, the lock needs to be held when accessing mZoomConstraints.
    * IMPORTANT: See the note about lock ordering at the top of this file. */
-  mutable mozilla::Mutex mTreeLock;
+  mutable mozilla::RecursiveMutex mTreeLock;
   RefPtr<HitTestingTreeNode> mRootNode;
   /* Holds the zoom constraints for scrollable layers, as determined by the
    * the main-thread gecko code. */

@@ -781,9 +781,19 @@ public:
    *
    * @param aContent The content node.
    * @return the presContext, or nullptr if the content is not in a document
-   *         (if GetCurrentDoc returns nullptr)
+   *         (if GetComposedDoc returns nullptr)
    */
   static nsPresContext* GetContextForContent(const nsIContent* aContent);
+
+
+  /**
+   * Method that gets the pres shell for the node.
+   *
+   * @param aContent The content node.
+   * @return the pres shell, or nullptr if the content is not in a document
+   *         (if GetComposedDoc returns nullptr)
+   */
+  static nsIPresShell* GetPresShellForContent(const nsIContent* aContent);
 
   /**
    * Method to do security and content policy checks on the image URI
@@ -1578,6 +1588,11 @@ public:
   static bool IsValidNodeName(nsAtom *aLocalName, nsAtom *aPrefix,
                                 int32_t aNamespaceID);
 
+  enum SanitizeFragments {
+    SanitizeSystemPrivileged,
+    NeverSanitize,
+  };
+
   /**
    * Creates a DocumentFragment from text using a context node to resolve
    * namespaces.
@@ -1591,6 +1606,8 @@ public:
    * @param aFragment the string which is parsed to a DocumentFragment
    * @param aReturn the resulting fragment
    * @param aPreventScriptExecution whether to mark scripts as already started
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    */
   static nsresult CreateContextualFragment(nsINode* aContextNode,
                                            const nsAString& aFragment,
@@ -1599,7 +1616,16 @@ public:
   static already_AddRefed<mozilla::dom::DocumentFragment>
   CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
                            bool aPreventScriptExecution,
+                           SanitizeFragments aSanitize,
                            mozilla::ErrorResult& aRv);
+  static already_AddRefed<mozilla::dom::DocumentFragment>
+  CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
+                           bool aPreventScriptExecution,
+                           mozilla::ErrorResult& aRv)
+  {
+    return CreateContextualFragment(aContextNode, aFragment, aPreventScriptExecution,
+                                    SanitizeSystemPrivileged, aRv);
+  }
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the HTML parser.
@@ -1612,6 +1638,8 @@ public:
    * @param aPreventScriptExecution true to prevent scripts from executing;
    *        don't set to false when parsing into a target node that has been
    *        bound to tree.
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, NS_ERROR_OUT_OF_MEMORY if aSourceBuffer is too
    *         long and NS_OK otherwise.
@@ -1621,7 +1649,8 @@ public:
                                     nsAtom* aContextLocalName,
                                     int32_t aContextNamespace,
                                     bool aQuirks,
-                                    bool aPreventScriptExecution);
+                                    bool aPreventScriptExecution,
+                                    SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the XML parser.
@@ -1631,6 +1660,8 @@ public:
    * @param aTagStack the namespace mapping context
    * @param aPreventExecution whether to mark scripts as already started
    * @param aReturn the result fragment
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, a return code from the XML parser.
    */
@@ -1638,7 +1669,8 @@ public:
                                    nsIDocument* aDocument,
                                    nsTArray<nsString>& aTagStack,
                                    bool aPreventScriptExecution,
-                                   nsIDOMDocumentFragment** aReturn);
+                                   nsIDOMDocumentFragment** aReturn,
+                                   SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
    * Parse a string into a document using the HTML parser.
@@ -2907,6 +2939,8 @@ public:
 
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
 
+  static bool IsNonSubresourceInternalPolicyType(nsContentPolicyType aType);
+
   // The order of these entries matters, as we use std::min for total ordering
   // of permissions. Private Browsing is considered to be more limiting
   // then session scoping
@@ -2952,6 +2986,13 @@ public:
   static StorageAccess StorageAllowedForNewWindow(nsIPrincipal* aPrincipal,
                                                   nsIURI* aURI,
                                                   nsPIDOMWindowInner* aParent);
+
+  /*
+   * Checks if storage should be allowed for the given channel.  The check will
+   * be based on the channel result principal and, depending on preferences and
+   * permissions, mozIThirdPartyUtil.isThirdPartyChannel().
+   */
+  static StorageAccess StorageAllowedForChannel(nsIChannel* aChannel);
 
   /*
    * Checks if storage for the given principal is permitted by the user's
@@ -3331,14 +3372,17 @@ private:
    * preferences. If aWindow is non-null, its principal must be passed as
    * aPrincipal, and the third-party iframe and sandboxing status of the window
    * are also checked.  If aURI is non-null, then it is used as the comparison
-   * against aWindow to determine if this is a third-party load.
+   * against aWindow to determine if this is a third-party load.  We also
+   * allow a channel instead of the window reference when determining 3rd party
+   * status.
    *
    * Used in the implementation of StorageAllowedForWindow and
    * StorageAllowedForPrincipal.
    */
   static StorageAccess InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
                                                           nsPIDOMWindowInner* aWindow,
-                                                          nsIURI* aURI);
+                                                          nsIURI* aURI,
+                                                          nsIChannel* aChannel);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,

@@ -20,7 +20,6 @@ interfaces = [
     'html',
     'events',
     'sidebar',
-    'traversal',
     'range',
     'xbl',
     'xpath',
@@ -74,7 +73,6 @@ DIRS += [
     'security',
     'storage',
     'svg',
-    'time',
     'locales',
     'network',
     'permission',
@@ -107,13 +105,11 @@ DIRS += [
     'script',
     'payments',
     'websocket',
+    'serviceworkers',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['plugins/ipc/hangui']
-
-if CONFIG['MOZ_SECUREELEMENT']:
-    DIRS += ['secureelement']
 
 DIRS += ['presentation']
 

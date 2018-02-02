@@ -60,13 +60,13 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-Cu.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 Cu.importGlobalProperties(["fetch"]);
-const { EventEmitter } = Cu.import("resource://gre/modules/EventEmitter.jsm", {});
+const { EventEmitter } = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
 const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
 // Use standalone kinto-http module landed in FFx.
-const { KintoHttpClient } = Cu.import("resource://services-common/kinto-http-client.js");
+const { KintoHttpClient } = ChromeUtils.import("resource://services-common/kinto-http-client.js");
 
 class Kinto extends _KintoBase2.default {
   constructor(options = {}) {
@@ -322,7 +322,7 @@ const cursorHandlers = {
 function findIndexedField(filters) {
   const filteredFields = Object.keys(filters);
   const indexedFields = filteredFields.filter(field => {
-    return INDEXED_FIELDS.indexOf(field) !== -1;
+    return INDEXED_FIELDS.includes(field);
   });
   return indexedFields[0];
 }
@@ -1243,7 +1243,7 @@ class Collection {
     const validatedHooks = {};
 
     for (const hook in hooks) {
-      if (AVAILABLE_HOOKS.indexOf(hook) === -1) {
+      if (!AVAILABLE_HOOKS.includes(hook)) {
         throw new Error("The hook should be one of " + AVAILABLE_HOOKS.join(", "));
       }
       validatedHooks[hook] = this._validateHook(hooks[hook]);
@@ -2507,7 +2507,7 @@ function deepEqual(a, b) {
  */
 function omitKeys(obj, keys = []) {
   return Object.keys(obj).reduce((acc, key) => {
-    if (keys.indexOf(key) === -1) {
+    if (!keys.includes(key)) {
       acc[key] = obj[key];
     }
     return acc;

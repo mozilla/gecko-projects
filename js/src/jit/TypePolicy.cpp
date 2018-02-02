@@ -99,7 +99,7 @@ ArithPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
 }
 
 bool
-AllDoublePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
+AllDoublePolicy::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     for (size_t i = 0, e = ins->numOperands(); i < e; i++) {
         MDefinition* in = ins->getOperand(i);
@@ -235,12 +235,12 @@ ComparePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
             break;
           }
           case MIRType::Int32: {
-            MacroAssembler::IntConversionInputKind convert = MacroAssembler::IntConversion_NumbersOnly;
+            IntConversionInputKind convert = IntConversionInputKind::NumbersOnly;
             if (compare->compareType() == MCompare::Compare_Int32MaybeCoerceBoth ||
                 (compare->compareType() == MCompare::Compare_Int32MaybeCoerceLHS && i == 0) ||
                 (compare->compareType() == MCompare::Compare_Int32MaybeCoerceRHS && i == 1))
             {
-                convert = MacroAssembler::IntConversion_NumbersOrBoolsOnly;
+                convert = IntConversionInputKind::NumbersOrBoolsOnly;
             }
             replace = MToNumberInt32::New(alloc, in, convert);
             break;
@@ -266,6 +266,37 @@ ComparePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
     }
 
     return true;
+}
+
+bool
+SameValuePolicy::adjustInputs(TempAllocator& alloc, MInstruction* def)
+{
+    MOZ_ASSERT(def->isSameValue());
+    MSameValue* sameValue = def->toSameValue();
+    MIRType lhsType = sameValue->lhs()->type();
+    MIRType rhsType = sameValue->rhs()->type();
+
+    // If both operands are numbers, convert them to doubles.
+    if (IsNumberType(lhsType) && IsNumberType(rhsType))
+        return AllDoublePolicy::staticAdjustInputs(alloc, def);
+
+    // SameValue(Anything, Double) is specialized, so convert the rhs if it's
+    // not already a double.
+    if (lhsType == MIRType::Value && IsNumberType(rhsType)) {
+        if (rhsType != MIRType::Double) {
+            MInstruction* replace = MToDouble::New(alloc, sameValue->rhs());
+            def->block()->insertBefore(def, replace);
+            def->replaceOperand(1, replace);
+
+            if (!replace->typePolicy()->adjustInputs(alloc, replace))
+                return false;
+        }
+
+        return true;
+    }
+
+    // Otherwise box both operands.
+    return BoxInputsPolicy::staticAdjustInputs(alloc, def);
 }
 
 bool
@@ -728,7 +759,7 @@ ToInt32Policy::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins)
 {
     MOZ_ASSERT(ins->isToNumberInt32() || ins->isTruncateToInt32());
 
-    MacroAssembler::IntConversionInputKind conversion = MacroAssembler::IntConversion_Any;
+    IntConversionInputKind conversion = IntConversionInputKind::Any;
     if (ins->isToNumberInt32())
         conversion = ins->toToNumberInt32()->conversion();
 
@@ -747,14 +778,14 @@ ToInt32Policy::staticAdjustInputs(TempAllocator& alloc, MInstruction* ins)
         break;
       case MIRType::Null:
         // No need for boxing, when we will convert.
-        if (conversion == MacroAssembler::IntConversion_Any)
+        if (conversion == IntConversionInputKind::Any)
             return true;
         break;
       case MIRType::Boolean:
         // No need for boxing, when we will convert.
-        if (conversion == MacroAssembler::IntConversion_Any)
+        if (conversion == IntConversionInputKind::Any)
             return true;
-        if (conversion == MacroAssembler::IntConversion_NumbersOrBoolsOnly)
+        if (conversion == IntConversionInputKind::NumbersOrBoolsOnly)
             return true;
         break;
       case MIRType::Object:
@@ -857,7 +888,7 @@ SimdShufflePolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
         if (in->type() == MIRType::Int32)
             continue;
 
-        auto* replace = MToNumberInt32::New(alloc, in, MacroAssembler::IntConversion_NumbersOnly);
+        auto* replace = MToNumberInt32::New(alloc, in, IntConversionInputKind::NumbersOnly);
         ins->block()->insertBefore(ins, replace);
         ins->replaceOperand(s->numVectors() + i, replace);
         if (!replace->typePolicy()->adjustInputs(alloc, replace))
@@ -1204,6 +1235,7 @@ FilterTypeSetPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
     _(FilterTypeSetPolicy)                      \
     _(InstanceOfPolicy)                         \
     _(PowPolicy)                                \
+    _(SameValuePolicy)                          \
     _(SimdAllPolicy)                            \
     _(SimdSelectPolicy)                         \
     _(SimdShufflePolicy)                        \

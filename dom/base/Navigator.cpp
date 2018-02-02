@@ -45,7 +45,7 @@
 #include "mozilla/dom/VRDisplay.h"
 #include "mozilla/dom/VRDisplayEvent.h"
 #include "mozilla/dom/VRServiceTest.h"
-#include "mozilla/dom/workers/RuntimeService.h"
+#include "mozilla/dom/workerinternals/RuntimeService.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
@@ -62,7 +62,6 @@
 #include "nsIStringStream.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
-#include "TimeManager.h"
 #include "nsStreamUtils.h"
 #include "WidgetUtils.h"
 #include "nsIPresentationService.h"
@@ -83,8 +82,8 @@
 #include "mozilla/dom/FormData.h"
 #include "nsIDocShell.h"
 
-#include "WorkerPrivate.h"
-#include "WorkerRunnable.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
 
 #if defined(XP_LINUX)
 #include "mozilla/Hal.h"
@@ -198,7 +197,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStorageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCredentials)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaDevices)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTimeManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mServiceWorkerContainer)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
@@ -247,10 +245,6 @@ Navigator::Invalidate()
   }
 
   mMediaDevices = nullptr;
-
-  if (mTimeManager) {
-    mTimeManager = nullptr;
-  }
 
   if (mPresentation) {
     mPresentation = nullptr;
@@ -698,7 +692,8 @@ Navigator::JavaEnabled(CallerType aCallerType, ErrorResult& aRv)
 uint64_t
 Navigator::HardwareConcurrency()
 {
-  workers::RuntimeService* rts = workers::RuntimeService::GetOrCreateService();
+  workerinternals::RuntimeService* rts =
+    workerinternals::RuntimeService::GetOrCreateService();
   if (!rts) {
     return 1;
   }
@@ -1156,6 +1151,7 @@ Navigator::SendBeaconInternal(const nsAString& aUrl,
                      doc,
                      securityFlags,
                      nsIContentPolicy::TYPE_BEACON,
+                     nullptr, // aPerformanceStorage
                      nullptr, // aLoadGroup
                      nullptr, // aCallbacks
                      loadFlags);
@@ -1483,8 +1479,7 @@ Navigator::RequestVRPresentation(VRDisplay& aDisplay)
 nsINetworkProperties*
 Navigator::GetNetworkProperties()
 {
-  IgnoredErrorResult rv;
-  return GetConnection(rv);
+  return GetConnection(IgnoreErrors());
 }
 
 network::Connection*
@@ -1500,23 +1495,6 @@ Navigator::GetConnection(ErrorResult& aRv)
 
   return mConnection;
 }
-
-#ifdef MOZ_TIME_MANAGER
-time::TimeManager*
-Navigator::GetMozTime(ErrorResult& aRv)
-{
-  if (!mWindow) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  if (!mTimeManager) {
-    mTimeManager = new time::TimeManager(mWindow);
-  }
-
-  return mTimeManager;
-}
-#endif
 
 already_AddRefed<ServiceWorkerContainer>
 Navigator::ServiceWorker()

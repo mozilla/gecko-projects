@@ -1,9 +1,5 @@
 "use strict";
 
-const StandardURL = Components.Constructor("@mozilla.org/network/standard-url;1",
-                                           "nsIStandardURL",
-                                           "init");
-const nsIStandardURL = Components.interfaces.nsIStandardURL;
 const gPrefs = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefBranch);
 
 function symmetricEquality(expect, a, b)
@@ -31,9 +27,11 @@ function symmetricEquality(expect, a, b)
 }
 
 function stringToURL(str) {
-  return (new StandardURL(nsIStandardURL.URLTYPE_AUTHORITY, 80,
-			 str, "UTF-8", null))
-         .QueryInterface(Components.interfaces.nsIURL);
+  return Cc["@mozilla.org/network/standard-url-mutator;1"]
+         .createInstance(Ci.nsIStandardURLMutator)
+         .init(Ci.nsIStandardURL.URLTYPE_AUTHORITY, 80, str, "UTF-8", null)
+         .finalize()
+         .QueryInterface(Ci.nsIURL);
 }
 
 function pairToURLs(pair) {
@@ -305,7 +303,7 @@ add_test(function test_hugeStringThrows()
   let hugeString = new Array(maxLen + 1).fill("a").join("");
   let properties = ["scheme", "userPass", "username",
                     "password", "hostPort", "host", "pathQueryRef", "ref",
-                    "query", "fileName", "filePath", "fileBaseName", "fileExtension"];
+                    "query", "filePath"];
   for (let prop of properties) {
     Assert.throws(() => url[prop] = hugeString,
                   /NS_ERROR_MALFORMED_URI/,
@@ -315,6 +313,18 @@ add_test(function test_hugeStringThrows()
   Assert.throws(() => { url = url.mutate().setSpec(hugeString).finalize(); },
                 /NS_ERROR_MALFORMED_URI/,
                 "Passing a huge string to setSpec should throw");
+
+  let setters = [
+    { method: "setFileName", qi: Ci.nsIURLMutator },
+    { method: "setFileExtension", qi: Ci.nsIURLMutator },
+    { method: "setFileBaseName", qi: Ci.nsIURLMutator },
+  ];
+
+  for (let prop of setters) {
+    Assert.throws(() => url = url.mutate().QueryInterface(prop.qi)[prop.method](hugeString).finalize(),
+                  /NS_ERROR_MALFORMED_URI/,
+                  `Passing a huge string to "${prop.method}" should throw`);
+  }
 
   run_next_test();
 });
@@ -332,7 +342,7 @@ add_test(function test_filterWhitespace()
   Assert.equal(url.spec, "http://test.com/pa%0D%0A%09th?qu%0D%0A%09ery#hash");
   url.ref = "ha\r\n\tsh";
   Assert.equal(url.spec, "http://test.com/pa%0D%0A%09th?qu%0D%0A%09ery#ha%0D%0A%09sh");
-  url.fileName = "fi\r\n\tle.name";
+  url = url.mutate().QueryInterface(Ci.nsIURLMutator).setFileName("fi\r\n\tle.name").finalize();
   Assert.equal(url.spec, "http://test.com/fi%0D%0A%09le.name?qu%0D%0A%09ery#ha%0D%0A%09sh");
 
   run_next_test();
@@ -401,7 +411,7 @@ add_test(function test_encode_C0_and_space()
   Assert.equal(url.spec, "http://example.com/pa%00th?qu%00ery#hash");
   url.ref = "ha\0sh";
   Assert.equal(url.spec, "http://example.com/pa%00th?qu%00ery#ha%00sh");
-  url.fileName = "fi\0le.name";
+  url = url.mutate().QueryInterface(Ci.nsIURLMutator).setFileName("fi\0le.name").finalize();
   Assert.equal(url.spec, "http://example.com/fi%00le.name?qu%00ery#ha%00sh");
 
   run_next_test();

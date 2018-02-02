@@ -15,7 +15,9 @@
 #ifdef XP_WIN
 #include "mozilla/LookAndFeel.h"
 #endif
+#ifdef MOZ_OLD_STYLE
 #include "nsCSSRuleProcessor.h"
+#endif
 #include "nsDeviceContext.h"
 #include "nsIBaseWindow.h"
 #include "nsIDocShell.h"
@@ -138,12 +140,6 @@ GetHeight(nsIDocument* aDocument, const nsMediaFeature*,
 }
 
 static bool
-ShouldResistFingerprinting(nsIDocument* aDocument)
-{
-  return nsContentUtils::ShouldResistFingerprinting(aDocument->GetDocShell());
-}
-
-static bool
 IsDeviceSizePageSize(nsIDocument* aDocument)
 {
   nsIDocShell* docShell = aDocument->GetDocShell();
@@ -157,7 +153,8 @@ IsDeviceSizePageSize(nsIDocument* aDocument)
 static nsSize
 GetDeviceSize(nsIDocument* aDocument)
 {
-  if (ShouldResistFingerprinting(aDocument) || IsDeviceSizePageSize(aDocument)) {
+  if (nsContentUtils::ShouldResistFingerprinting(aDocument) ||
+      IsDeviceSizePageSize(aDocument)) {
     return GetSize(aDocument);
   }
 
@@ -274,7 +271,7 @@ GetColor(nsIDocument* aDocument, const nsMediaFeature*,
   // rendered.
   uint32_t depth = 24;
 
-  if (!ShouldResistFingerprinting(aDocument)) {
+  if (!nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     if (nsDeviceContext* dx = GetDeviceContextFor(aDocument)) {
       // FIXME: On a monochrome device, return 0!
       dx->GetDepth(depth);
@@ -323,7 +320,7 @@ GetResolution(nsIDocument* aDocument, const nsMediaFeature*,
   float dppx = 1.;
 
   if (nsDeviceContext* dx = GetDeviceContextFor(aDocument)) {
-    if (ShouldResistFingerprinting(aDocument)) {
+    if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
       dppx = dx->GetFullZoom();
     } else {
       // Get the actual device pixel ratio, which also takes zoom into account.
@@ -397,7 +394,7 @@ static void
 GetDevicePixelRatio(nsIDocument* aDocument, const nsMediaFeature*,
                     nsCSSValue& aResult)
 {
-  if (ShouldResistFingerprinting(aDocument)) {
+  if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     aResult.SetFloatValue(1.0, eCSSUnit_Number);
     return;
   }
@@ -454,7 +451,8 @@ GetSystemMetric(nsIDocument* aDocument, const nsMediaFeature* aFeature,
   MOZ_ASSERT(!isAccessibleFromContentPages ||
              *aFeature->mName == nsGkAtoms::_moz_touch_enabled);
 
-  if (isAccessibleFromContentPages && ShouldResistFingerprinting(aDocument)) {
+  if (isAccessibleFromContentPages &&
+      nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     // If "privacy.resistFingerprinting" is enabled, then we simply don't
     // return any system-backed media feature values. (No spoofed values
     // returned.)
@@ -476,7 +474,7 @@ GetWindowsTheme(nsIDocument* aDocument, const nsMediaFeature* aFeature,
   aResult.Reset();
 
   MOZ_ASSERT(aFeature->mReqFlags & nsMediaFeature::eUserAgentAndChromeOnly);
-  if (ShouldResistFingerprinting(aDocument)) {
+  if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return;
   }
 
@@ -505,7 +503,7 @@ GetOperatingSystemVersion(nsIDocument* aDocument, const nsMediaFeature* aFeature
   aResult.Reset();
 
   MOZ_ASSERT(aFeature->mReqFlags & nsMediaFeature::eUserAgentAndChromeOnly);
-  if (ShouldResistFingerprinting(aDocument)) {
+  if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return;
   }
 

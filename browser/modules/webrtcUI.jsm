@@ -10,18 +10,18 @@ const Cu = Components.utils;
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 
-Cu.import("resource:///modules/syncedtabs/EventEmitter.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-                                  "resource://gre/modules/PluralForm.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SitePermissions",
-                                  "resource:///modules/SitePermissions.jsm");
+ChromeUtils.defineModuleGetter(this, "AppConstants",
+                               "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(this, "PluralForm",
+                               "resource://gre/modules/PluralForm.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "SitePermissions",
+                               "resource:///modules/SitePermissions.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
   return Services.strings.createBundle("chrome://branding/locale/brand.properties");
@@ -298,13 +298,6 @@ this.webrtcUI = {
     }
   }
 };
-
-function getBrowserForWindow(aContentWindow) {
-  return aContentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIWebNavigation)
-                       .QueryInterface(Ci.nsIDocShell)
-                       .chromeEventHandler;
-}
 
 function denyRequest(aBrowser, aRequest) {
   aBrowser.messageManager.sendAsyncMessage("webrtc:Deny",
@@ -649,21 +642,26 @@ function prompt(aBrowser, aRequest) {
               bundle.getString("getUserMedia.shareScreen.learnMoreLabel");
             let baseURL =
               Services.urlFormatter.formatURLPref("app.support.baseURL");
-            let learnMore =
-              "<label class='text-link' href='" + baseURL + "screenshare-safety'>" +
-              learnMoreText + "</label>";
+
+            let learnMore = chromeWin.document.createElement("label");
+            learnMore.className = "text-link";
+            learnMore.setAttribute("href", baseURL + "screenshare-safety");
+            learnMore.textContent = learnMoreText;
 
             if (type == "screen") {
               string = bundle.getFormattedString("getUserMedia.shareScreenWarning.message",
-                                                 [learnMore]);
+                                                 ["<>"]);
             } else {
               let brand =
                 doc.getElementById("bundle_brand").getString("brandShortName");
               string = bundle.getFormattedString("getUserMedia.shareFirefoxWarning.message",
-                                                 [brand, learnMore]);
+                                                 [brand, "<>"]);
             }
-            // eslint-disable-next-line no-unsanitized/property
-            warning.innerHTML = string;
+
+            let [pre, post] = string.split("<>");
+            warning.textContent = pre;
+            warning.appendChild(learnMore);
+            warning.appendChild(chromeWin.document.createTextNode(post));
           }
 
           let perms = Services.perms;

@@ -4,11 +4,11 @@
 
 /* import-globals-from preferences.js */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionSettingsStore",
-                                  "resource://gre/modules/ExtensionSettingsStore.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
+                               "resource://gre/modules/PlacesUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ExtensionSettingsStore",
+                               "resource://gre/modules/ExtensionSettingsStore.jsm");
 
 Preferences.addAll([
   { id: "browser.search.suggest.enabled", type: "bool" },
@@ -417,7 +417,7 @@ EngineStore.prototype = {
     for (var i in aEngine)
       clonedObj[i] = aEngine[i];
     clonedObj.originalEngine = aEngine;
-    clonedObj.shown = this.hiddenList.indexOf(clonedObj.name) == -1;
+    clonedObj.shown = !this.hiddenList.includes(clonedObj.name);
     return clonedObj;
   },
 

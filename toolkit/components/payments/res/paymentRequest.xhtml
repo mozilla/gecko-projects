@@ -10,6 +10,9 @@
   <link rel="stylesheet" href="paymentRequest.css"/>
   <link rel="stylesheet" href="components/rich-select.css"/>
   <link rel="stylesheet" href="components/address-option.css"/>
+  <link rel="stylesheet" href="components/payment-details-item.css"/>
+  <link rel="stylesheet" href="containers/order-details.css"/>
+
   <script src="vendor/custom-elements.min.js"></script>
 
   <script src="PaymentsStore.js"></script>
@@ -18,74 +21,64 @@
   <script src="mixins/PaymentStateSubscriberMixin.js"></script>
 
   <script src="components/currency-amount.js"></script>
-
+  <script src="containers/order-details.js"></script>
+  <script src="components/payment-details-item.js"></script>
   <script src="components/rich-select.js"></script>
   <script src="components/rich-option.js"></script>
   <script src="components/address-option.js"></script>
+  <script src="containers/address-picker.js"></script>
   <script src="containers/payment-dialog.js"></script>
 
   <script src="paymentRequest.js"></script>
 
   <template id="payment-dialog-template">
-    <div id="host-name"></div>
+    <header>
+      <div id="total">
+        <h2 class="label"></h2>
+        <currency-amount></currency-amount>
+        <div id="host-name"></div>
+      </div>
+      <div id="top-buttons" >
+        <button id="view-all" class="closed">View All Items</button>
+      </div>
+    </header>
 
-    <div id="total">
-      <h2 class="label"></h2>
-      <currency-amount></currency-amount>
+    <div id="main-container">
+      <section id="payment-summary">
+        <h1>Your Payment</h1>
+
+        <section>
+          <div><label>Shipping Address</label></div>
+          <address-picker selected-state-key="selectedShippingAddress"></address-picker>
+        </section>
+
+        <footer id="controls-container">
+          <button id="cancel">Cancel</button>
+          <button id="pay">Pay</button>
+        </footer>
+      </section>
+      <section id="order-details-overlay" hidden="hidden">
+        <h1>Order Details</h1>
+        <order-details></order-details>
+      </section>
     </div>
-    <div id="controls-container">
-      <button id="cancel">Cancel</button>
-      <button id="pay">Pay</button>
+  </template>
+
+  <template id="order-details-template">
+    <ul class="main-list"></ul>
+    <ul class="footer-items-list"></ul>
+
+    <div class="details-total">
+      <h2 class="label">Total</h2>
+      <currency-amount></currency-amount>
     </div>
   </template>
 </head>
 <body>
-  <iframe id="debugging-console" hidden="hidden" src="debugging.html"></iframe>
-
-  <rich-select>
-    <address-option email="emzembrano92@example.com"
-                    recipient="Emily Zembrano"
-                    addressLine="717 Hyde Street #6"
-                    city="San Francisco"
-                    region="CA"
-                    phone="415 203 0845"
-                    postalCode="94109"
-                    country="USA"></address-option>
-    <address-option email="jenz9382@example.com"
-                    recipient="Jennifer Zembrano"
-                    addressLine="42 Fairydust Lane"
-                    city="Lala Land"
-                    region="HI"
-                    phone="415 439 2827"
-                    postalCode="98765"
-                    country="USA"></address-option>
-    <address-option email="johnz9382@example.com"
-                    recipient="John Zembrano"
-                    addressLine="42 Fairydust Lane"
-                    city="Lala Land"
-                    missinginformation="true"
-                    region="HI"
-                    phone="415 439 2827"
-                    postalCode="98765"
-                    country="USA"></address-option>
-    <address-option email="adbrwodne@example.com"
-                    recipient="Andrew Browne"
-                    addressLine="42 Fairydust Lane"
-                    city="Lala Land"
-                    region="HI"
-                    phone="517 410 0845"
-                    postalCode="98765"
-                    country="USA"></address-option>
-    <address-option email="johnz9382@example.com"
-                    recipient="Jacob Humphrey"
-                    addressLine="1855 Pinecrest Rd"
-                    city="East Lansing"
-                    region="MI"
-                    phone="517 439 2827"
-                    postalCode="48823"
-                    country="USA"></address-option>
-  </rich-select>
-
+  <iframe id="debugging-console"
+          hidden="hidden"
+          height="300"
+          src="debugging.html"></iframe>
   <payment-dialog></payment-dialog>
 </body>
 </html>

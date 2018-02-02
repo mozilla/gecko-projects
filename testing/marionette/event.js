@@ -8,9 +8,9 @@ this.event = {};
 "use strict";
 /* global content, is */
 
-const {interfaces: Ci, utils: Cu, classes: Cc} = Components;
+const {interfaces: Ci, classes: Cc} = Components;
 
-Cu.import("chrome://marionette/content/element.js");
+ChromeUtils.import("chrome://marionette/content/element.js");
 
 const dblclickTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
 
@@ -217,7 +217,7 @@ event.parseModifiers_ = function(modifiers) {
     mval |= Ci.nsIDOMNSEvent.META_MASK;
   }
   if (modifiers.accelKey) {
-    if (navigator.platform.indexOf("Mac") >= 0) {
+    if (navigator.platform.includes("Mac")) {
       mval |= Ci.nsIDOMNSEvent.META_MASK;
     } else {
       mval |= Ci.nsIDOMNSEvent.CONTROL_MASK;
@@ -1306,8 +1306,8 @@ event.sendKeyDown = function(keyToSend, modifiers, document) {
   // TODO: This doesn't do anything since |synthesizeKeyEvent| ignores
   // explicit keypress request, and instead figures out itself when to
   // send keypress.
-  if (["VK_SHIFT", "VK_CONTROL", "VK_ALT", "VK_META"]
-      .indexOf(getKeyCode(keyToSend)) < 0) {
+  if (!["VK_SHIFT", "VK_CONTROL", "VK_ALT", "VK_META"]
+      .includes(getKeyCode(keyToSend))) {
     modifiers.type = "keypress";
     event.sendSingleKey(keyToSend, modifiers, document);
   }
@@ -1377,25 +1377,6 @@ event.sendEvent = function(eventType, el, modifiers = {}, opts = {}) {
   ev.ctrlKey = modifiers.ctrl;
 
   ev.initEvent(eventType, opts.canBubble, true);
-  el.dispatchEvent(ev);
-};
-
-event.focus = function(el, opts = {}) {
-  opts.canBubble = opts.canBubble || true;
-  let doc = el.ownerDocument || el.document;
-  let win = doc.defaultView;
-
-  let ev = new win.FocusEvent(el);
-  ev.initEvent("focus", opts.canBubble, true);
-  el.dispatchEvent(ev);
-};
-
-event.blur = function(el, {canBubble = true} = {}) {
-  let doc = el.ownerDocument || el.document;
-  let win = doc.defaultView;
-
-  let ev = new win.FocusEvent(el);
-  ev.initEvent("blur", canBubble, true);
   el.dispatchEvent(ev);
 };
 

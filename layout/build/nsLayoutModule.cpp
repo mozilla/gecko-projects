@@ -41,7 +41,9 @@
 #include "nsPlainTextSerializer.h"
 #include "nsXMLContentSerializer.h"
 #include "nsXHTMLContentSerializer.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsRuleNode.h"
+#endif
 #include "nsContentAreaDragDrop.h"
 #include "nsBox.h"
 #include "nsIFrameTraversal.h"
@@ -82,9 +84,9 @@
 #include "mozilla/dom/LocalStorageManager.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/dom/SessionStorageManager.h"
-#include "mozilla/dom/workers/ServiceWorkerManager.h"
-#include "mozilla/dom/workers/WorkerDebuggerManager.h"
+#include "mozilla/dom/WorkerDebuggerManager.h"
 #include "mozilla/dom/Notification.h"
 #include "mozilla/OSFileConstants.h"
 #include "mozilla/Services.h"
@@ -144,7 +146,7 @@ class nsIDocumentLoaderFactory;
 #include "inDeepTreeWalker.h"
 
 #ifdef MOZ_XUL
-#include "nsIXULDocument.h"
+#include "XULDocument.h"
 #include "nsIXULSortService.h"
 #endif
 
@@ -163,7 +165,6 @@ static void Shutdown();
 #include "mozilla/net/WebSocketEventService.h"
 
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "mozilla/dom/time/TimeService.h"
 
 #include "nsIPresentationService.h"
 
@@ -182,10 +183,8 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::dom::power::PowerManagerService;
 using mozilla::dom::quota::QuotaManagerService;
-using mozilla::dom::workers::ServiceWorkerManager;
-using mozilla::dom::workers::WorkerDebuggerManager;
+using mozilla::dom::WorkerDebuggerManager;
 using mozilla::dom::UDPSocketChild;
-using mozilla::dom::time::TimeService;
 using mozilla::gmp::GeckoMediaPluginService;
 using mozilla::dom::NotificationTelemetryService;
 
@@ -261,8 +260,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsHapticFeedback)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(ThirdPartyUtil, Init)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIPowerManagerService,
                                          PowerManagerService::GetInstance)
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsITimeService,
-                                         TimeService::GetInstance)
 
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIMediaManagerService,
                                          MediaManager::GetInstance)
@@ -436,7 +433,7 @@ MAKE_CTOR(CreatePlainTextSerializer,      nsIContentSerializer,        NS_NewPla
 MAKE_CTOR(CreateContentPolicy,            nsIContentPolicy,            NS_NewContentPolicy)
 #ifdef MOZ_XUL
 MAKE_CTOR(CreateXULSortService,           nsIXULSortService,           NS_NewXULSortService)
-MAKE_CTOR(CreateXULDocument,              nsIXULDocument,              NS_NewXULDocument)
+MAKE_CTOR(CreateXULDocument,              nsIDocument,                 NS_NewXULDocument)
 // NS_NewXULControllers
 #endif
 MAKE_CTOR(CreateContentDLF,               nsIDocumentLoaderFactory,    NS_NewContentDocumentLoaderFactory)
@@ -649,7 +646,6 @@ NS_DEFINE_NAMED_CID(NS_HAPTICFEEDBACK_CID);
 NS_DEFINE_NAMED_CID(NS_POWERMANAGERSERVICE_CID);
 NS_DEFINE_NAMED_CID(OSFILECONSTANTSSERVICE_CID);
 NS_DEFINE_NAMED_CID(UDPSOCKETCHILD_CID);
-NS_DEFINE_NAMED_CID(NS_TIMESERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MEDIAMANAGERSERVICE_CID);
 #ifdef MOZ_WEBSPEECH_TEST_BACKEND
 NS_DEFINE_NAMED_CID(NS_FAKE_SPEECH_RECOGNITION_SERVICE_CID);
@@ -910,7 +906,6 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kOSFILECONSTANTSSERVICE_CID, true, nullptr, OSFileConstantsServiceConstructor },
   { &kUDPSOCKETCHILD_CID, false, nullptr, UDPSocketChildConstructor },
   { &kGECKO_MEDIA_PLUGIN_SERVICE_CID, true, nullptr, GeckoMediaPluginServiceConstructor },
-  { &kNS_TIMESERVICE_CID, false, nullptr, nsITimeServiceConstructor },
   { &kNS_MEDIAMANAGERSERVICE_CID, false, nullptr, nsIMediaManagerServiceConstructor },
 #ifdef ACCESSIBILITY
   { &kNS_ACCESSIBILITY_SERVICE_CID, false, nullptr, CreateA11yService },
@@ -967,7 +962,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { "@mozilla.org/xul/xul-controllers;1", &kNS_XULCONTROLLERS_CID },
 #ifdef MOZ_XUL
   { "@mozilla.org/xul/xul-sort-service;1", &kNS_XULSORTSERVICE_CID },
-  { "@mozilla.org/xul/xul-document;1", &kNS_XULDOCUMENT_CID },
 #endif
   { CONTENT_DLF_CONTRACTID, &kNS_CONTENT_DOCUMENT_LOADER_FACTORY_CID },
   { NS_JSPROTOCOLHANDLER_CONTRACTID, &kNS_JSPROTOCOLHANDLER_CID },
@@ -1029,7 +1023,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { POWERMANAGERSERVICE_CONTRACTID, &kNS_POWERMANAGERSERVICE_CID, Module::ALLOW_IN_GPU_PROCESS },
   { OSFILECONSTANTSSERVICE_CONTRACTID, &kOSFILECONSTANTSSERVICE_CID },
   { "@mozilla.org/udp-socket-child;1", &kUDPSOCKETCHILD_CID },
-  { TIMESERVICE_CONTRACTID, &kNS_TIMESERVICE_CID },
   { MEDIAMANAGERSERVICE_CONTRACTID, &kNS_MEDIAMANAGERSERVICE_CID },
 #ifdef ACCESSIBILITY
   { "@mozilla.org/accessibilityService;1", &kNS_ACCESSIBILITY_SERVICE_CID },

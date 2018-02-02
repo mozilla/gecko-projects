@@ -21,6 +21,7 @@
 #include "jit/VMFunctions.h"
 
 #include "jit/MacroAssembler-inl.h"
+#include "jit/SharedICHelpers-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -64,8 +65,6 @@ struct EnterJITRegs
 static void
 GenerateReturn(MacroAssembler& masm, int returnCode)
 {
-    MOZ_ASSERT(masm.framePushed() == sizeof(EnterJITRegs));
-
     if (isLoongson()) {
         // Restore non-volatile registers
         masm.as_ld(s0, StackPointer, offsetof(EnterJITRegs, s0));

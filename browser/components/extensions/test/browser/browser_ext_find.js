@@ -15,7 +15,7 @@ function frameScript() {
     let selection = controller.getSelection(controller.SELECTION_FIND);
     let range = selection.getRangeAt(0);
     let scope = {};
-    Cu.import("resource://gre/modules/FindContent.jsm", scope);
+    ChromeUtils.import("resource://gre/modules/FindContent.jsm", scope);
     let highlighter = (new scope.FindContent(docShell)).highlighter;
     let r1 = frame.parent.frameElement.getBoundingClientRect();
     let f1 = highlighter._getFrameElementOffsets(frame.parent);
@@ -159,4 +159,29 @@ add_task(async function testDuplicatePinnedTab() {
   info("Test that rectangle data returned from the search matches the highlighted result.");
   is(message.data.rect.top, top, `rect.top: - Expected: ${message.data.rect.top}, Actual: ${top}`);
   is(message.data.rect.left, left, `rect.left: - Expected: ${message.data.rect.left}, Actual: ${left}`);
+});
+
+add_task(async function testAboutFind() {
+  async function background() {
+    await browser.test.assertRejects(
+      browser.find.find("banana"),
+      /Unable to search:/,
+      "Should not be able to search about tabs");
+
+    browser.test.sendMessage("done");
+  }
+
+  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:home");
+
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      "permissions": ["find", "tabs"],
+    },
+    background,
+  });
+
+  await extension.startup();
+  await extension.awaitMessage("done");
+  await extension.unload();
+  await BrowserTestUtils.removeTab(tab);
 });

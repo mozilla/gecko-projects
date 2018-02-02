@@ -40,7 +40,7 @@ const kFromUserInput = 1;
 // //////////////////////////////////////////////////////////////////////////////
 // General
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 /**
  * Set up this variable to dump events into DOM.
@@ -61,6 +61,14 @@ var gA11yEventDumpToAppConsole = false;
  * Semicolon separated set of logging features.
  */
 var gA11yEventDumpFeature = "";
+
+/**
+ * Function to detect HTML elements when given a node.
+ */
+function isHTMLElement(aNode) {
+  return aNode.nodeType == aNode.ELEMENT_NODE &&
+         aNode.namespaceURI == "http://www.w3.org/1999/xhtml";
+}
 
 /**
  * Executes the function when requested event is handled.
@@ -1059,7 +1067,7 @@ function synthClick(aNodeOrID, aCheckerOrEventSeq, aArgs) {
     }
 
     // Scroll the node into view, otherwise synth click may fail.
-    if (targetNode instanceof nsIDOMHTMLElement) {
+    if (isHTMLElement(targetNode)) {
       targetNode.scrollIntoView(true);
     } else if (targetNode instanceof nsIDOMXULElement) {
       var targetAcc = getAccessible(targetNode);
@@ -1068,7 +1076,7 @@ function synthClick(aNodeOrID, aCheckerOrEventSeq, aArgs) {
 
     var x = 1, y = 1;
     if (aArgs && ("where" in aArgs) && aArgs.where == "right") {
-      if (targetNode instanceof nsIDOMHTMLElement)
+      if (isHTMLElement(targetNode))
         x = targetNode.offsetWidth - 1;
       else if (targetNode instanceof nsIDOMXULElement)
         x = targetNode.boxObject.width - 1;
@@ -2078,7 +2086,7 @@ var gLogger =
       return;
     }
 
-    var containerTagName = document instanceof nsIDOMHTMLDocument ?
+    var containerTagName = ChromeUtils.getClassName(document) == "HTMLDocument" ?
       "div" : "description";
 
     var container = document.createElement(containerTagName);
@@ -2086,7 +2094,7 @@ var gLogger =
       container.setAttribute("style", "padding-left: 10px;");
 
     if (aPreEmphText) {
-      var inlineTagName = document instanceof nsIDOMHTMLDocument ?
+      var inlineTagName = ChromeUtils.getClassName(document) == "HTMLDocument" ?
         "span" : "description";
       var emphElm = document.createElement(inlineTagName);
       emphElm.setAttribute("style", "color: blue;");

@@ -22,6 +22,9 @@
 #include "mozilla/dom/ProgressEvent.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/WorkerScope.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/Telemetry.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -29,18 +32,12 @@
 #include "nsThreadUtils.h"
 #include "nsVariant.h"
 
-#include "RuntimeService.h"
-#include "WorkerScope.h"
-#include "WorkerPrivate.h"
-#include "WorkerRunnable.h"
 #include "XMLHttpRequestUpload.h"
 
 #include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace dom {
-
-using namespace workers;
 
 /* static */ void
 XMLHttpRequestWorker::StateData::trace(JSTracer *aTrc)
@@ -97,6 +94,8 @@ public:
   // Read on multiple threads.
   WorkerPrivate* mWorkerPrivate;
   XMLHttpRequestWorker* mXMLHttpRequestPrivate;
+  const ClientInfo mClientInfo;
+  const Maybe<ServiceWorkerDescriptor> mController;
 
   // XHR Params:
   bool mMozAnon;
@@ -132,8 +131,11 @@ public:
   bool mArrayBufferResponseWasTransferred;
 
 public:
-  Proxy(XMLHttpRequestWorker* aXHRPrivate, bool aMozAnon, bool aMozSystem)
+  Proxy(XMLHttpRequestWorker* aXHRPrivate, const ClientInfo& aClientInfo,
+        const Maybe<ServiceWorkerDescriptor>& aController, bool aMozAnon,
+        bool aMozSystem)
   : mWorkerPrivate(nullptr), mXMLHttpRequestPrivate(aXHRPrivate),
+    mClientInfo(aClientInfo), mController(aController),
     mMozAnon(aMozAnon), mMozSystem(aMozSystem),
     mInnerEventStreamId(0), mInnerChannelId(0), mOutstandingSendCount(0),
     mOuterEventStreamId(0), mOuterChannelId(0), mOpenCount(0), mLastLoaded(0),
@@ -159,7 +161,7 @@ public:
   void
   Reset()
   {
-    AssertIsOnMainThread();
+    workers::AssertIsOnMainThread();
 
     if (mUploadEventListenersAttached) {
       AddRemoveEventListeners(true, false);
@@ -169,7 +171,7 @@ public:
   already_AddRefed<nsIEventTarget>
   GetEventTarget()
   {
-    AssertIsOnMainThread();
+    workers::AssertIsOnMainThread();
 
     nsCOMPtr<nsIEventTarget> target = mSyncEventResponseTarget ?
                                       mSyncEventResponseTarget :
@@ -208,7 +210,7 @@ public:
   }
 
   void
-  Dispatch(Status aFailStatus, ErrorResult& aRv)
+  Dispatch(WorkerStatus aFailStatus, ErrorResult& aRv)
   {
     WorkerMainThreadRunnable::Dispatch(aFailStatus, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
@@ -370,7 +372,7 @@ private:
   NS_IMETHOD
   Run() override
   {
-    AssertIsOnMainThread();
+    workers::AssertIsOnMainThread();
 
     // This means the XHR was GC'd, so we can't be pinned, and we don't need to
     // try to unpin.
@@ -447,7 +449,7 @@ public:
     , mChannelId(mProxy->mInnerChannelId)
     , mReceivedLoadStart(false)
   {
-    AssertIsOnMainThread();
+    workers::AssertIsOnMainThread();
     CopyASCIItoUTF16(sEventStrings[STRING_loadstart], mEventType);
   }
 
@@ -458,7 +460,7 @@ public:
   bool
   RegisterAndDispatch()
   {
-    AssertIsOnMainThread();
+    workers::AssertIsOnMainThread();
 
     if (NS_FAILED(mXHR->AddEventListener(mEventType, this, false, false, 2))) {
       NS_WARNING("Failed to add event listener!");
@@ -471,8 +473,8 @@ public:
 private:
   ~LoadStartDetectionRunnable()
   {
-    AssertIsOnMainThread();
-    }
+    workers::AssertIsOnMainThread();
+  }
 };
 
 class EventRunnable final : public MainThreadProxyRunnable
@@ -850,7 +852,7 @@ public:
 bool
 Proxy::Init()
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
   MOZ_ASSERT(mWorkerPrivate);
 
   if (mXHR) {
@@ -868,9 +870,11 @@ Proxy::Init()
   mXHR = new XMLHttpRequestMainThread();
   mXHR->Construct(mWorkerPrivate->GetPrincipal(), global,
                   mWorkerPrivate->GetBaseURI(),
-                  mWorkerPrivate->GetLoadGroup());
+                  mWorkerPrivate->GetLoadGroup(),
+                  mWorkerPrivate->GetPerformanceStorage());
 
   mXHR->SetParameters(mMozAnon, mMozSystem);
+  mXHR->SetClientInfoAndController(mClientInfo, mController);
 
   ErrorResult rv;
   mXHRUpload = mXHR->GetUpload(rv);
@@ -891,7 +895,7 @@ Proxy::Init()
 void
 Proxy::Teardown(bool aSendUnpin)
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   if (mXHR) {
     Reset();
@@ -941,7 +945,7 @@ Proxy::Teardown(bool aSendUnpin)
 bool
 Proxy::AddRemoveEventListeners(bool aUpload, bool aAdd)
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   NS_ASSERTION(!aUpload ||
                (mUploadEventListenersAttached && !aAdd) ||
@@ -981,7 +985,7 @@ NS_IMPL_ISUPPORTS(Proxy, nsIDOMEventListener)
 NS_IMETHODIMP
 Proxy::HandleEvent(nsIDOMEvent* aEvent)
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   if (!mWorkerPrivate || !mXMLHttpRequestPrivate) {
     NS_ERROR("Shouldn't get here!");
@@ -1062,7 +1066,7 @@ NS_IMPL_ISUPPORTS_INHERITED(LoadStartDetectionRunnable, Runnable,
 NS_IMETHODIMP
 LoadStartDetectionRunnable::Run()
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   if (NS_FAILED(mXHR->RemoveEventListener(mEventType, this, false))) {
     NS_WARNING("Failed to remove event listener!");
@@ -1094,7 +1098,7 @@ LoadStartDetectionRunnable::Run()
 NS_IMETHODIMP
 LoadStartDetectionRunnable::HandleEvent(nsIDOMEvent* aEvent)
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
 #ifdef DEBUG
   {
@@ -1115,7 +1119,7 @@ LoadStartDetectionRunnable::HandleEvent(nsIDOMEvent* aEvent)
 bool
 EventRunnable::PreDispatch(WorkerPrivate* /* unused */)
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   AutoJSAPI jsapi;
   DebugOnly<bool> ok = jsapi.Init(xpc::NativeGlobal(mScopeObj));
@@ -1370,7 +1374,7 @@ EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
 bool
 WorkerThreadProxySyncRunnable::MainThreadRun()
 {
-  AssertIsOnMainThread();
+  workers::AssertIsOnMainThread();
 
   nsCOMPtr<nsIEventTarget> tempTarget = mSyncLoopTarget;
 
@@ -1585,7 +1589,7 @@ XMLHttpRequestWorker::Construct(const GlobalObject& aGlobal,
                                 ErrorResult& aRv)
 {
   JSContext* cx = aGlobal.Context();
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
+  WorkerPrivate* workerPrivate = workers::GetWorkerPrivateFromContext(cx);
   MOZ_ASSERT(workerPrivate);
 
   RefPtr<XMLHttpRequestWorker> xhr = new XMLHttpRequestWorker(workerPrivate);
@@ -1849,7 +1853,7 @@ XMLHttpRequestWorker::SendInternal(SendRunnable* aRunnable,
 }
 
 bool
-XMLHttpRequestWorker::Notify(Status aStatus)
+XMLHttpRequestWorker::Notify(WorkerStatus aStatus)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -1882,7 +1886,8 @@ XMLHttpRequestWorker::Open(const nsACString& aMethod,
     }
   }
   else {
-    mProxy = new Proxy(this, mMozAnon, mMozSystem);
+    mProxy = new Proxy(this, mWorkerPrivate->GetClientInfo(),
+                       mWorkerPrivate->GetController(), mMozAnon, mMozSystem);
   }
 
   mProxy->mOuterEventStreamId++;

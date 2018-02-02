@@ -1,11 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource:///modules/PlacesUIUtils.jsm");
+ChromeUtils.import("resource:///modules/PlacesUIUtils.jsm");
 
-Cu.import("resource://services-sync/engines/bookmarks.js");
-Cu.import("resource://services-sync/service.js");
-Cu.import("resource://services-sync/bookmark_repair.js");
+ChromeUtils.import("resource://services-sync/engines/bookmarks.js");
+ChromeUtils.import("resource://services-sync/service.js");
+ChromeUtils.import("resource://services-sync/bookmark_repair.js");
 
 // Disable validation so that we don't try to automatically repair the server
 // when we sync.
@@ -15,7 +15,9 @@ Svc.Prefs.set("engine.bookmarks.validation.enabled", false);
 var recordedEvents = [];
 
 function checkRecordedEvents(expected) {
-  deepEqual(recordedEvents, expected);
+  // Ignore event telemetry from the merger.
+  let repairEvents = recordedEvents.filter(event => event.object != "mirror");
+  deepEqual(repairEvents, expected);
   // and clear the list so future checks are easier to write.
   recordedEvents = [];
 }
@@ -347,7 +349,7 @@ add_task(async function test_non_syncable() {
 
   for (let guid of queryGuids) {
     let wbo = collection.wbo(guid);
-    if (request.ids.indexOf(guid) >= 0 || guid == bookmarksMenuQueryGuid) {
+    if (request.ids.includes(guid) || guid == bookmarksMenuQueryGuid) {
       // explicitly requested or already on the server, so should have a tombstone.
       let payload = JSON.parse(JSON.parse(wbo.payload).ciphertext);
       ok(payload.deleted, `Should upload tombstone for left pane query ${guid}`);

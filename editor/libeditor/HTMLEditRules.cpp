@@ -1004,7 +1004,7 @@ HTMLEditRules::GetIndentState(bool* aCanIndent,
   NS_ENSURE_STATE(mHTMLEditor);
   bool useCSS = mHTMLEditor->IsCSSEnabled();
   for (auto& curNode : Reversed(arrayOfNodes)) {
-    if (HTMLEditUtils::IsNodeThatCanOutdent(GetAsDOMNode(curNode))) {
+    if (HTMLEditUtils::IsNodeThatCanOutdent(curNode)) {
       *aCanOutdent = true;
       break;
     } else if (useCSS) {
@@ -1037,7 +1037,7 @@ HTMLEditRules::GetIndentState(bool* aCanIndent,
 
     // gather up info we need for test
     NS_ENSURE_STATE(mHTMLEditor);
-    nsCOMPtr<nsIDOMNode> parent, tmp, root = do_QueryInterface(mHTMLEditor->GetRoot());
+    nsCOMPtr<nsINode> parent, root = mHTMLEditor->GetRoot();
     NS_ENSURE_TRUE(root, NS_ERROR_NULL_POINTER);
     int32_t selOffset;
     NS_ENSURE_STATE(mHTMLEditor);
@@ -1053,8 +1053,7 @@ HTMLEditRules::GetIndentState(bool* aCanIndent,
         *aCanOutdent = true;
         break;
       }
-      tmp = parent;
-      tmp->GetParentNode(getter_AddRefs(parent));
+      parent = parent->GetParentNode();
     }
 
     // test end parent hierarchy
@@ -1066,8 +1065,7 @@ HTMLEditRules::GetIndentState(bool* aCanIndent,
         *aCanOutdent = true;
         break;
       }
-      tmp = parent;
-      tmp->GetParentNode(getter_AddRefs(parent));
+      parent = parent->GetParentNode();
     }
   }
   return NS_OK;
@@ -1123,7 +1121,7 @@ HTMLEditRules::GetParagraphState(bool* aMixed,
 
   // remember root node
   NS_ENSURE_STATE(mHTMLEditor);
-  nsCOMPtr<nsIDOMElement> rootElem = do_QueryInterface(mHTMLEditor->GetRoot());
+  nsCOMPtr<Element> rootElem = mHTMLEditor->GetRoot();
   NS_ENSURE_TRUE(rootElem, NS_ERROR_NULL_POINTER);
 
   // loop through the nodes in selection and examine their paragraph format
@@ -1131,7 +1129,7 @@ HTMLEditRules::GetParagraphState(bool* aMixed,
     nsAutoString format;
     // if it is a known format node we have it easy
     if (HTMLEditUtils::IsFormatNode(curNode)) {
-      GetFormatString(GetAsDOMNode(curNode), format);
+      GetFormatString(curNode, format);
     } else if (IsBlockNode(curNode)) {
       // this is a div or some other non-format block.
       // we should ignore it.  Its children were appended to this list
@@ -1139,8 +1137,7 @@ HTMLEditRules::GetParagraphState(bool* aMixed,
       // info when we examine them instead.
       continue;
     } else {
-      nsCOMPtr<nsIDOMNode> node, tmp = GetAsDOMNode(curNode);
-      tmp->GetParentNode(getter_AddRefs(node));
+      nsINode* node = curNode->GetParentNode();
       while (node) {
         if (node == rootElem) {
           format.Truncate(0);
@@ -1150,8 +1147,7 @@ HTMLEditRules::GetParagraphState(bool* aMixed,
           break;
         }
         // else keep looking up
-        tmp = node;
-        tmp->GetParentNode(getter_AddRefs(node));
+        node = node->GetParentNode();
       }
     }
 
@@ -1202,14 +1198,13 @@ HTMLEditRules::AppendInnerFormatNodes(nsTArray<OwningNonNull<nsINode>>& aArray,
 }
 
 nsresult
-HTMLEditRules::GetFormatString(nsIDOMNode* aNode,
+HTMLEditRules::GetFormatString(nsINode* aNode,
                                nsAString& outFormat)
 {
   NS_ENSURE_TRUE(aNode, NS_ERROR_NULL_POINTER);
 
   if (HTMLEditUtils::IsFormatNode(aNode)) {
-    RefPtr<nsAtom> atom = EditorBase::GetTag(aNode);
-    atom->ToString(outFormat);
+    aNode->NodeInfo()->NameAtom()->ToString(outFormat);
   } else {
     outFormat.Truncate();
   }
@@ -1864,8 +1859,8 @@ HTMLEditRules::InsertBRElement(Selection& aSelection,
     }
     // If the container of the break is a link, we need to split it and
     // insert new <br> between the split links.
-    nsCOMPtr<nsIDOMNode> linkDOMNode;
-    if (htmlEditor->IsInLink(pointToBreak.GetContainerAsDOMNode(),
+    nsCOMPtr<nsINode> linkDOMNode;
+    if (htmlEditor->IsInLink(pointToBreak.GetContainer(),
                              address_of(linkDOMNode))) {
       nsCOMPtr<Element> linkNode = do_QueryInterface(linkDOMNode);
       if (NS_WARN_IF(!linkNode)) {
@@ -6651,11 +6646,11 @@ HTMLEditRules::GetNodesFromPoint(
     return NS_ERROR_INVALID_ARG;
   }
   RefPtr<nsRange> range = new nsRange(aPoint.GetContainer());
-  IgnoredErrorResult error;
+  ErrorResult error;
   range->SetStart(aPoint, error);
-  if (NS_WARN_IF(error.Failed())) {
-    MOZ_ASSERT(!error.Failed());
-  }
+  // error will assert on failure, because we are not cleaning it up,
+  // but we're asserting in that case anyway.
+  MOZ_ASSERT(!error.Failed());
 
   // Expand the range to include adjacent inlines
   PromoteRange(*range, aOperation);
@@ -6882,6 +6877,71 @@ HTMLEditRules::ReturnInParagraph(Selection& aSelection,
     return EditActionResult(NS_ERROR_FAILURE);
   }
   MOZ_ASSERT(atStartOfSelection.IsSetAndValid());
+
+  // We shouldn't create new anchor element which has non-empty href unless
+  // splitting middle of it because we assume that users don't want to create
+  // *same* anchor element across two or more paragraphs in most cases.
+  // So, adjust selection start if it's edge of anchor element(s).
+  // XXX We don't support whitespace collapsing in these cases since it needs
+  //     some additional work with WSRunObject but it's not usual case.
+  //     E.g., |<a href="foo"><b>foo []</b> </a>|
+  if (atStartOfSelection.IsStartOfContainer()) {
+    for (nsIContent* container = atStartOfSelection.GetContainerAsContent();
+         container && container != &aParentDivOrP;
+         container = container->GetParent()) {
+      if (HTMLEditUtils::IsLink(container)) {
+        // Found link should be only in right node.  So, we shouldn't split it.
+        atStartOfSelection.Set(container);
+        // Even if we found an anchor element, don't break because DOM API
+        // allows to nest anchor elements.
+      }
+      // If the container is middle of its parent, stop adjusting split point.
+      if (container->GetPreviousSibling()) {
+        // XXX Should we check if previous sibling is visible content?
+        //     E.g., should we ignore comment node, invisible <br> element?
+        break;
+      }
+    }
+  }
+  // We also need to check if selection is at invisible <br> element at end
+  // of an <a href="foo"> element because editor inserts a <br> element when
+  // user types Enter key after a whitespace which is at middle of
+  // <a href="foo"> element and when setting selection at end of the element,
+  // selection becomes referring the <br> element.  We may need to change this
+  // behavior later if it'd be standardized.
+  else if (atStartOfSelection.IsEndOfContainer() ||
+           atStartOfSelection.IsBRElementAtEndOfContainer()) {
+    // If there are 2 <br> elements, the first <br> element is visible.  E.g.,
+    // |<a href="foo"><b>boo[]<br></b><br></a>|, we should split the <a>
+    // element.  Otherwise, E.g., |<a href="foo"><b>boo[]<br></b></a>|,
+    // we should not split the <a> element and ignore inline elements in it.
+    bool foundBRElement = atStartOfSelection.IsBRElementAtEndOfContainer();
+    for (nsIContent* container = atStartOfSelection.GetContainerAsContent();
+         container && container != &aParentDivOrP;
+         container = container->GetParent()) {
+      if (HTMLEditUtils::IsLink(container)) {
+        // Found link should be only in left node.  So, we shouldn't split it.
+        atStartOfSelection.SetAfter(container);
+        // Even if we found an anchor element, don't break because DOM API
+        // allows to nest anchor elements.
+      }
+      // If the container is middle of its parent, stop adjusting split point.
+      if (nsIContent* nextSibling = container->GetNextSibling()) {
+        if (foundBRElement) {
+          // If we've already found a <br> element, we assume found node is
+          // visible <br> or something other node.
+          // XXX Should we check if non-text data node like comment?
+          break;
+        }
+
+        // XXX Should we check if non-text data node like comment?
+        if (!nextSibling->IsHTMLElement(nsGkAtoms::br)) {
+          break;
+        }
+        foundBRElement = true;
+      }
+    }
+  }
 
   bool doesCRCreateNewP = htmlEditor->GetReturnInParagraphCreatesNewParagraph();
 
@@ -9400,11 +9460,14 @@ HTMLEditRules::WillAbsolutePosition(Selection& aSelection,
 nsresult
 HTMLEditRules::DidAbsolutePosition()
 {
-  NS_ENSURE_STATE(mHTMLEditor);
-  nsCOMPtr<nsIHTMLAbsPosEditor> absPosHTMLEditor = mHTMLEditor;
-  nsCOMPtr<nsIDOMElement> elt =
-    static_cast<nsIDOMElement*>(GetAsDOMNode(mNewBlock));
-  return absPosHTMLEditor->AbsolutelyPositionElement(elt, true);
+  if (!mNewBlock) {
+    return NS_OK;
+  }
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  RefPtr<HTMLEditor> htmlEditor = mHTMLEditor;
+  return htmlEditor->SetPositionToAbsoluteOrStatic(*mNewBlock, true);
 }
 
 nsresult
@@ -9414,6 +9477,12 @@ HTMLEditRules::WillRemoveAbsolutePosition(Selection* aSelection,
   if (!aSelection || !aCancel || !aHandled) {
     return NS_ERROR_NULL_POINTER;
   }
+
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  RefPtr<HTMLEditor> htmlEditor = mHTMLEditor;
+
   WillInsert(*aSelection, aCancel);
 
   // initialize out param
@@ -9421,18 +9490,15 @@ HTMLEditRules::WillRemoveAbsolutePosition(Selection* aSelection,
   *aCancel = false;
   *aHandled = true;
 
-  nsCOMPtr<nsIDOMElement>  elt;
-  NS_ENSURE_STATE(mHTMLEditor);
-  nsresult rv =
-    mHTMLEditor->GetAbsolutelyPositionedSelectionContainer(getter_AddRefs(elt));
-  NS_ENSURE_SUCCESS(rv, rv);
+  RefPtr<Element> element =
+    htmlEditor->GetAbsolutelyPositionedSelectionContainer();
+  if (NS_WARN_IF(!element)) {
+    return NS_ERROR_FAILURE;
+  }
 
-  NS_ENSURE_STATE(mHTMLEditor);
-  AutoSelectionRestorer selectionRestorer(aSelection, mHTMLEditor);
+  AutoSelectionRestorer selectionRestorer(aSelection, htmlEditor);
 
-  NS_ENSURE_STATE(mHTMLEditor);
-  nsCOMPtr<nsIHTMLAbsPosEditor> absPosHTMLEditor = mHTMLEditor;
-  return absPosHTMLEditor->AbsolutelyPositionElement(elt, false);
+  return htmlEditor->SetPositionToAbsoluteOrStatic(*element, false);
 }
 
 nsresult
@@ -9444,6 +9510,12 @@ HTMLEditRules::WillRelativeChangeZIndex(Selection* aSelection,
   if (!aSelection || !aCancel || !aHandled) {
     return NS_ERROR_NULL_POINTER;
   }
+
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  RefPtr<HTMLEditor> htmlEditor = mHTMLEditor;
+
   WillInsert(*aSelection, aCancel);
 
   // initialize out param
@@ -9451,19 +9523,16 @@ HTMLEditRules::WillRelativeChangeZIndex(Selection* aSelection,
   *aCancel = false;
   *aHandled = true;
 
-  nsCOMPtr<nsIDOMElement>  elt;
-  NS_ENSURE_STATE(mHTMLEditor);
-  nsresult rv =
-    mHTMLEditor->GetAbsolutelyPositionedSelectionContainer(getter_AddRefs(elt));
-  NS_ENSURE_SUCCESS(rv, rv);
+  RefPtr<Element> element =
+    htmlEditor->GetAbsolutelyPositionedSelectionContainer();
+  if (NS_WARN_IF(!element)) {
+    return NS_ERROR_FAILURE;
+  }
 
-  NS_ENSURE_STATE(mHTMLEditor);
-  AutoSelectionRestorer selectionRestorer(aSelection, mHTMLEditor);
+  AutoSelectionRestorer selectionRestorer(aSelection, htmlEditor);
 
-  NS_ENSURE_STATE(mHTMLEditor);
-  nsCOMPtr<nsIHTMLAbsPosEditor> absPosHTMLEditor = mHTMLEditor;
   int32_t zIndex;
-  return absPosHTMLEditor->RelativeChangeElementZIndex(elt, aChange, &zIndex);
+  return htmlEditor->RelativeChangeElementZIndex(*element, aChange, &zIndex);
 }
 
 nsresult

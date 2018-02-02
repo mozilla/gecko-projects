@@ -9,7 +9,9 @@
 #include "gfxFontConstants.h"
 #include "gfxFontSrcPrincipal.h"
 #include "gfxFontSrcURI.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/css/Declaration.h"
+#endif
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/FontFaceSetBinding.h"
 #include "mozilla/dom/FontFaceSetIterator.h"
@@ -38,6 +40,7 @@
 #include "nsILoadContext.h"
 #include "nsINetworkPredictor.h"
 #include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 #include "nsIPrincipal.h"
 #include "nsISupportsPriority.h"
 #include "nsIWebNavigation.h"
@@ -47,7 +50,9 @@
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsPrintfCString.h"
+#ifdef MOZ_OLD_STYLE
 #include "nsStyleSet.h"
+#endif
 #include "nsUTF8Utils.h"
 #include "nsDOMNavigationTiming.h"
 
@@ -223,6 +228,7 @@ FontFaceSet::ParseFontShorthandForMatching(
     return;
   }
 
+#ifdef MOZ_OLD_STYLE
   // Parse aFont as a 'font' property value.
   RefPtr<Declaration> declaration = new Declaration;
   declaration->InitializeEmpty();
@@ -275,6 +281,9 @@ FontFaceSet::ParseFontShorthandForMatching(
 
   aStretch = data->ValueFor(eCSSProperty_font_stretch)->GetIntValue();
   aStyle = data->ValueFor(eCSSProperty_font_style)->GetIntValue();
+#else
+  MOZ_CRASH("old style system disabled");
+#endif
 }
 
 static bool
@@ -470,18 +479,18 @@ FontFaceSet::HasRuleFontFace(FontFace* aFontFace)
 }
 #endif
 
-FontFaceSet*
+void
 FontFaceSet::Add(FontFace& aFontFace, ErrorResult& aRv)
 {
   FlushUserFontSet();
 
   if (aFontFace.IsInFontFaceSet(this)) {
-    return this;
+    return;
   }
 
   if (aFontFace.HasRule()) {
     aRv.Throw(NS_ERROR_DOM_INVALID_MODIFICATION_ERR);
-    return nullptr;
+    return;
   }
 
   aFontFace.AddFontFaceSet(this);
@@ -501,10 +510,9 @@ FontFaceSet::Add(FontFace& aFontFace, ErrorResult& aRv)
     aFontFace.Status() == FontFaceLoadStatus::Loading;
 
   mNonRuleFacesDirty = true;
-  RebuildUserFontSet();
+  MarkUserFontSetDirty();
   mHasLoadingFontFacesIsDirty = true;
   CheckLoadingStarted();
-  return this;
 }
 
 void
@@ -523,7 +531,7 @@ FontFaceSet::Clear()
 
   mNonRuleFaces.Clear();
   mNonRuleFacesDirty = true;
-  RebuildUserFontSet();
+  MarkUserFontSetDirty();
   mHasLoadingFontFacesIsDirty = true;
   CheckLoadingFinished();
 }
@@ -552,7 +560,7 @@ FontFaceSet::Delete(FontFace& aFontFace)
   aFontFace.RemoveFontFaceSet(this);
 
   mNonRuleFacesDirty = true;
-  RebuildUserFontSet();
+  MarkUserFontSetDirty();
   mHasLoadingFontFacesIsDirty = true;
   CheckLoadingFinished();
   return true;
@@ -657,6 +665,7 @@ FontFaceSet::StartLoad(gfxUserFontEntry* aUserFontEntry,
                                             principal ? principal->get() : nullptr,
                                             nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS,
                                             nsIContentPolicy::TYPE_FONT,
+                                            nullptr, // PerformanceStorage
                                             loadGroup);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1832,10 +1841,16 @@ FontFaceSet::FlushUserFontSet()
 }
 
 void
-FontFaceSet::RebuildUserFontSet()
+FontFaceSet::MarkUserFontSetDirty()
 {
   if (mDocument) {
-    mDocument->RebuildUserFontSet();
+    // Ensure we trigger at least a style flush, that will eventually flush the
+    // user font set. Otherwise the font loads that that flush may cause could
+    // never be triggered.
+    if (nsIPresShell* shell = mDocument->GetShell()) {
+      shell->EnsureStyleFlush();
+    }
+    mDocument->MarkUserFontSetDirty();
   }
 }
 
@@ -1976,7 +1991,7 @@ FontFaceSet::UserFontSet::DoRebuildUserFontSet()
   if (!mFontFaceSet) {
     return;
   }
-  mFontFaceSet->RebuildUserFontSet();
+  mFontFaceSet->MarkUserFontSetDirty();
 }
 
 /* virtual */ already_AddRefed<gfxUserFontEntry>

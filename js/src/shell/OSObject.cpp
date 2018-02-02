@@ -29,6 +29,7 @@
 #endif
 #include "jswrapper.h"
 
+#include "gc/FreeOp.h"
 #include "js/Conversions.h"
 #include "shell/jsshell.h"
 #include "vm/StringBuffer.h"
@@ -393,7 +394,8 @@ RCFile::release()
     return true;
 }
 
-class FileObject : public JSObject {
+class FileObject : public NativeObject
+{
     enum : uint32_t {
         FILE_SLOT = 0,
         NUM_SLOTS

@@ -75,7 +75,6 @@
 .requests-list-column {
   display: table-cell;
   cursor: default;
-  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -228,6 +227,8 @@
   padding: 0 2px;
   border-radius: 3px;
   font-family: var(--monospace-font-family);
+  /* prevent status code from having full line height width from .request-list-item */
+  line-height: normal;
 }
 
 .status-code[data-code^="1"] {
@@ -372,13 +373,13 @@
 
 /* Duration column */
 
-.requests-list-duration {
+.requests-list-duration-time {
   width: 8%;
 }
 
 /* Latency column */
 
-.requests-list-latency {
+.requests-list-latency-time {
   width: 8%;
 }
 
@@ -403,7 +404,7 @@
   width: 16px;
   height: 16px;
   margin: 0 4px;
-  vertical-align: top;
+  vertical-align: text-bottom;
 }
 
 .request-list-item.selected .requests-security-state-icon {
@@ -546,9 +547,6 @@
 }
 
 .requests-list-timings {
-  display: flex;
-  flex: none;
-  align-items: center;
   transform: scaleX(var(--timings-scale));
 }
 
@@ -606,6 +604,7 @@
   white-space: nowrap;
   /* This node should not be scaled - apply a reversed transformation */
   transform: scaleX(var(--timings-rev-scale));
+  text-align: left;
 }
 
 .requests-list-timings-total:dir(ltr) {
@@ -627,6 +626,7 @@
   a new request/row.
 */
   height: 24px;
+  line-height: 24px;
 }
 
 .request-list-item.selected {

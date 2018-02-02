@@ -81,7 +81,6 @@
 
 [xpcom]
 @BINPATH@/package-name.txt
-@BINPATH@/classes.dex
 
 [browser]
 ; [Base Browser Files]
@@ -143,7 +142,6 @@
 @BINPATH@/components/dom_sidebar.xpt
 @BINPATH@/components/dom_storage.xpt
 @BINPATH@/components/dom_system.xpt
-@BINPATH@/components/dom_traversal.xpt
 #ifdef MOZ_WEBSPEECH
 @BINPATH@/components/dom_webspeechrecognition.xpt
 #endif
@@ -469,7 +467,6 @@
 @BINPATH@/res/table-remove-row.gif
 @BINPATH@/res/grabber.gif
 @BINPATH@/res/dtd/*
-@BINPATH@/res/html/*
 @BINPATH@/res/language.properties
 
 #ifndef MOZ_ANDROID_EXCLUDE_FONTS

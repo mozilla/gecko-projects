@@ -46,6 +46,11 @@
 #include "mozilla/UniquePtr.h"
 #include <bitset>                        // for member
 
+// windows.h #defines CreateEvent
+#ifdef CreateEvent
+#undef CreateEvent
+#endif
+
 #ifdef MOZILLA_INTERNAL_API
 #include "mozilla/dom/DocumentBinding.h"
 #else
@@ -68,6 +73,7 @@ class nsGlobalWindowInner;
 class nsHTMLCSSStyleSheet;
 class nsHTMLDocument;
 class nsHTMLStyleSheet;
+class nsGenericHTMLElement;
 class nsAtom;
 class nsIBFCacheEntry;
 class nsIChannel;
@@ -80,7 +86,6 @@ class nsIDocumentObserver;
 class nsIDOMDocument;
 class nsIDOMDocumentType;
 class nsIDOMElement;
-class nsIDOMNodeFilter;
 class nsIDOMNodeList;
 class nsIHTMLCollection;
 class nsILayoutHistoryState;
@@ -172,16 +177,17 @@ class XPathEvaluator;
 class XPathExpression;
 class XPathNSResolver;
 class XPathResult;
+class XULDocument;
 template<typename> class Sequence;
 
 template<typename, typename> class CallbackObjectHolder;
-typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 
 enum class CallerType : uint32_t;
 
 } // namespace dom
 } // namespace mozilla
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_IDOCUMENT_IID \
 { 0xce1f7627, 0x7109, 0x4977, \
   { 0xba, 0x77, 0x49, 0x0f, 0xfd, 0xe0, 0x7a, 0xaa } }
@@ -561,10 +567,8 @@ public:
 
   /**
    * Get the Content-Type of this document.
-   * (This will always return NS_OK, but has this signature to be compatible
-   *  with nsIDOMDocument::GetContentType())
    */
-  NS_IMETHOD GetContentType(nsAString& aContentType) = 0;
+  void GetContentType(nsAString& aContentType);
 
   /**
    * Set the Content-Type of this document.
@@ -1170,8 +1174,12 @@ public:
             mServo = aOther.mServo;
             aOther.mServo = nullptr;
           } else {
+#ifdef MOZ_OLD_STYLE
             mGecko = aOther.mGecko;
             aOther.mGecko = nullptr;
+#else
+            MOZ_CRASH("old style system disabled");
+#endif
           }
           return *this;
         }
@@ -1183,10 +1191,12 @@ public:
           , mServo(aList.release())
         {}
 
+#ifdef MOZ_OLD_STYLE
         explicit SelectorList(mozilla::UniquePtr<nsCSSSelectorList>&& aList)
           : mIsServo(false)
           , mGecko(aList.release())
         {}
+#endif
 
         ~SelectorList() {
           Reset();
@@ -1274,6 +1284,11 @@ public:
   Element* GetHeadElement() {
     return GetHtmlChildElement(nsGkAtoms::head);
   }
+  // Get the "body" in the sense of document.body: The first <body> or
+  // <frameset> that's a child of a root <html>
+  nsGenericHTMLElement* GetBody();
+  // Set the "body" in the sense of document.body.
+  void SetBody(nsGenericHTMLElement* aBody, mozilla::ErrorResult& rv);
 
   /**
    * Accessors to the collection of stylesheets owned by this document.
@@ -1914,6 +1929,15 @@ public:
   typedef bool (*nsSubDocEnumFunc)(nsIDocument *aDocument, void *aData);
   virtual void EnumerateSubDocuments(nsSubDocEnumFunc aCallback,
                                      void *aData) = 0;
+
+  /**
+   * Collect all the descendant documents for which |aCalback| returns true.
+   * The callback function must not mutate any state for the given document.
+   */
+  typedef bool (*nsDocTestFunc)(const nsIDocument* aDocument);
+  virtual void CollectDescendantDocuments(
+    nsTArray<nsCOMPtr<nsIDocument>>& aDescendants,
+    nsDocTestFunc aCallback) const = 0;
 
   /**
    * Check whether it is safe to cache the presentation of this document
@@ -2851,18 +2875,9 @@ public:
     CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
                        mozilla::dom::NodeFilter* aFilter,
                        mozilla::ErrorResult& rv) const;
-  already_AddRefed<mozilla::dom::NodeIterator>
-    CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
-                       mozilla::dom::NodeFilterHolder aFilter,
-                       mozilla::ErrorResult& rv) const;
   already_AddRefed<mozilla::dom::TreeWalker>
     CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
                      mozilla::dom::NodeFilter* aFilter, mozilla::ErrorResult& rv) const;
-  already_AddRefed<mozilla::dom::TreeWalker>
-    CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
-                     mozilla::dom::NodeFilterHolder aFilter,
-                     mozilla::ErrorResult& rv) const;
-
   // Deprecated WebIDL bits
   already_AddRefed<mozilla::dom::CDATASection>
     CreateCDATASection(const nsAString& aData, mozilla::ErrorResult& rv);
@@ -2872,15 +2887,14 @@ public:
     CreateAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aQualifiedName,
                       mozilla::ErrorResult& rv);
+  void SetAllowUnsafeHTML(bool aAllow) { mAllowUnsafeHTML = aAllow; }
+  bool AllowUnsafeHTML() const;
   void GetInputEncoding(nsAString& aInputEncoding) const;
   already_AddRefed<mozilla::dom::Location> GetLocation() const;
   void GetReferrer(nsAString& aReferrer) const;
   void GetLastModified(nsAString& aLastModified) const;
   void GetReadyState(nsAString& aReadyState) const;
-  // Not const because otherwise the compiler can't figure out whether to call
-  // this GetTitle or the nsAString version from non-const methods, since
-  // neither is an exact match.
-  virtual void GetTitle(nsString& aTitle) = 0;
+  virtual void GetTitle(nsAString& aTitle) = 0;
   virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv) = 0;
   void GetDir(nsAString& aDirection) const;
   void SetDir(const nsAString& aDirection);
@@ -2935,7 +2949,7 @@ public:
 #endif
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) = 0;
-  virtual void GetLastStyleSheetSet(nsString& aSheetSet) = 0;
+  virtual void GetLastStyleSheetSet(nsAString& aSheetSet) = 0;
   void GetPreferredStyleSheetSet(nsAString& aSheetSet);
   virtual mozilla::dom::DOMStringList* StyleSheetSets() = 0;
   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) = 0;
@@ -3024,6 +3038,7 @@ public:
 
   virtual nsHTMLDocument* AsHTMLDocument() { return nullptr; }
   virtual mozilla::dom::SVGDocument* AsSVGDocument() { return nullptr; }
+  virtual mozilla::dom::XULDocument* AsXULDocument() { return nullptr; }
 
   /*
    * Given a node, get a weak reference to it and append that reference to
@@ -3045,7 +3060,7 @@ public:
 
   gfxUserFontSet* GetUserFontSet(bool aFlushUserFontSet = true);
   void FlushUserFontSet();
-  void RebuildUserFontSet(); // asynchronously
+  void MarkUserFontSetDirty();
   mozilla::dom::FontFaceSet* GetFonts() { return mFontFaceSet; }
 
   // FontFaceSource
@@ -3108,6 +3123,7 @@ public:
   virtual void UpdateIntersectionObservations() = 0;
   virtual void ScheduleIntersectionObserverNotification() = 0;
   virtual void NotifyIntersectionObservers() = 0;
+  virtual bool HasIntersectionObservers() const = 0;
 
   // Dispatch a runnable related to the document.
   virtual nsresult Dispatch(mozilla::TaskCategory aCategory,
@@ -3261,11 +3277,6 @@ protected:
   }
 
   mozilla::dom::XPathEvaluator* XPathEvaluator();
-
-  void HandleRebuildUserFontSet() {
-    mPostedFlushUserFontSet = false;
-    FlushUserFontSet();
-  }
 
   // Update our frame request callback scheduling state, if needed.  This will
   // schedule or unschedule them, if necessary, and update
@@ -3516,9 +3527,6 @@ protected:
   // Has GetUserFontSet() been called?
   bool mGetUserFontSetCalled : 1;
 
-  // Do we currently have an event posted to call FlushUserFontSet?
-  bool mPostedFlushUserFontSet : 1;
-
   // True if we have fired the DOMContentLoaded event, or don't plan to fire one
   // (e.g. we're not being parsed at all).
   bool mDidFireDOMContentLoaded : 1;
@@ -3554,6 +3562,10 @@ protected:
 
   // True if this document is for an SVG-in-OpenType font.
   bool mIsSVGGlyphsDocument : 1;
+
+  // True if unsafe HTML fragments should be allowed in chrome-privileged
+  // documents.
+  bool mAllowUnsafeHTML : 1;
 
   // Whether <style scoped> support is enabled in this document.
   enum { eScopedStyle_Unknown, eScopedStyle_Disabled, eScopedStyle_Enabled };

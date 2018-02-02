@@ -299,18 +299,17 @@ UnboxedPlainObject::getValue(const UnboxedLayout::Property& property,
 void
 UnboxedPlainObject::trace(JSTracer* trc, JSObject* obj)
 {
-    if (obj->as<UnboxedPlainObject>().expando_) {
-        TraceManuallyBarrieredEdge(trc,
-            reinterpret_cast<NativeObject**>(&obj->as<UnboxedPlainObject>().expando_),
-            "unboxed_expando");
-    }
+    UnboxedPlainObject* uobj = &obj->as<UnboxedPlainObject>();
 
-    const UnboxedLayout& layout = obj->as<UnboxedPlainObject>().layoutDontCheckGeneration();
+    if (uobj->maybeExpando())
+        TraceManuallyBarrieredEdge(trc, uobj->addressOfExpando(), "unboxed_expando");
+
+    const UnboxedLayout& layout = uobj->layoutDontCheckGeneration();
     const int32_t* list = layout.traceList();
     if (!list)
         return;
 
-    uint8_t* data = obj->as<UnboxedPlainObject>().data();
+    uint8_t* data = uobj->data();
     while (*list != -1) {
         GCPtrString* heap = reinterpret_cast<GCPtrString*>(data + *list);
         TraceEdge(trc, heap, "unboxed_string");
@@ -330,8 +329,8 @@ UnboxedPlainObject::trace(JSTracer* trc, JSObject* obj)
 /* static */ UnboxedExpandoObject*
 UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj)
 {
-    if (obj->expando_)
-        return obj->expando_;
+    if (obj->maybeExpando())
+        return obj->maybeExpando();
 
     UnboxedExpandoObject* expando =
         NewObjectWithGivenProto<UnboxedExpandoObject>(cx, nullptr, gc::AllocKind::OBJECT4);
@@ -356,7 +355,7 @@ UnboxedPlainObject::ensureExpando(JSContext* cx, Handle<UnboxedPlainObject*> obj
     if (IsInsideNursery(expando) && !IsInsideNursery(obj))
         cx->zone()->group()->storeBuffer().putWholeCell(obj);
 
-    obj->expando_ = expando;
+    obj->setExpandoUnsafe(expando);
     return expando;
 }
 
@@ -627,12 +626,10 @@ UnboxedObject::createInternal(JSContext* cx, js::gc::AllocKind kind, js::gc::Ini
         return cx->alreadyReportedOOM();
 
     UnboxedObject* uobj = static_cast<UnboxedObject*>(obj);
-    uobj->group_.init(group);
+    uobj->initGroup(group);
 
-    if (clasp->shouldDelayMetadataBuilder())
-        cx->compartment()->setObjectPendingMetadata(cx, uobj);
-    else
-        uobj = SetNewObjectMetadata(cx, uobj);
+    MOZ_ASSERT(clasp->shouldDelayMetadataBuilder());
+    cx->compartment()->setObjectPendingMetadata(cx, uobj);
 
     js::gc::TraceCreateObject(uobj);
 
@@ -651,18 +648,17 @@ UnboxedPlainObject::create(JSContext* cx, HandleObjectGroup group, NewObjectKind
 
     MOZ_ASSERT(newKind != SingletonObject);
 
-    UnboxedObject* res_;
-    JS_TRY_VAR_OR_RETURN_NULL(cx, res_, createInternal(cx, allocKind, heap, group));
-    UnboxedPlainObject* res = &res_->as<UnboxedPlainObject>();
+    JSObject* obj;
+    JS_TRY_VAR_OR_RETURN_NULL(cx, obj, createInternal(cx, allocKind, heap, group));
 
-    // Overwrite the dummy shape which was written to the object's expando field.
-    res->initExpando();
+    UnboxedPlainObject* uobj = static_cast<UnboxedPlainObject*>(obj);
+    uobj->initExpando();
 
     // Initialize reference fields of the object. All fields in the object will
     // be overwritten shortly, but references need to be safe for the GC.
-    const int32_t* list = res->layout().traceList();
+    const int32_t* list = uobj->layout().traceList();
     if (list) {
-        uint8_t* data = res->data();
+        uint8_t* data = uobj->data();
         while (*list != -1) {
             GCPtrString* heap = reinterpret_cast<GCPtrString*>(data + *list);
             heap->init(cx->names().empty);
@@ -678,7 +674,7 @@ UnboxedPlainObject::create(JSContext* cx, HandleObjectGroup group, NewObjectKind
         MOZ_ASSERT(*(list + 1) == -1);
     }
 
-    return res;
+    return uobj;
 }
 
 /* static */ JSObject*

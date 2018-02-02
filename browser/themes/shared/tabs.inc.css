@@ -45,6 +45,20 @@ tabbrowser {
   min-height: inherit;
 }
 
+@supports -moz-bool-pref("layout.css.emulate-moz-box-with-flex") {
+  .tab-stack {
+    /* Needed to allow tabs to shrink to be skinnier than their page-title: */
+    min-width: 0;
+  }
+
+  .tabbrowser-arrowscrollbox > .arrowscrollbox-scrollbox > .scrollbox-innerbox {
+    /* Needed to prevent tabstrip from growing as wide as the sum of the tabs'
+       page-title widths (when we'd rather have it be as wide as the window and
+       compress the tabs to their minimum size): */
+    max-width: 100%;
+  }
+}
+
 .tabbrowser-tab {
   -moz-appearance: none;
   background-color: transparent;
@@ -220,9 +234,6 @@ tabbrowser {
 
 .tab-icon-image {
   list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
-}
-
-.tab-icon-image[src^="chrome://"] {
   -moz-context-properties: fill;
   fill: currentColor;
 }
@@ -356,6 +367,8 @@ tabbrowser {
 .tab-label {
   margin-inline-end: 0;
   margin-inline-start: 0;
+  /* Maintain consistent alignment in case of font fallback for non-Latin characters. */
+  line-height: 1.7em;
 }
 
 .tab-close-button {
@@ -688,6 +701,8 @@ tabbrowser {
 
 .alltabs-item > .menu-iconic-left > .menu-iconic-icon {
   list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 .alltabs-item[busy] > .menu-iconic-left > .menu-iconic-icon {

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const HAVE_CSS_WINDOW_DRAG_SUPPORT = ["win", "macosx"].includes(AppConstants.platform);
 
@@ -45,7 +45,7 @@ WindowDraggingElement.prototype = {
       parent = parent.parentNode;
     }
     while (target != this._elem) {
-      if (this.dragTags.indexOf(target.localName) == -1)
+      if (!this.dragTags.includes(target.localName))
         return false;
       target = target.parentNode;
     }

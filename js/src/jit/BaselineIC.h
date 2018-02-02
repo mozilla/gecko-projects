@@ -242,121 +242,6 @@ class ICToBool_Fallback : public ICFallbackStub
     };
 };
 
-class ICToBool_Int32 : public ICStub
-{
-    friend class ICStubSpace;
-
-    explicit ICToBool_Int32(JitCode* stubCode)
-      : ICStub(ICStub::ToBool_Int32, stubCode) {}
-
-  public:
-    // Compiler for this stub kind.
-    class Compiler : public ICStubCompiler {
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        explicit Compiler(JSContext* cx)
-          : ICStubCompiler(cx, ICStub::ToBool_Int32, Engine::Baseline) {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICToBool_Int32>(space, getStubCode());
-        }
-    };
-};
-
-class ICToBool_String : public ICStub
-{
-    friend class ICStubSpace;
-
-    explicit ICToBool_String(JitCode* stubCode)
-      : ICStub(ICStub::ToBool_String, stubCode) {}
-
-  public:
-    // Compiler for this stub kind.
-    class Compiler : public ICStubCompiler {
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        explicit Compiler(JSContext* cx)
-          : ICStubCompiler(cx, ICStub::ToBool_String, Engine::Baseline) {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICToBool_String>(space, getStubCode());
-        }
-    };
-};
-
-class ICToBool_NullUndefined : public ICStub
-{
-    friend class ICStubSpace;
-
-    explicit ICToBool_NullUndefined(JitCode* stubCode)
-      : ICStub(ICStub::ToBool_NullUndefined, stubCode) {}
-
-  public:
-    // Compiler for this stub kind.
-    class Compiler : public ICStubCompiler {
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        explicit Compiler(JSContext* cx)
-          : ICStubCompiler(cx, ICStub::ToBool_NullUndefined, Engine::Baseline) {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICToBool_NullUndefined>(space, getStubCode());
-        }
-    };
-};
-
-class ICToBool_Double : public ICStub
-{
-    friend class ICStubSpace;
-
-    explicit ICToBool_Double(JitCode* stubCode)
-      : ICStub(ICStub::ToBool_Double, stubCode) {}
-
-  public:
-    // Compiler for this stub kind.
-    class Compiler : public ICStubCompiler {
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        explicit Compiler(JSContext* cx)
-          : ICStubCompiler(cx, ICStub::ToBool_Double, Engine::Baseline) {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICToBool_Double>(space, getStubCode());
-        }
-    };
-};
-
-class ICToBool_Object : public ICStub
-{
-    friend class ICStubSpace;
-
-    explicit ICToBool_Object(JitCode* stubCode)
-      : ICStub(ICStub::ToBool_Object, stubCode) {}
-
-  public:
-    // Compiler for this stub kind.
-    class Compiler : public ICStubCompiler {
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        explicit Compiler(JSContext* cx)
-          : ICStubCompiler(cx, ICStub::ToBool_Object, Engine::Baseline) {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICToBool_Object>(space, getStubCode());
-        }
-    };
-};
-
 // ToNumber
 //     JSOP_POS
 
@@ -1454,7 +1339,6 @@ class ICInstanceOf_Fallback : public ICFallbackStub
     static const uint16_t UNOPTIMIZABLE_ACCESS_BIT = 0x1;
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 4;
 
     void noteUnoptimizableAccess() {
         extra_ |= UNOPTIMIZABLE_ACCESS_BIT;
@@ -1474,59 +1358,6 @@ class ICInstanceOf_Fallback : public ICFallbackStub
 
         ICStub* getStub(ICStubSpace* space) override {
             return newStub<ICInstanceOf_Fallback>(space, getStubCode());
-        }
-    };
-};
-
-class ICInstanceOf_Function : public ICStub
-{
-    friend class ICStubSpace;
-
-    GCPtrShape shape_;
-    GCPtrObject prototypeObj_;
-    uint32_t slot_;
-
-    ICInstanceOf_Function(JitCode* stubCode, Shape* shape, JSObject* prototypeObj, uint32_t slot);
-
-  public:
-    GCPtrShape& shape() {
-        return shape_;
-    }
-    GCPtrObject& prototypeObject() {
-        return prototypeObj_;
-    }
-    uint32_t slot() const {
-        return slot_;
-    }
-    static size_t offsetOfShape() {
-        return offsetof(ICInstanceOf_Function, shape_);
-    }
-    static size_t offsetOfPrototypeObject() {
-        return offsetof(ICInstanceOf_Function, prototypeObj_);
-    }
-    static size_t offsetOfSlot() {
-        return offsetof(ICInstanceOf_Function, slot_);
-    }
-
-    class Compiler : public ICStubCompiler {
-        RootedShape shape_;
-        RootedObject prototypeObj_;
-        uint32_t slot_;
-
-      protected:
-        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm) override;
-
-      public:
-        Compiler(JSContext* cx, Shape* shape, JSObject* prototypeObj, uint32_t slot)
-          : ICStubCompiler(cx, ICStub::InstanceOf_Function, Engine::Baseline),
-            shape_(cx, shape),
-            prototypeObj_(cx, prototypeObj),
-            slot_(slot)
-        {}
-
-        ICStub* getStub(ICStubSpace* space) override {
-            return newStub<ICInstanceOf_Function>(space, getStubCode(), shape_, prototypeObj_,
-                                                  slot_);
         }
     };
 };

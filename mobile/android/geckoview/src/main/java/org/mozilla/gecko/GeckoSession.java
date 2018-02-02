@@ -75,6 +75,7 @@ public class GeckoSession extends LayerSession
             new String[]{
                 "GeckoView:ContextMenu",
                 "GeckoView:DOMTitleChanged",
+                "GeckoView:DOMWindowFocus",
                 "GeckoView:FullScreenEnter",
                 "GeckoView:FullScreenExit"
             }
@@ -94,6 +95,8 @@ public class GeckoSession extends LayerSession
                 } else if ("GeckoView:DOMTitleChanged".equals(event)) {
                     listener.onTitleChange(GeckoSession.this,
                                            message.getString("title"));
+                } else if ("GeckoView:DOMWindowFocus".equals(event)) {
+                    listener.onFocusRequest(GeckoSession.this);
                 } else if ("GeckoView:FullScreenEnter".equals(event)) {
                     listener.onFullScreen(GeckoSession.this, true);
                 } else if ("GeckoView:FullScreenExit".equals(event)) {
@@ -316,6 +319,11 @@ public class GeckoSession extends LayerSession
             // read from any parcels.
             asBinder().attachInterface(null, Window.class.getName());
 
+            // Reset our queue, so we don't end up with queued calls on a disposed object.
+            synchronized (this) {
+                mNativeQueue.reset(State.INITIAL);
+            }
+
             if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
                 nativeDisposeNative();
             } else {
@@ -342,7 +350,7 @@ public class GeckoSession extends LayerSession
                 // then return the old queue to its initial state if applicable,
                 // because the old queue is no longer the active queue.
                 nativeQueue.setState(mNativeQueue.getState());
-                mNativeQueue.checkAndSetState(State.READY, State.INITIAL);
+                mNativeQueue.reset(State.INITIAL);
                 mNativeQueue = nativeQueue;
             }
         }
@@ -1191,6 +1199,13 @@ public class GeckoSession extends LayerSession
         * @param title The title sent from the content.
         */
         void onTitleChange(GeckoSession session, String title);
+
+        /**
+        * A page has requested focus. Note that window.focus() in content will not result
+        * in this being called.
+        * @param session The GeckoSession that initiated the callback.
+        */
+        void onFocusRequest(GeckoSession session);
 
         /**
          * A page has entered or exited full screen mode. Typically, the implementation

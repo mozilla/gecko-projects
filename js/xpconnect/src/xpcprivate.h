@@ -435,6 +435,10 @@ public:
         IDX_VALUE                   ,
         IDX_QUERY_INTERFACE         ,
         IDX_COMPONENTS              ,
+        IDX_CC                      ,
+        IDX_CI                      ,
+        IDX_CR                      ,
+        IDX_CU                      ,
         IDX_WRAPPED_JSOBJECT        ,
         IDX_OBJECT                  ,
         IDX_FUNCTION                ,
@@ -2352,18 +2356,6 @@ xpc_JSObjectToID(JSContext* cx, JSObject* obj);
 
 extern bool
 xpc_JSObjectIsID(JSContext* cx, JSObject* obj);
-
-/***************************************************************************/
-// in XPCDebug.cpp
-
-extern bool
-xpc_DumpJSStack(bool showArgs, bool showLocals, bool showThisProps);
-
-// Return a newly-allocated string containing a representation of the
-// current JS stack.
-extern JS::UniqueChars
-xpc_PrintJSStack(JSContext* cx, bool showArgs, bool showLocals,
-                 bool showThisProps);
 
 /******************************************************************************
  * Handles pre/post script processing.

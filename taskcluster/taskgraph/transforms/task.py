@@ -874,7 +874,7 @@ def build_docker_worker_payload(config, task, task_def):
         # string literal in the variable below can be changed. This is
         # preferred to changing run-task because it doesn't require images
         # to be rebuilt.
-        cache_version = 'v1'
+        cache_version = 'v2'
 
         if run_task:
             suffix = '-%s-%s' % (cache_version, _run_task_suffix())
@@ -1638,9 +1638,10 @@ def check_caches_are_volumes(task):
         return
 
     raise Exception('task %s (image %s) has caches that are not declared as '
-                    'Docker volumes: %s' % (task['label'],
-                                            task['worker']['docker-image'],
-                                            ', '.join(sorted(missing))))
+                    'Docker volumes: %s'
+                    'Have you added them as VOLUMEs in the Dockerfile?'
+                    % (task['label'], task['worker']['docker-image'],
+                       ', '.join(sorted(missing))))
 
 
 @transforms.add

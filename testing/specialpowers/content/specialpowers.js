@@ -8,7 +8,7 @@
 /* import-globals-from specialpowersAPI.js */
 /* globals addMessageListener, removeMessageListener, sendSyncMessage, sendAsyncMessage */
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function SpecialPowers(window) {
   this.window = Components.utils.getWeakReference(window);
@@ -86,14 +86,14 @@ SpecialPowers.prototype.Components = undefined;
 SpecialPowers.prototype.IsInNestedFrame = false;
 
 SpecialPowers.prototype._sendSyncMessage = function(msgname, msg) {
-  if (this.SP_SYNC_MESSAGES.indexOf(msgname) == -1) {
+  if (!this.SP_SYNC_MESSAGES.includes(msgname)) {
     dump("TEST-INFO | specialpowers.js |  Unexpected SP message: " + msgname + "\n");
   }
   return sendSyncMessage(msgname, msg);
 };
 
 SpecialPowers.prototype._sendAsyncMessage = function(msgname, msg) {
-  if (this.SP_ASYNC_MESSAGES.indexOf(msgname) == -1) {
+  if (!this.SP_ASYNC_MESSAGES.includes(msgname)) {
     dump("TEST-INFO | specialpowers.js |  Unexpected SP message: " + msgname + "\n");
   }
   sendAsyncMessage(msgname, msg);

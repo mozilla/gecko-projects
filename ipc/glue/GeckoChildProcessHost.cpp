@@ -25,9 +25,7 @@
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #include "mozilla/SandboxSettings.h"
-#if defined(XP_MACOSX)
 #include "nsAppDirectoryServiceDefs.h"
-#endif
 #endif
 
 #include "nsExceptionHandler.h"
@@ -280,6 +278,18 @@ GeckoChildProcessHost::PrepareLaunch()
   mEnableSandboxLogging = mEnableSandboxLogging
                           || !!PR_GetEnv("MOZ_SANDBOX_LOGGING");
 #endif
+#elif defined(XP_LINUX)
+#if defined(MOZ_CONTENT_SANDBOX)
+  // Get and remember the path to the per-content-process tmpdir
+  if (ShouldHaveDirectoryService()) {
+    nsCOMPtr<nsIFile> contentTempDir;
+    nsresult rv = NS_GetSpecialDirectory(NS_APP_CONTENT_PROCESS_TEMP_DIR,
+                                         getter_AddRefs(contentTempDir));
+    if (NS_SUCCEEDED(rv)) {
+      contentTempDir->GetNativePath(mTmpDirName);
+    }
+  }
+#endif
 #endif
 }
 
@@ -505,6 +515,18 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts)
     mLaunchOptions->env_map[ENVIRONMENT_LITERAL("RUST_LOG")]
         = ENVIRONMENT_STRING(childRustLog);
   }
+
+#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+  if (!mTmpDirName.IsEmpty()) {
+    // Point a bunch of things that might want to write from content to our
+    // shiny new content-process specific tmpdir
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("TMPDIR")] =
+      ENVIRONMENT_STRING(mTmpDirName);
+    // Partial fix for bug 1380051 (not persistent - should be)
+    mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MESA_GLSL_CACHE_DIR")] =
+      ENVIRONMENT_STRING(mTmpDirName);
+  }
+#endif
 
   return PerformAsyncLaunchInternal(aExtraOpts);
 }
@@ -873,7 +895,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     }
   }
 
-# if defined(XP_WIN) && defined(MOZ_SANDBOX)
+# if defined(MOZ_SANDBOX)
   bool shouldSandboxCurrentProcess = false;
 
   // XXX: Bug 1124167: We should get rid of the process specific logic for
@@ -954,7 +976,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       mSandboxBroker.AllowReadFile(it->c_str());
     }
   }
-# endif // defined(XP_WIN) && defined(MOZ_SANDBOX)
+# endif // defined(MOZ_SANDBOX)
 
   // Add the application directory path (-appdir path)
   AddAppDirToCommandLine(cmdLine);
@@ -988,7 +1010,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // Process type
   cmdLine.AppendLooseValue(UTF8ToWide(childProcessType));
 
-# if defined(XP_WIN) && defined(MOZ_SANDBOX)
+# if defined(MOZ_SANDBOX)
   if (shouldSandboxCurrentProcess) {
     if (mSandboxBroker.LaunchApp(cmdLine.program().c_str(),
                                  cmdLine.command_line_string().c_str(),
@@ -1002,7 +1024,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
         cmdLine.command_line_string().c_str());
     }
   } else
-# endif // defined(XP_WIN) && defined(MOZ_SANDBOX)
+# endif // defined(MOZ_SANDBOX)
   {
     base::LaunchApp(cmdLine, *mLaunchOptions, &process);
 

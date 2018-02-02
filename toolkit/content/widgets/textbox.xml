@@ -519,7 +519,7 @@
             this._spellCheckInitialized = true;
 
             const CI = Components.interfaces;
-            if (!(document instanceof CI.nsIDOMXULDocument))
+            if (ChromeUtils.getClassName(document) != "XULDocument")
               return null;
 
             var textbox = document.getBindingParent(this);
@@ -527,7 +527,7 @@
               return null;
 
             try {
-              Components.utils.import("resource://gre/modules/InlineSpellChecker.jsm", this);
+              ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm", this);
               this.InlineSpellCheckerUI = new this.InlineSpellChecker(textbox.editor);
             } catch (ex) { }
           }

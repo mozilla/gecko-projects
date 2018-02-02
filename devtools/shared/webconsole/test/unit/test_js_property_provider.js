@@ -3,11 +3,11 @@
 // http://creativecommons.org/publicdomain/zero/1.0/
 
 "use strict";
-const { require } = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const { FallibleJSPropertyProvider: JSPropertyProvider } =
   require("devtools/shared/webconsole/js-property-provider");
 
-Components.utils.import("resource://gre/modules/jsdebugger.jsm");
+ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
 addDebuggerToGlobal(this);
 
 function run_test() {
@@ -199,5 +199,5 @@ function test_has_no_results(results) {
 function test_has_result(results, requiredSuggestion) {
   Assert.notEqual(results, null);
   Assert.ok(results.matches.length > 0);
-  Assert.ok(results.matches.indexOf(requiredSuggestion) !== -1);
+  Assert.ok(results.matches.includes(requiredSuggestion));
 }

@@ -22,8 +22,8 @@ const Cu = Components.utils;
 
 const PR_UINT32_MAX = 0xffffffff;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const BinaryInputStream = Components.Constructor("@mozilla.org/binaryinputstream;1",
                                                  "nsIBinaryInputStream", "setInputStream");
@@ -340,9 +340,15 @@ this.NetUtil = {
         }
 
         if (securityFlags === undefined) {
-            securityFlags = loadUsingSystemPrincipal
-                            ? Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL
-                            : Ci.nsILoadInfo.SEC_NORMAL;
+            if (!loadUsingSystemPrincipal) {
+                throw new Components.Exception(
+                    "newChannel requires the 'securityFlags' property on" +
+                    " the options object unless loading from system principal.",
+                    Cr.NS_ERROR_INVALID_ARG,
+                    Components.stack.caller
+                );
+            }
+            securityFlags = Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
         }
 
         if (contentPolicyType === undefined) {

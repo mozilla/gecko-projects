@@ -4,10 +4,10 @@
 
 const { interfaces: Ci, classes: Cc, results: Cr, utils: Cu } = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/ContentPrefUtils.jsm");
-Cu.import("resource://gre/modules/ContentPrefStore.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/ContentPrefUtils.jsm");
+ChromeUtils.import("resource://gre/modules/ContentPrefStore.jsm");
 
 const CACHE_MAX_GROUP_ENTRIES = 100;
 
@@ -20,7 +20,7 @@ const GROUP_CLAUSE = `
 
 function ContentPrefService2() {
   if (Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_CONTENT) {
-    return Cu.import("resource://gre/modules/ContentPrefServiceChild.jsm")
+    return ChromeUtils.import("resource://gre/modules/ContentPrefServiceChild.jsm")
              .ContentPrefServiceChild;
   }
 
@@ -850,7 +850,7 @@ ContentPrefService2.prototype = {
     } else
       observers = this._genericObservers;
 
-    if (observers.indexOf(aObserver) == -1)
+    if (!observers.includes(aObserver))
       observers.push(aObserver);
   },
 
@@ -863,7 +863,7 @@ ContentPrefService2.prototype = {
     } else
       observers = this._genericObservers;
 
-    if (observers.indexOf(aObserver) != -1)
+    if (observers.includes(aObserver))
       observers.splice(observers.indexOf(aObserver), 1);
   },
 

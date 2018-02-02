@@ -15,6 +15,7 @@
 #include "jscompartmentinlines.h"
 
 #include "jit/MacroAssembler-inl.h"
+#include "jit/SharedICHelpers-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -449,6 +450,34 @@ BaselineCacheIRCompiler::emitGuardXrayExpandoShapeAndDefaultProto()
 }
 
 bool
+BaselineCacheIRCompiler::emitGuardFunctionPrototype()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register prototypeObject = allocator.useRegister(masm, reader.objOperandId());
+
+    // Allocate registers before the failure path to make sure they're registered
+    // by addFailurePath.
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+     // Guard on the .prototype object.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
+    masm.load32(Address(stubAddress(reader.stubOffset())), scratch2);
+    BaseValueIndex prototypeSlot(scratch1, scratch2);
+    masm.branchTestObject(Assembler::NotEqual, prototypeSlot, failure->label());
+    masm.unboxObject(prototypeSlot, scratch1);
+    masm.branchPtr(Assembler::NotEqual,
+                   prototypeObject,
+                   scratch1, failure->label());
+
+    return true;
+}
+
+bool
 BaselineCacheIRCompiler::emitLoadFixedSlotResult()
 {
     AutoOutputRegister output(*this);
@@ -865,15 +894,16 @@ BaselineCacheIRCompiler::emitLoadFrameArgumentResult()
 {
     AutoOutputRegister output(*this);
     Register index = allocator.useRegister(masm, reader.int32OperandId());
-    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegisterMaybeOutput scratch2(allocator, masm, output);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
         return false;
 
     // Bounds check.
-    masm.loadPtr(Address(BaselineFrameReg, BaselineFrame::offsetOfNumActualArgs()), scratch);
-    masm.branch32(Assembler::AboveOrEqual, index, scratch, failure->label());
+    masm.loadPtr(Address(BaselineFrameReg, BaselineFrame::offsetOfNumActualArgs()), scratch1);
+    masm.boundsCheck32ForLoad(index, scratch1, scratch2, failure->label());
 
     // Load the argument.
     masm.loadValue(BaseValueIndex(BaselineFrameReg, index, BaselineFrame::offsetOfArg(0)),
@@ -2065,6 +2095,7 @@ BaselineCacheIRCompiler::init(CacheKind kind)
       case CacheKind::GetProp:
       case CacheKind::TypeOf:
       case CacheKind::GetIterator:
+      case CacheKind::ToBool:
         MOZ_ASSERT(numInputs == 1);
         allocator.initInputLocation(0, R0);
         break;
@@ -2074,6 +2105,7 @@ BaselineCacheIRCompiler::init(CacheKind kind)
       case CacheKind::SetProp:
       case CacheKind::In:
       case CacheKind::HasOwn:
+      case CacheKind::InstanceOf:
         MOZ_ASSERT(numInputs == 2);
         allocator.initInputLocation(0, R0);
         allocator.initInputLocation(1, R1);

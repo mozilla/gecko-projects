@@ -1078,16 +1078,6 @@ public:
     return mRule ? mRule->GetDocument() : nullptr;
   }
 
-  virtual DocGroup* GetDocGroup() const override
-  {
-    if (!mRule) {
-      return nullptr;
-    }
-
-    nsIDocument* document = mRule->GetDocument();
-    return document ? document->GetDocGroup() : nullptr;
-  }
-
 protected:
   // This reference is not reference-counted. The rule object owns us and we go
   // away when it does.
@@ -1342,7 +1332,7 @@ StyleRule::List(FILE* out, int32_t aIndent) const
 #endif
 
 void
-StyleRule::GetCssTextImpl(nsAString& aCssText) const
+StyleRule::GetCssText(nsAString& aCssText) const
 {
   if (mSelector) {
     mSelector->ToString(aCssText, GetStyleSheet());

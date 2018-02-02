@@ -1,6 +1,6 @@
-Cu.import("resource://gre/modules/ObjectUtils.jsm");
-Cu.import("resource://gre/modules/PlacesSyncUtils.jsm");
-Cu.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
+ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
 Cu.importGlobalProperties(["URLSearchParams"]);
 
 const DESCRIPTION_ANNO = "bookmarkProperties/description";
@@ -703,10 +703,14 @@ add_task(async function test_pullChanges_tags() {
     await setChangesSynced(changes);
   }
 
-  info("Change tag entry URI using Bookmarks.changeBookmarkURI");
+  info("Change tag entry URL using Bookmarks.update");
   {
-    let tagId = PlacesUtils.bookmarks.getIdForItemAt(tagFolderId, 0);
-    PlacesUtils.bookmarks.changeBookmarkURI(tagId, uri("https://bugzilla.org"));
+    let tagGuid = await PlacesUtils.promiseItemGuid(
+      PlacesUtils.bookmarks.getIdForItemAt(tagFolderId, 0));
+    await PlacesUtils.bookmarks.update({
+      guid: tagGuid,
+      url: "https://bugzilla.org",
+    });
     let changes = await PlacesSyncUtils.bookmarks.pullChanges();
     deepEqual(Object.keys(changes).sort(),
       [firstItem.recordId, secondItem.recordId, untaggedItem.recordId].sort(),
@@ -714,17 +718,12 @@ add_task(async function test_pullChanges_tags() {
     assertTagForURLs("tricky", ["https://bugzilla.org/", "https://mozilla.org/"],
       "Should remove tag entry for old URI");
     await setChangesSynced(changes);
-  }
 
-  info("Change tag entry URL using Bookmarks.update");
-  {
-    let tagGuid = await PlacesUtils.promiseItemGuid(
-      PlacesUtils.bookmarks.getIdForItemAt(tagFolderId, 0));
     await PlacesUtils.bookmarks.update({
       guid: tagGuid,
       url: "https://example.com",
     });
-    let changes = await PlacesSyncUtils.bookmarks.pullChanges();
+    changes = await PlacesSyncUtils.bookmarks.pullChanges();
     deepEqual(Object.keys(changes).sort(),
       [untaggedItem.recordId].sort(),
       "Should include tagged bookmarks after changing tag entry URL");
@@ -2893,7 +2892,7 @@ add_task(async function test_ensureMobileQuery() {
 
   let PlacesUIUtils;
   try {
-    PlacesUIUtils = Cu.import("resource:///modules/PlacesUIUtils.jsm", {}).PlacesUIUtils;
+    PlacesUIUtils = ChromeUtils.import("resource:///modules/PlacesUIUtils.jsm", {}).PlacesUIUtils;
     PlacesUIUtils.maybeRebuildLeftPane();
   } catch (ex) {
     info("Can't build left pane roots; skipping test");

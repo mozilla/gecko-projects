@@ -7,6 +7,7 @@
 #define mozilla_HTMLEditor_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/ComposerCommandsUpdater.h"
 #include "mozilla/CSSEditUtils.h"
 #include "mozilla/ManualNAC.h"
 #include "mozilla/StyleSheet.h"
@@ -29,7 +30,6 @@
 #include "nsIHTMLEditor.h"
 #include "nsIHTMLInlineTableEditor.h"
 #include "nsIHTMLObjectResizer.h"
-#include "nsISelectionListener.h"
 #include "nsITableEditor.h"
 #include "nsPoint.h"
 #include "nsStubMutationObserver.h"
@@ -38,16 +38,19 @@
 class nsDocumentFragment;
 class nsITransferable;
 class nsIClipboard;
+class nsIDOMDocument;
 class nsIDOMMouseEvent;
 class nsILinkHandler;
 class nsTableWrapperFrame;
 class nsIDOMRange;
 class nsRange;
+class nsISelection;
 
 namespace mozilla {
 class AutoSelectionSetterAfterTableEdit;
 class HTMLEditorEventListener;
 class HTMLEditRules;
+class ResizerSelectionListener;
 class TypeInState;
 class WSRunObject;
 enum class EditAction : int32_t;
@@ -106,6 +109,11 @@ public:
   // nsIEditor overrides
   NS_IMETHOD GetPreferredIMEState(widget::IMEState* aState) override;
 
+  // nsISelectionListener overrides
+  NS_IMETHOD NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
+                                    nsISelection* aSelection,
+                                    int16_t aReason) override;
+
   // TextEditor overrides
   NS_IMETHOD BeginningOfDocument() override;
   virtual nsresult HandleKeyPressEvent(
@@ -157,7 +165,7 @@ public:
 
   nsresult GetCSSBackgroundColorState(bool* aMixed, nsAString& aOutColor,
                                       bool aBlockLevel);
-  NS_IMETHOD GetHTMLBackgroundColorState(bool* aMixed, nsAString& outColor);
+  nsresult GetHTMLBackgroundColorState(bool* aMixed, nsAString& outColor);
 
   // nsIEditorStyleSheets methods
   NS_DECL_NSIEDITORSTYLESHEETS
@@ -229,12 +237,58 @@ public:
   {
     return mIsAbsolutelyPositioningEnabled;
   }
-  nsresult GetAbsolutelyPositionedSelectionContainer(nsINode** aContainer);
+
+  /**
+   * returns the deepest absolutely positioned container of the selection
+   * if it exists or null.
+   */
+  already_AddRefed<Element> GetAbsolutelyPositionedSelectionContainer();
+
   Element* GetPositionedElement() const
   {
     return mAbsolutelyPositionedObject;
   }
-  nsresult GetElementZIndex(Element* aElement, int32_t* aZindex);
+
+  /**
+   * extracts the selection from the normal flow of the document and
+   * positions it.
+   * @param aEnabled [IN] true to absolutely position the selection,
+   *                      false to put it back in the normal flow
+   */
+  nsresult SetSelectionToAbsoluteOrStatic(bool aEnabled);
+
+  /**
+   * extracts an element from the normal flow of the document and
+   * positions it, and puts it back in the normal flow.
+   * @param aElement [IN] the element
+   * @param aEnabled [IN] true to absolutely position the element,
+   *                      false to put it back in the normal flow
+   */
+  nsresult SetPositionToAbsoluteOrStatic(Element& aElement,
+                                         bool aEnabled);
+
+  /**
+   * returns the absolute z-index of a positioned element. Never returns 'auto'
+   * @return         the z-index of the element
+   * @param aElement [IN] the element.
+   */
+  int32_t GetZIndex(Element& aElement);
+
+  /**
+   * adds aChange to the z-index of the currently positioned element.
+   * @param aChange [IN] relative change to apply to current z-index
+   */
+  nsresult AddZIndex(int32_t aChange);
+
+  /**
+   * adds aChange to the z-index of an arbitrary element.
+   * @param aElement [IN] the element
+   * @param aChange  [IN] relative change to apply to current z-index of
+   *                      the element
+   * @param aReturn  [OUT] the new z-index of the element
+   */
+  nsresult RelativeChangeElementZIndex(Element& aElement, int32_t aChange,
+                                       int32_t* aReturn);
 
   nsresult SetInlineProperty(nsAtom* aProperty,
                              nsAtom* aAttribute,
@@ -254,6 +308,20 @@ public:
                                           nsAString& outValue);
   nsresult RemoveInlineProperty(nsAtom* aProperty,
                                 nsAtom* aAttribute);
+
+  /**
+   * SetComposerCommandsUpdater() sets or unsets mComposerCommandsUpdater.
+   * This will crash in debug build if the editor already has an instance
+   * but called with another instance.
+   */
+  void SetComposerCommandsUpdater(
+         ComposerCommandsUpdater* aComposerCommandsUpdater)
+  {
+    MOZ_ASSERT(!aComposerCommandsUpdater || !mComposerCommandsUpdater ||
+               aComposerCommandsUpdater == mComposerCommandsUpdater);
+    mComposerCommandsUpdater = aComposerCommandsUpdater;
+  }
+
 protected:
   virtual ~HTMLEditor();
 
@@ -467,6 +535,13 @@ public:
    */
   nsresult OnMouseMove(nsIDOMMouseEvent* aMouseEvent);
 
+  /**
+   * Modifies the table containing the selection according to the
+   * activation of an inline table editing UI element
+   * @param aUIAnonymousElement [IN] the inline table editing UI element
+   */
+  nsresult DoInlineTableEditingAction(const Element& aUIAnonymousElement);
+
 protected:
   class BlobReader final : public nsIEditorBlobListener
   {
@@ -501,7 +576,7 @@ protected:
 
   bool ShouldReplaceRootElement();
   void NotifyRootChanged();
-  nsresult GetBodyElement(nsIDOMHTMLElement** aBody);
+  Element* GetBodyElement();
 
   /**
    * Get the focused node of this editor.
@@ -531,27 +606,27 @@ protected:
    * of course)
    * This doesn't change or use the current selection.
    */
-  NS_IMETHOD InsertCell(nsIDOMElement* aCell, int32_t aRowSpan,
-                        int32_t aColSpan, bool aAfter, bool aIsHeader,
-                        nsIDOMElement** aNewCell);
+  nsresult InsertCell(nsIDOMElement* aCell, int32_t aRowSpan,
+                      int32_t aColSpan, bool aAfter, bool aIsHeader,
+                      nsIDOMElement** aNewCell);
 
   /**
    * Helpers that don't touch the selection or do batch transactions.
    */
-  NS_IMETHOD DeleteRow(nsIDOMElement* aTable, int32_t aRowIndex);
-  NS_IMETHOD DeleteColumn(nsIDOMElement* aTable, int32_t aColIndex);
-  NS_IMETHOD DeleteCellContents(nsIDOMElement* aCell);
+  nsresult DeleteRow(nsIDOMElement* aTable, int32_t aRowIndex);
+  nsresult DeleteColumn(nsIDOMElement* aTable, int32_t aColIndex);
+  nsresult DeleteCellContents(nsIDOMElement* aCell);
 
   /**
    * Move all contents from aCellToMerge into aTargetCell (append at end).
    */
-  NS_IMETHOD MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
-                        nsCOMPtr<nsIDOMElement> aCellToMerge,
-                        bool aDeleteCellToMerge);
+  nsresult MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
+                      nsCOMPtr<nsIDOMElement> aCellToMerge,
+                      bool aDeleteCellToMerge);
 
   nsresult DeleteTable2(nsIDOMElement* aTable, Selection* aSelection);
-  NS_IMETHOD SetColSpan(nsIDOMElement* aCell, int32_t aColSpan);
-  NS_IMETHOD SetRowSpan(nsIDOMElement* aCell, int32_t aRowSpan);
+  nsresult SetColSpan(nsIDOMElement* aCell, int32_t aColSpan);
+  nsresult SetRowSpan(nsIDOMElement* aCell, int32_t aRowSpan);
 
   /**
    * Helper used to get nsTableWrapperFrame for a table.
@@ -589,18 +664,18 @@ protected:
                           int32_t* aCellOffset, int32_t* aRowIndex,
                           int32_t* aColIndex);
 
-  NS_IMETHOD GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex,
-                            int32_t aColIndex, int32_t& aActualRowSpan,
-                            int32_t& aActualColSpan);
+  nsresult GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex,
+                          int32_t aColIndex, int32_t& aActualRowSpan,
+                          int32_t& aActualColSpan);
 
-  NS_IMETHOD SplitCellIntoColumns(nsIDOMElement* aTable, int32_t aRowIndex,
-                                  int32_t aColIndex, int32_t aColSpanLeft,
-                                  int32_t aColSpanRight,
-                                  nsIDOMElement** aNewCell);
+  nsresult SplitCellIntoColumns(nsIDOMElement* aTable, int32_t aRowIndex,
+                                int32_t aColIndex, int32_t aColSpanLeft,
+                                int32_t aColSpanRight,
+                                nsIDOMElement** aNewCell);
 
-  NS_IMETHOD SplitCellIntoRows(nsIDOMElement* aTable, int32_t aRowIndex,
-                               int32_t aColIndex, int32_t aRowSpanAbove,
-                               int32_t aRowSpanBelow, nsIDOMElement** aNewCell);
+  nsresult SplitCellIntoRows(nsIDOMElement* aTable, int32_t aRowIndex,
+                             int32_t aColIndex, int32_t aRowSpanAbove,
+                             int32_t aRowSpanBelow, nsIDOMElement** aNewCell);
 
   nsresult CopyCellBackgroundColor(nsIDOMElement* destCell,
                                    nsIDOMElement* sourceCell);
@@ -608,10 +683,10 @@ protected:
   /**
    * Reduce rowspan/colspan when cells span into nonexistent rows/columns.
    */
-  NS_IMETHOD FixBadRowSpan(nsIDOMElement* aTable, int32_t aRowIndex,
-                           int32_t& aNewRowCount);
-  NS_IMETHOD FixBadColSpan(nsIDOMElement* aTable, int32_t aColIndex,
-                           int32_t& aNewColCount);
+  nsresult FixBadRowSpan(nsIDOMElement* aTable, int32_t aRowIndex,
+                         int32_t& aNewRowCount);
+  nsresult FixBadColSpan(nsIDOMElement* aTable, int32_t aColIndex,
+                         int32_t& aNewColCount);
 
   /**
    * Fallback method: Call this after using ClearSelection() and you
@@ -653,7 +728,7 @@ protected:
                                   nsAString* outValue = nullptr);
 
   // Methods for handling plaintext quotations
-  NS_IMETHOD PasteAsPlaintextQuotation(int32_t aSelectionType);
+  nsresult PasteAsPlaintextQuotation(int32_t aSelectionType);
 
   /**
    * Insert a string as quoted text, replacing the selected text (if any).
@@ -664,9 +739,9 @@ protected:
    * @return aNodeInserted  The node spanning the insertion, if applicable.
    *                        If aAddCites is false, this will be null.
    */
-  NS_IMETHOD InsertAsPlaintextQuotation(const nsAString& aQuotedText,
-                                        bool aAddCites,
-                                        nsIDOMNode** aNodeInserted);
+  nsresult InsertAsPlaintextQuotation(const nsAString& aQuotedText,
+                                      bool aAddCites,
+                                      nsIDOMNode** aNodeInserted);
 
   nsresult InsertObject(const nsACString& aType, nsISupports* aObject,
                         bool aIsSafe,
@@ -697,14 +772,14 @@ protected:
   nsresult ParseCFHTML(nsCString& aCfhtml, char16_t** aStuffToPaste,
                        char16_t** aCfcontext);
 
-  bool IsInLink(nsIDOMNode* aNode, nsCOMPtr<nsIDOMNode>* outLink = nullptr);
+  bool IsInLink(nsINode* aNode, nsCOMPtr<nsINode>* outLink = nullptr);
   nsresult StripFormattingNodes(nsIContent& aNode, bool aOnlyList = false);
   nsresult CreateDOMFragmentFromPaste(const nsAString& aInputString,
                                       const nsAString& aContextStr,
                                       const nsAString& aInfoStr,
-                                      nsCOMPtr<nsIDOMNode>* outFragNode,
-                                      nsCOMPtr<nsIDOMNode>* outStartNode,
-                                      nsCOMPtr<nsIDOMNode>* outEndNode,
+                                      nsCOMPtr<nsINode>* outFragNode,
+                                      nsCOMPtr<nsINode>* outStartNode,
+                                      nsCOMPtr<nsINode>* outEndNode,
                                       int32_t* outStartOffset,
                                       int32_t* outEndOffset,
                                       bool aTrustedInput);
@@ -938,7 +1013,14 @@ protected:
   nsresult ClearStyle(nsCOMPtr<nsINode>* aNode, int32_t* aOffset,
                       nsAtom* aProperty, nsAtom* aAttribute);
 
-  void SetElementPosition(Element& aElement, int32_t aX, int32_t aY);
+  /**
+   * sets the position of an element; warning it does NOT check if the
+   * element is already positioned or not and that's on purpose.
+   * @param aElement [IN] the element
+   * @param aX       [IN] the x position in pixels.
+   * @param aY       [IN] the y position in pixels.
+   */
+  void SetTopAndLeft(Element& aElement, int32_t aX, int32_t aY);
 
   /**
    * Reset a selected cell or collapsed selection (the caret) after table
@@ -964,8 +1046,15 @@ protected:
                                   int32_t aRow, int32_t aCol,
                                   int32_t aDirection, bool aSelected);
 
+  /**
+   * A more C++-friendly version of nsIHTMLEditor::GetSelectedElement
+   * that just returns null on errors.
+   */
+  already_AddRefed<dom::Element> GetSelectedElement(const nsAString& aTagName);
+
 protected:
   RefPtr<TypeInState> mTypeInState;
+  RefPtr<ComposerCommandsUpdater> mComposerCommandsUpdater;
 
   bool mCRInParagraphCreatesParagraph;
 
@@ -1049,7 +1138,6 @@ protected:
   nsCOMPtr<Element> mResizedObject;
 
   nsCOMPtr<nsIDOMEventListener>  mMouseMotionListenerP;
-  nsCOMPtr<nsISelectionListener> mSelectionListenerP;
   nsCOMPtr<nsIDOMEventListener>  mResizeEventListenerP;
 
   int32_t mOriginalX;
@@ -1074,6 +1162,12 @@ protected:
   int8_t  mInfoYIncrement;
 
   nsresult SetAllResizersPosition();
+
+  /**
+   * Shows active resizers around an element's frame
+   * @param aResizedElement [IN] a DOM Element
+   */
+  nsresult ShowResizers(Element& aResizedElement);
 
   ManualNACPtr CreateResizer(int16_t aLocation, nsIContent& aParentContent);
   void SetAnonymousElementPosition(int32_t aX, int32_t aY,
@@ -1118,6 +1212,30 @@ protected:
 
   int32_t mGridSize;
 
+  nsresult SetPositionToAbsolute(Element& aElement);
+  nsresult SetPositionToStatic(Element& aElement);
+
+  /**
+   * sets the z-index of an element.
+   * @param aElement [IN] the element
+   * @param aZorder  [IN] the z-index
+   */
+  void SetZIndex(Element& aElement, int32_t aZorder);
+
+  /**
+   * shows a grabber attached to an arbitrary element. The grabber is an image
+   * positioned on the left hand side of the top border of the element. Draggin
+   * and dropping it allows to change the element's absolute position in the
+   * document. See chrome://editor/content/images/grabber.gif
+   * @param aElement [IN] the element
+   */
+  nsresult ShowGrabber(Element& aElement);
+
+  /**
+   * hide the grabber if it shown.
+   */
+  void HideGrabber();
+
   ManualNACPtr CreateGrabber(nsIContent& aParentContent);
   nsresult StartMoving(nsIDOMElement* aHandle);
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
@@ -1125,8 +1243,8 @@ protected:
   void SnapToGrid(int32_t& newX, int32_t& newY);
   nsresult GrabberClicked();
   nsresult EndMoving();
-  nsresult CheckPositionedElementBGandFG(nsIDOMElement* aElement,
-                                         nsAString& aReturn);
+  nsresult GetTemporaryStyleForFocusedPositionedElement(Element& aElement,
+                                                        nsAString& aReturn);
 
   // inline table editing
   RefPtr<Element> mInlineEditedCell;
@@ -1139,7 +1257,16 @@ protected:
   ManualNACPtr mRemoveRowButton;
   ManualNACPtr mAddRowAfterButton;
 
+  /**
+   * Shows inline table editing UI around a table cell
+   * @param aCell [IN] a DOM Element being a table cell, td or th
+   */
   nsresult ShowInlineTableEditingUI(Element* aCell);
+
+  /**
+   * Hide all inline table editing UI
+   */
+  nsresult HideInlineTableEditingUI();
 
   void AddMouseClickListener(Element* aElement);
   void RemoveMouseClickListener(Element* aElement);

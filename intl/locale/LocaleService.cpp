@@ -10,6 +10,7 @@
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/intl/MozLocale.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "nsIObserverService.h"
 #include "nsIToolkitChromeRegistry.h"
@@ -441,35 +442,29 @@ LocaleService::FilterMatches(const nsTArray<nsCString>& aRequested,
                              nsTArray<nsCString>& aRetVal)
 {
   // Local copy of the list of available locales, in Locale form for flexible
-  // matching. We will remove entries from this list as they get appended to
-  // aRetVal, so that no available locale will be found more than once.
+  // matching. We will invalidate entries in this list when they are matched
+  // and the corresponding strings from aAvailable added to aRetVal, so that
+  // no available locale will be found more than once.
   AutoTArray<Locale, 100> availLocales;
   for (auto& avail : aAvailable) {
-    availLocales.AppendElement(Locale(avail, true));
+    availLocales.AppendElement(Locale(avail));
   }
 
-  // Helper to erase an entry from availLocales once we have copied it to
-  // the result list. Returns an iterator pointing to the entry that was
-  // immediately after the one that was erased (or availLocales.end() if
-  // the target was the last in the array).
-  auto eraseFromAvail = [&](nsTArray<Locale>::iterator aIter) {
-    nsTArray<Locale>::size_type index = aIter - availLocales.begin();
-    availLocales.RemoveElementAt(index);
-    return availLocales.begin() + index;
-  };
-
   for (auto& requested : aRequested) {
+    if (requested.IsEmpty()) {
+      continue;
+    }
 
     // 1) Try to find a simple (case-insensitive) string match for the request.
-    auto matchesExactly = [&](const Locale& aLoc) {
+    auto matchesExactly = [&](Locale& aLoc) {
       return requested.Equals(aLoc.AsString(),
                               nsCaseInsensitiveCStringComparator());
     };
     auto match = std::find_if(availLocales.begin(), availLocales.end(),
                               matchesExactly);
     if (match != availLocales.end()) {
-      aRetVal.AppendElement(match->AsString());
-      eraseFromAvail(match);
+      aRetVal.AppendElement(aAvailable[match - availLocales.begin()]);
+      match->Invalidate();
     }
 
     if (!aRetVal.IsEmpty()) {
@@ -477,16 +472,16 @@ LocaleService::FilterMatches(const nsTArray<nsCString>& aRequested,
     }
 
     // 2) Try to match against the available locales treated as ranges.
-    auto findRangeMatches = [&](const Locale& aReq) {
-      auto matchesRange = [&](const Locale& aLoc) {
-        return aReq.Matches(aLoc);
+    auto findRangeMatches = [&](Locale& aReq, bool aAvailRange, bool aReqRange) {
+      auto matchesRange = [&](Locale& aLoc) {
+        return aLoc.Matches(aReq, aAvailRange, aReqRange);
       };
       bool foundMatch = false;
       auto match = availLocales.begin();
       while ((match = std::find_if(match, availLocales.end(),
                                    matchesRange)) != availLocales.end()) {
-        aRetVal.AppendElement(match->AsString());
-        match = eraseFromAvail(match);
+        aRetVal.AppendElement(aAvailable[match - availLocales.begin()]);
+        match->Invalidate();
         foundMatch = true;
         if (aStrategy != LangNegStrategy::Filtering) {
           return true; // we only want the first match
@@ -495,35 +490,35 @@ LocaleService::FilterMatches(const nsTArray<nsCString>& aRequested,
       return foundMatch;
     };
 
-    Locale requestedLocale = Locale(requested, false);
-    if (findRangeMatches(requestedLocale)) {
+    Locale requestedLocale = Locale(requested);
+    if (findRangeMatches(requestedLocale, true, false)) {
       HANDLE_STRATEGY;
     }
 
     // 3) Try to match against a maximized version of the requested locale
     if (requestedLocale.AddLikelySubtags()) {
-      if (findRangeMatches(requestedLocale)) {
+      if (findRangeMatches(requestedLocale, true, false)) {
         HANDLE_STRATEGY;
       }
     }
 
     // 4) Try to match against a variant as a range
-    requestedLocale.SetVariantRange();
-    if (findRangeMatches(requestedLocale)) {
+    requestedLocale.ClearVariants();
+    if (findRangeMatches(requestedLocale, true, true)) {
       HANDLE_STRATEGY;
     }
 
     // 5) Try to match against the likely subtag without region
-    if (requestedLocale.AddLikelySubtagsWithoutRegion()) {
-      if (findRangeMatches(requestedLocale)) {
+    requestedLocale.ClearRegion();
+    if (requestedLocale.AddLikelySubtags()) {
+      if (findRangeMatches(requestedLocale, true, false)) {
         HANDLE_STRATEGY;
       }
     }
 
-
     // 6) Try to match against a region as a range
-    requestedLocale.SetRegionRange();
-    if (findRangeMatches(requestedLocale)) {
+    requestedLocale.ClearRegion();
+    if (findRangeMatches(requestedLocale, true, true)) {
       HANDLE_STRATEGY;
     }
   }
@@ -591,10 +586,12 @@ LocaleService::Observe(nsISupports *aSubject, const char *aTopic,
 }
 
 bool
-LocaleService::LanguagesMatch(const nsCString& aRequested,
-                              const nsCString& aAvailable)
+LocaleService::LanguagesMatch(const nsACString& aRequested,
+                              const nsACString& aAvailable)
 {
-  return Locale(aRequested, true).LanguageMatches(Locale(aAvailable, true));
+  Locale requested = Locale(aRequested);
+  Locale available = Locale(aAvailable);
+  return requested.GetLanguage().Equals(available.GetLanguage());
 }
 
 
@@ -802,149 +799,6 @@ LocaleService::NegotiateLanguages(const char** aRequested,
   }
 
   return NS_OK;
-}
-
-LocaleService::Locale::Locale(const nsCString& aLocale, bool aRange)
-  : mLocaleStr(aLocale)
-{
-  int32_t partNum = 0;
-
-  nsAutoCString normLocale(aLocale);
-  normLocale.ReplaceChar('_', '-');
-
-  for (const nsACString& part : normLocale.Split('-')) {
-    switch (partNum) {
-      case 0:
-        if (part.EqualsLiteral("*") ||
-            part.Length() == 2 || part.Length() == 3) {
-          mLanguage.Assign(part);
-        }
-        break;
-      case 1:
-        if (part.EqualsLiteral("*") || part.Length() == 4) {
-          mScript.Assign(part);
-          break;
-        }
-
-        // fallover to region case
-        partNum++;
-        MOZ_FALLTHROUGH;
-      case 2:
-        if (part.EqualsLiteral("*") || part.Length() == 2) {
-          mRegion.Assign(part);
-        }
-        break;
-      case 3:
-        if (part.EqualsLiteral("*") || (part.Length() >= 3 && part.Length() <= 8)) {
-          mVariant.Assign(part);
-        }
-        break;
-    }
-    partNum++;
-  }
-
-  if (aRange) {
-    if (mLanguage.IsEmpty()) {
-      mLanguage.AssignLiteral("*");
-    }
-    if (mScript.IsEmpty()) {
-      mScript.AssignLiteral("*");
-    }
-    if (mRegion.IsEmpty()) {
-      mRegion.AssignLiteral("*");
-    }
-    if (mVariant.IsEmpty()) {
-      mVariant.AssignLiteral("*");
-    }
-  }
-}
-
-static bool
-SubtagMatches(const nsCString& aSubtag1, const nsCString& aSubtag2)
-{
-  return aSubtag1.EqualsLiteral("*") ||
-         aSubtag2.EqualsLiteral("*") ||
-         aSubtag1.Equals(aSubtag2, nsCaseInsensitiveCStringComparator());
-}
-
-bool
-LocaleService::Locale::Matches(const LocaleService::Locale& aLocale) const
-{
-  return SubtagMatches(mLanguage, aLocale.mLanguage) &&
-         SubtagMatches(mScript, aLocale.mScript) &&
-         SubtagMatches(mRegion, aLocale.mRegion) &&
-         SubtagMatches(mVariant, aLocale.mVariant);
-}
-
-bool
-LocaleService::Locale::LanguageMatches(const LocaleService::Locale& aLocale) const
-{
-  return SubtagMatches(mLanguage, aLocale.mLanguage) &&
-         SubtagMatches(mScript, aLocale.mScript);
-}
-
-void
-LocaleService::Locale::SetVariantRange()
-{
-  mVariant.AssignLiteral("*");
-}
-
-void
-LocaleService::Locale::SetRegionRange()
-{
-  mRegion.AssignLiteral("*");
-}
-
-bool
-LocaleService::Locale::AddLikelySubtags()
-{
-  return AddLikelySubtagsForLocale(mLocaleStr);
-}
-
-bool
-LocaleService::Locale::AddLikelySubtagsWithoutRegion()
-{
-  nsAutoCString locale(mLanguage);
-
-  if (!mScript.IsEmpty()) {
-    locale.Append("-");
-    locale.Append(mScript);
-  }
-
-  // We don't add variant here because likelySubtag doesn't care about it.
-
-  return AddLikelySubtagsForLocale(locale);
-}
-
-bool
-LocaleService::Locale::AddLikelySubtagsForLocale(const nsACString& aLocale)
-{
-  const int32_t kLocaleMax = 160;
-  char maxLocale[kLocaleMax];
-  nsAutoCString locale(aLocale);
-
-  UErrorCode status = U_ZERO_ERROR;
-  uloc_addLikelySubtags(locale.get(), maxLocale, kLocaleMax, &status);
-
-  if (U_FAILURE(status)) {
-    return false;
-  }
-
-  nsDependentCString maxLocStr(maxLocale);
-  Locale loc = Locale(maxLocStr, false);
-
-  if (loc == *this) {
-    return false;
-  }
-
-  mLanguage = loc.mLanguage;
-  mScript = loc.mScript;
-  mRegion = loc.mRegion;
-
-  // We don't update variant from likelySubtag since it's not going to
-  // provide it and we want to preserve the range
-
-  return true;
 }
 
 NS_IMETHODIMP

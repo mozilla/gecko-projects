@@ -153,13 +153,13 @@ const RESTORE_TAB_CONTENT_REASON = {
   NAVIGATE_AND_RESTORE: 1,
 };
 
-Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm", this);
-Cu.import("resource://gre/modules/Services.jsm", this);
-Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
-Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", this);
-Cu.import("resource://gre/modules/Timer.jsm", this);
-Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/osfile.jsm", this);
+ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/Services.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
+ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", this);
+ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   gSessionStartup: ["@mozilla.org/browser/sessionstartup;1", "nsISessionStartup"],
@@ -1735,8 +1735,8 @@ var SessionStoreInternal = {
     }
 
     if (aData != "restart") {
-      // Throw away the previous session on shutdown
-      LastSession.clear();
+      // Throw away the previous session on shutdown without notification
+      LastSession.clear(true);
     }
 
     this._uninit();
@@ -3083,7 +3083,7 @@ var SessionStoreInternal = {
 
     for (let i = tabbrowser._numPinnedTabs; i < tabbrowser.tabs.length; i++) {
       let tab = tabbrowser.tabs[i];
-      if (homePages.indexOf(tab.linkedBrowser.currentURI.spec) != -1) {
+      if (homePages.includes(tab.linkedBrowser.currentURI.spec)) {
         removableTabs.push(tab);
       }
     }
@@ -4008,7 +4008,7 @@ var SessionStoreInternal = {
   restoreWindowFeatures: function ssi_restoreWindowFeatures(aWindow, aWinData) {
     var hidden = (aWinData.hidden) ? aWinData.hidden.split(",") : [];
     WINDOW_HIDEABLE_FEATURES.forEach(function(aItem) {
-      aWindow[aItem].visible = hidden.indexOf(aItem) == -1;
+      aWindow[aItem].visible = !hidden.includes(aItem);
     });
 
     if (aWinData.isPopup) {
@@ -5104,10 +5104,11 @@ var LastSession = {
     this._state = state;
   },
 
-  clear() {
+  clear(silent = false) {
     if (this._state) {
       this._state = null;
-      Services.obs.notifyObservers(null, NOTIFY_LAST_SESSION_CLEARED);
+      if (!silent)
+        Services.obs.notifyObservers(null, NOTIFY_LAST_SESSION_CLEARED);
     }
   }
 };

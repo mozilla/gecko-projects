@@ -4,14 +4,14 @@
 _("Test that node reassignment responses are respected on all kinds of " +
   "requests.");
 
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://services-common/rest.js");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-sync/service.js");
-Cu.import("resource://services-sync/status.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://testing-common/services/sync/rotaryengine.js");
-Cu.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-common/rest.js");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://services-sync/service.js");
+ChromeUtils.import("resource://services-sync/status.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://testing-common/services/sync/rotaryengine.js");
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 
 
 add_task(async function setup() {
@@ -78,11 +78,9 @@ async function syncAndExpectNodeReassignment(server, firstNotification, between,
 
   let getTokenCount = 0;
   let mockTSC = { // TokenServerClient
-    getTokenFromBrowserIDAssertion(uri, assertion, cb) {
+    async getTokenFromBrowserIDAssertion(uri, assertion) {
       getTokenCount++;
-      cb(null, {
-        endpoint: server.baseURI + "1.1/johndoe/"
-      });
+      return {endpoint: server.baseURI + "1.1/johndoe/"};
     },
   };
   Service.identity._tokenServerClient = mockTSC;
@@ -179,8 +177,8 @@ add_task(async function test_momentary_401_engine() {
                                       "weave:service:sync:finish",
                                       Service.storageURL + "rotary");
 
-  tracker.clearChangedIDs();
-  Service.engineManager.unregister(engine);
+  await tracker.clearChangedIDs();
+  await Service.engineManager.unregister(engine);
 });
 
 // This test ends up being a failing fetch *after we're already logged in*.
@@ -280,11 +278,9 @@ add_task(async function test_loop_avoidance_storage() {
 
   let getTokenCount = 0;
   let mockTSC = { // TokenServerClient
-    getTokenFromBrowserIDAssertion(uri, assertion, cb) {
+    async getTokenFromBrowserIDAssertion(uri, assertion) {
       getTokenCount++;
-      cb(null, {
-        endpoint: server.baseURI + "1.1/johndoe/"
-      });
+      return {endpoint: server.baseURI + "1.1/johndoe/"};
     },
   };
   Service.identity._tokenServerClient = mockTSC;
@@ -376,11 +372,9 @@ add_task(async function test_loop_avoidance_engine() {
 
   let getTokenCount = 0;
   let mockTSC = { // TokenServerClient
-    getTokenFromBrowserIDAssertion(uri, assertion, cb) {
+    getTokenFromBrowserIDAssertion(uri, assertion) {
       getTokenCount++;
-      cb(null, {
-        endpoint: server.baseURI + "1.1/johndoe/"
-      });
+      return {endpoint: server.baseURI + "1.1/johndoe/"};
     },
   };
   Service.identity._tokenServerClient = mockTSC;
@@ -496,6 +490,6 @@ add_task(async function test_loop_avoidance_engine() {
   await Service.sync();
   await deferred.promise;
 
-  tracker.clearChangedIDs();
-  Service.engineManager.unregister(engine);
+  await tracker.clearChangedIDs();
+  await Service.engineManager.unregister(engine);
 });

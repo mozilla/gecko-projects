@@ -5,9 +5,9 @@
 function genericChecker() {
   let kind = "background";
   let path = window.location.pathname;
-  if (path.indexOf("popup") != -1) {
+  if (path.includes("popup")) {
     kind = "popup";
-  } else if (path.indexOf("tab") != -1) {
+  } else if (path.includes("tab")) {
     kind = "tab";
   }
   window.kind = kind;
@@ -54,7 +54,7 @@ function genericChecker() {
       browser.tabs.query({
         windowId: args[0],
       }, tabs => {
-        let tab = tabs.find(tab => tab.url.indexOf("tab.html") != -1);
+        let tab = tabs.find(tab => tab.url.includes("tab.html"));
         browser.tabs.remove(tab.id, () => {
           browser.test.sendMessage("closed");
         });
@@ -104,7 +104,7 @@ add_task(async function() {
 
   info("started");
 
-  let {Management: {global: {windowTracker}}} = Cu.import("resource://gre/modules/Extension.jsm", {});
+  let {Management: {global: {windowTracker}}} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
 
   let winId1 = windowTracker.getId(win1);
   let winId2 = windowTracker.getId(win2);

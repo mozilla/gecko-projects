@@ -8,7 +8,7 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const PREF_DEBUG_ENABLED = "browser.safebrowsing.debug";
 let loggingEnabled = false;
@@ -207,7 +207,7 @@ this.SafeBrowsing = {
 
   observe(aSubject, aTopic, aData) {
     // skip nextupdatetime and lastupdatetime
-    if (aData.indexOf("lastupdatetime") >= 0 || aData.indexOf("nextupdatetime") >= 0) {
+    if (aData.includes("lastupdatetime") || aData.includes("nextupdatetime")) {
       return;
     }
 
@@ -287,7 +287,7 @@ this.SafeBrowsing = {
 
       for (let i = 0; i < obsoleteLists.length; ++i) {
         obsoleteLists[i] = obsoleteLists[i]
-          .filter(list => newLists[i].indexOf(list) == -1);
+          .filter(list => !newLists[i].includes(list));
       }
     }
 
@@ -405,14 +405,14 @@ this.SafeBrowsing = {
       }
     }
     for (let i = 0; i < this.downloadBlockLists.length; ++i) {
-      if (this.downloadsEnabled) {
+      if (this.malwareEnabled && this.downloadsEnabled) {
         listManager.enableUpdate(this.downloadBlockLists[i]);
       } else {
         listManager.disableUpdate(this.downloadBlockLists[i]);
       }
     }
     for (let i = 0; i < this.downloadAllowLists.length; ++i) {
-      if (this.downloadsEnabled) {
+      if (this.malwareEnabled && this.downloadsEnabled) {
         listManager.enableUpdate(this.downloadAllowLists[i]);
       } else {
         listManager.disableUpdate(this.downloadAllowLists[i]);

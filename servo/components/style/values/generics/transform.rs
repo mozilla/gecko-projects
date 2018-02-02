@@ -98,20 +98,26 @@ pub enum TimingFunction<Integer, Number> {
     Frames(Integer),
 }
 
-define_css_keyword_enum! { TimingKeyword:
-    "linear" => Linear,
-    "ease" => Ease,
-    "ease-in" => EaseIn,
-    "ease-out" => EaseOut,
-    "ease-in-out" => EaseInOut,
+#[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq)]
+#[derive(ToComputedValue, ToCss)]
+pub enum TimingKeyword {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
 }
-add_impls_for_keyword_enum!(TimingKeyword);
 
-define_css_keyword_enum! { StepPosition:
-    "start" => Start,
-    "end" => End,
+#[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq)]
+#[derive(ToComputedValue, ToCss)]
+pub enum StepPosition {
+    Start,
+    End,
 }
-add_impls_for_keyword_enum!(StepPosition);
 
 impl<H, V, D> TransformOrigin<H, V, D> {
     /// Returns a new transform origin.
@@ -667,4 +673,60 @@ pub fn get_normalized_vector_and_angle<T: Zero>(
         let vector = vector.normalize();
         (vector.x, vector.y, vector.z, angle)
     }
+}
+
+#[derive(ComputeSquaredDistance, ToAnimatedZero, ToComputedValue)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
+/// A value of the `Rotate` property
+///
+/// <https://drafts.csswg.org/css-transforms-2/#individual-transforms>
+pub enum Rotate<Number, Angle> {
+    /// 'none'
+    None,
+    /// '<angle>'
+    Rotate(Angle),
+    /// '<number>{3} <angle>'
+    Rotate3D(Number, Number, Number, Angle),
+}
+
+#[derive(ComputeSquaredDistance, ToAnimatedZero, ToComputedValue)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
+/// A value of the `Scale` property
+///
+/// <https://drafts.csswg.org/css-transforms-2/#individual-transforms>
+pub enum Scale<Number> {
+    /// 'none'
+    None,
+    /// '<number>'
+    ScaleX(Number),
+    /// '<number>{2}'
+    Scale(Number, Number),
+    /// '<number>{3}'
+    Scale3D(Number, Number, Number),
+}
+
+#[derive(ComputeSquaredDistance, ToAnimatedZero, ToComputedValue)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
+/// A value of the `Translate` property
+///
+/// <https://drafts.csswg.org/css-transforms-2/#individual-transforms>
+pub enum Translate<LengthOrPercentage, Length> {
+    /// 'none'
+    None,
+    /// '<length-percentage>'
+    TranslateX(LengthOrPercentage),
+    /// '<length-percentage> <length-percentage>'
+    Translate(LengthOrPercentage, LengthOrPercentage),
+    /// '<length-percentage> <length-percentage> <length>'
+    Translate3D(LengthOrPercentage, LengthOrPercentage, Length),
+}
+
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, Parse, PartialEq, ToComputedValue, ToCss)]
+pub enum TransformStyle {
+    #[cfg(feature = "servo")]
+    Auto,
+    Flat,
+    #[css(keyword = "preserve-3d")]
+    Preserve3d,
 }

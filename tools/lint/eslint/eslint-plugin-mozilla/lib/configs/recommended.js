@@ -12,11 +12,15 @@ module.exports = {
     "BrowserFeedWriter": false,
     "CSSPrimitiveValue": false,
     "CSSValueList": false,
+    "Cc": false,
     "CheckerboardReportService": false,
     // Specific to Firefox (Chrome code only).
     "ChromeUtils": false,
     "ChromeWorker": false,
+    "Ci": false,
     "Components": false,
+    "Cr": false,
+    "Cu": false,
     "DOMRequest": false,
     "DedicatedWorkerGlobalScope": false,
     "IDBFileRequest": false,
@@ -70,12 +74,12 @@ module.exports = {
     },
     "files": "**/*.jsm",
     "rules": {
-      "mozilla/mark-exported-symbols-as-used": "error"
-      // "no-unused-vars": ["error", {
-      //   "args": "none",
-      //   "vars": "all",
-      //   "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
-      // }]
+      "mozilla/mark-exported-symbols-as-used": "error",
+      "no-unused-vars": ["error", {
+        "args": "none",
+        "vars": "all",
+        "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+      }]
     }
   }],
 
@@ -169,7 +173,9 @@ module.exports = {
     "mozilla/no-import-into-var-and-global": "error",
     "mozilla/no-useless-parameters": "error",
     "mozilla/no-useless-removeEventListener": "error",
+    "mozilla/use-chromeutils-import": "error",
     "mozilla/use-default-preference-values": "error",
+    "mozilla/use-includes-instead-of-indexOf": "error",
     "mozilla/use-ownerGlobal": "error",
     "mozilla/use-services": "error",
 
@@ -245,7 +251,7 @@ module.exports = {
     // Disallow eval and setInteral/setTimeout with strings
     "no-implied-eval": "error",
 
-    // No invalid regular expresions
+    // No invalid regular expressions
     "no-invalid-regexp": "error",
 
     // No odd whitespace characters

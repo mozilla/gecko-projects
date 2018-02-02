@@ -32,13 +32,17 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/dom/MutableBlobStorage.h"
 #include "mozilla/dom/BodyExtractor.h"
+#include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FormData.h"
+#include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/dom/ServiceWorkerDescriptor.h"
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/XMLHttpRequest.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
@@ -198,7 +202,8 @@ public:
   void Construct(nsIPrincipal* aPrincipal,
                  nsIGlobalObject* aGlobalObject,
                  nsIURI* aBaseURI = nullptr,
-                 nsILoadGroup* aLoadGroup = nullptr)
+                 nsILoadGroup* aLoadGroup = nullptr,
+                 PerformanceStorage* aPerformanceStorage = nullptr)
   {
     MOZ_ASSERT(aPrincipal);
     nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobalObject);
@@ -211,6 +216,7 @@ public:
     BindToOwner(aGlobalObject);
     mBaseURI = aBaseURI;
     mLoadGroup = aLoadGroup;
+    mPerformanceStorage = aPerformanceStorage;
   }
 
   void InitParameters(bool aAnon, bool aSystem);
@@ -220,6 +226,9 @@ public:
     mIsAnon = aAnon || aSystem;
     mIsSystem = aSystem;
   }
+
+  void SetClientInfoAndController(const ClientInfo& aClientInfo,
+                                  const Maybe<ServiceWorkerDescriptor>& aController);
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -582,6 +591,8 @@ protected:
 
   nsCOMPtr<nsIStreamListener> mXMLParserStreamListener;
 
+  RefPtr<PerformanceStorage> mPerformanceStorage;
+
   // used to implement getAllResponseHeaders()
   class nsHeaderVisitor : public nsIHttpHeaderVisitor
   {
@@ -689,6 +700,9 @@ protected:
 
   nsCOMPtr<nsIURI> mBaseURI;
   nsCOMPtr<nsILoadGroup> mLoadGroup;
+
+  Maybe<ClientInfo> mClientInfo;
+  Maybe<ServiceWorkerDescriptor> mController;
 
   State mState;
 

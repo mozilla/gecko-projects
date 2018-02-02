@@ -17,8 +17,8 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "paymentSrv",
@@ -28,7 +28,7 @@ XPCOMUtils.defineLazyServiceGetter(this,
 function PaymentUIService() {
   this.wrappedJSObject = this;
   XPCOMUtils.defineLazyGetter(this, "log", () => {
-    let {ConsoleAPI} = Cu.import("resource://gre/modules/Console.jsm", {});
+    let {ConsoleAPI} = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
     return new ConsoleAPI({
       maxLogLevelPref: "dom.payments.loglevel",
       prefix: "Payment UI Service",
@@ -40,7 +40,7 @@ function PaymentUIService() {
 PaymentUIService.prototype = {
   classID: Components.ID("{01f8bd55-9017-438b-85ec-7c15d2b35cdc}"),
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIPaymentUIService]),
-  DIALOG_URL: "chrome://payments/content/paymentDialog.xhtml",
+  DIALOG_URL: "chrome://payments/content/paymentDialogWrapper.xhtml",
   REQUEST_ID_PREFIX: "paymentRequest-",
 
   // nsIPaymentUIService implementation:

@@ -34,8 +34,8 @@ const FTP_URL = "ftp://localhost/clearHistoryOnShutdown/";
 var formHistoryStartup = Cc["@mozilla.org/satchel/form-history-startup;1"].
                          getService(Ci.nsIObserver);
 formHistoryStartup.observe(null, "profile-after-change", null);
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
+ChromeUtils.defineModuleGetter(this, "FormHistory",
+                               "resource://gre/modules/FormHistory.jsm");
 
 var timeInMicroseconds = Date.now() * 1000;
 
@@ -124,7 +124,7 @@ function getFormHistoryCount() {
 
 function storeCache(aURL, aContent) {
   let cache = Services.cache2;
-  let storage = cache.diskCacheStorage(LoadContextInfo.default, false);
+  let storage = cache.diskCacheStorage(Services.loadContextInfo.default, false);
 
   return new Promise(resolve => {
     let storeCacheListener = {
@@ -159,7 +159,7 @@ function storeCache(aURL, aContent) {
 
 function checkCache(aURL) {
   let cache = Services.cache2;
-  let storage = cache.diskCacheStorage(LoadContextInfo.default, false);
+  let storage = cache.diskCacheStorage(Services.loadContextInfo.default, false);
 
   return new Promise(resolve => {
     let checkCacheListener = {

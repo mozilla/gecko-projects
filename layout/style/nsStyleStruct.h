@@ -14,7 +14,9 @@
 
 #include "mozilla/ArenaObjectID.h"
 #include "mozilla/Attributes.h"
+#ifdef MOZ_OLD_STYLE
 #include "mozilla/CSSVariableValues.h"
+#endif
 #include "mozilla/Maybe.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/StaticPtr.h"
@@ -2556,6 +2558,16 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   uint8_t mTransformStyle;
   StyleGeometryBox mTransformBox; // [reset] see nsStyleConsts.h
   RefPtr<nsCSSValueSharedList> mSpecifiedTransform; // [reset]
+  RefPtr<nsCSSValueSharedList> mSpecifiedRotate; // [reset]
+  RefPtr<nsCSSValueSharedList> mSpecifiedTranslate; // [reset]
+  RefPtr<nsCSSValueSharedList> mSpecifiedScale; // [reset]
+
+  // Used to store the final combination of mSpecifiedTranslate,
+  // mSpecifiedRotate, mSpecifiedScale and mSpecifiedTransform.
+  // Use GetCombinedTransform() to get the final transform, instead of
+  // accessing mCombinedTransform directly.
+  RefPtr<nsCSSValueSharedList> mCombinedTransform;
+
   nsStyleCoord mTransformOrigin[3]; // [reset] percent, coord, calc, 3rd param is coord, calc only
   nsStyleCoord mChildPerspective; // [reset] none, coord
   nsStyleCoord mPerspectiveOrigin[2]; // [reset] percent, coord, calc
@@ -2753,9 +2765,14 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   /* Returns whether the element has the -moz-transform property
    * or a related property. */
   bool HasTransformStyle() const {
-    return mSpecifiedTransform != nullptr ||
+    return mSpecifiedTransform || mSpecifiedRotate || mSpecifiedTranslate ||
+           mSpecifiedScale ||
            mTransformStyle == NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D ||
            (mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM);
+  }
+
+  bool HasIndividualTransform() const {
+    return mSpecifiedRotate || mSpecifiedTranslate || mSpecifiedScale;
   }
 
   bool HasPerspectiveStyle() const {
@@ -2822,6 +2839,18 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   inline bool IsFixedPosContainingBlockForAppropriateFrame(
                 StyleContextLike* aStyleContext) const;
 
+  /**
+   * Returns the final combined transform.
+   **/
+  already_AddRefed<nsCSSValueSharedList> GetCombinedTransform() const {
+    if (mCombinedTransform) {
+      return do_AddRef(mCombinedTransform);
+    }
+
+    // backward compatible to gecko-backed style system.
+    return mSpecifiedTransform ? do_AddRef(mSpecifiedTransform) : nullptr;
+  }
+
 private:
   // Helpers for above functions, which do some but not all of the tests
   // for them (since transform must be tested separately for each).
@@ -2831,7 +2860,7 @@ private:
   template<class StyleContextLike>
   inline bool HasFixedPosContainingBlockStyleInternal(
                 StyleContextLike* aStyleContext) const;
-
+  void GenerateCombinedTransform();
 public:
   // Return the 'float' and 'clear' properties, with inline-{start,end} values
   // resolved to {left,right} according to the given writing mode. These are
@@ -3604,6 +3633,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset
   uint8_t          mMaskType;         // [reset] see nsStyleConsts.h
 };
 
+// XXX This can be removed once the old style system is gone.
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVariables
 {
   nsStyleVariables();
@@ -3626,7 +3656,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVariables
 
   nsChangeHint CalcDifference(const nsStyleVariables& aNewData) const;
 
+#ifdef MOZ_OLD_STYLE
   mozilla::CSSVariableValues mVariables;
+#endif
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects

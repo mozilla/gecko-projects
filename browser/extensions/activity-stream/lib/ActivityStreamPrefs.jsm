@@ -4,9 +4,9 @@
 "use strict";
 
 const {utils: Cu} = Components;
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const ACTIVITY_STREAM_PREF_BRANCH = "browser.newtabpage.activity-stream.";
 
@@ -20,14 +20,17 @@ this.Prefs = class Prefs extends Preferences {
     this._branchName = branch;
     this._branchObservers = new Map();
   }
+
   get branchName() {
     return this._branchName;
   }
+
   ignoreBranch(listener) {
     const observer = this._branchObservers.get(listener);
     this._prefBranch.removeObserver("", observer);
     this._branchObservers.delete(listener);
   }
+
   observeBranch(listener) {
     const observer = (subject, topic, pref) => {
       listener.onPrefChanged(pref, this.get(pref));

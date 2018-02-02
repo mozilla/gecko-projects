@@ -30,7 +30,6 @@ public:
 
   css::Rule* GetParentRule() final override;
   nsINode* GetParentObject() final override;
-  DocGroup* GetDocGroup() const final override;
 
 protected:
   DeclarationBlock* GetCSSDeclaration(Operation aOperation) final override;
@@ -70,7 +69,7 @@ public:
   RawServoPageRule* Raw() const { return mRawRule; }
 
   // WebIDL interface
-  void GetCssTextImpl(nsAString& aCssText) const final override;
+  void GetCssText(nsAString& aCssText) const final override;
   nsICSSDeclaration* Style() final override;
 
   // Methods of mozilla::css::Rule

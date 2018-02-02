@@ -7,8 +7,8 @@ this.EXPORTED_SYMBOLS = ["CastingApps"];
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/SimpleServiceDiscovery.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/SimpleServiceDiscovery.jsm");
 
 
 var CastingApps = {
@@ -155,10 +155,10 @@ var CastingApps = {
   },
 
   allowableExtension(uri, extensions) {
-    return (uri instanceof Ci.nsIURL) && extensions.indexOf(uri.fileExtension) != -1;
+    return (uri instanceof Ci.nsIURL) && extensions.includes(uri.fileExtension);
   },
 
   allowableMimeType(type, types) {
-    return types.indexOf(type) != -1;
+    return types.includes(type);
   }
 };

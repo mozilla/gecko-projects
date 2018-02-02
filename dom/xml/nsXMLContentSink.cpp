@@ -8,7 +8,6 @@
 #include "nsXMLContentSink.h"
 #include "nsIParser.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMDocumentType.h"
 #include "nsIContent.h"
 #include "nsIURI.h"
@@ -16,7 +15,6 @@
 #include "nsIDocShell.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIDOMComment.h"
-#include "nsIDOMCDATASection.h"
 #include "DocumentType.h"
 #include "nsHTMLParts.h"
 #include "nsCRT.h"
@@ -362,8 +360,6 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
 
   mDocumentChildren.Clear();
 
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aResultDocument);
-
   nsCOMPtr<nsIContentViewer> contentViewer;
   mDocShell->GetContentViewer(getter_AddRefs(contentViewer));
 
@@ -371,7 +367,7 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
     // Transform failed.
     aResultDocument->SetMayStartLayout(false);
     // We have an error document.
-    contentViewer->SetDOMDocument(domDoc);
+    contentViewer->SetDocument(aResultDocument);
   }
 
   nsCOMPtr<nsIDocument> originalDocument = mDocument;
@@ -987,7 +983,7 @@ nsXMLContentSink::HandleStartElement(const char16_t *aName,
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(localName, prefix, nameSpaceID,
-                                           nsIDOMNode::ELEMENT_NODE);
+                                           nsINode::ELEMENT_NODE);
 
   result = CreateElement(aAtts, aAttsCount, nodeInfo, aLineNumber,
                          getter_AddRefs(content), &appendContent,
@@ -1369,15 +1365,8 @@ nsXMLContentSink::ReportError(const char16_t* aErrorText,
 
   // Clear the current content
   mDocumentChildren.Clear();
-  nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mDocument));
-  if (node) {
-    for (;;) {
-      nsCOMPtr<nsIDOMNode> child, dummy;
-      node->GetLastChild(getter_AddRefs(child));
-      if (!child)
-        break;
-      node->RemoveChild(child, getter_AddRefs(dummy));
-    }
+  while (mDocument->GetLastChild()) {
+    mDocument->GetLastChild()->Remove();
   }
   mDocElement = nullptr;
 

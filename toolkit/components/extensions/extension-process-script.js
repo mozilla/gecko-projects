@@ -12,9 +12,9 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://gre/modules/MessageChannel.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/MessageChannel.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionChild: "resource://gre/modules/ExtensionChild.jsm",
@@ -22,7 +22,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionPageChild: "resource://gre/modules/ExtensionPageChild.jsm",
 });
 
-Cu.import("resource://gre/modules/ExtensionUtils.jsm");
+ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "console", () => ExtensionUtils.getConsole());
 
@@ -114,7 +114,7 @@ class ExtensionGlobal {
     return this.frameData;
   }
 
-  receiveMessage({target, messageName, recipient, data, name}) {
+  async receiveMessage({target, messageName, recipient, data, name}) {
     switch (name) {
       case "Extension:SetFrameData":
         if (this.frameData) {
@@ -142,11 +142,14 @@ class ExtensionGlobal {
           wantReturnValue: data.options.wantReturnValue,
           removeCSS: data.options.remove_css,
           cssOrigin: data.options.css_origin,
-          cssCode: data.options.cssCode,
           jsCode: data.options.jsCode,
         });
 
         let script = contentScripts.get(matcher);
+
+        // Add the cssCode to the script, so that it can be converted into a cached URL.
+        await script.addCSSCode(data.options.cssCode);
+        delete data.options.cssCode;
 
         return ExtensionContent.handleExtensionExecute(this.global, target, data.options, script);
       case "WebNavigation:GetFrame":

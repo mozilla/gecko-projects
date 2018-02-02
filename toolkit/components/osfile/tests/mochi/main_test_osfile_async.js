@@ -1,13 +1,13 @@
 "use strict";
 
-Components.utils.import("resource://gre/modules/osfile.jsm");
-Components.utils.import("resource://gre/modules/AsyncShutdown.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 
 // The following are used to compare against a well-tested reference
 // implementation of file I/O.
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
-Components.utils.import("resource://gre/modules/FileUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var myok = ok;
 var myis = is;
@@ -412,7 +412,7 @@ var test_debug_test = maketest("debug_test", function debug_test(test) {
         if (!(aMessage instanceof Components.interfaces.nsIConsoleMessage)) {
           return;
         }
-        if (aMessage.message.indexOf("TEST OS") < 0) {
+        if (!aMessage.message.includes("TEST OS")) {
           return;
         }
         test.ok(true, "DEBUG TEST messages are logged correctly.");

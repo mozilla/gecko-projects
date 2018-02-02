@@ -54,6 +54,8 @@ var Components_ = this.require ? require("chrome").components : Components;
 
 // If Cu is defined, use it to lazily define the FinalizationWitnessService.
 if (Cu) {
+  // If we're in a devtools module environment, ChromeUtils won't exist.
+  /* eslint "mozilla/use-chromeutils-import": ["error", {allowCu: true}] */
   Cu.import("resource://gre/modules/Services.jsm");
   Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -930,7 +932,7 @@ Handler.prototype = {
       // An exception has occurred in the handler.
 
       if (ex && typeof ex == "object" && "name" in ex &&
-          ERRORS_TO_REPORT.indexOf(ex.name) != -1) {
+          ERRORS_TO_REPORT.includes(ex.name)) {
 
         // We suspect that the exception is a programmer error, so we now
         // display it using dump().  Note that we do not use Cu.reportError as

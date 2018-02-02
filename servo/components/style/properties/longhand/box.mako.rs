@@ -390,6 +390,30 @@ ${helpers.predefined_type("transform", "Transform",
                           flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
                           spec="https://drafts.csswg.org/css-transforms/#propdef-transform")}
 
+${helpers.predefined_type("rotate", "Rotate",
+                          "generics::transform::Rotate::None",
+                          animation_value_type="ComputedValue",
+                          boxed=True,
+                          flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+                          gecko_pref="layout.css.individual-transform.enabled",
+                          spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms")}
+
+${helpers.predefined_type("scale", "Scale",
+                          "generics::transform::Scale::None",
+                          animation_value_type="ComputedValue",
+                          boxed=True,
+                          flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+                          gecko_pref="layout.css.individual-transform.enabled",
+                          spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms")}
+
+${helpers.predefined_type("translate", "Translate",
+                          "generics::transform::Translate::None",
+                          animation_value_type="ComputedValue",
+                          boxed=True,
+                          flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+                          gecko_pref="layout.css.individual-transform.enabled",
+                          spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms")}
+
 // CSSOM View Module
 // https://www.w3.org/TR/cssom-view-1/
 ${helpers.single_keyword("scroll-behavior",
@@ -502,14 +526,16 @@ ${helpers.single_keyword("transform-box",
                          gecko_inexhaustive="True",
                          animation_value_type="discrete")}
 
-// `auto` keyword is not supported in gecko yet.
-${helpers.single_keyword("transform-style",
-                         "auto flat preserve-3d" if product == "servo" else
-                         "flat preserve-3d",
-                         spec="https://drafts.csswg.org/css-transforms/#transform-style-property",
-                         extra_prefixes="moz webkit",
-                         flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
-                         animation_value_type="discrete")}
+${helpers.predefined_type(
+    "transform-style",
+    "TransformStyle",
+    "computed::TransformStyle::" + ("Auto" if product == "servo" else "Flat"),
+    spec="https://drafts.csswg.org/css-transforms-2/#transform-style-property",
+    needs_context=False,
+    extra_prefixes="moz webkit",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    animation_value_type="discrete",
+)}
 
 ${helpers.predefined_type("transform-origin",
                           "TransformOrigin",

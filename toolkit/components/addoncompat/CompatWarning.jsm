@@ -8,12 +8,12 @@ const Ci = Components.interfaces;
 const Cc = Components.classes;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "console",
-                                  "resource://gre/modules/Console.jsm");
+ChromeUtils.defineModuleGetter(this, "console",
+                               "resource://gre/modules/Console.jsm");
 
 function section(number, url) {
   const baseURL = "https://developer.mozilla.org/en-US/Firefox/Multiprocess_Firefox/Limitations_of_chrome_scripts";
@@ -28,10 +28,10 @@ var CompatWarning = {
   // registration site.
   delayedWarning(msg, addon, warning) {
     function isShimLayer(filename) {
-      return filename.indexOf("CompatWarning.jsm") != -1 ||
-        filename.indexOf("RemoteAddonsParent.jsm") != -1 ||
-        filename.indexOf("RemoteAddonsChild.jsm") != -1 ||
-        filename.indexOf("multiprocessShims.js") != -1;
+      return filename.includes("CompatWarning.jsm") ||
+        filename.includes("RemoteAddonsParent.jsm") ||
+        filename.includes("RemoteAddonsChild.jsm") ||
+        filename.includes("multiprocessShims.js");
     }
 
     let stack = Components.stack;

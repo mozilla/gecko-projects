@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const requestStore = window.parent.document.querySelector("payment-dialog").requestStore;
+const paymentDialog = window.parent.document.querySelector("payment-dialog");
+// The requestStore should be manipulated for most changes but autofill storage changes
+// happen through setStateFromParent which includes some consistency checks.
+const requestStore = paymentDialog.requestStore;
 
 let REQUEST_1 = {
   tabId: 9,
@@ -76,6 +79,14 @@ let REQUEST_2 = {
           value: "10.50",
         },
       },
+      {
+        label: "Tax",
+        type: "tax",
+        amount: {
+          currency: "USD",
+          value: "1.50",
+        },
+      },
     ],
     shippingOptions: [
       {
@@ -109,8 +120,44 @@ let REQUEST_2 = {
   },
 };
 
+let ADDRESSES_1 = {
+  "48bnds6854t": {
+    "address-level1": "MI",
+    "address-level2": "Some City",
+    "country": "US",
+    "guid": "48bnds6854t",
+    "name": "Mr. Foo",
+    "postal-code": "90210",
+    "street-address": "123 Sesame Street,\nApt 40",
+    "tel": "+1 519 555-5555",
+  },
+  "68gjdh354j": {
+    "address-level1": "CA",
+    "address-level2": "Mountain View",
+    "country": "US",
+    "guid": "68gjdh354j",
+    "name": "Mrs. Bar",
+    "postal-code": "94041",
+    "street-address": "P.O. Box 123",
+    "tel": "+1 650 555-5555",
+  },
+};
 
 let buttonActions = {
+  debugFrame() {
+    window.parent.paymentRequest.sendMessageToChrome("debugFrame");
+  },
+
+  delete1Address() {
+    let savedAddresses = Object.assign({}, requestStore.getState().savedAddresses);
+    delete savedAddresses[Object.keys(savedAddresses)[0]];
+    // Use setStateFromParent since it ensures there is no dangling
+    // `selectedShippingAddress` foreign key (FK) reference.
+    paymentDialog.setStateFromParent({
+      savedAddresses,
+    });
+  },
+
   logState() {
     let state = requestStore.getState();
     // eslint-disable-next-line no-console
@@ -120,6 +167,14 @@ let buttonActions = {
 
   refresh() {
     window.parent.location.reload(true);
+  },
+
+  rerender() {
+    requestStore.setState({});
+  },
+
+  setAddresses1() {
+    paymentDialog.setStateFromParent({savedAddresses: ADDRESSES_1});
   },
 
   setRequest1() {
@@ -138,4 +193,14 @@ window.addEventListener("click", function onButtonClick(evt) {
   }
 
   buttonActions[id]();
+});
+
+window.addEventListener("DOMContentLoaded", function onDCL() {
+  if (window.location.protocol == "resource:") {
+    // Only show the debug frame button if we're running from a resource URI
+    // so it doesn't show during development over file: or http: since it won't work.
+    // Note that the button still won't work if resource://payments/paymentRequest.xhtml
+    // is manually loaded in a tab but will be shown.
+    document.getElementById("debugFrame").hidden = false;
+  }
 });

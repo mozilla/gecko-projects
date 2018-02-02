@@ -4,7 +4,7 @@
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const history = Cc["@mozilla.org/browser/nav-history-service;1"].getService(Ci.nsINavHistoryService);
 
@@ -257,7 +257,7 @@ this.UserDomainAffinityProvider = class UserDomainAffinityProvider {
     options.sortingMode = options.SORT_BY_VISITCOUNT_DESCENDING;
     options.maxResults = this.maxHistoryQueryResults;
 
-    const root = history.executeQuery(query, options).root;
+    const {root} = history.executeQuery(query, options);
     root.containerOpen = true;
     for (let i = 0; i < root.childCount; i++) {
       let node = root.getChild(i);

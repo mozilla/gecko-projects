@@ -13,9 +13,9 @@ this.EXPORTED_SYMBOLS = [
 
 var {utils: Cu} = Components;
 
-Cu.import("resource://services-sync/engines.js");
-Cu.import("resource://services-sync/record.js");
-Cu.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-sync/engines.js");
+ChromeUtils.import("resource://services-sync/record.js");
+ChromeUtils.import("resource://services-sync/util.js");
 
 /*
  * A fake engine implementation.
@@ -100,8 +100,8 @@ RotaryTracker.prototype = {
 this.RotaryEngine = function RotaryEngine(service) {
   SyncEngine.call(this, "Rotary", service);
   // Ensure that the engine starts with a clean slate.
-  this.toFetch        = [];
-  this.previousFailed = [];
+  this.toFetch        = new SerializableSet();
+  this.previousFailed = new SerializableSet();
 };
 RotaryEngine.prototype = {
   __proto__: SyncEngine.prototype,

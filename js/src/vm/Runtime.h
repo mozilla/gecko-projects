@@ -24,7 +24,7 @@
 #include "jsscript.h"
 
 #include "builtin/AtomicsObject.h"
-#include "builtin/Intl.h"
+#include "builtin/intl/SharedIntlData.h"
 #include "builtin/Promise.h"
 #include "frontend/NameCollections.h"
 #include "gc/GCRuntime.h"
@@ -138,52 +138,6 @@ class Simulator;
 //   on helper threads may be referred to as happening 'off thread' or on a
 //   background thread in some parts of the VM.
 
-/*
- * A FreeOp can do one thing: free memory. For convenience, it has delete_
- * convenience methods that also call destructors.
- *
- * FreeOp is passed to finalizers and other sweep-phase hooks so that we do not
- * need to pass a JSContext to those hooks.
- */
-class FreeOp : public JSFreeOp
-{
-    Vector<void*, 0, SystemAllocPolicy> freeLaterList;
-    jit::JitPoisonRangeVector jitPoisonRanges;
-
-  public:
-    static FreeOp* get(JSFreeOp* fop) {
-        return static_cast<FreeOp*>(fop);
-    }
-
-    explicit FreeOp(JSRuntime* maybeRuntime);
-    ~FreeOp();
-
-    bool onActiveCooperatingThread() const {
-        return runtime_ != nullptr;
-    }
-
-    bool maybeOnHelperThread() const {
-        // Sometimes background finalization happens on the active thread so
-        // runtime_ being null doesn't always mean we are off thread.
-        return !runtime_;
-    }
-
-    bool isDefaultFreeOp() const;
-
-    inline void free_(void* p);
-    inline void freeLater(void* p);
-
-    inline bool appendJitPoisonRange(const jit::JitPoisonRange& range);
-
-    template <class T>
-    inline void delete_(T* p) {
-        if (p) {
-            p->~T();
-            free_(p);
-        }
-    }
-};
-
 } /* namespace js */
 
 namespace JS {
@@ -280,6 +234,7 @@ void DisableExtraThreads();
 using ScriptAndCountsVector = GCVector<ScriptAndCounts, 0, SystemAllocPolicy>;
 
 class AutoLockForExclusiveAccess;
+class AutoLockScriptData;
 
 } // namespace js
 
@@ -610,10 +565,26 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     bool activeThreadHasExclusiveAccess;
 #endif
 
-    /* Number of zones which may be operated on by non-cooperating helper threads. */
+    /*
+     * Lock used to protect the script data table, which can be used by
+     * off-thread parsing.
+     *
+     * Locking this only occurs if there is actually a thread other than the
+     * active thread which could access this.
+     */
+    js::Mutex scriptDataLock;
+#ifdef DEBUG
+    bool activeThreadHasScriptDataAccess;
+#endif
+
+    /*
+     * Number of zones which may be operated on by non-cooperating helper
+     * threads.
+     */
     js::UnprotectedData<size_t> numActiveHelperThreadZones;
 
     friend class js::AutoLockForExclusiveAccess;
+    friend class js::AutoLockScriptData;
 
   public:
     void setUsedByHelperThread(JS::Zone* zone);
@@ -627,6 +598,11 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     bool currentThreadHasExclusiveAccess() const {
         return (!hasHelperThreadZones() && activeThreadHasExclusiveAccess) ||
             exclusiveAccessLock.ownedByCurrentThread();
+    }
+
+    bool currentThreadHasScriptDataAccess() const {
+        return (!hasHelperThreadZones() && activeThreadHasScriptDataAccess) ||
+            scriptDataLock.ownedByCurrentThread();
     }
 #endif
 
@@ -906,7 +882,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     js::WriteOnceData<js::WellKnownSymbols*> wellKnownSymbols;
 
     /* Shared Intl data for this runtime. */
-    js::ActiveThreadData<js::SharedIntlData> sharedIntlData;
+    js::ActiveThreadData<js::intl::SharedIntlData> sharedIntlData;
 
     void traceSharedIntlData(JSTracer* trc);
 
@@ -914,9 +890,9 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     // within the runtime. This may be modified by threads using
     // AutoLockForExclusiveAccess.
   private:
-    js::ExclusiveAccessLockData<js::ScriptDataTable> scriptDataTable_;
+    js::ScriptDataLockData<js::ScriptDataTable> scriptDataTable_;
   public:
-    js::ScriptDataTable& scriptDataTable(js::AutoLockForExclusiveAccess& lock) {
+    js::ScriptDataTable& scriptDataTable(const js::AutoLockScriptData& lock) {
         return scriptDataTable_.ref();
     }
 
@@ -1090,34 +1066,6 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 };
 
 namespace js {
-
-inline void
-FreeOp::free_(void* p)
-{
-    js_free(p);
-}
-
-inline void
-FreeOp::freeLater(void* p)
-{
-    // FreeOps other than the defaultFreeOp() are constructed on the stack,
-    // and won't hold onto the pointers to free indefinitely.
-    MOZ_ASSERT(!isDefaultFreeOp());
-
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-    if (!freeLaterList.append(p))
-        oomUnsafe.crash("FreeOp::freeLater");
-}
-
-inline bool
-FreeOp::appendJitPoisonRange(const jit::JitPoisonRange& range)
-{
-    // FreeOps other than the defaultFreeOp() are constructed on the stack,
-    // and won't hold onto the pointers to free indefinitely.
-    MOZ_ASSERT(!isDefaultFreeOp());
-
-    return jitPoisonRanges.append(range);
-}
 
 /*
  * RAII class that takes the GC lock while it is live.

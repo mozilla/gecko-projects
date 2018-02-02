@@ -148,8 +148,10 @@ class TypedOperandId : public OperandId
     _(In)                   \
     _(HasOwn)               \
     _(TypeOf)               \
+    _(InstanceOf)           \
     _(GetIterator)          \
     _(Compare)              \
+    _(ToBool)               \
     _(Call)
 
 enum class CacheKind : uint8_t
@@ -164,8 +166,10 @@ extern const char* CacheKindNames[];
 #define CACHE_IR_OPS(_)                   \
     _(GuardIsObject)                      \
     _(GuardIsObjectOrNull)                \
+    _(GuardIsNullOrUndefined)             \
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
+    _(GuardIsNumber)                      \
     _(GuardIsInt32Index)                  \
     _(GuardType)                          \
     _(GuardShape)                         \
@@ -195,6 +199,7 @@ extern const char* CacheKindNames[];
     _(GuardGroupHasUnanalyzedNewScript)   \
     _(GuardIndexIsNonNegative)            \
     _(GuardXrayExpandoShapeAndDefaultProto) \
+    _(GuardFunctionPrototype)             \
     _(LoadStackValue)                     \
     _(LoadObject)                         \
     _(LoadProto)                          \
@@ -264,7 +269,12 @@ extern const char* CacheKindNames[];
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadStringResult)                   \
+    _(LoadInstanceOfObjectResult)         \
     _(LoadTypeOfObjectResult)             \
+    _(LoadInt32TruthyResult)              \
+    _(LoadDoubleTruthyResult)             \
+    _(LoadStringTruthyResult)             \
+    _(LoadObjectTruthyResult)             \
                                           \
     _(CallStringSplitResult)              \
                                           \
@@ -517,6 +527,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOperandId(res);
         return res;
     }
+    void guardIsNumber(ValOperandId val) {
+        writeOpWithOperandId(CacheOp::GuardIsNumber, val);
+    }
     void guardType(ValOperandId val, JSValueType type) {
         writeOpWithOperandId(CacheOp::GuardType, val);
         static_assert(sizeof(type) == sizeof(uint8_t), "JSValueType should fit in a byte");
@@ -525,6 +538,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void guardIsObjectOrNull(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsObjectOrNull, val);
     }
+    void guardIsNullOrUndefined(ValOperandId val) {
+        writeOpWithOperandId(CacheOp::GuardIsNullOrUndefined, val);
+    }
     void guardShape(ObjOperandId obj, Shape* shape) {
         writeOpWithOperandId(CacheOp::GuardShape, obj);
         addStubField(uintptr_t(shape), StubField::Type::Shape);
@@ -532,6 +548,12 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void guardXrayExpandoShapeAndDefaultProto(ObjOperandId obj, JSObject* shapeWrapper) {
         writeOpWithOperandId(CacheOp::GuardXrayExpandoShapeAndDefaultProto, obj);
         buffer_.writeByte(uint32_t(!!shapeWrapper));        addStubField(uintptr_t(shapeWrapper), StubField::Type::JSObject);
+    }
+    // Guard rhs[slot] == prototypeObject
+    void guardFunctionPrototype(ObjOperandId rhs, uint32_t slot, ObjOperandId protoId) {
+        writeOpWithOperandId(CacheOp::GuardFunctionPrototype, rhs);
+        writeOperandId(protoId);
+        addStubField(slot, StubField::Type::RawWord);
     }
     void guardGroup(ObjOperandId obj, ObjectGroup* group) {
         writeOpWithOperandId(CacheOp::GuardGroup, obj);
@@ -992,10 +1014,26 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void loadObjectResult(ObjOperandId obj) {
         writeOpWithOperandId(CacheOp::LoadObjectResult, obj);
     }
+    void loadInstanceOfObjectResult(ValOperandId lhs, ObjOperandId protoId, uint32_t slot) {
+        writeOp(CacheOp::LoadInstanceOfObjectResult);
+        writeOperandId(lhs);
+        writeOperandId(protoId);
+    }
     void loadTypeOfObjectResult(ObjOperandId obj) {
         writeOpWithOperandId(CacheOp::LoadTypeOfObjectResult, obj);
     }
-
+    void loadInt32TruthyResult(ValOperandId integer) {
+        writeOpWithOperandId(CacheOp::LoadInt32TruthyResult, integer);
+    }
+    void loadDoubleTruthyResult(ValOperandId dbl) {
+        writeOpWithOperandId(CacheOp::LoadDoubleTruthyResult, dbl);
+    }
+    void loadStringTruthyResult(StringOperandId str) {
+        writeOpWithOperandId(CacheOp::LoadStringTruthyResult, str);
+    }
+    void loadObjectTruthyResult(ObjOperandId obj) {
+        writeOpWithOperandId(CacheOp::LoadObjectTruthyResult, obj);
+    }
     void callStringSplitResult(StringOperandId str, StringOperandId sep, ObjectGroup* group) {
         writeOp(CacheOp::CallStringSplitResult);
         writeOperandId(str);
@@ -1062,6 +1100,9 @@ class MOZ_RAII CacheIRReader
     CacheOp readOp() {
         return CacheOp(buffer_.readByte());
     }
+
+    // Skip data not currently used.
+    void skip() { buffer_.readByte(); }
 
     ValOperandId valOperandId() { return ValOperandId(buffer_.readByte()); }
     ObjOperandId objOperandId() { return ObjOperandId(buffer_.readByte()); }
@@ -1485,6 +1526,20 @@ class MOZ_RAII HasPropIRGenerator : public IRGenerator
     bool tryAttachStub();
 };
 
+class MOZ_RAII InstanceOfIRGenerator : public IRGenerator
+{
+    HandleValue lhsVal_;
+    HandleObject rhsObj_;
+
+    void trackAttached(const char* name);
+    void trackNotAttached();
+  public:
+    InstanceOfIRGenerator(JSContext*, HandleScript, jsbytecode*, ICState::Mode,
+                          HandleValue, HandleObject);
+
+    bool tryAttachStub();
+};
+
 class MOZ_RAII TypeOfIRGenerator : public IRGenerator
 {
     HandleValue val_;
@@ -1562,6 +1617,27 @@ class MOZ_RAII CompareIRGenerator : public IRGenerator
   public:
     CompareIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc, ICState::Mode mode,
                        JSOp op, HandleValue lhsVal, HandleValue rhsVal);
+
+    bool tryAttachStub();
+};
+
+class MOZ_RAII ToBoolIRGenerator : public IRGenerator
+{
+    HandleValue val_;
+
+    bool tryAttachInt32();
+    bool tryAttachDouble();
+    bool tryAttachString();
+    bool tryAttachSymbol();
+    bool tryAttachNullOrUndefined();
+    bool tryAttachObject();
+
+    void trackAttached(const char* name);
+    void trackNotAttached();
+
+  public:
+    ToBoolIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc, ICState::Mode mode,
+                      HandleValue val);
 
     bool tryAttachStub();
 };

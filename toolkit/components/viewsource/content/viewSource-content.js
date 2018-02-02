@@ -6,10 +6,10 @@
 
 var { utils: Cu, interfaces: Ci, classes: Cc } = Components;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
+ChromeUtils.defineModuleGetter(this, "DeferredTask",
   "resource://gre/modules/DeferredTask.jsm");
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
@@ -540,7 +540,7 @@ var ViewSourceContent = {
 
     // Walk through each of the text nodes and count newlines.
     let treewalker = content.document
-        .createTreeWalker(pre, Ci.nsIDOMNodeFilter.SHOW_TEXT, null);
+        .createTreeWalker(pre, 4 /* NodeFilter.SHOW_TEXT */, null);
 
     // The column number of the first character in the current text node.
     let firstCol = 1;

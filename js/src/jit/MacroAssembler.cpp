@@ -7,6 +7,7 @@
 #include "jit/MacroAssembler-inl.h"
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/MathAlgorithms.h"
 
 #include "jsfriendapi.h"
 #include "jsprf.h"
@@ -18,6 +19,7 @@
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
+#include "jit/JitOptions.h"
 #include "jit/Lowering.h"
 #include "jit/MIR.h"
 #include "js/Conversions.h"
@@ -596,7 +598,7 @@ MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
         } else {
             if (failure)
                 branchTestBoolean(Assembler::NotEqual, value.reg().valueReg(), failure);
-            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ 1);
+            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ 1, type);
         }
         break;
 
@@ -614,7 +616,7 @@ MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
         } else {
             if (failure)
                 branchTestInt32(Assembler::NotEqual, value.reg().valueReg(), failure);
-            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ 4);
+            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ 4, type);
         }
         break;
 
@@ -669,7 +671,8 @@ MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
                 branchTestObject(Assembler::NotEqual, value.reg().valueReg(), failure);
                 bind(&ok);
             }
-            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ sizeof(uintptr_t));
+            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ sizeof(uintptr_t),
+                                type);
         }
         break;
 
@@ -687,7 +690,8 @@ MacroAssembler::storeUnboxedProperty(T address, JSValueType type,
         } else {
             if (failure)
                 branchTestString(Assembler::NotEqual, value.reg().valueReg(), failure);
-            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ sizeof(uintptr_t));
+            storeUnboxedPayload(value.reg().valueReg(), address, /* width = */ sizeof(uintptr_t),
+                                type);
         }
         break;
 
@@ -870,6 +874,8 @@ MacroAssembler::allocateObject(Register result, Register temp, gc::AllocKind all
 
     if (!nDynamicSlots)
         return freeListAllocate(result, temp, allocKind, fail);
+
+    // Only NativeObject can have nDynamicSlots > 0 and reach here.
 
     callMallocStub(nDynamicSlots * sizeof(GCPtrValue), temp, fail);
 
@@ -1201,8 +1207,8 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject* templateObj,
 
     storePtr(ImmGCPtr(templateObj->group()), Address(obj, JSObject::offsetOfGroup()));
 
-    if (Shape* shape = templateObj->maybeShape())
-        storePtr(ImmGCPtr(shape), Address(obj, ShapedObject::offsetOfShape()));
+    if (templateObj->is<ShapedObject>())
+        storePtr(ImmGCPtr(templateObj->maybeShape()), Address(obj, ShapedObject::offsetOfShape()));
 
     MOZ_ASSERT_IF(convertDoubleElements, templateObj->is<ArrayObject>());
 
@@ -1280,7 +1286,8 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject* templateObj,
             offset += sizeof(uintptr_t);
         }
     } else if (templateObj->is<UnboxedPlainObject>()) {
-        storePtr(ImmWord(0), Address(obj, UnboxedPlainObject::offsetOfExpando()));
+        MOZ_ASSERT(!templateObj->as<UnboxedPlainObject>().maybeExpando());
+        storePtr(ImmPtr(nullptr), Address(obj, UnboxedPlainObject::offsetOfExpando()));
         if (initContents)
             initUnboxedObjectContents(obj, &templateObj->as<UnboxedPlainObject>());
     } else {
@@ -1376,10 +1383,13 @@ MacroAssembler::loadStringChars(Register str, Register dest)
 }
 
 void
-MacroAssembler::loadStringChar(Register str, Register index, Register output, Label* fail)
+MacroAssembler::loadStringChar(Register str, Register index, Register output, Register scratch,
+                               Label* fail)
 {
     MOZ_ASSERT(str != output);
+    MOZ_ASSERT(str != index);
     MOZ_ASSERT(index != output);
+    MOZ_ASSERT(output != scratch);
 
     movePtr(str, output);
 
@@ -1392,7 +1402,7 @@ MacroAssembler::loadStringChar(Register str, Register index, Register output, La
 
     // Check if the index is contained in the leftChild.
     // Todo: Handle index in the rightChild.
-    branch32(Assembler::BelowOrEqual, Address(output, JSString::offsetOfLength()), index, fail);
+    boundsCheck32ForLoad(index, Address(output, JSString::offsetOfLength()), scratch, fail);
 
     // If the left side is another rope, give up.
     branchIfRope(output, fail);
@@ -1533,7 +1543,7 @@ MacroAssembler::generateBailoutTail(Register scratch, Register bailoutInfo)
     {
         // Prepare a register set for use in this case.
         AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
-        MOZ_ASSERT(!regs.has(getStackPointer()));
+        MOZ_ASSERT_IF(!IsHiddenSP(getStackPointer()), !regs.has(AsRegister(getStackPointer())));
         regs.take(bailoutInfo);
 
         // Reset SP to the point where clobbering starts.
@@ -2133,14 +2143,14 @@ MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, FloatRegi
                                    IntConversionBehavior behavior)
 {
     switch (behavior) {
-      case IntConversion_Normal:
-      case IntConversion_NegativeZeroCheck:
-        convertDoubleToInt32(src, output, fail, behavior == IntConversion_NegativeZeroCheck);
+      case IntConversionBehavior::Normal:
+      case IntConversionBehavior::NegativeZeroCheck:
+        convertDoubleToInt32(src, output, fail, behavior == IntConversionBehavior::NegativeZeroCheck);
         break;
-      case IntConversion_Truncate:
+      case IntConversionBehavior::Truncate:
         branchTruncateDoubleMaybeModUint32(src, output, truncateFail ? truncateFail : fail);
         break;
-      case IntConversion_ClampToUint8:
+      case IntConversionBehavior::ClampToUint8:
         // Clamping clobbers the input register, so use a temp.
         moveDouble(src, temp);
         clampDoubleToUint8(temp, output);
@@ -2157,31 +2167,31 @@ MacroAssembler::convertValueToInt(ValueOperand value, MDefinition* maybeInput,
                                   IntConversionInputKind conversion)
 {
     Register tag = splitTagForTest(value);
-    bool handleStrings = (behavior == IntConversion_Truncate ||
-                          behavior == IntConversion_ClampToUint8) &&
+    bool handleStrings = (behavior == IntConversionBehavior::Truncate ||
+                          behavior == IntConversionBehavior::ClampToUint8) &&
                          handleStringEntry &&
                          handleStringRejoin;
 
-    MOZ_ASSERT_IF(handleStrings, conversion == IntConversion_Any);
+    MOZ_ASSERT_IF(handleStrings, conversion == IntConversionInputKind::Any);
 
     Label done, isInt32, isBool, isDouble, isNull, isString;
 
     maybeBranchTestType(MIRType::Int32, maybeInput, tag, &isInt32);
-    if (conversion == IntConversion_Any || conversion == IntConversion_NumbersOrBoolsOnly)
+    if (conversion == IntConversionInputKind::Any || conversion == IntConversionInputKind::NumbersOrBoolsOnly)
         maybeBranchTestType(MIRType::Boolean, maybeInput, tag, &isBool);
     maybeBranchTestType(MIRType::Double, maybeInput, tag, &isDouble);
 
-    if (conversion == IntConversion_Any) {
+    if (conversion == IntConversionInputKind::Any) {
         // If we are not truncating, we fail for anything that's not
         // null. Otherwise we might be able to handle strings and objects.
         switch (behavior) {
-          case IntConversion_Normal:
-          case IntConversion_NegativeZeroCheck:
+          case IntConversionBehavior::Normal:
+          case IntConversionBehavior::NegativeZeroCheck:
             branchTestNull(Assembler::NotEqual, tag, fail);
             break;
 
-          case IntConversion_Truncate:
-          case IntConversion_ClampToUint8:
+          case IntConversionBehavior::Truncate:
+          case IntConversionBehavior::ClampToUint8:
             maybeBranchTestType(MIRType::Null, maybeInput, tag, &isNull);
             if (handleStrings)
                 maybeBranchTestType(MIRType::String, maybeInput, tag, &isString);
@@ -2231,7 +2241,7 @@ MacroAssembler::convertValueToInt(ValueOperand value, MDefinition* maybeInput,
     if (isInt32.used()) {
         bind(&isInt32);
         unboxInt32(value, output);
-        if (behavior == IntConversion_ClampToUint8)
+        if (behavior == IntConversionBehavior::ClampToUint8)
             clampIntToUint8(output);
     }
 
@@ -2242,8 +2252,8 @@ bool
 MacroAssembler::convertValueToInt(JSContext* cx, const Value& v, Register output, Label* fail,
                                   IntConversionBehavior behavior)
 {
-    bool handleStrings = (behavior == IntConversion_Truncate ||
-                          behavior == IntConversion_ClampToUint8);
+    bool handleStrings = (behavior == IntConversionBehavior::Truncate ||
+                          behavior == IntConversionBehavior::ClampToUint8);
 
     if (v.isNumber() || (handleStrings && v.isString())) {
         double d;
@@ -2253,8 +2263,8 @@ MacroAssembler::convertValueToInt(JSContext* cx, const Value& v, Register output
             return false;
 
         switch (behavior) {
-          case IntConversion_Normal:
-          case IntConversion_NegativeZeroCheck: {
+          case IntConversionBehavior::Normal:
+          case IntConversionBehavior::NegativeZeroCheck: {
             // -0 is checked anyways if we have a constant value.
             int i;
             if (mozilla::NumberIsInt32(d, &i))
@@ -2263,10 +2273,10 @@ MacroAssembler::convertValueToInt(JSContext* cx, const Value& v, Register output
                 jump(fail);
             break;
           }
-          case IntConversion_Truncate:
+          case IntConversionBehavior::Truncate:
             move32(Imm32(ToInt32(d)), output);
             break;
-          case IntConversion_ClampToUint8:
+          case IntConversionBehavior::ClampToUint8:
             move32(Imm32(ClampDoubleToUint8(d)), output);
             break;
         }
@@ -2322,7 +2332,7 @@ MacroAssembler::convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister
       case MIRType::Int32:
         if (src.typedReg().gpr() != output)
             move32(src.typedReg().gpr(), output);
-        if (src.type() == MIRType::Int32 && behavior == IntConversion_ClampToUint8)
+        if (src.type() == MIRType::Int32 && behavior == IntConversionBehavior::ClampToUint8)
             clampIntToUint8(output);
         break;
       case MIRType::Double:
@@ -2933,7 +2943,7 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
 void
 MacroAssembler::wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset)
 {
-    append(trap, wasm::TrapSite(illegalInstruction().offset(), bytecodeOffset));
+    append(trap, wasm::TrapSite(wasmTrapInstruction().offset(), bytecodeOffset));
 }
 
 void
@@ -3123,14 +3133,18 @@ MacroAssembler::wasmEmitOldTrapOutOfLineCode()
 }
 
 void
-MacroAssembler::wasmEmitStackCheck(Register sp, Register scratch, Label* onOverflow)
+MacroAssembler::wasmEmitStackCheck(RegisterOrSP sp, Register scratch, Label* onOverflow)
 {
-    loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, addressOfContext)), scratch);
-    loadPtr(Address(scratch, 0), scratch);
-    branchPtr(Assembler::AboveOrEqual,
-              Address(scratch, offsetof(JSContext, jitStackLimitNoInterrupt)),
-              sp,
-              onOverflow);
+    if (IsHiddenSP(sp)) {
+        branchStackPtrRhs(Assembler::AboveOrEqual,
+                          Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
+                          onOverflow);
+    } else {
+        branchPtr(Assembler::AboveOrEqual,
+                  Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
+                  AsRegister(sp),
+                  onOverflow);
+    }
 }
 
 void
@@ -3143,7 +3157,7 @@ MacroAssembler::emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register tem
 
     // Load the GC thing in temp1.
     if (type == MIRType::Value) {
-        unboxNonDouble(Address(PreBarrierReg, 0), temp1);
+        unboxGCThingForPreBarrierTrampoline(Address(PreBarrierReg, 0), temp1);
     } else {
         MOZ_ASSERT(type == MIRType::Object ||
                    type == MIRType::String ||
@@ -3415,69 +3429,141 @@ MacroAssembler::debugAssertIsObject(const ValueOperand& val)
 
 template <typename T>
 void
-MacroAssembler::spectreMaskIndexImpl(Register index, const T& length, Register output)
+MacroAssembler::computeSpectreIndexMaskGeneric(Register index, const T& length, Register output)
 {
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(index != output);
+
     // mask := ((index - length) & ~index) >> 31
-    // output := index & mask
     mov(index, output);
     sub32(length, output);
     not32(index);
     and32(index, output);
     not32(index); // Restore index register to its original value.
     rshift32Arithmetic(Imm32(31), output);
-    and32(index, output);
 }
 
 template <typename T>
 void
-MacroAssembler::spectreMaskIndexImpl(int32_t index, const T& length, Register output)
+MacroAssembler::computeSpectreIndexMask(int32_t index, const T& length, Register output)
 {
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+
     // mask := ((index - length) & ~index) >> 31
-    // output := index & mask
     move32(Imm32(index), output);
-    if (index == 0)
-        return;
     sub32(length, output);
     and32(Imm32(~index), output);
     rshift32Arithmetic(Imm32(31), output);
-    and32(Imm32(index), output);
 }
 
 void
-MacroAssembler::spectreMaskIndex(int32_t index, Register length, Register output)
+MacroAssembler::computeSpectreIndexMask(Register index, Register length, Register output)
 {
-    spectreMaskIndexImpl(index, length, output);
-}
+    MOZ_ASSERT(JitOptions.spectreIndexMasking);
+    MOZ_ASSERT(length != output);
+    MOZ_ASSERT(index != output);
 
-void
-MacroAssembler::spectreMaskIndex(int32_t index, const Address& length, Register output)
-{
-    spectreMaskIndexImpl(index, length, output);
-}
-
-void
-MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
-{
 #if JS_BITS_PER_WORD == 64
     // On 64-bit platforms, we can use a faster algorithm:
     //
     //   mask := (uint64_t(index) - uint64_t(length)) >> 32
-    //   output := index & mask
     //
     // mask is 0x11…11 if index < length, 0 otherwise.
     move32(index, output);
     subPtr(length, output);
     rshiftPtr(Imm32(32), output);
-    and32(index, output);
 #else
-    spectreMaskIndexImpl(index, length, output);
+    computeSpectreIndexMaskGeneric(index, length, output);
 #endif
+}
+
+void
+MacroAssembler::spectreMaskIndex(int32_t index, Register length, Register output)
+{
+    MOZ_ASSERT(length != output);
+    if (index == 0) {
+        move32(Imm32(index), output);
+    } else {
+        computeSpectreIndexMask(index, length, output);
+        and32(Imm32(index), output);
+    }
+}
+
+void
+MacroAssembler::spectreMaskIndex(int32_t index, const Address& length, Register output)
+{
+    MOZ_ASSERT(length.base != output);
+    if (index == 0) {
+        move32(Imm32(index), output);
+    } else {
+        computeSpectreIndexMask(index, length, output);
+        and32(Imm32(index), output);
+    }
+}
+
+void
+MacroAssembler::spectreMaskIndex(Register index, Register length, Register output)
+{
+    MOZ_ASSERT(length != output);
+    MOZ_ASSERT(index != output);
+
+    computeSpectreIndexMask(index, length, output);
+    and32(index, output);
 }
 
 void
 MacroAssembler::spectreMaskIndex(Register index, const Address& length, Register output)
 {
-    spectreMaskIndexImpl(index, length, output);
+    MOZ_ASSERT(index != length.base);
+    MOZ_ASSERT(length.base != output);
+    MOZ_ASSERT(index != output);
+
+    computeSpectreIndexMaskGeneric(index, length, output);
+    and32(index, output);
+}
+
+void
+MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure)
+{
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(length));
+    branch32(Assembler::AboveOrEqual, index, Imm32(length), failure);
+
+    // Note: it's fine to clobber the input register, as this is a no-op: it
+    // only affects speculative execution.
+    if (JitOptions.spectreIndexMasking)
+        and32(Imm32(length - 1), index);
+}
+
+void
+MacroAssembler::boundsCheck32ForLoad(Register index, Register length, Register scratch,
+                                     Label* failure)
+{
+    MOZ_ASSERT(index != length);
+    MOZ_ASSERT(length != scratch);
+    MOZ_ASSERT(index != scratch);
+
+    branch32(Assembler::AboveOrEqual, index, length, failure);
+
+    if (JitOptions.spectreIndexMasking) {
+        computeSpectreIndexMask(index, length, scratch);
+        and32(scratch, index);
+    }
+}
+
+void
+MacroAssembler::boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
+                                     Label* failure)
+{
+    MOZ_ASSERT(index != length.base);
+    MOZ_ASSERT(length.base != scratch);
+    MOZ_ASSERT(index != scratch);
+
+    branch32(Assembler::BelowOrEqual, length, index, failure);
+
+    if (JitOptions.spectreIndexMasking) {
+        computeSpectreIndexMaskGeneric(index, length, scratch);
+        and32(scratch, index);
+    }
 }
 
 namespace js {

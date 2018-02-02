@@ -226,7 +226,10 @@ gfxFT2FontBase::InitMetrics()
     if (!mStyle.variationSettings.IsEmpty()) {
         SetupVarCoords(face, mStyle.variationSettings, &mCoords);
         if (!mCoords.IsEmpty()) {
-            typedef FT_UInt (*SetCoordsFunc)(FT_Face, FT_UInt, FT_Fixed*);
+#if MOZ_TREE_FREETYPE
+            FT_Set_Var_Design_Coordinates(face, mCoords.Length(), mCoords.Elements());
+#else
+            typedef FT_Error (*SetCoordsFunc)(FT_Face, FT_UInt, FT_Fixed*);
             static SetCoordsFunc setCoords;
             static bool firstTime = true;
             if (firstTime) {
@@ -237,6 +240,7 @@ gfxFT2FontBase::InitMetrics()
             if (setCoords) {
                 (*setCoords)(face, mCoords.Length(), mCoords.Elements());
             }
+#endif
         }
     }
 
@@ -516,10 +520,10 @@ gfxFT2FontBase::GetFTGlyphAdvance(uint16_t aGID)
         // Failed to get the FT_Face? Give up already.
         return 0;
     }
+    bool hinting = gfxPlatform::GetPlatform()->FontHintingEnabled();
     int32_t flags =
-        gfxPlatform::GetPlatform()->FontHintingEnabled()
-            ? FT_LOAD_ADVANCE_ONLY
-            : FT_LOAD_ADVANCE_ONLY | FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING;
+        hinting ? FT_LOAD_ADVANCE_ONLY
+                : FT_LOAD_ADVANCE_ONLY | FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING;
     FT_Error ftError = FT_Load_Glyph(face.get(), aGID, flags);
     MOZ_ASSERT(!ftError);
     if (ftError != FT_Err_Ok) {
@@ -527,7 +531,11 @@ gfxFT2FontBase::GetFTGlyphAdvance(uint16_t aGID)
         return 0;
     }
     FT_Fixed advance = 0;
-    if (face.get()->face_flags & FT_FACE_FLAG_SCALABLE) {
+    // Due to freetype bug 52683 we MUST use the linearHoriAdvance field when
+    // dealing with a variation font; also use it for scalable fonts when not
+    // applying hinting. Otherwise, prefer hinted width from glyph->advance.x.
+    if ((face.get()->face_flags & FT_FACE_FLAG_SCALABLE) &&
+        (!hinting || (face.get()->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS))) {
         advance = face.get()->glyph->linearHoriAdvance;
     } else {
         advance = face.get()->glyph->advance.x << 10; // convert 26.6 to 16.16
@@ -620,13 +628,21 @@ gfxFT2FontBase::SetupVarCoords(FT_Face aFace,
 {
     aCoords->TruncateLength(0);
     if (aFace->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS) {
-        typedef FT_UInt (*GetVarFunc)(FT_Face, FT_MM_Var**);
+        typedef FT_Error (*GetVarFunc)(FT_Face, FT_MM_Var**);
+        typedef FT_Error (*DoneVarFunc)(FT_Library, FT_MM_Var*);
+#if MOZ_TREE_FREETYPE
+        GetVarFunc getVar = &FT_Get_MM_Var;
+        DoneVarFunc doneVar = &FT_Done_MM_Var;
+#else
         static GetVarFunc getVar;
+        static DoneVarFunc doneVar;
         static bool firstTime = true;
         if (firstTime) {
             firstTime = false;
             getVar = (GetVarFunc)dlsym(RTLD_DEFAULT, "FT_Get_MM_Var");
+            doneVar = (DoneVarFunc)dlsym(RTLD_DEFAULT, "FT_Done_MM_Var");
         }
+#endif
         FT_MM_Var* ftVar;
         if (getVar && FT_Err_Ok == (*getVar)(aFace, &ftVar)) {
             for (unsigned i = 0; i < ftVar->num_axis; ++i) {
@@ -641,7 +657,11 @@ gfxFT2FontBase::SetupVarCoords(FT_Face aFace,
                     }
                 }
             }
-            free(ftVar);
+            if (doneVar) {
+                (*doneVar)(aFace->glyph->library, ftVar);
+            } else {
+                free(ftVar);
+            }
         }
     }
 }

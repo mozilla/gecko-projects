@@ -1219,21 +1219,23 @@ pub extern "C" fn Servo_StyleSet_RemoveStyleSheet(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_StyleSet_FlushStyleSheets(
+pub unsafe extern "C" fn Servo_StyleSet_FlushStyleSheets(
     raw_data: RawServoStyleSetBorrowed,
     doc_element: RawGeckoElementBorrowedOrNull,
+    snapshots: *const ServoElementSnapshotTable,
 ) {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     let doc_element = doc_element.map(GeckoElement);
-    let have_invalidations = data.flush_stylesheets(&guard, doc_element);
+
+    let have_invalidations =
+        data.flush_stylesheets(&guard, doc_element, snapshots.as_ref());
+
     if have_invalidations && doc_element.is_some() {
-        // The invalidation machinery propagates the bits up, but we still
-        // need to tell the gecko restyle root machinery about it.
-        unsafe {
-            bindings::Gecko_NoteDirtySubtreeForInvalidation(doc_element.unwrap().0);
-        }
+        // The invalidation machinery propagates the bits up, but we still need
+        // to tell the Gecko restyle root machinery about it.
+        bindings::Gecko_NoteDirtySubtreeForInvalidation(doc_element.unwrap().0);
     }
 }
 
@@ -4725,10 +4727,11 @@ pub extern "C" fn Servo_ParseFontDescriptor(
 ) -> bool {
     use cssparser::UnicodeRange;
     use self::nsCSSFontDesc::*;
-    use style::computed_values::{font_feature_settings, font_stretch, font_style};
+    use style::computed_values::{font_stretch, font_style};
     use style::font_face::{FontDisplay, FontWeight, Source};
     use style::properties::longhands::font_language_override;
     use style::values::computed::font::FamilyName;
+    use style::values::specified::font::SpecifiedFontFeatureSettings;
 
     let string = unsafe { (*value).to_string() };
     let mut input = ParserInput::new(&string);
@@ -4777,7 +4780,7 @@ pub extern "C" fn Servo_ParseFontDescriptor(
             eCSSFontDesc_Stretch / font_stretch::T,
             eCSSFontDesc_Src / Vec<Source>,
             eCSSFontDesc_UnicodeRange / Vec<UnicodeRange>,
-            eCSSFontDesc_FontFeatureSettings / font_feature_settings::T,
+            eCSSFontDesc_FontFeatureSettings / SpecifiedFontFeatureSettings,
             eCSSFontDesc_FontLanguageOverride / font_language_override::SpecifiedValue,
             eCSSFontDesc_Display / FontDisplay,
         ]

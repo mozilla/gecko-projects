@@ -4,13 +4,13 @@
 
 "use strict";
 
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
-                                  "resource://gre/modules/Downloads.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "PlacesUtils",
+                               "resource://gre/modules/PlacesUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "Downloads",
+                               "resource://gre/modules/Downloads.jsm");
 
 this.EXPORTED_SYMBOLS = ["ForgetAboutSite"];
 
@@ -123,7 +123,7 @@ this.ForgetAboutSite = {
     })().catch(ex => {
       // XXXehsan: is there a better way to do this rather than this
       // hacky comparison?
-      if (ex.message.indexOf("User canceled Master Password entry") == -1) {
+      if (!ex.message.includes("User canceled Master Password entry")) {
         throw new Error("Exception occured in clearing passwords :" + ex);
       }
     }));

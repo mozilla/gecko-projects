@@ -13,6 +13,7 @@
 #include "nsError.h"
 #include "nsIXULSortService.h"
 #include "nsTreeBodyFrame.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TreeContentViewBinding.h"
 #include "nsServiceManagerUtils.h"
@@ -247,10 +248,11 @@ void
 nsTreeContentView::GetColumnProperties(nsTreeColumn& aColumn,
                                        nsAString& aProperties)
 {
-  nsCOMPtr<nsIDOMElement> element;
-  aColumn.GetElement(getter_AddRefs(element));
+  RefPtr<Element> element = aColumn.GetElement(IgnoreErrors());
 
-  element->GetAttribute(NS_LITERAL_STRING("properties"), aProperties);
+  if (element) {
+    element->GetAttribute(NS_LITERAL_STRING("properties"), aProperties);
+  }
 }
 
 NS_IMETHODIMP

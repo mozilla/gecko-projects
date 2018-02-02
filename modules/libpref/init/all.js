@@ -88,6 +88,15 @@ pref("browser.cache.frecency_half_life_hours", 6);
 pref("browser.cache.max_shutdown_io_lag", 2);
 
 pref("browser.cache.offline.enable",           true);
+
+// Nightly and Early Beta will have AppCache disabled by default
+// Stable will remain enabled until Firefox 62.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("browser.cache.offline.insecure.enable",  false);
+#else
+pref("browser.cache.offline.insecure.enable",  true);
+#endif
+
 // enable offline apps by default, disable prompt
 pref("offline-apps.allow_by_default",          true);
 
@@ -144,9 +153,6 @@ pref("dom.select_events.textcontrols.enabled", true);
 #else
 pref("dom.select_events.textcontrols.enabled", false);
 #endif
-
-// Whether or not Web Workers are enabled.
-pref("dom.workers.enabled", true);
 
 // The number of workers per domain allowed to run concurrently.
 // We're going for effectively infinite, while preventing abuse.
@@ -205,6 +211,11 @@ pref("dom.gamepad.haptic_feedback.enabled", true);
 // even during composition (keypress events are never fired during composition
 // even if this is true).
 pref("dom.keyboardevent.dispatch_during_composition", false);
+
+// If this is true, TextEventDispatcher dispatches keypress event with setting
+// WidgetEvent::mFlags::mOnlySystemGroupDispatchInContent to true if it won't
+// cause inputting printable character.
+pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
@@ -441,7 +452,7 @@ pref("media.suspend-bkgnd-video.enabled", true);
 pref("media.suspend-bkgnd-video.delay-ms", 10000);
 // Resume video decoding when the cursor is hovering on a background tab to
 // reduce the resume latency and improve the user experience.
-pref("media.resume-bkgnd-video-on-tabhover", true);;
+pref("media.resume-bkgnd-video-on-tabhover", true);
 
 // Whether to enable media seamless looping.
 pref("media.seamless-looping", true);
@@ -476,6 +487,12 @@ pref("media.peerconnection.video.vp9_preferred", false);
 pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.browser.enabled", false);
 pref("media.getusermedia.channels", 0);
+#if defined(ANDROID)
+pref("media.getusermedia.camera.off_while_disabled.enabled", false);
+#else
+pref("media.getusermedia.camera.off_while_disabled.enabled", true);
+#endif
+pref("media.getusermedia.camera.off_while_disabled.delay_ms", 3000);
 // Desktop is typically VGA capture or more; and qm_select will not drop resolution
 // below 1/2 in each dimension (or so), so QVGA (320x200) is the lowest here usually.
 pref("media.peerconnection.video.min_bitrate", 0);
@@ -630,13 +647,11 @@ pref("media.decoder.skip-to-next-key-frame.enabled", true);
 // "verbose", "normal" and "" (log disabled).
 pref("media.cubeb.logging_level", "");
 
-#ifdef NIGHTLY_BUILD
 // Cubeb sandbox (remoting) control
-#ifdef XP_MACOSX
-pref("media.cubeb.sandbox", false);
-#else
+#ifdef XP_LINUX
 pref("media.cubeb.sandbox", true);
-#endif
+#else
+pref("media.cubeb.sandbox", false);
 #endif
 
 // Set to true to force demux/decode warnings to be treated as errors.
@@ -894,7 +909,7 @@ pref("gfx.webrender.program-binary", true);
 
 pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.blob-images", 2);
-pref("gfx.webrender.hit-test", false);
+pref("gfx.webrender.hit-test", true);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
@@ -1855,6 +1870,7 @@ pref("network.http.active_tab_priority", true);
 // per Section 4.7 "Low-Latency Data Service Class".
 pref("network.ftp.data.qos", 0);
 pref("network.ftp.control.qos", 0);
+pref("network.ftp.enabled", true);
 
 // The max time to spend on xpcom events between two polls in ms.
 pref("network.sts.max_time_for_events_between_two_polls", 100);
@@ -2422,7 +2438,7 @@ pref("intl.hyphenation-alias.nb-*", "nb");
 pref("intl.hyphenation-alias.nn-*", "nn");
 
 // All prefs of default font should be "auto".
-pref("font.name.serif.ar", "");;
+pref("font.name.serif.ar", "");
 pref("font.name.sans-serif.ar", "");
 pref("font.name.monospace.ar", "");
 pref("font.name.cursive.ar", "");
@@ -2577,7 +2593,6 @@ pref("font.blacklist.underline_offset", "FangSong,Gulim,GulimChe,MingLiU,MingLiU
 
 pref("security.directory",              "");
 
-pref("signed.applets.codebase_principal_support", false);
 // security-sensitive dialogs should delay button enabling. In milliseconds.
 pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
@@ -2610,9 +2625,6 @@ pref("security.sri.enable", true);
 
 // Block scripts with wrong MIME type such as image/ or video/.
 pref("security.block_script_with_wrong_mime", true);
-
-// Block images of wrong MIME for XCTO: nosniff.
-pref("security.xcto_nosniff_block_images", false);
 
 // OCSP must-staple
 pref("security.ssl.enable_ocsp_must_staple", true);
@@ -2928,6 +2940,9 @@ pref("layout.css.dpi", -1);
 // of a CSS "px". This is only used for windows on the screen, not for printing.
 pref("layout.css.devPixelsPerPx", "-1.0");
 
+// Is support for CSS individual transform enabled?
+pref("layout.css.individual-transform.enabled", false);
+
 // Is support for CSS initial-letter property enabled?
 pref("layout.css.initial-letter.enabled", false);
 
@@ -3009,6 +3024,10 @@ pref("layout.css.frames-timing.enabled", true);
 #ifndef RELEASE_OR_BETA
 pref("layout.css.emulate-moz-box-with-flex", false);
 #endif
+
+// Is the paint-order property supported for HTML text? (It is always supported
+// for SVG, provided it is enabled at all; see "svg.paint-order.enabled".)
+pref("layout.css.paint-order.enabled", false);
 
 // Are sets of prefixed properties supported?
 pref("layout.css.prefixes.border-image", true);
@@ -5449,11 +5468,7 @@ pref("browser.safebrowsing.id", "Firefox");
 #endif
 
 // Download protection
-#ifdef MOZILLA_OFFICIAL
 pref("browser.safebrowsing.downloads.enabled", true);
-#else
-pref("browser.safebrowsing.downloads.enabled", false);
-#endif
 pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
 pref("browser.safebrowsing.downloads.remote.url", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
@@ -5733,11 +5748,6 @@ pref("media.gmp.insecure.allow", false);
 // HTML <dialog> element
 pref("dom.dialog_element.enabled", false);
 
-// Secure Element API
-#ifdef MOZ_SECUREELEMENT
-pref("dom.secureelement.enabled", false);
-#endif
-
 // Allow control characters appear in composition string.
 // When this is false, control characters except
 // CHARACTER TABULATION (horizontal tab) are removed from
@@ -5803,9 +5813,6 @@ pref("media.block-autoplay-until-in-foreground", true);
 // Is Stylo CSS support built and enabled?
 // Only define these prefs if Stylo support is actually built in.
 #ifdef MOZ_STYLO
-// XXX: We should flip this pref to true once the blocked_domains is non-empty.
-pref("layout.css.stylo-blocklist.enabled", false);
-pref("layout.css.stylo-blocklist.blocked_domains", "");
 #ifdef MOZ_STYLO_ENABLE
 pref("layout.css.servo.enabled", true);
 #else
@@ -5815,7 +5822,11 @@ pref("layout.css.servo.enabled", false);
 // If Stylo is not enabled, this pref doesn't take any effect.
 // Note that this pref is only read once when requested. Changing it
 // at runtime may have no effect.
+#ifdef MOZ_OLD_STYLE
 pref("layout.css.servo.chrome.enabled", false);
+#else
+pref("layout.css.servo.chrome.enabled", true);
+#endif
 #endif
 
 // TODO: Bug 1324406: Treat 'data:' documents as unique, opaque origins
@@ -5929,5 +5940,9 @@ pref("layers.omtp.enabled", true);
 #else
 pref("layers.omtp.enabled", false);
 #endif
-pref("layers.omtp.release-capture-on-main-thread", false);
+#if defined(XP_MACOSX)
+pref("layers.omtp.paint-workers", -1);
+#else
 pref("layers.omtp.paint-workers", 1);
+#endif
+pref("layers.omtp.release-capture-on-main-thread", false);

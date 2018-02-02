@@ -2882,6 +2882,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     return NS_OK;
   }
 
+#ifdef MOZ_OLD_STYLE
   StyleAnimationValue computedValue;
   if (!StyleAnimationValue::ExtractComputedValue(propertyID,
                                                  styleContext->AsGecko(),
@@ -2915,6 +2916,9 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
   MOZ_ASSERT(uncomputeResult,
              "Unable to get specified value from computed value");
   return NS_OK;
+#else
+  MOZ_CRASH("old style system disabled");
+#endif
 }
 
 nsresult
@@ -4445,24 +4449,6 @@ nsDOMWindowUtils::GetIsStyledByServo(bool* aStyledByServo)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::AddToStyloBlocklist(const nsACString& aBlockedDomain)
-{
-#ifdef MOZ_STYLO
-  nsLayoutUtils::AddToStyloBlocklist(aBlockedDomain);
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::RemoveFromStyloBlocklist(const nsACString& aBlockedDomain)
-{
-#ifdef MOZ_STYLO
-  nsLayoutUtils::RemoveFromStyloBlocklist(aBlockedDomain);
-#endif
-  return NS_OK;
-}
-
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
@@ -4497,5 +4483,14 @@ nsTranslationNodeList::GetLength(uint32_t* aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aRetVal);
   *aRetVal = mLength;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::WrCapture()
+{
+  if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
+    wrbc->Capture();
+  }
   return NS_OK;
 }

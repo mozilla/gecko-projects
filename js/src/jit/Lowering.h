@@ -120,6 +120,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitFunctionDispatch(MFunctionDispatch* ins) override;
     void visitObjectGroupDispatch(MObjectGroupDispatch* ins) override;
     void visitCompare(MCompare* comp) override;
+    void visitSameValue(MSameValue* comp) override;
     void visitTypeOf(MTypeOf* ins) override;
     void visitToAsync(MToAsync* ins) override;
     void visitToAsyncGen(MToAsyncGen* ins) override;
@@ -294,7 +295,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitInArray(MInArray* ins) override;
     void visitHasOwnCache(MHasOwnCache* ins) override;
     void visitInstanceOf(MInstanceOf* ins) override;
-    void visitCallInstanceOf(MCallInstanceOf* ins) override;
+    void visitInstanceOfCache(MInstanceOfCache* ins) override;
     void visitIsCallable(MIsCallable* ins) override;
     void visitIsConstructor(MIsConstructor* ins) override;
     void visitIsArray(MIsArray* ins) override;

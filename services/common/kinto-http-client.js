@@ -59,9 +59,9 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 Cu.importGlobalProperties(['fetch']);
-const { EventEmitter } = Cu.import("resource://gre/modules/EventEmitter.jsm", {});
+const { EventEmitter } = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
 
 let KintoHttpClient = class KintoHttpClient extends _base2.default {
   constructor(remote, options = {}) {
@@ -2690,7 +2690,7 @@ async function pMap(list, fn) {
  */
 function omit(obj, ...keys) {
   return Object.keys(obj).reduce((acc, key) => {
-    if (keys.indexOf(key) === -1) {
+    if (!keys.includes(key)) {
       acc[key] = obj[key];
     }
     return acc;

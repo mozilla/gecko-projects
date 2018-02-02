@@ -301,6 +301,29 @@ linux64-android-sdk-linux-repack:
         toolchain-artifact: project/gecko/android-sdk/android-sdk-linux.tar.xz
         toolchain-alias: android-sdk-linux
 
+linux64-android-ndk-linux-repack:
+    description: "Android NDK (Linux) repack toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TL(android-ndk-linux)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        docker-image: {in-tree: android-build}
+        max-run-time: 1800
+        artifacts:
+            - name: project/gecko/android-ndk
+              path: /builds/worker/project/gecko/android-ndk/
+              type: directory
+    run:
+        using: toolchain-script
+        script: repack-android-ndk-linux.sh
+        resources:
+            - 'python/mozboot/**/*android*'
+        toolchain-artifact: project/gecko/android-ndk/android-ndk.tar.xz
+        toolchain-alias: android-ndk-linux
+
 linux64-android-gradle-dependencies:
     description: "Android Gradle dependencies toolchain task"
     treeherder:
@@ -333,7 +356,7 @@ linux64-android-gradle-dependencies:
         - linux64-android-sdk-linux-repack
         - linux64-proguard-jar-repack
 
-linux64-rust-1.22:
+linux64-rust-1.23:
     description: "rust repack"
     treeherder:
         kind: build
@@ -349,7 +372,7 @@ linux64-rust-1.22:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.22.1',
+            '--channel', '1.23.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'i686-unknown-linux-gnu',
@@ -380,7 +403,7 @@ linux64-rust-1.19:
         ]
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-macos-1.22:
+linux64-rust-macos-1.23:
     description: "rust repack with macos-cross support"
     treeherder:
         kind: build
@@ -396,7 +419,7 @@ linux64-rust-macos-1.22:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.22.1',
+            '--channel', '1.23.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-apple-darwin',
@@ -404,7 +427,7 @@ linux64-rust-macos-1.22:
         toolchain-alias: linux64-rust-macos
         toolchain-artifact: public/build/rustc.tar.xz
 
-linux64-rust-android-1.22:
+linux64-rust-android-1.23:
     description: "rust repack with android-cross support"
     treeherder:
         kind: build
@@ -420,7 +443,7 @@ linux64-rust-android-1.22:
         using: toolchain-script
         script: repack_rust.py
         arguments: [
-            '--channel', '1.22.1',
+            '--channel', '1.23.0',
             '--host', 'x86_64-unknown-linux-gnu',
             '--target', 'x86_64-unknown-linux-gnu',
             '--target', 'armv7-linux-androideabi',
@@ -482,7 +505,7 @@ linux64-upx:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        docker-image: {in-tree: desktop-build}
+        docker-image: {in-tree: mingw32-build}
         max-run-time: 3600
     run:
         using: toolchain-script
@@ -498,7 +521,7 @@ linux64-wine:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        docker-image: {in-tree: desktop-build}
+        docker-image: {in-tree: mingw32-build}
         max-run-time: 10800
     run:
         using: toolchain-script
@@ -514,7 +537,7 @@ linux64-mingw32-gcc:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        docker-image: {in-tree: desktop-build}
+        docker-image: {in-tree: mingw32-build}
         max-run-time: 10800
     run:
         using: toolchain-script
@@ -532,7 +555,7 @@ linux64-mingw32-nsis:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        docker-image: {in-tree: desktop-build}
+        docker-image: {in-tree: mingw32-build}
         max-run-time: 3600
     run:
         using: toolchain-script
@@ -550,7 +573,7 @@ linux64-mingw32-fxc2:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        docker-image: {in-tree: desktop-build}
+        docker-image: {in-tree: mingw32-build}
         max-run-time: 1800
     run:
         using: toolchain-script

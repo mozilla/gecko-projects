@@ -28,8 +28,8 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
  */
 
 var Cu = Components.utils;
-Cu.import('resource://gre/modules/Services.jsm');
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+ChromeUtils.import('resource://gre/modules/Services.jsm');
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
 (function(global) {
@@ -281,7 +281,7 @@ const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
   }
 
   function containsTimeDirectionSymbol(input) {
-    return input.indexOf("-->") !== -1;
+    return input.includes("-->");
   }
 
   function maybeIsTimeStampFormat(input) {

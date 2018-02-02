@@ -4,7 +4,7 @@
 "use strict";
 
 var {classes: Cc, interfaces: Ci, manager: Cm, utils: Cu} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const VKB_ENTER_KEY = 13; // User press of VKB enter key
 const INITIAL_PAGE_DELAY = 500; // Initial pause on program start for scroll alignment
@@ -572,6 +572,15 @@ Pref.prototype = {
     return aValue ? aValue.test(this.name) : true;
   },
 
+  escapeHTML: function(input) {
+    return input.replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#x27;")
+                .replace(/\//g, "&#x2F;");
+  },
+
   // Get existing or create new LI node for the pref
   getOrCreateNewLINode: function AC_getOrCreateNewLINode() {
     if (!this.li) {
@@ -597,11 +606,10 @@ Pref.prototype = {
       this.li.setAttribute("contextmenu", "prefs-context-menu");
 
       // Create list item outline, bind to object actions
-      // eslint-disable-next-line no-unsanitized/property
-      this.li.innerHTML =
+      this.li.unsafeSetInnerHTML(
         "<div class='pref-name' " +
             "onclick='AboutConfig.selectOrToggleBoolPref(event);'>" +
-            this.name +
+            this.escapeHTML(this.name) +
         "</div>" +
         "<div class='pref-item-line'>" +
           "<input class='pref-value' value='' " +
@@ -622,7 +630,7 @@ Pref.prototype = {
           "<div class='pref-button down' " +
             "onclick='AboutConfig.incrOrDecrIntPref(event, -1);'>" +
           "</div>" +
-        "</div>";
+        "</div>");
 
       // Delay providing the list item values, until the LI is returned and added to the document
       setTimeout(this._valueSetup.bind(this), INNERHTML_VALUE_DELAY);

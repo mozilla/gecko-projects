@@ -10,11 +10,11 @@ this.EXPORTED_SYMBOLS = [
 
 var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://services-sync/main.js");
-Cu.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-sync/main.js");
+ChromeUtils.import("resource://services-sync/util.js");
 
 /**
  * Represents a pair of keys.
@@ -129,6 +129,13 @@ this.BulkKeyBundle = function BulkKeyBundle(collection) {
   KeyBundle.call(this);
 
   this._collection = collection;
+};
+BulkKeyBundle.fromHexKey = function(hexKey) {
+  let key = CommonUtils.hexToBytes(hexKey);
+  let bundle = new BulkKeyBundle();
+  // [encryptionKey, hmacKey]
+  bundle.keyPair = [key.slice(0, 32), key.slice(32, 64)];
+  return bundle;
 };
 
 BulkKeyBundle.prototype = {

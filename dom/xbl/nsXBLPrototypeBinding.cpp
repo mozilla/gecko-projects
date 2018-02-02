@@ -38,7 +38,9 @@
 #include "nsIInterfaceInfo.h"
 #include "nsIScriptError.h"
 
+#ifdef MOZ_OLD_STYLE
 #include "nsCSSRuleProcessor.h"
+#endif
 #include "nsXBLResourceLoader.h"
 #include "mozilla/AddonPathService.h"
 #include "mozilla/dom/CDATASection.h"
@@ -564,6 +566,7 @@ nsXBLPrototypeBinding::SetInitialAttributes(
   }
 }
 
+#ifdef MOZ_OLD_STYLE
 nsIStyleRuleProcessor*
 nsXBLPrototypeBinding::GetRuleProcessor()
 {
@@ -573,6 +576,7 @@ nsXBLPrototypeBinding::GetRuleProcessor()
 
   return nullptr;
 }
+#endif
 
 void
 nsXBLPrototypeBinding::ComputeServoStyleSet(nsPresContext* aPresContext)
@@ -1244,7 +1248,7 @@ nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
 
   RefPtr<nsAtom> tagAtom = NS_Atomize(tag);
   RefPtr<NodeInfo> nodeInfo =
-    aNim->GetNodeInfo(tagAtom, prefixAtom, namespaceID, nsIDOMNode::ELEMENT_NODE);
+    aNim->GetNodeInfo(tagAtom, prefixAtom, namespaceID, nsINode::ELEMENT_NODE);
 
   uint32_t attrCount;
   rv = aStream->Read32(&attrCount);
@@ -1292,7 +1296,7 @@ nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
 
         RefPtr<NodeInfo> ni =
           aNim->GetNodeInfo(nameAtom, prefixAtom,
-                            namespaceID, nsIDOMNode::ATTRIBUTE_NODE);
+                            namespaceID, nsINode::ATTRIBUTE_NODE);
         attrs[i].mName.SetTo(ni);
       }
 
@@ -1385,13 +1389,13 @@ nsXBLPrototypeBinding::WriteContentNode(nsIObjectOutputStream* aStream,
     // Text is writen out as a single byte for the type, followed by the text.
     uint8_t type = XBLBinding_Serialize_NoContent;
     switch (aNode->NodeType()) {
-      case nsIDOMNode::TEXT_NODE:
+      case nsINode::TEXT_NODE:
         type = XBLBinding_Serialize_TextNode;
         break;
-      case nsIDOMNode::CDATA_SECTION_NODE:
+      case nsINode::CDATA_SECTION_NODE:
         type = XBLBinding_Serialize_CDATANode;
         break;
-      case nsIDOMNode::COMMENT_NODE:
+      case nsINode::COMMENT_NODE:
         type = XBLBinding_Serialize_CommentNode;
         break;
       default:

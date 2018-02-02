@@ -10,13 +10,13 @@ this.EXPORTED_SYMBOLS = ["EngineSynchronizer"];
 
 var {utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://services-sync/constants.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-common/async.js");
-XPCOMUtils.defineLazyModuleGetter(this, "Doctor",
-                                  "resource://services-sync/doctor.js");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-sync/constants.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://services-common/async.js");
+ChromeUtils.defineModuleGetter(this, "Doctor",
+                               "resource://services-sync/doctor.js");
 
 /**
  * Perform synchronization of engines.
@@ -51,7 +51,7 @@ EngineSynchronizer.prototype = {
     }
 
     // If we don't have a node, get one. If that fails, retry in 10 minutes.
-    if (!this.service.clusterURL && !this.service._clusterManager.setCluster()) {
+    if (!this.service.clusterURL && !(await this.service._clusterManager.setCluster())) {
       this.service.status.sync = NO_SYNC_NODE_FOUND;
       this._log.info("No cluster URL found. Cannot sync.");
       return;

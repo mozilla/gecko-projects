@@ -267,10 +267,13 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onBackPressed() {
-        if (mCanGoBack) {
+        final boolean fullScreen = ActivityUtils.isFullScreen(this);
+        if (fullScreen) {
+            mGeckoSession.exitFullScreen();
+        } else if (mCanGoBack) {
             mGeckoSession.goBack();
         } else {
-            finish();
+            super.onBackPressed();
         }
     }
 
@@ -673,6 +676,13 @@ public class CustomTabsActivity extends AppCompatActivity
     public void onTitleChange(GeckoSession session, String title) {
         mCurrentTitle = title;
         updateActionBar();
+    }
+
+    @Override
+    public void onFocusRequest(GeckoSession session) {
+        Intent intent = new Intent(getIntent());
+        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(intent);
     }
 
     @Override

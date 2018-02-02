@@ -21,9 +21,9 @@ if (arguments.length != 3) {
 
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-var { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
-var { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
-var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+var { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm", {});
+var { FileUtils } = ChromeUtils.import("resource://gre/modules/FileUtils.jsm", {});
+var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 
 var gCertDB = Cc["@mozilla.org/security/x509certdb;1"]
                 .getService(Ci.nsIX509CertDB);
@@ -353,11 +353,11 @@ function downloadAndParseChromePins(filename,
     entry.name = entry.name.trim();
 
     let isProductionDomain =
-      (cData.production_domains.indexOf(entry.name) != -1);
+      (cData.production_domains.includes(entry.name));
     let isProductionPinset =
-      (cData.production_pinsets.indexOf(pinsetName) != -1);
+      (cData.production_pinsets.includes(pinsetName));
     let excludeDomain =
-      (cData.exclude_domains.indexOf(entry.name) != -1);
+      (cData.exclude_domains.includes(entry.name));
     let isTestMode = !isProductionPinset && !isProductionDomain;
     if (entry.pins && !excludeDomain && chromeImportedPinsets[entry.pins]) {
       chromeImportedEntries.push({
@@ -483,7 +483,7 @@ function writeEntry(entry) {
   } else {
     printVal += "false, ";
   }
-  if (entry.is_moz || (entry.pins.indexOf("mozilla") != -1 &&
+  if (entry.is_moz || (entry.pins.includes("mozilla") &&
                        entry.pins != "mozilla_test")) {
     printVal += "true, ";
   } else {

@@ -8,14 +8,14 @@
  * Toolkit glue for the remote debugging protocol, loaded into the
  * debugging global.
  */
-var { Ci, Cc, CC, Cu, Cr } = require("chrome");
+var { Ci, Cc } = require("chrome");
 var Services = require("Services");
 var { ActorPool, OriginalLocation, RegisteredActorFactory,
       ObservedActorFactory } = require("devtools/server/actors/common");
 var { LocalDebuggerTransport, ChildDebuggerTransport, WorkerDebuggerTransport } =
   require("devtools/shared/transport/transport");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var { dumpn, dumpv } = DevToolsUtils;
+var { dumpn } = DevToolsUtils;
 var flags = require("devtools/shared/flags");
 var OldEventEmitter = require("devtools/shared/old-event-emitter");
 var SyncPromise = require("devtools/shared/deprecated-sync-thenables");
@@ -32,20 +32,6 @@ DevToolsUtils.defineLazyGetter(this, "generateUUID", () => {
                            .getService(Ci.nsIUUIDGenerator);
   return generateUUID;
 });
-
-// On B2G, `this` != Global scope, so `Ci` won't be binded on `this`
-// (i.e. this.Ci is undefined) Then later, when using loadSubScript,
-// Ci,... won't be defined for sub scripts.
-this.Ci = Ci;
-this.Cc = Cc;
-this.CC = CC;
-this.Cu = Cu;
-this.Cr = Cr;
-this.Services = Services;
-this.ActorPool = ActorPool;
-this.DevToolsUtils = DevToolsUtils;
-this.dumpn = dumpn;
-this.dumpv = dumpv;
 
 // Overload `Components` to prevent SDK loader exception on Components
 // object usage
@@ -463,7 +449,7 @@ var DebuggerServer = {
       constructor: "WebConsoleActor",
       type: { tab: true }
     });
-    this.registerModule("devtools/server/actors/inspector", {
+    this.registerModule("devtools/server/actors/inspector/inspector-actor", {
       prefix: "inspector",
       constructor: "InspectorActor",
       type: { tab: true }
@@ -1276,7 +1262,7 @@ var DebuggerServer = {
    *        actorPrefix property of the constructor prototype is used.
    */
   addTabActor(actor, name = actor.prototype.actorPrefix) {
-    if (["title", "url", "actor"].indexOf(name) != -1) {
+    if (["title", "url", "actor"].includes(name)) {
       throw Error(name + " is not allowed");
     }
     if (DebuggerServer.tabActorFactories.hasOwnProperty(name)) {
@@ -1337,7 +1323,7 @@ var DebuggerServer = {
    *        actorPrefix property of the constructor prototype is used.
    */
   addGlobalActor(actor, name = actor.prototype.actorPrefix) {
-    if (["from", "tabs", "selected"].indexOf(name) != -1) {
+    if (["from", "tabs", "selected"].includes(name)) {
       throw Error(name + " is not allowed");
     }
     if (DebuggerServer.globalActorFactories.hasOwnProperty(name)) {

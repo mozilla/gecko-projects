@@ -1363,13 +1363,17 @@ SetUserTimeAndStartupIDForActivatedWindow(GtkWidget* aWindow)
 /* static */ guint32
 nsWindow::GetLastUserInputTime()
 {
-    // gdk_x11_display_get_user_time tracks button and key presses,
-    // DESKTOP_STARTUP_ID used to start the app, drop events from external
-    // drags, WM_DELETE_WINDOW delete events, but not usually mouse motion nor
+    // gdk_x11_display_get_user_time/gtk_get_current_event_time tracks
+    // button and key presses, DESKTOP_STARTUP_ID used to start the app,
+    // drop events from external drags,
+    // WM_DELETE_WINDOW delete events, but not usually mouse motion nor
     // button and key releases.  Therefore use the most recent of
     // gdk_x11_display_get_user_time and the last time that we have seen.
-    guint32 timestamp =
-            gdk_x11_display_get_user_time(gdk_display_get_default());
+    GdkDisplay* gdkDisplay = gdk_display_get_default();
+    guint32 timestamp = GDK_IS_X11_DISPLAY(gdkDisplay) ?
+            gdk_x11_display_get_user_time(gdkDisplay) :
+            gtk_get_current_event_time();
+
     if (sLastUserInputTime != GDK_CURRENT_TIME &&
         TimestampIsNewerThan(sLastUserInputTime, timestamp)) {
         return sLastUserInputTime;
@@ -3784,6 +3788,10 @@ nsWindow::Create(nsIWidget* aParent,
                 gint wmd = ConvertBorderStyles(mBorderStyle);
                 if (wmd != -1)
                   gdk_window_set_decorations(mGdkWindow, (GdkWMDecoration) wmd);
+            }
+
+            if (!mIsX11Display) {
+                gtk_widget_set_app_paintable(mShell, TRUE);
             }
 
             // If the popup ignores mouse events, set an empty input shape.
@@ -6860,12 +6868,17 @@ nsWindow::GetCSDSupportLevel() {
 
     const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP");
     if (currentDesktop) {
-        if (strstr(currentDesktop, "GNOME") != nullptr) {
+        // GNOME Flashback (fallback)
+        if (strstr(currentDesktop, "GNOME-Flashback:GNOME") != nullptr) {
+            sCSDSupportLevel = CSD_SUPPORT_FLAT;
+        // gnome-shell
+        } else if (strstr(currentDesktop, "GNOME") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
         } else if (strstr(currentDesktop, "XFCE") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else if (strstr(currentDesktop, "X-Cinnamon") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
+        // KDE Plasma
         } else if (strstr(currentDesktop, "KDE") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
         } else if (strstr(currentDesktop, "LXDE") != nullptr) {
@@ -6876,12 +6889,22 @@ nsWindow::GetCSDSupportLevel() {
             sCSDSupportLevel = CSD_SUPPORT_NONE;
         } else if (strstr(currentDesktop, "MATE") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
+        // Ubuntu Unity
         } else if (strstr(currentDesktop, "Unity") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
+        // Elementary OS
         } else if (strstr(currentDesktop, "Pantheon") != nullptr) {
             sCSDSupportLevel = CSD_SUPPORT_FULL;
+        } else if (strstr(currentDesktop, "LXQt") != nullptr) {
+            sCSDSupportLevel = CSD_SUPPORT_FULL;
         } else {
+// Release or beta builds are not supposed to be broken
+// so disable titlebar rendering on untested/unknown systems.
+#if defined(RELEASE_OR_BETA)
+            sCSDSupportLevel = CSD_SUPPORT_NONE;
+#else
             sCSDSupportLevel = CSD_SUPPORT_FLAT;
+#endif
         }
     } else {
         sCSDSupportLevel = CSD_SUPPORT_NONE;

@@ -26,6 +26,7 @@
 #include "nsIObserver.h"                // for NS_DECL_NSIOBSERVER, etc.
 #include "nsIPlaintextEditor.h"         // for nsIPlaintextEditor, etc.
 #include "nsISelectionController.h"     // for nsISelectionController constants
+#include "nsISelectionListener.h"       // for nsISelectionListener
 #include "nsISupportsImpl.h"            // for EditorBase::Release, etc.
 #include "nsIWeakReferenceUtils.h"      // for nsWeakPtr
 #include "nsLiteralString.h"            // for NS_LITERAL_STRING
@@ -67,6 +68,7 @@ class EditAggregateTransaction;
 class EditTransactionBase;
 class ErrorResult;
 class HTMLEditor;
+class IMEContentObserver;
 class InsertNodeTransaction;
 class InsertTextTransaction;
 class JoinNodeTransaction;
@@ -76,6 +78,7 @@ class SplitNodeResult;
 class SplitNodeTransaction;
 class TextComposition;
 class TextEditor;
+class TextInputListener;
 class TextServicesDocument;
 enum class EditAction : int32_t;
 
@@ -186,6 +189,7 @@ enum class SplitAtEdges
  * implementation.
  */
 class EditorBase : public nsIEditor
+                 , public nsISelectionListener
                  , public nsSupportsWeakReference
 {
 public:
@@ -251,6 +255,21 @@ public:
 
   // nsIEditor methods
   NS_DECL_NSIEDITOR
+
+  // nsISelectionListener method
+  NS_DECL_NSISELECTIONLISTENER
+
+  /**
+   * Set or unset TextInputListener.  If setting non-nullptr when the editor
+   * already has a TextInputListener, this will crash in debug build.
+   */
+  void SetTextInputListener(TextInputListener* aTextInputListener);
+
+  /**
+   * Set or unset IMEContentObserver.  If setting non-nullptr when the editor
+   * already has an IMEContentObserver, this will crash in debug build.
+   */
+  void SetIMEContentObserver(IMEContentObserver* aIMEContentObserver);
 
 public:
   virtual bool IsModifiableNode(nsINode* aNode);
@@ -916,11 +935,11 @@ public:
     }
 
     switch (aNode->NodeType()) {
-      case nsIDOMNode::ELEMENT_NODE:
+      case nsINode::ELEMENT_NODE:
         // In HTML editors, if we're dealing with an element, then ask it
         // whether it's editable.
         return mIsHTMLEditorClass ? aNode->IsEditable() : true;
-      case nsIDOMNode::TEXT_NODE:
+      case nsINode::TEXT_NODE:
         // Text nodes are considered to be editable by both typed of editors.
         return true;
       default:
@@ -990,7 +1009,7 @@ public:
   static bool IsTextNode(nsIDOMNode* aNode);
   static bool IsTextNode(nsINode* aNode)
   {
-    return aNode->NodeType() == nsIDOMNode::TEXT_NODE;
+    return aNode->NodeType() == nsINode::TEXT_NODE;
   }
 
   /**
@@ -1023,9 +1042,6 @@ public:
   static nsresult GetEndChildNode(Selection* aSelection,
                                   nsIContent** aEndNode);
 
-#if DEBUG_JOE
-  static void DumpNode(nsIDOMNode* aNode, int32_t indent = 0);
-#endif
   Selection* GetSelection(SelectionType aSelectionType =
                                           SelectionType::eNormal)
   {
@@ -1406,6 +1422,10 @@ protected:
   RefPtr<TextComposition> mComposition;
 
   RefPtr<TextEditRules> mRules;
+
+  RefPtr<TextInputListener> mTextInputListener;
+
+  RefPtr<IMEContentObserver> mIMEContentObserver;
 
   // Listens to all low level actions on the doc.
   typedef AutoTArray<OwningNonNull<nsIEditActionListener>, 5>

@@ -29,8 +29,9 @@
     </content>
     <implementation>
       <constructor><![CDATA[
-        const {PanelMultiView} = Components.utils.import("resource:///modules/PanelMultiView.jsm", {});
-        this.instance = new PanelMultiView(this);
+        const {PanelMultiView} = ChromeUtils.import("resource:///modules/PanelMultiView.jsm", {});
+        this.instance = PanelMultiView.forNode(this);
+        this.instance.connect();
       ]]></constructor>
 
       <destructor><![CDATA[

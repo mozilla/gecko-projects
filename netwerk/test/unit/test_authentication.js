@@ -1,8 +1,8 @@
 // This file tests authentication prompt callbacks
 // TODO NIT use do_check_eq(expected, actual) consistently, not sometimes eq(actual, expected)
 
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 // Turn off the authentication dialog blocking for this test.
 var prefs = Cc["@mozilla.org/preferences-service;1"].
@@ -58,19 +58,19 @@ AuthPrompt1.prototype = {
       Assert.equal(URL + " (" + this.expectedRealm + ")", realm);
     }
     if (!(this.flags & CROSS_ORIGIN)) {
-      if (text.indexOf(this.expectedRealm) == -1) {
+      if (!text.includes(this.expectedRealm)) {
         do_throw("Text must indicate the realm");
       }
     } else {
-      if (text.indexOf(this.expectedRealm) != -1) {
+      if (text.includes(this.expectedRealm)) {
         do_throw("There should not be realm for cross origin");
       }
     }
-    if (text.indexOf("localhost") == -1)
+    if (!text.includes("localhost"))
       do_throw("Text must indicate the hostname");
-    if (text.indexOf(String(PORT)) == -1)
+    if (!text.includes(String(PORT)))
       do_throw("Text must indicate the port");
-    if (text.indexOf("-1") != -1)
+    if (text.includes("-1"))
       do_throw("Text must contain negative numbers");
 
     if (this.flags & FLAG_RETURN_FALSE)
@@ -121,8 +121,8 @@ AuthPrompt2.prototype = {
   promptAuth:
     function ap2_promptAuth(channel, level, authInfo)
   {
-    var isNTLM = channel.URI.pathQueryRef.indexOf("ntlm") != -1;
-    var isDigest = channel.URI.pathQueryRef.indexOf("digest") != -1;
+    var isNTLM = channel.URI.pathQueryRef.includes("ntlm");
+    var isDigest = channel.URI.pathQueryRef.includes("digest");
 
     if (isNTLM || (this.flags & FLAG_NO_REALM)) {
       this.expectedRealm = ""; // NTLM knows no realms

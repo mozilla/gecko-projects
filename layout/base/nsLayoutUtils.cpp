@@ -26,9 +26,8 @@
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
-#include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsFrameList.h"
+#include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
 #include "nsAtom.h"
 #include "nsCaret.h"
@@ -130,7 +129,6 @@
 #include "DisplayListChecker.h"
 #include "TextDrawTarget.h"
 #include "nsDeckFrame.h"
-#include "nsIEffectiveTLDService.h" // for IsInStyloBlocklist
 #include "mozilla/StylePrefs.h"
 #include "mozilla/dom/InspectorFontFace.h"
 
@@ -197,8 +195,6 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ bool nsLayoutUtils::sTextCombineUprightDigitsEnabled;
 #ifdef MOZ_STYLO
 /* static */ bool nsLayoutUtils::sStyloEnabled;
-/* static */ bool nsLayoutUtils::sStyloBlocklistEnabled;
-/* static */ nsTArray<nsCString>* nsLayoutUtils::sStyloBlocklist = nullptr;
 #endif
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
@@ -1390,7 +1386,7 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
     // rect properties on so we can find the frame later to remove the properties.
     frame->SchedulePaint();
 
-    if (!gfxPrefs::LayoutRetainDisplayList()) {
+    if (!nsLayoutUtils::AreRetainedDisplayListsEnabled()) {
       return;
     }
 
@@ -1409,6 +1405,19 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
       rect = new nsRect();
       frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
       frame->SetHasOverrideDirtyRegion(true);
+
+      nsIFrame* rootFrame = frame->PresContext()->PresShell()->GetRootFrame();
+      MOZ_ASSERT(rootFrame);
+
+      nsTArray<nsIFrame*>* frames =
+        rootFrame->GetProperty(nsIFrame::OverriddenDirtyRectFrameList());
+
+      if (!frames) {
+        frames = new nsTArray<nsIFrame*>();
+        rootFrame->SetProperty(nsIFrame::OverriddenDirtyRectFrameList(), frames);
+      }
+
+      frames->AppendElement(frame);
     }
 
     if (aHadDisplayPort) {
@@ -3686,7 +3695,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   // Retained builder exists, but display list retaining is disabled.
   if (!useRetainedBuilder && retainedBuilder) {
     // Clear the modified frames lists and frame properties.
-    retainedBuilder->ClearModifiedFrameProps();
+    retainedBuilder->ClearFramesWithProps();
 
     // Clear the retained display list.
     retainedBuilder->List()->DeleteAll(retainedBuilder->Builder());
@@ -3856,7 +3865,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         list.DeleteAll(&builder);
         builder.EnterPresShell(aFrame);
         builder.SetDirtyRect(visibleRect);
-        builder.ClearWindowDraggingRegion();
+        builder.ClearRetainedWindowRegions();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
         AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
@@ -7934,11 +7943,8 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
   }
 
   // contenteditable only works with HTML document.
-  // Note: Use nsIDOMHTMLDocument rather than nsIHTMLDocument for getting the
-  //       body node because nsIDOMHTMLDocument::GetBody() does something
-  //       additional work for some cases and EditorBase uses them.
-  nsCOMPtr<nsIDOMHTMLDocument> domHTMLDoc = do_QueryInterface(aDocument);
-  if (!domHTMLDoc) {
+  // XXXbz should this test IsHTMLOrXHTML(), or just IsHTML()?
+  if (!aDocument->IsHTMLOrXHTML()) {
     return nullptr;
   }
 
@@ -7947,13 +7953,11 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
     return rootElement;
   }
 
-  // If there are no editable root element, check its <body> element.
+  // If there is no editable root element, check its <body> element.
   // Note that the body element could be <frameset> element.
-  nsCOMPtr<nsIDOMHTMLElement> body;
-  nsresult rv = domHTMLDoc->GetBody(getter_AddRefs(body));
-  nsCOMPtr<Element> content = do_QueryInterface(body);
-  if (NS_SUCCEEDED(rv) && content && content->IsEditable()) {
-    return content;
+  Element* bodyElement = aDocument->GetBody();
+  if (bodyElement && bodyElement->IsEditable()) {
+    return bodyElement;
   }
   return nullptr;
 }
@@ -8216,6 +8220,7 @@ nsLayoutUtils::Initialize()
   Preferences::AddBoolVarCache(&sTextCombineUprightDigitsEnabled,
                                "layout.css.text-combine-upright-digits.enabled");
 #ifdef MOZ_STYLO
+#ifdef MOZ_OLD_STYLE
   if (PR_GetEnv("STYLO_FORCE_ENABLED")) {
     sStyloEnabled = true;
   } else if (PR_GetEnv("STYLO_FORCE_DISABLED")) {
@@ -8224,25 +8229,11 @@ nsLayoutUtils::Initialize()
     Preferences::AddBoolVarCache(&sStyloEnabled,
                                  "layout.css.servo.enabled");
   }
-  // We should only create the blocklist ONCE, and ignore any blocklist
-  // reloads happen. Because otherwise we could have a top level page that
-  // uses Stylo (if its load happens before the blocklist reload) and a
-  // child iframe that uses Gecko (if its load happens after the blocklist
-  // reload). If some page contains both backends, and they try to move
-  // element across backend boundary, it could crash (see bug 1404020).
-  sStyloBlocklistEnabled =
-    Preferences::GetBool("layout.css.stylo-blocklist.enabled");
-  if (sStyloBlocklistEnabled && !sStyloBlocklist) {
-    nsAutoCString blocklist;
-    Preferences::GetCString("layout.css.stylo-blocklist.blocked_domains", blocklist);
-    if (!blocklist.IsEmpty()) {
-      sStyloBlocklist = new nsTArray<nsCString>;
-      for (const nsACString& domainString : blocklist.Split(',')) {
-        sStyloBlocklist->AppendElement(domainString);
-      }
-    }
-  }
+#else
+  sStyloEnabled = true;
 #endif
+#endif
+
   Preferences::AddUintVarCache(&sIdlePeriodDeadlineLimit,
                                "layout.idle_period.time_limit",
                                DEFAULT_IDLE_PERIOD_TIME_LIMIT);
@@ -8264,13 +8255,7 @@ nsLayoutUtils::Shutdown()
     delete sContentMap;
     sContentMap = nullptr;
   }
-#ifdef MOZ_STYLO
-  if (sStyloBlocklist) {
-    sStyloBlocklist->Clear();
-    delete sStyloBlocklist;
-    sStyloBlocklist = nullptr;
-  }
-#endif
+
   for (auto& callback : kPrefCallbacks) {
     Preferences::UnregisterCallback(callback.func, callback.name);
   }
@@ -8283,8 +8268,9 @@ nsLayoutUtils::Shutdown()
 #ifdef MOZ_STYLO
 /* static */
 bool
-nsLayoutUtils::ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal)
+nsLayoutUtils::ShouldUseStylo(nsIPrincipal* aPrincipal)
 {
+#ifdef MOZ_OLD_STYLE
   // Disable stylo for system principal because XUL hasn't been fully
   // supported. Other principal aren't able to use XUL by default, and
   // the back door to enable XUL is mostly just for testing, which means
@@ -8293,88 +8279,15 @@ nsLayoutUtils::ShouldUseStylo(nsIURI* aDocumentURI, nsIPrincipal* aPrincipal)
       nsContentUtils::IsSystemPrincipal(aPrincipal)) {
     return false;
   }
-  // Check any internal page which we need to explicitly blacklist.
-  if (aDocumentURI) {
-    bool isAbout = false;
-    if (NS_SUCCEEDED(aDocumentURI->SchemeIs("about", &isAbout)) && isAbout) {
-      nsAutoCString path;
-      aDocumentURI->GetFilePath(path);
-      // about:reader requires support of scoped style, so we have to
-      // use Gecko backend for now. See bug 1402094.
-      // This should be fixed by bug 1204818.
-      if (path.EqualsLiteral("reader")) {
-        return false;
-      }
-    }
-  }
-  // Check the stylo block list.
-  if (IsInStyloBlocklist(aPrincipal)) {
-    return false;
-  }
+#endif
   return true;
-}
-
-/* static */
-bool
-nsLayoutUtils::IsInStyloBlocklist(nsIPrincipal* aPrincipal)
-{
-  if (!sStyloBlocklist) {
-    return false;
-  }
-
-  // Note that a non-codebase principal (eg the system principal) will return
-  // a null URI.
-  nsCOMPtr<nsIURI> codebaseURI;
-  aPrincipal->GetURI(getter_AddRefs(codebaseURI));
-  if (!codebaseURI) {
-    return false;
-  }
-
-  nsCOMPtr<nsIEffectiveTLDService> tldService =
-    do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(tldService, false);
-
-  // Check if a document's eTLD+1 domain belongs to one of the stylo blocklist.
-  nsAutoCString baseDomain;
-  NS_SUCCEEDED(tldService->GetBaseDomain(codebaseURI, 0, baseDomain));
-  for (const nsCString& domains : *sStyloBlocklist) {
-    if (baseDomain.Equals(domains)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/* static */
-void
-nsLayoutUtils::AddToStyloBlocklist(const nsACString& aBlockedDomain)
-{
-  if (!sStyloBlocklist) {
-    sStyloBlocklist = new nsTArray<nsCString>;
-  }
-  sStyloBlocklist->AppendElement(aBlockedDomain);
-}
-
-/* static */
-void
-nsLayoutUtils::RemoveFromStyloBlocklist(const nsACString& aBlockedDomain)
-{
-  if (!sStyloBlocklist) {
-    return;
-  }
-
-  sStyloBlocklist->RemoveElement(aBlockedDomain);
-
-  if (sStyloBlocklist->IsEmpty()) {
-    delete sStyloBlocklist;
-    sStyloBlocklist = nullptr;
-  }
 }
 
 /* static */
 bool
 nsLayoutUtils::StyloChromeEnabled()
 {
+#ifdef MOZ_OLD_STYLE
   static bool sInitialized = false;
   static bool sEnabled = false;
   if (!sInitialized) {
@@ -8384,6 +8297,9 @@ nsLayoutUtils::StyloChromeEnabled()
     sInitialized = true;
   }
   return sEnabled;
+#else
+  return true;
+#endif
 }
 #endif
 

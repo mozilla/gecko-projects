@@ -22,7 +22,6 @@ user_pref("dom.ipc.reportProcessHangs", false); // process hang monitor
 user_pref("dom.popup_maximum", -1);
 user_pref("dom.send_after_paint_to_content", true);
 user_pref("dom.successive_dialog_time_limit", 0);
-user_pref("signed.applets.codebase_principal_support", true);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("shell.checkDefaultClient", false);
 user_pref("browser.warnOnQuit", false);
@@ -394,3 +393,6 @@ user_pref("extensions.screenshots.disabled", true);
 // relatively long time which may cause unnecessary intermittents and slow down
 // tests. This, like many things, will stop working correctly in 2038.
 user_pref("places.database.lastMaintenance", 2147483647);
+
+// Disable Bookmark backups by default.
+user_pref("browser.bookmarks.max_backups", 0);
