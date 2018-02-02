@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global PaymentStateSubscriberMixin, PaymentRequest */
+/* global PaymentStateSubscriberMixin, paymentRequest */
 
 "use strict";
 
@@ -14,6 +14,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
   constructor() {
     super();
     this._template = document.getElementById("payment-dialog-template");
+    this._cachedState = {};
   }
 
   connectedCallback() {
@@ -24,7 +25,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     this._cancelButton.addEventListener("click", this.cancelRequest);
 
     this._payButton = contents.querySelector("#pay");
-    this._payButton.addEventListener("click", this.pay);
+    this._payButton.addEventListener("click", this);
 
     this._viewAllButton = contents.querySelector("#view-all");
     this._viewAllButton.addEventListener("click", this);
@@ -50,16 +51,19 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
           let orderDetailsShowing = !this.requestStore.getState().orderDetailsShowing;
           this.requestStore.setState({ orderDetailsShowing });
           break;
+        case this._payButton:
+          this.pay();
+          break;
       }
     }
   }
 
   cancelRequest() {
-    PaymentRequest.cancel();
+    paymentRequest.cancel();
   }
 
   pay() {
-    PaymentRequest.pay({
+    paymentRequest.pay({
       methodName: "basic-card",
       methodData: {
         cardholderName: "John Doe",
@@ -68,6 +72,12 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
         expiryYear: "9999",
         cardSecurityCode: "999",
       },
+    });
+  }
+
+  changeShippingAddress(shippingAddressGUID) {
+    paymentRequest.changeShippingAddress({
+      shippingAddressGUID,
     });
   }
 
@@ -104,6 +114,16 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
         selectedPaymentCard: Object.keys(savedBasicCards)[0] || null,
       });
     }
+  }
+
+  stateChangeCallback(state) {
+    super.stateChangeCallback(state);
+
+    if (state.selectedShippingAddress != this._cachedState.selectedShippingAddress) {
+      this.changeShippingAddress(state.selectedShippingAddress);
+    }
+
+    this._cachedState.selectedShippingAddress = state.selectedShippingAddress;
   }
 
   render(state) {

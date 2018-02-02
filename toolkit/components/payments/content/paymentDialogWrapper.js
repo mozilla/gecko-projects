@@ -30,7 +30,7 @@ XPCOMUtils.defineLazyGetter(this, "profileStorage", () => {
   return profileStorage;
 });
 
-var PaymentDialog = {
+var paymentDialogWrapper = {
   componentsLoaded: new Map(),
   frame: null,
   mm: null,
@@ -40,6 +40,26 @@ var PaymentDialog = {
     Ci.nsIObserver,
     Ci.nsISupportsWeakReference,
   ]),
+
+  _convertProfileAddressToPaymentAddress(guid) {
+    let addressData = profileStorage.addresses.get(guid);
+    if (!addressData) {
+      throw new Error(`Shipping address not found: ${guid}`);
+    }
+
+    let address = this.createPaymentAddress({
+      country: addressData.country,
+      addressLines: addressData["street-address"].split("\n"),
+      region: addressData["address-level1"],
+      city: addressData["address-level2"],
+      postalCode: addressData["postal-code"],
+      organization: addressData.organization,
+      recipient: addressData.name,
+      phone: addressData.tel,
+    });
+
+    return address;
+  },
 
   init(requestId, frame) {
     if (!requestId || typeof(requestId) != "string") {
@@ -110,7 +130,7 @@ var PaymentDialog = {
     recipient = "",
     phone = "",
   }) {
-    const billingAddress = Cc["@mozilla.org/dom/payments/payment-address;1"]
+    const paymentAddress = Cc["@mozilla.org/dom/payments/payment-address;1"]
                            .createInstance(Ci.nsIPaymentAddress);
     const addressLine = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
     for (let line of addressLines) {
@@ -118,7 +138,7 @@ var PaymentDialog = {
       address.data = line;
       addressLine.appendElement(address);
     }
-    billingAddress.init(country,
+    paymentAddress.init(country,
                         addressLine,
                         region,
                         city,
@@ -129,7 +149,7 @@ var PaymentDialog = {
                         organization,
                         recipient,
                         phone);
-    return billingAddress;
+    return paymentAddress;
   },
 
   createComponentInstance(componentInterface) {
@@ -206,6 +226,21 @@ var PaymentDialog = {
     Services.obs.addObserver(this, "formautofill-storage-changed", true);
   },
 
+  debugFrame() {
+    // To avoid self-XSS-type attacks, ensure that Browser Chrome debugging is enabled.
+    if (!Services.prefs.getBoolPref("devtools.chrome.enabled", false)) {
+      Cu.reportError("devtools.chrome.enabled must be enabled to debug the frame");
+      return;
+    }
+    let chromeWindow = Services.wm.getMostRecentWindow(null);
+    let {
+      gDevToolsBrowser,
+    } = ChromeUtils.import("resource://devtools/client/framework/gDevTools.jsm", {});
+    gDevToolsBrowser.openContentProcessToolbox({
+      selectedBrowser: chromeWindow.document.getElementById("paymentRequestFrame").frameLoader,
+    });
+  },
+
   onPaymentCancel() {
     const showResponse = this.createShowResponse({
       acceptStatus: Ci.nsIPaymentActionResponse.PAYMENT_REJECTED,
@@ -233,6 +268,11 @@ var PaymentDialog = {
     paymentSrv.respondPayment(showResponse);
   },
 
+  onChangeShippingAddress({shippingAddressGUID}) {
+    let address = this._convertProfileAddressToPaymentAddress(shippingAddressGUID);
+    paymentSrv.changeShippingAddress(this.request.requestId, address);
+  },
+
   /**
    * @implements {nsIObserver}
    * @param {nsISupports} subject
@@ -255,8 +295,16 @@ var PaymentDialog = {
     let {messageType} = data;
 
     switch (messageType) {
+      case "debugFrame": {
+        this.debugFrame();
+        break;
+      }
       case "initializeRequest": {
         this.initializeFrame();
+        break;
+      }
+      case "changeShippingAddress": {
+        this.onChangeShippingAddress(data);
         break;
       }
       case "paymentCancel": {
@@ -275,5 +323,5 @@ if ("document" in this) {
   // Running in a browser, not a unit test
   let frame = document.getElementById("paymentRequestFrame");
   let requestId = (new URLSearchParams(window.location.search)).get("requestId");
-  PaymentDialog.init(requestId, frame);
+  paymentDialogWrapper.init(requestId, frame);
 }

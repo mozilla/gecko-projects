@@ -10,7 +10,7 @@
 
 "use strict";
 
-let PaymentRequest = {
+var paymentRequest = {
   domReadyPromise: null,
 
   init() {
@@ -83,6 +83,11 @@ let PaymentRequest = {
   onPaymentRequestLoad(requestId) {
     window.addEventListener("unload", this, {once: true});
     this.sendMessageToChrome("paymentDialogReady");
+
+    // Automatically show the debugging console if loaded with a truthy `debug` query parameter.
+    if (new URLSearchParams(location.search).get("debug")) {
+      document.getElementById("debugging-console").hidden = false;
+    }
   },
 
   async onShowPaymentRequest(detail) {
@@ -104,10 +109,14 @@ let PaymentRequest = {
     this.sendMessageToChrome("pay", data);
   },
 
+  changeShippingAddress(data) {
+    this.sendMessageToChrome("changeShippingAddress", data);
+  },
+
   onPaymentRequestUnload() {
     // remove listeners that may be used multiple times here
     window.removeEventListener("paymentChromeToContent", this);
   },
 };
 
-PaymentRequest.init();
+paymentRequest.init();
