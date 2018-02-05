@@ -68,8 +68,6 @@ job-defaults:
          by-project:
             mozilla-release: "beta-localtest"
             default: "default"
-   optimization:
-      only-if-dependencies-run: null
    notifications:
       completed:
          subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"

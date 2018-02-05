@@ -59,8 +59,6 @@ job-defaults:
             mozilla-release: "57.0"
             mozilla-esr52: "TODO"
             default: null
-   optimization:
-      only-if-dependencies-run: null
    notifications:
       completed:
          subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
