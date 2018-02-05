@@ -8,6 +8,7 @@ kind-dependencies:
    - post-balrog-dummy
    - post-beetmover-dummy
    - release-updates-builder
+   - release-update-verify-config
 
 transforms:
    - taskgraph.transforms.release_deps:transforms
