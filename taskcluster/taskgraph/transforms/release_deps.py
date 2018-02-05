@@ -60,7 +60,8 @@ def add_dependencies(config, jobs):
             if dep_phase and PHASES.index(dep_phase) > PHASES.index(phase):
                 continue
 
-            if dep_task.attributes.get("build_platform") and job.get("attributes", {}).get("build_platform"):
+            if dep_task.attributes.get("build_platform") and \
+               job.get("attributes", {}).get("build_platform"):
                 if dep_task.attributes["build_platform"] != job["attributes"]["build_platform"]:
                     continue
             # Add matching product tasks to deps
