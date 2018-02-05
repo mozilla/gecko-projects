@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 # ftp -> update platform map
 update_platform_map = {
     "android": ["Android_arm-eabi-gcc3"],
