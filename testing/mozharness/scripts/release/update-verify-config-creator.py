@@ -9,14 +9,14 @@ from urlparse import urljoin
 
 sys.path.insert(1, os.path.dirname(os.path.dirname(sys.path[0])))
 
-from mozharness.base.log import DEBUG, FATAL, INFO
+from mozharness.base.log import DEBUG, INFO
 from mozharness.base.script import BaseScript
 from mozharness.base.python import VirtualenvMixin
 
 
 def is_triangualar(x):
     """Check if a number is triangular (0, 1, 3, 6, 10, 15, ...)
-    see: https://en.wikipedia.org/wiki/Triangular_number#Triangular_roots_and_tests_for_triangular_numbers
+    see: https://en.wikipedia.org/wiki/Triangular_number#Triangular_roots_and_tests_for_triangular_numbers # noqa
 
     >>> is_triangualar(0)
     True
@@ -79,7 +79,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         [["--partial-version"], {
             "dest": "partial_versions",
             "action": "append",
-            "help": "List of previous release versions that are expected to receive a partial update",
+            "help": "List of previous release versions that are expected to "
+                    "receive a partial update",
         }],
         [["--last-watershed"], {
             "dest": "last_watershed",
@@ -211,23 +212,29 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             # Do as much filtering with basic information as possible to avoid
             # unnecessary requests to Ship It.
             if self.config["stage_product_name"] != product:
-                self.log("Skipping release that doesn't match product name: %s" % release_name, level=INFO)
+                self.log("Skipping release that doesn't match product name: %s" % release_name,
+                         level=INFO)
                 continue
             if MozillaVersion(version) < self.config["last_watershed"]:
-                self.log("Skipping release that's behind the last watershed: %s" % release_name, level=INFO)
+                self.log("Skipping release that's behind the last watershed: %s" % release_name,
+                         level=INFO)
                 continue
             if version == self.config["to_version"]:
-                self.log("Skipping release that is the same as to version: %s" % release_name, level=INFO)
+                self.log("Skipping release that is the same as to version: %s" % release_name,
+                         level=INFO)
                 continue
             if MozillaVersion(version) > self.config["to_version"]:
-                self.log("Skipping release that's newer than to version: %s" % release_name, level=INFO)
+                self.log("Skipping release that's newer than to version: %s" % release_name,
+                         level=INFO)
                 continue
 
             for v in self.config["include_versions"]:
                 if re.match(v, version):
                     break
             else:
-                self.log("Skipping release whose version doesn't match any include_version pattern: %s" % release_name, level=INFO)
+                self.log("Skipping release whose version doesn't match any "
+                         "include_version pattern: %s" % release_name,
+                         level=INFO)
                 continue
 
             if version in self.update_paths:
@@ -253,7 +260,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             )
             ret = requests.get(shipped_locales_url)
             if not ret.ok:
-                raise Exception("Couldn't find shipped-locales for %s - cannot continue" % release_name)
+                raise Exception("Couldn't find shipped-locales for %s "
+                                "- cannot continue" % release_name)
             shipped_locales = ret.text.strip()
 
             app_version_url = urljoin(
@@ -267,7 +275,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             app_version = requests.get(app_version_url).text.strip()
             ret = requests.get(app_version_url)
             if not ret.ok:
-                raise Exception("Couldn't find app version for %s - cannot continue" % release_name)
+                raise Exception("Couldn't find app version for %s "
+                                "- cannot continue" % release_name)
             app_version = ret.text.strip()
 
             self.log("Adding {} to update paths".format(version), level=INFO)
@@ -288,9 +297,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
     def create_config(self):
         from mozrelease.platforms import ftp2updatePlatforms
         from mozrelease.update_verify import UpdateVerifyConfig
-        from mozrelease.paths import getCandidatesDir, getReleasesDir, \
-            getReleaseInstallerPath, getBuildhubReleaseUrl
-        import requests
+        from mozrelease.paths import getCandidatesDir, getReleasesDir, getReleaseInstallerPath
 
         candidates_dir = getCandidatesDir(
             self.config["stage_product_name"], self.config["to_version"],
@@ -347,34 +354,32 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
 
             # Exclude locales being full checked
             quick_check_locales = [l for l in locales
-                                if l not in self.config["full_check_locales"]]
+                                   if l not in self.config["full_check_locales"]]
             # Get the intersection of from and to full_check_locales
             this_full_check_locales = [l for l in self.config["full_check_locales"]
-                                    if l in locales]
+                                       if l in locales]
 
             if fromVersion in self.config["partial_versions"]:
-                self.info("Generating configs for partial update checks for %s" %
-                        fromVersion)
-                self.update_verify_config.addRelease(release=appVersion, build_id=build_id,
-                            locales=locales,
-                            patch_types=["complete", "partial"],
-                            from_path=from_path,
-                            ftp_server_from=self.config["previous_archive_prefix"],
-                            ftp_server_to=self.config["archive_prefix"],
-                            mar_channel_IDs=mar_channel_IDs,
-                            platform=update_platform,
-                            updater_package=updater_package)
+                self.info("Generating configs for partial update checks for %s" % fromVersion)
+                self.update_verify_config.addRelease(
+                    release=appVersion, build_id=build_id, locales=locales,
+                    patch_types=["complete", "partial"], from_path=from_path,
+                    ftp_server_from=self.config["previous_archive_prefix"],
+                    ftp_server_to=self.config["archive_prefix"],
+                    mar_channel_IDs=mar_channel_IDs, platform=update_platform,
+                    updater_package=updater_package
+                )
             else:
                 if this_full_check_locales and is_triangualar(completes_only_index):
                     self.info("Generating full check configs for %s" % fromVersion)
-                    self.update_verify_config.addRelease(release=appVersion, build_id=build_id,
-                                locales=this_full_check_locales,
-                                from_path=from_path,
-                                ftp_server_from=self.config["previous_archive_prefix"],
-                                ftp_server_to=self.config["archive_prefix"],
-                                mar_channel_IDs=mar_channel_IDs,
-                                platform=update_platform,
-                                updater_package=updater_package)
+                    self.update_verify_config.addRelease(
+                        release=appVersion, build_id=build_id, locales=this_full_check_locales,
+                        from_path=from_path,
+                        ftp_server_from=self.config["previous_archive_prefix"],
+                        ftp_server_to=self.config["archive_prefix"],
+                        mar_channel_IDs=mar_channel_IDs, platform=update_platform,
+                        updater_package=updater_package
+                    )
                 # Quick test for other locales, no download
                 if len(quick_check_locales) > 0:
                     self.info("Generating quick check configs for %s" % fromVersion)
@@ -384,9 +389,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                     else:
                         # Excluding full check locales from the quick check
                         _locales = quick_check_locales
-                    self.update_verify_config.addRelease(release=appVersion, build_id=build_id,
-                                locales=_locales,
-                                platform=update_platform)
+                    self.update_verify_config.addRelease(
+                        release=appVersion, build_id=build_id,
+                        locales=_locales, platform=update_platform
+                    )
                 completes_only_index += 1
 
     def write_config(self):
