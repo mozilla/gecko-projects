@@ -295,18 +295,6 @@ release-update-verify
 ---------------------
 Verifies the contents and package of release update MARs.
 
-release-secondary-update-verify
----------------------
-Verifies the contents and package of release update MARs.
-
-release-update-verify-config
-----------------------------
-Creates configs for release-update-verify tasks
-
-release-secondary-update-verify-config
---------------------------------------
-Creates configs for release-secondary-update-verify tasks
-
 release-updates-builder
 -----------------------
 Top level Balrog blob submission & patcher/update verify config updates.
