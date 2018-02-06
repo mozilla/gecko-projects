@@ -458,6 +458,7 @@ def get_release_config(config):
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
                                                  'release-uptake-monitoring',
                                                  'release-updates-builder',
+                                                 'release-update-verify-config',
                                                  ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([
