@@ -19,7 +19,7 @@ job-defaults:
          in-tree: "update-verify"
       max-run-time: 3600
       artifacts:
-         - name: public/update-verify.cfg
+         - name: public/build/update-verify.cfg
            path: /builds/worker/checkouts/gecko/update-verify.cfg
            type: file
    run:
