@@ -107,6 +107,7 @@ SCOPE_SUMMARY_REGEXPS = [
     re.compile(r'(index:insert-task:buildbot\.revisions\.).*'),
     re.compile(r'(index:insert-task:docker\.images\.v1\.[^.]*\.).*'),
     re.compile(r'(index:insert-task:gecko\.v2\.[^.]*\.).*'),
+    re.compile(r'(index:insert-task:releases\.v1\.[^.]*\.).*'),
 ]
 
 

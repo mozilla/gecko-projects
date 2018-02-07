@@ -14,7 +14,11 @@ transforms:
 
 job-defaults:
    name: final-verify
+   description: final verify
+   shipping-phase: push
    run-on-projects: []  # to make sure this never runs as part of CI
+   index:
+      type: release
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
       implementation: docker-worker
@@ -69,11 +73,12 @@ job-defaults:
                try: ["{task_def[metadata][owner]}"]
                maple: ["release+tcstaging@mozilla.com"]
                default: []
+   routes:
+      - index.releases.v1.{branch}.latest.{product}.latest.final_verification
+      - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.final_verification
 
 jobs:
    firefox:
-      description: final verify
-      shipping-phase: push
       shipping-product: firefox
       worker:
          env:
@@ -92,8 +97,6 @@ jobs:
          tier: 1
 
    devedition:
-      description: final verify
-      shipping-phase: push
       shipping-product: devedition
       worker:
          env:
