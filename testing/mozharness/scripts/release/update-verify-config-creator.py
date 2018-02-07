@@ -302,6 +302,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         from mozrelease.platforms import ftp2updatePlatforms
         from mozrelease.update_verify import UpdateVerifyConfig
         from mozrelease.paths import getCandidatesDir, getReleasesDir, getReleaseInstallerPath
+        from mozrelease.versions import getPrettyVersion
 
         candidates_dir = getCandidatesDir(
             self.config["stage_product_name"], self.config["to_version"],
@@ -314,12 +315,16 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         )
         to_path = "{}/{}".format(candidates_dir, to_)
 
+        to_display_version = self.config.get("to_display_version")
+        if not to_display_version:
+            to_display_version = getPrettyVersion(self.config["to_version"])
+
         self.update_verify_config = UpdateVerifyConfig(
             product=self.config["product"].title(), channel=self.config["channel"],
             aus_server=self.config["aus_server"], to=to_path,
             to_build_id=self.config["to_buildid"],
             to_app_version=self.config["to_app_version"],
-            to_display_version=self.config["to_display_version"],
+            to_display_version=to_display_version,
         )
 
         completes_only_index = 0
