@@ -9,7 +9,7 @@ from urlparse import urljoin
 
 sys.path.insert(1, os.path.dirname(os.path.dirname(sys.path[0])))
 
-from mozharness.base.log import DEBUG, INFO
+from mozharness.base.log import DEBUG, INFO, FATAL
 from mozharness.base.script import BaseScript
 from mozharness.base.python import VirtualenvMixin
 
@@ -295,8 +295,11 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
 
     def gather_info(self):
         self._get_update_paths()
-        self.log("Found update paths:", level=DEBUG)
-        self.log(pprint.pformat(self.update_paths), level=DEBUG)
+        if self.update_paths:
+            self.log("Found update paths:", level=DEBUG)
+            self.log(pprint.pformat(self.update_paths), level=DEBUG)
+        else:
+            self.log("Didn't find any update paths, cannot continue", level=FATAL)
 
     def create_config(self):
         from mozrelease.platforms import ftp2updatePlatforms
