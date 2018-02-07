@@ -46,7 +46,7 @@ def getReleaseInstallerPath(productName, brandName, version, platform,
             filename = '%s.tar.bz2' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s-%s.tar.bz2' % (productName, version)]])
-        elif platform.startswith('macosx'):
+        elif 'osx' in platform:
             filename = '%s.dmg' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s %s.dmg' % (brandName, version)]])
@@ -75,7 +75,7 @@ def getReleaseInstallerPath(productName, brandName, version, platform,
             filename = '%s.tar.bz2' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s-%s.%s.linux-i686.tar.bz2' % (productName, version, locale)]])
-        elif platform == 'macosx':
+        elif 'osx' in platform:
             filename = '%s.dmg' % productName
             return '/'.join([p.strip('/') for p in [
                 platform, locale, '%s-%s.%s.mac.dmg' % (brandName, version, locale)]])
