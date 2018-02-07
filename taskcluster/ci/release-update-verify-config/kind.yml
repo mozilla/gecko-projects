@@ -178,7 +178,7 @@ jobs:
       attributes:
          build_platform: win32
       extra:
-         platform: win
+         platform: win32
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -257,7 +257,7 @@ jobs:
       attributes:
          build_platform: win32-devedition
       extra:
-         platform: win
+         platform: win32
          channel: "aurora-localtest"
 
    devedition-win64:

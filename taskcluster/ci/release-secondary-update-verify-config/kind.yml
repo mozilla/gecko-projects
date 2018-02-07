@@ -157,7 +157,7 @@ jobs:
       attributes:
          build_platform: win32
       extra:
-         platform: win
+         platform: win32
 
    firefox-secondary-win64:
       shipping-product: firefox
