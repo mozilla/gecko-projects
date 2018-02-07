@@ -36,6 +36,12 @@ job-defaults:
             jamun: "http://ftp.stage.mozaws.net/pub"
             maple: "http://ftp.stage.mozaws.net/pub"
             default: "https://archive.mozilla.org/pub"
+      previous-archive-prefix:
+         by-project:
+            birch: "https://archive.mozilla.org/pub"
+            jamun: "https://archive.mozilla.org/pub"
+            maple: "https://archive.mozilla.org/pub"
+            default: null
       aus-server:
          by-project:
             birch: "https://aus4.stage.mozaws.net"
@@ -113,6 +119,7 @@ jobs:
          build_platform: linux
       extra:
          platform: linux-i686
+         updater-platform: linux-x86_64
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -133,12 +140,7 @@ jobs:
          build_platform: linux64
       extra:
          platform: linux-x86_64
-         # TODO: only for secondary update verify
-         mar-channel-id-override:
-            by-project:
-               maple: "'^58.0b12$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^58.0b12$,firefox-mozilla-beta,firefox-mozilla-release'"
-               default: null
+         updater-platform: linux-x86_64
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -159,6 +161,7 @@ jobs:
          build_platform: macosx64
       extra:
          platform: mac
+         updater-platform: linux-x86_64
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -179,6 +182,7 @@ jobs:
          build_platform: win32
       extra:
          platform: win32
+         updater-platform: linux-x86_64
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -199,6 +203,7 @@ jobs:
          build_platform: win64
       extra:
          platform: win64
+         updater-platform: linux-x86_64
          channel:
             by-project:
                jamun: "beta-localtest"
@@ -219,6 +224,7 @@ jobs:
          build_platform: linux-devedition
       extra:
          platform: linux-i686
+         updater-platform: linux-x86_64
          channel: "aurora-localtest"
 
    devedition-linux64:
@@ -232,6 +238,7 @@ jobs:
          build_platform: linux64-devedition
       extra:
          platform: linux-x86_64
+         updater-platform: linux-x86_64
          channel: "aurora-localtest"
 
    devedition-macosx64:
@@ -245,6 +252,7 @@ jobs:
          build_platform: macosx64-devedition
       extra:
          platform: osx
+         updater-platform: linux-x86_64
          channel: "aurora-localtest"
 
    devedition-win32:
@@ -258,6 +266,7 @@ jobs:
          build_platform: win32-devedition
       extra:
          platform: win32
+         updater-platform: linux-x86_64
          channel: "aurora-localtest"
 
    devedition-win64:
@@ -271,4 +280,5 @@ jobs:
          build_platform: win64-devedition
       extra:
          platform: win64
+         updater-platform: linux-x86_64
          channel: "aurora-localtest"

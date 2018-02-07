@@ -19,10 +19,14 @@ def add_command(config, tasks):
     keyed_by_args = [
         "channel",
         "archive-prefix",
+        "previous-archive-prefix",
         "aus-server",
         "include-version",
         "mar-channel-id-override",
-        "last-watershed"
+        "last-watershed",
+    ]
+    optional_args = [
+        "updater-platform",
     ]
 
     for task in tasks:
@@ -49,6 +53,11 @@ def add_command(config, tasks):
         if release_config.get("partial_versions"):
             for partial in release_config["partial_versions"].split(","):
                 command.extend(["--partial-version", partial.split("build")[0]])
+
+        for arg in optional_args:
+            if task["extra"].get(arg):
+                command.append("--{}".format(arg))
+                command.append(task["extra"][arg])
 
         for arg in keyed_by_args:
             thing = "extra.{}".format(arg)
