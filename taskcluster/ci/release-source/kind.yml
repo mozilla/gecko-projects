@@ -19,8 +19,6 @@ jobs-from:
 
 job-defaults:
    shipping-phase: promote
-   index:
-      type: release
    notifications:
       completed:
          subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"

@@ -37,8 +37,6 @@ job-defaults:
                default: https://hg.mozilla.org/build/tools
    extra:
       chunks: 12
-   index:
-      type: release
    notifications:
       completed:
          subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
