@@ -158,7 +158,7 @@ jobs:
       attributes:
          build_platform: macosx64
       extra:
-         platform: osx
+         platform: mac
          channel:
             by-project:
                jamun: "beta-localtest"

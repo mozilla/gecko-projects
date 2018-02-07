@@ -145,7 +145,7 @@ jobs:
       attributes:
          build_platform: macosx64
       extra:
-         platform: osx
+         platform: mac
 
    firefox-secondary-win32:
       shipping-product: firefox
