@@ -41,7 +41,6 @@ def add_command(config, tasks):
             "--platform", task["extra"]["platform"],
             "--to-version", release_config["version"],
             "--to-app-version", release_config["appVersion"],
-            "--to-display-version", release_config["version"],
             "--to-build-number", str(release_config["build_number"]),
             "--to-buildid", config.params["moz_build_date"],
             "--output-file", "update-verify.cfg",
