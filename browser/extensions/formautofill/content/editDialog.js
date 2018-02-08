@@ -6,7 +6,6 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 const AUTOFILL_BUNDLE_URI = "chrome://formautofill/locale/formautofill.properties";
 const REGIONS_BUNDLE_URI = "chrome://global/locale/regionNames.properties";
 
@@ -124,6 +123,13 @@ class EditDialog {
         this.handleChange(event);
         break;
       }
+      case "contextmenu": {
+        if (!(event.target instanceof HTMLInputElement) &&
+            !(event.target instanceof HTMLTextAreaElement)) {
+          event.preventDefault();
+        }
+        break;
+      }
     }
   }
 
@@ -172,6 +178,7 @@ class EditDialog {
    */
   attachEventListeners() {
     window.addEventListener("keypress", this);
+    window.addEventListener("contextmenu", this);
     this._elements.controlsContainer.addEventListener("click", this);
     document.addEventListener("input", this);
   }
@@ -181,6 +188,7 @@ class EditDialog {
    */
   detachEventListeners() {
     window.removeEventListener("keypress", this);
+    window.removeEventListener("contextmenu", this);
     this._elements.controlsContainer.removeEventListener("click", this);
     document.removeEventListener("input", this);
   }

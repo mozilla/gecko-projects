@@ -52,6 +52,7 @@
 #include "nsTArray.h"
 #include "nsTransitionManager.h"
 
+#include "mozilla/CORSMode.h"
 #include "mozilla/DeclarationBlockInlines.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
@@ -365,6 +366,14 @@ Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed aElement)
 {
   MOZ_ASSERT(NS_IsMainThread());
   const_cast<Element*>(aElement)->NoteAnimationOnlyDirtyForServo();
+}
+
+bool Gecko_AnimationNameMayBeReferencedFromStyle(
+  RawGeckoPresContextBorrowed aPresContext,
+  nsAtom* aName)
+{
+  MOZ_ASSERT(aPresContext);
+  return aPresContext->AnimationManager()->AnimationMayBeReferenced(aName);
 }
 
 CSSPseudoElementType
@@ -1499,8 +1508,11 @@ CreateStyleImageRequest(nsStyleImageRequest::Mode aModeFlags,
 mozilla::css::ImageValue*
 Gecko_ImageValue_Create(ServoBundledURI aURI, ServoRawOffsetArc<RustString> aURIString)
 {
+  // Bug 1434963: Change this to accept a CORS mode from the caller.
   RefPtr<css::ImageValue> value(
-    new css::ImageValue(aURIString, do_AddRef(aURI.mExtraData)));
+    new css::ImageValue(aURIString,
+                        do_AddRef(aURI.mExtraData),
+                        mozilla::CORSMode::CORS_NONE));
   return value.forget().take();
 }
 

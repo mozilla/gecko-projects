@@ -1811,7 +1811,6 @@ NS_INTERFACE_TABLE_HEAD(nsDocument)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIRadioGroupContainer)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIMutationObserver)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIApplicationCacheContainer)
-    NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIDOMXPathEvaluator)
   NS_INTERFACE_TABLE_END
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsDocument)
 NS_INTERFACE_MAP_END
@@ -1972,7 +1971,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
 #ifdef MOZ_OLD_STYLE
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleAttrStyleSheet)
 #endif
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXPathEvaluator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLayoutHistoryState)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOnloadBlocker)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstBaseNodeWithHref)
@@ -2065,7 +2063,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
 
   tmp->UnlinkOriginalDocumentIfStatic();
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mXPathEvaluator)
   tmp->mCachedRootElement = nullptr; // Avoid a dangling pointer
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDisplayDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstBaseNodeWithHref)
@@ -8816,6 +8813,7 @@ nsDocument::OnPageHide(bool aPersisted,
   mVisible = false;
 
   UpdateVisibilityState();
+
   EnumerateExternalResources(NotifyPageHide, &aPersisted);
   EnumerateActivityObservers(NotifyActivityChanged, nullptr);
 
@@ -9256,20 +9254,9 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr,
     return;
   }
 
-  nsLoadFlags loadFlags = nsIRequest::LOAD_NORMAL;
-  switch (Element::StringToCORSMode(aCrossOriginAttr)) {
-  case CORS_NONE:
-    // Nothing to do
-    break;
-  case CORS_ANONYMOUS:
-    loadFlags |= imgILoader::LOAD_CORS_ANONYMOUS;
-    break;
-  case CORS_USE_CREDENTIALS:
-    loadFlags |= imgILoader::LOAD_CORS_USE_CREDENTIALS;
-    break;
-  default:
-    MOZ_CRASH("Unknown CORS mode!");
-  }
+  nsLoadFlags loadFlags = nsIRequest::LOAD_NORMAL |
+                          nsContentUtils::CORSModeToLoadImageFlags(
+                            Element::StringToCORSMode(aCrossOriginAttr));
 
   nsContentPolicyType policyType =
     aIsImgSet ? nsIContentPolicy::TYPE_IMAGESET :
@@ -11640,7 +11627,7 @@ GetPointerLockError(Element* aElement, Element* aCurrentLock,
     return "PointerLockDeniedInUse";
   }
 
-  if (!aElement->IsInUncomposedDoc()) {
+  if (!aElement->IsInComposedDoc()) {
     return "PointerLockDeniedNotInDocument";
   }
 
@@ -11691,11 +11678,11 @@ ChangePointerLockedElement(Element* aElement, nsIDocument* aDocument,
   MOZ_ASSERT(aDocument);
   MOZ_ASSERT(aElement != aPointerLockedElement);
   if (aPointerLockedElement) {
-    MOZ_ASSERT(aPointerLockedElement->GetUncomposedDoc() == aDocument);
+    MOZ_ASSERT(aPointerLockedElement->GetComposedDoc() == aDocument);
     aPointerLockedElement->ClearPointerLock();
   }
   if (aElement) {
-    MOZ_ASSERT(aElement->GetUncomposedDoc() == aDocument);
+    MOZ_ASSERT(aElement->GetComposedDoc() == aDocument);
     aElement->SetPointerLock();
     EventStateManager::sPointerLockedElement = do_GetWeakReference(aElement);
     EventStateManager::sPointerLockedDoc = do_GetWeakReference(aDocument);
@@ -11719,9 +11706,9 @@ PointerLockRequest::Run()
   nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
   nsDocument* d = static_cast<nsDocument*>(doc.get());
   const char* error = nullptr;
-  if (!e || !d || !e->GetUncomposedDoc()) {
+  if (!e || !d || !e->GetComposedDoc()) {
     error = "PointerLockDeniedNotInDocument";
-  } else if (e->GetUncomposedDoc() != d) {
+  } else if (e->GetComposedDoc() != d) {
     error = "PointerLockDeniedMovedDocument";
   }
   if (!error) {
@@ -11870,25 +11857,6 @@ void
 nsIDocument::UnlockPointer(nsIDocument* aDoc)
 {
   nsDocument::UnlockPointer(aDoc);
-}
-
-Element*
-nsIDocument::GetPointerLockElement()
-{
-  nsCOMPtr<Element> pointerLockedElement =
-    do_QueryReferent(EventStateManager::sPointerLockedElement);
-  if (!pointerLockedElement) {
-    return nullptr;
-  }
-
-  // Make sure pointer locked element is in the same document.
-  nsCOMPtr<nsIDocument> pointerLockedDoc =
-    do_QueryReferent(EventStateManager::sPointerLockedDoc);
-  if (pointerLockedDoc != this) {
-    return nullptr;
-  }
-
-  return pointerLockedElement;
 }
 
 void
@@ -12178,15 +12146,6 @@ nsIDocument::Evaluate(JSContext* aCx, const nsAString& aExpression,
 {
   return XPathEvaluator()->Evaluate(aCx, aExpression, aContextNode, aResolver,
                                     aType, aResult, rv);
-}
-
-NS_IMETHODIMP
-nsDocument::Evaluate(const nsAString& aExpression, nsIDOMNode* aContextNode,
-                     nsIDOMNode* aResolver, uint16_t aType,
-                     nsISupports* aInResult, nsISupports** aResult)
-{
-  return XPathEvaluator()->Evaluate(aExpression, aContextNode, aResolver, aType,
-                                    aInResult, aResult);
 }
 
 nsIDocument*
@@ -12532,9 +12491,9 @@ XPathEvaluator*
 nsIDocument::XPathEvaluator()
 {
   if (!mXPathEvaluator) {
-    mXPathEvaluator = new dom::XPathEvaluator(this);
+    mXPathEvaluator.reset(new dom::XPathEvaluator(this));
   }
-  return mXPathEvaluator;
+  return mXPathEvaluator.get();
 }
 
 already_AddRefed<nsIDocumentEncoder>

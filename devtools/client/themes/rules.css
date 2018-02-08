@@ -368,6 +368,7 @@
 }
 
 .ruleview-ruleclose {
+  clear: both;
   cursor: text;
   padding-right: 20px;
 }
@@ -402,7 +403,6 @@
 }
 
 .ruleview-newproperty {
-  /* (enable checkbox width: 12px) + (expander width: 15px) */
   margin-inline-start: -10px;
 }
 
@@ -558,7 +558,7 @@
 
 .ruleview-property {
   border-left: 3px solid transparent;
-  clear: right;
+  clear: both;
   padding-left: 28px;
 }
 

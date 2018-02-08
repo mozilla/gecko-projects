@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
@@ -106,9 +105,9 @@ const PREFS_CONFIG = new Map([
     title: "Collapse the Top Sites section",
     value: false
   }],
-  ["topSitesCount", {
-    title: "Number of Top Sites to display",
-    value: 12
+  ["topSitesRows", {
+    title: "Number of rows of Top Sites to display",
+    value: 2
   }],
   ["telemetry", {
     title: "Enable system error and usage data collection",

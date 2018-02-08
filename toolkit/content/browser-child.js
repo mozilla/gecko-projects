@@ -4,11 +4,6 @@
 
 /* eslint-env mozilla/frame-script */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
-
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -223,6 +218,11 @@ var WebProgressListener = {
 
     json.state = aState;
     json.status = SecurityUI.getSSLStatusAsString();
+
+    json.matchedList = null;
+    if (aRequest && aRequest instanceof Ci.nsIClassifiedChannel) {
+      json.matchedList = aRequest.matchedList;
+    }
 
     this._send("Content:SecurityChange", json, objects);
   },

@@ -2,9 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cu = Components.utils;
-var Ci = Components.interfaces;
-
 const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {gDevToolsBrowser} = require("devtools/client/framework/devtools-browser");
@@ -180,9 +177,6 @@ var UI = {
         this.updateTitle();
         this.updateCommands();
         break;
-      case "install-progress":
-        this.updateProgress(Math.round(100 * details.bytesSent / details.totalBytes));
-        break;
       case "runtime-targets":
         this.autoSelectProject();
         break;
@@ -215,13 +209,6 @@ var UI = {
   _busyTimeout: null,
   _busyOperationDescription: null,
   _busyPromise: null,
-
-  updateProgress: function (percent) {
-    let progress = document.querySelector("#action-busy-determined");
-    progress.mode = "determined";
-    progress.value = percent;
-    this.setupBusyTimeout();
-  },
 
   busy: function () {
     let win = document.querySelector("window");
@@ -392,7 +379,6 @@ var UI = {
     }
 
     // Runtime commands
-    let monitorCmd = document.querySelector("#cmd_showMonitor");
     let screenshotCmd = document.querySelector("#cmd_takeScreenshot");
     let detailsCmd = document.querySelector("#cmd_showRuntimeDetails");
     let disconnectCmd = document.querySelector("#cmd_disconnectRuntime");
@@ -401,7 +387,6 @@ var UI = {
 
     if (AppManager.connected) {
       if (AppManager.deviceFront) {
-        monitorCmd.removeAttribute("disabled");
         detailsCmd.removeAttribute("disabled");
         screenshotCmd.removeAttribute("disabled");
       }
@@ -410,7 +395,6 @@ var UI = {
       }
       disconnectCmd.removeAttribute("disabled");
     } else {
-      monitorCmd.setAttribute("disabled", "true");
       detailsCmd.setAttribute("disabled", "true");
       screenshotCmd.setAttribute("disabled", "true");
       disconnectCmd.setAttribute("disabled", "true");
@@ -892,10 +876,6 @@ var Cmds = {
 
   showDevicePrefs: function () {
     UI.selectDeckPanel("devicepreferences");
-  },
-
-  showMonitor: function () {
-    UI.selectDeckPanel("monitor");
   },
 
   play: Task.async(function* () {

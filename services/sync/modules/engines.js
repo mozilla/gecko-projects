@@ -11,8 +11,6 @@ this.EXPORTED_SYMBOLS = [
   "Changeset"
 ];
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/JSONFile.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
@@ -838,7 +836,7 @@ SyncEngine.prototype = {
     if (Array.isArray(json)) {
       // Pre-`JSONFile` storage stored an array, but `JSONFile` defaults to
       // an object, so we wrap the array for consistency.
-      return { ids: json };
+      json = { ids: json };
     }
     if (!json.ids) {
       json.ids = [];

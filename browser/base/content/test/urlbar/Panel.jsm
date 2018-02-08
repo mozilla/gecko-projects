@@ -6,8 +6,6 @@ this.EXPORTED_SYMBOLS = [
   "Panel",
 ];
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
 this.Panel = function(panelElt, iframeURL) {
@@ -97,7 +95,7 @@ this.Panel.prototype = {
     let controller = this.p.mInput.controller;
     for (let i = 0; i < this.p.maxResults; i++) {
       let idx = this._currentIndex;
-      if (idx >= this.p._matchCount) {
+      if (idx >= this.p.matchCount) {
         break;
       }
       let url = controller.getValueAt(idx);

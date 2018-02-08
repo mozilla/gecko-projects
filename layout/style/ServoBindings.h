@@ -23,8 +23,7 @@
 #include "nsStyleStruct.h"
 
 /*
- * API for Servo to access Gecko data structures. This file must compile as valid
- * C code in order for the binding generator to parse it.
+ * API for Servo to access Gecko data structures.
  *
  * Functions beginning with Gecko_ are implemented in Gecko and invoked from Servo.
  * Functions beginning with Servo_ are implemented in Servo and invoked from Gecko.
@@ -41,7 +40,6 @@ namespace mozilla {
   class SharedFontList;
   enum class CSSPseudoElementType : uint8_t;
   struct Keyframe;
-  enum Side;
   struct StyleTransition;
   namespace css {
     class ErrorReporter;
@@ -146,6 +144,12 @@ struct FontSizePrefs
   nscoord mDefaultMonospaceSize;
   nscoord mDefaultCursiveSize;
   nscoord mDefaultFantasySize;
+};
+
+struct MediumFeaturesChangedResult {
+  bool mAffectsDocumentRules;
+  bool mAffectsNonDocumentRules;
+  bool mUsesViewportUnits;
 };
 
 // DOM Traversal.
@@ -396,6 +400,10 @@ void Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 void Gecko_NoteDirtyElement(RawGeckoElementBorrowed element);
 void Gecko_NoteDirtySubtreeForInvalidation(RawGeckoElementBorrowed element);
 void Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed element);
+
+bool Gecko_AnimationNameMayBeReferencedFromStyle(
+  RawGeckoPresContextBorrowed pres_context,
+  nsAtom* name);
 
 // Incremental restyle.
 mozilla::CSSPseudoElementType Gecko_GetImplementedPseudo(RawGeckoElementBorrowed element);

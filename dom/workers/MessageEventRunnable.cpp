@@ -126,11 +126,12 @@ MessageEventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
 
     aWorkerPrivate->AssertInnerWindowIsCorrect();
 
-    return DispatchDOMEvent(aCx, aWorkerPrivate, aWorkerPrivate,
+    return DispatchDOMEvent(aCx, aWorkerPrivate,
+                            aWorkerPrivate->ParentEventTargetRef(),
                             !aWorkerPrivate->GetParent());
   }
 
-  MOZ_ASSERT(aWorkerPrivate == workers::GetWorkerPrivateFromContext(aCx));
+  MOZ_ASSERT(aWorkerPrivate == GetWorkerPrivateFromContext(aCx));
 
   return DispatchDOMEvent(aCx, aWorkerPrivate, aWorkerPrivate->GlobalScope(),
                           false);

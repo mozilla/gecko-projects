@@ -149,13 +149,18 @@ class Theme {
         case "icons_attention":
           this.lwtStyles.icon_attention_color = cssColor;
           break;
+        case "tab_loading":
         case "tab_text":
         case "toolbar_field":
         case "toolbar_field_text":
         case "toolbar_field_border":
+        case "toolbar_field_separator":
         case "toolbar_top_separator":
         case "toolbar_bottom_separator":
         case "toolbar_vertical_separator":
+        case "button_background":
+        case "button_background_hover":
+        case "button_background_active":
           this.lwtStyles[color] = cssColor;
           break;
       }

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* import-globals-from extensionControlled.js */
 /* import-globals-from preferences.js */
 
 /* FIXME: ESlint globals workaround should be removed once bug 1395426 gets fixed */
@@ -1519,20 +1520,7 @@ var gPrivacyPane = {
   },
 
   clearSiteData() {
-    let flags =
-      Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
-      Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1 +
-      Services.prompt.BUTTON_POS_0_DEFAULT;
-    let prefStrBundle = document.getElementById("bundlePreferences");
-    let title = prefStrBundle.getString("clearSiteDataPromptTitle");
-    let text = prefStrBundle.getString("clearSiteDataPromptText");
-    let btn0Label = prefStrBundle.getString("clearSiteDataNow");
-
-    let result = Services.prompt.confirmEx(
-      window, title, text, flags, btn0Label, null, null, null, {});
-    if (result == 0) {
-      SiteDataManager.removeAll();
-    }
+    gSubDialog.open("chrome://browser/content/preferences/clearSiteData.xul");
   },
 
   initDataCollection() {

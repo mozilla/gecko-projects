@@ -2,11 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
-
 const FRECENCY_DEFAULT = 10000;
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -66,9 +61,6 @@ AutoCompleteInput.prototype = {
 
   minResultsForPopup: 0,
   maxRows: 0,
-
-  showCommentColumn: false,
-  showImageColumn: false,
 
   timeout: 10,
   searchParam: "",

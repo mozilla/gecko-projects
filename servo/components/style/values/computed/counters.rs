@@ -4,77 +4,202 @@
 
 //! Computed values for counter properties
 
-use values::CustomIdent;
-use values::computed::{Context, ToComputedValue};
-use values::generics::counters::CounterIntegerList;
-use values::specified::{CounterIncrement as SpecifiedCounterIncrement, CounterReset as SpecifiedCounterReset};
-
-type ComputedIntegerList = CounterIntegerList<i32>;
+#[cfg(feature = "servo")]
+use computed_values::list_style_type::T as ListStyleType;
+use cssparser::{self, Parser, Token};
+use parser::{Parse, ParserContext};
+use selectors::parser::SelectorParseErrorKind;
+use std::fmt::{self, Write};
+use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
+#[cfg(feature = "gecko")]
+use values::generics::CounterStyleOrNone;
+use values::generics::counters::CounterIncrement as GenericCounterIncrement;
+use values::generics::counters::CounterReset as GenericCounterReset;
+#[cfg(feature = "gecko")]
+use values::specified::Attr;
+#[cfg(feature = "gecko")]
+use values::specified::url::SpecifiedUrl;
+pub use values::specified::{Content, ContentItem};
 
 /// A computed value for the `counter-increment` property.
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
-pub struct CounterIncrement(pub ComputedIntegerList);
+pub type CounterIncrement = GenericCounterIncrement<i32>;
 
-impl CounterIncrement {
-    /// Returns the `none` value.
+/// A computed value for the `counter-increment` property.
+pub type CounterReset = GenericCounterReset<i32>;
+
+impl Content {
+    /// Set `content` property to `normal`.
     #[inline]
-    pub fn none() -> CounterIncrement {
-        CounterIncrement(ComputedIntegerList::new(Vec::new()))
+    pub fn normal() -> Self {
+        Content::Normal
     }
 
-    /// Returns a new computed `counter-increment` object with the given values.
-    pub fn new(vec: Vec<(CustomIdent, i32)>) -> CounterIncrement {
-        CounterIncrement(ComputedIntegerList::new(vec))
+    #[cfg(feature = "servo")]
+    fn parse_counter_style(
+        input: &mut Parser
+    ) -> ListStyleType {
+        input.try(|input| {
+            input.expect_comma()?;
+            ListStyleType::parse(input)
+        }).unwrap_or(ListStyleType::Decimal)
     }
 
-    /// Returns the values of the computed `counter-increment` object.
-    pub fn get_values(&self) -> &[(CustomIdent, i32)] {
-        self.0.get_values()
-    }
-}
-
-impl ToComputedValue for SpecifiedCounterIncrement {
-    type ComputedValue = CounterIncrement;
-
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        CounterIncrement(self.0.to_computed_value(context))
-    }
-
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        SpecifiedCounterIncrement(ToComputedValue::from_computed_value(&computed.0))
-    }
-}
-
-/// A computed value for the `counter-reset` property.
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss)]
-pub struct CounterReset(pub ComputedIntegerList);
-
-impl CounterReset {
-    /// Returns the `none` value.
-    #[inline]
-    pub fn none() -> CounterReset {
-        CounterReset(ComputedIntegerList::new(Vec::new()))
-    }
-
-    /// Returns a new computed `counter-reset` object with the given values.
-    pub fn new(vec: Vec<(CustomIdent, i32)>) -> CounterReset {
-        CounterReset(ComputedIntegerList::new(vec))
-    }
-
-    /// Returns the values of the computed `counter-reset` object.
-    pub fn get_values(&self) -> &[(CustomIdent, i32)] {
-        self.0.get_values()
+    #[cfg(feature = "gecko")]
+    fn parse_counter_style(
+        context: &ParserContext,
+        input: &mut Parser
+    ) -> CounterStyleOrNone {
+        input.try(|input| {
+            input.expect_comma()?;
+            CounterStyleOrNone::parse(context, input)
+        }).unwrap_or(CounterStyleOrNone::decimal())
     }
 }
 
-impl ToComputedValue for SpecifiedCounterReset {
-    type ComputedValue = CounterReset;
+impl Parse for Content {
+    // normal | none | [ <string> | <counter> | open-quote | close-quote | no-open-quote |
+    // no-close-quote ]+
+    // TODO: <uri>, attr(<identifier>)
+    fn parse<'i, 't>(
+        _context: &ParserContext,
+        input: &mut Parser<'i, 't>
+    ) -> Result<Self, ParseError<'i>> {
+        if input.try(|input| input.expect_ident_matching("normal")).is_ok() {
+            return Ok(Content::Normal);
+        }
+        if input.try(|input| input.expect_ident_matching("none")).is_ok() {
+            return Ok(Content::None);
+        }
+        #[cfg(feature = "gecko")] {
+            if input.try(|input| input.expect_ident_matching("-moz-alt-content")).is_ok() {
+                return Ok(Content::MozAltContent);
+            }
+        }
 
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        CounterReset(self.0.to_computed_value(context))
+        let mut content = vec![];
+        loop {
+            #[cfg(feature = "gecko")] {
+                if let Ok(mut url) = input.try(|i| SpecifiedUrl::parse(_context, i)) {
+                    url.build_image_value();
+                    content.push(ContentItem::Url(url));
+                    continue;
+                }
+            }
+            // FIXME: remove clone() when lifetimes are non-lexical
+            match input.next().map(|t| t.clone()) {
+                Ok(Token::QuotedString(ref value)) => {
+                    content.push(ContentItem::String(value.as_ref().to_owned().into_boxed_str()));
+                }
+                Ok(Token::Function(ref name)) => {
+                    let result = match_ignore_ascii_case! { &name,
+                        "counter" => Some(input.parse_nested_block(|input| {
+                            let name = input.expect_ident()?.as_ref().to_owned().into_boxed_str();
+                            #[cfg(feature = "servo")]
+                            let style = Content::parse_counter_style(input);
+                            #[cfg(feature = "gecko")]
+                            let style = Content::parse_counter_style(_context, input);
+                            Ok(ContentItem::Counter(name, style))
+                        })),
+                        "counters" => Some(input.parse_nested_block(|input| {
+                            let name = input.expect_ident()?.as_ref().to_owned().into_boxed_str();
+                            input.expect_comma()?;
+                            let separator = input.expect_string()?.as_ref().to_owned().into_boxed_str();
+                            #[cfg(feature = "servo")]
+                            let style = Content::parse_counter_style(input);
+                            #[cfg(feature = "gecko")]
+                            let style = Content::parse_counter_style(_context, input);
+                            Ok(ContentItem::Counters(name, separator, style))
+                        })),
+                        #[cfg(feature = "gecko")]
+                        "attr" => Some(input.parse_nested_block(|input| {
+                            Ok(ContentItem::Attr(Attr::parse_function(_context, input)?))
+                        })),
+                        _ => None
+                    };
+                    match result {
+                        Some(result) => content.push(result?),
+                        None => return Err(input.new_custom_error(
+                            StyleParseErrorKind::UnexpectedFunction(name.clone())
+                        ))
+                    }
+                }
+                Ok(Token::Ident(ref ident)) => {
+                    content.push(
+                        match_ignore_ascii_case! { &ident,
+                            "open-quote" => ContentItem::OpenQuote,
+                            "close-quote" => ContentItem::CloseQuote,
+                            "no-open-quote" => ContentItem::NoOpenQuote,
+                            "no-close-quote" => ContentItem::NoCloseQuote,
+                            _ => return Err(input.new_custom_error(
+                                    SelectorParseErrorKind::UnexpectedIdent(ident.clone())))
+                        }
+                    );
+                }
+                Err(_) => break,
+                Ok(t) => return Err(input.new_unexpected_token_error(t))
+            }
+        }
+        if content.is_empty() {
+            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+        }
+        Ok(Content::Items(content.into_boxed_slice()))
     }
+}
 
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        SpecifiedCounterReset(ToComputedValue::from_computed_value(&computed.0))
+impl ToCss for Content {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+        where W: Write,
+    {
+        match *self {
+            Content::Normal => dest.write_str("normal"),
+            Content::None => dest.write_str("none"),
+            #[cfg(feature = "gecko")]
+            Content::MozAltContent => dest.write_str("-moz-alt-content"),
+            Content::Items(ref content) => {
+                let mut iter = content.iter();
+                iter.next().unwrap().to_css(dest)?;
+                for c in iter {
+                    dest.write_str(" ")?;
+                    c.to_css(dest)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl ToCss for ContentItem {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+        where W: Write,
+    {
+        match *self {
+            ContentItem::String(ref s) => s.to_css(dest),
+            ContentItem::Counter(ref s, ref counter_style) => {
+                dest.write_str("counter(")?;
+                cssparser::serialize_identifier(&**s, dest)?;
+                dest.write_str(", ")?;
+                counter_style.to_css(dest)?;
+                dest.write_str(")")
+            }
+            ContentItem::Counters(ref s, ref separator, ref counter_style) => {
+                dest.write_str("counters(")?;
+                cssparser::serialize_identifier(&**s, dest)?;
+                dest.write_str(", ")?;
+                separator.to_css(dest)?;
+                dest.write_str(", ")?;
+                counter_style.to_css(dest)?;
+                dest.write_str(")")
+            }
+            ContentItem::OpenQuote => dest.write_str("open-quote"),
+            ContentItem::CloseQuote => dest.write_str("close-quote"),
+            ContentItem::NoOpenQuote => dest.write_str("no-open-quote"),
+            ContentItem::NoCloseQuote => dest.write_str("no-close-quote"),
+            #[cfg(feature = "gecko")]
+            ContentItem::Attr(ref attr) => {
+                attr.to_css(dest)
+            }
+            #[cfg(feature = "gecko")]
+            ContentItem::Url(ref url) => url.to_css(dest),
+        }
     }
 }

@@ -2,8 +2,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-const { interfaces: Ci, utils: Cu, results: Cr } = Components;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
@@ -49,6 +47,7 @@ let gSiteDataSettings = {
     let settingsDescription = document.getElementById("settingsDescription");
     settingsDescription.textContent = this._prefStrBundle.getFormattedString("siteDataSettings2.description", [brandShortName]);
 
+    setEventListener("sitesList", "select", this.onSelect);
     setEventListener("hostCol", "click", this.onClickTreeCol);
     setEventListener("usageCol", "click", this.onClickTreeCol);
     setEventListener("statusCol", "click", this.onClickTreeCol);
@@ -63,8 +62,8 @@ let gSiteDataSettings = {
     let items = this._list.getElementsByTagName("richlistitem");
     let removeSelectedBtn = document.getElementById("removeSelected");
     let removeAllBtn = document.getElementById("removeAll");
-    removeSelectedBtn.disabled = items.length == 0;
-    removeAllBtn.disabled = removeSelectedBtn.disabled;
+    removeSelectedBtn.disabled = this._list.selectedItems.length == 0;
+    removeAllBtn.disabled = items.length == 0;
 
     let removeAllBtnLabelStringID = "removeAllSiteData.label";
     let removeAllBtnAccesskeyStringID = "removeAllSiteData.accesskey";
@@ -208,18 +207,7 @@ let gSiteDataSettings = {
 
     if (removals.size > 0) {
       if (this._sites.length == 0) {
-        // User selects all sites so equivalent to clearing all data
-        let flags =
-          Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
-          Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1 +
-          Services.prompt.BUTTON_POS_0_DEFAULT;
-        let prefStrBundle = document.getElementById("bundlePreferences");
-        let title = prefStrBundle.getString("clearSiteDataPromptTitle");
-        let text = prefStrBundle.getString("clearSiteDataPromptText");
-        let btn0Label = prefStrBundle.getString("clearSiteDataNow");
-        let result = Services.prompt.confirmEx(window, title, text, flags, btn0Label, null, null, null, {});
-        allowed = result == 0;
-        if (allowed) {
+        if (SiteDataManager.promptSiteDataRemoval(window)) {
           SiteDataManager.removeAll();
         }
       } else {
@@ -283,6 +271,7 @@ let gSiteDataSettings = {
 
   onCommandSearch() {
     this._buildSitesList(this._sites);
+    this._list.clearSelection();
   },
 
   onClickRemoveSelected() {
@@ -290,6 +279,7 @@ let gSiteDataSettings = {
     if (selected) {
       this._removeSiteItems([selected]);
     }
+    this._list.clearSelection();
   },
 
   onClickRemoveAll() {
@@ -303,5 +293,9 @@ let gSiteDataSettings = {
     if (e.keyCode == KeyEvent.DOM_VK_ESCAPE) {
       this.close();
     }
+  },
+
+  onSelect() {
+    this._updateButtonsState();
   }
 };

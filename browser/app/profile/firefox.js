@@ -343,6 +343,10 @@ pref("browser.urlbar.decodeURLsOnCopy", false);
 // Tab" feature of the awesomebar.
 pref("browser.urlbar.switchTabs.adoptIntoActiveWindow", false);
 
+// Whether addresses and search results typed into the address bar
+// should be opened in new tabs by default.
+pref("browser.urlbar.openintab", false);
+
 pref("browser.altClickSave", false);
 
 // Enable logging downloads operations to the Console.
@@ -386,9 +390,7 @@ pref("browser.search.order.2",                "chrome://browser-region/locale/re
 pref("browser.search.order.3",                "chrome://browser-region/locale/region.properties");
 
 // Market-specific search defaults
-// This is disabled globally, and then enabled for individual locales
-// in firefox-l10n.js (eg. it's enabled for en-US).
-pref("browser.search.geoSpecificDefaults", false);
+pref("browser.search.geoSpecificDefaults", true);
 pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
 
 // US specific default (used as a fallback if the geoSpecificDefaults request fails).

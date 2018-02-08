@@ -5,26 +5,24 @@
 
 this.EXPORTED_SYMBOLS = ["RemoteWebProgressManager"];
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cu = Components.utils;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-function RemoteWebProgressRequest(spec, originalSpec, requestCPOW) {
+function RemoteWebProgressRequest(spec, originalSpec, matchedList, requestCPOW) {
   this.wrappedJSObject = this;
 
   this._uri = Services.io.newURI(spec);
   this._originalURI = Services.io.newURI(originalSpec);
   this._requestCPOW = requestCPOW;
+  this._matchedList = matchedList;
 }
 
 RemoteWebProgressRequest.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannel]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannel, Ci.nsIClassifiedChannel]),
 
   get URI() { return this._uri.clone(); },
-  get originalURI() { return this._originalURI.clone(); }
+  get originalURI() { return this._originalURI.clone(); },
+  get matchedList() { return this._matchedList; }
 };
 
 function RemoteWebProgress(aManager, aIsTopLevel) {
@@ -213,6 +211,7 @@ RemoteWebProgressManager.prototype = {
     if (json.requestURI) {
       request = new RemoteWebProgressRequest(json.requestURI,
                                              json.originalRequestURI,
+                                             json.matchedList,
                                              objects.request);
     }
 

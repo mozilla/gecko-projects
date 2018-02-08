@@ -359,6 +359,7 @@ CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool)
       case CacheKind::Compare:
       case CacheKind::TypeOf:
       case CacheKind::ToBool:
+      case CacheKind::GetIntrinsic:
         MOZ_CRASH("Unsupported IC");
     }
     MOZ_CRASH();
@@ -5505,7 +5506,8 @@ CodeGenerator::generateBody()
         TrackedOptimizations* last = nullptr;
 
 #if defined(JS_ION_PERF)
-        perfSpewer->startBasicBlock(current->mir(), masm);
+        if (!perfSpewer->startBasicBlock(current->mir(), masm))
+            return false;
 #endif
 
         for (LInstructionIterator iter = current->begin(); iter != current->end(); iter++) {
@@ -8653,24 +8655,14 @@ CodeGenerator::visitSpectreMaskIndex(LSpectreMaskIndex* lir)
 {
     MOZ_ASSERT(JitOptions.spectreIndexMasking);
 
-    const LAllocation* index = lir->index();
     const LAllocation* length = lir->length();
+    Register index = ToRegister(lir->index());
     Register output = ToRegister(lir->output());
 
-    if (index->isConstant()) {
-        int32_t idx = ToInt32(index);
-        if (length->isRegister())
-            masm.spectreMaskIndex(idx, ToRegister(length), output);
-        else
-            masm.spectreMaskIndex(idx, ToAddress(length), output);
-        return;
-    }
-
-    Register indexReg = ToRegister(index);
     if (length->isRegister())
-        masm.spectreMaskIndex(indexReg, ToRegister(length), output);
+        masm.spectreMaskIndex(index, ToRegister(length), output);
     else
-        masm.spectreMaskIndex(indexReg, ToAddress(length), output);
+        masm.spectreMaskIndex(index, ToAddress(length), output);
 }
 
 class OutOfLineStoreElementHole : public OutOfLineCodeBase<CodeGenerator>

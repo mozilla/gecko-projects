@@ -5,11 +5,6 @@
 
 /* eslint-env mozilla/browser-window */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cc = Components.classes;
-var Cr = Components.results;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
@@ -50,6 +45,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ReaderParent: "resource:///modules/ReaderParent.jsm",
   RecentWindow: "resource:///modules/RecentWindow.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
+  Sanitizer: "resource:///modules/Sanitizer.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
   SchedulePressure: "resource:///modules/SchedulePressure.jsm",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
@@ -143,6 +139,18 @@ if (AppConstants.MOZ_CRASHREPORTER) {
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
   return Services.strings.createBundle("chrome://browser/locale/browser.properties");
 });
+XPCOMUtils.defineLazyGetter(this, "gNavigatorBundle", function() {
+  // This is a stringbundle-like interface to gBrowserBundle, formerly a getter for
+  // the "bundle_browser" element.
+  return {
+    getString(key) {
+      return gBrowserBundle.GetStringFromName(key);
+    },
+    getFormattedString(key, array) {
+      return gBrowserBundle.formatStringFromName(key, array, array.length);
+    }
+  };
+});
 XPCOMUtils.defineLazyGetter(this, "gTabBrowserBundle", function() {
   return Services.strings.createBundle("chrome://browser/locale/tabbrowser.properties");
 });
@@ -224,12 +232,11 @@ if (AppConstants.platform != "macosx") {
   var gEditUIVisible = true;
 }
 
-/* globals gBrowser, gNavToolbox, gURLBar:true, gNavigatorBundle*/
+/* globals gBrowser, gNavToolbox, gURLBar:true */
 [
   ["gBrowser",            "content"],
   ["gNavToolbox",         "navigator-toolbox"],
   ["gURLBar",             "urlbar"],
-  ["gNavigatorBundle",    "bundle_browser"]
 ].forEach(function(elementGlobal) {
   var [name, id] = elementGlobal;
   Object.defineProperty(window, name, {

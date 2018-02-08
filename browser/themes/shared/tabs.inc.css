@@ -6,22 +6,28 @@
 %filter substitution
 %define horizontalTabPadding 9px
 
-:root {
-  --tabs-top-border-width: 0px;
+#titlebar,
+#tabbrowser-tabs {
   --tab-min-height: 33px;
+}
+
+:root[uidensity=compact] #titlebar,
+:root[uidensity=compact] #tabbrowser-tabs {
+  --tab-min-height: 29px;
+}
+
+:root[uidensity=touch] #titlebar,
+:root[uidensity=touch] #tabbrowser-tabs {
+  --tab-min-height: 41px;
+}
+
+#tabbrowser-tabs {
+  --tabs-top-border-width: 0px;
   --tab-min-width: 76px;
   --tab-loading-fill: #0A84FF;
 }
 
-:root[uidensity=compact] {
-  --tab-min-height: 29px;
-}
-
-:root[uidensity=touch] {
-  --tab-min-height: 41px;
-}
-
-:root:-moz-lwtheme {
+#tabbrowser-tabs:-moz-lwtheme {
   --tab-line-color: var(--lwt-accent-color);
 }
 

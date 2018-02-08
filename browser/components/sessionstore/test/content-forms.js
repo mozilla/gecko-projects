@@ -6,8 +6,6 @@
 
 "use strict";
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
 /**
  * This frame script is only loaded for sessionstore mochitests. It contains
  * a bunch of utility functions used to test form data collection and
@@ -31,7 +29,7 @@ function queryElement(data) {
   }
 
   if (data.hasOwnProperty("xpath")) {
-    let xptype = Ci.nsIDOMXPathResult.FIRST_ORDERED_NODE_TYPE;
+    let xptype = doc.defaultView.XPathResult.FIRST_ORDERED_NODE_TYPE;
     return doc.evaluate(data.xpath, doc, null, xptype, null).singleNodeValue;
   }
 

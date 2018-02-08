@@ -114,7 +114,7 @@ public:
   mozilla::ipc::IPCResult RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch) override;
 
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
-  mozilla::ipc::IPCResult RecvForceComposite() override;
+  mozilla::ipc::IPCResult RecvScheduleComposite() override;
   mozilla::ipc::IPCResult RecvCapture() override;
 
   mozilla::ipc::IPCResult RecvSetConfirmedTargetAPZC(const uint64_t& aBlockId,
@@ -172,7 +172,8 @@ public:
   void UpdateAPZ(bool aUpdateHitTestingTree);
   const WebRenderScrollData& GetScrollData() const;
 
-  void FlushRendering(bool aIsSync);
+  void FlushRendering();
+  void FlushRenderingAsync();
 
   /**
    * Schedule generating WebRender frame definitely at next composite timing.

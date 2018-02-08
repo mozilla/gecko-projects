@@ -15,6 +15,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from argparse import Namespace
 from collections import defaultdict
 from contextlib import closing
+from distutils import spawn
 import copy
 import ctypes
 import glob
@@ -518,7 +519,7 @@ class MochitestServer(object):
                 # https://bugzilla.mozilla.org/show_bug.cgi?id=912285
                 # self._process.terminate()
                 self._process.proc.terminate()
-        except:
+        except Exception:
             self._log.info("Failed to stop web server on %s" % self.shutdownURL)
             traceback.print_exc()
             self._process.kill()
@@ -744,20 +745,29 @@ def findTestMediaDevices(log):
         return None
 
     # Feed it a frame of output so it has something to display
-    subprocess.check_call(['/usr/bin/gst-launch-0.10', 'videotestsrc',
+    gst01 = spawn.find_executable("gst-launch-0.1")
+    gst10 = spawn.find_executable("gst-launch-1.0")
+    if gst01:
+        gst = gst01
+    else:
+        gst = gst10
+    subprocess.check_call([gst, 'videotestsrc',
                            'pattern=green', 'num-buffers=1', '!',
                            'v4l2sink', 'device=%s' % device])
     info['video'] = name
 
+    pactl = spawn.find_executable("pactl")
+    pacmd = spawn.find_executable("pacmd")
+
     # Use pactl to see if the PulseAudio module-null-sink module is loaded.
     def null_sink_loaded():
         o = subprocess.check_output(
-            ['/usr/bin/pactl', 'list', 'short', 'modules'])
+            [pactl, 'list', 'short', 'modules'])
         return filter(lambda x: 'module-null-sink' in x, o.splitlines())
 
     if not null_sink_loaded():
         # Load module-null-sink
-        subprocess.check_call(['/usr/bin/pactl', 'load-module',
+        subprocess.check_call([pactl, 'load-module',
                                'module-null-sink'])
 
     if not null_sink_loaded():
@@ -765,7 +775,7 @@ def findTestMediaDevices(log):
         return None
 
     # Whether it was loaded or not make it the default output
-    subprocess.check_call(['/usr/bin/pacmd', 'set-default-sink', 'null'])
+    subprocess.check_call([pacmd, 'set-default-sink', 'null'])
 
     # Hardcode the name since it's always the same.
     info['audio'] = 'Monitor of Null Output'
@@ -1163,7 +1173,7 @@ class MochitestDesktop(object):
                 sock = socket.create_connection(("127.0.0.1", 8191))
                 sock.close()
                 break
-            except:
+            except Exception:
                 time.sleep(0.1)
         else:
             self.log.error("runtests.py | Timed out while waiting for "
@@ -1943,18 +1953,19 @@ toolbar#nav-bar {
 
         return os.pathsep.join(gmp_paths)
 
-    def cleanup(self, options):
+    def cleanup(self, options, final=False):
         """ remove temporary files and profile """
         if hasattr(self, 'manifest') and self.manifest is not None:
-            os.remove(self.manifest)
+            if os.path.exists(self.manifest):
+                os.remove(self.manifest)
         if hasattr(self, 'profile'):
             del self.profile
-        if options.pidFile != "":
+        if options.pidFile != "" and os.path.exists(options.pidFile):
             try:
                 os.remove(options.pidFile)
                 if os.path.exists(options.pidFile + ".xpcshell.pid"):
                     os.remove(options.pidFile + ".xpcshell.pid")
-            except:
+            except Exception:
                 self.log.warning(
                     "cleaning up pidfile '%s' was unsuccessful from the test harness" %
                     options.pidFile)
@@ -2062,7 +2073,7 @@ toolbar#nav-bar {
                 try:
                     if 'firefox' in proc.name():
                         firefoxes = "%s%s\n" % (firefoxes, proc.as_dict(attrs=attrs))
-                except:
+                except Exception:
                     # may not be able to access process info for all processes
                     continue
         if len(firefoxes) > 0:
@@ -2589,6 +2600,9 @@ toolbar#nav-bar {
             if res == -1:
                 break
 
+        if self.manifest is not None:
+            self.cleanup(options, True)
+
         e10s_mode = "e10s" if options.e10s else "non-e10s"
 
         # printing total number of tests
@@ -2774,7 +2788,7 @@ toolbar#nav-bar {
         except KeyboardInterrupt:
             self.log.info("runtests.py | Received keyboard interrupt.\n")
             status = -1
-        except:
+        except Exception:
             traceback.print_exc()
             self.log.error(
                 "Automation Error: Received unexpected exception while running application\n")
@@ -2804,7 +2818,7 @@ toolbar#nav-bar {
         self.log.info("runtests.py | Running tests: end.")
 
         if self.manifest is not None:
-            self.cleanup(options)
+            self.cleanup(options, False)
 
         return status
 
@@ -2827,12 +2841,12 @@ toolbar#nav-bar {
         if HAVE_PSUTIL:
             try:
                 browser_proc = [psutil.Process(browser_pid)]
-            except:
+            except Exception:
                 self.log.info('Failed to get proc for pid %d' % browser_pid)
                 browser_proc = []
             try:
                 child_procs = [psutil.Process(pid) for pid in child_pids]
-            except:
+            except Exception:
                 self.log.info('Failed to get child procs')
                 child_procs = []
             for pid in child_pids:

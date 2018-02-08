@@ -25,6 +25,7 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/Logging.h"
+#include "mozilla/MediaFeatureChange.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/Services.h"
@@ -4179,7 +4180,8 @@ nsDocShell::SetDeviceSizeIsPageSize(bool aValue)
     RefPtr<nsPresContext> presContext;
     GetPresContext(getter_AddRefs(presContext));
     if (presContext) {
-      presContext->MediaFeatureValuesChanged(nsRestyleHint(0));
+      presContext->MediaFeatureValuesChanged({
+        MediaFeatureChangeReason::DeviceSizeIsPageSizeChange });
     }
   }
   return NS_OK;
@@ -6411,9 +6413,17 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
    */
   loadInfo->SetReferrer(mCurrentURI);
 
-  /* Don't ever "guess" on which principal to use to avoid picking
-   * the current principal.
-   */
+  // Set the triggering pricipal to aPrincipal if available, or current
+  // document's principal otherwise.
+  nsCOMPtr<nsIPrincipal> principal = aPrincipal;
+  if (!principal) {
+    nsCOMPtr<nsIDocument> doc = GetDocument();
+    if (!doc) {
+      return NS_ERROR_FAILURE;
+    }
+    principal = doc->NodePrincipal();
+  }
+  loadInfo->SetTriggeringPrincipal(principal);
   loadInfo->SetPrincipalIsExplicit(true);
 
   /* Check if this META refresh causes a redirection
@@ -6439,13 +6449,6 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
     }
   } else {
     loadInfo->SetLoadType(nsIDocShellLoadInfo::loadRefresh);
-  }
-
-  // If the principal is null, the refresh will have a triggeringPrincipal
-  // derived from the referrer URI, or will be set to the system principal
-  // if there is no refererrer. See LoadURI()
-  if (aPrincipal) {
-    loadInfo->SetTriggeringPrincipal(aPrincipal);
   }
 
   /*
@@ -14422,7 +14425,8 @@ nsDocShell::SetDisplayMode(uint32_t aDisplayMode)
 
     RefPtr<nsPresContext> presContext;
     if (NS_SUCCEEDED(GetPresContext(getter_AddRefs(presContext)))) {
-      presContext->MediaFeatureValuesChangedAllDocuments(nsRestyleHint(0));
+      presContext->MediaFeatureValuesChangedAllDocuments({
+        MediaFeatureChangeReason::DisplayModeChange });
     }
   }
 

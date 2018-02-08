@@ -8,13 +8,14 @@
 //! `pseudo_element_definition.mako.rs`. If you touch that file, you probably
 //! need to update the checked-in files for Servo.
 
-use cssparser::{ToCss, serialize_identifier};
+use cssparser::ToCss;
 use gecko_bindings::structs::{self, CSSPseudoElementType};
 use properties::{CascadeFlags, ComputedValues, PropertyFlags};
 use properties::longhands::display::computed_value::T as Display;
 use selector_parser::{NonTSPseudoClass, PseudoElementCascadeType, SelectorImpl};
 use std::fmt;
 use string_cache::Atom;
+use values::serialize_atom_identifier;
 
 include!(concat!(env!("OUT_DIR"), "/gecko/pseudo_element_definition.rs"));
 
@@ -124,14 +125,24 @@ impl PseudoElement {
         !self.is_eager() && !self.is_precomputed()
     }
 
-    /// Whether this pseudo-element is web-exposed.
-    pub fn exposed_in_non_ua_sheets(&self) -> bool {
-        (self.flags() & structs::CSS_PSEUDO_ELEMENT_UA_SHEET_ONLY) == 0
-    }
-
     /// Whether this pseudo-element supports user action selectors.
     pub fn supports_user_action_state(&self) -> bool {
         (self.flags() & structs::CSS_PSEUDO_ELEMENT_SUPPORTS_USER_ACTION_STATE) != 0
+    }
+
+    /// Whether this pseudo-element is enabled for all content.
+    pub fn enabled_in_content(&self) -> bool {
+        (self.flags() & structs::CSS_PSEUDO_ELEMENT_ENABLED_IN_UA_SHEETS_AND_CHROME) == 0
+    }
+
+    /// Whether this pseudo is enabled explicitly in UA sheets.
+    pub fn enabled_in_ua_sheets(&self) -> bool {
+        (self.flags() & structs::CSS_PSEUDO_ELEMENT_ENABLED_IN_UA_SHEETS) != 0
+    }
+
+    /// Whether this pseudo is enabled explicitly in chrome sheets.
+    pub fn enabled_in_chrome(&self) -> bool {
+        (self.flags() & structs::CSS_PSEUDO_ELEMENT_ENABLED_IN_CHROME) != 0
     }
 
     /// Whether this pseudo-element skips flex/grid container display-based

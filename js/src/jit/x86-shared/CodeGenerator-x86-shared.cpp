@@ -338,7 +338,7 @@ CodeGeneratorX86Shared::visitWasmSelect(LWasmSelect* ins)
     if (mirType == MIRType::Int32) {
         Register out = ToRegister(ins->output());
         MOZ_ASSERT(ToRegister(ins->trueExpr()) == out, "true expr input is reused for output");
-        masm.cmovz(falseExpr, out);
+        masm.cmovzl(falseExpr, out);
         return;
     }
 
@@ -4358,16 +4358,16 @@ CodeGeneratorX86Shared::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateChe
 
     if (fromType == MIRType::Float32) {
         if (toType == MIRType::Int32)
-            masm.outOfLineWasmTruncateFloat32ToInt32(input, isUnsigned, off, oolRejoin);
+            masm.oolWasmTruncateCheckF32ToI32(input, isUnsigned, off, oolRejoin);
         else if (toType == MIRType::Int64)
-            masm.outOfLineWasmTruncateFloat32ToInt64(input, isUnsigned, off, oolRejoin);
+            masm.oolWasmTruncateCheckF32ToI64(input, isUnsigned, off, oolRejoin);
         else
             MOZ_CRASH("unexpected type");
     } else if (fromType == MIRType::Double) {
         if (toType == MIRType::Int32)
-            masm.outOfLineWasmTruncateDoubleToInt32(input, isUnsigned, off, oolRejoin);
+            masm.oolWasmTruncateCheckF64ToI32(input, isUnsigned, off, oolRejoin);
         else if (toType == MIRType::Int64)
-            masm.outOfLineWasmTruncateDoubleToInt64(input, isUnsigned, off, oolRejoin);
+            masm.oolWasmTruncateCheckF64ToI64(input, isUnsigned, off, oolRejoin);
         else
             MOZ_CRASH("unexpected type");
     } else {

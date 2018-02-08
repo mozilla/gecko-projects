@@ -120,7 +120,7 @@ def valid_windows_sdk_dir(compiler, windows_sdk_dir, target_version,
                 maxver = result.splitlines()[-1]
                 try:
                     maxver = int(maxver, 0)
-                except:
+                except Exception:
                     pass
                 else:
                     sdks[d] = maxver, sdk
@@ -429,7 +429,7 @@ def valid_mt(path):
 set_config('MSMANIFEST_TOOL', depends(valid_mt)(lambda x: bool(x)))
 
 
-link = check_prog('LINKER', ('link.exe',), paths=vc_compiler_path)
+link = check_prog('LINKER', ('link.exe',), paths=toolchain_search_path)
 
 add_old_configure_assignment('LINKER', link)
 

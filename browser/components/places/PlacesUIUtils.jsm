@@ -5,8 +5,6 @@
 
 this.EXPORTED_SYMBOLS = ["PlacesUIUtils"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
@@ -207,7 +205,7 @@ let InternalFaviconLoader = {
 };
 
 this.PlacesUIUtils = {
-  ORGANIZER_LEFTPANE_VERSION: 7,
+  ORGANIZER_LEFTPANE_VERSION: 8,
   ORGANIZER_FOLDER_ANNO: "PlacesOrganizer/OrganizerFolder",
   ORGANIZER_QUERY_ANNO: "PlacesOrganizer/OrganizerQuery",
 
@@ -452,7 +450,7 @@ this.PlacesUIUtils = {
     if (PlacesUtils.nodeIsBookmark(aURINode))
       return true;
 
-    var uri = PlacesUtils._uri(aURINode.uri);
+    var uri = Services.io.newURI(aURINode.uri);
     if (uri.schemeIs("javascript") || uri.schemeIs("data")) {
       const BRANDING_BUNDLE_URI = "chrome://branding/locale/brand.properties";
       var brandShortName = Services.strings.
@@ -515,6 +513,16 @@ this.PlacesUIUtils = {
       return false;
     }
 
+    // Is it a query pointing to one of the special root folders?
+    if (PlacesUtils.nodeIsQuery(parentNode) && PlacesUtils.nodeIsFolder(aNode)) {
+      let guid = PlacesUtils.getConcreteItemGuid(aNode);
+      // If the parent folder is not a folder, it must be a query, and so this node
+      // cannot be removed.
+      if (PlacesUtils.isRootItem(guid)) {
+        return false;
+      }
+    }
+
     // If it's not a bookmark, we can remove it unless it's a child of a
     // livemark.
     if (aNode.itemId == -1) {
@@ -565,7 +573,7 @@ this.PlacesUIUtils = {
         view.controller.hasCachedLivemarkInfo(placesNode))
       return true;
 
-    // leftPaneFolderId, and as a result, allBookmarksFolderId, is a lazy getter
+    // leftPaneFolderId is a lazy getter
     // performing at least a synchronous DB query (and on its very first call
     // in a fresh profile, it also creates the entire structure).
     // Therefore we don't want to this function, which is called very often by
@@ -579,8 +587,7 @@ this.PlacesUIUtils = {
     if (typeof Object.getOwnPropertyDescriptor(this, "leftPaneFolderId").get == "function") {
       return false;
     }
-    return itemId == this.leftPaneFolderId ||
-           itemId == this.allBookmarksFolderId;
+    return itemId == this.leftPaneFolderId;
   },
 
   /**
@@ -804,9 +811,9 @@ this.PlacesUIUtils = {
     var title;
     if (!aNode.title && PlacesUtils.nodeIsURI(aNode)) {
       // if node title is empty, try to set the label using host and filename
-      // PlacesUtils._uri() will throw if aNode.uri is not a valid URI
+      // Services.io.newURI will throw if aNode.uri is not a valid URI
       try {
-        var uri = PlacesUtils._uri(aNode.uri);
+        var uri = Services.io.newURI(aNode.uri);
         var host = uri.host;
         var fileName = uri.QueryInterface(Ci.nsIURL).fileName;
         // if fileName is empty, use path to distinguish labels
@@ -841,7 +848,6 @@ this.PlacesUIUtils = {
   // Get the folder id for the organizer left-pane folder.
   maybeRebuildLeftPane() {
     let leftPaneRoot = -1;
-    let allBookmarksId;
 
     // Shortcuts to services.
     let bs = PlacesUtils.bookmarks;
@@ -854,21 +860,9 @@ this.PlacesUIUtils = {
       "Downloads": { title: this.getString("OrganizerQueryDownloads") },
       "Tags": { title: this.getString("OrganizerQueryTags") },
       "AllBookmarks": { title: this.getString("OrganizerQueryAllBookmarks") },
-      "BookmarksToolbar":
-        { title: "",
-          concreteTitle: PlacesUtils.getString("BookmarksToolbarFolderTitle"),
-          concreteId: PlacesUtils.toolbarFolderId },
-      "BookmarksMenu":
-        { title: "",
-          concreteTitle: PlacesUtils.getString("BookmarksMenuFolderTitle"),
-          concreteId: PlacesUtils.bookmarksMenuFolderId },
-      "UnfiledBookmarks":
-        { title: "",
-          concreteTitle: PlacesUtils.getString("OtherBookmarksFolderTitle"),
-          concreteId: PlacesUtils.unfiledBookmarksFolderId },
     };
     // All queries but PlacesRoot.
-    const EXPECTED_QUERY_COUNT = 7;
+    const EXPECTED_QUERY_COUNT = 4;
 
     // Removes an item and associated annotations, ignoring eventual errors.
     function safeRemoveItem(aItemId) {
@@ -988,7 +982,7 @@ this.PlacesUIUtils = {
       // Helper to create an organizer special query.
       create_query: function CB_create_query(aQueryName, aParentId, aQueryUrl) {
         let itemId = bs.insertBookmark(aParentId,
-                                       PlacesUtils._uri(aQueryUrl),
+                                       Services.io.newURI(aQueryUrl),
                                        bs.DEFAULT_INDEX,
                                        queries[aQueryName].title);
         // Mark as special organizer query.
@@ -1055,34 +1049,14 @@ this.PlacesUIUtils = {
                           Ci.nsINavHistoryQueryOptions.SORT_BY_TITLE_ASCENDING);
 
         // All Bookmarks Folder.
-        allBookmarksId = this.create_folder("AllBookmarks", leftPaneRoot, false);
-
-        // All Bookmarks->Bookmarks Toolbar Query.
-        this.create_query("BookmarksToolbar", allBookmarksId,
-                          "place:folder=TOOLBAR");
-
-        // All Bookmarks->Bookmarks Menu Query.
-        this.create_query("BookmarksMenu", allBookmarksId,
-                          "place:folder=BOOKMARKS_MENU");
-
-        // All Bookmarks->Unfiled Bookmarks Query.
-        this.create_query("UnfiledBookmarks", allBookmarksId,
-                          "place:folder=UNFILED_BOOKMARKS");
+        this.create_query("AllBookmarks", leftPaneRoot,
+                          "place:type=" +
+                          Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY);
       }
     };
     bs.runInBatchMode(callback, null);
 
     return leftPaneRoot;
-  },
-
-  /**
-   * Get the folder id for the organizer left-pane folder.
-   */
-  get allBookmarksFolderId() {
-    // ensure the left-pane root is initialized;
-    this.leftPaneFolderId;
-    delete this.allBookmarksFolderId;
-    return this.allBookmarksFolderId = this.leftPaneQueries.AllBookmarks;
   },
 
   /**

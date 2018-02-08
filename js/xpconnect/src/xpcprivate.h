@@ -118,7 +118,6 @@
 #include "XPCForwards.h"
 #include "XPCLog.h"
 #include "xpccomponents.h"
-#include "xpcexception.h"
 #include "xpcjsid.h"
 #include "prenv.h"
 #include "prcvar.h"
@@ -128,7 +127,6 @@
 #include "MainThreadUtils.h"
 
 #include "nsIConsoleService.h"
-#include "nsIException.h"
 
 #include "nsVariant.h"
 #include "nsIPropertyBag.h"
@@ -161,6 +159,12 @@
 #undef GetClassName
 #endif
 #endif /* XP_WIN */
+
+namespace mozilla {
+namespace dom {
+class Exception;
+} // namespace dom
+} // namespace mozilla
 
 /***************************************************************************/
 // default initial sizes for maps (hashtables)
@@ -1847,7 +1851,7 @@ private:
                                       mozilla::dom::AutoEntryScript& aes,
                                       const char * aPropertyName,
                                       const char * anInterfaceName,
-                                      nsIException* aSyntheticException = nullptr);
+                                      mozilla::dom::Exception* aSyntheticException = nullptr);
     virtual ~nsXPCWrappedJSClass();
 
     nsXPCWrappedJSClass() = delete;
@@ -2136,13 +2140,13 @@ public:
     static nsresult JSValToXPCException(JS::MutableHandleValue s,
                                         const char* ifaceName,
                                         const char* methodName,
-                                        nsIException** exception);
+                                        mozilla::dom::Exception** exception);
 
     static nsresult ConstructException(nsresult rv, const char* message,
                                        const char* ifaceName,
                                        const char* methodName,
                                        nsISupports* data,
-                                       nsIException** exception,
+                                       mozilla::dom::Exception** exception,
                                        JSContext* cx,
                                        JS::Value* jsExceptionPtr);
 
@@ -2671,27 +2675,32 @@ struct GlobalProperties {
     bool Parse(JSContext* cx, JS::HandleObject obj);
     bool DefineInXPCComponents(JSContext* cx, JS::HandleObject obj);
     bool DefineInSandbox(JSContext* cx, JS::HandleObject obj);
+
+    // Interface objects we can expose.
+    bool Blob : 1;
+    bool ChromeUtils : 1;
     bool CSS : 1;
     bool CSSRule : 1;
-    bool indexedDB : 1;
-    bool XMLHttpRequest : 1;
+    bool Directory : 1;
+    bool File : 1;
+    bool FileReader: 1;
+    bool InspectorUtils : 1;
+    bool MessageChannel: 1;
+    bool NodeFilter : 1;
     bool TextDecoder : 1;
     bool TextEncoder : 1;
     bool URL : 1;
     bool URLSearchParams : 1;
+    bool XMLHttpRequest : 1;
+
+    // Ad-hoc property names we implement.
     bool atob : 1;
     bool btoa : 1;
-    bool Blob : 1;
-    bool Directory : 1;
-    bool File : 1;
-    bool crypto : 1;
-    bool rtcIdentityProvider : 1;
-    bool fetch : 1;
     bool caches : 1;
-    bool fileReader: 1;
-    bool messageChannel: 1;
-    bool ChromeUtils : 1;
-    bool inspectorUtils : 1;
+    bool crypto : 1;
+    bool fetch : 1;
+    bool indexedDB : 1;
+    bool rtcIdentityProvider : 1;
 private:
     bool Define(JSContext* cx, JS::HandleObject obj);
 };

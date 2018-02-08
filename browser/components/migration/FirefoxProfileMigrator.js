@@ -13,8 +13,6 @@
  * from the source profile.
  */
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource:///modules/MigrationUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -244,7 +242,6 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
       };
 
       // If the 'datareporting' directory exists we migrate files from it.
-      let haveStateFile = false;
       let dataReportingDir = this._getFileObject(sourceProfileDir, "datareporting");
       if (dataReportingDir && dataReportingDir.isDirectory()) {
         // Copy only specific files.
@@ -257,26 +254,7 @@ FirefoxProfileMigrator.prototype._getResourcesInternal = function(sourceProfileD
           if (file.isDirectory() || !toCopy.includes(file.leafName)) {
             continue;
           }
-
-          if (file.leafName == "state.json") {
-            haveStateFile = true;
-          }
           file.copyTo(dest, "");
-        }
-      }
-
-      if (!haveStateFile) {
-        // Fall back to migrating the state file that contains the client id from healthreport/.
-        // We first moved the client id management from the FHR implementation to the datareporting
-        // service.
-        // Consequently, we try to migrate an existing FHR state file here as a fallback.
-        let healthReportDir = this._getFileObject(sourceProfileDir, "healthreport");
-        if (healthReportDir && healthReportDir.isDirectory()) {
-          let stateFile = this._getFileObject(healthReportDir, "state.json");
-          if (stateFile) {
-            let dest = createSubDir("healthreport");
-            stateFile.copyTo(dest, "");
-          }
         }
       }
 

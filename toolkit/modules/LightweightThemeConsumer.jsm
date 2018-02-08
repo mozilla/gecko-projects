@@ -4,8 +4,6 @@
 
 this.EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
-const {utils: Cu, interfaces: Ci, classes: Cc} = Components;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
@@ -13,22 +11,27 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
-const kCSSVarsMap = new Map([
+const kCSSVarsMap = [
   ["--lwt-accent-color-inactive", "accentcolorInactive"],
   ["--lwt-background-alignment", "backgroundsAlignment"],
   ["--lwt-background-tiling", "backgroundsTiling"],
+  ["--tab-loading-fill", "tab_loading", "tabbrowser-tabs"],
   ["--lwt-tab-text", "tab_text"],
   ["--toolbar-bgcolor", "toolbarColor"],
   ["--toolbar-color", "toolbar_text"],
   ["--url-and-searchbar-background-color", "toolbar_field"],
   ["--url-and-searchbar-color", "toolbar_field_text"],
   ["--lwt-toolbar-field-border-color", "toolbar_field_border"],
-  ["--tabs-border-color", "toolbar_top_separator"],
+  ["--urlbar-separator-color", "toolbar_field_separator"],
+  ["--tabs-border-color", "toolbar_top_separator", "navigator-toolbox"],
+  ["--lwt-toolbar-vertical-separator", "toolbar_vertical_separator"],
   ["--toolbox-border-bottom-color", "toolbar_bottom_separator"],
-  ["--urlbar-separator-color", "toolbar_vertical_separator"],
   ["--lwt-toolbarbutton-icon-fill", "icon_color"],
   ["--lwt-toolbarbutton-icon-fill-attention", "icon_attention_color"],
-]);
+  ["--lwt-toolbarbutton-background", "button_background"],
+  ["--lwt-toolbarbutton-hover-background", "button_background_hover"],
+  ["--lwt-toolbarbutton-active-background", "button_background_active"],
+];
 
 this.LightweightThemeConsumer =
  function LightweightThemeConsumer(aDocument) {
@@ -194,17 +197,19 @@ function _setImage(aRoot, aActive, aVariableName, aURLs) {
   _setProperty(aRoot, aActive, aVariableName, aURLs && aURLs.map(v => `url("${v.replace(/"/g, '\\"')}")`).join(","));
 }
 
-function _setProperty(root, active, variableName, value) {
+function _setProperty(elem, active, variableName, value) {
   if (active && value) {
-    root.style.setProperty(variableName, value);
+    elem.style.setProperty(variableName, value);
   } else {
-    root.style.removeProperty(variableName);
+    elem.style.removeProperty(variableName);
   }
 }
 
 function _setProperties(root, active, vars) {
-  for (let [cssVarName, varsKey] of kCSSVarsMap) {
-    _setProperty(root, active, cssVarName, vars[varsKey]);
+  for (let [cssVarName, varsKey, optionalElementID] of kCSSVarsMap) {
+    let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
+                                 : root;
+    _setProperty(elem, active, cssVarName, vars[varsKey]);
   }
 }
 

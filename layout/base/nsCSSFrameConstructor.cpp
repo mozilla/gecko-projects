@@ -5760,13 +5760,6 @@ nsCSSFrameConstructor::FindSVGData(Element* aElement,
       return &sTSpanData;
     }
     return &sSuppressData;
-  } else if (aTag == nsGkAtoms::text) {
-    static const FrameConstructionData sTextData =
-      FCDATA_WITH_WRAPPING_BLOCK(FCDATA_DISALLOW_OUT_OF_FLOW |
-                                 FCDATA_ALLOW_BLOCK_STYLES,
-                                 NS_NewSVGTextFrame,
-                                 nsCSSAnonBoxes::mozSVGText);
-    return &sTextData;
   } else if (aTag == nsGkAtoms::tspan ||
              aTag == nsGkAtoms::textPath) {
     return &sSuppressData;
@@ -5786,6 +5779,11 @@ nsCSSFrameConstructor::FindSVGData(Element* aElement,
     SIMPLE_SVG_CREATE(path, NS_NewSVGGeometryFrame),
     SIMPLE_SVG_CREATE(defs, NS_NewSVGContainerFrame),
     SIMPLE_SVG_CREATE(generic_, NS_NewSVGGenericContainerFrame),
+    { &nsGkAtoms::text,
+      FCDATA_WITH_WRAPPING_BLOCK(FCDATA_DISALLOW_OUT_OF_FLOW |
+                                 FCDATA_ALLOW_BLOCK_STYLES,
+                                 NS_NewSVGTextFrame,
+                                 nsCSSAnonBoxes::mozSVGText) },
     { &nsGkAtoms::foreignObject,
       FCDATA_WITH_WRAPPING_BLOCK(FCDATA_DISALLOW_OUT_OF_FLOW,
                                  NS_NewSVGForeignObjectFrame,
@@ -6097,6 +6095,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
   }
 
   bool isPopup = false;
+  bool foundMathMLData = false;
   // Try to find frame construction data for this content
   const FrameConstructionData* data;
   if (isText) {
@@ -6126,6 +6125,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
     }
     if (!data) {
       data = FindMathMLData(element, aTag, aNameSpaceID, styleContext);
+      foundMathMLData = !!data;
     }
     if (!data) {
       data = FindSVGData(element, aTag, aNameSpaceID, aParentFrame,
@@ -6191,7 +6191,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
   //
   // Figure out what should happen for display: contents in MathML.
   if (display->mDisplay == StyleDisplay::Contents &&
-      !aContent->IsMathMLElement()) {
+      !foundMathMLData) {
     if (!GetDisplayContentsStyleFor(aContent)) {
       MOZ_ASSERT(styleContext->GetPseudo() || !isGeneratedContent,
                  "Should have had pseudo type");
