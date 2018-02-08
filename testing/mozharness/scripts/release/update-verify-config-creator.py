@@ -312,7 +312,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             self.config["to_build_number"],
         )
         to_ = getReleaseInstallerPath(
-            self.config["stage_product_name"], self.config["app_name"],
+            self.config["product"], self.config["product"].title(),
             self.config["to_version"], self.config["platform"],
             locale="%locale%"
         )
@@ -350,7 +350,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 self.config["stage_product_name"], fromVersion
             )
             path_ = getReleaseInstallerPath(
-                self.config["stage_product_name"], self.config["app_name"],
+                self.config["product"], self.config["product"].title(),
                 fromVersion, self.config["platform"], locale="%locale%",
             )
             from_path = "{}/{}".format(release_dir, path_)
@@ -358,7 +358,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             updater_package = "{}/{}".format(
                 release_dir,
                 getReleaseInstallerPath(
-                    self.config["stage_product_name"], self.config["app_name"],
+                    self.config["product"], self.config["product"].title(),
                     fromVersion, self.config["updater_platform"],
                     locale="%locale%",
                 )
