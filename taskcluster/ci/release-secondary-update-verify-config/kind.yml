@@ -30,6 +30,10 @@ job-defaults:
       #   to-build-number, to-version, to-app-version, to-display-version
       #   output-file, to-build-id
       app-name: browser
+      # Note! This product is _not_ the same as shipping product.
+      # It is set to "firefox" even for devedition.
+      # stage-product maintains the firefox vs devedition distinction
+      product: firefox
       archive-prefix:
          by-project:
             birch: "http://ftp.stage.mozaws.net/pub"
