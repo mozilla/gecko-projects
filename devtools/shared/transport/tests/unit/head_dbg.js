@@ -7,10 +7,6 @@
             writeTestTempFile, socket_transport, local_transport, really_long
 */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
 var CC = Components.Constructor;
 
 const { require } =
@@ -98,7 +94,7 @@ consoleService.registerListener(listener);
  * Initialize the testing debugger server.
  */
 function initTestDebuggerServer() {
-  DebuggerServer.registerModule("devtools/server/actors/script", {
+  DebuggerServer.registerModule("devtools/server/actors/thread", {
     prefix: "script",
     constructor: "ScriptActor",
     type: { global: true, tab: true }

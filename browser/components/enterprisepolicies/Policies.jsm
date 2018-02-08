@@ -4,11 +4,6 @@
 
 "use strict";
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cr = Components.results;
-const Cu = Components.utils;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "gXulStore",
@@ -88,6 +83,22 @@ this.Policies = {
     onBeforeAddons(manager, param) {
       if (param == true) {
         setAndLockPref("extensions.screenshots.disabled", true);
+      }
+    }
+  },
+
+  "DisableFirefoxStudies": {
+    onBeforeAddons(manager, param) {
+      if (param == true) {
+        manager.disallowFeature("Shield");
+      }
+    }
+  },
+
+  "DisableFormHistory": {
+    onBeforeUIStartup(manager, param) {
+      if (param == true) {
+        setAndLockPref("browser.formfill.enable", false);
       }
     }
   },

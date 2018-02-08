@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -247,7 +246,10 @@ class PlacesFeed {
    * Open a link in a desired destination defaulting to action's event.
    */
   openLink(action, where = "", isPrivate = false) {
-    const params = {private: isPrivate};
+    const params = {
+      private: isPrivate,
+      triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({})
+    };
 
     // Always include the referrer (even for http links) if we have one
     const {event, referrer} = action.data;

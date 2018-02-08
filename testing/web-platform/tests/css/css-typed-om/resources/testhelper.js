@@ -40,10 +40,10 @@ function assert_style_value_equals(a, b) {
     case 'CSSTransformValue':
       assert_style_value_array_equals(a, b);
       break;
-    case 'CSSRotation':
+    case 'CSSRotate':
       assert_style_value_equals(a.angle, b.angle);
       // fallthrough
-    case 'CSSTranslation':
+    case 'CSSTranslate':
     case 'CSSScale':
       assert_style_value_equals(a.x, b.x);
       assert_style_value_equals(a.y, b.y);
@@ -137,7 +137,7 @@ function createRuleWithDeclaredStyleMap(test, cssText) {
   test.add_cleanup(() => {
     style.remove();
   });
-  return [rule, rule.attributeStyleMap];
+  return [rule, rule.styleMap];
 }
 
 // Creates a new element with background image set to |imageValue|

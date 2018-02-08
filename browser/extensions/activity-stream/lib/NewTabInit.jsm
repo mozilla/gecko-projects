@@ -3,8 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu} = Components;
-
 const {actionCreators: ac, actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
 
 /**
@@ -23,7 +21,7 @@ this.NewTabInit = class NewTabInit {
     }
 
     const action = {type: at.NEW_TAB_INITIAL_STATE, data: this.store.getState()};
-    this.store.dispatch(ac.SendToContent(action, target));
+    this.store.dispatch(ac.AlsoToOneContent(action, target));
 
     // Remember that this early tab has already gotten a rehydration response in
     // case it thought we lost its initial REQUEST and asked again

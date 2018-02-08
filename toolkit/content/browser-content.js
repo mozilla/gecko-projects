@@ -6,11 +6,6 @@
 /* eslint-env mozilla/frame-script */
 /* global sendAsyncMessage */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
-
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -1402,7 +1397,8 @@ var ViewSelectionSource = {
     var source =
       "<!DOCTYPE html>"
     + "<html>"
-    + "<head><title>" + title + "</title>"
+    + '<head><meta name="viewport" content="width=device-width"/>'
+    + "<title>" + title + "</title>"
     + '<link rel="stylesheet" type="text/css" href="' + VIEW_SOURCE_CSS + '">'
     + '<style type="text/css">'
     + "#target { border: dashed 1px; background-color: lightyellow; }"

@@ -1,4 +1,3 @@
-const Ci = Components.interfaces;
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", {});
 const gMgr = Cc["@mozilla.org/memory-reporter-manager;1"].getService(Ci.nsIMemoryReporterManager);
@@ -287,7 +286,7 @@ Damp.prototype = {
   reloadPage(onReload) {
     return new Promise(resolve => {
       let browser = gBrowser.selectedBrowser;
-      if (typeof (onReload) == "function") {
+      if (typeof(onReload) == "function") {
         onReload().then(resolve);
       } else {
         browser.addEventListener("load", resolve, {capture: true, once: true});

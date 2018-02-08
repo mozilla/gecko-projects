@@ -53,7 +53,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsStringFwd.h"
-#include "nsSubstringTuple.h"
 #include "nsTextNode.h"
 #include "nsUnicharUtils.h"
 #include "nsXPCOM.h"
@@ -114,16 +113,13 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TextEditor)
 NS_INTERFACE_MAP_END_INHERITING(EditorBase)
 
 
-NS_IMETHODIMP
-TextEditor::Init(nsIDOMDocument* aDoc,
-                 nsIContent* aRoot,
+nsresult
+TextEditor::Init(nsIDocument& aDoc,
+                 Element* aRoot,
                  nsISelectionController* aSelCon,
                  uint32_t aFlags,
                  const nsAString& aInitialValue)
 {
-  NS_PRECONDITION(aDoc, "bad arg");
-  NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
-
   if (mRules) {
     mRules->DetachEditor();
   }

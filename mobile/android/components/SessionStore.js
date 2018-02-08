@@ -3,11 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -1269,8 +1264,10 @@ SessionStore.prototype = {
     let window = Services.wm.getMostRecentWindow("navigator:browser");
     for (let i = 0; i < aData.urls.length; i++) {
       let url = aData.urls[i];
+      let selected = (i == aData.urls.length - 1);
       let params = {
-        selected: (i == aData.urls.length - 1),
+        selected,
+        delayLoad: !selected,
         isPrivate: false,
         desktopMode: false,
       };
@@ -1284,19 +1281,26 @@ SessionStore.prototype = {
     let window = Services.wm.getMostRecentWindow("navigator:browser");
     for (let i = 0; i < aData.tabs.length; i++) {
       let tabData = JSON.parse(aData.tabs[i]);
-      let isSelectedTab = (i == aData.tabs.length - 1);
+      let activeSHEntry = tabData.entries[tabData.index - 1];
+      let selected = (i == aData.tabs.length - 1);
+      let delayLoad = !selected;
+
       let params = {
-        selected: isSelectedTab,
+        title: activeSHEntry.title,
+        selected,
+        delayLoad,
         isPrivate: tabData.isPrivate,
         desktopMode: tabData.desktopMode,
-        cancelEditMode: isSelectedTab,
+        cancelEditMode: selected,
         parentId: tabData.parentId
       };
 
-      let tab = window.BrowserApp.addTab(tabData.entries[tabData.index - 1].url, params);
+      let tab = window.BrowserApp.addTab(activeSHEntry.url, params);
       tab.browser.__SS_data = tabData;
       tab.browser.__SS_extdata = tabData.extData;
-      this._restoreTab(tabData, tab.browser);
+      if (!delayLoad) {
+        this._restoreTab(tabData, tab.browser);
+      }
     }
   },
 

@@ -17,13 +17,7 @@
 
 var EXPORTED_SYMBOLS = ["PdfStreamConverter"];
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
-
 const PDFJS_EVENT_ID = "pdf.js.message";
-const PDF_CONTENT_TYPE = "application/pdf";
 const PREF_PREFIX = "pdfjs";
 const PDF_VIEWER_WEB_PAGE = "resource://pdf.js/web/viewer.html";
 const MAX_NUMBER_OF_PREFS = 50;

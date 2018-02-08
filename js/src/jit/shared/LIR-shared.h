@@ -4064,12 +4064,10 @@ class LModD : public LBinaryMath<1>
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp);
+        setIsCall();
     }
     const LDefinition* temp() {
         return getTemp(0);
-    }
-    bool isCall() const override {
-        return true;
     }
     MMod* mir() const {
         return mir_->toMod();
@@ -6410,6 +6408,7 @@ class LCompareExchangeTypedArrayElement : public LInstructionHelper<1, 4, 4>
   public:
     LIR_HEADER(CompareExchangeTypedArrayElement)
 
+    // ARM, ARM64, x86, x64
     LCompareExchangeTypedArrayElement(const LAllocation& elements, const LAllocation& index,
                                       const LAllocation& oldval, const LAllocation& newval,
                                       const LDefinition& temp)
@@ -6420,6 +6419,7 @@ class LCompareExchangeTypedArrayElement : public LInstructionHelper<1, 4, 4>
         setOperand(3, newval);
         setTemp(0, temp);
     }
+    // MIPS32, MIPS64
     LCompareExchangeTypedArrayElement(const LAllocation& elements, const LAllocation& index,
                                       const LAllocation& oldval, const LAllocation& newval,
                                       const LDefinition& temp, const LDefinition& valueTemp,
@@ -6472,6 +6472,7 @@ class LAtomicExchangeTypedArrayElement : public LInstructionHelper<1, 3, 4>
   public:
     LIR_HEADER(AtomicExchangeTypedArrayElement)
 
+    // ARM, ARM64, x86, x64
     LAtomicExchangeTypedArrayElement(const LAllocation& elements, const LAllocation& index,
                                      const LAllocation& value, const LDefinition& temp)
     {
@@ -6480,6 +6481,7 @@ class LAtomicExchangeTypedArrayElement : public LInstructionHelper<1, 3, 4>
         setOperand(2, value);
         setTemp(0, temp);
     }
+    // MIPS32, MIPS64
     LAtomicExchangeTypedArrayElement(const LAllocation& elements, const LAllocation& index,
                                      const LAllocation& value, const LDefinition& temp,
                                      const LDefinition& valueTemp, const LDefinition& offsetTemp,
@@ -6530,6 +6532,7 @@ class LAtomicTypedArrayElementBinop : public LInstructionHelper<1, 3, 5>
 
     static const int32_t valueOp = 2;
 
+    // ARM, ARM64, x86, x64
     LAtomicTypedArrayElementBinop(const LAllocation& elements, const LAllocation& index,
                                   const LAllocation& value, const LDefinition& temp1,
                                   const LDefinition& temp2)
@@ -6540,15 +6543,16 @@ class LAtomicTypedArrayElementBinop : public LInstructionHelper<1, 3, 5>
         setTemp(0, temp1);
         setTemp(1, temp2);
     }
+    // MIPS32, MIPS64
     LAtomicTypedArrayElementBinop(const LAllocation& elements, const LAllocation& index,
-                                  const LAllocation& value, const LDefinition& temp1,
-                                  const LDefinition& temp2, const LDefinition& valueTemp,
-                                  const LDefinition& offsetTemp, const LDefinition& maskTemp)
+                                  const LAllocation& value, const LDefinition& temp2,
+                                  const LDefinition& valueTemp, const LDefinition& offsetTemp,
+                                  const LDefinition& maskTemp)
     {
         setOperand(0, elements);
         setOperand(1, index);
         setOperand(2, value);
-        setTemp(0, temp1);
+        setTemp(0, LDefinition::BogusTemp());
         setTemp(1, temp2);
         setTemp(2, valueTemp);
         setTemp(3, offsetTemp);
@@ -6594,6 +6598,7 @@ class LAtomicTypedArrayElementBinopForEffect : public LInstructionHelper<0, 3, 4
   public:
     LIR_HEADER(AtomicTypedArrayElementBinopForEffect)
 
+    // ARM, ARM64, x86, x64
     LAtomicTypedArrayElementBinopForEffect(const LAllocation& elements, const LAllocation& index,
                                            const LAllocation& value,
                                            const LDefinition& flagTemp = LDefinition::BogusTemp())
@@ -6603,15 +6608,15 @@ class LAtomicTypedArrayElementBinopForEffect : public LInstructionHelper<0, 3, 4
         setOperand(2, value);
         setTemp(0, flagTemp);
     }
+    // MIPS32, MIPS64
     LAtomicTypedArrayElementBinopForEffect(const LAllocation& elements, const LAllocation& index,
-                                           const LAllocation& value, const LDefinition& flagTemp,
-                                           const LDefinition& valueTemp, const LDefinition& offsetTemp,
-                                           const LDefinition& maskTemp)
+                                           const LAllocation& value, const LDefinition& valueTemp,
+                                           const LDefinition& offsetTemp, const LDefinition& maskTemp)
     {
         setOperand(0, elements);
         setOperand(1, index);
         setOperand(2, value);
-        setTemp(0, flagTemp);
+        setTemp(0, LDefinition::BogusTemp());
         setTemp(1, valueTemp);
         setTemp(2, offsetTemp);
         setTemp(3, maskTemp);
@@ -8732,16 +8737,15 @@ class LWasmAtomicBinopHeap : public LInstructionHelper<1, 3, 6>
     }
     // MIPS32, MIPS64
     LWasmAtomicBinopHeap(const LAllocation& ptr, const LAllocation& value,
-                         const LDefinition& temp, const LDefinition& flagTemp,
                          const LDefinition& valueTemp, const LDefinition& offsetTemp,
                          const LDefinition& maskTemp)
     {
         setOperand(0, ptr);
         setOperand(1, value);
         setOperand(2, LAllocation());
-        setTemp(0, temp);
+        setTemp(0, LDefinition::BogusTemp());
         setTemp(1, LDefinition::BogusTemp());
-        setTemp(2, flagTemp);
+        setTemp(2, LDefinition::BogusTemp());
         setTemp(3, valueTemp);
         setTemp(4, offsetTemp);
         setTemp(5, maskTemp);
@@ -8806,14 +8810,14 @@ class LWasmAtomicBinopHeapForEffect : public LInstructionHelper<0, 3, 5>
     }
     // MIPS32, MIPS64
     LWasmAtomicBinopHeapForEffect(const LAllocation& ptr, const LAllocation& value,
-                                  const LDefinition& flagTemp, const LDefinition& valueTemp,
-                                  const LDefinition& offsetTemp, const LDefinition& maskTemp)
+                                  const LDefinition& valueTemp, const LDefinition& offsetTemp,
+                                  const LDefinition& maskTemp)
     {
         setOperand(0, ptr);
         setOperand(1, value);
         setOperand(2, LAllocation());
         setTemp(0, LDefinition::BogusTemp());
-        setTemp(1, flagTemp);
+        setTemp(1, LDefinition::BogusTemp());
         setTemp(2, valueTemp);
         setTemp(3, offsetTemp);
         setTemp(4, maskTemp);
@@ -8996,19 +9000,20 @@ class LWasmCallBase : public LInstruction
 
   public:
 
-    LWasmCallBase(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
-      : operands_(operands),
+    LWasmCallBase(LAllocation* operands, uint32_t numOperands, uint32_t numDefs,
+                  bool needsBoundsCheck)
+      : LInstruction(numDefs, /* numTemps = */ 0),
+        operands_(operands),
         numOperands_(numOperands),
         needsBoundsCheck_(needsBoundsCheck)
-    {}
+    {
+        setIsCall();
+    }
 
     MWasmCall* mir() const {
         return mir_->toWasmCall();
     }
 
-    bool isCall() const override {
-        return true;
-    }
     bool isCallPreserved(AnyRegister reg) const override {
         // All MWasmCalls preserve the TLS register:
         //  - internal/indirect calls do by the internal wasm ABI
@@ -9029,9 +9034,6 @@ class LWasmCallBase : public LInstruction
     void setOperand(size_t index, const LAllocation& a) override {
         MOZ_ASSERT(index < numOperands_);
         operands_[index] = a;
-    }
-    size_t numTemps() const override {
-        return 0;
     }
     LDefinition* getTemp(size_t index) override {
         MOZ_CRASH("no temps");
@@ -9060,15 +9062,12 @@ class LWasmCall : public LWasmCallBase
   public:
     LIR_HEADER(WasmCall);
 
-    LWasmCall(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
-      : LWasmCallBase(operands, numOperands, needsBoundsCheck),
+    LWasmCall(LAllocation* operands, uint32_t numOperands, uint32_t numDefs, bool needsBoundsCheck)
+      : LWasmCallBase(operands, numOperands, numDefs, needsBoundsCheck),
         def_(LDefinition::BogusTemp())
     {}
 
     // LInstruction interface
-    size_t numDefs() const override {
-        return def_.isBogusTemp() ? 0 : 1;
-    }
     LDefinition* getDef(size_t index) override {
         MOZ_ASSERT(numDefs() == 1);
         MOZ_ASSERT(index == 0);
@@ -9088,16 +9087,13 @@ class LWasmCallI64 : public LWasmCallBase
     LIR_HEADER(WasmCallI64);
 
     LWasmCallI64(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
-      : LWasmCallBase(operands, numOperands, needsBoundsCheck)
+      : LWasmCallBase(operands, numOperands, INT64_PIECES, needsBoundsCheck)
     {
         for (size_t i = 0; i < numDefs(); i++)
             defs_[i] = LDefinition::BogusTemp();
     }
 
     // LInstruction interface
-    size_t numDefs() const override {
-        return INT64_PIECES;
-    }
     LDefinition* getDef(size_t index) override {
         MOZ_ASSERT(index < numDefs());
         return &defs_[index];

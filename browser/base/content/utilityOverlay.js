@@ -211,8 +211,6 @@ function openUILinkIn(url, where, aAllowThirdPartyFixup, aPostData, aReferrerURI
 function openLinkIn(url, where, params) {
   if (!where || !url)
     return;
-  const Cc = Components.classes;
-  const Ci = Components.interfaces;
 
   var aFromChrome           = params.fromChrome;
   var aAllowThirdPartyFixup = params.allowThirdPartyFixup;
@@ -547,15 +545,15 @@ function createUserContextMenu(event, {
     event.target.firstChild.remove();
   }
 
-  let bundle = document.getElementById("bundle_browser");
+  let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
   let docfrag = document.createDocumentFragment();
 
   // If we are excluding a userContextId, we want to add a 'no-container' item.
   if (excludeUserContextId || showDefaultTab) {
     let menuitem = document.createElement("menuitem");
     menuitem.setAttribute("data-usercontextid", "0");
-    menuitem.setAttribute("label", bundle.getString("userContextNone.label"));
-    menuitem.setAttribute("accesskey", bundle.getString("userContextNone.accesskey"));
+    menuitem.setAttribute("label", bundle.GetStringFromName("userContextNone.label"));
+    menuitem.setAttribute("accesskey", bundle.GetStringFromName("userContextNone.accesskey"));
 
     // We don't set an oncommand/command attribute because if we have
     // to exclude a userContextId we are generating the contextMenu and
@@ -577,7 +575,7 @@ function createUserContextMenu(event, {
     menuitem.setAttribute("label", ContextualIdentityService.getUserContextLabel(identity.userContextId));
 
     if (identity.accessKey && useAccessKeys) {
-      menuitem.setAttribute("accesskey", bundle.getString(identity.accessKey));
+      menuitem.setAttribute("accesskey", bundle.GetStringFromName(identity.accessKey));
     }
 
     menuitem.classList.add("menuitem-iconic");
@@ -597,10 +595,10 @@ function createUserContextMenu(event, {
 
     let menuitem = document.createElement("menuitem");
     menuitem.setAttribute("label",
-                          bundle.getString("userContext.aboutPage.label"));
+                          bundle.GetStringFromName("userContext.aboutPage.label"));
     if (useAccessKeys) {
       menuitem.setAttribute("accesskey",
-                            bundle.getString("userContext.aboutPage.accesskey"));
+                            bundle.GetStringFromName("userContext.aboutPage.accesskey"));
     }
     menuitem.setAttribute("command", "Browser:OpenAboutContainers");
     docfrag.appendChild(menuitem);
@@ -774,8 +772,6 @@ function openPreferences(paneID, extraArgs) {
   let newLoad = true;
   let browser = null;
   if (!win) {
-    const Cc = Components.classes;
-    const Ci = Components.interfaces;
     let windowArguments = Cc["@mozilla.org/array;1"]
       .createInstance(Ci.nsIMutableArray);
     let supportsStringPrefURL = Cc["@mozilla.org/supports-string;1"]

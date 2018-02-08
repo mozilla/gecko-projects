@@ -4,7 +4,6 @@
 
 "use strict";
 
-const {utils: Cu} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://shield-recipe-client/lib/LogManager.jsm");
@@ -145,6 +144,12 @@ this.RecipeRunner = {
 
     if (!Services.prefs.getBoolPref(SHIELD_ENABLED_PREF)) {
       log.debug(`Disabling Shield because ${SHIELD_ENABLED_PREF} is set to false`);
+      this.disable();
+      return;
+    }
+
+    if (!Services.policies.isAllowed("Shield")) {
+      log.debug("Disabling Shield because it's blocked by policy.");
       this.disable();
       return;
     }

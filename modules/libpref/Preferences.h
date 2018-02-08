@@ -92,10 +92,10 @@ public:
   }
 
   // Gets the type of the pref.
-  static int32_t GetType(const char* aPrefName,
-                         PrefValueKind aKind = PrefValueKind::User);
+  static int32_t GetType(const char* aPrefName);
 
-  // Fallible value getters.
+  // Fallible value getters. When `aKind` is `User` they will get the user
+  // value if possible, and fall back to the default value otherwise.
   static nsresult GetBool(const char* aPrefName,
                           bool* aResult,
                           PrefValueKind aKind = PrefValueKind::User);
@@ -130,14 +130,14 @@ public:
                              PrefValueKind aKind = PrefValueKind::User);
 
   // Infallible getters of user or default values, with fallback results on
-  // failure.
-  // Infallible value getters.
+  // failure. When `aKind` is `User` they will get the user value if possible,
+  // and fall back to the default value otherwise.
   static bool GetBool(const char* aPrefName,
                       bool aFallback = false,
                       PrefValueKind aKind = PrefValueKind::User)
   {
     bool result = aFallback;
-    GetBool(aPrefName, &result);
+    GetBool(aPrefName, &result, aKind);
     return result;
   }
   static int32_t GetInt(const char* aPrefName,
@@ -145,7 +145,7 @@ public:
                         PrefValueKind aKind = PrefValueKind::User)
   {
     int32_t result = aFallback;
-    GetInt(aPrefName, &result);
+    GetInt(aPrefName, &result, aKind);
     return result;
   }
   static uint32_t GetUint(const char* aPrefName,
@@ -153,7 +153,7 @@ public:
                           PrefValueKind aKind = PrefValueKind::User)
   {
     uint32_t result = aFallback;
-    GetUint(aPrefName, &result);
+    GetUint(aPrefName, &result, aKind);
     return result;
   }
   static float GetFloat(const char* aPrefName,
@@ -161,7 +161,7 @@ public:
                         PrefValueKind aKind = PrefValueKind::User)
   {
     float result = aFallback;
-    GetFloat(aPrefName, &result);
+    GetFloat(aPrefName, &result, aKind);
     return result;
   }
 

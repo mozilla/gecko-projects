@@ -299,6 +299,10 @@ release-secondary-update-verify
 ---------------------
 Verifies the contents and package of release update MARs.
 
+release-secondary-update-verify
+---------------------
+Verifies the contents and package of release update MARs.
+
 release-update-verify-config
 ----------------------------
 Creates configs for release-update-verify tasks

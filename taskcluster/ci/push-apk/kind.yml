@@ -43,6 +43,11 @@ jobs:
                mozilla-release: 'rollout'
                maple: 'rollout'
                default: 'invalid'
+         rc-google-play-track:
+            by-project:
+               mozilla-release: 'rollout'
+               birch: 'rollout'
+               default: 'invalid'
          implementation: push-apk
          commit:
             by-project:
@@ -63,6 +68,11 @@ jobs:
                mozilla-release: 5
                birch: 5
                maple: 5
+               default: null
+         rc-rollout-percentage:
+            by-project:
+               mozilla-release: 5
+               birch: 5
                default: null
       requires: all-resolved
       scopes:  # see transforms

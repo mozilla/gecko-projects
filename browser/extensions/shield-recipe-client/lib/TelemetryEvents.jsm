@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu, interfaces: Ci} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -18,6 +17,13 @@ const TelemetryEvents = {
         methods: ["enroll"],
         objects: ["preference_study", "addon_study"],
         extra_keys: ["experimentType", "branch", "addonId", "addonVersion"],
+        record_on_release: true,
+      },
+
+      enroll_failure: {
+        methods: ["enrollFailed"],
+        objects: ["addon_study"],
+        extra_keys: ["reason"],
         record_on_release: true,
       },
 

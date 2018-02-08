@@ -5,9 +5,6 @@
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-
 const CHILD_SCRIPT = "chrome://quitter/content/contentscript.js";
 
 /* XPCOM gunk */
@@ -17,7 +14,7 @@ QuitterObserver.prototype = {
   classDescription: "Quitter Observer for use in testing.",
   classID:          Components.ID("{c235a986-5ac1-4f28-ad73-825dae9bad90}"),
   contractID:       "@mozilla.org/quitter-observer;1",
-  QueryInterface:   XPCOMUtils.generateQI([Components.interfaces.nsIObserver]),
+  QueryInterface:   XPCOMUtils.generateQI([Ci.nsIObserver]),
   _xpcom_categories: [{category: "profile-after-change", service: true }],
   isFrameScriptLoaded: false,
 

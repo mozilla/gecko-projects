@@ -4,11 +4,6 @@
 
 "use strict";
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cr = Components.results;
-const Cu = Components.utils;
-
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
@@ -48,10 +43,19 @@ function validateAndParseParamRecursive(param, properties) {
     case "integer":
     case "string":
     case "URL":
+    case "URLorEmpty":
     case "origin":
       return validateAndParseSimpleParam(param, properties.type);
 
     case "array":
+      if (param === undefined) {
+        // Accept a missing array as valid. Policies that use
+        // arrays should still check before iterating through
+        // the array, unless it is marked as "required" in the
+        // schema (but "required" is not implemented yet).
+        return [true, undefined];
+      }
+
       if (!Array.isArray(param)) {
         log.error("Array expected but not received");
         return [false, null];
@@ -100,6 +104,15 @@ function validateAndParseSimpleParam(param, type) {
 
   switch (type) {
     case "boolean":
+      if (typeof(param) == "boolean") {
+        valid = true;
+      } else if (typeof(param) == "number" &&
+                 (param == 0 || param == 1)) {
+        valid = true;
+        parsedParam = !!param;
+      }
+      break;
+
     case "number":
     case "string":
       valid = (typeof(param) == type);
@@ -131,7 +144,13 @@ function validateAndParseSimpleParam(param, type) {
       break;
 
     case "URL":
+    case "URLorEmpty":
       if (typeof(param) != "string") {
+        break;
+      }
+
+      if (type == "URLorEmpty" && param === "") {
+        valid = true;
         break;
       }
 

@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -110,9 +109,18 @@ this.ShieldPreferences = {
     checkbox.setAttribute("id", "optOutStudiesEnabled");
     checkbox.setAttribute("class", "tail-with-learn-more");
     checkbox.setAttribute("label", "Allow Firefox to install and run studies");
-    checkbox.setAttribute("preference", OPT_OUT_STUDIES_ENABLED_PREF);
+
+    let allowedByPolicy = Services.policies.isAllowed("Shield");
+    if (allowedByPolicy) {
+      // If Shield is not allowed by policy, don't tie this checkbox to the preference,
+      // so that the checkbox remains unchecked.
+      // Otherwise, it would be grayed out but still checked, which looks confusing
+      // because it appears it's enabled with no way to disable it.
+      checkbox.setAttribute("preference", OPT_OUT_STUDIES_ENABLED_PREF);
+    }
     checkbox.setAttribute("disabled", Services.prefs.prefIsLocked(FHR_UPLOAD_ENABLED_PREF) ||
-      !AppConstants.MOZ_TELEMETRY_REPORTING);
+                                      !AppConstants.MOZ_TELEMETRY_REPORTING ||
+                                      !allowedByPolicy);
     hContainer.appendChild(checkbox);
 
     const viewStudies = doc.createElementNS(XUL_NS, "label");
@@ -129,7 +137,7 @@ this.ShieldPreferences = {
     // Weirdly, FHR doesn't have a Preference instance on the page, so we create it.
     const fhrPref = doc.defaultView.Preferences.add({ id: FHR_UPLOAD_ENABLED_PREF, type: "bool" });
     function onChangeFHRPref(event) {
-      checkbox.disabled = !Services.prefs.getBoolPref(FHR_UPLOAD_ENABLED_PREF);
+      checkbox.disabled = !Services.prefs.getBoolPref(FHR_UPLOAD_ENABLED_PREF) || !allowedByPolicy;
     }
     fhrPref.on("change", onChangeFHRPref);
     doc.defaultView.addEventListener("unload", () => fhrPref.off("change", onChangeFHRPref), { once: true });

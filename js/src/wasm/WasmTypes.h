@@ -1126,8 +1126,14 @@ class CodeRange
     bool isFunction() const {
         return kind() == Function;
     }
+    bool isInterpEntry() const {
+        return kind() == InterpEntry;
+    }
     bool isImportExit() const {
         return kind() == ImportJitExit || kind() == ImportInterpExit || kind() == BuiltinThunk;
+    }
+    bool isImportInterpExit() const {
+        return kind() == ImportInterpExit;
     }
     bool isImportJitExit() const {
         return kind() == ImportJitExit;
@@ -1388,6 +1394,9 @@ enum class SymbolicAddress
     WaitI32,
     WaitI64,
     Wake,
+#if defined(JS_CODEGEN_MIPS32)
+    js_jit_gAtomic64Lock,
+#endif
     Limit
 };
 
@@ -1531,7 +1540,7 @@ static_assert(offsetof(TlsData, globalArea) % TlsDataAlign == 0, "aligned");
 
 struct TlsDataDeleter
 {
-    void operator()(TlsData* tlsData) { js_free(tlsData); }
+    void operator()(TlsData* tlsData) { js_free(tlsData->allocatedBase); }
 };
 
 typedef UniquePtr<TlsData, TlsDataDeleter> UniqueTlsData;
@@ -1865,6 +1874,11 @@ struct Frame
     // effectively the callee's instance.
     TlsData* tls;
 
+#if defined(JS_CODEGEN_MIPS32)
+    // Double word aligned frame ensures correct alignment for wasm locals
+    // on architectures that require the stack alignment to be more than word size.
+    uintptr_t padding_;
+#endif
     // The return address pushed by the call (in the case of ARM/MIPS the return
     // address is pushed by the first instruction of the prologue).
     void* returnAddress;
@@ -1916,8 +1930,10 @@ class DebugFrame
 
     // Avoid -Wunused-private-field warnings.
   protected:
-#if JS_BITS_PER_WORD == 32
-    uint32_t padding_;  // See alignmentStaticAsserts().
+#if JS_BITS_PER_WORD == 32 && !defined(JS_CODEGEN_MIPS32)
+    // See alignmentStaticAsserts().
+    // For MIPS32 padding is already incorporated in the frame.
+    uint32_t padding_;
 #endif
 
   private:

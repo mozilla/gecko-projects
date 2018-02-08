@@ -1359,6 +1359,24 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(arm, arm64, x86_shared);
 
   public:
+
+    inline void cmp32Move32(Condition cond, Register lhs, Register rhs, Register src,
+                            Register dest)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    inline void cmp32Move32(Condition cond, Register lhs, const Address& rhs, Register src,
+                            Register dest)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    // Performs a bounds check and zeroes the index register if out-of-bounds
+    // (to mitigate Spectre).
+    inline void boundsCheck32ForLoad(Register index, Register length, Register scratch,
+                                     Label* failure)
+        DEFINED_ON(arm, arm64, x86_shared);
+    inline void boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
+                                     Label* failure)
+        DEFINED_ON(arm, arm64, x86_shared);
+
     // ========================================================================
     // Canonicalization primitives.
     inline void canonicalizeDouble(FloatRegister reg);
@@ -1520,15 +1538,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     // wasm specific methods, used in both the wasm baseline compiler and ion.
     void wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry) PER_ARCH;
     void wasmTruncateDoubleToInt32(FloatRegister input, Register output, Label* oolEntry) PER_SHARED_ARCH;
-    void outOfLineWasmTruncateDoubleToInt32(FloatRegister input, bool isUnsigned,
-                                            wasm::BytecodeOffset off, Label* rejoin)
-        DEFINED_ON(x86_shared);
+    void oolWasmTruncateCheckF64ToI32(FloatRegister input, bool isUnsigned,
+                                      wasm::BytecodeOffset off, Label* rejoin)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, Label* oolEntry) PER_ARCH;
     void wasmTruncateFloat32ToInt32(FloatRegister input, Register output, Label* oolEntry) PER_SHARED_ARCH;
-    void outOfLineWasmTruncateFloat32ToInt32(FloatRegister input, bool isUnsigned,
-                                             wasm::BytecodeOffset off, Label* rejoin)
-        DEFINED_ON(x86_shared);
+    void oolWasmTruncateCheckF32ToI32(FloatRegister input, bool isUnsigned,
+                                      wasm::BytecodeOffset off, Label* rejoin)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                    Label* oolRejoin, FloatRegister tempDouble)
@@ -1536,9 +1554,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                     Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void outOfLineWasmTruncateDoubleToInt64(FloatRegister input, bool isUnsigned,
-                                            wasm::BytecodeOffset off, Label* rejoin)
-        DEFINED_ON(x86_shared);
+    void oolWasmTruncateCheckF64ToI64(FloatRegister input, bool isUnsigned,
+                                      wasm::BytecodeOffset off, Label* rejoin)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                     Label* oolRejoin, FloatRegister tempDouble)
@@ -1546,9 +1564,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                      Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void outOfLineWasmTruncateFloat32ToInt64(FloatRegister input, bool isUnsigned,
-                                             wasm::BytecodeOffset off, Label* rejoin)
-        DEFINED_ON(x86_shared);
+    void oolWasmTruncateCheckF32ToI64(FloatRegister input, bool isUnsigned,
+                                      wasm::BytecodeOffset off, Label* rejoin)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     // This function takes care of loading the callee's TLS and pinned regs but
     // it is the caller's responsibility to save/restore TLS or pinned regs.
@@ -1594,13 +1612,16 @@ class MacroAssembler : public MacroAssemblerSpecific
     // 8-bit, 16-bit, and 32-bit wide operations.
     //
     // The 8-bit and 16-bit operations zero-extend or sign-extend the result to
-    // 32 bits, according to `type`.  On 64-bit systems, the upper 32 bits of
-    // the result will be zero.
+    // 32 bits, according to `type`. On 64-bit systems, the upper 32 bits of the
+    // result will be zero on some platforms (eg, on x64) and will be the sign
+    // extension of the lower bits on other platforms (eg, MIPS).
 
     // CompareExchange with memory.  Return the value that was in memory,
     // whether we wrote or not.
     //
     // x86-shared: `output` must be eax.
+    // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
+    // and 16-bit wide operations.
 
     void compareExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
                          Register expected, Register replacement, Register output)
@@ -1610,7 +1631,20 @@ class MacroAssembler : public MacroAssemblerSpecific
                          Register expected, Register replacement, Register output)
         DEFINED_ON(arm, arm64, x86_shared);
 
+
+    void compareExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                         Register expected, Register replacement, Register valueTemp,
+                         Register offsetTemp, Register maskTemp, Register output)
+        DEFINED_ON(mips_shared);
+
+    void compareExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                         Register expected, Register replacement, Register valueTemp,
+                         Register offsetTemp, Register maskTemp, Register output)
+        DEFINED_ON(mips_shared);
+
     // Exchange with memory.  Return the value initially in memory.
+    // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
+    // and 16-bit wide operations.
 
     void atomicExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
                         Register value, Register output)
@@ -1619,6 +1653,16 @@ class MacroAssembler : public MacroAssemblerSpecific
     void atomicExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
                         Register value, Register output)
         DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                        Register value, Register valueTemp, Register offsetTemp, Register maskTemp,
+                        Register output)
+        DEFINED_ON(mips_shared);
+
+    void atomicExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                        Register value, Register valueTemp, Register offsetTemp, Register maskTemp,
+                        Register output)
+        DEFINED_ON(mips_shared);
 
     // Read-modify-write with memory.  Return the value in memory before the
     // operation.
@@ -1629,6 +1673,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     //   For And, Or, and Xor, `output` must be eax and `temp` must have a byte subregister.
     //
     // ARM: Registers `value` and `output` must differ.
+    // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
+    // and 16-bit wide operations; `value` and `output` must differ.
 
     void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
                        Register value, const Address& mem, Register temp, Register output)
@@ -1646,7 +1692,19 @@ class MacroAssembler : public MacroAssemblerSpecific
                        Imm32 value, const BaseIndex& mem, Register temp, Register output)
         DEFINED_ON(x86_shared);
 
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Register value, const Address& mem, Register valueTemp,
+                       Register offsetTemp, Register maskTemp, Register output)
+        DEFINED_ON(mips_shared);
+
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Register value, const BaseIndex& mem, Register valueTemp,
+                       Register offsetTemp, Register maskTemp, Register output)
+        DEFINED_ON(mips_shared);
+
     // Read-modify-write with memory.  Return no value.
+    // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
+    // and 16-bit wide operations.
 
     void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Register value,
                         const Address& mem, Register temp)
@@ -1663,6 +1721,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Imm32 value,
                         const BaseIndex& mem, Register temp)
         DEFINED_ON(x86_shared);
+
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Register value,
+                    const Address& mem, Register valueTemp, Register offsetTemp, Register maskTemp)
+        DEFINED_ON(mips_shared);
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Register value,
+                    const BaseIndex& mem, Register valueTemp, Register offsetTemp, Register maskTemp)
+        DEFINED_ON(mips_shared);
 
     // 64-bit wide operations.
 
@@ -1671,50 +1738,51 @@ class MacroAssembler : public MacroAssemblerSpecific
     //
     // x86: `temp` must be ecx:ebx; `output` must be edx:eax.
     // ARM: `temp` should be invalid; `output` must be (even,odd) pair.
+    // MIPS32: `temp` should be invalid.
 
     void atomicLoad64(const Synchronization& sync, const Address& mem, Register64 temp,
                       Register64 output)
-        DEFINED_ON(arm, x86);
+        DEFINED_ON(arm, mips32, x86);
 
     void atomicLoad64(const Synchronization& sync, const BaseIndex& mem, Register64 temp,
                       Register64 output)
-        DEFINED_ON(arm, x86);
+        DEFINED_ON(arm, mips32, x86);
 
     // x86: `expected` must be the same as `output`, and must be edx:eax
     // x86: `replacement` must be ecx:ebx
     // x64: `output` must be rax.
     // ARM: Registers must be distinct; `replacement` and `output` must be (even,odd) pairs.
+    // MIPS: Registers must be distinct.
 
     void compareExchange64(const Synchronization& sync, const Address& mem, Register64 expected,
-                           Register64 replacement, Register64 output)
-        DEFINED_ON(arm, arm64, x64, x86);
+                           Register64 replacement, Register64 output) PER_ARCH;
 
     void compareExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 expected,
-                           Register64 replacement, Register64 output)
-        DEFINED_ON(arm, arm64, x64, x86);
+                           Register64 replacement, Register64 output) PER_ARCH;
 
     // x86: `value` must be ecx:ebx; `output` must be edx:eax.
     // ARM: Registers must be distinct; `value` and `output` must be (even,odd) pairs.
+    // MIPS: Registers must be distinct.
 
     void atomicExchange64(const Synchronization& sync, const Address& mem, Register64 value,
-                          Register64 output)
-        DEFINED_ON(arm, arm64, x64, x86);
+                          Register64 output) PER_ARCH;
 
     void atomicExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 value,
-                          Register64 output)
-        DEFINED_ON(arm, arm64, x64, x86);
+                          Register64 output) PER_ARCH;
 
     // x86: `output` must be edx:eax, `temp` must be ecx:ebx.
     // x64: For And, Or, and Xor `output` must be rax.
     // ARM: Registers must be distinct; `temp` and `output` must be (even,odd) pairs.
+    // MIPS: Registers must be distinct.
+    // MIPS32: `temp` should be invalid.
 
     void atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value,
                          const Address& mem, Register64 temp, Register64 output)
-        DEFINED_ON(arm, arm64, x64);
+        DEFINED_ON(arm, arm64, mips32, mips64, x64);
 
     void atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value,
                          const BaseIndex& mem, Register64 temp, Register64 output)
-        DEFINED_ON(arm, arm64, x64);
+        DEFINED_ON(arm, arm64, mips32, mips64, x64);
 
     void atomicFetchOp64(const Synchronization& sync, AtomicOp op, const Address& value,
                          const Address& mem, Register64 temp, Register64 output)
@@ -1748,25 +1816,54 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
                            Register expected, Register replacement, Register temp,
-                           AnyRegister output);
+                           AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
                            const BaseIndex& mem, Register expected, Register replacement,
-                           Register temp, AnyRegister output);
+                           Register temp, AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
+                           Register expected, Register replacement, Register valueTemp,
+                           Register offsetTemp, Register maskTemp, Register temp,
+                           AnyRegister output)
+        DEFINED_ON(mips_shared);
+
+    void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const BaseIndex& mem,
+                           Register expected, Register replacement, Register valueTemp,
+                           Register offsetTemp, Register maskTemp, Register temp,
+                           AnyRegister output)
+        DEFINED_ON(mips_shared);
 
     void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
-                          Register value, Register temp, AnyRegister output);
+                          Register value, Register temp, AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const BaseIndex& mem,
-                          Register value, Register temp, AnyRegister output);
+                          Register value, Register temp,  AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
+                          Register value, Register valueTemp, Register offsetTemp,
+                          Register maskTemp, Register temp, AnyRegister output)
+        DEFINED_ON(mips_shared);
+
+    void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const BaseIndex& mem,
+                          Register value, Register valueTemp, Register offsetTemp,
+                          Register maskTemp, Register temp, AnyRegister output)
+        DEFINED_ON(mips_shared);
+
 
     void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
                          Register value, const Address& mem, Register temp1, Register temp2,
-                         AnyRegister output);
+                         AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
                          Register value, const BaseIndex& mem, Register temp1, Register temp2,
-                         AnyRegister output);
+                         AnyRegister output)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
                          Imm32 value, const Address& mem, Register temp1, Register temp2,
@@ -1778,11 +1875,25 @@ class MacroAssembler : public MacroAssemblerSpecific
                          AnyRegister output)
         DEFINED_ON(x86_shared);
 
-    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
-                          Register value, const Address& mem, Register temp);
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Register value, const Address& mem, Register valueTemp,
+                         Register offsetTemp, Register maskTemp, Register temp,
+                         AnyRegister output)
+        DEFINED_ON(mips_shared);
+
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Register value, const BaseIndex& mem, Register valueTemp,
+                         Register offsetTemp, Register maskTemp, Register temp,
+                         AnyRegister output)
+        DEFINED_ON(mips_shared);
 
     void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
-                          Register value, const BaseIndex& mem, Register temp);
+                          Register value, const Address& mem, Register temp)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Register value, const BaseIndex& mem, Register temp)
+        DEFINED_ON(arm, arm64, x86_shared);
 
     void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
                           Imm32 value, const Address& mem, Register temp)
@@ -1791,6 +1902,16 @@ class MacroAssembler : public MacroAssemblerSpecific
     void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
                           Imm32 value, const BaseIndex& mem, Register temp)
         DEFINED_ON(x86_shared);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Register value, const Address& mem, Register valueTemp,
+                          Register offsetTemp, Register maskTemp)
+        DEFINED_ON(mips_shared);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Register value, const BaseIndex& mem, Register valueTemp,
+                          Register offsetTemp, Register maskTemp)
+        DEFINED_ON(mips_shared);
 
     //}}} check_macroassembler_decl_style
   public:
@@ -1952,28 +2073,12 @@ class MacroAssembler : public MacroAssemblerSpecific
             store32(Imm32(key.constant()), dest);
     }
 
-  private:
-    template <typename T>
-    void computeSpectreIndexMaskGeneric(Register index, const T& length, Register output);
-
-    void computeSpectreIndexMask(Register index, Register length, Register output);
-
-    template <typename T>
-    void computeSpectreIndexMask(int32_t index, const T& length, Register output);
-
-  public:
-    void spectreMaskIndex(int32_t index, Register length, Register output);
-    void spectreMaskIndex(int32_t index, const Address& length, Register output);
     void spectreMaskIndex(Register index, Register length, Register output);
     void spectreMaskIndex(Register index, const Address& length, Register output);
 
     // The length must be a power of two. Performs a bounds check and Spectre index
     // masking.
     void boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure);
-
-    // Performs a bounds check and Spectre index masking.
-    void boundsCheck32ForLoad(Register index, Register length, Register scratch, Label* failure);
-    void boundsCheck32ForLoad(Register index, const Address& length, Register scratch, Label* failure);
 
     template <typename T>
     void guardedCallPreBarrier(const T& address, MIRType type) {

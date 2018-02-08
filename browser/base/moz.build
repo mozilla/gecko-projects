@@ -8,6 +8,7 @@ with Files("**"):
     BUG_COMPONENT = ("Firefox", "General")
 
 SPHINX_TREES['sslerrorreport'] = 'content/docs/sslerrorreport'
+SPHINX_TREES['tabbrowser'] = 'content/docs/tabbrowser'
 
 with Files('content/docs/sslerrorreport/**'):
     SCHEDULES.exclusive = ['docs']
@@ -39,6 +40,7 @@ BROWSER_CHROME_MANIFESTS += [
     'content/test/popupNotifications/browser.ini',
     'content/test/popups/browser.ini',
     'content/test/referrer/browser.ini',
+    'content/test/sanitize/browser.ini',
     'content/test/sidebar/browser.ini',
     'content/test/siteIdentity/browser.ini',
     'content/test/static/browser.ini',

@@ -2444,9 +2444,9 @@ nsContentUtils::CalcRoundedWindowSizeForResistingFingerprinting(int32_t  aChrome
 bool
 nsContentUtils::ThreadsafeIsCallerChrome()
 {
-  return NS_IsMainThread() ?
-    IsCallerChrome() :
-    workers::IsCurrentThreadRunningChromeWorker();
+  return NS_IsMainThread()
+           ? IsCallerChrome()
+           : IsCurrentThreadRunningChromeWorker();
 }
 
 bool
@@ -2485,7 +2485,7 @@ nsContentUtils::ThreadsafeIsSystemCaller(JSContext* aCx)
     return IsSystemCaller(aCx);
   }
 
-  return workers::GetWorkerPrivateFromContext(aCx)->UsesSystemPrincipal();
+  return GetWorkerPrivateFromContext(aCx)->UsesSystemPrincipal();
 }
 
 // static
@@ -3699,6 +3699,20 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
     nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aDocument);
     nsresult rv = cache->FindEntryProperties(aURI, domDoc, getter_AddRefs(props));
     return (NS_SUCCEEDED(rv) && props);
+}
+
+// static
+int32_t
+nsContentUtils::CORSModeToLoadImageFlags(mozilla::CORSMode aMode)
+{
+  switch (aMode) {
+  case CORS_ANONYMOUS:
+    return imgILoader::LOAD_CORS_ANONYMOUS;
+  case CORS_USE_CREDENTIALS:
+    return imgILoader::LOAD_CORS_USE_CREDENTIALS;
+  default:
+    return 0;
+  }
 }
 
 // static
@@ -6144,7 +6158,7 @@ nsContentUtils::GetCurrentJSContextForThread()
   if (MOZ_LIKELY(NS_IsMainThread())) {
     return GetCurrentJSContext();
   }
-  return workers::GetCurrentThreadJSContext();
+  return GetCurrentWorkerThreadJSContext();
 }
 
 template<typename StringType, typename CharType>
@@ -10043,9 +10057,11 @@ nsContentUtils::TryToUpgradeElement(Element* aElement)
   NodeInfo* nodeInfo = aElement->NodeInfo();
   RefPtr<nsAtom> typeAtom =
     aElement->GetCustomElementData()->GetCustomElementType();
+
+  MOZ_ASSERT(nodeInfo->NameAtom()->Equals(nodeInfo->LocalName()));
   CustomElementDefinition* definition =
     nsContentUtils::LookupCustomElementDefinition(nodeInfo->GetDocument(),
-                                                  nodeInfo->LocalName(),
+                                                  nodeInfo->NameAtom(),
                                                   nodeInfo->NamespaceID(),
                                                   typeAtom);
   if (definition) {
@@ -10129,9 +10145,10 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
   CustomElementDefinition* definition = aDefinition;
   if (CustomElementRegistry::IsCustomElementEnabled() && isCustomElement &&
       !definition) {
+    MOZ_ASSERT(nodeInfo->NameAtom()->Equals(nodeInfo->LocalName()));
     definition =
       nsContentUtils::LookupCustomElementDefinition(nodeInfo->GetDocument(),
-                                                    nodeInfo->LocalName(),
+                                                    nodeInfo->NameAtom(),
                                                     nodeInfo->NamespaceID(),
                                                     typeAtom);
   }
@@ -10243,7 +10260,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
 
 /* static */ CustomElementDefinition*
 nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
-                                              const nsAString& aLocalName,
+                                              nsAtom* aNameAtom,
                                               uint32_t aNameSpaceID,
                                               nsAtom* aTypeAtom)
 {
@@ -10265,7 +10282,7 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
     return nullptr;
   }
 
-  return registry->LookupCustomElementDefinition(aLocalName, aTypeAtom);
+  return registry->LookupCustomElementDefinition(aNameAtom, aTypeAtom);
 }
 
 /* static */ void

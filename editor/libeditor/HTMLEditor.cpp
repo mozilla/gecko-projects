@@ -231,15 +231,13 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLEditor)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
 NS_INTERFACE_MAP_END_INHERITING(TextEditor)
 
-NS_IMETHODIMP
-HTMLEditor::Init(nsIDOMDocument* aDoc,
-                 nsIContent* aRoot,
+nsresult
+HTMLEditor::Init(nsIDocument& aDoc,
+                 Element* aRoot,
                  nsISelectionController* aSelCon,
                  uint32_t aFlags,
                  const nsAString& aInitialValue)
 {
-  NS_PRECONDITION(aDoc && !aSelCon, "bad arg");
-  NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
   MOZ_ASSERT(aInitialValue.IsEmpty(), "Non-empty initial values not supported");
 
   nsresult rulesRv = NS_OK;
@@ -255,8 +253,7 @@ HTMLEditor::Init(nsIDOMDocument* aDoc,
     }
 
     // Init mutation observer
-    nsCOMPtr<nsINode> document = do_QueryInterface(aDoc);
-    document->AddMutationObserverUnlessExists(this);
+    aDoc.AddMutationObserverUnlessExists(this);
 
     if (!mRootElement) {
       UpdateRootElement();
@@ -1724,9 +1721,9 @@ HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
     // Make sure to not walk off onto the Document node
     do {
       // retrieve the computed style of background-color for blockParent
-      mCSSEditUtils->GetComputedProperty(*blockParent,
-                                         *nsGkAtoms::backgroundColor,
-                                         aOutColor);
+      CSSEditUtils::GetComputedProperty(*blockParent,
+                                        *nsGkAtoms::backgroundColor,
+                                        aOutColor);
       blockParent = blockParent->GetParentElement();
       // look at parent if the queried color is transparent and if the node to
       // examine is not the root of the document
@@ -1735,7 +1732,7 @@ HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
       // we have hit the root of the document and the color is still transparent !
       // Grumble... Let's look at the default background color because that's the
       // color we are looking for
-      mCSSEditUtils->GetDefaultBackgroundColor(aOutColor);
+      CSSEditUtils::GetDefaultBackgroundColor(aOutColor);
     }
   }
   else {
@@ -1757,9 +1754,9 @@ HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
       } else {
         // no, it's not; let's retrieve the computed style of background-color for the
         // node to examine
-        mCSSEditUtils->GetComputedProperty(*nodeToExamine,
-                                           *nsGkAtoms::backgroundColor,
-                                           aOutColor);
+        CSSEditUtils::GetComputedProperty(*nodeToExamine,
+                                          *nsGkAtoms::backgroundColor,
+                                          aOutColor);
         if (!aOutColor.EqualsLiteral("transparent")) {
           break;
         }
@@ -3089,7 +3086,8 @@ HTMLEditor::DeleteNode(nsIDOMNode* aNode)
 {
   // do nothing if the node is read-only
   nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
-  if (NS_WARN_IF(!IsModifiableNode(aNode) && !IsMozEditorBogusNode(content))) {
+  if (NS_WARN_IF(!IsModifiableNode(content) &&
+                 !IsMozEditorBogusNode(content))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -3247,13 +3245,6 @@ HTMLEditor::ContentRemoved(nsIDocument* aDocument,
     RefPtr<TextEditRules> rules(mRules);
     rules->DocumentModified();
   }
-}
-
-NS_IMETHODIMP_(bool)
-HTMLEditor::IsModifiableNode(nsIDOMNode* aNode)
-{
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  return IsModifiableNode(node);
 }
 
 bool
@@ -4313,9 +4304,13 @@ HTMLEditor::AreNodesSameType(nsIContent* aNode1,
     return true;
   }
 
+  if (!aNode1->IsElement() || !aNode2->IsElement()) {
+    return false;
+  }
+
   // If CSS is enabled, we are stricter about span nodes.
-  return mCSSEditUtils->ElementsSameStyle(aNode1->AsDOMNode(),
-                                          aNode2->AsDOMNode());
+  return CSSEditUtils::ElementsSameStyle(aNode1->AsElement(),
+                                         aNode2->AsElement());
 }
 
 nsresult
@@ -4832,7 +4827,7 @@ HTMLEditor::IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent)
   return IsActiveInDOMWindow();
 }
 
-NS_IMETHODIMP
+nsresult
 HTMLEditor::GetPreferredIMEState(IMEState* aState)
 {
   // HTML editor don't prefer the CSS ime-mode because IE didn't do so too.

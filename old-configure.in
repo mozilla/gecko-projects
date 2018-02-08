@@ -3862,32 +3862,6 @@ fi])
 
 AC_DEFINE_UNQUOTED(MOZ_USER_DIR,"$MOZ_USER_DIR")
 
-dnl ========================================================
-dnl = Doxygen configuration
-dnl ========================================================
-dnl Use commas to specify multiple dirs to this arg
-MOZ_DOC_INPUT_DIRS='./dist/include ./dist/idl'
-MOZ_ARG_WITH_STRING(doc-input-dirs,
-[  --with-doc-input-dirs=DIRS
-                          Header/idl dirs to create docs from],
-[ MOZ_DOC_INPUT_DIRS=`echo "$withval" | sed "s/,/ /g"` ] )
-AC_SUBST(MOZ_DOC_INPUT_DIRS)
-
-dnl Use commas to specify multiple dirs to this arg
-MOZ_DOC_INCLUDE_DIRS='./dist/include ./dist/include/nspr'
-MOZ_ARG_WITH_STRING(doc-include-dirs,
-[  --with-doc-include-dirs=DIRS
-                          Include dirs to preprocess doc headers],
-[ MOZ_DOC_INCLUDE_DIRS=`echo "$withval" | sed "s/,/ /g"` ] )
-AC_SUBST(MOZ_DOC_INCLUDE_DIRS)
-
-MOZ_DOC_OUTPUT_DIR='./dist/docs'
-MOZ_ARG_WITH_STRING(doc-output-dir,
-[  --with-doc-output-dir=DIR
-                          Dir to generate docs into],
-[ MOZ_DOC_OUTPUT_DIR=$withval ] )
-AC_SUBST(MOZ_DOC_OUTPUT_DIR)
-
 if test -z "$SKIP_COMPILER_CHECKS"; then
 dnl ========================================================
 dnl =
@@ -4330,7 +4304,7 @@ dnl Mac bundle identifier (based on MOZ_APP_DISPLAYNAME)
 # If the MOZ_MACBUNDLE_ID is defined in the configure.sh, use it
 # Otherwise, use MOZ_APP_DISPLAYNAME
 if test -z "$MOZ_MACBUNDLE_ID"; then
-   MOZ_MACBUNDLE_ID=`echo $MOZ_APP_DISPLAYNAME | tr 'A-Z' 'a-z' | tr -d '[[:blank:]]'`
+   MOZ_MACBUNDLE_ID=`echo $MOZ_APP_DISPLAYNAME | tr 'A-Z' 'a-z' | tr -dc 'a-z-'`
 fi
 MOZ_MACBUNDLE_ID=${MOZ_DISTRIBUTION_ID}.${MOZ_MACBUNDLE_ID}
 if test "$MOZ_DEBUG"; then

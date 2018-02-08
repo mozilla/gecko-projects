@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu} = Components;
 ChromeUtils.import("resource://gre/modules/EventEmitter.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -82,7 +81,7 @@ const BUILT_IN_SECTIONS = {
 };
 
 const SectionsManager = {
-  ACTIONS_TO_PROXY: ["SYSTEM_TICK", "NEW_TAB_LOAD"],
+  ACTIONS_TO_PROXY: ["WEBEXT_CLICK", "WEBEXT_DISMISS"],
   CONTEXT_MENU_PREFS: {"SaveToPocket": "extensions.pocket.enabled"},
   initialized: false,
   sections: new Map(),
@@ -223,6 +222,13 @@ const SectionsManager = {
       this.emit(this.UPDATE_SECTION_CARD, id, url, options, shouldBroadcast);
     }
   },
+  removeSectionCard(sectionId, url) {
+    if (!this.sections.has(sectionId)) {
+      return;
+    }
+    const rows = this.sections.get(sectionId).rows.filter(row => row.url !== url);
+    this.updateSection(sectionId, {rows}, true);
+  },
   onceInitialized(callback) {
     if (this.initialized) {
       callback();
@@ -294,14 +300,14 @@ class SectionsFeed {
   onUpdateSection(event, id, options, shouldBroadcast = false) {
     if (options) {
       const action = {type: at.SECTION_UPDATE, data: Object.assign(options, {id})};
-      this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : ac.SendToPreloaded(action));
+      this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : ac.AlsoToPreloaded(action));
     }
   }
 
   onUpdateSectionCard(event, id, url, options, shouldBroadcast = false) {
     if (options) {
       const action = {type: at.SECTION_UPDATE_CARD, data: {id, url, options}};
-      this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : ac.SendToPreloaded(action));
+      this.store.dispatch(shouldBroadcast ? ac.BroadcastToContent(action) : ac.AlsoToPreloaded(action));
     }
   }
 
@@ -326,6 +332,11 @@ class SectionsFeed {
       }
       case at.PLACES_BOOKMARK_ADDED:
         SectionsManager.updateBookmarkMetadata(action.data);
+        break;
+      case at.WEBEXT_DISMISS:
+        if (action.data) {
+          SectionsManager.removeSectionCard(action.data.source, action.data.url);
+        }
         break;
       case at.SECTION_DISABLE:
         SectionsManager.disableSection(action.data);

@@ -5,8 +5,6 @@
 
 this.EXPORTED_SYMBOLS = ["PlacesUtils"];
 
-const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
-
 Cu.importGlobalProperties(["URL"]);
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -115,7 +113,11 @@ function serializeNode(aNode, aIsLivemark) {
   data.instanceId = PlacesUtils.instanceId;
 
   let guid = aNode.bookmarkGuid;
-  if (guid) {
+  // Some nodes, e.g. the unfiled/menu/toolbar ones can have a virtual guid, so
+  // we ignore any that are a folder shortcut. These will be handled below.
+  if (guid && !PlacesUtils.bookmarks.isVirtualRootItem(guid)) {
+    // TODO: Really guid should be set on everything, however currently this upsets
+    // the drag 'n' drop / cut/copy/paste operations.
     data.itemGuid = guid;
     if (aNode.parent)
       data.parent = aNode.parent.itemId;
@@ -157,6 +159,7 @@ function serializeNode(aNode, aIsLivemark) {
         data.type = PlacesUtils.TYPE_X_MOZ_PLACE;
         data.uri = aNode.uri;
         data.concreteId = concreteId;
+        data.concreteGuid = PlacesUtils.getConcreteItemGuid(aNode);
       } else {
         // This is a bookmark folder.
         data.type = PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER;
@@ -321,16 +324,6 @@ this.PlacesUtils = {
   endl: NEWLINE,
 
   /**
-   * Makes a URI from a spec.
-   * @param   aSpec
-   *          The string spec of the URI
-   * @returns A URI object for the spec.
-   */
-  _uri: function PU__uri(aSpec) {
-    return NetUtil.newURI(aSpec);
-  },
-
-  /**
    * Is a string a valid GUID?
    *
    * @param guid: (String)
@@ -442,6 +435,18 @@ this.PlacesUtils = {
                 let bucket = v.split(":");
                 return [ bucket[0].trim().toLowerCase(), Number(bucket[1]) ];
               });
+  },
+
+  /**
+   * Determines if a folder is generated from a query.
+   * @param aNode a result true.
+   * @returns true if the node is a folder generated from a query.
+   */
+  isQueryGeneratedFolder(node) {
+    if (!node.parent) {
+      return false;
+    }
+    return this.nodeIsFolder(node) && this.nodeIsQuery(node.parent);
   },
 
   /**
@@ -898,12 +903,12 @@ this.PlacesUtils = {
           else {
             // for drag and drop of files, try to use the leafName as title
             try {
-              titleString = this._uri(uriString).QueryInterface(Ci.nsIURL)
+              titleString = Services.io.newURI(uriString).QueryInterface(Ci.nsIURL)
                                 .fileName;
             } catch (e) {}
           }
-          // note:  this._uri() will throw if uriString is not a valid URI
-          if (this._uri(uriString)) {
+          // note:  Services.io.newURI() will throw if uriString is not a valid URI
+          if (Services.io.newURI(uriString)) {
             nodes.push({ uri: uriString,
                          title: titleString ? titleString : uriString,
                          type: this.TYPE_X_MOZ_URL });
@@ -919,8 +924,8 @@ this.PlacesUtils = {
           // comments line prepended by #, we should skip them
           if (uriString.substr(0, 1) == "\x23")
             continue;
-          // note: this._uri() will throw if uriString is not a valid URI
-          if (uriString != "" && this._uri(uriString))
+          // note: Services.io.newURI) will throw if uriString is not a valid URI
+          if (uriString != "" && Services.io.newURI(uriString))
             nodes.push({ uri: uriString,
                          title: uriString,
                          type: this.TYPE_X_MOZ_URL });

@@ -4,8 +4,6 @@
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
 this.EXPORTED_SYMBOLS = ["AutoCompletePopup"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -189,8 +187,6 @@ this.AutoCompletePopup = {
         this.openedPopup._normalMaxRows = this.openedPopup.maxRows;
         this.openedPopup.mInput.maxRows = 100;
       }
-      this.openedPopup.showCommentColumn = false;
-      this.openedPopup.showImageColumn = false;
       this.openedPopup.addEventListener("popuphidden", this);
       this.openedPopup.addEventListener("popupshowing", this);
       this.openedPopup.openPopupAtScreenRect("after_start", rect.left, rect.top,

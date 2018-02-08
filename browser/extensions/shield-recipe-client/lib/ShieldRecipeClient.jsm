@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {utils: Cu, interfaces: Ci} = Components;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -48,6 +47,12 @@ this.ShieldRecipeClient = {
     log = LogManager.getLogger("bootstrap");
 
     try {
+      TelemetryEvents.init();
+    } catch (err) {
+      log.error("Failed to initialize telemetry events:", err);
+    }
+
+    try {
       await AboutPages.init();
     } catch (err) {
       log.error("Failed to initialize about pages:", err);
@@ -69,12 +74,6 @@ this.ShieldRecipeClient = {
       ShieldPreferences.init();
     } catch (err) {
       log.error("Failed to initialize preferences UI:", err);
-    }
-
-    try {
-      TelemetryEvents.init();
-    } catch (err) {
-      log.error("Failed to initialize telemetry events:", err);
     }
 
     await RecipeRunner.init();
