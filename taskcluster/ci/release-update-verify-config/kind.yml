@@ -30,6 +30,10 @@ job-defaults:
       #   to-build-number, to-version, to-app-version, to-display-version
       #   output-file, to-build-id
       app-name: browser
+      # Note! This product is _not_ the same as shipping product.
+      # It is set to "firefox" even for devedition.
+      # stage-product maintains the firefox vs devedition distinction
+      product: firefox
       archive-prefix:
          by-project:
             birch: "http://ftp.stage.mozaws.net/pub"
@@ -223,6 +227,7 @@ jobs:
       attributes:
          build_platform: linux-devedition
       extra:
+         stage-product: devedition
          platform: linux-i686
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
@@ -237,6 +242,7 @@ jobs:
       attributes:
          build_platform: linux64-devedition
       extra:
+         stage-product: devedition
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
@@ -251,6 +257,7 @@ jobs:
       attributes:
          build_platform: macosx64-devedition
       extra:
+         stage-product: devedition
          platform: osx
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
@@ -265,6 +272,7 @@ jobs:
       attributes:
          build_platform: win32-devedition
       extra:
+         stage-product: devedition
          platform: win32
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
@@ -279,6 +287,7 @@ jobs:
       attributes:
          build_platform: win64-devedition
       extra:
+         stage-product: devedition
          platform: win64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"

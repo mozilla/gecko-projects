@@ -27,6 +27,7 @@ def add_command(config, tasks):
     ]
     optional_args = [
         "updater-platform",
+        "stage-product",
     ]
 
     for task in tasks:
@@ -40,7 +41,7 @@ def add_command(config, tasks):
             "./mach", "python",
             "testing/mozharness/scripts/release/update-verify-config-creator.py",
             "--config", "internal_pypi.py",
-            "--product", task["shipping-product"],
+            "--product", task["extra"]["product"],
             "--app-name", task["extra"]["app-name"],
             "--platform", task["extra"]["platform"],
             "--to-version", release_config["version"],

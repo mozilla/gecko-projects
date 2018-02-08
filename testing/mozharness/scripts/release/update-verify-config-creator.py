@@ -43,6 +43,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             "dest": "product",
             "help": "Product being tested.",
         }],
+        [["--stage-product"], {
+            "dest": "stage_product",
+            "help": "Product being tested.",
+        }],
         [["--app-name"], {
             "dest": "app_name",
             "help": "App name being tested.",
@@ -168,8 +172,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
 
         if "updater_platform" not in self.config:
             self.config["updater_platform"] = self.config["platform"]
-        if "stage_product_name" not in self.config:
-            self.config["stage_product_name"] = self.config["product"]
+        if "stage_product" not in self.config:
+            self.config["stage_product"] = self.config["product"]
         if "previous_archive_prefix" not in self.config:
             self.config["previous_archive_prefix"] = self.config["archive_prefix"]
         self.config["archive_prefix"].rstrip("/")
@@ -207,7 +211,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
 
             # Do as much filtering with basic information as possible to avoid
             # unnecessary requests to Ship It.
-            if self.config["stage_product_name"] != product:
+            if self.config["stage_product"] != product:
                 self.log("Skipping release that doesn't match product name: %s" % release_name,
                          level=INFO)
                 continue
@@ -239,7 +243,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             info_file_url = "{}{}/{}_info.txt".format(
                 self.config["previous_archive_prefix"],
                 getCandidatesDir(
-                    self.config["stage_product_name"],
+                    self.config["stage_product"],
                     version,
                     # TODO: remove .get() when this is available
                     release_info.get("build_number", 1),
@@ -308,7 +312,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         from mozrelease.versions import getPrettyVersion
 
         candidates_dir = getCandidatesDir(
-            self.config["stage_product_name"], self.config["to_version"],
+            self.config["stage_product"], self.config["to_version"],
             self.config["to_build_number"],
         )
         to_ = getReleaseInstallerPath(
@@ -347,7 +351,7 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 update_platform = ftp2updatePlatforms(self.config["platform"])[1]
 
             release_dir = getReleasesDir(
-                self.config["stage_product_name"], fromVersion
+                self.config["stage_product"], fromVersion
             )
             path_ = getReleaseInstallerPath(
                 self.config["product"], self.config["product"].title(),
