@@ -5,7 +5,7 @@
 loader: taskgraph.loader.transform:loader
 
 kind-dependencies:
-   - beetmover-cdns
+    - beetmover-cdns
 
 transforms:
     - taskgraph.transforms.release_deps:transforms
@@ -30,13 +30,13 @@ job-defaults:
     index:
         type: release
     routes:
-       - index.releases.v1.{branch}.latest.{product}.latest.bouncer_check
-       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.bouncer_check
+        - index.releases.v1.{branch}.latest.{product}.latest.bouncer_check
+        - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.bouncer_check
     attributes:
         build_platform: linux64
         build_type: opt
     treeherder:
-        symbol: Rel(BncChk)
+        symbol: Rel(BncChk
         kind: test
         tier: 1
 

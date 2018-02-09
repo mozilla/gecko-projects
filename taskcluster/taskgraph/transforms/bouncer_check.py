@@ -46,7 +46,8 @@ def handle_keyed_by(config, jobs):
     for job in jobs:
         job = copy.deepcopy(job)  # don't overwrite dict values here
         for field in fields:
-            resolve_keyed_by(item=job, field=field, item_name=job['name'], project=config.params['project'])
+            resolve_keyed_by(item=job, field=field, item_name=job['name'],
+                             project=config.params['project'])
         yield job
 
 
