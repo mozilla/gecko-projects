@@ -132,6 +132,11 @@ jobs:
                mozilla-release: "release-localtest"
                mozilla-esr52: "esr-localtest"
                default: "default"
+         mar-channel-id-override:
+            by-project:
+               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               default: null
 
    firefox-linux64:
       shipping-product: firefox
@@ -153,6 +158,11 @@ jobs:
                mozilla-release: "release-localtest"
                mozilla-esr52: "esr-localtest"
                default: "default"
+         mar-channel-id-override:
+            by-project:
+               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               default: null
 
    firefox-macosx64:
       shipping-product: firefox
@@ -174,6 +184,11 @@ jobs:
                mozilla-release: "release-localtest"
                mozilla-esr52: "esr-localtest"
                default: "default"
+         mar-channel-id-override:
+            by-project:
+               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               default: null
 
    firefox-win32:
       shipping-product: firefox
@@ -195,6 +210,11 @@ jobs:
                mozilla-release: "release-localtest"
                mozilla-esr52: "esr-localtest"
                default: "default"
+         mar-channel-id-override:
+            by-project:
+               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               default: null
 
    firefox-win64:
       shipping-product: firefox
@@ -216,6 +236,11 @@ jobs:
                mozilla-release: "release-localtest"
                mozilla-esr52: "esr-localtest"
                default: "default"
+         mar-channel-id-override:
+            by-project:
+               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               default: null
 
    devedition-linux:
       shipping-product: devedition
