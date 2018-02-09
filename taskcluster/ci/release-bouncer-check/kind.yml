@@ -36,7 +36,7 @@ job-defaults:
         build_platform: linux64
         build_type: opt
     treeherder:
-        symbol: Rel(BncChk
+        symbol: Rel(BncChk)
         kind: test
         tier: 1
 
