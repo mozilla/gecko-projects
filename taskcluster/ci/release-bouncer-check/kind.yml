@@ -1,0 +1,120 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+loader: taskgraph.loader.transform:loader
+
+kind-dependencies:
+   - beetmover-cdns
+
+transforms:
+    - taskgraph.transforms.release_deps:transforms
+    - taskgraph.transforms.bouncer_check:transforms
+    - taskgraph.transforms.job:transforms
+    - taskgraph.transforms.task:transforms
+
+job-defaults:
+    name: bouncer-check
+    description: bouncer check
+    run-on-projects: []  # to make sure this never runs as part of CI
+    shipping-phase: push
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        max-run-time: 1200
+    run:
+        using: mozharness
+        options:
+            - "version={version}"
+        script: "mozharness/scripts/release/bouncer_check.py"
+    # 'release' index type interpolates the routes placeholders
+    index:
+        type: release
+    routes:
+       - index.releases.v1.{branch}.latest.{product}.latest.bouncer_check
+       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.bouncer_check
+    attributes:
+        build_platform: linux64
+        build_type: opt
+    treeherder:
+        symbol: Rel(BncChk)
+        kind: test
+        tier: 1
+
+    notifications:
+        completed:
+            subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            plugins:
+                by-project:
+                    mozilla-beta: ["log_collect"]
+                    mozilla-release: ["log_collect"]
+                    default: []
+
+        failed:
+            subject: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            plugins:
+                by-project:
+                    mozilla-beta: ["log_collect", "ses"]
+                    mozilla-release: ["log_collect", "ses"]
+                    default: ["ses"]
+            emails:
+                by-project:
+                    mozilla-beta: ["release-automation-notifications@mozilla.com"]
+                    mozilla-release: ["release-automation-notifications@mozilla.com"]
+                    try: ["{task_def[metadata][owner]}"]
+                    maple: ["release+tcstaging@mozilla.com"]
+                    default: []
+
+        exception:
+            subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
+            plugins:
+                by-project:
+                    mozilla-beta: ["log_collect", "ses"]
+                    mozilla-release: ["log_collect", "ses"]
+                    default: ["ses"]
+            emails:
+                by-project:
+                    mozilla-beta: ["release-automation-notifications@mozilla.com"]
+                    mozilla-release: ["release-automation-notifications@mozilla.com"]
+                    try: ["{task_def[metadata][owner]}"]
+                    maple: ["release+tcstaging@mozilla.com"]
+                    default: []
+
+jobs:
+    firefox:
+        shipping-product: firefox
+        index:
+            product: firefox
+        run:
+            config:
+                by-project:
+                    mozilla-release:
+                        - releases/bouncer_firefox_release.py
+                    mozilla-beta:
+                        - releases/bouncer_firefox_beta.py
+                    maple:
+                        - releases/dev_bouncer_firefox_beta.py
+                    default:
+                        - releases/bouncer_firefox_dev.py
+        treeherder:
+            platform: linux64/opt
+
+    devedition:
+        shipping-product: devedition
+        index:
+            product: devedition
+        run:
+            config:
+                by-project:
+                    mozilla-release:
+                        - releases/bouncer_devedition_release.py
+                    mozilla-beta:
+                        - releases/bouncer_devedition_beta.py
+                    maple:
+                        - releases/dev_bouncer_devedition_beta.py
+                    default:
+                        - releases/bouncer_devedition_dev.py
+        treeherder:
+            platform: linux64-devedition/opt
