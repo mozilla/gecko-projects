@@ -193,7 +193,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         self.update_paths = {}
 
         releases = requests.get(
-            "{}/1.0/firefox.json".format(self.config["product_details_server"]),
+            "{}/1.0/{}.json".format(
+                self.config["product_details_server"],
+                self.config["stage_product"],
+            ),
         ).json()["releases"]
         for release_name, release_info in releases.items():
             product, version = release_name.split("-", 1)
@@ -245,17 +248,14 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 getCandidatesDir(
                     self.config["stage_product"],
                     version,
-                    # TODO: remove .get() when this is available
-                    release_info.get("build_number", 1),
+                    release_info["build_number"],
                 ),
                 ftp2infoFile(self.config["platform"])
             )
             self.log("Retrieving buildid from info file: %s" % info_file_url, level=DEBUG)
             ret = requests.get(info_file_url)
             if not ret.ok:
-                # TODO: this is an error after build number is available
-                # raise Exception("Couldn't find buildid for %s - cannot continue." % release_name)
-                continue
+                raise Exception("Couldn't find buildid for %s - cannot continue." % release_name)
             buildID = ret.text.split("=")[1].strip()
 
             shipped_locales_url = urljoin(
