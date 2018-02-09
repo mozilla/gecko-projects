@@ -273,7 +273,11 @@ Marks releases as shipped in Ship-It.
 
 release-bouncer-aliases
 ------------------------------
-Update Bouncers (download.mozilla.org) "latest" aliases.
+Update Bouncer's (download.mozilla.org) "latest" aliases.
+
+release-bouncer-check
+------------------------------
+Checks Bouncer (download.mozilla.org) uptake.
 
 release-generate-checksums
 --------------------------

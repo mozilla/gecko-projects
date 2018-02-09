@@ -102,6 +102,16 @@ def get_partials_artifact_map(release_history, platform, locale):
     return artifact_map
 
 
+def get_previsous_versions(release_history):
+    versions = set()
+    for platform in release_history.values():
+        for locale in platform.values():
+            for target in locale.values():
+                if "previousVersion" in target:
+                    versions.add(target["previousVersion"])
+    return versions
+
+
 def _retry_on_http_errors(url, verify, params, errors):
     if params:
         params_str = "&".join("=".join([k, str(v)])
