@@ -319,10 +319,6 @@ release-updates-builder
 -----------------------
 Top level Balrog blob submission & patcher/update verify config updates.
 
-release-uptake-monitoring
--------------------------
-Run uptake monitoring for releases.
-
 release-version-bump
 --------------------
 Bumps to the next version.
