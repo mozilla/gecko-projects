@@ -54,6 +54,10 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
             "type": int,
             "help": "Number of HTTP sessions running in parallel",
         }],
+        [["--scm-level"], {
+            "dest": "scm_level",
+            "help": "dummy option",
+        }],
     ] + virtualenv_config_options
 
     def __init__(self, require_config_file=True):
