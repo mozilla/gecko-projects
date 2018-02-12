@@ -52,8 +52,16 @@ job-defaults:
             jamun: "https://aus4.stage.mozaws.net"
             maple: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
+      # This is overridden for devedition to exclude 58.0b1
+      # because of the special case added by
+      # https://bugzilla.mozilla.org/show_bug.cgi?id=1419189
       include-version:
          by-project:
+            # The beta regexes (jamun, maple, mozilla-beta) do not match
+            # point releases. In the rare event that we do ship a point
+            # release to beta, we need to either:
+            # 1) update these regexes to match that specific version
+            # 2) pass a second include version that matches that specifivc version
             birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
             jamun: "'^(\\d+\\.\\d+(b\\d+)?)$'"
             maple: "'^(\\d+\\.\\d+(b\\d+)?)$'"
@@ -256,6 +264,7 @@ jobs:
          platform: linux-i686
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-linux64:
       shipping-product: devedition
@@ -271,6 +280,7 @@ jobs:
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-macosx64:
       shipping-product: devedition
@@ -286,6 +296,7 @@ jobs:
          platform: osx
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-win32:
       shipping-product: devedition
@@ -301,6 +312,7 @@ jobs:
          platform: win32
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-win64:
       shipping-product: devedition
@@ -316,3 +328,4 @@ jobs:
          platform: win64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"

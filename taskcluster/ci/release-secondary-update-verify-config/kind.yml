@@ -54,6 +54,11 @@ job-defaults:
             default: "https://aus5.mozilla.org"
       include-version:
          by-project:
+            # The beta regexes (jamun, maple, mozilla-beta) do not match
+            # point releases. In the rare event that we do ship a point
+            # release to beta, we need to either:
+            # 1) update these regexes to match that specific version
+            # 2) pass a second include version that matches that specifivc version
             birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
             jamun: "'^(\\d+\\.\\d+(b\\d+)?)$'"
             maple: "'^(\\d+\\.\\d+(b\\d+)?)$'"
