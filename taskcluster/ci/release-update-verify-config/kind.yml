@@ -293,7 +293,7 @@ jobs:
          build_platform: macosx64-devedition
       extra:
          stage-product: devedition
-         platform: osx
+         platform: mac
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
          include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
