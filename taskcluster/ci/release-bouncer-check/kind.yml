@@ -21,11 +21,10 @@ job-defaults:
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 1200
+        docker-image: {in-tree: "lint"}
     run:
-        using: mozharness
-        options:
-            - "version={version}"
-        script: "mozharness/scripts/release/bouncer_check.py"
+        using: run-task
+        sparse-profile: mozharness
     # 'release' index type interpolates the routes placeholders
     index:
         type: release

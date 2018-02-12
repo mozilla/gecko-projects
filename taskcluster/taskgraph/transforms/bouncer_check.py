@@ -6,7 +6,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 import copy
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.partials import get_previsous_versions
 from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.schema import (
     resolve_keyed_by,
@@ -19,21 +18,35 @@ transforms = TransformSequence()
 
 
 @transforms.add
+def add_command(config, jobs):
+    release_config = get_release_config(config)
+    version = release_config["version"]
+    for job in jobs:
+        job = copy.deepcopy(job)  # don't overwrite dict values here
+        command = [
+            "cd", "/builds/worker/checkouts/gecko", "&&",
+            "./mach", "python",
+            "testing/mozharness/scripts/release/bouncer_check.py",
+            "--version={}".format(version),
+        ]
+        job["run"]["command"] = command
+        yield job
+
+
+@transforms.add
 def add_previous_versions(config, jobs):
-    release_history = config.params.get('release_history')
-    # If no release history, then don't generate extra parameters
-    if not release_history:
+    release_config = get_release_config(config)
+    if not release_config.get("partial_versions"):
         for job in jobs:
             yield job
     else:
-        previous_versions = get_previsous_versions(release_history)
         extra_params = []
-        for previous_version in previous_versions:
-            extra_params.append("previous-version={}".format(previous_version))
+        for partial in release_config["partial_versions"].split(","):
+            extra_params.append("--previous-version={}".format(partial.split("build")[0]))
 
         for job in jobs:
-            job["run"].setdefault("options", [])
-            job["run"]["options"].extend(extra_params)
+            job = copy.deepcopy(job)  # don't overwrite dict values here
+            job["run"]["command"].extend(extra_params)
             yield job
 
 
@@ -48,16 +61,9 @@ def handle_keyed_by(config, jobs):
         for field in fields:
             resolve_keyed_by(item=job, field=field, item_name=job['name'],
                              project=config.params['project'])
-        yield job
 
+        for cfg in job["run"]["config"]:
+            job["run"]["command"].extend(["--config", cfg])
 
-@transforms.add
-def interpolate(config, jobs):
-    release_config = get_release_config(config)
-    for job in jobs:
-        mh_options = list(job["run"]["options"])
-        job["run"]["options"] = [
-            option.format(version=release_config["version"])
-            for option in mh_options
-        ]
+        del job["run"]["config"]
         yield job

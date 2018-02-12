@@ -23,10 +23,6 @@ BOUNCER_URL_PATTERN = "{bouncer_prefix}?product={product}&os={os}&lang={lang}"
 
 class BouncerCheck(BaseScript, VirtualenvMixin):
     config_options = [
-        [["--product"], {
-            "dest": "product",
-            "help": "Product being released, eg: firefox, thunderbird",
-        }],
         [["--version"], {
             "dest": "version",
             "help": "Version of release, eg: 39.0b5",
@@ -53,10 +49,6 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
             "default": 20,
             "type": int,
             "help": "Number of HTTP sessions running in parallel",
-        }],
-        [["--scm-level"], {
-            "dest": "scm_level",
-            "help": "dummy option",
         }],
     ] + virtualenv_config_options
 
