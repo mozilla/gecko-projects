@@ -1431,6 +1431,8 @@ pref("dom.webcomponents.customelements.enabled", false);
 #endif
 
 pref("javascript.enabled",                  true);
+// Enable Array.prototype.values
+pref("javascript.options.array_prototype_values", true);
 pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     false);
@@ -1550,6 +1552,8 @@ pref("javascript.options.dump_stack_on_debuggee_would_run", false);
 
 // Spectre security vulnerability mitigations.
 pref("javascript.options.spectre.index_masking", true);
+pref("javascript.options.spectre.string_mitigations", true);
+pref("javascript.options.spectre.value_masking", true);
 
 // Streams API
 pref("javascript.options.streams", false);
@@ -3027,7 +3031,7 @@ pref("layout.css.emulate-moz-box-with-flex", false);
 
 // Is the paint-order property supported for HTML text? (It is always supported
 // for SVG, provided it is enabled at all; see "svg.paint-order.enabled".)
-pref("layout.css.paint-order.enabled", false);
+pref("layout.css.paint-order.enabled", true);
 
 // Are sets of prefixed properties supported?
 pref("layout.css.prefixes.border-image", true);

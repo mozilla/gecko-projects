@@ -1104,20 +1104,6 @@ TabParent::SendMouseEvent(const nsAString& aType, float aX, float aY,
 }
 
 void
-TabParent::SendKeyEvent(const nsAString& aType,
-                        int32_t aKeyCode,
-                        int32_t aCharCode,
-                        int32_t aModifiers,
-                        bool aPreventDefault)
-{
-  if (mIsDestroyed || !mIsReadyToHandleInputEvents) {
-    return;
-  }
-  Unused << PBrowserParent::SendKeyEvent(nsString(aType), aKeyCode, aCharCode,
-                                         aModifiers, aPreventDefault);
-}
-
-void
 TabParent::SendRealMouseEvent(WidgetMouseEvent& aEvent)
 {
   if (mIsDestroyed) {
@@ -1281,7 +1267,8 @@ TabParent::QueryDropLinksForVerification()
 
 void
 TabParent::SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
-                             uint32_t aDropEffect)
+                             uint32_t aDropEffect,
+                             const nsCString& aPrincipalURISpec)
 {
   if (mIsDestroyed || !mIsReadyToHandleInputEvents) {
     return;
@@ -1294,7 +1281,8 @@ TabParent::SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
     }
   }
   DebugOnly<bool> ret =
-    PBrowserParent::SendRealDragEvent(aEvent, aDragAction, aDropEffect);
+    PBrowserParent::SendRealDragEvent(aEvent, aDragAction, aDropEffect,
+                                      aPrincipalURISpec);
   NS_WARNING_ASSERTION(ret, "PBrowserParent::SendRealDragEvent() failed");
   MOZ_ASSERT(!ret || aEvent.HasBeenPostedToRemoteProcess());
 }
@@ -3345,7 +3333,8 @@ TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
                                  const uint32_t& aAction,
                                  const OptionalShmem& aVisualDnDData,
                                  const uint32_t& aStride, const uint8_t& aFormat,
-                                 const LayoutDeviceIntRect& aDragRect)
+                                 const LayoutDeviceIntRect& aDragRect,
+                                 const nsCString& aPrincipalURISpec)
 {
   mInitialDataTransferItems.Clear();
   nsIPresShell* shell = mFrameElement->OwnerDoc()->GetShell();
@@ -3387,6 +3376,7 @@ TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
 
   mDragValid = true;
   mDragRect = aDragRect;
+  mDragPrincipalURISpec = aPrincipalURISpec;
 
   esm->BeginTrackingRemoteDragGesture(mFrameElement);
 
@@ -3398,8 +3388,22 @@ TabParent::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
 }
 
 void
-TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer)
+TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer,
+                               nsACString& aPrincipalURISpec)
 {
+  aPrincipalURISpec.Assign(mDragPrincipalURISpec);
+
+  nsCOMPtr<nsIPrincipal> principal;
+  if (!mDragPrincipalURISpec.IsEmpty()) {
+    // If principal is given, try using it first.
+    principal = BasePrincipal::CreateCodebasePrincipal(mDragPrincipalURISpec);
+  }
+  if (!principal) {
+    // Fallback to system principal, to handle like the data is from browser
+    // chrome or OS.
+    principal = nsContentUtils::GetSystemPrincipal();
+  }
+
   for (uint32_t i = 0; i < mInitialDataTransferItems.Length(); ++i) {
     nsTArray<IPCDataTransferItem>& itemArray = mInitialDataTransferItems[i];
     for (auto& item : itemArray) {
@@ -3435,19 +3439,17 @@ TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer)
         mozilla::Unused << DeallocShmem(item.data().get_Shmem());
       }
 
-      // Using system principal here, since once the data is on parent process
-      // side, it can be handled as being from browser chrome or OS.
-
       // We set aHidden to false, as we don't need to worry about hiding data
       // from content in the parent process where there is no content.
       // XXX: Nested Content Processes may change this
       aDataTransfer->SetDataWithPrincipalFromOtherProcess(NS_ConvertUTF8toUTF16(item.flavor()),
                                                           variant, i,
-                                                          nsContentUtils::GetSystemPrincipal(),
+                                                          principal,
                                                           /* aHidden = */ false);
     }
   }
   mInitialDataTransferItems.Clear();
+  mDragPrincipalURISpec.Truncate(0);
 }
 
 bool

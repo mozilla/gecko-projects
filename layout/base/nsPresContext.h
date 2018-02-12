@@ -472,7 +472,7 @@ public:
     if (!r.IsEqualEdges(mVisibleArea)) {
       mVisibleArea = r;
       // Visible area does not affect media queries when paginated.
-      if (!IsPaginated() && HasCachedStyleData()) {
+      if (!IsPaginated()) {
         MediaFeatureValuesChanged({
           mozilla::MediaFeatureChangeReason::ViewportChange
         });
@@ -619,19 +619,19 @@ public:
    * independent of the language-specific global preference.
    */
   void SetBaseMinFontSize(int32_t aMinFontSize) {
-    if (aMinFontSize == mBaseMinFontSize)
+    if (aMinFontSize == mBaseMinFontSize) {
       return;
+    }
 
     mBaseMinFontSize = aMinFontSize;
-    if (HasCachedStyleData()) {
-      // Media queries could have changed, since we changed the meaning
-      // of 'em' units in them.
-      MediaFeatureValuesChanged({
-        eRestyle_ForceDescendants,
-        NS_STYLE_HINT_REFLOW,
-        mozilla::MediaFeatureChangeReason::MinFontSizeChange
-      });
-    }
+
+    // Media queries could have changed, since we changed the meaning
+    // of 'em' units in them.
+    MediaFeatureValuesChanged({
+      eRestyle_ForceDescendants,
+      NS_STYLE_HINT_REFLOW,
+      mozilla::MediaFeatureChangeReason::MinFontSizeChange
+    });
   }
 
   float GetFullZoom() { return mFullZoom; }
@@ -1282,14 +1282,17 @@ protected:
 
   bool HavePendingInputEvent();
 
-  // Can't be inline because we can't include nsStyleSet.h.
-  bool HasCachedStyleData();
-
   // Creates a one-shot timer with the given aCallback & aDelay.
   // Returns a refcounted pointer to the timer (or nullptr on failure).
   already_AddRefed<nsITimer> CreateTimer(nsTimerCallbackFunc aCallback,
                                          const char* aName,
                                          uint32_t aDelay);
+
+  struct TransactionInvalidations {
+    uint64_t mTransactionId;
+    nsTArray<nsRect> mInvalidations;
+  };
+  TransactionInvalidations* GetInvalidations(uint64_t aTransactionId);
 
   // IMPORTANT: The ownership implicit in the following member variables
   // has been explicitly checked.  If you add any members to this class,
@@ -1359,10 +1362,6 @@ protected:
 
   mozilla::UniquePtr<nsBidi> mBidiEngine;
 
-  struct TransactionInvalidations {
-    uint64_t mTransactionId;
-    nsTArray<nsRect> mInvalidations;
-  };
   AutoTArray<TransactionInvalidations, 4> mTransactions;
 
   // text performance metrics
@@ -1488,8 +1487,6 @@ protected:
   unsigned              mSuppressResizeReflow : 1;
 
   unsigned              mIsVisual : 1;
-
-  unsigned              mFireAfterPaintEvents : 1;
 
   unsigned              mIsChrome : 1;
   unsigned              mIsChromeOriginImage : 1;

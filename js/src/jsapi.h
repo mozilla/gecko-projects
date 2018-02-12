@@ -1118,6 +1118,7 @@ class JS_PUBLIC_API(ContextOptions) {
         , fuzzing_(false)
 #endif
         , expressionClosures_(false)
+        , arrayProtoValues_(true)
     {
     }
 
@@ -1279,6 +1280,12 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
+    bool arrayProtoValues() const { return arrayProtoValues_; }
+    ContextOptions& setArrayProtoValues(bool flag) {
+        arrayProtoValues_ = flag;
+        return *this;
+    }
+
     void disableOptionsForSafeMode() {
         setBaseline(false);
         setIon(false);
@@ -1310,6 +1317,7 @@ class JS_PUBLIC_API(ContextOptions) {
     bool fuzzing_ : 1;
 #endif
     bool expressionClosures_ : 1;
+    bool arrayProtoValues_ : 1;
 
 };
 
@@ -5904,6 +5912,8 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(JUMP_THRESHOLD, "jump-threshold")                              \
     Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
     Register(SPECTRE_INDEX_MASKING, "spectre.index-masking")                \
+    Register(SPECTRE_STRING_MITIGATIONS, "spectre.string-mitigations")      \
+    Register(SPECTRE_VALUE_MASKING, "spectre.value-masking")                \
     Register(ASMJS_ATOMICS_ENABLE, "asmjs.atomics.enable")                  \
     Register(WASM_FOLD_OFFSETS, "wasm.fold-offsets")
 

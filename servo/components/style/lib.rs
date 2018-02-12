@@ -33,6 +33,7 @@ extern crate bitflags;
 #[allow(unused_extern_crates)] extern crate byteorder;
 #[cfg(feature = "gecko")] #[macro_use] #[no_link] extern crate cfg_if;
 #[macro_use] extern crate cssparser;
+#[macro_use] extern crate debug_unreachable;
 extern crate euclid;
 extern crate fallible;
 extern crate fnv;
@@ -77,6 +78,7 @@ extern crate uluru;
 extern crate unicode_bidi;
 #[allow(unused_extern_crates)]
 extern crate unicode_segmentation;
+extern crate void;
 
 #[macro_use]
 mod macros;
@@ -116,13 +118,12 @@ pub mod selector_map;
 pub mod selector_parser;
 pub mod shared_lock;
 pub mod sharing;
-pub mod style_resolver;
-pub mod stylist;
-#[cfg(feature = "servo")] #[allow(unsafe_code)] pub mod servo;
 pub mod str;
 pub mod style_adjuster;
+pub mod style_resolver;
 pub mod stylesheet_set;
 pub mod stylesheets;
+pub mod stylist;
 pub mod thread_state;
 pub mod timer;
 pub mod traversal;
@@ -153,6 +154,9 @@ use style_traits::{CssWriter, ToCss};
 pub mod properties {
     include!(concat!(env!("OUT_DIR"), "/properties.rs"));
 }
+
+// uses a macro from properties
+#[cfg(feature = "servo")] #[allow(unsafe_code)] pub mod servo;
 
 #[cfg(feature = "gecko")]
 #[allow(unsafe_code, missing_docs)]

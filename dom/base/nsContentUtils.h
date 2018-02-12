@@ -74,7 +74,6 @@ class nsIDOMDocument;
 class nsIDOMDocumentFragment;
 class nsIDOMEvent;
 class nsIDOMHTMLInputElement;
-class nsIDOMKeyEvent;
 class nsIDOMNode;
 class nsIDragSession;
 class nsIEventTarget;
@@ -2874,18 +2873,6 @@ public:
                                                      nsPresContext* aPresContext);
   static nsView* GetViewToDispatchEvent(nsPresContext* aPresContext,
                                         nsIPresShell** aPresShell);
-
-  /**
-   * Synthesize a key event to the given widget
-   * (see nsIDOMWindowUtils.sendKeyEvent).
-   */
-  static nsresult SendKeyEvent(nsIWidget* aWidget,
-                               const nsAString& aType,
-                               int32_t aKeyCode,
-                               int32_t aCharCode,
-                               int32_t aModifiers,
-                               uint32_t aAdditionalFlags,
-                               bool* aDefaultActionTaken);
 
   /**
    * Synthesize a mouse event to the given widget

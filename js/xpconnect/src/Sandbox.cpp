@@ -234,8 +234,7 @@ SandboxCreateCrypto(JSContext* cx, JS::HandleObject obj)
     nsIGlobalObject* native = xpc::NativeGlobal(obj);
     MOZ_ASSERT(native);
 
-    dom::Crypto* crypto = new dom::Crypto();
-    crypto->Init(native);
+    dom::Crypto* crypto = new dom::Crypto(native);
     JS::RootedObject wrapped(cx, crypto->WrapObject(cx, nullptr));
     return JS_DefineProperty(cx, obj, "crypto", wrapped, JSPROP_ENUMERATE);
 }
@@ -315,12 +314,11 @@ SandboxFetch(JSContext* cx, JS::HandleObject scope, const CallArgs& args)
 static bool SandboxFetchPromise(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    RootedObject callee(cx, &args.callee());
     RootedObject scope(cx, JS::CurrentGlobalOrNull(cx));
     if (SandboxFetch(cx, scope, args)) {
         return true;
     }
-    return ConvertExceptionToPromise(cx, scope, args.rval());
+    return ConvertExceptionToPromise(cx, args.rval());
 }
 
 

@@ -896,6 +896,12 @@ class JSScript : public js::gc::TenuredCell
                            js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
 
   private:
+    // Pointer to baseline->method()->raw(), ion->method()->raw(), a wasm jit
+    // entry, the JIT's EnterInterpreter stub, or the lazy link stub. Must be
+    // non-null.
+    uint8_t* jitCodeRaw_;
+    uint8_t* jitCodeSkipArgCheck_;
+
     js::SharedScriptData* scriptData_;
   public:
     uint8_t*        data;      /* pointer to variable-length data array (see
@@ -926,13 +932,6 @@ class JSScript : public js::gc::TenuredCell
 
     /* Information used to re-lazify a lazily-parsed interpreted function. */
     js::LazyScript* lazyScript;
-
-    /*
-     * Pointer to baseline->method()->raw(), ion->method()->raw(), the JIT's
-     * EnterInterpreter stub, or the lazy link stub. Must be non-null.
-     */
-    uint8_t* jitCodeRaw_;
-    uint8_t* jitCodeSkipArgCheck_;
 
     // 32-bit fields.
 
@@ -1584,10 +1583,10 @@ class JSScript : public js::gc::TenuredCell
     static size_t offsetOfIonScript() {
         return offsetof(JSScript, ion);
     }
-    static size_t offsetOfJitCodeRaw() {
+    static constexpr size_t offsetOfJitCodeRaw() {
         return offsetof(JSScript, jitCodeRaw_);
     }
-    static size_t offsetOfJitCodeSkipArgCheck() {
+    static constexpr size_t offsetOfJitCodeSkipArgCheck() {
         return offsetof(JSScript, jitCodeSkipArgCheck_);
     }
     uint8_t* jitCodeRaw() const {
@@ -1888,6 +1887,7 @@ class JSScript : public js::gc::TenuredCell
 
     js::GCPtrAtom& getAtom(jsbytecode* pc) const {
         MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
+        MOZ_ASSERT(js::JOF_OPTYPE((JSOp)*pc) == JOF_ATOM);
         return getAtom(GET_UINT32_INDEX(pc));
     }
 
@@ -1896,8 +1896,7 @@ class JSScript : public js::gc::TenuredCell
     }
 
     js::PropertyName* getName(jsbytecode* pc) const {
-        MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
-        return getAtom(GET_UINT32_INDEX(pc))->asPropertyName();
+        return getAtom(pc)->asPropertyName();
     }
 
     JSObject* getObject(size_t index) {
