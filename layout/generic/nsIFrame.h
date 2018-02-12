@@ -1250,8 +1250,6 @@ public:
   // or height), imposed by its flex container.
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(FlexItemMainSizeOverride, nscoord)
 
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(CachedBackgroundImageDT, DrawTarget)
-
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(InvalidationRect, nsRect)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(RefusedAsyncAnimationProperty, bool)
@@ -2070,7 +2068,7 @@ public:
    * @param aNameSpaceID the namespace of the attribute
    * @param aAttribute the atom name of the attribute
    * @param aModType Whether or not the attribute was added, changed, or removed.
-   *   The constants are defined in nsIDOMMutationEvent.h.
+   *   The constants are defined in MutationEvent.webidl.
    */
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
                                      nsAtom*        aAttribute,

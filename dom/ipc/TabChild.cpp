@@ -1948,7 +1948,8 @@ TabChild::RecvNormalPriorityRealTouchMoveEvent(
 mozilla::ipc::IPCResult
 TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
                             const uint32_t& aDragAction,
-                            const uint32_t& aDropEffect)
+                            const uint32_t& aDropEffect,
+                            const nsCString& aPrincipalURISpec)
 {
   WidgetDragEvent localEvent(aEvent);
   localEvent.mWidget = mPuppetWidget;
@@ -1956,6 +1957,7 @@ TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
   nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
   if (dragSession) {
     dragSession->SetDragAction(aDragAction);
+    dragSession->SetTriggeringPrincipalURISpec(aPrincipalURISpec);
     nsCOMPtr<nsIDOMDataTransfer> initialDataTransfer;
     dragSession->GetDataTransfer(getter_AddRefs(initialDataTransfer));
     if (initialDataTransfer) {
@@ -2127,19 +2129,6 @@ mozilla::ipc::IPCResult
 TabChild::RecvNormalPriorityRealKeyEvent(const WidgetKeyboardEvent& aEvent)
 {
   return RecvRealKeyEvent(aEvent);
-}
-
-mozilla::ipc::IPCResult
-TabChild::RecvKeyEvent(const nsString& aType,
-                       const int32_t& aKeyCode,
-                       const int32_t& aCharCode,
-                       const int32_t& aModifiers,
-                       const bool& aPreventDefault)
-{
-  bool ignored = false;
-  nsContentUtils::SendKeyEvent(mPuppetWidget, aType, aKeyCode, aCharCode,
-                               aModifiers, aPreventDefault, &ignored);
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult

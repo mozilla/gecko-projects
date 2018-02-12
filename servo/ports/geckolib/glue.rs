@@ -142,7 +142,7 @@ use style::stylesheets::{StylesheetContents, SupportsRule};
 use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
 use style::stylesheets::keyframes_rule::{Keyframe, KeyframeSelector, KeyframesStepValue};
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
-use style::stylist::{add_size_of_ua_cache, RuleInclusion, Stylist};
+use style::stylist::{add_size_of_ua_cache, AuthorStylesEnabled, RuleInclusion, Stylist};
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::DomTraversal;
@@ -279,19 +279,8 @@ fn traverse_subtree(
         None
     };
 
-    let is_restyle = element.get_data().is_some();
-
     let traversal = RecalcStyleOnly::new(shared_style_context);
-    let (used_parallel, stats) = driver::traverse_dom(&traversal, token, thread_pool);
-
-    if traversal_flags.contains(TraversalFlags::ParallelTraversal) &&
-       !traversal_flags.contains(TraversalFlags::AnimationOnly) &&
-       is_restyle && !element.is_native_anonymous() {
-       // We turn off parallel traversal for background tabs; this
-       // shouldn't count in telemetry. We're also focusing on restyles so
-       // we ensure that it's a restyle.
-       per_doc_data.record_traversal(used_parallel, stats);
-    }
+    driver::traverse_dom(&traversal, token, thread_pool);
 }
 
 /// Traverses the subtree rooted at `root` for restyling.
@@ -1258,12 +1247,25 @@ pub unsafe extern "C" fn Servo_StyleSet_FlushStyleSheets(
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_NoteStyleSheetsChanged(
     raw_data: RawServoStyleSetBorrowed,
-    author_style_disabled: bool,
     changed_origins: OriginFlags,
 ) {
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     data.stylist.force_stylesheet_origins_dirty(OriginSet::from(changed_origins));
-    data.stylist.set_author_style_disabled(author_style_disabled);
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleSet_SetAuthorStyleDisabled(
+    raw_data: RawServoStyleSetBorrowed,
+    author_style_disabled: bool,
+) {
+    let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
+    let enabled =
+        if author_style_disabled {
+            AuthorStylesEnabled::No
+        } else {
+            AuthorStylesEnabled::Yes
+        };
+    data.stylist.set_author_styles_enabled(enabled);
 }
 
 #[no_mangle]
@@ -2448,19 +2450,12 @@ pub extern "C" fn Servo_StyleSet_Drop(data: RawServoStyleSetOwned) {
     let _ = data.into_box::<PerDocumentStyleData>();
 }
 
-
-/// Updating the stylesheets and redoing selector matching is always happens
-/// before the document element is inserted. Therefore we don't need to call
-/// `force_dirty` here.
 #[no_mangle]
-pub extern "C" fn Servo_StyleSet_CompatModeChanged(raw_data: RawServoStyleSetBorrowed) {
+pub unsafe extern "C" fn Servo_StyleSet_CompatModeChanged(raw_data: RawServoStyleSetBorrowed) {
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    let quirks_mode = unsafe {
-        (*data.stylist.device().pres_context().mDocument.raw::<nsIDocument>())
-            .mCompatMode
-    };
-
-    data.stylist.set_quirks_mode(quirks_mode.into());
+    let doc =
+        &*data.stylist.device().pres_context().mDocument.raw::<nsIDocument>();
+    data.stylist.set_quirks_mode(QuirksMode::from(doc.mCompatMode));
 }
 
 fn parse_property_into<R>(
@@ -2872,8 +2867,8 @@ fn remove_property(
 pub unsafe extern "C" fn Servo_DeclarationBlock_RemoveProperty(
     declarations: RawServoDeclarationBlockBorrowed,
     property: *const nsACString,
-) {
-    remove_property(declarations, get_property_id_from_property!(property, ()));
+) -> bool {
+    remove_property(declarations, get_property_id_from_property!(property, false))
 }
 
 #[no_mangle]

@@ -36,6 +36,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   PageActions: "resource:///modules/PageActions.jsm",
   PageThumbs: "resource://gre/modules/PageThumbs.jsm",
+  PanelMultiView: "resource:///modules/PanelMultiView.jsm",
   PanelView: "resource:///modules/PanelMultiView.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
@@ -1246,6 +1247,12 @@ var gBrowserInit = {
     gBrowser.updateBrowserRemoteness(initBrowser, isRemote, {
       remoteType, sameProcessAsFrameLoader
     });
+
+    gUIDensity.init();
+
+    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+      gDragSpaceObserver.init();
+    }
   },
 
   onLoad() {
@@ -1299,12 +1306,6 @@ var gBrowserInit = {
     // restore tabs into windows AFTER important parts like gMultiProcessBrowser
     // have been initialized.
     Services.obs.notifyObservers(window, "browser-window-before-show");
-
-    gUIDensity.init();
-
-    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      gDragSpaceObserver.init();
-    }
 
     if (!window.toolbar.visible) {
       // adjust browser UI for popups
@@ -1767,6 +1768,14 @@ var gBrowserInit = {
   },
 
   onUnload() {
+    gUIDensity.uninit();
+
+    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
+      gDragSpaceObserver.uninit();
+    }
+
+    TabsInTitlebar.uninit();
+
     // In certain scenarios it's possible for unload to be fired before onload,
     // (e.g. if the window is being closed after browser.js loads but before the
     // load completes). In that case, there's nothing to do here.
@@ -1790,12 +1799,6 @@ var gBrowserInit = {
 
     Services.obs.removeObserver(gPluginHandler.NPAPIPluginCrashed, "plugin-crashed");
 
-    gUIDensity.uninit();
-
-    if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
-      gDragSpaceObserver.uninit();
-    }
-
     try {
       gBrowser.removeProgressListener(window.XULBrowserWindow);
       gBrowser.removeTabsProgressListener(window.TabsProgressListener);
@@ -1805,8 +1808,6 @@ var gBrowserInit = {
     PlacesToolbarHelper.uninit();
 
     BookmarkingUI.uninit();
-
-    TabsInTitlebar.uninit();
 
     ToolbarIconColor.uninit();
 
@@ -4334,17 +4335,17 @@ var XULBrowserWindow = {
   },
 
   setOverLink(url, anchorElt) {
-    const textToSubURI = Cc["@mozilla.org/intl/texttosuburi;1"].
-                         getService(Ci.nsITextToSubURI);
-    url = textToSubURI.unEscapeURIForUI("UTF-8", url);
+    if (url) {
+      url = Services.textToSubURI.unEscapeURIForUI("UTF-8", url);
 
-    // Encode bidirectional formatting characters.
-    // (RFC 3987 sections 3.2 and 4.1 paragraph 6)
-    url = url.replace(/[\u200e\u200f\u202a\u202b\u202c\u202d\u202e]/g,
-                      encodeURIComponent);
+      // Encode bidirectional formatting characters.
+      // (RFC 3987 sections 3.2 and 4.1 paragraph 6)
+      url = url.replace(/[\u200e\u200f\u202a\u202b\u202c\u202d\u202e]/g,
+                        encodeURIComponent);
 
-    if (gURLBar && gURLBar._mayTrimURLs /* corresponds to browser.urlbar.trimURLs */)
-      url = trimURL(url);
+      if (gURLBar && gURLBar._mayTrimURLs /* corresponds to browser.urlbar.trimURLs */)
+        url = trimURL(url);
+    }
 
     this.overLink = url;
     LinkTargetDisplay.update();
@@ -7255,7 +7256,7 @@ var gIdentityHandler = {
   handleMoreInfoClick(event) {
     displaySecurityInfo();
     event.stopPropagation();
-    this._identityPopup.hidePopup();
+    PanelMultiView.hidePopup(this._identityPopup);
   },
 
   showSecuritySubView() {
@@ -7277,14 +7278,14 @@ var gIdentityHandler = {
     // Reload the page with the content unblocked
     BrowserReloadWithFlags(
       Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_MIXED_CONTENT);
-    this._identityPopup.hidePopup();
+    PanelMultiView.hidePopup(this._identityPopup);
   },
 
   enableMixedContentProtection() {
     gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
       "MixedContent:ReenableProtection", {});
     BrowserReload();
-    this._identityPopup.hidePopup();
+    PanelMultiView.hidePopup(this._identityPopup);
   },
 
   removeCertException() {
@@ -7296,7 +7297,7 @@ var gIdentityHandler = {
     let port = this._uri.port > 0 ? this._uri.port : 443;
     this._overrideService.clearValidityOverride(host, port);
     BrowserReloadSkipCache();
-    this._identityPopup.hidePopup();
+    PanelMultiView.hidePopup(this._identityPopup);
   },
 
   /**
@@ -7362,7 +7363,7 @@ var gIdentityHandler = {
     // Handle a location change while the Control Center is focused
     // by closing the popup (bug 1207542)
     if (shouldHidePopup) {
-      this._identityPopup.hidePopup();
+      PanelMultiView.hidePopup(this._identityPopup);
     }
 
     // NOTE: We do NOT update the identity popup (the control center) when
@@ -7826,7 +7827,8 @@ var gIdentityHandler = {
     this._identityBox.setAttribute("open", "true");
 
     // Now open the popup, anchored off the primary chrome element
-    this._identityPopup.openPopup(this._identityIcon, "bottomcenter topleft");
+    PanelMultiView.openPopup(this._identityPopup, this._identityIcon,
+                             "bottomcenter topleft").catch(Cu.reportError);
   },
 
   onPopupShown(event) {
@@ -7859,7 +7861,7 @@ var gIdentityHandler = {
       // Hide the panel when focusing an element that is
       // neither an ancestor nor descendant unless the panel has
       // @noautohide (e.g. for a tour).
-      this._identityPopup.hidePopup();
+      PanelMultiView.hidePopup(this._identityPopup);
     }
   },
 
@@ -7992,8 +7994,10 @@ var gIdentityHandler = {
 
       for (let state of SitePermissions.getAvailableStates(aPermission.id)) {
         let menuitem = document.createElement("menuitem");
+        // We need to correctly display the default/unknown state, which has its
+        // own integer value (0) but represents one of the other states.
         if (state == SitePermissions.getDefault(aPermission.id)) {
-          menuitem.setAttribute("value", 0);
+          menuitem.setAttribute("value", "0");
         } else {
           menuitem.setAttribute("value", state);
         }
@@ -8002,7 +8006,12 @@ var gIdentityHandler = {
       }
 
       menulist.appendChild(menupopup);
-      menulist.setAttribute("value", aPermission.state);
+
+      if (aPermission.state == SitePermissions.getDefault(aPermission.id)) {
+        menulist.value = "0";
+      } else {
+        menulist.value = aPermission.state;
+      }
 
       // Avoiding listening to the "select" event on purpose. See Bug 1404262.
       menulist.addEventListener("command", () => {

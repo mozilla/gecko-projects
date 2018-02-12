@@ -478,17 +478,6 @@ interface nsINavBookmarksService : nsISupports
                             [optional] in unsigned short aSource);
 
   /**
-   * Get the itemId given the containing folder and the index.
-   *  @param aParentId
-   *         The id of the diret parent folder of the item
-   *  @param aIndex
-   *         The index of the item within the parent folder.
-   *         Pass DEFAULT_INDEX for the last item.
-   *  @return The ID of the found item, -1 if the item does not exists.
-   */
-  long long getIdForItemAt(in long long aParentId, in long aIndex);
-
-  /**
    * Set the title for an item.
    *  @param aItemId
    *         The id of the item whose title should be updated.
@@ -515,32 +504,6 @@ interface nsINavBookmarksService : nsISupports
   AUTF8String getItemTitle(in long long aItemId);
 
   /**
-   * Set the date added time for an item.
-   *
-   * @param aItemId
-   *        the id of the item whose date added time should be updated.
-   * @param aDateAdded
-   *        the new date added value in microseconds.  Note that it is rounded
-   *        down to milliseconds precision.
-   *  @param [optional] aSource
-   *         The change source, forwarded to all bookmark observers. Defaults
-   *         to SOURCE_DEFAULT.
-   */
-  void setItemDateAdded(in long long aItemId,
-                        in PRTime aDateAdded,
-                        [optional] in unsigned short aSource);
-
-  /**
-   * Get the date added time for an item.
-   *
-   * @param aItemId
-   *        the id of the item whose date added time should be retrieved.
-   *
-   * @return the date added value in microseconds.
-   */
-  PRTime getItemDateAdded(in long long aItemId);
-
-  /**
    * Set the last modified time for an item.
    *
    * @param aItemId
@@ -562,19 +525,6 @@ interface nsINavBookmarksService : nsISupports
                            [optional] in unsigned short aSource);
 
   /**
-   * Get the last modified time for an item.
-   *
-   * @param aItemId
-   *        the id of the item whose last modified time should be retrieved.
-   *
-   * @return the date added value in microseconds.
-   *
-   * @note When an item is added lastModified is set to the same value as
-   *       dateAdded.
-   */
-  PRTime getItemLastModified(in long long aItemId);
-
-  /**
    * Get the URI for a bookmark item.
    */
   nsIURI getBookmarkURI(in long long aItemId);
@@ -583,27 +533,6 @@ interface nsINavBookmarksService : nsISupports
    * Get the index for an item.
    */
   long getItemIndex(in long long aItemId);
-
-  /**
-   * Changes the index for a item. This method does not change the indices of
-   * any other items in the same folder, so ensure that the new index does not
-   * already exist, or change the index of other items accordingly, otherwise
-   * the indices will become corrupted.
-   *
-   * WARNING: This is API is intended for scenarios such as folder sorting,
-   *          where the caller manages the indices of *all* items in the folder.
-   *          You must always ensure each index is unique after a reordering.
-   *
-   *  @param aItemId    The id of the item to modify
-   *  @param aNewIndex  The new index
-   *  @param aSource    The optional change source, forwarded to all bookmark
-   *                    observers. Defaults to SOURCE_DEFAULT.
-   *
-   *  @throws If aNewIndex is out of bounds.
-   */
-  void setItemIndex(in long long aItemId,
-                    in long aNewIndex,
-                    [optional] in unsigned short aSource);
 
   /**
    * Get the parent folder's id for an item.

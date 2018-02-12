@@ -431,8 +431,12 @@ class nsStyleSet final
                                   mozilla::CSSStyleSheet* aReferenceSheet);
 
   // Enable/Disable entire author style level (Doc, ScopedDoc & PresHint levels)
-  bool GetAuthorStyleDisabled() const;
-  nsresult SetAuthorStyleDisabled(bool aStyleDisabled);
+  bool GetAuthorStyleDisabled() const
+  {
+    return mAuthorStyleDisabled;
+  }
+
+  void SetAuthorStyleDisabled(bool aStyleDisabled);
 
   int32_t SheetCount(mozilla::SheetType aType) const {
     return mSheets[aType].Length();
@@ -469,16 +473,6 @@ class nsStyleSet final
   void RootStyleContextRemoved() {
     MOZ_ASSERT(mRootStyleContextCount > 0);
     --mRootStyleContextCount;
-  }
-
-  // Return whether the rule tree has cached data such that we need to
-  // do dynamic change handling for changes that change the results of
-  // media queries or require rebuilding all style data.
-  // We don't care whether we have cached rule processors or whether
-  // they have cached rule cascades; getting the rule cascades again in
-  // order to do rule matching will get the correct rule cascade.
-  bool HasCachedStyleData() const {
-    return (mRuleTree && mRuleTree->TreeHasCachedData()) || mRootStyleContextCount > 0;
   }
 
   // Notify the style set that a rulenode is no longer in use, or was
@@ -535,7 +529,7 @@ private:
   nsresult DirtyRuleProcessors(mozilla::SheetType aType);
 
   // Update the rule processor list after a change to the style sheet list.
-  nsresult GatherRuleProcessors(mozilla::SheetType aType);
+  void GatherRuleProcessors(mozilla::SheetType aType);
 
   void AddImportantRules(nsRuleNode* aCurrLevelNode,
                          nsRuleNode* aLastPrevLevelNode,

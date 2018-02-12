@@ -3710,7 +3710,9 @@ NS_IMETHODIMP nsDocumentViewer::GetInLink(bool* aInLink)
 
   // get the popup link
   nsCOMPtr<nsINode> node = GetPopupLinkNode();
-  NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
+  if (!node) {
+    return NS_ERROR_FAILURE;
+  }
 
   // if we made it here, we're in a link
   *aInLink = true;
@@ -3946,9 +3948,8 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
                                nsIWebProgressListener* aWebProgressListener)
 {
 #if defined(NS_PRINTING) && defined(NS_PRINT_PREVIEW)
-  NS_WARNING_ASSERTION(
-    IsInitializedForPrintPreview(),
-    "Using docshell.printPreview is the preferred way for print previewing!");
+  MOZ_ASSERT(IsInitializedForPrintPreview(),
+    "For print preview nsIWebBrowserPrint must be from docshell.printPreview!");
 
   NS_ENSURE_ARG_POINTER(aChildDOMWin);
   nsresult rv = NS_OK;

@@ -8,6 +8,69 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
+(function earlyBlankFirstPaint() {
+  if (!Services.prefs.getBoolPref("browser.startup.blankWindow", false))
+    return;
+
+  let store = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+  let getValue = attr =>
+    store.getValue("chrome://browser/content/browser.xul", "main-window", attr);
+  let width = getValue("width");
+  let height = getValue("height");
+
+  // The clean profile case isn't handled yet. Return early for now.
+  if (!width || !height)
+    return;
+
+  let screenX = getValue("screenX");
+  let screenY = getValue("screenY");
+  let browserWindowFeatures =
+    "chrome,all,dialog=no,extrachrome,menubar,resizable,scrollbars,status," +
+    "location,toolbar,personalbar," +
+    `left=${screenX},top=${screenY}`;
+
+  if (Services.prefs.getBoolPref("browser.suppress_first_window_animation"))
+    browserWindowFeatures += ",suppressanimation";
+
+  let win = Services.ww.openWindow(null, "about:blank", null,
+                                   browserWindowFeatures, null);
+
+  // Hide the titlebar if the actual browser window will draw in it.
+  if (Services.prefs.getBoolPref("browser.tabs.drawInTitlebar")) {
+    win.QueryInterface(Ci.nsIInterfaceRequestor)
+       .getInterface(Ci.nsIDOMWindowUtils)
+       .setChromeMargin(0, 2, 2, 2);
+  }
+
+  if (AppConstants.platform != "macosx") {
+    // On Windows/Linux the position is in device pixels rather than CSS pixels.
+    let scale = win.devicePixelRatio;
+    if (scale > 1)
+      win.moveTo(screenX / scale, screenY / scale);
+  }
+
+  // The sizemode="maximized" attribute needs to be set before first paint.
+  let docElt = win.document.documentElement;
+  let sizemode = getValue("sizemode");
+  if (sizemode == "maximized") {
+    docElt.setAttribute("sizemode", sizemode);
+
+    // Needed for when the user leaves the maximized mode.
+    docElt.setAttribute("height", height);
+    docElt.setAttribute("width", width);
+  } else {
+    // Setting the size of the window in the features string instead of here
+    // causes the window to grow by the size of the titlebar.
+    win.resizeTo(width, height);
+  }
+
+  // The window becomes visible after OnStopRequest, so make this happen now.
+  win.stop();
+
+  // Used in nsBrowserContentHandler.js to close unwanted blank windows.
+  docElt.setAttribute("windowtype", "navigator:blank");
+})();
+
 Cu.importGlobalProperties(["fetch"]);
 
 XPCOMUtils.defineLazyServiceGetter(this, "WindowsUIUtils", "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils");
@@ -37,6 +100,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileUtils: "resource://gre/modules/FileUtils.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
+  FxAccounts: "resource://gre/modules/FxAccounts.jsm",
   HybridContentTelemetry: "resource://gre/modules/HybridContentTelemetry.jsm",
   Integration: "resource://gre/modules/Integration.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
@@ -236,7 +300,6 @@ function BrowserGlue() {
                                 return new DistributionCustomizer();
                               });
 
-  ChromeUtils.defineModuleGetter(this, "fxAccounts", "resource://gre/modules/FxAccounts.jsm");
   XPCOMUtils.defineLazyServiceGetter(this, "AlertsService", "@mozilla.org/alerts-service;1", "nsIAlertsService");
 
   this._init();
@@ -404,10 +467,6 @@ BrowserGlue.prototype = {
         } else if (data == "smart-bookmarks-init") {
           this.ensurePlacesDefaultQueriesInitialized().then(() => {
             Services.obs.notifyObservers(null, "test-smart-bookmarks-done");
-          });
-        } else if (data == "mock-fxaccounts") {
-          Object.defineProperty(this, "fxAccounts", {
-            value: subject.wrappedJSObject
           });
         } else if (data == "mock-alerts-service") {
           Object.defineProperty(this, "AlertsService", {
@@ -2647,7 +2706,7 @@ BrowserGlue.prototype = {
     let clickCallback = async (subject, topic, data) => {
       if (topic != "alertclickcallback")
         return;
-      let url = await this.fxAccounts.promiseAccountsManageDevicesURI("device-connected-notification");
+      let url = await FxAccounts.config.promiseManageDevicesURI("device-connected-notification");
       let win = RecentWindow.getMostRecentBrowserWindow({private: false});
       if (!win) {
         this._openURLInNewWindow(url);

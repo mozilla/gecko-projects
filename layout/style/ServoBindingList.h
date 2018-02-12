@@ -114,9 +114,11 @@ SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void,
                    RawServoStyleSetBorrowed set,
                    RawGeckoElementBorrowedOrNull doc_elem,
                    const mozilla::ServoElementSnapshotTable* snapshots)
+SERVO_BINDING_FUNC(Servo_StyleSet_SetAuthorStyleDisabled, void,
+                   RawServoStyleSetBorrowed set,
+                   bool author_style_disabled)
 SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
                    RawServoStyleSetBorrowed set,
-                   bool author_style_disabled,
                    mozilla::OriginFlags changed_origins)
 SERVO_BINDING_FUNC(Servo_StyleSet_GetKeyframesForName, bool,
                    RawServoStyleSetBorrowed set,
@@ -465,7 +467,7 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetPropertyById, bool,
                    mozilla::ParsingMode parsing_mode,
                    nsCompatibility quirks_mode,
                    mozilla::css::Loader* loader)
-SERVO_BINDING_FUNC(Servo_DeclarationBlock_RemoveProperty, void,
+SERVO_BINDING_FUNC(Servo_DeclarationBlock_RemoveProperty, bool,
                    RawServoDeclarationBlockBorrowed declarations,
                    const nsACString* property)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_RemovePropertyById, bool,

@@ -129,13 +129,9 @@ add_task(async function test_bookmarks() {
   Assert.ok(bookmarksObserver._itemAddedURI.equals(uri("http://google.com/")));
   Assert.equal(bs.getBookmarkURI(newId).spec, "http://google.com/");
 
-  let dateAdded = bs.getItemDateAdded(newId);
-  // dateAdded can equal beforeInsert
-  Assert.ok(is_time_ordered(beforeInsert, dateAdded));
-
   // after just inserting, modified should not be set
-  let lastModified = bs.getItemLastModified(newId);
-  Assert.equal(lastModified, dateAdded);
+  let lastModified = PlacesUtils.toPRTime((await PlacesUtils.bookmarks.fetch(
+    await PlacesUtils.promiseItemGuid(newId))).lastModified);
 
   // The time before we set the title, in microseconds.
   let beforeSetTitle = Date.now() * 1000;
@@ -145,8 +141,6 @@ add_task(async function test_bookmarks() {
   // to the past.
   lastModified -= 1000;
   bs.setItemLastModified(newId, lastModified);
-  dateAdded -= 1000;
-  bs.setItemDateAdded(newId, dateAdded);
 
   // set bookmark title
   bs.setItemTitle(newId, "Google");
@@ -154,19 +148,14 @@ add_task(async function test_bookmarks() {
   Assert.equal(bookmarksObserver._itemChangedProperty, "title");
   Assert.equal(bookmarksObserver._itemChangedValue, "Google");
 
-  // check that dateAdded hasn't changed
-  let dateAdded2 = bs.getItemDateAdded(newId);
-  Assert.equal(dateAdded2, dateAdded);
-
   // check lastModified after we set the title
-  let lastModified2 = bs.getItemLastModified(newId);
+  let lastModified2 = PlacesUtils.toPRTime((await PlacesUtils.bookmarks.fetch(
+    await PlacesUtils.promiseItemGuid(newId))).lastModified);
   info("test setItemTitle");
-  info("dateAdded = " + dateAdded);
   info("beforeSetTitle = " + beforeSetTitle);
   info("lastModified = " + lastModified);
   info("lastModified2 = " + lastModified2);
   Assert.ok(is_time_ordered(lastModified, lastModified2));
-  Assert.ok(is_time_ordered(dateAdded, lastModified2));
 
   // get item title
   let title = bs.getItemTitle(newId);
@@ -263,15 +252,6 @@ add_task(async function test_bookmarks() {
   bs.setItemTitle(newId6, "Google Sites");
   Assert.equal(bookmarksObserver._itemChangedProperty, "title");
 
-  // test getIdForItemAt
-  Assert.equal(bs.getIdForItemAt(testRoot, 0), workFolder);
-  // wrong parent, should return -1
-  Assert.equal(bs.getIdForItemAt(1337, 0), -1);
-  // wrong index, should return -1
-  Assert.equal(bs.getIdForItemAt(testRoot, 1337), -1);
-  // wrong parent and index, should return -1
-  Assert.equal(bs.getIdForItemAt(1337, 1337), -1);
-
   // move folder, appending, to different folder
   let oldParentCC = getChildCount(testRoot);
   bs.moveItem(workFolder, homeFolder, bs.DEFAULT_INDEX);
@@ -285,15 +265,6 @@ add_task(async function test_bookmarks() {
   Assert.equal(bs.getItemIndex(workFolder), 1);
   Assert.equal(bs.getFolderIdForItem(workFolder), homeFolder);
 
-  // try to get index of the item from within the old parent folder
-  // check that it has been really removed from there
-  Assert.notEqual(bs.getIdForItemAt(testRoot, 0), workFolder);
-  // check the last item from within the old parent folder
-  Assert.notEqual(bs.getIdForItemAt(testRoot, -1), workFolder);
-  // check the index of the item within the new parent folder
-  Assert.equal(bs.getIdForItemAt(homeFolder, 1), workFolder);
-  // try to get index of the last item within the new parent folder
-  Assert.equal(bs.getIdForItemAt(homeFolder, -1), workFolder);
   // XXX expose FolderCount, and check that the old parent has one less child?
   Assert.equal(getChildCount(testRoot), oldParentCC - 1);
 
@@ -413,17 +384,11 @@ add_task(async function test_bookmarks() {
   // test change bookmark uri
   let newId10 = bs.insertBookmark(testRoot, uri("http://foo10.com/"),
                                   bs.DEFAULT_INDEX, "");
-  dateAdded = bs.getItemDateAdded(newId10);
-  // after just inserting, modified should not be set
-  lastModified = bs.getItemLastModified(newId10);
-  Assert.equal(lastModified, dateAdded);
 
   // Workaround possible VM timers issues moving lastModified and dateAdded
   // to the past.
   lastModified -= 1000;
   bs.setItemLastModified(newId10, lastModified);
-  dateAdded -= 1000;
-  bs.setItemDateAdded(newId10, dateAdded);
 
   // test getBookmarkURI
   let newId11 = bs.insertBookmark(testRoot, uri("http://foo10.com/"),
@@ -540,18 +505,13 @@ add_task(async function test_bookmarks() {
     do_throw("bookmarks query: " + ex);
   }
 
-  // check setItemLastModified() and setItemDateAdded()
+  // check setItemLastModified()
   let newId14 = bs.insertBookmark(testRoot, uri("http://bar.tld/"),
                                   bs.DEFAULT_INDEX, "");
-  dateAdded = bs.getItemDateAdded(newId14);
-  lastModified = bs.getItemLastModified(newId14);
-  Assert.equal(lastModified, dateAdded);
   bs.setItemLastModified(newId14, 1234000000000000);
-  let fakeLastModified = bs.getItemLastModified(newId14);
+  let fakeLastModified = PlacesUtils.toPRTime((await PlacesUtils.bookmarks.fetch(
+    await PlacesUtils.promiseItemGuid(newId14))).lastModified);
   Assert.equal(fakeLastModified, 1234000000000000);
-  bs.setItemDateAdded(newId14, 4321000000000000);
-  let fakeDateAdded = bs.getItemDateAdded(newId14);
-  Assert.equal(fakeDateAdded, 4321000000000000);
 
   // ensure that removing an item removes its annotations
   Assert.ok(anno.itemHasAnnotation(newId3, "test-annotation"));
@@ -592,12 +552,6 @@ function testSimpleFolderResult() {
   // create a folder
   let parent = bs.createFolder(root, "test", bs.DEFAULT_INDEX);
 
-  let dateCreated = bs.getItemDateAdded(parent);
-  info("check that the folder was created with a valid dateAdded");
-  info("beforeCreate = " + beforeCreate);
-  info("dateCreated = " + dateCreated);
-  Assert.ok(is_time_ordered(beforeCreate, dateCreated));
-
   // the time before we insert, in microseconds
   // Workaround possible VM timers issues subtracting 1ms.
   let beforeInsert = Date.now() * 1000 - 1;
@@ -605,12 +559,6 @@ function testSimpleFolderResult() {
 
   // insert a separator
   let sep = bs.insertSeparator(parent, bs.DEFAULT_INDEX);
-
-  let dateAdded = bs.getItemDateAdded(sep);
-  info("check that the separator was created with a valid dateAdded");
-  info("beforeInsert = " + beforeInsert);
-  info("dateAdded = " + dateAdded);
-  Assert.ok(is_time_ordered(beforeInsert, dateAdded));
 
   // re-set item title separately so can test nodes' last modified
   let item = bs.insertBookmark(parent, uri("about:blank"),

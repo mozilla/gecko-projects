@@ -809,6 +809,9 @@ ReloadPrefsCallback(const char* pref, void* data)
     bool streams = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
 
     bool spectreIndexMasking = Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.index_masking");
+    bool spectreStringMitigations =
+        Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.string_mitigations");
+    bool spectreValueMasking = Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.value_masking");
 
     sSharedMemoryEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
 
@@ -830,6 +833,8 @@ ReloadPrefsCallback(const char* pref, void* data)
     bool fuzzingEnabled = Preferences::GetBool("fuzzing.enabled");
 #endif
 
+    bool arrayProtoValues = Preferences::GetBool(JS_OPTIONS_DOT_STR "array_prototype_values");
+
     JS::ContextOptionsRef(cx).setBaseline(useBaseline)
                              .setIon(useIon)
                              .setAsmJS(useAsmJS)
@@ -846,7 +851,8 @@ ReloadPrefsCallback(const char* pref, void* data)
                              .setFuzzing(fuzzingEnabled)
 #endif
                              .setStreams(streams)
-                             .setExtraWarnings(extraWarnings);
+                             .setExtraWarnings(extraWarnings)
+                             .setArrayProtoValues(arrayProtoValues);
 
     nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
     if (xr) {
@@ -868,6 +874,9 @@ ReloadPrefsCallback(const char* pref, void* data)
 #endif
 
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_INDEX_MASKING, spectreIndexMasking);
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_STRING_MITIGATIONS,
+                                  spectreStringMitigations);
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_VALUE_MASKING, spectreValueMasking);
 }
 
 XPCJSContext::~XPCJSContext()

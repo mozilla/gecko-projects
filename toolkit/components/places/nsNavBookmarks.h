@@ -69,8 +69,7 @@ namespace places {
   typedef void (nsNavBookmarks::*ItemChangeMethod)(const ItemChangeData&);
 
   enum BookmarkDate {
-    DATE_ADDED = 0
-  , LAST_MODIFIED
+    LAST_MODIFIED
   };
 
 } // namespace places
@@ -280,8 +279,6 @@ private:
                            nsACString& _guid,
                            int64_t* _parentId);
 
-  nsresult GetLastChildId(int64_t aFolder, int64_t* aItemId);
-
   nsresult AddSyncChangesForBookmarksWithURL(const nsACString& aURL,
                                              int64_t aSyncChangeDelta);
 
@@ -462,7 +459,6 @@ private:
 
   // Used to enable and disable the observer notifications.
   bool mCanNotify;
-  nsCategoryCache<nsINavBookmarkObserver> mCacheObservers;
 
   // Tracks whether we are in batch mode.
   // Note: this is only tracking bookmarks batches, not history ones.

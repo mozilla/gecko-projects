@@ -381,10 +381,6 @@ menuitem.menuitem-iconic {
   -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic");
 }
 
-menuitem[description] {
-  -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic-desc-noaccel");
-}
-
 menuitem[type="checkbox"],
 menuitem[type="radio"] {
   -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic");
@@ -921,16 +917,6 @@ arrowscrollbox[clicktoscroll="true"] {
 
 autorepeatbutton {
   -moz-binding: url("chrome://global/content/bindings/scrollbox.xml#autorepeatbutton");
-}
-
-/********** spinbuttons ***********/
-
-spinbuttons {
-  -moz-binding: url("chrome://global/content/bindings/spinbuttons.xml#spinbuttons");
-}
-
-.spinbuttons-button {
-  -moz-user-focus: ignore;
 }
 
 /********** stringbundle **********/
