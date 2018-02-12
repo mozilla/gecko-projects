@@ -1,4 +1,7 @@
-FROM ubuntu:16.04
+# Ideally we'd use LTS here, but 16.04 doesn't have a new enough
+# p7zip-full for us. We should change this to the next LTS
+# (18.04), once available
+FROM ubuntu:17.10
 
 MAINTAINER release@mozilla.com
 
@@ -6,7 +9,8 @@ RUN dpkg --add-architecture i386 && apt-get -q update \
     # p7zip-full is for extracting Windows and OS X packages
     # wget is for downloading update.xml, installers, and MARs
     # libgtk-3-0 and libgtk2.0-0 are required to run the Firefox updater
-    && apt-get -q --yes install p7zip-full wget libgtk-3-0 libgtk-3.0:i386 libgtk2.0-0 libgtk2.0-0:i386 \
+    # python-pip is required to install install mercurial
+    && apt-get -q --yes install p7zip-full wget libgtk-3-0 libgtk-3.0:i386 libgtk2.0-0 libgtk2.0-0:i386 python-pip \
     && apt-get clean
 
 RUN mkdir /builds
