@@ -43,6 +43,9 @@ balrog_description_schema = Schema({
     # Shipping product / phase
     Optional('shipping-product'): task_description_schema['shipping-product'],
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
+
+    # Notifications
+    Optional('notifications'): task_description_schema['notifications'],
 })
 
 
@@ -116,6 +119,7 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': job.get('shipping-phase', phase),
             'shipping-product': job.get('shipping-product'),
+            'notifications': job.get('notifications'),
         }
 
         yield task
