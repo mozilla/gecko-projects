@@ -26,12 +26,6 @@ job-defaults:
     run:
         using: run-task
         sparse-profile: mozharness
-    # 'release' index type interpolates the routes placeholders
-    index:
-        type: release
-    routes:
-        - index.releases.v1.{branch}.latest.{product}.latest.bouncer_check
-        - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.bouncer_check
     attributes:
         build_platform: linux64
         build_type: opt
@@ -40,53 +34,9 @@ job-defaults:
         kind: test
         tier: 1
 
-    notifications:
-        completed:
-            subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            plugins:
-                by-project:
-                    mozilla-beta: ["log_collect"]
-                    mozilla-release: ["log_collect"]
-                    default: []
-
-        failed:
-            subject: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            plugins:
-                by-project:
-                    mozilla-beta: ["log_collect", "ses"]
-                    mozilla-release: ["log_collect", "ses"]
-                    default: ["ses"]
-            emails:
-                by-project:
-                    mozilla-beta: ["release-automation-notifications@mozilla.com"]
-                    mozilla-release: ["release-automation-notifications@mozilla.com"]
-                    try: ["{task_def[metadata][owner]}"]
-                    maple: ["release+tcstaging@mozilla.com"]
-                    default: []
-
-        exception:
-            subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-            plugins:
-                by-project:
-                    mozilla-beta: ["log_collect", "ses"]
-                    mozilla-release: ["log_collect", "ses"]
-                    default: ["ses"]
-            emails:
-                by-project:
-                    mozilla-beta: ["release-automation-notifications@mozilla.com"]
-                    mozilla-release: ["release-automation-notifications@mozilla.com"]
-                    try: ["{task_def[metadata][owner]}"]
-                    maple: ["release+tcstaging@mozilla.com"]
-                    default: []
-
 jobs:
     firefox:
         shipping-product: firefox
-        index:
-            product: firefox
         run:
             config:
                 by-project:
@@ -103,8 +53,6 @@ jobs:
 
     devedition:
         shipping-product: devedition
-        index:
-            product: devedition
         run:
             config:
                 by-project:
