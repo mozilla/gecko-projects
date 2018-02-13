@@ -34,12 +34,10 @@ class Label;
 
 namespace wasm {
 
-class CallSite;
 class Code;
 class CodeRange;
-class CodeSegment;
+class ModuleSegment;
 class DebugFrame;
-class DebugState;
 class Instance;
 class SigIdDesc;
 struct Frame;
@@ -218,10 +216,12 @@ GenerateJitExitEpilogue(jit::MacroAssembler& masm, unsigned framePushed, Callabl
 void
 GenerateJitEntryPrologue(jit::MacroAssembler& masm, Offsets* offsets);
 
+typedef bool IsLeaf;
+
 void
-GenerateFunctionPrologue(jit::MacroAssembler& masm, unsigned framePushed, const SigIdDesc& sigId,
-                         FuncOffsets* offsets, CompileMode mode = CompileMode::Once,
-                         uint32_t funcIndex = 0);
+GenerateFunctionPrologue(jit::MacroAssembler& masm, uint32_t framePushed, IsLeaf isLeaf,
+                         const SigIdDesc& sigId, BytecodeOffset trapOffset, FuncOffsets* offsets,
+                         const mozilla::Maybe<uint32_t>& tier1FuncIndex = mozilla::Nothing());
 void
 GenerateFunctionEpilogue(jit::MacroAssembler& masm, unsigned framePushed, FuncOffsets* offsets);
 
@@ -229,7 +229,7 @@ GenerateFunctionEpilogue(jit::MacroAssembler& masm, unsigned framePushed, FuncOf
 // is such a plausible instance, and otherwise null.
 
 Instance*
-LookupFaultingInstance(const CodeSegment& codeSegment, void* pc, void* fp);
+LookupFaultingInstance(const ModuleSegment& codeSegment, void* pc, void* fp);
 
 // Return whether the given PC is in wasm code.
 

@@ -1488,14 +1488,12 @@ CodeGeneratorShared::omitOverRecursedCheck() const
     // stack overflow check. Note that the actual number here is somewhat
     // arbitrary, and codegen actually uses small bounded amounts of
     // additional stack space in some cases too.
-    return frameSize() < 64 && !gen->needsOverrecursedCheck();
+    return frameSize() < MAX_UNCHECKED_LEAF_FRAME_SIZE && !gen->needsOverrecursedCheck();
 }
 
 void
-CodeGeneratorShared::emitWasmCallBase(LWasmCallBase* ins)
+CodeGeneratorShared::emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck)
 {
-    MWasmCall* mir = ins->mir();
-
     if (mir->spIncrement())
         masm.freeStack(mir->spIncrement());
 
@@ -1528,7 +1526,7 @@ CodeGeneratorShared::emitWasmCallBase(LWasmCallBase* ins)
         break;
       case wasm::CalleeDesc::AsmJSTable:
       case wasm::CalleeDesc::WasmTable:
-        masm.wasmCallIndirect(desc, callee, ins->needsBoundsCheck());
+        masm.wasmCallIndirect(desc, callee, needsBoundsCheck);
         reloadRegs = callee.which() == wasm::CalleeDesc::WasmTable && callee.wasmTableIsExternal();
         break;
       case wasm::CalleeDesc::Builtin:

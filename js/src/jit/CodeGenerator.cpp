@@ -9631,34 +9631,15 @@ CodeGenerator::generateWasm(wasm::SigIdDesc sigId, wasm::BytecodeOffset trapOffs
 {
     JitSpew(JitSpew_Codegen, "# Emitting wasm code");
 
-    wasm::GenerateFunctionPrologue(masm, frameSize(), sigId, offsets);
+    wasm::IsLeaf isLeaf = !gen->needsOverrecursedCheck();
 
-    // Overflow checks are omitted by CodeGenerator in some cases (leaf
-    // functions with small framePushed). Perform overflow-checking after
-    // pushing framePushed to catch cases with really large frames.
-    Label onOverflow;
-    if (!omitOverRecursedCheck())
-        masm.wasmEmitStackCheck(masm.getStackPointer(), ABINonArgReg0, &onOverflow);
+    wasm::GenerateFunctionPrologue(masm, frameSize(), isLeaf, sigId, trapOffset, offsets);
 
     if (!generateBody())
         return false;
 
     masm.bind(&returnLabel_);
     wasm::GenerateFunctionEpilogue(masm, frameSize(), offsets);
-
-    if (!omitOverRecursedCheck()) {
-        // Since we just overflowed the stack, to be on the safe side, pop the
-        // stack so that, when the trap exit stub executes, it is a safe
-        // distance away from the end of the native stack.
-        wasm::OldTrapDesc trap(trapOffset, wasm::Trap::StackOverflow, /* framePushed = */ 0);
-        if (frameSize() > 0) {
-            masm.bind(&onOverflow);
-            masm.addToStackPtr(Imm32(frameSize()));
-            masm.jump(trap);
-        } else {
-            masm.bindLater(&onOverflow, trap);
-        }
-    }
 
 #if defined(JS_ION_PERF)
     // Note the end of the inline code and start of the OOL code.
@@ -9838,6 +9819,11 @@ CodeGenerator::linkSharedStubs(JSContext* cx)
 bool
 CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 {
+    // We cancel off-thread Ion compilations in a few places during GC, but if
+    // this compilation was performed off-thread it will already have been
+    // removed from the relevant lists by this point. Don't allow GC here.
+    JS::AutoAssertNoGC nogc(cx);
+
     RootedScript script(cx, gen->info().script());
     OptimizationLevel optimizationLevel = gen->optimizationInfo().level();
 
@@ -9918,7 +9904,7 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     // read barriers which were skipped while compiling the script off thread.
     Linker linker(masm);
     AutoFlushICache afc("IonLink");
-    JitCode* code = linker.newCode<CanGC>(cx, ION_CODE, !patchableBackedges_.empty());
+    JitCode* code = linker.newCode<NoGC>(cx, ION_CODE, !patchableBackedges_.empty());
     if (!code)
         return false;
 

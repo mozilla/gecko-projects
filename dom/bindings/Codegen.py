@@ -1588,6 +1588,12 @@ class CGAbstractMethod(CGThing):
         maybeNewline = " " if self.inline else "\n"
         return ' '.join(decorators) + maybeNewline
 
+    def _auto_profiler_label(self):
+        profiler_label_and_jscontext = self.profiler_label_and_jscontext()
+        if profiler_label_and_jscontext:
+            return 'AUTO_PROFILER_LABEL_FAST("%s", OTHER, %s);' % profiler_label_and_jscontext
+        return None
+
     def declare(self):
         if self.inline:
             return self._define(True)
@@ -1610,8 +1616,13 @@ class CGAbstractMethod(CGThing):
         return "" if self.inline else self._define()
 
     def definition_prologue(self, fromDeclare):
-        return "%s%s%s(%s)\n{\n" % (self._template(), self._decorators(),
-                                    self.name, self._argstring(fromDeclare))
+        prologue = "%s%s%s(%s)\n{\n" % (self._template(), self._decorators(),
+                                        self.name, self._argstring(fromDeclare))
+        profiler_label = self._auto_profiler_label()
+        if profiler_label:
+            prologue += "  %s\n\n" % profiler_label
+
+        return prologue
 
     def definition_epilogue(self):
         return "}\n"
@@ -1619,6 +1630,12 @@ class CGAbstractMethod(CGThing):
     def definition_body(self):
         assert False  # Override me!
 
+    """
+    Override this method to return a pair of (descriptive string, name of a
+    JSContext* variable) in order to generate a profiler label for this method.
+    """
+    def profiler_label_and_jscontext(self):
+        return None # Override me!
 
 class CGAbstractStaticMethod(CGAbstractMethod):
     """
@@ -1939,6 +1956,13 @@ class CGClassConstructor(CGAbstractStaticMethod):
                                          constructorName=ctorName)
         return preamble + "\n" + callGenerator.define()
 
+    def profiler_label_and_jscontext(self):
+        name = self._ctor.identifier.name
+        if name != "constructor":
+            ctorName = name
+        else:
+            ctorName = self.descriptor.interface.identifier.name
+        return ("%s constructor" % ctorName, "cx")
 
 # Encapsulate the constructor in a helper method to share genConstructorBody with CGJSImplMethod.
 class CGConstructNavigatorObject(CGAbstractMethod):
@@ -8794,8 +8818,16 @@ class CGAbstractStaticBindingMethod(CGAbstractStaticMethod):
             """)
         return unwrap + self.generate_code().define()
 
+    def profiler_label_and_jscontext(self):
+        # Our args are JSNativeArguments() which contain a "JSContext* cx"
+        # argument. We let our subclasses choose the label.
+        return (self.profiler_label(), "cx")
+
     def generate_code(self):
         assert False  # Override me
+
+    def profiler_label(self):
+        assert False # Override me
 
 
 def MakeNativeName(name):
@@ -8890,6 +8922,11 @@ class CGSpecializedMethod(CGAbstractStaticMethod):
                                                         self.method)
         return CGMethodCall(nativeName, self.method.isStatic(), self.descriptor,
                             self.method).define()
+
+    def profiler_label_and_jscontext(self):
+        interface_name = self.descriptor.interface.identifier.name
+        method_name = self.method.identifier.name
+        return ("%s.%s" % (interface_name, method_name), "cx")
 
     @staticmethod
     def makeNativeName(descriptor, method):
@@ -9146,6 +9183,11 @@ class CGStaticMethod(CGAbstractStaticBindingMethod):
                                                         self.method)
         return CGMethodCall(nativeName, True, self.descriptor, self.method)
 
+    def profiler_label(self):
+        interface_name = self.descriptor.interface.identifier.name
+        method_name = self.method.identifier.name
+        return "%s.%s" % (interface_name, method_name)
+
 
 class CGGenericGetter(CGAbstractBindingMethod):
     """
@@ -9334,6 +9376,11 @@ class CGSpecializedGetter(CGAbstractStaticMethod):
                 cgGetterCall(self.attr.type, nativeName,
                              self.descriptor, self.attr).define())
 
+    def profiler_label_and_jscontext(self):
+        interface_name = self.descriptor.interface.identifier.name
+        attr_name = self.attr.identifier.name
+        return ("get %s.%s" % (interface_name, attr_name), "cx")
+
     @staticmethod
     def makeNativeName(descriptor, attr):
         name = attr.identifier.name
@@ -9391,6 +9438,11 @@ class CGStaticGetter(CGAbstractStaticBindingMethod):
                                                         self.attr)
         return CGGetterCall(self.attr.type, nativeName, self.descriptor,
                             self.attr)
+
+    def profiler_label(self):
+        interface_name = self.descriptor.interface.identifier.name
+        attr_name = self.attr.identifier.name
+        return "get %s.%s" % (interface_name, attr_name)
 
 
 class CGGenericSetter(CGAbstractBindingMethod):
@@ -9463,6 +9515,11 @@ class CGSpecializedSetter(CGAbstractStaticMethod):
         return CGSetterCall(self.attr.type, nativeName, self.descriptor,
                             self.attr).define()
 
+    def profiler_label_and_jscontext(self):
+        interface_name = self.descriptor.interface.identifier.name
+        attr_name = self.attr.identifier.name
+        return ("set %s.%s" % (interface_name, attr_name), "cx")
+
     @staticmethod
     def makeNativeName(descriptor, attr):
         name = attr.identifier.name
@@ -9491,6 +9548,11 @@ class CGStaticSetter(CGAbstractStaticBindingMethod):
         call = CGSetterCall(self.attr.type, nativeName, self.descriptor,
                             self.attr)
         return CGList([checkForArg, call])
+
+    def profiler_label(self):
+        interface_name = self.descriptor.interface.identifier.name
+        attr_name = self.attr.identifier.name
+        return "set %s.%s" % (interface_name, attr_name)
 
 
 class CGSpecializedForwardingSetter(CGSpecializedSetter):
@@ -14208,6 +14270,7 @@ class CGBindingRoot(CGThing):
             'mozilla/dom/BindingDeclarations.h',
             'mozilla/dom/Nullable.h',
             'mozilla/ErrorResult.h',
+            'GeckoProfiler.h'
             ),
             True)
 
@@ -17788,9 +17851,17 @@ class CGEventClass(CGBindingImplClass):
         CGBindingImplClass.__init__(self, descriptor, CGEventMethod, CGEventGetter, CGEventSetter, False, "WrapObjectInternal")
         members = []
         extraMethods = []
+        self.membersNeedingCC = []
+        self.membersNeedingTrace = []
+
         for m in descriptor.interface.members:
+            if getattr(m, "originatingInterface",
+                       descriptor.interface) != descriptor.interface:
+                continue
+
             if m.isAttr():
                 if m.type.isAny():
+                    self.membersNeedingTrace.append(m)
                     # Add a getter that doesn't need a JSContext.  Note that we
                     # don't need to do this if our originating interface is not
                     # the descriptor's interface, because in that case we
@@ -17809,9 +17880,16 @@ class CGEventClass(CGBindingImplClass):
                                 aRetVal.set(${memberName});
                                 """,
                                 memberName=CGDictionary.makeMemberName(m.identifier.name))))
-                if getattr(m, "originatingInterface",
-                           descriptor.interface) != descriptor.interface:
-                    continue
+                elif (m.type.isObject() or
+                      m.type.isSpiderMonkeyInterface()):
+                    self.membersNeedingTrace.append(m)
+                elif typeNeedsRooting(m.type):
+                    raise TypeError(
+                        "Need to implement tracing for event member of type %s" %
+                        m.type)
+                elif idlTypeNeedsCycleCollection(m.type):
+                    self.membersNeedingCC.append(m)
+
                 nativeType = self.getNativeTypeForIDLType(m.type).define()
                 members.append(ClassMember(CGDictionary.makeMemberName(m.identifier.name),
                                nativeType,
@@ -17820,20 +17898,39 @@ class CGEventClass(CGBindingImplClass):
 
         parent = self.descriptor.interface.parent
         self.parentType = self.descriptor.getDescriptor(parent.identifier.name).nativeType.split('::')[-1]
+        self.nativeType = self.descriptor.nativeType.split('::')[-1]
+
+        if self.needCC():
+            isupportsDecl = fill(
+                """
+                NS_DECL_ISUPPORTS_INHERITED
+                NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(${nativeType}, ${parentType})
+                """,
+                nativeType=self.nativeType,
+                parentType=self.parentType)
+        else:
+            isupportsDecl = fill(
+                """
+                NS_INLINE_DECL_REFCOUNTING_INHERITED(${nativeType}, ${parentType})
+                """,
+                nativeType=self.nativeType,
+                parentType=self.parentType)
+
         baseDeclarations = fill(
             """
             public:
-              NS_DECL_ISUPPORTS_INHERITED
-              NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(${nativeType}, ${parentType})
+              $*{isupportsDecl}
+
             protected:
               virtual ~${nativeType}();
               explicit ${nativeType}(mozilla::dom::EventTarget* aOwner);
 
             """,
-            nativeType=self.descriptor.nativeType.split('::')[-1],
+            isupportsDecl=isupportsDecl,
+            nativeType=self.nativeType,
             parentType=self.parentType)
 
-        className = descriptor.nativeType.split('::')[-1]
+        className = self.nativeType
         asConcreteTypeMethod = ClassMethod("As%s" % className,
                                            "%s*" % className,
                                            [],
@@ -17852,80 +17949,90 @@ class CGEventClass(CGBindingImplClass):
     def getWrapObjectBody(self):
         return "return %sBinding::Wrap(aCx, this, aGivenProto);\n" % self.descriptor.name
 
+    def needCC(self):
+        return (len(self.membersNeedingCC) != 0 or
+                len(self.membersNeedingTrace) != 0)
+
     def implTraverse(self):
         retVal = ""
-        for m in self.descriptor.interface.members:
-            # Unroll the type so we pick up sequences of interfaces too.
-            if m.isAttr() and idlTypeNeedsCycleCollection(m.type):
-                retVal += ("  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(" +
-                           CGDictionary.makeMemberName(m.identifier.name) +
-                           ")\n")
+        for m in self.membersNeedingCC:
+            retVal += ("  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(%s)\n" %
+                       CGDictionary.makeMemberName(m.identifier.name))
         return retVal
 
     def implUnlink(self):
         retVal = ""
-        for m in self.descriptor.interface.members:
-            if m.isAttr():
-                name = CGDictionary.makeMemberName(m.identifier.name)
-                # Unroll the type so we pick up sequences of interfaces too.
-                if idlTypeNeedsCycleCollection(m.type):
-                    retVal += "  NS_IMPL_CYCLE_COLLECTION_UNLINK(" + name + ")\n"
-                elif m.type.isAny():
-                    retVal += "  tmp->" + name + ".setUndefined();\n"
-                elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
-                    retVal += "  tmp->" + name + " = nullptr;\n"
+        for m in self.membersNeedingCC:
+            retVal += ("  NS_IMPL_CYCLE_COLLECTION_UNLINK(%s)\n" %
+                       CGDictionary.makeMemberName(m.identifier.name))
+        for m in self.membersNeedingTrace:
+            name = CGDictionary.makeMemberName(m.identifier.name)
+            if m.type.isAny():
+                retVal += "  tmp->" + name + ".setUndefined();\n"
+            elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
+                retVal += "  tmp->" + name + " = nullptr;\n"
+            else:
+                raise TypeError("Unknown traceable member type %s" % m.type)
         return retVal
 
     def implTrace(self):
         retVal = ""
-        for m in self.descriptor.interface.members:
-            if m.isAttr():
-                name = CGDictionary.makeMemberName(m.identifier.name)
-                if m.type.isAny() or m.type.isObject() or m.type.isSpiderMonkeyInterface():
-                    retVal += "  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(" + name + ")\n"
-                elif typeNeedsRooting(m.type):
-                    raise TypeError("Need to implement tracing for event "
-                                    "member of type %s" % m.type)
+        for m in self.membersNeedingTrace:
+            retVal += ("  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(%s)\n" %
+                       CGDictionary.makeMemberName(m.identifier.name))
         return retVal
 
     def define(self):
         dropJS = ""
-        for m in self.descriptor.interface.members:
-            if m.isAttr():
-                member = CGDictionary.makeMemberName(m.identifier.name)
-                if m.type.isAny():
-                    dropJS += member + " = JS::UndefinedValue();\n"
-                elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
-                    dropJS += member + " = nullptr;\n"
+        for m in self.membersNeedingTrace:
+            member = CGDictionary.makeMemberName(m.identifier.name)
+            if m.type.isAny():
+                dropJS += member + " = JS::UndefinedValue();\n"
+            elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
+                dropJS += member + " = nullptr;\n"
+            else:
+                raise TypeError("Unknown traceable member type %s" % m.type)
+
         if dropJS != "":
             dropJS += "mozilla::DropJSObjects(this);\n"
         # Just override CGClass and do our own thing
-        nativeType = self.descriptor.nativeType.split('::')[-1]
         ctorParams = ("aOwner, nullptr, nullptr" if self.parentType == "Event"
                       else "aOwner")
 
-        classImpl = fill(
+        if self.needCC():
+            classImpl = fill(
+                """
+
+                NS_IMPL_CYCLE_COLLECTION_CLASS(${nativeType})
+
+                NS_IMPL_ADDREF_INHERITED(${nativeType}, ${parentType})
+                NS_IMPL_RELEASE_INHERITED(${nativeType}, ${parentType})
+
+                NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(${nativeType}, ${parentType})
+                $*{traverse}
+                NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+                NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(${nativeType}, ${parentType})
+                $*{trace}
+                NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+                NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(${nativeType}, ${parentType})
+                $*{unlink}
+                NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+                NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${nativeType})
+                NS_INTERFACE_MAP_END_INHERITING(${parentType})
+                """,
+                nativeType=self.nativeType,
+                parentType=self.parentType,
+                traverse=self.implTraverse(),
+                unlink=self.implUnlink(),
+                trace=self.implTrace())
+        else:
+            classImpl = ""
+
+        classImpl += fill(
             """
-
-            NS_IMPL_CYCLE_COLLECTION_CLASS(${nativeType})
-
-            NS_IMPL_ADDREF_INHERITED(${nativeType}, ${parentType})
-            NS_IMPL_RELEASE_INHERITED(${nativeType}, ${parentType})
-
-            NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(${nativeType}, ${parentType})
-            $*{traverse}
-            NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-            NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(${nativeType}, ${parentType})
-            $*{trace}
-            NS_IMPL_CYCLE_COLLECTION_TRACE_END
-
-            NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(${nativeType}, ${parentType})
-            $*{unlink}
-            NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-            NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${nativeType})
-            NS_INTERFACE_MAP_END_INHERITING(${parentType})
 
             ${nativeType}::${nativeType}(mozilla::dom::EventTarget* aOwner)
               : ${parentType}(${ctorParams})
@@ -17938,14 +18045,11 @@ class CGEventClass(CGBindingImplClass):
             }
 
             """,
-            ifaceName=self.descriptor.name,
-            nativeType=nativeType,
+            nativeType=self.nativeType,
             ctorParams=ctorParams,
             parentType=self.parentType,
-            traverse=self.implTraverse(),
-            unlink=self.implUnlink(),
-            trace=self.implTrace(),
             dropJS=dropJS)
+
         return classImpl + CGBindingImplClass.define(self)
 
     def getNativeTypeForIDLType(self, type):
