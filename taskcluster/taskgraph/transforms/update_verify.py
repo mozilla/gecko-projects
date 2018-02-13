@@ -11,7 +11,6 @@ from copy import deepcopy
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.scriptworker import get_release_config
 from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
 
 transforms = TransformSequence()
@@ -21,11 +20,6 @@ transforms = TransformSequence()
 def add_command(config, tasks):
     for task in tasks:
         total_chunks = task["extra"]["chunks"]
-        release_config = get_release_config(config)
-        release_tag = "{}_{}_RELEASE_RUNTIME".format(
-            task["shipping-product"].upper(),
-            release_config["version"].replace(".", "_")
-        )
 
         for this_chunk in range(1, total_chunks+1):
             chunked = deepcopy(task)
@@ -39,9 +33,6 @@ def add_command(config, tasks):
                 "/bin/bash",
                 "-c",
                 "hg clone $BUILD_TOOLS_REPO tools && cd tools && " +
-                "hg up -r {} && cd .. && ".format(
-                    release_tag,
-                ) +
                 "tools/scripts/release/updates/chunked-verify.sh " +
                 "UNUSED UNUSED {} {}".format(
                     total_chunks,
