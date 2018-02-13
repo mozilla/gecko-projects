@@ -67,3 +67,12 @@ def handle_keyed_by(config, jobs):
 
         del job["run"]["config"]
         yield job
+
+
+@transforms.add
+def command_to_string(config, jobs):
+    """Convert command to string to make it work properly with run-task"""
+    for job in jobs:
+        job = copy.deepcopy(job)  # don't overwrite dict values here
+        job["run"]["command"] = " ".join(job["run"]["command"])
+        yield job
