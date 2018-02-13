@@ -260,11 +260,6 @@ PUSH_APK_SCOPES = {
 }
 
 
-""" The list of the phases for release promotion, which append to the on-push graph.
-"""
-RELEASE_PHASES = ('promote', 'push', 'ship')
-
-
 def add_scope_prefix(config, scope):
     """
     Prepends the scriptworker scope prefix from the :ref:`graph config

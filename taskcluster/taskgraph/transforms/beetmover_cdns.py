@@ -44,7 +44,6 @@ beetmover_cdns_description_schema = Schema({
     Required('shipping-phase'): task_description_schema['shipping-phase'],
     Required('shipping-product'): task_description_schema['shipping-product'],
     Optional('notifications'): task_description_schema['notifications'],
-    Optional('extra'): task_description_schema['extra'],
 })
 
 
@@ -94,9 +93,7 @@ def make_beetmover_cdns_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': job.get('shipping-phase', 'push'),
             'shipping-product': job.get('shipping-product'),
-            'notifications': job.get('notifications', {}),
-            'routes': job.get('routes', []),
-            'extra': job.get('extra', {}),
+            'notifications': job.get('notifications'),
         }
 
         yield task
