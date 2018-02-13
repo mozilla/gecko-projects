@@ -80,6 +80,9 @@ PARTIAL_UPDATES_FLAVORS = (
     'promote_firefox',
     'promote_firefox_rc',
     'promote_devedition',
+    'ship_firefox',
+    'ship_firefox_rc',
+    'ship_devedition',
 )
 
 

@@ -98,7 +98,7 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
             for path in product["paths"].values():
                 bouncer_platform = path["bouncer-platform"]
                 for locale in self.config["locales"]:
-                    url = "{bouncer_prefix}?product={product}&os={os}&lang={lang}".format(
+                    url = BOUNCER_URL_PATTERN.format(
                         bouncer_prefix=self.config["bouncer_prefix"],
                         product=product_name,
                         os=bouncer_platform,
