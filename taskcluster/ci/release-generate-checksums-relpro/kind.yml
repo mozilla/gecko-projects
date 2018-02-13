@@ -22,6 +22,19 @@ job-defaults:
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
       max-run-time: 1200
+      artifacts:
+         - name: public/build/SHA256SUMMARY
+           path: /builds/worker/workspace/build/SHA256SUMMARY
+           type: file
+         - name: public/build/SHA256SUMS
+           path: /builds/worker/workspace/build/SHA256SUMS
+           type: file
+         - name: public/build/SHA512SUMMARY
+           path: /builds/worker/workspace/build/SHA512SUMMARY
+           type: file
+         - name: public/build/SHA512SUMS
+           path: /builds/worker/workspace/build/SHA512SUMS
+           type: file
    run:
       using: mozharness
       actions: [create-virtualenv collect-individual-checksums create-big-checksums create-summary]
