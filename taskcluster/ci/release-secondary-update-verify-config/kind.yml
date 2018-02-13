@@ -52,6 +52,14 @@ job-defaults:
             jamun: "https://aus4.stage.mozaws.net"
             maple: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
+      repo-path:
+         by-project:
+            birch: projects/birch
+            jamun: projects/jamun
+            maple: projects/maple
+            mozilla-beta: releases/mozilla-beta
+            mozilla-release: releases/mozilla-release
+            default: ADDME
       include-version:
          by-project:
             # The beta regexes (jamun, maple, mozilla-beta) do not match

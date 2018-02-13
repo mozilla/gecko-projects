@@ -24,6 +24,7 @@ def add_command(config, tasks):
         "include-version",
         "mar-channel-id-override",
         "last-watershed",
+        "repo-path",
     ]
     optional_args = [
         "updater-platform",
@@ -48,6 +49,7 @@ def add_command(config, tasks):
             "--to-app-version", release_config["appVersion"],
             "--to-build-number", str(release_config["build_number"]),
             "--to-buildid", config.params["moz_build_date"],
+            "--to-revision", config.params["head_rev"],
             "--output-file", "update-verify.cfg",
         ]
 
