@@ -25,7 +25,14 @@ if [ -f /etc/lsb-release ]; then
         HG_COMMON_FILENAME=mercurial-common_4.4.2_all.deb
     elif [ "${DISTRIB_ID}" = "Ubuntu" ] && [ "${DISTRIB_RELEASE}" = "17.10" ]
     then
-        PIP_PATH=`which pip`
+        HG_DEB=1
+        HG_DIGEST=10e518ec50117c091470f24a6a034c9566cce3bb81b27407a4891a64bd56b82daa5774b125d3025700c5b24148b4d8c2430f9a91bc2ebc452152c22703fcf2c0
+        HG_SIZE=193186
+        HG_FILENAME=mercurial_4.5_amd64.deb
+
+        HG_COMMON_DIGEST=028bf43aace41aaa00c4967487e6c9ce89ea2d72a0a44bd86b505b30c31c8313843605fbfea40ead747793119dc47ab75b2c2c5aec875a5f58a069b16b4b9fc3
+        HG_COMMON_SIZE=2134620
+        HG_COMMON_FILENAME=mercurial-common_4.5_all.deb
     elif [ "${DISTRIB_ID}" = "Ubuntu" ] && [ "${DISTRIB_RELEASE}" = "12.04" ]
     then
         echo "Ubuntu 12.04 not supported"
