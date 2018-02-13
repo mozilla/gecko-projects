@@ -37,6 +37,18 @@ class ChecksumsGenerator(BaseScript, VirtualenvMixin):
             "type": int,
             "help": "Number of checksums file to download concurrently",
         }],
+        [["--scm-level"], {
+            "dest": "scm_level",
+            "help": "dummy option",
+        }],
+        [["--branch"], {
+            "dest": "branch",
+            "help": "dummy option",
+        }],
+        [["--build-pool"], {
+            "dest": "build_pool",
+            "help": "dummy option",
+        }],
     ] + virtualenv_config_options
 
     def __init__(self):
