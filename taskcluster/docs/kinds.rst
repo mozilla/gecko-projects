@@ -283,6 +283,10 @@ release-generate-checksums
 --------------------------
 Generate the per-release checksums along with the summaries and upload it to S3.
 
+release-generate-checksums-relpro
+--------------------------
+Temporary checksums generation that's to replace the above.
+
 release-final-verify
 ---------------------
 Verifies the contents and package of release update MARs.
