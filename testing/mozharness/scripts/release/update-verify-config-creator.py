@@ -80,6 +80,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             "dest": "to_buildid",
             "help": "The buildid of the release being updated to",
         }],
+        [["--to-revision"], {
+            "dest": "to_revision",
+            "help": "The revision of the release being updated to",
+        }],
         [["--partial-version"], {
             "dest": "partial_versions",
             "action": "append",
@@ -116,6 +120,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         }],
         [["--previous-archive-prefix"], {
             "dest": "previous_archive_prefix",
+            "help": "",
+        }],
+        [["--repo-path"], {
+            "dest": "repo_path",
             "help": "",
         }],
         [["--output-file"], {
@@ -306,10 +314,12 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             self.log("Didn't find any update paths, cannot continue", level=FATAL)
 
     def create_config(self):
+        from mozrelease.l10n import getPlatformLocales
         from mozrelease.platforms import ftp2updatePlatforms
         from mozrelease.update_verify import UpdateVerifyConfig
         from mozrelease.paths import getCandidatesDir, getReleasesDir, getReleaseInstallerPath
         from mozrelease.versions import getPrettyVersion
+        import requests
 
         candidates_dir = getCandidatesDir(
             self.config["stage_product"], self.config["to_version"],
@@ -334,10 +344,24 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             to_display_version=to_display_version,
         )
 
+        to_shipped_locales_url = urljoin(
+            self.config["hg_server"],
+            "{}/raw-file/{}/{}/locales/shipped-locales".format(
+                self.config["repo_path"],
+                self.config["to_revision"],
+                self.config["app_name"],
+            ),
+        )
+        ret = requests.get(to_shipped_locales_url)
+        if not ret.ok:
+            raise Exception("Couldn't find shipped-locales for current release")
+        to_shipped_locales = ret.text.strip()
+        to_locales = set(getPlatformLocales(to_shipped_locales, self.config["platform"]))
+
         completes_only_index = 0
         for fromVersion in reversed(sorted(self.update_paths, key=LooseVersion)):
             from_ = self.update_paths[fromVersion]
-            locales = from_["locales"]
+            locales = sorted(list(set(from_["locales"]).intersection(to_locales)))
             appVersion = from_["appVersion"]
             build_id = from_["buildID"]
             mar_channel_IDs = from_.get('marChannelIds')
