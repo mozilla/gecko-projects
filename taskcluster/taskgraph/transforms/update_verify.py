@@ -32,7 +32,7 @@ def add_command(config, tasks):
             chunked["worker"]["command"] = [
                 "/bin/bash",
                 "-c",
-                "hg clone $BUILD_TOOLS_REPO tools && cd tools && " +
+                "hg clone $BUILD_TOOLS_REPO tools && " +
                 "tools/scripts/release/updates/chunked-verify.sh " +
                 "UNUSED UNUSED {} {}".format(
                     total_chunks,
