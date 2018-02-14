@@ -55,6 +55,7 @@ def add_command(config, tasks):
         ]
 
         repo_path = urlparse.urlsplit(config.params["head_repository"]).path.lstrip("/")
+        command.extend(["--repo-path", repo_path])
 
         if release_config.get("partial_versions"):
             for partial in release_config["partial_versions"].split(","):
