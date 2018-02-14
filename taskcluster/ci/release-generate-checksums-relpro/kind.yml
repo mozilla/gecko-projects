@@ -24,16 +24,16 @@ job-defaults:
       max-run-time: 1200
       artifacts:
          - name: public/build/SHA256SUMMARY
-           path: /builds/worker/SHA256SUMMARY_relpro
+           path: /builds/worker/SHA256SUMMARY
            type: file
          - name: public/build/SHA256SUMS
-           path: /builds/worker/SHA256SUMS_relpro
+           path: /builds/worker/SHA256SUMS
            type: file
          - name: public/build/SHA512SUMMARY
-           path: /builds/worker/SHA512SUMMARY_relpro
+           path: /builds/worker/SHA512SUMMARY
            type: file
          - name: public/build/SHA512SUMS
-           path: /builds/worker/SHA512SUMS_relpro
+           path: /builds/worker/SHA512SUMS
            type: file
    run:
       using: mozharness
