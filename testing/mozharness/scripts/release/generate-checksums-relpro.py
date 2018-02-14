@@ -106,10 +106,10 @@ class ChecksumsGenerator(BaseScript, VirtualenvMixin):
         )
 
     def _get_sums_filename(self, format_):
-        return "{}SUMS_relpro".format(format_.upper())
+        return "{}SUMS".format(format_.upper())
 
     def _get_summary_filename(self, format_):
-        return "{}SUMMARY_relpro".format(format_.upper())
+        return "{}SUMMARY".format(format_.upper())
 
     def _get_hash_function(self, format_):
         if format_ in ("sha256", "sha384", "sha512"):
