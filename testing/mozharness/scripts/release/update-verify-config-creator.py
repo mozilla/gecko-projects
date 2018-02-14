@@ -41,15 +41,16 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
     config_options = [
         [["--product"], {
             "dest": "product",
-            "help": "Product being tested.",
+            "help": "Product being tested, as used in the update URL and filenames. Eg: firefox",
         }],
         [["--stage-product"], {
             "dest": "stage_product",
-            "help": "Product being tested.",
+            "help": "Product being tested, as used in stage directories and ship it"
+                    "If not passed this is assumed to be the same as product."
         }],
         [["--app-name"], {
             "dest": "app_name",
-            "help": "App name being tested.",
+            "help": "App name being tested. Eg: browser",
         }],
         [["--channel"], {
             "dest": "channel",
@@ -62,15 +63,15 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         }],
         [["--to-version"], {
             "dest": "to_version",
-            "help": "The version of the release being updated to",
+            "help": "The version of the release being updated to. Eg: 59.0b5",
         }],
         [["--to-app-version"], {
             "dest": "to_app_version",
-            "help": "The in-app version of the release being updated to",
+            "help": "The in-app version of the release being updated to. Eg: 59.0",
         }],
         [["--to-display-version"], {
             "dest": "to_display_version",
-            "help": "The human-readable version of the release being updated to",
+            "help": "The human-readable version of the release being updated to. Eg: 59.0 Beta 9",
         }],
         [["--to-build-number"], {
             "dest": "to_build_number",
@@ -82,69 +83,80 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
         }],
         [["--to-revision"], {
             "dest": "to_revision",
-            "help": "The revision of the release being updated to",
+            "help": "The revision that the release being updated to was built against",
         }],
         [["--partial-version"], {
             "dest": "partial_versions",
             "action": "append",
-            "help": "List of previous release versions that are expected to "
-                    "receive a partial update",
+            "help": "A previous release version that is expected to receive a partial update. "
+                    "Eg: 59.0b4. May be specified multiple times."
         }],
         [["--last-watershed"], {
             "dest": "last_watershed",
-            "help": "",
+            "help": "The earliest version to include in the update verify config. Eg: 57.0b10",
         }],
         [["--include-version"], {
             "dest": "include_versions",
             "default": [],
             "action": "append",
-            "help": "",
+            "help": "Only include versions that match one of these regexes. "
+                    "May be passed multiple times",
         }],
         [["--mar-channel-id-override"], {
             "dest": "mar_channel_id_options",
             "default": [],
             "action": "append",
-            "help": "",
+            "help": "A version regex and channel id string to override those versions with."
+                    "Eg: ^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release "
+                    "will set accepted mar channel ids to 'firefox-mozilla-beta' and "
+                    "'firefox-mozilla-release for x.y and x.y.z versions. "
+                    "May be passed multiple times"
         }],
         [["--platform"], {
             "dest": "platform",
-            "help": "",
+            "help": "The platform to generate the update verify config for, in FTP-style",
         }],
         [["--updater-platform"], {
             "dest": "updater_platform",
-            "help": "",
+            "help": "The platform to run the updater on, in FTP-style."
+                    "If not specified, this is assumed to be the same as platform",
         }],
         [["--archive-prefix"], {
             "dest": "archive_prefix",
-            "help": "",
+            "help": "The server/path to pull the current release from. "
+                    "Eg: https://archive.mozilla.org/pub",
         }],
         [["--previous-archive-prefix"], {
             "dest": "previous_archive_prefix",
-            "help": "",
+            "help": "The server/path to pull the previous releases from"
+                    "If not specified, this is assumed to be the same as --archive-prefix"
         }],
         [["--repo-path"], {
             "dest": "repo_path",
-            "help": "",
+            "help": "The repository (relative to the hg server root) that the current release was "
+                    "built from Eg: releases/mozilla-beta"
         }],
         [["--output-file"], {
             "dest": "output_file",
-            "help": "",
+            "help": "Where to write the update verify config to",
         }],
         [["--product-details-server"], {
             "dest": "product_details_server",
             "default": "https://product-details.mozilla.org",
-            "help": "Product Details server to pull previous release info from",
+            "help": "Product Details server to pull previous release info from. "
+                    "Using anything other than the production server is likely to "
+                    "cause issues with update verify."
         }],
         [["--hg-server"], {
             "dest": "hg_server",
             "default": "https://hg.mozilla.org",
-            "help": "Mercurial server to pull previous locale information from",
+            "help": "Mercurial server to pull various previous and current version info from",
         }],
         [["--full-check-locale"], {
             "dest": "full_check_locales",
             "default": ["de", "en-US", "ru"],
             "action": "append",
-            "help": "",
+            "help": "A list of locales to generate full update verify checks for",
         }],
     ]
 
@@ -210,6 +222,10 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             product, version = release_name.split("-", 1)
             version = version.rstrip("esr")
             tag = "{}_{}_RELEASE".format(product.upper(), version.replace(".", "_"))
+            # Product details has a "category" for releases that we can use to
+            # determine the repo path. This will fail if any previous releases
+            # were built from a project branch - but that's not something we do
+            # at the time of writing.
             branch = None
             if release_info["category"] == "dev":
                 branch = "releases/mozilla-beta"
@@ -220,13 +236,13 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             if not branch:
                 raise Exception("Cannot determine branch, cannot continue!")
 
-            # Do as much filtering with basic information as possible to avoid
-            # unnecessary requests to Ship It.
+            # We have to trim out previous releases that aren't in the same
+            # product line, too old, etc.
             if self.config["stage_product"] != product:
                 self.log("Skipping release that doesn't match product name: %s" % release_name,
                          level=INFO)
                 continue
-            if MozillaVersion(version) < self.config["last_watershed"]:
+            if MozillaVersion(version) < MozillaVersion(self.config["last_watershed"]):
                 self.log("Skipping release that's behind the last watershed: %s" % release_name,
                          level=INFO)
                 continue
@@ -234,11 +250,15 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
                 self.log("Skipping release that is the same as to version: %s" % release_name,
                          level=INFO)
                 continue
-            if MozillaVersion(version) > self.config["to_version"]:
+            if MozillaVersion(version) > MozillaVersion(self.config["to_version"]):
                 self.log("Skipping release that's newer than to version: %s" % release_name,
                          level=INFO)
                 continue
 
+            # In addition to the above, we also exclude any releases that
+            # don't match one of our include version regexes.
+            # This is generally to avoid including versions from other channels
+            # Eg: including betas when testing releases
             for v in self.config["include_versions"]:
                 if re.match(v, version):
                     break
@@ -251,6 +271,8 @@ class UpdateVerifyConfigCreator(BaseScript, VirtualenvMixin):
             if version in self.update_paths:
                 raise Exception("Found duplicate release for version: %s", version)
 
+            # This is a crappy place to get buildids from, but we don't have a better one.
+            # This will start to fail if old info files are deleted.
             info_file_url = "{}{}/{}_info.txt".format(
                 self.config["previous_archive_prefix"],
                 getCandidatesDir(
