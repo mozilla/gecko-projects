@@ -201,18 +201,12 @@ class ChecksumsGenerator(BaseScript, VirtualenvMixin):
             for i in range(len(files)):
                 content += "{} {}\n".format(proofs[i], files[i])
 
-            import os
-            cwd = os.getcwd()
-            self.info("Current working directory is: {}".format(cwd))
             self.write_to_file(summary, content)
 
     def create_big_checksums(self):
         for fmt in self.config["formats"]:
             sums = self._get_sums_filename(fmt)
             self.info("Creating big checksums file: {}".format(sums))
-            import os
-            cwd = os.getcwd()
-            self.info("Current working directory is: {}".format(cwd))
             with open(sums, "w+") as output_file:
                 for fn in sorted(self.checksums):
                     output_file.write("{}  {}\n".format(self.checksums[fn]["hashes"][fmt], fn))
