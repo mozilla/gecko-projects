@@ -12,6 +12,7 @@ transforms:
 job-defaults:
    name: secondary-update-verify-config
    run-on-projects: []  # to make sure this never runs as part of CI
+   shipping-product: firefox
    shipping-phase: promote
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
@@ -26,64 +27,38 @@ job-defaults:
       using: run-task
       sparse-profile: update-verify
    extra:
-      # other info passed in transform:
-      #   to-build-number, to-version, to-app-version, to-display-version
-      #   output-file, to-build-id
       app-name: browser
-      # Note! This product is _not_ the same as shipping product.
-      # It is set to "firefox" even for devedition.
-      # stage-product maintains the firefox vs devedition distinction
       product: firefox
       archive-prefix:
          by-project:
             birch: "http://ftp.stage.mozaws.net/pub"
-            jamun: "http://ftp.stage.mozaws.net/pub"
-            maple: "http://ftp.stage.mozaws.net/pub"
             default: "https://archive.mozilla.org/pub"
       previous-archive-prefix:
          by-project:
             birch: "https://archive.mozilla.org/pub"
-            jamun: "https://archive.mozilla.org/pub"
-            maple: "https://archive.mozilla.org/pub"
             default: null
       aus-server:
          by-project:
             birch: "https://aus4.stage.mozaws.net"
-            jamun: "https://aus4.stage.mozaws.net"
-            maple: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
-      repo-path:
-         by-project:
-            birch: projects/birch
-            jamun: projects/jamun
-            maple: projects/maple
-            mozilla-beta: releases/mozilla-beta
-            mozilla-release: releases/mozilla-release
-            default: ADDME
       include-version:
          by-project:
             birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
-            jamun: "'^(\\d+\\.\\d+(b\\d+)?)$'"
-            maple: "'^(\\d+\\.\\d+(b\\d+)?)$'"
-            mozilla-beta: "'^(\\d+\\.\\d+(b\\d+)?)$'"
             mozilla-release: "'^\\d+\\.\\d+(\\.\\d+)?$'"
             default: null
       last-watershed:
          by-project:
             birch: "57.0"
-            jamun: "56.0b10"
-            maple: "56.0b10"
-            mozilla-beta: "56.0b10"
             mozilla-release: "57.0"
-            mozilla-esr52: "TODO"
             default: null
       mar-channel-id-override:
          by-project:
             birch: "'^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release'"
-            mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release'"
+            mozilla-release: "'^\\d+\\.\\d+(\\.\\d+)?$,firefox-mozilla-beta,firefox-mozilla-release'"
             default: null
       channel:
          by-project:
+            birch: "beta-localtest"
             mozilla-release: "beta-localtest"
             default: "default"
    notifications:
@@ -92,7 +67,6 @@ job-defaults:
          message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
          plugins:
             by-project:
-               mozilla-beta: ["log_collect"]
                mozilla-release: ["log_collect"]
                default: []
 
@@ -101,15 +75,13 @@ job-defaults:
          message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
          plugins:
             by-project:
-               mozilla-beta: ["log_collect", "ses"]
                mozilla-release: ["log_collect", "ses"]
                default: ["ses"]
          emails:
             by-project:
-               mozilla-beta: ["release-automation-notifications@mozilla.com"]
+               birch: ["release+tcstaging@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
                default: []
 
       exception:
@@ -117,20 +89,16 @@ job-defaults:
          message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
          plugins:
             by-project:
-               mozilla-beta: ["log_collect", "ses"]
                mozilla-release: ["log_collect", "ses"]
                default: ["ses"]
          emails:
             by-project:
-               mozilla-beta: ["release-automation-notifications@mozilla.com"]
+               birch: ["release+tcstaging@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
-               try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
                default: []
 
 jobs:
    firefox-secondary-linux:
-      shipping-product: firefox
       treeherder:
          symbol: UVCS
          platform: linux/opt
@@ -143,7 +111,6 @@ jobs:
          updater-platform: linux-x86_64
 
    firefox-secondary-linux64:
-      shipping-product: firefox
       treeherder:
          symbol: UVCS
          platform: linux64/opt
@@ -156,7 +123,6 @@ jobs:
          updater-platform: linux-x86_64
 
    firefox-secondary-macosx64:
-      shipping-product: firefox
       treeherder:
          symbol: UVCS
          platform: macosx64/opt
@@ -169,7 +135,6 @@ jobs:
          updater-platform: linux-x86_64
 
    firefox-secondary-win32:
-      shipping-product: firefox
       treeherder:
          symbol: UVCS
          platform: win32/opt
@@ -182,7 +147,6 @@ jobs:
          updater-platform: linux-x86_64
 
    firefox-secondary-win64:
-      shipping-product: firefox
       treeherder:
          symbol: UVCS
          platform: win64/opt

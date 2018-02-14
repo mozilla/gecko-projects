@@ -26,14 +26,7 @@ job-defaults:
       using: run-task
       sparse-profile: update-verify
    extra:
-      # other info passed in transform:
-      #   to-build-number, to-version, to-app-version, to-display-version
-      #   output-file, to-build-id
       app-name: browser
-      # Note! This product is _not_ the same as shipping product.
-      # It is set to "firefox" even for devedition.
-      # stage-product maintains the firefox vs devedition distinction
-      product: firefox
       archive-prefix:
          by-project:
             birch: "http://ftp.stage.mozaws.net/pub"
@@ -52,16 +45,18 @@ job-defaults:
             jamun: "https://aus4.stage.mozaws.net"
             maple: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
-      repo-path:
-         by-project:
-            birch: projects/birch
-            jamun: projects/jamun
-            maple: projects/maple
-            mozilla-beta: releases/mozilla-beta
-            mozilla-release: releases/mozilla-release
-            default: ADDME
+      # This is overridden for devedition to exclude 58.0b1
+      # because of the special case added by
+      # https://bugzilla.mozilla.org/show_bug.cgi?id=1419189
+      # The devedition override can be removed after 58.0b1
+      # is behind a watershed
       include-version:
          by-project:
+            # The beta regexes (jamun, maple, mozilla-beta) do not match
+            # point releases. In the rare event that we do ship a point
+            # release to beta, we need to either:
+            # 1) update these regexes to match that specific version
+            # 2) pass a second include version that matches that specifivc version
             birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
             jamun: "'^(\\d+\\.\\d+(b\\d+)?)$'"
             maple: "'^(\\d+\\.\\d+(b\\d+)?)$'"
@@ -75,7 +70,8 @@ job-defaults:
             maple: "56.0b10"
             mozilla-beta: "56.0b10"
             mozilla-release: "57.0"
-            mozilla-esr52: "TODO"
+            # TODO: double check me
+            mozilla-esr52: "52.0esr"
             default: null
    notifications:
       completed:
@@ -97,10 +93,12 @@ job-defaults:
                default: ["ses"]
          emails:
             by-project:
+               birch: ["release+tcstaging@mozilla.com"]
+               jamun: ["release+tcstaging@mozilla.com"]
+               maple: ["release+tcstaging@mozilla.com"]
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
                default: []
 
       exception:
@@ -113,10 +111,12 @@ job-defaults:
                default: ["ses"]
          emails:
             by-project:
+               birch: ["release+tcstaging@mozilla.com"]
+               jamun: ["release+tcstaging@mozilla.com"]
+               maple: ["release+tcstaging@mozilla.com"]
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
                default: []
 
 jobs:
@@ -130,10 +130,12 @@ jobs:
       attributes:
          build_platform: linux
       extra:
+         product: firefox
          platform: linux-i686
          updater-platform: linux-x86_64
          channel:
             by-project:
+               birch: "release-localtest"
                jamun: "beta-localtest"
                maple: "beta-localtest"
                mozilla-beta: "beta-localtest"
@@ -156,10 +158,12 @@ jobs:
       attributes:
          build_platform: linux64
       extra:
+         product: firefox
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel:
             by-project:
+               birch: "release-localtest"
                jamun: "beta-localtest"
                maple: "beta-localtest"
                mozilla-beta: "beta-localtest"
@@ -182,10 +186,12 @@ jobs:
       attributes:
          build_platform: macosx64
       extra:
+         product: firefox
          platform: mac
          updater-platform: linux-x86_64
          channel:
             by-project:
+               birch: "release-localtest"
                jamun: "beta-localtest"
                maple: "beta-localtest"
                mozilla-beta: "beta-localtest"
@@ -208,10 +214,12 @@ jobs:
       attributes:
          build_platform: win32
       extra:
+         product: firefox
          platform: win32
          updater-platform: linux-x86_64
          channel:
             by-project:
+               birch: "release-localtest"
                jamun: "beta-localtest"
                maple: "beta-localtest"
                mozilla-beta: "beta-localtest"
@@ -234,10 +242,12 @@ jobs:
       attributes:
          build_platform: win64
       extra:
+         product: firefox
          platform: win64
          updater-platform: linux-x86_64
          channel:
             by-project:
+               birch: "release-localtest"
                jamun: "beta-localtest"
                maple: "beta-localtest"
                mozilla-beta: "beta-localtest"
@@ -260,10 +270,11 @@ jobs:
       attributes:
          build_platform: linux-devedition
       extra:
-         stage-product: devedition
+         product: firefox
          platform: linux-i686
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-linux64:
       shipping-product: devedition
@@ -275,10 +286,11 @@ jobs:
       attributes:
          build_platform: linux64-devedition
       extra:
-         stage-product: devedition
+         product: firefox
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-macosx64:
       shipping-product: devedition
@@ -290,10 +302,11 @@ jobs:
       attributes:
          build_platform: macosx64-devedition
       extra:
-         stage-product: devedition
+         product: firefox
          platform: mac
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-win32:
       shipping-product: devedition
@@ -305,10 +318,11 @@ jobs:
       attributes:
          build_platform: win32-devedition
       extra:
-         stage-product: devedition
+         product: firefox
          platform: win32
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
 
    devedition-win64:
       shipping-product: devedition
@@ -320,7 +334,8 @@ jobs:
       attributes:
          build_platform: win64-devedition
       extra:
-         stage-product: devedition
+         product: firefox
          platform: win64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
+         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
