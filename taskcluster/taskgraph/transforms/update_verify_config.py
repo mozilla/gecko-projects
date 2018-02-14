@@ -7,6 +7,8 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import urlparse
+
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
@@ -24,11 +26,9 @@ def add_command(config, tasks):
         "include-version",
         "mar-channel-id-override",
         "last-watershed",
-        "repo-path",
     ]
     optional_args = [
         "updater-platform",
-        "stage-product",
     ]
 
     for task in tasks:
@@ -43,6 +43,7 @@ def add_command(config, tasks):
             "testing/mozharness/scripts/release/update-verify-config-creator.py",
             "--config", "internal_pypi.py",
             "--product", task["extra"]["product"],
+            "--stage-product", task["shipping-product"],
             "--app-name", task["extra"]["app-name"],
             "--platform", task["extra"]["platform"],
             "--to-version", release_config["version"],
@@ -52,6 +53,8 @@ def add_command(config, tasks):
             "--to-revision", config.params["head_rev"],
             "--output-file", "update-verify.cfg",
         ]
+
+        repo_path = urlparse.urlsplit(config.params["head_repository"]).path.lstrip("/")
 
         if release_config.get("partial_versions"):
             for partial in release_config["partial_versions"].split(","):
