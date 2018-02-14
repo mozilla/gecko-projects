@@ -13,7 +13,7 @@ if [ -f /etc/lsb-release ]; then
     # shellcheck disable=SC1091
     . /etc/lsb-release
 
-    if [ "${DISTRIB_ID}" = "Ubuntu" ] && [ "${DISTRIB_RELEASE}" = "16.04" ]
+    if [ "${DISTRIB_ID}" = "Ubuntu" ] && [[ "${DISTRIB_RELEASE}" = "16.04" || "${DISTRIB_RELEASE}" = "17.10" ]]
     then
         HG_DEB=1
         HG_DIGEST=458746bd82b4732c72c611f1041f77a47a683bc75ff3f6ab7ed86ea394f48d94cd7e2d3d1d5b020906318a9a24bea27401a3a63d7e645514dbc2cb581621977f
@@ -23,16 +23,6 @@ if [ -f /etc/lsb-release ]; then
         HG_COMMON_DIGEST=8074efbfff974f0bbdd0c3be3d272cc7a634456921e04db31369fbec1c9256ddaf44bdbe120f6f33113d2be9324a1537048028ebaaf205c6659e476a757358fd
         HG_COMMON_SIZE=2097892
         HG_COMMON_FILENAME=mercurial-common_4.4.2_all.deb
-    elif [ "${DISTRIB_ID}" = "Ubuntu" ] && [ "${DISTRIB_RELEASE}" = "17.10" ]
-    then
-        HG_DEB=1
-        HG_DIGEST=10e518ec50117c091470f24a6a034c9566cce3bb81b27407a4891a64bd56b82daa5774b125d3025700c5b24148b4d8c2430f9a91bc2ebc452152c22703fcf2c0
-        HG_SIZE=193186
-        HG_FILENAME=mercurial_4.5_amd64.deb
-
-        HG_COMMON_DIGEST=028bf43aace41aaa00c4967487e6c9ce89ea2d72a0a44bd86b505b30c31c8313843605fbfea40ead747793119dc47ab75b2c2c5aec875a5f58a069b16b4b9fc3
-        HG_COMMON_SIZE=2134620
-        HG_COMMON_FILENAME=mercurial-common_4.5_all.deb
     elif [ "${DISTRIB_ID}" = "Ubuntu" ] && [ "${DISTRIB_RELEASE}" = "12.04" ]
     then
         echo "Ubuntu 12.04 not supported"
