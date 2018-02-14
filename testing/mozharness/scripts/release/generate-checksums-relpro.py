@@ -211,6 +211,7 @@ class ChecksumsGenerator(BaseScript, VirtualenvMixin):
                 for fn in sorted(self.checksums):
                     output_file.write("{}  {}\n".format(self.checksums[fn]["hashes"][fmt], fn))
 
+
 if __name__ == "__main__":
     myScript = ChecksumsGenerator()
     myScript.run_and_exit()
