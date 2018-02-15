@@ -14,18 +14,12 @@ transforms = TransformSequence()
 @transforms.add
 def tweak_beetmover_source_dependencies_and_upstream_artifacts(config, jobs):
     for job in jobs:
-        # HACK1: instead of grabbing SOURCE file from `release-source` task, we
+        # HACK: instead of grabbing SOURCE file from `release-source` task, we
         # instead take it along with SOURCE.asc directly from the
         # `release-source-signing`.
         #
-        # HACK2: This way, we can just overwrite the `build`
-        # dependency, which at this point still is `release-source` task, with
-        # the actual Nightly en-US linux64 build which contains the
-        # `balrog_props` file we're interested in.
-        #
-        # XXX: this hack should go away by either:
+        # XXX: this hack should go away by
         # * rewriting beetmover transforms to allow more flexibility in deps
-        # * ditch balrog_props in beetmover and rely on in-tree task payload
 
         if job['attributes']['shipping_product'] == 'firefox':
             job['dependencies']['build'] = u'build-linux64-nightly/opt'
@@ -39,10 +33,5 @@ def tweak_beetmover_source_dependencies_and_upstream_artifacts(config, jobs):
                     job['attributes']['shipping_product']
                 )
             )
-        upstream_artifacts = job['worker']['upstream-artifacts']
-        for artifact in upstream_artifacts:
-            if artifact['taskType'] == 'build':
-                artifact['paths'].append(u'public/build/balrog_props.json')
-                break
 
         yield job
