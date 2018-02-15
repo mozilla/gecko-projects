@@ -95,15 +95,6 @@ jobs:
                   mozilla-release: "release-localtest"
                   mozilla-esr52: "esr-localtest"
                   default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  birch: "release-firefox-linux64.cfg"
-                  jamun: "beta-firefox-linux64.cfg"
-                  maple: "beta-firefox-linux64.cfg"
-                  mozilla-beta: "beta-firefox-linux64.cfg"
-                  mozilla-release: "release-firefox-linux64.cfg"
-                  mozilla-esr52: "esr-firefox-linux64.cfg"
-                  default: "none"
       treeherder:
          symbol: UV
          platform: linux64/opt
@@ -126,15 +117,6 @@ jobs:
                   mozilla-release: "release-localtest"
                   mozilla-esr52: "esr-localtest"
                   default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  birch: "release-firefox-linux.cfg"
-                  jamun: "beta-firefox-linux.cfg"
-                  maple: "beta-firefox-linux.cfg"
-                  mozilla-beta: "beta-firefox-linux.cfg"
-                  mozilla-release: "release-firefox-linux.cfg"
-                  mozilla-esr52: "esr-firefox-linux.cfg"
-                  default: "none"
       treeherder:
          symbol: UV
          platform: linux/opt
@@ -157,15 +139,6 @@ jobs:
                   mozilla-release: "release-localtest"
                   mozilla-esr52: "esr-localtest"
                   default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  birch: "release-firefox-win64.cfg"
-                  jamun: "beta-firefox-win64.cfg"
-                  maple: "beta-firefox-win64.cfg"
-                  mozilla-beta: "beta-firefox-win64.cfg"
-                  mozilla-release: "release-firefox-win64.cfg"
-                  mozilla-esr52: "esr-firefox-win64.cfg"
-                  default: "none"
       treeherder:
          symbol: UV
          platform: win64/opt
@@ -188,15 +161,6 @@ jobs:
                   mozilla-release: "release-localtest"
                   mozilla-esr52: "esr-localtest"
                   default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  birch: "release-firefox-win32.cfg"
-                  jamun: "beta-firefox-win32.cfg"
-                  maple: "beta-firefox-win32.cfg"
-                  mozilla-beta: "beta-firefox-win32.cfg"
-                  mozilla-release: "release-firefox-win32.cfg"
-                  mozilla-esr52: "esr-firefox-win32.cfg"
-                  default: "none"
       treeherder:
          symbol: UV
          platform: win32/opt
@@ -219,15 +183,6 @@ jobs:
                   mozilla-release: "release-localtest"
                   mozilla-esr52: "esr-localtest"
                   default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  birch: "release-firefox-macosx64.cfg"
-                  jamun: "beta-firefox-macosx64.cfg"
-                  maple: "beta-firefox-macosx64.cfg"
-                  mozilla-beta: "beta-firefox-macosx64.cfg"
-                  mozilla-release: "release-firefox-macosx64.cfg"
-                  mozilla-esr52: "esr-firefox-macosx64.cfg"
-                  default: "none"
       treeherder:
          symbol: UV
          platform: macosx64/opt
@@ -241,22 +196,7 @@ jobs:
       shipping-product: devedition
       worker:
          env:
-            CHANNEL:
-               by-project:
-                  jamun: "aurora-localtest"
-                  maple: "aurora-localtest"
-                  mozilla-beta: "aurora-localtest"
-                  mozilla-release: "release-localtest"
-                  mozilla-esr52: "esr-localtest"
-                  default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  jamun: "aurora-devedition-linux64.cfg"
-                  maple: "aurora-devedition-linux64.cfg"
-                  mozilla-beta: "aurora-devedition-linux64.cfg"
-                  mozilla-release: "release-devedition-linux64.cfg"
-                  mozilla-esr52: "esr-devedition-linux64.cfg"
-                  default: "none"
+            CHANNEL: "aurora-localtest"
       treeherder:
          symbol: UV
          platform: linux64-devedition/opt
@@ -270,22 +210,7 @@ jobs:
       shipping-product: devedition
       worker:
          env:
-            CHANNEL:
-               by-project:
-                  jamun: "aurora-localtest"
-                  maple: "aurora-localtest"
-                  mozilla-beta: "aurora-localtest"
-                  mozilla-release: "release-localtest"
-                  mozilla-esr52: "esr-localtest"
-                  default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  jamun: "aurora-devedition-linux.cfg"
-                  maple: "aurora-devedition-linux.cfg"
-                  mozilla-beta: "aurora-devedition-linux.cfg"
-                  mozilla-release: "release-devedition-linux.cfg"
-                  mozilla-esr52: "esr-devedition-linux.cfg"
-                  default: "none"
+            CHANNEL: "aurora-localtest"
       treeherder:
          symbol: UV
          platform: linux-devedition/opt
@@ -299,22 +224,7 @@ jobs:
       shipping-product: devedition
       worker:
          env:
-            CHANNEL:
-               by-project:
-                  jamun: "aurora-localtest"
-                  maple: "aurora-localtest"
-                  mozilla-beta: "aurora-localtest"
-                  mozilla-release: "release-localtest"
-                  mozilla-esr52: "esr-localtest"
-                  default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  jamun: "aurora-devedition-win64.cfg"
-                  maple: "aurora-devedition-win64.cfg"
-                  mozilla-beta: "aurora-devedition-win64.cfg"
-                  mozilla-release: "release-devedition-win64.cfg"
-                  mozilla-esr52: "esr-devedition-win64.cfg"
-                  default: "none"
+            CHANNEL: "aurora-localtest"
       treeherder:
          symbol: UV
          platform: win64-devedition/opt
@@ -328,22 +238,7 @@ jobs:
       shipping-product: devedition
       worker:
          env:
-            CHANNEL:
-               by-project:
-                  jamun: "aurora-localtest"
-                  maple: "aurora-localtest"
-                  mozilla-beta: "aurora-localtest"
-                  mozilla-release: "release-localtest"
-                  mozilla-esr52: "esr-localtest"
-                  default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  jamun: "aurora-devedition-win32.cfg"
-                  maple: "aurora-devedition-win32.cfg"
-                  mozilla-beta: "aurora-devedition-win32.cfg"
-                  mozilla-release: "release-devedition-win32.cfg"
-                  mozilla-esr52: "esr-devedition-win32.cfg"
-                  default: "none"
+            CHANNEL: "aurora-localtest"
       treeherder:
          symbol: UV
          platform: win32-devedition/opt
@@ -357,22 +252,7 @@ jobs:
       shipping-product: devedition
       worker:
          env:
-            CHANNEL:
-               by-project:
-                  jamun: "aurora-localtest"
-                  maple: "aurora-localtest"
-                  mozilla-beta: "aurora-localtest"
-                  mozilla-release: "release-localtest"
-                  mozilla-esr52: "esr-localtest"
-                  default: "default"
-            VERIFY_CONFIG:
-               by-project:
-                  jamun: "aurora-devedition-macosx64.cfg"
-                  maple: "aurora-devedition-macosx64.cfg"
-                  mozilla-beta: "aurora-devedition-macosx64.cfg"
-                  mozilla-release: "release-devedition-macosx64.cfg"
-                  mozilla-esr52: "esr-devedition-macosx64.cfg"
-                  default: "none"
+            CHANNEL: "aurora-localtest"
       treeherder:
          symbol: UV
          platform: macosx64-devedition/opt
