@@ -74,9 +74,7 @@ def make_release_generate_checksums_signing_description(config, jobs):
             "taskId": {"task-reference": "<build>"},
             "taskType": "build",
             "paths": [
-                "public/build/SHA256SUMMARY",
                 "public/build/SHA256SUMS",
-                "public/build/SHA512SUMMARY",
                 "public/build/SHA512SUMS",
             ],
             "formats": ["gpg"]
