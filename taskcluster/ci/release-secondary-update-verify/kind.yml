@@ -32,8 +32,7 @@ job-defaults:
          NO_BBCONFIG: "1"
          BUILD_TOOLS_REPO:
             by-project:
-               jamun: https://hg.mozilla.org/users/stage-ffxbld/tools
-               maple: https://hg.mozilla.org/users/asasaki_mozilla.com/tools
+               birch: https://hg.mozilla.org/users/bhearsum_mozilla.com/tools
                default: https://hg.mozilla.org/build/tools
          CHANNEL:
             by-project:
@@ -64,7 +63,7 @@ job-defaults:
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
+               birch: ["release+tcstaging@mozilla.com"]
                default: []
 
       exception:
@@ -80,7 +79,7 @@ job-defaults:
                mozilla-beta: ["release-automation-notifications@mozilla.com"]
                mozilla-release: ["release-automation-notifications@mozilla.com"]
                try: ["{task_def[metadata][owner]}"]
-               maple: ["release+tcstaging@mozilla.com"]
+               birch: ["release+tcstaging@mozilla.com"]
                default: []
 
 jobs:
