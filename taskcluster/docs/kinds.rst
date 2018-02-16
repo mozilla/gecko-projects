@@ -287,6 +287,10 @@ release-generate-checksums-signing
 ----------------------------------
 Sign the pre-release checksums produced by the above task
 
+release-generate-checksums-beetmover
+------------------------------------
+Submit to S3 the artifacts produced by the release-checksums task and its signing counterpart.
+
 release-final-verify
 --------------------
 Verifies the contents and package of release update MARs.
