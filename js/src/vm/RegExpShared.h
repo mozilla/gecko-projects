@@ -16,7 +16,6 @@
 #include "mozilla/MemoryReporting.h"
 
 #include "jsalloc.h"
-#include "jsatom.h"
 
 #include "builtin/SelfHostingDefines.h"
 #include "gc/Barrier.h"
@@ -25,8 +24,7 @@
 #include "js/UbiNode.h"
 #include "js/Vector.h"
 #include "vm/ArrayObject.h"
-
-struct JSContext;
+#include "vm/JSAtom.h"
 
 namespace js {
 

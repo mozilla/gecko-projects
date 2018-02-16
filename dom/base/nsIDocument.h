@@ -2091,9 +2091,6 @@ public:
     return mHaveFiredTitleChange;
   }
 
-  /**
-   * See GetAnonymousElementByAttribute on nsIDOMDocumentXBL.
-   */
   virtual Element*
     GetAnonymousElementByAttribute(nsIContent* aElement,
                                    nsAtom* aAttrName,
@@ -2640,6 +2637,9 @@ public:
 
   virtual nsISupports* GetCurrentContentSink() = 0;
 
+  virtual void SetAutoFocusElement(Element* aAutoFocusElement) = 0;
+  virtual void TriggerAutoFocus() = 0;
+
   virtual void SetScrollToRef(nsIURI *aDocumentURI) = 0;
   virtual void ScrollToRef() = 0;
   virtual void ResetScrolledToRefAlready() = 0;
@@ -2926,7 +2926,7 @@ public:
   nsIURI* GetDocumentURIObject() const;
   // Not const because all the full-screen goop is not const
   virtual bool FullscreenEnabled(mozilla::dom::CallerType aCallerType) = 0;
-  virtual Element* GetFullscreenElement() = 0;
+  virtual Element* FullScreenStackTop() = 0;
   bool Fullscreen()
   {
     return !!GetFullscreenElement();
@@ -2936,6 +2936,9 @@ public:
   {
     UnlockPointer(this);
   }
+
+  static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
+
 #ifdef MOZILLA_INTERNAL_API
   bool Hidden() const
   {
@@ -2984,9 +2987,6 @@ public:
   Element* GetBindingParent(nsINode& aNode);
   void LoadBindingDocument(const nsAString& aURI,
                            nsIPrincipal& aSubjectPrincipal,
-                           mozilla::ErrorResult& rv);
-  void LoadBindingDocument(const nsAString& aURI,
-                           const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                            mozilla::ErrorResult& rv);
   mozilla::dom::XPathExpression*
     CreateExpression(const nsAString& aExpression,

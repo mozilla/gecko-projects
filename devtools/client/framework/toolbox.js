@@ -115,6 +115,9 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
   this.frameMap = new Map();
   this.selectedFrameId = null;
 
+  // List of listeners for `devtools.network.onRequestFinished` WebExt API
+  this._requestFinishedListeners = new Set();
+
   this._toolRegistered = this._toolRegistered.bind(this);
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this._onWillNavigate = this._onWillNavigate.bind(this);
@@ -151,6 +154,7 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
   this._onPickerStopped = this._onPickerStopped.bind(this);
   this._onInspectObject = this._onInspectObject.bind(this);
   this._onNewSelectedNodeFront = this._onNewSelectedNodeFront.bind(this);
+  this._updatePickerButton = this._updatePickerButton.bind(this);
   this.selectTool = this.selectTool.bind(this);
 
   this._target.on("close", this.destroy);
@@ -174,6 +178,7 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this.on("host-changed", this._refreshHostTitle);
   this.on("select", this._refreshHostTitle);
+  this.on("select", this._updatePickerButton);
 
   this.on("ready", this._showDevEditionPromo);
 
@@ -720,6 +725,7 @@ Toolbox.prototype = {
    * @property {String} className - An optional additional className for the button.
    * @property {String} description - The value that will display as a tooltip and in
    *                    the options panel for enabling/disabling.
+   * @property {Boolean} disabled - An optional disabled state for the button.
    * @property {Function} onClick - The function to run when the button is activated by
    *                      click or keyboard shortcut. First argument will be the 'click'
    *                      event, and second argument is the toolbox instance.
@@ -746,6 +752,7 @@ Toolbox.prototype = {
       id,
       className,
       description,
+      disabled,
       onClick,
       isInStartContainer,
       setup,
@@ -759,6 +766,7 @@ Toolbox.prototype = {
       id,
       className,
       description,
+      disabled,
       onClick(event) {
         if (typeof onClick == "function") {
           onClick(event, toolbox);
@@ -1306,11 +1314,19 @@ Toolbox.prototype = {
    * focus the window. This is only desirable when the toolbox is mounted to the
    * window. When devtools is free floating, then the target window should not
    * pop in front of the viewer when the picker is clicked.
+   *
+   * Note: Toggle picker can be overwritten by panel other than the inspector to
+   * allow for custom picker behaviour.
    */
   _onPickerClick: function () {
     let focus = this.hostType === Toolbox.HostType.BOTTOM ||
                 this.hostType === Toolbox.HostType.SIDE;
-    this.highlighterUtils.togglePicker(focus);
+    let currentPanel = this.getCurrentPanel();
+    if (currentPanel.togglePicker) {
+      currentPanel.togglePicker(focus);
+    } else {
+      this.highlighterUtils.togglePicker(focus);
+    }
   },
 
   /**
@@ -1319,7 +1335,12 @@ Toolbox.prototype = {
    */
   _onPickerKeypress: function (event) {
     if (event.keyCode === KeyCodes.DOM_VK_ESCAPE) {
-      this.highlighterUtils.cancelPicker();
+      let currentPanel = this.getCurrentPanel();
+      if (currentPanel.cancelPicker) {
+        currentPanel.cancelPicker();
+      } else {
+        this.highlighterUtils.cancelPicker();
+      }
       // Stop the console from toggling.
       event.stopImmediatePropagation();
     }
@@ -1391,6 +1412,29 @@ Toolbox.prototype = {
     this.toolbarButtons.forEach(button => {
       button.isVisible = this._commandIsVisible(button);
     });
+    this.component.setToolboxButtons(this.toolbarButtons);
+  },
+
+  /**
+   * Visually update picker button.
+   * This function is called on every "select" event. Newly selected panel can
+   * update the visual state of the picker button such as disabled state,
+   * additional CSS classes (className), and tooltip (description).
+   */
+  _updatePickerButton() {
+    const button = this.pickerButton;
+    let currentPanel = this.getCurrentPanel();
+
+    if (currentPanel && currentPanel.updatePickerButton) {
+      currentPanel.updatePickerButton();
+    } else {
+      // If the current panel doesn't define a custom updatePickerButton,
+      // revert the button to its default state
+      button.description = L10N.getStr("pickButton.tooltip");
+      button.className = null;
+      button.disabled = null;
+    }
+
     this.component.setToolboxButtons(this.toolbarButtons);
   },
 
@@ -2580,7 +2624,13 @@ Toolbox.prototype = {
       // in the initialization process can throw errors.
       yield this._initInspector;
 
-      yield this.highlighterUtils.stopPicker();
+      let currentPanel = this.getCurrentPanel();
+      if (currentPanel.stopPicker) {
+        yield currentPanel.stopPicker();
+      } else {
+        yield this.highlighterUtils.stopPicker();
+      }
+
       yield this._inspector.destroy();
       if (this._highlighter) {
         // Note that if the toolbox is closed, this will work fine, but will fail
@@ -2639,6 +2689,7 @@ Toolbox.prototype = {
     this._target.off("navigate", this._refreshHostTitle);
     this._target.off("frame-update", this._updateFrames);
     this.off("select", this._refreshHostTitle);
+    this.off("select", this._updatePickerButton);
     this.off("host-changed", this._refreshHostTitle);
     this.off("ready", this._showDevEditionPromo);
 
@@ -2998,6 +3049,8 @@ Toolbox.prototype = {
     return viewSource.viewSource(this, sourceURL, sourceLine);
   },
 
+  // Support for WebExtensions API (`devtools.network.*`)
+
   /**
    * Returns data (HAR) collected by the Network panel.
    */
@@ -3013,5 +3066,54 @@ Toolbox.prototype = {
 
     // Use Netmonitor object to get the current HAR log.
     return netPanel.panelWin.Netmonitor.getHar();
+  },
+
+  /**
+   * Add listener for `onRequestFinished` events.
+   *
+   * @param {Object} listener
+   *        The listener to be called it's expected to be
+   *        a function that takes ({harEntry, requestId})
+   *        as first argument.
+   */
+  addRequestFinishedListener: function (listener) {
+    // Log console message informing the extension developer
+    // that the Network panel needs to be selected at least
+    // once in order to receive `onRequestFinished` events.
+    let message = "The Network panel needs to be selected at least" +
+      " once in order to receive 'onRequestFinished' events.";
+    this.target.logErrorInPage(message, "har");
+
+    // Add the listener into internal list.
+    this._requestFinishedListeners.add(listener);
+  },
+
+  removeRequestFinishedListener: function (listener) {
+    this._requestFinishedListeners.delete(listener);
+  },
+
+  getRequestFinishedListeners: function () {
+    return this._requestFinishedListeners;
+  },
+
+  /**
+   * Used to lazily fetch HTTP response content within
+   * `onRequestFinished` event listener.
+   *
+   * @param {String} requestId
+   *        Id of the request for which the response content
+   *        should be fetched.
+   */
+  fetchResponseContent: function (requestId) {
+    let netPanel = this.getPanel("netmonitor");
+
+    // The panel doesn't have to exist (it must be selected
+    // by the user at least once to be created).
+    // Return undefined content in such case.
+    if (!netPanel) {
+      return Promise.resolve({content: {}});
+    }
+
+    return netPanel.panelWin.Netmonitor.fetchResponseContent(requestId);
   }
 };

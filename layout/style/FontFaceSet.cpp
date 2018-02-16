@@ -55,6 +55,7 @@
 #endif
 #include "nsUTF8Utils.h"
 #include "nsDOMNavigationTiming.h"
+#include "StylePrefs.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -1102,6 +1103,19 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
                  "@font-face font-feature-settings has unexpected unit");
   }
 
+  // set up font variations
+  nsTArray<gfxFontVariation> variationSettings;
+  aFontFace->GetDesc(eCSSFontDesc_FontVariationSettings, val);
+  unit = val.GetUnit();
+  if (unit == eCSSUnit_Normal) {
+    // empty list of variations
+  } else if (unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep) {
+    nsLayoutUtils::ComputeFontVariations(val.GetPairListValue(), variationSettings);
+  } else {
+    NS_ASSERTION(unit == eCSSUnit_Null,
+                 "@font-face font-variation-settings has unexpected unit");
+  }
+
   // set up font language override
   aFontFace->GetDesc(eCSSFontDesc_FontLanguageOverride, val);
   unit = val.GetUnit();
@@ -1195,6 +1209,19 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
               face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_EOT;
             } else if (valueString.LowerCaseEqualsASCII("svg")) {
               face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_SVG;
+            } else if (StylePrefs::sFontVariationsEnabled &&
+                       valueString.LowerCaseEqualsASCII("woff-variations")) {
+              face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_WOFF_VARIATIONS;
+            } else if (StylePrefs::sFontVariationsEnabled &&
+                       Preferences::GetBool(GFX_PREF_WOFF2_ENABLED) &&
+                       valueString.LowerCaseEqualsASCII("woff2-variations")) {
+              face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_WOFF2_VARIATIONS;
+            } else if (StylePrefs::sFontVariationsEnabled &&
+                       valueString.LowerCaseEqualsASCII("opentype-variations")) {
+              face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_OPENTYPE_VARIATIONS;
+            } else if (StylePrefs::sFontVariationsEnabled &&
+                       valueString.LowerCaseEqualsASCII("truetype-variations")) {
+              face->mFormatFlags |= gfxUserFontSet::FLAG_FORMAT_TRUETYPE_VARIATIONS;
             } else {
               // unknown format specified, mark to distinguish from the
               // case where no format hints are specified
@@ -1229,6 +1256,7 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
     set->mUserFontSet->FindOrCreateUserFontEntry(aFamilyName, srcArray, weight,
                                                  stretch, italicStyle,
                                                  featureSettings,
+                                                 variationSettings,
                                                  languageOverride,
                                                  unicodeRanges, fontDisplay);
   return entry.forget();
@@ -2001,13 +2029,15 @@ FontFaceSet::UserFontSet::CreateUserFontEntry(
                                int32_t aStretch,
                                uint8_t aStyle,
                                const nsTArray<gfxFontFeature>& aFeatureSettings,
+                               const nsTArray<gfxFontVariation>& aVariationSettings,
                                uint32_t aLanguageOverride,
                                gfxCharacterMap* aUnicodeRanges,
                                uint8_t aFontDisplay)
 {
   RefPtr<gfxUserFontEntry> entry =
     new FontFace::Entry(this, aFontFaceSrcList, aWeight, aStretch, aStyle,
-                        aFeatureSettings, aLanguageOverride, aUnicodeRanges,
+                        aFeatureSettings, aVariationSettings,
+                        aLanguageOverride, aUnicodeRanges,
                         aFontDisplay);
   return entry.forget();
 }

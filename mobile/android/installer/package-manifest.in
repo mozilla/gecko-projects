@@ -145,7 +145,6 @@
 #ifdef MOZ_WEBSPEECH
 @BINPATH@/components/dom_webspeechrecognition.xpt
 #endif
-@BINPATH@/components/dom_xbl.xpt
 @BINPATH@/components/dom_xhr.xpt
 @BINPATH@/components/dom_xul.xpt
 @BINPATH@/components/dom_presentation.xpt
@@ -435,7 +434,11 @@
 
 ; [Default Preferences]
 ; All the pref files must be part of base to prevent migration bugs
+#ifdef MOZ_GECKOVIEW_JAR
+@BINPATH@/@PREF_DIR@/geckoview-prefs.js
+#else
 @BINPATH@/@PREF_DIR@/mobile.js
+#endif
 @BINPATH@/@PREF_DIR@/channel-prefs.js
 @BINPATH@/ua-update.json
 @BINPATH@/greprefs.js

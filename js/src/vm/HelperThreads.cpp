@@ -25,12 +25,11 @@
 #include "vm/TraceLogging.h"
 #include "vm/Xdr.h"
 
-#include "jscntxtinlines.h"
-#include "jscompartmentinlines.h"
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
-
-#include "gc/Iteration-inl.h"
+#include "gc/GCIteration-inl.h"
+#include "vm/JSCompartment-inl.h"
+#include "vm/JSContext-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
@@ -793,7 +792,7 @@ StartOffThreadParseTask(JSContext* cx, const ReadOnlyCompileOptions& options,
     // Suppress GC so that calls below do not trigger a new incremental GC
     // which could require barriers on the atoms compartment.
     gc::AutoSuppressGC nogc(cx);
-    gc::AutoAssertNoNurseryAlloc noNurseryAlloc;
+    gc::AutoSuppressNurseryCellAlloc noNurseryAlloc(cx);
     AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
 
     JSObject* global = CreateGlobalForOffThreadParse(cx, kind, nogc);
@@ -2091,8 +2090,16 @@ js::StartOffThreadPromiseHelperTask(PromiseHelperTask* task)
 }
 
 void
-GlobalHelperThreadState::trace(JSTracer* trc)
+GlobalHelperThreadState::trace(JSTracer* trc, gc::AutoTraceSession& session)
 {
+    // There's an assertion that requires the exclusive access lock when tracing
+    // atoms (see AtomIsPinnedInRuntime). Due to mutex ordering requirements we
+    // need to take that lock before the helper thread lock, if we don't have it
+    // already.
+    Maybe<AutoLockForExclusiveAccess> exclusiveLock;
+    if (!session.maybeLock.isSome())
+        exclusiveLock.emplace(trc->runtime());
+
     AutoLockHelperThreadState lock;
     for (auto builder : ionWorklist(lock))
         builder->trace(trc);
@@ -2145,7 +2152,13 @@ HelperThread::handleGCHelperWorkload(AutoLockHelperThreadState& locked)
 void
 JSContext::setHelperThread(HelperThread* thread)
 {
+    if (helperThread_)
+        nurserySuppressions_--;
+
     helperThread_ = thread;
+
+    if (helperThread_)
+        nurserySuppressions_++;
 }
 
 void

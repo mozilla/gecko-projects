@@ -23,6 +23,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/PLayerTransaction.h"
 #include "nsCSSRendering.h"
+#include "nsCSSRenderingGradients.h"
 #include "nsISelectionController.h"
 #include "nsIPresShell.h"
 #include "nsRegion.h"
@@ -43,6 +44,7 @@
 #include "imgIContainer.h"
 #include "BasicLayers.h"
 #include "nsBoxFrame.h"
+#include "nsImageFrame.h"
 #include "nsSubDocumentFrame.h"
 #include "SVGObserverUtils.h"
 #include "nsSVGElement.h"
@@ -569,7 +571,11 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
   animation->direction() = static_cast<uint8_t>(timing.Direction());
   animation->fillMode() = static_cast<uint8_t>(computedTiming.mFill);
   animation->property() = aProperty.mProperty;
-  animation->playbackRate() = aAnimation->PlaybackRate();
+  animation->playbackRate() = aAnimation->CurrentOrPendingPlaybackRate();
+  animation->previousPlaybackRate() =
+    aAnimation->HasPendingPlaybackRate()
+      ? aAnimation->PlaybackRate()
+      : std::numeric_limits<float>::quiet_NaN();
   animation->data() = aData;
   animation->easingFunction() = ToTimingFunction(timing.TimingFunction());
   animation->iterationComposite() =

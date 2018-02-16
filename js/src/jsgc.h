@@ -17,21 +17,9 @@
 #include "gc/GCEnum.h"
 #include "js/TraceKind.h"
 
-struct JSCompartment;
-struct JSContext;
-class JSObject;
 class JSExternalString;
 class JSFatInlineString;
-struct JSPrincipals;
-class JSScript;
-struct JSRuntime;
 class JSTracer;
-
-namespace JS {
-
-struct Zone;
-
-} // namespace JS
 
 namespace js {
 
@@ -138,6 +126,8 @@ NewCompartment(JSContext* cx, JSPrincipals* principals,
                const JS::CompartmentOptions& options);
 
 namespace gc {
+
+void FinishGC(JSContext* cx);
 
 /*
  * Merge all contents of source into target. This can only be used if source is

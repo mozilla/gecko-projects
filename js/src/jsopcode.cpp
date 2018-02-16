@@ -12,6 +12,7 @@
 
 #define __STDC_FORMAT_MACROS
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Vector.h"
@@ -23,14 +24,8 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jscompartment.h"
-#include "jsfun.h"
 #include "jsnum.h"
-#include "jsobj.h"
 #include "jsprf.h"
-#include "jsscript.h"
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -42,16 +37,21 @@
 #include "js/CharacterEncoding.h"
 #include "vm/CodeCoverage.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/JSAtom.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/Opcodes.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 
-#include "jscntxtinlines.h"
-#include "jscompartmentinlines.h"
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
-
-#include "gc/Iteration-inl.h"
+#include "gc/GCIteration-inl.h"
+#include "vm/JSCompartment-inl.h"
+#include "vm/JSContext-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -71,7 +71,7 @@ const JSCodeSpec js::CodeSpec[] = {
 #undef MAKE_CODESPEC
 };
 
-const unsigned js::NumCodeSpecs = JS_ARRAY_LENGTH(CodeSpec);
+const unsigned js::NumCodeSpecs = mozilla::ArrayLength(CodeSpec);
 
 /*
  * Each element of the array is either a source literal associated with JS
@@ -2896,7 +2896,7 @@ GenerateLcovInfo(JSContext* cx, JSCompartment* comp, GenericPrinter& out)
 
     // Collect the list of scripts which are part of the current compartment.
     {
-        js::gc::AutoPrepareForTracing apft(cx, SkipAtoms);
+        js::gc::AutoPrepareForTracing apft(cx);
     }
     Rooted<ScriptVector> topScripts(cx, ScriptVector(cx));
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {

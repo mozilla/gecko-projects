@@ -21,7 +21,6 @@
 #include "nsTArray.h"
 #include "nsIdentifierMapEntry.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMDocumentXBL.h"
 #include "nsStubDocumentObserver.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIContent.h"
@@ -322,7 +321,6 @@ class PrincipalFlashClassifier;
 // Base class for our document implementations.
 class nsDocument : public nsIDocument,
                    public nsIDOMDocument,
-                   public nsIDOMDocumentXBL,
                    public nsSupportsWeakReference,
                    public nsIScriptObjectPrincipal,
                    public nsIRadioGroupContainer,
@@ -636,9 +634,6 @@ public:
   // nsIDOMDocument
   NS_DECL_NSIDOMDOCUMENT
 
-  // nsIDOMDocumentXBL
-  NS_DECL_NSIDOMDOCUMENTXBL
-
   using mozilla::dom::DocumentOrShadowRoot::GetElementById;
   using mozilla::dom::DocumentOrShadowRoot::GetElementsByTagName;
   using mozilla::dom::DocumentOrShadowRoot::GetElementsByTagNameNS;
@@ -809,6 +804,9 @@ public:
   // Only BlockOnload should call this!
   void AsyncBlockOnload();
 
+  virtual void SetAutoFocusElement(Element* aAutoFocusElement) override;
+  virtual void TriggerAutoFocus() override;
+
   virtual void SetScrollToRef(nsIURI *aDocumentURI) override;
   virtual void ScrollToRef() override;
   virtual void ResetScrolledToRefAlready() override;
@@ -883,8 +881,6 @@ public:
   //
   already_AddRefed<nsSimpleContentList> BlockedTrackingNodes() const;
 
-  static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
-
   // Do the "fullscreen element ready check" from the fullscreen spec.
   // It returns true if the given element is allowed to go into fullscreen.
   bool FullscreenElementReadyCheck(Element* aElement, bool aWasCallerChrome);
@@ -908,11 +904,10 @@ public:
   void FullScreenStackPop();
 
   // Returns the top element from the full-screen stack.
-  Element* FullScreenStackTop();
+  Element* FullScreenStackTop() override;
 
   // DOM-exposed fullscreen API
   bool FullscreenEnabled(mozilla::dom::CallerType aCallerType) override;
-  Element* GetFullscreenElement() override;
 
   virtual bool AllowPaymentRequest() const override;
   virtual void SetAllowPaymentRequest(bool aIsAllowPaymentRequest) override;
@@ -1314,6 +1309,8 @@ private:
 
   RefPtr<nsContentList> mImageMaps;
 
+  nsWeakPtr mAutoFocusElement;
+
   nsCString mScrollToRef;
   uint8_t mScrolledToRefAlready : 1;
   uint8_t mChangeScrollPosWhenScrollingToRef : 1;
@@ -1364,6 +1361,7 @@ private:
   bool mDOMLoadingSet : 1;
   bool mDOMInteractiveSet : 1;
   bool mDOMCompleteSet : 1;
+  bool mAutoFocusFired : 1;
 };
 
 class nsDocumentOnStack

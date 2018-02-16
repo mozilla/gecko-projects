@@ -1263,11 +1263,7 @@ pref("editor.use_css",                       false);
 pref("editor.css.default_length_unit",       "px");
 pref("editor.resizing.preserve_ratio",       true);
 pref("editor.positioning.offset",            0);
-#ifdef EARLY_BETA_OR_EARLIER
 pref("editor.use_div_for_default_newlines",  true);
-#else
-pref("editor.use_div_for_default_newlines",  false);
-#endif
 
 // Scripts & Windows prefs
 pref("dom.disable_beforeunload",            false);
@@ -3032,8 +3028,8 @@ pref("layout.css.frames-timing.enabled", true);
 pref("layout.css.emulate-moz-box-with-flex", false);
 #endif
 
-// Is the paint-order property supported for HTML text? (It is always supported
-// for SVG, provided it is enabled at all; see "svg.paint-order.enabled".)
+// Is the paint-order property supported for HTML text?
+// (It is always supported for SVG.)
 pref("layout.css.paint-order.enabled", true);
 
 // Are sets of prefixed properties supported?
@@ -3412,9 +3408,6 @@ pref("svg.path-caching.enabled", true);
 // Enable the use of display-lists for SVG hit-testing and painting.
 pref("svg.display-lists.hit-testing.enabled", true);
 pref("svg.display-lists.painting.enabled", true);
-
-// Is support for the SVG 2 paint-order property enabled?
-pref("svg.paint-order.enabled", true);
 
 // Is support for the <marker orient="auto-start-reverse"> feature enabled?
 pref("svg.marker-improvements.enabled", true);

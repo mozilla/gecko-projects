@@ -4125,6 +4125,15 @@ CompileFunction(JSContext* cx, AutoObjectVector& envChain,
                 const char* name, unsigned nargs, const char* const* argnames,
                 const char* bytes, size_t length, JS::MutableHandleFunction fun);
 
+/*
+ * Associate an element wrapper and attribute name with a previously compiled
+ * script, for debugging purposes. Calling this function is optional, but should
+ * be done before script execution if it is required.
+ */
+extern JS_PUBLIC_API(bool)
+InitScriptSourceElement(JSContext* cx, HandleScript script,
+                        HandleObject element, HandleString elementAttrName = nullptr);
+
 } /* namespace JS */
 
 extern JS_PUBLIC_API(JSString*)
@@ -4322,6 +4331,9 @@ GetRequestedModuleSpecifier(JSContext* cx, JS::HandleValue requestedModuleObject
 extern JS_PUBLIC_API(void)
 GetRequestedModuleSourcePos(JSContext* cx, JS::HandleValue requestedModuleObject,
                             uint32_t* lineNumber, uint32_t* columnNumber);
+
+extern JS_PUBLIC_API(JSScript*)
+GetModuleScript(JS::HandleObject moduleRecord);
 
 } /* namespace JS */
 
@@ -6329,15 +6341,18 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
      *
      *  Case 1: Regular Iteration
      *      iterator - pointer to the iterator object.
+     *      nextMethod - value of |iterator|.next.
      *      index - fixed to NOT_ARRAY (== UINT32_MAX)
      *
      *  Case 2: Optimized Array Iteration
      *      iterator - pointer to the array object.
+     *      nextMethod - the undefined value.
      *      index - current position in array.
      *
      * The cases are distinguished by whether or not |index| is equal to NOT_ARRAY.
      */
     JS::RootedObject iterator;
+    JS::RootedValue nextMethod;
     uint32_t index;
 
     static const uint32_t NOT_ARRAY = UINT32_MAX;
@@ -6346,7 +6361,9 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
     ForOfIterator& operator=(const ForOfIterator&) = delete;
 
   public:
-    explicit ForOfIterator(JSContext* cx) : cx_(cx), iterator(cx_), index(NOT_ARRAY) { }
+    explicit ForOfIterator(JSContext* cx)
+      : cx_(cx), iterator(cx_), nextMethod(cx), index(NOT_ARRAY)
+    { }
 
     enum NonIterableBehavior {
         ThrowOnNonIterable,
@@ -6384,7 +6401,6 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
 
   private:
     inline bool nextFromOptimizedArray(MutableHandleValue val, bool* done);
-    bool materializeArrayIterator();
 };
 
 

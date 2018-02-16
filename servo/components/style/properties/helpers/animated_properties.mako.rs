@@ -52,15 +52,12 @@ use values::computed::transform::Translate as ComputedTranslate;
 use values::computed::transform::Scale as ComputedScale;
 use values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
-use values::generics::font::FontSettings as GenericFontSettings;
+use values::generics::font::{FontSettings as GenericFontSettings, FontTag, VariationValue};
 use values::computed::font::FontVariationSettings;
-use values::generics::font::VariationValue;
-use values::generics::NonNegative;
 use values::generics::effects::Filter;
 use values::generics::position as generic_position;
 use values::generics::svg::{SVGLength,  SvgLengthOrPercentageOrNumber, SVGPaint};
 use values::generics::svg::{SVGPaintKind, SVGStrokeDashArray, SVGOpacity};
-use values::specified::font::FontTag;
 use void::{self, Void};
 
 /// <https://drafts.csswg.org/css-transitions/#animtype-repeatable-list>
@@ -789,7 +786,7 @@ impl ToAnimatedZero for AnimationValue {
 impl RepeatableListAnimatable for LengthOrPercentage {}
 impl RepeatableListAnimatable for Either<f32, LengthOrPercentage> {}
 impl RepeatableListAnimatable for Either<NonNegativeNumber, NonNegativeLengthOrPercentage> {}
-impl RepeatableListAnimatable for SvgLengthOrPercentageOrNumber<NonNegativeLengthOrPercentage, NonNegativeNumber> {}
+impl RepeatableListAnimatable for SvgLengthOrPercentageOrNumber<LengthOrPercentage, Number> {}
 
 macro_rules! repeated_vec_impl {
     ($($ty:ty),*) => {
@@ -3012,12 +3009,8 @@ impl Animate for AnimatedFilter {
             },
             % endfor
             % for func in ['Brightness', 'Contrast', 'Opacity', 'Saturate']:
-            (&Filter::${func}(ref this), &Filter::${func}(ref other)) => {
-                Ok(Filter::${func}(NonNegative(animate_multiplicative_factor(
-                    this.0,
-                    other.0,
-                    procedure,
-                )?)))
+            (&Filter::${func}(this), &Filter::${func}(other)) => {
+                Ok(Filter::${func}(animate_multiplicative_factor(this, other, procedure)?))
             },
             % endfor
             % if product == "gecko":
@@ -3038,7 +3031,7 @@ impl ToAnimatedZero for AnimatedFilter {
             Filter::${func}(ref this) => Ok(Filter::${func}(this.to_animated_zero()?)),
             % endfor
             % for func in ['Brightness', 'Contrast', 'Opacity', 'Saturate']:
-            Filter::${func}(_) => Ok(Filter::${func}(NonNegative(1.))),
+            Filter::${func}(_) => Ok(Filter::${func}(1.)),
             % endfor
             % if product == "gecko":
             Filter::DropShadow(ref this) => Ok(Filter::DropShadow(this.to_animated_zero()?)),

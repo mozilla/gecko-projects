@@ -147,6 +147,10 @@ class CodeGeneratorShared : public LElementVisitor
         return gen->isProfilerInstrumentationEnabled();
     }
 
+    bool stringsCanBeInNursery() const {
+        return gen->stringsCanBeInNursery();
+    }
+
     js::Vector<NativeToTrackedOptimizations, 0, SystemAllocPolicy> trackedOptimizations_;
     uint8_t* trackedOptimizationsMap_;
     uint32_t trackedOptimizationsMapSize_;
@@ -370,7 +374,7 @@ class CodeGeneratorShared : public LElementVisitor
     MBasicBlock* skipTrivialBlocks(MBasicBlock* block) {
         while (block->lir()->isTrivial()) {
             MOZ_ASSERT(block->lir()->rbegin()->numSuccessors() == 1);
-            block = block->lir()->rbegin()->getSuccessor(0);
+            block = block->lir()->rbegin()->toGoto()->getSuccessor(0);
         }
         return block;
     }

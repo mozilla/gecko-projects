@@ -25,10 +25,11 @@
 #include "jit/RangeAnalysis.h"
 #include "js/Conversions.h"
 
-#include "jsatominlines.h"
 #include "jsboolinlines.h"
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
+
+#include "vm/JSAtom-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
 using namespace js;

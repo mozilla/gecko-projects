@@ -1086,6 +1086,10 @@ pref("security.sandbox.gpu.level", 0);
 pref("security.sandbox.content.level", 3);
 #endif
 
+#if defined(NIGHTLY_BUILD) && defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+pref("security.sandbox.mac.flash.enabled", false);
+#endif
+
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // This pref is introduced as part of bug 742434, the naming is inspired from
 // its Windows/Mac counterpart, but on Linux it's an integer which means:
@@ -1690,12 +1694,9 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
 #ifdef NIGHTLY_BUILD
 pref("extensions.formautofill.available", "on");
 pref("extensions.formautofill.creditCards.available", true);
-#elif MOZ_UPDATE_CHANNEL == release
-pref("extensions.formautofill.available", "detect");
-pref("extensions.formautofill.creditCards.available", false);
 #else
 pref("extensions.formautofill.available", "detect");
-pref("extensions.formautofill.creditCards.available", true);
+pref("extensions.formautofill.creditCards.available", false);
 #endif
 pref("extensions.formautofill.addresses.enabled", true);
 pref("extensions.formautofill.creditCards.enabled", true);
@@ -1711,13 +1712,15 @@ pref("extensions.formautofill.firstTimeUse", true);
 pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.section.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
-// Comma separated list of countries Form Autofill supports
-#if MOZ_UPDATE_CHANNEL == release
-pref("extensions.formautofill.supportedCountries", "US");
-pref("extensions.formautofill.supportRTL", false);
-#else
+
+#ifdef NIGHTLY_BUILD
+// Comma separated list of countries Form Autofill supports.
+// This affects feature availability and the address edit form country picker.
 pref("extensions.formautofill.supportedCountries", "US,CA,DE");
 pref("extensions.formautofill.supportRTL", true);
+#else
+pref("extensions.formautofill.supportedCountries", "US");
+pref("extensions.formautofill.supportRTL", false);
 #endif
 
 // Whether or not to restore a session with lazy-browser tabs.

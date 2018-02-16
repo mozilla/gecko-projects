@@ -976,14 +976,17 @@ class LControlInstructionHelper : public LInstructionHelper<0, Operands, Temps> 
 
     mozilla::Array<MBasicBlock*, Succs> successors_;
 
-  public:
-    virtual size_t numSuccessors() const final override { return Succs; }
+  protected:
+    LControlInstructionHelper() {
+        this->setNumSuccessors(Succs);
+    }
 
-    virtual MBasicBlock* getSuccessor(size_t i) const final override {
+  public:
+    MBasicBlock* getSuccessor(size_t i) const {
         return successors_[i];
     }
 
-    virtual void setSuccessor(size_t i, MBasicBlock* successor) final override {
+    void setSuccessor(size_t i, MBasicBlock* successor) {
         successors_[i] = successor;
     }
 };
@@ -1628,15 +1631,18 @@ class LToAsyncGen : public LCallInstructionHelper<1, 1, 0>
     }
 };
 
-class LToAsyncIter : public LCallInstructionHelper<1, 1, 0>
+class LToAsyncIter : public LCallInstructionHelper<1, 1 + BOX_PIECES, 0>
 {
   public:
     LIR_HEADER(ToAsyncIter)
-    explicit LToAsyncIter(const LAllocation& input) {
-        setOperand(0, input);
+    explicit LToAsyncIter(const LAllocation& iterator, const LBoxAllocation& nextMethod) {
+        setOperand(0, iterator);
+        setBoxOperand(NextMethodIndex, nextMethod);
     }
 
-    const LAllocation* unwrapped() {
+    static const size_t NextMethodIndex = 1;
+
+    const LAllocation* iterator() {
         return getOperand(0);
     }
 };
@@ -7871,6 +7877,33 @@ class LPostWriteBarrierO : public LInstructionHelper<0, 2, 1>
     }
 };
 
+// Generational write barrier used when writing a string to an object.
+class LPostWriteBarrierS : public LInstructionHelper<0, 2, 1>
+{
+  public:
+    LIR_HEADER(PostWriteBarrierS)
+
+    LPostWriteBarrierS(const LAllocation& obj, const LAllocation& value,
+                       const LDefinition& temp) {
+        setOperand(0, obj);
+        setOperand(1, value);
+        setTemp(0, temp);
+    }
+
+    const MPostWriteBarrier* mir() const {
+        return mir_->toPostWriteBarrier();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* value() {
+        return getOperand(1);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+};
+
 // Generational write barrier used when writing a value to another object.
 class LPostWriteBarrierV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
 {
@@ -7905,6 +7938,42 @@ class LPostWriteElementBarrierO : public LInstructionHelper<0, 3, 1>
     LIR_HEADER(PostWriteElementBarrierO)
 
     LPostWriteElementBarrierO(const LAllocation& obj, const LAllocation& value,
+                              const LAllocation& index, const LDefinition& temp) {
+        setOperand(0, obj);
+        setOperand(1, value);
+        setOperand(2, index);
+        setTemp(0, temp);
+    }
+
+    const MPostWriteElementBarrier* mir() const {
+        return mir_->toPostWriteElementBarrier();
+    }
+
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+
+    const LAllocation* value() {
+        return getOperand(1);
+    }
+
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+};
+
+// Generational write barrier used when writing a string to an object's
+// elements.
+class LPostWriteElementBarrierS : public LInstructionHelper<0, 3, 1>
+{
+  public:
+    LIR_HEADER(PostWriteElementBarrierS)
+
+    LPostWriteElementBarrierS(const LAllocation& obj, const LAllocation& value,
                               const LAllocation& index, const LDefinition& temp) {
         setOperand(0, obj);
         setOperand(1, value);

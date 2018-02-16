@@ -8,29 +8,12 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
+// Get the theme variables from the app resource directory.
+// This allows per-app variables.
+ChromeUtils.import("resource:///modules/ThemeVariableMap.jsm");
+
 ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
-
-const kCSSVarsMap = [
-  ["--lwt-accent-color-inactive", "accentcolorInactive"],
-  ["--lwt-background-alignment", "backgroundsAlignment"],
-  ["--lwt-background-tiling", "backgroundsTiling"],
-  ["--tab-loading-fill", "tab_loading", "tabbrowser-tabs"],
-  ["--lwt-tab-text", "tab_text"],
-  ["--toolbar-bgcolor", "toolbarColor"],
-  ["--toolbar-color", "toolbar_text"],
-  ["--url-and-searchbar-background-color", "toolbar_field"],
-  ["--url-and-searchbar-color", "toolbar_field_text"],
-  ["--lwt-toolbar-field-border-color", "toolbar_field_border"],
-  ["--urlbar-separator-color", "toolbar_field_separator"],
-  ["--tabs-border-color", "toolbar_top_separator", "navigator-toolbox"],
-  ["--lwt-toolbar-vertical-separator", "toolbar_vertical_separator"],
-  ["--toolbox-border-bottom-color", "toolbar_bottom_separator"],
-  ["--lwt-toolbarbutton-icon-fill", "icon_color"],
-  ["--lwt-toolbarbutton-icon-fill-attention", "icon_attention_color"],
-  ["--lwt-toolbarbutton-hover-background", "button_background_hover"],
-  ["--lwt-toolbarbutton-active-background", "button_background_active"],
-];
 
 this.LightweightThemeConsumer =
  function LightweightThemeConsumer(aDocument) {
@@ -47,6 +30,7 @@ this.LightweightThemeConsumer =
   ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
   this._update(temp.LightweightThemeManager.currentThemeForDisplay);
   this._win.addEventListener("resize", this);
+  this._win.addEventListener("unload", this.destroy.bind(this), { once: true });
 };
 
 LightweightThemeConsumer.prototype = {
@@ -125,7 +109,7 @@ LightweightThemeConsumer.prototype = {
       return;
 
     let root = this._doc.documentElement;
-    let active = !!aData.headerURL;
+    let active = !!aData.accentcolor;
 
     // We need to clear these either way: either because the theme is being removed,
     // or because we are applying a new theme and the data might be bogus CSS,
@@ -146,6 +130,12 @@ LightweightThemeConsumer.prototype = {
     } else {
       root.removeAttribute("lwthemetextcolor");
       root.removeAttribute("lwtheme");
+    }
+
+    if (aData.headerURL) {
+      root.setAttribute("lwtheme-image", "true");
+    } else {
+      root.removeAttribute("lwtheme-image");
     }
 
     this._active = active;
@@ -205,7 +195,7 @@ function _setProperty(elem, active, variableName, value) {
 }
 
 function _setProperties(root, active, vars) {
-  for (let [cssVarName, varsKey, optionalElementID] of kCSSVarsMap) {
+  for (let [cssVarName, varsKey, optionalElementID] of ThemeVariableMap) {
     let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
                                  : root;
     _setProperty(elem, active, cssVarName, vars[varsKey]);

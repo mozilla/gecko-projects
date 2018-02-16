@@ -10,12 +10,12 @@
 #include "mozilla/Maybe.h"
 
 #include "jsapi.h"
-#include "jsatom.h"
 
 #include "builtin/SelfHostingDefines.h"
 #include "js/GCVector.h"
 #include "js/Id.h"
 #include "js/UniquePtr.h"
+#include "vm/JSAtom.h"
 #include "vm/NativeObject.h"
 #include "vm/ProxyObject.h"
 

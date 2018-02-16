@@ -51,7 +51,6 @@
         tabsintitlebar="true"
 #endif
         titlemenuseparator="&mainWindow.titlemodifiermenuseparator;"
-        lightweightthemes="true"
         windowtype="navigator:browser"
         macanimationtype="document"
         screenX="4" screenY="4"
@@ -775,6 +774,7 @@
                      class="chromeclass-location" overflows="false">
             <textbox id="urlbar" flex="1"
                      placeholder="&urlbar.placeholder2;"
+                     focused="true"
                      type="autocomplete"
                      autocompletesearch="unifiedcomplete"
                      autocompletesearchparam="enable-actions"

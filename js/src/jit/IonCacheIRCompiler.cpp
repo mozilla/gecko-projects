@@ -14,10 +14,9 @@
 #include "jit/SharedICHelpers.h"
 #include "proxy/Proxy.h"
 
-#include "jscompartmentinlines.h"
-
 #include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
+#include "vm/JSCompartment-inl.h"
 #include "vm/TypeInference-inl.h"
 
 using namespace js;
@@ -602,7 +601,7 @@ IonCacheIRCompiler::compile()
 
     Linker linker(masm);
     AutoFlushICache afc("getStubCode");
-    Rooted<JitCode*> newStubCode(cx_, linker.newCode<NoGC>(cx_, ION_CODE));
+    Rooted<JitCode*> newStubCode(cx_, linker.newCode<NoGC>(cx_, CodeKind::Ion));
     if (!newStubCode) {
         cx_->recoverFromOutOfMemory();
         return nullptr;
@@ -768,8 +767,8 @@ IonCacheIRCompiler::emitGuardSpecificAtom()
 
     // The pointers are not equal, so if the input string is also an atom it
     // must be a different string.
-    masm.branchTest32(Assembler::NonZero, Address(str, JSString::offsetOfFlags()),
-                      Imm32(JSString::ATOM_BIT), failure->label());
+    masm.branchTest32(Assembler::Zero, Address(str, JSString::offsetOfFlags()),
+                      Imm32(JSString::NON_ATOM_BIT), failure->label());
 
     // Check the length.
     masm.branch32(Assembler::NotEqual, Address(str, JSString::offsetOfLength()),

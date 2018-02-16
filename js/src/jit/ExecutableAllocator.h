@@ -28,6 +28,7 @@
 #ifndef jit_ExecutableAllocator_h
 #define jit_ExecutableAllocator_h
 
+#include "mozilla/EnumeratedArray.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/XorShift128PlusRNG.h"
 
@@ -47,6 +48,7 @@
 #include "jit/mips64/Simulator-mips64.h"
 #include "jit/ProcessExecutableMemory.h"
 #include "js/HashTable.h"
+#include "js/TypeDecls.h"
 #include "js/Vector.h"
 
 #if defined(__sparc__)
@@ -75,8 +77,6 @@ extern  "C" void sync_instruction_memory(caddr_t v, u_int len);
 #include <libkern/OSCacheControl.h>
 #endif
 
-struct JSRuntime;
-
 namespace JS {
     struct CodeSizes;
 } // namespace JS
@@ -84,7 +84,13 @@ namespace JS {
 namespace js {
 namespace jit {
 
-enum CodeKind { ION_CODE = 0, BASELINE_CODE, REGEXP_CODE, OTHER_CODE };
+enum class CodeKind : uint8_t {
+    Ion,
+    Baseline,
+    RegExp,
+    Other,
+    Count
+};
 
 class ExecutableAllocator;
 class JitRuntime;
@@ -111,11 +117,8 @@ class ExecutablePool
     // Flag that can be used by algorithms operating on pools.
     bool m_mark:1;
 
-    // Number of bytes currently used for Method and Regexp JIT code.
-    size_t m_ionCodeBytes;
-    size_t m_baselineCodeBytes;
-    size_t m_regexpCodeBytes;
-    size_t m_otherCodeBytes;
+    // Number of bytes currently allocated for each CodeKind.
+    mozilla::EnumeratedArray<CodeKind, CodeKind::Count, size_t> m_codeBytes;
 
   public:
     void release(bool willDestroy = false);
@@ -125,9 +128,11 @@ class ExecutablePool
 
     ExecutablePool(ExecutableAllocator* allocator, Allocation a)
       : m_allocator(allocator), m_freePtr(a.pages), m_end(m_freePtr + a.size), m_allocation(a),
-        m_refCount(1), m_mark(false), m_ionCodeBytes(0), m_baselineCodeBytes(0),
-        m_regexpCodeBytes(0), m_otherCodeBytes(0)
-    { }
+        m_refCount(1), m_mark(false)
+    {
+        for (size_t& count : m_codeBytes)
+            count = 0;
+    }
 
     ~ExecutablePool();
 
@@ -150,6 +155,15 @@ class ExecutablePool
     void* alloc(size_t n, CodeKind kind);
 
     size_t available() const;
+
+    // Returns the number of bytes that are currently in use (referenced by
+    // live JitCode objects).
+    size_t usedCodeBytes() const {
+        size_t res = 0;
+        for (size_t count : m_codeBytes)
+            res += count;
+        return res;
+    }
 };
 
 struct JitPoisonRange

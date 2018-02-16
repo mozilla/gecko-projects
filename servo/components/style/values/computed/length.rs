@@ -14,7 +14,7 @@ use style_traits::{CssWriter, ToCss};
 use style_traits::values::specified::AllowedNumericType;
 use super::{Number, ToComputedValue, Context, Percentage};
 use values::{Auto, CSSFloat, Either, None_, Normal, specified};
-use values::animated::{Animate, Procedure, ToAnimatedZero};
+use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
 use values::computed::NonNegativeNumber;
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::NonNegative;
@@ -664,6 +664,20 @@ impl ToComputedValue for specified::LengthOrPercentageOrNone {
 /// A wrapper of LengthOrPercentage, whose value must be >= 0.
 pub type NonNegativeLengthOrPercentage = NonNegative<LengthOrPercentage>;
 
+impl ToAnimatedValue for NonNegativeLengthOrPercentage {
+    type AnimatedValue = LengthOrPercentage;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.into()
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        animated.clamp_to_non_negative().into()
+    }
+}
+
 impl From<NonNegativeLength> for NonNegativeLengthOrPercentage {
     #[inline]
     fn from(length: NonNegativeLength) -> Self {
@@ -800,6 +814,20 @@ pub type LengthOrNormal = Either<Length, Normal>;
 
 /// A wrapper of Length, whose value must be >= 0.
 pub type NonNegativeLength = NonNegative<Length>;
+
+impl ToAnimatedValue for NonNegativeLength {
+    type AnimatedValue = Length;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.0
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        NonNegativeLength::new(animated.px().max(0.))
+    }
+}
 
 impl NonNegativeLength {
     /// Create a NonNegativeLength.
