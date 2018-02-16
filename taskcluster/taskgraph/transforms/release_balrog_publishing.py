@@ -2,17 +2,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-Resolve worker-type by project
+Add from parameters.yml into Balrog publishing tasks.
 """
+
 from __future__ import absolute_import, print_function, unicode_literals
-from taskgraph.util.schema import resolve_keyed_by
+
 from taskgraph.transforms.base import TransformSequence
 
 transforms = TransformSequence()
 
 
 @transforms.add
-def resolve_worker_type(config, jobs):
+def add_release_eta(config, jobs):
     for job in jobs:
-        resolve_keyed_by(job, 'worker-type', job['description'], **config.params)
+        if config.params['release_eta']:
+            job['run']['release-eta'] = config.params['release_eta']
+
         yield job
