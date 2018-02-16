@@ -10,7 +10,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import get_phase
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
