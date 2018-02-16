@@ -24,12 +24,7 @@ from taskgraph.util.hash import hash_path
 from taskgraph.util.treeherder import split_symbol
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema, Schema, optionally_keyed_by, resolve_keyed_by
-from taskgraph.util.scriptworker import (
-    BALROG_ACTIONS,
-    get_balrog_action_scope,
-    get_balrog_server_scope,
-    get_release_config,
-)
+from taskgraph.util.scriptworker import get_release_config
 from voluptuous import Any, Required, Optional, Extra
 from taskgraph import GECKO, MAX_DEPENDENCIES
 from ..util import docker as dockerutil
@@ -541,18 +536,9 @@ task_description_schema = Schema({
         Required('product'): basestring,
     }, {
         Required('implementation'): 'balrog',
-        Required('balrog-action'): Any(*BALROG_ACTIONS),
-        Optional('product'): basestring,
-        Optional('platforms'): [basestring],
-        Optional('channel-names'): optionally_keyed_by('project', [basestring]),
-        Optional('require-mirrors'): bool,
-        Optional('publish-rules'): optionally_keyed_by('project', [int]),
-        Optional('rules-to-update'): optionally_keyed_by('project', [basestring]),
-        Optional('archive-domain'): optionally_keyed_by('project', basestring),
-        Optional('download-domain'): optionally_keyed_by('project', basestring),
 
         # list of artifact URLs for the artifacts that should be beetmoved
-        Optional('upstream-artifacts'): [{
+        Required('upstream-artifacts'): [{
             # taskId of the task with the artifact
             Required('taskId'): taskref_or_string,
 
@@ -1056,44 +1042,10 @@ def build_beetmover_cdns_payload(config, task, task_def):
 @payload_builder('balrog')
 def build_balrog_payload(config, task, task_def):
     worker = task['worker']
-    release_config = get_release_config(config)
 
-    server_scope = get_balrog_server_scope(config)
-    action_scope = get_balrog_action_scope(config, action=worker['balrog-action'])
-    task_def['scopes'] = [server_scope, action_scope]
-
-    if worker['balrog-action'] == 'submit':
-        task_def['payload'] = {
-            'upstreamArtifacts':  worker['upstream-artifacts']
-        }
-    else:
-        for prop in ('channel-names', 'publish-rules', 'rules-to-update'):
-            if prop in worker:
-                resolve_keyed_by(
-                    worker, prop, task['description'],
-                    **config.params
-                )
-        task_def['payload'] = {
-            'build_number': release_config['build_number'],
-            'channel_names': worker['channel-names'],
-            'product': worker['product'],
-            'rules_to_update': worker['rules-to-update'],
-            'version': release_config['version'],
-        }
-        if worker['balrog-action'] == 'push':
-            task_def['payload'].update({
-                'app_version': release_config['appVersion'],
-                'archive_domain': worker['archive-domain'],
-                'download_domain': worker['download-domain'],
-                'partial_versions': release_config.get('partial_versions', ""),
-                'require-mirrors': worker['require-mirrors'],
-                'platforms': worker['platforms'],
-            })
-        else:  # schedule / ship
-            task_def['payload'].update({
-                'publish_rules': worker['publish-rules'],
-                'release_eta': config.params['release_eta'],
-            })
+    task_def['payload'] = {
+        'upstreamArtifacts':  worker['upstream-artifacts']
+    }
 
 
 @payload_builder('push-apk')

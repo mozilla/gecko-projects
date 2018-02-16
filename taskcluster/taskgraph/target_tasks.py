@@ -335,7 +335,6 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if parameters.get('release_type') != 'rc':
             if task.kind in ('release-secondary-update-verify',
                              'release-secondary-update-verify-config',
-                             'release-secondary-balrog-push',
                              'release-secondary-final-verify'):
                 return False
 
