@@ -454,9 +454,11 @@ def craft_release_properties(config, job):
     else:
         build_platform = build_platform.replace('-source', '')
 
+    app_name = 'Fennec' if 'android' in job['label'] or 'fennec' in job['label'] else 'Firefox'
+
     return {
         # XXX Even DevEdition is called Firefox
-        'app-name': 'Fennec' if 'android' in job['label'] else 'Firefox',
+        'app-name': app_name,
         'app-version': str(params['app_version']),
         'branch': params['project'],
         'build-id': str(params['moz_build_date']),
