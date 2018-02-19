@@ -11,7 +11,7 @@ kind-dependencies:
 transforms:
    - taskgraph.transforms.build:transforms
    - taskgraph.transforms.release_deps:transforms
-   - taskgraph.transforms.checksums:transforms
+   - taskgraph.transforms.release_generate_checksums:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -48,9 +48,6 @@ job-defaults:
    routes:
       - index.releases.v1.{branch}.latest.{product}.latest.checksums
       - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.checksums
-   attributes:
-      build_platform: linux64
-      build_type: opt
    treeherder:
       symbol: Rel(GenChcks)
       kind: test
@@ -100,6 +97,9 @@ job-defaults:
 jobs:
    firefox:
       shipping-product: firefox
+      attributes:
+         build_platform: linux64
+         build_type: opt
       index:
          product: firefox
       run:
@@ -118,6 +118,9 @@ jobs:
 
    fennec:
       shipping-product: fennec
+      attributes:
+         build_platform: android-nightly
+         build_type: opt
       index:
          product: fennec
       run:
@@ -136,6 +139,9 @@ jobs:
 
    devedition:
       shipping-product: devedition
+      attributes:
+         build_platform: linux64-devedition
+         build_type: opt
       index:
          product: devedition
       run:
