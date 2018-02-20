@@ -449,26 +449,24 @@ CodeGeneratorX86Shared::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
 
     MOZ_ASSERT(inputType == MIRType::Double || inputType == MIRType::Float32);
 
-    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input, output);
+    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input);
     addOutOfLineCode(ool, mir);
 
     Label* oolEntry = ool->entry();
     if (mir->isUnsigned()) {
         if (inputType == MIRType::Double)
-            masm.wasmTruncateDoubleToUInt32(input, output, mir->isSaturating(), oolEntry);
+            masm.wasmTruncateDoubleToUInt32(input, output, oolEntry);
         else if (inputType == MIRType::Float32)
-            masm.wasmTruncateFloat32ToUInt32(input, output, mir->isSaturating(), oolEntry);
+            masm.wasmTruncateFloat32ToUInt32(input, output, oolEntry);
         else
             MOZ_CRASH("unexpected type");
-        if (mir->isSaturating())
-            masm.bind(ool->rejoin());
         return;
     }
 
     if (inputType == MIRType::Double)
-        masm.wasmTruncateDoubleToInt32(input, output, mir->isSaturating(), oolEntry);
+        masm.wasmTruncateDoubleToInt32(input, output, oolEntry);
     else if (inputType == MIRType::Float32)
-        masm.wasmTruncateFloat32ToInt32(input, output, mir->isSaturating(), oolEntry);
+        masm.wasmTruncateFloat32ToInt32(input, output, oolEntry);
     else
         MOZ_CRASH("unexpected type");
 
@@ -4369,26 +4367,24 @@ void
 CodeGeneratorX86Shared::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool)
 {
     FloatRegister input = ool->input();
-    Register output = ool->output();
-    Register64 output64 = ool->output64();
     MIRType fromType = ool->fromType();
     MIRType toType = ool->toType();
     Label* oolRejoin = ool->rejoin();
-    TruncFlags flags = ool->flags();
+    bool isUnsigned = ool->isUnsigned();
     wasm::BytecodeOffset off = ool->bytecodeOffset();
 
     if (fromType == MIRType::Float32) {
         if (toType == MIRType::Int32)
-            masm.oolWasmTruncateCheckF32ToI32(input, output, flags, off, oolRejoin);
+            masm.oolWasmTruncateCheckF32ToI32(input, isUnsigned, off, oolRejoin);
         else if (toType == MIRType::Int64)
-            masm.oolWasmTruncateCheckF32ToI64(input, output64, flags, off, oolRejoin);
+            masm.oolWasmTruncateCheckF32ToI64(input, isUnsigned, off, oolRejoin);
         else
             MOZ_CRASH("unexpected type");
     } else if (fromType == MIRType::Double) {
         if (toType == MIRType::Int32)
-            masm.oolWasmTruncateCheckF64ToI32(input, output, flags, off, oolRejoin);
+            masm.oolWasmTruncateCheckF64ToI32(input, isUnsigned, off, oolRejoin);
         else if (toType == MIRType::Int64)
-            masm.oolWasmTruncateCheckF64ToI64(input, output64, flags, off, oolRejoin);
+            masm.oolWasmTruncateCheckF64ToI64(input, isUnsigned, off, oolRejoin);
         else
             MOZ_CRASH("unexpected type");
     } else {
