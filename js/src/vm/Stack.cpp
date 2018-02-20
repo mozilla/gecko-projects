@@ -6,8 +6,6 @@
 
 #include "vm/Stack-inl.h"
 
-#include "mozilla/PodOperations.h"
-
 #include "gc/Marking.h"
 #include "jit/BaselineFrame.h"
 #include "jit/JitcodeMap.h"
@@ -26,7 +24,6 @@ using namespace js;
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::Maybe;
-using mozilla::PodCopy;
 
 /*****************************************************************************/
 
@@ -1770,10 +1767,8 @@ jit::JitActivation::startWasmInterrupt(const JS::ProfilingFrameIterator::Registe
         // caller's FP, and the caller could be the jit entry. Ignore this
         // interrupt, in this case, because FP points to a jit frame and not a
         // wasm one.
-        const wasm::CodeRange* codeRange = wasm::LookupCode(pc)->lookupRange(pc);
-        if (codeRange->isJitEntry())
+        if (!wasm::LookupCode(pc)->lookupFuncRange(pc))
             return false;
-        MOZ_ASSERT(codeRange->isFunction());
     }
 
     cx_->runtime()->wasmUnwindData.ref().construct<wasm::InterruptData>(pc, state.pc);

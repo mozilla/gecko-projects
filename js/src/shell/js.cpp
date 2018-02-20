@@ -55,9 +55,6 @@
 #include "jsprf.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#ifdef XP_WIN
-# include "jswin.h"
-#endif
 #include "jswrapper.h"
 #ifndef JS_POSIX_NSPR
 # include "prerror.h"
@@ -72,7 +69,7 @@
 # include "frontend/BinSource.h"
 #endif // defined(JS_BUILD_BINAST)
 #include "frontend/Parser.h"
-#include "gc/Iteration.h"
+#include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
@@ -92,6 +89,7 @@
 #include "threading/ExclusiveData.h"
 #include "threading/LockGuard.h"
 #include "threading/Thread.h"
+#include "util/Windows.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
@@ -1551,23 +1549,27 @@ CacheEntry_isCacheEntry(JSObject* cache)
 }
 
 static JSString*
-CacheEntry_getSource(HandleObject cache)
+CacheEntry_getSource(JSContext* cx, HandleObject cache)
 {
     MOZ_ASSERT(CacheEntry_isCacheEntry(cache));
     Value v = JS_GetReservedSlot(cache, CacheEntry_SOURCE);
-    if (!v.isString())
+    if (!v.isString()) {
+        JS_ReportErrorASCII(cx, "CacheEntry_getSource: Unexpected type of source reserved slot.");
         return nullptr;
+    }
 
     return v.toString();
 }
 
 static uint8_t*
-CacheEntry_getBytecode(HandleObject cache, uint32_t* length)
+CacheEntry_getBytecode(JSContext* cx, HandleObject cache, uint32_t* length)
 {
     MOZ_ASSERT(CacheEntry_isCacheEntry(cache));
     Value v = JS_GetReservedSlot(cache, CacheEntry_BYTECODE);
-    if (!v.isObject() || !v.toObject().is<ArrayBufferObject>())
+    if (!v.isObject() || !v.toObject().is<ArrayBufferObject>()) {
+        JS_ReportErrorASCII(cx, "CacheEntry_getBytecode: Unexpected type of bytecode reserved slot.");
         return nullptr;
+    }
 
     ArrayBufferObject* arrayBuffer = &v.toObject().as<ArrayBufferObject>();
     *length = arrayBuffer->byteLength();
@@ -1654,7 +1656,9 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         code = args[0].toString();
     } else if (args[0].isObject() && CacheEntry_isCacheEntry(&args[0].toObject())) {
         cacheEntry = &args[0].toObject();
-        code = CacheEntry_getSource(cacheEntry);
+        code = CacheEntry_getSource(cx, cacheEntry);
+        if (!code)
+            return false;
     }
 
     if (!code || (args.length() == 2 && args[1].isPrimitive())) {
@@ -1837,7 +1841,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
     if (loadBytecode) {
         uint32_t loadLength = 0;
         uint8_t* loadData = nullptr;
-        loadData = CacheEntry_getBytecode(cacheEntry, &loadLength);
+        loadData = CacheEntry_getBytecode(cx, cacheEntry, &loadLength);
         if (!loadData)
             return false;
         if (!loadBuffer.append(loadData, loadLength)) {
@@ -4915,7 +4919,7 @@ OffThreadDecodeScript(JSContext* cx, unsigned argc, Value* vp)
     JS::TranscodeBuffer loadBuffer;
     uint32_t loadLength = 0;
     uint8_t* loadData = nullptr;
-    loadData = CacheEntry_getBytecode(cacheEntry, &loadLength);
+    loadData = CacheEntry_getBytecode(cx, cacheEntry, &loadLength);
     if (!loadData)
         return false;
     if (!loadBuffer.append(loadData, loadLength)) {

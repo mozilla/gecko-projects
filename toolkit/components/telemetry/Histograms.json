@@ -3612,7 +3612,7 @@
     "description": "I want to be tracked, I do NOT want to be tracked, DNT unset"
   },
   "DNS_LOOKUP_METHOD2": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 16,
@@ -3621,7 +3621,7 @@
     "description": "DNS Lookup Type (hit, renewal, negative-hit, literal, overflow, network-first, network-shared)"
   },
   "DNS_CLEANUP_AGE": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 1440,
@@ -3629,17 +3629,75 @@
     "description": "DNS Cache Entry Age at Removal Time (minutes)"
   },
   "DNS_LOOKUP_TIME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 60000,
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com", "pmcmanus@mozilla.com"],
     "n_buckets": 50,
-    "description": "Time for a successful DNS OS resolution (msec)"
+    "description": "Time for a successful DNS resolution (msec)"
+  },
+  "DNS_TRR_LOOKUP_TIME": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "bug_numbers": [1434852],
+    "n_buckets": 50,
+    "description": "Time for a completed TRR resolution (msec)"
+  },
+  "DNS_NATIVE_LOOKUP_TIME": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "bug_numbers": [1434852],
+    "n_buckets": 50,
+    "description": "Time for a completed native name resolution (msec)"
+  },
+  "DNS_TRR_RACE": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": ["TRRFasterBy50", "TRRFaster", "NativeFaster", "NativeFasterBy50"],
+    "bug_numbers": [1434852],
+    "description": "DNS: TRR parallel resolve racing results"
+  },
+  "DNS_TRR_BLACKLISTED": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "DNS check for TRR was blocked by blacklist",
+    "bug_numbers": [1434852],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+  },
+  "DNS_LOOKUP_ALGORITHM": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": ["nativeOnly", "trrRace", "trrFirst", "trrOnly", "trrShadow"],
+    "bug_numbers": [1434852],
+    "description": "DNS: lookup algorithm"
+  },
+  "DNS_LOOKUP_DISPOSITION": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": ["trrOK", "trrFail", "trrAOK", "trrAFail",
+	       "trrAAAAOK", "trrAAAAFail", "osOK", "osFail"],
+    "bug_numbers": [1434852],
+    "description": "DNS: lookup algorithm"
   },
   "DNS_RENEWAL_TIME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 60000,
@@ -3647,7 +3705,7 @@
     "description": "Time for a renewed DNS OS resolution (msec)"
   },
   "DNS_RENEWAL_TIME_FOR_TTL": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 60000,
@@ -3655,7 +3713,7 @@
     "description": "Time for a DNS OS resolution (msec) used to get TTL"
   },
   "DNS_FAILED_LOOKUP_TIME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 60000,
@@ -3665,7 +3723,7 @@
     "description": "Time for an unsuccessful DNS OS resolution (msec)"
   },
   "DNS_BLACKLIST_COUNT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com", "pmcmanus@mozilla.com"],
@@ -7801,14 +7859,14 @@
     "n_values": 3,
     "description": "Whether the user is in safe mode (No, Yes, Forced)"
   },
-  "SCRIPT_BLOCK_INCORRECT_MIME": {
+  "SCRIPT_BLOCK_INCORRECT_MIME_2": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["ckerschbaumer@mozilla.com"],
-    "bug_numbers": [1288361, 1299267],
-    "expires_in_version": "56",
-    "kind": "enumerated",
-    "n_values": 15,
-    "description": "Whether the script load has a MIME type of ...?  (0=unknown, 1=js, 2=image, 3=audio, 4=video, 5=text/plain, 6=text/csv, 7=text/xml, 8=application/octet-stream, 9=application/xml, 10=text/html, 11=empty)"
+    "bug_numbers": [1288361, 1299267, 1399990],
+    "expires_in_version": "63",
+    "kind": "categorical",
+    "labels": ["unknown","javaScript","image", "audio", "video","text_plain","text_csv","text_xml","app_octet_stream","app_xml","text_html","empty","worker_load","importSript_load","script_load","same_origin","CORS_origin","cross_origin"],
+    "description": "Whether the script load has a MIME type of ...?  (unknown, javaScript, image, audio, video, text_plain, text_csv, text_xml, app_octet_stream, app_xml, text_html, empty). Whether the script load is from ...?  (worker_load, importSript_load, script_load). Whether the script load is of ...?  (same_origin, CORS_origin, cross_origin)"
   },
   "NEWTAB_PAGE_ENABLED": {
     "record_in_processes": ["main", "content"],
@@ -13865,36 +13923,6 @@
     "n_buckets": 50,
     "description": "Amount of time in milliseconds the main thread spends waiting for the paint thread to complete, if the time was greater than 200us.",
     "bug_numbers": [1386968]
-  },
-  "STYLO_PARALLEL_RESTYLE_FRACTION": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["manish@mozilla.com"],
-    "expires_in_version": "60",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 50,
-    "description": "Percentage of restyles on a single page that were parallel",
-    "bug_numbers": [1421195]
-  },
-  "STYLO_PARALLEL_RESTYLE_FRACTION_WEIGHTED_TRAVERSED": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["manish@mozilla.com"],
-    "expires_in_version": "60",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 50,
-    "description": "Percentage of restyles on a single page that were parallel, weighted by elements traversed",
-    "bug_numbers": [1421195]
-  },
-  "STYLO_PARALLEL_RESTYLE_FRACTION_WEIGHTED_STYLED": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["manish@mozilla.com"],
-    "expires_in_version": "60",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 50,
-    "description": "Percentage of restyles on a single page that were parallel, weighted by elements styled",
-    "bug_numbers": [1421195]
   },
   "PREFERENCES_FILE_LOAD_TIME_US": {
     "record_in_processes": ["main", "content"],

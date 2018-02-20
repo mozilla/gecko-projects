@@ -6,13 +6,10 @@
 
 #include "js/MemoryMetrics.h"
 
-#include "mozilla/DebugOnly.h"
-
-#include "jsgc.h"
-
+#include "gc/GC.h"
 #include "gc/Heap.h"
-#include "gc/Iteration.h"
 #include "gc/Nursery.h"
+#include "gc/PublicIterators.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/ArrayObject.h"
@@ -28,11 +25,9 @@
 #include "wasm/WasmJS.h"
 #include "wasm/WasmModule.h"
 
-using mozilla::DebugOnly;
 using mozilla::MallocSizeOf;
 using mozilla::Move;
 using mozilla::PodCopy;
-using mozilla::PodEqual;
 
 using namespace js;
 
@@ -362,7 +357,6 @@ StatsCompartmentCallback(JSContext* cx, void* data, JSCompartment* compartment)
                                         &cStats.savedStacksSet,
                                         &cStats.varNamesSet,
                                         &cStats.nonSyntacticLexicalScopesTable,
-                                        &cStats.templateLiteralMap,
                                         &cStats.jitCompartment,
                                         &cStats.privateData,
                                         &cStats.scriptCountsMap);

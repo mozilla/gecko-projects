@@ -44,6 +44,7 @@
 namespace mozilla {
 
 using namespace dom;
+using namespace dom::SVGPreserveAspectRatioBinding;
 using namespace gfx;
 using namespace layers;
 
@@ -876,7 +877,7 @@ VectorImage::IsImageContainerAvailableAtSize(LayerManager* aManager,
                                              uint32_t aFlags)
 {
   if (mError || !mIsFullyLoaded || aSize.IsEmpty() ||
-      mHaveAnimations || !gfxVars::UseWebRender()) {
+      mHaveAnimations || !gfxVars::GetUseWebRenderOrDefault()) {
     return false;
   }
 

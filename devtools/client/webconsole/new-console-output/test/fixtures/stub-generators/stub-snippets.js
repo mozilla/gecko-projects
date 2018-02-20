@@ -106,8 +106,20 @@ consoleApi.set("console.log(%cfoobar)", {
   code: `
 console.log(
   "%cfoo%cbar",
-  "color:blue;font-size:1.3em;background:url('http://example.com/test');position:absolute;top:10px",
-  "color:red;background:\\165rl('http://example.com/test')");
+  "color:blue; font-size:1.3em; background:url('http://example.com/test'); position:absolute; top:10px; ",
+  "color:red; line-height: 1.5; background:\\165rl('http://example.com/test')"
+);
+`});
+
+consoleApi.set('console.log("%cHello%c|%cWorld")', {
+  keys: ['console.log("%cHello%c|%cWorld")'],
+  code: `
+  console.log(
+    "%cHello%c|%cWorld",
+    "color:red",
+    "",
+    "color: blue"
+  );
 `});
 
 consoleApi.set("console.group(%cfoo%cbar)", {

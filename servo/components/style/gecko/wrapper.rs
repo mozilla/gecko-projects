@@ -17,13 +17,14 @@
 use CaseSensitivityExt;
 use app_units::Au;
 use applicable_declarations::ApplicableDeclarationBlock;
-use atomic_refcell::{AtomicRefCell, AtomicRef, AtomicRefMut};
+use atomic_refcell::{AtomicRefCell, AtomicRefMut};
+use author_styles::AuthorStyles;
 use context::{QuirksMode, SharedStyleContext, PostAnimationTasks, UpdateAnimationsTasks};
 use data::ElementData;
 use dom::{LayoutIterator, NodeInfo, OpaqueNode, TElement, TDocument, TNode};
 use element_state::{ElementState, DocumentState};
 use font_metrics::{FontMetrics, FontMetricsProvider, FontMetricsQueryResult};
-use gecko::data::PerDocumentStyleData;
+use gecko::data::GeckoStyleSheet;
 use gecko::global_style_data::GLOBAL_STYLE_DATA;
 use gecko::selector_parser::{SelectorImpl, NonTSPseudoClass, PseudoElement};
 use gecko::snapshot_helpers;
@@ -431,20 +432,19 @@ impl<'lb> GeckoXBLBinding<'lb> {
 
     fn each_xbl_cascade_data<F>(&self, f: &mut F)
     where
-        F: FnMut(AtomicRef<'lb, CascadeData>, QuirksMode),
+        F: FnMut(&'lb CascadeData, QuirksMode),
     {
         if let Some(base) = self.base_binding() {
             base.each_xbl_cascade_data(f);
         }
 
-        let raw_data = unsafe {
-            bindings::Gecko_XBLBinding_GetRawServoStyleSet(self.0)
+        let data = unsafe {
+            bindings::Gecko_XBLBinding_GetRawServoStyles(self.0)
         };
 
-        if let Some(raw_data) = raw_data {
-            let data = PerDocumentStyleData::from_ffi(&*raw_data).borrow();
-            let quirks_mode = data.stylist.quirks_mode();
-            f(AtomicRef::map(data, |d| d.stylist.author_cascade_data()), quirks_mode);
+        if let Some(data) = data {
+            let data: &'lb _ = AuthorStyles::<GeckoStyleSheet>::from_ffi(data);
+            f(&data.data, data.quirks_mode)
         }
     }
 }
@@ -692,33 +692,14 @@ impl<'le> GeckoElement<'le> {
         unsafe { Gecko_GetDocumentLWTheme(node.owner_doc().0) }
     }
 
-    /// Only safe to call on the main thread, with exclusive access to the element and
-    /// its ancestors.
-    /// This function is also called after display property changed for SMIL animation.
+    /// Only safe to call on the main thread, with exclusive access to the
+    /// element and its ancestors.
+    ///
+    /// This function is also called after display property changed for SMIL
+    /// animation.
     ///
     /// Also this function schedules style flush.
-    unsafe fn maybe_restyle<'a>(
-        &self,
-        data: &'a mut ElementData,
-        animation_only: bool,
-    ) -> bool {
-        if !data.has_styles() {
-            return false;
-        }
-
-        // Propagate the bit up the chain.
-        if animation_only {
-            bindings::Gecko_NoteAnimationOnlyDirtyElement(self.0);
-        } else {
-            bindings::Gecko_NoteDirtyElement(self.0);
-        }
-
-        // Ensure and return the RestyleData.
-        true
-    }
-
-    /// Set restyle and change hints to the element data.
-    pub fn note_explicit_hints(
+    pub unsafe fn note_explicit_hints(
         &self,
         restyle_hint: nsRestyleHint,
         change_hint: nsChangeHint,
@@ -735,20 +716,25 @@ impl<'le> GeckoElement<'le> {
                         restyle_hint.has_non_animation_hint()),
                       "Animation restyle hints should not appear with non-animation restyle hints");
 
-        let mut maybe_data = self.mutate_data();
-        let should_restyle = maybe_data.as_mut().map_or(false, |d| unsafe {
-            self.maybe_restyle(d, restyle_hint.has_animation_hint())
-        });
-        if should_restyle {
-            maybe_data
-                .as_mut()
-                .unwrap()
-                .hint
-                .insert(restyle_hint.into());
-            maybe_data.as_mut().unwrap().damage |= damage;
+        let mut data = match self.mutate_data() {
+            Some(d) => d,
+            None => {
+                debug!("(Element not styled, discarding hints)");
+                return;
+            }
+        };
+
+        debug_assert!(data.has_styles(), "how?");
+
+        // Propagate the bit up the chain.
+        if restyle_hint.has_animation_hint() {
+            bindings::Gecko_NoteAnimationOnlyDirtyElement(self.0);
         } else {
-            debug!("(Element not styled, discarding hints)");
+            bindings::Gecko_NoteDirtyElement(self.0);
         }
+
+        data.hint.insert(restyle_hint);
+        data.damage |= damage;
     }
 
     /// This logic is duplicated in Gecko's nsIContent::IsRootOfAnonymousSubtree.
@@ -1320,8 +1306,7 @@ impl<'le> TElement for GeckoElement<'le> {
     }
 
     /// Process various tasks that are a result of animation-only restyle.
-    fn process_post_animation(&self,
-                              tasks: PostAnimationTasks) {
+    fn process_post_animation(&self, tasks: PostAnimationTasks) {
         use gecko_bindings::structs::nsChangeHint_nsChangeHint_Empty;
         use gecko_bindings::structs::nsRestyleHint_eRestyle_Subtree;
 
@@ -1336,8 +1321,12 @@ impl<'le> TElement for GeckoElement<'le> {
                               .map_or(true, |p| !p.is_before_or_after()),
                           "display property animation shouldn't run on pseudo elements \
                            since it's only for SMIL");
-            self.note_explicit_hints(nsRestyleHint_eRestyle_Subtree,
-                                     nsChangeHint_nsChangeHint_Empty);
+            unsafe {
+                self.note_explicit_hints(
+                    nsRestyleHint_eRestyle_Subtree,
+                    nsChangeHint_nsChangeHint_Empty,
+                );
+            }
         }
     }
 
@@ -1378,7 +1367,7 @@ impl<'le> TElement for GeckoElement<'le> {
     fn each_xbl_cascade_data<'a, F>(&self, mut f: F) -> bool
     where
         'le: 'a,
-        F: FnMut(AtomicRef<'a, CascadeData>, QuirksMode),
+        F: FnMut(&'a CascadeData, QuirksMode),
     {
         // Walk the binding scope chain, starting with the binding attached to
         // our content, up till we run out of scopes or we get cut off.

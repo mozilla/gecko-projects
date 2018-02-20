@@ -597,6 +597,7 @@ public:
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::Matrix Matrix;
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
+  typedef mozilla::gfx::Matrix4x4Flagged Matrix4x4Flagged;
   typedef mozilla::Sides Sides;
   typedef mozilla::LogicalSides LogicalSides;
   typedef mozilla::SmallPointerArray<mozilla::DisplayItemData> DisplayItemDataArray;
@@ -2786,6 +2787,11 @@ public:
   nsIWidget* GetNearestWidget(nsPoint& aOffset) const;
 
   /**
+   * Whether the content for this frame is disabled, used for event handling.
+   */
+  bool IsContentDisabled() const;
+
+  /**
    * Get the "type" of the frame.
    *
    * @see mozilla::LayoutFrameType
@@ -2824,9 +2830,9 @@ public:
     IN_CSS_UNITS = 1 << 0,
     STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT = 1 << 1
   };
-  Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
-                               nsIFrame **aOutAncestor,
-                               uint32_t aFlags = 0);
+  Matrix4x4Flagged GetTransformMatrix(const nsIFrame* aStopAtAncestor,
+                                      nsIFrame **aOutAncestor,
+                                      uint32_t aFlags = 0);
 
   /**
    * Bit-flags to pass to IsFrameOfType()

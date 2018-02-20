@@ -5231,15 +5231,21 @@ AddCanvasBackgroundColor(const nsDisplayList& aList, nsIFrame* aCanvasFrame,
                          nscolor aColor, bool aCSSBackgroundColor)
 {
   for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
+    const DisplayItemType type = i->GetType();
+
     if (i->Frame() == aCanvasFrame &&
-        i->GetType() == DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR) {
+        type == DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR) {
       nsDisplayCanvasBackgroundColor* bg = static_cast<nsDisplayCanvasBackgroundColor*>(i);
       bg->SetExtraBackgroundColor(aColor);
       return true;
     }
+
+    const bool isBlendContainer =
+      type == DisplayItemType::TYPE_BLEND_CONTAINER ||
+      type == DisplayItemType::TYPE_TABLE_BLEND_CONTAINER;
+
     nsDisplayList* sublist = i->GetSameCoordinateSystemChildren();
-    if (sublist &&
-        !(i->GetType() == DisplayItemType::TYPE_BLEND_CONTAINER && !aCSSBackgroundColor) &&
+    if (sublist && !(isBlendContainer && !aCSSBackgroundColor) &&
         AddCanvasBackgroundColor(*sublist, aCanvasFrame, aColor, aCSSBackgroundColor))
       return true;
   }
@@ -6304,7 +6310,7 @@ private:
 };
 
 void
-PresShell::RecordShadowStyleChange(ShadowRoot* aShadowRoot)
+nsIPresShell::RecordShadowStyleChange(ShadowRoot& aShadowRoot)
 {
   mStyleSet->RecordShadowStyleChange(aShadowRoot);
 }
@@ -9717,9 +9723,7 @@ PresShell::CloneStyleSet(nsStyleSet* aSet)
 ServoStyleSet*
 PresShell::CloneStyleSet(ServoStyleSet* aSet)
 {
-  MOZ_ASSERT(aSet->IsMaster());
-
-  ServoStyleSet* clone = new ServoStyleSet(ServoStyleSet::Kind::Master);
+  ServoStyleSet* clone = new ServoStyleSet();
   CopySheetsIntoClone(aSet, clone);
   return clone;
 }

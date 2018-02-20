@@ -152,10 +152,6 @@ struct MediumFeaturesChangedResult {
   bool mUsesViewportUnits;
 };
 
-// DOM Traversal.
-void Gecko_RecordTraversalStatistics(uint32_t total, uint32_t parallel,
-                                     uint32_t total_t, uint32_t parallel_t,
-                                     uint32_t total_s, uint32_t parallel_s);
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
                               bool text_is_significant,
                               bool whitespace_is_significant);
@@ -607,7 +603,7 @@ FontSizePrefs Gecko_GetBaseSize(nsAtom* lang);
 // XBL related functions.
 RawGeckoElementBorrowedOrNull Gecko_GetBindingParent(RawGeckoElementBorrowed aElement);
 RawGeckoXBLBindingBorrowedOrNull Gecko_GetXBLBinding(RawGeckoElementBorrowed aElement);
-RawServoStyleSetBorrowedOrNull Gecko_XBLBinding_GetRawServoStyleSet(RawGeckoXBLBindingBorrowed aXBLBinding);
+RawServoAuthorStylesBorrowedOrNull Gecko_XBLBinding_GetRawServoStyles(RawGeckoXBLBindingBorrowed aXBLBinding);
 bool Gecko_XBLBinding_InheritsStyle(RawGeckoXBLBindingBorrowed aXBLBinding);
 
 struct GeckoFontMetrics

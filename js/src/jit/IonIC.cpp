@@ -6,8 +6,6 @@
 
 #include "jit/IonIC.h"
 
-#include "mozilla/Maybe.h"
-
 #include "jit/CacheIRCompiler.h"
 #include "jit/Linker.h"
 
@@ -16,8 +14,6 @@
 
 using namespace js;
 using namespace js::jit;
-
-using mozilla::Maybe;
 
 void
 IonIC::updateBaseAddress(JitCode* code, MacroAssembler& masm)
@@ -320,7 +316,7 @@ IonSetPropertyIC::update(JSContext* cx, HandleScript outerScript, IonSetProperty
             ic->attachCacheIRStub(cx, gen.writerRef(), gen.cacheKind(), ionScript, &attached,
                                   gen.typeCheckInfo());
         } else {
-            gen.trackNotAttached();
+            gen.trackAttached(nullptr);
         }
 
         if (!attached && !isTemporarilyUnoptimizable)

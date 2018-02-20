@@ -19,6 +19,7 @@
 #include "nsXBLProtoImplMethod.h"
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLPrototypeResources.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/StyleSheet.h"
 
@@ -135,8 +136,29 @@ public:
 #ifdef MOZ_OLD_STYLE
   nsIStyleRuleProcessor* GetRuleProcessor();
 #endif
-  void ComputeServoStyleSet(nsPresContext* aPresContext);
-  mozilla::ServoStyleSet* GetServoStyleSet() const;
+
+  const RawServoAuthorStyles* GetServoStyles() const
+  {
+    return mResources ? mResources->GetServoStyles() : nullptr;
+  }
+
+  void SyncServoStyles()
+  {
+    MOZ_ASSERT(mResources);
+    mResources->SyncServoStyles();
+  }
+
+  RawServoAuthorStyles* GetServoStyles()
+  {
+    return mResources
+      ? const_cast<RawServoAuthorStyles*>(mResources->GetServoStyles())
+      : nullptr;
+  }
+
+  mozilla::ServoStyleRuleMap* GetServoStyleRuleMap()
+  {
+    return mResources ? mResources->GetServoStyleRuleMap() : nullptr;
+  }
 
   nsresult FlushSkinSheets();
 
@@ -256,6 +278,8 @@ public:
   void Traverse(nsCycleCollectionTraversalCallback &cb) const;
   void Unlink();
   void Trace(const TraceCallbacks& aCallbacks, void *aClosure) const;
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 // Internal member functions.
 public:

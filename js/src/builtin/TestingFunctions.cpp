@@ -18,7 +18,6 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "jsiter.h"
 #include "jsprf.h"
 #include "jswrapper.h"
 
@@ -42,6 +41,7 @@
 #include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/ProxyObject.h"
@@ -557,6 +557,19 @@ WasmSignExtensionSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_SIGNEXTEND_OPS
+    bool isSupported = true;
+#else
+    bool isSupported = false;
+#endif
+    args.rval().setBoolean(isSupported);
+    return true;
+}
+
+static bool
+WasmSaturatingTruncationSupported(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     bool isSupported = true;
 #else
     bool isSupported = false;
@@ -5297,6 +5310,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmSignExtensionSupported", WasmSignExtensionSupported, 0, 0,
 "wasmSignExtensionSupported()",
 "  Returns a boolean indicating whether the WebAssembly sign extension opcodes are\n"
+"  supported on the current device."),
+
+    JS_FN_HELP("wasmSaturatingTruncationSupported", WasmSaturatingTruncationSupported, 0, 0,
+"wasmSaturatingTruncationSupported()",
+"  Returns a boolean indicating whether the WebAssembly saturating truncates opcodes are\n"
 "  supported on the current device."),
 
     JS_FN_HELP("wasmCompileMode", WasmCompileMode, 0, 0,

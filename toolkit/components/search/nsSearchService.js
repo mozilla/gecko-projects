@@ -1424,8 +1424,7 @@ Engine.prototype = {
    */
   _retrieveSearchXMLData: function SRCH_ENG__retrieveSearchXMLData(aURL) {
     return new Promise(resolve => {
-      let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                      createInstance(Ci.nsIXMLHttpRequest);
+      let request = new XMLHttpRequest();
       request.overrideMimeType("text/xml");
       request.onload = (aEvent) => {
         let responseXML = aEvent.target.responseXML;
@@ -2256,21 +2255,6 @@ Engine.prototype = {
     // or distribution directory.
     if (/^(?:jar:)?(?:\[app\]|\[distribution\])/.test(this._loadPath))
       return true;
-
-    // If we are using a non-default locale or in the xpcshell test case,
-    // we'll accept as a 'default' engine anything that has been registered at
-    // resource://search-plugins/ even if the file doesn't come from the
-    // application folder.  If not, skip costly additional checks.
-    if (Services.locale.defaultLocale == Services.locale.getRequestedLocale() &&
-        !gEnvironment.get("XPCSHELL_TEST_PROFILE_DIR"))
-      return false;
-
-    // Some xpcshell tests use the search service without registering
-    // resource://search-plugins/.
-    if (!Services.io.getProtocolHandler("resource")
-                 .QueryInterface(Ci.nsIResProtocolHandler)
-                 .hasSubstitution("search-plugins"))
-      return false;
 
     let uri = makeURI(APP_SEARCH_PREFIX + this._shortName + ".xml");
     if (this.getAnonymizedLoadPath(null, uri) == this._loadPath) {
@@ -3433,8 +3417,7 @@ SearchService.prototype = {
     let uris = [];
 
     // Read list.json to find the engines we need to load.
-    let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
-                    createInstance(Ci.nsIXMLHttpRequest);
+    let request = new XMLHttpRequest();
     request.overrideMimeType("text/plain");
     let list = await new Promise(resolve => {
       request.onload = function(aEvent) {

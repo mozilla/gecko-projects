@@ -1286,10 +1286,8 @@ pref("browser.newtabpage.columns", 5);
 // directory tiles download URL
 pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
 
-// activates Activity Stream
-pref("browser.newtabpage.activity-stream.enabled", true);
+// Activity Stream prefs that control to which page to redirect
 pref("browser.newtabpage.activity-stream.prerender", true);
-pref("browser.newtabpage.activity-stream.aboutHome.enabled", true);
 #ifndef RELEASE_OR_BETA
 pref("browser.newtabpage.activity-stream.debug", false);
 #endif
@@ -1614,8 +1612,6 @@ pref("reader.parse-node-limit", 0);
 // On desktop, we want the URLs to be included here for ease of debugging,
 // and because (normally) these errors are not persisted anywhere.
 pref("reader.errors.includeURLs", true);
-
-pref("view_source.tab", true);
 
 pref("dom.serviceWorkers.enabled", true);
 

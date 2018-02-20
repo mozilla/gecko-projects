@@ -46,10 +46,7 @@ using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
 
-using mozilla::BitwiseCast;
 using mozilla::CheckedInt;
-using mozilla::IsNaN;
-using mozilla::IsSame;
 using mozilla::Nothing;
 using mozilla::RangedPtr;
 
@@ -1278,7 +1275,7 @@ wasm::ExportedFunctionToFuncIndex(JSFunction* fun)
 {
     MOZ_ASSERT(IsExportedFunction(fun));
     Instance& instance = ExportedFunctionToInstanceObject(fun)->instance();
-    return instance.code().lookupFuncIndex(fun);
+    return instance.code().getFuncIndex(fun);
 }
 
 // ============================================================================
@@ -1810,8 +1807,7 @@ WasmTableObject::getImpl(JSContext* cx, const CallArgs& args)
     }
 
     Instance& instance = *elem.tls->instance;
-    const CodeRange& codeRange = *instance.code().lookupRange(elem.code);
-    MOZ_ASSERT(codeRange.isFunction());
+    const CodeRange& codeRange = *instance.code().lookupFuncRange(elem.code);
 
     RootedWasmInstanceObject instanceObj(cx, instance.object());
     RootedFunction fun(cx);

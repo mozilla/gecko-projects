@@ -11,7 +11,6 @@
 #include "vm/JSScript-inl.h"
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
@@ -23,7 +22,6 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jsopcode.h"
 #include "jsprf.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -39,6 +37,7 @@
 #include "js/MemoryMetrics.h"
 #include "js/Utility.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/Compression.h"
 #include "vm/Debugger.h"
 #include "vm/JSAtom.h"
@@ -65,10 +64,8 @@ using namespace js;
 using namespace js::gc;
 using namespace js::frontend;
 
-using mozilla::AsVariant;
 using mozilla::PodCopy;
 using mozilla::PodZero;
-using mozilla::RotateLeft;
 
 
 // Check that JSScript::data hasn't experienced obvious memory corruption.
@@ -3674,23 +3671,6 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
             Rebase<uint32_t>(dst, src, src->yieldAndAwaitOffsets().vector_);
     }
 
-    /*
-     * Function delazification assumes that their script does not have a
-     * non-syntactic global scope.  We ensure that as follows:
-     *
-     * 1) Initial parsing only creates lazy functions if
-     *    !hasNonSyntacticScope.
-     * 2) Cloning a lazy function into a non-global scope will always require
-     *    that its script be cloned.  See comments in
-     *    CloneFunctionObjectUseSameScript.
-     * 3) Cloning a script never sets a lazyScript on the clone, so the function
-     *    cannot be relazified.
-     *
-     * If you decide that lazy functions should be supported with a
-     * non-syntactic global scope, make sure delazification can deal.
-     */
-    MOZ_ASSERT_IF(dst->hasNonSyntacticScope(), !dst->maybeLazyScript());
-    MOZ_ASSERT_IF(dst->hasNonSyntacticScope(), !dst->isRelazifiable());
     return true;
 }
 

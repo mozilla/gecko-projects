@@ -31,10 +31,7 @@
 using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
-using mozilla::BinarySearch;
 using mozilla::BitwiseCast;
-using mozilla::IsNaN;
-using mozilla::Swap;
 
 class SigIdSet
 {
@@ -398,7 +395,7 @@ Instance::Instance(JSContext* cx,
     enterFrameTrapsEnabled_(false)
 {
 #ifdef DEBUG
-    for (auto t : metadata().tiers())
+    for (auto t : code_->tiers())
         MOZ_ASSERT(funcImports.length() == metadata(t).funcImports.length());
 #endif
     MOZ_ASSERT(tables_.length() == metadata().tables.length());

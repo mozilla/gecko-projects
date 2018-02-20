@@ -456,7 +456,7 @@ def get_release_config(config):
 
     partial_updates = os.environ.get("PARTIAL_UPDATES", "")
     if partial_updates != "" and config.kind in ('release-bouncer-sub',
-                                                 'release-uptake-monitoring',
+                                                 'release-bouncer-check',
                                                  'release-updates-builder',
                                                  'release-update-verify-config',
                                                  'release-secondary-update-verify-config',
@@ -468,14 +468,6 @@ def get_release_config(config):
         ])
         if release_config['partial_versions'] == "{}":
             del release_config['partial_versions']
-
-    uptake_monitoring_platforms = os.environ.get("UPTAKE_MONITORING_PLATFORMS", "[]")
-    if uptake_monitoring_platforms != "[]" and \
-            config.kind in ('release-uptake-monitoring',):
-        uptake_monitoring_platforms = json.loads(uptake_monitoring_platforms)
-        release_config['platforms'] = ', '.join(uptake_monitoring_platforms)
-        if release_config['platforms'] == "[]":
-            del release_config['platforms']
 
     release_config['version'] = str(config.params['version'])
     release_config['appVersion'] = str(config.params['app_version'])

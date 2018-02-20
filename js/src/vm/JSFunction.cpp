@@ -13,7 +13,6 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 
 #include <string.h>
@@ -62,8 +61,6 @@ using namespace js::frontend;
 
 using mozilla::ArrayLength;
 using mozilla::Maybe;
-using mozilla::PodCopy;
-using mozilla::RangedPtr;
 using mozilla::Some;
 
 static bool
@@ -2038,10 +2035,10 @@ js::CanReuseScriptForClone(JSCompartment* compartment, HandleFunction fun,
         return true;
 
     // We need to clone the script if we're not already marked as having a
-    // non-syntactic scope. If we're lazy, go ahead and clone the script; see
-    // the big comment at the end of CopyScriptInternal for the explanation of
-    // what's going on there.
-    return fun->hasScript() && fun->nonLazyScript()->hasNonSyntacticScope();
+    // non-syntactic scope.
+    return fun->hasScript()
+        ? fun->nonLazyScript()->hasNonSyntacticScope()
+        : fun->lazyScript()->enclosingScope()->hasOnChain(ScopeKind::NonSyntactic);
 }
 
 static inline JSFunction*

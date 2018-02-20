@@ -3037,7 +3037,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     }
 
     aBuilder->BuildCompositorHitTestInfoIfNeeded(this, set.BorderBackground(),
-                                                 false);
+                                                 true);
 
     MarkAbsoluteFramesForDisplayList(aBuilder);
     BuildDisplayList(aBuilder, set);
@@ -3079,7 +3079,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
         aBuilder->BuildCompositorHitTestInfoIfNeeded(this,
                                                      set.BorderBackground(),
-                                                     false);
+                                                     true);
 
         // If this is the root frame, then the previous call to
         // MarkAbsoluteFramesForDisplayList might have stored some fixed
@@ -6550,6 +6550,19 @@ nsFrame::Reflow(nsPresContext*          aPresContext,
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
+bool
+nsIFrame::IsContentDisabled() const
+{
+  // FIXME(emilio): Doing this via CSS means callers must ensure the style is up
+  // to date, and they don't!
+  if (StyleUserInterface()->mUserInput == StyleUserInput::None) {
+    return true;
+  }
+
+  auto* element = nsGenericHTMLElement::FromContentOrNull(GetContent());
+  return element && element->IsDisabled();
+}
+
 nsresult
 nsFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 {
@@ -6841,7 +6854,7 @@ nsIFrame::GetNearestWidget(nsPoint& aOffset) const
   return widget;
 }
 
-Matrix4x4
+Matrix4x4Flagged
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                              nsIFrame** aOutAncestor,
                              uint32_t aFlags)
@@ -6902,7 +6915,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
 
         *aOutAncestor = docRootFrame;
         Matrix4x4 docRootTransformToTop =
-          nsLayoutUtils::GetTransformToAncestor(docRootFrame, nullptr);
+          nsLayoutUtils::GetTransformToAncestor(docRootFrame, nullptr).GetMatrix();
         if (docRootTransformToTop.IsSingular()) {
           NS_WARNING("Containing document is invisible, we can't compute a valid transform");
         } else {
@@ -7190,7 +7203,7 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
     return false;
   }
 
-  gfx::Matrix4x4 transform3d;
+  gfx::Matrix4x4Flagged transform3d;
   if (!nsLayoutUtils::GetLayerTransformForFrame(this, &transform3d)) {
     // We're not able to compute a layer transform that we know would
     // be used at the next layers transaction, so we can't only update
@@ -7215,7 +7228,7 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
       !gfx::FuzzyEqual(transform._12, previousTransform._12, kError)) {
     return false;
   }
-  layer->SetBaseTransformForNextTransaction(transform3d);
+  layer->SetBaseTransformForNextTransaction(transform3d.GetMatrix());
   *aLayerResult = layer;
   return true;
 }
@@ -9702,6 +9715,16 @@ nsFrame::ConsiderChildOverflow(nsOverflowAreas& aOverflowAreas,
 {
   aOverflowAreas.UnionWith(aChildFrame->GetOverflowAreas() +
                            aChildFrame->GetPosition());
+}
+
+bool
+nsFrame::ShouldAvoidBreakInside(const ReflowInput& aReflowInput) const
+{
+  const auto* disp = StyleDisplay();
+  return !aReflowInput.mFlags.mIsTopOfPage &&
+    NS_STYLE_PAGE_BREAK_AVOID == disp->mBreakInside &&
+    !(HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) && IsAbsolutelyPositioned(disp)) &&
+    !GetPrevInFlow();
 }
 
 /**

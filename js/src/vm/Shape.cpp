@@ -8,15 +8,13 @@
 
 #include "vm/Shape-inl.h"
 
-#include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
-#include "jshashutil.h"
-
 #include "gc/FreeOp.h"
-#include "gc/Iteration.h"
+#include "gc/HashUtil.h"
 #include "gc/Policy.h"
+#include "gc/PublicIterators.h"
 #include "js/HashTable.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -32,9 +30,7 @@ using namespace js;
 using namespace js::gc;
 
 using mozilla::CeilingLog2Size;
-using mozilla::DebugOnly;
 using mozilla::PodZero;
-using mozilla::RotateLeft;
 
 using JS::AutoCheckCannotGC;
 

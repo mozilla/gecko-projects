@@ -18,7 +18,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/TypedArrayObject.h"
 
-#include "jsopcodeinlines.h"
+#include "vm/BytecodeUtil-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -30,7 +30,6 @@ using mozilla::ExponentComponent;
 using mozilla::FloorLog2;
 using mozilla::IsInfinite;
 using mozilla::IsNaN;
-using mozilla::IsNegative;
 using mozilla::IsNegativeZero;
 using mozilla::NegativeInfinity;
 using mozilla::PositiveInfinity;

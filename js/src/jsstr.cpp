@@ -8,7 +8,6 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Casting.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
@@ -24,7 +23,6 @@
 #include "jsarray.h"
 #include "jsbool.h"
 #include "jsnum.h"
-#include "jsopcode.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
@@ -35,9 +33,10 @@
 #include "js/Conversions.h"
 #include "js/UniquePtr.h"
 #if ENABLE_INTL_API
-#include "unicode/uchar.h"
-#include "unicode/unorm2.h"
+# include "unicode/uchar.h"
+# include "unicode/unorm2.h"
 #endif
+#include "vm/BytecodeUtil.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/JSAtom.h"
@@ -61,15 +60,11 @@ using namespace js::gc;
 
 using JS::Symbol;
 using JS::SymbolCode;
-using JS::ToInt32;
-using JS::ToUint32;
 
-using mozilla::AssertedCast;
 using mozilla::CheckedInt;
 using mozilla::IsNaN;
 using mozilla::IsNegativeZero;
 using mozilla::IsSame;
-using mozilla::Move;
 using mozilla::PodCopy;
 using mozilla::PodEqual;
 using mozilla::RangedPtr;

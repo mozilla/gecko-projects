@@ -209,6 +209,9 @@ class nsContentUtils
 public:
   static nsresult Init();
 
+  // Strip off "wyciwyg://n/" part of a URL. aURI must have "wyciwyg" scheme.
+  static nsresult RemoveWyciwygScheme(nsIURI* aURI, nsIURI** aReturn);
+
   static bool     IsCallerChrome();
   static bool     ThreadsafeIsCallerChrome();
   static bool     IsCallerContentXBL();
@@ -1228,11 +1231,6 @@ public:
    * Returns true if aDocument is in a docshell whose parent is the same type
    */
   static bool IsChildOfSameType(nsIDocument* aDoc);
-
-  /**
-   * Returns true if the content-type is any of the supported script types.
-   */
-  static bool IsScriptType(const nsACString& aContentType);
 
   /**
    * Returns true if the content-type will be rendered as plain-text.

@@ -10,9 +10,9 @@
 
 #include "jsnum.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/double-conversion.h"
 #include "mozilla/FloatingPoint.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 
 #ifdef HAVE_LOCALECONV
@@ -21,11 +21,11 @@
 #include <math.h>
 #include <string.h>
 
-#include "jsdtoa.h"
 #include "jsstr.h"
 #include "jstypes.h"
 
 #include "js/Conversions.h"
+#include "util/DoubleToString.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -42,7 +42,6 @@ using mozilla::Abs;
 using mozilla::ArrayLength;
 using mozilla::MinNumberValue;
 using mozilla::NegativeInfinity;
-using mozilla::PodCopy;
 using mozilla::PositiveInfinity;
 using mozilla::RangedPtr;
 

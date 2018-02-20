@@ -10,20 +10,16 @@
 
 #include "vm/Interpreter-inl.h"
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
 #include <string.h>
 
 #include "jsarray.h"
-#include "jsiter.h"
 #include "jslibmath.h"
 #include "jsnum.h"
-#include "jsopcode.h"
 #include "jsprf.h"
 #include "jsstr.h"
 
@@ -35,8 +31,10 @@
 #include "jit/Jit.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
 #include "vm/GeneratorObject.h"
+#include "vm/Iteration.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
 #include "vm/JSFunction.h"
@@ -65,11 +63,8 @@
 using namespace js;
 using namespace js::gc;
 
-using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::NumberEqualsInt32;
-using mozilla::PodCopy;
-using JS::ForOfIterator;
 
 template <bool Eq>
 static MOZ_ALWAYS_INLINE bool
@@ -3317,7 +3312,7 @@ CASE(JSOP_CALLSITEOBJ)
     ReservedRooted<JSObject*> cso(&rootObject0, script->getObject(REGS.pc));
     ReservedRooted<JSObject*> raw(&rootObject1, script->getObject(GET_UINT32_INDEX(REGS.pc) + 1));
 
-    if (!cx->compartment()->getTemplateLiteralObject(cx, raw.as<ArrayObject>(), &cso))
+    if (!ProcessCallSiteObjOperation(cx, cso, raw))
         goto error;
 
     PUSH_OBJECT(*cso);

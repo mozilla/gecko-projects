@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-
 #ifdef MOZ_VALGRIND
 # include <valgrind/memcheck.h>
 #endif
@@ -23,14 +21,12 @@
 #include "vm/JSContext.h"
 #include "vm/JSONParser.h"
 
-#include "gc/GCIteration-inl.h"
 #include "gc/Nursery-inl.h"
+#include "gc/PrivateIterators-inl.h"
 #include "vm/JSObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
-
-using mozilla::ArrayEnd;
 
 using JS::AutoGCRooter;
 

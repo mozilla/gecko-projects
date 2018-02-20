@@ -76,15 +76,13 @@ VERSION_BUMP_FLAVORS = (
     'ship_devedition',
 )
 
-UPTAKE_MONITORING_PLATFORMS_FLAVORS = (
-    'push_firefox',
-    'push_devedition',
-)
-
-PARTIAL_UPDATES_FLAVORS = UPTAKE_MONITORING_PLATFORMS_FLAVORS + (
+PARTIAL_UPDATES_FLAVORS = (
     'promote_firefox',
     'promote_firefox_rc',
     'promote_devedition',
+    'ship_firefox',
+    'ship_firefox_rc',
+    'ship_devedition',
 )
 
 
@@ -203,21 +201,6 @@ def is_release_promotion_available(parameters):
                 }
             },
 
-            'uptake_monitoring_platforms': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                    'enum': [
-                        'macosx',
-                        'win32',
-                        'win64',
-                        'linux',
-                        'linux64',
-                    ],
-                },
-                'default': [],
-            },
-
             'release_eta': {
                 'type': 'string',
                 'default': '',
@@ -268,6 +251,8 @@ def release_promotion_action(parameters, input, task_group_id, task_id, task):
     release_eta = input.get('release_eta', '')
     if release_eta:
         os.environ['RELEASE_ETA'] = release_eta
+
+    promotion_config = RELEASE_PROMOTION_CONFIG[release_promotion_flavor]
 
     target_tasks_method = promotion_config['target_tasks_method'].format(
         project=parameters['project']

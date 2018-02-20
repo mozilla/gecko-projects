@@ -19,7 +19,6 @@
 #include "wasm/WasmBuiltins.h"
 
 #include "mozilla/Atomics.h"
-#include "mozilla/BinarySearch.h"
 
 #include "fdlibm.h"
 #include "jslibmath.h"
@@ -38,7 +37,6 @@ using namespace js;
 using namespace jit;
 using namespace wasm;
 
-using mozilla::BinarySearchIf;
 using mozilla::HashGeneric;
 using mozilla::IsNaN;
 using mozilla::MakeEnumeratedRange;
@@ -441,6 +439,35 @@ TruncateDoubleToUint64(double input)
     return uint64_t(input);
 }
 
+static int64_t
+SaturatingTruncateDoubleToInt64(double input)
+{
+    // Handle in-range values (except INT64_MIN).
+    if (fabs(input) < -double(INT64_MIN))
+        return int64_t(input);
+    // Handle NaN.
+    if (IsNaN(input))
+        return 0;
+    // Handle positive overflow.
+    if (input > 0)
+        return INT64_MAX;
+    // Handle negative overflow.
+    return INT64_MIN;
+}
+
+static uint64_t
+SaturatingTruncateDoubleToUint64(double input)
+{
+    // Handle positive overflow.
+    if (input >= -double(INT64_MIN) * 2.0)
+        return UINT64_MAX;
+    // Handle in-range values.
+    if (input >= -1.0)
+        return uint64_t(input);
+    // Handle NaN and negative overflow.
+    return 0;
+}
+
 static double
 Int64ToDouble(int32_t x_hi, uint32_t x_lo)
 {
@@ -550,6 +577,12 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::TruncateDoubleToInt64:
         *abiType = Args_Int64_Double;
         return FuncCast(TruncateDoubleToInt64, *abiType);
+      case SymbolicAddress::SaturatingTruncateDoubleToUint64:
+        *abiType = Args_Int64_Double;
+        return FuncCast(SaturatingTruncateDoubleToUint64, *abiType);
+      case SymbolicAddress::SaturatingTruncateDoubleToInt64:
+        *abiType = Args_Int64_Double;
+        return FuncCast(SaturatingTruncateDoubleToInt64, *abiType);
       case SymbolicAddress::Uint64ToDouble:
         *abiType = Args_Double_IntInt;
         return FuncCast(Uint64ToDouble, *abiType);
@@ -683,6 +716,8 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::UModI64:
       case SymbolicAddress::TruncateDoubleToUint64:
       case SymbolicAddress::TruncateDoubleToInt64:
+      case SymbolicAddress::SaturatingTruncateDoubleToUint64:
+      case SymbolicAddress::SaturatingTruncateDoubleToInt64:
       case SymbolicAddress::Uint64ToDouble:
       case SymbolicAddress::Uint64ToFloat32:
       case SymbolicAddress::Int64ToDouble:

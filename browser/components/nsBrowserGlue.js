@@ -315,7 +315,9 @@ BrowserGlue.prototype = {
     if (!this._saveSession && !aForce)
       return;
 
-    Services.prefs.setBoolPref("browser.sessionstore.resume_session_once", true);
+    if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
+      Services.prefs.setBoolPref("browser.sessionstore.resume_session_once", true);
+    }
 
     // This method can be called via [NSApplication terminate:] on Mac, which
     // ends up causing prefs not to be flushed to disk, so we need to do that
@@ -367,13 +369,10 @@ BrowserGlue.prototype = {
   },
 
   _sendMainPingCentrePing() {
-    const ACTIVITY_STREAM_ENABLED_PREF = "browser.newtabpage.activity-stream.enabled";
     const ACTIVITY_STREAM_ID = "activity-stream";
-    let asEnabled = Services.prefs.getBoolPref(ACTIVITY_STREAM_ENABLED_PREF, false);
-
     const payload = {
       event: "AS_ENABLED",
-      value: asEnabled
+      value: true
     };
     const options = {filter: ACTIVITY_STREAM_ID};
     this.pingCentre.sendPing(payload, options);
@@ -1335,7 +1334,7 @@ BrowserGlue.prototype = {
       var browser = browserEnum.getNext();
       if (!PrivateBrowsingUtils.isWindowPrivate(browser))
         allWindowsPrivate = false;
-      var tabbrowser = browser.document.getElementById("content");
+      var tabbrowser = browser.ownerGlobal.gBrowser;
       if (tabbrowser)
         pagecount += tabbrowser.browsers.length - tabbrowser._numPinnedTabs;
     }

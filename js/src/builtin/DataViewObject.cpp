@@ -14,13 +14,11 @@
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsnum.h"
-#ifdef XP_WIN
-# include "jswin.h"
-#endif
 #include "jswrapper.h"
 
 #include "jit/AtomicOperations.h"
 #include "js/Conversions.h"
+#include "util/Windows.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -40,7 +38,6 @@ using namespace js::gc;
 using mozilla::AssertedCast;
 using JS::CanonicalizeNaN;
 using JS::ToInt32;
-using JS::ToUint32;
 
 static NewObjectKind
 DataViewNewObjectKind(JSContext* cx)

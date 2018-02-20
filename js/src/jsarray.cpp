@@ -9,14 +9,12 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include <algorithm>
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
-#include "jsiter.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -28,6 +26,7 @@
 #include "js/Conversions.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Iteration.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
 #include "vm/JSFunction.h"
@@ -55,7 +54,6 @@ using mozilla::ArrayLength;
 using mozilla::CeilingLog2;
 using mozilla::CheckedInt;
 using mozilla::DebugOnly;
-using mozilla::IsNaN;
 
 using JS::AutoCheckCannotGC;
 using JS::IsArrayAnswer;

@@ -6,11 +6,8 @@
 
 #include "vm/HelperThreads.h"
 
-#include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Unused.h"
-
-#include "jsnativestack.h"
 
 #include "builtin/Promise.h"
 #include "frontend/BytecodeCompiler.h"
@@ -18,6 +15,7 @@
 #include "jit/IonBuilder.h"
 #include "js/Utility.h"
 #include "threading/CpuCount.h"
+#include "util/NativeStack.h"
 #include "vm/Debugger.h"
 #include "vm/ErrorReporting.h"
 #include "vm/SharedImmutableStringsCache.h"
@@ -25,7 +23,7 @@
 #include "vm/TraceLogging.h"
 #include "vm/Xdr.h"
 
-#include "gc/GCIteration-inl.h"
+#include "gc/PrivateIterators-inl.h"
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
@@ -34,8 +32,6 @@
 
 using namespace js;
 
-using mozilla::ArrayLength;
-using mozilla::DebugOnly;
 using mozilla::Maybe;
 using mozilla::Unused;
 using mozilla::TimeDuration;

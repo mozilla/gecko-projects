@@ -15,6 +15,8 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/ScopeExit.h"
 
+#include <type_traits>
+
 #include "jslibmath.h"
 #include "jsmath.h"
 #include "jsnum.h"
@@ -640,7 +642,7 @@ class OutOfLineTestObject : public OutOfLineCodeBase<CodeGenerator>
 #endif
     { }
 
-    void accept(CodeGenerator* codegen) final override {
+    void accept(CodeGenerator* codegen) final {
         MOZ_ASSERT(initialized());
         codegen->emitOOLTestObject(objreg_, ifEmulatesUndefined_, ifDoesntEmulateUndefined_,
                                    scratch_);
@@ -5346,7 +5348,7 @@ struct ScriptCountBlockState
     {
         // Prefix stream of assembly instructions with their LIR instruction
         // name and any associated high level info.
-        if (const char* extra = ins->extraName())
+        if (const char* extra = ins->getExtraName())
             printer.printf("[%s:%s]\n", ins->opName(), extra);
         else
             printer.printf("[%s]\n", ins->opName());
@@ -5681,7 +5683,7 @@ CodeGenerator::generateBody()
 
 #ifdef JS_JITSPEW
             JitSpewStart(JitSpew_Codegen, "instruction %s", iter->opName());
-            if (const char* extra = iter->extraName())
+            if (const char* extra = iter->getExtraName())
                 JitSpewCont(JitSpew_Codegen, ":%s", extra);
             JitSpewFin(JitSpew_Codegen);
 #endif
@@ -5713,12 +5715,20 @@ CodeGenerator::generateBody()
                 }
             }
 
-#ifdef DEBUG
             setElement(*iter); // needed to encode correct snapshot location.
+
+#ifdef DEBUG
             emitDebugForceBailing(*iter);
 #endif
 
-            iter->accept(this);
+            switch (iter->op()) {
+#define LIROP(op) case LNode::LOp_##op: visit##op(iter->to##op()); break;
+    LIR_OPCODE_LIST(LIROP)
+#undef LIROP
+              case LNode::LOp_Invalid:
+              default:
+                MOZ_CRASH("Invalid LIR op");
+            }
 
             // Track the end native offset of optimizations.
             if (iter->mirRaw() && iter->mirRaw()->trackedOptimizations())
@@ -13233,6 +13243,9 @@ CodeGenerator::visitGetPrototypeOf(LGetPrototypeOf* lir)
 
     masm.bind(ool->rejoin());
 }
+
+static_assert(!std::is_polymorphic<CodeGenerator>::value,
+              "CodeGenerator should not have any virtual methods");
 
 } // namespace jit
 } // namespace js

@@ -10,13 +10,12 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Variant.h"
 
-#include "jsopcode.h"
-
 #include "gc/DeletePolicy.h"
 #include "gc/Heap.h"
 #include "gc/Policy.h"
 #include "js/UbiNode.h"
 #include "js/UniquePtr.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/JSObject.h"
 #include "vm/Xdr.h"
 
@@ -1578,7 +1577,7 @@ class Concrete<js::Scope> : TracerConcrete<js::Scope>
         new (storage) Concrete(ptr);
     }
 
-    CoarseType coarseType() const final override { return CoarseType::Script; }
+    CoarseType coarseType() const final { return CoarseType::Script; }
 
     Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
 

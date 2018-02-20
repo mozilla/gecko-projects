@@ -2239,6 +2239,17 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
     // Note: this should match nsDocShell::OnLoadingSite
     NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
 
+    bool isWyciwyg = false;
+    uri->SchemeIs("wyciwyg", &isWyciwyg);
+    if (isWyciwyg) {
+      nsCOMPtr<nsIURI> cleanURI;
+      nsresult rv =
+        nsContentUtils::RemoveWyciwygScheme(uri, getter_AddRefs(cleanURI));
+      if (NS_SUCCEEDED(rv)) {
+        uri = cleanURI;
+      }
+    }
+
     nsIScriptSecurityManager *securityManager =
       nsContentUtils::GetSecurityManager();
     if (securityManager) {
@@ -2923,6 +2934,13 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     return NS_OK;
   }
 
+  // In case this channel was instrument to discard the CSP, then
+  // there is nothing for us to do here.
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+  if (loadInfo->GetAllowDocumentToBeAgnosticToCSP()) {
+    return NS_OK;
+  }
+
   nsAutoCString tCspHeaderValue, tCspROHeaderValue;
 
   nsCOMPtr<nsIHttpChannel> httpChannel;
@@ -2949,7 +2967,6 @@ nsDocument::InitCSP(nsIChannel* aChannel)
 
   // Check if this is a signed content to apply default CSP.
   bool applySignedContentCSP = false;
-  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
   if (loadInfo && loadInfo->GetVerifySignedContent()) {
     applySignedContentCSP = true;
   }
@@ -3532,110 +3549,6 @@ nsIDocument::GetCurrentScript()
 {
   nsCOMPtr<Element> el(do_QueryInterface(ScriptLoader()->GetCurrentScript()));
   return el;
-}
-
-Element*
-nsIDocument::ElementFromPoint(float aX, float aY)
-{
-  return ElementFromPointHelper(aX, aY, false, true);
-}
-
-void
-nsIDocument::ElementsFromPoint(float aX, float aY,
-                               nsTArray<RefPtr<Element>>& aElements)
-{
-  ElementsFromPointHelper(aX, aY, nsIDocument::FLUSH_LAYOUT, aElements);
-}
-
-Element*
-nsDocument::ElementFromPointHelper(float aX, float aY,
-                                   bool aIgnoreRootScrollFrame,
-                                   bool aFlushLayout)
-{
-  AutoTArray<RefPtr<Element>, 1> elementArray;
-  ElementsFromPointHelper(aX, aY,
-                          ((aIgnoreRootScrollFrame ? nsIDocument::IGNORE_ROOT_SCROLL_FRAME : 0) |
-                           (aFlushLayout ? nsIDocument::FLUSH_LAYOUT : 0) |
-                           nsIDocument::IS_ELEMENT_FROM_POINT),
-                          elementArray);
-  if (elementArray.IsEmpty()) {
-    return nullptr;
-  }
-  return elementArray[0];
-}
-
-void
-nsDocument::ElementsFromPointHelper(float aX, float aY,
-                                    uint32_t aFlags,
-                                    nsTArray<RefPtr<mozilla::dom::Element>>& aElements)
-{
-  // As per the the spec, we return null if either coord is negative
-  if (!(aFlags & nsIDocument::IGNORE_ROOT_SCROLL_FRAME) && (aX < 0 || aY < 0)) {
-    return;
-  }
-
-  nscoord x = nsPresContext::CSSPixelsToAppUnits(aX);
-  nscoord y = nsPresContext::CSSPixelsToAppUnits(aY);
-  nsPoint pt(x, y);
-
-  // Make sure the layout information we get is up-to-date, and
-  // ensure we get a root frame (for everything but XUL)
-  if (aFlags & nsIDocument::FLUSH_LAYOUT) {
-    FlushPendingNotifications(FlushType::Layout);
-  }
-
-  nsIPresShell *ps = GetShell();
-  if (!ps) {
-    return;
-  }
-  nsIFrame *rootFrame = ps->GetRootFrame();
-
-  // XUL docs, unlike HTML, have no frame tree until everything's done loading
-  if (!rootFrame) {
-    return; // return null to premature XUL callers as a reminder to wait
-  }
-
-  nsTArray<nsIFrame*> outFrames;
-  // Emulate what GetFrameAtPoint does, since we want all the frames under our
-  // point.
-  nsLayoutUtils::GetFramesForArea(rootFrame, nsRect(pt, nsSize(1, 1)), outFrames,
-    nsLayoutUtils::IGNORE_PAINT_SUPPRESSION | nsLayoutUtils::IGNORE_CROSS_DOC |
-    ((aFlags & nsIDocument::IGNORE_ROOT_SCROLL_FRAME) ? nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME : 0));
-
-  // Dunno when this would ever happen, as we should at least have a root frame under us?
-  if (outFrames.IsEmpty()) {
-    return;
-  }
-
-  // Used to filter out repeated elements in sequence.
-  nsIContent* lastAdded = nullptr;
-
-  for (uint32_t i = 0; i < outFrames.Length(); i++) {
-    nsIContent* node = GetContentInThisDocument(outFrames[i]);
-
-    if (!node || !node->IsElement()) {
-      // If this helper is called via ElementsFromPoint, we need to make sure
-      // our frame is an element. Otherwise return whatever the top frame is
-      // even if it isn't the top-painted element.
-      // SVG 'text' element's SVGTextFrame doesn't respond to hit-testing, so
-      // if 'node' is a child of such an element then we need to manually defer
-      // to the parent here.
-      if (!(aFlags & nsIDocument::IS_ELEMENT_FROM_POINT) &&
-          !nsSVGUtils::IsInSVGTextSubtree(outFrames[i])) {
-        continue;
-      }
-      node = node->GetParent();
-    }
-    if (node && node != lastAdded) {
-      aElements.AppendElement(node->AsElement());
-      lastAdded = node;
-      // If this helper is called via ElementFromPoint, just return the first
-      // element we find.
-      if (aFlags & nsIDocument::IS_ELEMENT_FROM_POINT) {
-        return;
-      }
-    }
-  }
 }
 
 nsresult
@@ -4813,11 +4726,8 @@ nsDocument::SetScopeObject(nsIGlobalObject* aGlobal)
 static void
 CheckIfContainsEMEContent(nsISupports* aSupports, void* aContainsEME)
 {
-  nsCOMPtr<nsIDOMHTMLMediaElement> domMediaElem(do_QueryInterface(aSupports));
-  if (domMediaElem) {
-    nsCOMPtr<nsIContent> content(do_QueryInterface(domMediaElem));
-    MOZ_ASSERT(content, "aSupports is not a content");
-    HTMLMediaElement* mediaElem = static_cast<HTMLMediaElement*>(content.get());
+  nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
+  if (auto mediaElem = HTMLMediaElement::FromContentOrNull(content)) {
     bool* contains = static_cast<bool*>(aContainsEME);
     if (mediaElem->GetMediaKeys()) {
       *contains = true;
@@ -4837,11 +4747,8 @@ nsDocument::ContainsEMEContent()
 static void
 CheckIfContainsMSEContent(nsISupports* aSupports, void* aContainsMSE)
 {
-  nsCOMPtr<nsIDOMHTMLMediaElement> domMediaElem(do_QueryInterface(aSupports));
-  if (domMediaElem) {
-    nsCOMPtr<nsIContent> content(do_QueryInterface(domMediaElem));
-    MOZ_ASSERT(content, "aSupports is not a content");
-    HTMLMediaElement* mediaElem = static_cast<HTMLMediaElement*>(content.get());
+  nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
+  if (auto mediaElem = HTMLMediaElement::FromContentOrNull(content)) {
     bool* contains = static_cast<bool*>(aContainsMSE);
     RefPtr<MediaSource> ms = mediaElem->GetMozMediaSourceObject();
     if (ms) {
@@ -4862,11 +4769,8 @@ nsDocument::ContainsMSEContent()
 static void
 NotifyActivityChanged(nsISupports *aSupports, void *aUnused)
 {
-  nsCOMPtr<nsIDOMHTMLMediaElement> domMediaElem(do_QueryInterface(aSupports));
-  if (domMediaElem) {
-    nsCOMPtr<nsIContent> content(do_QueryInterface(domMediaElem));
-    MOZ_ASSERT(content, "aSupports is not a content");
-    HTMLMediaElement* mediaElem = static_cast<HTMLMediaElement*>(content.get());
+  nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
+  if (auto mediaElem = HTMLMediaElement::FromContentOrNull(content)) {
     mediaElem->NotifyOwnerDocumentActivityChanged();
   }
   nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent(do_QueryInterface(aSupports));
@@ -8538,7 +8442,7 @@ nsDocument::DoUnblockOnload()
 }
 
 nsIContent*
-nsDocument::GetContentInThisDocument(nsIFrame* aFrame) const
+nsIDocument::GetContentInThisDocument(nsIFrame* aFrame) const
 {
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(f)) {
@@ -10638,7 +10542,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() override final
+  NS_IMETHOD Run() final
   {
     if (!mDoc) {
       FullscreenRoots::ForEach(&AskWindowToExitFullscreen);
@@ -11645,7 +11549,7 @@ public:
     , mUserInputOrChromeCaller(aUserInputOrChromeCaller)
   {}
 
-  NS_IMETHOD Run() final override;
+  NS_IMETHOD Run() final;
 
 private:
   nsWeakPtr mElement;
@@ -11975,6 +11879,10 @@ nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aSizes) const
 
   if (EventListenerManager* elm = GetExistingListenerManager()) {
     aSizes.mDOMEventListenersCount += elm->ListenerCount();
+  }
+
+  if (mNodeInfoManager) {
+    mNodeInfoManager->AddSizeOfIncludingThis(aSizes);
   }
 
   // Measurement of the following members may be added later if DMD finds it
