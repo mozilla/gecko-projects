@@ -16,6 +16,23 @@ from taskgraph.util.scriptworker import get_release_config
 transforms = TransformSequence()
 
 
+# The beta regexes do not match point releases.
+# In the rare event that we do ship a point
+# release to beta, we need to either:
+# 1) update these regexes to match that specific version
+# 2) pass a second include version that matches that specifivc version
+INCLUDE_VERSION_REGEXES = {
+    "beta": r"'^(\d+\.\d+(b\d+)?)$'",
+    "nonbeta": r"'^\d+\.\d+(\.\d+)?$'",
+    # Same as beta, except excludes 58.0b1 due to issues with it not being able
+    # to update to latest
+    "devedition_hack": r"'^((?!58\.0b1$)\d+\.\d+(b\d+)?)$'",
+}
+
+MAR_CHANNEL_ID_OVERRIDE_REGEXES = {
+    "beta": r"'^\d+\.\d+(\.\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'",
+}
+
 @transforms.add
 def add_command(config, tasks):
     keyed_by_args = [
@@ -70,9 +87,15 @@ def add_command(config, tasks):
             thing = "extra.{}".format(arg)
             resolve_keyed_by(task, thing, thing, **config.params)
             # ignore things that resolved to null
-            if task["extra"].get(arg):
-                command.append("--{}".format(arg))
-                command.append(task["extra"][arg])
+            if not task["extra"].get(arg):
+                continue
+            if arg == "include-version":
+                task["extra"][arg] = INCLUDE_VERSION_REGEXES[task["extra"][arg]]
+            if arg == "mar-channel-id-override":
+                task["extra"][arg] = MAR_CHANNEL_ID_OVERRIDE_REGEXES[task["extra"][arg]]
+
+            command.append("--{}".format(arg))
+            command.append(task["extra"][arg])
 
         task["run"]["command"] = " ".join(command)
 

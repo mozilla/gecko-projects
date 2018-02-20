@@ -6,6 +6,7 @@ loader: taskgraph.loader.transform:loader
 
 transforms:
    - taskgraph.transforms.update_verify_config:transforms
+   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -57,11 +58,11 @@ job-defaults:
             # release to beta, we need to either:
             # 1) update these regexes to match that specific version
             # 2) pass a second include version that matches that specifivc version
-            birch: "'^\\d+\\.\\d+(\\.\\d+)?$'"
-            jamun: "'^(\\d+\\.\\d+(b\\d+)?)$'"
-            maple: "'^(\\d+\\.\\d+(b\\d+)?)$'"
-            mozilla-beta: "'^(\\d+\\.\\d+(b\\d+)?)$'"
-            mozilla-release: "'^\\d+\\.\\d+(\\.\\d+)?$'"
+            birch: nonbeta
+            jamun: beta
+            maple: beta
+            mozilla-beta: beta
+            mozilla-release: nonbeta
             default: null
       last-watershed:
          by-project:
@@ -73,51 +74,6 @@ job-defaults:
             # TODO: double check me
             mozilla-esr52: "52.0esr"
             default: null
-   notifications:
-      completed:
-         subject: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "COMPLETED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-beta: ["log_collect"]
-               mozilla-release: ["log_collect"]
-               default: []
-
-      failed:
-         subject: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "FAILED: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-beta: ["log_collect", "ses"]
-               mozilla-release: ["log_collect", "ses"]
-               default: ["ses"]
-         emails:
-            by-project:
-               birch: ["release+tcstaging@mozilla.com"]
-               jamun: ["release+tcstaging@mozilla.com"]
-               maple: ["release+tcstaging@mozilla.com"]
-               mozilla-beta: ["release-automation-notifications@mozilla.com"]
-               mozilla-release: ["release-automation-notifications@mozilla.com"]
-               try: ["{task_def[metadata][owner]}"]
-               default: []
-
-      exception:
-         subject: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         message: "EXCEPTION: [{task[shipping-product]} {release_config[version]} build{release_config[build_number]}/{config[params][project]}] {task_def[metadata][name]} task"
-         plugins:
-            by-project:
-               mozilla-beta: ["log_collect", "ses"]
-               mozilla-release: ["log_collect", "ses"]
-               default: ["ses"]
-         emails:
-            by-project:
-               birch: ["release+tcstaging@mozilla.com"]
-               jamun: ["release+tcstaging@mozilla.com"]
-               maple: ["release+tcstaging@mozilla.com"]
-               mozilla-beta: ["release-automation-notifications@mozilla.com"]
-               mozilla-release: ["release-automation-notifications@mozilla.com"]
-               try: ["{task_def[metadata][owner]}"]
-               default: []
 
 jobs:
    firefox-linux:
@@ -144,8 +100,8 @@ jobs:
                default: "default"
          mar-channel-id-override:
             by-project:
-               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               maple: beta
+               mozilla-beta: beta
                default: null
 
    firefox-linux64:
@@ -172,8 +128,8 @@ jobs:
                default: "default"
          mar-channel-id-override:
             by-project:
-               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               maple: beta
+               mozilla-beta: beta
                default: null
 
    firefox-macosx64:
@@ -200,8 +156,8 @@ jobs:
                default: "default"
          mar-channel-id-override:
             by-project:
-               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               maple: beta
+               mozilla-beta: beta
                default: null
 
    firefox-win32:
@@ -228,8 +184,8 @@ jobs:
                default: "default"
          mar-channel-id-override:
             by-project:
-               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               maple: beta
+               mozilla-beta: beta
                default: null
 
    firefox-win64:
@@ -256,8 +212,8 @@ jobs:
                default: "default"
          mar-channel-id-override:
             by-project:
-               maple: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
-               mozilla-beta: "'^\\d+\\.\\d+(\\.\\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'"
+               maple: beta
+               mozilla-beta: beta
                default: null
 
    devedition-linux:
@@ -274,7 +230,7 @@ jobs:
          platform: linux-i686
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
-         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
+         include-version: devedition_hack
 
    devedition-linux64:
       shipping-product: devedition
@@ -290,7 +246,7 @@ jobs:
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
-         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
+         include-version: devedition_hack
 
    devedition-macosx64:
       shipping-product: devedition
@@ -306,7 +262,7 @@ jobs:
          platform: mac
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
-         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
+         include-version: devedition_hack
 
    devedition-win32:
       shipping-product: devedition
@@ -322,7 +278,7 @@ jobs:
          platform: win32
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
-         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
+         include-version: devedition_hack
 
    devedition-win64:
       shipping-product: devedition
@@ -338,4 +294,4 @@ jobs:
          platform: win64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
-         include-version: "'^((?!58\\.0b1$)\\d+\\.\\d+(b\\d+)?)$'"
+         include-version: devedition_hack
