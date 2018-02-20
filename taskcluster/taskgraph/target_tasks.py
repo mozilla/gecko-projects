@@ -330,12 +330,14 @@ def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
         if task.label in beta_release_tasks:
             return True
 
-        # 'secondary' update/final verify tasks only run for
-        # RCs
+        # 'secondary' balrog/update verify/final verify tasks only run for RCs
         if parameters.get('release_type') != 'rc':
-            if task.kind in ('release-secondary-update-verify',
-                             'release-secondary-update-verify-config',
-                             'release-secondary-final-verify'):
+            if task.kind in (
+                'release-secondary-balrog-submit-toplevel',
+                'release-secondary-final-verify'
+                'release-secondary-update-verify',
+                'release-secondary-update-verify-config',
+            ):
                 return False
 
         if task.attributes.get('shipping_product') == 'firefox' and \
@@ -390,7 +392,7 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
             return False
 
         if task.kind in (
-            'release-secondary-balrog-publishing',
+            'release-secondary-balrog-scheduling',
             'release-secondary-notify-ship',
         ):
                 return is_rc
