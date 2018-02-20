@@ -10,26 +10,17 @@
 
 #include "vm/Interpreter-inl.h"
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
 #include <string.h>
 
 #include "jsarray.h"
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jsfun.h"
-#include "jsiter.h"
 #include "jslibmath.h"
 #include "jsnum.h"
-#include "jsobj.h"
-#include "jsopcode.h"
 #include "jsprf.h"
-#include "jsscript.h"
 #include "jsstr.h"
 
 #include "builtin/Eval.h"
@@ -40,8 +31,15 @@
 #include "jit/Jit.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
 #include "vm/GeneratorObject.h"
+#include "vm/Iteration.h"
+#include "vm/JSAtom.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/Opcodes.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
@@ -49,15 +47,15 @@
 #include "vm/StringBuffer.h"
 #include "vm/TraceLogging.h"
 
-#include "jsatominlines.h"
 #include "jsboolinlines.h"
-#include "jsfuninlines.h"
-#include "jsscriptinlines.h"
 
 #include "jit/JitFrames-inl.h"
 #include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/GeckoProfiler-inl.h"
+#include "vm/JSAtom-inl.h"
+#include "vm/JSFunction-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Probes-inl.h"
 #include "vm/Stack-inl.h"
@@ -65,11 +63,8 @@
 using namespace js;
 using namespace js::gc;
 
-using mozilla::ArrayLength;
 using mozilla::DebugOnly;
 using mozilla::NumberEqualsInt32;
-using mozilla::PodCopy;
-using JS::ForOfIterator;
 
 template <bool Eq>
 static MOZ_ALWAYS_INLINE bool
@@ -3317,7 +3312,7 @@ CASE(JSOP_CALLSITEOBJ)
     ReservedRooted<JSObject*> cso(&rootObject0, script->getObject(REGS.pc));
     ReservedRooted<JSObject*> raw(&rootObject1, script->getObject(GET_UINT32_INDEX(REGS.pc) + 1));
 
-    if (!cx->compartment()->getTemplateLiteralObject(cx, raw.as<ArrayObject>(), &cso))
+    if (!ProcessCallSiteObjOperation(cx, cso, raw))
         goto error;
 
     PUSH_OBJECT(*cso);
@@ -3664,11 +3659,13 @@ END_CASE(JSOP_TOASYNCGEN)
 
 CASE(JSOP_TOASYNCITER)
 {
-    ReservedRooted<JSObject*> iter(&rootObject1, &REGS.sp[-1].toObject());
-    JSObject* asyncIter = CreateAsyncFromSyncIterator(cx, iter);
+    ReservedRooted<Value> nextMethod(&rootValue0, REGS.sp[-1]);
+    ReservedRooted<JSObject*> iter(&rootObject1, &REGS.sp[-2].toObject());
+    JSObject* asyncIter = CreateAsyncFromSyncIterator(cx, iter, nextMethod);
     if (!asyncIter)
         goto error;
 
+    REGS.sp--;
     REGS.sp[-1].setObject(*asyncIter);
 }
 END_CASE(JSOP_TOASYNCITER)

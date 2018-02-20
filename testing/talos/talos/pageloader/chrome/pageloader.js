@@ -240,6 +240,7 @@ function plInit() {
 
         }
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/talos-content.js", false);
+        content.selectedBrowser.messageManager.loadFrameScript("chrome://talos-powers-content/content/TalosContentProfiler.js", false, true);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/tscroll.js", false, true);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/Profiler.js", false, true);
 
@@ -405,7 +406,7 @@ var plNextPage = async function() {
     doNextPage = true;
   }
 
-  if (doNextPage == true) {
+  if (doNextPage) {
     if (forceCC) {
       var tccstart = new Date();
       window.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
@@ -539,7 +540,7 @@ function plWaitForPaintingCapturing() {
                    .getInterface(Components.interfaces.nsIDOMWindowUtils);
 
   if (utils.isMozAfterPaintPending && useMozAfterPaint) {
-    if (gPaintListener == false)
+    if (!gPaintListener)
       gPaintWindow.addEventListener("MozAfterPaint", plPaintedCapturing, true);
     gPaintListener = true;
     return;
@@ -600,7 +601,7 @@ function waitForPainted() {
     return;
   }
 
-  if (gPaintListener == false)
+  if (!gPaintListener)
     gPaintWindow.addEventListener("MozAfterPaint", plPainted, true);
   gPaintListener = true;
 }
@@ -702,7 +703,7 @@ function plStop(force) {
 
 function plStopAll(force) {
   try {
-    if (force == false) {
+    if (!force) {
       pageIndex = 0;
       pageCycle = 1;
       if (cycle < NUM_CYCLES - 1) {

@@ -1086,6 +1086,10 @@ pref("security.sandbox.gpu.level", 0);
 pref("security.sandbox.content.level", 3);
 #endif
 
+#if defined(NIGHTLY_BUILD) && defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+pref("security.sandbox.mac.flash.enabled", false);
+#endif
+
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // This pref is introduced as part of bug 742434, the naming is inspired from
 // its Windows/Mac counterpart, but on Linux it's an integer which means:
@@ -1282,10 +1286,8 @@ pref("browser.newtabpage.columns", 5);
 // directory tiles download URL
 pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
 
-// activates Activity Stream
-pref("browser.newtabpage.activity-stream.enabled", true);
+// Activity Stream prefs that control to which page to redirect
 pref("browser.newtabpage.activity-stream.prerender", true);
-pref("browser.newtabpage.activity-stream.aboutHome.enabled", true);
 #ifndef RELEASE_OR_BETA
 pref("browser.newtabpage.activity-stream.debug", false);
 #endif
@@ -1611,8 +1613,6 @@ pref("reader.parse-node-limit", 0);
 // and because (normally) these errors are not persisted anywhere.
 pref("reader.errors.includeURLs", true);
 
-pref("view_source.tab", true);
-
 pref("dom.serviceWorkers.enabled", true);
 
 // Enable Push API.
@@ -1690,12 +1690,9 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
 #ifdef NIGHTLY_BUILD
 pref("extensions.formautofill.available", "on");
 pref("extensions.formautofill.creditCards.available", true);
-#elif MOZ_UPDATE_CHANNEL == release
-pref("extensions.formautofill.available", "detect");
-pref("extensions.formautofill.creditCards.available", false);
 #else
 pref("extensions.formautofill.available", "detect");
-pref("extensions.formautofill.creditCards.available", true);
+pref("extensions.formautofill.creditCards.available", false);
 #endif
 pref("extensions.formautofill.addresses.enabled", true);
 pref("extensions.formautofill.creditCards.enabled", true);
@@ -1711,13 +1708,15 @@ pref("extensions.formautofill.firstTimeUse", true);
 pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.section.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
-// Comma separated list of countries Form Autofill supports
-#if MOZ_UPDATE_CHANNEL == release
-pref("extensions.formautofill.supportedCountries", "US");
-pref("extensions.formautofill.supportRTL", false);
-#else
+
+#ifdef NIGHTLY_BUILD
+// Comma separated list of countries Form Autofill supports.
+// This affects feature availability and the address edit form country picker.
 pref("extensions.formautofill.supportedCountries", "US,CA,DE");
 pref("extensions.formautofill.supportRTL", true);
+#else
+pref("extensions.formautofill.supportedCountries", "US");
+pref("extensions.formautofill.supportRTL", false);
 #endif
 
 // Whether or not to restore a session with lazy-browser tabs.
@@ -1746,3 +1745,20 @@ pref("extensions.screenshots.disabled", false);
 // Preference that allows individual users to leave Screenshots enabled, but
 // disable uploading to the server.
 pref("extensions.screenshots.upload-disabled", false);
+
+// Preferences for BrowserErrorReporter.jsm
+// Only collect errors on Nightly, and specifically not local builds
+#if defined(NIGHTLY_BUILD) && MOZ_UPDATE_CHANNEL != default
+pref("browser.chrome.errorReporter.enabled", true);
+#else
+pref("browser.chrome.errorReporter.enabled", false);
+#endif
+pref("browser.chrome.errorReporter.sampleRate", "0.001");
+pref("browser.chrome.errorReporter.publicKey", "c709cb7a2c0b4f0882fcc84a5af161ec");
+pref("browser.chrome.errorReporter.projectId", "339");
+pref("browser.chrome.errorReporter.submitUrl", "https://sentry.prod.mozaws.net/api/339/store/");
+pref("browser.chrome.errorReporter.logLevel", "Error");
+
+// URL for Learn More link for browser error logging in preferences
+pref("browser.chrome.errorReporter.infoURL",
+     "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/nightly-error-collection");

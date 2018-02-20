@@ -6,6 +6,7 @@
 #ifndef _mozilla_dom_ServiceWorkerDescriptor_h
 #define _mozilla_dom_ServiceWorkerDescriptor_h
 
+#include "mozilla/UniquePtr.h"
 #include "nsString.h"
 
 class nsIPrincipal;
@@ -79,6 +80,11 @@ public:
 
   void
   SetState(ServiceWorkerState aState);
+
+  // Try to determine if two workers match each other.  This is less strict
+  // than an operator==() call since it ignores mutable values like State().
+  bool
+  Matches(const ServiceWorkerDescriptor& aDescriptor) const;
 
   // Expose the underlying IPC type so that it can be passed via IPC.
   const IPCServiceWorkerDescriptor&

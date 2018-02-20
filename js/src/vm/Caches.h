@@ -7,17 +7,17 @@
 #ifndef vm_Caches_h
 #define vm_Caches_h
 
-#include "jsatom.h"
 #include "jsbytecode.h"
 #include "jsmath.h"
-#include "jsobj.h"
-#include "jsscript.h"
 
 #include "frontend/SourceNotes.h"
 #include "gc/Tracer.h"
 #include "js/RootingAPI.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayObject.h"
+#include "vm/JSAtom.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/NativeObject.h"
 
 namespace js {
@@ -65,6 +65,15 @@ struct EvalCacheEntry
     JSScript* script;
     JSScript* callerScript;
     jsbytecode* pc;
+
+    // We sweep this cache before a nursery collection to remove entries with
+    // string keys in the nursery.
+    //
+    // The entire cache is purged on a major GC, so we don't need to sweep it
+    // then.
+    bool needsSweep() {
+        return !str->isTenured();
+    }
 };
 
 struct EvalCacheLookup
@@ -83,7 +92,7 @@ struct EvalCacheHashPolicy
     static bool match(const EvalCacheEntry& entry, const EvalCacheLookup& l);
 };
 
-typedef HashSet<EvalCacheEntry, EvalCacheHashPolicy, SystemAllocPolicy> EvalCache;
+typedef GCHashSet<EvalCacheEntry, EvalCacheHashPolicy, SystemAllocPolicy> EvalCache;
 
 /*
  * Cache for speeding up repetitive creation of objects in the VM.
@@ -241,6 +250,24 @@ class RuntimeCaches
     }
     js::MathCache* maybeGetMathCache() {
         return mathCache_.get();
+    }
+
+    void purgeForMinorGC(JSRuntime* rt) {
+        newObjectCache.clearNurseryObjects(rt);
+        evalCache.sweep();
+    }
+
+    void purgeForCompaction() {
+        newObjectCache.purge();
+        if (evalCache.initialized())
+            evalCache.clear();
+    }
+
+    void purge() {
+        purgeForCompaction();
+        gsnCache.purge();
+        envCoordinateNameCache.purge();
+        uncompressedSourceCache.purge();
     }
 };
 

@@ -11,7 +11,6 @@
 #include "nsIDocument.h"
 #include "nsIGlobalObject.h"
 #include "nsIStreamLoader.h"
-#include "nsIThreadRetargetableRequest.h"
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsDOMString.h"
@@ -473,7 +472,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
   GlobalObject global(cx, jsGlobal);
 
   RefPtr<Request> request = Request::Constructor(global, aInput, aInit, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
+  if (aRv.Failed()) {
     return nullptr;
   }
 
@@ -915,14 +914,14 @@ ExtractByteStreamFromBody(const fetch::OwningBodyInit& aBodyInit,
 
   if (aBodyInit.IsBlob()) {
     Blob& blob = aBodyInit.GetAsBlob();
-    BodyExtractor<nsIXHRSendable> body(&blob);
+    BodyExtractor<const Blob> body(&blob);
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
 
   if (aBodyInit.IsFormData()) {
     FormData& formData = aBodyInit.GetAsFormData();
-    BodyExtractor<nsIXHRSendable> body(&formData);
+    BodyExtractor<const FormData> body(&formData);
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
@@ -935,7 +934,7 @@ ExtractByteStreamFromBody(const fetch::OwningBodyInit& aBodyInit,
 
   if (aBodyInit.IsURLSearchParams()) {
     URLSearchParams& usp = aBodyInit.GetAsURLSearchParams();
-    BodyExtractor<nsIXHRSendable> body(&usp);
+    BodyExtractor<const URLSearchParams> body(&usp);
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
@@ -969,13 +968,13 @@ ExtractByteStreamFromBody(const fetch::BodyInit& aBodyInit,
   }
 
   if (aBodyInit.IsBlob()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsBlob());
+    BodyExtractor<const Blob> body(&aBodyInit.GetAsBlob());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
 
   if (aBodyInit.IsFormData()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsFormData());
+    BodyExtractor<const FormData> body(&aBodyInit.GetAsFormData());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
@@ -987,7 +986,7 @@ ExtractByteStreamFromBody(const fetch::BodyInit& aBodyInit,
   }
 
   if (aBodyInit.IsURLSearchParams()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsURLSearchParams());
+    BodyExtractor<const URLSearchParams> body(&aBodyInit.GetAsURLSearchParams());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
@@ -1025,13 +1024,13 @@ ExtractByteStreamFromBody(const fetch::ResponseBodyInit& aBodyInit,
   }
 
   if (aBodyInit.IsBlob()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsBlob());
+    BodyExtractor<const Blob> body(&aBodyInit.GetAsBlob());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
 
   if (aBodyInit.IsFormData()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsFormData());
+    BodyExtractor<const FormData> body(&aBodyInit.GetAsFormData());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }
@@ -1043,7 +1042,7 @@ ExtractByteStreamFromBody(const fetch::ResponseBodyInit& aBodyInit,
   }
 
   if (aBodyInit.IsURLSearchParams()) {
-    BodyExtractor<nsIXHRSendable> body(&aBodyInit.GetAsURLSearchParams());
+    BodyExtractor<const URLSearchParams> body(&aBodyInit.GetAsURLSearchParams());
     return body.GetAsStream(aStream, &aContentLength, aContentTypeWithCharset,
                             charset);
   }

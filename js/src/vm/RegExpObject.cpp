@@ -9,7 +9,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
-#include "jshashutil.h"
 #include "jsstr.h"
 #ifdef DEBUG
 #include "jsutil.h"
@@ -17,6 +16,7 @@
 
 #include "builtin/RegExp.h"
 #include "frontend/TokenStream.h"
+#include "gc/HashUtil.h"
 #ifdef DEBUG
 #include "irregexp/RegExpBytecode.h"
 #endif
@@ -30,8 +30,7 @@
 #endif
 #include "vm/Xdr.h"
 
-#include "jsobjinlines.h"
-
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Shape-inl.h"
 
@@ -39,7 +38,6 @@ using namespace js;
 
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
-using mozilla::Maybe;
 using mozilla::PodCopy;
 using js::frontend::TokenStream;
 

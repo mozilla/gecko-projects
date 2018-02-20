@@ -28,25 +28,11 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
-#if defined(MOZ_DEV_EDITION) || defined(RELEASE_OR_BETA)
-
 #define ENSURE_HR_SUCCEEDED(hr) \
+  MOZ_ASSERT(SUCCEEDED((HRESULT)hr)); \
   if (FAILED((HRESULT)hr)) { \
     return hr; \
   }
-
-#else
-
-#define ENSURE_HR_SUCCEEDED(hr) \
-  if (FAILED((HRESULT)hr)) { \
-    nsPrintfCString location("ENSURE_HR_SUCCEEDED \"%s\": %u", __FILE__, __LINE__); \
-    nsPrintfCString hrAsStr("0x%08X", (HRESULT)hr); \
-    CrashReporter::AnnotateCrashReport(location, hrAsStr); \
-    MOZ_DIAGNOSTIC_ASSERT(SUCCEEDED((HRESULT)hr)); \
-    return hr; \
-  }
-
-#endif // defined(MOZ_DEV_EDITION) || defined(RELEASE_OR_BETA)
 
 namespace mozilla {
 namespace mscom {
@@ -703,6 +689,12 @@ Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
     // already have an entry for this
     MapEntry* entry = Lookup(interceptorIid);
     if (entry && entry->mInterceptor) {
+      // Bug 1433046: Because of aggregation, the QI for |interceptor|
+      // AddRefed |this|, not |unkInterceptor|. Thus, releasing |unkInterceptor|
+      // will destroy the object. Before we do that, we must first release
+      // |interceptor|. Otherwise, |interceptor| would be invalidated when
+      // |unkInterceptor| is destroyed.
+      interceptor = nullptr;
       unkInterceptor = entry->mInterceptor;
     } else {
       // MapEntry has a RefPtr to unkInterceptor, OTOH we must not touch the

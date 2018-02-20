@@ -52,6 +52,9 @@ ServiceWorkerDescriptor::ServiceWorkerDescriptor(const ServiceWorkerDescriptor& 
 ServiceWorkerDescriptor&
 ServiceWorkerDescriptor::operator=(const ServiceWorkerDescriptor& aRight)
 {
+  if (this == &aRight) {
+    return *this;
+  }
   mData.reset();
   mData = MakeUnique<IPCServiceWorkerDescriptor>(*aRight.mData);
   return *this;
@@ -114,6 +117,15 @@ void
 ServiceWorkerDescriptor::SetState(ServiceWorkerState aState)
 {
   mData->state() = aState;
+}
+
+bool
+ServiceWorkerDescriptor::Matches(const ServiceWorkerDescriptor& aDescriptor) const
+{
+  return Id() == aDescriptor.Id() &&
+         Scope() == aDescriptor.Scope() &&
+         ScriptURL() == aDescriptor.ScriptURL() &&
+         PrincipalInfo() == aDescriptor.PrincipalInfo();
 }
 
 const IPCServiceWorkerDescriptor&

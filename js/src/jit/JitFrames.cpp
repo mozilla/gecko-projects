@@ -6,9 +6,6 @@
 
 #include "jit/JitFrames-inl.h"
 
-#include "jsfun.h"
-#include "jsobj.h"
-#include "jsscript.h"
 #include "jsutil.h"
 
 #include "gc/Marking.h"
@@ -30,14 +27,17 @@
 #include "vm/Debugger.h"
 #include "vm/GeckoProfiler.h"
 #include "vm/Interpreter.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/TraceLogging.h"
 #include "vm/TypeInference.h"
 #include "wasm/WasmBuiltins.h"
 
-#include "jsscriptinlines.h"
 #include "gc/Nursery-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
 #include "vm/Debugger-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/Probes-inl.h"
 #include "vm/TypeInference-inl.h"
 
@@ -836,8 +836,7 @@ TraceThisAndArguments(JSTracer* trc, const JSJitFrameIter& frame, JitFrameLayout
 
     JSFunction* fun = CalleeTokenToFunction(layout->calleeToken());
     if (frame.type() != JitFrame_JSJitToWasm &&
-        !frame.isExitFrameLayout<LazyLinkExitFrameLayout>() &&
-        !frame.isExitFrameLayout<InterpreterStubExitFrameLayout>() &&
+        !frame.isExitFrameLayout<CalledFromJitExitFrameLayout>() &&
         !fun->nonLazyScript()->mayReadFrameArgsDirectly())
     {
         nformals = fun->nargs();
@@ -1133,16 +1132,8 @@ TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame)
         return;
     }
 
-    if (frame.isExitFrameLayout<LazyLinkExitFrameLayout>()) {
-        auto* layout = frame.exitFrame()->as<LazyLinkExitFrameLayout>();
-        JitFrameLayout* jsLayout = layout->jsFrame();
-        jsLayout->replaceCalleeToken(TraceCalleeToken(trc, jsLayout->calleeToken()));
-        TraceThisAndArguments(trc, frame, jsLayout);
-        return;
-    }
-
-    if (frame.isExitFrameLayout<InterpreterStubExitFrameLayout>()) {
-        auto* layout = frame.exitFrame()->as<InterpreterStubExitFrameLayout>();
+    if (frame.isExitFrameLayout<CalledFromJitExitFrameLayout>()) {
+        auto* layout = frame.exitFrame()->as<CalledFromJitExitFrameLayout>();
         JitFrameLayout* jsLayout = layout->jsFrame();
         jsLayout->replaceCalleeToken(TraceCalleeToken(trc, jsLayout->calleeToken()));
         TraceThisAndArguments(trc, frame, jsLayout);

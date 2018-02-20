@@ -4,13 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-
 #ifdef MOZ_VALGRIND
 # include <valgrind/memcheck.h>
 #endif
 
-#include "jscntxt.h"
 #include "jsprf.h"
 #include "jstypes.h"
 
@@ -21,18 +18,15 @@
 #include "jit/MacroAssembler.h"
 #include "js/HashTable.h"
 #include "vm/Debugger.h"
+#include "vm/JSContext.h"
 #include "vm/JSONParser.h"
 
-#include "jsgcinlines.h"
-#include "jsobjinlines.h"
-
-#include "gc/Iteration-inl.h"
 #include "gc/Nursery-inl.h"
+#include "gc/PrivateIterators-inl.h"
+#include "vm/JSObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
-
-using mozilla::ArrayEnd;
 
 using JS::AutoGCRooter;
 
@@ -257,22 +251,24 @@ PropertyDescriptor::trace(JSTracer* trc)
 }
 
 void
-js::gc::GCRuntime::traceRuntimeForMajorGC(JSTracer* trc, AutoLockForExclusiveAccess& lock)
+js::gc::GCRuntime::traceRuntimeForMajorGC(JSTracer* trc, AutoTraceSession& session)
 {
+    MOZ_ASSERT_IF(atomsZone->isCollecting(), session.maybeLock.isSome());
+
     // FinishRoots will have asserted that every root that we do not expect
     // is gone, so we can simply skip traceRuntime here.
     if (rt->isBeingDestroyed())
         return;
 
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_ROOTS);
-    if (rt->atomsCompartment(lock)->zone()->isCollecting())
-        traceRuntimeAtoms(trc, lock);
+    if (atomsZone->isCollecting())
+        traceRuntimeAtoms(trc, session.lock());
     JSCompartment::traceIncomingCrossCompartmentEdgesForZoneGC(trc);
-    traceRuntimeCommon(trc, MarkRuntime, lock);
+    traceRuntimeCommon(trc, MarkRuntime, session);
 }
 
 void
-js::gc::GCRuntime::traceRuntimeForMinorGC(JSTracer* trc, AutoLockForExclusiveAccess& lock)
+js::gc::GCRuntime::traceRuntimeForMinorGC(JSTracer* trc, AutoTraceSession& session)
 {
     // Note that we *must* trace the runtime during the SHUTDOWN_GC's minor GC
     // despite having called FinishRoots already. This is because FinishRoots
@@ -285,7 +281,7 @@ js::gc::GCRuntime::traceRuntimeForMinorGC(JSTracer* trc, AutoLockForExclusiveAcc
 
     jit::JitRuntime::TraceJitcodeGlobalTableForMinorGC(trc);
 
-    traceRuntimeCommon(trc, TraceRuntime, lock);
+    traceRuntimeCommon(trc, TraceRuntime, session);
 }
 
 void
@@ -295,19 +291,19 @@ js::TraceRuntime(JSTracer* trc)
 
     JSRuntime* rt = trc->runtime();
     EvictAllNurseries(rt);
-    AutoPrepareForTracing prep(TlsContext.get(), WithAtoms);
+    AutoPrepareForTracing prep(TlsContext.get());
     gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::TRACE_HEAP);
-    rt->gc.traceRuntime(trc, prep.session().lock);
+    rt->gc.traceRuntime(trc, prep.session());
 }
 
 void
-js::gc::GCRuntime::traceRuntime(JSTracer* trc, AutoLockForExclusiveAccess& lock)
+js::gc::GCRuntime::traceRuntime(JSTracer* trc, AutoTraceSession& session)
 {
     MOZ_ASSERT(!rt->isBeingDestroyed());
 
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_ROOTS);
-    traceRuntimeAtoms(trc, lock);
-    traceRuntimeCommon(trc, TraceRuntime, lock);
+    traceRuntimeAtoms(trc, session.lock());
+    traceRuntimeCommon(trc, TraceRuntime, session);
 }
 
 void
@@ -322,7 +318,7 @@ js::gc::GCRuntime::traceRuntimeAtoms(JSTracer* trc, AutoLockForExclusiveAccess& 
 
 void
 js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrMark,
-                                      AutoLockForExclusiveAccess& lock)
+                                      AutoTraceSession& session)
 {
     MOZ_ASSERT(!TlsContext.get()->suppressGC);
 
@@ -367,7 +363,7 @@ js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrM
         c->traceRoots(trc, traceOrMark);
 
     // Trace helper thread roots.
-    HelperThreadState().trace(trc);
+    HelperThreadState().trace(trc, session);
 
     // Trace the embedding's black and gray roots.
     if (!JS::CurrentThreadIsHeapMinorCollecting()) {
@@ -431,9 +427,9 @@ js::gc::GCRuntime::finishRoots()
     grayRootTracer = Callback<JSTraceDataOp>(nullptr, nullptr);
 
     AssertNoRootsTracer trc(rt, TraceWeakMapKeysValues);
-    AutoPrepareForTracing prep(TlsContext.get(), WithAtoms);
+    AutoPrepareForTracing prep(TlsContext.get());
     gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::TRACE_HEAP);
-    traceRuntime(&trc, prep.session().lock);
+    traceRuntime(&trc, prep.session());
 
     // Restore the wrapper tracing so that we leak instead of leaving dangling
     // pointers.

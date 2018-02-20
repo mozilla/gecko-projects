@@ -152,10 +152,6 @@ struct MediumFeaturesChangedResult {
   bool mUsesViewportUnits;
 };
 
-// DOM Traversal.
-void Gecko_RecordTraversalStatistics(uint32_t total, uint32_t parallel,
-                                     uint32_t total_t, uint32_t parallel_t,
-                                     uint32_t total_s, uint32_t parallel_s);
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
                               bool text_is_significant,
                               bool whitespace_is_significant);
@@ -584,6 +580,7 @@ void Gecko_CSSValue_SetAtomIdent(nsCSSValueBorrowedMut css_value, nsAtom* atom);
 void Gecko_CSSValue_SetArray(nsCSSValueBorrowedMut css_value, int32_t len);
 void Gecko_CSSValue_SetURL(nsCSSValueBorrowedMut css_value, ServoBundledURI uri);
 void Gecko_CSSValue_SetInt(nsCSSValueBorrowedMut css_value, int32_t integer, nsCSSUnit unit);
+void Gecko_CSSValue_SetFloat(nsCSSValueBorrowedMut css_value, float value, nsCSSUnit unit);
 void Gecko_CSSValue_SetPair(nsCSSValueBorrowedMut css_value,
                             nsCSSValueBorrowed xvalue, nsCSSValueBorrowed yvalue);
 void Gecko_CSSValue_SetList(nsCSSValueBorrowedMut css_value, uint32_t len);
@@ -606,7 +603,7 @@ FontSizePrefs Gecko_GetBaseSize(nsAtom* lang);
 // XBL related functions.
 RawGeckoElementBorrowedOrNull Gecko_GetBindingParent(RawGeckoElementBorrowed aElement);
 RawGeckoXBLBindingBorrowedOrNull Gecko_GetXBLBinding(RawGeckoElementBorrowed aElement);
-RawServoStyleSetBorrowedOrNull Gecko_XBLBinding_GetRawServoStyleSet(RawGeckoXBLBindingBorrowed aXBLBinding);
+RawServoAuthorStylesBorrowedOrNull Gecko_XBLBinding_GetRawServoStyles(RawGeckoXBLBindingBorrowed aXBLBinding);
 bool Gecko_XBLBinding_InheritsStyle(RawGeckoXBLBindingBorrowed aXBLBinding);
 
 struct GeckoFontMetrics

@@ -9,29 +9,27 @@
 #include "mozilla/Casting.h"
 #include "mozilla/CheckedInt.h"
 
-#include "jscompartment.h"
-#include "jsfun.h"
 #include "jsutil.h"
 
 #include "builtin/SIMD.h"
 #include "gc/Marking.h"
 #include "js/Vector.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSFunction.h"
 #include "vm/String.h"
 #include "vm/StringBuffer.h"
 #include "vm/TypedArrayObject.h"
 
-#include "jsatominlines.h"
-#include "jsobjinlines.h"
-
 #include "gc/Nursery-inl.h"
 #include "gc/StoreBuffer-inl.h"
+#include "vm/JSAtom-inl.h"
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Shape-inl.h"
 
 using mozilla::AssertedCast;
 using mozilla::CheckedInt32;
-using mozilla::DebugOnly;
 using mozilla::IsPowerOfTwo;
 using mozilla::PodCopy;
 using mozilla::PointerRangeSize;

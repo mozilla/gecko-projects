@@ -903,7 +903,17 @@ KeyframeEffectReadOnly::ConstructKeyframeEffect(
     const OptionsType& aOptions,
     ErrorResult& aRv)
 {
-  nsIDocument* doc = AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
+  // We should get the document from `aGlobal` instead of the current Realm
+  // to make this works in Xray case.
+  //
+  // In all non-Xray cases, `aGlobal` matches the current Realm, so this
+  // matches the spec behavior.
+  //
+  // In Xray case, the new objects should be created using the document of
+  // the target global, but KeyframeEffect and KeyframeEffectReadOnly
+  // constructors are called in the caller's compartment to access
+  // `aKeyframes` object.
+  nsIDocument* doc = AnimationUtils::GetDocumentFromGlobal(aGlobal.Get());
   if (!doc) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -1457,13 +1467,19 @@ KeyframeEffectReadOnly::CanThrottle() const
     if (presShell && !presShell->IsActive()) {
       return true;
     }
-    if (frame->IsScrolledOutOfView()) {
+
+    const bool isVisibilityHidden =
+      !frame->IsVisibleOrMayHaveVisibleDescendants();
+    if (isVisibilityHidden ||
+        frame->IsScrolledOutOfView()) {
       // If there are transform change hints, unthrottle the animation
       // periodically since it might affect the overflow region.
       if (mCumulativeChangeHint & (nsChangeHint_UpdatePostTransformOverflow |
                                    nsChangeHint_AddOrRemoveTransform |
                                    nsChangeHint_UpdateTransformLayer)) {
-        return CanThrottleTransformChanges(*frame);
+        return isVisibilityHidden
+          ? CanThrottleTransformChangesInScrollable(*frame)
+          : CanThrottleTransformChanges(*frame);
       }
       return true;
     }
@@ -1500,7 +1516,7 @@ KeyframeEffectReadOnly::CanThrottle() const
     // If this is a transform animation that affects the overflow region,
     // we should unthrottle the animation periodically.
     if (record.mProperty == eCSSProperty_transform &&
-        !CanThrottleTransformChangesForCompositor(*frame)) {
+        !CanThrottleTransformChangesInScrollable(*frame)) {
       return false;
     }
   }
@@ -1532,7 +1548,7 @@ KeyframeEffectReadOnly::CanThrottleTransformChanges(const nsIFrame& aFrame) cons
 }
 
 bool
-KeyframeEffectReadOnly::CanThrottleTransformChangesForCompositor(nsIFrame& aFrame) const
+KeyframeEffectReadOnly::CanThrottleTransformChangesInScrollable(nsIFrame& aFrame) const
 {
   // If the target element is not associated with any documents, we don't care
   // it.

@@ -81,7 +81,7 @@ function getCleanedPacket(key, packet) {
         // Clean timer properties on the message.
         // Those properties are found on console.time and console.timeEnd calls,
         // and those time can vary, which is why we need to clean them.
-        if (res.message.timer.duration) {
+        if ("duration" in res.message.timer) {
           res.message.timer.duration = existingPacket.message.timer.duration;
         }
       }
@@ -94,22 +94,25 @@ function getCleanedPacket(key, packet) {
 
           let newArgument = Object.assign({}, argument);
           let existingArgument = existingPacket.message.arguments[i];
-          // Clean actor ids on each message.arguments item.
-          if (newArgument.actor) {
-            newArgument.actor = existingArgument.actor;
-          }
 
-          // `window`'s properties count can vary from OS to OS, so we
-          // clean the `ownPropertyLength` property from the grip.
-          if (newArgument.class === "Window") {
-            newArgument.ownPropertyLength = existingArgument.ownPropertyLength;
+          if (existingArgument) {
+            // Clean actor ids on each message.arguments item.
+            if (newArgument.actor) {
+              newArgument.actor = existingArgument.actor;
+            }
+
+            // `window`'s properties count can vary from OS to OS, so we
+            // clean the `ownPropertyLength` property from the grip.
+            if (newArgument.class === "Window") {
+              newArgument.ownPropertyLength = existingArgument.ownPropertyLength;
+            }
           }
           return newArgument;
         });
       }
     }
 
-    if (res.result) {
+    if (res.result && existingPacket.result) {
       // Clean actor ids on evaluation result messages.
       res.result.actor = existingPacket.result.actor;
       if (res.result.preview) {
@@ -120,9 +123,12 @@ function getCleanedPacket(key, packet) {
       }
     }
 
-    if (res.exception) {
+    if (res.exception && existingPacket.exception) {
       // Clean actor ids on exception messages.
-      res.exception.actor = existingPacket.exception.actor;
+      if (existingPacket.exception.actor) {
+        res.exception.actor = existingPacket.exception.actor;
+      }
+
       if (res.exception.preview) {
         if (res.exception.preview.timestamp) {
           // Clean timestamp there too.
@@ -234,7 +240,7 @@ function getCleanedPacket(key, packet) {
 
 function formatPacket(key, packet) {
   let stringifiedPacket = JSON.stringify(getCleanedPacket(key, packet), null, 2);
-  return `stubPackets.set("${key}", ${stringifiedPacket});`;
+  return `stubPackets.set(\`${key}\`, ${stringifiedPacket});`;
 }
 
 function formatStub(key, packet) {
@@ -243,7 +249,8 @@ function formatStub(key, packet) {
     {getNextId: () => "1"}
   );
   let stringifiedMessage = JSON.stringify(prepared, null, 2);
-  return `stubPreparedMessages.set("${key}", new ConsoleMessage(${stringifiedMessage}));`;
+  return (
+    `stubPreparedMessages.set(\`${key}\`, new ConsoleMessage(${stringifiedMessage}));`);
 }
 
 function formatNetworkEventStub(key, packet) {

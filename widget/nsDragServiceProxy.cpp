@@ -19,8 +19,6 @@ using mozilla::dom::OptionalShmem;
 using mozilla::LayoutDeviceIntRect;
 using mozilla::Maybe;
 
-NS_IMPL_ISUPPORTS_INHERITED0(nsDragServiceProxy, nsBaseDragService)
-
 nsDragServiceProxy::nsDragServiceProxy()
 {
 }
@@ -41,7 +39,7 @@ GetPrincipalURIFromNode(nsCOMPtr<nsIDOMNode>& sourceNode,
   nsCOMPtr<nsIPrincipal> principal = node->NodePrincipal();
   nsCOMPtr<nsIURI> principalURI;
   nsresult rv = principal->GetURI(getter_AddRefs(principalURI));
-  if (NS_FAILED(rv)) {
+  if (NS_FAILED(rv) || !principalURI) {
     return;
   }
 

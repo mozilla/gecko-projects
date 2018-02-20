@@ -24,11 +24,6 @@
 #include "mozilla/TypeTraits.h"
 
 #include "jsapi.h"
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jsfun.h"
-#include "jsopcode.h"
-#include "jsscript.h"
 #include "jstypes.h"
 
 #include "builtin/ModuleObject.h"
@@ -37,15 +32,19 @@
 #include "frontend/FoldConstants.h"
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
+#include "vm/BytecodeUtil.h"
+#include "vm/JSAtom.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSScript.h"
 #include "vm/RegExpObject.h"
 #include "wasm/AsmJS.h"
-
-#include "jsatominlines.h"
-#include "jsscriptinlines.h"
 
 #include "frontend/ParseContext-inl.h"
 #include "frontend/ParseNode-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/JSAtom-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::gc;

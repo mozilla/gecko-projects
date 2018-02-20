@@ -16,8 +16,8 @@
 #include "jit/MacroAssembler.h"
 #include "jit/MoveEmitter.h"
 
-#include "jsscriptinlines.h"
 #include "jit/MacroAssembler-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -453,6 +453,15 @@ MacroAssembler::moveValue(const Value& src, const ValueOperand& dest)
 // Branch functions
 
 void
+MacroAssembler::loadStoreBuffer(Register ptr, Register buffer)
+{
+    if (ptr != buffer)
+        movePtr(ptr, buffer);
+    orPtr(Imm32(gc::ChunkMask), buffer);
+    loadPtr(Address(buffer, gc::ChunkStoreBufferOffsetFromLastByte), buffer);
+}
+
+void
 MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
                                         Label* label)
 {
@@ -482,20 +491,6 @@ MacroAssembler::branchPtrInNurseryChunkImpl(Condition cond, Register ptr, Label*
 }
 
 void
-MacroAssembler::branchValueIsNurseryObject(Condition cond, const Address& address, Register temp,
-                                           Label* label)
-{
-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-
-    Label done;
-
-    branchTestObject(Assembler::NotEqual, address, cond == Assembler::Equal ? &done : label);
-    branchPtrInNurseryChunk(cond, address, temp, label);
-
-    bind(&done);
-}
-
-void
 MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp,
                                            Label* label)
 {
@@ -504,6 +499,40 @@ MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value, R
     Label done;
 
     branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
+    branchPtrInNurseryChunk(cond, value.payloadReg(), temp, label);
+
+    bind(&done);
+}
+
+void
+MacroAssembler::branchValueIsNurseryCell(Condition cond, const Address& address, Register temp,
+                                         Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    Label done, checkAddress;
+
+    Register tag = extractTag(address, temp);
+    MOZ_ASSERT(tag == temp);
+    branchTestObject(Assembler::Equal, tag, &checkAddress);
+    branchTestString(Assembler::NotEqual, tag, cond == Assembler::Equal ? &done : label);
+
+    bind(&checkAddress);
+    branchPtrInNurseryChunk(cond, ToPayload(address), temp, label);
+
+    bind(&done);
+}
+
+void
+MacroAssembler::branchValueIsNurseryCell(Condition cond, ValueOperand value, Register temp,
+                                         Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    Label done, checkAddress;
+
+    branchTestObject(Assembler::Equal, value, &checkAddress);
+    branchTestString(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
+
+    bind(&checkAddress);
     branchPtrInNurseryChunk(cond, value.payloadReg(), temp, label);
 
     bind(&done);
@@ -956,7 +985,8 @@ MacroAssembler::atomicFetchOp64(const Synchronization&, AtomicOp op, const Addre
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, bool isSaturating,
+                                           Label* oolEntry)
 {
     Label done;
     vcvttsd2si(input, output);
@@ -973,7 +1003,8 @@ MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output,
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, bool isSaturating,
+                                            Label* oolEntry)
 {
     Label done;
     vcvttss2si(input, output);
@@ -990,8 +1021,8 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                          Label* oolRejoin, FloatRegister tempReg)
+MacroAssembler::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, bool isSaturating,
+                                          Label* oolEntry, Label* oolRejoin, FloatRegister tempReg)
 {
     Label fail, convert;
     Register temp = output.high;
@@ -1020,8 +1051,9 @@ MacroAssembler::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                           Label* oolRejoin, FloatRegister tempReg)
+MacroAssembler::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output,
+                                           bool isSaturating,
+                                           Label* oolEntry, Label* oolRejoin, FloatRegister tempReg)
 {
     Label fail, convert;
     Register temp = output.high;
@@ -1050,7 +1082,8 @@ MacroAssembler::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 outpu
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+MacroAssembler::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output,
+                                           bool isSaturating, Label* oolEntry,
                                            Label* oolRejoin, FloatRegister tempReg)
 {
     Label fail, convert;
@@ -1080,7 +1113,8 @@ MacroAssembler::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 outpu
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+MacroAssembler::wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output,
+                                            bool isSaturating, Label* oolEntry,
                                             Label* oolRejoin, FloatRegister tempReg)
 {
     Label fail, convert;

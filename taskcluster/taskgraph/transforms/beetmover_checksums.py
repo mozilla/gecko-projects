@@ -34,7 +34,6 @@ beetmover_checksums_description_schema = Schema({
     Optional('locale'): basestring,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('notifications'): task_description_schema['notifications'],
 })
 
 
@@ -115,9 +114,6 @@ def make_beetmover_checksums_description(config, jobs):
 
         if 'shipping-product' in job:
             task['shipping-product'] = job['shipping-product']
-
-        if 'notifications' in job:
-            task['notifications'] = job['notifications']
 
         yield task
 

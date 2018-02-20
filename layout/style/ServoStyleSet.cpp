@@ -98,9 +98,8 @@ private:
 
 } // namespace mozilla
 
-ServoStyleSet::ServoStyleSet(Kind aKind)
-  : mKind(aKind)
-  , mDocument(nullptr)
+ServoStyleSet::ServoStyleSet()
+  : mDocument(nullptr)
   , mAuthorStyleDisabled(false)
   , mStylistState(StylistState::NotDirty)
   , mUserFontSetUpdateGeneration(0)
@@ -116,34 +115,6 @@ ServoStyleSet::~ServoStyleSet()
       sheet->DropStyleSet(this);
     }
   }
-}
-
-UniquePtr<ServoStyleSet>
-ServoStyleSet::CreateXBLServoStyleSet(
-  nsPresContext* aPresContext,
-  const nsTArray<RefPtr<ServoStyleSheet>>& aNewSheets)
-{
-  auto set = MakeUnique<ServoStyleSet>(Kind::ForXBL);
-  set->Init(aPresContext);
-
-  // The XBL style sheets aren't document level sheets, but we need to
-  // decide a particular SheetType to add them to style set. This type
-  // doesn't affect the place where we pull those rules from
-  // stylist::push_applicable_declarations_as_xbl_only_stylist().
-  set->ReplaceSheets(SheetType::Doc, aNewSheets);
-
-  // Update stylist immediately.
-  //
-  // NOTE(emilio): that this _needs_ to be the only call to UpdateStylist for
-  // XBL bindings, otherwise the Servo-side Device may have stale pres context
-  // pointers and such, which are not great.
-  set->UpdateStylist();
-
-  // XBL resources are shared for a given URL, even across documents, so we
-  // can't safely keep this reference.
-  set->mDocument = nullptr;
-
-  return set;
 }
 
 nsPresContext*
@@ -190,6 +161,16 @@ ServoStyleSet::Init(nsPresContext* aPresContext)
   // We added prefilled stylesheets into mRawSet, so the stylist is dirty.
   // The Stylist should be updated later when necessary.
   SetStylistStyleSheetsDirty();
+
+  // We may have Shadow DOM style changes that we weren't notified about because
+  // the document didn't have a shell, if the ShadowRoot was created in a
+  // display: none iframe.
+  //
+  // Now that we got a shell, we may need to get them up-to-date.
+  //
+  // TODO(emilio, bug 1418159): This wouldn't be needed if the StyleSet was
+  // owned by the document.
+  SetStylistXBLStyleSheetsDirty();
 }
 
 void
@@ -212,9 +193,22 @@ ServoStyleSet::InvalidateStyleForCSSRuleChanges()
 }
 
 void
+ServoStyleSet::RecordShadowStyleChange(ShadowRoot& aShadowRoot)
+{
+  // TODO(emilio): We could keep track of the actual shadow roots that need
+  // their styles recomputed.
+  SetStylistXBLStyleSheetsDirty();
+
+  // FIXME(emilio): This should be done using stylesheet invalidation instead.
+  if (nsPresContext* pc = GetPresContext()) {
+    pc->RestyleManager()->PostRestyleEvent(
+      aShadowRoot.Host(), eRestyle_Subtree, nsChangeHint(0));
+  }
+}
+
+void
 ServoStyleSet::InvalidateStyleForDocumentStateChanges(EventStates aStatesChanged)
 {
-  MOZ_ASSERT(IsMaster());
   MOZ_ASSERT(mDocument);
   MOZ_ASSERT(!aStatesChanged.IsEmpty());
 
@@ -232,20 +226,19 @@ ServoStyleSet::InvalidateStyleForDocumentStateChanges(EventStates aStatesChanged
   // for XBL sheets / shadow DOM. Consider just enumerating bound content
   // instead and run invalidation individually, passing mRawSet for the UA /
   // User sheets.
-  AutoTArray<RawServoStyleSetBorrowed, 20> styleSets;
-  styleSets.AppendElement(mRawSet.get());
+  AutoTArray<RawServoAuthorStylesBorrowed, 20> xblStyles;
   // FIXME(emilio): When bug 1425759 is fixed we need to enumerate ShadowRoots
   // too.
   mDocument->BindingManager()->EnumerateBoundContentBindings(
     [&](nsXBLBinding* aBinding) {
-      if (ServoStyleSet* set = aBinding->PrototypeBinding()->GetServoStyleSet()) {
-        styleSets.AppendElement(set->RawSet());
+      if (auto* authorStyles = aBinding->PrototypeBinding()->GetServoStyles()) {
+        xblStyles.AppendElement(authorStyles);
       }
       return true;
     });
 
   Servo_InvalidateStyleForDocStateChanges(
-    root, &styleSets, aStatesChanged.ServoValue());
+    root, mRawSet.get(), &xblStyles, aStatesChanged.ServoValue());
 }
 
 static const MediaFeatureChangeReason kMediaFeaturesAffectingDefaultStyle =
@@ -263,15 +256,15 @@ static const MediaFeatureChangeReason kMediaFeaturesAffectingDefaultStyle =
 nsRestyleHint
 ServoStyleSet::MediumFeaturesChanged(MediaFeatureChangeReason aReason)
 {
-  AutoTArray<ServoStyleSet*, 20> nonDocumentStyleSets;
+  AutoTArray<RawServoAuthorStylesBorrowedMut, 20> nonDocumentStyles;
   // FIXME(emilio): When bug 1425759 is fixed we need to enumerate ShadowRoots
   // too.
   //
   // FIXME(emilio): This is broken for XBL. See bug 1406875.
   mDocument->BindingManager()->EnumerateBoundContentBindings(
     [&](nsXBLBinding* aBinding) {
-      if (ServoStyleSet* set = aBinding->PrototypeBinding()->GetServoStyleSet()) {
-        nonDocumentStyleSets.AppendElement(set);
+      if (auto* authorStyles = aBinding->PrototypeBinding()->GetServoStyles()) {
+        nonDocumentStyles.AppendElement(authorStyles);
       }
       return true;
     });
@@ -281,7 +274,7 @@ ServoStyleSet::MediumFeaturesChanged(MediaFeatureChangeReason aReason)
 
   const MediumFeaturesChangedResult result =
     Servo_StyleSet_MediumFeaturesChanged(
-      mRawSet.get(), &nonDocumentStyleSets, mayAffectDefaultStyle);
+      mRawSet.get(), &nonDocumentStyles, mayAffectDefaultStyle);
 
   const bool rulesChanged =
     result.mAffectsDocumentRules || result.mAffectsNonDocumentRules;
@@ -369,6 +362,12 @@ ServoStyleSet::SetAuthorStyleDisabled(bool aStyleDisabled)
     }
   }
   Servo_StyleSet_SetAuthorStyleDisabled(mRawSet.get(), mAuthorStyleDisabled);
+  // XXX Workaround for the assertion in InvalidateStyleForDocumentStateChanges
+  // which is called by nsIPresShell::SetAuthorStyleDisabled via nsIPresShell::
+  // RestyleForCSSRuleChanges. It is not really necessary because we don't need
+  // to rebuild stylist for this change. But we have bug around this, and we
+  // may want to rethink how things should work. See bug 1437785.
+  SetStylistStyleSheetsDirty();
 }
 
 void
@@ -456,7 +455,7 @@ ServoStyleSet::PreTraverseSync()
     }
   }
 
-  UpdateStylistIfNeeded();
+  MOZ_ASSERT(!StylistNeedsUpdate());
   presContext->CacheAllLangs();
 }
 
@@ -572,8 +571,9 @@ ServoStyleSet::ResolvePseudoElementStyle(Element* aOriginatingElement,
                                          ServoStyleContext* aParentContext,
                                          Element* aPseudoElement)
 {
+  // Runs from frame construction, this should have clean styles already, except
+  // with non-lazy FC...
   UpdateStylistIfNeeded();
-
   MOZ_ASSERT(aType < CSSPseudoElementType::Count);
 
   RefPtr<ServoStyleContext> computedValues;
@@ -929,6 +929,8 @@ ServoStyleSet::ProbePseudoElementStyle(Element* aOriginatingElement,
                                        CSSPseudoElementType aType,
                                        ServoStyleContext* aParentContext)
 {
+  // Runs from frame construction, this should have clean styles already, except
+  // with non-lazy FC...
   UpdateStylistIfNeeded();
 
   // NB: We ignore aParentContext, because in some cases
@@ -1176,8 +1178,9 @@ ServoStyleSet::GetKeyframesForName(nsAtom* aName,
                                    const nsTimingFunction& aTimingFunction,
                                    nsTArray<Keyframe>& aKeyframes)
 {
-  UpdateStylistIfNeeded();
-
+  // TODO(emilio): This may need to look at the element itself for handling
+  // @keyframes properly in Shadow DOM.
+  MOZ_ASSERT(!StylistNeedsUpdate());
   return Servo_StyleSet_GetKeyframesForName(mRawSet.get(),
                                             aName,
                                             &aTimingFunction,
@@ -1261,22 +1264,40 @@ ServoStyleSet::ComputeAnimationValue(
 bool
 ServoStyleSet::EnsureUniqueInnerOnCSSSheets()
 {
-  AutoTArray<StyleSheet*, 32> queue;
+  using SheetOwner = Variant<ServoStyleSet*, nsXBLPrototypeBinding*>;
+
+  AutoTArray<Pair<StyleSheet*, SheetOwner>, 32> queue;
   for (auto& entryArray : mSheets) {
     for (auto& sheet : entryArray) {
-      queue.AppendElement(sheet);
+      StyleSheet* downcasted = sheet;
+      queue.AppendElement(MakePair(downcasted, SheetOwner { this }));
     }
   }
-  // This is a stub until more of the functionality of nsStyleSet is
-  // replicated for Servo here.
 
-  // Bug 1290276 will replicate the nsStyleSet work of checking
-  // a nsBindingManager
+  mDocument->BindingManager()->EnumerateBoundContentBindings(
+      [&](nsXBLBinding* aBinding) {
+        AutoTArray<StyleSheet*, 3> sheets;
+        aBinding->PrototypeBinding()->AppendStyleSheetsTo(sheets);
+        for (auto* sheet : sheets) {
+          queue.AppendElement(MakePair(sheet, SheetOwner { aBinding->PrototypeBinding() }));
+        }
+        return true;
+      });
 
+  bool anyXBLSheetChanged = false;
   while (!queue.IsEmpty()) {
     uint32_t idx = queue.Length() - 1;
-    StyleSheet* sheet = queue[idx];
+    auto* sheet = queue[idx].first();
+    SheetOwner owner = queue[idx].second();
     queue.RemoveElementAt(idx);
+
+    if (!sheet->HasUniqueInner() && owner.is<nsXBLPrototypeBinding*>()) {
+      if (auto* styles = owner.as<nsXBLPrototypeBinding*>()->GetServoStyles()) {
+        Servo_AuthorStyles_ForceDirty(styles);
+        mNeedsRestyleAfterEnsureUniqueInner = true;
+        anyXBLSheetChanged = true;
+      }
+    }
 
     // Only call EnsureUniqueInner for complete sheets. If we do call it on
     // incomplete sheets, we'll cause problems when the sheet is actually
@@ -1289,7 +1310,15 @@ ServoStyleSet::EnsureUniqueInnerOnCSSSheets()
     }
 
     // Enqueue all the sheet's children.
-    sheet->AppendAllChildSheets(queue);
+    AutoTArray<StyleSheet*, 3> children;
+    sheet->AppendAllChildSheets(children);
+    for (auto* sheet : children) {
+      queue.AppendElement(MakePair(sheet, owner));
+    }
+  }
+
+  if (anyXBLSheetChanged) {
+    SetStylistXBLStyleSheetsDirty();
   }
 
   if (mNeedsRestyleAfterEnsureUniqueInner) {
@@ -1405,14 +1434,15 @@ ServoStyleSet::AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray)
 nsCSSCounterStyleRule*
 ServoStyleSet::CounterStyleRuleForName(nsAtom* aName)
 {
-  // FIXME(emilio): This should probably call UpdateStylistIfNeeded, or
-  // otherwise assert?
+  MOZ_ASSERT(!StylistNeedsUpdate());
   return Servo_StyleSet_GetCounterStyleRule(mRawSet.get(), aName);
 }
 
 already_AddRefed<gfxFontFeatureValueSet>
 ServoStyleSet::BuildFontFeatureValueSet()
 {
+  // FIXME(emilio): This should assert once we update the stylist from
+  // FlushPendingNotifications explicitly.
   UpdateStylistIfNeeded();
   RefPtr<gfxFontFeatureValueSet> set =
     Servo_StyleSet_BuildFontFeatureValueSet(mRawSet.get());
@@ -1424,7 +1454,7 @@ ServoStyleSet::ResolveForDeclarations(
   const ServoStyleContext* aParentOrNull,
   RawServoDeclarationBlockBorrowed aDeclarations)
 {
-  UpdateStylistIfNeeded();
+  // No need to update the stylist, we're only cascading aDeclarations.
   return Servo_StyleSet_ResolveForDeclarations(mRawSet.get(),
                                                aParentOrNull,
                                                aDeclarations).Consume();
@@ -1439,7 +1469,7 @@ ServoStyleSet::UpdateStylist()
     // There's no need to compute invalidations and such for an XBL styleset,
     // since they are loaded and unloaded synchronously, and they don't have to
     // deal with dynamic content changes.
-    Element* root = IsMaster() ? mDocument->GetRootElement() : nullptr;
+    Element* root = mDocument->GetRootElement();
     const ServoElementSnapshotTable* snapshots = nullptr;
     if (nsPresContext* pc = GetPresContext()) {
       snapshots = &pc->RestyleManager()->AsServo()->Snapshots();
@@ -1448,12 +1478,14 @@ ServoStyleSet::UpdateStylist()
   }
 
   if (MOZ_UNLIKELY(mStylistState & StylistState::XBLStyleSheetsDirty)) {
-    MOZ_ASSERT(IsMaster(), "Only master styleset can mark XBL stylesets dirty!");
     MOZ_ASSERT(GetPresContext(), "How did they get dirty?");
-    // NOTE(emilio): This right now rebuilds the stylist in the prototype
-    // binding. That is fine, and if we wanted to be more incremental, which we
-    // probably should, we need to move away from using a StyleSet for XBL.
-    mDocument->BindingManager()->UpdateBoundContentBindingsForServo(GetPresContext());
+    mDocument->BindingManager()->EnumerateBoundContentBindings(
+      [&](nsXBLBinding* aBinding) {
+        if (auto* authorStyles = aBinding->PrototypeBinding()->GetServoStyles()) {
+          Servo_AuthorStyles_Flush(authorStyles, mRawSet.get());
+        }
+        return true;
+      });
   }
 
   mStylistState = StylistState::NotDirty;
@@ -1557,8 +1589,9 @@ ServoStyleRuleMap*
 ServoStyleSet::StyleRuleMap()
 {
   if (!mStyleRuleMap) {
-    mStyleRuleMap = MakeUnique<ServoStyleRuleMap>(this);
+    mStyleRuleMap = MakeUnique<ServoStyleRuleMap>();
   }
+  mStyleRuleMap->EnsureTable(*this);
   return mStyleRuleMap.get();
 }
 

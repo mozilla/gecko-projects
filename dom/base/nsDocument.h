@@ -21,7 +21,6 @@
 #include "nsTArray.h"
 #include "nsIdentifierMapEntry.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMDocumentXBL.h"
 #include "nsStubDocumentObserver.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIContent.h"
@@ -322,7 +321,6 @@ class PrincipalFlashClassifier;
 // Base class for our document implementations.
 class nsDocument : public nsIDocument,
                    public nsIDOMDocument,
-                   public nsIDOMDocumentXBL,
                    public nsSupportsWeakReference,
                    public nsIScriptObjectPrincipal,
                    public nsIRadioGroupContainer,
@@ -415,7 +413,7 @@ public:
   already_AddRefed<nsIPresShell> CreateShell(nsPresContext* aContext,
                                              nsViewManager* aViewManager,
                                              mozilla::StyleSetHandle aStyleSet)
-    final override;
+    final;
   virtual void DeleteShell() override;
 
   virtual bool GetAllowPlugins() override;
@@ -636,9 +634,6 @@ public:
   // nsIDOMDocument
   NS_DECL_NSIDOMDOCUMENT
 
-  // nsIDOMDocumentXBL
-  NS_DECL_NSIDOMDOCUMENTXBL
-
   using mozilla::dom::DocumentOrShadowRoot::GetElementById;
   using mozilla::dom::DocumentOrShadowRoot::GetElementsByTagName;
   using mozilla::dom::DocumentOrShadowRoot::GetElementsByTagNameNS;
@@ -695,14 +690,6 @@ public:
                                    nsAtom* aAttrName,
                                    const nsAString& aAttrValue) const override;
 
-  virtual Element* ElementFromPointHelper(float aX, float aY,
-                                          bool aIgnoreRootScrollFrame,
-                                          bool aFlushLayout) override;
-
-  virtual void ElementsFromPointHelper(float aX, float aY,
-                                       uint32_t aFlags,
-                                       nsTArray<RefPtr<mozilla::dom::Element>>& aElements) override;
-
   virtual nsresult NodesFromRectHelper(float aX, float aY,
                                                    float aTopSize, float aRightSize,
                                                    float aBottomSize, float aLeftSize,
@@ -727,7 +714,7 @@ public:
   nsSMILAnimationController* GetAnimationController() override;
 
   virtual mozilla::PendingAnimationTracker*
-  GetPendingAnimationTracker() final override
+  GetPendingAnimationTracker() final
   {
     return mPendingAnimationTracker;
   }
@@ -809,6 +796,9 @@ public:
   // Only BlockOnload should call this!
   void AsyncBlockOnload();
 
+  virtual void SetAutoFocusElement(Element* aAutoFocusElement) override;
+  virtual void TriggerAutoFocus() override;
+
   virtual void SetScrollToRef(nsIURI *aDocumentURI) override;
   virtual void ScrollToRef() override;
   virtual void ResetScrolledToRefAlready() override;
@@ -883,8 +873,6 @@ public:
   //
   already_AddRefed<nsSimpleContentList> BlockedTrackingNodes() const;
 
-  static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
-
   // Do the "fullscreen element ready check" from the fullscreen spec.
   // It returns true if the given element is allowed to go into fullscreen.
   bool FullscreenElementReadyCheck(Element* aElement, bool aWasCallerChrome);
@@ -908,11 +896,10 @@ public:
   void FullScreenStackPop();
 
   // Returns the top element from the full-screen stack.
-  Element* FullScreenStackTop();
+  Element* FullScreenStackTop() override;
 
   // DOM-exposed fullscreen API
   bool FullscreenEnabled(mozilla::dom::CallerType aCallerType) override;
-  Element* GetFullscreenElement() override;
 
   virtual bool AllowPaymentRequest() const override;
   virtual void SetAllowPaymentRequest(bool aIsAllowPaymentRequest) override;
@@ -1230,16 +1217,6 @@ private:
 
   nsresult InitCSP(nsIChannel* aChannel);
 
-  /**
-   * Find the (non-anonymous) content in this document for aFrame. It will
-   * be aFrame's content node if that content is in this document and not
-   * anonymous. Otherwise, when aFrame is in a subdocument, we use the frame
-   * element containing the subdocument containing aFrame, and/or find the
-   * nearest non-anonymous ancestor in this document.
-   * Returns null if there is no such element.
-   */
-  nsIContent* GetContentInThisDocument(nsIFrame* aFrame) const;
-
   // Just like EnableStyleSheetsForSet, but doesn't check whether
   // aSheetSet is null and allows the caller to control whether to set
   // aSheetSet as the preferred set in the CSSLoader.
@@ -1314,6 +1291,8 @@ private:
 
   RefPtr<nsContentList> mImageMaps;
 
+  nsWeakPtr mAutoFocusElement;
+
   nsCString mScrollToRef;
   uint8_t mScrolledToRefAlready : 1;
   uint8_t mChangeScrollPosWhenScrollingToRef : 1;
@@ -1364,6 +1343,7 @@ private:
   bool mDOMLoadingSet : 1;
   bool mDOMInteractiveSet : 1;
   bool mDOMCompleteSet : 1;
+  bool mAutoFocusFired : 1;
 };
 
 class nsDocumentOnStack

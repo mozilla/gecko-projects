@@ -15,7 +15,6 @@ const { ActorClassWithSpec } = require("devtools/shared/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, fetch } = DevToolsUtils;
 const { joinURI } = require("devtools/shared/path");
-const promise = require("promise");
 const { sourceSpec } = require("devtools/shared/specs/source");
 
 loader.lazyRequireGetter(this, "SourceMapConsumer", "source-map", true);
@@ -479,7 +478,7 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
    * Handler for the "source" packet.
    */
   onSource: function () {
-    return promise.resolve(this._init)
+    return Promise.resolve(this._init)
       .then(this._getSourceText)
       .then(({ content, contentType }) => {
         if (typeof content === "object" && content && content.constructor &&
@@ -788,7 +787,7 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
         // GCed as well, and no scripts will exist on those lines
         // anymore. We will never slide through a GCed script.
         if (originalLocation.originalColumn || scripts.length === 0) {
-          return promise.resolve(actor);
+          return Promise.resolve(actor);
         }
 
         // Find the script that spans the largest amount of code to
@@ -814,7 +813,7 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
         // which means there must be valid entry points somewhere
         // within those scripts.
         if (actualLine > maxLine) {
-          return promise.reject({
+          return Promise.reject({
             error: "noCodeAtLineColumn",
             message:
               "Could not find any entry points to set a breakpoint on, " +
@@ -837,7 +836,7 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
         }
       }
 
-      return promise.resolve(actor);
+      return Promise.resolve(actor);
     }
     return this.sources.getAllGeneratedLocations(originalLocation)
       .then((generatedLocations) => {
@@ -909,16 +908,35 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
         }
       }
     } else {
+      // Compute columnToOffsetMaps for each script so that we can
+      // find matching entrypoints for the column breakpoint.
+      const columnToOffsetMaps = scripts.map(script =>
+        [
+          script,
+          script.getAllColumnOffsets()
+            .filter(({ lineNumber }) => lineNumber === generatedLine)
+        ]
+      );
+
       // This is a column breakpoint, so we are interested in all column
       // offsets that correspond to the given line *and* column number.
-      for (let script of scripts) {
-        let columnToOffsetMap = script.getAllColumnOffsets()
-                                      .filter(({ lineNumber }) => {
-                                        return lineNumber === generatedLine;
-                                      });
+      for (let [script, columnToOffsetMap] of columnToOffsetMaps) {
         for (let { columnNumber: column, offset } of columnToOffsetMap) {
           if (column >= generatedColumn && column <= generatedLastColumn) {
             entryPoints.push({ script, offsets: [offset] });
+          }
+        }
+      }
+
+      // If we don't find any matching entrypoints, then
+      // we should check to see if the breakpoint is to the left of the first offset.
+      if (entryPoints.length === 0) {
+        for (let [script, columnToOffsetMap] of columnToOffsetMaps) {
+          if (columnToOffsetMap.length > 0) {
+            let { columnNumber: column, offset } = columnToOffsetMap[0];
+            if (generatedColumn < column) {
+              entryPoints.push({ script, offsets: [offset] });
+            }
           }
         }
       }
@@ -927,6 +945,7 @@ let SourceActor = ActorClassWithSpec(sourceSpec, {
     if (entryPoints.length === 0) {
       return false;
     }
+
     setBreakpointAtEntryPoints(actor, entryPoints);
     return true;
   }

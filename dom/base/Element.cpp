@@ -3726,7 +3726,7 @@ Element::GetTransformToAncestor(Element& aAncestor)
     // then the call to GetTransformToAncestor will return the transform
     // all the way up through the parent chain.
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      ancestorFrame, nsIFrame::IN_CSS_UNITS);
+      ancestorFrame, nsIFrame::IN_CSS_UNITS).GetMatrix();
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform, IsStyledByServo());
@@ -3743,7 +3743,7 @@ Element::GetTransformToParent()
   if (primaryFrame) {
     nsIFrame* parentFrame = primaryFrame->GetParent();
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      parentFrame, nsIFrame::IN_CSS_UNITS);
+      parentFrame, nsIFrame::IN_CSS_UNITS).GetMatrix();
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform, IsStyledByServo());
@@ -3758,7 +3758,7 @@ Element::GetTransformToViewport()
   Matrix4x4 transform;
   if (primaryFrame) {
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), nsIFrame::IN_CSS_UNITS);
+      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), nsIFrame::IN_CSS_UNITS).GetMatrix();
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform, IsStyledByServo());
@@ -3804,22 +3804,23 @@ Element::Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
   GlobalObject global(aContext, ownerGlobal->GetGlobalJSObject());
   MOZ_ASSERT(!global.Failed());
 
-  // Wrap the aKeyframes object for the cross-compartment case.
-  JS::Rooted<JSObject*> keyframes(aContext);
-  keyframes = aKeyframes;
+  // KeyframeEffect constructor doesn't follow the standard Xray calling
+  // convention and needs to be called in caller's compartment.
+  // This should match to RunConstructorInCallerCompartment attribute in
+  // KeyframeEffect.webidl.
+  RefPtr<KeyframeEffect> effect =
+    KeyframeEffect::Constructor(global, aTarget, aKeyframes, aOptions,
+                                aError);
+  if (aError.Failed()) {
+    return nullptr;
+  }
+
+  // Animation constructor follows the standard Xray calling convention and
+  // needs to be called in the target element's compartment.
   Maybe<JSAutoCompartment> ac;
   if (js::GetContextCompartment(aContext) !=
       js::GetObjectCompartment(ownerGlobal->GetGlobalJSObject())) {
     ac.emplace(aContext, ownerGlobal->GetGlobalJSObject());
-    if (!JS_WrapObject(aContext, &keyframes)) {
-      return nullptr;
-    }
-  }
-
-  RefPtr<KeyframeEffect> effect =
-    KeyframeEffect::Constructor(global, aTarget, keyframes, aOptions, aError);
-  if (aError.Failed()) {
-    return nullptr;
   }
 
   AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();

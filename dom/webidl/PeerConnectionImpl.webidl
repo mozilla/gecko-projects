@@ -41,8 +41,6 @@ interface PeerConnectionImpl  {
 
   /* Adds the tracks created by GetUserMedia */
   [Throws]
-  void removeTrack(MediaStreamTrack track);
-  [Throws]
   TransceiverImpl createTransceiverImpl(DOMString kind,
                                         MediaStreamTrack? track);
   [Throws]
@@ -128,7 +126,7 @@ interface PeerConnectionImpl  {
 
   /* Data channels */
   [Throws]
-  DataChannel createDataChannel(DOMString label, DOMString protocol,
+  RTCDataChannel createDataChannel(DOMString label, DOMString protocol,
     unsigned short type, boolean ordered,
     unsigned short maxTime, unsigned short maxNum,
     boolean externalNegotiated, unsigned short stream);

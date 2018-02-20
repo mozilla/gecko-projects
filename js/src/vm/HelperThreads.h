@@ -21,16 +21,13 @@
 #include "mozilla/Variant.h"
 
 #include "jsapi.h"
-#include "jscntxt.h"
 
 #include "ds/Fifo.h"
 #include "jit/Ion.h"
+#include "js/TypeDecls.h"
 #include "threading/ConditionVariable.h"
+#include "vm/JSContext.h"
 #include "vm/MutexIDs.h"
-
-namespace JS {
-struct Zone;
-} // namespace JS
 
 namespace js {
 
@@ -298,7 +295,7 @@ class GlobalHelperThreadState
                                    Handle<GlobalObject*> global,
                                    JSCompartment* dest);
 
-    void trace(JSTracer* trc);
+    void trace(JSTracer* trc, js::gc::AutoTraceSession& session);
 
     JSScript* finishScriptParseTask(JSContext* cx, void* token);
     JSScript* finishScriptDecodeTask(JSContext* cx, void* token);

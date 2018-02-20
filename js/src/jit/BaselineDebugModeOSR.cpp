@@ -6,8 +6,6 @@
 
 #include "jit/BaselineDebugModeOSR.h"
 
-#include "mozilla/DebugOnly.h"
-
 #include "jit/BaselineIC.h"
 #include "jit/JitcodeMap.h"
 #include "jit/Linker.h"
@@ -20,8 +18,6 @@
 
 using namespace js;
 using namespace js::jit;
-
-using mozilla::DebugOnly;
 
 struct DebugModeOSREntry
 {
@@ -1172,7 +1168,7 @@ JitRuntime::generateBaselineDebugModeOSRHandler(JSContext* cx, uint32_t* noFrame
 
     Linker linker(masm);
     AutoFlushICache afc("BaselineDebugModeOSRHandler");
-    JitCode* code = linker.newCode<NoGC>(cx, OTHER_CODE);
+    JitCode* code = linker.newCode<NoGC>(cx, CodeKind::Other);
     if (!code)
         return nullptr;
 

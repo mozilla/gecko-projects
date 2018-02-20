@@ -10,7 +10,7 @@
 #include "mozilla/MacroForEach.h"
 #include "mozilla/MathAlgorithms.h"
 
-#include "jscompartment.h"
+#include "vm/JSCompartment.h"
 
 #if defined(JS_CODEGEN_X86)
 # include "jit/x86/MacroAssembler-x86.h"
@@ -1091,6 +1091,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchPtr(Condition cond, wasm::SymbolicAddress lhs, Register rhs, Label* label)
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
+    // Given a pointer to a GC Cell, retrieve the StoreBuffer pointer from its
+    // chunk trailer, or nullptr if it is in the tenured heap.
+    void loadStoreBuffer(Register ptr, Register buffer) PER_ARCH;
+
     template <typename T>
     inline CodeOffsetJump branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label) PER_SHARED_ARCH;
     template <typename T>
@@ -1100,8 +1104,9 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
     void branchPtrInNurseryChunk(Condition cond, const Address& address, Register temp, Label* label)
         DEFINED_ON(x86);
-    void branchValueIsNurseryObject(Condition cond, const Address& address, Register temp, Label* label) PER_ARCH;
     void branchValueIsNurseryObject(Condition cond, ValueOperand value, Register temp, Label* label) PER_ARCH;
+    void branchValueIsNurseryCell(Condition cond, const Address& address, Register temp, Label* label) PER_ARCH;
+    void branchValueIsNurseryCell(Condition cond, ValueOperand value, Register temp, Label* label) PER_ARCH;
 
     // This function compares a Value (lhs) which is having a private pointer
     // boxed inside a js::Value, with a raw pointer (rhs).
@@ -1320,7 +1325,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchPtrInNurseryChunkImpl(Condition cond, Register ptr, Label* label)
         DEFINED_ON(x86);
     template <typename T>
-    void branchValueIsNurseryObjectImpl(Condition cond, const T& value, Register temp, Label* label)
+    void branchValueIsNurseryCellImpl(Condition cond, const T& value, Register temp, Label* label)
         DEFINED_ON(arm64, mips64, x64);
 
     template <typename T>
@@ -1364,32 +1369,32 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void cmp32Move32(Condition cond, Register lhs, Register rhs, Register src,
                             Register dest)
-        DEFINED_ON(arm, arm64, x86_shared);
+        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
     inline void cmp32Move32(Condition cond, Register lhs, const Address& rhs, Register src,
                             Register dest)
-        DEFINED_ON(arm, arm64, x86_shared);
+        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
     inline void cmp32MovePtr(Condition cond, Register lhs, Imm32 rhs, Register src,
                              Register dest)
-        DEFINED_ON(arm, arm64, x86, x64);
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
     inline void test32LoadPtr(Condition cond, const Address& addr, Imm32 mask, const Address& src,
                               Register dest)
-        DEFINED_ON(arm, arm64, x86, x64);
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
     inline void test32MovePtr(Condition cond, const Address& addr, Imm32 mask, Register src,
                               Register dest)
-        DEFINED_ON(arm, arm64, x86, x64);
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
     // Performs a bounds check and zeroes the index register if out-of-bounds
     // (to mitigate Spectre).
     inline void boundsCheck32ForLoad(Register index, Register length, Register scratch,
                                      Label* failure)
-        DEFINED_ON(arm, arm64, x86_shared);
+        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
     inline void boundsCheck32ForLoad(Register index, const Address& length, Register scratch,
                                      Label* failure)
-        DEFINED_ON(arm, arm64, x86_shared);
+        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
     // ========================================================================
     // Canonicalization primitives.
@@ -1553,35 +1558,44 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(arm);
 
     // wasm specific methods, used in both the wasm baseline compiler and ion.
-    void wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry) PER_ARCH;
-    void wasmTruncateDoubleToInt32(FloatRegister input, Register output, Label* oolEntry) PER_SHARED_ARCH;
-    void oolWasmTruncateCheckF64ToI32(FloatRegister input, bool isUnsigned,
+
+    // The truncate-to-int32 methods do not bind the rejoin label; clients must
+    // do so if oolWasmTruncateCheckF64ToI32() can jump to it.
+    void wasmTruncateDoubleToUInt32(FloatRegister input, Register output, bool isSaturating,
+                                    Label* oolEntry) PER_ARCH;
+    void wasmTruncateDoubleToInt32(FloatRegister input, Register output, bool isSaturating,
+                                   Label* oolEntry) PER_SHARED_ARCH;
+    void oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output, TruncFlags flags,
                                       wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(arm, arm64, x86_shared);
 
-    void wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, Label* oolEntry) PER_ARCH;
-    void wasmTruncateFloat32ToInt32(FloatRegister input, Register output, Label* oolEntry) PER_SHARED_ARCH;
-    void oolWasmTruncateCheckF32ToI32(FloatRegister input, bool isUnsigned,
+    void wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, bool isSaturating,
+                                     Label* oolEntry) PER_ARCH;
+    void wasmTruncateFloat32ToInt32(FloatRegister input, Register output, bool isSaturating,
+                                    Label* oolEntry) PER_SHARED_ARCH;
+    void oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output, TruncFlags flags,
                                       wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(arm, arm64, x86_shared);
 
-    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                   Label* oolRejoin, FloatRegister tempDouble)
+    // The truncate-to-int64 methods will always bind the `oolRejoin` label
+    // after the last emitted instruction.
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, bool isSaturating,
+                                   Label* oolEntry, Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                    Label* oolRejoin, FloatRegister tempDouble)
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, bool isSaturating,
+                                    Label* oolEntry, Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void oolWasmTruncateCheckF64ToI64(FloatRegister input, bool isUnsigned,
+    void oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output, TruncFlags flags,
                                       wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(arm, arm64, x86_shared);
 
-    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                    Label* oolRejoin, FloatRegister tempDouble)
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, bool isSaturating,
+                                    Label* oolEntry, Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                     Label* oolRejoin, FloatRegister tempDouble)
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, bool isSaturating,
+                                     Label* oolEntry, Label* oolRejoin, FloatRegister tempDouble)
         DEFINED_ON(arm64, x86, x64);
-    void oolWasmTruncateCheckF32ToI64(FloatRegister input, bool isUnsigned,
+    void oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output, TruncFlags flags,
                                       wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(arm, arm64, x86_shared);
 
@@ -1603,8 +1617,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     // including "normal" OutOfLineCode.
     void wasmEmitOldTrapOutOfLineCode();
 
-    // Perform a stack-overflow test, branching to the given Label on overflow.
-    void wasmEmitStackCheck(RegisterOrSP sp, Register scratch, Label* onOverflow);
+  public:
+    // ========================================================================
+    // Barrier functions.
 
     void emitPreBarrierFastPath(JSRuntime* rt, MIRType type, Register temp1, Register temp2,
                                 Register temp3, Label* noBarrier);
@@ -1988,6 +2003,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void loadDependentStringBase(Register str, Register dest);
     void storeDependentStringBase(Register base, Register str);
+    void leaNewDependentStringBase(Register str, Register dest);
 
     void loadStringIndexValue(Register str, Register dest, Label* fail);
 
@@ -2225,11 +2241,15 @@ class MacroAssembler : public MacroAssemblerSpecific
   private:
     void checkAllocatorState(Label* fail);
     bool shouldNurseryAllocate(gc::AllocKind allocKind, gc::InitialHeap initialHeap);
-    void nurseryAllocate(Register result, Register temp, gc::AllocKind allocKind,
-                         size_t nDynamicSlots, gc::InitialHeap initialHeap, Label* fail);
+    void nurseryAllocateObject(Register result, Register temp, gc::AllocKind allocKind,
+                               size_t nDynamicSlots, Label* fail);
     void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind, Label* fail);
     void allocateObject(Register result, Register temp, gc::AllocKind allocKind,
                         uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label* fail);
+    void nurseryAllocateString(Register result, Register temp, gc::AllocKind allocKind,
+                               Label* fail);
+    void allocateString(Register result, Register temp, gc::AllocKind allocKind,
+                        gc::InitialHeap initialHeap, Label* fail);
     void allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label* fail);
     void copySlotsFromTemplate(Register obj, const NativeObject* templateObj,
                                uint32_t start, uint32_t end);
@@ -2255,8 +2275,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void initUnboxedObjectContents(Register object, UnboxedPlainObject* templateObject);
 
-    void newGCString(Register result, Register temp, Label* fail);
-    void newGCFatInlineString(Register result, Register temp, Label* fail);
+    void newGCString(Register result, Register temp, Label* fail, bool attemptNursery);
+    void newGCFatInlineString(Register result, Register temp, Label* fail, bool attemptNursery);
 
     // Compares two strings for equality based on the JSOP.
     // This checks for identical pointers, atoms and length and fails for everything else.

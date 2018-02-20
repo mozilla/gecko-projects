@@ -4791,32 +4791,65 @@ MacroAssembler::moveValue(const Value& src, const ValueOperand& dest)
 // Branch functions
 
 void
-MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
-                                        Label* label)
+MacroAssembler::loadStoreBuffer(Register ptr, Register buffer)
 {
-    SecondScratchRegisterScope scratch2(*this);
-
-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-    MOZ_ASSERT(ptr != temp);
-    MOZ_ASSERT(ptr != scratch2);
-
-    ma_lsr(Imm32(gc::ChunkShift), ptr, scratch2);
-    ma_lsl(Imm32(gc::ChunkShift), scratch2, scratch2);
-    load32(Address(scratch2, gc::ChunkLocationOffset), scratch2);
-    branch32(cond, scratch2, Imm32(int32_t(gc::ChunkLocation::Nursery)), label);
+    ma_lsr(Imm32(gc::ChunkShift), ptr, buffer);
+    ma_lsl(Imm32(gc::ChunkShift), buffer, buffer);
+    load32(Address(buffer, gc::ChunkStoreBufferOffset), buffer);
 }
 
 void
-MacroAssembler::branchValueIsNurseryObject(Condition cond, const Address& address,
-                                           Register temp, Label* label)
+MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
+                                        Label* label)
+{
+    Maybe<SecondScratchRegisterScope> scratch2;
+    if (temp == Register::Invalid()) {
+        scratch2.emplace(*this);
+        temp = scratch2.ref();
+    }
+
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    MOZ_ASSERT(ptr != temp);
+
+    ma_lsr(Imm32(gc::ChunkShift), ptr, temp);
+    ma_lsl(Imm32(gc::ChunkShift), temp, temp);
+    load32(Address(temp, gc::ChunkLocationOffset), temp);
+    branch32(cond, temp, Imm32(int32_t(gc::ChunkLocation::Nursery)), label);
+}
+
+void
+MacroAssembler::branchValueIsNurseryCell(Condition cond, const Address& address,
+                                         Register temp, Label* label)
 {
     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    Label done, checkAddress;
 
-    Label done;
-    branchTestObject(Assembler::NotEqual, address, cond == Assembler::Equal ? &done : label);
+    Register tag = temp;
+    extractTag(address, tag);
+    branchTestObject(Assembler::Equal, tag, &checkAddress);
+    branchTestString(Assembler::NotEqual, tag, cond == Assembler::Equal ? &done : label);
 
-    loadPtr(address, temp);
-    branchPtrInNurseryChunk(cond, temp, InvalidReg, label);
+    bind(&checkAddress);
+    loadPtr(ToPayload(address), temp);
+    SecondScratchRegisterScope scratch2(*this);
+    branchPtrInNurseryChunk(cond, temp, scratch2, label);
+
+    bind(&done);
+}
+
+void
+MacroAssembler::branchValueIsNurseryCell(Condition cond, ValueOperand value,
+                                         Register temp, Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+    Label done, checkAddress;
+
+    branchTestObject(Assembler::Equal, value.typeReg(), &checkAddress);
+    branchTestString(Assembler::NotEqual, value.typeReg(),
+                     cond == Assembler::Equal ? &done : label);
+
+    bind(&checkAddress);
+    branchPtrInNurseryChunk(cond, value.payloadReg(), temp, label);
 
     bind(&done);
 }
@@ -4826,11 +4859,10 @@ MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value,
                                            Register temp, Label* label)
 {
     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-
     Label done;
-    branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
 
-    branchPtrInNurseryChunk(cond, value.payloadReg(), InvalidReg, label);
+    branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
+    branchPtrInNurseryChunk(cond, value.payloadReg(), temp, label);
 
     bind(&done);
 }
@@ -4894,59 +4926,64 @@ MacroAssembler::wasmTrapInstruction()
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output,
+                                           bool isSaturating, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ true, oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ true, isSaturating,
+                        oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input, Register output,
+                                          bool isSaturating, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ false, oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ false,isSaturating,
+                         oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output,
+                                            bool isSaturating, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ true, oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ true,isSaturating,
+                         oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output, Label* oolEntry)
+MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output,
+                                           bool isSaturating, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ false, oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ false,isSaturating,
+                         oolEntry);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, bool isUnsigned,
+MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output, TruncFlags flags,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int32, isUnsigned,
-                                    rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int32, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, bool isUnsigned,
+MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output, TruncFlags flags,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int32, isUnsigned,
-                                    rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int32, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, bool isUnsigned,
+MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output, TruncFlags flags,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int64, isUnsigned,
-                                    rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int64, flags, rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, bool isUnsigned,
-                                             wasm::BytecodeOffset off, Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output, TruncFlags flags,
+                                             wasm::BytecodeOffset off,
+                                             Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int64, isUnsigned,
-                                    rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int64, flags, rejoin, off);
 }
 
 void
@@ -5763,10 +5800,10 @@ MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Regist
 
 void
 MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIRType fromType,
-                                       bool isUnsigned, Label* oolEntry)
+                                       bool isUnsigned, bool isSaturating, Label* oolEntry)
 {
     // vcvt* converts NaN into 0, so check for NaNs here.
-    {
+    if (!isSaturating) {
         if (fromType == MIRType::Double)
             asMasm().compareDouble(input, input);
         else if (fromType == MIRType::Float32)
@@ -5794,10 +5831,12 @@ MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIR
 
         ma_vxfer(scratch, output);
 
-        // int32_t(UINT32_MAX) == -1.
-        ma_cmp(output, Imm32(-1), scratchReg);
-        as_cmp(output, Imm8(0), Assembler::NotEqual);
-        ma_b(oolEntry, Assembler::Equal);
+        if (!isSaturating) {
+            // int32_t(UINT32_MAX) == -1.
+            ma_cmp(output, Imm32(-1), scratchReg);
+            as_cmp(output, Imm8(0), Assembler::NotEqual);
+            ma_b(oolEntry, Assembler::Equal);
+        }
 
         return;
     }
@@ -5812,16 +5851,25 @@ MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIR
         MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
 
     ma_vxfer(scratch, output);
-    ma_cmp(output, Imm32(INT32_MAX), scratchReg);
-    ma_cmp(output, Imm32(INT32_MIN), scratchReg, Assembler::NotEqual);
-    ma_b(oolEntry, Assembler::Equal);
+
+    if (!isSaturating) {
+        ma_cmp(output, Imm32(INT32_MAX), scratchReg);
+        ma_cmp(output, Imm32(INT32_MIN), scratchReg, Assembler::NotEqual);
+        ma_b(oolEntry, Assembler::Equal);
+    }
 }
 
 void
 MacroAssemblerARM::outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                                   MIRType toType, bool isUnsigned, Label* rejoin,
-                                                   wasm::BytecodeOffset trapOffset)
+                                                   MIRType toType, TruncFlags flags,
+                                                   Label* rejoin, wasm::BytecodeOffset trapOffset)
 {
+    // On ARM, saturating truncation codegen handles saturating itself rather
+    // than relying on out-of-line fixup code.
+    if (flags & TRUNC_SATURATING)
+        return;
+
+    bool isUnsigned = flags & TRUNC_UNSIGNED;
     ScratchDoubleScope scratchScope(asMasm());
     FloatRegister scratch;
 
@@ -5895,12 +5943,10 @@ MacroAssemblerARM::outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType 
 
     // Handle errors.
     bind(&fail);
-    asMasm().jump(wasm::OldTrapDesc(trapOffset, wasm::Trap::IntegerOverflow,
-                                    asMasm().framePushed()));
+    asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapOffset);
 
     bind(&inputIsNaN);
-    asMasm().jump(wasm::OldTrapDesc(trapOffset, wasm::Trap::InvalidConversionToInteger,
-                                    asMasm().framePushed()));
+    asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapOffset);
 }
 
 void

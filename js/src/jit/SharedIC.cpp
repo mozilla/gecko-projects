@@ -7,7 +7,6 @@
 #include "jit/SharedIC.h"
 
 #include "mozilla/Casting.h"
-#include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Sprintf.h"
 
@@ -32,7 +31,6 @@
 #include "vm/Interpreter-inl.h"
 
 using mozilla::BitwiseCast;
-using mozilla::DebugOnly;
 
 namespace js {
 namespace jit {
@@ -519,7 +517,7 @@ ICStubCompiler::getStubCode()
         return nullptr;
     Linker linker(masm);
     AutoFlushICache afc("getStubCode");
-    Rooted<JitCode*> newStubCode(cx, linker.newCode<CanGC>(cx, BASELINE_CODE));
+    Rooted<JitCode*> newStubCode(cx, linker.newCode<CanGC>(cx, CodeKind::Baseline));
     if (!newStubCode)
         return nullptr;
 
@@ -2781,7 +2779,7 @@ GenerateNewObjectWithTemplateCode(JSContext* cx, JSObject* templateObject)
 
     Linker linker(masm);
     AutoFlushICache afc("GenerateNewObjectWithTemplateCode");
-    return linker.newCode<CanGC>(cx, BASELINE_CODE);
+    return linker.newCode<CanGC>(cx, CodeKind::Baseline);
 }
 
 static bool

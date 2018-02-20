@@ -13,6 +13,7 @@
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "nsIInputStreamPump.h"
+#include "nsIThreadRetargetableRequest.h"
 #include "nsProxyRelease.h"
 
 namespace mozilla {
@@ -587,7 +588,7 @@ FetchBodyConsumer<Derived>::BeginConsumeBodyMainThread()
   if (rr) {
     nsCOMPtr<nsIEventTarget> sts = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
     rv = rr->RetargetDeliveryTo(sts);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (NS_FAILED(rv)) {
       NS_WARNING("Retargeting failed");
     }
   }

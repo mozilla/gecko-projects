@@ -4,7 +4,6 @@
 
 const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
-const { Task } = require("devtools/shared/task");
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const { DebuggerServer } = require("devtools/server/main");
 
@@ -12,8 +11,11 @@ const { MemoryFront } = require("devtools/shared/fronts/memory");
 
 // Always log packets when running tests.
 Services.prefs.setBoolPref("devtools.debugger.log", true);
+var gReduceTimePrecision = Services.prefs.getBoolPref("privacy.reduceTimerPrecision");
+Services.prefs.setBoolPref("privacy.reduceTimerPrecision", false);
 SimpleTest.registerCleanupFunction(function () {
   Services.prefs.clearUserPref("devtools.debugger.log");
+  Services.prefs.setBoolPref("privacy.reduceTimerPrecision", gReduceTimePrecision);
 });
 
 function startServerAndGetSelectedTabMemory() {

@@ -2091,7 +2091,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() final override
+  NS_IMETHOD Run() final
   {
     MOZ_ASSERT(!mRequestProxy || NS_IsMainThread(),
                "If mRequestProxy is non-null, we need to run on main thread!");
@@ -2274,7 +2274,7 @@ CachedBorderImageData::GetCachedSVGViewportSize()
 struct PurgeCachedImagesTask : mozilla::Runnable
 {
   PurgeCachedImagesTask() : mozilla::Runnable("PurgeCachedImagesTask") {}
-  NS_IMETHOD Run() final override
+  NS_IMETHOD Run() final
   {
     mSubImages.Clear();
     return NS_OK;
@@ -4111,6 +4111,10 @@ nsStyleVisibility::CalcDifference(const nsStyleVisibility& aNewData) const
               nsChangeHint_RepaintFrame;
     }
     if (mVisible != aNewData.mVisible) {
+      if (mVisible == NS_STYLE_VISIBILITY_VISIBLE ||
+          aNewData.mVisible == NS_STYLE_VISIBILITY_VISIBLE) {
+        hint |= nsChangeHint_VisibilityChange;
+      }
       if ((NS_STYLE_VISIBILITY_COLLAPSE == mVisible) ||
           (NS_STYLE_VISIBILITY_COLLAPSE == aNewData.mVisible)) {
         hint |= NS_STYLE_HINT_REFLOW;

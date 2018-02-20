@@ -13,7 +13,7 @@ const { ConsoleMessage } =
 
 let stubPreparedMessages = new Map();
 let stubPackets = new Map();
-stubPreparedMessages.set("new Date(0)", new ConsoleMessage({
+stubPreparedMessages.set(`new Date(0)`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -44,7 +44,7 @@ stubPreparedMessages.set("new Date(0)", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPreparedMessages.set("asdf()", new ConsoleMessage({
+stubPreparedMessages.set(`asdf()`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -72,7 +72,7 @@ stubPreparedMessages.set("asdf()", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPreparedMessages.set("1 + @", new ConsoleMessage({
+stubPreparedMessages.set(`1 + @`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -100,7 +100,7 @@ stubPreparedMessages.set("1 + @", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPreparedMessages.set("inspect({a: 1})", new ConsoleMessage({
+stubPreparedMessages.set(`inspect({a: 1})`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -143,7 +143,7 @@ stubPreparedMessages.set("inspect({a: 1})", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPreparedMessages.set("cd(document)", new ConsoleMessage({
+stubPreparedMessages.set(`cd(document)`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -166,7 +166,29 @@ stubPreparedMessages.set("cd(document)", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPreparedMessages.set("longString message Error", new ConsoleMessage({
+stubPreparedMessages.set(`undefined`, new ConsoleMessage({
+  "id": "1",
+  "allowRepeating": true,
+  "source": "javascript",
+  "timeStamp": 1518606917356,
+  "type": "result",
+  "helperType": null,
+  "level": "log",
+  "parameters": [
+    {
+      "type": "undefined"
+    }
+  ],
+  "repeatId": "{\"frame\":null,\"groupId\":null,\"indent\":0,\"level\":\"log\",\"parameters\":[{\"type\":\"undefined\"}],\"source\":\"javascript\",\"type\":\"result\",\"userProvidedStyles\":null}",
+  "stacktrace": null,
+  "frame": null,
+  "groupId": null,
+  "userProvidedStyles": null,
+  "notes": null,
+  "indent": 0
+}));
+
+stubPreparedMessages.set(`longString message Error`, new ConsoleMessage({
   "id": "1",
   "allowRepeating": true,
   "source": "javascript",
@@ -194,7 +216,53 @@ stubPreparedMessages.set("longString message Error", new ConsoleMessage({
   "indent": 0
 }));
 
-stubPackets.set("new Date(0)", {
+stubPreparedMessages.set(`eval throw ""`, new ConsoleMessage({
+  "id": "1",
+  "allowRepeating": true,
+  "source": "javascript",
+  "timeStamp": 1517990289517,
+  "type": "result",
+  "helperType": null,
+  "level": "error",
+  "messageText": "Error",
+  "parameters": [
+    {
+      "type": "undefined"
+    }
+  ],
+  "repeatId": "{\"frame\":null,\"groupId\":null,\"indent\":0,\"level\":\"error\",\"messageText\":\"Error\",\"parameters\":[{\"type\":\"undefined\"}],\"source\":\"javascript\",\"type\":\"result\",\"userProvidedStyles\":null}",
+  "stacktrace": null,
+  "frame": null,
+  "groupId": null,
+  "userProvidedStyles": null,
+  "notes": null,
+  "indent": 0
+}));
+
+stubPreparedMessages.set(`eval throw "tomato"`, new ConsoleMessage({
+  "id": "1",
+  "allowRepeating": true,
+  "source": "javascript",
+  "timeStamp": 1517990289520,
+  "type": "result",
+  "helperType": null,
+  "level": "error",
+  "messageText": "Error: tomato",
+  "parameters": [
+    {
+      "type": "undefined"
+    }
+  ],
+  "repeatId": "{\"frame\":null,\"groupId\":null,\"indent\":0,\"level\":\"error\",\"messageText\":\"Error: tomato\",\"parameters\":[{\"type\":\"undefined\"}],\"source\":\"javascript\",\"type\":\"result\",\"userProvidedStyles\":null}",
+  "stacktrace": null,
+  "frame": null,
+  "groupId": null,
+  "userProvidedStyles": null,
+  "notes": null,
+  "indent": 0
+}));
+
+stubPackets.set(`new Date(0)`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "new Date(0)",
   "result": {
@@ -216,7 +284,7 @@ stubPackets.set("new Date(0)", {
   "notes": null
 });
 
-stubPackets.set("asdf()", {
+stubPackets.set(`asdf()`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "asdf()",
   "result": {
@@ -252,7 +320,7 @@ stubPackets.set("asdf()", {
   "notes": null
 });
 
-stubPackets.set("1 + @", {
+stubPackets.set(`1 + @`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "1 + @",
   "result": {
@@ -288,7 +356,7 @@ stubPackets.set("1 + @", {
   "notes": null
 });
 
-stubPackets.set("inspect({a: 1})", {
+stubPackets.set(`inspect({a: 1})`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "inspect({a: 1})",
   "result": {
@@ -328,7 +396,7 @@ stubPackets.set("inspect({a: 1})", {
   "notes": null
 });
 
-stubPackets.set("cd(document)", {
+stubPackets.set(`cd(document)`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "cd(document)",
   "result": {
@@ -344,7 +412,20 @@ stubPackets.set("cd(document)", {
   "notes": null
 });
 
-stubPackets.set("longString message Error", {
+stubPackets.set(`undefined`, {
+  "from": "server1.conn0.child1/consoleActor2",
+  "input": "undefined",
+  "result": {
+    "type": "undefined"
+  },
+  "timestamp": 1518606917356,
+  "exception": null,
+  "frame": null,
+  "helperResult": null,
+  "notes": null
+});
+
+stubPackets.set(`longString message Error`, {
   "from": "server1.conn0.child1/consoleActor2",
   "input": "throw new Error(\"Long error \".repeat(10000))",
   "result": {
@@ -380,6 +461,34 @@ stubPackets.set("longString message Error", {
     "length": 110007,
     "actor": "server1.conn0.child1/longString37"
   },
+  "frame": null,
+  "helperResult": null,
+  "notes": null
+});
+
+stubPackets.set(`eval throw ""`, {
+  "from": "server1.conn0.child1/consoleActor2",
+  "input": "throw \"\"",
+  "result": {
+    "type": "undefined"
+  },
+  "timestamp": 1517990289517,
+  "exception": "",
+  "exceptionMessage": "",
+  "frame": null,
+  "helperResult": null,
+  "notes": null
+});
+
+stubPackets.set(`eval throw "tomato"`, {
+  "from": "server1.conn0.child1/consoleActor2",
+  "input": "throw \"tomato\"",
+  "result": {
+    "type": "undefined"
+  },
+  "timestamp": 1517990289520,
+  "exception": "tomato",
+  "exceptionMessage": "tomato",
   "frame": null,
   "helperResult": null,
   "notes": null

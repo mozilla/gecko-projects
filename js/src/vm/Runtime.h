@@ -21,9 +21,6 @@
 
 #include <setjmp.h>
 
-#include "jsatom.h"
-#include "jsscript.h"
-
 #include "builtin/AtomicsObject.h"
 #include "builtin/intl/SharedIntlData.h"
 #include "builtin/Promise.h"
@@ -46,6 +43,8 @@
 #include "vm/CommonPropertyNames.h"
 #include "vm/DateTime.h"
 #include "vm/GeckoProfiler.h"
+#include "vm/JSAtom.h"
+#include "vm/JSScript.h"
 #include "vm/Scope.h"
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/Stack.h"
@@ -686,7 +685,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     /* Gets current default locale. String remains owned by context. */
     const char* getDefaultLocale();
 
-    /* Garbage collector state, used by jsgc.c. */
+    /* Garbage collector state. */
     js::gc::GCRuntime   gc;
 
     /* Garbage collector state has been successfully initialized. */

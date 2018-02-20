@@ -93,7 +93,7 @@ public:
     return mOwner;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override final;
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) final;
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto);
 
@@ -266,14 +266,6 @@ public:
   {
     return mIsMainThreadEvent;
   }
-
-  /**
-   * For a given current target, returns the related target adjusted with
-   * shadow DOM retargeting rules. Returns nullptr if related target
-   * is not adjusted.
-   */
-  static nsIContent* GetShadowRelatedTarget(nsIContent* aCurrentTarget,
-                                            nsIContent* aRelatedTarget);
 
   void MarkUninitialized()
   {

@@ -538,6 +538,12 @@ XPCOMUtils.defineLazyGetter(this, "gCanCheckForUpdates", function aus_gCanCheckF
     return false;
   }
 
+  if (Services.policies && !Services.policies.isAllowed("appUpdate")) {
+    LOG("gCanCheckForUpdates - unable to automatically check for updates. " +
+        "Functionality disabled by enterprise policy.");
+    return false;
+  }
+
   // If we don't know the binary platform we're updating, we can't update.
   if (!UpdateUtils.ABI) {
     LOG("gCanCheckForUpdates - unable to check for updates, unknown ABI");
@@ -3597,9 +3603,6 @@ class ChannelDownloader extends CommonDownloader {
    * See nsIProgressEventSink.idl
    */
   onProgress(request, context, progress, maxProgress) {
-    LOG("ChannelDownloader:onProgress - progress: " + progress +
-        "/" + maxProgress);
-
     if (progress > this._patch.size) {
       LOG("ChannelDownloader:onProgress - progress: " + progress +
           " is higher than patch size: " + this._patch.size);
@@ -3621,6 +3624,8 @@ class ChannelDownloader extends CommonDownloader {
 
     let currentTime = Date.now();
     if ((currentTime - this._lastProgressTimeMs) > DOWNLOAD_PROGRESS_INTERVAL) {
+      LOG("ChannelDownloader:onProgress - progress: " + progress +
+          "/" + maxProgress);
       this._lastProgressTimeMs = currentTime;
       let listeners = this._listeners.concat();
       let listenerCount = listeners.length;

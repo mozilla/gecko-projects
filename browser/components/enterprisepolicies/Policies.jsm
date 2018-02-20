@@ -29,17 +29,41 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
 this.EXPORTED_SYMBOLS = ["Policies"];
 
 this.Policies = {
-  "block_about_config": {
+  "BlockAboutConfig": {
     onBeforeUIStartup(manager, param) {
-      if (param == true) {
+      if (param) {
         manager.disallowFeature("about:config", true);
+      }
+    }
+  },
+
+  "BlockAboutProfiles": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("about:profiles", true);
+      }
+    }
+  },
+
+  "BlockAboutSupport": {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("about:support", true);
+      }
+    }
+  },
+
+  "DisableAppUpdate": {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        manager.disallowFeature("appUpdate");
       }
     }
   },
 
   "display_menu_bar": {
     onBeforeUIStartup(manager, param) {
-      if (param == true) {
+      if (param) {
         // This policy is meant to change the default behavior, not to force it.
         // If this policy was alreay applied and the user chose to re-hide the
         // menu bar, do not show it again.
@@ -56,7 +80,7 @@ this.Policies = {
 
   "display_bookmarks_toolbar": {
     onBeforeUIStartup(manager, param) {
-      if (param == true) {
+      if (param) {
         // This policy is meant to change the default behavior, not to force it.
         // If this policy was alreay applied and the user chose to re-hide the
         // bookmarks toolbar, do not show it again.
@@ -73,7 +97,7 @@ this.Policies = {
 
   "block_set_desktop_background": {
     onBeforeUIStartup(manager, param) {
-      if (param == true) {
+      if (param) {
         manager.disallowFeature("setDesktopBackground", true);
       }
     }
@@ -81,7 +105,7 @@ this.Policies = {
 
   "DisableFirefoxScreenshots": {
     onBeforeAddons(manager, param) {
-      if (param == true) {
+      if (param) {
         setAndLockPref("extensions.screenshots.disabled", true);
       }
     }
@@ -89,7 +113,7 @@ this.Policies = {
 
   "DisableFirefoxStudies": {
     onBeforeAddons(manager, param) {
-      if (param == true) {
+      if (param) {
         manager.disallowFeature("Shield");
       }
     }
@@ -97,7 +121,7 @@ this.Policies = {
 
   "DisableFormHistory": {
     onBeforeUIStartup(manager, param) {
-      if (param == true) {
+      if (param) {
         setAndLockPref("browser.formfill.enable", false);
       }
     }

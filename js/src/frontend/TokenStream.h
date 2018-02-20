@@ -172,7 +172,6 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include "jscntxt.h"
 #include "jspubtd.h"
 
 #include "frontend/ErrorReporter.h"
@@ -180,6 +179,7 @@
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "vm/ErrorReporting.h"
+#include "vm/JSContext.h"
 #include "vm/RegExpShared.h"
 #include "vm/String.h"
 #include "vm/Unicode.h"
@@ -774,19 +774,19 @@ class TokenStreamAnyChars
   public:
     // ErrorReporter API.
 
-    virtual const JS::ReadOnlyCompileOptions& options() const override final {
+    const JS::ReadOnlyCompileOptions& options() const final {
         return options_;
     }
 
-    virtual void
-    lineAndColumnAt(size_t offset, uint32_t* line, uint32_t* column) const override final;
+    void
+    lineAndColumnAt(size_t offset, uint32_t* line, uint32_t* column) const final;
 
-    virtual void currentLineAndColumn(uint32_t* line, uint32_t* column) const override final;
+    void currentLineAndColumn(uint32_t* line, uint32_t* column) const final;
 
-    virtual bool hasTokenizationStarted() const override final;
-    virtual void reportErrorNoOffsetVA(unsigned errorNumber, va_list args) override final;
+    bool hasTokenizationStarted() const final;
+    void reportErrorNoOffsetVA(unsigned errorNumber, va_list args) final;
 
-    virtual const char* getFilename() const override final {
+    const char* getFilename() const final {
         return filename_;
     }
 
@@ -948,7 +948,7 @@ class TokenStreamCharsBase
         const CharT* ptr;
     };
 
-    MOZ_MUST_USE bool appendMultiUnitCodepointToTokenbuf(uint32_t codepoint);
+    MOZ_MUST_USE bool appendCodePointToTokenbuf(uint32_t codePoint);
 
     class MOZ_STACK_CLASS Position
     {
@@ -1158,7 +1158,7 @@ class MOZ_STACK_CLASS TokenStreamSpecific
     using typename CharsSharedBase::TokenBuf;
 
   private:
-    using CharsSharedBase::appendMultiUnitCodepointToTokenbuf;
+    using CharsSharedBase::appendCodePointToTokenbuf;
     using CharsSharedBase::atomizeChars;
     using CharsSharedBase::copyTokenbufTo;
     using GeneralCharsBase::getCharIgnoreEOL;
@@ -1437,7 +1437,7 @@ class MOZ_STACK_CLASS TokenStreamSpecific
 
     MOZ_MUST_USE bool getTokenInternal(TokenKind* ttp, Modifier modifier);
 
-    MOZ_MUST_USE bool getStringOrTemplateToken(int untilChar, Token** tp);
+    MOZ_MUST_USE bool getStringOrTemplateToken(char untilChar, Token** tp);
 
     // Try to get the next character, normalizing '\r', '\r\n', and '\n' into
     // '\n'.  Also updates internal line-counter state.  Return true on success

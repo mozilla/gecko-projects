@@ -1835,8 +1835,7 @@ impl<'a> SelectorVisitor for StylistSelectorVisitor<'a> {
 }
 
 /// A set of rules for element and pseudo-elements.
-#[derive(Debug, Default)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(Debug, Default, MallocSizeOf)]
 struct ElementAndPseudoRules {
     /// Rules from stylesheets at this `CascadeData`'s origin.
     element_map: SelectorMap<Rule>,
@@ -1904,8 +1903,7 @@ impl ElementAndPseudoRules {
 ///
 /// FIXME(emilio): Consider renaming and splitting in `CascadeData` and
 /// `InvalidationData`? That'd make `clear_cascade_data()` clearer.
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-#[derive(Debug)]
+#[derive(Debug, MallocSizeOf)]
 pub struct CascadeData {
     /// The data coming from normal style rules that apply to elements at this
     /// cascade level.
@@ -1927,7 +1925,7 @@ pub struct CascadeData {
     /// to avoid taking element snapshots when an irrelevant attribute changes.
     /// (We don't bother storing the namespace, since namespaced attributes
     /// are rare.)
-    #[cfg_attr(feature = "servo", ignore_malloc_size_of = "just an array")]
+    #[ignore_malloc_size_of = "just an array"]
     attribute_dependencies: NonCountingBloomFilter,
 
     /// Whether `"style"` appears in an attribute selector.  This is not common,
@@ -1952,13 +1950,13 @@ pub struct CascadeData {
     /// hence in our selector maps).  Used to determine when sharing styles is
     /// safe: we disallow style sharing for elements whose id matches this
     /// filter, and hence might be in one of our selector maps.
-    #[cfg_attr(feature = "servo", ignore_malloc_size_of = "just an array")]
+    #[ignore_malloc_size_of = "just an array"]
     mapped_ids: NonCountingBloomFilter,
 
     /// Selectors that require explicit cache revalidation (i.e. which depend
     /// on state that is not otherwise visible to the cache, like attributes or
     /// tree-structural state like child index and pseudos).
-    #[cfg_attr(feature = "servo", ignore_malloc_size_of = "Arc")]
+    #[ignore_malloc_size_of = "Arc"]
     selectors_for_cache_revalidation: SelectorMap<RevalidationSelectorAndHashes>,
 
     /// A map with all the animations at this `CascadeData`'s origin, indexed
@@ -1983,7 +1981,8 @@ pub struct CascadeData {
 }
 
 impl CascadeData {
-    fn new() -> Self {
+    /// Creates an empty `CascadeData`.
+    pub fn new() -> Self {
         Self {
             normal_rules: ElementAndPseudoRules::default(),
             slotted_rules: None,
@@ -2005,7 +2004,7 @@ impl CascadeData {
 
     /// Rebuild the cascade data from a given SheetCollection, incrementally if
     /// possible.
-    fn rebuild<'a, S>(
+    pub fn rebuild<'a, S>(
         &mut self,
         device: &Device,
         quirks_mode: QuirksMode,
@@ -2281,7 +2280,7 @@ impl CascadeData {
 
     /// Returns whether all the media-feature affected values matched before and
     /// match now in the given stylesheet.
-    fn media_feature_affected_matches<S>(
+    pub fn media_feature_affected_matches<S>(
         &self,
         stylesheet: &S,
         guard: &SharedRwLockReadGuard,

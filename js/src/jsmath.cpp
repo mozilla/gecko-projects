@@ -17,29 +17,24 @@
 
 #include <algorithm>  // for std::max
 #include <fcntl.h>
-
 #ifdef XP_UNIX
 # include <unistd.h>
 #endif
 
 #include "fdlibm.h"
-
-#ifdef XP_WIN
-# include "jswin.h"
-#endif
-
 #include "jsapi.h"
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jscompartment.h"
 #include "jslibmath.h"
 #include "jstypes.h"
 
 #include "jit/InlinableNatives.h"
 #include "js/Class.h"
+#include "util/Windows.h"
+#include "vm/JSAtom.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
 #include "vm/Time.h"
 
-#include "jsobjinlines.h"
+#include "vm/JSObject-inl.h"
 
 #if defined(XP_WIN)
 // #define needed to link in RtlGenRandom(), a.k.a. SystemFunction036.  See the
@@ -658,10 +653,10 @@ js::minmax_impl(JSContext* cx, bool max, HandleValue a, HandleValue b, MutableHa
 }
 
 double
-js::powi(double x, int y)
+js::powi(double x, int32_t y)
 {
     AutoUnsafeCallWithABI unsafe;
-    unsigned n = (y < 0) ? -y : y;
+    uint32_t n = Abs(y);
     double m = x;
     double p = 1;
     while (true) {

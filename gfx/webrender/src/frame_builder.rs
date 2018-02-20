@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{AlphaType, BorderDetails, BorderDisplayItem, BuiltDisplayList, ClipAndScrollInfo};
-use api::{ClipId, ColorF, ColorU, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePixelScale};
+use api::{ClipId, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePixelScale};
 use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentLayer, Epoch, ExtendMode};
 use api::{ExternalScrollId, FontRenderMode, GlyphInstance, GlyphOptions, GradientStop, ImageKey};
 use api::{ImageRendering, ItemRange, LayerPoint, LayerPrimitiveInfo, LayerRect, LayerSize};
@@ -30,8 +30,8 @@ use prim_store::{PrimitiveContainer, PrimitiveIndex};
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu};
 use prim_store::{BrushSegmentDescriptor, PrimitiveRun, TextRunPrimitiveCpu};
 use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
-use render_task::{ClearMode, ClipChain, RenderTask, RenderTaskId, RenderTaskTree};
-use resource_cache::ResourceCache;
+use render_task::{ClearMode, ClipChain, RenderTask, RenderTaskId, RenderTaskLocation, RenderTaskTree};
+use resource_cache::{ImageRequest, ResourceCache};
 use scene::{ScenePipeline, SceneProperties};
 use std::{mem, usize, f32};
 use tiling::{CompositeOps, Frame, RenderPass, RenderTargetKind};
@@ -632,26 +632,25 @@ impl FrameBuilder {
 
     pub fn push_reference_frame(
         &mut self,
+        reference_frame_id: ClipId,
         parent_id: Option<ClipId>,
         pipeline_id: PipelineId,
         rect: &LayerRect,
         source_transform: Option<PropertyBinding<LayoutTransform>>,
         source_perspective: Option<LayoutTransform>,
         origin_in_parent_reference_frame: LayerVector2D,
-        root_for_pipeline: bool,
         clip_scroll_tree: &mut ClipScrollTree,
-    ) -> ClipId {
-        let new_id = clip_scroll_tree.add_reference_frame(
+    ) {
+        let node = ClipScrollNode::new_reference_frame(
+            parent_id,
             rect,
             source_transform,
             source_perspective,
             origin_in_parent_reference_frame,
             pipeline_id,
-            parent_id,
-            root_for_pipeline,
         );
-        self.reference_frame_stack.push(new_id);
-        new_id
+        clip_scroll_tree.add_node(node, reference_frame_id);
+        self.reference_frame_stack.push(reference_frame_id);
     }
 
     pub fn current_reference_frame_id(&self) -> ClipId {
@@ -686,13 +685,13 @@ impl FrameBuilder {
     ) -> ClipId {
         let viewport_rect = LayerRect::new(LayerPoint::zero(), *viewport_size);
         self.push_reference_frame(
+            ClipId::root_reference_frame(pipeline_id),
             None,
             pipeline_id,
             &viewport_rect,
             None,
             None,
             LayerVector2D::zero(),
-            true,
             clip_scroll_tree,
         );
 
@@ -1407,7 +1406,7 @@ impl FrameBuilder {
             glyph_gpu_blocks: Vec::new(),
             glyph_keys: Vec::new(),
             offset: run_offset,
-            shadow_color: ColorU::new(0, 0, 0, 0),
+            shadow: false,
         };
 
         // Text shadows that have a blur radius of 0 need to be rendered as normal
@@ -1425,7 +1424,8 @@ impl FrameBuilder {
             match picture_prim.kind {
                 PictureKind::TextShadow { offset, color, blur_radius, .. } if blur_radius == 0.0 => {
                     let mut text_prim = prim.clone();
-                    text_prim.shadow_color = color.into();
+                    text_prim.font.color = color.into();
+                    text_prim.shadow = true;
                     text_prim.offset += offset;
                     fast_shadow_prims.push((idx, text_prim));
                 }
@@ -1511,37 +1511,64 @@ impl FrameBuilder {
             tile_spacing = LayerSize::zero();
         }
 
-        let prim_cpu = ImagePrimitiveCpu {
-            tile_spacing,
-            alpha_type,
-            stretch_size,
-            current_epoch: Epoch::invalid(),
-            source: ImageSource::Default,
-            key: ImageCacheKey {
-                image_key,
-                image_rendering,
-                tile_offset,
-                texel_rect: sub_rect.map(|texel_rect| {
-                    DeviceIntRect::new(
-                        DeviceIntPoint::new(
-                            texel_rect.uv0.x as i32,
-                            texel_rect.uv0.y as i32,
-                        ),
-                        DeviceIntSize::new(
-                            (texel_rect.uv1.x - texel_rect.uv0.x) as i32,
-                            (texel_rect.uv1.y - texel_rect.uv0.y) as i32,
-                        ),
-                    )
-                }),
-            },
+        let request = ImageRequest {
+            key: image_key,
+            rendering: image_rendering,
+            tile: tile_offset,
         };
 
-        self.add_primitive(
-            clip_and_scroll,
-            info,
-            Vec::new(),
-            PrimitiveContainer::Image(prim_cpu),
-        );
+        // See if conditions are met to run through the new
+        // image brush shader, which supports segments.
+        if tile_spacing == LayerSize::zero() &&
+           stretch_size == info.rect.size &&
+           sub_rect.is_none() &&
+           tile_offset.is_none() {
+            let prim = BrushPrimitive::new(
+                BrushKind::Image {
+                    request,
+                    current_epoch: Epoch::invalid(),
+                    alpha_type,
+                },
+                None,
+            );
+
+            self.add_primitive(
+                clip_and_scroll,
+                info,
+                Vec::new(),
+                PrimitiveContainer::Brush(prim),
+            );
+        } else {
+            let prim_cpu = ImagePrimitiveCpu {
+                tile_spacing,
+                alpha_type,
+                stretch_size,
+                current_epoch: Epoch::invalid(),
+                source: ImageSource::Default,
+                key: ImageCacheKey {
+                    request,
+                    texel_rect: sub_rect.map(|texel_rect| {
+                        DeviceIntRect::new(
+                            DeviceIntPoint::new(
+                                texel_rect.uv0.x as i32,
+                                texel_rect.uv0.y as i32,
+                            ),
+                            DeviceIntSize::new(
+                                (texel_rect.uv1.x - texel_rect.uv0.x) as i32,
+                                (texel_rect.uv1.y - texel_rect.uv0.y) as i32,
+                            ),
+                        )
+                    }),
+                },
+            };
+
+            self.add_primitive(
+                clip_and_scroll,
+                info,
+                Vec::new(),
+                PrimitiveContainer::Image(prim_cpu),
+            );
+        }
     }
 
     pub fn add_yuv_image(
@@ -1646,7 +1673,7 @@ impl FrameBuilder {
         pic.runs = pic_context.prim_runs;
 
         let root_render_task = RenderTask::new_picture(
-            None,
+            RenderTaskLocation::Fixed(frame_context.screen_rect),
             PrimitiveIndex(0),
             RenderTargetKind::Color,
             ContentOrigin::Screen(DeviceIntPoint::zero()),

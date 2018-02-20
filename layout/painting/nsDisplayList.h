@@ -33,6 +33,7 @@
 #include "DisplayListClipState.h"
 #include "LayerState.h"
 #include "FrameMetrics.h"
+#include "ImgDrawResult.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/UniquePtr.h"
@@ -4135,7 +4136,7 @@ public:
 
   virtual nsIFrame* FrameForInvalidation() const override { return mAncestorFrame; }
 
-  NS_DISPLAY_DECL_NAME("TableThemedBackground", TYPE_TABLE_BACKGROUND_IMAGE)
+  NS_DISPLAY_DECL_NAME("TableThemedBackground", TYPE_TABLE_THEMED_BACKGROUND_IMAGE)
 protected:
   virtual nsIFrame* StyleFrame() const override { return mAncestorFrame; }
   nsIFrame* mAncestorFrame;
@@ -5258,7 +5259,7 @@ public:
            nsDisplayItem::GetPerFrameKey();
   }
 
-  NS_DISPLAY_DECL_NAME("BlendMode", TYPE_BLEND_MODE)
+  NS_DISPLAY_DECL_NAME("TableBlendMode", TYPE_TABLE_BLEND_MODE)
 
 protected:
   nsIFrame* mAncestorFrame;
@@ -5353,7 +5354,7 @@ public:
            nsDisplayItem::GetPerFrameKey();
   }
 
-  NS_DISPLAY_DECL_NAME("BlendContainer", TYPE_BLEND_CONTAINER)
+  NS_DISPLAY_DECL_NAME("TableBlendContainer", TYPE_TABLE_BLEND_CONTAINER)
 
 protected:
   nsDisplayTableBlendContainer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
@@ -6064,6 +6065,7 @@ private:
 class nsDisplayTransform: public nsDisplayItem
 {
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
+  typedef mozilla::gfx::Matrix4x4Flagged Matrix4x4Flagged;
   typedef mozilla::gfx::Point3D Point3D;
 
   /*
@@ -6243,7 +6245,7 @@ public:
    * we set on the layer (for rendering), since there will be an
    * nsDisplayPerspective created for that.
    */
-  const Matrix4x4& GetTransform() const;
+  const Matrix4x4Flagged& GetTransform() const;
   Matrix4x4 GetTransformForRendering(mozilla::LayoutDevicePoint* aOutOrigin = nullptr);
 
   /**
@@ -6444,7 +6446,7 @@ private:
                                                        const nsRect* aBoundsOverride);
 
   StoreList mStoredList;
-  mutable Matrix4x4 mTransform;
+  mutable Matrix4x4Flagged mTransform;
   // Accumulated transform of ancestors on the preserves-3d chain.
   Matrix4x4 mTransformPreserves3D;
   ComputeTransformFunction mTransformGetter;
@@ -6678,7 +6680,8 @@ public:
 
   static nsCharClipDisplayItem* CheckCast(nsDisplayItem* aItem) {
     DisplayItemType t = aItem->GetType();
-    return (t == DisplayItemType::TYPE_TEXT)
+    return (t == DisplayItemType::TYPE_TEXT ||
+            t == DisplayItemType::TYPE_SVG_CHAR_CLIP)
       ? static_cast<nsCharClipDisplayItem*>(aItem) : nullptr;
   }
 

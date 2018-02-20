@@ -7,11 +7,10 @@
 #ifndef jit_mips64_MacroAssembler_mips64_h
 #define jit_mips64_MacroAssembler_mips64_h
 
-#include "jsopcode.h"
-
 #include "jit/JitFrames.h"
 #include "jit/mips-shared/MacroAssembler-mips-shared.h"
 #include "jit/MoveResolver.h"
+#include "vm/BytecodeUtil.h"
 
 namespace js {
 namespace jit {
@@ -446,6 +445,13 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
     }
     Register extractSymbol(const ValueOperand& value, Register scratch) {
         unboxSymbol(value, scratch);
+        return scratch;
+    }
+    Register extractCell(const Address& address, Register scratch) {
+        return extractObject(address, scratch);
+    }
+    Register extractCell(const ValueOperand& value, Register scratch) {
+        unboxNonDouble(value, scratch);
         return scratch;
     }
     Register extractInt32(const ValueOperand& value, Register scratch) {

@@ -9,27 +9,23 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/TypeTraits.h"
 
-#include "jscntxt.h"
-
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
 #include "jit/InlinableNatives.h"
+#include "vm/JSContext.h"
 #include "vm/RegExpStatics.h"
 #include "vm/SelfHosting.h"
 #include "vm/StringBuffer.h"
 #include "vm/Unicode.h"
 
-#include "jsobjinlines.h"
-
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 using namespace js::unicode;
 
-using mozilla::ArrayLength;
 using mozilla::CheckedInt;
-using mozilla::Maybe;
 
 /*
  * ES 2017 draft rev 6a13789aa9e7c6de4e96b7d3e24d9e6eba6584ad 21.2.5.2.2

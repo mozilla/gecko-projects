@@ -272,8 +272,10 @@
     _(TypeBarrierO)                 \
     _(MonitorTypes)                 \
     _(PostWriteBarrierO)            \
+    _(PostWriteBarrierS)            \
     _(PostWriteBarrierV)            \
     _(PostWriteElementBarrierO)     \
+    _(PostWriteElementBarrierS)     \
     _(PostWriteElementBarrierV)     \
     _(InitializedLength)            \
     _(SetInitializedLength)         \
@@ -460,6 +462,7 @@
     _(WasmStackArg)                 \
     _(WasmStackArgI64)              \
     _(WasmCall)                     \
+    _(WasmCallVoid)                 \
     _(WasmCallI64)                  \
     _(WasmUint32ToDouble)           \
     _(WasmUint32ToFloat32)

@@ -7,18 +7,15 @@
 "use strict";
 
 const Services = require("Services");
-const { Cc, Ci, Cr } = require("chrome");
+const { Cr } = require("chrome");
 const { ActorPool, GeneratedLocation } = require("devtools/server/actors/common");
 const { createValueGrip, longStringGrip } = require("devtools/server/actors/object");
 const { ActorClassWithSpec } = require("devtools/shared/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const flags = require("devtools/shared/flags");
 const { assert, dumpn } = DevToolsUtils;
-const promise = require("promise");
 const { DevToolsWorker } = require("devtools/shared/worker/worker");
 const { threadSpec } = require("devtools/shared/specs/script");
-
-const { resolve, reject, all } = promise;
 
 loader.lazyGetter(this, "Debugger", () => {
   let Debugger = require("Debugger");
@@ -380,7 +377,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
                       line: originalLocation.originalLine,
                       column: originalLocation.originalColumn
                     };
-                    resolve(onPacket(packet))
+                    Promise.resolve(onPacket(packet))
           .catch(error => {
             reportError(error);
             return {
@@ -565,8 +562,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   _handleResumeLimit: function (request) {
     let steppingType = request.resumeLimit.type;
     if (!["break", "step", "next", "finish"].includes(steppingType)) {
-      return reject({ error: "badParameterType",
-                      message: "Unknown resumeLimit type" });
+      return Promise.reject({ error: "badParameterType",
+                              message: "Unknown resumeLimit type" });
     }
 
     const generatedLocation = this.sources.getFrameLocation(this.youngestFrame);
@@ -629,9 +626,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         (events == "*" ||
         (Array.isArray(events) && events.length))) {
       this._pauseOnDOMEvents = events;
-      let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                .getService(Ci.nsIEventListenerService);
-      els.addListenerForAllEvents(this.global, this._allEventsListener, true);
+      Services.els.addListenerForAllEvents(this.global, this._allEventsListener, true);
     }
   },
 
@@ -676,7 +671,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       resumeLimitHandled = this._handleResumeLimit(request);
     } else {
       this._clearSteppingHooks(this.youngestFrame);
-      resumeLimitHandled = resolve(true);
+      resumeLimitHandled = Promise.resolve(true);
     }
 
     return resumeLimitHandled.then(() => {
@@ -780,14 +775,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    * @returns Array
    */
   _getAllEventListeners: function (eventTarget) {
-    let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                .getService(Ci.nsIEventListenerService);
-
-    let targets = els.getEventTargetChainFor(eventTarget, true);
+    let targets = Services.els.getEventTargetChainFor(eventTarget, true);
     let listeners = [];
 
     for (let target of targets) {
-      let handlers = els.getListenerInfoFor(target);
+      let handlers = Services.els.getListenerInfoFor(target);
       for (let handler of handlers) {
         // Null is returned for all-events handlers, and native event listeners
         // don't provide any listenerObject, which makes them not that useful to
@@ -947,7 +939,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       promises.push(framePromise);
     }
 
-    return all(promises).then(function (frames) {
+    return Promise.all(promises).then(function (frames) {
       // Filter null values because sourcemapping may have failed.
       return { frames: frames.filter(x => !!x) };
     });
@@ -989,7 +981,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
     }
 
-    return all([...sourcesToScripts.values()].map(script => {
+    return Promise.all([...sourcesToScripts.values()].map(script => {
       return this.sources.createSourceActors(script.source);
     }));
   },
@@ -1084,15 +1076,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       };
     }
 
-    let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                .getService(Ci.nsIEventListenerService);
-
     let nodes = this.global.document.getElementsByTagName("*");
     nodes = [this.global].concat([].slice.call(nodes));
     let listeners = [];
 
     for (let node of nodes) {
-      let handlers = els.getListenerInfoFor(node);
+      let handlers = Services.els.getListenerInfoFor(node);
 
       for (let handler of handlers) {
         // Create a form object for serializing the listener via the protocol.
@@ -1193,9 +1182,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // XPCShell tests don't use actual DOM windows for globals and cause
     // removeListenerForAllEvents to throw.
     if (!isWorker && this.global && !this.global.toString().includes("Sandbox")) {
-      let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                .getService(Ci.nsIEventListenerService);
-      els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
+      Services.els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
       for (let [, bp] of this._hiddenBreakpoints) {
         bp.delete();
       }
@@ -1644,7 +1631,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
 
       if (promises.length > 0) {
-        this.unsafeSynchronize(promise.all(promises));
+        this.unsafeSynchronize(Promise.all(promises));
       }
     } else {
       // Bug 1225160: If addSource is called in response to a new script

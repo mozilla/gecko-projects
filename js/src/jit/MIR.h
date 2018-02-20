@@ -1283,10 +1283,10 @@ class MAryInstruction : public MInstruction
     mozilla::Array<MUse, Arity> operands_;
 
   protected:
-    MUse* getUseFor(size_t index) final override {
+    MUse* getUseFor(size_t index) final {
         return &operands_[index];
     }
-    const MUse* getUseFor(size_t index) const final override {
+    const MUse* getUseFor(size_t index) const final {
         return &operands_[index];
     }
     void initOperand(size_t index, MDefinition* operand) {
@@ -1294,21 +1294,21 @@ class MAryInstruction : public MInstruction
     }
 
   public:
-    MDefinition* getOperand(size_t index) const final override {
+    MDefinition* getOperand(size_t index) const final {
         return operands_[index].producer();
     }
-    size_t numOperands() const final override {
+    size_t numOperands() const final {
         return Arity;
     }
 #ifdef DEBUG
     static const size_t staticNumOperands = Arity;
 #endif
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u >= &operands_[0]);
         MOZ_ASSERT(u <= &operands_[numOperands() - 1]);
         return u - &operands_[0];
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         operands_[index].replaceProducer(operand);
     }
 
@@ -1463,27 +1463,27 @@ class MVariadicT : public T
         // FixedList doesn't initialize its elements, so do an unchecked init.
         operands_[index].initUnchecked(operand, this);
     }
-    MUse* getUseFor(size_t index) final override {
+    MUse* getUseFor(size_t index) final {
         return &operands_[index];
     }
-    const MUse* getUseFor(size_t index) const final override {
+    const MUse* getUseFor(size_t index) const final {
         return &operands_[index];
     }
 
   public:
     // Will assert if called before initialization.
-    MDefinition* getOperand(size_t index) const final override {
+    MDefinition* getOperand(size_t index) const final {
         return operands_[index].producer();
     }
-    size_t numOperands() const final override {
+    size_t numOperands() const final {
         return operands_.length();
     }
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u >= &operands_[0]);
         MOZ_ASSERT(u <= &operands_[numOperands() - 1]);
         return u - &operands_[0];
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         operands_[index].replaceProducer(operand);
     }
 };
@@ -3030,12 +3030,12 @@ class MTableSwitch final
         return 1;
     }
 
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u == getUseFor(0));
         return 0;
     }
 
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         MOZ_ASSERT(index == 0);
         operand_.replaceProducer(operand);
     }
@@ -3057,10 +3057,10 @@ class MAryControlInstruction : public MControlInstruction
         successors_[index] = successor;
     }
 
-    MUse* getUseFor(size_t index) final override {
+    MUse* getUseFor(size_t index) final {
         return &operands_[index];
     }
-    const MUse* getUseFor(size_t index) const final override {
+    const MUse* getUseFor(size_t index) const final {
         return &operands_[index];
     }
     void initOperand(size_t index, MDefinition* operand) {
@@ -3068,27 +3068,27 @@ class MAryControlInstruction : public MControlInstruction
     }
 
   public:
-    MDefinition* getOperand(size_t index) const final override {
+    MDefinition* getOperand(size_t index) const final {
         return operands_[index].producer();
     }
-    size_t numOperands() const final override {
+    size_t numOperands() const final {
         return Arity;
     }
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u >= &operands_[0]);
         MOZ_ASSERT(u <= &operands_[numOperands() - 1]);
         return u - &operands_[0];
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         operands_[index].replaceProducer(operand);
     }
-    size_t numSuccessors() const final override {
+    size_t numSuccessors() const final {
         return Successors;
     }
-    MBasicBlock* getSuccessor(size_t i) const final override {
+    MBasicBlock* getSuccessor(size_t i) const final {
         return successors_[i];
     }
-    void replaceSuccessor(size_t i, MBasicBlock* succ) final override {
+    void replaceSuccessor(size_t i, MBasicBlock* succ) final {
         successors_[i] = succ;
     }
 };
@@ -5595,12 +5595,12 @@ class MWasmTruncateToInt64
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    bool isUnsigned_;
+    TruncFlags flags_;
     wasm::BytecodeOffset bytecodeOffset_;
 
-    MWasmTruncateToInt64(MDefinition* def, bool isUnsigned, wasm::BytecodeOffset bytecodeOffset)
+    MWasmTruncateToInt64(MDefinition* def, TruncFlags flags, wasm::BytecodeOffset bytecodeOffset)
       : MUnaryInstruction(classOpcode, def),
-        isUnsigned_(isUnsigned),
+        flags_(flags),
         bytecodeOffset_(bytecodeOffset)
     {
         setResultType(MIRType::Int64);
@@ -5611,12 +5611,14 @@ class MWasmTruncateToInt64
     INSTRUCTION_HEADER(WasmTruncateToInt64)
     TRIVIAL_NEW_WRAPPERS
 
-    bool isUnsigned() const { return isUnsigned_; }
+    bool isUnsigned() const { return flags_ & TRUNC_UNSIGNED; }
+    bool isSaturating() const { return flags_ & TRUNC_SATURATING; }
+    TruncFlags flags() const { return flags_; }
     wasm::BytecodeOffset bytecodeOffset() const { return bytecodeOffset_; }
 
     bool congruentTo(const MDefinition* ins) const override {
         return congruentIfOperandsEqual(ins) &&
-               ins->toWasmTruncateToInt64()->isUnsigned() == isUnsigned_;
+               ins->toWasmTruncateToInt64()->flags() == flags_;
     }
     AliasSet getAliasSet() const override {
         return AliasSet::None();
@@ -5629,13 +5631,12 @@ class MWasmTruncateToInt32
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    bool isUnsigned_;
+    TruncFlags flags_;
     wasm::BytecodeOffset bytecodeOffset_;
 
-    explicit MWasmTruncateToInt32(MDefinition* def, bool isUnsigned,
+    explicit MWasmTruncateToInt32(MDefinition* def, TruncFlags flags,
                                   wasm::BytecodeOffset bytecodeOffset)
-      : MUnaryInstruction(classOpcode, def),
-        isUnsigned_(isUnsigned), bytecodeOffset_(bytecodeOffset)
+      : MUnaryInstruction(classOpcode, def), flags_(flags), bytecodeOffset_(bytecodeOffset)
     {
         setResultType(MIRType::Int32);
         setGuard(); // neither removable nor movable because of possible side-effects.
@@ -5646,7 +5647,13 @@ class MWasmTruncateToInt32
     TRIVIAL_NEW_WRAPPERS
 
     bool isUnsigned() const {
-        return isUnsigned_;
+        return flags_ & TRUNC_UNSIGNED;
+    }
+    bool isSaturating() const {
+        return flags_ & TRUNC_SATURATING;
+    }
+    TruncFlags flags() const {
+        return flags_;
     }
     wasm::BytecodeOffset bytecodeOffset() const {
         return bytecodeOffset_;
@@ -5656,7 +5663,7 @@ class MWasmTruncateToInt32
 
     bool congruentTo(const MDefinition* ins) const override {
         return congruentIfOperandsEqual(ins) &&
-               ins->toWasmTruncateToInt32()->isUnsigned() == isUnsigned_;
+               ins->toWasmTruncateToInt32()->flags() == flags_;
     }
 
     AliasSet getAliasSet() const override {
@@ -6040,11 +6047,11 @@ class MToAsyncGen
 };
 
 class MToAsyncIter
-  : public MUnaryInstruction,
-    public SingleObjectPolicy::Data
+  : public MBinaryInstruction,
+    public MixPolicy<ObjectPolicy<0>, BoxPolicy<1>>::Data
 {
-    explicit MToAsyncIter(MDefinition* unwrapped)
-      : MUnaryInstruction(classOpcode, unwrapped)
+    explicit MToAsyncIter(MDefinition* iterator, MDefinition* nextMethod)
+      : MBinaryInstruction(classOpcode, iterator, nextMethod)
     {
         setResultType(MIRType::Object);
     }
@@ -6052,6 +6059,7 @@ class MToAsyncIter
   public:
     INSTRUCTION_HEADER(ToAsyncIter)
     TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, getIterator), (1, getNextMethod))
 };
 
 class MToId
@@ -7911,12 +7919,12 @@ class MPhi final
     size_t numOperands() const override {
         return inputs_.length();
     }
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u >= &inputs_[0]);
         MOZ_ASSERT(u <= &inputs_[numOperands() - 1]);
         return u - &inputs_[0];
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         inputs_[index].replaceProducer(operand);
     }
     bool hasBackedgeType() const {
@@ -10011,7 +10019,7 @@ class MFallibleStoreElement
 };
 
 
-// Store an unboxed object or null pointer to a v\ector.
+// Store an unboxed object or null pointer to an elements vector.
 class MStoreUnboxedObjectOrNull
   : public MQuaternaryInstruction,
     public StoreUnboxedObjectOrNullPolicy::Data
@@ -10054,28 +10062,30 @@ class MStoreUnboxedObjectOrNull
     ALLOW_CLONE(MStoreUnboxedObjectOrNull)
 };
 
-// Store an unboxed object or null pointer to a vector.
+// Store an unboxed string to an elements vector.
 class MStoreUnboxedString
-  : public MTernaryInstruction,
-    public MixPolicy<SingleObjectPolicy, ConvertToStringPolicy<2> >::Data
+  : public MQuaternaryInstruction,
+    public StoreUnboxedStringPolicy::Data
 {
     int32_t offsetAdjustment_;
     bool preBarrier_;
 
-    MStoreUnboxedString(MDefinition* elements, MDefinition* index, MDefinition* value,
+    MStoreUnboxedString(MDefinition* elements, MDefinition* index,
+                        MDefinition* value, MDefinition* typedObj,
                         int32_t offsetAdjustment = 0, bool preBarrier = true)
-      : MTernaryInstruction(classOpcode, elements, index, value),
+      : MQuaternaryInstruction(classOpcode, elements, index, value, typedObj),
         offsetAdjustment_(offsetAdjustment),
         preBarrier_(preBarrier)
     {
         MOZ_ASSERT(IsValidElementsType(elements, offsetAdjustment));
         MOZ_ASSERT(index->type() == MIRType::Int32);
+        MOZ_ASSERT(typedObj->type() == MIRType::Object);
     }
 
   public:
     INSTRUCTION_HEADER(StoreUnboxedString)
     TRIVIAL_NEW_WRAPPERS
-    NAMED_OPERANDS((0, elements), (1, index), (2, value))
+    NAMED_OPERANDS((0, elements), (1, index), (2, value), (3, typedObj));
 
     int32_t offsetAdjustment() const {
         return offsetAdjustment_;
@@ -10085,6 +10095,12 @@ class MStoreUnboxedString
     }
     AliasSet getAliasSet() const override {
         return AliasSet::Store(AliasSet::UnboxedElement);
+    }
+
+    // For StoreUnboxedStringPolicy, to replace the original output with the
+    // output of a post barrier (if one is needed.)
+    void setValue(MDefinition* def) {
+        replaceOperand(2, def);
     }
 
     ALLOW_CLONE(MStoreUnboxedString)
@@ -11345,26 +11361,26 @@ class MDispatchInstruction
     }
 
   protected:
-    MUse* getUseFor(size_t index) final override {
+    MUse* getUseFor(size_t index) final {
         MOZ_ASSERT(index == 0);
         return &operand_;
     }
-    const MUse* getUseFor(size_t index) const final override {
+    const MUse* getUseFor(size_t index) const final {
         MOZ_ASSERT(index == 0);
         return &operand_;
     }
-    MDefinition* getOperand(size_t index) const final override {
+    MDefinition* getOperand(size_t index) const final {
         MOZ_ASSERT(index == 0);
         return operand_.producer();
     }
-    size_t numOperands() const final override {
+    size_t numOperands() const final {
         return 1;
     }
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u == getUseFor(0));
         return 0;
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         MOZ_ASSERT(index == 0);
         operand_.replaceProducer(operand);
     }
@@ -11377,13 +11393,13 @@ class MDispatchInstruction
         else
             map_[i].block = successor;
     }
-    size_t numSuccessors() const final override {
+    size_t numSuccessors() const final {
         return map_.length() + (fallback_ ? 1 : 0);
     }
-    void replaceSuccessor(size_t i, MBasicBlock* successor) final override {
+    void replaceSuccessor(size_t i, MBasicBlock* successor) final {
         setSuccessor(i, successor);
     }
-    MBasicBlock* getSuccessor(size_t i) const final override {
+    MBasicBlock* getSuccessor(size_t i) const final {
         MOZ_ASSERT(i < numSuccessors());
         if (i == map_.length())
             return fallback_;
@@ -13537,7 +13553,7 @@ class MResumePoint final :
     size_t numOperands() const override {
         return numAllocatedOperands();
     }
-    size_t indexOf(const MUse* u) const final override {
+    size_t indexOf(const MUse* u) const final {
         MOZ_ASSERT(u >= &operands_[0]);
         MOZ_ASSERT(u <= &operands_[numOperands() - 1]);
         return u - &operands_[0];
@@ -13546,7 +13562,7 @@ class MResumePoint final :
         // FixedList doesn't initialize its elements, so do an unchecked init.
         operands_[index].initUnchecked(operand, this);
     }
-    void replaceOperand(size_t index, MDefinition* operand) final override {
+    void replaceOperand(size_t index, MDefinition* operand) final {
         operands_[index].replaceProducer(operand);
     }
 

@@ -13,19 +13,17 @@
 
 #include "jsapi.h"
 #include "jsarray.h"
-#include "jscntxt.h"
 #include "jsnum.h"
-#include "jsobj.h"
-#ifdef XP_WIN
-# include "jswin.h"
-#endif
 #include "jswrapper.h"
 
 #include "jit/AtomicOperations.h"
 #include "js/Conversions.h"
+#include "util/Windows.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 #include "vm/SharedMem.h"
 #include "vm/WrapperObject.h"
 
@@ -40,13 +38,10 @@ using namespace js::gc;
 using mozilla::AssertedCast;
 using JS::CanonicalizeNaN;
 using JS::ToInt32;
-using JS::ToUint32;
 
 static NewObjectKind
-DataViewNewObjectKind(JSContext* cx, uint32_t byteLength, JSObject* proto)
+DataViewNewObjectKind(JSContext* cx)
 {
-    if (!proto && byteLength >= TypedArrayObject::SINGLETON_BYTE_LENGTH)
-        return SingletonObject;
     jsbytecode* pc;
     JSScript* script = cx->currentScript(&pc);
     if (script && ObjectGroup::useSingletonForAllocationSite(script, pc, &DataViewObject::class_))
@@ -70,7 +65,7 @@ DataViewObject::create(JSContext* cx, uint32_t byteOffset, uint32_t byteLength,
     RootedObject proto(cx, protoArg);
     RootedObject obj(cx);
 
-    NewObjectKind newKind = DataViewNewObjectKind(cx, byteLength, proto);
+    NewObjectKind newKind = DataViewNewObjectKind(cx);
     obj = NewObjectWithClassProto(cx, &class_, proto, newKind);
     if (!obj)
         return nullptr;

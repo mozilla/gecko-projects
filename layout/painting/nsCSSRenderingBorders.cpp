@@ -18,7 +18,9 @@
 #include "nsStyleConsts.h"
 #include "nsContentUtils.h"
 #include "nsCSSColorUtils.h"
+#include "nsCSSRendering.h"
 #include "nsCSSRenderingGradients.h"
+#include "nsDisplayList.h"
 #include "GeckoProfiler.h"
 #include "nsExpirationTracker.h"
 #include "RoundedRect.h"
@@ -30,11 +32,13 @@
 #include "gfx2DGlue.h"
 #include "gfxGradientCache.h"
 #include "mozilla/layers/StackingContextHelper.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/Range.h"
 #include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::gfx;
+using namespace mozilla::image;
 
 #define MAX_COMPOSITE_BORDER_WIDTH LayoutDeviceIntCoord(10000)
 
@@ -3836,9 +3840,11 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(nsIFrame* aForFrame,
   // <http://dev.w3.org/csswg/css-backgrounds/#corner-clipping>.
   nsMargin borderWidths(aStyleBorder.GetComputedBorder());
   mImageOutset = aStyleBorder.GetImageOutset();
-  if (::IsBoxDecorationSlice(aStyleBorder) && !aSkipSides.IsEmpty()) {
-    mArea = ::BoxDecorationRectForBorder(aForFrame, aBorderArea,
-                                         aSkipSides, &aStyleBorder);
+  if (nsCSSRendering::IsBoxDecorationSlice(aStyleBorder) &&
+      !aSkipSides.IsEmpty()) {
+    mArea = nsCSSRendering::BoxDecorationRectForBorder(aForFrame, aBorderArea,
+                                                       aSkipSides,
+                                                       &aStyleBorder);
     if (mArea.IsEqualEdges(aBorderArea)) {
       // No need for a clip, just skip the sides we don't want.
       borderWidths.ApplySkipSides(aSkipSides);

@@ -241,7 +241,7 @@ WebRenderAPI::InitExternalLogHandler()
 {
   // Redirect the webrender's log to gecko's log system.
   // The current log level is "error".
-  mozilla::wr::wr_init_external_log_handler(wr::LogLevelFilter::Error);
+  mozilla::wr::wr_init_external_log_handler(wr::WrLogLevelFilter::Error);
 }
 
 /*static*/ void
@@ -400,7 +400,7 @@ WebRenderAPI::Readback(gfx::IntSize size,
 
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
-                aRenderThread.UpdateAndRender(aWindowId);
+                aRenderThread.UpdateAndRender(aWindowId, /* aReadback */ true);
                 wr_renderer_readback(aRenderThread.GetRenderer(aWindowId)->GetRenderer(),
                                      mSize.width, mSize.height, mBuffer, mBufferSize);
                 layers::AutoCompleteTask complete(mTask);

@@ -4,6 +4,7 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 import copy
+import subprocess
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.scriptworker import get_release_config
@@ -74,5 +75,5 @@ def command_to_string(config, jobs):
     """Convert command to string to make it work properly with run-task"""
     for job in jobs:
         job = copy.deepcopy(job)  # don't overwrite dict values here
-        job["run"]["command"] = " ".join(job["run"]["command"])
+        job["run"]["command"] = subprocess.list2cmdline(job["run"]["command"])
         yield job

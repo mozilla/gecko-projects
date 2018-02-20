@@ -14,8 +14,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Variant.h"
 
-#include "jsfun.h"
-#include "jsscript.h"
 #include "jsutil.h"
 
 #include "gc/Rooting.h"
@@ -24,12 +22,13 @@
 #endif
 #include "jit/JSJitFrameIter.h"
 #include "js/RootingAPI.h"
+#include "js/TypeDecls.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/JSFunction.h"
+#include "vm/JSScript.h"
 #include "vm/SavedFrame.h"
 #include "wasm/WasmFrameIter.h"
 #include "wasm/WasmTypes.h"
-
-struct JSCompartment;
 
 namespace JS {
 namespace dbg {
@@ -324,7 +323,7 @@ class InterpreterFrame
         PREV_UP_TO_DATE        =       0x20,  /* see DebugScopes::updateLiveScopes */
 
         /*
-         * See comment above 'isDebuggee' in jscompartment.h for explanation of
+         * See comment above 'isDebuggee' in JSCompartment.h for explanation of
          * invariants of debuggee compartments, scripts, and frames.
          */
         DEBUGGEE               =       0x40,  /* Execution is being observed by Debugger */

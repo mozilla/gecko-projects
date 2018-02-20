@@ -484,6 +484,11 @@ LDefinition::dump() const
 void
 LNode::printOperands(GenericPrinter& out)
 {
+    if (isMoveGroup()) {
+        toMoveGroup()->printOperands(out);
+        return;
+    }
+
     size_t numOperands = isPhi() ? toPhi()->numOperands() : toInstruction()->numOperands();
 
     for (size_t i = 0; i < numOperands; i++) {
@@ -511,13 +516,42 @@ LInstruction::assignSnapshot(LSnapshot* snapshot)
 #endif
 }
 
+#ifdef JS_JITSPEW
+static MBasicBlock*
+GetSuccessorHelper(const LNode* ins, size_t i)
+{
+    MOZ_CRASH("Unexpected instruction with successors");
+}
+
+template <size_t Succs, size_t Operands, size_t Temps>
+static MBasicBlock*
+GetSuccessorHelper(const LControlInstructionHelper<Succs, Operands, Temps>* ins, size_t i)
+{
+    return ins->getSuccessor(i);
+}
+
+static MBasicBlock*
+GetSuccessor(const LInstruction* ins, size_t i)
+{
+    MOZ_ASSERT(i < ins->numSuccessors());
+
+    switch (ins->op()) {
+      default: MOZ_CRASH("Unexpected LIR op");
+# define LIROP(x) case LNode::LOp_##x: return GetSuccessorHelper(ins->to##x(), i);
+    LIR_OPCODE_LIST(LIROP)
+# undef LIROP
+    }
+}
+#endif
+
 void
 LNode::dump(GenericPrinter& out)
 {
     if (numDefs() != 0) {
         out.printf("{");
         for (size_t i = 0; i < numDefs(); i++) {
-            out.printf("%s", getDef(i)->toString().get());
+            const LDefinition* def = isPhi() ? toPhi()->getDef(i) : toInstruction()->getDef(i);
+            out.printf("%s", def->toString().get());
             if (i != numDefs() - 1)
                 out.printf(", ");
         }
@@ -527,24 +561,34 @@ LNode::dump(GenericPrinter& out)
     printName(out);
     printOperands(out);
 
-    if (numTemps()) {
-        out.printf(" t=(");
-        for (size_t i = 0; i < numTemps(); i++) {
-            out.printf("%s", getTemp(i)->toString().get());
-            if (i != numTemps() - 1)
-                out.printf(", ");
+    if (isInstruction()) {
+        LInstruction* ins = toInstruction();
+        size_t numTemps = ins->numTemps();
+        if (numTemps > 0) {
+            out.printf(" t=(");
+            for (size_t i = 0; i < numTemps; i++) {
+                out.printf("%s", ins->getTemp(i)->toString().get());
+                if (i != numTemps - 1)
+                    out.printf(", ");
+            }
+            out.printf(")");
         }
-        out.printf(")");
-    }
 
-    if (numSuccessors()) {
-        out.printf(" s=(");
-        for (size_t i = 0; i < numSuccessors(); i++) {
-            out.printf("block%u", getSuccessor(i)->id());
-            if (i != numSuccessors() - 1)
-                out.printf(", ");
+        size_t numSuccessors = ins->numSuccessors();
+        if (numSuccessors > 0) {
+            out.printf(" s=(");
+            for (size_t i = 0; i < numSuccessors; i++) {
+#ifdef JS_JITSPEW
+                MBasicBlock* succ = GetSuccessor(ins, i);
+                out.printf("block%u", succ->id());
+#else
+                out.put("block<unknown>");
+#endif
+                if (i != numSuccessors - 1)
+                    out.printf(", ");
+            }
+            out.printf(")");
         }
-        out.printf(")");
     }
 }
 
@@ -555,6 +599,17 @@ LNode::dump()
     dump(out);
     out.printf("\n");
     out.finish();
+}
+
+const char*
+LNode::getExtraName() const
+{
+    switch (op()) {
+      default: MOZ_CRASH("Unexpected LIR op");
+# define LIROP(x) case LNode::LOp_##x: return to##x()->extraName();
+    LIR_OPCODE_LIST(LIROP)
+# undef LIROP
+    }
 }
 
 void

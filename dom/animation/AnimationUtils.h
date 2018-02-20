@@ -33,7 +33,7 @@ public:
 
     if (!aTime.IsNull()) {
       result.SetValue(
-        nsRFPService::ReduceTimePrecisionAsMSecs(aTime.Value().ToMilliseconds())
+        nsRFPService::ReduceTimePrecisionAsMSecs(aTime.Value().ToMilliseconds(), TimerPrecisionType::RFPOnly)
       );
     }
 
@@ -60,6 +60,14 @@ public:
    */
   static nsIDocument*
   GetCurrentRealmDocument(JSContext* aCx);
+
+  /**
+   * Get the document from the global object, or nullptr if the document has
+   * no window, to use when constructing DOM object without entering the
+   * target window's compartment (see KeyframeEffect constructor).
+   */
+  static nsIDocument*
+  GetDocumentFromGlobal(JSObject* aGlobalObject);
 
   /**
    * Checks if offscreen animation throttling is enabled.

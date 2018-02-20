@@ -1,6 +1,8 @@
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.defineModuleGetter(this, "Preferences",
+                               "resource://gre/modules/Preferences.jsm");
 Cu.importGlobalProperties(["URLSearchParams"]);
 
 const DESCRIPTION_ANNO = "bookmarkProperties/description";
@@ -1892,7 +1894,7 @@ add_task(async function test_fetch() {
       parentRecordId: "menu",
       description: "Folder description",
       childRecordIds: [folderBmk.recordId, folderSep.recordId],
-      parentTitle: "Bookmarks Menu",
+      parentTitle: "menu",
       dateAdded: item.dateAdded,
       title: "",
     }, "Should include description, children, title, and parent title in folder");
@@ -1910,7 +1912,7 @@ add_task(async function test_fetch() {
     deepEqual(item.tags, ["taggy"], "Should return tags");
     equal(item.description, "Bookmark description", "Should return bookmark description");
     strictEqual(item.loadInSidebar, true, "Should return sidebar anno");
-    equal(item.parentTitle, "Bookmarks Menu", "Should return parent title");
+    equal(item.parentTitle, "menu", "Should return parent title");
     strictEqual(item.title, "", "Should return empty title");
   }
 
@@ -2809,6 +2811,13 @@ add_task(async function test_remove_partial() {
 });
 
 add_task(async function test_migrateOldTrackerEntries() {
+  let timerPrecision = Preferences.get("privacy.reduceTimerPrecision");
+  Preferences.set("privacy.reduceTimerPrecision", false);
+
+  registerCleanupFunction(function() {
+    Preferences.set("privacy.reduceTimerPrecision", timerPrecision);
+  });
+
   let unknownBmk = await PlacesUtils.bookmarks.insert({
     parentGuid: PlacesUtils.bookmarks.menuGuid,
     url: "http://getfirefox.com",

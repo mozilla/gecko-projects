@@ -13,13 +13,13 @@
 #include <stdint.h>
 
 #include "jsfriendapi.h"
-#include "jsobj.h"
 #include "NamespaceImports.h"
 
 #include "gc/Barrier.h"
 #include "gc/Heap.h"
 #include "gc/Marking.h"
 #include "js/Value.h"
+#include "vm/JSObject.h"
 #include "vm/Shape.h"
 #include "vm/ShapedObject.h"
 #include "vm/String.h"
@@ -1401,8 +1401,7 @@ class NativeObject : public ShapedObject
     }
 
     void setPrivateGCThing(gc::Cell* cell) {
-        MOZ_ASSERT_IF(IsMarkedBlack(this),
-                      !JS::GCThingIsMarkedGray(JS::GCCellPtr(cell, cell->getTraceKind())));
+        MOZ_ASSERT_IF(IsMarkedBlack(this), !cell->isMarkedGray());
         void** pprivate = &privateRef(numFixedSlots());
         privateWriteBarrierPre(pprivate);
         *pprivate = reinterpret_cast<void*>(cell);
@@ -1611,7 +1610,7 @@ AddPropertyTypesAfterProtoChange(JSContext* cx, NativeObject* obj, ObjectGroup* 
 } // namespace js
 
 
-/*** Inline functions declared in jsobj.h that use the native declarations above *****************/
+/*** Inline functions declared in JSObject.h that use the native declarations above **************/
 
 inline bool
 js::HasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp)

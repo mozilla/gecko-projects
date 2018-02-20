@@ -10,19 +10,13 @@
 
 #include "jsexn.h"
 
-#include "mozilla/ArrayUtils.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
 #include <string.h>
 
 #include "jsapi.h"
-#include "jscntxt.h"
-#include "jsfun.h"
 #include "jsnum.h"
-#include "jsobj.h"
 #include "jsprf.h"
-#include "jsscript.h"
 #include "jstypes.h"
 #include "jsutil.h"
 #include "jswrapper.h"
@@ -32,20 +26,20 @@
 #include "js/CharacterEncoding.h"
 #include "vm/ErrorObject.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/SavedStacks.h"
 #include "vm/SelfHosting.h"
 #include "vm/StringBuffer.h"
 
-#include "jsobjinlines.h"
-
 #include "vm/ErrorObject-inl.h"
+#include "vm/JSObject-inl.h"
 #include "vm/SavedStacks-inl.h"
 
 using namespace js;
 using namespace js::gc;
-
-using mozilla::ArrayLength;
-using mozilla::PodArrayZero;
 
 static void
 exn_finalize(FreeOp* fop, JSObject* obj);

@@ -15,9 +15,8 @@
 #include "mozilla/Casting.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsgc.h"
-
 #include "builtin/SymbolObject.h"
+#include "gc/GC.h"
 #include "jit/BaselineJIT.h"
 #include "vm/ArrayObject.h"
 #include "vm/BooleanObject.h"
@@ -27,8 +26,7 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/UnboxedObject.h"
 
-#include "jscntxtinlines.h"
-
+#include "vm/JSContext-inl.h"
 #include "vm/ObjectGroup-inl.h"
 
 namespace js {

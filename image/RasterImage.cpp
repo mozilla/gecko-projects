@@ -12,6 +12,7 @@
 #include "gfxPlatform.h"
 #include "nsComponentManagerUtils.h"
 #include "nsError.h"
+#include "DecodePool.h"
 #include "Decoder.h"
 #include "prenv.h"
 #include "prsystem.h"
@@ -577,12 +578,7 @@ RasterImage::GetFrameAtSize(const IntSize& aSize,
 #endif
 
   auto result = GetFrameInternal(aSize, Nothing(), aWhichFrame, aFlags);
-  RefPtr<SourceSurface> surf = mozilla::Get<2>(result).forget();
-
-  // If we are here, it suggests the image is embedded in a canvas or some
-  // other path besides layers, and we won't need the file handle.
-  MarkSurfaceShared(surf);
-  return surf.forget();
+  return mozilla::Get<2>(result).forget();
 }
 
 Tuple<ImgDrawResult, IntSize, RefPtr<SourceSurface>>

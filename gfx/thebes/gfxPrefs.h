@@ -537,6 +537,7 @@ private:
   DECL_GFX_PREF(Once, "image.mem.surfacecache.min_expiration_ms", ImageMemSurfaceCacheMinExpirationMS, uint32_t, 60*1000);
   DECL_GFX_PREF(Once, "image.mem.surfacecache.size_factor",    ImageMemSurfaceCacheSizeFactor, uint32_t, 64);
   DECL_GFX_PREF(Once, "image.multithreaded_decoding.limit",    ImageMTDecodingLimit, int32_t, -1);
+  DECL_GFX_PREF(Once, "image.multithreaded_decoding.idle_timeout", ImageMTDecodingIdleTimeout, int32_t, -1);
 
   DECL_GFX_PREF(Once, "layers.acceleration.disabled",          LayersAccelerationDisabledDoNotUseDirectly, bool, false);
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps",          LayersDrawFPS, bool, false);
@@ -615,6 +616,7 @@ private:
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-container-resizing", AdvancedLayersEnableContainerResizing, bool, true);
   DECL_GFX_PREF(Once, "layers.offmainthreadcomposition.force-disabled", LayersOffMainThreadCompositionForceDisabled, bool, false);
   DECL_GFX_PREF(Live, "layers.offmainthreadcomposition.frame-rate", LayersCompositionFrameRate, int32_t,-1);
+  DECL_GFX_PREF(Live, "layers.omtp.dump-capture",              LayersOMTPDumpCapture, bool, false);
   DECL_GFX_PREF(Live, "layers.omtp.paint-workers",             LayersOMTPPaintWorkers, int32_t, 1);
   DECL_GFX_PREF(Live, "layers.omtp.release-capture-on-main-thread", LayersOMTPReleaseCaptureOnMainThread, bool, false);
   DECL_GFX_PREF(Live, "layers.orientation.sync.timeout",       OrientationSyncMillis, uint32_t, (uint32_t)0);

@@ -6,15 +6,14 @@
 
 #include "builtin/MapObject.h"
 
-#include "jscntxt.h"
-#include "jsiter.h"
-#include "jsobj.h"
-
 #include "ds/OrderedHashTable.h"
 #include "gc/FreeOp.h"
 #include "js/Utility.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Iteration.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 #include "vm/SelfHosting.h"
 #include "vm/Symbol.h"
 
@@ -24,12 +23,10 @@
 
 using namespace js;
 
-using mozilla::ArrayLength;
 using mozilla::IsNaN;
 using mozilla::NumberEqualsInt32;
 
 using JS::DoubleNaNValue;
-using JS::ForOfIterator;
 
 
 /*** HashableValue *******************************************************************************/

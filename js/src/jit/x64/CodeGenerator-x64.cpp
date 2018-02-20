@@ -10,10 +10,9 @@
 
 #include "jit/MIR.h"
 
-#include "jsscriptinlines.h"
-
 #include "jit/MacroAssembler-inl.h"
 #include "jit/shared/CodeGenerator-shared-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -285,20 +284,23 @@ CodeGeneratorX64::visitDivOrModI64(LDivOrModI64* lir)
 
     // Handle divide by zero.
     if (lir->canBeDivideByZero()) {
-        masm.branchTestPtr(Assembler::Zero, rhs, rhs, oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+        Label nonZero;
+        masm.branchTestPtr(Assembler::NonZero, rhs, rhs, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
     }
 
     // Handle an integer overflow exception from INT64_MIN / -1.
     if (lir->canBeNegativeOverflow()) {
-        Label notmin;
-        masm.branchPtr(Assembler::NotEqual, lhs, ImmWord(INT64_MIN), &notmin);
-        masm.branchPtr(Assembler::NotEqual, rhs, ImmWord(-1), &notmin);
+        Label notOverflow;
+        masm.branchPtr(Assembler::NotEqual, lhs, ImmWord(INT64_MIN), &notOverflow);
+        masm.branchPtr(Assembler::NotEqual, rhs, ImmWord(-1), &notOverflow);
         if (lir->mir()->isMod())
             masm.xorl(output, output);
         else
-            masm.jump(oldTrap(lir, wasm::Trap::IntegerOverflow));
+            masm.wasmTrap(wasm::Trap::IntegerOverflow, lir->bytecodeOffset());
         masm.jump(&done);
-        masm.bind(&notmin);
+        masm.bind(&notOverflow);
     }
 
     // Sign extend the lhs into rdx to make rdx:rax.
@@ -327,8 +329,12 @@ CodeGeneratorX64::visitUDivOrModI64(LUDivOrModI64* lir)
     Label done;
 
     // Prevent divide by zero.
-    if (lir->canBeDivideByZero())
-        masm.branchTestPtr(Assembler::Zero, rhs, rhs, oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+    if (lir->canBeDivideByZero()) {
+        Label nonZero;
+        masm.branchTestPtr(Assembler::NonZero, rhs, rhs, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
+    }
 
     // Zero extend the lhs into rdx to make (rdx:rax).
     masm.xorl(rdx, rdx);
@@ -734,23 +740,28 @@ CodeGeneratorX64::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 
     MOZ_ASSERT(inputType == MIRType::Double || inputType == MIRType::Float32);
 
-    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input, output);
     addOutOfLineCode(ool, mir);
 
     FloatRegister temp = mir->isUnsigned() ? ToFloatRegister(lir->temp()) : InvalidFloatReg;
 
     Label* oolEntry = ool->entry();
     Label* oolRejoin = ool->rejoin();
+    bool isSaturating = mir->isSaturating();
     if (inputType == MIRType::Double) {
         if (mir->isUnsigned())
-            masm.wasmTruncateDoubleToUInt64(input, output, oolEntry, oolRejoin, temp);
+            masm.wasmTruncateDoubleToUInt64(input, output, isSaturating,
+                                            oolEntry, oolRejoin, temp);
         else
-            masm.wasmTruncateDoubleToInt64(input, output, oolEntry, oolRejoin, temp);
+            masm.wasmTruncateDoubleToInt64(input, output, isSaturating,
+                                           oolEntry, oolRejoin, temp);
     } else {
         if (mir->isUnsigned())
-            masm.wasmTruncateFloat32ToUInt64(input, output, oolEntry, oolRejoin, temp);
+            masm.wasmTruncateFloat32ToUInt64(input, output, isSaturating,
+                                             oolEntry, oolRejoin, temp);
         else
-            masm.wasmTruncateFloat32ToInt64(input, output, oolEntry, oolRejoin, temp);
+            masm.wasmTruncateFloat32ToInt64(input, output, isSaturating,
+                                            oolEntry, oolRejoin, temp);
     }
 }
 

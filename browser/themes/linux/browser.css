@@ -261,24 +261,13 @@ html|*.addon-webext-perm-list {
 }
 
 .popup-notification-description[popupid="addon-webext-permissions"],
-.popup-notification-description[popupid="addon-installed"] {
-  display: none;
+.popup-notification-description[popupid="addon-webext-permissions-notification"] {
+  margin-inline-start: -1px;
 }
 
 .addon-webext-perm-notification-content,
 .addon-installed-notification-content {
   margin-top: 0;
-}
-
-#addon-webext-perm-header {
-  /* Align the text more closely with the icon by clearing some top line height. */
-  margin-top: -1px;
-  margin-inline-start: 0;
-}
-
-#addon-installed-notification-header {
-  /* Align the text more closely with the icon by clearing some top line height. */
-  margin-top: -1px;
 }
 
 .addon-webext-name {
@@ -481,8 +470,8 @@ notification[value="translation"] menulist > .menulist-dropmarker {
 }
 
 @media (-moz-menubar-drag) {
-  #toolbar-menubar:not([autohide="true"]):not(:-moz-lwtheme),
-  #TabsToolbar:not(:-moz-lwtheme) {
+  #toolbar-menubar:not([autohide="true"]),
+  #TabsToolbar {
     -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-drag");
   }
 }
@@ -663,6 +652,20 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   }
   :root[tabsintitlebar][sizemode="maximized"] > #titlebar {
     -moz-appearance: -moz-window-titlebar-maximized;
+  }
+
+  /* Add extra space to titlebar for dragging */
+  :root[sizemode="normal"][chromehidden~="menubar"] #TabsToolbar,
+  :root[sizemode="normal"] #toolbar-menubar[autohide="true"][inactive] + #TabsToolbar {
+    margin-top: var(--space-above-tabbar);
+  }
+
+  /* Private browsing and accessibility indicators */
+  :root[sizemode="normal"][chromehidden~="menubar"] #TabsToolbar > .private-browsing-indicator,
+  :root[sizemode="normal"][chromehidden~="menubar"] #TabsToolbar > .accessibility-indicator,
+  :root[sizemode="normal"] #toolbar-menubar[autohide="true"][inactive] + #TabsToolbar > .private-browsing-indicator,
+  :root[sizemode="normal"] #toolbar-menubar[autohide="true"][inactive] + #TabsToolbar > .accessibility-indicator {
+    margin-top: calc(-1 * var(--space-above-tabbar));
   }
 
   /* The button box must appear on top of the navigator-toolbox in order for

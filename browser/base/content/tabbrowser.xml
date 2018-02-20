@@ -9,6 +9,13 @@
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
           xmlns:xbl="http://www.mozilla.org/xbl">
 
+  <!--
+  This binding is bound to <toolbox id="navigator-toolbox"> so that
+  the #tabbrowser binding is initialized before the #tabs binding.
+  Remove after bug 1392352.
+  -->
+  <binding id="empty"/>
+
   <binding id="tabbrowser">
     <resources>
       <stylesheet src="chrome://browser/content/tabbrowser.css"/>
@@ -492,11 +499,13 @@
           if (!aBrowser)
             aBrowser = this.mCurrentBrowser;
 
+          // eslint-disable-next-line mozilla/no-compare-against-boolean-literals
           if (aCallGlobalListeners != false &&
               aBrowser == this.mCurrentBrowser) {
             callListeners(this.mProgressListeners, aArguments);
           }
 
+          // eslint-disable-next-line mozilla/no-compare-against-boolean-literals
           if (aCallTabsListeners != false) {
             aArguments.unshift(aBrowser);
 
@@ -3890,6 +3899,7 @@
             let event = document.createEvent("Events");
             event.initEvent("TabShow", true, false);
             aTab.dispatchEvent(event);
+            SessionStore.deleteTabValue(aTab, "hiddenBy");
           }
         ]]>
         </body>
@@ -3897,6 +3907,7 @@
 
       <method name="hideTab">
         <parameter name="aTab"/>
+        <parameter name="aSource"/>
         <body>
         <![CDATA[
           if (!aTab.hidden && !aTab.pinned && !aTab.selected &&
@@ -3911,6 +3922,9 @@
             let event = document.createEvent("Events");
             event.initEvent("TabHide", true, false);
             aTab.dispatchEvent(event);
+            if (aSource) {
+              SessionStore.setTabValue(aTab, "hiddenBy", aSource);
+            }
           }
         ]]>
         </body>
@@ -6339,31 +6353,39 @@
 
     <handlers>
       <handler event="underflow" phase="capturing"><![CDATA[
-        if (event.originalTarget != this._scrollbox)
+        // Ignore underflow events:
+        // - from nested scrollable elements
+        // - for vertical orientation
+        // - corresponding to an overflow event that we ignored
+        let tabs = document.getBindingParent(this);
+        if (event.originalTarget != this._scrollbox ||
+            event.detail == 0 ||
+            !tabs.hasAttribute("overflow")) {
           return;
+        }
 
-        // Ignore vertical events
-        if (event.detail == 0)
-          return;
-
-        var tabs = document.getBindingParent(this);
         tabs.removeAttribute("overflow");
 
-        if (tabs._lastTabClosedByMouse)
+        if (tabs._lastTabClosedByMouse) {
           tabs._expandSpacerBy(this._scrollButtonDown.clientWidth);
+        }
 
-        for (let tab of Array.from(tabs.tabbrowser._removingTabs))
+        for (let tab of Array.from(tabs.tabbrowser._removingTabs)) {
           tabs.tabbrowser.removeTab(tab);
+        }
 
         tabs._positionPinnedTabs();
       ]]></handler>
       <handler event="overflow"><![CDATA[
-        if (event.originalTarget != this._scrollbox)
+        // Ignore overflow events:
+        // - from nested scrollable elements
+        // - for vertical orientation
+        // - when the window is tiny initially
+        if (event.originalTarget != this._scrollbox ||
+            event.detail == 0 ||
+            window.outerWidth <= 1) {
           return;
-
-        // Ignore vertical events
-        if (event.detail == 0)
-          return;
+        }
 
         var tabs = document.getBindingParent(this);
         tabs.setAttribute("overflow", "true");
@@ -6442,7 +6464,7 @@
       </destructor>
 
       <field name="tabbrowser" readonly="true">
-        document.getElementById(this.getAttribute("tabbrowser"));
+        gBrowser;
       </field>
 
       <field name="tabbox" readonly="true">

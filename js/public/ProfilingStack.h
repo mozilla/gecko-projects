@@ -15,9 +15,7 @@
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
-struct JSRuntime;
 class JSTracer;
-
 class PseudoStack;
 
 // This file defines the classes PseudoStack and ProfileEntry.
@@ -55,7 +53,7 @@ class PseudoStack;
 //
 // When the thread is suspended, the values in pseudoStack->stackPointer and in
 // the entry range pseudoStack->entries[0..pseudoStack->stackPointer] need to
-// be in a consistent state, so that thread A does not read partially-
+// be in a consistent state, so that thread S does not read partially-
 // constructed profile entries. More specifically, we have two requirements:
 //  (1) When adding a new entry at the top of the stack, its ProfileEntry data
 //      needs to be put in place *before* the stackPointer is incremented, and
@@ -267,6 +265,8 @@ class ProfileEntry
 JS_FRIEND_API(void)
 SetContextProfilingStack(JSContext* cx, PseudoStack* pseudoStack);
 
+// GetContextProfilingStack also exists, but it's defined in RootingAPI.h.
+
 JS_FRIEND_API(void)
 EnableContextProfilingStack(JSContext* cx, bool enabled);
 
@@ -381,5 +381,48 @@ class PseudoStack
     // for more details.
     mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> stackPointer;
 };
+
+namespace js {
+
+class AutoGeckoProfilerEntry;
+class GeckoProfilerEntryMarker;
+class GeckoProfilerBaselineOSRMarker;
+
+class GeckoProfilerThread
+{
+    friend class AutoGeckoProfilerEntry;
+    friend class GeckoProfilerEntryMarker;
+    friend class GeckoProfilerBaselineOSRMarker;
+
+    PseudoStack*         pseudoStack_;
+
+  public:
+    GeckoProfilerThread();
+
+    uint32_t stackPointer() { MOZ_ASSERT(installed()); return pseudoStack_->stackPointer; }
+    ProfileEntry* stack() { return pseudoStack_->entries; }
+    PseudoStack* getPseudoStack() { return pseudoStack_; }
+
+    /* management of whether instrumentation is on or off */
+    bool installed() { return pseudoStack_ != nullptr; }
+
+    void setProfilingStack(PseudoStack* pseudoStack);
+    void trace(JSTracer* trc);
+
+    /*
+     * Functions which are the actual instrumentation to track run information
+     *
+     *   - enter: a function has started to execute
+     *   - updatePC: updates the pc information about where a function
+     *               is currently executing
+     *   - exit: this function has ceased execution, and no further
+     *           entries/exits will be made
+     */
+    bool enter(JSContext* cx, JSScript* script, JSFunction* maybeFun);
+    void exit(JSScript* script, JSFunction* maybeFun);
+    inline void updatePC(JSContext* cx, JSScript* script, jsbytecode* pc);
+};
+
+} // namespace js
 
 #endif  /* js_ProfilingStack_h */

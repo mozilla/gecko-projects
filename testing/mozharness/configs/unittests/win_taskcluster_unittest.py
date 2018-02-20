@@ -33,9 +33,7 @@ config = {
     "xpcshell_name": XPCSHELL_NAME,
     "virtualenv_modules": ['pypiwin32'],
     "virtualenv_path": 'venv',
-    "virtualenv_python_dll": os.path.join(os.path.dirname(sys.executable), "python27.dll"),
 
-    "proxxy": {},
     "find_links": [
         "http://pypi.pub.build.mozilla.org/pub",
     ],
@@ -63,16 +61,6 @@ config = {
         "mozpack/*",
         "mozbuild/*",
     ],
-    "specific_tests_zip_dirs": {
-        "mochitest": ["mochitest/*"],
-        "reftest": ["reftest/*", "jsreftest/*"],
-        "xpcshell": ["xpcshell/*"],
-        "cppunittest": ["cppunittest/*"],
-        "gtest": ["gtest/*"],
-        "jittest": ["jit-test/*"],
-        "mozbase": ["mozbase/*"],
-        "mozmill": ["mozmill/*"],
-    },
     "suite_definitions": {
         "cppunittest": {
             "options": [

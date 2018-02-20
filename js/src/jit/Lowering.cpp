@@ -14,10 +14,9 @@
 #include "jit/MIRGraph.h"
 #include "wasm/WasmSignalHandlers.h"
 
-#include "jsobjinlines.h"
-#include "jsopcodeinlines.h"
-
 #include "jit/shared/Lowering-shared-inl.h"
+#include "vm/BytecodeUtil-inl.h"
+#include "vm/JSObject-inl.h"
 
 using namespace js;
 using namespace jit;
@@ -116,7 +115,7 @@ TryToUseImplicitInterruptCheck(MIRGraph& graph, MBasicBlock* backedge)
                 continue;
             }
 
-            MOZ_ASSERT_IF(iter->isPostWriteBarrierO() || iter->isPostWriteBarrierV(),
+            MOZ_ASSERT_IF(iter->isPostWriteBarrierO() || iter->isPostWriteBarrierV() || iter->isPostWriteBarrierS(),
                           iter->safepoint());
 
             if (iter->safepoint())
@@ -1248,7 +1247,8 @@ LIRGenerator::visitToAsyncGen(MToAsyncGen* ins)
 void
 LIRGenerator::visitToAsyncIter(MToAsyncIter* ins)
 {
-    LToAsyncIter* lir = new(alloc()) LToAsyncIter(useRegisterAtStart(ins->input()));
+    LToAsyncIter* lir = new(alloc()) LToAsyncIter(useRegisterAtStart(ins->getIterator()),
+                                                  useBoxAtStart(ins->getNextMethod()));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2890,6 +2890,17 @@ LIRGenerator::visitPostWriteBarrier(MPostWriteBarrier* ins)
         assignSafepoint(lir, ins);
         break;
       }
+      case MIRType::String: {
+          LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
+          LPostWriteBarrierS* lir =
+            new(alloc()) LPostWriteBarrierS(useConstantObject
+                                            ? useOrConstant(ins->object())
+                                            : useRegister(ins->object()),
+                                            useRegister(ins->value()), tmp);
+        add(lir, ins);
+        assignSafepoint(lir, ins);
+        break;
+      }
       case MIRType::Value: {
         LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
         LPostWriteBarrierV* lir =
@@ -2903,8 +2914,8 @@ LIRGenerator::visitPostWriteBarrier(MPostWriteBarrier* ins)
         break;
       }
       default:
-        // Currently, only objects can be in the nursery. Other instruction
-        // types cannot hold nursery pointers.
+        // Currently, only objects and strings can be in the nursery. Other
+        // instruction types cannot hold nursery pointers.
         break;
     }
 }
@@ -2938,6 +2949,19 @@ LIRGenerator::visitPostWriteElementBarrier(MPostWriteElementBarrier* ins)
         assignSafepoint(lir, ins);
         break;
       }
+      case MIRType::String: {
+        LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
+        LPostWriteElementBarrierS* lir =
+            new(alloc()) LPostWriteElementBarrierS(useConstantObject
+                                                   ? useOrConstant(ins->object())
+                                                   : useRegister(ins->object()),
+                                                   useRegister(ins->value()),
+                                                   useRegister(ins->index()),
+                                                   tmp);
+        add(lir, ins);
+        assignSafepoint(lir, ins);
+        break;
+      }
       case MIRType::Value: {
         LDefinition tmp = needTempForPostBarrier() ? temp() : LDefinition::BogusTemp();
         LPostWriteElementBarrierV* lir =
@@ -2952,8 +2976,8 @@ LIRGenerator::visitPostWriteElementBarrier(MPostWriteElementBarrier* ins)
         break;
       }
       default:
-        // Currently, only objects can be in the nursery. Other instruction
-        // types cannot hold nursery pointers.
+        // Currently, only objects and strings can be in the nursery. Other
+        // instruction types cannot hold nursery pointers.
         break;
     }
 }
@@ -4659,12 +4683,12 @@ LIRGenerator::visitWasmCall(MWasmCall* ins)
     }
 
     LInstruction* lir;
-    if (ins->type() == MIRType::Int64) {
+    if (ins->type() == MIRType::Int64)
         lir = new(alloc()) LWasmCallI64(args, ins->numOperands(), needsBoundsCheck);
-    } else {
-        uint32_t numDefs = (ins->type() != MIRType::None) ? 1 : 0;
-        lir = new(alloc()) LWasmCall(args, ins->numOperands(), numDefs, needsBoundsCheck);
-    }
+    else if (ins->type() == MIRType::None)
+        lir = new(alloc()) LWasmCallVoid(args, ins->numOperands(), needsBoundsCheck);
+    else
+        lir = new(alloc()) LWasmCall(args, ins->numOperands(), needsBoundsCheck);
 
     if (ins->type() == MIRType::None)
         add(lir, ins);

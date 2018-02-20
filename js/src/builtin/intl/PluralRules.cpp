@@ -11,17 +11,15 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 
-#include "jscntxt.h"
-
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "gc/FreeOp.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSContext.h"
 #include "vm/String.h"
 
-#include "jsobjinlines.h"
-
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
@@ -29,11 +27,8 @@ using namespace js;
 using mozilla::AssertedCast;
 
 using js::intl::CallICU;
-using js::intl::DateTimeFormatOptions;
 using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
-using js::intl::INITIAL_CHAR_BUFFER_SIZE;
-using js::intl::StringsAreEqual;
 
 const ClassOps PluralRulesObject::classOps_ = {
     nullptr, /* addProperty */
@@ -78,7 +73,7 @@ static const JSFunctionSpec pluralRules_methods[] = {
 
 /**
  * PluralRules constructor.
- * Spec: ECMAScript 402 API, PluralRules, 1.1
+ * Spec: ECMAScript 402 API, PluralRules, 13.2.1
  */
 static bool
 PluralRules(JSContext* cx, unsigned argc, Value* vp)

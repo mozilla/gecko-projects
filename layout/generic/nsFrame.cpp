@@ -23,10 +23,13 @@
 #include "nsFrameList.h"
 #include "nsPlaceholderFrame.h"
 #include "nsPluginFrame.h"
+#include "nsIBaseWindow.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "nsContentUtils.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsCSSPseudoElements.h"
+#include "nsCSSRendering.h"
 #include "nsAtom.h"
 #include "nsString.h"
 #include "nsReadableUtils.h"
@@ -89,6 +92,7 @@
 #include "RetainedDisplayListBuilder.h"
 
 #include "gfxContext.h"
+#include "gfxPrefs.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "StickyScrollContainer.h"
 #include "nsFontInflationData.h"
@@ -734,6 +738,12 @@ nsFrame::Init(nsIContent*       aContent,
 
   if (::IsXULBoxWrapped(this))
     ::InitBoxMetrics(this, false);
+
+  // For a newly created frame, we need to update this frame's visibility state.
+  // Usually we update the state when the frame is restyled and has a
+  // VisibilityChange change hint but we don't generate any change hints for
+  // newly created frames.
+  UpdateVisibleDescendantsState();
 }
 
 void
@@ -1896,7 +1906,6 @@ nsIFrame::GetShapeBoxBorderRadii(nscoord aRadii[8]) const
       MOZ_ASSERT_UNREACHABLE("Unexpected box value");
       return false;
   }
-  return false;
 }
 
 nsStyleContext*
@@ -3028,7 +3037,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     }
 
     aBuilder->BuildCompositorHitTestInfoIfNeeded(this, set.BorderBackground(),
-                                                 false);
+                                                 true);
 
     MarkAbsoluteFramesForDisplayList(aBuilder);
     BuildDisplayList(aBuilder, set);
@@ -3070,7 +3079,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
         aBuilder->BuildCompositorHitTestInfoIfNeeded(this,
                                                      set.BorderBackground(),
-                                                     false);
+                                                     true);
 
         // If this is the root frame, then the previous call to
         // MarkAbsoluteFramesForDisplayList might have stored some fixed
@@ -3497,14 +3506,22 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
 
   aBuilder->ClearWillChangeBudget(child);
 
-  const bool doingShortcut =
+  const bool shortcutPossible = aBuilder->IsPaintingToWindow() &&
+    (aBuilder->IsBuildingLayerEventRegions() ||
+     aBuilder->BuildCompositorHitTestInfo());
+
+  const bool doingShortcut = shortcutPossible &&
     (child->GetStateBits() & NS_FRAME_SIMPLE_DISPLAYLIST) &&
-    aBuilder->IsPaintingToWindow() &&
-    // This would be changed by the change of preference.
-    aBuilder->IsBuildingLayerEventRegions() &&
     // Animations may change the value of |HasOpacity()|.
     !(child->GetContent() &&
       child->GetContent()->MayHaveAnimations());
+
+  // dirty rect in child-relative coordinates
+  NS_ASSERTION(aBuilder->GetCurrentFrame() == this, "Wrong coord space!");
+  const nsPoint offset = child->GetOffsetTo(this);
+  nsRect visible = aBuilder->GetVisibleRect() - offset;
+  nsRect dirty = aBuilder->GetDirtyRect() - offset;
+
   if (doingShortcut) {
     // This is the shortcut for frames been handled along the common
     // path, the most common one of THE COMMON CASE mentioned later.
@@ -3518,10 +3535,6 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
       // return below.
       aBuilder->AllocatePerspectiveItemIndex();
     }
-
-    // dirty rect in child-relative coordinates
-    nsRect dirty = aBuilder->GetDirtyRect() - child->GetOffsetTo(this);
-    nsRect visible = aBuilder->GetVisibleRect() - child->GetOffsetTo(this);
 
     if (!DescendIntoChild(aBuilder, child, visible, dirty)) {
       return;
@@ -3572,12 +3585,6 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     awayFromCommonPath = true;
   }
 
-  // dirty rect in child-relative coordinates
-  NS_ASSERTION(aBuilder->GetCurrentFrame() == this, "Wrong coord space!");
-  nsPoint offset = child->GetOffsetTo(this);
-  nsRect visible = aBuilder->GetVisibleRect() - offset;
-  nsRect dirty = aBuilder->GetDirtyRect() - offset;
-
   nsDisplayListBuilder::OutOfFlowDisplayData* savedOutOfFlowData = nullptr;
   bool isPlaceholder = false;
   if (child->IsPlaceholderFrame()) {
@@ -3618,7 +3625,9 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     awayFromCommonPath = true;
   }
 
-  if (child->HasPerspective()) {
+  const nsStyleDisplay* disp = child->StyleDisplay();
+
+  if (child->HasPerspective(disp)) {
     // We need to allocate a perspective index before a potential early
     // return below.
     aBuilder->AllocatePerspectiveItemIndex();
@@ -3663,7 +3672,6 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   // Child is composited if it's transformed, partially transparent, or has
   // SVG effects or a blend mode..
   EffectSet* effectSet = EffectSet::GetEffectSet(child);
-  const nsStyleDisplay* disp = child->StyleDisplay();
   const nsStyleEffects* effects = child->StyleEffects();
   const nsStylePosition* pos = child->StylePosition();
   bool isVisuallyAtomic = child->IsVisuallyAtomic(effectSet, disp, effects);
@@ -3785,13 +3793,13 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
         if (eventRegions) {
           eventRegions->AddFrame(aBuilder, child);
         }
-        if (!awayFromCommonPath &&
-            aBuilder->IsPaintingToWindow() &&
-            !buildingForChild.MaybeAnimatedGeometryRoot()) {
-          // The shortcut is available for the child for next time.
-          child->AddStateBits(NS_FRAME_SIMPLE_DISPLAYLIST);
-        }
       }
+    }
+
+    if (!awayFromCommonPath && shortcutPossible &&
+        !differentAGR && !buildingForChild.MaybeAnimatedGeometryRoot()) {
+      // The shortcut is available for the child for next time.
+      child->AddStateBits(NS_FRAME_SIMPLE_DISPLAYLIST);
     }
 
     if (!pseudoStackingContext) {
@@ -6542,6 +6550,19 @@ nsFrame::Reflow(nsPresContext*          aPresContext,
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
+bool
+nsIFrame::IsContentDisabled() const
+{
+  // FIXME(emilio): Doing this via CSS means callers must ensure the style is up
+  // to date, and they don't!
+  if (StyleUserInterface()->mUserInput == StyleUserInput::None) {
+    return true;
+  }
+
+  auto* element = nsGenericHTMLElement::FromContentOrNull(GetContent());
+  return element && element->IsDisabled();
+}
+
 nsresult
 nsFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
 {
@@ -6833,7 +6854,7 @@ nsIFrame::GetNearestWidget(nsPoint& aOffset) const
   return widget;
 }
 
-Matrix4x4
+Matrix4x4Flagged
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                              nsIFrame** aOutAncestor,
                              uint32_t aFlags)
@@ -6894,7 +6915,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
 
         *aOutAncestor = docRootFrame;
         Matrix4x4 docRootTransformToTop =
-          nsLayoutUtils::GetTransformToAncestor(docRootFrame, nullptr);
+          nsLayoutUtils::GetTransformToAncestor(docRootFrame, nullptr).GetMatrix();
         if (docRootTransformToTop.IsSingular()) {
           NS_WARNING("Containing document is invisible, we can't compute a valid transform");
         } else {
@@ -7182,7 +7203,7 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
     return false;
   }
 
-  gfx::Matrix4x4 transform3d;
+  gfx::Matrix4x4Flagged transform3d;
   if (!nsLayoutUtils::GetLayerTransformForFrame(this, &transform3d)) {
     // We're not able to compute a layer transform that we know would
     // be used at the next layers transaction, so we can't only update
@@ -7207,7 +7228,7 @@ nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
       !gfx::FuzzyEqual(transform._12, previousTransform._12, kError)) {
     return false;
   }
-  layer->SetBaseTransformForNextTransaction(transform3d);
+  layer->SetBaseTransformForNextTransaction(transform3d.GetMatrix());
   *aLayerResult = layer;
   return true;
 }
@@ -9696,6 +9717,16 @@ nsFrame::ConsiderChildOverflow(nsOverflowAreas& aOverflowAreas,
                            aChildFrame->GetPosition());
 }
 
+bool
+nsFrame::ShouldAvoidBreakInside(const ReflowInput& aReflowInput) const
+{
+  const auto* disp = StyleDisplay();
+  return !aReflowInput.mFlags.mIsTopOfPage &&
+    NS_STYLE_PAGE_BREAK_AVOID == disp->mBreakInside &&
+    !(HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) && IsAbsolutelyPositioned(disp)) &&
+    !GetPrevInFlow();
+}
+
 /**
  * This function takes a frame that is part of a block-in-inline split,
  * and _if_ that frame is an anonymous block created by an ib split it
@@ -11355,6 +11386,39 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
   }
 
   return result;
+}
+
+// Returns true if we can guarantee there is no visible descendants.
+static bool
+HasNoVisibleDescendants(const nsIFrame* aFrame)
+{
+  for (nsIFrame::ChildListIterator lists(aFrame);
+       !lists.IsDone();
+       lists.Next()) {
+    for (nsIFrame* f : lists.CurrentList()) {
+      if (nsPlaceholderFrame::GetRealFrameFor(f)->
+            IsVisibleOrMayHaveVisibleDescendants()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void
+nsIFrame::UpdateVisibleDescendantsState()
+{
+  if (StyleVisibility()->IsVisible()) {
+    // Notify invisible ancestors that a visible descendant exists now.
+    nsIFrame* ancestor;
+    for (ancestor = GetInFlowParent();
+         ancestor && !ancestor->StyleVisibility()->IsVisible();
+         ancestor = ancestor->GetInFlowParent()) {
+      ancestor->mAllDescendantsAreInvisible = false;
+    }
+  } else {
+    mAllDescendantsAreInvisible = HasNoVisibleDescendants(this);
+  }
 }
 
 // Box layout debugging

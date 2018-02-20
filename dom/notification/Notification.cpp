@@ -92,7 +92,7 @@ public:
                     const nsAString& aIcon,
                     const nsAString& aData,
                     const nsAString& aBehavior,
-                    const nsAString& aServiceWorkerRegistrationScope) final override
+                    const nsAString& aServiceWorkerRegistrationScope) final
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(!aID.IsEmpty());
@@ -145,7 +145,7 @@ public:
     MOZ_ASSERT(aPromise);
   }
 
-  NS_IMETHOD Done() final override
+  NS_IMETHOD Done() final
   {
     ErrorResult result;
     AutoTArray<RefPtr<Notification>, 5> notifications;
@@ -1202,7 +1202,8 @@ Notification::GetPrincipal()
 class WorkerNotificationObserver final : public MainThreadNotificationObserver
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(WorkerNotificationObserver,
+                                       MainThreadNotificationObserver)
   NS_DECL_NSIOBSERVER
 
   explicit WorkerNotificationObserver(UniquePtr<NotificationRef> aRef)
@@ -1231,8 +1232,6 @@ protected:
     }
   }
 };
-
-NS_IMPL_ISUPPORTS_INHERITED0(WorkerNotificationObserver, MainThreadNotificationObserver)
 
 class ServiceWorkerNotificationObserver final : public nsIObserver
 {
@@ -2088,7 +2087,7 @@ public:
     MOZ_ASSERT(aProxy);
   }
 
-  NS_IMETHOD Done() final override
+  NS_IMETHOD Done() final
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(mPromiseProxy, "Was Done() called twice?");

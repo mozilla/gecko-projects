@@ -108,7 +108,6 @@
 #include "nsIDeviceSensors.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
-#include "nsIDocCharset.h"
 #include "nsIDocument.h"
 #include "Crypto.h"
 #include "nsIDOMDocument.h"
@@ -244,6 +243,7 @@
 #include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerRegistration.h"
+#include "mozilla/dom/ServiceWorkerRegistrationDescriptor.h"
 #include "mozilla/dom/U2F.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/Worklet.h"
@@ -2988,6 +2988,13 @@ nsGlobalWindowInner::IsRequestIdleCallbackEnabled(JSContext* aCx, JSObject* aObj
          nsContentUtils::IsSystemCaller(aCx);
 }
 
+/* static */ bool
+nsGlobalWindowInner::RegisterProtocolHandlerAllowedForContext(JSContext* aCx, JSObject* aObj)
+{
+  return IsSecureContextOrObjectIsFromSecureContext(aCx, aObj) ||
+         Preferences::GetBool("dom.registerProtocolHandler.insecure.enabled");
+}
+
 nsIDOMOfflineResourceList*
 nsGlobalWindowInner::GetApplicationCache(ErrorResult& aError)
 {
@@ -5174,14 +5181,15 @@ nsGlobalWindowInner::GetCaches(ErrorResult& aRv)
 }
 
 already_AddRefed<ServiceWorkerRegistration>
-nsPIDOMWindowInner::GetServiceWorkerRegistration(const nsAString& aScope)
+nsPIDOMWindowInner::GetServiceWorkerRegistration(const ServiceWorkerRegistrationDescriptor& aDescriptor)
 {
+  NS_ConvertUTF8toUTF16 scope(aDescriptor.Scope());
   RefPtr<ServiceWorkerRegistration> registration;
-  if (!mServiceWorkerRegistrationTable.Get(aScope,
+  if (!mServiceWorkerRegistrationTable.Get(scope,
                                            getter_AddRefs(registration))) {
     registration =
-      ServiceWorkerRegistration::CreateForMainThread(this, aScope);
-    mServiceWorkerRegistrationTable.Put(aScope, registration);
+      ServiceWorkerRegistration::CreateForMainThread(this, aDescriptor);
+    mServiceWorkerRegistrationTable.Put(scope, registration);
   }
   return registration.forget();
 }
@@ -6386,7 +6394,7 @@ nsGlobalWindowInner::GetOrCreateServiceWorker(const ServiceWorkerDescriptor& aDe
   MOZ_ASSERT(NS_IsMainThread());
   RefPtr<ServiceWorker> ref;
   for (auto sw : mServiceWorkerList) {
-    if (sw->MatchesDescriptor(aDescriptor)) {
+    if (sw->Descriptor().Matches(aDescriptor)) {
       ref = sw;
       return ref.forget();
     }

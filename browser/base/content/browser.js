@@ -30,6 +30,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
   LanguagePrompt: "resource://gre/modules/LanguagePrompt.jsm",
+  LightweightThemeConsumer: "resource://gre/modules/LightweightThemeConsumer.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
   Log: "resource://gre/modules/Log.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
@@ -1253,6 +1254,18 @@ var gBrowserInit = {
     if (AppConstants.CAN_DRAW_IN_TITLEBAR) {
       gDragSpaceObserver.init();
     }
+
+    // Hack to ensure that the about:home favicon is loaded
+    // instantaneously, to avoid flickering and improve perceived performance.
+    this._callWithURIToLoad(uriToLoad => {
+      if (uriToLoad == "about:home") {
+        gBrowser.setIcon(gBrowser.selectedTab, "chrome://branding/content/icon32.png");
+      } else if (uriToLoad == "about:privatebrowsing") {
+        gBrowser.setIcon(gBrowser.selectedTab, "chrome://browser/skin/privatebrowsing/favicon.svg");
+      }
+    });
+
+    this._setInitialFocus();
   },
 
   onLoad() {
@@ -1313,6 +1326,7 @@ var gBrowserInit = {
     }
 
     // Misc. inits.
+    new LightweightThemeConsumer(document);
     TabletModeUpdater.init();
     CombinedStopReload.ensureInitialized();
     gPrivateBrowsingUI.init();
@@ -1351,18 +1365,6 @@ var gBrowserInit = {
         Cu.reportError(e);
       }
     }
-
-    this._setInitialFocus();
-
-    // Hack to ensure that the about:home favicon is loaded
-    // instantaneously, to avoid flickering and improve perceived performance.
-    this._uriToLoadPromise.then(uriToLoad => {
-      if (uriToLoad == "about:home") {
-        gBrowser.setIcon(gBrowser.selectedTab, "chrome://branding/content/icon32.png");
-      } else if (uriToLoad == "about:privatebrowsing") {
-        gBrowser.setIcon(gBrowser.selectedTab, "chrome://browser/skin/privatebrowsing/favicon.svg");
-      }
-    });
 
     // Wait until chrome is painted before executing code not critical to making the window visible
     this._boundDelayedStartup = this._delayedStartup.bind(this);
@@ -1590,9 +1592,15 @@ var gBrowserInit = {
       initialBrowser.removeAttribute("blank");
     });
 
-    this._uriToLoadPromise.then(uriToLoad => {
+    // To prevent flickering of the urlbar-history-dropmarker in the general
+    // case, the urlbar has the 'focused' attribute set by default.
+    // If we are not fully sure the urlbar will be focused in this window,
+    // we should remove the attribute before first paint.
+    let shouldRemoveFocusedAttribute = true;
+    this._callWithURIToLoad(uriToLoad => {
       if ((isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") &&
           focusAndSelectUrlBar()) {
+        shouldRemoveFocusedAttribute = false;
         return;
       }
 
@@ -1612,10 +1620,19 @@ var gBrowserInit = {
         gBrowser.selectedBrowser.focus();
       }
     });
+    // Delay removing the attribute using requestAnimationFrame to avoid
+    // invalidating styles multiple times in a row if _uriToLoadPromise
+    // resolves before first paint.
+    if (shouldRemoveFocusedAttribute) {
+      window.requestAnimationFrame(() => {
+        if (shouldRemoveFocusedAttribute)
+          gURLBar.removeAttribute("focused");
+      });
+    }
   },
 
   _handleURIToLoad() {
-    this._uriToLoadPromise.then(uriToLoad => {
+    this._callWithURIToLoad(uriToLoad => {
       if (!uriToLoad || uriToLoad == "about:blank") {
         return;
       }
@@ -1734,18 +1751,18 @@ var gBrowserInit = {
     }, {timeout: 10000});
   },
 
-  // Returns the URI(s) to load at startup.
+  // Returns the URI(s) to load at startup if it is immediately known, or a
+  // promise resolving to the URI to load.
   get _uriToLoadPromise() {
     delete this._uriToLoadPromise;
-    return this._uriToLoadPromise = new Promise(resolve => {
+    return this._uriToLoadPromise = function() {
       // window.arguments[0]: URI to load (string), or an nsIArray of
       //                      nsISupportsStrings to load, or a xul:tab of
       //                      a tabbrowser, which will be replaced by this
       //                      window (for this case, all other arguments are
       //                      ignored).
       if (!window.arguments || !window.arguments[0]) {
-        resolve(null);
-        return;
+        return null;
       }
 
       let uri = window.arguments[0];
@@ -1755,16 +1772,28 @@ var gBrowserInit = {
 
       // If the given URI is different from the homepage, we want to load it.
       if (uri != defaultArgs) {
-        resolve(uri);
-        return;
+        return uri;
       }
 
       // The URI appears to be the the homepage. We want to load it only if
       // session restore isn't about to override the homepage.
-      SessionStartup.willOverrideHomepagePromise.then(willOverrideHomepage => {
-        resolve(willOverrideHomepage ? null : uri);
-      });
-    });
+      let willOverride = SessionStartup.willOverrideHomepage;
+      if (typeof willOverride == "boolean") {
+        return willOverride ? null : uri;
+      }
+      return willOverride.then(willOverrideHomepage =>
+                                 willOverrideHomepage ? null : uri);
+    }();
+  },
+
+  // Calls the given callback with the URI to load at startup.
+  // Synchronously if possible, or after _uriToLoadPromise resolves otherwise.
+  _callWithURIToLoad(callback) {
+    let uriToLoad = this._uriToLoadPromise;
+    if (!uriToLoad || !uriToLoad.then)
+      callback(uriToLoad);
+    else
+      uriToLoad.then(callback);
   },
 
   onUnload() {
@@ -2574,58 +2603,53 @@ function BrowserViewSourceOfDocument(aArgsOrDocument) {
   }
 
   let viewInternal = () => {
-    let inTab = Services.prefs.getBoolPref("view_source.tab");
-    if (inTab) {
-      let tabBrowser = gBrowser;
-      let preferredRemoteType;
-      if (args.browser) {
-        preferredRemoteType = args.browser.remoteType;
-      } else {
-        if (!tabBrowser) {
-          throw new Error("BrowserViewSourceOfDocument should be passed the " +
-                          "subject browser if called from a window without " +
-                          "gBrowser defined.");
-        }
-        // Some internal URLs (such as specific chrome: and about: URLs that are
-        // not yet remote ready) cannot be loaded in a remote browser.  View
-        // source in tab expects the new view source browser's remoteness to match
-        // that of the original URL, so disable remoteness if necessary for this
-        // URL.
-        preferredRemoteType =
-          E10SUtils.getRemoteTypeForURI(args.URL, gMultiProcessBrowser);
-      }
-
-      // In the case of popups, we need to find a non-popup browser window.
-      if (!tabBrowser || !window.toolbar.visible) {
-        // This returns only non-popup browser windows by default.
-        let browserWindow = RecentWindow.getMostRecentBrowserWindow();
-        tabBrowser = browserWindow.gBrowser;
-      }
-
-      // `viewSourceInBrowser` will load the source content from the page
-      // descriptor for the tab (when possible) or fallback to the network if
-      // that fails.  Either way, the view source module will manage the tab's
-      // location, so use "about:blank" here to avoid unnecessary redundant
-      // requests.
-      let tab = tabBrowser.loadOneTab("about:blank", {
-        relatedToCurrent: true,
-        inBackground: false,
-        preferredRemoteType,
-        sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null,
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      });
-      args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
-      top.gViewSourceUtils.viewSourceInBrowser(args);
+    let tabBrowser = gBrowser;
+    let preferredRemoteType;
+    if (args.browser) {
+      preferredRemoteType = args.browser.remoteType;
     } else {
-      top.gViewSourceUtils.viewSource(args);
+      if (!tabBrowser) {
+        throw new Error("BrowserViewSourceOfDocument should be passed the " +
+                        "subject browser if called from a window without " +
+                        "gBrowser defined.");
+      }
+      // Some internal URLs (such as specific chrome: and about: URLs that are
+      // not yet remote ready) cannot be loaded in a remote browser.  View
+      // source in tab expects the new view source browser's remoteness to match
+      // that of the original URL, so disable remoteness if necessary for this
+      // URL.
+      preferredRemoteType =
+        E10SUtils.getRemoteTypeForURI(args.URL, gMultiProcessBrowser);
     }
+
+    // In the case of popups, we need to find a non-popup browser window.
+    if (!tabBrowser || !window.toolbar.visible) {
+      // This returns only non-popup browser windows by default.
+      let browserWindow = RecentWindow.getMostRecentBrowserWindow();
+      tabBrowser = browserWindow.gBrowser;
+    }
+
+    // `viewSourceInBrowser` will load the source content from the page
+    // descriptor for the tab (when possible) or fallback to the network if
+    // that fails.  Either way, the view source module will manage the tab's
+    // location, so use "about:blank" here to avoid unnecessary redundant
+    // requests.
+    let tab = tabBrowser.loadOneTab("about:blank", {
+      relatedToCurrent: true,
+      inBackground: false,
+      preferredRemoteType,
+      sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null,
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
+    args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
+    top.gViewSourceUtils.viewSourceInBrowser(args);
   };
 
   // Check if external view source is enabled.  If so, try it.  If it fails,
   // fallback to internal view source.
   if (Services.prefs.getBoolPref("view_source.editor.external")) {
     top.gViewSourceUtils
-       .openInExternalEditor(args, null, null, null, result => {
+       .openInExternalEditor(args, result => {
       if (!result) {
         viewInternal();
       }
@@ -4485,8 +4509,7 @@ var XULBrowserWindow = {
           if (location.scheme == "keyword" && aWebProgress.isTopLevel)
             gBrowser.userTypedValue = null;
 
-          canViewSource = !Services.prefs.getBoolPref("view_source.tab") ||
-                          location.scheme != "view-source";
+          canViewSource = location.scheme != "view-source";
 
           if (location.spec != "about:blank") {
             switch (aStatus) {
@@ -5614,10 +5637,11 @@ var gUIDensity = {
       mode = this.getCurrentDensity().mode;
     }
 
-    let docs = [
-      document.documentElement,
-      SidebarUI.browser.contentDocument.documentElement,
-    ];
+    let docs = [document.documentElement];
+    let shouldUpdateSidebar = SidebarUI.initialized && SidebarUI.isOpen;
+    if (shouldUpdateSidebar) {
+      docs.push(SidebarUI.browser.contentDocument.documentElement);
+    }
     for (let doc of docs) {
       switch (mode) {
       case this.MODE_COMPACT:
@@ -5631,12 +5655,14 @@ var gUIDensity = {
         break;
       }
     }
-    let tree = SidebarUI.browser.contentDocument.querySelector(".sidebar-placesTree");
-    if (tree) {
-      // Tree items don't update their styles without changing some property on the
-      // parent tree element, like background-color or border. See bug 1407399.
-      tree.style.border = "1px";
-      tree.style.border = "";
+    if (shouldUpdateSidebar) {
+      let tree = SidebarUI.browser.contentDocument.querySelector(".sidebar-placesTree");
+      if (tree) {
+        // Tree items don't update their styles without changing some property on the
+        // parent tree element, like background-color or border. See bug 1407399.
+        tree.style.border = "1px";
+        tree.style.border = "";
+      }
     }
 
     TabsInTitlebar.updateAppearance(true);
@@ -7948,7 +7974,7 @@ var gIdentityHandler = {
         !hasBlockedPopupIndicator) {
       let permission = {
         id: "popup",
-        state: SitePermissions.UNKNOWN,
+        state: SitePermissions.getDefault("popup"),
         scope: SitePermissions.SCOPE_PERSISTENT,
       };
       let item = this._createPermissionItem(permission);

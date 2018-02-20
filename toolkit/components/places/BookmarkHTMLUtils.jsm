@@ -65,10 +65,10 @@ ChromeUtils.import("resource://gre/modules/osfile.jsm");
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesUtils.jsm");
 
+Cu.importGlobalProperties(["XMLHttpRequest"]);
+
 ChromeUtils.defineModuleGetter(this, "PlacesBackups",
   "resource://gre/modules/PlacesBackups.jsm");
-ChromeUtils.defineModuleGetter(this, "Deprecated",
-  "resource://gre/modules/Deprecated.jsm");
 
 const Container_Normal = 0;
 const Container_Toolbar = 1;
@@ -159,16 +159,8 @@ this.BookmarkHTMLUtils = Object.freeze({
    * @return {Promise}
    * @resolves When the new bookmarks have been created.
    * @rejects JavaScript exception.
-   * @deprecated passing an nsIFile is deprecated
    */
   async importFromFile(aFilePath, aInitialImport) {
-    if (aFilePath instanceof Ci.nsIFile) {
-      Deprecated.warning("Passing an nsIFile to BookmarksJSONUtils.importFromFile " +
-                         "is deprecated. Please use an OS.File path string instead.",
-                         "https://developer.mozilla.org/docs/JavaScript_OS.File");
-      aFilePath = aFilePath.path;
-    }
-
     notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aInitialImport);
     try {
       if (!(await OS.File.exists(aFilePath))) {
@@ -194,33 +186,24 @@ this.BookmarkHTMLUtils = Object.freeze({
    * @return {Promise}
    * @resolves To the exported bookmarks count when the file has been created.
    * @rejects JavaScript exception.
-   * @deprecated passing an nsIFile is deprecated
    */
-  exportToFile: function BHU_exportToFile(aFilePath) {
-    if (aFilePath instanceof Ci.nsIFile) {
-      Deprecated.warning("Passing an nsIFile to BookmarksHTMLUtils.exportToFile " +
-                         "is deprecated. Please use an OS.File path string instead.",
-                         "https://developer.mozilla.org/docs/JavaScript_OS.File");
-      aFilePath = aFilePath.path;
+  async exportToFile(aFilePath) {
+    let [bookmarks, count] = await PlacesBackups.getBookmarksTree();
+    let startTime = Date.now();
+
+    // Report the time taken to convert the tree to HTML.
+    let exporter = new BookmarkExporter(bookmarks);
+    await exporter.exportToFile(aFilePath);
+
+    try {
+      Services.telemetry
+              .getHistogramById("PLACES_EXPORT_TOHTML_MS")
+              .add(Date.now() - startTime);
+    } catch (ex) {
+      Components.utils.reportError("Unable to report telemetry.");
     }
-    return (async function() {
-      let [bookmarks, count] = await PlacesBackups.getBookmarksTree();
-      let startTime = Date.now();
 
-      // Report the time taken to convert the tree to HTML.
-      let exporter = new BookmarkExporter(bookmarks);
-      await exporter.exportToFile(aFilePath);
-
-      try {
-        Services.telemetry
-                .getHistogramById("PLACES_EXPORT_TOHTML_MS")
-                .add(Date.now() - startTime);
-      } catch (ex) {
-        Components.utils.reportError("Unable to report telemetry.");
-      }
-
-      return count;
-    })();
+    return count;
   },
 
   get defaultPath() {
@@ -937,8 +920,12 @@ function BookmarkExporter(aBookmarksTree) {
   // Create a map of the roots.
   let rootsMap = new Map();
   for (let child of aBookmarksTree.children) {
-    if (child.root)
+    if (child.root) {
       rootsMap.set(child.root, child);
+      // Also take the opportunity to get the correctly localised title for the
+      // root.
+      child.title = PlacesUtils.bookmarks.getLocalizedTitle(child);
+    }
   }
 
   // For backwards compatibility reasons the bookmarks menu is the root, while
@@ -1205,8 +1192,7 @@ function insertFaviconsForTree(nodeTree) {
  */
 function fetchData(href) {
   return new Promise((resolve, reject) => {
-    let xhr = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                .createInstance(Ci.nsIXMLHttpRequest);
+    let xhr = new XMLHttpRequest();
     xhr.onload = () => {
       resolve(xhr.responseXML);
     };

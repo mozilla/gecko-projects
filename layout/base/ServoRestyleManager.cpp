@@ -19,6 +19,7 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "nsBlockFrame.h"
 #include "nsBulletFrame.h"
+#include "nsIFrameInlines.h"
 #include "nsImageFrame.h"
 #include "nsPlaceholderFrame.h"
 #include "nsContentUtils.h"
@@ -26,6 +27,10 @@
 #include "nsPrintfCString.h"
 #include "nsRefreshDriver.h"
 #include "nsStyleChangeList.h"
+
+#ifdef ACCESSIBILITY
+#include "nsAccessibilityService.h"
+#endif
 
 using namespace mozilla::dom;
 
@@ -1099,7 +1104,13 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
   nsPresContext* presContext = PresContext();
 
   MOZ_ASSERT(presContext->Document(), "No document?  Pshaw!");
-  MOZ_ASSERT(!presContext->HasPendingMediaQueryUpdates(),
+  // FIXME(emilio): In the "flush animations" case, ideally, we should only
+  // recascade animation styles running on the compositor, so we shouldn't care
+  // about other styles, or new rules that apply to the page...
+  //
+  // However, that's not true as of right now, see bug 1388031 and bug 1388692.
+  MOZ_ASSERT((aFlags & ServoTraversalFlags::FlushThrottledAnimations) ||
+             !presContext->HasPendingMediaQueryUpdates(),
              "Someone forgot to update media queries?");
   MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript(), "Missing a script blocker!");
   MOZ_ASSERT(!mInStyleRefresh, "Reentrant call?");

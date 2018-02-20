@@ -8,33 +8,29 @@
 
 #include "vm/Shape-inl.h"
 
-#include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jshashutil.h"
-#include "jsobj.h"
-
 #include "gc/FreeOp.h"
+#include "gc/HashUtil.h"
 #include "gc/Policy.h"
+#include "gc/PublicIterators.h"
 #include "js/HashTable.h"
-
-#include "jscntxtinlines.h"
-#include "jscompartmentinlines.h"
-#include "jsobjinlines.h"
+#include "vm/JSAtom.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 
 #include "vm/Caches-inl.h"
+#include "vm/JSCompartment-inl.h"
+#include "vm/JSContext-inl.h"
+#include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
 
 using mozilla::CeilingLog2Size;
-using mozilla::DebugOnly;
 using mozilla::PodZero;
-using mozilla::RotateLeft;
 
 using JS::AutoCheckCannotGC;
 

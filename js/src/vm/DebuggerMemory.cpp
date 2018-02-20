@@ -13,8 +13,6 @@
 #include <stdlib.h>
 
 #include "jsalloc.h"
-#include "jscntxt.h"
-#include "jscompartment.h"
 
 #include "builtin/MapObject.h"
 #include "gc/Marking.h"
@@ -25,6 +23,8 @@
 #include "js/Utility.h"
 #include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
 #include "vm/SavedStacks.h"
 
 #include "vm/Debugger-inl.h"
@@ -32,13 +32,8 @@
 
 using namespace js;
 
-using JS::ubi::BreadthFirst;
-using JS::ubi::Edge;
-using JS::ubi::Node;
-
 using mozilla::Forward;
 using mozilla::Maybe;
-using mozilla::Move;
 using mozilla::Nothing;
 
 /* static */ DebuggerMemory*

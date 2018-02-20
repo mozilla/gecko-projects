@@ -49,21 +49,12 @@
 # include <sys/wait.h>
 # include <unistd.h>
 #endif
-
 #include "jsapi.h"
 #include "jsarray.h"
-#include "jsatom.h"
-#include "jscntxt.h"
 #include "jsfriendapi.h"
-#include "jsfun.h"
-#include "jsobj.h"
 #include "jsprf.h"
-#include "jsscript.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#ifdef XP_WIN
-# include "jswin.h"
-#endif
 #include "jswrapper.h"
 #ifndef JS_POSIX_NSPR
 # include "prerror.h"
@@ -74,13 +65,11 @@
 #include "builtin/ModuleObject.h"
 #include "builtin/RegExp.h"
 #include "builtin/TestingFunctions.h"
-
 #if defined(JS_BUILD_BINAST)
-#include "frontend/BinSource.h"
+# include "frontend/BinSource.h"
 #endif // defined(JS_BUILD_BINAST)
-
 #include "frontend/Parser.h"
-#include "gc/GCInternals.h"
+#include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
@@ -100,12 +89,18 @@
 #include "threading/ExclusiveData.h"
 #include "threading/LockGuard.h"
 #include "threading/Thread.h"
+#include "util/Windows.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/Compression.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
+#include "vm/JSAtom.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/Monitor.h"
 #include "vm/MutexIDs.h"
 #include "vm/Printer.h"
@@ -117,11 +112,10 @@
 #include "vm/WrapperObject.h"
 #include "wasm/WasmJS.h"
 
-#include "jscompartmentinlines.h"
-#include "jsobjinlines.h"
-
 #include "vm/ErrorObject-inl.h"
 #include "vm/Interpreter-inl.h"
+#include "vm/JSCompartment-inl.h"
+#include "vm/JSObject-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;
@@ -1555,23 +1549,27 @@ CacheEntry_isCacheEntry(JSObject* cache)
 }
 
 static JSString*
-CacheEntry_getSource(HandleObject cache)
+CacheEntry_getSource(JSContext* cx, HandleObject cache)
 {
     MOZ_ASSERT(CacheEntry_isCacheEntry(cache));
     Value v = JS_GetReservedSlot(cache, CacheEntry_SOURCE);
-    if (!v.isString())
+    if (!v.isString()) {
+        JS_ReportErrorASCII(cx, "CacheEntry_getSource: Unexpected type of source reserved slot.");
         return nullptr;
+    }
 
     return v.toString();
 }
 
 static uint8_t*
-CacheEntry_getBytecode(HandleObject cache, uint32_t* length)
+CacheEntry_getBytecode(JSContext* cx, HandleObject cache, uint32_t* length)
 {
     MOZ_ASSERT(CacheEntry_isCacheEntry(cache));
     Value v = JS_GetReservedSlot(cache, CacheEntry_BYTECODE);
-    if (!v.isObject() || !v.toObject().is<ArrayBufferObject>())
+    if (!v.isObject() || !v.toObject().is<ArrayBufferObject>()) {
+        JS_ReportErrorASCII(cx, "CacheEntry_getBytecode: Unexpected type of bytecode reserved slot.");
         return nullptr;
+    }
 
     ArrayBufferObject* arrayBuffer = &v.toObject().as<ArrayBufferObject>();
     *length = arrayBuffer->byteLength();
@@ -1658,7 +1656,9 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         code = args[0].toString();
     } else if (args[0].isObject() && CacheEntry_isCacheEntry(&args[0].toObject())) {
         cacheEntry = &args[0].toObject();
-        code = CacheEntry_getSource(cacheEntry);
+        code = CacheEntry_getSource(cx, cacheEntry);
+        if (!code)
+            return false;
     }
 
     if (!code || (args.length() == 2 && args[1].isPrimitive())) {
@@ -1841,7 +1841,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
     if (loadBytecode) {
         uint32_t loadLength = 0;
         uint8_t* loadData = nullptr;
-        loadData = CacheEntry_getBytecode(cacheEntry, &loadLength);
+        loadData = CacheEntry_getBytecode(cx, cacheEntry, &loadLength);
         if (!loadData)
             return false;
         if (!loadBuffer.append(loadData, loadLength)) {
@@ -4512,14 +4512,14 @@ BinParse(JSContext* cx, unsigned argc, Value* vp)
     }
     if (!args[0].isObject()) {
         const char* typeName = InformalValueTypeName(args[0]);
-        JS_ReportErrorASCII(cx, "expected object (typed array) to parse, got %s", typeName);
+        JS_ReportErrorASCII(cx, "expected object (ArrayBuffer) to parse, got %s", typeName);
         return false;
     }
 
     RootedObject obj(cx, &args[0].toObject());
-    if (!JS_IsTypedArrayObject(obj)) {
+    if (!JS_IsArrayBufferObject(obj)) {
         const char* typeName = InformalValueTypeName(args[0]);
-        JS_ReportErrorASCII(cx, "expected typed array to parse, got %s", typeName);
+        JS_ReportErrorASCII(cx, "expected ArrayBuffer to parse, got %s", typeName);
         return false;
     }
 
@@ -4919,7 +4919,7 @@ OffThreadDecodeScript(JSContext* cx, unsigned argc, Value* vp)
     JS::TranscodeBuffer loadBuffer;
     uint32_t loadLength = 0;
     uint8_t* loadData = nullptr;
-    loadData = CacheEntry_getBytecode(cacheEntry, &loadLength);
+    loadData = CacheEntry_getBytecode(cx, cacheEntry, &loadLength);
     if (!loadData)
         return false;
     if (!loadBuffer.append(loadData, loadLength)) {

@@ -9,19 +9,13 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include <algorithm>
 
 #include "jsapi.h"
-#include "jsatom.h"
-#include "jscntxt.h"
 #include "jsfriendapi.h"
-#include "jsfun.h"
-#include "jsiter.h"
 #include "jsnum.h"
-#include "jsobj.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
@@ -32,19 +26,23 @@
 #include "js/Conversions.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Iteration.h"
+#include "vm/JSAtom.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
-#include "jsatominlines.h"
-
 #include "vm/ArgumentsObject-inl.h"
 #include "vm/ArrayObject-inl.h"
 #include "vm/Caches-inl.h"
 #include "vm/GeckoProfiler-inl.h"
 #include "vm/Interpreter-inl.h"
+#include "vm/JSAtom-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
@@ -56,7 +54,6 @@ using mozilla::ArrayLength;
 using mozilla::CeilingLog2;
 using mozilla::CheckedInt;
 using mozilla::DebugOnly;
-using mozilla::IsNaN;
 
 using JS::AutoCheckCannotGC;
 using JS::IsArrayAnswer;

@@ -11,11 +11,11 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jscntxt.h"
-#include "jsscript.h"
 
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/JSContext.h"
+#include "vm/JSScript.h"
 #include "vm/TraceLogging.h"
 
 using namespace js;
@@ -73,6 +73,8 @@ XDRState<mode>::codeChars(char16_t* chars, size_t nchars)
         mozilla::NativeEndian::copyAndSwapToLittleEndian(ptr, chars, nchars);
     } else {
         const uint8_t* ptr = buf.read(nbytes);
+        if (!ptr)
+            return fail(JS::TranscodeResult_Failure_BadDecode);
         mozilla::NativeEndian::copyAndSwapFromLittleEndian(chars, ptr, nchars);
     }
     return true;

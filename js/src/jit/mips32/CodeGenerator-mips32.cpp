@@ -6,6 +6,7 @@
 
 #include "jit/mips32/CodeGenerator-mips32.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "jit/CodeGenerator.h"
@@ -113,7 +114,7 @@ static const uint32_t FrameSizes[] = { 128, 256, 512, 1024 };
 FrameSizeClass
 FrameSizeClass::FromDepth(uint32_t frameDepth)
 {
-    for (uint32_t i = 0; i < JS_ARRAY_LENGTH(FrameSizes); i++) {
+    for (uint32_t i = 0; i < mozilla::ArrayLength(FrameSizes); i++) {
         if (frameDepth < FrameSizes[i])
             return FrameSizeClass(i);
     }
@@ -124,14 +125,14 @@ FrameSizeClass::FromDepth(uint32_t frameDepth)
 FrameSizeClass
 FrameSizeClass::ClassLimit()
 {
-    return FrameSizeClass(JS_ARRAY_LENGTH(FrameSizes));
+    return FrameSizeClass(mozilla::ArrayLength(FrameSizes));
 }
 
 uint32_t
 FrameSizeClass::frameSize() const
 {
     MOZ_ASSERT(class_ != NO_FRAME_SIZE_CLASS_ID);
-    MOZ_ASSERT(class_ < JS_ARRAY_LENGTH(FrameSizes));
+    MOZ_ASSERT(class_ < mozilla::ArrayLength(FrameSizes));
 
     return FrameSizes[class_];
 }
@@ -379,21 +380,24 @@ CodeGeneratorMIPS::visitDivOrModI64(LDivOrModI64* lir)
     Label done;
 
     // Handle divide by zero.
-    if (lir->canBeDivideByZero())
-        masm.branchTest64(Assembler::Zero, rhs, rhs, temp, oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+    if (lir->canBeDivideByZero()) {
+        Label nonZero;
+        masm.branchTest64(Assembler::NonZero, rhs, rhs, temp, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
+    }
 
     // Handle an integer overflow exception from INT64_MIN / -1.
     if (lir->canBeNegativeOverflow()) {
-        Label notmin;
-        masm.branch64(Assembler::NotEqual, lhs, Imm64(INT64_MIN), &notmin);
-        masm.branch64(Assembler::NotEqual, rhs, Imm64(-1), &notmin);
-        if (lir->mir()->isMod()) {
+        Label notOverflow;
+        masm.branch64(Assembler::NotEqual, lhs, Imm64(INT64_MIN), &notOverflow);
+        masm.branch64(Assembler::NotEqual, rhs, Imm64(-1), &notOverflow);
+        if (lir->mir()->isMod())
             masm.xor64(output, output);
-        } else {
-            masm.jump(oldTrap(lir, wasm::Trap::IntegerOverflow));
-        }
+        else
+            masm.wasmTrap(wasm::Trap::IntegerOverflow, lir->bytecodeOffset());
         masm.jump(&done);
-        masm.bind(&notmin);
+        masm.bind(&notOverflow);
     }
 
     masm.setupWasmABICall();
@@ -432,8 +436,12 @@ CodeGeneratorMIPS::visitUDivOrModI64(LUDivOrModI64* lir)
     Register temp = regs.takeAny();
 
     // Prevent divide by zero.
-    if (lir->canBeDivideByZero())
-        masm.branchTest64(Assembler::Zero, rhs, rhs, temp, oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+    if (lir->canBeDivideByZero()) {
+        Label nonZero;
+        masm.branchTest64(Assembler::NonZero, rhs, rhs, temp, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
+    }
 
     masm.setupWasmABICall();
     masm.passABIArg(lhs.high);

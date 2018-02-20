@@ -24,8 +24,8 @@ uniform sampler2DArray sSharedCacheA8;
 
 uniform sampler2D sGradients;
 
-vec2 clamp_rect(vec2 point, RectWithSize rect) {
-    return clamp(point, rect.p0, rect.p0 + rect.size);
+vec2 clamp_rect(vec2 pt, RectWithSize rect) {
+    return clamp(pt, rect.p0, rect.p0 + rect.size);
 }
 
 float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
@@ -288,7 +288,7 @@ struct ClipArea {
 ClipArea fetch_clip_area(int index) {
     ClipArea area;
 
-    if (index == 0x7FFFFFFF) { //special sentinel task index
+    if (index == 0x7FFF) { //special sentinel task index
         area.common_data = RenderTaskCommonData(
             RectWithSize(vec2(0.0), vec2(0.0)),
             0.0
@@ -368,6 +368,7 @@ Glyph fetch_glyph(int specific_prim_address,
         case SUBPX_DIR_VERTICAL:
             glyph.y = floor(glyph.y + 0.125);
             break;
+        default: break;
     }
 
     return Glyph(glyph);
@@ -481,11 +482,11 @@ Primitive load_primitive() {
 // Return the intersection of the plane (set up by "normal" and "point")
 // with the ray (set up by "ray_origin" and "ray_dir"),
 // writing the resulting scaler into "t".
-bool ray_plane(vec3 normal, vec3 point, vec3 ray_origin, vec3 ray_dir, out float t)
+bool ray_plane(vec3 normal, vec3 pt, vec3 ray_origin, vec3 ray_dir, out float t)
 {
     float denom = dot(normal, ray_dir);
     if (abs(denom) > 1e-6) {
-        vec3 d = point - ray_origin;
+        vec3 d = pt - ray_origin;
         t = dot(d, normal) / denom;
         return t >= 0.0;
     }
@@ -554,6 +555,8 @@ vec2 compute_snap_offset(vec2 local_pos,
 struct VertexInfo {
     vec2 local_pos;
     vec2 screen_pos;
+    float w;
+    vec2 snapped_device_pos;
 };
 
 VertexInfo write_vertex(RectWithSize instance_rect,
@@ -579,13 +582,20 @@ VertexInfo write_vertex(RectWithSize instance_rect,
     vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
 
     // Apply offsets for the render task to get correct screen location.
-    vec2 final_pos = device_pos + snap_offset -
+    vec2 snapped_device_pos = device_pos + snap_offset;
+    vec2 final_pos = snapped_device_pos -
                      task.content_origin +
                      task.common_data.task_rect.p0;
 
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
 
-    VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
+    VertexInfo vi = VertexInfo(
+        clamped_local_pos,
+        device_pos,
+        world_pos.w,
+        snapped_device_pos
+    );
+
     return vi;
 }
 
@@ -666,7 +676,13 @@ VertexInfo write_transform_vertex(RectWithSize local_segment_rect,
         clip_edge_mask
     );
 
-    VertexInfo vi = VertexInfo(local_pos, device_pos);
+    VertexInfo vi = VertexInfo(
+        local_pos,
+        device_pos,
+        world_pos.w,
+        device_pos
+    );
+
     return vi;
 }
 

@@ -5273,7 +5273,6 @@ nsCSSFrameConstructor::ResolveStyleContext(nsStyleContext* aParentStyleContext,
                                            Element* aOriginatingElementOrNull)
 {
   StyleSetHandle styleSet = mPresShell->StyleSet();
-  aContent->OwnerDoc()->FlushPendingLinkUpdates();
 
   RefPtr<nsStyleContext> result;
   if (aContent->IsElement()) {
@@ -7173,14 +7172,15 @@ nsCSSFrameConstructor::AddTextItemIfNeeded(nsFrameConstructorState& aState,
 {
   NS_PRECONDITION(aPossibleTextContent, "Must have node");
   if (!aPossibleTextContent->IsNodeOfType(nsINode::eTEXT) ||
-      !aPossibleTextContent->HasFlag(NS_CREATE_FRAME_IF_NON_WHITESPACE)) {
-    // Not text, or not suppressed due to being all-whitespace (if it
-    // were being suppressed, it would have the
-    // NS_CREATE_FRAME_IF_NON_WHITESPACE flag)
+      !aPossibleTextContent->HasFlag(NS_CREATE_FRAME_IF_NON_WHITESPACE) ||
+      aPossibleTextContent->HasFlag(NODE_NEEDS_FRAME)) {
+    // Not text, or not suppressed due to being all-whitespace (if it were being
+    // suppressed, it would have the NS_CREATE_FRAME_IF_NON_WHITESPACE flag), or
+    // going to be reframed anyway.
     return;
   }
-  NS_ASSERTION(!aPossibleTextContent->GetPrimaryFrame(),
-               "Text node has a frame and NS_CREATE_FRAME_IF_NON_WHITESPACE");
+  MOZ_ASSERT(!aPossibleTextContent->GetPrimaryFrame(),
+             "Text node has a frame and NS_CREATE_FRAME_IF_NON_WHITESPACE");
   AddFrameConstructionItems(aState, aPossibleTextContent, false,
                             aInsertion, aItems);
 }
@@ -7190,14 +7190,15 @@ nsCSSFrameConstructor::ReframeTextIfNeeded(nsIContent* aParentContent,
                                            nsIContent* aContent)
 {
   if (!aContent->IsNodeOfType(nsINode::eTEXT) ||
-      !aContent->HasFlag(NS_CREATE_FRAME_IF_NON_WHITESPACE)) {
-    // Not text, or not suppressed due to being all-whitespace (if it
-    // were being suppressed, it would have the
-    // NS_CREATE_FRAME_IF_NON_WHITESPACE flag)
+      !aContent->HasFlag(NS_CREATE_FRAME_IF_NON_WHITESPACE) ||
+      aContent->HasFlag(NODE_NEEDS_FRAME)) {
+    // Not text, or not suppressed due to being all-whitespace (if it were being
+    // suppressed, it would have the NS_CREATE_FRAME_IF_NON_WHITESPACE flag), or
+    // going to be reframed anyway.
     return;
   }
-  NS_ASSERTION(!aContent->GetPrimaryFrame(),
-               "Text node has a frame and NS_CREATE_FRAME_IF_NON_WHITESPACE");
+  MOZ_ASSERT(!aContent->GetPrimaryFrame(),
+             "Text node has a frame and NS_CREATE_FRAME_IF_NON_WHITESPACE");
   ContentInserted(aParentContent, aContent, nullptr, InsertionKind::Async);
 }
 
@@ -8581,7 +8582,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aContainer,
       return true;
     }
 
-    FlattenedChildIterator iter(aChild);
+    StyleChildrenIterator iter(aChild);
     for (nsIContent* c = iter.GetNextChild(); c; c = iter.GetNextChild()) {
       if (c->GetPrimaryFrame() || GetDisplayContentsStyleFor(c)) {
         LAYOUT_PHASE_TEMP_EXIT();

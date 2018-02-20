@@ -12,17 +12,17 @@
 
 #include <stdio.h>
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+# include <process.h>
+# define getpid _getpid
 #else
-#include <unistd.h>
+# include <unistd.h>
 #endif
 
-#include "jscompartment.h"
-#include "jsopcode.h"
 #include "jsprf.h"
-#include "jsscript.h"
 
+#include "vm/BytecodeUtil.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSScript.h"
 #include "vm/Runtime.h"
 #include "vm/Time.h"
 

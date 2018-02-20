@@ -18,9 +18,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "jsatom.h"
-#include "jscntxt.h"
-#include "jscompartment.h"
 #include "jsexn.h"
 #include "jsnum.h"
 
@@ -30,16 +27,16 @@
 #include "js/CharacterEncoding.h"
 #include "js/UniquePtr.h"
 #include "vm/HelperThreads.h"
+#include "vm/JSAtom.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
 #include "vm/StringBuffer.h"
 #include "vm/Unicode.h"
 
 using mozilla::ArrayLength;
 using mozilla::MakeScopeExit;
-using mozilla::Maybe;
 using mozilla::PodArrayZero;
-using mozilla::PodAssign;
 using mozilla::PodCopy;
-using mozilla::PodZero;
 
 struct ReservedWordInfo
 {
@@ -985,11 +982,12 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::error(unsigned errorNumber, ...)
     va_list args;
     va_start(args, errorNumber);
 
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
     ErrorMetadata metadata;
-    if (computeErrorMetadata(&metadata, anyChars.currentToken().pos.begin))
+    if (computeErrorMetadata(&metadata, userbuf.offset())) {
+        TokenStreamAnyChars& anyChars = anyCharsAccess();
         ReportCompileError(anyChars.cx, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber,
                            args);
+    }
 
     va_end(args);
 }
@@ -1001,11 +999,12 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::errorAt(uint32_t offset, unsigned er
     va_list args;
     va_start(args, errorNumber);
 
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
     ErrorMetadata metadata;
-    if (computeErrorMetadata(&metadata, offset))
+    if (computeErrorMetadata(&metadata, offset)) {
+        TokenStreamAnyChars& anyChars = anyCharsAccess();
         ReportCompileError(anyChars.cx, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber,
                            args);
+    }
 
     va_end(args);
 }
@@ -1292,12 +1291,22 @@ IsTokenSane(Token* tp)
 
 template<>
 MOZ_MUST_USE bool
-TokenStreamCharsBase<char16_t>::appendMultiUnitCodepointToTokenbuf(uint32_t codepoint)
+TokenStreamCharsBase<char16_t>::appendCodePointToTokenbuf(uint32_t codePoint)
 {
-    char16_t lead, trail;
-    unicode::UTF16Encode(codepoint, &lead, &trail);
+    char16_t units[2];
+    unsigned numUnits = 0;
+    unicode::UTF16Encode(codePoint, units, &numUnits);
 
-    return tokenbuf.append(lead) && tokenbuf.append(trail);
+    MOZ_ASSERT(numUnits == 1 || numUnits == 2,
+               "UTF-16 code points are only encoded in one or two units");
+
+    if (!tokenbuf.append(units[0]))
+        return false;
+
+    if (numUnits == 1)
+        return true;
+
+    return tokenbuf.append(units[1]);
 }
 
 template<class AnyCharsAccess>
@@ -1340,31 +1349,16 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::putIdentInTokenbuf(const CharT* iden
         if (codePoint) {
             if (!unicode::IsIdentifierPart(codePoint))
                 break;
-
-            if (!appendMultiUnitCodepointToTokenbuf(codePoint))
-                return false;
-
-            continue;
-        }
-
-        if (!unicode::IsIdentifierPart(char16_t(c))) {
-            uint32_t qc;
-            if (c != '\\' || !matchUnicodeEscapeIdent(&qc))
-                break;
-
-            if (MOZ_UNLIKELY(unicode::IsSupplementary(qc))) {
-                char16_t lead, trail;
-                unicode::UTF16Encode(qc, &lead, &trail);
-                if (!tokenbuf.append(lead) || !tokenbuf.append(trail))
-                    return false;
-
-                continue;
+        } else {
+            if (unicode::IsIdentifierPart(char16_t(c))) {
+                codePoint = c;
+            } else {
+                if (c != '\\' || !matchUnicodeEscapeIdent(&codePoint))
+                    break;
             }
-
-            c = qc;
         }
 
-        if (!tokenbuf.append(c))
+        if (!appendCodePointToTokenbuf(codePoint))
             return false;
     }
 
@@ -1708,7 +1702,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* ttp, Mod
     // Look for a string or a template string.
     //
     if (c1kind == String) {
-        if (!getStringOrTemplateToken(c, &tp))
+        if (!getStringOrTemplateToken(static_cast<char>(c), &tp))
             goto error;
         goto out;
     }
@@ -2132,8 +2126,11 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* ttp, Mod
 
 template<typename CharT, class AnyCharsAccess>
 bool
-TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(int untilChar, Token** tp)
+TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilChar, Token** tp)
 {
+    MOZ_ASSERT(untilChar == '\'' || untilChar == '"' || untilChar == '`',
+               "unexpected string/template literal delimiter");
+
     int c;
     int nc = -1;
 
@@ -2148,7 +2145,8 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(int untilCh
     while ((c = getCharIgnoreEOL()) != untilChar) {
         if (c == EOF) {
             ungetCharIgnoreEOL(c);
-            error(JSMSG_UNTERMINATED_STRING);
+            const char delimiters[] = { untilChar, untilChar, '\0' };
+            error(JSMSG_EOF_BEFORE_END_OF_LITERAL, delimiters);
             return false;
         }
 
@@ -2160,7 +2158,13 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(int untilCh
             if (!getChar(&c))
                 return false;
 
-            switch (c) {
+            if (c == EOF) {
+                const char delimiters[] = { untilChar, untilChar, '\0' };
+                error(JSMSG_EOF_IN_ESCAPE_IN_LITERAL, delimiters);
+                return false;
+            }
+
+            switch (static_cast<CharT>(c)) {
               case 'b': c = '\b'; break;
               case 'f': c = '\f'; break;
               case 'n': c = '\n'; break;
@@ -2346,7 +2350,8 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(int untilCh
         } else if (TokenBuf::isRawEOLChar(c)) {
             if (!parsingTemplate) {
                 ungetCharIgnoreEOL(c);
-                error(JSMSG_UNTERMINATED_STRING);
+                const char delimiters[] = { untilChar, untilChar, '\0' };
+                error(JSMSG_EOL_BEFORE_END_OF_STRING, delimiters);
                 return false;
             }
             if (c == '\r') {

@@ -53,6 +53,8 @@ public class GeckoThread extends Thread {
         @WrapForJNI EXITING(3),
         // After granting request to restart
         @WrapForJNI RESTARTING(3),
+        // After failed lib extraction due to corrupted APK
+        CORRUPT_APK(2),
         // After exiting GeckoThread (corresponding to "Gecko:Exited" event)
         @WrapForJNI EXITED(0);
 
@@ -127,6 +129,7 @@ public class GeckoThread extends Thread {
     // Child process parameters
     private int mCrashFileDescriptor = -1;
     private int mIPCFileDescriptor = -1;
+    private int mCrashAnnotationFileDescriptor = -1;
 
     GeckoThread() {
         setName("Gecko");
@@ -139,7 +142,8 @@ public class GeckoThread extends Thread {
 
     private synchronized boolean init(final GeckoProfile profile, final String[] args,
                                       final String extraArgs, final int flags,
-                                      final int crashFd, final int ipcFd) {
+                                      final int crashFd, final int ipcFd,
+                                      final int crashAnnotationFd) {
         ThreadUtils.assertOnUiThread();
         uiThreadId = android.os.Process.myTid();
 
@@ -153,6 +157,7 @@ public class GeckoThread extends Thread {
         mFlags = flags;
         mCrashFileDescriptor = crashFd;
         mIPCFileDescriptor = ipcFd;
+        mCrashAnnotationFileDescriptor = crashAnnotationFd;
 
         mInitialized = true;
         notifyAll();
@@ -162,13 +167,15 @@ public class GeckoThread extends Thread {
     public static boolean initMainProcess(final GeckoProfile profile, final String extraArgs,
                                           final int flags) {
         return INSTANCE.init(profile, /* args */ null, extraArgs, flags,
-                                 /* crashFd */ -1, /* ipcFd */ -1);
+                                 /* crashFd */ -1, /* ipcFd */ -1,
+                                 /* crashAnnotationFd */ -1);
     }
 
     public static boolean initChildProcess(final String[] args, final int crashFd,
-                                           final int ipcFd) {
+                                           final int ipcFd,
+                                           final int crashAnnotationFd) {
         return INSTANCE.init(/* profile */ null, args, /* extraArgs */ null,
-                                 /* flags */ 0, crashFd, ipcFd);
+                                 /* flags */ 0, crashFd, ipcFd, crashAnnotationFd);
     }
 
     private static boolean canUseProfile(final Context context, final GeckoProfile profile,
@@ -249,6 +256,7 @@ public class GeckoThread extends Thread {
         GeckoLoader.loadSQLiteLibs(context, resourcePath);
         GeckoLoader.loadNSSLibs(context, resourcePath);
         GeckoLoader.loadGeckoLibs(context, resourcePath);
+        setState(State.LIBS_READY);
     }
 
     private static void initGeckoEnvironment() {
@@ -271,19 +279,24 @@ public class GeckoThread extends Thread {
 
         try {
             loadGeckoLibs(context, resourcePath);
-
+            return;
         } catch (final Exception e) {
             // Cannot load libs; try clearing the cached files.
             Log.w(LOGTAG, "Clearing cache after load libs exception", e);
-            FileUtils.delTree(GeckoLoader.getCacheDir(context),
-                              new FileUtils.FilenameRegexFilter(".*\\.so(?:\\.crc)?$"),
-                              /* recurse */ true);
-
-            // Then try loading again. If this throws again, we actually crash.
-            loadGeckoLibs(context, resourcePath);
         }
 
-        setState(State.LIBS_READY);
+        FileUtils.delTree(GeckoLoader.getCacheDir(context),
+                          new FileUtils.FilenameRegexFilter(".*\\.so(?:\\.crc)?$"),
+                          /* recurse */ true);
+
+        if (!GeckoLoader.verifyCRCs(resourcePath)) {
+            setState(State.CORRUPT_APK);
+            EventDispatcher.getInstance().dispatch("Gecko:CorruptAPK", null);
+            return;
+        }
+
+        // Then try loading again. If this throws again, we actually crash.
+        loadGeckoLibs(context, resourcePath);
     }
 
     private String[] getMainProcessArgs() {
@@ -380,7 +393,7 @@ public class GeckoThread extends Thread {
 
         // Wait until initialization before calling Gecko entry point.
         synchronized (this) {
-            while (!mInitialized) {
+            while (!mInitialized || !isState(State.LIBS_READY)) {
                 try {
                     wait();
                 } catch (final InterruptedException e) {
@@ -404,7 +417,7 @@ public class GeckoThread extends Thread {
         }
 
         // And go.
-        GeckoLoader.nativeRun(args, mCrashFileDescriptor, mIPCFileDescriptor);
+        GeckoLoader.nativeRun(args, mCrashFileDescriptor, mIPCFileDescriptor, mCrashAnnotationFileDescriptor);
 
         // And... we're done.
         final boolean restarting = isState(State.RESTARTING);

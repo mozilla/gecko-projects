@@ -10,27 +10,27 @@
 
 #include <stdint.h>
 
-#include "jscntxt.h"
-#include "jscompartment.h"
-#include "jsobj.h"
 #include "jsprf.h"
-#include "jsweakmap.h"
 #include "jswrapper.h"
 
 #include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "gc/GCInternals.h"
+#include "gc/PublicIterators.h"
+#include "gc/WeakMap.h"
 #include "js/Proxy.h"
 #include "proxy/DeadObjectProxy.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 #include "vm/Time.h"
 #include "vm/WrapperObject.h"
 
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
-
 #include "gc/Nursery-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
@@ -1227,9 +1227,9 @@ js::DumpHeap(JSContext* cx, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
     fprintf(dtrc.output, "# Roots.\n");
     {
         JSRuntime* rt = cx->runtime();
-        js::gc::AutoPrepareForTracing prep(cx, WithAtoms);
+        js::gc::AutoPrepareForTracing prep(cx);
         gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::TRACE_HEAP);
-        rt->gc.traceRuntime(&dtrc, prep.session().lock);
+        rt->gc.traceRuntime(&dtrc, prep.session());
     }
 
     fprintf(dtrc.output, "# Weak maps.\n");

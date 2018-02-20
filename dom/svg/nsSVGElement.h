@@ -46,10 +46,6 @@ namespace dom {
 class SVGSVGElement;
 class SVGViewportElement;
 
-static const unsigned short SVG_UNIT_TYPE_UNKNOWN           = 0;
-static const unsigned short SVG_UNIT_TYPE_USERSPACEONUSE    = 1;
-static const unsigned short SVG_UNIT_TYPE_OBJECTBOUNDINGBOX = 2;
-
 } // namespace dom
 
 class SVGAnimatedNumberList;
@@ -316,7 +312,7 @@ public:
   }
 
   virtual void ClearAnyCachedPath() {}
-  virtual nsIDOMNode* AsDOMNode() final override { return this; }
+  nsIDOMNode* AsDOMNode() final { return this; }
   virtual bool IsTransformable() { return false; }
 
   // WebIDL
@@ -338,9 +334,9 @@ protected:
   // This is because we're not currently passing the correct value for aValue to
   // BeforeSetAttr since it would involve allocating extra SVG value types.
   // See the comment in nsSVGElement::WillChangeValue.
-  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
-                                 const nsAttrValueOrString* aValue,
-                                 bool aNotify) override final;
+  nsresult BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                         const nsAttrValueOrString* aValue,
+                         bool aNotify) final;
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,

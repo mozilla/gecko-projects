@@ -9,11 +9,10 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "jsopcode.h"
-
 #include "jit/arm/Assembler-arm.h"
 #include "jit/JitFrames.h"
 #include "jit/MoveResolver.h"
+#include "vm/BytecodeUtil.h"
 
 using mozilla::DebugOnly;
 
@@ -99,10 +98,10 @@ class MacroAssemblerARM : public Assembler
     void convertInt32ToFloat32(const Address& src, FloatRegister dest);
 
     void wasmTruncateToInt32(FloatRegister input, Register output, MIRType fromType,
-                             bool isUnsigned, Label* oolEntry);
+                             bool isUnsigned, bool isSaturating, Label* oolEntry);
     void outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                         MIRType toType, bool isUnsigned, Label* rejoin,
-                                         wasm::BytecodeOffset trapOffset);
+                                         MIRType toType, TruncFlags flags,
+                                         Label* rejoin, wasm::BytecodeOffset trapOffset);
 
     // Somewhat direct wrappers for the low-level assembler funcitons
     // bitops. Attempt to encode a virtual alu instruction using two real

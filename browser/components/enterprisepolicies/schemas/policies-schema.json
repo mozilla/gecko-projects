@@ -2,9 +2,34 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "properties": {
-    "block_about_config": {
+    "BlockAboutConfig": {
       "description": "Blocks access to the about:config page.",
       "first_available": "60.0",
+
+      "type": "boolean",
+      "enum": [true]
+    },
+
+    "BlockAboutProfiles": {
+      "description": "Blocks access to the about:profiles page.",
+      "first_available": "60.0",
+
+      "type": "boolean",
+      "enum": [true]
+    },
+
+    "BlockAboutSupport": {
+      "description": "Blocks access to the about:support page.",
+      "first_available": "60.0",
+
+      "type": "boolean",
+      "enum": [true]
+    },
+
+    "DisableAppUpdate": {
+      "description": "Prevent the browser from updating.",
+      "first_available": "60.0",
+      "enterprise_only": true,
 
       "type": "boolean",
       "enum": [true]

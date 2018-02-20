@@ -14,29 +14,22 @@
 #include <limits>
 #include <math.h>
 #include <stdint.h>
-
 #if defined(XP_WIN)
-#include <float.h>
+# include <float.h>
 #endif
-
 #if defined(SOLARIS)
-#include <ieeefp.h>
+# include <ieeefp.h>
 #endif
-
 #ifdef HAVE_SSIZE_T
-#include <sys/types.h>
+# include <sys/types.h>
 #endif
-
 #if defined(XP_UNIX)
-#include <errno.h>
+# include <errno.h>
 #endif
 
-#include "jscntxt.h"
 #include "jsexn.h"
-#include "jsfun.h"
 #include "jsnum.h"
 #include "jsprf.h"
-#include "jswin.h"
 
 #include "builtin/TypedObject.h"
 #include "ctypes/Library.h"
@@ -45,9 +38,11 @@
 #include "gc/Zone.h"
 #include "jit/AtomicOperations.h"
 #include "js/Vector.h"
+#include "util/Windows.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
 
-#include "jsatominlines.h"
-#include "jsobjinlines.h"
+#include "vm/JSObject-inl.h"
 
 using namespace std;
 

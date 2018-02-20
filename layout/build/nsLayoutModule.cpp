@@ -24,7 +24,6 @@
 #include "nsIContentViewer.h"
 #include "nsIController.h"
 #include "nsIControllers.h"
-#include "nsIDOMDOMImplementation.h"
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIFactory.h"
@@ -63,7 +62,6 @@
 #include "txNodeSetAdaptor.h"
 
 #include "mozilla/dom/DOMParser.h"
-#include "mozilla/dom/XMLHttpRequestMainThread.h"
 #include "nsDOMSerializer.h"
 
 // view stuff
@@ -225,7 +223,6 @@ already_AddRefed<nsIPresentationService> NS_CreatePresentationService();
 // Factory Constructor
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(txNodeSetAdaptor, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDOMSerializer)
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(XMLHttpRequestMainThread, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(FormData)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHostObjectURI)
 NS_GENERIC_FACTORY_CONSTRUCTOR(DOMParser)
@@ -596,7 +593,6 @@ NS_DEFINE_NAMED_CID(TRANSFORMIIX_NODESET_CID);
 NS_DEFINE_NAMED_CID(NS_XMLSERIALIZER_CID);
 NS_DEFINE_NAMED_CID(NS_FORMDATA_CID);
 NS_DEFINE_NAMED_CID(NS_HOSTOBJECTURI_CID);
-NS_DEFINE_NAMED_CID(NS_XMLHTTPREQUEST_CID);
 NS_DEFINE_NAMED_CID(NS_DOMPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMSESSIONSTORAGEMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMLOCALSTORAGEMANAGER_CID);
@@ -846,7 +842,6 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_XMLSERIALIZER_CID, false, nullptr, nsDOMSerializerConstructor },
   { &kNS_FORMDATA_CID, false, nullptr, FormDataConstructor },
   { &kNS_HOSTOBJECTURI_CID, false, nullptr, nsHostObjectURIConstructor },
-  { &kNS_XMLHTTPREQUEST_CID, false, nullptr, XMLHttpRequestMainThreadConstructor },
   { &kNS_DOMPARSER_CID, false, nullptr, DOMParserConstructor },
   { &kNS_DOMSESSIONSTORAGEMANAGER_CID, false, nullptr, SessionStorageManagerConstructor },
   { &kNS_DOMLOCALSTORAGEMANAGER_CID, false, nullptr, LocalStorageManagerConstructor },
@@ -961,7 +956,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { TRANSFORMIIX_NODESET_CONTRACTID, &kTRANSFORMIIX_NODESET_CID },
   { NS_XMLSERIALIZER_CONTRACTID, &kNS_XMLSERIALIZER_CID },
   { NS_FORMDATA_CONTRACTID, &kNS_FORMDATA_CID },
-  { NS_XMLHTTPREQUEST_CONTRACTID, &kNS_XMLHTTPREQUEST_CID },
   { NS_DOMPARSER_CONTRACTID, &kNS_DOMPARSER_CID },
   { "@mozilla.org/dom/localStorage-manager;1", &kNS_DOMLOCALSTORAGEMANAGER_CID },
   // Keeping the old ContractID for backward compatibility

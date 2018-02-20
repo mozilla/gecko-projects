@@ -83,6 +83,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 
@@ -4951,7 +4952,7 @@ NS_IMETHODIMP
 ScrollFrameHelper::AsyncScrollPortEvent::Run()
 {
   if (mHelper) {
-    mHelper->mOuter->PresContext()->GetPresShell()->
+    mHelper->mOuter->PresContext()->Document()->
       FlushPendingNotifications(FlushType::InterruptibleLayout);
   }
   return mHelper ? mHelper->FireScrollPortEvent() : NS_OK;

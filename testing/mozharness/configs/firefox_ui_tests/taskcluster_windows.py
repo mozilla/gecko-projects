@@ -5,7 +5,6 @@ import sys
 
 
 config = {
-    "virtualenv_python_dll": os.path.join(os.path.dirname(sys.executable), 'python27.dll'),
     "virtualenv_path": 'venv',
     "exes": {
         'python': sys.executable,
@@ -13,7 +12,6 @@ config = {
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
     },
 
-    "proxxy": {},
     "find_links": [
         "http://pypi.pub.build.mozilla.org/pub",
     ],

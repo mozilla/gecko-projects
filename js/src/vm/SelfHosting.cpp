@@ -12,13 +12,8 @@
 #include "mozilla/Maybe.h"
 
 #include "jsarray.h"
-#include "jscntxt.h"
-#include "jscompartment.h"
 #include "jsdate.h"
 #include "jsfriendapi.h"
-#include "jsfun.h"
-#include "jshashutil.h"
-#include "jsiter.h"
 #include "jsstr.h"
 #include "jswrapper.h"
 #include "selfhosted.out.h"
@@ -40,6 +35,7 @@
 #include "builtin/Stream.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
+#include "gc/HashUtil.h"
 #include "gc/Marking.h"
 #include "gc/Policy.h"
 #include "jit/AtomicOperations.h"
@@ -49,6 +45,10 @@
 #include "vm/Compression.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
+#include "vm/Iteration.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
 #include "vm/Printer.h"
 #include "vm/RegExpObject.h"
 #include "vm/String.h"
@@ -56,13 +56,12 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
-#include "jsatominlines.h"
-#include "jsfuninlines.h"
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
-
-#include "gc/Iteration-inl.h"
+#include "gc/PrivateIterators-inl.h"
 #include "vm/BooleanObject-inl.h"
+#include "vm/JSAtom-inl.h"
+#include "vm/JSFunction-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/StringObject-inl.h"
@@ -73,7 +72,6 @@ using namespace js::selfhosted;
 using JS::AutoCheckCannotGC;
 using mozilla::IsInRange;
 using mozilla::Maybe;
-using mozilla::PodMove;
 
 static void
 selfHosting_WarningReporter(JSContext* cx, JSErrorReport* report)

@@ -13,7 +13,7 @@ use std::{mem, slice};
 use stylesheets::{Origin, OriginSet, OriginSetIterator, PerOrigin, StylesheetInDocument};
 
 /// Entry for a StylesheetSet.
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(MallocSizeOf)]
 struct StylesheetSetEntry<S>
 where
     S: StylesheetInDocument + PartialEq + 'static,
@@ -103,8 +103,7 @@ where
 }
 
 /// The validity of the data in a given cascade origin.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Ord, PartialEq, PartialOrd)]
 pub enum DataValidity {
     /// The origin is clean, all the data already there is valid, though we may
     /// have new sheets at the end.
@@ -231,7 +230,7 @@ where
     }
 }
 
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[derive(MallocSizeOf)]
 struct SheetCollection<S>
 where
     S: StylesheetInDocument + PartialEq + 'static,
@@ -558,6 +557,7 @@ where
 }
 
 /// The set of stylesheets effective for a given XBL binding or Shadow Root.
+#[derive(MallocSizeOf)]
 pub struct AuthorStylesheetSet<S>
 where
     S: StylesheetInDocument + PartialEq + 'static,
@@ -583,6 +583,20 @@ impl<S> AuthorStylesheetSet<S>
 where
     S: StylesheetInDocument + PartialEq + 'static,
 {
+    /// Create a new empty AuthorStylesheetSet.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            collection: Default::default(),
+            invalidations: StylesheetInvalidationSet::new(),
+        }
+    }
+
+    /// Whether anything has changed since the last time this was flushed.
+    pub fn dirty(&self) -> bool {
+        self.collection.dirty
+    }
+
     fn collection_for(
         &mut self,
         _sheet: &S,
@@ -592,6 +606,17 @@ where
     }
 
     sheet_set_methods!("AuthorStylesheetSet");
+
+    /// Iterate over the list of stylesheets.
+    pub fn iter(&self) -> StylesheetCollectionIterator<S> {
+        self.collection.iter()
+    }
+
+    /// Mark the sheet set dirty, as appropriate.
+    pub fn force_dirty(&mut self) {
+        self.invalidations.invalidate_fully();
+        self.collection.set_data_validity_at_least(DataValidity::FullyInvalid);
+    }
 
     /// Flush the stylesheets for this author set.
     ///

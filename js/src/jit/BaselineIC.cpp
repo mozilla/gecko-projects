@@ -10,7 +10,6 @@
 #include "mozilla/TemplateLib.h"
 
 #include "jsfriendapi.h"
-#include "jsfun.h"
 #include "jslibmath.h"
 #include "jstypes.h"
 
@@ -31,12 +30,12 @@
 #include "jit/VMFunctions.h"
 #include "js/Conversions.h"
 #include "js/GCVector.h"
+#include "vm/JSFunction.h"
 #include "vm/Opcodes.h"
 #include "vm/SelfHosting.h"
 #include "vm/TypedArrayObject.h"
 
 #include "jsboolinlines.h"
-#include "jsscriptinlines.h"
 
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
@@ -44,6 +43,7 @@
 #include "jit/SharedICHelpers-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/StringObject-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
@@ -918,7 +918,7 @@ DoSetElemFallback(JSContext* cx, BaselineFrame* frame, ICSetElem_Fallback* stub_
                 return true;
             }
         } else {
-            gen.trackNotAttached();
+            gen.trackAttached(IRGenerator::NotAttached);
         }
         if (!attached && !isTemporarilyUnoptimizable)
             stub->state().trackNotAttached();
@@ -1584,7 +1584,7 @@ DoSetPropFallback(JSContext* cx, BaselineFrame* frame, ICSetProp_Fallback* stub_
                 SetUpdateStubData(newStub->toCacheIR_Updated(), gen.typeCheckInfo());
             }
         } else {
-            gen.trackNotAttached();
+            gen.trackAttached(IRGenerator::NotAttached);
         }
         if (!attached && !isTemporarilyUnoptimizable)
             stub->state().trackNotAttached();

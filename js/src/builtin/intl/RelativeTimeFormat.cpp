@@ -9,29 +9,24 @@
 #include "builtin/intl/RelativeTimeFormat.h"
 
 #include "mozilla/Assertions.h"
-#include "mozilla/Casting.h"
-
-#include "jscntxt.h"
+#include "mozilla/FloatingPoint.h"
 
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "gc/FreeOp.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSContext.h"
 
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
 
 using mozilla::IsNegativeZero;
-using mozilla::Range;
-using mozilla::RangedPtr;
 
 using js::intl::CallICU;
-using js::intl::DateTimeFormatOptions;
 using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
-using js::intl::StringsAreEqual;
 
 /**************** RelativeTimeFormat *****************/
 

@@ -90,7 +90,7 @@
 #include "mozilla/dom/RTCStatsReportBinding.h"
 #include "mozilla/dom/RTCPeerConnectionBinding.h"
 #include "mozilla/dom/PeerConnectionImplBinding.h"
-#include "mozilla/dom/DataChannelBinding.h"
+#include "mozilla/dom/RTCDataChannelBinding.h"
 #include "mozilla/dom/PerformanceTiming.h"
 #include "mozilla/dom/PluginCrashedEvent.h"
 #include "MediaStreamTrack.h"
@@ -2317,41 +2317,6 @@ PeerConnectionImpl::DisablePacketDump(unsigned long level,
   if (level < packetDumpFlags->size()) {
     (*packetDumpFlags)[level] &= ~flag;
   }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-PeerConnectionImpl::RemoveTrack(MediaStreamTrack& aTrack) {
-  PC_AUTO_ENTER_API_CALL(true);
-
-  std::vector<RefPtr<TransceiverImpl>>& transceivers =
-    mMedia->GetTransceivers();
-
-  nsresult rv = NS_ERROR_INVALID_ARG;
-
-  for (RefPtr<TransceiverImpl>& transceiver : transceivers) {
-    if (transceiver->HasSendTrack(&aTrack)) {
-      // TODO(bug 1401983): Move DTMF stuff to TransceiverImpl
-      for (size_t i = 0; i < mDTMFStates.Length(); ++i) {
-        if (mDTMFStates[i]->mTransceiver.get() == transceiver.get()) {
-          mDTMFStates[i]->mSendTimer->Cancel();
-          mDTMFStates.RemoveElementAt(i);
-          break;
-        }
-      }
-
-      rv = transceiver->UpdateSendTrack(nullptr);
-      break;
-    }
-  }
-
-  if (NS_FAILED(rv)) {
-    CSFLogError(LOGTAG, "Error updating send track on transceiver");
-    return rv;
-  }
-
-  aTrack.RemovePrincipalChangeObserver(this);
 
   return NS_OK;
 }

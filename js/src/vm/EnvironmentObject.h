@@ -7,15 +7,14 @@
 #ifndef vm_EnvironmentObject_h
 #define vm_EnvironmentObject_h
 
-#include "jscntxt.h"
-#include "jsobj.h"
-#include "jsweakmap.h"
-
 #include "builtin/ModuleObject.h"
 #include "frontend/NameAnalysisTypes.h"
 #include "gc/Barrier.h"
+#include "gc/WeakMap.h"
 #include "js/GCHashTable.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 #include "vm/ProxyObject.h"
 #include "vm/Scope.h"
 

@@ -2135,8 +2135,6 @@ const KTableEntry nsCSSProps::kUserFocusKTable[] = {
 
 const KTableEntry nsCSSProps::kUserInputKTable[] = {
   { eCSSKeyword_none,     StyleUserInput::None },
-  { eCSSKeyword_enabled,  StyleUserInput::Enabled },
-  { eCSSKeyword_disabled, StyleUserInput::Disabled },
   { eCSSKeyword_auto,     StyleUserInput::Auto },
   { eCSSKeyword_UNKNOWN,  -1 }
 };
@@ -2990,13 +2988,6 @@ static const nsCSSPropertyID gPlaceItemsSubpropTable[] = {
 static const nsCSSPropertyID gPlaceSelfSubpropTable[] = {
   eCSSProperty_align_self,
   eCSSProperty_justify_self,
-  eCSSProperty_UNKNOWN
-};
-
-// Subproperty tables for shorthands that are just aliases with
-// different parsing rules.
-static const nsCSSPropertyID gMozTransformSubpropTable[] = {
-  eCSSProperty_transform,
   eCSSProperty_UNKNOWN
 };
 

@@ -148,6 +148,11 @@ public:
   nsString mKey;
 };
 
+enum TimerPrecisionType {
+  All = 1,
+  RFPOnly = 2
+};
+
 class nsRFPService final : public nsIObserver
 {
 public:
@@ -156,12 +161,18 @@ public:
 
   static nsRFPService* GetOrCreate();
   static bool IsResistFingerprintingEnabled();
-  static bool IsTimerPrecisionReductionEnabled();
+  static bool IsTimerPrecisionReductionEnabled(TimerPrecisionType aType);
 
   // The following Reduce methods can be called off main thread.
-  static double ReduceTimePrecisionAsMSecs(double aTime);
-  static double ReduceTimePrecisionAsUSecs(double aTime);
-  static double ReduceTimePrecisionAsSecs(double aTime);
+  static double ReduceTimePrecisionAsMSecs(
+    double aTime,
+    TimerPrecisionType aType = TimerPrecisionType::All);
+  static double ReduceTimePrecisionAsUSecs(
+    double aTime,
+    TimerPrecisionType aType = TimerPrecisionType::All);
+  static double ReduceTimePrecisionAsSecs(
+    double aTime,
+    TimerPrecisionType aType = TimerPrecisionType::All);
 
   // This method calculates the video resolution (i.e. height x width) based
   // on the video quality (480p, 720p, etc).
@@ -236,8 +247,8 @@ private:
                                     const WidgetKeyboardEvent* aKeyboardEvent,
                                     SpoofingKeyboardCode& aOut);
 
-  static Atomic<bool, ReleaseAcquire> sPrivacyResistFingerprinting;
-  static Atomic<bool, ReleaseAcquire> sPrivacyTimerPrecisionReduction;
+  static Atomic<bool, Relaxed> sPrivacyResistFingerprinting;
+  static Atomic<bool, Relaxed> sPrivacyTimerPrecisionReduction;
 
   static nsDataHashtable<KeyboardHashKey, const SpoofingKeyboardCode*>* sSpoofingKeyboardCodes;
 

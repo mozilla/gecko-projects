@@ -83,6 +83,18 @@ const GPU_CACHE_RESIZE_TEST: bool = false;
 /// Number of GPU blocks per UV rectangle provided for an image.
 pub const BLOCKS_PER_UV_RECT: usize = 2;
 
+const GPU_TAG_BRUSH_MIXBLEND: GpuProfileTag = GpuProfileTag {
+    label: "B_MixBlend",
+    color: debug_colors::MAGENTA,
+};
+const GPU_TAG_BRUSH_BLEND: GpuProfileTag = GpuProfileTag {
+    label: "B_Blend",
+    color: debug_colors::LIGHTBLUE,
+};
+const GPU_TAG_BRUSH_IMAGE: GpuProfileTag = GpuProfileTag {
+    label: "B_Image",
+    color: debug_colors::SPRINGGREEN,
+};
 const GPU_TAG_BRUSH_SOLID: GpuProfileTag = GpuProfileTag {
     label: "B_Solid",
     color: debug_colors::RED,
@@ -123,10 +135,6 @@ const GPU_TAG_PRIM_YUV_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "YuvImage",
     color: debug_colors::DARKGREEN,
 };
-const GPU_TAG_PRIM_BLEND: GpuProfileTag = GpuProfileTag {
-    label: "Blend",
-    color: debug_colors::LIGHTBLUE,
-};
 const GPU_TAG_PRIM_HW_COMPOSITE: GpuProfileTag = GpuProfileTag {
     label: "HwComposite",
     color: debug_colors::DODGERBLUE,
@@ -134,10 +142,6 @@ const GPU_TAG_PRIM_HW_COMPOSITE: GpuProfileTag = GpuProfileTag {
 const GPU_TAG_PRIM_SPLIT_COMPOSITE: GpuProfileTag = GpuProfileTag {
     label: "SplitComposite",
     color: debug_colors::DARKBLUE,
-};
-const GPU_TAG_PRIM_COMPOSITE: GpuProfileTag = GpuProfileTag {
-    label: "Composite",
-    color: debug_colors::MAGENTA,
 };
 const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag {
     label: "TextRun",
@@ -223,15 +227,16 @@ impl BatchKind {
     #[cfg(feature = "debugger")]
     fn debug_name(&self) -> &'static str {
         match *self {
-            BatchKind::Composite { .. } => "Composite",
             BatchKind::HardwareComposite => "HardwareComposite",
             BatchKind::SplitComposite => "SplitComposite",
-            BatchKind::Blend => "Blend",
             BatchKind::Brush(kind) => {
                 match kind {
                     BrushBatchKind::Picture(..) => "Brush (Picture)",
                     BrushBatchKind::Solid => "Brush (Solid)",
                     BrushBatchKind::Line => "Brush (Line)",
+                    BrushBatchKind::Image(..) => "Brush (Image)",
+                    BrushBatchKind::Blend => "Brush (Blend)",
+                    BrushBatchKind::MixBlend { .. } => "Brush (Composite)",
                 }
             }
             BatchKind::Transformable(_, batch_kind) => batch_kind.debug_name(),
@@ -240,15 +245,16 @@ impl BatchKind {
 
     fn gpu_sampler_tag(&self) -> GpuProfileTag {
         match *self {
-            BatchKind::Composite { .. } => GPU_TAG_PRIM_COMPOSITE,
             BatchKind::HardwareComposite => GPU_TAG_PRIM_HW_COMPOSITE,
             BatchKind::SplitComposite => GPU_TAG_PRIM_SPLIT_COMPOSITE,
-            BatchKind::Blend => GPU_TAG_PRIM_BLEND,
             BatchKind::Brush(kind) => {
                 match kind {
                     BrushBatchKind::Picture(..) => GPU_TAG_BRUSH_PICTURE,
                     BrushBatchKind::Solid => GPU_TAG_BRUSH_SOLID,
                     BrushBatchKind::Line => GPU_TAG_BRUSH_LINE,
+                    BrushBatchKind::Image(..) => GPU_TAG_BRUSH_IMAGE,
+                    BrushBatchKind::Blend => GPU_TAG_BRUSH_BLEND,
+                    BrushBatchKind::MixBlend { .. } => GPU_TAG_BRUSH_MIXBLEND,
                 }
             }
             BatchKind::Transformable(_, batch_kind) => batch_kind.gpu_sampler_tag(),
@@ -262,12 +268,11 @@ bitflags! {
         const PROFILER_DBG      = 1 << 0;
         const RENDER_TARGET_DBG = 1 << 1;
         const TEXTURE_CACHE_DBG = 1 << 2;
-        const ALPHA_PRIM_DBG    = 1 << 3;
-        const GPU_TIME_QUERIES  = 1 << 4;
-        const GPU_SAMPLE_QUERIES= 1 << 5;
-        const DISABLE_BATCHING  = 1 << 6;
-        const EPOCHS            = 1 << 7;
-        const COMPACT_PROFILER  = 1 << 8;
+        const GPU_TIME_QUERIES  = 1 << 3;
+        const GPU_SAMPLE_QUERIES= 1 << 4;
+        const DISABLE_BATCHING  = 1 << 5;
+        const EPOCHS            = 1 << 6;
+        const COMPACT_PROFILER  = 1 << 7;
     }
 }
 
@@ -1597,6 +1602,9 @@ pub struct Renderer {
     brush_picture_a8: BrushShader,
     brush_solid: BrushShader,
     brush_line: BrushShader,
+    brush_image: Vec<Option<BrushShader>>,
+    brush_blend: BrushShader,
+    brush_mix_blend: BrushShader,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
@@ -1622,10 +1630,8 @@ pub struct Renderer {
     ps_angle_gradient: PrimitiveShader,
     ps_radial_gradient: PrimitiveShader,
 
-    ps_blend: LazilyCompiledShader,
     ps_hw_composite: LazilyCompiledShader,
     ps_split_composite: LazilyCompiledShader,
-    ps_composite: LazilyCompiledShader,
 
     max_texture_size: u32,
 
@@ -1651,7 +1657,7 @@ pub struct Renderer {
 
     gpu_cache_frame_id: FrameId,
 
-    pipeline_epoch_map: FastHashMap<PipelineId, Epoch>,
+    pipeline_info: PipelineInfo,
 
     // Manages and resolves source textures IDs to real texture IDs.
     texture_resolver: SourceTextureResolver,
@@ -1820,6 +1826,20 @@ impl Renderer {
                              options.precache_shaders)
         };
 
+        let brush_blend = try!{
+            BrushShader::new("brush_blend",
+                             &mut device,
+                             &[],
+                             options.precache_shaders)
+        };
+
+        let brush_mix_blend = try!{
+            BrushShader::new("brush_mix_blend",
+                             &mut device,
+                             &[],
+                             options.precache_shaders)
+        };
+
         let brush_picture_a8 = try!{
             BrushShader::new("brush_picture",
                              &mut device,
@@ -1897,10 +1917,12 @@ impl Renderer {
 
         // All image configuration.
         let mut image_features = Vec::new();
-        let mut ps_image: Vec<Option<PrimitiveShader>> = Vec::new();
+        let mut ps_image = Vec::new();
+        let mut brush_image = Vec::new();
         // PrimitiveShader is not clonable. Use push() to initialize the vec.
         for _ in 0 .. IMAGE_BUFFER_KINDS.len() {
             ps_image.push(None);
+            brush_image.push(None);
         }
         for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
             if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
@@ -1915,6 +1937,14 @@ impl Renderer {
                                          options.precache_shaders)
                 };
                 ps_image[buffer_kind] = Some(shader);
+
+                let shader = try!{
+                    BrushShader::new("brush_image",
+                                     &mut device,
+                                     &image_features,
+                                     options.precache_shaders)
+                };
+                brush_image[buffer_kind] = Some(shader);
             }
             image_features.clear();
         }
@@ -2010,22 +2040,6 @@ impl Renderer {
                                     &[]
                                  },
                                  options.precache_shaders)
-        };
-
-        let ps_blend = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                     "ps_blend",
-                                     &[],
-                                     &mut device,
-                                     options.precache_shaders)
-        };
-
-        let ps_composite = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                      "ps_composite",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
         };
 
         let ps_hw_composite = try!{
@@ -2273,6 +2287,9 @@ impl Renderer {
             brush_picture_a8,
             brush_solid,
             brush_line,
+            brush_image,
+            brush_blend,
+            brush_mix_blend,
             cs_clip_rectangle,
             cs_clip_border,
             cs_clip_image,
@@ -2285,10 +2302,8 @@ impl Renderer {
             ps_gradient,
             ps_angle_gradient,
             ps_radial_gradient,
-            ps_blend,
             ps_hw_composite,
             ps_split_composite,
-            ps_composite,
             debug: debug_renderer,
             debug_flags,
             backend_profile_counters: BackendProfileCounters::new(),
@@ -2306,7 +2321,7 @@ impl Renderer {
             node_data_texture,
             local_clip_rects_texture,
             render_task_texture,
-            pipeline_epoch_map: FastHashMap::default(),
+            pipeline_info: PipelineInfo::default(),
             dither_matrix_texture,
             external_image_handler: None,
             output_image_handler: None,
@@ -2353,13 +2368,11 @@ impl Renderer {
 
     /// Returns the Epoch of the current frame in a pipeline.
     pub fn current_epoch(&self, pipeline_id: PipelineId) -> Option<Epoch> {
-        self.pipeline_epoch_map.get(&pipeline_id).cloned()
+        self.pipeline_info.epochs.get(&pipeline_id).cloned()
     }
 
-    /// Returns a HashMap containing the pipeline ids that have been received by the renderer and
-    /// their respective epochs since the last time the method was called.
-    pub fn flush_rendered_epochs(&mut self) -> FastHashMap<PipelineId, Epoch> {
-        mem::replace(&mut self.pipeline_epoch_map, FastHashMap::default())
+    pub fn flush_pipeline_info(&mut self) -> PipelineInfo {
+        mem::replace(&mut self.pipeline_info, PipelineInfo::default())
     }
 
     // update the program cache with new binaries, e.g. when some of the lazy loaded
@@ -2378,15 +2391,16 @@ impl Renderer {
             match msg {
                 ResultMsg::PublishDocument(
                     document_id,
-                    doc,
+                    mut doc,
                     texture_update_list,
                     profile_counters,
                 ) => {
                     // Update the list of available epochs for use during reftests.
                     // This is a workaround for https://github.com/servo/servo/issues/13149.
-                    for (pipeline_id, epoch) in &doc.pipeline_epoch_map {
-                        self.pipeline_epoch_map.insert(*pipeline_id, *epoch);
+                    for (pipeline_id, epoch) in &doc.pipeline_info.epochs {
+                        self.pipeline_info.epochs.insert(*pipeline_id, *epoch);
                     }
+                    self.pipeline_info.removed_pipelines.extend(doc.pipeline_info.removed_pipelines.drain(..));
 
                     // Add a new document to the active set, expressed as a `Vec` in order
                     // to re-order based on `DocumentLayer` during rendering.
@@ -2567,35 +2581,35 @@ impl Renderer {
             "Horizontal Blur",
             target.horizontal_blurs.len(),
         );
-        for (_, batch) in &target.alpha_batcher.text_run_cache_prims {
-            debug_target.add(
-                debug_server::BatchKind::Cache,
-                "Text Shadow",
-                batch.len(),
-            );
-        }
 
-        for batch in target
-            .alpha_batcher
-            .batch_list
-            .opaque_batch_list
-            .batches
-            .iter()
-            .rev()
-        {
-            debug_target.add(
-                debug_server::BatchKind::Opaque,
-                batch.key.kind.debug_name(),
-                batch.instances.len(),
-            );
-        }
+        for alpha_batch_container in &target.alpha_batch_containers {
+            for (_, batch) in &alpha_batch_container.text_run_cache_prims {
+                debug_target.add(
+                    debug_server::BatchKind::Cache,
+                    "Text Shadow",
+                    batch.len(),
+                );
+            }
 
-        for batch in &target.alpha_batcher.batch_list.alpha_batch_list.batches {
-            debug_target.add(
-                debug_server::BatchKind::Alpha,
-                batch.key.kind.debug_name(),
-                batch.instances.len(),
-            );
+            for batch in alpha_batch_container
+                .opaque_batches
+                .iter()
+                .rev() {
+                debug_target.add(
+                    debug_server::BatchKind::Opaque,
+                    batch.key.kind.debug_name(),
+                    batch.instances.len(),
+                );
+            }
+
+            for batch in &alpha_batch_container
+                .alpha_batches {
+                debug_target.add(
+                    debug_server::BatchKind::Alpha,
+                    batch.key.kind.debug_name(),
+                    batch.instances.len(),
+                );
+            }
         }
 
         debug_target
@@ -2674,9 +2688,6 @@ impl Renderer {
             }
             DebugCommand::EnableRenderTargetDebug(enable) => {
                 self.set_debug_flag(DebugFlags::RENDER_TARGET_DBG, enable);
-            }
-            DebugCommand::EnableAlphaRectsDebug(enable) => {
-                self.set_debug_flag(DebugFlags::ALPHA_PRIM_DBG, enable);
             }
             DebugCommand::EnableGpuTimeQueries(enable) => {
                 self.set_debug_flag(DebugFlags::GPU_TIME_QUERIES, enable);
@@ -3167,11 +3178,9 @@ impl Renderer {
         render_target: Option<(&Texture, i32)>,
         framebuffer_size: DeviceUintSize,
         stats: &mut RendererStats,
+        scissor_rect: Option<DeviceIntRect>,
     ) {
         match key.kind {
-            BatchKind::Composite { .. } => {
-                self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            }
             BatchKind::HardwareComposite => {
                 self.ps_hw_composite
                     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
@@ -3184,9 +3193,6 @@ impl Renderer {
                     &mut self.renderer_errors,
                 );
             }
-            BatchKind::Blend => {
-                self.ps_blend.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            }
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
                     BrushBatchKind::Solid => {
@@ -3197,6 +3203,18 @@ impl Renderer {
                             0,
                             &mut self.renderer_errors,
                         );
+                    }
+                    BrushBatchKind::Image(image_buffer_kind) => {
+                        self.brush_image[image_buffer_kind as usize]
+                            .as_mut()
+                            .expect("Unsupported image shader kind")
+                            .bind(
+                                &mut self.device,
+                                key.blend_mode,
+                                projection,
+                                0,
+                                &mut self.renderer_errors,
+                            );
                     }
                     BrushBatchKind::Picture(target_kind) => {
                         let shader = match target_kind {
@@ -3214,6 +3232,24 @@ impl Renderer {
                     }
                     BrushBatchKind::Line => {
                         self.brush_line.bind(
+                            &mut self.device,
+                            key.blend_mode,
+                            projection,
+                            0,
+                            &mut self.renderer_errors,
+                        );
+                    }
+                    BrushBatchKind::Blend => {
+                        self.brush_blend.bind(
+                            &mut self.device,
+                            key.blend_mode,
+                            projection,
+                            0,
+                            &mut self.renderer_errors,
+                        );
+                    }
+                    BrushBatchKind::MixBlend { .. } => {
+                        self.brush_mix_blend.bind(
                             &mut self.device,
                             key.blend_mode,
                             projection,
@@ -3302,7 +3338,11 @@ impl Renderer {
         };
 
         // Handle special case readback for composites.
-        if let BatchKind::Composite { task_id, source_id, backdrop_id } = key.kind {
+        if let BatchKind::Brush(BrushBatchKind::MixBlend { task_id, source_id, backdrop_id }) = key.kind {
+            if scissor_rect.is_some() {
+                self.device.disable_scissor();
+            }
+
             // composites can't be grouped together because
             // they may overlap and affect each other.
             debug_assert_eq!(instances.len(), 1);
@@ -3361,6 +3401,10 @@ impl Renderer {
             // Restore draw target to current pass render target + layer.
             // Note: leaving the viewport unchanged, it's not a part of FBO state
             self.device.bind_draw_target(render_target, None);
+
+            if scissor_rect.is_some() {
+                self.device.enable_scissor();
+            }
         }
 
         let _timer = self.gpu_profile.start_timer(key.kind.gpu_sampler_tag());
@@ -3548,45 +3592,46 @@ impl Renderer {
         // considering using this for (some) other text runs, since
         // it removes the overhead of submitting many small glyphs
         // to multiple tiles in the normal text run case.
-        if !target.alpha_batcher.text_run_cache_prims.is_empty() {
-            self.device.set_blend(true);
-            self.device.set_blend_mode_premultiplied_alpha();
+        for alpha_batch_container in &target.alpha_batch_containers {
+            if !alpha_batch_container.text_run_cache_prims.is_empty() {
+                self.device.set_blend(true);
+                self.device.set_blend_mode_premultiplied_alpha();
 
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
-            self.cs_text_run
-                .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
-                self.draw_instanced_batch(
-                    instances,
-                    VertexArrayKind::Primitive,
-                    &BatchTextures::color(*texture_id),
-                    stats,
-                );
+                let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
+                self.cs_text_run
+                    .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+                for (texture_id, instances) in &alpha_batch_container.text_run_cache_prims {
+                    self.draw_instanced_batch(
+                        instances,
+                        VertexArrayKind::Primitive,
+                        &BatchTextures::color(*texture_id),
+                        stats,
+                    );
+                }
             }
         }
 
         //TODO: record the pixel count for cached primitives
 
-        if !target.alpha_batcher.is_empty() {
-            let _gl = self.gpu_profile.start_marker("alpha batches");
+        if target.needs_depth() {
+            let _gl = self.gpu_profile.start_marker("opaque batches");
+            let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
             self.device.set_blend(false);
-            let mut prev_blend_mode = BlendMode::None;
+            //Note: depth equality is needed for split planes
+            self.device.set_depth_func(DepthFunction::LessEqual);
+            self.device.enable_depth();
+            self.device.enable_depth_write();
 
-            if target.needs_depth() {
-                let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
-
-                //Note: depth equality is needed for split planes
-                self.device.set_depth_func(DepthFunction::LessEqual);
-                self.device.enable_depth();
-                self.device.enable_depth_write();
+            for alpha_batch_container in &target.alpha_batch_containers {
+                if let Some(target_rect) = alpha_batch_container.target_rect {
+                    self.device.enable_scissor();
+                    self.device.set_scissor_rect(target_rect);
+                }
 
                 // Draw opaque batches front-to-back for maximum
                 // z-buffer efficiency!
-                for batch in target
-                    .alpha_batcher
-                    .batch_list
-                    .opaque_batch_list
-                    .batches
+                for batch in alpha_batch_container
+                    .opaque_batches
                     .iter()
                     .rev()
                 {
@@ -3598,32 +3643,31 @@ impl Renderer {
                         render_target,
                         target_size,
                         stats,
+                        alpha_batch_container.target_rect,
                     );
                 }
 
-                self.device.disable_depth_write();
-                self.gpu_profile.finish_sampler(opaque_sampler);
+                if alpha_batch_container.target_rect.is_some() {
+                    self.device.disable_scissor();
+                }
             }
 
-            let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
+            self.device.disable_depth_write();
+            self.gpu_profile.finish_sampler(opaque_sampler);
+        }
 
-            for batch in &target.alpha_batcher.batch_list.alpha_batch_list.batches {
-                if self.debug_flags.contains(DebugFlags::ALPHA_PRIM_DBG) {
-                    let color = match batch.key.blend_mode {
-                        BlendMode::None => debug_colors::BLACK,
-                        BlendMode::Alpha |
-                        BlendMode::PremultipliedAlpha => debug_colors::GREY,
-                        BlendMode::PremultipliedDestOut => debug_colors::SALMON,
-                        BlendMode::SubpixelConstantTextColor(..) => debug_colors::GREEN,
-                        BlendMode::SubpixelVariableTextColor => debug_colors::RED,
-                        BlendMode::SubpixelWithBgColor => debug_colors::BLUE,
-                        BlendMode::SubpixelDualSource => debug_colors::YELLOW,
-                    }.into();
-                    for item_rect in &batch.item_rects {
-                        self.debug.add_rect(item_rect, color);
-                    }
-                }
+        let _gl = self.gpu_profile.start_marker("alpha batches");
+        let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
+        self.device.set_blend(false);
+        let mut prev_blend_mode = BlendMode::None;
 
+        for alpha_batch_container in &target.alpha_batch_containers {
+            if let Some(target_rect) = alpha_batch_container.target_rect {
+                self.device.enable_scissor();
+                self.device.set_scissor_rect(target_rect);
+            }
+
+            for batch in &alpha_batch_container.alpha_batches {
                 match batch.key.kind {
                     BatchKind::Transformable(transform_kind, TransformBatchKind::TextRun(glyph_format)) => {
                         // Text run batches are handled by this special case branch.
@@ -3837,15 +3881,20 @@ impl Renderer {
                             render_target,
                             target_size,
                             stats,
+                            alpha_batch_container.target_rect,
                         );
                     }
                 }
             }
 
-            self.device.disable_depth();
-            self.device.set_blend(false);
-            self.gpu_profile.finish_sampler(transparent_sampler);
+            if alpha_batch_container.target_rect.is_some() {
+                self.device.disable_scissor();
+            }
         }
+
+        self.device.disable_depth();
+        self.device.set_blend(false);
+        self.gpu_profile.finish_sampler(transparent_sampler);
 
         // For any registered image outputs on this render target,
         // get the texture from caller and blit it.
@@ -4625,7 +4674,7 @@ impl Renderer {
         let y0: f32 = 30.0;
         let mut y = y0;
         let mut text_width = 0.0;
-        for (pipeline, epoch) in  &self.pipeline_epoch_map {
+        for (pipeline, epoch) in  &self.pipeline_info.epochs {
             y += dy;
             let w = self.debug.add_text(
                 x0, y,
@@ -4699,11 +4748,18 @@ impl Renderer {
         self.brush_picture_a8.deinit(&mut self.device);
         self.brush_solid.deinit(&mut self.device);
         self.brush_line.deinit(&mut self.device);
+        self.brush_blend.deinit(&mut self.device);
+        self.brush_mix_blend.deinit(&mut self.device);
         self.cs_clip_rectangle.deinit(&mut self.device);
         self.cs_clip_image.deinit(&mut self.device);
         self.cs_clip_border.deinit(&mut self.device);
         self.ps_text_run.deinit(&mut self.device);
         self.ps_text_run_dual_source.deinit(&mut self.device);
+        for shader in self.brush_image {
+            if let Some(shader) = shader {
+                shader.deinit(&mut self.device);
+            }
+        }
         for shader in self.ps_image {
             if let Some(shader) = shader {
                 shader.deinit(&mut self.device);
@@ -4722,10 +4778,8 @@ impl Renderer {
         self.ps_gradient.deinit(&mut self.device);
         self.ps_angle_gradient.deinit(&mut self.device);
         self.ps_radial_gradient.deinit(&mut self.device);
-        self.ps_blend.deinit(&mut self.device);
         self.ps_hw_composite.deinit(&mut self.device);
         self.ps_split_composite.deinit(&mut self.device);
-        self.ps_composite.deinit(&mut self.device);
         #[cfg(feature = "capture")]
         self.device.delete_fbo(self.read_fbo);
         #[cfg(feature = "replay")]
@@ -4938,6 +4992,12 @@ impl OutputImageHandler for () {
     fn unlock(&mut self, _: PipelineId) {
         unreachable!()
     }
+}
+
+#[derive(Default)]
+pub struct PipelineInfo {
+    pub epochs: FastHashMap<PipelineId, Epoch>,
+    pub removed_pipelines: Vec<PipelineId>,
 }
 
 impl Renderer {

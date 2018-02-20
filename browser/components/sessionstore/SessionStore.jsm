@@ -1719,7 +1719,10 @@ var SessionStoreInternal = {
    */
   onQuitApplication: function ssi_onQuitApplication(aData) {
     if (aData == "restart") {
-      this._prefBranch.setBoolPref("sessionstore.resume_session_once", true);
+      if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
+        this._prefBranch.setBoolPref("sessionstore.resume_session_once", true);
+      }
+
       // The browser:purge-session-history notification fires after the
       // quit-application notification so unregister the
       // browser:purge-session-history notification to prevent clearing
@@ -3436,7 +3439,7 @@ var SessionStoreInternal = {
       tabs.push(tab);
 
       if (tabData.hidden) {
-        tabbrowser.hideTab(tab);
+        tabbrowser.hideTab(tab, tabData.extData && tabData.extData.hiddenBy);
       }
 
       if (tabData.pinned) {

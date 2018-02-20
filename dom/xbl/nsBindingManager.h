@@ -19,6 +19,7 @@
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 #include "mozilla/MediaFeatureChange.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/EventStates.h"
 
@@ -142,10 +143,6 @@ public:
   bool MediumFeaturesChanged(nsPresContext* aPresContext,
                              mozilla::MediaFeatureChangeReason);
 
-  // Update the content bindings in mBoundContentSet due to medium features
-  // changed.
-  void UpdateBoundContentBindingsForServo(nsPresContext* aPresContext);
-
   void AppendAllSheets(nsTArray<mozilla::StyleSheet*>& aArray);
 
   void Traverse(nsIContent *aContent,
@@ -176,6 +173,8 @@ public:
   void DropDocumentReference();
 
   nsIContent* FindNestedSingleInsertionPoint(nsIContent* aContainer, bool* aMulti);
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   // Enumerate each bound content's bindings (including its base bindings)
   // in mBoundContentSet. Return false from the callback to stop enumeration.

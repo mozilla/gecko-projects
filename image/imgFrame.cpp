@@ -101,7 +101,8 @@ AllocateBufferForImage(const IntSize& size,
   }
 #endif
 
-  if (!aIsAnimated && gfxPrefs::ImageMemShared()) {
+  if (!aIsAnimated && gfxVars::GetUseWebRenderOrDefault()
+                   && gfxPrefs::ImageMemShared()) {
     RefPtr<SourceSurfaceSharedData> newSurf = new SourceSurfaceSharedData();
     if (newSurf->Init(size, stride, format)) {
       return newSurf.forget();
@@ -136,19 +137,6 @@ ClearSurface(DataSourceSurface* aSurface, const IntSize& aSize, SurfaceFormat aF
   }
 
   return true;
-}
-
-void
-MarkSurfaceShared(SourceSurface* aSurface)
-{
-  // Depending on what requested the image decoding, the buffer may or may not
-  // end up being shared with another process (e.g. put in a painted layer,
-  // used inside a canvas). If not shared, we should ensure are not keeping the
-  // handle only because we have yet to share it.
-  if (aSurface && aSurface->GetType() == SurfaceType::DATA_SHARED) {
-    auto sharedSurface = static_cast<SourceSurfaceSharedData*>(aSurface);
-    sharedSurface->FinishedSharing();
-  }
 }
 
 // Returns true if an image of aWidth x aHeight is allowed and legal.
@@ -586,9 +574,6 @@ bool imgFrame::Draw(gfxContext* aContext, const ImageRegion& aRegion,
                                aSamplingFilter, aImageFlags, aOpacity);
   }
 
-  // Image got put into a painted layer, it will not be shared with another
-  // process.
-  MarkSurfaceShared(surf);
   return true;
 }
 

@@ -14,18 +14,18 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Vector.h"
 
-#include "jscntxt.h"
-#include "jscompartment.h"
-#include "jsweakmap.h"
 #include "jswrapper.h"
 
 #include "builtin/Promise.h"
 #include "ds/TraceableFifo.h"
 #include "gc/Barrier.h"
+#include "gc/WeakMap.h"
 #include "js/Debug.h"
 #include "js/GCVariant.h"
 #include "js/HashTable.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
 #include "vm/SavedStacks.h"
 #include "wasm/WasmJS.h"
 

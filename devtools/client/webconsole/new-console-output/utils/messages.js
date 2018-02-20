@@ -182,13 +182,17 @@ function transformNavigationMessagePacket(packet) {
 }
 
 function transformLogMessagePacket(packet) {
-  let { message } = packet;
+  let {
+    message,
+    timeStamp,
+  } = packet;
+
   return new ConsoleMessage({
     source: MESSAGE_SOURCE.CONSOLE_API,
     type: MESSAGE_TYPE.LOG,
     level: MESSAGE_LEVEL.LOG,
-    messageText: message.message,
-    timeStamp: message.timeStamp
+    messageText: message,
+    timeStamp,
   });
 }
 
@@ -243,8 +247,9 @@ function transformNetworkEventPacket(packet) {
 
 function transformEvaluationResultPacket(packet) {
   let {
-    exceptionMessage: messageText,
+    exceptionMessage,
     exceptionDocURL,
+    exception,
     frame,
     result,
     helperResult,
@@ -258,19 +263,25 @@ function transformEvaluationResultPacket(packet) {
 
   if (helperResult && helperResult.type === "error") {
     try {
-      messageText = l10n.getStr(helperResult.message);
+      exceptionMessage = l10n.getStr(helperResult.message);
     } catch (ex) {
-      messageText = helperResult.message;
+      exceptionMessage = helperResult.message;
     }
+  } else if (typeof exception === "string") {
+    // Wrap thrown strings in Error objects, so `throw "foo"` outputs "Error: foo"
+    exceptionMessage = new Error(exceptionMessage).toString();
   }
 
-  const level = messageText ? MESSAGE_LEVEL.ERROR : MESSAGE_LEVEL.LOG;
+  const level = typeof exceptionMessage !== "undefined" && exceptionMessage !== null
+    ? MESSAGE_LEVEL.ERROR
+    : MESSAGE_LEVEL.LOG;
+
   return new ConsoleMessage({
     source: MESSAGE_SOURCE.JAVASCRIPT,
     type: MESSAGE_TYPE.RESULT,
     helperType: helperResult ? helperResult.type : null,
     level,
-    messageText,
+    messageText: exceptionMessage,
     parameters: [parameter],
     exceptionDocURL,
     frame,
@@ -311,8 +322,10 @@ function convertCachedPacket(packet) {
     convertPacket.networkEvent = packet;
     convertPacket.type = "networkEvent";
   } else if (packet._type === "LogMessage") {
-    convertPacket.message = packet;
-    convertPacket.type = "logMessage";
+    convertPacket = {
+      ...packet,
+      type: "logMessage"
+    };
   } else {
     throw new Error("Unexpected packet type: " + packet._type);
   }

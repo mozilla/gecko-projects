@@ -51,7 +51,6 @@
         tabsintitlebar="true"
 #endif
         titlemenuseparator="&mainWindow.titlemodifiermenuseparator;"
-        lightweightthemes="true"
         windowtype="navigator:browser"
         macanimationtype="document"
         screenX="4" screenY="4"
@@ -136,6 +135,7 @@
 
     <panel type="autocomplete-richlistbox"
            id="PopupAutoComplete"
+           role="group"
            noautofocus="true"
            hidden="true"
            overflowpadding="4"
@@ -145,12 +145,14 @@
     <!-- for search with one-off buttons -->
     <panel type="autocomplete-richlistbox"
            id="PopupSearchAutoComplete"
+           role="group"
            noautofocus="true"
            hidden="true" />
 
     <!-- for url bar autocomplete -->
     <panel type="autocomplete-richlistbox"
            id="PopupAutoCompleteRichResult"
+           role="group"
            noautofocus="true"
            hidden="true"
            flip="none"
@@ -638,7 +640,6 @@
 #endif
 
       <tabs id="tabbrowser-tabs"
-            tabbrowser="content"
             flex="1"
             setfocus="false"
             tooltip="tabbrowser-tab-tooltip"
@@ -772,6 +773,7 @@
                      class="chromeclass-location" overflows="false">
             <textbox id="urlbar" flex="1"
                      placeholder="&urlbar.placeholder2;"
+                     focused="true"
                      type="autocomplete"
                      autocompletesearch="unifiedcomplete"
                      autocompletesearchparam="enable-actions"

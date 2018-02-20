@@ -12,11 +12,6 @@
  */
 var internalIntlRegExps = std_Object_create(null);
 internalIntlRegExps.unicodeLocaleExtensionSequenceRE = null;
-internalIntlRegExps.languageTagRE = null;
-internalIntlRegExps.duplicateVariantRE = null;
-internalIntlRegExps.duplicateSingletonRE = null;
-internalIntlRegExps.isWellFormedCurrencyCodeRE = null;
-internalIntlRegExps.currencyDigitsRE = null;
 
 /**
  * Regular expression matching a "Unicode locale extension sequence", which the
@@ -74,188 +69,412 @@ function removeUnicodeExtensions(locale) {
     return combined;
 }
 
+/* eslint-disable complexity */
 /**
- * Regular expression defining BCP 47 language tags.
+ * Parser for BCP 47 language tags.
+ *
+ * Returns null if |locale| can't be parsed as a Language-Tag. If the input is
+ * an irregular grandfathered language tag, the object
+ *
+ *   {
+ *     locale: locale.toLowerCase(),
+ *     grandfathered: true,
+ *   }
+ *
+ * is returned. Otherwise the returned object has the following structure:
+ *
+ *   {
+ *     locale: locale.toLowerCase(),
+ *     language: language subtag without extlang / undefined,
+ *     extlang1: first extlang subtag / undefined,
+ *     extlang2: second extlang subtag / undefined,
+ *     extlang3: third extlang subtag / undefined,
+ *     script: script subtag / undefined,
+ *     region: region subtag / undefined,
+ *     variants: array of variant subtags,
+ *     extensions: array of extension subtags,
+ *     privateuse: privateuse subtag / undefined,
+ *   }
+ *
+ * All language tag subtags are returned in lower-case:
+ *
+ *   var langtag = parseLanguageTag("en-Latn-US");
+ *   assertEq("en-latn-us", langtag.locale);
+ *   assertEq("en", langtag.language);
+ *   assertEq("latn", langtag.script);
+ *   assertEq("us", langtag.region);
  *
  * Spec: RFC 5646 section 2.1.
  */
-function getLanguageTagRE() {
-    if (internalIntlRegExps.languageTagRE)
-        return internalIntlRegExps.languageTagRE;
+function parseLanguageTag(locale) {
+    assert(typeof locale === "string", "locale is a string");
 
-    // RFC 5234 section B.1
-    // ALPHA          =  %x41-5A / %x61-7A   ; A-Z / a-z
-    var ALPHA = "[a-zA-Z]";
-    // DIGIT          =  %x30-39
-    //                        ; 0-9
-    var DIGIT = "[0-9]";
+    // Current parse index in |locale|.
+    var index = 0;
 
-    // RFC 5646 section 2.1
-    // alphanum      = (ALPHA / DIGIT)     ; letters and numbers
-    var alphanum = "(?:" + ALPHA + "|" + DIGIT + ")";
-    // regular       = "art-lojban"        ; these tags match the 'langtag'
-    //               / "cel-gaulish"       ; production, but their subtags
-    //               / "no-bok"            ; are not extended language
-    //               / "no-nyn"            ; or variant subtags: their meaning
-    //               / "zh-guoyu"          ; is defined by their registration
-    //               / "zh-hakka"          ; and all of these are deprecated
-    //               / "zh-min"            ; in favor of a more modern
-    //               / "zh-min-nan"        ; subtag or sequence of subtags
-    //               / "zh-xiang"
-    var regular = "(?:art-lojban|cel-gaulish|no-bok|no-nyn|zh-guoyu|zh-hakka|zh-min|zh-min-nan|zh-xiang)";
-    // irregular     = "en-GB-oed"         ; irregular tags do not match
-    //                / "i-ami"             ; the 'langtag' production and
-    //                / "i-bnn"             ; would not otherwise be
-    //                / "i-default"         ; considered 'well-formed'
-    //                / "i-enochian"        ; These tags are all valid,
-    //                / "i-hak"             ; but most are deprecated
-    //                / "i-klingon"         ; in favor of more modern
-    //                / "i-lux"             ; subtags or subtag
-    //                / "i-mingo"           ; combination
-    //                / "i-navajo"
-    //                / "i-pwn"
-    //                / "i-tao"
-    //                / "i-tay"
-    //                / "i-tsu"
-    //                / "sgn-BE-FR"
-    //                / "sgn-BE-NL"
-    //                / "sgn-CH-DE"
-    var irregular = "(?:en-GB-oed|i-ami|i-bnn|i-default|i-enochian|i-hak|i-klingon|i-lux|i-mingo|i-navajo|i-pwn|i-tao|i-tay|i-tsu|sgn-BE-FR|sgn-BE-NL|sgn-CH-DE)";
-    // grandfathered = irregular           ; non-redundant tags registered
-    //               / regular             ; during the RFC 3066 era
-    var grandfathered = "(?:" + irregular + "|" + regular + ")";
-    // privateuse    = "x" 1*("-" (1*8alphanum))
-    var privateuse = "(?:x(?:-[a-z0-9]{1,8})+)";
-    // singleton     = DIGIT               ; 0 - 9
-    //               / %x41-57             ; A - W
-    //               / %x59-5A             ; Y - Z
-    //               / %x61-77             ; a - w
-    //               / %x79-7A             ; y - z
-    var singleton = "(?:" + DIGIT + "|[A-WY-Za-wy-z])";
-    // extension     = singleton 1*("-" (2*8alphanum))
-    var extension = "(?:" + singleton + "(?:-" + alphanum + "{2,8})+)";
-    // variant       = 5*8alphanum         ; registered variants
-    //               / (DIGIT 3alphanum)
-    var variant = "(?:" + alphanum + "{5,8}|(?:" + DIGIT + alphanum + "{3}))";
-    // region        = 2ALPHA              ; ISO 3166-1 code
-    //               / 3DIGIT              ; UN M.49 code
-    var region = "(?:" + ALPHA + "{2}|" + DIGIT + "{3})";
-    // script        = 4ALPHA              ; ISO 15924 code
-    var script = "(?:" + ALPHA + "{4})";
-    // extlang       = 3ALPHA              ; selected ISO 639 codes
-    //                 *2("-" 3ALPHA)      ; permanently reserved
-    var extlang = "(?:" + ALPHA + "{3}(?:-" + ALPHA + "{3}){0,2})";
-    // language      = 2*3ALPHA            ; shortest ISO 639 code
-    //                 ["-" extlang]       ; sometimes followed by
-    //                                     ; extended language subtags
-    //               / 4ALPHA              ; or reserved for future use
-    //               / 5*8ALPHA            ; or registered language subtag
-    var language = "(?:" + ALPHA + "{2,3}(?:-" + extlang + ")?|" + ALPHA + "{4}|" + ALPHA + "{5,8})";
-    // langtag       = language
-    //                 ["-" script]
-    //                 ["-" region]
-    //                 *("-" variant)
-    //                 *("-" extension)
-    //                 ["-" privateuse]
-    var langtag = language + "(?:-" + script + ")?(?:-" + region + ")?(?:-" +
-                  variant + ")*(?:-" + extension + ")*(?:-" + privateuse + ")?";
-    // Language-Tag  = langtag             ; normal language tags
-    //               / privateuse          ; private use tag
-    //               / grandfathered       ; grandfathered tags
-    var languageTag = "^(?:" + langtag + "|" + privateuse + "|" + grandfathered + ")$";
+    // The three possible token type bits. Expressed as #defines to avoid
+    // extra named lookups in the interpreter/jits.
+    #define NONE  0b00
+    #define ALPHA 0b01
+    #define DIGIT 0b10
 
-    // Language tags are case insensitive (RFC 5646 section 2.1.1).
-    return (internalIntlRegExps.languageTagRE = RegExpCreate(languageTag, "i"));
+    // The current token type, its start index, and its length.
+    var token = 0;
+    var tokenStart = 0;
+    var tokenLength = 0;
+
+    // Constants for code units used below.
+    #define HYPHEN  0x2D
+    #define DIGIT_ZERO 0x30
+    #define DIGIT_NINE 0x39
+    #define UPPER_A 0x41
+    #define UPPER_Z 0x5A
+    #define LOWER_A 0x61
+    #define LOWER_X 0x78
+    #define LOWER_Z 0x7A
+    assert(std_String_fromCharCode(HYPHEN) === "-" &&
+           std_String_fromCharCode(DIGIT_ZERO) === "0" &&
+           std_String_fromCharCode(DIGIT_NINE) === "9" &&
+           std_String_fromCharCode(UPPER_A) === "A" &&
+           std_String_fromCharCode(UPPER_Z) === "Z" &&
+           std_String_fromCharCode(LOWER_A) === "a" &&
+           std_String_fromCharCode(LOWER_X) === "x" &&
+           std_String_fromCharCode(LOWER_Z) === "z",
+           "code unit constants should match the expected characters");
+
+    // Reads the next token, returns |false| if an illegal character was
+    // found, otherwise returns |true|.
+    function nextToken() {
+        var type = NONE;
+        for (var i = index; i < locale.length; i++) {
+            // RFC 5234 section B.1
+            // ALPHA = %x41-5A / %x61-7A   ; A-Z / a-z
+            // DIGIT = %x30-39             ; 0-9
+            var c = callFunction(std_String_charCodeAt, locale, i);
+            if ((UPPER_A <= c && c <= UPPER_Z) || (LOWER_A <= c && c <= LOWER_Z))
+                type |= ALPHA;
+            else if (DIGIT_ZERO <= c && c <= DIGIT_NINE)
+                type |= DIGIT;
+            else if (c === HYPHEN && i > index && i + 1 < locale.length)
+                break;
+            else
+                return false;
+        }
+
+        token = type;
+        tokenStart = index;
+        tokenLength = i - index;
+        index = i + 1;
+        return true;
+    }
+
+    // Language tags are compared and processed case-insensitively, so
+    // technically it's not necessary to adjust case. But for easier processing,
+    // and because the canonical form for most subtags is lower case, we start
+    // with lower case for all.
+    //
+    // Note that the tokenizer function keeps using the original input string
+    // to properly detect non-ASCII characters. The lower-case string can't be
+    // used to detect those characters, because some non-ASCII characters
+    // lower-case map into ASCII characters, e.g. U+212A (KELVIN SIGN) lower-
+    // case maps to U+006B (LATIN SMALL LETTER K).
+    var localeLowercase = callFunction(std_String_toLowerCase, locale);
+
+    // Returns the code unit of the first character at the current token
+    // position. Always returns the lower-case form of an alphabetical
+    // character.
+    function tokenStartCodeUnitLower() {
+        var c = callFunction(std_String_charCodeAt, localeLowercase, tokenStart);
+        assert((DIGIT_ZERO <= c && c <= DIGIT_NINE) || (LOWER_A <= c && c <= LOWER_Z),
+               "unexpected code unit");
+        return c;
+    }
+
+    // Returns the current token part transformed to lower-case.
+    function tokenStringLower() {
+        return Substring(localeLowercase, tokenStart, tokenLength);
+    }
+
+    // Language-Tag = langtag           ; normal language tags
+    //              / privateuse        ; private use tag
+    //              / grandfathered     ; grandfathered tags
+    if (!nextToken())
+        return null;
+
+    // All Language-Tag productions start with the ALPHA token and contain
+    // less-or-equal to eight characters.
+    if (token !== ALPHA || tokenLength > 8)
+        return null;
+
+    assert(tokenLength > 0, "token length is not zero if type is ALPHA");
+
+    var language, extlang1, extlang2, extlang3, script, region, privateuse;
+    var variants = [];
+    var extensions = [];
+
+    // langtag = language
+    //           ["-" script]
+    //           ["-" region]
+    //           *("-" variant)
+    //           *("-" extension)
+    //           ["-" privateuse]
+    if (tokenLength > 1) {
+        // language = 2*3ALPHA          ; shortest ISO 639 code
+        //            ["-" extlang]     ; sometimes followed by
+        //                              ; extended language subtags
+        //          / 4ALPHA            ; or reserved for future use
+        //          / 5*8ALPHA          ; or registered language subtag
+        if (tokenLength <= 3) {
+            language = tokenStringLower();
+            if (!nextToken())
+                return null;
+
+            // extlang = 3ALPHA         ; selected ISO 639 codes
+            //           *2("-" 3ALPHA) ; permanently reserved
+            if (token === ALPHA && tokenLength === 3) {
+                extlang1 = tokenStringLower();
+                if (!nextToken())
+                    return null;
+                if (token === ALPHA && tokenLength === 3) {
+                    extlang2 = tokenStringLower();
+                    if (!nextToken())
+                        return null;
+                    if (token === ALPHA && tokenLength === 3) {
+                        extlang3 = tokenStringLower();
+                        if (!nextToken())
+                            return null;
+                    }
+                }
+            }
+        } else {
+            assert(4 <= tokenLength && tokenLength <= 8, "reserved/registered language subtags");
+            language = tokenStringLower();
+            if (!nextToken())
+                return null;
+        }
+
+        // script = 4ALPHA              ; ISO 15924 code
+        if (tokenLength === 4 && token === ALPHA) {
+            script = tokenStringLower();
+            if (!nextToken())
+                return null;
+        }
+
+        // region = 2ALPHA              ; ISO 3166-1 code
+        //        / 3DIGIT              ; UN M.49 code
+        if ((tokenLength === 2 && token === ALPHA) || (tokenLength === 3 && token === DIGIT)) {
+            region = tokenStringLower();
+            if (!nextToken())
+                return null;
+        }
+
+        // variant = 5*8alphanum        ; registered variants
+        //         / (DIGIT 3alphanum)
+        //
+        // RFC 5646 section 2.1
+        // alphanum = (ALPHA / DIGIT)   ; letters and numbers
+        while ((5 <= tokenLength && tokenLength <= 8) ||
+               (tokenLength === 4 && tokenStartCodeUnitLower() <= DIGIT_NINE))
+        {
+            assert(!(tokenStartCodeUnitLower() <= DIGIT_NINE) ||
+                   tokenStartCodeUnitLower() >= DIGIT_ZERO,
+                   "token-start-code-unit <= '9' implies token-start-code-unit is in '0'..'9'");
+
+            // Language tags are case insensitive (RFC 5646 section 2.1.1).
+            // All seen variants are compared ignoring case differences by
+            // using the lower-case form. This allows to properly detect and
+            // reject variant repetitions with differing case, e.g.
+            // "en-variant-Variant".
+            var variant = tokenStringLower();
+
+            // Reject the language tag if a duplicate variant was found.
+            //
+            // This linear-time verification step means the whole variant
+            // subtag checking is potentially quadratic, but we're okay doing
+            // that because language tags are unlikely to be deliberately
+            // pathological.
+            if (callFunction(ArrayIndexOf, variants, variant) !== -1)
+                return null;
+            _DefineDataProperty(variants, variants.length, variant);
+
+            if (!nextToken())
+                return null;
+        }
+
+        // extension = singleton 1*("-" (2*8alphanum))
+        // singleton = DIGIT            ; 0 - 9
+        //           / %x41-57          ; A - W
+        //           / %x59-5A          ; Y - Z
+        //           / %x61-77          ; a - w
+        //           / %x79-7A          ; y - z
+        var seenSingletons = [];
+        while (tokenLength === 1) {
+            var extensionStart = tokenStart;
+            var singleton = tokenStartCodeUnitLower();
+            if (singleton === LOWER_X)
+                break;
+
+            // Language tags are case insensitive (RFC 5646 section 2.1.1).
+            // Ensure |tokenStartCodeUnitLower()| does not return the code
+            // unit of an upper-case character, so we can properly detect and
+            // reject language tags with different case, e.g. "en-u-foo-U-foo".
+            assert(!(UPPER_A <= singleton && singleton <= UPPER_Z),
+                   "unexpected upper-case code unit");
+
+            // Reject the input if a duplicate singleton was found.
+            //
+            // Similar to the variant validation step this check is O(n**2),
+            // but given that there are only 35 possible singletons the
+            // quadratic runtime is negligible.
+            if (callFunction(ArrayIndexOf, seenSingletons, singleton) !== -1)
+                return null;
+            _DefineDataProperty(seenSingletons, seenSingletons.length, singleton);
+
+            if (!nextToken())
+                return null;
+
+            if (!(2 <= tokenLength && tokenLength <= 8))
+                return null;
+            do {
+                if (!nextToken())
+                    return null;
+            } while (2 <= tokenLength && tokenLength <= 8);
+
+            var extension = Substring(localeLowercase, extensionStart,
+                                      (tokenStart - 1 - extensionStart));
+            _DefineDataProperty(extensions, extensions.length, extension);
+        }
+    }
+
+    // Either trailing privateuse component of the langtag production or
+    // standalone privateuse tag.
+    //
+    // privateuse = "x" 1*("-" (1*8alphanum))
+    if (tokenLength === 1 && tokenStartCodeUnitLower() === LOWER_X) {
+        var privateuseStart = tokenStart;
+        if (!nextToken())
+            return null;
+
+        if (!(1 <= tokenLength && tokenLength <= 8))
+            return null;
+        do {
+            if (!nextToken())
+                return null;
+        } while (1 <= tokenLength && tokenLength <= 8);
+
+        privateuse = Substring(localeLowercase, privateuseStart,
+                               localeLowercase.length - privateuseStart);
+    }
+
+    // Return if the complete input was successfully parsed. That means it is
+    // either a langtag or privateuse-only language tag, or it is a regular
+    // grandfathered language tag.
+    if (token === NONE) {
+        return {
+            locale: localeLowercase,
+            language,
+            extlang1,
+            extlang2,
+            extlang3,
+            script,
+            region,
+            variants,
+            extensions,
+            privateuse,
+        };
+    }
+
+    // Before we can compare the lower-case form of locale to the list of
+    // grandfathered language tags, we need to ensure any remaining parts are
+    // alphanum-only ASCII characters. This step is necessary because locale
+    // could include other characters which lower-case map into ASCII
+    // characters.
+    // For example we need to reject "i-ha\u212A" (U+212A KELVIN SIGN) even
+    // though its lower-case form "i-hak" matches a grandfathered language
+    // tag.
+    do {
+        if (!nextToken())
+            return null;
+    } while (token !== NONE);
+
+    // grandfathered = irregular        ; non-redundant tags registered
+    //               / regular          ; during the RFC 3066 era
+    switch (localeLowercase) {
+#ifdef DEBUG
+      // regular = "art-lojban"         ; these tags match the 'langtag'
+      //         / "cel-gaulish"        ; production, but their subtags
+      //         / "no-bok"             ; are not extended language
+      //         / "no-nyn"             ; or variant subtags: their meaning
+      //         / "zh-guoyu"           ; is defined by their registration
+      //         / "zh-hakka"           ; and all of these are deprecated
+      //         / "zh-min"             ; in favor of a more modern
+      //         / "zh-min-nan"         ; subtag or sequence of subtags
+      //         / "zh-xiang"
+      case "art-lojban":
+      case "cel-gaulish":
+      case "no-bok":
+      case "no-nyn":
+      case "zh-guoyu":
+      case "zh-hakka":
+      case "zh-min":
+      case "zh-min-nan":
+      case "zh-xiang":
+        assert(false, "regular grandfathered tags should have been matched above");
+#endif /* DEBUG */
+
+      // irregular = "en-GB-oed"        ; irregular tags do not match
+      //           / "i-ami"            ; the 'langtag' production and
+      //           / "i-bnn"            ; would not otherwise be
+      //           / "i-default"        ; considered 'well-formed'
+      //           / "i-enochian"       ; These tags are all valid,
+      //           / "i-hak"            ; but most are deprecated
+      //           / "i-klingon"        ; in favor of more modern
+      //           / "i-lux"            ; subtags or subtag
+      //           / "i-mingo"          ; combination
+      //           / "i-navajo"
+      //           / "i-pwn"
+      //           / "i-tao"
+      //           / "i-tay"
+      //           / "i-tsu"
+      //           / "sgn-BE-FR"
+      //           / "sgn-BE-NL"
+      //           / "sgn-CH-DE"
+      case "en-gb-oed":
+      case "i-ami":
+      case "i-bnn":
+      case "i-default":
+      case "i-enochian":
+      case "i-hak":
+      case "i-klingon":
+      case "i-lux":
+      case "i-mingo":
+      case "i-navajo":
+      case "i-pwn":
+      case "i-tao":
+      case "i-tay":
+      case "i-tsu":
+      case "sgn-be-fr":
+      case "sgn-be-nl":
+      case "sgn-ch-de":
+        return { locale: localeLowercase, grandfathered: true };
+
+      default:
+        return null;
+    }
+
+    #undef NONE
+    #undef ALPHA
+    #undef DIGIT
+    #undef HYPHEN
+    #undef DIGIT_ZERO
+    #undef DIGIT_NINE
+    #undef UPPER_A
+    #undef UPPER_Z
+    #undef LOWER_A
+    #undef LOWER_X
+    #undef LOWER_Z
 }
-
-function getDuplicateVariantRE() {
-    if (internalIntlRegExps.duplicateVariantRE)
-        return internalIntlRegExps.duplicateVariantRE;
-
-    // RFC 5234 section B.1
-    // ALPHA          =  %x41-5A / %x61-7A   ; A-Z / a-z
-    var ALPHA = "[a-zA-Z]";
-    // DIGIT          =  %x30-39
-    //                        ; 0-9
-    var DIGIT = "[0-9]";
-
-    // RFC 5646 section 2.1
-    // alphanum      = (ALPHA / DIGIT)     ; letters and numbers
-    var alphanum = "(?:" + ALPHA + "|" + DIGIT + ")";
-    // variant       = 5*8alphanum         ; registered variants
-    //               / (DIGIT 3alphanum)
-    var variant = "(?:" + alphanum + "{5,8}|(?:" + DIGIT + alphanum + "{3}))";
-
-    // Match a langtag that contains a duplicate variant.
-    var duplicateVariant =
-        // Match everything in a langtag prior to any variants, and maybe some
-        // of the variants as well (which makes this pattern inefficient but
-        // not wrong, for our purposes);
-        "^(?:" + alphanum + "{2,8}-)+" +
-        // a variant, parenthesised so that we can refer back to it later;
-        "(" + variant + ")-" +
-        // zero or more subtags at least two characters long (thus stopping
-        // before extension and privateuse components);
-        "(?:" + alphanum + "{2,8}-)*" +
-        // and the same variant again
-        "\\1" +
-        // ...but not followed by any characters that would turn it into a
-        // different subtag.
-        "(?!" + alphanum + ")";
-
-    // Language tags are case insensitive (RFC 5646 section 2.1.1).  Using
-    // character classes covering both upper- and lower-case characters nearly
-    // addresses this -- but for the possibility of variant repetition with
-    // differing case, e.g. "en-variant-Variant".  Use a case-insensitive
-    // regular expression to address this.  (Note that there's no worry about
-    // case transformation accepting invalid characters here: users have
-    // already verified the string is alphanumeric Latin plus "-".)
-    return (internalIntlRegExps.duplicateVariantRE = RegExpCreate(duplicateVariant, "i"));
-}
-
-function getDuplicateSingletonRE() {
-    if (internalIntlRegExps.duplicateSingletonRE)
-        return internalIntlRegExps.duplicateSingletonRE;
-
-    // RFC 5234 section B.1
-    // ALPHA          =  %x41-5A / %x61-7A   ; A-Z / a-z
-    var ALPHA = "[a-zA-Z]";
-    // DIGIT          =  %x30-39
-    //                        ; 0-9
-    var DIGIT = "[0-9]";
-
-    // RFC 5646 section 2.1
-    // alphanum      = (ALPHA / DIGIT)     ; letters and numbers
-    var alphanum = "(?:" + ALPHA + "|" + DIGIT + ")";
-    // singleton     = DIGIT               ; 0 - 9
-    //               / %x41-57             ; A - W
-    //               / %x59-5A             ; Y - Z
-    //               / %x61-77             ; a - w
-    //               / %x79-7A             ; y - z
-    var singleton = "(?:" + DIGIT + "|[A-WY-Za-wy-z])";
-
-    // Match a langtag that contains a duplicate singleton.
-    var duplicateSingleton =
-        // Match a singleton subtag, parenthesised so that we can refer back to
-        // it later;
-        "-(" + singleton + ")-" +
-        // then zero or more subtags;
-        "(?:" + alphanum + "+-)*" +
-        // and the same singleton again
-        "\\1" +
-        // ...but not followed by any characters that would turn it into a
-        // different subtag.
-        "(?!" + alphanum + ")";
-
-    // Language tags are case insensitive (RFC 5646 section 2.1.1).  Using
-    // character classes covering both upper- and lower-case characters nearly
-    // addresses this -- but for the possibility of singleton repetition with
-    // differing case, e.g. "en-u-foo-U-foo".  Use a case-insensitive regular
-    // expression to address this.  (Note that there's no worry about case
-    // transformation accepting invalid characters here: users have already
-    // verified the string is alphanumeric Latin plus "-".)
-    return (internalIntlRegExps.duplicateSingletonRE = RegExpCreate(duplicateSingleton, "i"));
-}
+/* eslint-enable complexity */
 
 /**
  * Verifies that the given string is a well-formed BCP 47 language tag
@@ -264,44 +483,141 @@ function getDuplicateSingletonRE() {
  * Spec: ECMAScript Internationalization API Specification, 6.2.2.
  */
 function IsStructurallyValidLanguageTag(locale) {
-    assert(typeof locale === "string", "IsStructurallyValidLanguageTag");
-    var languageTagRE = getLanguageTagRE();
-    if (!regexp_test_no_statics(languageTagRE, locale))
-        return false;
-
-    // Before checking for duplicate variant or singleton subtags with
-    // regular expressions, we have to get private use subtag sequences
-    // out of the picture.
-    if (callFunction(std_String_startsWith, locale, "x-"))
-        return true;
-    var pos = callFunction(std_String_indexOf, locale, "-x-");
-    if (pos !== -1)
-        locale = callFunction(String_substring, locale, 0, pos);
-
-    // Check for duplicate variant or singleton subtags.
-    var duplicateVariantRE = getDuplicateVariantRE();
-    var duplicateSingletonRE = getDuplicateSingletonRE();
-    return !regexp_test_no_statics(duplicateVariantRE, locale) &&
-           !regexp_test_no_statics(duplicateSingletonRE, locale);
+    return parseLanguageTag(locale) !== null;
 }
 
 /**
- * Joins the array elements in the given range with the supplied separator.
+ * Canonicalizes the given structurally valid BCP 47 language tag, including
+ * regularized case of subtags. For example, the language tag
+ * Zh-NAN-haNS-bu-variant2-Variant1-u-ca-chinese-t-Zh-laTN-x-PRIVATE, where
+ *
+ *     Zh             ; 2*3ALPHA
+ *     -NAN           ; ["-" extlang]
+ *     -haNS          ; ["-" script]
+ *     -bu            ; ["-" region]
+ *     -variant2      ; *("-" variant)
+ *     -Variant1
+ *     -u-ca-chinese  ; *("-" extension)
+ *     -t-Zh-laTN
+ *     -x-PRIVATE     ; ["-" privateuse]
+ *
+ * becomes nan-Hans-mm-variant2-variant1-t-zh-latn-u-ca-chinese-x-private
+ *
+ * Spec: ECMAScript Internationalization API Specification, 6.2.3.
+ * Spec: RFC 5646, section 4.5.
  */
-function ArrayJoinRange(array, separator, from, to = array.length) {
-    assert(typeof separator === "string", "|separator| is a string value");
-    assert(typeof from === "number", "|from| is a number value");
-    assert(typeof to === "number", "|to| is a number value");
-    assert(0 <= from && from <= to && to <= array.length, "|from| and |to| form a valid range");
+function CanonicalizeLanguageTagFromObject(localeObj) {
+    assert(IsObject(localeObj), "CanonicalizeLanguageTagFromObject");
 
-    if (from === to)
-        return "";
+    var {locale} = localeObj;
+    assert(locale === callFunction(std_String_toLowerCase, locale),
+           "expected lower-case form for locale string");
 
-    var result = array[from];
-    for (var i = from + 1; i < to; i++) {
-        result += separator + array[i];
+    // Handle mappings for complete tags.
+    if (hasOwn(locale, langTagMappings))
+        return langTagMappings[locale];
+
+    assert(!hasOwn("grandfathered", localeObj),
+           "grandfathered tags should be mapped completely");
+
+    var {
+        language,
+        extlang1,
+        extlang2,
+        extlang3,
+        script,
+        region,
+        variants,
+        extensions,
+        privateuse,
+    } = localeObj;
+
+    // Be careful of a Language-Tag that is entirely privateuse.
+    if (!language) {
+        assert(typeof privateuse === "string", "language or privateuse subtag required");
+        return privateuse;
     }
-    return result;
+
+    // Replace deprecated language tags with their preferred values.
+    // "in" -> "id"
+    if (hasOwn(language, languageMappings))
+        language = languageMappings[language];
+
+    var canonical = language;
+
+    if (extlang1) {
+        // When an extlang subtag is encountered with its corresponding
+        // primary language tag prefix, replace the combination with the
+        // preferred value -- which MUST be the unadorned extlang subtag.
+        // For example, this entry
+        //
+        //   Type: extlang
+        //   Subtag: nan
+        //   Description: Min Nan Chinese
+        //   Added: 2009-07-29
+        //   Preferred-Value: nan
+        //   Prefix: zh
+        //   Macrolanguage: zh
+        //
+        // is interpreted to say that if a "nan" extlang appears after a "zh"
+        // primary language prefix, the extlang and its prefix must be
+        // replaced by its preferred value, so "zh-nan" must be replaced by
+        // the preferred value "nan". (RFC 5646 section 2.2.2)
+        if (hasOwn(extlang1, extlangMappings) && extlangMappings[extlang1] === language)
+            canonical = extlang1;
+        else
+            canonical += "-" + extlang1;
+    }
+
+    // The second extlang subtag will always be left as is.
+    // (RFC 5646 section 2.2.2)
+    if (extlang2)
+        canonical += "-" + extlang2;
+
+    // The third extlang subtag will always be left as is.
+    // (RFC 5646 section 2.2.2)
+    if (extlang3)
+        canonical += "-" + extlang3;
+
+    if (script) {
+        // The first character of a script code needs to be capitalized.
+        // "hans" -> "Hans"
+        script = callFunction(std_String_toUpperCase, script[0]) +
+                 Substring(script, 1, script.length - 1);
+
+        // No script replacements are currently present, so append as is.
+        canonical += "-" + script;
+    }
+
+    if (region) {
+        // Region codes need to be in upper-case. "bu" -> "BU"
+        region = callFunction(std_String_toUpperCase, region);
+
+        // Replace deprecated subtags with their preferred values.
+        // "BU" -> "MM"
+        if (hasOwn(region, regionMappings))
+            region = regionMappings[region];
+
+        canonical += "-" + region;
+    }
+
+    // No variant replacements are currently present, so append as is.
+    if (variants.length > 0)
+        canonical += "-" + callFunction(std_Array_join, variants, "-");
+
+    if (extensions.length > 0) {
+        // Extension sequences are sorted by their singleton characters.
+        // "u-ca-chinese-t-zh-latn" -> "t-zh-latn-u-ca-chinese"
+        callFunction(ArraySort, extensions);
+
+        canonical += "-" + callFunction(std_Array_join, extensions, "-");
+    }
+
+    // Private use sequences are left as is. "x-private"
+    if (privateuse)
+        canonical += "-" + privateuse;
+
+    return canonical;
 }
 
 /**
@@ -325,119 +641,10 @@ function ArrayJoinRange(array, separator, from, to = array.length) {
  * Spec: RFC 5646, section 4.5.
  */
 function CanonicalizeLanguageTag(locale) {
-    assert(IsStructurallyValidLanguageTag(locale), "CanonicalizeLanguageTag");
+    var localeObj = parseLanguageTag(locale);
+    assert(localeObj !== null, "CanonicalizeLanguageTag");
 
-    // The input
-    // "Zh-NAN-haNS-bu-variant2-Variant1-u-ca-chinese-t-Zh-laTN-x-PRIVATE"
-    // will be used throughout this method to illustrate how it works.
-
-    // Language tags are compared and processed case-insensitively, so
-    // technically it's not necessary to adjust case. But for easier processing,
-    // and because the canonical form for most subtags is lower case, we start
-    // with lower case for all.
-    // "Zh-NAN-haNS-bu-variant2-Variant1-u-ca-chinese-t-Zh-laTN-x-PRIVATE" ->
-    // "zh-nan-hans-bu-variant2-variant1-u-ca-chinese-t-zh-latn-x-private"
-    locale = callFunction(std_String_toLowerCase, locale);
-
-    // Handle mappings for complete tags.
-    if (hasOwn(locale, langTagMappings))
-        return langTagMappings[locale];
-
-    var subtags = StringSplitString(locale, "-");
-    var i = 0;
-
-    // Handle the standard part: All subtags before the first singleton or "x".
-    // "zh-nan-hans-bu-variant2-variant1"
-    while (i < subtags.length) {
-        var subtag = subtags[i];
-
-        // If we reach the start of an extension sequence or private use part,
-        // we're done with this loop. We have to check for i > 0 because for
-        // irregular language tags, such as i-klingon, the single-character
-        // subtag "i" is not the start of an extension sequence.
-        // In the example, we break at "u".
-        if (subtag.length === 1 && (i > 0 || subtag === "x"))
-            break;
-
-        if (i !== 0) {
-            if (subtag.length === 4) {
-                // 4-character subtags that are not in initial position are
-                // script codes; their first character needs to be capitalized.
-                // "hans" -> "Hans"
-                subtag = callFunction(std_String_toUpperCase, subtag[0]) +
-                         callFunction(String_substring, subtag, 1);
-            } else if (subtag.length === 2) {
-                // 2-character subtags that are not in initial position are
-                // region codes; they need to be upper case. "bu" -> "BU"
-                subtag = callFunction(std_String_toUpperCase, subtag);
-            }
-        }
-        if (hasOwn(subtag, langSubtagMappings)) {
-            // Replace deprecated subtags with their preferred values.
-            // "BU" -> "MM"
-            // This has to come after we capitalize region codes because
-            // otherwise some language and region codes could be confused.
-            // For example, "in" is an obsolete language code for Indonesian,
-            // but "IN" is the country code for India.
-            // Note that the script generating langSubtagMappings makes sure
-            // that no regular subtag mapping will replace an extlang code.
-            subtag = langSubtagMappings[subtag];
-        } else if (hasOwn(subtag, extlangMappings)) {
-            // Replace deprecated extlang subtags with their preferred values,
-            // and remove the preceding subtag if it's a redundant prefix.
-            // "zh-nan" -> "nan"
-            // Note that the script generating extlangMappings makes sure that
-            // no extlang mapping will replace a normal language code.
-            // The preferred value for all current deprecated extlang subtags
-            // is equal to the extlang subtag, so we only need remove the
-            // redundant prefix to get the preferred value.
-            if (i === 1 && extlangMappings[subtag] === subtags[0]) {
-                callFunction(std_Array_shift, subtags);
-                i--;
-            }
-        }
-        subtags[i] = subtag;
-        i++;
-    }
-
-    // Directly return when the language tag doesn't contain any extension or
-    // private use sub-tags.
-    if (i === subtags.length)
-        return callFunction(std_Array_join, subtags, "-");
-
-    var normal = ArrayJoinRange(subtags, "-", 0, i);
-
-    // Extension sequences are sorted by their singleton characters.
-    // "u-ca-chinese-t-zh-latn" -> "t-zh-latn-u-ca-chinese"
-    var extensions = [];
-    while (i < subtags.length && subtags[i] !== "x") {
-        var extensionStart = i;
-        i++;
-        while (i < subtags.length && subtags[i].length > 1)
-            i++;
-        var extension = ArrayJoinRange(subtags, "-", extensionStart, i);
-        _DefineDataProperty(extensions, extensions.length, extension);
-    }
-    callFunction(ArraySort, extensions);
-
-    // Private use sequences are left as is. "x-private"
-    var privateUse = "";
-    if (i < subtags.length)
-        privateUse = ArrayJoinRange(subtags, "-", i);
-
-    // Put everything back together.
-    var canonical = normal;
-    if (extensions.length > 0)
-        canonical += "-" + callFunction(std_Array_join, extensions, "-");
-    if (privateUse.length > 0) {
-        // Be careful of a Language-Tag that is entirely privateuse.
-        if (canonical.length > 0)
-            canonical += "-" + privateUse;
-        else
-            canonical = privateUse;
-    }
-
-    return canonical;
+    return CanonicalizeLanguageTagFromObject(localeObj);
 }
 
 /**
@@ -480,18 +687,19 @@ function ValidateAndCanonicalizeLanguageTag(locale) {
         assert(!hasOwn(locale, langTagMappings), "langTagMappings contains no 2*3ALPHA mappings");
 
         // Replace deprecated subtags with their preferred values.
-        locale = hasOwn(locale, langSubtagMappings)
-                 ? langSubtagMappings[locale]
+        locale = hasOwn(locale, languageMappings)
+                 ? languageMappings[locale]
                  : locale;
         assert(locale === CanonicalizeLanguageTag(locale), "expected same canonicalization");
 
         return locale;
     }
 
-    if (!IsStructurallyValidLanguageTag(locale))
+    var localeObj = parseLanguageTag(locale);
+    if (localeObj === null)
         ThrowRangeError(JSMSG_INVALID_LANGUAGE_TAG, locale);
 
-    return CanonicalizeLanguageTag(locale);
+    return CanonicalizeLanguageTagFromObject(localeObj);
 }
 
 function localeContainsNoUnicodeExtensions(locale) {
@@ -556,11 +764,11 @@ function DefaultLocaleIgnoringAvailableLocales() {
 
     // If we didn't get a cache hit, compute the candidate default locale and
     // cache it.  Fall back on the last-ditch locale when necessary.
-    var candidate;
-    if (!IsStructurallyValidLanguageTag(runtimeDefaultLocale)) {
+    var candidate = parseLanguageTag(runtimeDefaultLocale);
+    if (candidate === null) {
         candidate = lastDitchLocale();
     } else {
-        candidate = CanonicalizeLanguageTag(runtimeDefaultLocale);
+        candidate = CanonicalizeLanguageTagFromObject(candidate);
 
         // The default locale must be in [[availableLocales]], and that list
         // must not contain any locales with Unicode extension sequences, so
@@ -656,33 +864,53 @@ function addSpecialMissingLanguageTags(availableLocales) {
  * Spec: ECMAScript Internationalization API Specification, 9.2.1.
  */
 function CanonicalizeLocaleList(locales) {
+    // Step 1.
     if (locales === undefined)
         return [];
-    if (typeof locales === "string") {
-        if (!IsStructurallyValidLanguageTag(locales))
-            ThrowRangeError(JSMSG_INVALID_LANGUAGE_TAG, locales);
-        return [CanonicalizeLanguageTag(locales)];
-    }
+
+    // Step 3 (and the remaining steps).
+    if (typeof locales === "string")
+        return [ValidateAndCanonicalizeLanguageTag(locales)];
+
+    // Step 2.
     var seen = [];
+
+    // Step 4.
     var O = ToObject(locales);
+
+    // Step 5.
     var len = ToLength(O.length);
+
+    // Step 6.
     var k = 0;
+
+    // Step 7.
     while (k < len) {
-        // Don't call ToString(k) - SpiderMonkey is faster with integers.
-        var kPresent = HasProperty(O, k);
-        if (kPresent) {
+        // Steps 7.a-c.
+        if (k in O) {
+            // Step 7.c.i.
             var kValue = O[k];
+
+            // Step 7.c.ii.
             if (!(typeof kValue === "string" || IsObject(kValue)))
                 ThrowTypeError(JSMSG_INVALID_LOCALES_ELEMENT);
+
+            // Step 7.c.iii.
             var tag = ToString(kValue);
-            if (!IsStructurallyValidLanguageTag(tag))
-                ThrowRangeError(JSMSG_INVALID_LANGUAGE_TAG, tag);
-            tag = CanonicalizeLanguageTag(tag);
+
+            // Step 7.c.iv.
+            tag = ValidateAndCanonicalizeLanguageTag(tag);
+
+            // Step 7.c.v.
             if (callFunction(ArrayIndexOf, seen, tag) === -1)
                 _DefineDataProperty(seen, seen.length, tag);
         }
+
+        // Step 7.d.
         k++;
     }
+
+    // Step 8.
     return seen;
 }
 
@@ -762,28 +990,41 @@ function BestAvailableLocaleIgnoringDefault(availableLocales, locale) {
  * Spec: RFC 4647, section 3.4.
  */
 function LookupMatcher(availableLocales, requestedLocales) {
-    var i = 0;
-    var len = requestedLocales.length;
-    var availableLocale;
-    var locale, noExtensionsLocale;
-    while (i < len && availableLocale === undefined) {
-        locale = requestedLocales[i];
-        noExtensionsLocale = removeUnicodeExtensions(locale);
-        availableLocale = BestAvailableLocale(availableLocales, noExtensionsLocale);
-        i++;
+    // Step 1.
+    var result = new Record();
+
+    // Step 2.
+    for (var i = 0; i < requestedLocales.length; i++) {
+        var locale = requestedLocales[i];
+
+        // Step 2.a.
+        var noExtensionsLocale = removeUnicodeExtensions(locale);
+
+        // Step 2.b.
+        var availableLocale = BestAvailableLocale(availableLocales, noExtensionsLocale);
+
+        // Step 2.c.
+        if (availableLocale !== undefined) {
+            // Step 2.c.i.
+            result.locale = availableLocale;
+
+            // Step 2.c.ii.
+            if (locale !== noExtensionsLocale) {
+                var unicodeLocaleExtensionSequenceRE = getUnicodeLocaleExtensionSequenceRE();
+                var extensionMatch = regexp_exec_no_statics(unicodeLocaleExtensionSequenceRE,
+                                                            locale);
+                result.extension = extensionMatch[0];
+            }
+
+            // Step 2.c.iii.
+            return result;
+        }
     }
 
-    var result = new Record();
-    if (availableLocale !== undefined) {
-        result.locale = availableLocale;
-        if (locale !== noExtensionsLocale) {
-            var unicodeLocaleExtensionSequenceRE = getUnicodeLocaleExtensionSequenceRE();
-            var extensionMatch = regexp_exec_no_statics(unicodeLocaleExtensionSequenceRE, locale);
-            result.extension = extensionMatch[0];
-        }
-    } else {
-        result.locale = DefaultLocale();
-    }
+    // Steps 3-4.
+    result.locale = DefaultLocale();
+
+    // Step 5.
     return result;
 }
 
@@ -804,7 +1045,7 @@ function BestFitMatcher(availableLocales, requestedLocales) {
 /**
  * Returns the Unicode extension value subtags for the requested key subtag.
  *
- * NOTE: PR to add UnicodeExtensionValue to ECMA-402 isn't yet written.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.5.
  */
 function UnicodeExtensionValue(extension, key) {
     assert(typeof extension === "string", "extension is a string value");
@@ -814,63 +1055,65 @@ function UnicodeExtensionValue(extension, key) {
         return extensionMatch !== null && extensionMatch[0] === extension;
     }(), "extension is a Unicode extension subtag");
     assert(typeof key === "string", "key is a string value");
-    assert(key.length === 2, "key is a Unicode extension key subtag");
 
     // Step 1.
-    var size = extension.length;
+    assert(key.length === 2, "key is a Unicode extension key subtag");
 
     // Step 2.
-    var searchValue = "-" + key + "-";
+    var size = extension.length;
 
     // Step 3.
-    var pos = callFunction(std_String_indexOf, extension, searchValue);
+    var searchValue = "-" + key + "-";
 
     // Step 4.
+    var pos = callFunction(std_String_indexOf, extension, searchValue);
+
+    // Step 5.
     if (pos !== -1) {
-        // Step 4.a.
+        // Step 5.a.
         var start = pos + 4;
 
-        // Step 4.b.
+        // Step 5.b.
         var end = start;
 
-        // Step 4.c.
+        // Step 5.c.
         var k = start;
 
-        // Steps 4.d-e.
+        // Steps 5.d-e.
         while (true) {
-            // Step 4.e.i.
+            // Step 5.e.i.
             var e = callFunction(std_String_indexOf, extension, "-", k);
 
-            // Step 4.e.ii.
+            // Step 5.e.ii.
             var len = e === -1 ? size - k : e - k;
 
-            // Step 4.e.iii.
+            // Step 5.e.iii.
             if (len === 2)
                 break;
 
-            // Step 4.e.iv.
+            // Step 5.e.iv.
             if (e === -1) {
                 end = size;
                 break;
             }
 
-            // Step 4.e.v.
+            // Step 5.e.v.
             end = e;
             k = e + 1;
         }
 
-        // Step 4.f.
+        // Step 5.f.
         return callFunction(String_substring, extension, start, end);
     }
 
-    // Step 5.
+    // Step 6.
     searchValue = "-" + key;
 
-    // Steps 6-7.
+    // Steps 7-8.
     if (callFunction(std_String_endsWith, extension, searchValue))
         return "";
 
-    // Step 8 (implicit).
+    // Step 9 (implicit).
 }
 
 /**
@@ -880,11 +1123,9 @@ function UnicodeExtensionValue(extension, key) {
  * caller's relevant extensions and locale data as well as client-provided
  * options into consideration.
  *
- * Spec: ECMAScript Internationalization API Specification, 9.2.5.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.6.
  */
 function ResolveLocale(availableLocales, requestedLocales, options, relevantExtensionKeys, localeData) {
-    /*jshint laxbreak: true */
-
     // Steps 1-3.
     var matcher = options.localeMatcher;
     var r = (matcher === "lookup")
@@ -893,58 +1134,52 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
 
     // Step 4.
     var foundLocale = r.locale;
-
-    // Step 5 (Not applicable in this implementation).
     var extension = r.extension;
 
-    // Steps 6-7.
+    // Step 5.
     var result = new Record();
+
+    // Step 6.
     result.dataLocale = foundLocale;
 
-    // Step 8.
+    // Step 7.
     var supportedExtension = "-u";
 
     // In this implementation, localeData is a function, not an object.
     var localeDataProvider = localeData();
 
-    // Steps 9-12.
+    // Step 8.
     for (var i = 0; i < relevantExtensionKeys.length; i++) {
-        // Step 12.a.
         var key = relevantExtensionKeys[i];
 
-        // Steps 12.b-d (The locale data is only computed when needed).
+        // Steps 8.a-h (The locale data is only computed when needed).
         var keyLocaleData = undefined;
         var value = undefined;
 
         // Locale tag may override.
 
-        // Step 12.e.
+        // Step 8.g.
         var supportedExtensionAddition = "";
 
-        // Step 12.f.
+        // Step 8.h.
         if (extension !== undefined) {
-            // NB: The step annotations don't yet match the ES2017 Intl draft,
-            // 94045d234762ad107a3d09bb6f7381a65f1a2f9b, because the PR to add
-            // the new UnicodeExtensionValue abstract operation still needs to
-            // be written.
-
-            // Step 12.f.i.
+            // Step 8.h.i.
             var requestedValue = UnicodeExtensionValue(extension, key);
 
-            // Step 12.f.ii.
+            // Step 8.h.ii.
             if (requestedValue !== undefined) {
-                // Steps 12.b-c.
+                // Steps 8.a-d.
                 keyLocaleData = callFunction(localeDataProvider[key], null, foundLocale);
 
-                // Step 12.f.ii.1.
+                // Step 8.h.ii.1.
                 if (requestedValue !== "") {
-                    // Step 12.f.ii.1.a.
+                    // Step 8.h.ii.1.a.
                     if (callFunction(ArrayIndexOf, keyLocaleData, requestedValue) !== -1) {
                         value = requestedValue;
                         supportedExtensionAddition = "-" + key + "-" + value;
                     }
                 } else {
-                    // Step 12.f.ii.2.
+                    // Step 8.h.ii.2.
 
                     // According to the LDML spec, if there's no type value,
                     // and true is an allowed value, it's used.
@@ -956,15 +1191,22 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
 
         // Options override all.
 
-        // Step 12.g.i.
+        // Step 8.i.i.
         var optionsValue = options[key];
 
-        // Step 12.g, 12.g.ii.
+        // Step 8.i.ii.
+        assert(typeof optionsValue === "string" ||
+               optionsValue === undefined ||
+               optionsValue === null,
+               "unexpected type for options value");
+
+        // Steps 8.i, 8.i.iii.1.
         if (optionsValue !== undefined && optionsValue !== value) {
-            // Steps 12.b-c.
+            // Steps 8.a-d.
             if (keyLocaleData === undefined)
                 keyLocaleData = callFunction(localeDataProvider[key], null, foundLocale);
 
+            // Step 8.i.iii.
             if (callFunction(ArrayIndexOf, keyLocaleData, optionsValue) !== -1) {
                 value = optionsValue;
                 supportedExtensionAddition = "";
@@ -973,27 +1215,29 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
 
         // Locale data provides default value.
         if (value === undefined) {
-            // Steps 12.b-d.
+            // Steps 8.a-f.
             value = keyLocaleData === undefined
                     ? callFunction(localeDataProvider.default[key], null, foundLocale)
                     : keyLocaleData[0];
         }
 
-        // Steps 12.h-j.
+        // Step 8.j.
         assert(typeof value === "string" || value === null, "unexpected locale data value");
         result[key] = value;
+
+        // Step 8.k.
         supportedExtension += supportedExtensionAddition;
     }
 
-    // Step 13.
+    // Step 9.
     if (supportedExtension.length > 2) {
         assert(!callFunction(std_String_startsWith, foundLocale, "x-"),
                "unexpected privateuse-only locale returned from ICU");
 
-        // Step 13.a.
+        // Step 9.a.
         var privateIndex = callFunction(std_String_indexOf, foundLocale, "-x-");
 
-        // Steps 13.b-c.
+        // Steps 9.b-c.
         if (privateIndex === -1) {
             foundLocale += supportedExtension;
         } else {
@@ -1002,18 +1246,18 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
             foundLocale = preExtension + supportedExtension + postExtension;
         }
 
-        // Step 13.d.
+        // Step 9.d.
         assert(IsStructurallyValidLanguageTag(foundLocale), "invalid locale after concatenation");
 
-        // Step 13.e (Not required in this implementation, because we don't
+        // Step 9.e (Not required in this implementation, because we don't
         // canonicalize Unicode extension subtags).
         assert(foundLocale === CanonicalizeLanguageTag(foundLocale), "same locale with extension");
     }
 
-    // Step 14.
+    // Step 10.
     result.locale = foundLocale;
 
-    // Step 15.
+    // Step 11.
     return result;
 }
 
@@ -1022,30 +1266,28 @@ function ResolveLocale(availableLocales, requestedLocales, options, relevantExte
  * matching (possibly fallback) locale. Locales appear in the same order in the
  * returned list as in the input list.
  *
- * Spec: ECMAScript Internationalization API Specification, 9.2.6.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.7.
  */
 function LookupSupportedLocales(availableLocales, requestedLocales) {
-    // Steps 1-2.
-    var len = requestedLocales.length;
+    // Step 1.
     var subset = [];
 
-    // Steps 3-4.
-    var k = 0;
-    while (k < len) {
-        // Steps 4.a-b.
-        var locale = requestedLocales[k];
+    // Step 2.
+    for (var i = 0; i < requestedLocales.length; i++) {
+        var locale = requestedLocales[i];
+
+        // Step 2.a.
         var noExtensionsLocale = removeUnicodeExtensions(locale);
 
-        // Step 4.c-d.
+        // Step 2.b.
         var availableLocale = BestAvailableLocale(availableLocales, noExtensionsLocale);
+
+        // Step 2.c.
         if (availableLocale !== undefined)
             _DefineDataProperty(subset, subset.length, locale);
-
-        // Step 4.e.
-        k++;
     }
 
-    // Steps 5-6.
+    // Step 3.
     return subset;
 }
 
@@ -1054,7 +1296,7 @@ function LookupSupportedLocales(availableLocales, requestedLocales) {
  * matching (possibly fallback) locale. Locales appear in the same order in the
  * returned list as in the input list.
  *
- * Spec: ECMAScript Internationalization API Specification, 9.2.7.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.8.
  */
 function BestFitSupportedLocales(availableLocales, requestedLocales) {
     // don't have anything better
@@ -1066,19 +1308,17 @@ function BestFitSupportedLocales(availableLocales, requestedLocales) {
  * matching (possibly fallback) locale. Locales appear in the same order in the
  * returned list as in the input list.
  *
- * Spec: ECMAScript Internationalization API Specification, 9.2.8.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.9.
  */
 function SupportedLocales(availableLocales, requestedLocales, options) {
-    /*jshint laxbreak: true */
-
     // Step 1.
     var matcher;
     if (options !== undefined) {
-        // Steps 1.a-b.
+        // Step 1.a.
         options = ToObject(options);
-        matcher = options.localeMatcher;
 
-        // Step 1.c.
+        // Step 1.b
+        matcher = options.localeMatcher;
         if (matcher !== undefined) {
             matcher = ToString(matcher);
             if (matcher !== "lookup" && matcher !== "best fit")
@@ -1086,12 +1326,12 @@ function SupportedLocales(availableLocales, requestedLocales, options) {
         }
     }
 
-    // Steps 2-3.
+    // Steps 2-5.
     var subset = (matcher === undefined || matcher === "best fit")
                  ? BestFitSupportedLocales(availableLocales, requestedLocales)
                  : LookupSupportedLocales(availableLocales, requestedLocales);
 
-    // Step 4.
+    // Steps 6-7.
     for (var i = 0; i < subset.length; i++) {
         _DefineDataProperty(subset, i, subset[i],
                             ATTR_ENUMERABLE | ATTR_NONCONFIGURABLE | ATTR_NONWRITABLE);
@@ -1099,7 +1339,7 @@ function SupportedLocales(availableLocales, requestedLocales, options) {
     _DefineDataProperty(subset, "length", subset.length,
                         ATTR_NONENUMERABLE | ATTR_NONCONFIGURABLE | ATTR_NONWRITABLE);
 
-    // Step 5.
+    // Step 8.
     return subset;
 }
 
@@ -1108,7 +1348,7 @@ function SupportedLocales(availableLocales, requestedLocales, options) {
  * the required type, checks whether it is one of a list of allowed values,
  * and fills in a fallback value if necessary.
  *
- * Spec: ECMAScript Internationalization API Specification, 9.2.9.
+ * Spec: ECMAScript Internationalization API Specification, 9.2.10.
  */
 function GetOption(options, property, type, values, fallback) {
     // Step 1.
@@ -1172,7 +1412,7 @@ function DefaultNumberOption(value, minimum, maximum, fallback) {
  * Spec: ECMAScript Internationalization API Specification, 9.2.12.
  */
 function GetNumberOption(options, property, minimum, maximum, fallback) {
-    // Steps 1-3.
+    // Steps 1-2.
     return DefaultNumberOption(options[property], minimum, maximum, fallback);
 }
 

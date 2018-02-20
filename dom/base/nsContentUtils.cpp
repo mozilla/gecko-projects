@@ -762,6 +762,34 @@ nsContentUtils::Init()
   return NS_OK;
 }
 
+nsresult nsContentUtils::RemoveWyciwygScheme(nsIURI* aURI, nsIURI** aReturn)
+{
+#ifdef DEBUG
+  bool isWyciwyg = false;
+  aURI->SchemeIs("wyciwyg", &isWyciwyg);
+  NS_PRECONDITION(isWyciwyg, "Scheme should be wyciwyg");
+#endif
+  nsAutoCString path;
+  nsresult rv = aURI->GetPathQueryRef(path);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  uint32_t pathLength = path.Length();
+  if (pathLength <= 2) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Path is of the form "//123/http://foo/bar", with a variable number of
+  // digits. To figure out where the "real" URL starts, search path for a '/',
+  // starting at the third character.
+  int32_t slashIndex = path.FindChar('/', 2);
+  if (slashIndex == kNotFound) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_NewURI(aReturn,
+    Substring(path, slashIndex + 1, pathLength - slashIndex - 1));
+}
+
 void
 nsContentUtils::GetShiftText(nsAString& text)
 {
@@ -2558,6 +2586,34 @@ nsContentUtils::ContentIsHostIncludingDescendantOf(
   return false;
 }
 
+bool
+nsContentUtils::ContentIsShadowIncludingDescendantOf(
+  const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor)
+{
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
+
+  if (aPossibleAncestor == aPossibleDescendant->GetComposedDoc()) {
+    return true;
+  }
+
+  do {
+    if (aPossibleDescendant == aPossibleAncestor) {
+      return true;
+    }
+
+    if (aPossibleDescendant->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
+      ShadowRoot* shadowRoot =
+        ShadowRoot::FromNode(const_cast<nsINode*>(aPossibleDescendant));
+      aPossibleDescendant = shadowRoot ? shadowRoot->GetHost() : nullptr;
+    } else {
+      aPossibleDescendant = aPossibleDescendant->GetParentNode();
+    }
+  } while (aPossibleDescendant);
+
+  return false;
+}
+
 // static
 bool
 nsContentUtils::ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
@@ -2613,6 +2669,30 @@ nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
   } while (aPossibleDescendant);
 
   return false;
+}
+
+// static
+nsINode*
+nsContentUtils::Retarget(nsINode* aTargetA, nsINode* aTargetB)
+{
+  while (true && aTargetA) {
+    // If A's root is not a shadow root...
+    nsINode* root = aTargetA->SubtreeRoot();
+    if (!root->IsShadowRoot()) {
+      // ...then return A.
+      return aTargetA;
+    }
+
+    // or A's root is a shadow-including inclusive ancestor of B...
+    if (nsContentUtils::ContentIsShadowIncludingDescendantOf(aTargetB, root)) {
+      // ...then return A.
+      return aTargetA;
+    }
+
+    aTargetA = ShadowRoot::FromNode(root)->GetHost();
+  }
+
+  return nullptr;
 }
 
 // static
@@ -4229,20 +4309,6 @@ nsContentUtils::IsChildOfSameType(nsIDocument* aDoc)
 }
 
 bool
-nsContentUtils::IsScriptType(const nsACString& aContentType)
-{
-  // NOTE: if you add a type here, add it to the CONTENTDLF_CATEGORIES
-  // define in nsContentDLF.h as well.
-  return aContentType.EqualsLiteral(APPLICATION_JAVASCRIPT) ||
-         aContentType.EqualsLiteral(APPLICATION_XJAVASCRIPT) ||
-         aContentType.EqualsLiteral(TEXT_ECMASCRIPT) ||
-         aContentType.EqualsLiteral(APPLICATION_ECMASCRIPT) ||
-         aContentType.EqualsLiteral(TEXT_JAVASCRIPT) ||
-         aContentType.EqualsLiteral(APPLICATION_JSON) ||
-         aContentType.EqualsLiteral(TEXT_JSON);
-}
-
-bool
 nsContentUtils::IsPlainTextType(const nsACString& aContentType)
 {
   // NOTE: if you add a type here, add it to the CONTENTDLF_CATEGORIES
@@ -4251,7 +4317,13 @@ nsContentUtils::IsPlainTextType(const nsACString& aContentType)
          aContentType.EqualsLiteral(TEXT_CSS) ||
          aContentType.EqualsLiteral(TEXT_CACHE_MANIFEST) ||
          aContentType.EqualsLiteral(TEXT_VTT) ||
-         IsScriptType(aContentType);
+         aContentType.EqualsLiteral(APPLICATION_JAVASCRIPT) ||
+         aContentType.EqualsLiteral(APPLICATION_XJAVASCRIPT) ||
+         aContentType.EqualsLiteral(TEXT_ECMASCRIPT) ||
+         aContentType.EqualsLiteral(APPLICATION_ECMASCRIPT) ||
+         aContentType.EqualsLiteral(TEXT_JAVASCRIPT) ||
+         aContentType.EqualsLiteral(APPLICATION_JSON) ||
+         aContentType.EqualsLiteral(TEXT_JSON);
 }
 
 bool
@@ -5165,7 +5237,8 @@ nsContentUtils::ParseFragmentHTML(const nsAString& aSourceBuffer,
     nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
 
     nsTreeSanitizer sanitizer(nsIParserUtils::SanitizerAllowStyle |
-                              nsIParserUtils::SanitizerAllowComments);
+                              nsIParserUtils::SanitizerAllowComments |
+                              nsIParserUtils::SanitizerLogRemovals);
     sanitizer.Sanitize(fragment);
 
     ErrorResult error;
@@ -5258,7 +5331,8 @@ nsContentUtils::ParseFragmentXML(const nsAString& aSourceBuffer,
     RefPtr<DocumentFragment> fragment = static_cast<DocumentFragment*>(*aReturn);
 
     nsTreeSanitizer sanitizer(nsIParserUtils::SanitizerAllowStyle |
-                              nsIParserUtils::SanitizerAllowComments);
+                              nsIParserUtils::SanitizerAllowComments |
+                              nsIParserUtils::SanitizerLogRemovals);
     sanitizer.Sanitize(fragment);
   }
 

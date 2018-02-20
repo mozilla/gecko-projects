@@ -10,7 +10,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ThreadLocal.h"
 
-#include "jscompartment.h"
 #include "jsprf.h"
 
 #include "gc/FreeOp.h"
@@ -51,19 +50,19 @@
 #include "jit/WasmBCE.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
+#include "vm/JSCompartment.h"
 #include "vm/TraceLogging.h"
 #include "vtune/VTuneWrapper.h"
 
-#include "jscompartmentinlines.h"
-#include "jsobjinlines.h"
-#include "jsscriptinlines.h"
-
-#include "gc/Iteration-inl.h"
+#include "gc/PrivateIterators-inl.h"
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/JSCompartment-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;
@@ -340,7 +339,7 @@ JitRuntime::initialize(JSContext* cx, AutoLockForExclusiveAccess& lock)
 
     Linker linker(masm);
     AutoFlushICache afc("Trampolines");
-    trampolineCode_ = linker.newCode<NoGC>(cx, OTHER_CODE);
+    trampolineCode_ = linker.newCode<NoGC>(cx, CodeKind::Other);
     if (!trampolineCode_)
         return false;
 
@@ -455,6 +454,8 @@ JitCompartment::initialize(JSContext* cx)
         ReportOutOfMemory(cx);
         return false;
     }
+
+    stringsCanBeInNursery = cx->nursery().canAllocateStrings();
 
     return true;
 }

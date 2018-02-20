@@ -33,7 +33,7 @@ class LBox : public LInstructionHelper<BOX_PIECES, 1, 0>
     MIRType type() const {
         return type_;
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return StringFromMIRType(type_);
     }
 };
@@ -119,7 +119,7 @@ class LMoveGroup : public LInstructionHelper<0, 0, 0>
         return new(alloc) LMoveGroup(alloc);
     }
 
-    void printOperands(GenericPrinter& out) override;
+    void printOperands(GenericPrinter& out);
 
     // Add a move which takes place simultaneously with all others in the group.
     bool add(LAllocation from, LAllocation to, LDefinition::Type type);
@@ -509,7 +509,7 @@ public:
     MSimdBinaryComp::Operation operation() const {
         return mir_->toSimdBinaryComp()->operation();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MSimdBinaryComp::OperationName(operation());
     }
 };
@@ -565,7 +565,7 @@ class LSimdBinaryArith : public LInstructionHelper<1, 2, 1>
     MSimdBinaryArith::Operation operation() const {
         return this->mir_->toSimdBinaryArith()->operation();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MSimdBinaryArith::OperationName(operation());
     }
 };
@@ -625,7 +625,7 @@ class LSimdBinarySaturating : public LInstructionHelper<1, 2, 0>
     MIRType type() const {
         return mir_->type();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MSimdBinarySaturating::OperationName(operation());
     }
 };
@@ -688,7 +688,7 @@ class LSimdBinaryBitwise : public LInstructionHelper<1, 2, 0>
     MSimdBinaryBitwise::Operation operation() const {
         return mir_->toSimdBinaryBitwise()->operation();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MSimdBinaryBitwise::OperationName(operation());
     }
     MIRType type() const {
@@ -720,7 +720,7 @@ class LSimdShift : public LInstructionHelper<1, 2, 1>
     MSimdShift::Operation operation() const {
         return mir_->toSimdShift()->operation();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MSimdShift::OperationName(operation());
     }
     MSimdShift* mir() const {
@@ -849,7 +849,7 @@ class LPointer : public LInstructionHelper<1, 0, 0>
     Kind kind() const {
         return kind_;
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return kind_ == GC_THING ? "GC_THING" : "NON_GC_THING";
     }
 
@@ -976,14 +976,17 @@ class LControlInstructionHelper : public LInstructionHelper<0, Operands, Temps> 
 
     mozilla::Array<MBasicBlock*, Succs> successors_;
 
-  public:
-    virtual size_t numSuccessors() const final override { return Succs; }
+  protected:
+    LControlInstructionHelper() {
+        this->setNumSuccessors(Succs);
+    }
 
-    virtual MBasicBlock* getSuccessor(size_t i) const final override {
+  public:
+    MBasicBlock* getSuccessor(size_t i) const {
         return successors_[i];
     }
 
-    virtual void setSuccessor(size_t i, MBasicBlock* successor) final override {
+    void setSuccessor(size_t i, MBasicBlock* successor) {
         successors_[i] = successor;
     }
 };
@@ -1013,7 +1016,7 @@ class LNewArray : public LInstructionHelper<1, 0, 1>
         setTemp(0, temp);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->isVMCall() ? "VMCall" : nullptr;
     }
 
@@ -1138,7 +1141,7 @@ class LNewObject : public LInstructionHelper<1, 0, 1>
         setTemp(0, temp);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->isVMCall() ? "VMCall" : nullptr;
     }
 
@@ -1628,15 +1631,18 @@ class LToAsyncGen : public LCallInstructionHelper<1, 1, 0>
     }
 };
 
-class LToAsyncIter : public LCallInstructionHelper<1, 1, 0>
+class LToAsyncIter : public LCallInstructionHelper<1, 1 + BOX_PIECES, 0>
 {
   public:
     LIR_HEADER(ToAsyncIter)
-    explicit LToAsyncIter(const LAllocation& input) {
-        setOperand(0, input);
+    explicit LToAsyncIter(const LAllocation& iterator, const LBoxAllocation& nextMethod) {
+        setOperand(0, iterator);
+        setBoxOperand(NextMethodIndex, nextMethod);
     }
 
-    const LAllocation* unwrapped() {
+    static const size_t NextMethodIndex = 1;
+
+    const LAllocation* iterator() {
         return getOperand(0);
     }
 };
@@ -2471,7 +2477,7 @@ class LTestVAndBranch : public LControlInstructionHelper<2, BOX_PIECES, 3>
         setTemp(2, temp2);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->operandMightEmulateUndefined() ? "MightEmulateUndefined" : nullptr;
     }
 
@@ -2528,7 +2534,7 @@ class LObjectGroupDispatch : public LInstructionHelper<0, 1, 1>
   public:
     LIR_HEADER(ObjectGroupDispatch);
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->hasFallback() ? "HasFallback" : "NoFallback";
     }
 
@@ -2573,7 +2579,7 @@ class LCompare : public LInstructionHelper<1, 2, 0>
     MCompare* mir() {
         return mir_->toCompare();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -2601,7 +2607,7 @@ class LCompareI64 : public LInstructionHelper<1, 2 * INT64_PIECES, 0>
     MCompare* mir() {
         return mir_->toCompare();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -2643,7 +2649,7 @@ class LCompareI64AndBranch : public LControlInstructionHelper<2, 2 * INT64_PIECE
     MCompare* cmpMir() const {
         return cmpMir_;
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -2689,7 +2695,7 @@ class LCompareAndBranch : public LControlInstructionHelper<2, 2, 0>
     MCompare* cmpMir() const {
         return cmpMir_;
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -3333,7 +3339,7 @@ class LBitOpI : public LInstructionHelper<1, 2, 0>
       : op_(op)
     { }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         if (bitop() == JSOP_URSH && mir_->toUrsh()->bailoutsDisabled())
             return "ursh:BailoutsDisabled";
         return CodeName[op_];
@@ -3358,7 +3364,7 @@ class LBitOpI64 : public LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0>
       : op_(op)
     { }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[op_];
     }
 
@@ -3386,7 +3392,7 @@ class LBitOpV : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0>
         return jsop_;
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 
@@ -3415,7 +3421,7 @@ class LShiftI : public LBinaryMath<0>
         return mir_->toInstruction();
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[op_];
     }
 };
@@ -3442,7 +3448,7 @@ class LShiftI64 : public LInstructionHelper<INT64_PIECES, INT64_PIECES + 1, 0>
         return mir_->toInstruction();
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[op_];
     }
 };
@@ -3535,7 +3541,7 @@ class LMinMaxBase : public LInstructionHelper<1, 2, 0>
     MMinMax* mir() const {
         return mir_->toMinMax();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->isMax() ? "Max" : "Min";
     }
 };
@@ -3901,7 +3907,7 @@ class LMathFunctionD : public LCallInstructionHelper<1, 1, 1>
     MMathFunction* mir() const {
         return mir_->toMathFunction();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MMathFunction::FunctionName(mir()->function());
     }
 };
@@ -3921,7 +3927,7 @@ class LMathFunctionF : public LCallInstructionHelper<1, 1, 1>
     MMathFunction* mir() const {
         return mir_->toMathFunction();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return MMathFunction::FunctionName(mir()->function());
     }
 };
@@ -3938,7 +3944,7 @@ class LAddI : public LBinaryMath<0>
       : recoversInput_(false)
     { }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return snapshot() ? "OverflowCheck" : nullptr;
     }
 
@@ -3975,7 +3981,7 @@ class LSubI : public LBinaryMath<0>
       : recoversInput_(false)
     { }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return snapshot() ? "OverflowCheck" : nullptr;
     }
 
@@ -4046,7 +4052,7 @@ class LMathD : public LBinaryMath<0>
         return jsop_;
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -4067,7 +4073,7 @@ class LMathF: public LBinaryMath<0>
         return jsop_;
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 };
@@ -4110,7 +4116,7 @@ class LBinaryV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0>
         return jsop_;
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return CodeName[jsop_];
     }
 
@@ -4441,7 +4447,7 @@ class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 2>
         setTemp(1, temp1);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mode() == NORMAL ? "Normal" : "Truncate";
     }
 
@@ -5659,7 +5665,7 @@ class LLoadElementV : public LInstructionHelper<BOX_PIECES, 2, 0>
         setOperand(1, index);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->needsHoleCheck() ? "HoleCheck" : nullptr;
     }
 
@@ -5718,7 +5724,7 @@ class LLoadElementHole : public LInstructionHelper<BOX_PIECES, 3, 0>
         setOperand(2, initLength);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->needsHoleCheck() ? "HoleCheck" : nullptr;
     }
 
@@ -5750,7 +5756,7 @@ class LLoadElementT : public LInstructionHelper<1, 2, 0>
         setOperand(1, index);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->needsHoleCheck() ? "HoleCheck"
                                        : (mir()->loadDoubles() ? "Doubles" : nullptr);
     }
@@ -5882,7 +5888,7 @@ class LStoreElementV : public LInstructionHelper<0, 2 + BOX_PIECES, 0>
         setBoxOperand(Value, value);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->needsHoleCheck() ? "HoleCheck" : nullptr;
     }
 
@@ -5914,7 +5920,7 @@ class LStoreElementT : public LInstructionHelper<0, 3, 0>
         setOperand(2, value);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->needsHoleCheck() ? "HoleCheck" : nullptr;
     }
 
@@ -6108,7 +6114,7 @@ class LArrayPopShiftV : public LInstructionHelper<BOX_PIECES, 1, 2>
         setTemp(1, temp1);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->mode() == MArrayPopShift::Pop ? "Pop" : "Shift";
     }
 
@@ -6137,7 +6143,7 @@ class LArrayPopShiftT : public LInstructionHelper<1, 1, 2>
         setTemp(1, temp1);
     }
 
-    const char* extraName() const override {
+    const char* extraName() const {
         return mir()->mode() == MArrayPopShift::Pop ? "Pop" : "Shift";
     }
 
@@ -6933,7 +6939,7 @@ class LGetPropertyPolymorphicV : public LInstructionHelper<BOX_PIECES, 1, 0>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const override {
+    virtual const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -6958,7 +6964,7 @@ class LGetPropertyPolymorphicT : public LInstructionHelper<1, 1, 1>
     const MGetPropertyPolymorphic* mir() const {
         return mir_->toGetPropertyPolymorphic();
     }
-    virtual const char* extraName() const override {
+    virtual const char* extraName() const {
         return PropertyNameToExtraName(mir()->name());
     }
 };
@@ -7023,7 +7029,7 @@ class LSetPropertyPolymorphicT : public LInstructionHelper<0, 2, 1>
     const MSetPropertyPolymorphic* mir() const {
         return mir_->toSetPropertyPolymorphic();
     }
-    const char* extraName() const override {
+    const char* extraName() const {
         return StringFromMIRType(valueType_);
     }
 };
@@ -7871,6 +7877,33 @@ class LPostWriteBarrierO : public LInstructionHelper<0, 2, 1>
     }
 };
 
+// Generational write barrier used when writing a string to an object.
+class LPostWriteBarrierS : public LInstructionHelper<0, 2, 1>
+{
+  public:
+    LIR_HEADER(PostWriteBarrierS)
+
+    LPostWriteBarrierS(const LAllocation& obj, const LAllocation& value,
+                       const LDefinition& temp) {
+        setOperand(0, obj);
+        setOperand(1, value);
+        setTemp(0, temp);
+    }
+
+    const MPostWriteBarrier* mir() const {
+        return mir_->toPostWriteBarrier();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* value() {
+        return getOperand(1);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+};
+
 // Generational write barrier used when writing a value to another object.
 class LPostWriteBarrierV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
 {
@@ -7905,6 +7938,42 @@ class LPostWriteElementBarrierO : public LInstructionHelper<0, 3, 1>
     LIR_HEADER(PostWriteElementBarrierO)
 
     LPostWriteElementBarrierO(const LAllocation& obj, const LAllocation& value,
+                              const LAllocation& index, const LDefinition& temp) {
+        setOperand(0, obj);
+        setOperand(1, value);
+        setOperand(2, index);
+        setTemp(0, temp);
+    }
+
+    const MPostWriteElementBarrier* mir() const {
+        return mir_->toPostWriteElementBarrier();
+    }
+
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+
+    const LAllocation* value() {
+        return getOperand(1);
+    }
+
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+};
+
+// Generational write barrier used when writing a string to an object's
+// elements.
+class LPostWriteElementBarrierS : public LInstructionHelper<0, 3, 1>
+{
+  public:
+    LIR_HEADER(PostWriteElementBarrierS)
+
+    LPostWriteElementBarrierS(const LAllocation& obj, const LAllocation& value,
                               const LAllocation& index, const LDefinition& temp) {
         setOperand(0, obj);
         setOperand(1, value);
@@ -9010,24 +9079,25 @@ class LWasmStackArgI64 : public LInstructionHelper<0, INT64_PIECES, 0>
     }
 };
 
-class LWasmCallBase : public LInstruction
+template <size_t Defs>
+class LWasmCallBase : public details::LInstructionFixedDefsTempsHelper<Defs, 0>
 {
+    using Base = details::LInstructionFixedDefsTempsHelper<Defs, 0>;
+
     LAllocation* operands_;
     uint32_t needsBoundsCheck_;
 
   public:
-
-    LWasmCallBase(LAllocation* operands, uint32_t numOperands, uint32_t numDefs,
-                  bool needsBoundsCheck)
-      : LInstruction(numOperands, numDefs, /* numTemps = */ 0),
+    LWasmCallBase(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
+      : Base(numOperands),
         operands_(operands),
         needsBoundsCheck_(needsBoundsCheck)
     {
-        setIsCall();
+        this->setIsCall();
     }
 
     MWasmCall* mir() const {
-        return mir_->toWasmCall();
+        return this->mir_->toWasmCall();
     }
 
     static bool isCallPreserved(AnyRegister reg) {
@@ -9041,79 +9111,48 @@ class LWasmCallBase : public LInstruction
 
     // LInstruction interface
     LAllocation* getOperand(size_t index) override {
-        MOZ_ASSERT(index < numOperands());
+        MOZ_ASSERT(index < this->numOperands());
         return &operands_[index];
     }
     void setOperand(size_t index, const LAllocation& a) override {
-        MOZ_ASSERT(index < numOperands());
+        MOZ_ASSERT(index < this->numOperands());
         operands_[index] = a;
-    }
-    LDefinition* getTemp(size_t index) override {
-        MOZ_CRASH("no temps");
-    }
-    void setTemp(size_t index, const LDefinition& a) override {
-        MOZ_CRASH("no temps");
-    }
-    size_t numSuccessors() const override {
-        return 0;
-    }
-    MBasicBlock* getSuccessor(size_t i) const override {
-        MOZ_CRASH("no successors");
-    }
-    void setSuccessor(size_t i, MBasicBlock*) override {
-        MOZ_CRASH("no successors");
     }
     bool needsBoundsCheck() const {
         return needsBoundsCheck_;
     }
 };
 
-class LWasmCall : public LWasmCallBase
+class LWasmCall : public LWasmCallBase<1>
 {
-     LDefinition def_;
-
   public:
     LIR_HEADER(WasmCall);
 
-    LWasmCall(LAllocation* operands, uint32_t numOperands, uint32_t numDefs, bool needsBoundsCheck)
-      : LWasmCallBase(operands, numOperands, numDefs, needsBoundsCheck),
-        def_(LDefinition::BogusTemp())
-    {}
-
-    // LInstruction interface
-    LDefinition* getDef(size_t index) override {
-        MOZ_ASSERT(numDefs() == 1);
-        MOZ_ASSERT(index == 0);
-        return &def_;
-    }
-    void setDef(size_t index, const LDefinition& def) override {
-        MOZ_ASSERT(index == 0);
-        def_ = def;
+    LWasmCall(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
+      : LWasmCallBase(operands, numOperands, needsBoundsCheck)
+    {
     }
 };
 
-class LWasmCallI64 : public LWasmCallBase
+class LWasmCallVoid : public LWasmCallBase<0>
 {
-    LDefinition defs_[INT64_PIECES];
+  public:
+    LIR_HEADER(WasmCallVoid);
 
+    LWasmCallVoid(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
+      : LWasmCallBase(operands, numOperands, needsBoundsCheck)
+    {
+    }
+};
+
+class LWasmCallI64 : public LWasmCallBase<INT64_PIECES>
+{
   public:
     LIR_HEADER(WasmCallI64);
 
     LWasmCallI64(LAllocation* operands, uint32_t numOperands, bool needsBoundsCheck)
-      : LWasmCallBase(operands, numOperands, INT64_PIECES, needsBoundsCheck)
+      : LWasmCallBase(operands, numOperands, needsBoundsCheck)
     {
-        for (size_t i = 0; i < numDefs(); i++)
-            defs_[i] = LDefinition::BogusTemp();
-    }
-
-    // LInstruction interface
-    LDefinition* getDef(size_t index) override {
-        MOZ_ASSERT(index < numDefs());
-        return &defs_[index];
-    }
-    void setDef(size_t index, const LDefinition& def) override {
-        MOZ_ASSERT(index < numDefs());
-        defs_[index] = def;
     }
 };
 
@@ -9121,9 +9160,10 @@ inline bool
 LNode::isCallPreserved(AnyRegister reg) const
 {
     switch (op()) {
-      case LOp_WasmCallI64:
       case LOp_WasmCall:
-        return LWasmCallBase::isCallPreserved(reg);
+      case LOp_WasmCallVoid:
+      case LOp_WasmCallI64:
+        return LWasmCallBase<0>::isCallPreserved(reg);
       default:
         return false;
     }

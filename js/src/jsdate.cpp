@@ -27,9 +27,7 @@
 #include <string.h>
 
 #include "jsapi.h"
-#include "jscntxt.h"
 #include "jsnum.h"
-#include "jsobj.h"
 #include "jsprf.h"
 #include "jsstr.h"
 #include "jstypes.h"
@@ -41,11 +39,13 @@
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/JSContext.h"
+#include "vm/JSObject.h"
 #include "vm/String.h"
 #include "vm/StringBuffer.h"
 #include "vm/Time.h"
 
-#include "jsobjinlines.h"
+#include "vm/JSObject-inl.h"
 
 using namespace js;
 
@@ -54,7 +54,7 @@ using mozilla::ArrayLength;
 using mozilla::IsFinite;
 using mozilla::IsNaN;
 using mozilla::NumbersAreIdentical;
-using mozilla::ReleaseAcquire;
+using mozilla::Relaxed;
 
 using JS::AutoCheckCannotGC;
 using JS::ClippedTime;
@@ -63,7 +63,7 @@ using JS::TimeClip;
 using JS::ToInteger;
 
 // When this value is non-zero, we'll round the time by this resolution.
-static Atomic<uint32_t, ReleaseAcquire> sResolutionUsec;
+static Atomic<uint32_t, Relaxed> sResolutionUsec;
 
 /*
  * The JS 'Date' object is patterned after the Java 'Date' object.

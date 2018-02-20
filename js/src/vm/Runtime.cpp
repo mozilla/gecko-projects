@@ -23,17 +23,13 @@
 #ifdef JS_CAN_CHECK_THREADSAFE_ACCESSES
 # include <sys/mman.h>
 #endif
-
-#include "jsatom.h"
 #include "jsmath.h"
-#include "jsobj.h"
-#include "jsscript.h"
-#include "jswin.h"
 #include "jswrapper.h"
 
 #include "builtin/Promise.h"
 #include "gc/FreeOp.h"
 #include "gc/GCInternals.h"
+#include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/arm64/vixl/Simulator-vixl.h"
 #include "jit/JitCompartment.h"
@@ -42,13 +38,17 @@
 #include "js/Date.h"
 #include "js/MemoryMetrics.h"
 #include "js/SliceBudget.h"
+#include "util/Windows.h"
 #include "vm/Debugger.h"
+#include "vm/JSAtom.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 #include "vm/TraceLogging.h"
 #include "vm/TraceLoggingGraph.h"
 #include "wasm/WasmSignalHandlers.h"
 
-#include "jscntxtinlines.h"
-#include "jsgcinlines.h"
+#include "gc/GC-inl.h"
+#include "vm/JSContext-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -57,9 +57,7 @@ using mozilla::Atomic;
 using mozilla::DebugOnly;
 using mozilla::NegativeInfinity;
 using mozilla::PodZero;
-using mozilla::PodArrayZero;
 using mozilla::PositiveInfinity;
-using JS::GenericNaN;
 using JS::DoubleNaNValue;
 
 /* static */ MOZ_THREAD_LOCAL(JSContext*) js::TlsContext;

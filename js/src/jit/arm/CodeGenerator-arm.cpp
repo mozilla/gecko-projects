@@ -6,11 +6,10 @@
 
 #include "jit/arm/CodeGenerator-arm.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 
-#include "jscntxt.h"
-#include "jscompartment.h"
 #include "jsnum.h"
 
 #include "jit/CodeGenerator.h"
@@ -19,13 +18,14 @@
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
 #include "js/Conversions.h"
+#include "vm/JSCompartment.h"
+#include "vm/JSContext.h"
 #include "vm/Shape.h"
 #include "vm/TraceLogging.h"
 
-#include "jsscriptinlines.h"
-
 #include "jit/MacroAssembler-inl.h"
 #include "jit/shared/CodeGenerator-shared-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -531,7 +531,10 @@ CodeGeneratorARM::divICommon(MDiv* mir, Register lhs, Register rhs, Register out
         masm.ma_cmp(rhs, Imm32(-1), scratch, Assembler::Equal);
         if (mir->canTruncateOverflow()) {
             if (mir->trapOnError()) {
-                masm.ma_b(oldTrap(mir, wasm::Trap::IntegerOverflow), Assembler::Equal);
+                Label ok;
+                masm.ma_b(&ok, Assembler::NotEqual);
+                masm.wasmTrap(wasm::Trap::IntegerOverflow, mir->bytecodeOffset());
+                masm.bind(&ok);
             } else {
                 // (-INT32_MIN)|0 = INT32_MIN
                 Label skip;
@@ -551,7 +554,10 @@ CodeGeneratorARM::divICommon(MDiv* mir, Register lhs, Register rhs, Register out
         masm.as_cmp(rhs, Imm8(0));
         if (mir->canTruncateInfinities()) {
             if (mir->trapOnError()) {
-                masm.ma_b(oldTrap(mir, wasm::Trap::IntegerDivideByZero), Assembler::Equal);
+                Label nonZero;
+                masm.ma_b(&nonZero, Assembler::NotEqual);
+                masm.wasmTrap(wasm::Trap::IntegerDivideByZero, mir->bytecodeOffset());
+                masm.bind(&nonZero);
             } else {
                 // Infinity|0 == 0
                 Label skip;
@@ -714,7 +720,10 @@ CodeGeneratorARM::modICommon(MMod* mir, Register lhs, Register rhs, Register out
             // wasm allows negative lhs and return 0 in this case.
             MOZ_ASSERT(mir->isTruncated());
             masm.as_cmp(rhs, Imm8(0));
-            masm.ma_b(oldTrap(mir, wasm::Trap::IntegerDivideByZero), Assembler::Equal);
+            Label nonZero;
+            masm.ma_b(&nonZero, Assembler::NotEqual);
+            masm.wasmTrap(wasm::Trap::IntegerDivideByZero, mir->bytecodeOffset());
+            masm.bind(&nonZero);
             return;
         }
 
@@ -1345,7 +1354,7 @@ static const uint32_t FrameSizes[] = { 128, 256, 512, 1024 };
 FrameSizeClass
 FrameSizeClass::FromDepth(uint32_t frameDepth)
 {
-    for (uint32_t i = 0; i < JS_ARRAY_LENGTH(FrameSizes); i++) {
+    for (uint32_t i = 0; i < mozilla::ArrayLength(FrameSizes); i++) {
         if (frameDepth < FrameSizes[i])
             return FrameSizeClass(i);
     }
@@ -1356,14 +1365,14 @@ FrameSizeClass::FromDepth(uint32_t frameDepth)
 FrameSizeClass
 FrameSizeClass::ClassLimit()
 {
-    return FrameSizeClass(JS_ARRAY_LENGTH(FrameSizes));
+    return FrameSizeClass(mozilla::ArrayLength(FrameSizes));
 }
 
 uint32_t
 FrameSizeClass::frameSize() const
 {
     MOZ_ASSERT(class_ != NO_FRAME_SIZE_CLASS_ID);
-    MOZ_ASSERT(class_ < JS_ARRAY_LENGTH(FrameSizes));
+    MOZ_ASSERT(class_ < mozilla::ArrayLength(FrameSizes));
 
     return FrameSizes[class_];
 }
@@ -2417,7 +2426,10 @@ CodeGeneratorARM::generateUDivModZeroCheck(Register rhs, Register output, Label*
         masm.as_cmp(rhs, Imm8(0));
         if (mir->isTruncated()) {
             if (mir->trapOnError()) {
-                masm.ma_b(oldTrap(mir, wasm::Trap::IntegerDivideByZero), Assembler::Equal);
+                Label nonZero;
+                masm.ma_b(&nonZero, Assembler::NotEqual);
+                masm.wasmTrap(wasm::Trap::IntegerDivideByZero, mir->bytecodeOffset());
+                masm.bind(&nonZero);
             } else {
                 Label skip;
                 masm.ma_b(&skip, Assembler::NotEqual);
@@ -2550,10 +2562,20 @@ CodeGeneratorARM::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
     MWasmTruncateToInt32* mir = lir->mir();
     MIRType fromType = mir->input()->type();
 
-    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
-    addOutOfLineCode(ool, mir);
-    masm.wasmTruncateToInt32(input, output, fromType, mir->isUnsigned(), ool->entry());
-    masm.bind(ool->rejoin());
+    OutOfLineWasmTruncateCheck* ool = nullptr;
+    Label* oolEntry = nullptr;
+    if (!lir->mir()->isSaturating()) {
+        ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input, Register::Invalid());
+        addOutOfLineCode(ool, mir);
+        oolEntry = ool->entry();
+    }
+
+    masm.wasmTruncateToInt32(input, output, fromType, mir->isUnsigned(), mir->isSaturating(),
+                             oolEntry);
+
+    if (!lir->mir()->isSaturating()) {
+        masm.bind(ool->rejoin());
+    }
 }
 
 void
@@ -2566,8 +2588,11 @@ CodeGeneratorARM::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
     MWasmTruncateToInt64* mir = lir->mir();
     MIRType fromType = mir->input()->type();
 
-    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
-    addOutOfLineCode(ool, mir);
+    OutOfLineWasmTruncateCheck* ool = nullptr;
+    if (!lir->mir()->isSaturating()) {
+        ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input, Register64::Invalid());
+        addOutOfLineCode(ool, mir);
+    }
 
     ScratchDoubleScope scratchScope(masm);
     if (fromType == MIRType::Float32) {
@@ -2580,19 +2605,32 @@ CodeGeneratorARM::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
     masm.setupWasmABICall();
     masm.passABIArg(inputDouble, MoveOp::DOUBLE);
 
-    if (lir->mir()->isUnsigned())
-        masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToUint64);
-    else
-        masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToInt64);
+    if (lir->mir()->isSaturating()) {
+        if (lir->mir()->isUnsigned())
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::SaturatingTruncateDoubleToUint64);
+        else
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::SaturatingTruncateDoubleToInt64);
+    } else {
+        if (lir->mir()->isUnsigned())
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToUint64);
+        else
+            masm.callWithABI(mir->bytecodeOffset(), wasm::SymbolicAddress::TruncateDoubleToInt64);
+    }
 
     masm.Pop(input);
 
-    ScratchRegisterScope scratch(masm);
-    masm.ma_cmp(output.high, Imm32(0x80000000), scratch);
-    masm.as_cmp(output.low, Imm8(0x00000000), Assembler::Equal);
-    masm.ma_b(ool->entry(), Assembler::Equal);
+    // TruncateDoubleTo{UI,I}nt64 returns 0x8000000000000000 to indicate
+    // exceptional results, so check for that and produce the appropriate
+    // traps. The Saturating form always returns a normal value and never
+    // needs traps.
+    if (!lir->mir()->isSaturating()) {
+        ScratchRegisterScope scratch(masm);
+        masm.ma_cmp(output.high, Imm32(0x80000000), scratch);
+        masm.as_cmp(output.low, Imm8(0x00000000), Assembler::Equal);
+        masm.ma_b(ool->entry(), Assembler::Equal);
 
-    masm.bind(ool->rejoin());
+        masm.bind(ool->rejoin());
+    }
 
     MOZ_ASSERT(ReturnReg64 == output);
 }
@@ -2600,6 +2638,11 @@ CodeGeneratorARM::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 void
 CodeGeneratorARM::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool)
 {
+    // On ARM, saturating truncation codegen handles saturating itself rather than
+    // relying on out-of-line fixup code.
+    if (ool->isSaturating())
+        return;
+
     masm.outOfLineWasmTruncateToIntCheck(ool->input(), ool->fromType(), ool->toType(),
                                          ool->isUnsigned(), ool->rejoin(),
                                          ool->bytecodeOffset());
@@ -2767,8 +2810,10 @@ CodeGeneratorARM::visitDivOrModI64(LDivOrModI64* lir)
     // Handle divide by zero.
     if (lir->canBeDivideByZero()) {
         Register temp = WasmGetTemporaryForDivOrMod(lhs, rhs);
-        masm.branchTest64(Assembler::Zero, rhs, rhs, temp,
-                          oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+        Label nonZero;
+        masm.branchTest64(Assembler::NonZero, rhs, rhs, temp, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
     }
 
     auto* mir = lir->mir();
@@ -2781,7 +2826,7 @@ CodeGeneratorARM::visitDivOrModI64(LDivOrModI64* lir)
         if (mir->isMod())
             masm.xor64(output, output);
         else
-            masm.jump(oldTrap(lir, wasm::Trap::IntegerOverflow));
+            masm.wasmTrap(wasm::Trap::IntegerOverflow, lir->bytecodeOffset());
         masm.jump(&done);
         masm.bind(&notmin);
     }
@@ -2813,8 +2858,10 @@ CodeGeneratorARM::visitUDivOrModI64(LUDivOrModI64* lir)
     // Prevent divide by zero.
     if (lir->canBeDivideByZero()) {
         Register temp = WasmGetTemporaryForDivOrMod(lhs, rhs);
-        masm.branchTest64(Assembler::Zero, rhs, rhs, temp,
-                          oldTrap(lir, wasm::Trap::IntegerDivideByZero));
+        Label nonZero;
+        masm.branchTest64(Assembler::NonZero, rhs, rhs, temp, &nonZero);
+        masm.wasmTrap(wasm::Trap::IntegerDivideByZero, lir->bytecodeOffset());
+        masm.bind(&nonZero);
     }
 
     masm.setupWasmABICall();

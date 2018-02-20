@@ -197,7 +197,7 @@
     "de": {
       "default": {
         "visibleDefaultEngines": [
-          "google", "yahoo-de", "amazondotcom-de", "bing", "ddg", "ebay-de", "leo_ende_de", "wikipedia-de"
+          "google", "yahoo-de", "amazondotcom-de", "bing", "ddg", "ebay-de", "ecosia", "leo_ende_de", "wikipedia-de"
         ]
       }
     },
@@ -803,7 +803,7 @@
     "zh-TW": {
       "default": {
         "visibleDefaultEngines": [
-          "yahoo-zh-TW", "google", "ddg", "wikipedia-zh-TW", "yahoo-zh-TW-HK", "yahoo-bid-zh-TW", "yahoo-answer-zh-TW"
+          "yahoo-zh-TW", "google", "ddg", "readmoo", "wikipedia-zh-TW", "yahoo-zh-TW-HK", "yahoo-bid-zh-TW", "yahoo-answer-zh-TW"
         ]
       }
     }

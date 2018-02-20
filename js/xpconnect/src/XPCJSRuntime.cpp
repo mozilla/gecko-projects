@@ -1830,10 +1830,6 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
         cStats.nonSyntacticLexicalScopesTable,
         "The non-syntactic lexical scopes table.");
 
-    ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("template-literal-map"),
-        cStats.templateLiteralMap,
-        "The template literal registry.");
-
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("jit-compartment"),
         cStats.jitCompartment,
         "The JIT compartment.");
@@ -1842,6 +1838,10 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
         cStats.privateData,
         "Extra data attached to the compartment by XPConnect, including "
         "its wrapped-js.");
+
+    ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("script-counts-map"),
+        cStats.scriptCountsMap,
+        "Profiling-related information for scripts.");
 
     if (sundriesGCHeap > 0) {
         // We deliberately don't use ZCREPORT_GC_BYTES here.

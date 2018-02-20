@@ -52,15 +52,12 @@ use values::computed::transform::Translate as ComputedTranslate;
 use values::computed::transform::Scale as ComputedScale;
 use values::generics::transform::{self, Rotate, Translate, Scale, Transform, TransformOperation};
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
-use values::generics::font::FontSettings as GenericFontSettings;
+use values::generics::font::{FontSettings as GenericFontSettings, FontTag, VariationValue};
 use values::computed::font::FontVariationSettings;
-use values::generics::font::VariationValue;
-use values::generics::NonNegative;
 use values::generics::effects::Filter;
 use values::generics::position as generic_position;
 use values::generics::svg::{SVGLength,  SvgLengthOrPercentageOrNumber, SVGPaint};
 use values::generics::svg::{SVGPaintKind, SVGStrokeDashArray, SVGOpacity};
-use values::specified::font::FontTag;
 use void::{self, Void};
 
 /// <https://drafts.csswg.org/css-transitions/#animtype-repeatable-list>
@@ -547,37 +544,58 @@ impl AnimationValue {
         extra_custom_properties: Option<<&Arc<::custom_properties::CustomPropertiesMap>>,
         initial: &ComputedValues
     ) -> Option<Self> {
-        use properties::LonghandId;
+        use super::PropertyDeclarationVariantRepr;
+
+        <%
+            keyfunc = lambda x: (
+                x.specified_type(),
+                x.animated_type(),
+                x.boxed,
+                not x.is_animatable_with_computed_value,
+                x.style_struct.inherited,
+                x.ident in SYSTEM_FONT_LONGHANDS and product == "gecko",
+            )
+        %>
 
         let animatable = match *decl {
-            % for prop in data.longhands:
-            % if prop.animatable:
-            PropertyDeclaration::${prop.camel_case}(ref val) => {
-                context.for_non_inherited_property =
-                    % if prop.style_struct.inherited:
-                        None;
-                    % else:
-                        Some(LonghandId::${prop.camel_case});
-                    % endif
-            % if prop.ident in SYSTEM_FONT_LONGHANDS and product == "gecko":
-                if let Some(sf) = val.get_system() {
-                    longhands::system_font::resolve_system_font(sf, context);
+            % for (specified_ty, ty, boxed, to_animated, inherit, system), props in groupby(animated, key=keyfunc):
+            ${" |\n".join("PropertyDeclaration::{}(ref value)".format(prop.camel_case) for prop in props)} => {
+                let decl_repr = unsafe {
+                    &*(decl as *const _ as *const PropertyDeclarationVariantRepr<${specified_ty}>)
+                };
+                % if inherit:
+                context.for_non_inherited_property = None;
+                % else:
+                context.for_non_inherited_property = unsafe {
+                    Some(*(&decl_repr.tag as *const u16 as *const LonghandId))
+                };
+                % endif
+                % if system:
+                if let Some(sf) = value.get_system() {
+                    longhands::system_font::resolve_system_font(sf, context)
                 }
-            % endif
-            % if prop.boxed:
-            let computed = (**val).to_computed_value(context);
-            % else:
-            let computed = val.to_computed_value(context);
-            % endif
-            AnimationValue::${prop.camel_case}(
-            % if prop.is_animatable_with_computed_value:
-                computed
-            % else:
-                computed.to_animated_value()
-            % endif
-            )
-            },
-            % endif
+                % endif
+                % if boxed:
+                let value = (**value).to_computed_value(context);
+                % else:
+                let value = value.to_computed_value(context);
+                % endif
+                % if to_animated:
+                let value = value.to_animated_value();
+                % endif
+
+                unsafe {
+                    let mut out = mem::uninitialized();
+                    ptr::write(
+                        &mut out as *mut _ as *mut AnimationValueVariantRepr<${ty}>,
+                        AnimationValueVariantRepr {
+                            tag: decl_repr.tag,
+                            value,
+                        },
+                    );
+                    out
+                }
+            }
             % endfor
             PropertyDeclaration::CSSWideKeyword(ref declaration) => {
                 match declaration.id {
@@ -768,7 +786,7 @@ impl ToAnimatedZero for AnimationValue {
 impl RepeatableListAnimatable for LengthOrPercentage {}
 impl RepeatableListAnimatable for Either<f32, LengthOrPercentage> {}
 impl RepeatableListAnimatable for Either<NonNegativeNumber, NonNegativeLengthOrPercentage> {}
-impl RepeatableListAnimatable for SvgLengthOrPercentageOrNumber<NonNegativeLengthOrPercentage, NonNegativeNumber> {}
+impl RepeatableListAnimatable for SvgLengthOrPercentageOrNumber<LengthOrPercentage, Number> {}
 
 macro_rules! repeated_vec_impl {
     ($($ty:ty),*) => {
@@ -2991,12 +3009,8 @@ impl Animate for AnimatedFilter {
             },
             % endfor
             % for func in ['Brightness', 'Contrast', 'Opacity', 'Saturate']:
-            (&Filter::${func}(ref this), &Filter::${func}(ref other)) => {
-                Ok(Filter::${func}(NonNegative(animate_multiplicative_factor(
-                    this.0,
-                    other.0,
-                    procedure,
-                )?)))
+            (&Filter::${func}(this), &Filter::${func}(other)) => {
+                Ok(Filter::${func}(animate_multiplicative_factor(this, other, procedure)?))
             },
             % endfor
             % if product == "gecko":
@@ -3017,7 +3031,7 @@ impl ToAnimatedZero for AnimatedFilter {
             Filter::${func}(ref this) => Ok(Filter::${func}(this.to_animated_zero()?)),
             % endfor
             % for func in ['Brightness', 'Contrast', 'Opacity', 'Saturate']:
-            Filter::${func}(_) => Ok(Filter::${func}(NonNegative(1.))),
+            Filter::${func}(_) => Ok(Filter::${func}(1.)),
             % endfor
             % if product == "gecko":
             Filter::DropShadow(ref this) => Ok(Filter::DropShadow(this.to_animated_zero()?)),

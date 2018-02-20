@@ -2247,23 +2247,6 @@ nsNavBookmarks::GetBookmarksForURI(nsIURI* aURI,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNavBookmarks::GetItemIndex(int64_t aItemId, int32_t* _index)
-{
-  NS_ENSURE_ARG_MIN(aItemId, 1);
-  NS_ENSURE_ARG_POINTER(_index);
-
-  BookmarkData bookmark;
-  nsresult rv = FetchItemInfo(aItemId, bookmark);
-  // With respect to the API.
-  if (NS_FAILED(rv)) {
-    *_index = -1;
-    return NS_OK;
-  }
-
-  *_index = bookmark.position;
-  return NS_OK;
-}
 
 
 NS_IMETHODIMP
@@ -2313,9 +2296,26 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
 
   int64_t syncChangeDelta = DetermineSyncChangeDelta(aSource);
 
-  if (keyword.IsEmpty()) {
-    mozStorageTransaction removeTxn(mDB->MainConn(), false);
+  mozStorageTransaction transaction(mDB->MainConn(), false);
 
+  // Remove the existing keywords.
+  // Note this is wrong because in the insert-new-keyword case we should only
+  // remove those having the same POST data, but this API doesn't allow that.
+  // And in any case, this API is going away.
+  for (uint32_t i = 0; i < oldKeywords.Length(); ++i) {
+    nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+      "DELETE FROM moz_keywords WHERE keyword = :old_keyword"
+    );
+    NS_ENSURE_STATE(stmt);
+    mozStorageStatementScoper scoper(stmt);
+    rv = stmt->BindStringByName(NS_LITERAL_CSTRING("old_keyword"),
+                                oldKeywords[i]);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = stmt->Execute();
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  if (keyword.IsEmpty()) {
     // We are removing the existing keywords.
     for (uint32_t i = 0; i < oldKeywords.Length(); ++i) {
       nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
@@ -2361,7 +2361,7 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
-    rv = removeTxn.Commit();
+    rv = transaction.Commit();
     NS_ENSURE_SUCCESS(rv, rv);
 
     for (uint32_t i = 0; i < bookmarks.Length(); ++i) {
@@ -2412,8 +2412,6 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
   // If another uri is using the new keyword, we must update the keyword entry.
   // Note we cannot use INSERT OR REPLACE cause it wouldn't invoke the delete
   // trigger.
-  mozStorageTransaction updateTxn(mDB->MainConn(), false);
-
   nsCOMPtr<mozIStorageStatement> stmt;
   if (oldUri) {
     // In both cases, notify about the change.
@@ -2443,8 +2441,8 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
   }
   else {
     stmt = mDB->GetStatement(
-      "INSERT INTO moz_keywords (keyword, place_id) "
-      "VALUES (:keyword, :place_id)"
+      "INSERT INTO moz_keywords (keyword, place_id, post_data) "
+      "VALUES (:keyword, :place_id, '')"
     );
   }
   NS_ENSURE_STATE(stmt);
@@ -2486,7 +2484,7 @@ nsNavBookmarks::SetKeywordForBookmark(int64_t aBookmarkId,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  rv = updateTxn.Commit();
+  rv = transaction.Commit();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // In both cases, notify about the change.
