@@ -1066,7 +1066,7 @@ def build_balrog_payload(config, task, task_def):
             'upstreamArtifacts':  worker['upstream-artifacts']
         }
     else:
-        for prop in ('archive_domain', 'channel-names', 'download_domain',
+        for prop in ('archive-domain', 'channel-names', 'download-domain',
                      'publish-rules', 'rules-to-update'):
             if prop in worker:
                 resolve_keyed_by(
