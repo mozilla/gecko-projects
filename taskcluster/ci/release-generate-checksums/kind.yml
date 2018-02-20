@@ -44,11 +44,6 @@ job-defaults:
          - "version={version}"
          - "build-number={build_number}"
       script: "mozharness/scripts/release/generate-checksums.py"
-   index:
-      type: release
-   routes:
-      - index.releases.v1.{branch}.latest.{product}.latest.checksums
-      - index.releases.v1.{branch}.{revision}.{product}.{underscore_version}.build{build_number}.checksums
    treeherder:
       symbol: Rel(GenChcks)
       kind: test
@@ -60,8 +55,6 @@ jobs:
       attributes:
          build_platform: linux64
          build_type: opt
-      index:
-         product: firefox
       run:
          config:
             by-project:
@@ -81,8 +74,6 @@ jobs:
       attributes:
          build_platform: android-nightly
          build_type: opt
-      index:
-         product: fennec
       run:
          config:
             by-project:
@@ -102,8 +93,6 @@ jobs:
       attributes:
          build_platform: linux64-devedition
          build_type: opt
-      index:
-         product: devedition
       run:
          config:
             by-project:
