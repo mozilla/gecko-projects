@@ -100,7 +100,8 @@ jobs:
    devedition:
       shipping-product: devedition
       attributes:
-         build_platform: linux64-devedition
+         # XXX: fix this back to linux64-devedition once bug 1424482 is done
+         build_platform: linux64
          build_type: opt
       index:
          product: devedition
