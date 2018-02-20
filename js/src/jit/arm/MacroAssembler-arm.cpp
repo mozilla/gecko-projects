@@ -4926,64 +4926,59 @@ MacroAssembler::wasmTrapInstruction()
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output,
-                                           bool isSaturating, Label* oolEntry)
+MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ true, isSaturating,
-                        oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ true, oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input, Register output,
-                                          bool isSaturating, Label* oolEntry)
+MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input, Register output, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ false,isSaturating,
-                         oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Double, /* isUnsigned= */ false, oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output,
-                                            bool isSaturating, Label* oolEntry)
+MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ true,isSaturating,
-                         oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ true, oolEntry);
 }
 
 void
-MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output,
-                                           bool isSaturating, Label* oolEntry)
+MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output, Label* oolEntry)
 {
-    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ false,isSaturating,
-                         oolEntry);
+    wasmTruncateToInt32(input, output, MIRType::Float32, /* isUnsigned= */ false, oolEntry);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output, TruncFlags flags,
+MacroAssembler::oolWasmTruncateCheckF32ToI32(FloatRegister input, bool isUnsigned,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int32, flags, rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int32, isUnsigned,
+                                    rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output, TruncFlags flags,
+MacroAssembler::oolWasmTruncateCheckF64ToI32(FloatRegister input, bool isUnsigned,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int32, flags, rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int32, isUnsigned,
+                                    rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output, TruncFlags flags,
+MacroAssembler::oolWasmTruncateCheckF32ToI64(FloatRegister input, bool isUnsigned,
                                              wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int64, flags, rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Float32, MIRType::Int64, isUnsigned,
+                                    rejoin, off);
 }
 
 void
-MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output, TruncFlags flags,
-                                             wasm::BytecodeOffset off,
-                                             Label* rejoin)
+MacroAssembler::oolWasmTruncateCheckF64ToI64(FloatRegister input, bool isUnsigned,
+                                             wasm::BytecodeOffset off, Label* rejoin)
 {
-    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int64, flags, rejoin, off);
+    outOfLineWasmTruncateToIntCheck(input, MIRType::Double, MIRType::Int64, isUnsigned,
+                                    rejoin, off);
 }
 
 void
@@ -5800,10 +5795,10 @@ MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Regist
 
 void
 MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIRType fromType,
-                                       bool isUnsigned, bool isSaturating, Label* oolEntry)
+                                       bool isUnsigned, Label* oolEntry)
 {
     // vcvt* converts NaN into 0, so check for NaNs here.
-    if (!isSaturating) {
+    {
         if (fromType == MIRType::Double)
             asMasm().compareDouble(input, input);
         else if (fromType == MIRType::Float32)
@@ -5831,12 +5826,10 @@ MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIR
 
         ma_vxfer(scratch, output);
 
-        if (!isSaturating) {
-            // int32_t(UINT32_MAX) == -1.
-            ma_cmp(output, Imm32(-1), scratchReg);
-            as_cmp(output, Imm8(0), Assembler::NotEqual);
-            ma_b(oolEntry, Assembler::Equal);
-        }
+        // int32_t(UINT32_MAX) == -1.
+        ma_cmp(output, Imm32(-1), scratchReg);
+        as_cmp(output, Imm8(0), Assembler::NotEqual);
+        ma_b(oolEntry, Assembler::Equal);
 
         return;
     }
@@ -5851,25 +5844,16 @@ MacroAssemblerARM::wasmTruncateToInt32(FloatRegister input, Register output, MIR
         MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
 
     ma_vxfer(scratch, output);
-
-    if (!isSaturating) {
-        ma_cmp(output, Imm32(INT32_MAX), scratchReg);
-        ma_cmp(output, Imm32(INT32_MIN), scratchReg, Assembler::NotEqual);
-        ma_b(oolEntry, Assembler::Equal);
-    }
+    ma_cmp(output, Imm32(INT32_MAX), scratchReg);
+    ma_cmp(output, Imm32(INT32_MIN), scratchReg, Assembler::NotEqual);
+    ma_b(oolEntry, Assembler::Equal);
 }
 
 void
 MacroAssemblerARM::outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                                   MIRType toType, TruncFlags flags,
-                                                   Label* rejoin, wasm::BytecodeOffset trapOffset)
+                                                   MIRType toType, bool isUnsigned, Label* rejoin,
+                                                   wasm::BytecodeOffset trapOffset)
 {
-    // On ARM, saturating truncation codegen handles saturating itself rather
-    // than relying on out-of-line fixup code.
-    if (flags & TRUNC_SATURATING)
-        return;
-
-    bool isUnsigned = flags & TRUNC_UNSIGNED;
     ScratchDoubleScope scratchScope(asMasm());
     FloatRegister scratch;
 

@@ -5595,12 +5595,12 @@ class MWasmTruncateToInt64
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    TruncFlags flags_;
+    bool isUnsigned_;
     wasm::BytecodeOffset bytecodeOffset_;
 
-    MWasmTruncateToInt64(MDefinition* def, TruncFlags flags, wasm::BytecodeOffset bytecodeOffset)
+    MWasmTruncateToInt64(MDefinition* def, bool isUnsigned, wasm::BytecodeOffset bytecodeOffset)
       : MUnaryInstruction(classOpcode, def),
-        flags_(flags),
+        isUnsigned_(isUnsigned),
         bytecodeOffset_(bytecodeOffset)
     {
         setResultType(MIRType::Int64);
@@ -5611,14 +5611,12 @@ class MWasmTruncateToInt64
     INSTRUCTION_HEADER(WasmTruncateToInt64)
     TRIVIAL_NEW_WRAPPERS
 
-    bool isUnsigned() const { return flags_ & TRUNC_UNSIGNED; }
-    bool isSaturating() const { return flags_ & TRUNC_SATURATING; }
-    TruncFlags flags() const { return flags_; }
+    bool isUnsigned() const { return isUnsigned_; }
     wasm::BytecodeOffset bytecodeOffset() const { return bytecodeOffset_; }
 
     bool congruentTo(const MDefinition* ins) const override {
         return congruentIfOperandsEqual(ins) &&
-               ins->toWasmTruncateToInt64()->flags() == flags_;
+               ins->toWasmTruncateToInt64()->isUnsigned() == isUnsigned_;
     }
     AliasSet getAliasSet() const override {
         return AliasSet::None();
@@ -5631,12 +5629,13 @@ class MWasmTruncateToInt32
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    TruncFlags flags_;
+    bool isUnsigned_;
     wasm::BytecodeOffset bytecodeOffset_;
 
-    explicit MWasmTruncateToInt32(MDefinition* def, TruncFlags flags,
+    explicit MWasmTruncateToInt32(MDefinition* def, bool isUnsigned,
                                   wasm::BytecodeOffset bytecodeOffset)
-      : MUnaryInstruction(classOpcode, def), flags_(flags), bytecodeOffset_(bytecodeOffset)
+      : MUnaryInstruction(classOpcode, def),
+        isUnsigned_(isUnsigned), bytecodeOffset_(bytecodeOffset)
     {
         setResultType(MIRType::Int32);
         setGuard(); // neither removable nor movable because of possible side-effects.
@@ -5647,13 +5646,7 @@ class MWasmTruncateToInt32
     TRIVIAL_NEW_WRAPPERS
 
     bool isUnsigned() const {
-        return flags_ & TRUNC_UNSIGNED;
-    }
-    bool isSaturating() const {
-        return flags_ & TRUNC_SATURATING;
-    }
-    TruncFlags flags() const {
-        return flags_;
+        return isUnsigned_;
     }
     wasm::BytecodeOffset bytecodeOffset() const {
         return bytecodeOffset_;
@@ -5663,7 +5656,7 @@ class MWasmTruncateToInt32
 
     bool congruentTo(const MDefinition* ins) const override {
         return congruentIfOperandsEqual(ins) &&
-               ins->toWasmTruncateToInt32()->flags() == flags_;
+               ins->toWasmTruncateToInt32()->isUnsigned() == isUnsigned_;
     }
 
     AliasSet getAliasSet() const override {
