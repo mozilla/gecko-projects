@@ -850,9 +850,6 @@ class OutOfLineWasmTruncateCheckBase : public OutOfLineCodeBase<CodeGen>
     MIRType fromType_;
     MIRType toType_;
     FloatRegister input_;
-    Register output_;
-    Register64 output64_;
-    TruncFlags flags_;
     bool isUnsigned_;
     wasm::BytecodeOffset bytecodeOffset_;
 
