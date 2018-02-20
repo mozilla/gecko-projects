@@ -33,6 +33,7 @@ MAR_CHANNEL_ID_OVERRIDE_REGEXES = {
     "beta": r"'^\d+\.\d+(\.\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'",
 }
 
+
 @transforms.add
 def add_command(config, tasks):
     keyed_by_args = [
