@@ -425,6 +425,8 @@ def get_release_config(config):
                                                  'release-bouncer-check',
                                                  'release-updates-builder',
                                                  'release-update-verify-config',
+                                                 'release-balrog-submit-toplevel',
+                                                 'release-secondary-balrog-submit-toplevel',
                                                  ):
         partial_updates = json.loads(partial_updates)
         release_config['partial_versions'] = ', '.join([
