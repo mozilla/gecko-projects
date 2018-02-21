@@ -103,7 +103,7 @@ jobs:
                maple: ["devedition-cdntest", "devedition-localtest"]
                mozilla-beta: ["devedition-cdntest", "devedition-localtest"]
                default: []
-         platforms: ["linux-devedition", "linux64-devedition", "macosx64-devedition", "win32-devedition", "win64-devedition"]
+         platforms: ["linux", "linux64", "macosx64", "win32", "win64"]
       treeherder:
          platform: linux64/opt
          symbol: Rel(BPDev)
