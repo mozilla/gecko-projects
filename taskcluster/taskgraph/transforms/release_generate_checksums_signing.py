@@ -27,7 +27,7 @@ taskref_or_string = Any(
     basestring,
     {Required('task-reference'): basestring})
 
-release_generate_checksums_signing_description_schema = Schema({
+release_generate_checksums_signing_schema = Schema({
     Required('dependent-task'): object,
     Required('depname', default='release-generate-checksums'): basestring,
     Optional('label'): basestring,
@@ -42,8 +42,8 @@ def validate(config, jobs):
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
         validate_schema(
-            release_generate_checksums_signing_description_schema, job,
-            "In checksums-signing ({!r} kind) task for {!r}:".format(config.kind, label))
+            release_generate_checksums_signing_schema, job,
+            "In ({!r} kind) task for {!r}:".format(config.kind, label))
         yield job
 
 

@@ -68,7 +68,7 @@ def validate(config, jobs):
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
         validate_schema(
             release_generate_checksums_beetmover_schema, job,
-            "In beetmover ({!r} kind) task for {!r}:".format(config.kind, label))
+            "In ({!r} kind) task for {!r}:".format(config.kind, label))
         yield job
 
 
